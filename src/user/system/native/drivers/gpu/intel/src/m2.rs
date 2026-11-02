@@ -47,11 +47,14 @@ use ferrix_rt::native::vmo::{self, Vmo};
 use crate::steps::{At, Steps};
 use crate::{Bar0, Step, Time};
 
-/// Pages in the pool: four context images and their rings, two default
-/// images, two status pages, the test pages and the page tables, with room.
-const POOL_PAGES: usize = 384;
+/// Pages in the pool: six context images and their rings (two for the
+/// request-cost probe), two default images, two status pages, the test
+/// pages and the page tables, with room.
+const POOL_PAGES: usize = 448;
 /// Bytes in a page.
 const PAGE: usize = 4096;
+/// Copies of each variant the request-cost probe runs in one request.
+const COST_REPEATS: usize = 24;
 /// Dwords in a page.
 const PAGE_DWORDS: usize = PAGE / 4;
 /// Every context's ring: i915's default for a user context.
@@ -468,6 +471,15 @@ impl M2<'_> {
             m2.fast_copy(bcs)?;
             m2.screen_blit(bcs, plane)?;
             m2.ppgtt_batch(rcs)?;
+            // A measurement: said, never a failed check.
+            for engine in [&mut *rcs, &mut *bcs] {
+                if let Err(step) = m2.request_cost(engine) {
+                    ferrix_rt::warn!(
+                        "intel: M2: request cost on {} not measured ({step:?})",
+                        engine.info.name
+                    );
+                }
+            }
         }
         if CHECKPOINT >= 4 {
             steps.before(
@@ -1050,6 +1062,98 @@ impl M2<'_> {
         } else {
             Err(Step::Wrong)
         }
+    }
+
+    /// What the commands the driver wraps around every request cost the
+    /// GPU (H4 of `docs/GAME-MODE.md` §5.7): the engine's timestamp stored
+    /// before and after [`COST_REPEATS`] copies of each variant, run in one
+    /// request on an otherwise idle engine, so each line is the commands'
+    /// own time, not the stall they put into a busy pipeline. Variants: as
+    /// every request has them (the invalidation with the AUX table's, the
+    /// start breadcrumb, the final breadcrumb), without the AUX table's
+    /// invalidation and its quiescing flush, and each part alone.
+    fn request_cost(&mut self, engine: &mut Engine) -> Result<(), Step> {
+        use ferrix_intel_xelp::engine_cs as cs_;
+        let scratch = self.object(1)?;
+        let info = engine.info;
+        let render = info.class == ferrix_intel_xelp::engine::RENDER_CLASS;
+        let timestamp = ferrix_intel_xelp::engine::ring_timestamp(info.mmio_base).offset();
+        let hz = u64::from(ferrix_intel_xelp::clock::gen11_read_clock_frequency(
+            self.bar,
+        ))
+        .max(1);
+        let seqno_at = scratch.ggtt + 0x100;
+        let preempt_at = scratch.ggtt + 0x200;
+        let full = |cs: &mut Cs<'_>| cs_::gen12_emit_flush(&info, cs_::EMIT_INVALIDATE, cs);
+        let bare = |cs: &mut Cs<'_>| {
+            if render {
+                cs_::gen12_emit_invalidate_rcs_without_aux(cs);
+            } else {
+                cs_::gen12_emit_invalidate_xcs_without_aux(cs);
+            }
+        };
+        let start = |cs: &mut Cs<'_>| cs_::gen8_emit_init_breadcrumb(cs, seqno_at, 1);
+        let fini = |cs: &mut Cs<'_>| {
+            let _ = if render {
+                cs_::gen12_emit_fini_breadcrumb_rcs(cs, 1, seqno_at, preempt_at)
+            } else {
+                cs_::gen12_emit_fini_breadcrumb_xcs(cs, 1, seqno_at, preempt_at)
+            };
+        };
+        type Part<'p> = &'p dyn Fn(&mut Cs<'_>);
+        let variants: [(&str, [Option<Part<'_>>; 3]); 5] = [
+            ("as every request", [Some(&full), Some(&start), Some(&fini)]),
+            (
+                "without the AUX invalidation",
+                [Some(&bare), Some(&start), Some(&fini)],
+            ),
+            ("the invalidation alone", [Some(&full), None, None]),
+            (
+                "the invalidation without AUX alone",
+                [Some(&bare), None, None],
+            ),
+            ("the final breadcrumb alone", [None, None, Some(&fini)]),
+        ];
+        let (mut context, image, ring) = self.context(engine, 3)?;
+        for (name, parts) in variants {
+            let mut commands = [0_u32; 2048];
+            let length = {
+                let mut cs = Cs::new(&mut commands);
+                let stamp = |cs: &mut Cs<'_>, at: u32| {
+                    cs.push(gpu::MI_STORE_REGISTER_MEM_GEN8 | gpu::MI_SRM_LRM_GLOBAL_GTT);
+                    cs.push(timestamp);
+                    cs.push(scratch.ggtt + at);
+                    cs.push(0);
+                };
+                stamp(&mut cs, 0);
+                for part in (0..COST_REPEATS).flat_map(|_| parts.iter().flatten()) {
+                    part(&mut cs);
+                }
+                stamp(&mut cs, 4);
+                cs.len()
+            };
+            let Some(payload) = commands.get(..length).filter(|_| length < commands.len()) else {
+                return Err(Step::Memory);
+            };
+            let (seen, took) = self.run(
+                engine,
+                &mut context,
+                image,
+                ring,
+                Payload::Commands(payload),
+            )?;
+            let ticks = self
+                .pool
+                .read32(scratch, 1)
+                .wrapping_sub(self.pool.read32(scratch, 0));
+            let ns = u64::from(ticks) * 1_000_000_000 / hz / COST_REPEATS as u64;
+            ferrix_rt::info!(
+                "intel: M2: request cost on {}: {name}: {ns} ns a request on the GPU ({} dwords, {COST_REPEATS} in {ticks} ticks at {hz} Hz; {took} us, {seen:?})",
+                info.name,
+                length / COST_REPEATS,
+            );
+        }
+        Ok(())
     }
 
     /// A batch from the PPGTT on RCS0, not privileged, storing into a PPGTT

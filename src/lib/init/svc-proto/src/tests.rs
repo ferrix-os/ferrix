@@ -43,6 +43,13 @@ fn calls() -> Vec<Call> {
             unit: s("session-1.scope"),
             slice: Some(s("user-1000.slice")),
             pids: vec![41, 42],
+            seat: false,
+        },
+        Call::Scope {
+            unit: s("session-2.scope"),
+            slice: Some(s("user-1000.slice")),
+            pids: vec![43],
+            seat: true,
         },
     ]
 }
@@ -206,4 +213,26 @@ fn lines_arrive_in_pieces_and_an_overlong_one_is_dropped() {
     let mut long = vec![b'x'; notify::MAX_LINE + 10];
     long.extend_from_slice(b"\nREADY=1\n");
     assert_eq!(Lines::new().push(&long), [s("READY=1")]);
+}
+
+/// A plain scope is still tag 18, so a seat's flag changes no old bytes;
+/// the seat's is 19.
+#[test]
+fn a_seat_scope_has_its_own_tag() {
+    let plain = Call::Scope {
+        unit: s("a.scope"),
+        slice: None,
+        pids: vec![1],
+        seat: false,
+    };
+    let seat = Call::Scope {
+        unit: s("a.scope"),
+        slice: None,
+        pids: vec![1],
+        seat: true,
+    };
+    let (plain, seat) = (plain.encode(), seat.encode());
+    assert_eq!(plain.get(4), Some(&18));
+    assert_eq!(seat.get(4), Some(&19));
+    assert_eq!(plain.get(5..), seat.get(5..));
 }

@@ -67,6 +67,7 @@ pub fn check_iommu() {
         domains.waits,
     );
     say_line(check_cleaning(super::vtd::cleaning()));
+    say_line(check_runs(device::devices()));
     let failed_kept = match object::pin::check::check_budget(device::devices()) {
         Ok(Some(report)) => {
             println!(
@@ -450,6 +451,21 @@ fn check_domains(nodes: &[Arc<DeviceNode>]) -> Result<DomainReport, &'static str
     mm::deallocate_frames(first, 0);
     mm::deallocate_frames(second, 0);
     Ok(report)
+}
+
+/// The 2 MiB run cases (`super::blocks_check`) on the first PCI function's
+/// domain, as [`check_domains`] finds it.
+fn check_runs(nodes: &[Arc<DeviceNode>]) -> Result<Option<alloc::string::String>, &'static str> {
+    let Some(node) = nodes
+        .iter()
+        .find(|node| matches!(node.location(), Location::Pci(_)))
+    else {
+        return Ok(None);
+    };
+    let domain = node
+        .domain()
+        .map_err(|_| "no memory for a device's domain")?;
+    super::blocks_check::check_runs(&domain)
 }
 
 /// The body of [`check_domains`], once it has its frames.

@@ -1,0 +1,16 @@
+[package]
+name = "compositor-gpu-protocol"
+description = "What hyprix and hyprix-gpu say to each other: a frame's display list, buffers and answers (docs/GPU-COMPOSITOR.md)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# No dependencies, and no std: hyprix (static musl) and hyprix-gpu (glibc,
+# Vulkan) encode and decode with the same bytes, and neither brings the
+# other's world with it.
+[dependencies]
+
+[lints]
+workspace = true

@@ -468,6 +468,11 @@ allocate, and the box is reached over ssh (`fx.sh`).
   released buffer faults on every frame until the new driver reprograms
   it: refused DMA, not a leak (ledger 2388 C2). With K2 refused the box is
   as (a) to (c) say.
+* **Large pages** (§14, since 2026-10-30). A PPGTT entry may map 2 MiB or
+  64 KiB of a pin whose frames the kernel gave as aligned blocks
+  (`PIN_BLOCKS`). Under K2 an entry over pages the driver did not pin is
+  refused DMA as a 4 KiB one is; untranslated it is the same trusted-driver
+  fault as before, over more memory.
 * **Client to client.** Each VM is its own PPGTT, and batches run
   non-privileged from it (`MI_BATCH_BUFFER_START` with the PPGTT address
   space). The hardware itself refuses privileged commands and register
@@ -1857,6 +1862,340 @@ box's inspection Linux, plus bpftrace or perf there, and the inspection
 Linux carries none of them. That costs hours of setup and a 120 GB game
 copy. A microbench of `GET_CAP` alone would be cheap, but it says nothing
 about i915's settle, because i915 has none per ioctl.
+
+## 14. Large GPU pages: 64 KiB and 2 MiB PPGTT entries (2026-10-30)
+
+### 14.1 Why
+
+Measured on the N150 with one Vulkan probe (`~/.local/share/ferrix/gpu-probe`,
+compute shaders over 256 MiB buffers, GPU timestamps, 1000 MHz) and the same
+Mesa 25.0.7 anv under both kernels:
+
+| test | Linux i915, shmem THP | Linux i915, THP denied | Ferrix |
+|---|---|---|---|
+| FMA GFLOPS | 340 | - | 340 |
+| shader read GB/s | 20.7 | 18.2 | 17.7 |
+| shader copy GB/s | 21.7 | 19.7 | 16.4 |
+
+ALU is equal; the gap is in memory reach. i915 on Gen12 backs a large
+object from shmem with transparent huge pages and maps it with 2 MiB PDEs
+(`gen8_ppgtt_insert_huge`), or with 64 KiB pages (`GEN8_PDE_IPS_64K`) where
+the backing is 64 KiB-contiguous but not 2 MiB. Ferrix maps every page with
+a 4 KiB PTE (`ppgtt.rs`: "64 KiB and 2 MiB pages left out"), so the GPU's
+TLB covers 1/512 of what it covers on Linux. anv already asks for the
+layout: every BO of 1 MiB or more gets a 2 MiB-aligned GPU address on ICL+
+(`anv_allocator.c`, "Opportunistically align addresses to 2Mb ... for the
+kernel to use Transparent Huge Pages"). Endfield runs GPU-bound at 99.9 %;
+the expected gain is the memory-bound share of its frame, about 5-15 %.
+
+### 14.2 What i915 does, and what this driver will do
+
+`gen8_ppgtt_insert_huge`, for each 2 MiB-aligned GPU address of a binding:
+
+* **2 MiB**: the backing's next 2 MiB are one run from a 2 MiB-aligned
+  device address. The level-1 entry (PDE) itself maps them:
+  `pte_encode(addr, pat) | GEN8_PDE_PS_2M` (bit 7). No leaf table.
+* **64 KiB**: otherwise, the binding covers the whole 2 MiB and every 64 KiB
+  of it is one run from a 64 KiB-aligned address. All 512 4 KiB PTEs are
+  written as for 4 KiB pages, then `GEN8_PDE_IPS_64K` (bit 11) is set in the
+  PDE; the hardware then reads every 16th PTE as a 64 KiB page. i915 below
+  12.50 has no 64 KiB scratch, so it sets IPS only for a full table
+  (`index == I915_PDES`); the same here.
+* **4 KiB**: anything else, as today.
+
+The driver decides from the device addresses alone (runs in the pin's
+address list), so it is right whatever memory it gets: a dmabuf imported
+from elsewhere, a pin the kernel could not give large blocks, a VMO a
+client touched before the pin. Large pages are an optimisation, never a
+requirement; correctness is the 4 KiB path's.
+
+Tree rules (`ppgtt.rs`, whose own record is the hardware entries):
+
+* a level-1 entry with PS is a leaf: walks (`leaf`, `translate`,
+  `alloc_level`, `clear_level`) never descend into it. Allocating over it
+  is refused (`Range`, as an overlapping bind is); clearing it writes the
+  level's scratch entry and frees no table. A clear that reaches any part
+  of a 2 MiB page clears all of it: one binding alone ever covers it, and
+  an unbind is a whole binding;
+* clearing any entry of a leaf table whose PDE has IPS first clears IPS, so
+  the hardware reads the remaining PTEs as 4 KiB pages again. Every PTE of
+  such a table is a correct 4 KiB entry, so dropping IPS never exposes a
+  wrong page; keeping IPS over a scratch PTE would make it a 64 KiB page
+  past the 4 KiB scratch page, so it is never kept;
+* a 2 MiB entry goes in only where its PDE is scratch or a leaf table that
+  holds scratch entries alone (freed then). Binding never overwrites a live
+  mapping, as today.
+
+PAT: Gen12.0's `max_pat_index` is 3, so `GEN12_PPGTT_PTE_PAT2` (bit 7, the
+same bit as PS) is never set, and a PS entry's PAT bits are bits 3-4 as in
+a PTE (i915 does the same).
+
+### 14.3 Where the backing comes from: one kernel option
+
+Today a GEM object is an anonymous VMO the driver pins at its first bind;
+its frames are committed one at a time (at the pin, or earlier at a
+client's page fault through its mmap), so they are contiguous only by
+chance. Large pages need naturally aligned blocks from the buddy
+allocator. The kernel already gives one block to `PIN_CONTIGUOUS`
+(`Vmo::commit_run`, `docs/NVIDIA.md` §4.3), but only one per pin, and a pin
+per 2 MiB would pass the 4096-handle limit (`object::HANDLE_LIMIT`) with a
+game's 2-3 GiB of objects.
+
+**`PIN_BLOCKS`** (bit 3, value 8), a `vmo_pin` option whose bits 8-11 name
+the largest block order the caller wants (`PIN_BLOCKS | order << 8`, order
+1 to `MAX_ORDER`, 10). An order without `PIN_BLOCKS`, `PIN_BLOCKS` with
+order 0 or above 10, `PIN_BLOCKS` with `PIN_CONTIGUOUS`, and any other bit
+are `INVALID_ARGS` (`L.object.254`); the device's pin budget is checked
+before any frame is taken (`L.object.257`). Before the ordinary hold and pin, the kernel commits the
+range's **absent** pages with naturally aligned blocks, best effort:
+
+* at page `i` of the VMO, the order tried is the largest `o <= order` with
+  `i` a multiple of `2^o` and `i..i + 2^o` inside the range and wholly
+  absent; then `commit_run(i, 2^o)`, as `PIN_CONTIGUOUS` uses it (fresh
+  zeroed frames, each charged to the caller's job, the program watermark
+  kept, inserted under the pages lock or not at all);
+* the probe and `commit_run` look at the same range under the same lock,
+  so a page committed between them can only shrink the order, never grow
+  it;
+* on `OutOfMemory` the next lower order is tried, and no order above a
+  failed one is tried again in this call (no retry storm once the allocator
+  has no more large blocks); at order 0 a failure ends the pre-commit and
+  the hold that follows reports the shortage as today;
+* a committed page is skipped; `Committed` from a race is a smaller order,
+  down to the page being skipped; a file's VMO (`NotAnonymous`) is not
+  pre-committed at all;
+* then `vmo.hold` and `pin_through` exactly as a plain pin. Whether the
+  frames are blocks changes nothing the pin promises: one address per page,
+  the same budget, quarantine and rights.
+
+What the kernel does **not** do: decide sizes (the order is the driver's),
+compact or move memory, reserve blocks, or promise any block at all. A
+failed pin leaves its pre-committed pages committed in the VMO, as a hold
+that fails leaves the pages it committed (`Vmo::hold`'s errors).
+`L.object.257` states and checks this for a refusal at the job's memory
+limit only. For the hold's other refusals and the pin's own
+(`QUARANTINE_FULL`, which the budget check before the pre-commit does not
+read) the same holds by structure, unchecked: nothing after the
+pre-commit gives a committed page back or changes its charge, whatever
+refuses (ledger 5335 (1)).
+
+Cost to the rest of the machine: large blocks taken from the buddy
+allocator are not available to a later `PIN_CONTIGUOUS` or kernel
+allocation of that order. That is what i915's THP use costs Linux too; the
+watermark still holds, and the driver asks only for objects of 2 MiB or
+more (anv's 2 MiB alignment threshold is 1 MiB, but a smaller object can
+never take a 2 MiB page).
+
+### 14.4 The driver's side (ring 3, outside the item)
+
+* `Platform::pin` asks `PIN_BLOCKS` with order 9 for an object of 2 MiB or
+  more, plain pin otherwise.
+* The pin is made at the first of: bind, mmap answer, dmabuf export
+  (`Backend::populate`, a new call the front end makes before it hands the
+  VMO out), so a client's page faults do not commit the pages one by one
+  first. That is i915's `get_pages` on first use; the pin budget counts the
+  object from then on rather than from its first execbuffer.
+* `XelpBackend::bind` passes the whole address list to a new
+  `Ppgtt::insert_huge`, which follows §14.2.
+* Unit tests on `PtModel`: a 2 MiB run maps with PS, a 64 KiB-only run with
+  IPS, a mixed object with all three, translate and clear for each, a clear
+  of an IPS table dropping IPS, an alloc over a PS entry refused, the PT
+  pool's count back to its start after unbind.
+
+### 14.5 Tests for the kernel option
+
+* `object/check.rs`: `PIN_BLOCKS` on an absent 4 MiB range gives
+  addresses in 2 MiB-aligned runs of 512 (when the allocator has them);
+  on a range with committed pages keeps those frames; with an order past
+  `MAX_ORDER` or bits outside the option refused `INVALID_ARGS`; with the
+  job's limit below the range fails as a plain pin does, its charge
+  balanced; and with the allocator's large blocks taken (the check takes
+  them) falls back and still pins every page.
+* Negative control: with the order loop removed, the run check fails.
+* Done on the box when the probe reads ≈ 20.7 / 21.7 GB/s.
+
+Written as `object/blocks_check.rs` (stage 10, `L.object.254`-`258`): the
+option word, the budget first, the blocks over 1024 pages with page 3
+committed first, the fallback with one frame in every 32 of free memory
+held (so no block of 32 can form and the free count stays above the
+watermark), the race through the `BlockHook` (`user::vmo`, armed only by
+the check, FX-0908 if left armed), the failure rule under a job limited to
+half the range, and a file's object.
+
+### 14.6 Where it stands
+
+The consultant's design verdict: **OK IF (1)-(9)**, ledger line 5088
+(`~/.local/share/ferrix/cert-consultant/reviews.md`, 2026-10-30). The
+2 MiB/64 KiB tree rules of §14.2 are the driver's property, outside the
+item, and never cited as evidence (C1). The box probe's figure is product
+evidence only (`docs/BACKLOG.md`).
+
+The code verdict on fc1d5ccad: **OK IF (1)-(5)**, ledger line 5102: the
+fallback case asserts a refusal and no aligned block of 32, `L.object.258`
+covers a file's VMO only, M&T bounds the probes, the rows and controls on
+the landing hash, and coverage carried again after the final rebase.
+
+The landing verdict on the rebased stack (56586c895, b2ce8185e,
+defb45ad5 on 2464379ed): **OK IF (1)-(4)**, ledger line 5335:
+`L.object.257` narrowed to the job-limit refusal its case proves, the
+other refusals argued above; M&T's probes each one pages-lock hold of an
+O(log n) range lookup; a fresh `check` row on the landing hash; the
+commit citing the rows, the controls and the rebase. Rows: ilp5-check,
+-build-all, -boot-kvm, -boot-tcg, -boot-a64, -boot-v7 and -boot-v7-smp2
+PASSED on 5219d5929; controls ilp5-ctl-order, -align, -budget and
+-contig FIRED there. On the box, PIN_BLOCKS and the PPGTT pages alone
+read 18.3 / 19.2 GB/s against develop's 18.2 / 18.9 at a pinned 1000 MHz:
+no gain by themselves, since dmar0's 4 KiB entries still bound every
+walk (§14.7). The figures are product evidence, never cited for the
+item.
+
+### 14.7 The IOMMU's half: 2 MiB VT-d entries for a pin's aligned runs (design, 2026-10-31)
+
+**What the box showed.** With `PIN_BLOCKS` and the 2 MiB PPGTT pages in,
+the probe read no faster than develop: at a pinned 1000 MHz, 18.3 / 19.2
+GB/s read / copy against develop's 18.2 / 18.9 (main-5c14350f7 against
+main-18f63a9bd). A never-land diagnostic logged that every 2 MiB window of
+the probe's 256 MiB buffers was one 2 MiB-aligned run of frames, so the
+PPGTT did take 2 MiB pages. The GPU's DMA is translated by `dmar0` (K2,
+an RMRR identity domain), and `Domain::pin` maps every page with a 4 KiB
+second-level entry (`iommu.rs` `map_all`, `mm::map_io`'s `pages_only`),
+so each GPU TLB miss still ends in a walk to a 4 KiB IOMMU translation. A
+second diagnostic (`diag/ilp-pin-runs` aed12e018), mapping each such run
+as one VT-d 2 MiB entry, read 20.0 / 21.05 GB/s against Linux i915's
+20.7 / 21.7. Endfield under that diagnostic left the game in the world:
+its unpin took the pages down one at a time, `unmap_range` refuses to cut
+a block (`BlockInTheWay`), so every unpin of a blocked pin failed with
+`Tables` and the domain kept the pin and its frames for good -- the
+`AlreadyPinned` and exhausted budget that followed are the crash. The
+design below takes blocks down whole.
+
+**The box's unit.** `dmar0` reads `ver 4:0 cap 0x1c0000c40660462 ecap
+0x29a00f0505e` (the inspection Linux's `dmesg`): `SLLPS` (bits 37:34)
+0b0011, 2 MiB and 1 GiB pages; `SAGAW` 0b00100, the four-level walk; `CM`
+0, `RWBF` 0, `PSI` (bit 39) 0, so the unit offers no page-selective IOTLB
+invalidation at all. QEMU's intel-iommu sets `SLLPS` 2 MiB too.
+
+**Proposed.** `Domain::pin` maps, on a VT-d domain whose unit's
+`CAP.SLLPS` bit 34 says it walks 2 MiB pages, each run of 512 of its
+pin's addresses consecutive from a 2 MiB-aligned address with one 2 MiB
+second-level entry (the paging library's `MEGABYTE` block, which
+`VtdSecondLevel` and `VtdFourLevel` already encode); every other page with
+a 4 KiB entry, as today. The rule is the kernel's, read from the pin's own
+addresses alone: nothing is asked of the driver or promised to it
+(`PIN_BLOCKS` is best effort, SAFETY-MANUAL), and a block maps only pages
+that are all in that pin. 1 GiB entries are not used.
+
+* **The unit's bit (consultant note 3).** `ferrix_paging::vtd::unit::accept`
+  reads `CAP.SLLPS` bit 34 into `Accepted::blocks`; `Unit` keeps it, and
+  `map_all` is handed it: `false` maps every page at 4 KiB, which is
+  today's code path exactly. The arm without the bit is checked twice:
+  `accept`'s host test with bit 34 clear and set, and stage 10 calling the
+  domain's map with `blocks` false on a pin whose runs would be blocks,
+  every page then found at 4 KiB (`mapping_level`). The check does not
+  depend on QEMU's cap, which always offers the bit.
+* **Reach unchanged.** A block maps exactly the 512 frames the pin holds,
+  at their own addresses in an identity domain, as the 512 4 KiB entries
+  would. The RMRR check runs over every address first, as today; a run
+  fills its whole 2 MiB window with the pin's own frames, so no RMRR page
+  can share a block's window. AMD-Vi and SMMUv3 keep 4 KiB entries.
+* **A block that meets a table (consultant note 1).** `map_one` refuses a
+  block whose slot holds a table (`AlreadyMapped` at the 2 MiB level),
+  whether that table maps something or is empty -- the leftover of a map
+  that ran out of memory part-way. Then that run is mapped as 512 pages
+  instead, and only a page refused there refuses the pin. Under identity
+  every address of the window is one of the pin's own frames, so a page
+  mapped there is the same frame pinned again (`AlreadyPinned`, as today);
+  an empty table is reused. A pin is refused only where its pages mapped
+  one by one would be.
+* **Take-down: unpin and unwind.** The same predicate over the same
+  addresses finds the same runs. Each run is taken down with one 2 MiB
+  `unmap_range`, which removes a block or 512 pages alike (so a run that
+  fell back is taken down the same way), and every other page by itself.
+  The tables it empties are held until the flush has completed (F-36).
+  The unwind after a refused map does the same over what was mapped,
+  counting a block refused for a write not cleaned (F-58) as written. A
+  pin is unpinned whole; there is no partial unpin.
+* **Flush (consultant note 2).** The invalidation after a take-down stays
+  domain-selective (`IotlbScope::Domain`), which drops every IOTLB entry of
+  the domain whatever its size. `queue::iotlb` builds only global and
+  domain-selective descriptors -- the scope has no page-selective arm, and
+  the box's unit has none to offer -- so no flush can miss a block. That
+  is stated as a requirement and held by a host test on the descriptor's
+  granularity field, so that a page-selective scope added later must carry
+  `AM` >= 9 for a block.
+* **Cost.** A run is one entry write instead of 512, and one 2 MiB unmap
+  instead of 512 walks: the pin's and the unpin's time only shrink
+  (MEMORY-AND-TIMING's `Domain::pin` line says so).
+* **Certification.** An item change in `iommu.rs` (`map_all`,
+  `unpin_waiting`, the predicate), `iommu/vtd.rs` (`Unit::map_run`,
+  `Unit::unmap_run`, the kept bit), `mm.rs` (`map_io_run`,
+  `unmap_io_run`) and `ferrix_paging::vtd::unit::accept` (the cap bit),
+  plus a new stage 10 check file `iommu/blocks_check.rs`. Requirements
+  reserved first, `L.iommu.105-109`:
+  * 105: `accept` reports 2 MiB entries exactly where `CAP.SLLPS` bit 34 is
+    set (host test, both arms).
+  * 106: the predicate and the map: on a unit that takes them, each aligned
+    run of 512 of the pin's consecutive addresses is one 2 MiB entry and
+    every other page a 4 KiB one; on a unit that does not, every page is
+    4 KiB; every page resolves to its frame either way (stage 10: a pin of
+    1024 contiguous pages from a 2 MiB boundary has two 2 MiB entries; a
+    pin with one page of a window missing has none in that window; the
+    same pin with `blocks` false has none).
+  * 107: the fallback: a run whose 2 MiB slot holds a table is mapped as
+    512 pages, and the pin is refused only for a page refused there (stage
+    10: a checks-only helper links an empty leaf table into a window's
+    2 MiB slot, as a map that ran out of memory leaves one, and a run
+    pinned over it maps whole at 4 KiB; a window holding a pinned page refuses the run's pin
+    with `AlreadyPinned` and nothing else left mapped).
+  * 108: the take-down: an unpin and an unwind take each run down whole,
+    whichever way it was mapped, and after an unpin no page of the pin
+    resolves and every table it emptied is given back after the flush
+    (stage 10: device tables counted before and after; the unwind of a
+    pin refused after a block).
+  * 109: every IOTLB invalidation the item submits is global or
+    domain-selective (host test on `queue::iotlb`'s granularity field;
+    the scope type has no other arm).
+  Negative controls: the predicate's alignment test removed (stage 10's
+  106 case fires), the run's take-down done page by page (the 108 case
+  fires with the unpin refused, the diagnostic's failure), the fallback
+  removed (the 107 case fires), `accept`'s bit read as always set (105's
+  host test fails).
+
+**Verdict.** The consultant's design review: **OK IF (1)-(10)**, ledger
+line 5366: the unwind takes down only what this pin mapped (a run whole
+only where its entry was written or all 512 fallback pages were); the
+fallback only over a table, a slot holding a block refusing the run
+`AlreadyPinned`; the window's exclusivity stated as the argument for a
+2 MiB take-down; the five requirement texts no broader than their checks;
+a stage 10 assertion that the unit's kept bit is `CAP` bit 34; seven
+controls; 2 MiB-aligned frames for the 1024-page case, failing rather
+than skipping; the docs, rows and a code review before landing. A
+leftover empty table in a run's slot keeps that window at 4 KiB for
+good (C1).
+
+**Built (2026-10-31).** `accept` keeps `CAP.SLLPS` bit 34 as
+`Accepted::blocks`, and the unit keeps it; `Domain::pin` hands it to
+`map_all` (`Domain::pin_runs` takes it as an argument, for stage 10's
+`blocks` false case). A run is mapped by `vtd::Unit::map_run`
+(`mm::map_io_run`); a run refused `AlreadyMapped` is looked at
+(`vtd::Unit::entry_span`): a 2 MiB entry there refuses the pin
+`AlreadyPinned` with nothing of the run mapped, a table there maps the
+run page by page. A 4 KiB map that meets a block is `AlreadyPinned` too.
+Unpin and unwind share `take_down`: each run a 2 MiB `unmap_io_run`, other
+pages one by one; the unwind passes only the addresses this pin mapped,
+so a run refused part-way is taken out page by page. Stage 10's
+`iommu/blocks_check.rs` holds 105's wiring and 106-108 on QEMU's VT-d,
+and test-boot requires its line on every x86-64 VT-d boot. The fallback
+over a table is reached there twice: by a window holding another pin's
+page, refused at that page; and by a window whose leaf table is empty,
+mapped whole at 4 KiB. No product path leaves an empty leaf table (an
+unmap prunes the tables it empties, and a map that runs out of memory
+never links one), so the case makes one with a checks-only helper
+(`mm::link_empty_io_table`, which maps a page and clears its leaf alone).
+The consultant's code review: **OK IF (1)-(5)**, ledger line 5404: the
+rows on the landing hash (an AMD-Vi boot among them, since `take_down`
+serves every translation) and the seven controls FIRED, the rebase's
+reservation conflict resolved to the removal alone, and this line.
 
 ## Appendix A: the probe that printed the numbers
 

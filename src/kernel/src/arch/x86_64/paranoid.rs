@@ -48,13 +48,18 @@
 //! * **Each stack counts its occupants** in the word above the frame (the IST
 //!   entry is sixteen bytes below the top). A second is reported, as FX-9006,
 //!   rather than returned from.
-//! * **A `#DB` from ring 3 leaves the IST stack.** It is the program's own --
-//!   a trap flag, `SIGTRAP` -- and delivering it may block, switch or end the
-//!   task, none of which can happen on a stack the next `#DB` on this processor
-//!   starts from. Its frame is copied to the task's kernel stack, where the
-//!   processor would have pushed it without the IST, and takes the ordinary
-//!   path, whose `CS` test is right for a ring-3 frame. The other three stay:
-//!   an NMI from ring 3 is counted and returned from, and the other two stop.
+//! * **A `#DB` or `#MC` from ring 3 leaves the IST stack.** A `#DB` is the
+//!   program's own -- a trap flag, `SIGTRAP` -- and delivering it may block,
+//!   switch or end the task, none of which can happen on a stack the next
+//!   `#DB` on this processor starts from. A machine check from ring 3 may end
+//!   in `SIGBUS` for the same program (`docs/MACHINE-CHECK.md` §3.3, as
+//!   Linux's `exc_machine_check_user`). Either frame is copied to the task's
+//!   kernel stack, where the processor would have pushed it without the IST,
+//!   and takes the ordinary path, whose `CS` test is right for a ring-3 frame;
+//!   a machine check's `MCIP` stays set until its banks are read there. Only
+//!   vectors 1 and 18 are moved. The other two stay: an NMI from ring 3 is
+//!   counted and returned from, and a double fault stops. A machine check
+//!   from ring 0 never leaves its IST stack.
 //!
 //! # Nesting
 //!
@@ -78,7 +83,12 @@
 //!   handler takes none: it touches statics and per-CPU records mapped since
 //!   boot, never the demand window, prints nothing, and `DR7` is clear. Linux's
 //!   nested-NMI frame juggling exists because its NMI handlers do fault.
-//! * **`#MC` and `#DF` never return**, and a second on the same stack is the
+//! * **`#DF` never returns, and `#MC` returns only with `MCIP` clear.** A
+//!   ring-0 machine check returns only when every bank lets the kernel go on
+//!   (`mce::on_kernel_stack`), having cleared `MCIP` as its last act: until
+//!   then a second machine check shuts the processor down rather than
+//!   entering this stack, and after it the handler touches the stack no more
+//!   than the `iretq` does. Otherwise a second on the same stack is the
 //!   report failing.
 
 use core::sync::atomic::{AtomicU64, Ordering};
@@ -154,7 +164,10 @@ extern "C" fn ferrix_paranoid_entry(frame: &mut TrapFrame, occupants: u64) {
                 let _ = USER_NMIS.fetch_add(1, Ordering::Relaxed);
             }
         }
-        MACHINE_CHECK => crate::trap::fatal(frame, "machine check", &catalog::MACHINE_CHECK),
+        // From ring 0 only: a ring-3 one left this stack in the stub. Returns
+        // when every bank lets the kernel go on, with `MCIP` clear; stops as
+        // FX-9005 otherwise (`docs/MACHINE-CHECK.md` §3.3).
+        MACHINE_CHECK => super::mce::on_kernel_stack(frame),
         vector => crate::trap::fatal(
             frame,
             super::trap::vector_name(vector),

@@ -62,5 +62,16 @@ package FerrixInitRequirements {
             attribute :>> parent = "H.BOOT.15";
             attribute :>> unit = ("init::judge", "init::refuse");
         }
+        // docs/RAM-RELEASE.md §2, R1 (consultant ledger 4971, 5022).
+        requirement <'L.init.5'> theInputsOutliveTheArchive : ItemLowLevel {
+            attribute :>> statement = "set_inputs shall keep a copy of each input it
+                takes, so that pid 1's inputs are unchanged by the archive's release
+                and none of them lies in its pages.";
+            attribute :>> criterion = "Across the release, the inputs' fingerprint is
+                unchanged and none of their bytes lies in the archive's range, on
+                every boot whose checks run (the `release` line).";
+            attribute :>> parent = "H.BOOT.15";
+            attribute :>> unit = ("init::set_inputs", "init::keep");
+        }
     }
 }

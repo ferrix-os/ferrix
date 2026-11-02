@@ -445,9 +445,15 @@ victim's memory is freed when it is reaped, not at exit as on Linux, so a
 victim that has let go of everything else has its address space emptied
 by the next fault needing the room, as Linux's OOM reaper does, and a
 fault finding a victim still ending retries a millisecond later. With
-nothing killable left, or no limit full (the machine out of frames), the
-fault fails as before -- `SIGSEGV`, not §6's `SIGBUS`, or `EFAULT` for a
-system call's page. Not built: `memory.oom.group`, `memory.events.local`,
+nothing killable left in the job, the fault fails as before -- `SIGSEGV`,
+not §6's `SIGBUS`, or `EFAULT` for a system call's page. With no limit full
+(the machine out of frames) the fault reclaims anywhere and retries, at most
+16 times; once a reclaim gives nothing or those are spent, the machine-wide
+kill ends the process with the most resident memory anywhere, never pid 1,
+counts `oom_kill` in its job (and no `oom` anywhere), and retries, as
+Linux's global OOM killer does; no second machine-wide kill is made within
+250 ms of one, and a fault is failed as before after 1024 answers
+(2026-10-31, `object::oom`, L.object.102). Not built: `memory.oom.group`, `memory.events.local`,
 `oom_score_adj` in the choice, and a wake for `max` alone (a charge is
 refused under locks; its count moves, but a sleeping poller is woken only
 by an OOM). Its checks: the `cgroups` boot line runs a program writing
@@ -616,7 +622,10 @@ out of every mapping, a shootdown, then the frame and its charge).
 * **When.** A fault that finds `memory.max` full reclaims in the job before it
   asks for the kill of §6 (`object::oom`); a page-cache fill that finds it
   full does, and with room for part of a run fills that part; with no limit
-  full but the machine out of frames, the fault reclaims anywhere. A program
+  full but the machine out of frames, the fault reclaims anywhere, and so
+  does a `vmo_pin` that finds no frame, before it answers `NO_MEMORY`
+  (2026-10-31: a GPU object is pinned whole at its first bind, mmap or
+  export, and those pins found the machine full of cache). A program
   that just took a page while its job, or one above it, is over `memory.high`
   reclaims down to the mark (`oom::throttle`, after a fault and after a
   read) and, if that gave back less than the excess, pauses a millisecond.

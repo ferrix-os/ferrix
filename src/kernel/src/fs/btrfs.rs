@@ -16,6 +16,20 @@
 //! writable btrfs until stage 12 makes one; `syscall::fsctl` judges the flag
 //! and this module never sees a mount that could write.
 //!
+//! # Clean tree nodes are reclaimable
+//!
+//! A writable mount keeps the tree nodes it read and did not change, a cache
+//! of the disk, in kernel heap: up to 4096 of them between operations, about
+//! twice a node's size each, on every writable volume. That heap is charged
+//! to no job -- neither `ferrix-btrfs-write` nor `ferrix-btrfs-vfs` makes a
+//! `ferrix_kmem` charge -- so a job's `memory.max` reclaim has no claim on
+//! it, and only a reclaim of the whole machine takes it ([`drop_clean`],
+//! asked by the filesystem's shrinker). Every writable mount is listed here
+//! for that, weakly, and asked in turn: a volume an operation holds is
+//! skipped, never waited for (`ferrix_btrfs_vfs::rw`, "Clean tree nodes are
+//! given back between operations"). What they hold is counted for
+//! `/proc/meminfo` ([`clean_bytes`]).
+//!
 //! # The device outlives its registration
 //!
 //! The registry hands out an `Arc`, and the mount keeps it for its life. A
@@ -23,7 +37,7 @@
 //! mount then answers `EIO` to every read of a file — never a hang and never
 //! a panic — until it is unmounted.
 
-use alloc::sync::Arc;
+use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::fmt;
 
@@ -37,6 +51,11 @@ use ferrix_vfs::{Errno, FileSystem};
 use super::block::BlockDevice;
 use super::devfs;
 use super::pages::VmoStorage;
+use crate::fallible;
+use crate::sync::SpinLock;
+
+/// Every writable mount, weakly: those [`drop_clean`] asks.
+static WRITABLE: SpinLock<Vec<Weak<RwBtrfs<Disk>>>> = SpinLock::new(Vec::new());
 
 /// A registered disk as a btrfs volume reads it: bytes at physical offsets,
 /// fetched in whole sectors.
@@ -104,8 +123,7 @@ impl Device for Disk {
         }
         let sectors = end.div_ceil(self.sector).saturating_sub(first);
         let bytes = usize::try_from(sectors.saturating_mul(self.sector)).map_err(|_| failed)?;
-        let mut bounce =
-            crate::fallible::try_filled(0u8, bytes).map_err(|_| BtrfsError::OutOfMemory)?;
+        let mut bounce = fallible::try_filled(0u8, bytes).map_err(|_| BtrfsError::OutOfMemory)?;
         self.device.read(first, &mut bounce).map_err(|_| failed)?;
         let skip = usize::try_from(physical - first * self.sector).map_err(|_| failed)?;
         let taken = bounce.get(skip..skip + buf.len()).ok_or(failed)?;
@@ -136,8 +154,7 @@ impl WriteDevice for Disk {
         }
         let sectors = end.div_ceil(self.sector).saturating_sub(first);
         let bytes = usize::try_from(sectors.saturating_mul(self.sector)).map_err(|_| failed)?;
-        let mut bounce =
-            crate::fallible::try_filled(0u8, bytes).map_err(|_| WriteError::OutOfMemory)?;
+        let mut bounce = fallible::try_filled(0u8, bytes).map_err(|_| WriteError::OutOfMemory)?;
         self.device.read(first, &mut bounce).map_err(|_| failed)?;
         let skip = usize::try_from(physical - first * self.sector).map_err(|_| failed)?;
         let patch = bounce.get_mut(skip..skip + data.len()).ok_or(failed)?;
@@ -218,5 +235,71 @@ pub(crate) fn mount_rw(rdev: u64) -> Result<Arc<dyn FileSystem>, Errno> {
         &crate::sync::SchedParker,
         |why| crate::console::println!("  btrfs    {why}"),
     )?;
+    list_writable(&volume)?;
     Ok(volume as Arc<dyn FileSystem>)
+}
+
+/// List `volume` for [`drop_clean`] and [`clean_bytes`], dropping the
+/// entries of mounts that are gone first.
+///
+/// # Errors
+///
+/// `ENOMEM` when the list cannot grow: the mount is refused rather than
+/// left with a cache no reclaim reaches.
+fn list_writable(volume: &Arc<RwBtrfs<Disk>>) -> Result<(), Errno> {
+    let mut listed = WRITABLE.lock();
+    listed.retain(|entry| entry.strong_count() > 0);
+    fallible::try_push(&mut listed, Arc::downgrade(volume)).map_err(|_| Errno::ENOMEM)
+}
+
+/// The writable mounts alive now, or none with no memory to list them. The
+/// list's lock is let go before any is asked anything.
+fn writable() -> Vec<Arc<RwBtrfs<Disk>>> {
+    let listed = WRITABLE.lock();
+    let Ok(mut out) = fallible::try_with_capacity(listed.len()) else {
+        return Vec::new();
+    };
+    for entry in listed.iter() {
+        if let Some(volume) = entry.upgrade() {
+            // The room was had above.
+            let _ = fallible::push_within(&mut out, volume);
+        }
+    }
+    out
+}
+
+/// Give back up to `want` bytes of the writable mounts' clean tree nodes,
+/// oldest first: a batch of at most 64 nodes from each mount no operation
+/// holds, until `want` is met. Answers the bytes given. For a reclaim of the
+/// whole machine only; see "Clean tree nodes are reclaimable".
+///
+/// Must be called where a task may sleep and with no lock held, as the
+/// reclaim that calls it is: a volume's lock is a sleeping lock, taken here
+/// only if it is free.
+pub(crate) fn drop_clean(want: u64) -> u64 {
+    let mut given = 0u64;
+    for volume in writable() {
+        if given >= want {
+            break;
+        }
+        given = given.saturating_add(volume.drop_clean(want - given));
+    }
+    given
+}
+
+/// The writable mount `filesystem` is, if it is listed: for the checks,
+/// which ask one volume what it holds.
+pub(crate) fn writable_of(filesystem: &Arc<dyn FileSystem>) -> Option<Arc<RwBtrfs<Disk>>> {
+    writable()
+        .into_iter()
+        .find(|volume| core::ptr::addr_eq(Arc::as_ptr(volume), Arc::as_ptr(filesystem)))
+}
+
+/// What the writable mounts' clean tree nodes hold of the heap, for
+/// `/proc/meminfo`: each volume's exact count as of its lock's last release.
+pub(crate) fn clean_bytes() -> u64 {
+    writable()
+        .iter()
+        .map(|volume| volume.clean_bytes())
+        .fold(0, u64::saturating_add)
 }

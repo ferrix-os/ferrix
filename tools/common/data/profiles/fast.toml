@@ -8,7 +8,7 @@ level = "sc2"
 claim = "IEC 61508-3 SC 2 / ISO 26262 ASIL B, from M7"
 claim_architectures = ["aarch64"]
 buildable_from = "M5"
-image = { driver_updates = "absent", settings_writer = "absent", slot_signing = "required" }
+image = { driver_updates = "absent", settings_writer = "absent", slot_signing = "required", bad_frames = "persist" }
 # The families its loader accepts a slot manifest for (docs/SIGNING.md §1.4, §10.6).
 slot_families = ["aarch64-uefi-virt"]
 exceptions = []

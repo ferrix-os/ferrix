@@ -34,8 +34,8 @@ use ferrix_bootinfo::PAGE_SIZE;
 use ferrix_elf::Class;
 use ferrix_linux_abi::nr::Syscall;
 use ferrix_linux_abi::types::{
-    AT_FDCWD, MAP_ANONYMOUS, MAP_FIXED, MAP_PRIVATE, MAP_SHARED, MS_ASYNC, MS_SYNC, O_CREAT,
-    O_RDONLY, O_RDWR, O_TRUNC, PROT_EXEC, PROT_READ, PROT_WRITE, SEEK_SET,
+    AT_FDCWD, MAP_ANONYMOUS, MAP_FIXED, MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED, MS_ASYNC, MS_SYNC,
+    O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, PROT_EXEC, PROT_NONE, PROT_READ, PROT_WRITE, SEEK_SET,
 };
 use ferrix_vfs::{Errno, OpenFile, OpenFlags};
 use ferrix_vma::VmaFlags;
@@ -111,6 +111,22 @@ const WARM_NANOS: u64 = 10_000_000;
 /// How long the program has to answer, and to exit.
 const ANSWER_NANOS: u64 = 10_000_000_000;
 
+/// Anonymous pages put with `MAP_FIXED` into a `PROT_NONE` reservation, one
+/// page apart, for [`check_many_regions_and_their_maps`]: each page and each
+/// gap a region of its own, as a Windows program's reservations under Wine
+/// make them.
+const ANON_REGIONS: u64 = 2_000;
+/// File pages mapped the same way, each a line of `/proc/<pid>/maps` that
+/// ends in a path of nearly 4 KiB: about 5.4 MB of text, more than one
+/// kernel heap block (4 MiB) holds.
+const FILE_REGIONS: u64 = 1_400;
+/// The directory the deep file is made in.
+const DEEP_TOP: &[u8] = b"/tmp/ferrix-maps-check";
+/// How many directories deep the file is, each named by [`DEEP_NAME`] bytes.
+const DEEP_LEVELS: usize = 14;
+/// The length of each directory's name: within `NAME_MAX`.
+const DEEP_NAME: usize = 250;
+
 /// What the check measured, for the boot log.
 #[derive(Debug, Clone, Copy)]
 pub struct Report {
@@ -120,6 +136,10 @@ pub struct Report {
     pub cut: u64,
     /// Pages a private mapping copied and kept from the file.
     pub copied: u64,
+    /// Lines of `/proc/<pid>/maps` read back from the space of many regions.
+    pub maps_lines: u64,
+    /// Bytes of that file.
+    pub maps_bytes: u64,
     /// Frames the second run cost. Zero, or a mapping kept a file's pages.
     pub leaked: i64,
 }
@@ -130,11 +150,17 @@ pub fn run() -> Result<Report, &'static str> {
     let process =
         process::new_for_check().map_err(|_| "could not make a process for the mmap check")?;
     let _warm = check_once(&process)?;
+    let _warm = check_many_regions_and_their_maps(&process)?;
     crate::sched::wait_until_reaper_quiet(crate::sched::REAPER_PATIENCE_NANOS)?;
     let window = mm::FrameWindow::open();
     let (bytes, cut, copied) = check_once(&process)?;
+    let (maps_lines, maps_bytes) = check_many_regions_and_their_maps(&process)?;
     crate::sched::wait_until_reaper_quiet(crate::sched::REAPER_PATIENCE_NANOS)?;
     let leaked = window.kept();
+    crate::console::println!(
+        "  mmap     /proc/<pid>/maps read whole from a space of many MAP_FIXED regions: {maps_lines} \
+         lines, {maps_bytes} bytes"
+    );
     if leaked != 0 {
         window.report("mmap");
         crate::console::println!("  mmap     {leaked} frames across the second run");
@@ -151,6 +177,8 @@ pub fn run() -> Result<Report, &'static str> {
         bytes,
         cut,
         copied,
+        maps_lines,
+        maps_bytes,
         leaked,
     })
 }
@@ -556,6 +584,208 @@ fn check_msync_and_maps(process: &Process, at: u64) -> Result<(), &'static str> 
         return Err("/proc/<pid>/maps does not name a shared file mapping by its file");
     }
     Ok(())
+}
+
+/// A space of many small regions, as Wine's reservations make one, and its
+/// `/proc/<pid>/maps` read whole.
+///
+/// [`ANON_REGIONS`] anonymous pages go with `MAP_FIXED` into a `PROT_NONE`
+/// reservation one page apart, and [`FILE_REGIONS`] pages of a file whose path
+/// is nearly 4 KiB long into another, so the space holds over 2 * (ANON +
+/// FILE) regions and its maps file over 9 MiB. Every map must be made, the
+/// file must open and read to its end, and it must have a line for every
+/// region and every file page. Before the maps text was kept in page-sized
+/// blocks, the open grew one buffer past what a heap block holds and stopped
+/// the machine (FX-0008). Returns the lines and bytes read.
+fn check_many_regions_and_their_maps(process: &Process) -> Result<(u64, u64), &'static str> {
+    let ns = fs::namespace();
+    let ctx = ns.context();
+    let mut path = Vec::from(DEEP_TOP);
+    let mut made = Vec::new();
+    let mut outcome = ns
+        .mkdir(&ctx, None, &path, 0o700)
+        .map_err(|_| "the maps check's directory could not be made");
+    if outcome.is_ok() {
+        made.push(path.len());
+    }
+    for _ in 0..DEEP_LEVELS {
+        if outcome.is_err() {
+            break;
+        }
+        path.push(b'/');
+        path.extend(core::iter::repeat_n(b'm', DEEP_NAME));
+        outcome = ns
+            .mkdir(&ctx, None, &path, 0o700)
+            .map_err(|_| "the maps check's deep directory could not be made");
+        if outcome.is_ok() {
+            made.push(path.len());
+        }
+    }
+    path.extend_from_slice(b"/f");
+    let counted = outcome.and_then(|()| map_many_and_read_maps(process, &path));
+    let _ = ns.unlink(&ctx, None, &path);
+    while let Some(len) = made.pop() {
+        let _ = ns.rmdir(&ctx, None, path.get(..len).unwrap_or_default());
+    }
+    counted
+}
+
+/// [`check_many_regions_and_their_maps`] once the file's directories exist:
+/// make the file at `path`, map it and the anonymous pages, read the maps, and
+/// unmap everything whatever happened.
+fn map_many_and_read_maps(process: &Process, path: &[u8]) -> Result<(u64, u64), &'static str> {
+    let page = address(
+        memory::sys_mmap(
+            process,
+            &request(
+                -1,
+                PAGE_SIZE,
+                PROT_READ | PROT_WRITE,
+                MAP_ANONYMOUS | MAP_PRIVATE,
+            ),
+        ),
+        "a page for the maps check was refused",
+    )?;
+    let mut staged = Vec::from(path);
+    staged.push(0);
+    let opened = uaccess::copy_to_user(process.space(), page, &staged)
+        .map_err(|_| "could not stage the maps check's path")
+        .and_then(|()| {
+            descriptor(
+                by_number(
+                    process,
+                    Syscall::Openat,
+                    [
+                        CWD,
+                        page,
+                        u64::from(O_RDWR | O_CREAT | O_TRUNC),
+                        0o600,
+                        0,
+                        0,
+                    ],
+                ),
+                "the maps check's deep file would not open",
+            )
+        });
+    let _ = memory::sys_munmap(process, page, PAGE_SIZE);
+    let file = opened?;
+    let reserved = [ANON_REGIONS, FILE_REGIONS].map(|pages| {
+        memory::sys_mmap(
+            process,
+            &request(
+                -1,
+                2 * pages * PAGE_SIZE,
+                PROT_NONE,
+                MAP_ANONYMOUS | MAP_PRIVATE | MAP_NORESERVE,
+            ),
+        )
+        .ok()
+        .and_then(|at| u64::try_from(at).ok())
+    });
+    let outcome = match reserved {
+        [Some(anon), Some(files)] => fd::file(process, file)
+            .map_err(|_| "the maps check's descriptor names nothing")
+            .and_then(|open| {
+                if open.write_at(0, &[1; PAGE_SIZE as usize]) == Ok(PAGE_SIZE as usize) {
+                    Ok(())
+                } else {
+                    Err("the maps check's file was not written")
+                }
+            })
+            .and_then(|()| fill(process, anon, ANON_REGIONS, None))
+            .and_then(|()| fill(process, files, FILE_REGIONS, Some(file)))
+            .and_then(|()| read_maps(process, path)),
+        _ => Err("a reservation for the maps check was refused"),
+    };
+    for (at, pages) in reserved.into_iter().zip([ANON_REGIONS, FILE_REGIONS]) {
+        if let Some(at) = at {
+            let _ = memory::sys_munmap(process, at, 2 * pages * PAGE_SIZE);
+        }
+    }
+    let _ = fd::sys_close(process, file);
+    outcome
+}
+
+/// Map `pages` pages with `MAP_FIXED` into the reservation at `at`, every
+/// other page: anonymous and writable, or `file`'s first page read-only.
+fn fill(process: &Process, at: u64, pages: u64, file: Option<i32>) -> Result<(), &'static str> {
+    for page in 0..pages {
+        let mut each = match file {
+            Some(file) => request(file, PAGE_SIZE, PROT_READ, MAP_PRIVATE | MAP_FIXED),
+            None => request(
+                -1,
+                PAGE_SIZE,
+                PROT_READ | PROT_WRITE,
+                MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED,
+            ),
+        };
+        each.addr = at + 2 * page * PAGE_SIZE;
+        if memory::sys_mmap(process, &each) != Ok(each.addr as usize) {
+            return Err("a MAP_FIXED page in a PROT_NONE reservation was refused");
+        }
+    }
+    Ok(())
+}
+
+/// Read `/proc/<pid>/maps` whole, in pages, without keeping it: its lines,
+/// the lines that end in `path`, and its bytes. It must hold one line for
+/// each region the space holds, and the space at least every region the
+/// check made.
+///
+/// Verifies: L.user.98
+fn read_maps(process: &Process, path: &[u8]) -> Result<(u64, u64), &'static str> {
+    let ns = fs::namespace();
+    let maps_path = format!("/proc/{}/maps", process.pid());
+    let read = OpenFlags {
+        read: true,
+        ..OpenFlags::default()
+    };
+    let maps = ns
+        .open(&ns.context(), None, maps_path.as_bytes(), &read, 0)
+        .map_err(|_| "the maps of a space of many regions would not open")?;
+    let (mut lines, mut named, mut bytes) = (0_u64, 0_u64, 0_u64);
+    // The line being read, kept across reads, which split lines: a line is
+    // at most one path and its numbers, about 4 KiB.
+    let mut line = Vec::new();
+    let mut chunk = vec![0_u8; PAGE_SIZE as usize];
+    loop {
+        let count = match maps.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(count) => count,
+            Err(_) => return Err("the maps of a space of many regions would not read"),
+        };
+        bytes += count as u64;
+        let mut parts = chunk
+            .get(..count)
+            .unwrap_or_default()
+            .split(|&byte| byte == b'\n');
+        let mut part = parts.next();
+        while let Some(text) = part {
+            line.extend_from_slice(text);
+            part = parts.next();
+            // Every part but the last ended at a newline.
+            if part.is_some() {
+                lines += 1;
+                if line.ends_with(path) {
+                    named += 1;
+                }
+                line.clear();
+            }
+        }
+    }
+    if named != FILE_REGIONS {
+        return Err("the maps of a space of many regions lack a line for a file page");
+    }
+    let regions = process.space().with_regions(|regions| regions.count()) as u64;
+    if regions < 2 * (ANON_REGIONS + FILE_REGIONS) {
+        return Err("a space of many MAP_FIXED regions holds fewer regions than were made");
+    }
+    if lines != regions {
+        return Err(
+            "the maps of a space of many regions lack a line for a region, or have one too many",
+        );
+    }
+    Ok((lines, bytes))
 }
 
 /// Step 5: a truncation takes the pages past the new end away from both

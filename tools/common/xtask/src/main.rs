@@ -137,6 +137,7 @@ mod game_rig;
 mod gate_rows;
 mod gateway;
 mod hotpath;
+mod hyprix_gpu;
 mod image_file;
 mod init;
 mod init_file;
@@ -155,6 +156,11 @@ mod lode_net;
 mod lode_pstore;
 mod lode_remote;
 mod machine_check;
+mod mce_cmci;
+mod mce_copy;
+mod mce_driver;
+mod mce_pagecache;
+mod mce_restart;
 mod n150;
 mod native;
 mod net;
@@ -180,11 +186,13 @@ mod powerfail;
 mod procfs;
 mod pty;
 mod qemu;
+mod quarantine;
 mod remote;
 mod rename_crash;
 mod restart;
 mod rows_bench;
 mod rustc;
+mod scrub;
 mod seam;
 mod seat;
 mod seccomp;
@@ -588,7 +596,14 @@ const TASKS: &[&[Task]] = &[
     lode_pstore::TASKS,
     lode_remote::TASKS,
     machine_check::TASKS,
+    mce_cmci::TASKS,
+    mce_copy::TASKS,
+    mce_restart::TASKS,
+    mce_driver::TASKS,
+    mce_pagecache::TASKS,
     powerctl::TASKS,
+    quarantine::TASKS,
+    scrub::TASKS,
     n150::TASKS,
     netboot::TASKS,
     nvidia::TASKS,

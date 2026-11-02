@@ -186,6 +186,14 @@ Not flags, and why:
   is `crash_collector`'s (3595 (C3)). Each value allows: `absent` all,
   `present` `present` and `none`. `config_updates` (3564 (S11)) is a later
   key of the same kind, not built.
+* **`bad_frames`** (`persist` | `choice`; ledger 5579) is loader content:
+  whether the UEFI loader's bad-frame mode is fixed at build time
+  (`persist`: `max`, `fast`, `present`; its loader compiles no read of
+  `ferrix.badframes`) or chosen by that boot word (`choice`: `desktop`
+  alone). `loader_env` passes it as `FERRIX_BAD_FRAMES`, read from the
+  resolved base profile, so an ad-hoc build keeps its base profile's value
+  and the manifest agrees (`docs/MACHINE-CHECK-RESTART.md` §10). Each value
+  allows: `persist` all, `choice` `none` alone.
 * **Criticality levels** (K17) are set per job at run time by the partition
   manager, not per build.
 * **Game mode** (the customer, 2026-10-11) is a privileged run-time trade on

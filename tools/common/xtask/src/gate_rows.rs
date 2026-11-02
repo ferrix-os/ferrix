@@ -122,16 +122,267 @@ const IMAGE_ROW: &[&str] = &[
     "test-boot --arch armv7a --smp 2",
 ];
 
-/// The machine-check row (F-73): a machine check injected into every
-/// processor must stop the kernel as FX-9005, under both accelerators.
+/// The core quarantine row (`docs/CORE-QUARANTINE.md` §7, ledger 4932):
+/// lode takes a processor out, the surface says so, and root brings it
+/// back, on four processors and on two, under both accelerators; a
+/// compatibility-format message refuses (VT-d remapping off); and test-nvrm,
+/// whose unremapped boot runs the native check's refusal arm (ledger 4992).
+const TEST_QUARANTINE: &[&str] = &[
+    "test-quarantine --arch x86_64 --accel kvm",
+    "test-quarantine --arch x86_64 --accel tcg",
+    "test-quarantine-smp2 --arch x86_64 --accel kvm",
+    "test-quarantine-unremapped --arch x86_64 --accel kvm",
+    "test-nvrm --arch x86_64",
+];
+
+/// Whether `path` reaches core quarantine: the service, the scheduler's
+/// placement and park, the messages' aim and retarget, the doors, lode's
+/// policy, or the gate itself.
+fn reaches_quarantine(path: &str) -> bool {
+    [
+        "src/kernel/src/smp/service.rs",
+        "src/kernel/src/sched/mod.rs",
+        "src/kernel/src/sched/queue.rs",
+        "src/kernel/src/sched/task.rs",
+        "src/kernel/src/arch/x86_64/msi.rs",
+        "src/kernel/src/iommu/remapping.rs",
+        "src/kernel/src/iommu/vtd.rs",
+        "src/kernel/src/iommu/amdvi.rs",
+        "src/kernel/src/settings/cpu_online.rs",
+        "src/kernel/src/fs/sysfs.rs",
+        "src/kernel/src/init.rs",
+        "src/lib/log/lode/src/quarantine.rs",
+        "src/user/system/native/lode/src/quarantine.rs",
+        "tools/common/xtask/src/quarantine.rs",
+    ]
+    .contains(&path)
+        || path.starts_with("src/tests/quarantine/")
+}
+
+/// The RAM scrubber's row (`docs/RAM-SCRUBBER.md` §7, ledger 5057): a full
+/// sweep under the gate's override and the stand-down without it, under
+/// both accelerators on x86-64 and on AArch64, with the facade's pinned
+/// disassembly; ARMv7-A's stand-down.
+const TEST_SCRUB: &[&str] = &[
+    "test-scrub --arch x86_64 --accel kvm",
+    "test-scrub --arch x86_64 --accel tcg",
+    "test-scrub --arch aarch64",
+    "test-scrub --arch armv7a",
+];
+
+/// Whether `path` reaches the RAM scrubber: the batch, the facade, the
+/// type-16 decode, the frame allocator's block look-up, the token's call,
+/// the service, or the gate itself.
+fn reaches_scrub(path: &str) -> bool {
+    [
+        "src/kernel/src/mm/scrub.rs",
+        "src/kernel/src/arch/x86_64/scrub.rs",
+        "src/kernel/src/arch/aarch64/scrub.rs",
+        "src/lib/platform/smbios/src/lib.rs",
+        "src/lib/kernel/frame/src/lib.rs",
+        "src/user/system/linux/init/units/memscrub.service",
+        "tools/common/xtask/src/scrub.rs",
+    ]
+    .contains(&path)
+        || path.starts_with("src/user/system/native/memscrub/")
+}
+
+/// The machine check at a system call's copy (`docs/MACHINE-CHECK-COPY.md`
+/// §6, ledger 5216): the recovery under both accelerators and at two
+/// processors, and every mode that must stop or leave it alone.
+const TEST_MCE_COPY: &[&str] = &[
+    "test-mce-copy --arch x86_64 --accel kvm",
+    "test-mce-copy --arch x86_64 --accel tcg",
+    "test-mce-copy --arch x86_64 --accel kvm --smp 2",
+    "test-mce-copy-kill --arch x86_64 --accel kvm",
+    "test-mce-copy-tcc --arch x86_64 --accel kvm",
+    "test-mce-copy-page --arch x86_64 --accel kvm",
+    "test-mce-copy-off --arch x86_64 --accel kvm",
+    "test-mce-copy-outside --arch x86_64 --accel kvm",
+    "test-mce-copy-environ --arch x86_64 --accel kvm",
+    "test-mce-copy-intel --arch x86_64 --accel kvm",
+    "test-mce-copy-file --arch x86_64 --accel kvm",
+];
+
+/// Whether `path` reaches the copy's recovery: the copy, the decision and
+/// the handler, the readers of a program's memory, the poison record and
+/// its way out, or the gate.
+fn reaches_mce_copy(path: &str) -> bool {
+    [
+        "src/kernel/src/arch/x86_64/copy_mc.rs",
+        "src/kernel/src/arch/x86_64/mce.rs",
+        "src/kernel/src/arch/x86_64/mce/decode.rs",
+        "src/kernel/src/syscall/uaccess.rs",
+        "src/kernel/src/sched/task.rs",
+        "src/kernel/src/trap.rs",
+        "tools/common/xtask/src/mce_copy.rs",
+    ]
+    .contains(&path)
+        || path.starts_with("src/tests/mce-copy/")
+}
+
+/// Poison in the page cache (`docs/MACHINE-CHECK-PAGECACHE.md` §6, ledger
+/// 5294): a clean page's read and mapping under KVM with AMD's records, the
+/// dirty modes, the poll under TCG with Intel's UCNA record, and the copy
+/// from a clean file's mapping.
+const TEST_MCE_PAGECACHE: &[&str] = &[
+    "test-mce-pagecache --arch x86_64 --accel kvm",
+    "test-mce-pagecache --arch x86_64 --accel tcg",
+    "test-mce-pagecache-mapped --arch x86_64 --accel kvm",
+    "test-mce-pagecache-dirty --arch x86_64 --accel kvm",
+    "test-mce-pagecache-poll --arch x86_64 --accel tcg",
+    "test-mce-copy-file --arch x86_64 --accel kvm",
+];
+
+/// Whether `path` reaches the page cache's poison: the drop, the cache read,
+/// the fill loop, the ring-3 and poll paths, or the gate.
+fn reaches_mce_pagecache(path: &str) -> bool {
+    [
+        "src/kernel/src/user/cache.rs",
+        "src/kernel/src/user/vmo.rs",
+        "src/kernel/src/fs/pages.rs",
+        "src/kernel/src/arch/x86_64/mce.rs",
+        "src/kernel/src/trap.rs",
+        "src/kernel/src/fs/btrfs_write_check/poison_check.rs",
+        "tools/common/xtask/src/mce_pagecache.rs",
+    ]
+    .contains(&path)
+        || path.starts_with("src/tests/mce-pagecache/")
+}
+
+/// A warm restart after a fatal machine check (`docs/MACHINE-CHECK-RESTART.md`
+/// §5, ledger 5467): the stop word, the pstore table, the loader's keep-out,
+/// the kernel's leave-out.
+const TEST_MCE_RESTART: &[&str] = &[
+    "test-mce-restart --arch x86_64 --accel tcg",
+    "test-mce-restart-retired --arch x86_64 --accel tcg",
+    "test-mce-restart-power --arch x86_64 --accel tcg",
+    "test-mce-restart-reset --arch x86_64 --accel tcg --kernel-profile desktop",
+    "test-mce-restart-off --arch x86_64 --accel tcg --kernel-profile desktop",
+];
+
+/// Whether `path` reaches the restart after a machine check: the pstore
+/// table, the stop word, the loader's bank read and keep-out, the event log's
+/// bad-frame set, the allocator's leave-out, the machine check's stop, or
+/// the gate.
+fn reaches_mce_restart(path: &str) -> bool {
+    [
+        "src/lib/proto/bootinfo/src/pstore.rs",
+        "src/kernel/src/console/pstore.rs",
+        "src/kernel/src/panic.rs",
+        "src/kernel/src/mm.rs",
+        "src/kernel/src/arch/x86_64/mce.rs",
+        "src/boot/common/uefi/src/badframes.rs",
+        "src/boot/common/uefi/src/pstore.rs",
+        "src/boot/common/uefi/src/events.rs",
+        "src/boot/common/uefi/src/main.rs",
+        "src/boot/common/uefi/build.rs",
+        "src/lib/proto/eventlog/src/badframes.rs",
+        "src/lib/proto/eventlog/src/lib.rs",
+        "tools/common/xtask/src/mce_restart.rs",
+    ]
+    .contains(&path)
+}
+
+/// A ring-3 driver's poison (`docs/MACHINE-CHECK-DRIVER.md` §3, ledger
+/// 5444): Own and Kill under both accelerators, Copy under KVM with AMD's
+/// records, Bystander under TCG with Intel's.
+const TEST_MCE_DRIVER: &[&str] = &[
+    "test-mce-driver --arch x86_64 --accel kvm",
+    "test-mce-driver --arch x86_64 --accel tcg",
+    "test-mce-driver-kill --arch x86_64 --accel kvm",
+    "test-mce-driver-kill --arch x86_64 --accel tcg",
+    "test-mce-driver-copy --arch x86_64 --accel kvm",
+    "test-mce-driver-bystander --arch x86_64 --accel tcg",
+];
+
+/// Whether `path` reaches a driver's poison: the pin quarantine, the victim
+/// driver, or the gate.
+fn reaches_mce_driver(path: &str) -> bool {
+    [
+        "src/kernel/src/object/pin.rs",
+        "tools/common/xtask/src/mce_driver.rs",
+    ]
+    .contains(&path)
+        || path.starts_with("src/user/system/native/mce-victim/")
+}
+
+/// CMCI (`docs/MACHINE-CHECK-CMCI.md` §5, ledger 5348): every mode under
+/// TCG on QEMU with patch 0008, which no other machine here can run.
+const TEST_MCE_CMCI: &[&str] = &[
+    "test-mce-cmci --arch x86_64 --accel tcg",
+    "test-mce-cmci-ucna --arch x86_64 --accel tcg",
+    "test-mce-cmci-storm --arch x86_64 --accel tcg",
+    "test-mce-cmci-window --arch x86_64 --accel tcg",
+    "test-mce-cmci-off --arch x86_64 --accel tcg",
+    "test-mce-cmci-unoffered --arch x86_64 --accel tcg",
+    "test-mce-cmci-parked --arch x86_64 --accel tcg",
+];
+
+/// Whether `path` reaches CMCI: the claim, the handler and the poll's
+/// loop, the local APIC's entry, the return-to-service hook, the QEMU patch,
+/// or the gate.
+fn reaches_mce_cmci(path: &str) -> bool {
+    [
+        "src/kernel/src/arch/x86_64/mce.rs",
+        "src/kernel/src/arch/x86_64/mce/cmci.rs",
+        "src/kernel/src/arch/x86_64/apic.rs",
+        "tools/common/data/qemu/0008-target-i386-CMCI-under-TCG.patch",
+        "tools/common/xtask/src/mce_cmci.rs",
+    ]
+    .contains(&path)
+}
+
+/// The machine-check row (F-73, `docs/MACHINE-CHECK.md`): a fatal machine
+/// check injected into every processor must stop the kernel as FX-9005, and
+/// the log's and recovery's modes must hold, under both accelerators. Under
+/// KVM on a host whose processor model has no `MCG_SER_P` (nazuna's AMD) the
+/// recovery modes require the fail-closed stop instead.
 const TEST_MCE: &[&str] = &[
     "test-mce --arch x86_64 --accel kvm",
     "test-mce --arch x86_64 --accel tcg",
+    "test-mce-corrected --arch x86_64 --accel kvm",
+    "test-mce-corrected --arch x86_64 --accel tcg",
+    "test-mce-srar --arch x86_64 --accel kvm",
+    "test-mce-srar --arch x86_64 --accel tcg",
+    "test-mce-broadcast --arch x86_64 --accel kvm",
+    "test-mce-broadcast --arch x86_64 --accel tcg",
+    "test-mce-srao --arch x86_64 --accel kvm",
+    "test-mce-srao --arch x86_64 --accel tcg",
+    "test-mce-left --arch x86_64 --accel kvm",
+    "test-mce-left --arch x86_64 --accel tcg",
+    "test-mce-recover-off --arch x86_64 --accel kvm",
+    "test-mce-recover-off --arch x86_64 --accel tcg",
+    "test-mce-kill --arch x86_64 --accel kvm",
+    "test-mce-kill --arch x86_64 --accel tcg",
+    "test-mce-amd-srar --arch x86_64 --accel kvm",
+    "test-mce-amd-srar --arch x86_64 --accel tcg",
+    "test-mce-amd-kill --arch x86_64 --accel kvm",
+    "test-mce-amd-kill --arch x86_64 --accel tcg",
+    "test-mce-amd-tcc --arch x86_64 --accel kvm",
+    "test-mce-amd-tcc --arch x86_64 --accel tcg",
+    "test-mce-amd-eipv --arch x86_64 --accel kvm",
+    "test-mce-amd-eipv --arch x86_64 --accel tcg",
+    "test-mce-amd-pcc --arch x86_64 --accel kvm",
+    "test-mce-amd-pcc --arch x86_64 --accel tcg",
+    "test-mce-amd-nosuccor --arch x86_64 --accel kvm",
+    "test-mce-amd-nosuccor --arch x86_64 --accel tcg",
+    "test-mce-amd-over --arch x86_64 --accel kvm",
+    "test-mce-amd-over --arch x86_64 --accel tcg",
+    "test-mce-amd-deferred --arch x86_64 --accel kvm",
+    "test-mce-amd-deferred --arch x86_64 --accel tcg",
+    "test-mce-amd-ring0 --arch x86_64 --accel kvm",
+    "test-mce-amd-ring0 --arch x86_64 --accel tcg",
+    "test-mce-amd-corrected --arch x86_64 --accel kvm",
+    "test-mce-amd-corrected --arch x86_64 --accel tcg",
+    "test-mce-amd-recover-off --arch x86_64 --accel kvm",
+    "test-mce-amd-recover-off --arch x86_64 --accel tcg",
 ];
 
 /// Whether a change to `path` reaches the machine check: x86-64's `CR4`
-/// setup, its paranoid entry and their check, the trap gates and the
-/// secondaries' start (`docs/BACKLOG.md`, *What a landing runs*).
+/// setup, its paranoid entry and their check, the trap gates, the
+/// secondaries' start, the machine-check log and recovery, and their gate
+/// and guest program (`docs/BACKLOG.md`, *What a landing runs*).
 fn reaches_machine_check(path: &str) -> bool {
     [
         "src/kernel/src/arch/x86_64/cpu.rs",
@@ -139,8 +390,13 @@ fn reaches_machine_check(path: &str) -> bool {
         "src/kernel/src/arch/x86_64/paranoid/check.rs",
         "src/kernel/src/arch/x86_64/trap.rs",
         "src/kernel/src/arch/x86_64/smp.rs",
+        "src/kernel/src/arch/x86_64/mce.rs",
+        "src/kernel/src/arch/x86_64/mce/check.rs",
+        "src/kernel/src/arch/x86_64/mce/decode.rs",
+        "tools/common/xtask/src/machine_check.rs",
     ]
     .contains(&path)
+        || path.starts_with("src/tests/mce/")
 }
 
 /// Whether `path` is documentation only: under `docs/`, or a Markdown file
@@ -168,6 +424,22 @@ pub(crate) fn rows(changed: &[String], image_crates: &BTreeSet<String>) -> Rows 
         rows_for(path, image_crates, &mut rows);
     }
     rows
+}
+
+/// The machine check's and core quarantine's rows `path` reaches.
+fn machine_rows(path: &str, rows: &mut Rows) {
+    if reaches_machine_check(path) {
+        rows.add(TEST_MCE);
+        rows.reasons.push(format!(
+            "{path}: the machine check's code: test-mce under KVM and TCG"
+        ));
+    }
+    if reaches_quarantine(path) {
+        rows.add(TEST_QUARANTINE);
+        rows.reasons.push(format!(
+            "{path}: core quarantine's code: test-quarantine under KVM and TCG"
+        ));
+    }
 }
 
 /// What one path adds to `rows`.
@@ -242,10 +514,7 @@ fn rows_for(path: &str, image_crates: &BTreeSet<String>, rows: &mut Rows) {
     {
         rows.add(IMAGE_ROW);
         reason(rows, "in the image: the image row");
-        if reaches_machine_check(path) {
-            rows.add(TEST_MCE);
-            reason(rows, "the machine check's code: test-mce under KVM and TCG");
-        }
+        machine_rows(path, rows);
         rows.ask(
             "stage 7 or 8? then test-shell --arch x86_64 (zinc, --init ferrousli, the musl and \
              the glibc busybox) and test-vfs --arch x86_64 (ferrousli and musl busybox)",
@@ -271,7 +540,8 @@ fn rows_for(path: &str, image_crates: &BTreeSet<String>, rows: &mut Rows) {
 }
 
 /// The rows an area of the tree adds to whatever its kind of path asked:
-/// the memory-pressure row and the Intel GPU's restart row.
+/// the memory-pressure row, the RAM scrubber's row and the Intel GPU's
+/// restart row.
 fn area_rows(path: &str, rows: &mut Rows) {
     let under = |prefix: &str| path.starts_with(prefix);
     let reason = |rows: &mut Rows, why: &str| rows.reasons.push(format!("{path}: {why}"));
@@ -281,6 +551,42 @@ fn area_rows(path: &str, rows: &mut Rows) {
             rows,
             "the page cache, reclaim, the frame allocator, btrfs or the memory charge: \
              test-btrfs-pressure (docs/BTRFS-PRESSURE.md)",
+        );
+    }
+    if reaches_mce_restart(path) {
+        rows.add(TEST_MCE_RESTART);
+        reason(
+            rows,
+            "a warm restart after a machine check: test-mce-restart",
+        );
+    }
+    if reaches_mce_driver(path) {
+        rows.add(TEST_MCE_DRIVER);
+        reason(rows, "a driver's poison: test-mce-driver and its modes");
+    }
+    if reaches_mce_cmci(path) {
+        rows.add(TEST_MCE_CMCI);
+        reason(rows, "CMCI: test-mce-cmci and its modes");
+    }
+    if reaches_mce_pagecache(path) {
+        rows.add(TEST_MCE_PAGECACHE);
+        reason(
+            rows,
+            "the page cache's poison: test-mce-pagecache and its modes",
+        );
+    }
+    if reaches_mce_copy(path) {
+        rows.add(TEST_MCE_COPY);
+        reason(
+            rows,
+            "the copy's machine-check recovery: test-mce-copy and its modes",
+        );
+    }
+    if reaches_scrub(path) {
+        rows.add(TEST_SCRUB);
+        reason(
+            rows,
+            "the RAM scrubber's code: test-scrub on every architecture",
         );
     }
     if GPU_RESTARTED.iter().any(|prefix| under(prefix)) {
@@ -621,6 +927,44 @@ mod tests {
     }
 
     #[test]
+    fn the_copys_recovery_adds_its_row() {
+        for path in [
+            "src/kernel/src/syscall/uaccess.rs",
+            "src/kernel/src/arch/x86_64/copy_mc.rs",
+            "src/tests/mce-copy/src/main.rs",
+        ] {
+            let rows = rows_of(&[path]);
+            assert!(
+                TEST_MCE_COPY
+                    .iter()
+                    .all(|row| rows.commands.iter().any(|c| c == row)),
+                "{path}"
+            );
+        }
+        let rows = rows_of(&["src/kernel/src/main.rs"]);
+        assert!(!rows.commands.iter().any(|c| c == TEST_MCE_COPY[0]));
+    }
+
+    #[test]
+    fn the_scrubber_adds_its_row_and_other_kernel_code_does_not() {
+        for path in [
+            "src/kernel/src/mm/scrub.rs",
+            "src/kernel/src/arch/aarch64/scrub.rs",
+            "src/user/system/native/memscrub/src/main.rs",
+        ] {
+            let rows = rows_of(&[path]);
+            assert!(
+                TEST_SCRUB
+                    .iter()
+                    .all(|row| rows.commands.iter().any(|c| c == row)),
+                "{path}"
+            );
+        }
+        let rows = rows_of(&["src/kernel/src/main.rs"]);
+        assert!(!rows.commands.iter().any(|c| c == TEST_SCRUB[0]));
+    }
+
+    #[test]
     fn the_intel_driver_and_its_restart_path_add_the_gpu_restart_row() {
         for path in [
             "src/user/system/native/drivers/gpu/intel/src/main.rs",
@@ -758,8 +1102,18 @@ mod tests {
             )
         );
         assert_eq!(
-            rows_of(&["src/kernel/src/arch/x86_64/apic.rs"]).commands,
+            rows_of(&["src/kernel/src/arch/x86_64/pcid.rs"]).commands,
             IMAGE_ROW
+        );
+        assert!(
+            rows_of(&["src/kernel/src/arch/x86_64/apic.rs"])
+                .commands
+                .ends_with(
+                    &TEST_MCE_CMCI
+                        .iter()
+                        .map(|row| (*row).to_owned())
+                        .collect::<Vec<_>>()
+                )
         );
     }
 

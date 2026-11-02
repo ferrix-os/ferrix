@@ -58,6 +58,7 @@ pub(super) struct Found {
 pub(super) fn run() -> Result<Found, &'static str> {
     let (given, dirty) = reclaim_written()?;
     reclaim_beside_a_mapping()?;
+    resident_of_a_disk_file()?;
     let stolen_at_max = write_reclaims_at_max()?;
     let stolen_by_fill = fill_reclaims_until_room()?;
     Ok(Found {
@@ -66,6 +67,68 @@ pub(super) fn run() -> Result<Found, &'static str> {
         stolen_at_max,
         stolen_by_fill,
     })
+}
+
+/// The disk file [`resident_of_a_disk_file`] maps part of.
+const RESIDENT_FILE: &[u8] = b"/mnt-rw/resident-check";
+
+/// A disk file's pages in a space's resident set: the pages of the part a
+/// region maps count as the file's, not the file's other cached pages; a
+/// page a private mapping has written counts as anonymous instead, and the
+/// file's original no longer does.
+///
+/// Verifies: L.user.172
+fn resident_of_a_disk_file() -> Result<(), &'static str> {
+    write_file(RESIDENT_FILE, &pattern(17, 0, 8 * PAGE))?;
+    sync()?;
+    let object = object_of(RESIDENT_FILE)?;
+    if object.committed() != 8 {
+        return Err("a disk file just written does not hold its eight pages");
+    }
+    let space = AddressSpace::new().map_err(|_| "no address space for the resident check")?;
+    let map = |flags: VmaFlags, offset: u64, pages: u64| {
+        space.map_file(
+            FilePlace::Anywhere(None),
+            pages * PAGE_SIZE,
+            flags,
+            Arc::clone(&object),
+            offset * PAGE_SIZE,
+            FileMapping {
+                file: Arc::new(()) as Arc<dyn Any + Send + Sync>,
+                may_write: false,
+            },
+        )
+    };
+    let part = map(VmaFlags::READ, 2, 4)
+        .map_err(|_| "the space refused a mapping of part of a disk file")?;
+    let split = space
+        .resident_split()
+        .map_err(|_| "no memory to count the resident set")?;
+    if split.file != 4 || split.anon != 0 || split.shmem != 0 {
+        return Err(
+            "four pages of an eight-page disk file mapped did not count as four file pages",
+        );
+    }
+    let _ = space.unmap(part, 4 * PAGE_SIZE);
+    let private = map(VmaFlags::READ_WRITE, 0, 1)
+        .map_err(|_| "the space refused a private mapping of a disk file")?;
+    let wrote = space.with_page(private, Access::WRITE, |to| {
+        // SAFETY: `with_page` passes the direct-map address of the byte,
+        // translated under the space's lock, which it holds while this runs;
+        // the write fault gave the private mapping a copy of its own.
+        unsafe { core::ptr::write(to as *mut u8, 0xa5) }
+    });
+    let split = space.resident_split();
+    let _ = space.unmap(private, PAGE_SIZE);
+    drop(space);
+    wrote.map_err(|_| "could not write the private mapping of a disk file")?;
+    let split = split.map_err(|_| "no memory to count the resident set")?;
+    if split.anon != 1 || split.file != 0 || split.shmem != 0 {
+        return Err(
+            "a disk page a private mapping wrote did not move from the file's count to anon",
+        );
+    }
+    Ok(())
 }
 
 /// Sync the writable mount.

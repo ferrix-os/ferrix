@@ -11,8 +11,10 @@
 //! flushed rectangle of a compositor's buffer into the window, the processor
 //! doing the copy. Nothing of the display engine is touched: the plane, its
 //! GGTT entries and the mode stay the firmware's, and the window is the
-//! memory the plane already scans out of. A blit by BCS0 and flips are
-//! later steps.
+//! memory the plane already scans out of. Where the render node is served
+//! beside it, the copy into the lit plane is the GT's blitter's instead
+//! ([`blit`], H5 of `docs/GAME-MODE.md` §5.7), and the processor copies
+//! only what the blitter cannot take. Flips are a later step.
 //!
 //! The protocol's handling follows efifb's (`efifb/src/main.rs`): ATTACH maps
 //! a buffer's VMO read-only, SCANOUT says which buffer is shown and copies
@@ -24,6 +26,12 @@
 //! hyprix shows directly (`docs/DISPLAY.md` §8.2): the copy is then the
 //! frame's only one. Every copy ends
 //! with the device barrier that drains the write-combining buffers.
+//!
+//! HELLO says the card has a cursor, though no cursor plane is programmed:
+//! CURSOR and MOVE place a pointer the card blends into the plane itself
+//! after each copy ([`Display::repaint`]), so that a compositor leaves the
+//! pointer out of its frames and shows a game's buffer directly with a
+//! pointer over it (`docs/DISPLAY.md` §8.2).
 //!
 //! Its modes (displayctl v11, `docs/DISPLAY.md` §9.4): the plane's own,
 //! preferred, and every smaller standard size, shown scaled -- the pipe is
@@ -67,10 +75,14 @@ use ferrix_rt::native::vmo::Vmo;
 
 use ferrix_intel_xelp::display::hotplug::Port as PortOf;
 use ferrix_intel_xelp::display::light;
+use ferrix_intel_xelp::frontend::Completion;
 use ferrix_intel_xelp::io::Mmio;
 
 use crate::m2::ScreenPlane;
 
+pub(crate) use blit::{Gpu, NoGpu};
+
+mod blit;
 mod hotplug;
 mod modeset;
 mod regs;
@@ -97,6 +109,9 @@ const PAGE: usize = 4096;
 /// Buffers known at once: a compositor's two, and a client's swap chain
 /// shown directly.
 const MAX_BUFFERS: usize = 16;
+/// How long after a GPU's write to a shared object copies evict their
+/// source: longer than any frame takes to land.
+const EVICT_WINDOW_NS: u64 = 500_000_000;
 /// The refresh the one timing is listed at.
 const REFRESH_HZ: u64 = 60;
 
@@ -119,6 +134,22 @@ struct Output {
     /// second surface, mapped cached, which the display engine reads past
     /// them. The lent window is write-combining and needs only the barrier.
     flush: bool,
+    /// The cursor CURSOR and MOVE gave it, which the card blends in itself.
+    pointer: Pointer,
+}
+
+/// A scanout's cursor: a copying card has no plane for it, so the pointer
+/// is put into the plane after each copy ([`Display::repaint`],
+/// `ferrix_display_modes::pointer`).
+#[derive(Clone, Copy)]
+struct Pointer {
+    /// The image's buffer, 0 for none.
+    image: u32,
+    /// Its top-left corner, in the mode's pixels.
+    at: (i32, i32),
+    /// Where it is in the plane now, in the mode's pixels: what is copied
+    /// from the buffer shown again before it is drawn anywhere else.
+    drawn: Option<Rect>,
 }
 
 impl Output {
@@ -133,6 +164,11 @@ impl Output {
             owed_whole: false,
             scaler: None,
             flush: false,
+            pointer: Pointer {
+                image: 0,
+                at: (0, 0),
+                drawn: None,
+            },
         }
     }
 
@@ -159,12 +195,20 @@ impl Output {
     const fn size(&self) -> (u32, u32) {
         (self.width as u32, self.height as u32)
     }
+
+    /// The mode's size: the plane's, or the scaled mode's.
+    fn mode(&self) -> (u32, u32) {
+        self.scaler
+            .map_or_else(|| self.size(), |scaler| scaler.source)
+    }
 }
 
 /// A buffer the screen may show.
 #[derive(Clone, Copy)]
 struct Buffer {
     id: u32,
+    /// Where its range starts in its VMO.
+    offset: u64,
     base: usize,
     length: usize,
     stride: usize,
@@ -176,7 +220,7 @@ struct Buffer {
 const SCANOUTS: usize = 2;
 
 /// The display card.
-pub(crate) struct Display {
+pub(crate) struct Display<'d> {
     _window: IoMapping<Kernel>,
     /// The second scanout's memory, kept while the card runs.
     surface: Option<surface::Surface>,
@@ -208,6 +252,17 @@ pub(crate) struct Display {
     /// When the hotplug poll is due, in milliseconds; `u64::MAX` for never.
     hotplug_at: u64,
     tally: vblank::Tally,
+    /// The count of GPU writes to shared objects the last copy saw
+    /// (`ferrix_intel_xelp::frontend::shared_writes`).
+    shared_writes: u64,
+    /// Copies evict their source until then: a GPU write submitted before
+    /// one copy may land after it, and the lines that copy read would
+    /// otherwise be read again.
+    evict_until: u64,
+    /// Each buffer slot's VMO, kept for the blitter to pin or find it.
+    vmos: [Option<Vmo<Kernel>>; MAX_BUFFERS],
+    /// The first scanout's copy on BCS0.
+    blit: blit::State<'d>,
 }
 
 /// What the second scanout starts with.
@@ -222,18 +277,18 @@ struct Second {
     watch: Option<hotplug::Watch>,
 }
 
-impl Display {
+impl<'d> Display<'d> {
     /// Publish `card0`: the lent window found and mapped, the plane checked
     /// as one a copy can fill (linear XRGB8888, the window large enough),
     /// HELLO said and READY taken. `None`, said, when any of it is missing:
     /// the render node is served alone then, as before.
     pub(crate) fn publish(
-        device: &Device<Kernel>,
+        device: &'d Device<Kernel>,
         apertures: u32,
         location: u32,
         plane: Option<ScreenPlane>,
         port: &Port<Kernel>,
-    ) -> Option<Display> {
+    ) -> Option<Display<'d>> {
         let Some(plane) = plane else {
             ferrix_rt::info!("intel: no card0: pipe A's plane is not lit");
             return None;
@@ -311,6 +366,10 @@ impl Display {
             flip_at: u64::MAX,
             hotplug_at: u64::MAX,
             tally: vblank::Tally::default(),
+            shared_writes: 0,
+            evict_until: 0,
+            vmos: [const { None }; MAX_BUFFERS],
+            blit: blit::State::new(plane, device),
         };
         if let Some(second) = second {
             if let (Some(size), Some(surface)) = (second.size, second.surface.as_ref()) {
@@ -592,19 +651,163 @@ fn vblank_off() -> bool {
     })
 }
 
-impl Display {
+impl Display<'_> {
     /// A packet under one of the card's keys ([`ours`]): the hotplug poll,
     /// or the control channel's. `false` when the card is gone.
-    pub(crate) fn on_key(&mut self, key: u64, port: &Port<Kernel>) -> bool {
+    pub(crate) fn on_key(&mut self, key: u64, port: &Port<Kernel>, gpu: &mut dyn Gpu) -> bool {
         if key == KEY_HOTPLUG {
-            if self.pending.is_some() && self.flip_due().is_err() {
+            if self.pending.is_some() && self.flip_due(gpu).is_err() {
                 return false;
             }
             let alive = now_ms() < self.hotplug_at || self.poll_hotplug();
             self.rearm();
             return alive;
         }
-        self.on_packet(port)
+        self.on_packet(port, gpu)
+    }
+
+    /// After the render node's loop serviced the back end: the blit that
+    /// finished answered. `false` when the card is gone.
+    pub(crate) fn on_service(&mut self, gpu: &mut dyn Gpu) -> bool {
+        match self.settle_blit(gpu, false) {
+            Ok(()) => true,
+            Err(why) => {
+                ferrix_rt::err!("intel: card0 stopped: {why}");
+                false
+            }
+        }
+    }
+
+    /// Every copy on the processor from now on: nothing services the back
+    /// end, so no blit would be seen to finish.
+    pub(crate) fn copy_on_processor(&mut self) {
+        self.blit = blit::State::Off;
+    }
+
+    /// The running blit, if any, answered: at once if `wait`, servicing
+    /// the back end until it ends, else only if it has. A blit that did
+    /// not end well is copied by the processor and the blitter turned off.
+    fn settle_blit(&mut self, gpu: &mut dyn Gpu, wait: bool) -> Result<(), &'static str> {
+        let Some(blitter) = self.blit.made() else {
+            return Ok(());
+        };
+        let Some(inflight) = blitter.inflight else {
+            return Ok(());
+        };
+        let done = if wait {
+            blitter.wait(gpu)
+        } else {
+            gpu.completion(inflight.request).map(|how| {
+                blitter.inflight = None;
+                (inflight, how)
+            })
+        };
+        let (inflight, how) = match done {
+            Some(done) => done,
+            None if wait => (inflight, Completion::Hung),
+            None => return Ok(()),
+        };
+        let now = now_ns();
+        if how == Completion::Ok {
+            self.tally.blitted(now.saturating_sub(inflight.started));
+            // The blit wrote over the pointer, or moved under it.
+            self.repaint(0);
+        } else {
+            ferrix_rt::warn!(
+                "intel: card0: a blit ended {how:?}; frames are copied by the processor from now on"
+            );
+            self.blit = blit::State::Off;
+            if let Some(Some(buffer)) = self.buffers.get(inflight.slot).copied() {
+                if let Some(Some(output)) = self.outputs.first_mut() {
+                    output.owed_whole = true;
+                }
+                self.flush(buffer.id, Rect::default());
+            }
+        }
+        self.tally
+            .flip(now, now.saturating_sub(inflight.at), inflight.torn);
+        if let Some(done) = self.tally.report(now) {
+            done.say();
+        }
+        self.reply(Message::Flipped {
+            sequence: inflight.sequence,
+            status: Status::Ok,
+        })
+    }
+
+    /// The FLUSH copied by the blitter, if it can take it: `true` when its
+    /// blit was submitted, and FLIPPED is said once it ends.
+    fn blit_flush(&mut self, pending: vblank::Pending, torn: bool, gpu: &mut dyn Gpu) -> bool {
+        let Some(slot) = self
+            .buffers
+            .iter()
+            .position(|b| b.is_some_and(|b| b.id == pending.buffer))
+        else {
+            return false;
+        };
+        let Some(Some(buffer)) = self.buffers.get(slot).copied() else {
+            return false;
+        };
+        let [Some(first), second] = &mut self.outputs else {
+            return false;
+        };
+        if second
+            .as_ref()
+            .is_some_and(|o| o.shown.is_some_and(|(id, _)| id == pending.buffer))
+        {
+            return false;
+        }
+        let Some((id, whole)) = first.shown else {
+            return false;
+        };
+        if id != pending.buffer || first.scaler.is_some() {
+            return false;
+        }
+        let changed = if first.owed_whole {
+            whole
+        } else {
+            pending.rect
+        };
+        let Some(area) = area(&buffer, whole, changed, first) else {
+            return false;
+        };
+        let Some(vmo) = self.vmos.get(slot).and_then(Option::as_ref) else {
+            return false;
+        };
+        let Some(blitter) = self.blit.get(gpu) else {
+            return false;
+        };
+        if !blitter.prepare(
+            slot,
+            vmo,
+            buffer.offset,
+            buffer.length as u64,
+            buffer.stride,
+            gpu,
+        ) {
+            return false;
+        }
+        if blitter.written_by_processor(slot) {
+            // `clflush` writes a dirty line back as it evicts it.
+            write_back(&buffer, &area);
+        }
+        let Ok(request) = blitter.submit(slot, buffer.stride, &area, gpu) else {
+            return false;
+        };
+        blitter.inflight = Some(blit::Inflight {
+            request,
+            slot,
+            sequence: pending.sequence,
+            at: pending.at,
+            started: now_ns(),
+            torn,
+        });
+        first.owed_whole = false;
+        self.flushes += 1;
+        if self.flushes == 1 {
+            ferrix_rt::info!("intel: card0: the first frame is on the screen");
+        }
+        true
     }
 
     /// The loop's wake-up: the earlier of the hotplug poll and the blank a
@@ -620,11 +823,11 @@ impl Display {
 
     /// The FLUSH waiting for the blank, copied and answered if the blank
     /// is near enough to spin for; otherwise the wake-up set for it.
-    fn flip_due(&mut self) -> Result<(), &'static str> {
+    fn flip_due(&mut self, gpu: &mut dyn Gpu) -> Result<(), &'static str> {
         let (Some(_), Some(beam), Some(regs)) =
             (self.pending, self.beam.as_mut(), self.regs.as_mut())
         else {
-            return self.finish_pending(false);
+            return self.finish_pending(false, gpu);
         };
         let mut left = beam.until_blank(regs, now_ns());
         if left > vblank::SPIN_NS {
@@ -638,15 +841,23 @@ impl Display {
             core::hint::spin_loop();
             left = beam.until_blank(regs, now_ns());
         }
-        self.finish_pending(left > 0)
+        self.finish_pending(left > 0, gpu)
     }
 
     /// Copy the FLUSH waiting for the blank and answer it; `torn` when it
-    /// is copied outside the blank.
-    fn finish_pending(&mut self, torn: bool) -> Result<(), &'static str> {
+    /// is copied outside the blank. A blit still running is answered
+    /// first; a FLUSH the blitter takes is answered when its blit ends.
+    fn finish_pending(&mut self, torn: bool, gpu: &mut dyn Gpu) -> Result<(), &'static str> {
+        if self.pending.is_none() {
+            return Ok(());
+        }
+        self.settle_blit(gpu, true)?;
         let Some(pending) = self.pending.take() else {
             return Ok(());
         };
+        if self.blit_flush(pending, torn, gpu) {
+            return Ok(());
+        }
         self.flush(pending.buffer, pending.rect);
         let now = now_ns();
         self.tally.flip(now, now.saturating_sub(pending.at), torn);
@@ -745,8 +956,8 @@ impl Display {
     /// A packet under [`KEY_DISPLAY`]: every message taken and answered, the
     /// wait armed again. `false` when the core closed its end or sent what
     /// this card cannot act on; the card is then gone, the render node not.
-    pub(crate) fn on_packet(&mut self, port: &Port<Kernel>) -> bool {
-        match self.take_messages() {
+    pub(crate) fn on_packet(&mut self, port: &Port<Kernel>, gpu: &mut dyn Gpu) -> bool {
+        match self.take_messages(gpu) {
             Ok(true) => self
                 .control
                 .wait_async(port, Signals::READABLE | Signals::PEER_CLOSED, KEY_DISPLAY)
@@ -769,7 +980,7 @@ impl Display {
     }
 
     /// `Ok(true)` while the card goes on.
-    fn take_messages(&mut self) -> Result<bool, &'static str> {
+    fn take_messages(&mut self, gpu: &mut dyn Gpu) -> Result<bool, &'static str> {
         loop {
             let mut bytes = [0_u8; MAX_BYTES];
             let mut handles = [Handle::INVALID; Attach::HANDLES];
@@ -784,9 +995,21 @@ impl Display {
                         .map_err(|_| "a message that does not decode")?;
                     // Whatever comes next is acted on after the FLUSH that
                     // waits for the blank, as it was sent after it: that
-                    // one is copied now.
-                    if self.pending.is_some() {
-                        self.finish_pending(true)?;
+                    // one is copied now. A MOVE is not worth a torn frame:
+                    // the pointer is drawn where it is once that one lands.
+                    if self.pending.is_some() && !matches!(message, Message::Move { .. }) {
+                        self.finish_pending(true, gpu)?;
+                    }
+                    // What changes the plane or lets a buffer go waits for
+                    // the blit that may write or read it.
+                    if matches!(
+                        message,
+                        Message::Stop
+                            | Message::Detach { .. }
+                            | Message::SetMode { .. }
+                            | Message::Cursor { .. }
+                    ) {
+                        self.settle_blit(gpu, true)?;
                     }
                     match message {
                         Message::Stop if vmo.is_none() => {
@@ -795,7 +1018,7 @@ impl Display {
                         }
                         Message::Attach(attach) => {
                             let vmo = vmo.ok_or("an ATTACH without its VMO")?;
-                            let status = self.attach(&attach, &vmo);
+                            let status = self.attach(&attach, vmo);
                             self.reply(Message::Attached {
                                 buffer: attach.buffer,
                                 status,
@@ -804,7 +1027,7 @@ impl Display {
                         _ if vmo.is_some() => {
                             return Err("a handle on a message that carries none");
                         }
-                        other => self.act(other)?,
+                        other => self.act(other, gpu)?,
                     }
                 }
                 Err(ReadError::Failed(Error::PeerClosed)) => return Ok(false),
@@ -814,7 +1037,7 @@ impl Display {
         }
     }
 
-    fn act(&mut self, message: Message) -> Result<(), &'static str> {
+    fn act(&mut self, message: Message, gpu: &mut dyn Gpu) -> Result<(), &'static str> {
         match message {
             // A GPU object as a scanout buffer is M6's flip; not yet.
             Message::AttachObject(attach) => self.reply(Message::Attached {
@@ -853,15 +1076,15 @@ impl Display {
                     at: now_ns(),
                 });
                 if shown_first && self.beam.is_some() {
-                    self.flip_due()?;
+                    self.flip_due(gpu)?;
                     self.rearm();
                     Ok(())
                 } else {
-                    self.finish_pending(false)
+                    self.finish_pending(false, gpu)
                 }
             }
             Message::Detach { buffer } => {
-                let status = self.detach(buffer);
+                let status = self.detach(buffer, gpu);
                 self.reply(Message::Detached { buffer, status })
             }
             // A mode of the list: the plane's own, or a smaller one shown
@@ -877,6 +1100,8 @@ impl Display {
                 }
                 output.scaler = Scaler::new(size, plane).filter(|scaler| !scaler.is_identity());
                 clear(output);
+                // Cleared with the rest, and drawn again at the next copy.
+                output.pointer.drawn = None;
                 ferrix_rt::info!(
                     "intel: card0: scanout {scanout} mode {}x{}{}",
                     size.0,
@@ -889,7 +1114,117 @@ impl Display {
                 );
                 Ok(())
             }
-            _ => Err("a message a copying card without a cursor takes no part in"),
+            Message::Cursor {
+                scanout,
+                buffer,
+                sequence,
+                x,
+                y,
+                ..
+            } => self.cursor(scanout as usize, buffer, sequence, (x, y)),
+            Message::Move { scanout, x, y } => {
+                self.move_pointer(scanout as usize, (x, y));
+                Ok(())
+            }
+            _ => Err("a message a copying card takes no part in"),
+        }
+    }
+
+    /// CURSOR: `buffer`'s image, or none, as `scanout`'s pointer with its
+    /// corner at `at`, drawn into the plane and answered. The blit that may
+    /// write where it goes has been waited for (`take_messages`).
+    fn cursor(
+        &mut self,
+        scanout: usize,
+        buffer: u32,
+        sequence: u64,
+        at: (i32, i32),
+    ) -> Result<(), &'static str> {
+        let known = buffer == 0 || self.buffer(buffer).is_some();
+        if let Some(Some(output)) = self.outputs.get_mut(scanout) {
+            output.pointer.image = if known { buffer } else { 0 };
+            output.pointer.at = at;
+        }
+        if !self.behind(scanout) {
+            self.repaint(scanout);
+        }
+        self.reply(Message::Flipped {
+            sequence,
+            status: if known { Status::Ok } else { Status::Invalid },
+        })
+    }
+
+    /// MOVE: `scanout`'s pointer drawn at `at` at once, unless the plane
+    /// is behind the buffer shown ([`Display::behind`]): the copy that
+    /// brings it level draws the pointer where it is by then.
+    fn move_pointer(&mut self, scanout: usize, at: (i32, i32)) {
+        let Some(Some(output)) = self.outputs.get_mut(scanout) else {
+            return;
+        };
+        output.pointer.at = at;
+        if !self.behind(scanout) {
+            self.repaint(scanout);
+        }
+    }
+
+    /// Whether `scanout`'s plane does not yet hold the buffer it shows: a
+    /// SCANOUT not yet copied, a FLUSH waiting for the blank, or a blit
+    /// still writing the first plane. What [`Display::repaint`] copies back
+    /// from the buffer would then be part of a frame not yet on the screen.
+    fn behind(&mut self, scanout: usize) -> bool {
+        let Some(Some(output)) = self.outputs.get(scanout) else {
+            return false;
+        };
+        let shown = output.shown.map(|(id, _)| id);
+        let waiting = self
+            .pending
+            .is_some_and(|pending| Some(pending.buffer) == shown);
+        let owed = output.owed_whole;
+        let blitting = scanout == 0
+            && self
+                .blit
+                .made()
+                .is_some_and(|blitter| blitter.inflight.is_some());
+        owed || waiting || blitting
+    }
+
+    /// `scanout`'s pointer put into its plane where it is now: what is
+    /// under its last place copied again from the buffer shown, then the
+    /// image blended over the buffer's pixels at its new one. The plane is
+    /// otherwise the buffer's copy, so the two rectangles are all that a
+    /// pointer moving, or a frame copied over it, has to put right.
+    fn repaint(&mut self, scanout: usize) {
+        let Some(Some(output)) = self.outputs.get(scanout) else {
+            return;
+        };
+        let pointer = output.pointer;
+        let Some((shown_id, shown)) = output.shown else {
+            if let Some(Some(output)) = self.outputs.get_mut(scanout) {
+                output.pointer.drawn = None;
+            }
+            return;
+        };
+        let Some(buffer) = self.buffer(shown_id) else {
+            return;
+        };
+        let image = (pointer.image != 0)
+            .then(|| self.buffer(pointer.image))
+            .flatten();
+        let now =
+            image.and_then(|_| ferrix_display_modes::pointer::bounds(pointer.at, output.mode()));
+        if let Some(old) = pointer.drawn
+            && now != Some(old)
+        {
+            paint(output, &buffer, shown, None, old);
+        }
+        if let (Some(image), Some(rect)) = (image.as_ref(), now) {
+            paint(output, &buffer, shown, Some((image, pointer.at)), rect);
+        }
+        if pointer.drawn.is_some() || now.is_some() {
+            ferrix_rt::device_barrier();
+        }
+        if let Some(Some(output)) = self.outputs.get_mut(scanout) {
+            output.pointer.drawn = now;
         }
     }
 
@@ -899,34 +1234,60 @@ impl Display {
         let Some(source) = self.buffer(buffer) else {
             return;
         };
-        for output in self.outputs.iter_mut().flatten() {
+        let evicting = self.evicting();
+        let mut copied = [false; SCANOUTS];
+        for (output, copied) in self.outputs.iter_mut().zip(copied.iter_mut()) {
+            let Some(output) = output else {
+                continue;
+            };
             let Some((id, whole)) = output.shown else {
                 continue;
             };
             if id != buffer {
                 continue;
             }
+            *copied = true;
             let changed = if core::mem::take(&mut output.owed_whole) {
                 whole
             } else {
                 rect
             };
-            copy(output, &source, changed);
+            let started = now_ns();
+            let evicted = copy(output, &source, changed, evicting);
+            self.tally.copied(now_ns().saturating_sub(started), evicted);
             self.flushes += 1;
             if self.flushes == 1 {
                 ferrix_rt::info!("intel: card0: the first frame is on the screen");
             }
         }
+        for (scanout, copied) in copied.into_iter().enumerate() {
+            if copied {
+                self.repaint(scanout);
+            }
+        }
     }
 
-    fn attach(&mut self, attach: &Attach, vmo: &Vmo<Kernel>) -> Status {
+    /// Whether a copy now evicts its source first: a GPU wrote an object
+    /// shared with other programs within [`EVICT_WINDOW_NS`]. A desktop
+    /// drawn in software with no GPU client copies as before, at no cost.
+    fn evicting(&mut self) -> bool {
+        let writes = ferrix_intel_xelp::frontend::shared_writes();
+        let now = now_ns();
+        if writes != self.shared_writes {
+            self.shared_writes = writes;
+            self.evict_until = now.saturating_add(EVICT_WINDOW_NS);
+        }
+        now < self.evict_until
+    }
+
+    fn attach(&mut self, attach: &Attach, vmo: Vmo<Kernel>) -> Status {
         let Ok(vmo_bytes) = vmo.size() else {
             return Status::Invalid;
         };
         if attach.validate(vmo_bytes).is_err() || self.buffer(attach.buffer).is_some() {
             return Status::Invalid;
         }
-        let Some(slot) = self.buffers.iter_mut().find(|slot| slot.is_none()) else {
+        let Some(index) = self.buffers.iter().position(Option::is_none) else {
             return Status::OutOfMemory;
         };
         let Ok(length) = usize::try_from(attach.length) else {
@@ -935,8 +1296,15 @@ impl Display {
         let Ok(base) = vmo.map(None, length, Protection::Read, attach.offset) else {
             return Status::OutOfMemory;
         };
+        if let Some(kept) = self.vmos.get_mut(index) {
+            *kept = Some(vmo);
+        }
+        let Some(slot) = self.buffers.get_mut(index) else {
+            return Status::OutOfMemory;
+        };
         *slot = Some(Buffer {
             id: attach.buffer,
+            offset: attach.offset,
             base,
             length,
             stride: attach.stride as usize,
@@ -950,20 +1318,39 @@ impl Display {
         self.buffers.iter().flatten().find(|b| b.id == id).copied()
     }
 
-    fn detach(&mut self, id: u32) -> Status {
-        let Some(slot) = self
+    fn detach(&mut self, id: u32, gpu: &mut dyn Gpu) -> Status {
+        let Some(index) = self
             .buffers
-            .iter_mut()
-            .find(|slot| slot.is_some_and(|b| b.id == id))
+            .iter()
+            .position(|slot| slot.is_some_and(|b| b.id == id))
         else {
             return Status::Invalid;
         };
-        let Some(buffer) = slot.take() else {
+        let Some(buffer) = self.buffers.get_mut(index).and_then(Option::take) else {
             return Status::Invalid;
         };
+        // No blit runs (the caller settled it): the mapping and pin go
+        // before the core may give the pages back.
+        if let Some(blitter) = self.blit.made() {
+            blitter.forget(index, gpu);
+        }
+        // A pointer whose image goes is taken out of the plane first.
+        for scanout in 0..SCANOUTS {
+            let Some(Some(output)) = self.outputs.get_mut(scanout) else {
+                continue;
+            };
+            if output.pointer.image == id {
+                output.pointer.image = 0;
+                self.repaint(scanout);
+            }
+        }
+        if let Some(kept) = self.vmos.get_mut(index) {
+            *kept = None;
+        }
         for output in self.outputs.iter_mut().flatten() {
             if output.shown.is_some_and(|(shown, _)| shown == id) {
                 output.shown = None;
+                output.pointer.drawn = None;
             }
         }
         if ferrix_rt::linux::munmap(buffer.base, buffer.length).is_err() {
@@ -1030,12 +1417,72 @@ fn copy_scaled(screen: &Output, scaler: &Scaler, buffer: &Buffer, shown: Rect, c
     }
 }
 
-/// `changed` of `buffer`, clipped as efifb clips it, copied into the
-/// plane's memory, then the barrier that makes it shown.
-fn copy(screen: &Output, buffer: &Buffer, changed: Rect) {
-    let Some((_, shown)) = screen.shown else {
+/// Evict `changed` of `buffer` from the processor's caches before a copy
+/// reads it, while a GPU writes shared objects (`Display::evicting`).
+///
+/// The buffer may be a GPU's frame: hyprix drawing on iris or a Vulkan
+/// helper on anv, or a game's buffer shown directly. Mesa writes an object
+/// it imported or exported with uncached MOCS, past the LLC, so a line this
+/// process read from the buffer for an earlier frame stays in its cache and
+/// is read again, stale: on 2026-10-28 hyprix's frames drawn on iris showed
+/// on the N150 as the previous frames' pixels, with the pointer leaving a
+/// trail. Evicting the lines first sends the copy's reads to memory. A line
+/// the processor wrote (a compositor's dumb buffer) is written back by the
+/// same `clflush`, so a frame drawn in software reads the same pixels.
+fn evict(buffer: &Buffer, changed: Rect) {
+    let Some((left, right, top, bottom)) = source_span(buffer, changed) else {
         return;
     };
+    let bytes = (right - left) * PIXEL;
+    for row in top..bottom {
+        let from = row * buffer.stride + left * PIXEL;
+        if from + bytes > buffer.length {
+            break;
+        }
+        crate::arch::evict_range(buffer.base + from, bytes);
+    }
+    crate::arch::fence();
+}
+
+/// Write `area` of `buffer` back from the processor's caches before the
+/// blitter reads it past them.
+fn write_back(buffer: &Buffer, area: &Area) {
+    let bytes = area.columns * PIXEL;
+    for row in area.source_y..area.source_y + area.rows {
+        let from = row * buffer.stride + area.source_x * PIXEL;
+        if from + bytes > buffer.length {
+            break;
+        }
+        crate::arch::evict_range(buffer.base + from, bytes);
+    }
+    crate::arch::fence();
+}
+
+/// The columns and rows of `buffer` inside `changed`, ends exclusive, or
+/// `None` when that is nothing.
+fn source_span(buffer: &Buffer, changed: Rect) -> Option<(usize, usize, usize, usize)> {
+    let left = (changed.x as usize).min(buffer.width);
+    let right = (changed.x as usize)
+        .saturating_add(changed.width as usize)
+        .min(buffer.width);
+    let top = (changed.y as usize).min(buffer.height);
+    let bottom = (changed.y as usize)
+        .saturating_add(changed.height as usize)
+        .min(buffer.height);
+    (left < right && top < bottom).then_some((left, right, top, bottom))
+}
+
+/// `changed` of `buffer`, clipped as efifb clips it, copied into the
+/// plane's memory, then the barrier that makes it shown.
+fn copy(screen: &Output, buffer: &Buffer, changed: Rect, evicting: bool) -> u64 {
+    let Some((_, shown)) = screen.shown else {
+        return 0;
+    };
+    let started = now_ns();
+    if evicting {
+        evict(buffer, changed);
+    }
+    let evicted = now_ns().saturating_sub(started);
     if let Some(scaler) = screen.scaler {
         copy_scaled(screen, &scaler, buffer, shown, changed);
     } else if let Some(area) = area(buffer, shown, changed, screen) {
@@ -1067,6 +1514,78 @@ fn copy(screen: &Output, buffer: &Buffer, changed: Rect) {
         }
     }
     ferrix_rt::device_barrier();
+    evicted
+}
+
+/// `rect` of the mode, as `screen` shows it, written into the plane from
+/// `buffer` -- the buffer shown, `shown` of it on the screen -- with
+/// `image`, the pointer at its corner, blended over it where it reaches.
+/// No image is the buffer's pixels alone: what puts back what the pointer
+/// covered. The caller drains the writes with the device barrier.
+///
+/// The buffer's pixels are read rather than the plane's: the plane is
+/// write-combining memory, which reads uncached, and the buffer holds what
+/// it shows. Its lines there are evicted first, as a copy's are while a GPU
+/// writes it (`evict`): a client's buffer shown directly is a GPU's.
+fn paint(
+    screen: &Output,
+    buffer: &Buffer,
+    shown: Rect,
+    image: Option<(&Buffer, (i32, i32))>,
+    rect: Rect,
+) {
+    use ferrix_display_modes::pointer::{image_at, on_plane, over, shown_at};
+    let scaler = screen.scaler.as_ref();
+    let Some(area) = on_plane(scaler, rect, screen.size()) else {
+        return;
+    };
+    evict(
+        buffer,
+        Rect {
+            x: rect.x.saturating_add(shown.x),
+            y: rect.y.saturating_add(shown.y),
+            ..rect
+        },
+    );
+    let pixel_of = |from: &Buffer, x: usize, y: usize| {
+        let at = y * from.stride + x * PIXEL;
+        (x < from.width && y < from.height && at + PIXEL <= from.length).then(|| {
+            // SAFETY: `at` is a pixel inside the buffer's read-only
+            // mapping, which lives until its DETACH takes it from the
+            // card; bounds-checked just above and four-byte aligned.
+            unsafe { ptr::read_volatile((from.base + at) as *const u32) }
+        })
+    };
+    for y in area.y..area.y + area.height {
+        let line = (y as usize) * screen.pitch;
+        for x in area.x..area.x + area.width {
+            let (mode_x, mode_y) = shown_at(scaler, x, y);
+            let source_x = (mode_x + shown.x) as usize;
+            let source_y = (mode_y + shown.y) as usize;
+            let to = line + (x as usize) * PIXEL;
+            let Some(under) = pixel_of(buffer, source_x, source_y) else {
+                continue;
+            };
+            if to + PIXEL > screen.len {
+                continue;
+            }
+            let pixel = image
+                .and_then(|(image, at)| {
+                    let size = (image.width as u32, image.height as u32);
+                    let (column, row) = image_at(at, size, mode_x, mode_y)?;
+                    pixel_of(image, column as usize, row as usize)
+                })
+                .map_or(under, |top| over(top, under));
+            // SAFETY: `to` is a pixel inside the plane's memory mapped for
+            // this process, bounds-checked just above and four-byte
+            // aligned.
+            unsafe { ptr::write_volatile((screen.base + to) as *mut u32, pixel) };
+        }
+        screen.written(
+            line + (area.x as usize) * PIXEL,
+            (area.width as usize) * PIXEL,
+        );
+    }
 }
 
 /// Tell the core a scanout's monitor is there or not, as virtio-gpu does
@@ -1164,7 +1683,11 @@ fn introduce(
         capsets: 0,
         capset: 0,
         capset_bytes: 0,
-        cursor: false,
+        // No cursor plane is programmed: the card blends the pointer into
+        // the plane after each copy ([`Display::repaint`]), so that a
+        // compositor leaves it out of its frames and can show a client's
+        // buffer directly with a pointer over it.
+        cursor: true,
         timings,
         copies: true,
         connectors,

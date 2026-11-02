@@ -132,6 +132,14 @@ a failed invariant, an allocation failure at bring-up or in the uncertified
 load (§4, AoU-5), or an unhandled kernel fault. The report names the condition
 and carries a catalogued explanation.
 
+One class of hardware error does not enter it (H.FAIL.8, AoU-36): on x86-64,
+a machine check whose records leave the kernel's own state intact -- a
+corrected error, an uncorrected one nothing has consumed, or one a ring-3
+program consumed -- is logged, the frame is retired, and the program is
+ended or signalled; so is one a system call's copy of a program's memory
+consumed at the copy's one recoverable instruction, whose call then fails
+(H.FAIL.10); every other machine check halts as before.
+
 **AoU-2 below is the obligation this creates.** A halt is only a *safe* state in
 a system where stopping is safe. In a system where the controlled process must
 keep being controlled — a moving train, an infusion in progress — the
@@ -206,7 +214,13 @@ memory and page tables cannot take (`H.QUOTA.13`), so a program in no
 limited job that runs the machine out of memory is refused and the element
 carries on, unless the load's heap-borne demand uses up the watermark's
 frames as well, which still stops it with FX-0008; the job limits below
-remain the integrator's to set.
+remain the integrator's to set. Job limits did not cover one case before
+2026-10-27 (F-97): opening `/proc/<pid>/maps` rendered its text into one
+buffer, charged only after the render, and a request past the heap's 4 MiB
+block stopped the element with FX-0008 whatever the limits and however much
+memory was free. Its text is now kept in page-sized blocks charged before
+each is taken, and an open over the limit answers `ENOMEM`; the other
+generated files that still render into one buffer are F-98's.
 
 Since 2026-09-26 the element bounds what a partition's programs hold, when
 the partition is a job with limits set: the frames of their memory and their
@@ -344,9 +358,16 @@ engine a predecessor left pointed at a status page (`RING_HWS_PGA` not 0),
 never the GT (`GRDOM_FULL`) and never the function (FLR, which the kernel
 refuses there, K4), and sends no HELLO if any such reset fails
 (`docs/INTEL-GPU.md` §11.2); that is the driver's property, outside the
-element. devmgr starts no driver again
-after one that died before publishing, or once a device's restart budget is
-spent, so a device keeps at most two drivers' pins that way. An explicit rebind
+element. devmgr starts a driver that keeps dying at its start (before it is
+up, or within 10 s of it) at most three times more -- two restarts, then one
+on the device quiesced again -- and then quarantines the device: it starts
+nothing on it again until an explicit bind, and none at all once the
+device's restart budget is spent (`docs/DEVMGR.md` §4). So a device keeps at
+most four drivers' pins that way, together never more than `2B` (below): a
+later driver whose pin would pass it is refused `QUARANTINE_FULL`, and devmgr
+counts that driver's death as one more failed start. A quarantined device
+keeps those pages, mapped and charged to no job, until a reboot or an
+explicit rebind whose driver is accepted. An explicit rebind
 of a device whose drivers die before publishing keeps one more driver's pins
 each time, up to the element's own bound: each device has a pin budget `B`
 (`object/pin.rs`, `docs/NVIDIA.md` §12.2), 66560 pages (260 MiB, one driver's
@@ -369,6 +390,14 @@ integrator shall not rebind such a device in a loop, and shall treat
 
 ---
 
+
+`vmo_pin`'s `PIN_BLOCKS` (ledger 5088) commits a pin's absent pages in
+naturally aligned blocks where the frame allocator has them, and is best
+effort: a pin with it is an ordinary pin, its pages wherever they ended
+up. No driver may rely on getting a block -- the Intel driver reads its
+pages' addresses and maps a large GPU page only where it finds one -- and
+an integrator's driver that needs one run asks `PIN_CONTIGUOUS`, which
+refuses rather than pin anything else.
 ### AoU-13 — the disk checks of stages 10 to 12 run only when the kernel starts devmgr
 Under `ferrix.devmgr=init` pid 1 starts `devmgr` (`docs/INIT.md` §7.3), so
 the kernel has no driver to read a disk through before pid 1 runs, and the
@@ -722,6 +751,210 @@ reading taken from another processor counts kernel time up to the task's
 last return to user mode or its processor's last decision, which a task
 alone on a processor with no tick may not make for as long as it runs.
 
+### AoU-36 — recovery from a hardware error is the integrator's choice (x86-64)
+With recovery on, the default (customer, 2026-10-30), the kernel goes on
+after the machine checks H.FAIL.8 names: a corrected or no-action error is
+logged and counted, an action-optional one's frame retired, and a ring-3
+program that consumed poison receives `SIGBUS` (`BUS_MCEERR_AR`) or is
+ended (`docs/MACHINE-CHECK.md`). The integrator shall decide, in the
+system hazard analysis, whether a program losing a page and going on, or
+being ended, is acceptable for every program the system runs; where it is
+not, the integrator shall boot with `ferrix.mce.recover=off`, under which
+every machine check halts (L.x86_64.231). Either way:
+
+* a retired frame stays mapped in every process that maps it and has not
+  touched it (late kill, as Linux's default) -- but for a clean page of a
+  file on a disk, which is dropped from the cache and from every mapping and
+  read again from the disk when next touched (`docs/MACHINE-CHECK-PAGECACHE.md`,
+  H.FAIL.11): a read of it is refilled and answered, a program whose
+  restartable load consumed it is not signalled, and the poll drops it when
+  it finds the record first. A page with no other copy -- written and not
+  written back, a memory filesystem's -- is kept, and so is a clean one that
+  a write, a truncation, a writeback or a reclaim of its file holds still at
+  that moment: its read fails `EIO`, its mapper gets `SIGBUS`, and a dirty
+  page's data is lost. btrfs writeback reads a kept dirty page through the
+  same recoverable copy: it recovers, fails that round with `EIO`, and the
+  page stays dirty, so every later round consumes the poison again (one
+  recovered machine check and one `EIO` each; a BACKLOG row asks writeback
+  to skip a retired frame). A writeback read that did not go through that
+  copy would halt, and a device's DMA of such a page could put the poison on
+  the disk; no writeback in btrfs reads otherwise today. The kernel consuming
+  anything else -- a copy-on-write copy at `fork` or a write fault, a
+  device's DMA, any read of kernel memory -- is a machine check in ring 0,
+  which halts;
+* a system call's read of a program's memory that consumes poison fails the
+  call with `EFAULT` (a native call with its fault status), retires the
+  frame and, where the memory is the caller's own, raises `SIGBUS`
+  `BUS_MCEERR_AR` at the page as a ring-3 consumption does
+  (`docs/MACHINE-CHECK-COPY.md`, H.FAIL.10); a read of another process's
+  memory (`/proc/<pid>/environ`) ends short and signals nobody. This holds
+  only under `ferrix.mce.recover`, only on x86-64, and only where the record
+  names the very page the copy was loading with both `RIPV` and `EIPV`
+  (on AMD with `SUCCOR` and `TCC` clear); anything else halts. Under QEMU the
+  injected record is believed and no real poison is loaded, so the gate shows
+  the decision and the fixup, not a real load (a BACKLOG row asks for a
+  hardware run);
+* the corrected-error lines are a symptom log, not a guarantee: the kernel
+  applies no threshold; lode's quarantine policy may take a core out of
+  service on them (AoU-37), and a machine whose corrected counts grow is
+  still the integrator's to take out of service;
+* a ring-3 driver that consumes poison in its own memory, or whose system
+  call's copy consumes it, is a program like any other: it ends with status
+  135 (`SIGBUS`), its frame is retired, and devmgr quiesces the device and
+  starts it again by the kind's policy (`docs/MACHINE-CHECK-DRIVER.md`,
+  DEVMGR §4). The pin quarantine never reads a retired frame of a dead
+  driver's pins, at their close or their release (`L.object.262`). The
+  residual is the ring cores' own ring-0 reads of memory a live driver
+  shares with them -- `interfaces/block_ring`, `net_ring`, `display`,
+  `audio` -- which stop the machine on poison as any ring-0 consumption
+  outside a copy does (a BACKLOG row);
+* corrected errors are found by a poll every `ferrix.mce.poll` seconds (5
+  by default), and at once by CMCI where an Intel processor reports
+  `MCG_CMCI_P` (`docs/MACHINE-CHECK-CMCI.md`); a record a bank overwrites
+  before a round reads it is counted once with `OVER` set. A bank whose
+  `CMCI_EN` firmware already set is left to firmware and polled only. More
+  than 15 interrupt-driven rounds in a second mask the CMCI entry and the
+  poll goes on once a second until a round finds nothing. A CMCI on a
+  processor out of service is held until its return. `ferrix.mce.cmci=off`
+  leaves the poll alone. CMCI is shown on a patched emulator only, not on
+  hardware;
+* AArch64 and ARMv7-A make no such claim: their external aborts and
+  SErrors halt as before;
+* the vendor decides the rules (`docs/MACHINE-CHECK-AMD.md`): Intel's for
+  Intel and Zhaoxin, AMD's for AMD and Hygon, and none for any other
+  vendor, whose every uncorrected error halts. AMD recovery needs the
+  processor's `SUCCOR`; it is shown under KVM on an AMD host, never on AMD
+  bare metal, and the SMCA address path (`PhysAddrV`, the address cut,
+  `MCA_CONFIG`) by argument and stage-3 tables only, since no emulator has
+  SMCA. On an SMCA processor the kernel sets `MCA_CONFIG.McaX` on every
+  bank, which AMD requires before an uncorrectable error can be survived;
+  `ferrix.mce.recover=off` halts on AMD as on Intel.
+
+### AoU-37 — core quarantine is an availability aid, not a safety mechanism (x86-64)
+lode takes a physical core out of service once it has reported enough
+corrected errors of its own (`docs/CORE-QUARANTINE.md`; `action =
+quarantine` by default, the customer's choice of 2026-10-30), and root
+can take a processor out or bring it back with `cpuN/online`. The
+integrator shall not count on it to prevent a failure: it acts on
+corrected errors after the fact, an uncorrected error still stops or
+recovers as H.FAIL.8 says, a quarantined core is never brought back
+automatically, and a machine left with fewer processors runs slower.
+The integrator shall decide whether the policy's defaults (ten records in
+ten minutes, at most half the processors, at least one kept) suit the
+system, set `action = warn` or `off` where they do not, and treat a
+quarantined core as a hardware fault to be serviced. AArch64 and ARMv7-A
+take no processor out of service.
+
+### AoU-38 — the RAM scrubber is a detection aid for memory without ECC, not a guarantee
+`memscrub` tests free frames while the machine is idle and retires the
+ones that fail (`docs/RAM-SCRUBBER.md`, H.FAIL.9). The integrator shall
+not count on it to keep a program's data correct, and shall provide
+memory that corrects errors where that matters. In particular:
+
+* it tests only free memory: a program's pages, the heap, page tables,
+  the page cache and DMA buffers are never tested, and memory held for
+  the whole boot is never tested at all; `/proc/ferrix-scrub` shows how
+  much was tested (`tested-this-sweep` against `managed`);
+* detection stops at the point of coherency: a fault in a cache past it,
+  or one that only shows under a pattern the four do not make, is missed;
+* it stands down where the firmware's SMBIOS type 16 says the memory
+  corrects errors (parity, single-bit or multi-bit ECC, CRC), under a
+  hypervisor, on AArch64 with `DC ZVA` prohibited, and always on ARMv7-A.
+  A machine whose memory corrects errors but whose table says Other or
+  Unknown, or has no type 16, is scrubbed; on x86-64 an SMI or NMI that
+  splits one line's eight non-temporal stores lets such a memory
+  controller read the old line, and an uncorrectable error found there is
+  a machine check in ring 0 (AoU-36, H.FAIL.8). The integrator of such a
+  machine shall turn `memscrub.service` off;
+* a guest none of the tests betrays (x86-64's hypervisor bit, AArch64's
+  `hvc` PSCI conduit or `/hypervisor` node) is scrubbed, which makes its
+  host back every free frame;
+* while a frame is under test it is not free: two requests of the same
+  order made at once while exactly two blocks of it are free can see the
+  second fail for one frame's test (MEMORY-AND-TIMING §2.2e3); the
+  allocator does not retry;
+* a bad frame is retired and stays out until the next boot, at most 192
+  of the 256 retired places taken by the scrubber; past that it stops and
+  says so. A frame that fails is a hardware fault to be serviced.
+* `ferrix.scrub=test` is a test-only boot option for the gate: it is
+  honoured only where a hypervisor is positively seen, a certified
+  profile's command line may not carry it, and the integrator shall not
+  pass it;
+* a boot with the checks on runs stage 2's scrubber check only where the
+  scrubber itself would run, and says `scrub    check skipped: ...` with
+  the reason elsewhere.
+
+### AoU-39 — a bad frame stays out across a reset or a power cycle only on the loader's word
+
+H.FAIL.12 (`docs/MACHINE-CHECK-RESTART.md`, slice 8a): after a warm reset
+the kernel hands out no frame the boot before retired, nor the page of an
+uncorrected record a fatal machine check named, **where the loader marked
+it left out**. H.FAIL.13 (§9, slice 8b): after a power cycle the kernel
+hands out no frame of the boot disk's event-log bad-frame set, **where the
+loader marked it left out**. The loader is outside the item (A.FIRMWARE), and the kernel
+trusts its `BadFrame` pages only to leave memory out -- the risk is RAM
+lost, never wrong data. The integrator:
+
+* uses an image whose manifest says `bad_frames=persist`
+  (`docs/MACHINE-CHECK-RESTART.md` §10, ledger 5579), every certified
+  profile's: its loader compiles no read of `ferrix.badframes`. A
+  `bad_frames = choice` image (`desktop`, no claim) set to `reset` keeps
+  out no frame the event log's set alone names, and set to `off` keeps out
+  none: then the loader hands the kernel a page a bank's uncorrected record
+  named, and only the kernel's poll at bring-up retires it, possibly after
+  the allocator gave it out, and the loader's own later allocations may
+  land on that page and be read before the kernel's poll;
+* uses the `persist` loader that marks exactly the frames the pstore header's
+  version-3 table, the machine-check banks and the event log's bad-frame
+  set name, never one more and never dropping one, that never removes a
+  frame from the set, that writes the set durably before it renews the
+  pstore header, and that reads no pstore page a bank names; a loader and
+  kernel of different header versions fail closed (no region that boot);
+* ships the inspection tool (`ferrix-eventlog`) with the loader: a loader
+  or tool from before slice 8b drops the set on its first header write
+  (the records survive); and clears the set (`ferrix-eventlog
+  clear-bad-frames`, root on a host) only after replacing the memory;
+* knows that a frame retired in a run that ended by a power cut or a
+  power-off before any warm reset is not in the set (only a loader writes
+  the disk, and only a warm reset carries the table to one); that another
+  boot disk or a reinstall starts with an empty set; that a log which keeps
+  refusing writes keeps the pstore region off every boot, said; and that a
+  fatal machine check resets only under `ferrix.panic=reset`, after its 10 s
+  hold (the customer's R1);
+* knows that a frame the table could not take (past 64 in one boot) or the
+  retired set had no room for is not kept out after a reset, which the
+  kernel says once;
+* knows the residual of the order (ledger 5487 (3)): the loader reads the
+  table inside its pstore step, after it has allocated the boot info area,
+  since the command line there can turn pstore off; a retired frame that
+  area or firmware now holds is not kept out, which its line says (`is in
+  use (firmware or the loader's earlier allocation)`); from slice 8b the
+  same holds for the event log's set, read before the boot info area but
+  after firmware's own allocations (boot 3 onward). A page firmware holds
+  may stay held on every boot of a given machine and disk (ledger 5564):
+  then the residual is a retired frame firmware goes on using, not only RAM
+  lost -- "RAM lost, never wrong data" holds for the frames the loader
+  marked. The banks' pages are kept out first, before any allocation;
+* knows that the loader reads only the boot processor's banks; another
+  processor's record is kept out through the table, which its stop writes.
+
+### AoU-40 — a partition that must not be killed is in a limited job
+
+H.QUOTA.22 (since 2026-10-31): a fault with the machine out of frames and
+no memory limit full ends the process with the most resident memory
+anywhere, never pid 1, as Linux's global OOM killer does; it is not scoped
+to the faulting partition. The integrator:
+
+* puts every partition that must never be ended by another's demand in a
+  job with a `memory.max`, and keeps the sum of those limits below the
+  machine's memory less the watermark (`mm::watermark`), so that no limited
+  job's demand reaches the machine's floor;
+* knows that even then demand on the kernel heap (V-05) is not charged to
+  every job and can still bring the machine to its floor, where the
+  machine-wide kill chooses among all partitions;
+* knows that a ring-3 driver can be the victim (the Intel GPU driver's pins
+  make it large) and is restarted by `devmgr` (T0), its clients' work lost.
+
 ## 5. Element failure analysis
 
 The hazard analysis the element *can* do: not what harm the system causes —
@@ -738,7 +971,7 @@ cause.
 | FM-4 | A device writes outside its granted region | ASR-4 violated, arbitrary corruption | IOMMU fault | VT-d / SMMUv3 domains; a domain's emptied tables are freed only after the unit's invalidation completes (F-36) | no IOMMU on ARMv7-A (AoU-6) |
 | FM-5 | A frame is reused without being cleared | ASR-5 violated, data disclosure | none at runtime | zeroed on allocation | zeroing is on allocation, not free (V-04) |
 | FM-6 | The element continues in a corrupt state | any ASR may be violated silently | invariant checks | safe state on detection | detection is not exhaustive |
-| FM-7 | A partition exhausts memory | calls that allocate fail with `NO_MEMORY` or `ENOMEM` for every partition; the safe state if the load's allocation fails | allocation failure, reported at every site in the element (gate and boot check) | a job's memory, object and task limits, refused at the limit while other jobs go on (`quota` boot line), the Linux personality's heap within the memory limit (`kmem` boot line, F-37); job limits on depth and descendants; capped queues | a partition in no limited job, whose page demand is refused at the kernel's watermark (`H.QUOTA.13`, `watermark` boot line) but whose heap-borne demand is not; per-task kernel memory and machine-wide tables with fixed bounds (V-05, low); the load's allocations are fatal (AoU-5) once heap-borne demand has used up the watermark's frames too; a kernel allocation of more than one frame on a fragmented machine; a shared btrfs mount's transaction aborts for every partition (T.EXHAUST path 6) |
+| FM-7 | A partition exhausts memory | calls that allocate fail with `NO_MEMORY` or `ENOMEM` for every partition; the safe state if the load's allocation fails | allocation failure, reported at every site in the element (gate and boot check) | a job's memory, object and task limits, refused at the limit while other jobs go on (`quota` boot line), the Linux personality's heap within the memory limit (`kmem` boot line, F-37); job limits on depth and descendants; capped queues | a partition in no limited job, whose page demand is refused at the kernel's watermark (`H.QUOTA.13`, `watermark` boot line) but whose heap-borne demand is not; per-task kernel memory and machine-wide tables with fixed bounds (V-05, low); the load's allocations are fatal (AoU-5) once heap-borne demand has used up the watermark's frames too; until 2026-10-27, an open of `/proc/<pid>/maps` whose text passed 4 MiB, whatever the job's limit (F-97, closed; the other single-buffer generated files are F-98's); a kernel allocation of more than one frame on a fragmented machine; a shared btrfs mount's transaction aborts for every partition (T.EXHAUST path 6); with no limit full, the machine-wide OOM kill (`H.QUOTA.22`) may end the largest process of any partition, a ring-3 driver included (restarted, T0), AoU-40 |
 | FM-8 | A partition is starved of processor time | ASR-8 violated | none at runtime; the `quota` boot line checks one job's share against another's; `test-stall` reports woken tasks against a saturating load (reporting, not asserted) | EEVDF eligibility, EDF admission; a job's share of a contended processor is its weight's, whatever its task count, **except while its tasks wait for a kernel spin lock**: they wait with preemption off and every other job loses those processors for as long (F-95, open) An ending task may also pay for up to 16 dead tasks of other jobs, their teardowns included (L.sched.95, MEMORY-AND-TIMING §2.2y). | no WCET, so no bound is provable (AoU-4); F-95 holds the share claim false under lock contention until its fix lands |
 | FM-9 | Kernel stack overflow | page fault at the instruction that overflowed | **guard page below every kernel stack**, and a boot check that the guard is unmapped | `vmap` reserves an unmapped page on each side of every allocation; no recursion in the element | the loader-provided boot stack is not guarded (early boot only) |
 | FM-10 | A processor stops answering a TLB shootdown (x86-64) or a grace period (every architecture) | none while the wait lasts: nothing is freed and no narrowed permission relied on until every processor answers; then the safe state (FX-0001, FX-0002, FX-0003) | `smp::wait_for` and `take_turn`: two bounds, each a wall-clock floor **and** a count of the waiter's own polls, which stretches with the emulator's slowness: past the late bound (1 s for a shootdown, 5 s for a grace period) the answer is waited for and counted late (the `late` line, `L.smp.33`); past the stuck bound (10 s, 40 s for the turn) the safe state | the count is in guest units, so a slow machine is not called stuck; a processor a host stops running answers late and is waited for (2026-10-07: 257 late answers of 1.0 to 3.6 s, every one answered); a stuck processor answers no count and is still found | availability: while a processor answers late its waiter's processor runs nothing else, since the shootdown turn disables preemption, and other shootdowns queue for the turn for up to 40 s (ASR-8, AoU-4); a host that starves a virtual processor for more than 10 s still ends the wait: availability lost, never integrity |

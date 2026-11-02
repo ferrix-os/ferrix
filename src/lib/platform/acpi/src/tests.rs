@@ -2892,3 +2892,287 @@ fn a_units_later_rmrrs_are_read_too() {
         })
     );
 }
+
+// ---------------------------------------------------------------------------
+// S5: the PM1 control blocks and `\_S5` (sleep.rs)
+// ---------------------------------------------------------------------------
+
+use crate::sleep::{DSDT_SIGNATURE, HW_REDUCED_ACPI, SleepControl, s5_sleep_types};
+
+/// QEMU q35's own: `Name (_S5, Package (0x04) { Zero, Zero, Zero, Zero })`
+/// (hw/i386/acpi-build.c), the bytes iasl's disassembly of its DSDT shows.
+const Q35_S5: [u8; 12] = [
+    0x08, b'_', b'S', b'5', b'_', 0x12, 0x06, 0x04, 0x00, 0x00, 0x00, 0x00,
+];
+
+/// A typical PC firmware's: `Name (\_S5, Package (0x04) { 0x07, Zero, Zero,
+/// Zero })`, root-prefixed, `SLP_TYP` 7 as Intel's chipsets take it.
+const FIRMWARE_S5: [u8; 13] = [
+    0x08, b'\\', b'_', b'S', b'5', b'_', 0x12, 0x07, 0x04, 0x0A, 0x07, 0x00, 0x00,
+];
+
+/// `bytes` inside a DSDT's AML, with a scope's worth of other bytes round it.
+fn in_aml(bytes: &[u8]) -> Vec<u8> {
+    let mut aml = vec![0x10, 0x4F, 0x05, b'\\', b'_', b'S', b'B', b'_', 0xA0];
+    aml.extend_from_slice(bytes);
+    aml.extend_from_slice(&[0x14, 0x09, b'_', b'P', b'T', b'S', 0x01, 0xA3]);
+    aml
+}
+
+/// Verifies: `L.x86_64.212`
+#[test]
+fn reads_q35s_and_a_firmwares_s5() {
+    assert_eq!(s5_sleep_types(&in_aml(&Q35_S5)), Some((0, 0)));
+    assert_eq!(s5_sleep_types(&in_aml(&FIRMWARE_S5)), Some((7, 0)));
+}
+
+/// Every way AML writes a small integer, each masked to three bits.
+/// Verifies: `L.x86_64.212`
+#[test]
+fn reads_every_constant_encoding() {
+    let package = |elements: &[u8]| {
+        let mut bytes = vec![0x08, b'_', b'S', b'5', b'_', 0x12];
+        bytes.push(u8::try_from(2 + elements.len()).unwrap());
+        bytes.push(2);
+        bytes.extend_from_slice(elements);
+        bytes
+    };
+    assert_eq!(s5_sleep_types(&package(&[0x00, 0x01])), Some((0, 1)));
+    assert_eq!(s5_sleep_types(&package(&[0x0A, 0x05, 0x00])), Some((5, 0)));
+    assert_eq!(
+        s5_sleep_types(&package(&[0x0B, 0x06, 0x00, 0x0C, 0x07, 0, 0, 0])),
+        Some((6, 7))
+    );
+    // Masked: 0x0F is 7, 0x1D is 5.
+    assert_eq!(
+        s5_sleep_types(&package(&[0x0A, 0x0F, 0x0A, 0x1D])),
+        Some((7, 5))
+    );
+    // Ones, a string, a name: not constants.
+    assert_eq!(s5_sleep_types(&package(&[0xFF, 0x00])), None);
+    assert_eq!(s5_sleep_types(&package(&[0x0D, b'a', 0x00, 0x00])), None);
+}
+
+/// A `PkgLength` of one to four bytes.
+/// Verifies: `L.x86_64.212`
+#[test]
+fn reads_a_package_length_of_every_size() {
+    for follow in 0..4u8 {
+        let mut bytes = vec![0x08, b'_', b'S', b'5', b'_', 0x12];
+        // Elements 0x0A 0x03, One; the count; padding the package out.
+        let body = [0x02, 0x0A, 0x03, 0x01];
+        let length = usize::from(follow) + 1 + body.len();
+        if follow == 0 {
+            bytes.push(u8::try_from(length).unwrap());
+        } else {
+            bytes.push((follow << 6) | u8::try_from(length & 0x0F).unwrap());
+            for at in 0..usize::from(follow) {
+                bytes.push(u8::try_from((length >> (4 + 8 * at)) & 0xFF).unwrap());
+            }
+        }
+        bytes.extend_from_slice(&body);
+        assert_eq!(
+            s5_sleep_types(&bytes),
+            Some((3, 1)),
+            "{follow} following bytes"
+        );
+    }
+}
+
+/// Cut short anywhere, a package is no answer, and nothing panics.
+/// Verifies: `L.x86_64.212`
+#[test]
+fn every_truncation_is_no_answer() {
+    for fixture in [&Q35_S5[..], &FIRMWARE_S5[..]] {
+        for end in 0..fixture.len() {
+            assert_eq!(s5_sleep_types(&fixture[..end]), None, "cut at {end}");
+        }
+    }
+}
+
+/// Verifies: `L.x86_64.212`
+#[test]
+fn only_a_named_package_answers() {
+    // No package after the name.
+    assert_eq!(
+        s5_sleep_types(&[0x08, b'_', b'S', b'5', b'_', 0x0A, 0x05]),
+        None
+    );
+    // A method named _S5.
+    assert_eq!(
+        s5_sleep_types(&[0x14, 0x08, b'_', b'S', b'5', b'_', 0x00, 0xA4, 0x00]),
+        None
+    );
+    // _S5_ inside a string.
+    assert_eq!(
+        s5_sleep_types(&[
+            0x0D, b'x', b'_', b'S', b'5', b'_', 0x12, 0x06, 0x04, 0, 0, 0, 0, 0x00
+        ]),
+        None
+    );
+    // One element.
+    assert_eq!(
+        s5_sleep_types(&[0x08, b'_', b'S', b'5', b'_', 0x12, 0x03, 0x01, 0x00]),
+        None
+    );
+    // Nothing at all.
+    assert_eq!(s5_sleep_types(&[]), None);
+}
+
+/// Two `_S5` packages must agree.
+/// Verifies: `L.x86_64.212`
+#[test]
+fn two_packages_must_agree() {
+    let mut same = in_aml(&Q35_S5);
+    same.extend_from_slice(&Q35_S5);
+    assert_eq!(s5_sleep_types(&same), Some((0, 0)));
+    let mut differ = in_aml(&Q35_S5);
+    differ.extend_from_slice(&FIRMWARE_S5);
+    assert_eq!(s5_sleep_types(&differ), None);
+}
+
+/// Arbitrary bytes, with `_S5_` planted in some: an answer or none, never a
+/// panic, and any answer three bits wide.
+/// Verifies: `L.x86_64.212`
+#[test]
+fn arbitrary_bytes_never_panic() {
+    let mut seed: u64 = 0x5EED_0F55;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+    for _ in 0..20_000 {
+        let length = usize::try_from(next() % 64).unwrap();
+        let mut bytes: Vec<u8> = (0..length)
+            .map(|_| u8::try_from(next() & 0xFF).unwrap())
+            .collect();
+        if next() % 2 == 0 && bytes.len() > 8 {
+            let at = usize::try_from(next()).unwrap() % (bytes.len() - 6);
+            bytes[at] = 0x08;
+            bytes[at + 1..at + 5].copy_from_slice(b"_S5_");
+            bytes[at + 5] = 0x12;
+        }
+        if let Some((a, b)) = s5_sleep_types(&bytes) {
+            assert!(a < 8 && b < 8);
+        }
+    }
+}
+
+/// A q35-shaped FADT with its PM1 control block, as QEMU writes it: port
+/// 0x604, two bytes, in both the 32-bit and the 64-bit field; `SMI_CMD` 0xB2,
+/// `ACPI_ENABLE` 0xF1.
+fn fadt_with_pm1(edit: impl FnOnce(&mut Vec<u8>)) -> Vec<u8> {
+    let mut body = vec![0u8; FADT_LEN - SDT_HEADER_LEN];
+    put_u32(&mut body, 40, 0x7FFF_5000); // DSDT
+    put_u32(&mut body, 48, 0xB2); // SMI_CMD
+    put_u8(&mut body, 52, 0xF1); // ACPI_ENABLE
+    put_u32(&mut body, 64, 0x604); // PM1a_CNT_BLK
+    put_u8(&mut body, 89, 2); // PM1_CNT_LEN
+    put_u32(&mut body, 112, 1 << 8); // Flags
+    put_u8(&mut body, 172, GenericAddress::SYSTEM_IO); // X_PM1a_CNT_BLK
+    put_u8(&mut body, 173, 16);
+    put_u8(&mut body, 175, 2);
+    put_u64(&mut body, 176, 0x604);
+    edit(&mut body);
+    TableBuilder::new(FADT_SIGNATURE).raw(&body).build()
+}
+
+fn control(fadt: &[u8], aml: &[u8]) -> Option<SleepControl> {
+    let fadt = Fadt::parse(Table::parse(fadt).unwrap()).unwrap();
+    SleepControl::of(&fadt, aml)
+}
+
+/// Verifies: `L.x86_64.212`
+#[test]
+fn q35s_sleep_control() {
+    assert_eq!(
+        control(&fadt_with_pm1(|_| {}), &in_aml(&Q35_S5)),
+        Some(SleepControl {
+            pm1a: 0x604,
+            pm1b: None,
+            sleep_type_a: 0,
+            sleep_type_b: 0,
+            smi_command: 0xB2,
+            acpi_enable: 0xF1,
+        })
+    );
+    // The 32-bit field alone does as well.
+    let legacy = fadt_with_pm1(|body| body[172 - SDT_HEADER_LEN..184 - SDT_HEADER_LEN].fill(0));
+    assert_eq!(control(&legacy, &Q35_S5).map(|c| c.pm1a), Some(0x604));
+    // A second block.
+    let both = fadt_with_pm1(|body| put_u32(body, 68, 0x704));
+    assert_eq!(control(&both, &Q35_S5).and_then(|c| c.pm1b), Some(0x704));
+}
+
+/// Anything missing or unusable, and nothing is recorded (condition 3).
+/// Verifies: `L.x86_64.212`
+#[test]
+fn sleep_control_fails_closed() {
+    let s5 = in_aml(&Q35_S5);
+    let none = |fadt: Vec<u8>, why: &str| assert_eq!(control(&fadt, &s5), None, "{why}");
+    none(
+        fadt_with_pm1(|body| put_u32(body, 112, HW_REDUCED_ACPI)),
+        "hardware-reduced",
+    );
+    none(
+        fadt_with_pm1(|body| {
+            put_u32(body, 64, 0);
+            body[172 - SDT_HEADER_LEN..184 - SDT_HEADER_LEN].fill(0);
+        }),
+        "no PM1a",
+    );
+    none(
+        fadt_with_pm1(|body| put_u8(body, 172, GenericAddress::SYSTEM_MEMORY)),
+        "X_PM1a in memory, with the 32-bit field still set: no falling back",
+    );
+    none(
+        fadt_with_pm1(|body| put_u64(body, 176, 0x1_0604)),
+        "X_PM1a past 16 bits",
+    );
+    none(fadt_with_pm1(|body| put_u8(body, 89, 1)), "PM1_CNT_LEN 1");
+    none(
+        fadt_with_pm1(|body| put_u32(body, 68, 0x1_0000)),
+        "PM1b past 16 bits",
+    );
+    none(
+        fadt_with_pm1(|body| {
+            put_u8(body, 184, GenericAddress::SYSTEM_MEMORY);
+            put_u64(body, 188, 0xFED0_0000);
+        }),
+        "X_PM1b in memory",
+    );
+    assert_eq!(control(&fadt_with_pm1(|_| {}), &[]), None, "no _S5");
+    // A FADT too short to have the fields.
+    let short = TableBuilder::new(FADT_SIGNATURE).raw(&[0u8; 20]).build();
+    assert_eq!(control(&short, &s5), None, "a short FADT");
+}
+
+/// From the RSDP down: the DSDT must be read whole, be a DSDT and sum to
+/// zero.
+/// Verifies: `L.x86_64.212`
+#[test]
+fn sleep_control_reads_the_dsdt() {
+    let dsdt = TableBuilder::new(DSDT_SIGNATURE)
+        .raw(&in_aml(&Q35_S5))
+        .build();
+    let walk = |memory: &Memory| {
+        let rsdp = Rsdp::parse(memory.table(RSDP_ADDR, 36).unwrap()).unwrap();
+        Acpi::from_rsdp(memory, &rsdp).unwrap().sleep_control()
+    };
+    let mut memory = q35();
+    memory.put(FADT_ADDR, fadt_with_pm1(|_| {}));
+    assert_eq!(walk(&memory), None, "no DSDT at its address");
+    memory.put(0x7FFF_5000, dsdt.clone());
+    assert_eq!(walk(&memory).map(|c| c.pm1a), Some(0x604));
+    let mut bad = dsdt.clone();
+    let last = bad.len() - 1;
+    bad[last] ^= 0x40;
+    memory.put(0x7FFF_5000, bad);
+    assert_eq!(walk(&memory), None, "a DSDT whose checksum is wrong");
+    let mut not = dsdt;
+    not[0..4].copy_from_slice(b"SSDT");
+    memory.put(0x7FFF_5000, not);
+    assert_eq!(walk(&memory), None, "not a DSDT");
+}

@@ -65,7 +65,14 @@ jobs:
           else
             draft=
             [ "$INPUT_DRAFT" = true ] && draft=--draft
-            gh release create "$TAG" --verify-tag $draft --title "$title" --notes-file "$RUNNER_TEMP/notes.md"
+            # A release candidate (v0.2.0-rc1) is a pre-release, never the
+            # repository's latest release; release-notes.py gives it its
+            # release's notes when it has no section of its own.
+            pre=
+            case "$TAG" in
+              v*-rc*) pre="--prerelease --latest=false" ;;
+            esac
+            gh release create "$TAG" --verify-tag $draft $pre --title "$title" --notes-file "$RUNNER_TEMP/notes.md"
           fi
 
   # The Pixel 7 app's desktop, in two editions as a distribution has them:

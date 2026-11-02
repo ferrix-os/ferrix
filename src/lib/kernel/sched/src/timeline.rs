@@ -53,6 +53,7 @@ impl<T> Timeline<T> {
             vruntime: 0,
             deadline: at,
             sum_exec: 0,
+            request_ns: 0,
             payload: Some(payload),
         };
         self.tree.insert(node);
@@ -80,6 +81,19 @@ impl<T> Timeline<T> {
     pub fn remove(&mut self, id: u64) -> Option<(T, Slot<T>)> {
         let key = self.tree.find(id)?;
         self.take(key).map(|(_, payload, slot)| (payload, slot))
+    }
+
+    /// Take out the latest-due entity whose payload `wanted` accepts,
+    /// wherever it is filed: its instant, its payload and its slot -- for a
+    /// processor going out of service, whose sleepers move to another
+    /// processor's timeline due when they were (`docs/CORE-QUARANTINE.md`
+    /// §3.2). A walk. Allocates nothing.
+    pub fn take_last_where(&mut self, wanted: impl Fn(&T) -> bool) -> Option<(u64, T, Slot<T>)> {
+        let key = self
+            .tree
+            .last_where(|entity| entity.payload.as_ref().is_some_and(&wanted))?;
+        let at = self.tree.get(key)?.deadline;
+        self.take(key).map(|(_, payload, slot)| (at, payload, slot))
     }
 
     /// Take out the entity at `key`, emptying its slot.

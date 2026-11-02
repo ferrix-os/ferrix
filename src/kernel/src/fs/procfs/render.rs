@@ -11,6 +11,8 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use ferrix_bootinfo::{Arch, PAGE_SIZE};
+use ferrix_fallible::Chunks;
+use ferrix_kmem::Charge;
 use ferrix_net::IpAddress;
 use ferrix_procfs::filesystems::{self, Filesystem};
 use ferrix_procfs::kstat::{self, CpuTimes, Kstat};
@@ -26,7 +28,7 @@ use ferrix_procfs::sysctl;
 use ferrix_vfs::fd::MAX_LIMIT;
 use ferrix_vfs::{Errno, Location, MountFlags, Namespace, OpenFile, Result};
 
-use super::{Kernel, ThreadOf};
+use super::{JobMeter, Kernel, ThreadOf};
 use crate::arch;
 use crate::fs;
 use crate::fs::{block, devfs};
@@ -113,7 +115,7 @@ pub(super) fn cpuinfo(_: &Kernel) -> Result<Vec<u8>> {
     let Some(topology) = smp::topology() else {
         return Ok(out);
     };
-    let online = topology.cpus().iter().filter(|cpu| cpu.is_online());
+    let online = topology.cpus().iter().filter(|cpu| cpu.in_service());
     match arch::ARCH {
         Arch::X86_64 => {
             let processors: Vec<x86::Processor> = online
@@ -220,15 +222,19 @@ pub(super) fn loadavg(_: &Kernel) -> Result<Vec<u8>> {
 /// have nowhere to go, as there is no swap, and are not available. `Buffers`
 /// is zero: no block device has a page cache of its own here, and btrfs's
 /// metadata cache is kernel heap, which `Slab` counts, the kernel heap's
-/// pages being the same thing by another allocator.
+/// pages being the same thing by another allocator. Of that heap, the clean
+/// tree nodes of writable btrfs mounts are what a reclaim of the machine
+/// gives back (`fs::btrfs`), so they are `SReclaimable`, and `MemAvailable`
+/// counts them as Linux counts reclaimable slab.
 pub(super) fn meminfo(_: &Kernel) -> Result<Vec<u8>> {
     let kib = |frames: u64| frames.saturating_mul(PAGE_SIZE / 1024);
     let free = mm::free_frames();
     let cache = crate::user::cache::totals();
+    let nodes = fs::btrfs::clean_bytes() / 1024;
     let info = Meminfo {
         total: kib(mm::managed_frames()),
         free: kib(free),
-        available: kib(cache.available(free)),
+        available: kib(cache.available(free)).saturating_add(nodes),
         buffers: 0,
         cached: kib(cache.cached()),
         swap_cached: 0,
@@ -237,6 +243,7 @@ pub(super) fn meminfo(_: &Kernel) -> Result<Vec<u8>> {
         dirty: kib(cache.dirty),
         shmem: kib(cache.memory),
         slab: kib(mm::heap_pages() as u64),
+        s_reclaimable: nodes,
     };
     let mut out = Vec::new();
     meminfo::render(&mut out, &info);
@@ -501,7 +508,7 @@ fn online_times() -> Result<Vec<(u32, sched::CpuTime)>> {
                 topology
                     .cpus()
                     .get(*logical)
-                    .is_some_and(smp::PerCpu::is_online)
+                    .is_some_and(smp::PerCpu::in_service)
             })
         })
         .map(|(logical, time)| (u32::try_from(logical).unwrap_or(u32::MAX), time))
@@ -612,6 +619,92 @@ pub(super) fn cmdline_file(_: &Kernel) -> Result<Vec<u8>> {
 /// `/proc/version`: the release and version `uname` reports, in the sentence
 /// Linux writes them in, with the compiler it names being the one that built
 /// this kernel.
+/// `/proc/ferrix-mce`: the machine check's counts per processor
+/// (`L.x86_64.230`). Not Linux's; empty where there is no machine check.
+pub(super) fn machine_check(_: &Kernel) -> Result<Vec<u8>> {
+    struct Sink(Vec<u8>);
+    impl fmt::Write for Sink {
+        fn write_str(&mut self, text: &str) -> fmt::Result {
+            self.0.extend_from_slice(text.as_bytes());
+            Ok(())
+        }
+    }
+    let mut out = Sink(Vec::new());
+    let _ = arch::render_machine_check(&mut out);
+    Ok(out.0)
+}
+
+/// `/proc/ferrix-scrub`: the RAM scrubber's counts and its standing
+/// (`docs/RAM-SCRUBBER.md` §3.4). No addresses. Not Linux's.
+pub(super) fn scrub(_: &Kernel) -> Result<Vec<u8>> {
+    let mut out = alloc::string::String::new();
+    let _ = mm::scrub::render(&mut out);
+    Ok(out.into_bytes())
+}
+
+/// `/proc/ferrix-service`: each processor's service (`docs/CORE-QUARANTINE.md`
+/// §3) -- in or out, the tasks it drained while parked (expected 0) and the
+/// blocked tasks moved off it at their wake -- and the longest one move
+/// held its two queue locks. Not Linux's.
+pub(super) fn service(_: &Kernel) -> Result<Vec<u8>> {
+    use core::fmt::Write as _;
+    let mut out = alloc::string::String::new();
+    if let Some(topology) = smp::topology() {
+        for cpu in topology.cpus() {
+            let index = cpu.logical;
+            let _ = writeln!(
+                out,
+                "cpu{index} service {} drained {} rehomed {}",
+                if cpu.in_service() { "in" } else { "out" },
+                sched::drained(index),
+                sched::rehomed(index),
+            );
+        }
+    }
+    let _ = writeln!(out, "move-hold-max-ns {}", sched::move_hold_max());
+    Ok(out.into_bytes())
+}
+
+/// `/proc/interrupts`: per interrupt number with anything delivered, how
+/// many on each processor, in Linux's layout -- a header of `CPU<n>`, then
+/// `<number>:` and a count per processor. The source column is the
+/// kernel's number alone (`docs/CORE-QUARANTINE.md` §7).
+pub(super) fn interrupts(_: &Kernel) -> Result<Vec<u8>> {
+    use core::fmt::Write as _;
+    let mut out = alloc::string::String::new();
+    let cpus = smp::count();
+    out.push_str("    ");
+    for cpu in 0..cpus {
+        let _ = write!(out, " {:>10}", alloc::format!("CPU{cpu}"));
+    }
+    out.push('\n');
+    for irq in 0..irq::COUNTED as u32 {
+        let counts: Vec<u32> = (0..cpus).map(|cpu| irq::delivered_on(cpu, irq)).collect();
+        if counts.iter().all(|&count| count == 0) {
+            continue;
+        }
+        let _ = write!(out, "{irq:>3}:");
+        for count in counts {
+            let _ = write!(out, " {count:>10}");
+        }
+        out.push_str("  ferrix\n");
+    }
+    Ok(out.into_bytes())
+}
+
+/// `/proc/ferrix-mce-retired`: the frames retired for a hardware error, one
+/// physical address a line (`L.mm.91`). Root's alone: an address is a fact
+/// about the machine's memory a program has no use for.
+pub(super) fn retired_frames(_: &Kernel) -> Result<Vec<u8>> {
+    let mut frames = [0_u64; mm::RETIRED_CAPACITY];
+    let count = mm::retired_frames(&mut frames);
+    let mut out = Vec::new();
+    for frame in frames.iter().take(count) {
+        put(&mut out, format_args!("{:#x}\n", frame * PAGE_SIZE));
+    }
+    Ok(out)
+}
+
 /// `/proc/ferrix-seam`: what crosses the seam (`fs::seam`). Not Linux's.
 pub(super) fn seam(_: &Kernel) -> Result<Vec<u8>> {
     Ok(fs::seam::render())
@@ -1055,13 +1148,22 @@ fn located(at: &Location, root: &Location) -> Vec<u8> {
 /// `brk` made, `[stack]` for the one holding the stack pointer it was started
 /// with, and `[vdso]` and `[vvar]` for the vDSO's image and the data page
 /// below it.
-pub(super) fn maps(process: &Process) -> Result<Vec<u8>> {
+///
+/// Every allocation is fallible, and none grows with the file: each line is
+/// formatted into a buffer reserved for its longest form, then appended to
+/// page-sized [`Chunks`]. A process with tens of thousands of regions has a
+/// file of several MiB, more than one heap block can hold, and a single
+/// buffer grown to it stopped the machine (FX-0008); now its open gets the
+/// whole file, or `ENOMEM` when memory or the opener's job limit runs out.
+pub(super) fn maps(process: &Process) -> Result<Chunks<JobMeter>> {
     let heap = process.heap_range();
     let stack = start_stack(process);
     let vdso = process.startup().map_or(0, |startup| startup.vdso);
     let vvar = vdso.saturating_sub(PAGE_SIZE);
     let root = process.fs_context().lock().root.clone();
-    let mut out = Vec::new();
+    let mut out = Chunks::metered(JobMeter::new()?);
+    let mut line = Vec::new();
+    let mut line_charge = Charge::bytes(0).map_err(|_| Errno::ENOMEM)?;
     let regions = process.space().regions().map_err(|_| Errno::ENOMEM)?;
     for region in regions {
         let file = region.file.and_then(|(id, offset)| {
@@ -1105,7 +1207,12 @@ pub(super) fn maps(process: &Process) -> Result<Vec<u8>> {
             inode,
             name,
         };
-        maps::render(&mut out, &mapping, Width::native());
+        line.clear();
+        let longest = maps::longest_line(name.map_or(0, <[u8]>::len));
+        ferrix_kmem::reserve(&mut line, longest, &mut line_charge).map_err(|_| Errno::ENOMEM)?;
+        maps::render(&mut line, &mapping, Width::native()).map_err(|_| Errno::ENOMEM)?;
+        out.try_extend_from_slice(&line)
+            .map_err(|_| Errno::ENOMEM)?;
     }
     Ok(out)
 }
@@ -1342,6 +1449,10 @@ fn status_of(process: &Process, tid: u32) -> Result<Vec<u8>> {
         )
     });
     let memory = Memory::of(process);
+    let resident = process
+        .space()
+        .resident_split()
+        .map_err(|_| Errno::ENOMEM)?;
     let seen = pids_shown(process, tid);
     let name = shown_name(process, tid);
     // The thread's own seccomp mode and filter count, as Linux keeps them per
@@ -1375,6 +1486,10 @@ fn status_of(process: &Process, tid: u32) -> Result<Vec<u8>> {
         fd_size,
         vm_size: memory.size / 1024,
         vm_locked: memory.locked / 1024,
+        vm_rss: resident.total() * (PAGE_SIZE / 1024),
+        rss_anon: resident.anon * (PAGE_SIZE / 1024),
+        rss_file: resident.file * (PAGE_SIZE / 1024),
+        rss_shmem: resident.shmem * (PAGE_SIZE / 1024),
         vm_data: memory.data / 1024,
         vm_stack: memory.stack / 1024,
         threads: thread_count(process),
@@ -1600,7 +1715,10 @@ fn stat_of(process: &Process, tid: u32, times: Times) -> Result<Vec<u8>> {
         ) / (NANOS / CLOCK_TICKS),
         vsize: memory.size,
         // With no memory to count them in, none: `stat` is still answered.
-        rss: process.space().resident_pages().unwrap_or(0),
+        rss: process
+            .space()
+            .resident_split()
+            .map_or(0, |resident| resident.total()),
         // `RLIM_INFINITY`, as an `unsigned long`.
         rss_limit: usize::MAX as u64,
         // A copying loader keeps no record of where the text was put.

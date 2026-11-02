@@ -8,6 +8,9 @@
  * kill. The handle table itself and the rights arithmetic are
  * `src/lib/kernel/objects` and `src/lib/proto/native-abi`, whose host tests verify
  * H.OBJ.1 to H.OBJ.4 directly; nothing here restates them.
+ * L.object.253, reserved for init's grant of the memory scrub token to
+ * memscrub, is released unwritten: the grant is ring-3 init's, outside the
+ * item, and the item relies on nothing from it (ledger 5140 (3)).
  *
  * This is W-8's pilot (docs/certification/IMPLEMENTATION.md, step 3), the
  * subsystem the format was corrected on before the others copy it. What it
@@ -1491,18 +1494,37 @@ package FerrixObjectRequirements {
             attribute :>> parent = "H.QUOTA.6";
             attribute :>> unit = ("object::oom::kill_within", "object::oom::at_or_above");
         }
-        requirement <'L.object.102'> noLimitFullNoKill : ItemLowLevel {
+        requirement <'L.object.102'> noLimitFullKillsMachineWide : ItemLowLevel {
             attribute :>> statement = "A fault that failed for want of memory with
                 no limit full shall take back clean file cache anywhere and retry
-                if that gave back any, and otherwise, like one with nothing
-                killable in the full job, fail as it would without the OOM kill
-                and kill nothing.";
-            attribute :>> criterion = "A fault refused with every limit unset and
-                no cache to take back kills 0 processes and ends its program with
-                SIGSEGV; a system call's fault there answers EFAULT.";
-            attribute :>> parent = "H.QUOTA.6";
-            attribute :>> unit = ("object::oom::out_of_memory", "object::oom::fault",
-                "object::oom::kill_within");
+                while that gave back any, at most MACHINE_RECLAIMS (16) times for
+                one fault; once a reclaim gave back nothing or those are spent, it
+                shall end, with the kill's status, the live process with the most
+                resident pages anywhere, never pid 1, count the kill in that
+                process's job and above and an OOM in none, and retry; it shall
+                wait for a victim still ending, make no second machine-wide kill
+                within KILL_GRACE_NANOS (250 ms) of one, kill nobody for a
+                refusal the allocation check injected, and fail as it would
+                without the OOM kill after MOST_ANSWERS (1024) answers to one
+                fault.";
+            attribute :>> criterion = "Stage 5's quota check, over three processes
+                of its own in two jobs with 8, 32 and 1 pages resident and no limit
+                set: with the injection armed nobody is killed; a fault's 1024th
+                answer is a refusal; the process of 32 pages is killed, its job
+                counts oom 0 and oom_kill 1 and the other job 0 and 0, and the
+                answer is a retry; a second answer while it ends kills nobody;
+                once it lets go its job's use falls by its 32 pages; within the
+                grace a second kill is not made; after it the faulter, alone, is
+                killed and told it is the victim.";
+            attribute :>> parent = "H.QUOTA.22";
+            attribute :>> unit = ("object::oom::out_of_memory", "object::oom::out_of_memory_at",
+                "object::oom::fault", "object::oom::user_fault",
+                "object::oom::machine_out_of_memory", "object::oom::machine_answer",
+                "object::oom::machine_out_of_memory_among", "object::oom::kill_in",
+                "object::oom::kill_victim", "object::oom::ended", "object::oom::survey",
+                "object::oom::in_grace",
+                "object::oom::machine_want",
+                "fallible::injecting_here");
         }
         requirement <'L.object.103'> anEndedVictimIsEmptied : ItemLowLevel {
             attribute :>> statement = "A victim that has ended and closed
@@ -2120,6 +2142,81 @@ package FerrixObjectRequirements {
             attribute :>> parent = "H.OBJ.22";
             attribute :>> unit = ("syscall::native::process_create");
         }
+        requirement <'L.object.252'> theMemoryScrubToken : ItemLowLevel {
+            attribute :>> statement = "The kernel shall make one memory scrub token and give it to
+                pid 1 after the processor service token, with MANAGE,
+                DUPLICATE and TRANSFER, once.";
+            attribute :>> criterion = "The native boot check pins MEMORY_SCRUB_RIGHTS to MANAGE,
+                DUPLICATE and TRANSFER; test-scrub: memscrub scrubs through
+                the copy init granted it.";
+            attribute :>> parent = "H.FAIL.9";
+            attribute :>> unit = ("init::give_memory_scrub");
+        }
+        requirement <'L.object.259'> aPoisonedCachedPageIsDroppedOnlyClean : ItemLowLevel {
+            attribute :>> statement = "cache::drop_poisoned shall retire the frame before it
+                takes anything and take nothing unless the retirement answered
+                Claimed, Marked or Already; shall find the frame's page by a walk
+                of the cache list under the walker count, scanning each object's
+                page map at most 32 entries a hold of its pages lock; shall take
+                the page only through reclaim_clean's test, with the frame checked
+                again to be the page's in the take's hold of the pages lock, out of
+                the object and every space that maps it; and shall answer Clean,
+                NotClean (also for a clean page the source holds still at that
+                moment for a write, a truncation, a writeback or a reclaim of its
+                file), NotRetired or NotCache.";
+            attribute :>> criterion = "Stage 12's poison check: a clean mapped page dropped, its
+                frame retired, gone from the object and the mapping, read again
+                with the disk's bytes; a dirty and a held page NotClean and kept;
+                an unheld frame NotCache; a frame not retirable NotRetired; a page
+                asked for with another frame NotCache and kept. Controls: the
+                clean test, the retirement's answer and the frame check removed.";
+            attribute :>> parent = "H.FAIL.11";
+            attribute :>> unit = ("user::cache::drop_poisoned", "user::cache::drop_poisoned_at", "user::cache::retire", "user::cache::take", "user::cache::say", "user::vmo::Vmo::index_of", "user::vmo::Vmo::take_poisoned");
+        }
+        requirement <'L.object.260'> aCacheReadAnswersItsPoison : ItemLowLevel {
+            attribute :>> statement = "Vmo::read_present shall copy through arch::copy_mc,
+                answer Poisoned(frame) for a copy a machine check stopped after
+                checking the page against the frame it read (stopping as FX-9005
+                on another), and write no task record.";
+            attribute :>> criterion = "Stage 12's poison check: a read whose copy is answered as
+                poisoned retires and drops the page; test-mce-pagecache's read
+                mode. Control: Poisoned turned into EIO.";
+            attribute :>> parent = "H.FAIL.11";
+            attribute :>> unit = ("user::vmo::Vmo::read_present");
+        }
+        requirement <'L.object.261'> aPoisonedReadIsRefilledOrFails : ItemLowLevel {
+            attribute :>> statement = "cache::poisoned_read, which a read whose copy answered
+                Poisoned calls with no lock held, shall drop the page through
+                drop_poisoned_at and answer go round the fill loop again only
+                after Clean (or a page no longer holding the frame), and fail EIO
+                after NotClean or NotRetired.";
+            attribute :>> criterion = "Stage 12's poison check: a clean page's poisoned read
+                refilled and answered with the disk's bytes; a dirty page's fails;
+                test-mce-pagecache's read and dirty modes. Control: the refill on
+                Clean removed.";
+            attribute :>> parent = "H.FAIL.11";
+            attribute :>> unit = ("user::cache::poisoned_read");
+        }
+        requirement <'L.object.262'> theQuarantineLeavesARetiredFrameUnread : ItemLowLevel {
+            doc /* docs/MACHINE-CHECK-DRIVER.md §2.1 (customer, 2026-10-30, item 5; consultant NOT YET ledger 5435, OK IF ledger 5444). */
+            attribute :>> statement = "The pin quarantine shall not read a retired frame --
+                neither at a dead driver's pin's close nor at its release -- and
+                shall count each frame left unread and say the count in the
+                release line; every other frame shall be read and compared as
+                before.";
+            attribute :>> criterion = "The pin check's check_retired_unread: a frame the check
+                names retired left unread at the close and the release (the count
+                up by two, the release's retired 1), one not named read at both;
+                test-mce-driver's Own under KVM and TCG: the release after the
+                restart says 1 retired, not read. Negative controls: the skip
+                removed at the close, and at the release, each fires the check.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("object::pin::left_unread",
+                "mm::frame_retired",
+                "object::pin::retired_for_check",
+                "object::pin::quarantine_release",
+                "object::pin::release");
+        }
         requirement <'L.object.140'> anEndsWordIsItsInbox : ItemLowLevel {
             attribute :>> statement = "Under a channel end's inbox lock, its state
                 word's NONEMPTY shall be set exactly when the inbox holds a message,
@@ -2305,6 +2402,88 @@ package FerrixObjectRequirements {
                 "object::quota::Pending::charge", "object::quota::Pending::flush",
                 "object::quota::switched", "object::quota::leaving",
                 "object::quota::settle");
+        }
+        requirement <'L.object.254'> pinBlocksOptionWord : ItemLowLevel {
+            attribute :>> statement = "vmo_pin shall refuse with INVALID_ARGS, before
+                any frame is taken, an option word with an order in bits 8-11 and
+                no PIN_BLOCKS, PIN_BLOCKS with order 0 or an order above the frame
+                allocator's largest, PIN_BLOCKS with PIN_CONTIGUOUS, and any bit
+                above bit 11 or bit 4 to 7.";
+            attribute :>> criterion = "Stage 10's PIN_BLOCKS check: each of the four
+                words on a PCI function's node is INVALID_ARGS and the VMO commits
+                no page; the pin refusals check's unknown option 16 is
+                INVALID_ARGS.";
+            attribute :>> parent = "H.DMA.3";
+            attribute :>> unit = ("syscall::native::vmo_pin", "syscall::native::pin_block_order");
+        }
+        requirement <'L.object.255'> pinBlocksAreNaturallyAligned : ItemLowLevel {
+            attribute :>> statement = "With PIN_BLOCKS of order k, vmo_pin shall
+                commit each absent page of its range only as part of a block of
+                2^o pages, o at most k, that starts at a VMO page and at a frame
+                that are both multiples of 2^o, lies inside the range and held no
+                committed page when it was probed; a page committed before the
+                call shall keep its frame.";
+            attribute :>> criterion = "Stage 10's PIN_BLOCKS check: over 1024 pages
+                with page 3 committed first, page 3 keeps its frame, pages 0-1, 2,
+                4-7, 8-15 up to 256-511 and 512-1023 are each one run of frames
+                from a multiple of its length, and pages 0-1023 are not one run
+                from a multiple of 1024.";
+            attribute :>> parent = "H.DMA.3";
+            attribute :>> unit = ("user::vmo::Vmo::commit_blocks", "syscall::native::vmo_pin",
+                "syscall::native::commit_blocks_for_pin");
+        }
+        requirement <'L.object.256'> pinBlocksFallBack : ItemLowLevel {
+            attribute :>> statement = "Vmo::commit_blocks shall, where the frame
+                allocator refuses a block, try the next lower order and never again
+                an order above one refused in the same call; end at a refused
+                single frame; take a page committed between a block's probe and
+                its commit as a reason for a lower order, never a higher one, and
+                leave that page's frame as it is; and ask Vmo::commit_run at most
+                the range's pages plus the largest order plus one times.";
+            attribute :>> criterion = "Stage 10's PIN_BLOCKS check: with every
+                32-frame region of free memory holding a kept frame, 512 pages
+                asked at order 9 are all committed, at least one ask was refused,
+                no 32 pages from a multiple of 32 are one run of frames from a
+                multiple of 32, and the refusals are at most five more than the
+                blocks; with the block hook committing page 100 at the first
+                block's commit, page 100 keeps the hook's frame and all 512 are
+                committed; in every case the asks stay within the bound.";
+            attribute :>> parent = "H.DMA.3";
+            attribute :>> unit = ("user::vmo::Vmo::commit_blocks", "user::vmo::Vmo::block_at",
+                "user::vmo::run_block_hook");
+        }
+        requirement <'L.object.257'> pinBlocksBudgetAndFailure : ItemLowLevel {
+            attribute :>> statement = "vmo_pin with PIN_BLOCKS shall check the
+                device's pin budget before committing any page, refusing a range
+                past it with LIMIT_REACHED and nothing committed; and a PIN_BLOCKS
+                pin refused after its pre-commit shall leave committed exactly the
+                pages the pre-commit committed, each charged to the caller's job,
+                where the refusal is the job's memory limit. A pin refused for
+                want of memory shall first take back clean file cache, charged to
+                the job whose memory limit is full or beneath it or, with no limit
+                full, anywhere, and try again while that gave back any, at most
+                16 times, before it answers NO_MEMORY.";
+            attribute :>> criterion = "Stage 10's PIN_BLOCKS check: a pin of the
+                budget plus one page is LIMIT_REACHED with no page committed; a pin
+                of 512 pages by a job limited to 256 pages' memory is NO_MEMORY,
+                the VMO holds some pages and exactly that many are charged to the
+                job, and none once the VMO is gone; a pin of 512 pages by a job
+                limited to 1024 pages and filled to its limit with a file's clean
+                cache is answered, all 512 pages committed, the file holding fewer
+                pages than before.";
+            attribute :>> parent = ("H.DMA.3", "H.QUOTA.2");
+            attribute :>> unit = ("syscall::native::vmo_pin",
+                "syscall::native::commit_blocks_for_pin", "user::vmo::Vmo::commit_blocks",
+                "object::oom::reclaim_for");
+        }
+        requirement <'L.object.258'> pinBlocksLeaveFilesAlone : ItemLowLevel {
+            attribute :>> statement = "Vmo::commit_blocks shall commit no page of a
+                file's VMO.";
+            attribute :>> criterion = "Stage 10's PIN_BLOCKS check: on a VMO over a
+                source, commit_blocks asks commit_run never and the VMO holds no
+                page.";
+            attribute :>> parent = "H.DMA.3";
+            attribute :>> unit = ("user::vmo::Vmo::commit_blocks");
         }
     }
 }

@@ -75,7 +75,7 @@ use crate::discovery::smbios;
 use crate::fs::devfs::{self, DiskInfo};
 use crate::fs::{self, procfs};
 use crate::interfaces::{display, input, net_ring, render};
-use crate::{net, smp};
+use crate::{arch, net, smp};
 
 /// `SYSFS_MAGIC`, from `include/uapi/linux/magic.h`: how a program tells a
 /// real sysfs from a directory somebody made.
@@ -237,6 +237,10 @@ enum Dir {
     Cpus,
     /// `/sys/devices/system/cpu/cpu<N>`.
     Cpu(u32),
+    /// `/sys/devices/system/cpu/cpu<N>/topology`: which physical core it is
+    /// a thread of, what lode folds a core's errors by
+    /// (`docs/CORE-QUARANTINE.md` §5).
+    CpuTopology(u32),
     /// `/sys/devices/virtual`.
     Virtual,
     /// `/sys/devices/virtual/<class>`: devices of a class no node backs.
@@ -420,6 +424,8 @@ enum Attr {
     Present,
     Offline,
     KernelMax,
+    CoreId,
+    ThreadSiblingsList,
     Bind,
     Unbind,
     Initstate,
@@ -500,6 +506,8 @@ impl Attr {
             Attr::Present => b"present",
             Attr::Offline => b"offline",
             Attr::KernelMax => b"kernel_max",
+            Attr::CoreId => b"core_id",
+            Attr::ThreadSiblingsList => b"thread_siblings_list",
             Attr::Bind => b"bind",
             Attr::Unbind => b"unbind",
             Attr::Initstate => b"initstate",
@@ -509,24 +517,28 @@ impl Attr {
         }
     }
 
-    /// Whether a write goes anywhere: only `bind` and `unbind` take one.
-    const fn writable(self) -> bool {
+    /// Whether a write goes anywhere, in `dir`: `bind` and `unbind`, and on
+    /// x86-64 a processor's own `online` (`docs/CORE-QUARANTINE.md` §4; on
+    /// AArch64 and ARMv7-A no processor goes out of service yet).
+    const fn writable(self, dir: Dir) -> bool {
         matches!(self, Attr::Bind | Attr::Unbind)
+            || (arch::CAN_MOVE_INTERRUPTS && matches!((self, dir), (Attr::Online, Dir::Cpu(_))))
     }
 
     /// Whether it can be read: everything but `bind` and `unbind`, which
     /// have nothing to show.
     const fn readable(self) -> bool {
-        !self.writable()
+        !matches!(self, Attr::Bind | Attr::Unbind)
     }
 
-    /// Its permission bits, as Linux gives each: the serials, the UUID and
-    /// the raw SMBIOS tables to root alone (`docs/DMI.md` §1).
-    const fn permissions(self) -> u32 {
+    /// Its permission bits in `dir`, as Linux gives each: the serials, the
+    /// UUID and the raw SMBIOS tables to root alone (`docs/DMI.md` §1).
+    const fn permissions(self, dir: Dir) -> u32 {
         match self {
             Attr::Dmi(field) => field.mode(),
             Attr::EntryPoint | Attr::DmiTable => 0o400,
-            _ if self.writable() => 0o200,
+            _ if self.writable(dir) && self.readable() => 0o644,
+            _ if self.writable(dir) => 0o200,
             _ => 0o444,
         }
     }
@@ -840,6 +852,7 @@ fn path_of(dir: Dir) -> Option<Vec<Vec<u8>>> {
         Dir::System => path(&[b"devices", b"system"]),
         Dir::Cpus => path(&[b"devices", b"system", b"cpu"]),
         Dir::Cpu(cpu) => beneath(path_of(Dir::Cpus)?, &numbered("cpu", cpu)),
+        Dir::CpuTopology(cpu) => beneath(path_of(Dir::Cpu(cpu))?, b"topology"),
         Dir::Virtual => path(&[b"devices", b"virtual"]),
         Dir::VirtualOf(class) => class
             .shown()
@@ -967,6 +980,7 @@ fn entries(dir: Dir) -> Result<Vec<Entry>> {
         | Dir::System
         | Dir::Cpus
         | Dir::Cpu(_)
+        | Dir::CpuTopology(_)
         | Dir::Virtual
         | Dir::VirtualOf(_)
         | Dir::Device(_)
@@ -1134,6 +1148,13 @@ fn device_tree_entries(list: &mut Listing, dir: Dir) -> Result<()> {
             if cpu > 0 {
                 list.file(dir, Attr::Online);
             }
+            list.dir(b"topology", Dir::CpuTopology(cpu));
+        }
+        Dir::CpuTopology(cpu) => {
+            if cpu >= cpu_count() {
+                return Err(Errno::ENOENT);
+            }
+            list.files(dir, &[Attr::CoreId, Attr::ThreadSiblingsList]);
         }
         Dir::Virtual => {
             for class in [Class::Block, Class::Dmi, Class::Mem, Class::Net, Class::Tty] {
@@ -1318,7 +1339,28 @@ fn cpu_count() -> u32 {
     })
 }
 
-/// The processors that are running, ascending.
+/// The physical core processor `cpu` is a thread of, as a key equal for
+/// its threads alone, and the core's number in its package (Linux's
+/// `core_id`), as the architecture reads it (`arch::thread_core`); one core
+/// per processor where it reads none.
+fn core_of(cpu: u32) -> Option<(u64, u32)> {
+    let record = smp::topology()?.cpus().get(usize::try_from(cpu).ok()?)?;
+    Some(arch::thread_core(record.hardware_id).unwrap_or((record.logical as u64, cpu)))
+}
+
+/// The processors that are threads of `cpu`'s physical core, itself
+/// included, ascending.
+fn siblings_of(cpu: u32) -> Vec<u32> {
+    let Some((core, _)) = core_of(cpu) else {
+        return vec![cpu];
+    };
+    (0..cpu_count())
+        .filter(|&other| core_of(other).is_some_and(|(theirs, _)| theirs == core))
+        .collect()
+}
+
+/// The processors that are running and in service, ascending: one out of
+/// service is offline to Linux's surface (`docs/CORE-QUARANTINE.md` §3).
 fn cpus_online() -> Vec<u32> {
     smp::topology().map_or_else(
         || vec![0],
@@ -1326,7 +1368,7 @@ fn cpus_online() -> Vec<u32> {
             topology
                 .cpus()
                 .iter()
-                .filter(|cpu| cpu.is_online())
+                .filter(|cpu| cpu.in_service())
                 .filter_map(|cpu| u32::try_from(cpu.logical).ok())
                 .collect()
         },
@@ -1550,6 +1592,14 @@ fn render(dir: Dir, attr: Attr) -> Result<Vec<u8>> {
             out.extend_from_slice(b"live\n");
         }
         Dir::Cpu(cpu) => attr::flag(&mut out, cpus_online().contains(&cpu)),
+        Dir::CpuTopology(cpu) => {
+            let (_, core_id) = core_of(cpu).ok_or(Errno::ENOENT)?;
+            match attr {
+                Attr::CoreId => attr::decimal(&mut out, u64::from(core_id)),
+                Attr::ThreadSiblingsList => attr::cpu_list(&mut out, &siblings_of(cpu)),
+                _ => return Err(Errno::ENOENT),
+            }
+        }
         Dir::ClassOf(Class::Drm) => out.extend_from_slice(drm_text::VERSION),
         Dir::Card(index) => {
             let _ = display::card(index).ok_or(Errno::ENOENT)?;
@@ -1919,13 +1969,20 @@ fn render_input(out: &mut Vec<u8>, index: u32, attr: Attr) -> Result<()> {
     Ok(())
 }
 
-/// A write of `data` to file `attr` of `dir`: only a driver's `bind` and
-/// `unbind` take one, each a run-time setting (`crate::setters`).
+/// A write of `data` to file `attr` of `dir`: a driver's `bind` and
+/// `unbind`, and a processor's `online`, each a run-time setting
+/// (`crate::setters`).
 fn write(dir: Dir, attr: Attr, data: &[u8]) -> Result<usize> {
-    let (Dir::Driver(bus, driver), Attr::Bind | Attr::Unbind) = (dir, attr) else {
-        return Err(Errno::EACCES);
-    };
-    crate::setters::driver_bind(bus, driver, attr == Attr::Unbind, data)
+    match (dir, attr) {
+        (Dir::Driver(bus, driver), Attr::Bind | Attr::Unbind) => {
+            crate::setters::driver_bind(bus, driver, attr == Attr::Unbind, data)
+        }
+        (Dir::Cpu(cpu), Attr::Online) if attr.writable(dir) => {
+            let writer = crate::syscall::process::current().ok_or(Errno::EPERM)?;
+            crate::setters::cpu_online(&writer, cpu, data)
+        }
+        _ => Err(Errno::EACCES),
+    }
 }
 
 // -- The inode -----------------------------------------------------------------
@@ -1963,7 +2020,7 @@ impl Inode for Node {
         let (permissions, size) = match &self.what {
             What::Dir(_) => (0o755, 0),
             // Linux says a page for every attribute, whatever it holds.
-            What::File(_, attr) => (attr.permissions(), attr.size()),
+            What::File(dir, attr) => (attr.permissions(*dir), attr.size()),
             What::Link(_) => (
                 0o777,
                 self.read_link().map_or(0, |target| target.len() as u64),
@@ -2061,7 +2118,7 @@ impl Inode for Node {
             Vec::new()
         };
         let writer: Option<procfs::Writer> = attr
-            .writable()
+            .writable(dir)
             .then(|| Box::new(move |data: &[u8]| write(dir, attr, data)) as procfs::Writer);
         procfs::snapshot(self.metadata(), bytes, writer, Errno::EACCES).map(Some)
     }
@@ -2078,7 +2135,7 @@ impl Inode for Node {
     /// shell's `>` opens with; refused on every other.
     fn set_len(&self, _len: u64) -> Result<()> {
         match self.what {
-            What::File(_, attr) if attr.writable() => Ok(()),
+            What::File(dir, attr) if attr.writable(dir) => Ok(()),
             _ => Err(Errno::EACCES),
         }
     }
@@ -2128,8 +2185,8 @@ pub(crate) fn refuse_open(file: Arc<OpenFile>) -> Result<Arc<OpenFile>> {
     let Ok(node) = Arc::clone(file.inode()).into_any().downcast::<Node>() else {
         return Ok(file);
     };
-    if let What::File(_, attr) = node.what
-        && ((file.writable() && !attr.writable()) || (file.readable() && !attr.readable()))
+    if let What::File(dir, attr) = node.what
+        && ((file.writable() && !attr.writable(dir)) || (file.readable() && !attr.readable()))
     {
         return Err(Errno::EACCES);
     }

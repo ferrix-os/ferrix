@@ -64,6 +64,7 @@ pub fn run() -> Result<Report, &'static str> {
         report.alone_share = check_the_processor(&tree)?;
         check_the_weight(&tree)?;
         check_an_ended_victim_is_emptied(&tree)?;
+        check_the_machine_wide_kill(&tree)?;
         check_a_move_settles_the_pending_charge(&tree)?;
         if Resource::ALL
             .iter()
@@ -528,6 +529,137 @@ fn check_an_ended_victim_is_emptied(tree: &Arc<Job>) -> Result<(), &'static str>
     Ok(())
 }
 
+/// The machine out of frames, once the progress test has failed: the
+/// machine-wide kill ends the live process with the most resident pages,
+/// whatever job it is in and with no limit set anywhere, counts the kill in
+/// that job and above and an OOM nowhere, and retries; a fault that finds
+/// the victim still ending waits and kills nobody else, and once the victim
+/// has let go its space is emptied before any parent's wait; no second kill
+/// is made within the grace after one (`oom::KILL_GRACE_NANOS`); after it,
+/// the faulting process, the largest, is told it is the victim; and nobody
+/// is killed for
+/// a fault whose refusal the allocation check injected, nor for a fault
+/// past its last answer (`oom::MOST_ANSWERS`).
+///
+/// The progress test first: with reclaims left and a reclaimable file of
+/// the check's own holding pages, the answer is a retry, the file gave pages
+/// back and nobody was killed; with [`oom::MACHINE_RECLAIMS`] spent the kill
+/// is made and the file is not reclaimed again.
+///
+/// Driven through [`oom::machine_out_of_memory_among`] and
+/// [`oom::machine_answer`] over the check's own processes, so that nothing
+/// else on the machine can be chosen, and through [`oom::out_of_memory_at`]
+/// for the bound, which returns before any choice. The grace is made to
+/// look over (`oom::forget_last_machine_kill_for_check`) rather than slept.
+///
+/// Verifies: L.object.102, H.QUOTA.22
+fn check_the_machine_wide_kill(tree: &Arc<Job>) -> Result<(), &'static str> {
+    use crate::object::process::Host;
+    const BASE: u64 = 0x40_0000;
+    const SMALL_PAGES: u64 = 8;
+    const LARGE_PAGES: u64 = 32;
+    let left = tree.new_child().map_err(|_| "a job refused a child")?;
+    let right = tree.new_child().map_err(|_| "a job refused a child")?;
+    let small = member_of(&left)?;
+    let large = member_of(&right)?;
+    let faulter = member_of(&left)?;
+    let fault_in = |process: &Process, pages: u64| -> Result<(), &'static str> {
+        let _ = process
+            .space()
+            .map_anonymous(BASE, pages * PAGE_SIZE, VmaFlags::READ_WRITE)
+            .map_err(|_| "no mapping for the machine-wide OOM check")?;
+        for page in 0..pages {
+            process
+                .space()
+                .fault(BASE + page * PAGE_SIZE, Access::WRITE)
+                .map_err(|_| "the machine-wide OOM check could not fault its memory in")?;
+        }
+        Ok(())
+    };
+    let checked = (|| -> Result<(), &'static str> {
+        as_task_of(&left, || fault_in(&small, SMALL_PAGES)).0?;
+        as_task_of(&right, || fault_in(&large, LARGE_PAGES)).0?;
+        as_task_of(&left, || fault_in(&faulter, 1)).0?;
+        let used = |job: &Job| job.usage(Resource::Memory).map_or(0, |usage| usage.used);
+        let full = used(&right);
+        let host =
+            |process: &Arc<Process>| -> Arc<dyn Host> { Arc::clone(process) as Arc<dyn Host> };
+        let live = [host(&small), host(&large), host(&faulter)];
+        let kills = oom::kills();
+
+        let file = check_no_machine_kill_yet(&faulter, &live)?;
+        let among = |attempt| {
+            oom::machine_out_of_memory_among(faulter.space(), attempt, || {
+                Ok::<_, ()>(live.to_vec())
+            })
+        };
+        let cached = file.committed();
+        oom::forget_last_machine_kill_for_check();
+        large.thread_starting();
+        if among(oom::MACHINE_RECLAIMS) != oom::Answer::Retry {
+            return Err(
+                "the machine-wide OOM kill did not kill and retry once the progress \
+                        test failed",
+            );
+        }
+        if file.committed() != cached {
+            return Err("a fault whose reclaims were spent reclaimed again");
+        }
+        drop(file);
+        if !large.is_terminated() || small.is_terminated() || faulter.is_terminated() {
+            return Err(
+                "the machine-wide OOM kill did not choose the process with the most \
+                        resident, across jobs",
+            );
+        }
+        if right.oom_counts() != (0, 1) || left.oom_counts() != (0, 0) {
+            return Err(
+                "the machine-wide OOM kill was not counted in its victim's job alone, \
+                        as an oom_kill and no oom",
+            );
+        }
+        if oom::machine_answer(faulter.space(), &live) != oom::Answer::Retry
+            || oom::kills().wrapping_sub(kills) != 1
+            || small.is_terminated()
+        {
+            return Err("a fault finding the machine-wide victim still ending killed again");
+        }
+        large.thread_gone(true);
+        if oom::machine_answer(faulter.space(), &live) != oom::Answer::Retry
+            || used(&right).saturating_add(LARGE_PAGES * PAGE_SIZE) > full
+        {
+            return Err(
+                "an ended machine-wide victim's memory was not given back before its \
+                        parent's wait",
+            );
+        }
+
+        // The faulter alone, and so the largest: not killed within the grace
+        // after the last kill, while a reaped victim's memory comes back,
+        // and the victim once it is over.
+        let own = [host(&faulter)];
+        if oom::machine_answer(faulter.space(), &own) != oom::Answer::Retry
+            || faulter.is_terminated()
+            || oom::kills().wrapping_sub(kills) != 1
+        {
+            return Err("a second machine-wide OOM kill was made within the grace after one");
+        }
+        oom::forget_last_machine_kill_for_check();
+        if oom::machine_answer(faulter.space(), &own) != oom::Answer::Victim
+            || !faulter.is_terminated()
+            || oom::kills().wrapping_sub(kills) != 2
+        {
+            return Err("a faulting process the machine-wide OOM kill chose was not told so");
+        }
+        Ok(())
+    })();
+    for process in [&small, &large, &faulter] {
+        process::kill(process, KILLED_STATUS);
+    }
+    drop((small, large, faulter));
+    checked
+}
+
 /// A running task that moves to another job leaves nothing of its processor
 /// time kept back for the job it left (`quota::Pending`), and no hold on that
 /// job's slot: the job gone, its slot is free, though the task was charged to
@@ -571,4 +703,73 @@ fn check_a_move_settles_the_pending_charge(tree: &Arc<Job>) -> Result<(), &'stat
         return Err("a job a running task left is gone and its quota slot is not");
     }
     Ok(())
+}
+
+/// [`check_the_machine_wide_kill`]'s answers that kill nobody: a refusal
+/// the allocation check injected, a fault past its last answer, and a
+/// fault with reclaims left and clean cache to take back, which retries.
+/// The reclaimable file of the check's own, for the rest of the check.
+///
+/// Verifies: L.object.102, H.QUOTA.22
+fn check_no_machine_kill_yet(
+    faulter: &Process,
+    live: &[Arc<dyn crate::object::process::Host>],
+) -> Result<Arc<crate::user::vmo::Vmo>, &'static str> {
+    const FILE_PAGES: u64 = 64;
+    let kills = oom::kills();
+    // A refusal the allocation check injects is not the machine's.
+    crate::fallible::inject_once(
+        sched::current_id().ok_or("the machine-wide OOM check runs as no task")?,
+        u32::MAX,
+        false,
+    );
+    let injected = oom::machine_answer(faulter.space(), live);
+    let _ = crate::fallible::stop_injecting();
+    if injected != oom::Answer::Refused || oom::kills() != kills {
+        return Err("the machine-wide OOM kill killed for a refusal the allocation check made");
+    }
+    if oom::out_of_memory_at(faulter.space(), oom::MOST_ANSWERS) != oom::Answer::Refused {
+        return Err("a fault past its last answer was answered again, not refused");
+    }
+
+    // The progress test: a fault with reclaims left and clean cache to
+    // take back retries and kills nobody; one whose reclaims are spent
+    // kills without taking any back.
+    let source: Arc<dyn crate::user::vmo::Filler> = crate::fallible::try_arc(ReadAgain)
+        .map_err(|_| "no memory for the machine-wide OOM check's file")?;
+    let file = crate::user::vmo::Vmo::new_filled(FILE_PAGES, Some(source))
+        .map_err(|_| "no memory for the machine-wide OOM check's file")?;
+    for index in 0..FILE_PAGES {
+        file.commit_and_write(index, 0, &[1])
+            .map_err(|_| "the machine-wide OOM check could not fill its file")?;
+    }
+    let among = |attempt| {
+        oom::machine_out_of_memory_among(faulter.space(), attempt, || Ok::<_, ()>(live.to_vec()))
+    };
+    if among(0) != oom::Answer::Retry || oom::kills() != kills {
+        return Err(
+            "a fault with reclaims left and clean cache to give back did not \
+                    reclaim and retry, or killed",
+        );
+    }
+    Ok(file)
+}
+
+/// A file's source whose every page can be read again: what reclaim may
+/// take, as a read-only mount's pages.
+#[derive(Debug)]
+struct ReadAgain;
+
+impl crate::user::vmo::Filler for ReadAgain {
+    fn fill(&self, _: &crate::user::vmo::Vmo, _: u64) -> Result<(), ferrix_vfs::Errno> {
+        Ok(())
+    }
+
+    fn fill_one(&self, _: &crate::user::vmo::Vmo, _: u64) -> Result<(), ferrix_vfs::Errno> {
+        Ok(())
+    }
+
+    fn reclaimable(&self) -> bool {
+        true
+    }
 }

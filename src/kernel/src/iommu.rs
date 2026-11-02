@@ -949,6 +949,21 @@ impl Translation {
         }
     }
 
+    /// The VT-d unit and domain behind a translated domain whose pins are
+    /// taken down a run at a time, or `None` for every other domain.
+    fn vtd(&self) -> Option<(&'static vtd::Unit, &vtd::Attached)> {
+        match self {
+            Translation::VtD { unit, attached, .. } => Some((unit, attached)),
+            _ => None,
+        }
+    }
+
+    /// Whether a pin's aligned runs are mapped as 2 MiB entries: on a VT-d
+    /// unit whose `CAP.SLLPS` offers them (`L.iommu.105`, `L.iommu.106`).
+    fn blocks(&self) -> bool {
+        self.vtd().is_some_and(|(unit, _)| unit.blocks())
+    }
+
     /// Take the page at `iova` out of the tables, holding every table that
     /// empties in `tables` until the unit's flush has completed.
     fn unmap(&self, iova: u64, tables: &mut mm::UnlinkedTables) -> Result<(), MapError> {
@@ -1104,6 +1119,41 @@ impl Domain {
         &self.budget
     }
 
+    /// The span of the entry that maps `address` in a VT-d domain's tables,
+    /// or `None` where nothing does or the domain is not VT-d's.
+    #[doc(hidden)]
+    pub fn entry_span(&self, address: u64) -> Option<u64> {
+        let (unit, attached) = self.translation.vtd()?;
+        unit.entry_span(attached, address)
+    }
+
+    /// Leave an empty leaf table in a VT-d domain's 2 MiB slot over
+    /// `address`, as no product path does, for stage 10's fallback case.
+    /// The unit may hold the page `address` was mapped as for a moment, as
+    /// after any unmap before its flush; nothing is pinned there.
+    ///
+    /// # Errors
+    ///
+    /// The domain is not VT-d's, or the tables refused.
+    #[doc(hidden)]
+    pub fn link_empty_table(&self, address: u64) -> Result<(), DomainError> {
+        let (unit, attached) = self.translation.vtd().ok_or(DomainError::Tables)?;
+        unit.link_empty_table(attached, address)
+            .map_err(|_| DomainError::Tables)?;
+        self.translation
+            .flush(false, Wait::Status)
+            .map_err(DomainError::Unit)
+    }
+
+    /// For a VT-d domain, whether its pins' runs are mapped as blocks and
+    /// whether the unit's `CAP.SLLPS` bit 34, read now, offers them; `None`
+    /// for any other domain.
+    #[doc(hidden)]
+    pub fn blocks_wiring(&self) -> Option<(bool, bool)> {
+        let (unit, _) = self.translation.vtd()?;
+        Some((self.translation.blocks(), unit.sllps_2m()))
+    }
+
     /// Whether a unit translates this domain's DMA, so a device can reach only
     /// what is pinned into it.
     pub fn translated(&self) -> bool {
@@ -1183,6 +1233,33 @@ impl Domain {
     /// before a failure is unmapped again, except after a unit that never
     /// finished, whose pages stay mapped for good.
     pub fn pin(&self, frames: &[u64], flags: MapFlags) -> Result<Pinned, DomainError> {
+        self.pin_with(frames, flags, self.translation.blocks())
+    }
+
+    /// [`Domain::pin`], its aligned runs mapped as 2 MiB entries only where
+    /// `blocks` says: what [`Domain::pin`] passes is the unit's `CAP.SLLPS`;
+    /// stage 10 passes `false` to see the arm a unit without it takes.
+    ///
+    /// # Errors
+    ///
+    /// As [`Domain::pin`].
+    #[doc(hidden)]
+    pub fn pin_runs(
+        &self,
+        frames: &[u64],
+        flags: MapFlags,
+        blocks: bool,
+    ) -> Result<Pinned, DomainError> {
+        self.pin_with(frames, flags, blocks)
+    }
+
+    /// [`Domain::pin`]'s work, its runs mapped as blocks where `blocks` says.
+    fn pin_with(
+        &self,
+        frames: &[u64],
+        flags: MapFlags,
+        blocks: bool,
+    ) -> Result<Pinned, DomainError> {
         if frames.is_empty() {
             return Err(DomainError::Empty);
         }
@@ -1203,7 +1280,7 @@ impl Domain {
                 return Err(DomainError::OutOfRange);
             }
             let _held = changing.enter().map_err(DomainError::Unit)?;
-            map_all(&self.translation, &addresses, flags)?;
+            map_all(&self.translation, &addresses, flags, blocks)?;
         } else if !DEGRADED.swap(true, Ordering::Relaxed) {
             println!(
                 "  iommu    degraded trusted mode: no IOMMU domain is programmed, so device \
@@ -1277,11 +1354,7 @@ impl Domain {
             // frame of it -- and the tables it emptied are kept too, as
             // `tables` is dropped unreleased.
             let mut tables = mm::UnlinkedTables::of(mm::TableOwner::Device);
-            if pinned
-                .addresses
-                .iter()
-                .any(|&iova| self.translation.unmap(iova, &mut tables).is_err())
-            {
+            if take_down(&self.translation, &pinned.addresses, &mut tables).is_err() {
                 return Err((DomainError::Tables, pinned));
             }
             // Only once the unit has forgotten the pages may their frames go,
@@ -1298,35 +1371,130 @@ impl Domain {
     }
 }
 
+/// Pages in a run: the 4 KiB pages one 2 MiB entry maps.
+const RUN_PAGES: usize = (mm::IO_RUN / PAGE_SIZE) as usize;
+
+/// Whether `addresses` starts with a run: 512 consecutive pages from a
+/// 2 MiB-aligned address, all of them the pin's own (`L.iommu.106`).
+fn starts_run(addresses: &[u64]) -> bool {
+    let Some((&first, run)) = addresses.get(..RUN_PAGES).and_then(<[u64]>::split_first) else {
+        return false;
+    };
+    first.is_multiple_of(mm::IO_RUN)
+        && run
+            .iter()
+            .zip(1..)
+            .all(|(&address, page)| address == first + page * PAGE_SIZE)
+}
+
 /// Map every page in `addresses` at its own address in `translation`'s
-/// tables, or none of them.
+/// tables, or none of them: where `blocks` says, each run as one 2 MiB entry,
+/// and a run whose slot holds a table as its 512 pages instead, so that a pin
+/// is refused only where its pages mapped one by one would be (`L.iommu.106`,
+/// `L.iommu.107`).
 fn map_all(
     translation: &Translation,
     addresses: &[u64],
     flags: MapFlags,
+    blocks: bool,
 ) -> Result<(), DomainError> {
-    for (done, &phys) in addresses.iter().enumerate() {
-        let Err(error) = translation.map(phys, phys, flags) else {
-            continue;
-        };
-        let mut tables = mm::UnlinkedTables::of(mm::TableOwner::Device);
-        // A map refused for a write not cleaned (finding F-58) has written
-        // its page into the tables, so the unwind takes that page out too.
-        let written = done + usize::from(error == MapError::NotCleaned);
-        for &mapped in addresses.iter().take(written) {
-            let _ = translation.unmap(mapped, &mut tables);
+    let mut done = 0;
+    while let Some(rest) = addresses.get(done..)
+        && let Some(&phys) = rest.first()
+    {
+        let mut pages = 1;
+        if let Some((unit, attached)) = translation.vtd().filter(|_| blocks)
+            && starts_run(rest)
+        {
+            match unit.map_run(attached, phys, phys, flags) {
+                Ok(()) => {
+                    done += RUN_PAGES;
+                    continue;
+                }
+                // Another pin's block: under identity, the same frames.
+                Err(error @ MapError::AlreadyMapped(_))
+                    if unit.entry_span(attached, phys) == Some(mm::IO_RUN) =>
+                {
+                    return Err(unwind(translation, addresses, done, RUN_PAGES, error));
+                }
+                // A table in the run's slot, empty or not: the run's pages,
+                // one by one, and only a page refused there refuses the pin.
+                Err(MapError::AlreadyMapped(_)) => pages = RUN_PAGES,
+                Err(error) => return Err(unwind(translation, addresses, done, RUN_PAGES, error)),
+            }
         }
-        if translation.flush(false, Wait::Status).is_ok() {
-            tables.release();
+        for (at, &phys) in addresses.iter().enumerate().skip(done).take(pages) {
+            if let Err(error) = translation.map(phys, phys, flags) {
+                return Err(unwind(translation, addresses, at, 1, error));
+            }
         }
-        return Err(match error {
-            MapError::AlreadyMapped(_) => DomainError::AlreadyPinned,
-            _ => DomainError::Tables,
-        });
+        done += pages;
     }
     translation
         .flush(true, Wait::Status)
         .map_err(DomainError::Unit)
+}
+
+/// Take out again what [`map_all`] mapped of `addresses` before the map of
+/// `width` pages at `failed` was refused with `error`, and say why the pin is
+/// refused.
+fn unwind(
+    translation: &Translation,
+    addresses: &[u64],
+    failed: usize,
+    width: usize,
+    error: MapError,
+) -> DomainError {
+    let mut tables = mm::UnlinkedTables::of(mm::TableOwner::Device);
+    // A map refused for a write not cleaned (finding F-58) has written its
+    // page or run into the tables, so the unwind takes that out too.
+    let written = failed
+        + if error == MapError::NotCleaned {
+            width
+        } else {
+            0
+        };
+    let mapped = addresses.get(..written).unwrap_or(addresses);
+    let _ = take_down(translation, mapped, &mut tables);
+    if translation.flush(false, Wait::Status).is_ok() {
+        tables.release();
+    }
+    match error {
+        // A page of the run mapped already, or inside another pin's block:
+        // under identity, the same frame pinned twice.
+        MapError::AlreadyMapped(_) | MapError::BlockInTheWay(_) => DomainError::AlreadyPinned,
+        _ => DomainError::Tables,
+    }
+}
+
+/// Take `addresses` out of `translation`'s tables: on a VT-d domain each run
+/// [`starts_run`] finds as one 2 MiB range, whether it was mapped as one
+/// entry or as 512 pages, and every other page by itself (`L.iommu.108`).
+/// Every table that empties goes to `tables`, for the caller to give back
+/// once the unit's flush has completed (F-36).
+///
+/// # Errors
+///
+/// The first take-down the tables refused; what came before it is out.
+fn take_down(
+    translation: &Translation,
+    addresses: &[u64],
+    tables: &mut mm::UnlinkedTables,
+) -> Result<(), MapError> {
+    let mut rest = addresses;
+    while let Some(&first) = rest.first() {
+        let step = if let Some((unit, attached)) = translation.vtd()
+            && starts_run(rest)
+        {
+            unit.unmap_run(attached, first, tables)?;
+            RUN_PAGES
+        } else {
+            translation.unmap(first, tables)?;
+            1
+        };
+        rest = rest.get(step..).unwrap_or_default();
+    }
+    Ok(())
 }
 
 impl Drop for Domain {

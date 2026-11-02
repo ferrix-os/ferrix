@@ -797,6 +797,13 @@ pub(crate) fn check_desktop(lines: &[String]) -> Result<()> {
                 "the lease set no default route",
             ),
             ("n150-desktop: yserver is up on :0", "yserver did not start"),
+            // The log manager the desktop's viewer reads: an unstripped
+            // lode was too big for process_create and never started
+            // (2026-10-28).
+            (
+                "lode.service: active",
+                "lode, the log manager, did not start",
+            ),
         ],
     )?;
     // The keyboard in hyprix's own seat, not only the kernel's input line.

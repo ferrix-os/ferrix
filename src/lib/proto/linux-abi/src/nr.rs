@@ -394,6 +394,11 @@ pub mod x86_64 {
     pub const SCHED_SETAFFINITY: usize = 203;
     /// Read a thread's processor affinity mask.
     pub const SCHED_GETAFFINITY: usize = 204;
+    /// Set a thread's scheduling policy and attributes, its slice request among
+    /// them (`struct sched_attr`).
+    pub const SCHED_SETATTR: usize = 314;
+    /// Read a thread's scheduling policy and attributes.
+    pub const SCHED_GETATTR: usize = 315;
     /// Read directory entries in the 64-bit layout.
     pub const GETDENTS64: usize = 217;
     /// Register the address cleared and woken on thread exit.
@@ -775,6 +780,11 @@ pub mod aarch64 {
     pub const SCHED_SETAFFINITY: usize = 122;
     /// Read a thread's processor affinity mask.
     pub const SCHED_GETAFFINITY: usize = 123;
+    /// Set a thread's scheduling policy and attributes, its slice request among
+    /// them (`struct sched_attr`).
+    pub const SCHED_SETATTR: usize = 274;
+    /// Read a thread's scheduling policy and attributes.
+    pub const SCHED_GETATTR: usize = 275;
     /// Yield the processor to another runnable thread.
     pub const SCHED_YIELD: usize = 124;
     /// Report the highest priority a scheduling policy allows.
@@ -1377,6 +1387,11 @@ pub mod arm {
     pub const SCHED_SETAFFINITY: usize = 241;
     /// Read a thread's processor affinity mask.
     pub const SCHED_GETAFFINITY: usize = 242;
+    /// Set a thread's scheduling policy and attributes, its slice request among
+    /// them (`struct sched_attr`).
+    pub const SCHED_SETATTR: usize = 380;
+    /// Read a thread's scheduling policy and attributes.
+    pub const SCHED_GETATTR: usize = 381;
     /// Terminate every thread in the process.
     pub const EXIT_GROUP: usize = 248;
     /// Create an epoll set, the size a hint that is ignored.
@@ -2147,6 +2162,11 @@ pub mod i386 {
     /// Read a thread's processor mask, in a buffer a whole number of 32-bit
     /// words long.
     pub const SCHED_GETAFFINITY: usize = 242;
+    /// Set a thread's scheduling policy and attributes, its slice request among
+    /// them (`struct sched_attr`).
+    pub const SCHED_SETATTR: usize = 351;
+    /// Read a thread's scheduling policy and attributes.
+    pub const SCHED_GETATTR: usize = 352;
     /// Wait for descriptors with a signal mask and a 64-bit `timespec`, the
     /// sets and the mask pair in 32-bit words. The 32-bit `pselect6` at 308
     /// and `_newselect` at 142 are not carried: their timeouts are `long`s.
@@ -2774,6 +2794,10 @@ pub enum Syscall {
     SchedGetaffinity,
     /// Set a thread's processor affinity mask.
     SchedSetaffinity,
+    /// Set a thread's scheduling policy and attributes.
+    SchedSetattr,
+    /// Read a thread's scheduling policy and attributes.
+    SchedGetattr,
     /// Read a thread's scheduling parameters.
     SchedGetparam,
     /// Set a thread's scheduling policy and parameters.
@@ -3101,6 +3125,8 @@ fn x86_64_threads_and_time(nr: usize) -> Option<Syscall> {
         x86_64::TIME => Syscall::Time,
         x86_64::FUTEX => Syscall::Futex,
         x86_64::SCHED_SETAFFINITY => Syscall::SchedSetaffinity,
+        x86_64::SCHED_SETATTR => Syscall::SchedSetattr,
+        x86_64::SCHED_GETATTR => Syscall::SchedGetattr,
         x86_64::SCHED_GETAFFINITY => Syscall::SchedGetaffinity,
         x86_64::GETDENTS64 => Syscall::Getdents64,
         x86_64::SET_TID_ADDRESS => Syscall::SetTidAddress,
@@ -3420,6 +3446,8 @@ fn aarch64_signals_and_ids(nr: usize) -> Option<Syscall> {
         aarch64::SCHED_GETSCHEDULER => Syscall::SchedGetscheduler,
         aarch64::SCHED_GETPARAM => Syscall::SchedGetparam,
         aarch64::SCHED_SETAFFINITY => Syscall::SchedSetaffinity,
+        aarch64::SCHED_SETATTR => Syscall::SchedSetattr,
+        aarch64::SCHED_GETATTR => Syscall::SchedGetattr,
         aarch64::SCHED_GETAFFINITY => Syscall::SchedGetaffinity,
         aarch64::SCHED_YIELD => Syscall::SchedYield,
         aarch64::KILL => Syscall::Kill,
@@ -3782,6 +3810,8 @@ fn arm_ids_and_at_family(nr: usize) -> Option<Syscall> {
         arm::COPY_FILE_RANGE => Syscall::CopyFileRange,
         arm::FUTEX => Syscall::Futex,
         arm::SCHED_SETAFFINITY => Syscall::SchedSetaffinity,
+        arm::SCHED_SETATTR => Syscall::SchedSetattr,
+        arm::SCHED_GETATTR => Syscall::SchedGetattr,
         arm::SCHED_GETAFFINITY => Syscall::SchedGetaffinity,
         arm::EXIT_GROUP => Syscall::ExitGroup,
         arm::EPOLL_CREATE => Syscall::EpollCreate,
@@ -4198,6 +4228,8 @@ fn i386_ids_and_at_family(nr: usize) -> Option<Syscall> {
         i386::TKILL => Syscall::Tkill,
         i386::SENDFILE64 => Syscall::Sendfile64,
         i386::SCHED_SETAFFINITY => Syscall::SchedSetaffinity,
+        i386::SCHED_SETATTR => Syscall::SchedSetattr,
+        i386::SCHED_GETATTR => Syscall::SchedGetattr,
         i386::SCHED_GETAFFINITY => Syscall::SchedGetaffinity,
         i386::SET_THREAD_AREA => Syscall::SetThreadArea,
         i386::GET_THREAD_AREA => Syscall::GetThreadArea,

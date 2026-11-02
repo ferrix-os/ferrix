@@ -231,6 +231,15 @@ name = "ferrix-cpio"
 version = "0.1.0"
 
 [[package]]
+name = "ferrix-crash-at-start"
+version = "0.1.0"
+dependencies = [
+ "ferrix-blkring",
+ "ferrix-native-abi",
+ "ferrix-rt",
+]
+
+[[package]]
 name = "ferrix-crng"
 version = "0.1.0"
 
@@ -659,6 +668,24 @@ dependencies = [
  "ferrix-native-abi",
  "ferrix-rt",
  "ferrix-stm32-display",
+]
+
+[[package]]
+name = "ferrix-mce-victim"
+version = "0.1.0"
+dependencies = [
+ "ferrix-blkring",
+ "ferrix-chardevctl",
+ "ferrix-native-abi",
+ "ferrix-rt",
+]
+
+[[package]]
+name = "ferrix-memscrub"
+version = "0.1.0"
+dependencies = [
+ "ferrix-native-abi",
+ "ferrix-rt",
 ]
 
 [[package]]

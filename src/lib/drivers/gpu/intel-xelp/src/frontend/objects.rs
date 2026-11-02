@@ -8,7 +8,7 @@
 //! forbids. Each slot records its file, and a lookup from another file's id
 //! fails as an unknown id does (`ENOENT`).
 
-use super::backend::{Engine, HwContext, VmId};
+use super::backend::{Completion, Engine, HwContext, VmId};
 use super::limits;
 use super::{RequestId, fence::Waits};
 use ferrix_linux_abi::errno::Errno;
@@ -755,6 +755,71 @@ pub struct Said {
     pub bits: u64,
 }
 
+/// The bit every request id of the driver's own work carries
+/// ([`DriverRequests`]): the front end's own ids count up from 1 and never
+/// reach it.
+pub const DRIVER_REQUEST: RequestId = 1 << 63;
+
+/// The driver's own requests (card0's blit, H5 of `docs/GAME-MODE.md`
+/// §5.7): ids from [`DRIVER_REQUEST`] up, their completions kept until the
+/// driver takes them. No client's fence names one.
+#[derive(Clone, Copy, Debug)]
+pub struct DriverRequests {
+    /// The next id to give.
+    pub next: RequestId,
+    /// Given, and not yet completed.
+    pub outstanding: u32,
+    /// Completed and not yet taken.
+    pub done: [Option<(RequestId, Completion)>; DRIVER_DONE],
+}
+
+/// Completions of the driver's own requests kept at once; the oldest is
+/// dropped past it.
+pub const DRIVER_DONE: usize = 4;
+
+impl DriverRequests {
+    /// None yet.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            next: DRIVER_REQUEST,
+            outstanding: 0,
+            done: [None; DRIVER_DONE],
+        }
+    }
+
+    /// Request `id` ended `how`.
+    pub fn finish(&mut self, id: RequestId, how: Completion) {
+        self.outstanding = self.outstanding.saturating_sub(1);
+        let slot = self
+            .done
+            .iter()
+            .position(Option::is_none)
+            .unwrap_or_else(|| {
+                self.done.rotate_left(1);
+                DRIVER_DONE - 1
+            });
+        if let Some(entry) = self.done.get_mut(slot) {
+            *entry = Some((id, how));
+        }
+    }
+
+    /// How request `id` ended, once, if it has.
+    pub fn take(&mut self, id: RequestId) -> Option<Completion> {
+        let entry = self
+            .done
+            .iter_mut()
+            .find(|entry| entry.is_some_and(|(done, _)| done == id))?;
+        entry.take().map(|(_, how)| how)
+    }
+}
+
+impl Default for DriverRequests {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Every table.
 pub struct Tables<M> {
     /// Open files.
@@ -794,6 +859,8 @@ pub struct Tables<M> {
     pub why: &'static str,
     /// The `intel: uapi refused` lines' rate limit.
     pub refusals: Refusals,
+    /// The driver's own requests.
+    pub driver: DriverRequests,
 }
 
 /// The `intel: uapi refused` lines' rate limit: [`Refusals::BURST`] a
@@ -854,6 +921,7 @@ impl<M> Tables<M> {
                 said: 0,
                 quiet: 0,
             },
+            driver: DriverRequests::new(),
         }
     }
 

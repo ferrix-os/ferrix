@@ -188,6 +188,11 @@ why = "whether the image carries settingsd, settingsctl, the settings.* authd po
 values.absent = { allows = ["sc4", "present", "sc2", "none"] }
 values.present = { allows = ["present", "none"], requires = ["runtime_settings=live"] }
 
+[image_keys.bad_frames]
+why = "whether the UEFI loader's bad-frame mode is fixed: `persist` keeps the frames the machine checks retired out across a warm reset and a power cycle, with no code that reads ferrix.badframes; `choice` reads ferrix.badframes (persist, reset or off) from the command line (docs/MACHINE-CHECK-RESTART.md §10; ledger 5579)"
+values.persist = { allows = ["sc4", "present", "sc2", "none"] }
+values.choice = { allows = ["none"] }
+
 # ---------------------------------------------------------------------------
 # The boot options that stay boot options (BF4): the registry. A read of any
 # option not declared here fails the gate (check-item-boundary.py, with a
@@ -228,6 +233,11 @@ why = "Linux's: the kernel log's size, a memparse size (decimal or 0x hex, K/M/G
 values = ["on", "off"]
 why = "whether the loader keeps the kernel log across a reset (docs/POSTMORTEM.md §3; read by the loader through ferrix_bootinfo::pstore::switch); any other value is said and taken as off"
 
+[boot_options."ferrix.badframes"]
+values = ["persist", "reset", "off"]
+settable = true
+why = "the bad-frame mode a `bad_frames = choice` loader uses (docs/MACHINE-CHECK-RESTART.md §10): persist keeps retired frames out across a warm reset and a power cycle, reset across a warm reset only, off across neither; absent or not understood is persist, said; read by that loader alone (a `persist` loader compiles no read of it), through ferrix_bootinfo::option_in; settable by B5's set-boot-word where the image's profile permits it (ledger 5579 (8))"
+
 [boot_options."ferrix.efifb"]
 kind = "flag"
 why = "lend the firmware framebuffer to a ring-3 driver on x86-64 (discovery/firmware.rs, docs/DISPLAY.md §8); never in a configuration a claim is made of (SAFETY-MANUAL AoU-31)"
@@ -252,6 +262,23 @@ why = "x86-64 only, ignored on aarch64 and armv7a: a read-only log of the RAPL p
 values = ["*"]
 why = "seconds between ferrix.msrlog's reads, 0 to 3600, 0 for once; 5 without it or for a value not understood, which the log says (L.x86_64.187)"
 
+[boot_options."ferrix.mce.poll"]
+values = ["*"]
+why = "x86-64 only, ignored on aarch64 and armv7a: seconds between each processor's poll of its machine-check banks, 1 to 3600 by ferrix.msrlog's chooser; 5 without it, or for 0 or a value not understood, which the log says (arch/x86_64/mce.rs, docs/MACHINE-CHECK.md, L.x86_64.223)"
+
+[boot_options."ferrix.mce.recover"]
+values = ["off"]
+why = "x86-64 only, ignored on aarch64 and armv7a: off makes every machine check stop as FX-9005, as before recovery existed; without it a machine check H.FAIL.8 names is logged and recovered from (arch/x86_64/mce.rs, L.x86_64.231, SAFETY-MANUAL AoU-36); any other value is ignored"
+
+[boot_options."ferrix.mce.cmci"]
+values = ["off"]
+why = "x86-64 Intel only, ignored on aarch64 and armv7a: off claims no machine-check bank for CMCI and leaves every LVT CMCI entry masked, the poll alone as before CMCI; without it a processor reporting MCG_CMCI_P claims its banks and a corrected or no-action record wakes its poll at once; any other value is said and leaves CMCI on (arch/x86_64/mce/cmci.rs, docs/MACHINE-CHECK-CMCI.md §3.6, L.x86_64.252)"
+
+[boot_options."ferrix.mce.cmci-window"]
+values = ["*"]
+test_only = true
+why = "seconds (1 to 60) the first CMCI-driven poll round holds its masked window open before its unmask, so cargo xtask test-mce-cmci-window can make a record that only the look after the unmask finds (L.x86_64.253); read only in builds with the checks on, a product build has no option, and a certified profile's command line may not carry it (arch/x86_64/mce/cmci.rs, docs/MACHINE-CHECK-CMCI.md §3.4)"
+
 [boot_options."ferrix.powerctl"]
 kind = "flag"
 why = "x86-64 Alder Lake-N only (Intel family 6 model 0xBE, the N150, one package), ignored on aarch64 and armv7a: publishes the power node, whose driver may set a hardware current limit, MSR_VR_CURRENT_CONFIG bits 12:0, through typed calls the kernel bounds by its model table (firmware's own limit up to 48 A, at most 23 A above firmware's), with firmware's value restored when the holder goes, its lease lapses, its backstop trips at 90 C or a thermal/PROCHOT/critical bit, a write does not read back, and on power-off, reset and panic (arch/x86_64/powerctl.rs, docs/POWERCTL.md, L.x86_64.194-209, L.device.51-53); never in a configuration a claim is made of"
@@ -260,6 +287,11 @@ why = "x86-64 Alder Lake-N only (Intel family 6 model 0xBE, the N150, one packag
 kind = "flag"
 test_only = true
 why = "the power node over a fake register file on any x86-64 processor, reaching no MSR, every kernel line marked (fake): cargo xtask test-power's lease and holder-death rows (L.x86_64.207); test-only, never in a certified profile"
+
+[boot_options."ferrix.scrub"]
+values = ["test"]
+test_only = true
+why = "test turns the RAM scrubber's stand-down off where a hypervisor is positively seen (x86-64's hypervisor bit, AArch64's hvc conduit or /hypervisor node), so cargo xtask test-scrub can sweep a QEMU guest whose type 16 says ECC; compiled into every build with the checks on, certified profiles included, so it is never honoured on bare metal and a certified profile's command line may not carry it (mm/scrub.rs, docs/RAM-SCRUBBER.md §3.3, ledger 5057 (2), 5140 (1), L.mm.106, SAFETY-MANUAL AoU-38)"
 
 [boot_options."ferrix.panic"]
 values = ["halt", "reset"]

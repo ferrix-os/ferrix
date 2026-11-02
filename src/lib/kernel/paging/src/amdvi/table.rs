@@ -166,6 +166,16 @@ pub const fn destination(apic_id: u32) -> Option<u8> {
     }
 }
 
+/// The interrupt remapping entry `entry` aimed at `destination` instead,
+/// everything else kept: one aligned four-byte store
+/// (`docs/CORE-QUARANTINE.md` §3.3; the entry's layout, AMD I/O
+/// Virtualization Technology (IOMMU) Specification 2.2.5, then
+/// `INVALIDATE_INTERRUPT_TABLE`, 2.4.5, and a completion wait).
+#[must_use]
+pub const fn retargeted(entry: u32, destination: u8) -> u32 {
+    (entry & !(0xFF << DESTINATION_SHIFT)) | (destination as u32) << DESTINATION_SHIFT
+}
+
 /// A 32-bit interrupt remapping entry: remapped, its faults reported
 /// (`SupIOPF` 0), fixed delivery, physical destination `destination`, not
 /// guest mode, `vector`.

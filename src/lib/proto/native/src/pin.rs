@@ -7,7 +7,9 @@
 //! not contiguous to the device, so there is one address per page.
 
 use ferrix_native_abi::nr;
-use ferrix_native_abi::types::{PIN_COHERENT, PIN_CONTIGUOUS, PIN_READ_ONLY};
+use ferrix_native_abi::types::{
+    PIN_BLOCK_ORDER_SHIFT, PIN_BLOCKS, PIN_COHERENT, PIN_CONTIGUOUS, PIN_READ_ONLY,
+};
 
 use crate::call::{Call, Syscall};
 use crate::device::Device;
@@ -40,6 +42,13 @@ pub enum PinAccess {
     /// uncommitted, in an anonymous VMO, and at most one buddy block long;
     /// the kernel fills it, and refuses rather than pin anything else.
     Contiguous,
+    /// Read and write, the range's absent pages committed first in naturally
+    /// aligned blocks of at most `2^order` pages where the allocator has them:
+    /// `PIN_BLOCKS`. Best effort; the addresses are per page as for any pin.
+    Blocks {
+        /// The largest block's order, 1 to 10.
+        order: u8,
+    },
 }
 
 impl PinAccess {
@@ -51,6 +60,9 @@ impl PinAccess {
             PinAccess::ReadOnly => PIN_READ_ONLY as usize,
             PinAccess::Coherent => PIN_COHERENT as usize,
             PinAccess::Contiguous => PIN_CONTIGUOUS as usize,
+            PinAccess::Blocks { order } => {
+                (PIN_BLOCKS | (order as u64) << PIN_BLOCK_ORDER_SHIFT) as usize
+            }
         }
     }
 }

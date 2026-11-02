@@ -38,6 +38,13 @@ pub const GEN12_PPGTT_PTE_PAT0: u64 = 1 << 3;
 pub const GEN12_PPGTT_PTE_PAT1: u64 = 1 << 4;
 /// `GEN12_PPGTT_PTE_PAT2`.
 pub const GEN12_PPGTT_PTE_PAT2: u64 = 1 << 7;
+/// `GEN8_PDE_PS_2M`: a level-1 entry that maps 2 MiB itself rather than
+/// naming a leaf table. The same bit as [`GEN12_PPGTT_PTE_PAT2`], which
+/// Gen12.0 never sets ([`MAX_PAT_INDEX`] is 3).
+pub const GEN8_PDE_PS_2M: u64 = 1 << 7;
+/// `GEN8_PDE_IPS_64K`: the leaf table a level-1 entry names holds 64 KiB
+/// pages, of which the hardware reads every 16th entry.
+pub const GEN8_PDE_IPS_64K: u64 = 1 << 11;
 /// `GEN12_GGTT_PTE_ADDR_MASK`: bits 45..12.
 pub const GEN12_GGTT_PTE_ADDR_MASK: u64 = ((1 << 46) - 1) & !((1 << 12) - 1);
 

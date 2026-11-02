@@ -89,6 +89,8 @@ pub fn run() -> Result<Report, &'static str> {
     check_a_read_of_an_inaccessible_region_is_refused()?;
     let faulted = check_pages_arrive_on_demand_and_go_back()?;
     let walked = check_the_processor_walks_an_installed_space()?;
+    arch::check_root_tags()?;
+    check_a_space_switched_back_to_sees_its_shootdowns()?;
 
     check_a_shared_region_survives_fork_as_one_object()?;
     let copied = check_fork_shares_pages_and_a_write_copies_one()?;
@@ -942,6 +944,273 @@ fn walk_through_installed(
 
     arch::forbid_user_access();
     walked
+}
+
+/// How one install wrote the root, as [`read_installed`] saw it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RootWrite {
+    /// The bare root, nothing else: every install drops the user
+    /// translations, and there is nothing to tell apart. Every Arm install.
+    Untagged,
+    /// The root with a tag and the bit that keeps the tag's translations.
+    Kept,
+    /// The root with a tag and without that bit: the tag flushed.
+    Flushed,
+    /// Anything else: a tag on another root, a tag out of range, a keep
+    /// bit with no tag.
+    Malformed,
+}
+
+/// The largest tag a user space may carry (`docs/PCID.md` §2).
+const LARGEST_TAG: u64 = 6;
+
+/// Install `space` on this processor, read the word at user address `at`
+/// through it, uninstall it, and say what the read saw and how the install
+/// wrote the root. Interrupts must be masked across the call, and `at` must
+/// be mapped and readable in `space`.
+fn read_installed(space: &AddressSpace, at: u64) -> (u64, RootWrite) {
+    let cpu = crate::smp::this_cpu().map_or(usize::MAX, |cpu| cpu.logical);
+    // SAFETY: (TRANSLATE) `space` is borrowed across the whole call, so its tables
+    // outlive the installation; the caller masks interrupts, and it is
+    // uninstalled below before anything else can want a user address.
+    unsafe { space.install(None) };
+    let written = arch::last_root_write(cpu);
+    // What the root register holds, not only what was recorded: its low
+    // twelve bits, the PCID where tags are on and nothing otherwise.
+    let held = arch::root_tag_now();
+    arch::permit_user_access();
+    // SAFETY: (PROBE) the caller mapped `at` readable in `space`, which is
+    // installed on this processor.
+    let seen = unsafe { (at as *const u64).read_volatile() };
+    arch::forbid_user_access();
+    // SAFETY: (TRANSLATE) nothing after this wants a user address.
+    unsafe { space.uninstall() };
+    let root = space.root_table();
+    // Uninstalled, the kernel's root is loaded with PCID 0, the kernel's own.
+    if arch::root_tag_now() != 0 {
+        return (seen, RootWrite::Malformed);
+    }
+    let how = match written {
+        None => RootWrite::Untagged,
+        Some((value, _, _)) if value & (PAGE_SIZE - 1) != held => RootWrite::Malformed,
+        Some((value, _, _)) if value == root => RootWrite::Untagged,
+        Some((value, keep, _)) => {
+            let tag = value & (PAGE_SIZE - 1);
+            if value & !(PAGE_SIZE - 1) & !keep != root || tag == 0 || tag > LARGEST_TAG {
+                RootWrite::Malformed
+            } else if value & keep != 0 {
+                RootWrite::Kept
+            } else {
+                RootWrite::Flushed
+            }
+        }
+    };
+    (seen, how)
+}
+
+/// A space with one page at `at` holding `marker`, read and written through
+/// its own tables and the direct map.
+fn space_with_marker(at: u64, marker: u64) -> Result<Arc<AddressSpace>, &'static str> {
+    let space = AddressSpace::new().map_err(|_| "could not make an address space")?;
+    let _ = space
+        .map_anonymous(at, PAGE_SIZE, VmaFlags::READ_WRITE)
+        .map_err(|_| "mapping failed")?;
+    space
+        .fault(at, Access::WRITE)
+        .map_err(|_| "a fault in a mapped region was not resolved")?;
+    let phys = mm::translate_in(space.root_table(), at)
+        .ok_or("a faulted page does not translate in its own address space")?;
+    poke(phys, marker);
+    Ok(space)
+}
+
+/// What [`read_installed`] saw, held to `value` and, where the machine
+/// tags (`tagged`), to `write`; without tags every write must be the bare
+/// root and nothing else. `Err(what)` otherwise.
+fn expect_write(
+    tagged: bool,
+    (seen, how): (u64, RootWrite),
+    value: u64,
+    write: RootWrite,
+    what: &'static str,
+) -> Result<(), &'static str> {
+    let wanted = if tagged { write } else { RootWrite::Untagged };
+    if seen != value || how != wanted {
+        return Err(what);
+    }
+    Ok(())
+}
+
+/// Move `space`'s page at `at` to a new frame holding `marker`, while the
+/// space is on no processor: unmapped (a shootdown to its empty set,
+/// counted), mapped again, faulted onto a new frame.
+fn move_page(space: &AddressSpace, at: u64, marker: u64) -> Result<(), &'static str> {
+    space
+        .unmap(at, PAGE_SIZE)
+        .map_err(|_| "the moved page could not be unmapped")?;
+    let _ = space
+        .map_anonymous(at, PAGE_SIZE, VmaFlags::READ_WRITE)
+        .map_err(|_| "the moved page could not be mapped again")?;
+    space
+        .fault(at, Access::WRITE)
+        .map_err(|_| "the moved page could not be faulted in")?;
+    let moved = mm::translate_in(space.root_table(), at)
+        .ok_or("the moved page does not translate in its own address space")?;
+    poke(moved, marker);
+    Ok(())
+}
+
+/// Where the switch-back check's page is, and the markers it holds.
+const SWITCH_AT: u64 = 0x6000_0000;
+const SWITCH_FIRST: u64 = 0x5EED_0000_0000_0001;
+const SWITCH_SECOND: u64 = 0x5EED_0000_0000_0002;
+const SWITCH_OTHER: u64 = 0x5EED_0000_0000_00FF;
+
+/// The switch-back check's installs, with interrupts masked by the caller
+/// so that every one is on one processor: `space` and `other` hold
+/// [`SWITCH_FIRST`] and [`SWITCH_OTHER`] at [`SWITCH_AT`], and `crowd`'s
+/// spaces `SWITCH_OTHER + 1` onwards.
+fn switch_back(
+    space: &AddressSpace,
+    other: &AddressSpace,
+    crowd: &[Arc<AddressSpace>],
+) -> Result<(), &'static str> {
+    let first = read_installed(space, SWITCH_AT);
+    let cpu = crate::smp::this_cpu().map_or(usize::MAX, |cpu| cpu.logical);
+    let tagged = arch::last_root_write(cpu).is_some_and(|(_, _, tagged)| tagged);
+    expect_write(
+        tagged,
+        first,
+        SWITCH_FIRST,
+        RootWrite::Flushed,
+        "a space's first install on a processor did not flush its new tag",
+    )?;
+    expect_write(
+        tagged,
+        read_installed(space, SWITCH_AT),
+        SWITCH_FIRST,
+        RootWrite::Kept,
+        "a space installed again with nothing taken down did not keep its tag",
+    )?;
+    expect_write(
+        tagged,
+        read_installed(other, SWITCH_AT),
+        SWITCH_OTHER,
+        RootWrite::Flushed,
+        "a second space did not get a tag of its own",
+    )?;
+    expect_write(
+        tagged,
+        read_installed(space, SWITCH_AT),
+        SWITCH_FIRST,
+        RootWrite::Kept,
+        "a space lost its tag to a second space while a slot was free",
+    )?;
+
+    // The move, while `space` is on no processor.
+    move_page(space, SWITCH_AT, SWITCH_SECOND)?;
+
+    expect_write(
+        tagged,
+        read_installed(space, SWITCH_AT),
+        SWITCH_SECOND,
+        RootWrite::Flushed,
+        "a space switched back to after a shootdown of it kept its stale translations",
+    )?;
+    expect_write(
+        tagged,
+        read_installed(space, SWITCH_AT),
+        SWITCH_SECOND,
+        RootWrite::Kept,
+        "a space flushed after a shootdown did not keep its tag the next time",
+    )?;
+    for (index, crowded) in (0_u64..).zip(crowd) {
+        expect_write(
+            tagged,
+            read_installed(crowded, SWITCH_AT),
+            SWITCH_OTHER + 1 + index,
+            RootWrite::Flushed,
+            "a space new to a processor did not flush the slot it took",
+        )?;
+    }
+    expect_write(
+        tagged,
+        read_installed(space, SWITCH_AT),
+        SWITCH_SECOND,
+        RootWrite::Flushed,
+        "a space whose slot was taken found it again without a flush",
+    )?;
+    Ok(())
+}
+
+/// A space switched away from and back to sees every change a shootdown of
+/// it made while it was away, and keeps its translations when none did
+/// (`docs/PCID.md` §5, K1 and K2).
+///
+/// With PCIDs a processor that switches away keeps the space's translations
+/// under its tag and leaves the space's set, so the space's shootdowns no
+/// longer reach it; the switch back must then flush the tag. Here the page
+/// is moved to another frame while the processor runs elsewhere, and the
+/// read after the switch back must find the new frame's marker. On PCID
+/// hardware a switch that kept the tag reads the old frame instead; under
+/// TCG, which flushes at every `CR3` write, only the decision below can
+/// show it, so each install's root write is held to what it must be where
+/// the processor tags: a new tag flushes, a tag nothing touched is kept, a
+/// tag a shootdown touched since is flushed, a seventh space takes and
+/// flushes a slot, and a space made after one is dropped never finds its
+/// tag. Without tags every install drops everything and only the reads
+/// count. With the slot's comparison with the shootdown count taken out,
+/// the check fails at the switch after the move.
+///
+/// Verifies: `L.x86_64.216`, `L.x86_64.217`, `L.x86_64.218`, `L.x86_64.219`
+/// Verifies: L.user.169, L.user.170
+fn check_a_space_switched_back_to_sees_its_shootdowns() -> Result<(), &'static str> {
+    const AT: u64 = SWITCH_AT;
+    const FIRST: u64 = SWITCH_FIRST;
+    const OTHER: u64 = SWITCH_OTHER;
+    /// More spaces than a processor has slots.
+    const CROWD: u64 = 7;
+
+    let before = quiet_frames()?;
+    let space = space_with_marker(AT, FIRST)?;
+    let other = space_with_marker(AT, OTHER)?;
+    let mut crowd = Vec::new();
+    crowd
+        .try_reserve(CROWD as usize)
+        .map_err(|_| "no room for the crowd of spaces")?;
+    for index in 0..CROWD {
+        // NOALLOC: reserved above.
+        crowd.push(space_with_marker(AT, OTHER + 1 + index)?);
+    }
+
+    // Masked throughout, so that every install below is on one processor:
+    // the slots and the counts are that processor's. The move in the middle
+    // runs a scoped shootdown with them masked, which is allowed because
+    // the space's set is empty then -- it was uninstalled -- and nobody else
+    // has to answer.
+    let state = <arch::Irq as IrqControl>::disable();
+    let outcome = switch_back(&space, &other, &crowd);
+    <arch::Irq as IrqControl>::restore(state);
+    outcome?;
+
+    // A space made once another is gone, perhaps over its root's frame, is
+    // a new id and finds no tag.
+    drop(other);
+    let after = space_with_marker(AT, OTHER)?;
+    let state = <arch::Irq as IrqControl>::disable();
+    let (seen, how) = read_installed(&after, AT);
+    <arch::Irq as IrqControl>::restore(state);
+    if seen != OTHER || how == RootWrite::Kept {
+        return Err("a space made after another was dropped found a tag it never had");
+    }
+
+    drop(after);
+    drop(crowd);
+    drop(space);
+    expect_frames(
+        before,
+        "the spaces switched between did not give back every frame",
+    )
 }
 
 // ---------------------------------------------------------------------------

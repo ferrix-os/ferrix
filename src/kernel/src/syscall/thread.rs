@@ -104,6 +104,33 @@ pub(crate) struct Thread {
     /// per process, every thread of a game went to 19 with them. A fork
     /// child's first thread starts at 0, as `syscall::attributes` says.
     nice: AtomicI32,
+    /// The slice it asks for with `sched_setattr`'s `sched_runtime`, in
+    /// nanoseconds, or zero for its queue's (L.sched.109). Linux keeps it per
+    /// thread (`se.slice` with `se.custom_slice`), and a thread made by
+    /// `clone` or `fork` starts with its creator's: `dup_task_struct` copies
+    /// it and only `SCHED_RESET_ON_FORK`, which is refused here, resets it.
+    /// `execve` keeps it.
+    slice_request: AtomicU64,
+    /// The processors its task is made with (L.sched.101): its creator's
+    /// task's mask at the moment of the `clone`, `fork` or `vfork`, as
+    /// Linux's `dup_task_struct` copies `cpus_mask`; `None`, the whole
+    /// domain, for a process's first thread made any other way. Read once,
+    /// by `sched::prepare_user`; the task's own mask is what changes after.
+    start_affinity: Option<ferrix_sched::CpuSet>,
+}
+
+/// The mask of the task running `creator`, if `creator` is the running
+/// thread (L.sched.101): what a thread it makes starts with. A copy read
+/// whole, never half of one mask and half of another (`sched::task`'s
+/// `Affinity`). `None` where `creator` is not running here, as for a boot
+/// check's thread, which makes a thread with the whole domain.
+fn creator_mask(creator: &Thread) -> Option<ferrix_sched::CpuSet> {
+    sched::with_current(|task| {
+        of_task(task)
+            .filter(|running| core::ptr::eq(*running, creator))
+            .map(|_| task.affinity())
+    })
+    .flatten()
 }
 
 /// [`Thread::watched`]'s bit for seccomp state.
@@ -147,6 +174,8 @@ impl Thread {
             parent.seccomp_copy(),
         );
         *thread.name.get_mut() = parent.name();
+        *thread.slice_request.get_mut() = parent.slice_request();
+        thread.start_affinity = creator_mask(parent);
         Ok(thread)
     }
 
@@ -194,6 +223,8 @@ impl Thread {
         *thread.numbers.get_mut() = numbers;
         *thread.name.get_mut() = caller.name();
         *thread.nice.get_mut() = caller.nice();
+        *thread.slice_request.get_mut() = caller.slice_request();
+        thread.start_affinity = creator_mask(caller);
         Ok(thread)
     }
 
@@ -222,7 +253,20 @@ impl Thread {
             dispatch: SpinLock::new(Dispatch::OFF),
             name: SpinLock::new(None),
             nice: AtomicI32::new(0),
+            slice_request: AtomicU64::new(0),
+            start_affinity: None,
         }
+    }
+
+    /// Its slice request: see [`Thread::slice_request`]'s field.
+    pub(crate) fn slice_request(&self) -> u64 {
+        self.slice_request.load(Ordering::Relaxed)
+    }
+
+    /// Set its slice request. The caller has checked the value, and gives
+    /// its task the request (`sched::set_request`).
+    pub(crate) fn set_slice_request(&self, request_ns: u64) {
+        self.slice_request.store(request_ns, Ordering::Relaxed);
     }
 
     /// Its nice value: see [`Thread::nice`]'s field.
@@ -481,6 +525,14 @@ impl Thread {
 impl UserThread for Thread {
     fn process(&self) -> &dyn Host {
         &*self.process
+    }
+
+    fn slice_request(&self) -> u64 {
+        Thread::slice_request(self)
+    }
+
+    fn start_affinity(&self) -> Option<ferrix_sched::CpuSet> {
+        self.start_affinity
     }
 }
 
