@@ -5,7 +5,7 @@
 //! * **The refusals** (D-3, V9): no `SoftRt` domain where the tier is not
 //!   built; none of no processors, nor of more than all but two; none on a
 //!   machine of fewer than four; a second refused while one exists.
-//! * **The partition** (D-1, D-2, H.SCHED.21): [`SPINNERS`] kernel tasks of
+//! * **The partition** (D-1, D-2, H.SCHED.23): [`SPINNERS`] kernel tasks of
 //!   the boot domain spin, unpinned, across every processor; a `SoftRt`
 //!   domain of all but two processors is made under them, and afterwards
 //!   none of them runs on its processors.
@@ -106,7 +106,7 @@ fn mask(cpus: &CpuSet) -> u64 {
 ///
 /// The first case that failed, as a sentence.
 ///
-/// Verifies: H.SCHED.23, L.sched.122, L.sched.127
+/// Verifies: H.SCHED.25, L.sched.144, L.sched.149
 pub(super) fn run() -> Result<&'static str, &'static str> {
     if !super::realtime_built() {
         if domains::create_soft(1) != Err(Refused::Unavailable) {
@@ -147,7 +147,7 @@ pub(super) fn run() -> Result<&'static str, &'static str> {
 
 /// D-3's refusals, before any domain exists (V9).
 ///
-/// Verifies: H.SCHED.23, L.sched.127
+/// Verifies: H.SCHED.25, L.sched.149
 fn refusals(online: usize) -> Result<(), &'static str> {
     if domains::create_soft(0) != Err(Refused::Count) {
         return Err("a SoftRt domain of no processors was not refused");
@@ -176,7 +176,7 @@ fn started() -> Result<(), &'static str> {
 /// A job of no processes admitted (V10): it and a job made beneath it are
 /// in the domain. Answers the one beneath, for the dissolution's look.
 ///
-/// Verifies: L.sched.124
+/// Verifies: L.sched.146
 fn a_job_admitted() -> Result<Arc<Job>, &'static str> {
     let job = crate::object::job::root()
         .new_child()
@@ -195,8 +195,8 @@ fn a_job_admitted() -> Result<Arc<Job>, &'static str> {
 
 /// The partition, admission and dissolution, with `spinners` spinning.
 ///
-/// Verifies: H.SCHED.21, H.SCHED.22, L.sched.118, L.sched.119, L.sched.120
-/// Verifies: L.sched.121, L.sched.123, L.sched.124, L.sched.125, L.sched.126
+/// Verifies: H.SCHED.23, H.SCHED.24, L.sched.140, L.sched.141, L.sched.142
+/// Verifies: L.sched.143, L.sched.145, L.sched.146, L.sched.147, L.sched.148
 fn partition(spinners: &[Arc<Task>], online: usize) -> Result<(), &'static str> {
     let soft = domains::create_soft(online - 2)
         .map_err(|_| "a SoftRt domain of all but two processors was refused")?;

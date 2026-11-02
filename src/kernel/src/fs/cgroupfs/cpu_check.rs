@@ -380,7 +380,7 @@ fn throttling(harness: &mut Harness) -> Checked<u64> {
 /// is made to the running task's job whatever its tier. Only where the
 /// realtime tier is built.
 ///
-/// Verifies: L.sched.114
+/// Verifies: L.sched.136
 fn realtime_is_held(harness: &mut Harness) -> Checked<u64> {
     if crate::arch::USER_STOPPED_PROGRAM.is_empty() || !crate::sched::realtime_built() {
         return Ok(0);

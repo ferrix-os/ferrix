@@ -1476,7 +1476,7 @@ const CLASS_PROFILES: [&str; 2] = ["present", "desktop"];
 /// crate the profile's flags select leaves its marker in the ELF and its
 /// code in the map, and every other, the fixture among them, leaves nothing.
 ///
-/// Verifies: H.SCHED.18
+/// Verifies: H.SCHED.20
 fn class_crates(xtask: &std::path::Path, arches: &[Arch], kept: &std::path::Path) -> Result<usize> {
     let mut checked = 0;
     for &arch in arches {

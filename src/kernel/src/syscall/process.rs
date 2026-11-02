@@ -2794,7 +2794,7 @@ pub(crate) fn start_thread(
     // Read now, after the task is listed: a `setpriority` that came since
     // stored a value this applies, and one that comes later finds the task.
     // A creator with reset-on-fork set gives a thread no negative nice value,
-    // as Linux's `sched_fork` (L.sched.113); its policy `sched::prepare_user`
+    // as Linux's `sched_fork` (L.sched.135); its policy `sched::prepare_user`
     // has already left at `SCHED_OTHER`.
     if sched::current_resets_on_fork() && made.nice() < 0 {
         made.set_nice(0);
