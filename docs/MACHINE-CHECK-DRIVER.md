@@ -8,6 +8,8 @@ devmgr/T0 restarts it"). It builds on `docs/MACHINE-CHECK.md` (H.FAIL.8,
 call's copy), `docs/DEVMGR.md` §4 (a driver's death, the quiesce, the
 restart, the crash loop) and `object/pin.rs`'s quarantine (F-38).
 
+**Landed:** on `develop` as 7352a897a (2026-10-31); v2 here answers the NOT YET, and ledger 5444 and 5455 (§8) are its later verdicts. Reconciled 2026-11-02.
+
 ## 1. What is there today
 
 * **A driver's own load of poison** in ring 3 is a ring-3 SRAR: the frame is

@@ -10,6 +10,8 @@ emulator or host here offers CMCI (QEMU 10.2.1's `MCE_CAP_DEF` is `MCG_CTL_P
 | MCG_SER_P`; nazuna's KVM answers `KVM_X86_GET_MCE_CAP_SUPPORTED` with
 0x1000100, no `CMCI_P`).
 
+**Landed:** on `develop` as b12045c1a (2026-10-31); shown under a patched QEMU only. Reconciled 2026-11-02.
+
 ## 1. What is there today
 
 One kernel task per processor, pinned there, polls every bank every

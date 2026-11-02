@@ -8,6 +8,8 @@ log -- read the banks, report corrected errors through lode, count them
 per core; (2) recovery from an error confined to one user page -- kill
 the process that consumed it, retire the frame, keep the kernel running.
 
+**Landed:** on `develop` as 83dec24a1 (2026-10-30), with the consultant's code review (§7); the branch `feature/mce-log` is gone. Intel's recovery has run under TCG only (§7, V8). Reconciled 2026-11-02.
+
 ## 1. What is there today
 
 `CR4.MCE` is set on every processor (F-73, `L.x86_64.175`), and the
