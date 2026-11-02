@@ -378,3 +378,19 @@ fn table_descriptor_at_is_table_descriptor_for_every_other_encoding() {
     same::<crate::vtd::VtdSecondLevel>();
     same::<crate::vtd::VtdFourLevel>();
 }
+
+/// A retarget changes the destination byte alone (`docs/CORE-QUARANTINE.md`
+/// §3.3).
+///
+/// Verifies: L.iommu.101
+#[test]
+fn retarget_changes_only_the_destination() {
+    let entry = table::interrupt_entry(0x45, 3);
+    let moved = table::retargeted(entry, 0);
+    assert_eq!(moved, table::interrupt_entry(0x45, 0));
+    assert_eq!(
+        table::retargeted(moved, 0xFF),
+        table::interrupt_entry(0x45, 0xFF)
+    );
+    assert!(table::interrupt_entry_used(moved));
+}

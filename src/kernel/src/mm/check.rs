@@ -292,18 +292,27 @@ pub fn memory_check(stats: &mm::Stats) -> Result<(), &'static str> {
     }
 
     check_frames()?;
+    // The live bad-frame table before the retirement checks, compared after
+    // the last of them (ledger 5487 (4)).
+    let table = crate::console::pstore::table_claimed();
+    check_retired()?;
+    check_kept_out(table)?;
 
     // The heap must come back to where it started, and "where it started" is
     // not zero: the vmap arena below is a live `Vec` and a live `BTreeMap`,
     // and requiring zero afterwards would be requiring the arena not to exist.
     // So the balance is checked around the allocations that are supposed to be
     // transient, before anything permanent is built on top of them.
+    // The processors' caches hold freed objects, and with them their slab
+    // pages: drained before each count, so the pages are the heap's own.
+    let _ = mm::drain_caches();
     let heap_before = mm::heap_allocated();
     let pages_before = mm::heap_pages();
     check_heap()?;
     if mm::heap_allocated() != heap_before {
         return Err("the heap did not give everything back");
     }
+    let _ = mm::drain_caches();
 
     // And gave the *pages* back too, not only the objects. `check_heap` grows
     // a `Vec` to 32 KiB and a `BTreeMap` to two thousand nodes, which is tens
@@ -715,6 +724,44 @@ fn check_stacks() -> Result<(), &'static str> {
     Ok(())
 }
 
+/// A frame the loader kept out as bad (`docs/MACHINE-CHECK-RESTART.md`
+/// §2.8): one the allocator does not manage -- the kernel image's first
+/// frame here, since a check boot's map has no `BadFrame` page -- answers
+/// `NotCovered`; entered in the retired set as `init` enters a `BadFrame`
+/// page, it answers `Already`, which the poll's later retirement of a left
+/// record says; and the checked retirements leave the live bad-frame table
+/// as it was since before `check_retired` (`table`). The check's own entry
+/// is taken back by hand: no frame is
+/// freed.
+///
+/// Verifies: L.mm.109, L.mm.110
+fn check_kept_out(table: Option<u64>) -> Result<(), &'static str> {
+    let frame = super::IMAGE_PHYS.load(Ordering::Relaxed) / PAGE_SIZE;
+    super::hold_table(true);
+    let not_managed = super::retire_frame(frame);
+    let before = super::RETIRED_COUNT.load(Ordering::Relaxed);
+    let entered = super::keep_out(frame);
+    let answer = super::retire_frame(frame);
+    if entered {
+        let filled = super::RETIRED_COUNT.load(Ordering::Relaxed);
+        if let Some(slot) = super::RETIRED.get(filled.wrapping_sub(1)) {
+            slot.store(0, Ordering::Relaxed);
+        }
+        super::RETIRED_COUNT.store(before, Ordering::Release);
+    }
+    super::hold_table(false);
+    if not_managed != super::Retired::NotCovered {
+        return Err("a frame the allocator does not manage was retired");
+    }
+    if !entered || answer != super::Retired::Already {
+        return Err("a frame kept out as bad was not answered as retired");
+    }
+    if crate::console::pstore::table_claimed() != table {
+        return Err("a checked retirement reached the live bad-frame table");
+    }
+    Ok(())
+}
+
 /// A device window lands where it was asked to, offset and all, and can be
 /// taken back.
 ///
@@ -729,6 +776,315 @@ fn check_stacks() -> Result<(), &'static str> {
 /// window that rounded that away would work perfectly for the GIC and silently
 /// address the wrong register here.
 ///
+/// A retired frame is never handed out again (`docs/MACHINE-CHECK.md`
+/// §3.4): one retired while shared stays allocated when both references
+/// go; one retired inside a two-frame block stays allocated when the block
+/// is freed, and its neighbour is free; one retired while free is taken off
+/// the free lists. And the set refuses a frame once full, saying so once
+/// (here with its room lowered to what the check has used). Everything the
+/// check retired is forgotten and freed at the end.
+///
+/// Verifies: L.mm.91, L.mm.92
+fn check_retired() -> Result<(), &'static str> {
+    use ferrix_frame::State;
+    let before = super::RETIRED_COUNT.load(Ordering::Relaxed);
+    super::hold_table(true);
+    let checked = retire_three();
+    let retired = super::RETIRED_COUNT
+        .load(Ordering::Relaxed)
+        .saturating_sub(before);
+    super::forget_checked_retirements(retired);
+    let (shared, block, free) = checked?;
+    // The block's free half, claimed back by the check; the rest the
+    // forgetting freed.
+    mm::deallocate_frames(block + 1, 0);
+    if [shared, block, block + 1, free]
+        .iter()
+        .any(|&frame| !matches!(mm::frame_state(frame), Some(State::Free | State::FreeTail)))
+    {
+        return Err("a frame the retirement check retired was not free once forgotten");
+    }
+    println!(
+        "  retired  a retired frame shared, in a block and free never came back; a full set \
+         refused"
+    );
+    Ok(())
+}
+
+/// A free frame with a free block of its order elsewhere: one allocated and
+/// given straight back.
+fn fresh_free_frame() -> Result<super::Frame, &'static str> {
+    let frame = mm::allocate_frames(0).ok_or("no frame for the scrubber's check")?;
+    mm::deallocate_frames(frame, 0);
+    Ok(frame)
+}
+
+// CHECKS-ONLY: stages_check.rs; home: mm::check
+/// The RAM scrubber (`docs/RAM-SCRUBBER.md` §3.1, §7), at stage 2 on one
+/// processor, where nothing else moves the free lists: a clean frame is
+/// tested and given back with the free count and every order's free-block
+/// count as they were; a frame the check holds is skipped, its contents
+/// untouched; an injected one-off makes a suspect, released, and the same
+/// frame failing on a later sweep is retired; an injected stuck bit retires
+/// a frame after its retest, which then stays allocated, owned by nobody and
+/// retired; with the retired set full, a bad frame is held out, not
+/// released, and the batch stops; below twice the watermark nothing is
+/// claimed; and the last free block of the largest order is skipped. Every
+/// retirement is forgotten after.
+/// Run only where the scrubber itself would run ([`mm::scrub::verdict`]):
+/// skipped, with the reason said, where the processor has no write that reads
+/// nothing, where the firmware says the memory corrects errors or its table
+/// cannot be read, and as a guest without the gate's override -- so a boot
+/// with the checks never writes a frame where H.FAIL.9 promises the
+/// scrubber does not (ledger 5140 (2)).
+///
+/// Verifies: L.mm.101, L.mm.102, L.mm.104, L.mm.105
+pub fn check_scrubber(view: &BootView<'_>, memory: mm::scrub::Memory) -> Result<(), &'static str> {
+    use ferrix_frame::State;
+    use mm::scrub;
+    let verdict = scrub::verdict(view, memory);
+    if !verdict.runs() {
+        println!(
+            "  scrub    check skipped: the scrubber {}",
+            verdict.reason()
+        );
+        return Ok(());
+    }
+    let before = super::RETIRED_COUNT.load(Ordering::Relaxed);
+    super::hold_table(true);
+    let outcome = scrubber_cases();
+    let retired = super::RETIRED_COUNT
+        .load(Ordering::Relaxed)
+        .saturating_sub(before);
+    super::forget_checked_retirements(retired);
+    scrub::reset_for_check();
+    let (suspect, stuck) = outcome?;
+    if [suspect, stuck]
+        .iter()
+        .any(|&frame| !matches!(mm::frame_state(frame), Some(State::Free | State::FreeTail)))
+    {
+        return Err("a frame the scrubber's check retired was not free once forgotten");
+    }
+    println!(
+        "  scrub    a clean frame tested and given back as it was, a held one skipped, a \
+         one-off a suspect and retired when it failed again, a stuck bit retired, a full set \
+         holding the frame out, the watermark stopping it, the last block of its order skipped"
+    );
+    Ok(())
+}
+
+/// [`check_scrubber`]'s cases; the two frames retired, for the caller to
+/// free once forgotten.
+fn scrubber_cases() -> Result<(super::Frame, super::Frame), &'static str> {
+    use ferrix_frame::State;
+    use mm::scrub;
+    let blocks = || super::with_frames(|frames| frames.free_blocks());
+    let kept = |frame| {
+        mm::frame_state(frame) == Some(State::Allocated)
+            && mm::is_retired(frame)
+            && mm::frame_owner(frame) == crate::object::quota::NONE
+    };
+
+    // A clean frame, given back as it was.
+    let clean = fresh_free_frame()?;
+    let (free, shape) = (mm::free_frames(), blocks());
+    scrub::aim(clean);
+    let batch = scrub::batch_for_check(1);
+    if batch.tested != 1 || batch.bad != 0 || batch.suspects != 0 {
+        return Err("the scrubber did not test a clean frame clean");
+    }
+    if mm::free_frames() != free || blocks() != shape {
+        return Err("a scrubbed frame did not go back to the free lists as it was");
+    }
+
+    // A frame in use is skipped, its contents untouched.
+    let held = mm::allocate_frames(0).ok_or("no frame for the scrubber's check")?;
+    let marker = direct_map(held * PAGE_SIZE) as *mut u64;
+    // SAFETY: (KMEM) the check's own frame, through the direct map.
+    unsafe { marker.write_volatile(0x5c2b_5c2b_5c2b_5c2b) };
+    scrub::aim(held);
+    let _ = scrub::batch_for_check(1);
+    // SAFETY: (KMEM) as above.
+    let untouched = unsafe { marker.read_volatile() } == 0x5c2b_5c2b_5c2b_5c2b;
+    let still = mm::frame_state(held) == Some(State::Allocated);
+    mm::deallocate_frames(held, 0);
+    if !untouched || !still {
+        return Err("the scrubber touched a frame in use");
+    }
+
+    // A one-off: a suspect, released; failing again later, retired.
+    let suspect = fresh_free_frame()?;
+    scrub::aim(suspect);
+    scrub::inject(suspect, 1);
+    let first = scrub::batch_for_check(1);
+    if first.suspects != 1 || first.bad != 0 || mm::frame_state(suspect) == Some(State::Allocated) {
+        return Err("a frame that failed once was not a suspect, released");
+    }
+    scrub::aim(suspect);
+    scrub::inject(suspect, 1);
+    let again = scrub::batch_for_check(1);
+    if again.bad != 1 || again.retired != 1 || !kept(suspect) {
+        return Err("a suspect failing on a later sweep was not retired and kept");
+    }
+
+    // A stuck bit: retired after its retest.
+    let stuck = fresh_free_frame()?;
+    scrub::aim(stuck);
+    scrub::inject(stuck, 2);
+    let bad = scrub::batch_for_check(1);
+    if bad.bad != 1 || bad.retired != 1 || !kept(stuck) {
+        return Err("a frame that failed its retest was not retired and kept");
+    }
+
+    // The set full: the bad frame held out, and the batch stops.
+    let room = super::RETIRED_ROOM.load(Ordering::Relaxed);
+    super::RETIRED_ROOM.store(
+        super::RETIRED_COUNT.load(Ordering::Relaxed),
+        Ordering::Relaxed,
+    );
+    let full = fresh_free_frame()?;
+    scrub::aim(full);
+    scrub::inject(full, 2);
+    let held_out = scrub::batch_for_check(4);
+    super::RETIRED_ROOM.store(room, Ordering::Relaxed);
+    let out_of_use = mm::frame_state(full) == Some(State::Allocated) && !mm::is_retired(full);
+    // Freed only if held: a scrubber that released it has freed it already.
+    if out_of_use {
+        mm::deallocate_frames(full, 0);
+    }
+    if held_out.held != 1 || !held_out.stopped || held_out.tested != 1 || !out_of_use {
+        return Err("with the retired set full a bad frame was released, or the batch went on");
+    }
+
+    // Below twice the watermark nothing is claimed, and the batch stops.
+    let low = fresh_free_frame()?;
+    let watermark = super::WATERMARK.load(Ordering::Relaxed);
+    super::WATERMARK.store(mm::free_frames(), Ordering::Relaxed);
+    scrub::aim(low);
+    let stopped = scrub::batch_for_check(1);
+    super::WATERMARK.store(watermark, Ordering::Relaxed);
+    if stopped.tested != 0 || !stopped.stopped {
+        return Err("the scrubber claimed a frame below twice the watermark");
+    }
+
+    only_block_skipped()?;
+    Ok((suspect, stuck))
+}
+
+/// The last free block of the largest order free is skipped (`L.mm.101`):
+/// every other block of that order is taken, the last one's head aimed at
+/// with a stuck bit injected, and the watermark lifted so only the block
+/// rule can refuse it. Had the scrubber claimed it, it would have found it
+/// bad. The blocks taken are chained through their first words and given
+/// back.
+fn only_block_skipped() -> Result<(), &'static str> {
+    use mm::scrub;
+    let counts = super::with_frames(|frames| frames.free_blocks()).ok_or("no frame allocator")?;
+    let (order, count) = counts
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|&(_, &count)| count > 0)
+        .ok_or("no free block for the scrubber's check")?;
+    let order = u8::try_from(order).map_err(|_| "an order past u8")?;
+    let mut chain = 0;
+    for _ in 1..*count {
+        let Some(block) = mm::allocate_frames(order) else {
+            break;
+        };
+        // SAFETY: (KMEM) the first word of a block the check just took.
+        unsafe { (direct_map(block * PAGE_SIZE) as *mut u64).write_volatile(chain) };
+        chain = block + 1;
+    }
+    let last = mm::allocate_frames(order);
+    let outcome = match last {
+        Some(head) => {
+            mm::deallocate_frames(head, order);
+            let watermark = super::WATERMARK.load(Ordering::Relaxed);
+            super::WATERMARK.store(0, Ordering::Relaxed);
+            scrub::aim(head);
+            scrub::inject(head, 2);
+            let batch = scrub::batch_for_check(1);
+            scrub::inject(0, 0);
+            super::WATERMARK.store(watermark, Ordering::Relaxed);
+            if batch.bad != 0 {
+                Err("the scrubber claimed the last free block of the largest order")
+            } else {
+                Ok(())
+            }
+        }
+        None => Err("no block for the scrubber's check"),
+    };
+    while chain != 0 {
+        let block = chain - 1;
+        // SAFETY: (KMEM) as above, read back before the block is freed.
+        chain = unsafe { (direct_map(block * PAGE_SIZE) as *const u64).read_volatile() };
+        mm::deallocate_frames(block, order);
+    }
+    outcome
+}
+
+/// [`check_retired`]'s body: three frames retired and their outcomes
+/// checked, then the full set. The frames, for the caller to free once they
+/// are forgotten.
+fn retire_three() -> Result<(super::Frame, super::Frame, super::Frame), &'static str> {
+    use ferrix_frame::State;
+    let allocated = |frame| mm::frame_state(frame) == Some(State::Allocated);
+
+    let shared = mm::allocate_frames(0).ok_or("no frame for the retirement check")?;
+    if mm::share_frame(shared) != Some(2) || mm::retire_frame(shared) != mm::Retired::Marked {
+        return Err("a shared frame was not marked retired");
+    }
+    if mm::retire_frame(shared) != mm::Retired::Already {
+        return Err("a retired frame was retired twice");
+    }
+    let _ = mm::release_frame(shared);
+    let _ = mm::release_frame(shared);
+    if !allocated(shared) || mm::claim_frame(shared).is_some() {
+        return Err("a retired frame went back to the allocator with its last reference");
+    }
+
+    let block = mm::allocate_frames(1).ok_or("no block for the retirement check")?;
+    if mm::retire_frame(block) != mm::Retired::Marked {
+        return Err("a frame in a block was not marked retired");
+    }
+    mm::deallocate_frames(block, 1);
+    if !allocated(block)
+        || !matches!(
+            mm::frame_state(block + 1),
+            Some(State::Free | State::FreeTail)
+        )
+    {
+        return Err("a block holding a retired frame was freed whole, or not at all");
+    }
+    // Back to the caller as a single allocated frame, freed after the
+    // forgetting.
+    if mm::claim_frame(block + 1).is_none() {
+        return Err("the free half of a retired block could not be claimed");
+    }
+
+    let free = mm::allocate_frames(0).ok_or("no frame for the retirement check")?;
+    mm::deallocate_frames(free, 0);
+    if mm::retire_frame(free) != mm::Retired::Claimed || !allocated(free) {
+        return Err("a free frame retired was not taken off the free lists");
+    }
+
+    let spare = mm::allocate_frames(0).ok_or("no frame for the retirement check")?;
+    super::RETIRED_ROOM.store(
+        super::RETIRED_COUNT.load(Ordering::Relaxed),
+        Ordering::Relaxed,
+    );
+    let full = mm::retire_frame(spare);
+    let said = super::RETIRED_FULL_SAID.load(Ordering::Relaxed);
+    let again = mm::retire_frame(spare);
+    let refused = !mm::is_retired(spare);
+    mm::deallocate_frames(spare, 0);
+    if full != mm::Retired::Full || again != mm::Retired::Full || !said || !refused {
+        return Err("a full set of retired frames took one more, or did not say it was full");
+    }
+    Ok((shared, block, free))
+}
+
 /// Verifies: L.mm.49
 fn check_device_windows(aperture: u64) -> Result<(), &'static str> {
     const OFFSET: u64 = 0x40;
@@ -1107,5 +1463,624 @@ pub fn check_pstore_never_free() -> Result<(), &'static str> {
         }
     }
     println!("  pstore   none of its {} frames is free", len / PAGE_SIZE);
+    Ok(())
+}
+
+// CHECKS-ONLY: object/alloc_check.rs
+/// A section entered for a large block and closed without using it gives the
+/// block back: while it is open the heap has the block's pages out, and once
+/// it has closed the heap's large pages and the free frames are where they
+/// were before it. The section's end asks the reserve whether it holds a
+/// large block before it takes the heap's lock (`Reserve::holds_large`), so a
+/// wrong answer there would keep the pages out of the frame allocator, which
+/// nothing else would show.
+///
+/// Verifies: L.mm.38
+///
+/// Both counts are the whole machine's, and another processor's page taken
+/// or given between two reads moves them: an attempt so disturbed is made
+/// again, at most [`LARGE_BLOCK_ATTEMPTS`] times, and one undisturbed attempt
+/// passes. A defect fails every attempt; the boot line says how many were
+/// disturbed and why the first was.
+#[doc(hidden)]
+pub fn check_a_large_block_goes_back_with_the_section() -> Result<(), &'static str> {
+    let mut outcome = Ok(());
+    let mut disturbed = 0usize;
+    let mut first = None;
+    for _ in 0..LARGE_BLOCK_ATTEMPTS {
+        outcome = a_large_block_goes_back_once();
+        match outcome {
+            Ok(()) => break,
+            Err(why) => {
+                disturbed += 1;
+                first = first.or(Some(why));
+            }
+        }
+    }
+    println!(
+        "  reserve  a large block back with its section: {} of {} attempts disturbed{}{}",
+        disturbed,
+        LARGE_BLOCK_ATTEMPTS,
+        if first.is_some() { ", the first: " } else { "" },
+        first.unwrap_or(""),
+    );
+    // Every attempt failed: the first one's reason is the one to give, since
+    // a later attempt starts from whatever the failed one left behind.
+    outcome.map_err(|last| first.unwrap_or(last))
+}
+
+/// How many times [`check_a_large_block_goes_back_with_the_section`] tries.
+const LARGE_BLOCK_ATTEMPTS: usize = 5;
+
+/// One attempt of [`check_a_large_block_goes_back_with_the_section`].
+fn a_large_block_goes_back_once() -> Result<(), &'static str> {
+    // Three pages: past every size class, an order-two block.
+    let layout = core::alloc::Layout::from_size_align(3 * PAGE_SIZE as usize, 8)
+        .map_err(|_| "no layout for a large block")?;
+    // A section first, so the reserve's size classes are full and the one
+    // measured moves only the large block.
+    drop(mm::reserve(None).map_err(|_| "the reserve could not be filled")?);
+    let (pages, frames) = (mm::heap_large_pages(), mm::free_frames());
+    let section = mm::reserve(Some(layout))
+        .map_err(|_| "a section for a large block could not be entered")?;
+    let held = mm::heap_large_pages();
+    drop(section);
+    if held <= pages {
+        return Err("a section entered for a large block held none");
+    }
+    if mm::heap_large_pages() != pages || mm::free_frames() != frames {
+        return Err("a section closed without using its large block kept it");
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// The per-processor heap caches (docs/HEAP-CACHES.md)
+// ---------------------------------------------------------------------------
+
+/// The class the cache checks use, 2 KiB: the one the kernel allocates
+/// least of between two lines of a check, so an interrupt's allocation on
+/// the same processor is least likely to move its counts.
+const CHECK_CLASS: usize = ferrix_heap::CLASSES - 1;
+
+/// [`CHECK_CLASS`]'s size, and a layout of it.
+const CHECK_SIZE: usize = ferrix_heap::CLASS_SIZES[CHECK_CLASS];
+
+/// A layout of [`CHECK_CLASS`].
+fn check_layout() -> core::alloc::Layout {
+    // A power of two and at most a page: always a layout.
+    core::alloc::Layout::from_size_align(CHECK_SIZE, 8).unwrap_or(core::alloc::Layout::new::<u8>())
+}
+
+/// Allocate one object of [`CHECK_CLASS`] through the global allocator.
+fn take_one() -> Result<*mut u8, &'static str> {
+    // SAFETY: (KMEM) a layout of non-zero size; the pointer is given back through
+    // `give_one` with the same layout, or kept as a check requires.
+    // `black_box`, as in `injected_refusal_is_not_retried`.
+    let object = core::hint::black_box(unsafe { alloc::alloc::alloc(check_layout()) });
+    if object.is_null() {
+        return Err("an allocation of the check's class was refused");
+    }
+    Ok(object)
+}
+
+/// Free an object [`take_one`] made.
+fn give_one(object: *mut u8) {
+    // SAFETY: (KMEM) `object` came from `take_one`, with this layout, and is freed
+    // once.
+    unsafe { alloc::alloc::dealloc(object, check_layout()) }
+}
+
+// CHECKS-ONLY: object/alloc_check.rs
+/// The per-processor heap caches, on the processor the check runs on,
+/// preemption held off so every step is that processor's: an empty cache
+/// refills `REFILL` objects under one hold and hands out one; the rest come
+/// from the cache without the heap's count moving; frees go to the cache
+/// without it moving; a full cache's next free gives back `REFILL` and that
+/// one; `heap_allocated()` is the heap's count less the cached bytes; the
+/// drain leaves the cache empty and the count where it was. Then the
+/// injection rule and the refusal's drain, and every processor at once.
+///
+/// Verifies: L.mm.93, L.mm.94, L.mm.96
+#[doc(hidden)]
+pub fn check_heap_caches() -> Result<(), &'static str> {
+    crate::sched::preempt_disable();
+    let outcome = caches_on_one_processor();
+    crate::sched::preempt_enable();
+    outcome?;
+    injected_refusal_is_not_retried()?;
+    refusal_drains_every_cache()?;
+    reserve_refusals_drain_every_cache()?;
+    caches_on_every_processor()
+}
+
+/// [`check_heap_caches`]'s single-processor half. The heap's count it reads
+/// is the whole machine's, and another processor's allocation or free
+/// between two reads moves it: an attempt so disturbed is made again, at
+/// most [`ONE_PROCESSOR_ATTEMPTS`] times, and one undisturbed attempt with
+/// every count exact passes. A defect fails every attempt.
+fn caches_on_one_processor() -> Result<(), &'static str> {
+    let mut outcome = Ok(());
+    let mut disturbed = 0usize;
+    let mut first = None;
+    for _ in 0..ONE_PROCESSOR_ATTEMPTS {
+        outcome = caches_on_one_processor_once();
+        match outcome {
+            Ok(()) => break,
+            Err(why) => {
+                disturbed += 1;
+                first = first.or(Some(why));
+            }
+        }
+    }
+    // Said on every boot, zero included, so a defect that fails only some
+    // attempts shows in the row's log even when the check passes.
+    crate::console::println!(
+        "  heap     caches: {} of {} single-processor attempts disturbed{}{}",
+        disturbed,
+        ONE_PROCESSOR_ATTEMPTS,
+        if first.is_some() { ", the first: " } else { "" },
+        first.unwrap_or(""),
+    );
+    outcome
+}
+
+/// How many times [`caches_on_one_processor`] tries.
+const ONE_PROCESSOR_ATTEMPTS: usize = 5;
+
+/// One attempt of [`caches_on_one_processor`]; gives back everything it
+/// took, whatever it answers.
+fn caches_on_one_processor_once() -> Result<(), &'static str> {
+    let refill = ferrix_heap::REFILL;
+    let depth = ferrix_heap::CACHE_DEPTH;
+    // Objects to free into a full cache later, made before the drain so
+    // the drain leaves the class empty.
+    let mut spare = Vec::new();
+    spare
+        .try_reserve(depth + 1)
+        .map_err(|_| "no room for the check's list")?;
+    for _ in 0..=depth {
+        spare.push(take_one()?);
+    }
+    // Every list the check keeps is made before the counts are read: its own
+    // allocation would move them.
+    let mut out = Vec::new();
+    out.try_reserve(refill)
+        .map_err(|_| "no room for the check's list")?;
+    let _ = mm::drain_caches();
+    if mm::cached_here(CHECK_CLASS) != Some(0) {
+        for object in spare.drain(..) {
+            give_one(object);
+        }
+        return Err("the drain left an object in this processor's cache");
+    }
+    let base = mm::heap_raw_allocated();
+
+    // L.mm.93: an empty cache refills under one hold, then serves alone.
+    let started = crate::timer::now_nanos();
+    let first = take_one()?;
+    let refill_nanos = crate::timer::now_nanos().saturating_sub(started);
+    let refilled = mm::heap_raw_allocated();
+    out.push(first);
+    for _ in 1..refill {
+        out.push(take_one()?);
+    }
+    let popped = mm::heap_raw_allocated();
+    // L.mm.94: frees go to the cache.
+    for &object in &out {
+        give_one(object);
+    }
+    let pushed = mm::heap_raw_allocated();
+    let held = mm::cached_here(CHECK_CLASS);
+    let started = crate::timer::now_nanos();
+    let _ = mm::drain_caches();
+    let mut drain_nanos = crate::timer::now_nanos().saturating_sub(started);
+    let drained = mm::heap_raw_allocated();
+    let first = if refilled != base + refill * CHECK_SIZE {
+        Err("an empty cache's refill did not take REFILL objects from the heap")
+    } else if popped != refilled {
+        Err("an allocation the cache could serve went to the heap")
+    } else if pushed != popped || held != Some(refill) {
+        Err("a free the cache had room for went to the heap")
+    } else if drained != base {
+        Err("the drain did not give the cache's objects back to the heap")
+    } else {
+        Ok(())
+    };
+    if first.is_err() {
+        for object in spare.drain(..) {
+            give_one(object);
+        }
+        let _ = mm::drain_caches();
+        return first;
+    }
+
+    // L.mm.94: a full cache's next free gives back REFILL and that one;
+    // L.mm.96: what callers hold is the heap's count less the cached bytes.
+    for &object in spare.iter().take(depth) {
+        give_one(object);
+    }
+    let full = mm::heap_raw_allocated();
+    let callers = mm::heap_allocated();
+    let cached = mm::cached_bytes();
+    let last = spare
+        .get(depth)
+        .copied()
+        .ok_or("the check's list is short")?;
+    give_one(last);
+    let overflowed = mm::heap_raw_allocated();
+    let after = mm::cached_here(CHECK_CLASS);
+    let started = crate::timer::now_nanos();
+    let _ = mm::drain_caches();
+    drain_nanos = drain_nanos.max(crate::timer::now_nanos().saturating_sub(started));
+    crate::console::println!(
+        "  heap     caches: a refill of {} objects in {} ns, the longest drain {} ns",
+        refill,
+        refill_nanos,
+        drain_nanos,
+    );
+    if full != base {
+        return Err("frees into a cache with room went to the heap");
+    }
+    if callers != full.saturating_sub(cached) || cached < depth * CHECK_SIZE {
+        return Err("heap_allocated is not the heap's count less the cached bytes");
+    }
+    if overflowed != full - (refill + 1) * CHECK_SIZE || after != Some(depth - refill) {
+        return Err("a full cache's free did not give back REFILL objects and the freed one");
+    }
+    Ok(())
+}
+
+/// One page: past every size class, so its allocation always goes to the
+/// frame allocator through the heap, whatever the caches and lists hold.
+fn page_layout() -> core::alloc::Layout {
+    // A page, page-aligned: always a layout.
+    core::alloc::Layout::from_size_align(PAGE_SIZE as usize, PAGE_SIZE as usize)
+        .unwrap_or(core::alloc::Layout::new::<u8>())
+}
+
+/// L.mm.98: a refusal the failure injection made is answered at once, with
+/// warm caches: a page's allocation needs a frame, the injection refuses
+/// that frame, and the allocation comes back null with exactly one failure
+/// counted. A retry after a drain would ask the frame allocator again, and
+/// the one-shot injection would not refuse it twice.
+///
+/// Verifies: L.mm.98
+fn injected_refusal_is_not_retried() -> Result<(), &'static str> {
+    let task = crate::sched::current_id().ok_or("the cache check runs outside a task")?;
+    // Warm: a few objects of the check's class freed into this cache.
+    let mut warm = Vec::new();
+    warm.try_reserve(4)
+        .map_err(|_| "no room for the check's list")?;
+    for _ in 0..4 {
+        warm.push(take_one()?);
+    }
+    for object in warm {
+        give_one(object);
+    }
+    fallible::inject_once(task, 1, true);
+    // SAFETY: (KMEM) a non-zero layout; a null return is the answer looked for.
+    // `black_box`: an allocation whose only use is its free may otherwise be
+    // left out by the compiler, and the allocator never asked.
+    let refused = core::hint::black_box(unsafe { alloc::alloc::alloc(page_layout()) });
+    let failed = fallible::stop_injecting();
+    if !refused.is_null() {
+        // SAFETY: (KMEM) made just above with this layout.
+        unsafe { alloc::alloc::dealloc(refused, page_layout()) };
+    }
+    let _ = mm::drain_caches();
+    if !refused.is_null() || failed != 1 {
+        crate::console::println!(
+            "  heap     injected refusal: served {}, the injection failed {} allocation(s)",
+            !refused.is_null(),
+            failed,
+        );
+        return Err("an injected refusal was retried after a drain instead of answered");
+    }
+    Ok(())
+}
+
+/// L.mm.95, L.mm.97: with every free frame held, a page's allocation the
+/// heap cannot make drains every cache and is served from what the drain
+/// gave back: this processor's cache holds 2 KiB objects, two a page, made
+/// one after another, so whole pages of them come free when they go back.
+///
+/// Verifies: L.mm.95, L.mm.97
+fn refusal_drains_every_cache() -> Result<(), &'static str> {
+    const MADE: usize = 32;
+    let mut made = Vec::new();
+    made.try_reserve(MADE)
+        .map_err(|_| "no room for the check's list")?;
+    let mut frames = Chain::new();
+    crate::sched::preempt_disable();
+    let outcome = (|| {
+        let _ = mm::drain_caches();
+        for _ in 0..MADE {
+            made.push(take_one()?);
+        }
+        // Into this processor's cache, the first ones freed staying there
+        // (a full cache gives back its newest), whole pages of them.
+        for object in made.drain(..) {
+            give_one(object);
+        }
+        // Every free frame held: the page the next allocation needs is none.
+        while let Some(frame) = mm::allocate_frames(0) {
+            frames.push(frame);
+        }
+        let cached_before = mm::cached_bytes();
+        // SAFETY: (KMEM) a non-zero layout; freed below with the same one.
+        // `black_box`, as in `injected_refusal_is_not_retried`.
+        let served = core::hint::black_box(unsafe { alloc::alloc::alloc(page_layout()) });
+        let cached_after = mm::cached_bytes();
+        if !served.is_null() {
+            // SAFETY: (KMEM) made just above with this layout.
+            unsafe { alloc::alloc::dealloc(served, page_layout()) };
+        }
+        if cached_before < 4 * CHECK_SIZE {
+            return Err("the check's cache held too little to free a page");
+        }
+        if cached_after >= cached_before {
+            return Err("a refusal did not drain the caches");
+        }
+        if served.is_null() {
+            return Err("a refusal drained the caches but did not try again");
+        }
+        Ok(())
+    })();
+    while let Some(frame) = frames.pop() {
+        mm::deallocate_frames(frame, 0);
+    }
+    crate::sched::preempt_enable();
+    let _ = mm::drain_caches();
+    outcome
+}
+
+/// L.mm.95 for a reserve: a section's fill and its large hold, each refused
+/// by the heap with every free frame held, drain every cache and are served
+/// from what the drain gave back. For the fill, one 2 KiB object is taken
+/// out of this processor's reserve and every free object of that class out
+/// of the heap, so the fill needs one the caches hold; for the large hold,
+/// a page, which only whole pages of cached objects give back.
+///
+/// Verifies: L.mm.95
+fn reserve_refusals_drain_every_cache() -> Result<(), &'static str> {
+    crate::sched::preempt_disable();
+    let fill = reserve_refusal_drains(None);
+    crate::sched::preempt_enable();
+    let _ = mm::drain_caches();
+    fill.map_err(|why| match why {
+        "a refusal did not drain the caches" => "a reserve's fill did not drain the caches",
+        other => other,
+    })?;
+    crate::sched::preempt_disable();
+    let large = reserve_refusal_drains(Some(page_layout()));
+    crate::sched::preempt_enable();
+    let _ = mm::drain_caches();
+    large.map_err(|why| match why {
+        "a refusal did not drain the caches" => "a reserve's large hold did not drain the caches",
+        other => other,
+    })
+}
+
+/// [`reserve_refusals_drain_every_cache`]'s one case: enter a section
+/// holding `large`, or with the reserve one object short when `None`.
+fn reserve_refusal_drains(large: Option<core::alloc::Layout>) -> Result<(), &'static str> {
+    const MADE: usize = 32;
+    /// The end of the list of the class's spare objects.
+    const END: u64 = u64::MAX;
+    let request = ferrix_heap::Request::new(CHECK_SIZE, CHECK_SIZE);
+    // Full first, so the one refusal the case makes is the one it names.
+    drop(super::reserve::reserve(None).map_err(|_| "the reserve did not fill before the check")?);
+    let _ = mm::drain_caches();
+    let mut made = Vec::new();
+    made.try_reserve(MADE)
+        .map_err(|_| "no room for the check's list")?;
+    let taken = match large {
+        Some(_) => None,
+        None => Some(
+            super::reserve::take_from_reserve(request)
+                .ok_or("the reserve held no object of the check's class")?,
+        ),
+    };
+    for _ in 0..MADE {
+        made.push(take_one()?);
+    }
+    for object in made.drain(..) {
+        give_one(object);
+    }
+    let mut frames = Chain::new();
+    while let Some(frame) = mm::allocate_frames(0) {
+        frames.push(frame);
+    }
+    // For the fill, the class's free objects in the heap taken as well,
+    // linked through their own first word: the fill then needs what the
+    // caches hold.
+    let mut spare = END;
+    if large.is_none() {
+        while let Some(object) =
+            super::with_heap(|heap| heap.allocate(&mut super::KernelPages, request).ok())
+        {
+            // SAFETY: (KMEM) a 2 KiB object the heap has just handed out, which
+            // nothing else holds; its first word links the list until it is
+            // given back below.
+            unsafe { (object as *mut u64).write(spare) };
+            spare = object;
+        }
+    }
+    let cached_before = mm::cached_bytes();
+    let section = super::reserve::reserve(large);
+    let cached_after = mm::cached_bytes();
+    let entered = section.is_ok();
+    drop(section);
+    let full = super::reserve::full_here();
+    while spare != END {
+        // SAFETY: (KMEM) written above, before the object was linked.
+        let next = unsafe { (spare as *const u64).read() };
+        super::with_heap(|heap| heap.deallocate(&mut super::KernelPages, spare, request));
+        spare = next;
+    }
+    while let Some(frame) = frames.pop() {
+        mm::deallocate_frames(frame, 0);
+    }
+    if let Some(object) = taken {
+        super::with_heap(|heap| heap.deallocate(&mut super::KernelPages, object, request));
+    }
+    if cached_before < 4 * CHECK_SIZE {
+        return Err("the check's cache held too little to free a page");
+    }
+    if cached_after >= cached_before {
+        return Err("a refusal did not drain the caches");
+    }
+    if !entered {
+        return Err("a reserve's refusal drained the caches but did not try again");
+    }
+    if !full {
+        return Err("the section's reserve was not full after it was entered");
+    }
+    Ok(())
+}
+
+/// Set when [`cache_worker`]s are to stop.
+static CACHE_STOP: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// [`cache_worker`]s that have finished.
+static CACHE_DONE: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
+/// [`cache_worker`]s that saw an allocation refused.
+static CACHE_REFUSED: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
+/// Objects the workers have made and not yet freed.
+static CACHE_LIVE: core::sync::atomic::AtomicIsize = core::sync::atomic::AtomicIsize::new(0);
+
+/// Objects handed between processors: one worker allocates, another frees.
+static CACHE_HANDOFF: crate::sync::SpinLock<Vec<(usize, usize)>> =
+    crate::sync::SpinLock::new(Vec::new());
+
+/// One processor's share of [`caches_on_every_processor`]: allocate objects
+/// of every class, free half of them itself and hand the rest to whichever
+/// worker frees next, and drain every cache now and then -- a refusal's
+/// path -- while the others are in their refills and overflows.
+fn cache_worker(index: usize) {
+    let mut rounds = 0usize;
+    while !CACHE_STOP.load(Ordering::Acquire) && rounds < 2000 {
+        let class = (index + rounds) % ferrix_heap::CLASSES;
+        let size = ferrix_heap::CLASS_SIZES.get(class).copied().unwrap_or(8);
+        let Ok(layout) = core::alloc::Layout::from_size_align(size, 8) else {
+            break;
+        };
+        // SAFETY: (KMEM) a non-zero layout; freed below, here or by another worker,
+        // with the layout its class gives.
+        let object = core::hint::black_box(unsafe { alloc::alloc::alloc(layout) });
+        if !object.is_null() {
+            let _ = CACHE_LIVE.fetch_add(1, Ordering::Relaxed);
+        }
+        if object.is_null() {
+            let _ = CACHE_REFUSED.fetch_add(1, Ordering::Relaxed);
+        } else if rounds.is_multiple_of(2) {
+            // SAFETY: (KMEM) just made with this layout.
+            unsafe { alloc::alloc::dealloc(object, layout) };
+            let _ = CACHE_LIVE.fetch_sub(1, Ordering::Relaxed);
+        } else {
+            let mut handoff = CACHE_HANDOFF.lock();
+            if handoff.len() < handoff.capacity() {
+                handoff.push((object as usize, class));
+            } else {
+                drop(handoff);
+                // SAFETY: (KMEM) just made with this layout.
+                unsafe { alloc::alloc::dealloc(object, layout) };
+                let _ = CACHE_LIVE.fetch_sub(1, Ordering::Relaxed);
+            }
+        }
+        // Another worker's object, freed on this processor.
+        let taken = CACHE_HANDOFF.lock().pop();
+        if let Some((address, class)) = taken {
+            let size = ferrix_heap::CLASS_SIZES.get(class).copied().unwrap_or(0);
+            if let Ok(layout) = core::alloc::Layout::from_size_align(size, 8) {
+                // SAFETY: (KMEM) a worker made it with this class's layout, and it
+                // left the list once.
+                unsafe { alloc::alloc::dealloc(address as *mut u8, layout) };
+                let _ = CACHE_LIVE.fetch_sub(1, Ordering::Relaxed);
+            }
+        }
+        if rounds % 64 == 63 {
+            let _ = mm::drain_caches();
+        }
+        rounds += 1;
+    }
+    let _ = CACHE_DONE.fetch_add(1, Ordering::AcqRel);
+}
+
+/// Every processor allocating and freeing at once, objects freed on another
+/// processor than they were made on, and drains -- each a refusal's path --
+/// while the others hold their cache locks and the heap's: the drain takes
+/// one cache lock at a time with nothing held, so this ends rather than
+/// deadlocks (the review's D1), and the heap's count comes back.
+fn caches_on_every_processor() -> Result<(), &'static str> {
+    let online = crate::smp::topology().map_or(1, crate::smp::Topology::online);
+    {
+        let mut handoff = CACHE_HANDOFF.lock();
+        handoff.clear();
+        handoff
+            .try_reserve(256)
+            .map_err(|_| "no room for the handoff list")?;
+    }
+    CACHE_LIVE.store(0, Ordering::Release);
+    CACHE_STOP.store(false, Ordering::Release);
+    CACHE_DONE.store(0, Ordering::Release);
+    CACHE_REFUSED.store(0, Ordering::Release);
+    let mut tasks = Vec::new();
+    tasks
+        .try_reserve(online)
+        .map_err(|_| "no room for the workers")?;
+    for cpu in 0..online {
+        let mut only = ferrix_sched::CpuSet::empty();
+        only.insert(cpu).map_err(|_| "no such processor")?;
+        tasks.push(crate::sched::spawn_on(
+            "heap-cache",
+            cache_worker,
+            cpu,
+            ferrix_sched::NICE_0_WEIGHT,
+            cpu,
+            only,
+        )?);
+    }
+    let deadline = crate::timer::now_nanos().saturating_add(20_000_000_000);
+    while CACHE_DONE.load(Ordering::Acquire) < online {
+        if crate::timer::now_nanos() > deadline {
+            CACHE_STOP.store(true, Ordering::Release);
+            return Err(
+                "the heap cache workers did not finish: a drain deadlocked or a worker hung",
+            );
+        }
+        crate::sched::sleep_for(1_000_000);
+    }
+    drop(tasks);
+    // Whatever is left in the handoff list, freed here.
+    let left: Vec<(usize, usize)> = core::mem::take(&mut *CACHE_HANDOFF.lock());
+    for (address, class) in left {
+        let size = ferrix_heap::CLASS_SIZES.get(class).copied().unwrap_or(0);
+        if let Ok(layout) = core::alloc::Layout::from_size_align(size, 8) {
+            // SAFETY: (KMEM) as in `cache_worker`.
+            unsafe { alloc::alloc::dealloc(address as *mut u8, layout) };
+            let _ = CACHE_LIVE.fetch_sub(1, Ordering::Relaxed);
+        }
+    }
+    let _ = mm::drain_caches();
+    if CACHE_REFUSED.load(Ordering::Relaxed) != 0 {
+        return Err("an allocation was refused with memory to spare while every processor ran");
+    }
+    let _ = mm::drain_caches();
+    if CACHE_LIVE.load(Ordering::Acquire) != 0 {
+        return Err("an object the workers made was never freed");
+    }
+    // The other processors keep running the kernel and fill their caches
+    // again as soon as the drain has passed them, so one drain leaving
+    // nothing is what is asked: at most 100 tries.
+    if !(0..100).any(|_| {
+        let _ = mm::drain_caches();
+        mm::cached_bytes() == 0
+    }) {
+        return Err("the drain left bytes in the caches");
+    }
     Ok(())
 }

@@ -11,11 +11,12 @@
 //! and a shell prints it for `ulimit -s`, and the rest read as unlimited,
 //! which is the truth about a kernel that does not count those resources.
 //!
-//! # The scheduler is asked nothing
+//! # What the scheduler is asked
 //!
-//! Affinity, policy and priority are validated as Linux validates them and
-//! then not applied, and each handler says so. The one scheduling fact that is
-//! real is the set of processors, and that is what `sched_getaffinity` reports.
+//! A thread's processors (`sched_setaffinity`, applied and read back as
+//! Linux 7.0 does: `docs/GAME-MODE-SCHED.md` §2.1) and its slice request
+//! (`sched_setattr`, §2.2). Policy and priority are validated as Linux
+//! validates them and then not applied, and each handler says so.
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -24,6 +25,9 @@ use ferrix_linux_abi::errno::Errno;
 use ferrix_linux_abi::nr::Syscall;
 use ferrix_vfs::fd::MAX_LIMIT;
 
+use ferrix_sched::CpuSet;
+
+use crate::sched;
 use crate::smp;
 use crate::syscall::attributes::{self, Limit, RLIM_NLIMITS, int, subject};
 use crate::syscall::credentials;
@@ -55,6 +59,8 @@ pub(crate) fn dispatch(
         Syscall::SchedGetparam => sys_sched_getparam(process, int(a[0]), a[1]),
         Syscall::SchedSetparam => sys_sched_setparam(process, int(a[0]), a[1]),
         Syscall::SchedGetscheduler => sys_sched_getscheduler(process, int(a[0])),
+        Syscall::SchedSetattr => sys_sched_setattr(process, int(a[0]), a[1], a[2]),
+        Syscall::SchedGetattr => sys_sched_getattr(process, int(a[0]), a[1], a[2] as u32, a[3]),
         Syscall::SchedSetscheduler => sys_sched_setscheduler(process, int(a[0]), int(a[1]), a[2]),
         Syscall::SchedGetPriorityMax => priority_range(int(a[0])).map(|(_, max)| max),
         Syscall::SchedGetPriorityMin => priority_range(int(a[0])).map(|(min, _)| min),
@@ -286,20 +292,47 @@ fn mask_bytes() -> usize {
     smp::count().div_ceil(WORD * 8) * WORD
 }
 
-/// The logical numbers of the processors that are running.
+/// The logical numbers of the processors that are running and in service.
 fn online_cpus() -> Vec<usize> {
     match smp::topology() {
         Some(topology) => topology
             .cpus()
             .iter()
-            .filter(|cpu| cpu.is_online())
+            .filter(|cpu| cpu.in_service())
             .map(|cpu| cpu.logical)
             .collect(),
         None => vec![0],
     }
 }
 
-/// `sched_getaffinity`: the processors that are running, as a bit mask.
+/// The mask `sched_setaffinity` was given, `len` bytes at `at`, read as
+/// Linux reads it: a short one zero-extended, a long one truncated to this
+/// kernel's mask size.
+fn read_mask(process: &Process, len: u32, at: u64) -> Result<CpuSet, Errno> {
+    let size = mask_bytes();
+    let mut mask = vec![0_u8; size];
+    let take = usize::try_from(len).unwrap_or(usize::MAX).min(size);
+    let wanted = mask.get_mut(..take).ok_or(Errno::EINVAL)?;
+    uaccess::copy_from_user(process.space(), at, wanted).map_err(|_| Errno::EFAULT)?;
+    let mut set = CpuSet::empty();
+    for (index, byte) in mask.iter().enumerate() {
+        for bit in 0..8 {
+            if byte & (1 << bit) != 0 {
+                // Past the set's processors is no processor at all, and
+                // names nothing, as an offline one does.
+                let _ = set.insert(index * 8 + bit);
+            }
+        }
+    }
+    Ok(set)
+}
+
+/// `sched_getaffinity`: the processors the thread may run on now, as a bit
+/// mask -- its effective mask, the one it was given and in service, or
+/// every processor in service while that is none (`sched::effective_mask`,
+/// L.sched.123). A thread named by a tid in the caller's pid namespace, as
+/// Linux's pid here is a thread's; a process with no thread yet (a boot
+/// check's) reads every processor in service.
 ///
 /// **Returns the number of bytes written, not zero.** The raw system call
 /// does; the glibc wrapper zeroes the rest of the caller's buffer and returns
@@ -320,10 +353,20 @@ pub(crate) fn sys_sched_getaffinity(
     if len.saturating_mul(8) < smp::count() || len % word != 0 {
         return Err(Errno::EINVAL);
     }
-    let _target = subject(process, pid)?;
+    let effective = match attributes::thread_named(process, pid) {
+        Some(thread) => attributes::task_of(&thread).map(|task| sched::effective_mask(&task)),
+        None => {
+            let _target = subject(process, pid)?;
+            None
+        }
+    };
     let size = len.min(mask_bytes());
     let mut mask = vec![0_u8; size];
-    for cpu in online_cpus() {
+    let cpus = match effective {
+        Some(set) => set.iter().collect(),
+        None => online_cpus(),
+    };
+    for cpu in cpus {
         if let Some(byte) = mask.get_mut(cpu / 8) {
             *byte |= 1 << (cpu % 8);
         }
@@ -332,37 +375,49 @@ pub(crate) fn sys_sched_getaffinity(
     Ok(size)
 }
 
-/// `sched_setaffinity`: validated, accepted, and **not applied**.
+/// `sched_setaffinity`: the thread named runs only on the processors of the
+/// mask from now on (`docs/GAME-MODE-SCHED.md` §2.1, L.sched.96-101).
 ///
-/// The mask is read as Linux reads it (a short one is zero-extended, a long
-/// one truncated) and must name at least one running processor, or it is
-/// `EINVAL`. The task is not moved and not pinned: the scheduler has no
-/// per-task affinity to set, and a program told its mask took will at worst
-/// run somewhere it did not ask to, which is what a machine with one
-/// processor does to every affinity request anyway.
+/// As Linux 7.0's: the mask is read as [`read_mask`] reads it; the tid is
+/// the caller's pid namespace's, a thread's (`ESRCH` for none, and for a
+/// native process's, which no Linux call names); `EPERM` without
+/// `check_same_owner`'s permission (`credentials::same_owner`); the mask
+/// kept is the one given, in the domain and in service, and `EINVAL` when
+/// that is none (`cpu_active_mask`). The call returns once the thread is
+/// off any processor the mask excludes (`sched::set_affinity`). A process
+/// with no thread yet (a boot check's) has no task to place, and the mask
+/// is only validated.
 pub(crate) fn sys_sched_setaffinity(
     process: &Process,
     pid: i32,
     len: u32,
     at: u64,
 ) -> Result<usize, Errno> {
-    let size = mask_bytes();
-    let mut mask = vec![0_u8; size];
-    let take = usize::try_from(len).unwrap_or(usize::MAX).min(size);
-    let wanted = mask.get_mut(..take).ok_or(Errno::EINVAL)?;
-    uaccess::copy_from_user(process.space(), at, wanted).map_err(|_| Errno::EFAULT)?;
-    let target = subject(process, pid)?;
-    if !credentials::same_owner(process, &target) {
+    let mask = read_mask(process, len, at)?;
+    let Some(thread) = attributes::thread_named(process, pid) else {
+        let target = subject(process, pid)?;
+        if !target.threads().is_empty() {
+            return Err(Errno::ESRCH);
+        }
+        if !credentials::same_owner(process, &target) {
+            return Err(Errno::EPERM);
+        }
+        let runnable = online_cpus().into_iter().any(|cpu| mask.contains(cpu));
+        return if runnable { Ok(0) } else { Err(Errno::EINVAL) };
+    };
+    if !credentials::same_owner(process, thread.process()) {
         return Err(Errno::EPERM);
     }
-    let runnable = online_cpus().into_iter().any(|cpu| {
-        mask.get(cpu / 8)
-            .is_some_and(|byte| byte & (1 << (cpu % 8)) != 0)
-    });
-    if !runnable {
-        return Err(Errno::EINVAL);
+    let Some(task) = attributes::task_of(&thread) else {
+        return Err(Errno::ESRCH);
+    };
+    match sched::set_affinity(&task, &mask) {
+        Ok(_) => Ok(0),
+        Err(sched::AffinityRefusal::Empty) => Err(Errno::EINVAL),
+        // A Linux thread always runs on a task with a thread; a task with
+        // none is the kernel's, and refused (L.sched.96).
+        Err(sched::AffinityRefusal::KernelThread) => Err(Errno::EINVAL),
     }
-    Ok(0)
 }
 
 /// `SCHED_OTHER`, the only policy this kernel runs anything under.
@@ -398,6 +453,184 @@ pub(crate) fn sys_sched_setparam(process: &Process, pid: i32, at: u64) -> Result
         return Err(Errno::EPERM);
     }
     Ok(0)
+}
+
+/// `SCHED_ATTR_SIZE_VER0`: `struct sched_attr` up to `sched_period`.
+const SCHED_ATTR_SIZE_VER0: usize = 48;
+/// `SCHED_ATTR_SIZE_VER1`: with the utilisation clamps, the whole structure
+/// as this kernel knows it.
+const SCHED_ATTR_SIZE_VER1: usize = 56;
+/// Linux's `PAGE_SIZE` bound on a `sched_attr` a caller may pass.
+const SCHED_ATTR_SIZE_MAX: usize = 4096;
+/// `SCHED_FLAG_KEEP_POLICY`: leave the policy as it is.
+const SCHED_FLAG_KEEP_POLICY: u64 = 0x08;
+/// `SCHED_FLAG_KEEP_PARAMS`: leave the nice value and the slice as they are.
+const SCHED_FLAG_KEEP_PARAMS: u64 = 0x10;
+/// The longest `sched_runtime` a fair task may ask for, 100 ms: Linux's
+/// ceiling in `__setparam_fair`. What the queue then grants is never longer
+/// than its own slice (`ferrix_sched::effective_request`).
+const MAX_REQUEST_NS: u64 = 100_000_000;
+
+/// `sched_setattr`: the nice value and the slice request of a fair thread
+/// (`docs/GAME-MODE-SCHED.md` §2.2, F7; L.sched.109).
+///
+/// Only `SCHED_OTHER` at priority zero, as [`sys_sched_setscheduler`]
+/// accepts; every other policy, `SCHED_FLAG_RESET_ON_FORK`, the reclaim and
+/// overrun flags, the utilisation clamps and any unknown flag are `EINVAL`.
+/// `sched_runtime` is zero for the queue's slice, or clamped to 0.1 to
+/// 100 ms as Linux 7.0's `__setparam_fair` clamps it. The structure is read
+/// as `sched_copy_attr` reads it: a size of zero is the first version's, a
+/// size below it or above a page is `E2BIG` with this kernel's size written
+/// back, and so is a larger structure whose unknown tail is not zero.
+/// Permission is `setpriority`'s, except that a nice value lowered without
+/// privilege is `EPERM` here, as `sched_setattr`'s `can_nice` answers.
+pub(crate) fn sys_sched_setattr(
+    process: &Process,
+    pid: i32,
+    at: u64,
+    flags: u64,
+) -> Result<usize, Errno> {
+    if at == 0 || pid < 0 || flags != 0 {
+        return Err(Errno::EINVAL);
+    }
+    let attr = read_sched_attr(process, at)?;
+    let keep_policy = attr.flags & SCHED_FLAG_KEEP_POLICY != 0;
+    let keep_params = attr.flags & SCHED_FLAG_KEEP_PARAMS != 0;
+    if attr.flags & !(SCHED_FLAG_KEEP_POLICY | SCHED_FLAG_KEEP_PARAMS) != 0
+        || (!keep_policy && attr.policy != SCHED_OTHER as u32)
+        || attr.priority != 0
+    {
+        return Err(Errno::EINVAL);
+    }
+    let thread = attributes::thread_named(process, pid).ok_or(Errno::ESRCH)?;
+    if !credentials::same_owner(process, thread.process()) {
+        return Err(Errno::EPERM);
+    }
+    if keep_params {
+        return Ok(0);
+    }
+    let nice = attr.nice.clamp(-20, 19);
+    if nice < thread.nice() && credentials::require_privilege(process).is_err() {
+        return Err(Errno::EPERM);
+    }
+    let request = match attr.runtime {
+        0 => 0,
+        asked => asked.clamp(ferrix_sched::MIN_REQUEST_NS, MAX_REQUEST_NS),
+    };
+    thread.set_nice(nice);
+    if let Some(task) = attributes::task_of(&thread) {
+        attributes::apply_nice(thread.nice(), &task);
+    }
+    attributes::set_slice_request(&thread, request);
+    Ok(0)
+}
+
+/// `sched_getattr`: the policy, the nice value and the slice request of a
+/// fair thread, written as `sched_attr_copy_to_user` writes them: as much of
+/// the structure as both sides know, with `size` saying how much that was.
+/// `sched_runtime` is the request the thread's task has, or with none the
+/// slice a task alone on its queue is given; Linux answers its own base
+/// slice there.
+pub(crate) fn sys_sched_getattr(
+    process: &Process,
+    pid: i32,
+    at: u64,
+    size: u32,
+    flags: u64,
+) -> Result<usize, Errno> {
+    let size = size as usize;
+    if at == 0
+        || pid < 0
+        || flags != 0
+        || !(SCHED_ATTR_SIZE_VER0..=SCHED_ATTR_SIZE_MAX).contains(&size)
+    {
+        return Err(Errno::EINVAL);
+    }
+    let thread = attributes::thread_named(process, pid).ok_or(Errno::ESRCH)?;
+    // The task's own record, which is what its queue is told, not the
+    // thread's: so a task made without its thread's request reads none
+    // (L.sched.109's check).
+    let asked =
+        attributes::task_of(&thread).map_or(thread.slice_request(), |task| task.request_ns());
+    let runtime = match asked {
+        0 => sched::BASE_SLICE_NS,
+        asked => asked,
+    };
+    let written = size.min(SCHED_ATTR_SIZE_VER1);
+    let mut attr = [0_u8; SCHED_ATTR_SIZE_VER1];
+    put(&mut attr, 0, &(written as u32).to_ne_bytes());
+    put(&mut attr, 4, &(SCHED_OTHER as u32).to_ne_bytes());
+    put(&mut attr, 16, &thread.nice().to_ne_bytes());
+    put(&mut attr, 24, &runtime.to_ne_bytes());
+    let out = attr.get(..written).ok_or(Errno::EINVAL)?;
+    uaccess::copy_to_user(process.space(), at, out).map_err(|_| Errno::EFAULT)?;
+    Ok(0)
+}
+
+/// Write `bytes` into `buffer` at `offset`, where they always fit.
+fn put(buffer: &mut [u8], offset: usize, bytes: &[u8]) {
+    if let Some(field) = buffer.get_mut(offset..offset + bytes.len()) {
+        field.copy_from_slice(bytes);
+    }
+}
+
+/// The fields of a `struct sched_attr` this kernel reads.
+struct SchedAttr {
+    /// `sched_policy`.
+    policy: u32,
+    /// `sched_flags`.
+    flags: u64,
+    /// `sched_nice`.
+    nice: i32,
+    /// `sched_priority`.
+    priority: u32,
+    /// `sched_runtime`, in nanoseconds.
+    runtime: u64,
+}
+
+/// Read a `struct sched_attr` from `at` as Linux's `sched_copy_attr` does.
+fn read_sched_attr(process: &Process, at: u64) -> Result<SchedAttr, Errno> {
+    let too_big = || {
+        let _ = uaccess::put_u32(process.space(), at, SCHED_ATTR_SIZE_VER1 as u32);
+        Errno::E2BIG
+    };
+    let size = match uaccess::get_u32(process.space(), at)? as usize {
+        0 => SCHED_ATTR_SIZE_VER0,
+        size => size,
+    };
+    if !(SCHED_ATTR_SIZE_VER0..=SCHED_ATTR_SIZE_MAX).contains(&size) {
+        return Err(too_big());
+    }
+    let mut raw = [0_u8; SCHED_ATTR_SIZE_VER1];
+    let known = size.min(SCHED_ATTR_SIZE_VER1);
+    let head = raw.get_mut(..known).ok_or(Errno::EINVAL)?;
+    uaccess::copy_from_user(process.space(), at, head).map_err(|_| Errno::EFAULT)?;
+    // `copy_struct_from_user`: a tail this kernel does not know must be zero.
+    if size > SCHED_ATTR_SIZE_VER1 {
+        let mut tail = vec![0_u8; size - SCHED_ATTR_SIZE_VER1];
+        uaccess::copy_from_user(process.space(), at + SCHED_ATTR_SIZE_VER1 as u64, &mut tail)
+            .map_err(|_| Errno::EFAULT)?;
+        if tail.iter().any(|&byte| byte != 0) {
+            return Err(too_big());
+        }
+    }
+    let word = |offset: usize| {
+        raw.get(offset..offset + 4)
+            .and_then(|bytes| <[u8; 4]>::try_from(bytes).ok())
+            .unwrap_or_default()
+    };
+    let long = |offset: usize| {
+        raw.get(offset..offset + 8)
+            .and_then(|bytes| <[u8; 8]>::try_from(bytes).ok())
+            .unwrap_or_default()
+    };
+    Ok(SchedAttr {
+        policy: u32::from_ne_bytes(word(4)),
+        flags: u64::from_ne_bytes(long(8)),
+        nice: i32::from_ne_bytes(word(16)),
+        priority: u32::from_ne_bytes(word(20)),
+        runtime: u64::from_ne_bytes(long(24)),
+    })
 }
 
 /// `sched_getscheduler`: `SCHED_OTHER`, for every process.

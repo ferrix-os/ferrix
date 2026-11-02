@@ -952,8 +952,10 @@ package FerrixX8664Requirements {
                 that write's fault label, which returns failure. The match shall
                 be that one address, vector 13 and ring 0, with no range, beside
                 the checked read's. Outside cpu.rs only the power core,
-                powerctl.rs, shall call it, with 0x601, and its boot check, with
-                an absent index; inside cpu.rs nothing but its definition.";
+                powerctl.rs, shall call it, with 0x601, its boot check, with
+                an absent index, and the machine check's bring-up, mce.rs, with
+                IA32_MCG_CTL and the banks' registers (L.x86_64.232); inside
+                cpu.rs nothing but its definition.";
             attribute :>> criterion = "Stage 3, under a hypervisor only: a checked write of 0x3fffffff is
                 refused with exactly one #GP counted under KVM, which panics
                 otherwise; under another hypervisor (TCG) the line says which path
@@ -1632,7 +1634,8 @@ package FerrixX8664Requirements {
                 name. A
                 machine check injected through QEMU's monitor into each processor in
                 turn after stage 4 (`mce <cpu>`, test-mce) ends the boot in the FX-9005
-                report, under KVM and TCG.";
+                report, with an mce: bank line naming the record, under KVM and
+                TCG.";
             attribute :>> parent = "H.FAIL.1";
             attribute :>> unit = ("arch::x86_64::cpu::enable_machine_check",
                 "arch::x86_64::cpu::has_machine_check",
@@ -2565,10 +2568,750 @@ package FerrixX8664Requirements {
                 status 33, and init's exit line is in the log (F-46).";
             attribute :>> parent = "H.BOOT.6";
             attribute :>> unit = ("arch::x86_64::shutdown",
+                "arch::x86_64::power_off",
                 "arch::x86_64::cpu::debug_exit",
                 "arch::x86_64::cpu::outl",
                 "console::announce_power_off",
                 "console::announce_power_off_failed");
+        }
+        requirement <'L.x86_64.212'> theSoftOffIsRecordedWhole : ItemLowLevel {
+            doc /* ACPI 6.5 7.4.2 and 16.1.7; the consultant's OK IF, ledger
+                line 4704, conditions 3 and 4. The AML is matched, not run:
+                ferrix_acpi::sleep::s5_sleep_types. */
+            attribute :>> statement = "At interrupt bring-up the kernel shall
+                record what entering S5 needs -- the FADT's PM1a and PM1b
+                control ports, SLP_TYPa and SLP_TYPb
+                from the DSDT's Name (_S5, Package) -- all of it or nothing:
+                nothing on a hardware-reduced machine, for a PM1 control block
+                absent, outside I/O space or past 16 bits, a PM1_CNT_LEN under
+                2, a DSDT that fails its signature, length or checksum, and no
+                single constant _S5 package. SMI_CMD and ACPI_ENABLE are
+                recorded with them, an SMI_CMD past 16 bits as none (no
+                handoff).";
+            attribute :>> criterion = "ferrix-acpi's host tests: q35's and a
+                firmware's _S5 bytes read, every constant encoding and PkgLength
+                size, every truncation and arbitrary bytes no answer and no
+                panic, a method, a string and disagreeing packages no answer,
+                and each fail-closed case of the FADT and the DSDT recording
+                nothing.";
+            attribute :>> parent = "H.BOOT.6";
+            attribute :>> unit = ("arch::x86_64::record_sleep_registers");
+        }
+        requirement <'L.x86_64.213'> theMachineEntersSoftOff : ItemLowLevel {
+            doc /* ACPI 6.5 4.8.3.2 and 16.1.7, Linux's acpi_hw_legacy_sleep;
+                the consultant's OK IF, ledger line 4704, conditions 1, 2 and
+                10. No _PTS is run (no AML interpreter), and the other
+                processors are not stopped first, as for shutdown and reset:
+                a machine S5 does not take is said and halted. */
+            attribute :>> statement = "power_off shall, after the debug-exit write
+                returned and with interrupts masked, where S5 was recorded,
+                hand the machine to ACPI through SMI_CMD when SCI_EN is clear
+                (waiting a bounded time), write SLP_TYP to PM1a and PM1b, then
+                SLP_TYP with SLP_EN, and only then say the power-off failed and
+                halt.";
+            attribute :>> criterion = "cargo xtask test-iso: the live session's
+                person types poweroff on a QEMU line with no isa-debug-exit,
+                FERRIX-POWER-OFF is printed with no FERRIX-POWER-OFF-FAILED
+                after it, and QEMU exits by itself with status 0; test-boot
+                x86_64 still exits 33 (L.x86_64.98).";
+            attribute :>> parent = "H.BOOT.6";
+            attribute :>> unit = ("arch::x86_64::power_off",
+                "arch::x86_64::acpi_power_off",
+                "arch::x86_64::cpu::outw",
+                "arch::x86_64::cpu::inw");
+        }
+        requirement <'L.x86_64.214'> pcidsOnByTheBootProcessorsCpuid : ItemLowLevel {
+            doc /* docs/PCID.md; the consultant's OK IF P1-P12, ledger line
+                4734, P1. By CPUID, never by vendor or part. */
+            attribute :>> statement = "pcid::init shall, on the boot processor and
+                before the speculation plan reads CR4 and the secondaries copy it,
+                set CR4.PCIDE and turn PCIDs on for the machine exactly where
+                CPUID.1:ECX[17] is set and CR3[11:0] is zero, and leave both off
+                otherwise.";
+            attribute :>> criterion = "The boot's slot check finds PCIDs on exactly
+                where the boot processor's CPUID offers them: off on every gated
+                row (QEMU's TCG offers no PCID, nazuna's KVM has none), on on the
+                N150 (the `pcid` boot line).";
+            attribute :>> parent = "H.MEM.17";
+            attribute :>> unit = ("arch::x86_64::pcid::init",
+                "arch::x86_64::pcid::on",
+                "arch::x86_64::pcid::offered_here",
+                "arch::x86_64::pcid::invpcid_here",
+                "arch::x86_64::pcid::report",
+                "arch::x86_64::cpu::read_cr3",
+                "arch::x86_64::init_speculation");
+        }
+        requirement <'L.x86_64.215'> aSecondaryWithoutPcidsStopsTheBoot : ItemLowLevel {
+            doc /* P1: PCIDs only where every processor has them. */
+            attribute :>> statement = "A secondary processor shall, before it adopts
+                the boot processor's CR4, stop the boot with FX-0410 where that CR4
+                has PCIDE set and its own CPUID.1:ECX[17] is clear.";
+            attribute :>> criterion = "Argued: no emulated machine offers PCIDs,
+                and none offers different features to its processors; every boot
+                that comes up has passed the test on each secondary.";
+            attribute :>> parent = "H.MEM.17";
+            attribute :>> unit = ("arch::x86_64::pcid::require_on_secondary");
+        }
+        requirement <'L.x86_64.216'> aSlotHitKeepsOnlyWithoutAShootdownSince : ItemLowLevel {
+            attribute :>> statement = "With PCIDs on, installing a space whose id a
+                slot of the processor holds shall write CR3 with that slot's PCID
+                and bit 63 set only where the slot's recorded shootdown count is at
+                least the space's, read after the processor joined its set, and
+                otherwise with bit 63 clear, recording that count.";
+            attribute :>> criterion = "The slot rule on described spaces: a hit with
+                no shootdown since keeps, a hit after one flushes and keeps after,
+                every written value's bit 63 matching; and on PCID hardware the
+                switch back after a shootdown flushes and reads the moved page's
+                new frame. With the comparison taken out the boot fails.";
+            attribute :>> parent = "H.MEM.17";
+            attribute :>> unit = ("arch::x86_64::pcid::install",
+                "arch::x86_64::pcid::Slots::choose",
+                "arch::x86_64::pcid::Slots::flushed",
+                "arch::x86_64::pcid::tagged_root",
+                "arch::x86_64::install_user_root");
+        }
+        requirement <'L.x86_64.217'> aSlotMissTakesTheNextSlotAndFlushes : ItemLowLevel {
+            attribute :>> statement = "With PCIDs on, installing a space whose id no
+                slot holds shall take the processor's next slot round robin, record
+                the space's id in it, and write CR3 with that slot's PCID, 1 to 6,
+                and bit 63 clear; a slot shall match only the space whose id it
+                records, and no id shall be given twice.";
+            attribute :>> criterion = "The slot rule on described spaces: a new space
+                flushes, a seventh takes a slot and its owner flushes when it comes
+                back, every PCID in 1 to 6; a space made after another is dropped
+                keeps no slot. With the miss keeping, the boot fails.";
+            attribute :>> parent = "H.MEM.17";
+            attribute :>> unit = ("arch::x86_64::pcid::Slots::choose",
+                "user::space::next_id",
+                "user::space::AddressSpace::assemble");
+        }
+        requirement <'L.x86_64.218'> uninstallFlushesPcidZero : ItemLowLevel {
+            attribute :>> statement = "uninstall_user_root shall load the kernel's
+                root with PCID 0 and bit 63 clear; PCID 0 shall tag no user
+                space.";
+            attribute :>> criterion = "After every uninstall of the switch-back
+                check, CR3's PCID reads 0.";
+            attribute :>> parent = "H.MEM.17";
+            attribute :>> unit = ("arch::x86_64::uninstall_user_root",
+                "arch::x86_64::pcid::tag_now");
+        }
+        requirement <'L.x86_64.219'> withoutPcidsTheBareRoot : ItemLowLevel {
+            attribute :>> statement = "With PCIDs off, install_user_root shall write
+                the space's root to CR3 and nothing else.";
+            attribute :>> criterion = "On every gated x86-64 row the switch-back
+                check finds each install's written value equal to the space's root,
+                and the processor joining and leaving the space's set where it did
+                before PCIDs; the IPC round trip on nazuna within 1% of develop's.";
+            attribute :>> parent = "H.MEM.17";
+            attribute :>> unit = ("arch::x86_64::pcid::install",
+                "arch::x86_64::pcid::last_write",
+                "arch::x86_64::last_root_write");
+        }
+        requirement <'L.x86_64.220'> erapsNeverBesidePcids : ItemLowLevel {
+            doc /* Keeps ledger line 392's ERAPS guarantee unchanged. */
+            attribute :>> statement = "ERAPS shall stand in for the in-domain return
+                stack refill only on a machine where PCIDs are off, so that every
+                CR3 write a switch makes flushes.";
+            attribute :>> criterion = "The boot's speculation check finds the plan's
+                ERAPS and the machine's PCIDs never both on, and the ERAPS decision,
+                asked for a processor described as offering ERAPS, refusing it
+                where CR4.PCIDE is set.";
+            attribute :>> parent = "H.TRAP.17";
+            attribute :>> unit = ("arch::x86_64::speculation::eraps_empties_on_switch",
+                "arch::x86_64::speculation::switch_barrier_in_domain");
+        }
+        requirement <'L.x86_64.221'> machineCheckBanksBroughtUp : ItemLowLevel {
+            doc /* docs/MACHINE-CHECK.md §3.1. The banks are enabled the way
+                Linux's __mcheck_cpu_init_generic enables them; an enabled
+                error is one the processor reports, never one it causes. */
+            attribute :>> statement = "On every x86-64 processor whose CPUID
+                offers the machine-check exception and architecture, the kernel
+                shall, once that processor has its record and before any program
+                runs there, read IA32_MCG_CAP and IA32_MCG_STATUS through the
+                checked MSR read, write all ones to IA32_MCG_CTL where MCG_CTL_P
+                is set and to each bank's MCi_CTL (bank 0 excepted on Intel family
+                6 before model 0x1a), and record the bank count and MCG_SER_P for
+                that processor. It shall record, with the count, the vendor's rules
+                and CPUID 8000_0007h's OverflowRecov, SUCCOR and SMCA bits
+                (L.x86_64.233).";
+            attribute :>> criterion = "Every gate boot's /proc/ferrix-mce reads
+                a non-zero bank count for every processor (test-mce-corrected
+                under KVM and TCG), and the mce: line names the count; a
+                processor without a record stops on a machine check
+                (L.x86_64.224's table).";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::bring_up",
+                "arch::x86_64::mce::enable",
+                "arch::x86_64::mce::refuse",
+                "arch::x86_64::mce::refused",
+                "arch::x86_64::mce::start",
+                "arch::x86_64::mce::start_poll",
+                "arch::x86_64::mce::family_model",
+                "arch::x86_64::mce::has_banks",
+                "arch::x86_64::mce::intel");
+        }
+        requirement <'L.x86_64.222'> recordsLeftBeforeTheBootLogged : ItemLowLevel {
+            doc /* §3.1 step 2: the one record of why the boot before died, on
+                parts whose warm reset keeps MCi_STATUS. */
+            attribute :>> statement = "Bring-up shall read every bank's
+                MCi_STATUS before it enables any bank, hand each valid record with
+                its address and misc where valid to the processor's poll as one
+                left from before this boot, count it, and clear the bank; the poll
+                shall print it as mce: cpu <n> bank <b> left from before this
+                boot.";
+            attribute :>> criterion = "test-mce-left: a corrected error injected
+                into bank 1 of processor 0, then the monitor's system_reset; the
+                next boot prints mce: cpu 0 bank 1 left from before this boot,
+                under TCG (and under KVM where KVM keeps the banks across a reset,
+                measured).";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::bring_up",
+                "arch::x86_64::mce::keep_left",
+                "arch::x86_64::mce::poll");
+        }
+        requirement <'L.x86_64.223'> pollLogsAndClearsCorrected : ItemLowLevel {
+            attribute :>> statement = "One kernel task pinned to each processor
+                with a bring-up record shall, after its CMCI claim (L.x86_64.249),
+                once at once, then every ferrix.mce.poll seconds (1 to 3600 by
+                msrlog's chooser; 5 otherwise, said) and at once when the
+                processor's CMCI wakes it (L.x86_64.250), print each bank's
+                corrected or uncorrected-no-action record as one mce: line with
+                the processor, bank, class, status, address and misc where valid
+                and the processor's running count, count it, and clear the bank;
+                and shall leave every other uncorrected record in its bank.";
+            attribute :>> criterion = "test-mce-corrected under KVM and TCG: a
+                corrected error injected into bank 1 of every processor is printed
+                exactly once per processor as mce: cpu <n> bank 1 corrected and
+                retires no frame; test-mce-cmci (TCG, patch 0008): a corrected
+                record into bank 1 of processor 1 printed within 10 s with a
+                poll period of an hour. Negative control: the poll's clear
+                removed, the line repeats and the row fails.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::poll",
+                "arch::x86_64::mce::run",
+                "arch::x86_64::mce::cmci::wait",
+                "arch::x86_64::mce::say",
+                "arch::x86_64::mce::Line::write_str");
+        }
+        requirement <'L.x86_64.224'> machineCheckClassifierFailsClosed : ItemLowLevel {
+            attribute :>> statement = "For a processor that takes Intel's rules
+                (L.x86_64.233), the classifier shall put a record with VAL
+                clear in no class, one with UC clear in corrected, one with PCC
+                or OVER set or without MCG_SER_P in fatal, one with S and AR
+                clear or S set and EN clear in uncorrected-no-action, S with EN
+                in action-optional, S, AR and EN in action-required, and AR
+                without S in fatal; and shall take an address as one page only
+                with ADDRV and MISCV, and with MCG_SER_P a physical address mode
+                and recoverable bits at most 12.";
+            attribute :>> criterion = "Stage 3 runs the classifier and the
+                address rule over a table of every class and every bit that moves
+                a record between them; any difference stops the boot.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::decode::classify",
+                "arch::x86_64::mce::decode::usable_address",
+                "arch::x86_64::mce::decode::Class::name");
+        }
+        requirement <'L.x86_64.225'> bystanderMachineCheckReturns : ItemLowLevel {
+            doc /* The consultant's M1: an Intel machine check is broadcast to
+                every processor unless LMCE is on, and some banks are shared, so
+                a processor that did not consume the poison sees the record with
+                EIPV clear and RIPV set. */
+            attribute :>> statement = "On a processor that takes Intel's rules
+                (L.x86_64.233), a machine check whose banks hold nothing
+                but corrected, uncorrected-no-action and action-required records
+                with EIPV clear and RIPV set, or no valid record, shall return
+                with MCG_STATUS cleared and be counted as spurious, leaving those
+                banks as they were, where RIPV is set; and stop where it is
+                clear.";
+            attribute :>> criterion = "Stage 3's table of actions, folds and
+                finishes; test-mce-broadcast under KVM and TCG on two processors:
+                the processor given the record with EIPV clear counts one spurious
+                check and the kernel goes on. Negative control: the rule removed,
+                the bystander stops the boot.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::decode::action",
+                "arch::x86_64::mce::decode::fold",
+                "arch::x86_64::mce::decode::finish",
+                "arch::x86_64::mce::decode::rank",
+                "arch::x86_64::mce::address_of",
+                "arch::x86_64::mce::misc_of",
+                "arch::x86_64::mce::decide");
+        }
+        requirement <'L.x86_64.226'> actionOptionalHandedToThePoll : ItemLowLevel {
+            attribute :>> statement = "A machine check with RIPV set whose
+                worst record is action-optional shall copy each such record into
+                a free pending slot of its processor through the slot protocol
+                (empty to writing by compare and exchange, full by a release
+                store), clear its bank and MCG_STATUS, and return; the poll shall
+                print it and retire its frame where the address is usable; a
+                machine check that finds no free slot shall stop.";
+            attribute :>> criterion = "Stage 3's slot check: slots fill to
+                their number and refuse the next, a slot held by a writer is
+                passed by both ways, records come out whole. test-mce-srao under
+                KVM and TCG: the poll prints mce: cpu <n> bank 1 action-optional
+                and mce: frame <page> retired, the victim is not signalled, the
+                kernel goes on.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::put",
+                "arch::x86_64::mce::take",
+                "arch::x86_64::mce::defer_banks",
+                "arch::x86_64::mce::on_kernel_stack",
+                "arch::x86_64::mce::record_of",
+                "arch::x86_64::mce::read_bank",
+                "arch::x86_64::mce::clear_bank",
+                "arch::x86_64::mce::end_machine_check",
+                "arch::x86_64::mce::retire");
+        }
+        requirement <'L.x86_64.227'> fatalMachineCheckPrintsTheBanks : ItemLowLevel {
+            attribute :>> statement = "A machine check that stops shall print,
+                in its FX-9005 report, MCG_STATUS, the bank count and every valid
+                bank's MCi_STATUS, MCi_ADDR, MCi_MISC and class on a line
+                beginning mce: bank, leaving the banks uncleared.";
+            attribute :>> criterion = "test-mce under KVM and TCG: the PCC record
+                injected into every processor ends the boot in the FX-9005 report
+                with an mce: bank 0 line naming it fatal.";
+            attribute :>> parent = "H.FAIL.1";
+            attribute :>> unit = ("arch::x86_64::mce::report",
+                "arch::x86_64::mce::stop",
+                "arch::x86_64::trap::report_trap");
+        }
+        requirement <'L.x86_64.228'> programsPoisonIsItsSigbus : ItemLowLevel {
+            attribute :>> statement = "A machine check taken in ring 3 shall
+                leave its interrupt stack for the task's kernel stack, read its
+                banks before any other work of the trap path with interrupts
+                masked, and, where one action-required record has EIPV set and a
+                usable address under its vendor's rules (L.x86_64.224,
+                L.x86_64.235), clear that bank and MCG_STATUS, retire the
+                record's frame, and raise SIGBUS on the running program with
+                si_code BUS_MCEERR_AR, si_addr the lowest address in the
+                program's half that maps the frame (0 past 2^18 leaves) and
+                si_addr_lsb 12, ending the program without its handler where RIPV
+                is clear -- but for a clean cached page dropped as L.x86_64.247
+                says, which raises nothing.";
+            attribute :>> criterion = "test-mce-srar under KVM and TCG: the victim's
+                handler prints code=4, its own page's address, lsb=12 and err=0
+                (no physical address in its context), the frame is listed in
+                /proc/ferrix-mce-retired and a second program runs;
+                test-mce-kill, the same with RIPV clear: the victim is killed by
+                signal 7, its handler does not run, a second program runs. Negative controls: the classifier calling the record fatal,
+                and vector 18 not moved to the task stack, each stop the boot. test-mce-driver and its kill and
+                bystander modes: a native driver ends with status 135";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::from_user",
+                "arch::x86_64::mce::marked",
+                "arch::x86_64::mce::signal_for",
+                "arch::x86_64::trap::ferrix_trap_entry",
+                "trap::user_fault",
+                "trap::user_fault_ending",
+                "user::space::AddressSpace::find_frame",
+                "mm::for_each_leaf_in");
+        }
+        requirement <'L.x86_64.229'> kernelsPoisonStops : ItemLowLevel {
+            attribute :>> statement = "A machine check taken in ring 0 shall
+                stay on its interrupt stack and stop as FX-9005 where any record is
+                fatal, or action-required with EIPV set, or action-optional with
+                RIPV clear, or where two records each ask for a signal.";
+            attribute :>> criterion = "Stage 3's table of actions (an
+                action-required record from ring 0 with EIPV set stops) and
+                test-mce under KVM and TCG.";
+            attribute :>> parent = "H.FAIL.1";
+            attribute :>> unit = ("arch::x86_64::mce::on_kernel_stack",
+                "arch::x86_64::paranoid::ferrix_paranoid_entry");
+        }
+        requirement <'L.x86_64.230'> machineCheckCountsInProc : ItemLowLevel {
+            attribute :>> statement = "/proc/ferrix-mce, mode 0444, shall give
+                whether recovery is on and, for every processor, its bank count
+                and its counts of machine checks taken, recovered, spurious,
+                corrected and uncorrected-no-action records, records left from
+                before the boot, poll rounds and copies recovered, and no
+                physical address.";
+            attribute :>> criterion = "test-mce-srar prints the file before and
+                after: checks and recovered go from 0 to 1 on the consumer; the
+                file's text holds no 0x.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::render",
+                "arch::x86_64::mce::cmci::render",
+                "arch::x86_64::render_machine_check");
+        }
+        requirement <'L.x86_64.231'> recoveryOffStopsEveryCheck : ItemLowLevel {
+            attribute :>> statement = "With ferrix.mce.recover=off on the
+                command line, read when the poll starts, every machine check shall
+                stop as FX-9005, as before recovery existed, and /proc/ferrix-mce
+                shall say recover off.";
+            attribute :>> criterion = "test-mce-srar with ferrix.mce.recover=off:
+                the injection stops the boot as FX-9005.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::start",
+                "arch::x86_64::mce::read_options");
+        }
+        requirement <'L.x86_64.232'> machineCheckBankCapAndCheckedWrites : ItemLowLevel {
+            attribute :>> statement = "Bring-up shall read at most 32 banks,
+                saying so where MCG_CAP names more, and shall make every bring-up
+                read and write of a machine-check register through the checked
+                accesses, so that a register the processor refuses leaves that
+                processor without a record and is said, rather than stopping
+                it.";
+            attribute :>> criterion = "xtask's host test reads bring_up's body
+                from the kernel's source and fails on any unchecked read_msr or
+                write_msr in it, and on a bank cap other than 32; no emulator
+                refuses these registers, so the refusal's line is argued.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::bring_up");
+        }
+        requirement <'L.x86_64.233'> machineCheckVendorRules : ItemLowLevel {
+            doc /* docs/MACHINE-CHECK-AMD.md §2, the consultant's ruling (a),
+                ledger 4820: MCG_SER_P is Intel's bit, and QEMU sets it on
+                every model, AMD ones included, so an unknown vendor gets no
+                recovery whatever it says. */
+            attribute :>> statement = "Bring-up shall read records by AMD's rules
+                on a processor whose CPUID vendor string is AuthenticAMD or
+                HygonGenuine, with CPUID 8000_0007h's OverflowRecov (bit 0),
+                SUCCOR (bit 1) and SMCA (bit 3), by Intel's rules where it is
+                GenuineIntel or Zhaoxin's '  Shanghai  ', and on every other
+                processor shall treat every uncorrected record as fatal; the
+                boot line shall name the rules and print 8000_0007h's EBX.";
+            attribute :>> criterion = "Stage 3's vendor table (each string,
+                the bits, a lower-case Intel and a hypervisor's string with no
+                recovery); test-mce-amd-* print the rules and EBX on their
+                boot line under KVM and TCG. Negative control: an unknown
+                vendor given Intel's rules, stage 3 stops.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::decode::vendor_of",
+                "arch::x86_64::mce::decode::classify_by",
+                "arch::x86_64::mce::decode::Vendor::name",
+                "arch::x86_64::mce::this_vendor",
+                "arch::x86_64::mce::vendor_bits",
+                "arch::x86_64::mce::record_of",
+                "arch::x86_64::mce::Proc::class",
+                "arch::x86_64::mce::Proc::recovers");
+        }
+        requirement <'L.x86_64.234'> amdClassifier : ItemLowLevel {
+            doc /* Linux 6.18.54's mce_severity_amd. */
+            attribute :>> statement = "AMD's classifier shall put a record with
+                VAL clear in no class, PCC in fatal, Deferred (bit 44) in
+                deferred, UC clear in corrected, UC with OVER and no
+                OverflowRecov or UC with no SUCCOR in fatal, and every other UC
+                record in AMD's action-required class.";
+            attribute :>> criterion = "Stage 3's table of AMD records, each bit
+                flipped; any difference stops the boot.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::decode::classify_amd");
+        }
+        requirement <'L.x86_64.235'> amdUsableAddressAndCut : ItemLowLevel {
+            doc /* Linux 6.18.54's mce_usable_address, amd_mce_usable_address
+                and smca_extract_err_addr; PhysAddrV from Linux 821f5fe4dbcb
+                (Zen 6 on). */
+            attribute :>> statement = "An AMD record's address shall be usable
+                only with ADDRV and, on SMCA, only on a bank whose bring-up
+                reads and McaX write succeeded; then, where that bank's
+                MCA_CONFIG has bit 11 set, PhysAddrV (bit 54), otherwise
+                Poison (bit 43); on SMCA it shall be cut to bits 56:lsb with
+                lsb from MCA_STATUS 29:24 where the bank's MCA_CONFIG bit 8 is
+                set, else bits 55:lsb with lsb from MCA_ADDR 61:56, an lsb above
+                12 naming no frame; without SMCA the frame containing it.";
+            attribute :>> criterion = "Stage 3's tables of usable addresses
+                (ADDRV dropped, Poison, PhysAddrV with and without CONFIG bit
+                11 or its read) and cuts (lsb 12, 6, 13, 21, status-held, bits
+                above 55). Negative controls: ADDRV dropped and the cut
+                removed, stage 3 stops.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::decode::usable_address_amd",
+                "arch::x86_64::mce::decode::paddrv_supported",
+                "arch::x86_64::mce::decode::cut_address",
+                "arch::x86_64::mce::signal_page",
+                "arch::x86_64::mce::Proc::config");
+        }
+        requirement <'L.x86_64.236'> amdRingThreeAction : ItemLowLevel {
+            attribute :>> statement = "An AMD action-required record in a
+                machine check taken in ring 3 shall stop the kernel with EIPV
+                clear or no usable address, and with EIPV, RIPV and a usable
+                address and TCC clear shall raise SIGBUS BUS_MCEERR_AR on the
+                program with its handler run; it shall never be left as
+                another processor's record.";
+            attribute :>> criterion = "Stage 3's AMD action table, the
+                bystander's flags stopping; test-mce-amd-srar under KVM (SUCCOR
+                reported): the handler prints code=4, its address, lsb=12 and
+                err=0x0; test-mce-amd-eipv stops. Negative control: AMD's class
+                let into the bystander arm, -amd-eipv fails.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::decode::amd_action",
+                "arch::x86_64::mce::bank_action");
+        }
+        requirement <'L.x86_64.237'> amdTccOrRipvClearKills : ItemLowLevel {
+            doc /* The consultant's ruling (b): TCC means the task's context is
+                lost. No Linux source; strictly no more permissive than 6.18,
+                which signals. */
+            attribute :>> statement = "An AMD action-required record a ring-3
+                program consumed with EIPV and a usable address shall end the
+                program without its handler, and retire the frame, where RIPV is
+                clear or TCC (bit 55) is set.";
+            attribute :>> criterion = "Stage 3's AMD action table;
+                test-mce-amd-kill and -amd-tcc under KVM: the victim killed by
+                signal 7, its handler not run, a second program runs. Negative
+                control: TCC treated as resumable, -amd-tcc fails.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::decode::amd_action");
+        }
+        requirement <'L.x86_64.238'> amdRingZeroStops : ItemLowLevel {
+            attribute :>> statement = "An AMD uncorrected record in a machine
+                check taken in ring 0 shall stop the kernel as FX-9005.";
+            attribute :>> criterion = "Stage 3's AMD action table;
+                test-mce-amd-ring0 under KVM and TCG: the record injected into a
+                processor stopped in ring 0 stops the boot.";
+            attribute :>> parent = "H.FAIL.1";
+            attribute :>> unit = ("arch::x86_64::mce::decode::amd_action");
+        }
+        requirement <'L.x86_64.239'> smcaRegistersCheckedAndBounded : ItemLowLevel {
+            attribute :>> statement = "On an SMCA processor bring-up shall read
+                each bank's MCA_CONFIG and MCA_IPID through the checked read,
+                keep CONFIG bits 8 and 11 and the IPID, and count a refusal,
+                said and not fatal, leaving that bank's address unusable; and
+                MCA_SYND shall be read only for a valid bank with SyndV (bit 53)
+                whose bring-up reads succeeded, through the checked read; no
+                other code shall reach an SMCA register.";
+            attribute :>> criterion = "xtask's host test reads mce.rs: SMCA
+                registers only in smca_bank_up (CONFIG, IPID) and read_synd
+                (SYND, behind SyndV), with no unchecked access there;
+                check-device-access.py holds the same. No QEMU model sets
+                CPUID's SMCA bit, so the reads are argued, not run.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::smca_bank_up",
+                "arch::x86_64::mce::read_synd",
+                "arch::x86_64::mce::smca_msr",
+                "arch::x86_64::mce::Proc::ipid",
+                "arch::x86_64::mce::Proc::smca",
+                "arch::x86_64::mce::decode::bank_config");
+        }
+        requirement <'L.x86_64.240'> smcaMcaxSet : ItemLowLevel {
+            doc /* Linux 6.18.54's smca_configure: without McaX "uncorrectable
+                errors will cause a system panic". */
+            attribute :>> statement = "On an SMCA processor bring-up shall write
+                each bank's MCA_CONFIG back with McaX (bit 32) set and no other
+                bit changed, through the checked write, a refusal counted and
+                said.";
+            attribute :>> criterion = "Stage 3: with_mcax sets bit 32 and
+                changes nothing else over a table; check-device-access.py
+                allows the checked write of MCA_CONFIG in smca_bank_up alone.
+                The write itself is argued (no QEMU model has SMCA).";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::decode::with_mcax",
+                "arch::x86_64::mce::smca_bank_up");
+        }
+        requirement <'L.x86_64.241'> mceLineIpidAndSynd : ItemLowLevel {
+            attribute :>> statement = "An mce: line and a stop report's bank line
+                shall carry addr= and misc= where the status says they are
+                valid, and for an SMCA bank its cached ipid= and, with SyndV,
+                synd=.";
+            attribute :>> criterion = "Stage 3: write_fields over a table with
+                and without each field.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::write_fields",
+                "arch::x86_64::mce::say",
+                "arch::x86_64::mce::report");
+        }
+        requirement <'L.x86_64.242'> amdDeferredLoggedRetiredByPaddrv : ItemLowLevel {
+            doc /* Linux 6.18.54: Poison does not cover deferred errors. */
+            attribute :>> statement = "The poll shall log and count an AMD
+                deferred record and clear it, and retire its frame only where
+                ADDRV, the bank's PhysAddrV support and PhysAddrV make its
+                address physical, never by Poison alone.";
+            attribute :>> criterion = "Stage 3's table of deferred records;
+                test-mce-amd-deferred under KVM and TCG: logged once, no frame
+                retired.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::decode::deferred_retirable",
+                "arch::x86_64::mce::retirable",
+                "arch::x86_64::mce::poll");
+        }
+        requirement <'L.x86_64.243'> scrubWritesReadNothingAndEvict : ItemLowLevel {
+            attribute :>> statement = "On x86-64 the scrubber's writes shall be MOVNTI over every
+                word of each whole line, a line's stores made with interrupts
+                masked, then SFENCE; and its eviction CLFLUSH per line, the
+                line from CPUID leaf 1, over the whole range, then MFENCE.";
+            attribute :>> criterion = "Build evidence (ledger 5045 (B4), QEMU models no caches): the
+                facade's host test requires one operation per line over the
+                whole range with the line read from the processor and the
+                barrier after; the disassembly of fill_without_reading holds
+                MOVNTI and no ordinary store in its loop. A hardware row on
+                the N150 (BACKLOG).";
+            attribute :>> parent = "H.FAIL.9";
+            attribute :>> unit = ("arch::x86_64::scrub::fill_without_reading", "arch::x86_64::scrub::evict_to_coherency", "arch::x86_64::scrub::is_guest", "arch::x86_64::scrub::hypervisor_seen");
+        }
+        requirement <'L.x86_64.244'> copyMcIsOneRepMovsb : ItemLowLevel {
+            attribute :>> statement = "copy_mc shall copy len bytes from the source to the
+                destination with one rep movsb at ferrix_copy_mc_movs, touching
+                no other memory and calling nothing, and answer left 0 and page
+                0; resumed at ferrix_copy_mc_out it shall answer rcx as left
+                and rdx as page.";
+            attribute :>> criterion = "mce/check.rs's copies: lengths 0 to 9000 at every source and
+                destination alignment 0 to 7 copied exactly with the bytes
+                around untouched and (0, 0) answered; xtask's pinned
+                disassembly of ferrix_copy_mc_movs to ferrix_copy_mc_out.";
+            attribute :>> parent = "H.FAIL.10";
+            attribute :>> unit = ("arch::x86_64::copy_mc::copy_mc", "arch::x86_64::copy_mc::Copied::poisoned", "arch::x86_64::copy_mc::movs_address", "arch::x86_64::copy_mc::out_address");
+        }
+        requirement <'L.x86_64.245'> aCopysConsumptionRecoversOnlyWhenSafe : ItemLowLevel {
+            attribute :>> statement = "A ring-0 machine check shall be in the copy's context only
+                with rip at the relocated ferrix_copy_mc_movs and rcx above 0,
+                and shall recover there only for an Intel action-required data
+                load (MCA code 0x0134 under mask 0xefff) with EIPV, RIPV and a
+                usable address, or an AMD consumption with EIPV, RIPV, a usable
+                cut address and TCC clear, whose page is the RAM page behind the
+                frame's rsi; every other record in the copy's context shall be
+                acted on as anywhere else in ring 0, and two consumptions shall
+                stop.";
+            attribute :>> criterion = "mce/check.rs's copy_actions: the context at the symbol, one
+                byte off and with rcx 0; each condition removed in turn stops;
+                the page test; the fold (Intel's rules shown here alone on an
+                AMD host). test-mce-copy's modes under KVM with AMD's records:
+                RIPV clear, TCC, another page, recovery off and outside stop;
+                TCG rows fail-closed only. Controls: the
+                rip test and the page test removed.";
+            attribute :>> parent = "H.FAIL.10";
+            attribute :>> unit = ("arch::x86_64::mce::decode::context", "arch::x86_64::mce::decode::data_load", "arch::x86_64::mce::decode::same_page", "arch::x86_64::mce::decode::action", "arch::x86_64::mce::decode::amd_action", "mm::ram_behind");
+        }
+        requirement <'L.x86_64.246'> theCopyIsSentToItsExit : ItemLowLevel {
+            attribute :>> statement = "On a copy's recovery the ring-0 handler shall move the frame's
+                rip to ferrix_copy_mc_out, write the page with bit 0 set into
+                its rdx and leave its rcx, clear that bank, defer the
+                action-optional ones, count the check recovered and as a copy,
+                and clear MCG_STATUS last, with no lock, allocation or print.";
+            attribute :>> criterion = "mce/check.rs's copies: the fixup on a frame the check builds;
+                test-mce-copy under KVM with AMD's records: the copy returns,
+                the call fails, /proc/ferrix-mce counts copies 1 on the
+                consumer. Control: the rip write
+                removed.";
+            attribute :>> parent = "H.FAIL.10";
+            attribute :>> unit = ("arch::x86_64::mce::on_kernel_stack", "arch::x86_64::mce::recover_copy");
+        }
+        requirement <'L.x86_64.247'> aDroppedCleanPageNeedsNoSignal : ItemLowLevel {
+            attribute :>> statement = "A ring-3 consumption shall be answered with no signal
+                exactly when the check was restartable, the running space mapped
+                the frame before cache::drop_poisoned, the drop answered Clean, and
+                the space maps the frame no more after it; the program then faults
+                the page in again from the disk. Anything else is L.x86_64.228's
+                SIGBUS.";
+            attribute :>> criterion = "mce/check.rs's unseen: each condition removed in turn
+                signals; test-mce-pagecache's mapped mode under KVM with AMD's
+                records: no SIGBUS, the disk's bytes read after, the frame retired
+                and the page dropped. Control: the after-drop test removed.";
+            attribute :>> parent = "H.FAIL.11";
+            attribute :>> unit = ("arch::x86_64::mce::signal_for", "arch::x86_64::mce::dropped_unseen", "arch::x86_64::machine_check_signal");
+        }
+        requirement <'L.x86_64.248'> thePollDropsACleanCachedPage : ItemLowLevel {
+            attribute :>> statement = "The poll's retirement of an action-optional, no-action or
+                AMD deferred record, and a system call's poisoned copy at its way
+                out, shall go through cache::drop_poisoned, so a clean cached page
+                there is dropped and any other frame retired as before.";
+            attribute :>> criterion = "test-mce-pagecache's poll mode with Intel's UCNA record
+                under TCG, the one machine here whose Intel model reports
+                MCG_SER_P: the page dropped before it is read; test-mce-copy-file
+                under KVM: the copy's way out drops the clean file page. AMD's
+                deferred record by the stage 3 tables alone (retired only by
+                PhysAddrV, which no emulator sets) and the Intel-host BACKLOG
+                row.";
+            attribute :>> parent = "H.FAIL.11";
+            attribute :>> unit = ("arch::x86_64::mce::retire", "arch::x86_64::retire_poisoned");
+        }
+        requirement <'L.x86_64.249'> cmciClaimsBanksWithReadBack : ItemLowLevel {
+            doc /* docs/MACHINE-CHECK-CMCI.md §3.1 (customer, 2026-10-30, item 4; consultant OK IF ledger 5348). */
+            attribute :>> statement = "A processor taking Intel's rules whose MCG_CAP has CMCI_P
+                and whose local APIC names at least seven LVT entries shall, in
+                its poll task before its first round and with ferrix.mce.cmci not
+                off, claim each bank whose MCi_CTL2 it can read with CMCI_EN clear
+                by setting CMCI_EN and threshold 1 and reading it back, under one
+                lock across processors, and count as claimed only a bank whose
+                read-back has CMCI_EN; a refused access claims nothing.";
+            attribute :>> criterion = "Stage 3's cmci_claims over a fake MCi_CTL2 (refused
+                read, already set, refused write, a write that does not stick,
+                refused read-back, read-back set; the value written; two claimers
+                of one shared register in turn, the second Taken);
+                test-mce-cmci under TCG with patch 0008: each processor claims its
+                own bank 1. Negative controls: the read-back skipped and the
+                already-set test removed, each fires cmci_claims. The shared bank
+                on hardware is the N150 BACKLOG row.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::cmci::claim",
+                "arch::x86_64::mce::cmci::claim_bank",
+                "arch::x86_64::mce::cmci::offered");
+        }
+        requirement <'L.x86_64.250'> cmciWakesThePollInService : ItemLowLevel {
+            doc /* docs/MACHINE-CHECK-CMCI.md §3.2, §3.3. */
+            attribute :>> statement = "A processor with a claimed bank shall point its LVT CMCI
+                entry at CMCI_VECTOR, fixed, unmasked; its handler shall mask the
+                entry, count the interrupt and read no bank, and wake that
+                processor's poll task only when its park state is active,
+                leaving the wake held for the return to service otherwise, which
+                wakes it.";
+            attribute :>> criterion = "test-mce-cmci under TCG with patch 0008: a corrected
+                record printed within 10 s, its interrupt counted;
+                test-mce-cmci-parked: a record into processor 1 out of service
+                prints nothing and drains nothing until its return, then the line
+                within 10 s with one interrupt counted. Negative controls: the
+                handler's wake removed (Corrected fails), the park-state test
+                removed and the return hook removed (Parked fails).";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::cmci::on_cmci",
+                "arch::x86_64::mce::cmci::returned",
+                "arch::x86_64::mce::cmci::kick",
+                "arch::x86_64::mce::cmci::register",
+                "arch::x86_64::apic::unmask_cmci",
+                "arch::x86_64::apic::mask_cmci",
+                "arch::x86_64::returned_to_service",
+                "arch::x86_64::mce::returned_to_service");
+        }
+        requirement <'L.x86_64.251'> cmciStormMasksTheEntry : ItemLowLevel {
+            doc /* docs/MACHINE-CHECK-CMCI.md §3.4. */
+            attribute :>> statement = "More than 15 rounds a CMCI drove within one second shall
+                leave the entry masked and the round once a second, said once,
+                until a one-second round finds no record, which unmasks it, said.";
+            attribute :>> criterion = "Stage 3's cmci_storms over a sequence of round times;
+                test-mce-cmci-storm under TCG with patch 0008: forty records 20 ms
+                apart, the storm said, at most 16 interrupts counted, its end said
+                within 10 s. Negative control: the threshold raised tenfold fires
+                stage 3's cmci_storms (c6b), before the row is reached (c6).";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::cmci::Storm::after",
+                "arch::x86_64::mce::cmci::after_round",
+                "arch::x86_64::mce::cmci::next_wait");
+        }
+        requirement <'L.x86_64.252'> cmciOffClaimsNothing : ItemLowLevel {
+            doc /* docs/MACHINE-CHECK-CMCI.md §3.6. */
+            attribute :>> statement = "With ferrix.mce.cmci=off no bank shall be claimed and every
+                LVT CMCI entry left masked, said; any other value shall leave CMCI
+                on, said.";
+            attribute :>> criterion = "test-mce-cmci-off under TCG with patch 0008: the option
+                said, nothing claimed, no interrupt counted, and no corrected line
+                within 10 s with a poll period of an hour.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::cmci::read_option");
+        }
+        requirement <'L.x86_64.253'> cmciLooksAfterTheUnmask : ItemLowLevel {
+            doc /* docs/MACHINE-CHECK-CMCI.md §3.4, the masked window. */
+            attribute :>> statement = "After a round that leaves the entry to be unmasked, the
+                poll task shall, on a processor in service, unmask it and read each
+                claimed bank's status once more, going round again at once only on
+                a status the round takes; otherwise the unmask shall be held for
+                the return to service as L.x86_64.250 says.";
+            attribute :>> criterion = "Stage 3's cmci_kicks (a record the round leaves never
+                kicks); test-mce-cmci-window under TCG with patch 0008: a record
+                made while the check build holds the masked window open is printed
+                within 10 s. Negative controls: the look removed (Window fails),
+                its filter widened to VAL (cmci_kicks fires).";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::cmci::after_round",
+                "arch::x86_64::mce::cmci::take_back_hold",
+                "arch::x86_64::mce::poll_takes");
+        }
+        requirement <'L.x86_64.254'> theStopRecordsItsPages : ItemLowLevel {
+            doc /* docs/MACHINE-CHECK-RESTART.md §2.4: many firmwares clear the banks at reset. */
+            attribute :>> statement = "A machine check that stops shall, before its report,
+                record in the pstore bad-frame table the page of every uncorrected
+                record in its processor's banks with a usable address, lock-free.";
+            attribute :>> criterion = "test-mce-restart: boot 2's loader finds the page in the
+                table (kept out (table)) beside the banks' record.";
+            attribute :>> parent = "H.FAIL.12";
+            attribute :>> unit = ("arch::x86_64::mce::stop", "arch::x86_64::mce::record_stopping_pages");
         }
         requirement <'L.x86_64.99'> theMachineResets : ItemLowLevel {
             attribute :>> statement = "reset shall restart the machine from firmware
@@ -2672,8 +3415,8 @@ package FerrixX8664Requirements {
 
         requirement <'L.x86_64.108'> globalFlushReachesEveryProcessor : ItemLowLevel {
             attribute :>> statement = "flush_tlb_including_global shall drop every
-                cached translation on its processor, global ones included, by
-                toggling CR4.PGE and reloading CR3.";
+                cached translation on its processor, global ones included and
+                under every PCID, by toggling CR4.PGE and reloading CR3.";
             attribute :>> criterion = "20 remaps of a global kernel page to a new
                 frame are each seen by every online processor: 0 stale reads (the
                 `tlb` line). Under TCG a plain CR3 reload would pass as well; the
@@ -2999,6 +3742,56 @@ package FerrixX8664Requirements {
             attribute :>> parent = ("H.TRAP.4", "H.TRAP.9");
             attribute :>> unit = ("sched::work::post", "sched::work::post_own",
                 "sched::work::notify");
+        }
+        requirement <'L.syscall.24'> memoryScrubsArgumentsAndAnswers : ItemLowLevel {
+            attribute :>> statement = "memory_scrub shall answer only a handle to the memory scrub
+                token with MANAGE (ACCESS_DENIED without, WRONG_TYPE for
+                another object), refuse a budget of 0 or past 64
+                (INVALID_ARGS), refuse where the scrubber stands down
+                (WRONG_TYPE) or while a batch runs (SHOULD_WAIT), and copy the
+                batch's seven words to the answer.";
+            attribute :>> criterion = "The native boot check: the refusals for a budget of 0 and 65,
+                a handle without MANAGE and a channel end, and the
+                stand-down's WRONG_TYPE at stage 9, before the gate's override
+                can apply; test-scrub: memscrub's batches answered.";
+            attribute :>> parent = "H.FAIL.9";
+            attribute :>> unit = ("syscall::native::memory_scrub");
+        }
+        requirement <'L.syscall.25'> aPoisonedCopyFailsAndSignalsItsOwner : ItemLowLevel {
+            attribute :>> statement = "uaccess's reads of a program's memory shall copy through
+                arch::copy_mc; a copy a machine check stopped shall be checked
+                against the frame it read (stopping as FX-9005 on another),
+                recorded on the current task with no lock -- only inside a
+                program's system call, stopping as FX-9005 anywhere else, and a
+                second record in one call stopping -- and fail as Poisoned, which its caller treats
+                as a fault at that page; at the call's way out the frame shall be retired --
+                and a clean cached page holding it dropped (L.x86_64.248) -- and,
+                where the memory was the task's own, SIGBUS BUS_MCEERR_AR raised
+                at its user page through the personality's fault_signal;
+                copy_cstr_from_user shall read no further than the 64-byte line
+                holding the terminator.";
+            attribute :>> criterion = "sched/check.rs's poison_record: recorded only in a call,
+                signalling only the caller's own memory, stopping elsewhere;
+                sched/check.rs's poison_record: the record holds one, refuses a second
+                and empties; test-mce-copy: write fails EFAULT or ends short at
+                the poisoned page under KVM with AMD's records, SIGBUS code 4 at
+                the injected page's user address, mce: frame retired. Controls:
+                the signal not raised; the frame not retired. test-mce-driver-copy (KVM, AMD's
+                records): a native driver's channel_write consuming its page";
+            attribute :>> parent = "H.FAIL.10";
+            attribute :>> unit = ("syscall::uaccess::poisoned", "syscall::uaccess::poison_action", "syscall::uaccess::copy_from_user_through", "syscall::uaccess::copy_cstr_from_user", "sched::task::PoisonRecord::record", "sched::task::PoisonRecord::take", "sched::task::Task::record_copy_poison", "sched::task::Task::take_copy_poison", "trap::copy_poisoned");
+        }
+        requirement <'L.syscall.26'> anotherSpacesPoisonSignalsNobody : ItemLowLevel {
+            attribute :>> statement = "A copy of another process's space a machine check stopped
+                shall retire the frame and fail the read, signalling neither the
+                reader nor the space's owner.";
+            attribute :>> criterion = "sched/check.rs's poison_record (the actions); test-mce-copy's environ mode
+                under KVM with AMD's records: /proc/<pid>/environ read while
+                the target's page is injected ends short, the frame is retired,
+                no process is signalled, the kernel goes on. Control: the
+                another-space test removed.";
+            attribute :>> parent = "H.FAIL.10";
+            attribute :>> unit = ("syscall::uaccess::poisoned", "syscall::uaccess::poison_action");
         }
         requirement <'L.trap.5'> noEntryMeansEnosys : ItemLowLevel {
             attribute :>> statement = "system_call shall answer ENOSYS with no entry

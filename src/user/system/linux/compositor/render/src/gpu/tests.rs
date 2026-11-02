@@ -666,10 +666,7 @@ fn a_part_of_an_imported_buffer_spreads_the_whole_around_it() {
         .expect("a surface")
         .on_device(file.as_fd(), 1);
     let image = |width, height| super::Image {
-        resource: 1,
-        surface: 0,
-        view: 0,
-        opaque_view: 0,
+        id: 1,
         width,
         height,
     };

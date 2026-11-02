@@ -9,7 +9,14 @@ A tag's section is the one whose heading starts `## <tag> (`, as in
 `## <tag> — `, is still read. It runs to the next `## ` heading. The release
 workflow publishes exactly this, so a tag without a section fails here
 rather than going out as an empty release.
+
+A release candidate, `<tag>-rc<n>`, is read from its own section when it has
+one, and otherwise from `<tag>`'s, under a line that says what it is: the
+build the release is cut from, published as a pre-release through the
+release's own path before the release itself.
 """
+
+import re
 
 import sys
 from pathlib import Path
@@ -18,7 +25,29 @@ RELEASES = Path(__file__).resolve().parents[3] / "docs" / "RELEASES.md"
 REPO = "https://github.com/ferrix-os/ferrix"
 
 
+CANDIDATE = re.compile(r"^(v\d+(?:\.\d+)*)-rc(\d+)$")
+
+
 def section(tag):
+    try:
+        return own_section(tag)
+    except SystemExit:
+        candidate = CANDIDATE.match(tag)
+        if not candidate:
+            raise
+        release, number = candidate.groups()
+        heading, body = own_section(release)
+        heading = heading.replace(f"## {release}", f"## {tag}", 1)
+        lead = [
+            "",
+            f"**Release candidate {number} of {release}**, published as a pre-release: the "
+            f"build {release} is cut from, put through the release's own path first. "
+            f"What follows is {release}'s notes; the downloads here are named for {tag}.",
+        ]
+        return heading, lead + body
+
+
+def own_section(tag):
     lines = RELEASES.read_text(encoding="utf-8").splitlines()
     start = None
     for i, line in enumerate(lines):

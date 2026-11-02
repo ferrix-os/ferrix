@@ -185,7 +185,7 @@ pub fn finish() -> ! {
         ),
         _ => {
             let _ = crate::console::pstore::stop(Stop::ExitPowerOff);
-            arch::shutdown()
+            arch::power_off()
         }
     }
 }

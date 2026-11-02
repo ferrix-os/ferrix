@@ -5,10 +5,13 @@ ordinary Linux programs. The live ISO starts its desktop, Yoru, from memory,
 so you can try it without touching your disks, and it carries an installer
 if you want to keep it.
 
-**This is a development preview.** It is built from the `present` profile
-with slot signing off, it is not signed for Secure Boot, and parts of
-authentication and process isolation are still being finished. Do not put
-anything on it that you cannot lose.
+**This is a development preview.** Ferrix has run on very few PCs, it is
+not signed for Secure Boot, and parts of authentication and process
+isolation are still being finished. Do not put anything on it that you
+cannot lose. The live ISO's command line is not a configuration any
+certification claim is made of (it skips the boot self-checks, lends the
+firmware's framebuffer to a driver and, where there is no IOMMU, runs
+drivers unisolated).
 
 ## Download
 
@@ -21,11 +24,21 @@ From the release page of
 The ISO boots on 64-bit x86 PCs and virtual machines with **UEFI**
 firmware. There is no legacy BIOS boot.
 
+## Drivers and the IOMMU
+
+Ferrix runs every driver that does DMA behind the IOMMU (Intel VT-d,
+AMD-Vi). The **live session** also starts drivers on a machine with no
+IOMMU, and says so on its boot log: they are then trusted with all of
+memory, as every driver is on Linux. The **installed system** never does:
+without an IOMMU it starts no USB, disk or network driver. So turn VT-d or
+AMD-Vi on in the firmware -- or the virtual machine's IOMMU -- **before
+you install**.
+
 ## In QEMU (recommended)
 
-Ferrix starts its drivers only for devices an IOMMU isolates, so the
-virtual machine needs one: QEMU's `intel-iommu`, and virtio devices with
-`iommu_platform=on`. You also need OVMF, QEMU's UEFI firmware
+The command below is the machine Ferrix is tested in: an Intel IOMMU
+(`intel-iommu`) and virtio devices with `iommu_platform=on`. You also need
+OVMF, QEMU's UEFI firmware
 (`apt install qemu-system-x86 ovmf`, `dnf install qemu-system-x86
 edk2-ovmf`, `pacman -S qemu-full edk2-ovmf`).
 
@@ -54,7 +67,8 @@ The OVMF file names differ between distributions (`OVMF_CODE.fd`,
 The ISO is attached as a virtio **disk** here, not a CD. It also boots as
 a CD (`-cdrom`), and the live desktop then comes up the same way, but the
 installer can only copy the system from a medium Ferrix can read as a
-disk, and Ferrix has no CD driver yet.
+disk -- virtio, SATA or NVMe -- and Ferrix has no CD driver yet: booted as
+a CD it says so at Install and writes nothing.
 
 ### Installing into the virtual machine
 
@@ -72,6 +86,29 @@ quit QEMU, take the two `-drive ... live` and `-device ... drive=live`
 lines out, give the disk's `-device` line `bootindex=0`, and start it
 again. Ferrix starts from the disk and asks for your password.
 
+## In VirtualBox or VMware (untested)
+
+Nobody has run Ferrix in VirtualBox or VMware yet. What follows is what
+Ferrix needs, from the same machine shape checked in QEMU (a plain display
+adapter, USB keyboard and mouse on xHCI, the ISO as a SATA disk, the
+install going to an NVMe disk); tell us what happens.
+
+* **EFI** firmware on, Secure Boot off.
+* **A USB 3 (xHCI) controller**, and the keyboard and mouse on USB:
+  Ferrix has no PS/2 driver. In VirtualBox:
+  `VBoxManage modifyvm <vm> --firmware efi --usbxhci on --keyboard usb --mouse usbtablet`.
+* **4 GiB** of memory or more.
+* **The ISO as a SATA hard disk**, not as a CD, if you want to install:
+  `VBoxManage convertfromraw ferrix-<version>-x86_64.iso ferrix-live.vdi`,
+  or `qemu-img convert -O vmdk ferrix-<version>-x86_64.iso ferrix-live.vmdk`
+  for VMware, attached to the SATA controller and booted from; and a second,
+  empty disk of 8 GiB or more on SATA or NVMe to install onto.
+* **An IOMMU** for the installed system: VirtualBox's (Settings, System,
+  Motherboard, IOMMU: Intel, with the ICH9 chipset) or VMware's
+  "Virtualize IOMMU". The live session runs without one.
+* The display is the adapter's firmware framebuffer, at the resolution the
+  firmware chose; there is no 3D.
+
 ## On a PC
 
 Write the ISO to a USB stick (everything on the stick is lost):
@@ -80,21 +117,28 @@ Write the ISO to a USB stick (everything on the stick is lost):
 * Windows: Rufus in **DD image** mode, or balenaEtcher.
 
 Turn Secure Boot off in the firmware's settings, and start from the stick
-through the firmware's boot menu.
+through the firmware's boot menu. The boot log is drawn on the screen
+until the desktop takes it over; if it stops there, a photo of it is the
+most useful thing to put in an issue.
 
-Be ready for it not to work. Ferrix has run on very few PCs so far:
+Be ready for it not to work. This ISO has not been booted on a real PC
+yet; it was checked in QEMU shaped like one. Ferrix itself has run on the
+Intel N150 mini PC it is developed on, with its AHCI SATA disk and
+Motorcomm YT6801 Ethernet.
 
-* **Known to work:** an Intel N150 mini PC (Intel graphics, its AHCI SATA
-  disk, its Motorcomm YT6801 Ethernet).
-* **Needs an IOMMU** (Intel VT-d or AMD-Vi) turned on in the firmware:
-  without one Ferrix starts no drivers, and the screen stays empty.
-* **No Wi-Fi** and no Bluetooth.
-* **NVIDIA** graphics only through Ferrix's virtual-machine path, not on
-  the PC itself; AMD graphics are not driven. Other PCs get the firmware's
-  framebuffer at best.
-* The installer cannot install from a USB stick on a PC yet: Ferrix does
-  not serve USB disks to the system. Try the live session there; install
-  in a virtual machine.
+* **The screen** is the firmware's framebuffer, at the resolution the
+  firmware chose, with no GPU acceleration, whatever the graphics: Ferrix
+  does not drive Intel graphics in this image, nor AMD or NVIDIA ones.
+* **Keyboards and mice on USB only.** Many laptops' built-in keyboards and
+  touchpads are PS/2 or I2C, which Ferrix does not drive: plug in a USB
+  keyboard and mouse.
+* **Ethernet** only on the Motorcomm YT6801 and some of Realtek's
+  RTL8111/8168 family; no Intel Ethernet, no Wi-Fi, no Bluetooth.
+* **Disks** on AHCI SATA and NVMe.
+* **The installer cannot install from a USB stick yet**: Ferrix does not
+  serve USB disks to the system. Try the live session there, and install in
+  a virtual machine. (A copy of the ISO written to a SATA or NVMe disk of
+  the PC can be installed from.)
 
 ## The live session
 
@@ -102,6 +146,7 @@ The desktop starts logged in as the user `ferrix`, with no password, and
 the installer opens. **Try Ferrix** closes it; "Install Ferrix" is in the
 launcher to open it again.
 
+* The desktop is Yoru, in the live session and on the installed system.
 * SUPER+RETURN opens a terminal running zinc, Ferrix's shell.
 * SUPER+Q closes a window, SUPER+1 to 4 switch workspaces.
 * Try `ferrofetch`, `btop`, `curl https://example.com`, `git`.
@@ -123,8 +168,9 @@ It asks, page by page:
 6. a summary of every change, then **Install**;
 7. the progress, and a page to restart from.
 
-The installed system starts with your session locked: your password opens
-it. Its disk has an EFI system partition and a btrfs root.
+The installed system starts Yoru with your session locked: your password
+opens it. Its disk has an EFI system partition and a btrfs root. It
+isolates its drivers behind the IOMMU (above).
 
 The dock's clock shows UTC whatever the time zone; programs (`date`, the
 lock screen's clock) follow the zone you chose.

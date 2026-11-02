@@ -80,6 +80,10 @@ pub struct Slot {
     pid: i32,
     /// Whether it is finished and waiting to be dropped.
     gone: bool,
+    /// Whether its process is frozen by `suspend` (`crate::suspend`): its
+    /// frame callbacks wait and no input is sent to it, so that what it
+    /// cannot read does not pile up until the connection is dropped.
+    parked: bool,
     /// Which connection this is of all the compositor has had, counting
     /// from one. A slot's *place* changes when another connection ends;
     /// this does not, which is what something kept across frames for one of
@@ -125,6 +129,7 @@ impl Slot {
             answered: BTreeMap::new(),
             pid: 0,
             gone: false,
+            parked: false,
             serial: 1,
             lane: None,
         }
@@ -201,6 +206,21 @@ impl Slot {
     /// The process that opened it.
     pub const fn pid(&self) -> i32 {
         self.pid
+    }
+
+    /// The windows this connection owns, each with its `xdg_toplevel`.
+    pub fn windows(&self) -> &[(ObjectId, WindowId)] {
+        &self.windows
+    }
+
+    /// Whether its process is frozen by `suspend`.
+    pub const fn parked(&self) -> bool {
+        self.parked
+    }
+
+    /// Say whether its process is frozen by `suspend` (`crate::suspend`).
+    pub const fn park(&mut self, parked: bool) {
+        self.parked = parked;
     }
 
     /// What one of its windows was called when it mapped: the class and
@@ -431,6 +451,8 @@ struct Compositor<'r> {
     quit: bool,
     /// Whether `toggleswallow` is on.
     swallow: bool,
+    /// The programs `suspend` froze (`crate::suspend`).
+    suspended: crate::suspend::Suspended,
     /// When the seat was last used: `ext-idle-notify` measures from the
     /// last of this and `forced`.
     last_input: Instant,
@@ -523,6 +545,10 @@ struct Tally {
     since_from: [i64; 4],
     /// The largest window surface the slowest of them drew, and how.
     since_surface: Option<compositor_render::timing::Drawn>,
+    /// How many commits that attached a buffer each surface made since the
+    /// last report, by its connection's serial and its `wl_surface`: the
+    /// client's own frames, which the frames drawn are not.
+    client_frames: BTreeMap<(u64, ObjectId), u32>,
     /// When the last report was: the line is a second apart at most, and
     /// silent while nothing is drawn.
     reported: Instant,
@@ -662,6 +688,7 @@ impl<'r> Compositor<'r> {
                 since_drew: (0, 0, 0),
                 since_from: [0; 4],
                 since_surface: None,
+                client_frames: BTreeMap::new(),
                 reported: Instant::now(),
             },
             config,
@@ -726,6 +753,7 @@ impl<'r> Compositor<'r> {
             carried: None,
             quit: false,
             swallow: false,
+            suspended: crate::suspend::Suspended::new(),
             last_input: Instant::now(),
             forced: None,
             injected: Vec::new(),
@@ -1027,6 +1055,7 @@ impl<'r> Compositor<'r> {
                         unsized_dialogs: std::collections::BTreeSet::new(),
                         answered: BTreeMap::new(),
                         gone: false,
+                        parked: false,
                         lane: Some(self.devices.handle()),
                     }),
                     Err(_) => continue,
@@ -1161,6 +1190,7 @@ impl<'r> Compositor<'r> {
             self.carried
                 .as_ref()
                 .is_some_and(crate::dragging::Carried::holding),
+            self.drag.is_some(),
         )
     }
 
@@ -1407,9 +1437,18 @@ impl<'r> Compositor<'r> {
         // after (the customer's stash, 2026-10-25: a pick over a window's
         // bar opened nothing). With a drag or a swallowed press under way
         // the release still goes to what began it.
+        // Not a bar or a dock a fullscreen window hides, which is not drawn
+        // and covers nothing.
+        let fullscreen = crate::deliver::fullscreen_screens(&self.state);
+        let shown: Vec<crate::frame::Placed> = self
+            .placed_layers
+            .iter()
+            .copied()
+            .filter(|layer| !crate::frame::hidden_by_fullscreen(layer, &fullscreen))
+            .collect();
         let covered = self.drag.is_none()
             && !self.bars.swallow_release
-            && crate::frame::above_at(&self.placed_layers, self.seat.pointer(), |layer, (x, y)| {
+            && crate::frame::above_at(&shown, self.seat.pointer(), |layer, (x, y)| {
                 self.slots
                     .get(layer.client)
                     .and_then(|slot| slot.client().surface(layer.surface))
@@ -1503,6 +1542,7 @@ impl<'r> Compositor<'r> {
                 pending: &mut pending,
                 quit: &mut self.quit,
                 swallow: &mut self.swallow,
+                suspended: &mut self.suspended,
                 forced: &mut self.forced,
                 focus: &mut self.focus,
                 trigger: asked.trigger,
@@ -1975,6 +2015,7 @@ impl<'r> Compositor<'r> {
                 pending: &mut pending,
                 quit: &mut self.quit,
                 swallow: &mut self.swallow,
+                suspended: &mut self.suspended,
                 forced: &mut self.forced,
                 focus: &mut self.focus,
                 // `hyprctl dispatch pass` has no key behind it: `pass`
@@ -2569,6 +2610,7 @@ impl<'r> Compositor<'r> {
                                 from,
                                 lifted: false,
                                 edge: None,
+                                owed: (0, 0),
                             });
                         }
                     }
@@ -3620,17 +3662,29 @@ fn as_input(what: compositor_server::Injected) -> Option<crate::seat::Input> {
 /// compositor's, which would be a second frame round the client's, and a
 /// maximized window with no border, shadow or rounding at all
 /// (`docs/DESKTOP.md` §2.2).
+///
+/// A maximized window -- snapped to its whole work area, Yoru's maximize
+/// button -- is drawn as Hyprland draws a fullscreen one: with no shadow,
+/// and at `decoration:fullscreen_opacity` (`maximized`) rather than the
+/// inactive opacity, unless a rule gave it an opacity of its own. Nothing
+/// of the desktop shows beside it to be seen through it, and on a screen
+/// drawn in software a see-through game window behind a focused dialog was
+/// most of every frame (the N150, 2026-10-28); opaque, it is a copy, and
+/// what is behind it is not drawn at all.
 fn drawn_with(
     styled: &BTreeMap<WindowId, compositor_render::WindowStyle>,
     slots: &[Slot],
     sources: &BTreeMap<WindowId, Source>,
     own_frames: Option<&State>,
+    maximized: (&State, f32),
 ) -> BTreeMap<WindowId, compositor_render::WindowStyle> {
     let mut out = styled.clone();
+    let (state, maximized_opacity) = maximized;
     for (&window, source) in sources {
         let Some(slot) = slots.get(source.client) else {
             continue;
         };
+        as_maximized(&mut out, window, state, maximized_opacity);
         // And a maximized one fills its work area edge to edge, with square
         // corners and nothing round it, whoever draws its frame.
         if own_frames
@@ -3665,6 +3719,24 @@ fn drawn_with(
     out
 }
 
+/// Draw `window` as [`drawn_with`] draws a maximized one, if it is one: no
+/// shadow, and at `opacity` unless a rule gave it its own.
+fn as_maximized(
+    styles: &mut BTreeMap<WindowId, compositor_render::WindowStyle>,
+    window: WindowId,
+    state: &State,
+    opacity: f32,
+) {
+    if state.snap_of(window) != Some(compositor_layout::Snap::Maximized) {
+        return;
+    }
+    let style = styles.entry(window).or_default();
+    style.shadow = false;
+    if style.opacity.is_none() {
+        style.opacity = Some(opacity);
+    }
+}
+
 /// Tell every surface that went into the frame that it was drawn.
 ///
 /// Two events, both owed once a frame has been presented: the frame
@@ -3676,6 +3748,9 @@ fn drawn_with(
 /// Every surface on the screen is told, not only the windows: a bar, a
 /// wallpaper, a menu and the lock's own surface each drew, and each waits
 /// the same way.
+///
+/// Nor a frozen client's (`crate::suspend`), which is told once it is
+/// thawed.
 ///
 /// But for `unseen`, the surfaces under the windows of which this frame
 /// shows nothing (`State::unseen_layers`): their frame callbacks are kept
@@ -3740,6 +3815,12 @@ fn frames_done(
         let Some(slot) = slots.get_mut(index) else {
             continue;
         };
+        // A frozen client's callbacks wait for its thaw, as an unseen
+        // surface's wait for a frame that shows it: it reads nothing, and
+        // what it is sent meanwhile piles up (`crate::suspend`).
+        if slot.parked() {
+            continue;
+        }
         if !unseen.contains(&(index, surface)) {
             slot.client_mut().fire_frame_callbacks(surface, now);
         }
@@ -6791,6 +6872,7 @@ pub(crate) fn placed_popups(
                     i64::from(at.3),
                 ),
                 above: true,
+                overlay: false,
                 rules: crate::frame::LayerRules::default(),
             });
         }
@@ -7471,6 +7553,12 @@ fn place_layers(
         slot.layer_rects.clear();
     }
     for (index, id, surface, above, rules, rect) in placed {
+        // The overlay layer is the one drawn over a fullscreen window too
+        // (`crate::frame::hidden_by_fullscreen`).
+        let overlay = slots
+            .get(index)
+            .and_then(|slot| slot.client.layer_surface(id))
+            .is_some_and(|layer| layer.layer == compositor_server::Layer::Overlay);
         if let Some(slot) = slots.get_mut(index) {
             let _ = slot.layer_rects.insert(id, rect);
             let width = u32::try_from(rect.width).unwrap_or(0);
@@ -7488,6 +7576,7 @@ fn place_layers(
             surface,
             rect,
             above,
+            overlay,
             rules,
         });
     }

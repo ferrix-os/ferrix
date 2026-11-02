@@ -300,7 +300,10 @@ Hyprland's `fullscreen 1`.
   left or right edge half-tiles; while it is there a translucent preview of
   the rectangle it will take is drawn (GNOME's tile preview). Dragging a
   snapped or maximized window away restores its old size under the pointer,
-  at the same relative place across its width.
+  at the same relative place across its width. A maximized window is drawn
+  as Hyprland draws a fullscreen one: no shadow, and at
+  `decoration:fullscreen_opacity` rather than see-through when it loses the
+  focus (a rule's opacity still wins).
 * **Minimize.** `xdg_toplevel.set_minimized` and the foreign-toplevel
   request hide the window to a per-monitor special workspace; activating it
   from the overview, a taskbar or `focuswindow` brings it back. The
@@ -607,7 +610,8 @@ There is no notification daemon and no D-Bus code in Rust in the tree.
   kernel's message does not carry). The helper binds the abstract socket
   `\0ferrix.devmgr.events` and writes each event as one line to every
   connected reader (`died snd 0x00000010 status 137`, `restarted snd
-  0x00000010 1`, `gave-up gpu 0x00000008 8`), keeping the last 32 for a
+  0x00000010 1`, `gave-up gpu 0x00000008 8`, and since 2026-10-30 a crash
+  loop's `reinit` and `quarantined`, `docs/DEVMGR.md` §4), keeping the last 32 for a
   reader that connects late. Readers are read-only; any uid may read, as
   the events say no more than the kernel log does. A slow reader is
   dropped rather than allowed to hold the helper, and the helper never
@@ -896,6 +900,19 @@ dock's blur is three quarters of the frame. A guest drawing in software
 `layerrule = blur false, match:namespace ^(yoru-.*)$`, or `decoration:blur:enabled = false`.
 A host test also checks that the glow and the inactive shadow are the same
 picture on the GPU as in software.
+
+Yoru's theme does keep it off in software (`hyprix:blur_in_software = 0`),
+and since 2026-10-28 lays `hyprix:blur_scrim` instead: Nocturne's ground at
+85% behind every layer surface whose rule asks for a blur -- the dock, the
+sidebars, the wallpaper switcher, the launcher -- on a screen that draws
+none, which is every PC the live ISO boots on. The shell is drawn for a
+blurred backdrop, and without one the switcher's light text over a bright
+window was unreadable. The scrim is a fill of the rectangle the blur would
+have covered, inside the damage: 2.5 ms for a whole 1920x1080 surface on
+one of nazuna's cores, where the blur was most of a frame. `compositor-render`'s
+`a_shell_drawn_for_a_blur_gets_the_scrim_where_no_blur_is_drawn` holds the
+picture (`blur-scrim-switcher`) and the text's contrast, 4.5:1 or better
+with the scrim and 2.7:1 without.
 
 On the answers to §6.4: no Alt or Ctrl bind in `yoru-keys.conf` (the
 theme's test refuses one), the dock's hints say `Super`, Files is shelf,

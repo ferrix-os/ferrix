@@ -706,7 +706,12 @@ Network, input and disk drivers are started again too (2026-09-27, T0 of
 the live kernel update plan): a network interface is parked with its
 addresses, and a disk with its requests queued, for the next driver to take
 up, so a btrfs root survives every disk driver being killed. Gated by
-`cargo xtask test-restart --boot all`. **Still to do:** the serial port,
+`cargo xtask test-restart --boot all`. A driver that dies at every start
+(2026-10-30, after the N150 box's Intel driver did) is restarted twice, 1 s
+and 2 s after its deaths, started once more 4 s later on its device quiesced
+again, and then its device is quarantined, each step a line and a
+`devmgr-events` event (`docs/DEVMGR.md` §4; gated by `cargo xtask
+test-restart --boot crashloop`). **Still to do:** the serial port,
 USB host, GPU engine and gadget kinds; a GPU renderer that comes back, since hyprix
 draws in software after a restart; and a card with two connectors, whose
 screens would each try to reopen it.

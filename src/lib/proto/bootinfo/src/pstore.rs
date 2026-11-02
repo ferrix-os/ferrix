@@ -36,8 +36,11 @@ use crate::PAGE_SIZE;
 /// The region's first eight bytes.
 pub const MAGIC: [u8; 8] = *b"FXPSTORE";
 /// The header's layout version: the one [`encode`] writes and [`fresh`]
-/// takes.
-pub const VERSION: u32 = 2;
+/// takes. Version 3 adds the bad-frame table (`docs/MACHINE-CHECK-RESTART.md`
+/// §2.2).
+pub const VERSION: u32 = 3;
+/// The version before the bad-frame table, which [`validate`] still reads.
+pub const VERSION_2: u32 = 2;
 /// The version before the stop word, which [`validate`] still reads.
 pub const VERSION_1: u32 = 1;
 /// Bytes before the ring: one page.
@@ -58,8 +61,16 @@ pub const WRITTEN_LIMIT: u64 = 1 << 48;
 /// Where the stop word is ([`Stop::word`]), the other header field the
 /// kernel writes. Eight-byte aligned.
 pub const STOP_OFFSET: usize = WRITTEN_OFFSET + 8;
+/// Where the bad-frame table's count is (version 3): how many entries the
+/// kernel claimed, which may pass [`TABLE_ENTRIES`]. Eight-byte aligned.
+pub const TABLE_COUNT_OFFSET: usize = 128;
+/// Where the bad-frame table's entries start, each one word
+/// ([`table_entry`]).
+pub const TABLE_OFFSET: usize = TABLE_COUNT_OFFSET + 8;
+/// How many entries the table holds.
+pub const TABLE_ENTRIES: usize = 64;
 /// Bytes of the header [`validate`] reads and [`encode`] writes.
-pub const HEADER_BYTES: usize = STOP_OFFSET + 8;
+pub const HEADER_BYTES: usize = TABLE_OFFSET + TABLE_ENTRIES * 8;
 /// How far above the lowest conventional memory the region goes at least:
 /// past where firmware does its own work before it hands over. OVMF
 /// rewrites 8 to 27 MiB on every reset (its MEMFD and the firmware volumes
@@ -144,6 +155,9 @@ pub enum Refusal {
     Recorded,
     /// Not a fresh header ([`fresh`]): a stop word is there, whole or not.
     Stopped,
+    /// Not a fresh header ([`fresh`]): a byte of the bad-frame table is not
+    /// zero.
+    Tabled,
 }
 
 impl core::fmt::Display for Refusal {
@@ -156,6 +170,7 @@ impl core::fmt::Display for Refusal {
             Refusal::Written => f.write_str("damaged: its count is out of bounds"),
             Refusal::Recorded => f.write_str("something was recorded already"),
             Refusal::Stopped => f.write_str("a stop was recorded already"),
+            Refusal::Tabled => f.write_str("its bad-frame table is not empty"),
         }
     }
 }
@@ -163,7 +178,7 @@ impl core::fmt::Display for Refusal {
 /// A header [`validate`] took.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Found {
-    /// Its layout version: [`VERSION`] or [`VERSION_1`].
+    /// Its layout version: [`VERSION`], [`VERSION_2`] or [`VERSION_1`].
     pub version: u32,
     /// The ring's length.
     pub capacity: u64,
@@ -177,8 +192,8 @@ pub struct Found {
 }
 
 /// How a boot stopped when it stopped on purpose: the closed list of codes
-/// the stop word holds (`docs/POSTMORTEM.md` §5.1). Codes 7 to 255 are kept
-/// for the stops later slices add.
+/// the stop word holds (`docs/POSTMORTEM.md` §5.1). Code 7 is the lockup
+/// detector's (§6.2); 9 to 255 are kept for the stops later slices add.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Stop {
     /// The first failure report began.
@@ -193,17 +208,21 @@ pub enum Stop {
     ExitReset = 5,
     /// Init exited, and the default powers off.
     ExitPowerOff = 6,
+    /// A machine check stopped the machine: its first report
+    /// (`docs/MACHINE-CHECK-RESTART.md` §2.1).
+    MachineCheck = 8,
 }
 
 impl Stop {
     /// Every stop, in code order.
-    pub const ALL: [Stop; 6] = [
+    pub const ALL: [Stop; 7] = [
         Stop::Panic,
         Stop::Restart,
         Stop::PowerOff,
         Stop::Halt,
         Stop::ExitReset,
         Stop::ExitPowerOff,
+        Stop::MachineCheck,
     ];
 
     /// Its code.
@@ -231,6 +250,7 @@ impl Stop {
             4 => Some(Stop::Halt),
             5 => Some(Stop::ExitReset),
             6 => Some(Stop::ExitPowerOff),
+            8 => Some(Stop::MachineCheck),
             _ => None,
         }
     }
@@ -245,6 +265,7 @@ impl Stop {
             Stop::Halt => "a halt a program asked for (reboot(2))",
             Stop::ExitReset => "a reset after init exited (ferrix.onexit=reset)",
             Stop::ExitPowerOff => "a power-off after init exited",
+            Stop::MachineCheck => "a machine check",
         }
     }
 }
@@ -350,7 +371,7 @@ pub fn validate(header: &[u8; HEADER_BYTES], len: u64) -> Result<Found, Refusal>
         return Err(Refusal::NothingThere);
     }
     let version = u32_at(header, 8);
-    if version != VERSION && version != VERSION_1 {
+    if version != VERSION && version != VERSION_2 && version != VERSION_1 {
         return Err(Refusal::Version(version));
     }
     let capacity = u64_at(header, 16);
@@ -390,7 +411,94 @@ pub fn fresh(header: &[u8; HEADER_BYTES], len: u64) -> Result<Found, Refusal> {
     if found.stop != 0 {
         return Err(Refusal::Stopped);
     }
+    if header
+        .get(TABLE_COUNT_OFFSET..HEADER_BYTES)
+        .is_none_or(|table| table.iter().any(|&byte| byte != 0))
+    {
+        return Err(Refusal::Tabled);
+    }
     Ok(found)
+}
+
+/// The table entry that records frame `frame`: its number in the low half,
+/// the complement in the high half, the stop word's rule, so a word of
+/// zeros or a scribbled word names no frame.
+#[must_use]
+pub const fn table_entry(frame: u32) -> u64 {
+    (frame as u64) | ((!frame as u64) << 32)
+}
+
+/// The frame an entry names, if its halves match.
+#[must_use]
+pub const fn table_frame(word: u64) -> Option<u32> {
+    let frame = word as u32;
+    if (word >> 32) as u32 == !frame {
+        Some(frame)
+    } else {
+        None
+    }
+}
+
+/// The frames a version-3 header's bad-frame table names, in slot order,
+/// the damaged entries left out: at most [`TABLE_ENTRIES`], however high
+/// the count. None for an older version, which has no table.
+pub fn bad_frames<'a>(
+    header: &'a [u8; HEADER_BYTES],
+    found: &Found,
+) -> impl Iterator<Item = u32> + 'a {
+    let count = if found.version == VERSION {
+        usize::try_from(u64_at(header, TABLE_COUNT_OFFSET))
+            .unwrap_or(usize::MAX)
+            .min(TABLE_ENTRIES)
+    } else {
+        0
+    };
+    (0..count).filter_map(move |slot| table_frame(u64_at(header, TABLE_OFFSET + slot * 8)))
+}
+
+/// Whose rules a machine-check bank's record is read by, for [`left_page`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BankRules {
+    /// Intel's: `MISCV` and a physical address of page grain or finer.
+    Intel,
+    /// AMD's: the poison bit.
+    Amd,
+}
+
+/// `MCi_STATUS`: the record is valid.
+const BANK_VAL: u64 = 1 << 63;
+/// `MCi_STATUS`: uncorrected.
+const BANK_UC: u64 = 1 << 61;
+/// `MCi_STATUS`: `MCi_MISC` holds something.
+const BANK_MISCV: u64 = 1 << 59;
+/// `MCi_STATUS`: `MCi_ADDR` holds the address.
+const BANK_ADDRV: u64 = 1 << 58;
+/// AMD's `MCA_STATUS`: the error is in poisoned data.
+const BANK_POISON: u64 = 1 << 43;
+
+/// The page of an uncorrected record left in a machine-check bank that the
+/// loader keeps out of the next boot (`docs/MACHINE-CHECK-RESTART.md` §2.7),
+/// as a frame number: a valid, uncorrected record with a usable address --
+/// Intel's with `MISCV` and `MCi_MISC` naming a physical address (mode 2)
+/// of grain 12 bits or finer, AMD's with the poison bit -- and a frame that
+/// fits 32 bits. `None` for anything else.
+#[must_use]
+pub const fn left_page(rules: BankRules, status: u64, address: u64, misc: u64) -> Option<u32> {
+    if status & (BANK_VAL | BANK_UC | BANK_ADDRV) != (BANK_VAL | BANK_UC | BANK_ADDRV) {
+        return None;
+    }
+    let usable = match rules {
+        BankRules::Intel => {
+            status & BANK_MISCV != 0 && (misc >> 6) & 0b111 == 2 && misc & 0x3f <= 12
+        }
+        BankRules::Amd => status & BANK_POISON != 0,
+    };
+    let frame = address >> 12;
+    if usable && frame <= u32::MAX as u64 {
+        Some(frame as u32)
+    } else {
+        None
+    }
 }
 
 /// Where the region goes, given the conventional memory the firmware's map

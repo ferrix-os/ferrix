@@ -86,6 +86,10 @@ pub enum StatLayout {
 #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
 mod arm_common;
 
+/// Arm's power-off is its `shutdown` (PSCI `SYSTEM_OFF`); only x86-64 tells a
+/// halt from a power-off.
+#[cfg(target_arch = "aarch64")]
+pub use aarch64::shutdown as power_off;
 #[cfg(target_arch = "aarch64")]
 pub use aarch64::{
     ARCH, COMPAT_USER_END, EPOLL_EVENT_BYTES, Irq, NAME, OPEN_FLAGS, STAT_LAYOUT, TrapFrame,
@@ -98,11 +102,12 @@ pub use aarch64::{
 };
 #[cfg(target_arch = "aarch64")]
 pub(crate) use aarch64::{
-    CpuStarter, PageEncoding, advance_past_breakpoint, classify, console_receive_irq, cpu_local,
-    cpu_local_register, describe_cpus, drain_console, enable_console_receive, flush_tlb,
-    forbid_user_access, frame_pointer, hardware_id, identity_root, install_user_root, ipi_irq,
-    mask_interrupt, msi_doorbell, permit_user_access, prepare_stack, prepare_user_root,
-    report_trap, restore_user_state, save_user_state, send_ipi_to_others, service_interrupts,
+    CpuStarter, PageEncoding, advance_past_breakpoint, check_root_tags, classify,
+    console_receive_irq, cpu_local, cpu_local_register, describe_cpus, drain_console,
+    enable_console_receive, flush_tlb, forbid_user_access, frame_pointer, hardware_id,
+    identity_root, install_user_root, ipi_irq, last_root_write, mask_interrupt, msi_doorbell,
+    permit_user_access, prepare_stack, prepare_user_root, report_trap, restore_user_state,
+    returned_to_service, root_tag_now, save_user_state, send_ipi_to_others, service_interrupts,
     set_cpu_local, switch_to, system_call, timer_arm, timer_disarm, timer_disarm_fired, timer_irq,
     uninstall_user_root, unmask_interrupt,
 };
@@ -117,6 +122,9 @@ pub use aarch64::{
     drop_identity_map, halt, identity_map_live, init_console, init_interrupts, init_traps,
     kernel_write_protected, wait_for_interrupt, wait_for_work,
 };
+/// As AArch64's.
+#[cfg(target_arch = "arm")]
+pub use armv7a::shutdown as power_off;
 #[cfg(target_arch = "arm")]
 pub use armv7a::{
     ARCH, COMPAT_USER_END, EPOLL_EVENT_BYTES, Irq, NAME, OPEN_FLAGS, STAT_LAYOUT, TrapFrame,
@@ -129,11 +137,12 @@ pub use armv7a::{
 };
 #[cfg(target_arch = "arm")]
 pub(crate) use armv7a::{
-    CpuStarter, PageEncoding, advance_past_breakpoint, classify, console_receive_irq, cpu_local,
-    cpu_local_register, describe_cpus, drain_console, enable_console_receive, flush_tlb,
-    forbid_user_access, frame_pointer, hardware_id, identity_root, install_user_root, ipi_irq,
-    mask_interrupt, msi_doorbell, permit_user_access, prepare_stack, prepare_user_root,
-    report_trap, restore_user_state, save_user_state, send_ipi_to_others, service_interrupts,
+    CpuStarter, PageEncoding, advance_past_breakpoint, check_root_tags, classify,
+    console_receive_irq, cpu_local, cpu_local_register, describe_cpus, drain_console,
+    enable_console_receive, flush_tlb, forbid_user_access, frame_pointer, hardware_id,
+    identity_root, install_user_root, ipi_irq, last_root_write, mask_interrupt, msi_doorbell,
+    permit_user_access, prepare_stack, prepare_user_root, report_trap, restore_user_state,
+    returned_to_service, root_tag_now, save_user_state, send_ipi_to_others, service_interrupts,
     set_cpu_local, switch_to, system_call, timer_arm, timer_disarm, timer_disarm_fired, timer_irq,
     uninstall_user_root, unmask_interrupt,
 };
@@ -157,6 +166,114 @@ pub use aarch64::speculation::midr_of;
 pub use armv7a::speculation::midr_of;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{cpuid, user_extended_state};
+// The RAM scrubber's writes that read nothing, its eviction to the point of
+// coherency, and the guest test (`docs/RAM-SCRUBBER.md` §3.2, §3.3). ARMv7-A
+// has no write of a whole line that reads nothing, so it stands down.
+#[cfg(target_arch = "aarch64")]
+pub(crate) use aarch64::scrub::{
+    evict_to_coherency, fill_without_reading, hypervisor_seen, is_guest, scrub_ready,
+};
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::scrub::{
+    evict_to_coherency, fill_without_reading, hypervisor_seen, is_guest, scrub_ready,
+};
+
+// A copy a machine check can stop (`docs/MACHINE-CHECK-COPY.md` §3.1): on
+// x86-64 one `rep movsb` the ring-0 handler knows; elsewhere, where the item
+// recovers from no machine check, a plain copy that never stops.
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::copy_mc::{Copied, copy_mc};
+
+/// What a copy did (x86-64's `Copied`): never stopped here.
+#[cfg(not(target_arch = "x86_64"))]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct Copied {
+    /// Bytes not copied.
+    pub(crate) left: u64,
+    /// The poisoned page with bit 0 set; always 0 here.
+    pub(crate) page: u64,
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+impl Copied {
+    /// Never a poisoned page off x86-64.
+    pub(crate) const fn poisoned(self) -> Option<u64> {
+        None
+    }
+}
+
+/// Copy `out.len()` bytes from the kernel address `source` into `out`.
+///
+/// # Safety
+///
+/// (USER-COPY) `source..source + out.len()` is readable kernel memory that
+/// stays live for the call.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) unsafe fn copy_mc(out: &mut [u8], source: u64) -> Copied {
+    // SAFETY: (USER-COPY) the caller's range is readable and live for `out`'s
+    // length, which `out` itself is writable for.
+    let bytes = unsafe { core::slice::from_raw_parts(source as *const u8, out.len()) };
+    out.copy_from_slice(bytes);
+    Copied { left: 0, page: 0 }
+}
+
+/// ARMv7-A stands down: no write of a whole line reads nothing there.
+#[cfg(target_arch = "arm")]
+pub(crate) const fn scrub_ready() -> Result<(), &'static str> {
+    Err("ARMv7-A has no write of a whole line that reads nothing")
+}
+
+/// Never reached on ARMv7-A: [`scrub_ready`] refused first.
+#[cfg(target_arch = "arm")]
+pub(crate) fn fill_without_reading(_virt: u64, _len: u64, _value: &dyn Fn(u64) -> u64) {}
+
+/// Never reached on ARMv7-A: [`scrub_ready`] refused first.
+#[cfg(target_arch = "arm")]
+pub(crate) fn evict_to_coherency(_virt: u64, _len: u64) {}
+
+/// Not asked on ARMv7-A, which stands down whatever it runs on.
+#[cfg(target_arch = "arm")]
+pub(crate) const fn is_guest(_view: &ferrix_bootinfo::BootView<'_>) -> bool {
+    false
+}
+
+/// Not asked on ARMv7-A, which stands down whatever it runs on.
+#[cfg(target_arch = "arm")]
+pub(crate) const fn hypervisor_seen(_view: &ferrix_bootinfo::BootView<'_>) -> bool {
+    false
+}
+
+// Core quarantine's interrupt moves (`docs/CORE-QUARANTINE.md` §3.3): on
+// x86-64 every message is a remapping entry that can be retargeted; on the
+// Arm pair moving one is `GICD_IROUTER` or `ITARGETSR`, a later step, so no
+// processor goes out of service there.
+#[cfg(target_arch = "x86_64")]
+pub use x86_64::thread_core;
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::{immovable_aimed_at, move_messages};
+
+/// Whether interrupts can be moved off a processor, so that it may go out
+/// of service.
+pub const CAN_MOVE_INTERRUPTS: bool = cfg!(target_arch = "x86_64");
+
+/// No message can be moved off x86-64: every processor holds one that
+/// cannot.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn immovable_aimed_at(_hardware_id: u64) -> bool {
+    true
+}
+
+/// Nothing is moved off x86-64.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn move_messages(_from: u64, _to: u32) -> Result<usize, &'static str> {
+    Err("this architecture cannot move its interrupts")
+}
+
+/// No SMT topology is read off x86-64: each processor is a core of its own.
+#[cfg(not(target_arch = "x86_64"))]
+pub const fn thread_core(_hardware_id: u64) -> Option<(u64, u32)> {
+    None
+}
 
 /// No `CPUID` off x86-64.
 #[cfg(not(target_arch = "x86_64"))]
@@ -190,11 +307,17 @@ pub const fn write_combining_processors() -> Option<usize> {
 
 // `ferrix.msrlog`, x86-64's read-only MSR log (`L.x86_64.187`); none on Arm.
 #[cfg(target_arch = "x86_64")]
+pub use x86_64::start_machine_check_log;
+#[cfg(target_arch = "x86_64")]
 pub use x86_64::start_msr_log;
 
 /// No MSRs: the Arm kernels have no such log.
 #[cfg(not(target_arch = "x86_64"))]
 pub const fn start_msr_log(_view: &ferrix_bootinfo::BootView<'_>) {}
+
+/// The machine-check log: nothing here, which has no machine-check banks.
+#[cfg(not(target_arch = "x86_64"))]
+pub const fn start_machine_check_log(_view: &ferrix_bootinfo::BootView<'_>) {}
 
 // The power core, x86-64's VR current limit through typed calls on a claim
 // (`docs/POWERCTL.md`, `L.x86_64.194`-`208`, `L.device.51`-`53`); none on
@@ -392,18 +515,20 @@ pub use x86_64::{
 };
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::{
-    CpuStarter, PageEncoding, advance_past_breakpoint, classify, console_receive_irq, cpu_local,
-    cpu_local_register, describe_cpus, drain_console, enable_console_receive, flush_tlb,
-    forbid_user_access, frame_pointer, hardware_id, identity_root, install_user_root, ipi_irq,
-    mask_interrupt, msi_doorbell, permit_user_access, prepare_stack, prepare_user_root,
-    report_trap, restore_user_state, save_user_state, send_ipi_to_others, service_interrupts,
+    CpuStarter, PageEncoding, advance_past_breakpoint, check_root_tags, classify,
+    console_receive_irq, cpu_local, cpu_local_register, describe_cpus, drain_console,
+    enable_console_receive, flush_tlb, forbid_user_access, frame_pointer, hardware_id,
+    identity_root, install_user_root, ipi_irq, last_root_write, mask_interrupt, msi_doorbell,
+    permit_user_access, prepare_stack, prepare_user_root, report_trap, restore_user_state,
+    returned_to_service, root_tag_now, save_user_state, send_ipi_to_others, service_interrupts,
     set_cpu_local, switch_to, system_call, timer_arm, timer_disarm, timer_disarm_fired, timer_irq,
     uninstall_user_root, unmask_interrupt,
 };
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
     FAST_WRITE_READ, UserRegs, counter_now, decode_compat_syscall, decode_syscall,
-    disable_interrupts, enable_interrupts, hardware_random, msi_allocate, reset, shutdown,
+    disable_interrupts, enable_interrupts, hardware_random, msi_allocate, power_off, reset,
+    shutdown,
 };
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
@@ -554,6 +679,44 @@ pub(crate) use x86_64::check_machine_check_enabled;
 )]
 pub(crate) const fn check_machine_check_enabled() -> Result<(), &'static str> {
     Ok(())
+}
+
+// x86-64's machine check from ring 3 (`docs/MACHINE-CHECK.md` §3.5): whether
+// its entry marked a frame for `SIGBUS`, and the signal. The Arm
+// architectures take no machine check, so no frame is ever marked there.
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::{machine_check_marked, machine_check_signal, retire_poisoned};
+
+/// `/proc/ferrix-mce`: nothing here, which has no machine check.
+#[cfg(not(target_arch = "x86_64"))]
+pub fn render_machine_check(_out: &mut impl core::fmt::Write) -> core::fmt::Result {
+    Ok(())
+}
+
+#[cfg(target_arch = "x86_64")]
+pub use x86_64::render_machine_check;
+
+/// Whether a trap frame is a machine check marked for `SIGBUS`: never here.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn machine_check_marked(_frame: &TrapFrame) -> bool {
+    false
+}
+
+/// The signal for a marked machine check: unreachable here, since
+/// [`machine_check_marked`] is never true; `SIGBUS` from the kernel if it
+/// were.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn machine_check_signal(_frame: &mut TrapFrame) -> Option<(u32, i32, u64, bool)> {
+    Some((ferrix_linux_abi::types::SIGBUS, 0x80, 0, false))
+}
+
+/// Retire a frame a copy consumed poison in, dropping the cached page it
+/// holds if clean: unreachable here, since no copy is ever stopped
+/// ([`Copied::poisoned`] is always `None`), and the same as x86-64's if it
+/// were.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) fn retire_poisoned(page: u64) {
+    let _ = crate::user::cache::drop_poisoned(page / ferrix_bootinfo::PAGE_SIZE);
 }
 
 // Cache maintenance for a device that does not snoop the caches: the

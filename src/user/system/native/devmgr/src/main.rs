@@ -45,7 +45,7 @@ use ferrix_netring::control::{
     CONTROL_RIGHTS as NET_CONTROL_RIGHTS, DEVICE_RIGHTS as NET_DEVICE_RIGHTS, MAX_MESSAGE,
     Message as NetRing, Start as NetStart,
 };
-use ferrix_restart::{Decision, Ended, Exit, Policy, Restart, Signal};
+use ferrix_restart::{Ended, Escalation, Exit, Instant, Next, Policy, Restart, Signal};
 use ferrix_rt::native::channel::{self, Channel, ReadError};
 use ferrix_rt::native::device::{Device, Limit};
 use ferrix_rt::native::error::Error;
@@ -354,24 +354,49 @@ enum Step {
     Wait = 6,
 }
 
-/// How many times one device's driver is started again after it dies.
-///
-/// A native program has no clock, so the budget is a count rather than a
-/// rate: a driver that dies on every start stops being started after this
-/// many, and its device stays quiesced as a device with no restart does.
+/// How many times one device's driver is started again after it dies, in
+/// the life of the machine: a count, not a rate, so a driver that keeps
+/// dying stops being started after this many, and its device stays
+/// quiesced as a device with no restart does.
 const MAX_RESTARTS: u32 = 8;
+
+/// The delay before a first restart, doubled for each one of a crash loop
+/// (`docs/DEVMGR.md` §4): 1 s, 2 s, and 4 s before the start on a
+/// reinitialised device.
+const RESTART_DELAY: Duration = Duration::from_secs(1);
+
+/// How long a driver must stay up for its death not to count as a failed
+/// start of a crash loop ([`Escalation`]).
+const SETTLE: Duration = Duration::from_secs(10);
 
 /// A device's restart policy, the service manager's own (`src/lib/init/restart`,
 /// `docs/INIT.md` §5.4): `Restart=always` for a kind that is
-/// [`restarted`] and `Restart=no` for the rest, no delay, and a start limit of
-/// [`MAX_RESTARTS`] which, with no clock to renew it, is a count.
+/// [`restarted`] and `Restart=no` for the rest, [`RESTART_DELAY`] doubled
+/// along a crash loop, and a start limit of [`MAX_RESTARTS`], a count.
 fn policy_for(kind: Kind, location: u32) -> Policy {
     let restart = if restarted(kind, location) {
         Restart::Always
     } else {
         Restart::No
     };
-    Policy::new(restart, Duration::ZERO, MAX_RESTARTS, Duration::MAX)
+    Policy::new(restart, RESTART_DELAY, MAX_RESTARTS, Duration::MAX)
+}
+
+/// Monotonic now, if the clock answers.
+fn now() -> Option<Instant> {
+    ferrix_rt::linux::monotonic_nanos()
+        .ok()
+        .map(Instant::from_nanos)
+}
+
+/// A start [`serve`] makes once its time comes: a restart, or the start on
+/// a reinitialised device that is a crash loop's last.
+#[derive(Clone, Copy)]
+struct Due {
+    /// When; `None` is now.
+    at: Option<Instant>,
+    /// Whether the device is reinitialised first.
+    reinit: bool,
 }
 
 /// How a dead driver ended, as `process_status` (K6) says. A status that
@@ -466,6 +491,18 @@ struct Started {
     /// Whether its driver is started again when it dies, and how many times
     /// it has been.
     policy: Policy,
+    /// Where a crash loop stands: restarts that failed in a row, and whether
+    /// the last start was on a reinitialised device.
+    crashes: Escalation,
+    /// When this driver came up: published, or started for a kind that
+    /// publishes nothing. `None` while it has not.
+    up: Option<Instant>,
+    /// The start that is waited for, while its delay runs.
+    due: Option<Due>,
+    /// Whether the device is quarantined: its driver died at every start, a
+    /// reinitialised one included, and nothing is started on it again but by
+    /// an explicit BIND.
+    quarantined: bool,
     /// The device, for the quiesce when the driver dies.
     device: Device<Kernel>,
     /// The driver's job, killed if it never publishes.
@@ -636,6 +673,10 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
                     quiesced: false,
                     unbinding: None,
                     policy: policy_for(kind, info.location),
+                    crashes: Escalation::new(SETTLE),
+                    up: if published { now() } else { None },
+                    due: None,
+                    quarantined: false,
                     device: keep,
                     job,
                     process,
@@ -1277,7 +1318,14 @@ fn serve(
         while let Some(request) = inbox.take() {
             answer(channel, port, started, drivers, inbox, request);
         }
-        let packet = port.wait(Deadline::Never).map_err(|_| Step::Wait)?;
+        // Then every start whose delay has run; the wait below ends at the
+        // next one's time.
+        launch_due(channel, port, started, drivers, inbox, events.as_ref());
+        let packet = match port.wait(next_due(started)) {
+            Ok(packet) => packet,
+            Err(Error::TimedOut) => continue,
+            Err(_) => return Err(Step::Wait),
+        };
         let key = packet.key;
         if key == KEY_KERNEL {
             take_requests(channel, inbox);
@@ -1344,15 +1392,165 @@ fn serve(
             died_status(exit).cast_unsigned(),
             drivers,
         );
+        if entry.policy.restart == Restart::No {
+            continue;
+        }
         // Only a device that was quiesced is handed on: until then the dead
         // driver's core may still hold it, and the new one would be refused.
-        // The policy counts the restart it decides on.
-        let restarts =
-            |entry: &Started| u32::try_from(entry.policy.budget.used()).unwrap_or(u32::MAX);
-        if entry.quiesced
-            && entry.policy.decide(Ended::of(exit), None) == Decision::Now
-            && launch_again(channel, port, slot, entry, drivers, inbox, Deadline::Never)
-        {
+        if !entry.quiesced {
+            Events::tell(
+                events.as_ref(),
+                ferrix_devmgr_events_proto::What::GaveUp,
+                entry,
+                restarts(entry),
+                drivers,
+            );
+            continue;
+        }
+        let up = entry.up.take();
+        escalate(entry, Ended::of(exit), up, events.as_ref(), drivers);
+    }
+}
+
+/// How many times `entry`'s driver has been started again.
+fn restarts(entry: &Started) -> u32 {
+    u32::try_from(entry.policy.budget.used()).unwrap_or(u32::MAX)
+}
+
+/// Decide about the death of `entry`'s driver, which came up at `up` or
+/// never did, its device quiesced: a restart or a start on a reinitialised
+/// device, each after its delay, or quarantine, or nothing more once the
+/// start limit is spent. The policy counts the start it decides on.
+fn escalate(
+    entry: &mut Started,
+    ended: Ended,
+    up: Option<Instant>,
+    events: Option<&Events>,
+    drivers: &Drivers<'_>,
+) {
+    let now = now();
+    let name = driver_name(drivers.names, entry.driver);
+    let location = entry.location;
+    let millis = |at: Option<Instant>| {
+        at.zip(now)
+            .map_or(0, |(at, now)| at.saturating_since(now).as_millis())
+    };
+    match entry.crashes.decide(&mut entry.policy, ended, now, up) {
+        Next::Stay => {}
+        Next::Restart(at) => {
+            entry.due = Some(Due { at, reinit: false });
+            ferrix_rt::info!(
+                "devmgr   {name} {location:#010x}: restart {} in {} ms",
+                restarts(entry),
+                millis(at)
+            );
+        }
+        Next::Reinit(at) => {
+            entry.due = Some(Due { at, reinit: true });
+            ferrix_rt::warn!(
+                "devmgr   {name} {location:#010x}: {} restarts in a row died within {} s of their start; the device is reinitialised -- quiesced again and its configuration checked -- and the driver started once more in {} ms",
+                Escalation::FAILED_RESTARTS,
+                SETTLE.as_secs(),
+                millis(at)
+            );
+            Events::tell(
+                events,
+                ferrix_devmgr_events_proto::What::Reinit,
+                entry,
+                restarts(entry),
+                drivers,
+            );
+        }
+        Next::Quarantine => quarantine(
+            entry,
+            "the start on the reinitialised device died too",
+            events,
+            drivers,
+        ),
+        Next::GiveUp => {
+            ferrix_rt::err!(
+                "devmgr   {name} {location:#010x}: not started again: its {MAX_RESTARTS} restarts are spent"
+            );
+            Events::tell(
+                events,
+                ferrix_devmgr_events_proto::What::GaveUp,
+                entry,
+                restarts(entry),
+                drivers,
+            );
+        }
+    }
+}
+
+/// Quarantine `entry`'s device, `why`: nothing is started on it again but
+/// by an explicit BIND. It stays quiesced, and the pins its dead drivers
+/// left stay in the kernel's quarantine, mapped and held, until a driver of
+/// it is accepted again (`docs/DEVMGR.md` §4).
+fn quarantine(entry: &mut Started, why: &str, events: Option<&Events>, drivers: &Drivers<'_>) {
+    entry.quarantined = true;
+    entry.due = None;
+    let name = driver_name(drivers.names, entry.driver);
+    ferrix_rt::err!(
+        "devmgr   {name} {:#010x} quarantined after {} restarts: {why}. Nothing is started on it again until a bind asks; its dead drivers' pins stay in the kernel's quarantine",
+        entry.location,
+        restarts(entry)
+    );
+    Events::tell(
+        events,
+        ferrix_devmgr_events_proto::What::Quarantined,
+        entry,
+        restarts(entry),
+        drivers,
+    );
+}
+
+/// When [`serve`] must wake for the next start that is due.
+fn next_due(started: &[Option<Started>; MAX_DEVICES]) -> Deadline {
+    started
+        .iter()
+        .flatten()
+        .filter_map(|entry| entry.due)
+        .map(|due| due.at.map_or(0, Instant::as_nanos))
+        .min()
+        .map_or(Deadline::Never, Deadline::At)
+}
+
+/// Make every start whose time has come.
+///
+/// A start on a reinitialised device first quiesces the device again: the
+/// kernel turns its bus mastering off and reads back every register it
+/// owns in its configuration space (SAFETY-MANUAL AoU-22). The reset is the
+/// driver's own, at its start, as at every start: the kernel has no
+/// device-reset call. A device that will not quiesce, and a start the
+/// kernel or devmgr refuses, quarantine it at once; a driver that dies
+/// before it publishes is one more failed start.
+fn launch_due(
+    channel: &Channel<Kernel>,
+    port: &Port<Kernel>,
+    started: &mut [Option<Started>; MAX_DEVICES],
+    drivers: &Drivers<'_>,
+    inbox: &mut Inbox,
+    events: Option<&Events>,
+) {
+    for (slot, entry) in started.iter_mut().enumerate() {
+        let Some(entry) = entry.as_mut() else {
+            continue;
+        };
+        let Some(due) = entry.due else {
+            continue;
+        };
+        let now = now();
+        if due.at.zip(now).is_some_and(|(at, now)| at > now) {
+            continue;
+        }
+        entry.due = None;
+        if due.reinit && !quiesce(&entry.device) {
+            entry.quiesced = false;
+            quarantine(entry, "its device would not quiesce again", events, drivers);
+            continue;
+        }
+        let generation = entry.generation;
+        if launch_again(channel, port, slot, entry, drivers, inbox, Deadline::Never) {
             let _ = channel.write(
                 &Message::Restarted {
                     location: entry.location,
@@ -1361,23 +1559,40 @@ fn serve(
                 .encode(),
             );
             Events::tell(
-                events.as_ref(),
+                events,
                 ferrix_devmgr_events_proto::What::Restarted,
                 entry,
                 restarts(entry),
                 drivers,
             );
-        } else if entry.policy.restart != Restart::No {
-            // A kind that is started again, and was not: its budget is
-            // spent, or its device could not be quiesced, and it stays dark.
-            Events::tell(
-                events.as_ref(),
-                ferrix_devmgr_events_proto::What::GaveUp,
+            continue;
+        }
+        if entry.generation == generation || !entry.quiesced {
+            quarantine(
                 entry,
-                restarts(entry),
+                "its driver could not be started again, or its device not quiesced after it",
+                events,
                 drivers,
             );
+            continue;
         }
+        // It died before it published, and the wait took its death.
+        let exit = exit_of(&entry.process);
+        let _ = channel.write(
+            &Message::Died {
+                location: entry.location,
+                status: died_status(exit),
+            }
+            .encode(),
+        );
+        Events::tell(
+            events,
+            ferrix_devmgr_events_proto::What::Died,
+            entry,
+            died_status(exit).cast_unsigned(),
+            drivers,
+        );
+        escalate(entry, Ended::of(exit), None, events, drivers);
     }
 }
 
@@ -1528,6 +1743,11 @@ fn answer(
                 done(channel, token, ANSWER_FAILED);
                 return;
             }
+            // A start asked for: it takes the place of one that is due,
+            // and a crash loop, a quarantine included, begins again.
+            entry.due = None;
+            entry.quarantined = false;
+            entry.crashes.reset();
             let answered =
                 if launch_again(channel, port, key, entry, drivers, inbox, Deadline::Never) {
                     ANSWER_DONE
@@ -1942,6 +2162,7 @@ fn launch_again(
     };
     if awaited.published {
         entry.published = true;
+        entry.up = now();
         let _ = channel.write(
             &Message::Bound {
                 device: entry.index,

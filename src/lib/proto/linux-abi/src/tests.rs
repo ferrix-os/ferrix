@@ -1809,13 +1809,13 @@ fn table_sizes_are_stable() {
     // `socket` being unreachable on AArch64.
     assert_eq!(
         mapped(from_x86_64).len(),
-        258,
-        "the x86-64 table maps 258 calls"
+        260,
+        "the x86-64 table maps 260 calls"
     );
     assert_eq!(
         mapped(from_aarch64).len(),
-        226,
-        "the AArch64 table maps 226 calls"
+        228,
+        "the AArch64 table maps 228 calls"
     );
 }
 /// Calls only ARMv7-A has, because it is the only 32-bit target.
@@ -2332,7 +2332,7 @@ fn arm_covers_the_calls_musl_startup_makes() {
 #[test]
 fn arm_table_size_is_stable() {
     // A canary, as for the other two tables.
-    assert_eq!(mapped_arm().len(), 278, "the ARMv7-A table maps 278 calls");
+    assert_eq!(mapped_arm().len(), 280, "the ARMv7-A table maps 280 calls");
 }
 
 /// The filesystem-control and extended-attribute calls, against the numbers in
@@ -3390,7 +3390,7 @@ mod virtgpu;
 /// Every i386 number [`from_i386`] translates beside the thread-area pair:
 /// the constant, the number `asm/unistd_32.h` gives it, and ARMv7-A's constant
 /// for the same call.
-const I386_NUMBERS: [(usize, usize, usize); 248] = [
+const I386_NUMBERS: [(usize, usize, usize); 250] = [
     (i386::FORK, 2, arm::FORK),
     (i386::KILL, 37, arm::KILL),
     (i386::WAIT4, 114, arm::WAIT4),
@@ -3603,6 +3603,8 @@ const I386_NUMBERS: [(usize, usize, usize); 248] = [
     (i386::SYSLOG, 103, arm::SYSLOG),
     (i386::SCHED_SETAFFINITY, 241, arm::SCHED_SETAFFINITY),
     (i386::SCHED_GETAFFINITY, 242, arm::SCHED_GETAFFINITY),
+    (i386::SCHED_SETATTR, 351, arm::SCHED_SETATTR),
+    (i386::SCHED_GETATTR, 352, arm::SCHED_GETATTR),
     (i386::PSELECT6_TIME64, 413, arm::PSELECT6_TIME64),
     (i386::TIMES, 43, arm::TIMES),
     (i386::GETRUSAGE, 77, arm::GETRUSAGE),

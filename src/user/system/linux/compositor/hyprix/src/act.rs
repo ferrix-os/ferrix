@@ -54,6 +54,11 @@ pub struct Drag {
     /// monitor's edge (`compositor_layout::State::edge_snap_at`), and the
     /// frame draws the rectangle it would take (`docs/DESKTOP.md` §1.2).
     pub edge: Option<Snap>,
+    /// How far the pointer has moved that the window, held by a snap, has
+    /// not: carried into the next movement, so that a moved window goes
+    /// where the drag's whole distance puts it and snaps from there, as
+    /// Hyprland's drag works it out from where the drag began.
+    pub owed: (i64, i64),
 }
 
 /// What started a [`Drag`].
@@ -124,6 +129,8 @@ pub struct Around<'a> {
     /// Workspaces whose `on-created-empty:` command has already been run,
     /// so that going back to one does not start a second terminal.
     pub opened: &'a mut std::collections::BTreeSet<compositor_layout::WorkspaceId>,
+    /// The programs `suspend` froze.
+    pub suspended: &'a mut crate::suspend::Suspended,
     /// What to say.
     pub report: &'a mut dyn FnMut(&str),
 }
@@ -209,6 +216,8 @@ pub fn compositor(
         "sendshortcut" => Some(send_shortcut(argument, None, state, around)),
         "sendkeystate" => Some(send_key_state(argument, state, around)),
         "focusurgentorlast" => Some(focus_urgent_or_last(state, around)),
+        "suspend" => Some(suspend(argument, state, around)),
+        "resume" => Some(resume(argument, state, around)),
         "toggleswallow" => {
             *around.swallow = !*around.swallow;
             around.say("hyprix: swallowing a terminal is not implemented");
@@ -453,6 +462,7 @@ fn mouse(argument: &str, state: &mut State, around: &mut Around<'_>) -> bool {
         from,
         lifted,
         edge: None,
+        owed: (0, 0),
     });
     true
 }
@@ -525,6 +535,7 @@ pub fn grab_border(
                 from,
                 lifted: false,
                 edge: None,
+                owed: (0, 0),
             });
         } else if drag.is_some_and(|held| held.began == Began::Border) {
             if let Some(held) = drag.take() {
@@ -583,6 +594,7 @@ pub fn client_drag(
         from,
         lifted: false,
         edge: None,
+        owed: (0, 0),
     });
     true
 }
@@ -610,15 +622,37 @@ pub fn dragged(drag: &mut Drag, state: &mut State, (x, y): (i64, i64)) -> bool {
             return true;
         }
     }
+    // A move snapped against an edge was held back by the snap; what it
+    // was held back by is owed to it. Without that, every movement smaller
+    // than `general:snap`'s gap was snapped back to the same edge: a tall
+    // window whose bottom had snapped to the dock could not be dragged up
+    // at all (the customer on the N150, 2026-10-28).
+    let owed = if drag.resizing || drag.lifted {
+        (0, 0)
+    } else {
+        drag.owed
+    };
     let by = Move {
-        x: x.saturating_sub(drag.from.0),
-        y: y.saturating_sub(drag.from.1),
+        x: x.saturating_sub(drag.from.0).saturating_add(owed.0),
+        y: y.saturating_sub(drag.from.1).saturating_add(owed.1),
         exact: false,
     };
     if by.x == 0 && by.y == 0 {
         return false;
     }
     drag.from = (x, y);
+    if !drag.resizing && !drag.lifted {
+        let before = placed_rect(state, drag.window);
+        let moved = state.drag_window_pixel(drag.window, &by);
+        let after = placed_rect(state, drag.window);
+        if let (Some(before), Some(after)) = (before, after) {
+            drag.owed = (
+                by.x.saturating_sub(after.x.saturating_sub(before.x)),
+                by.y.saturating_sub(after.y.saturating_sub(before.y)),
+            );
+        }
+        return moved.is_ok_and(|changes| !changes.is_empty()) || unsnapped;
+    }
     // The drag entry points, not the dispatchers': a hand dragging a window
     // is helped to an edge by `general:snap:*` and a dispatcher asked for a
     // number of pixels and means it.
@@ -627,12 +661,20 @@ pub fn dragged(drag: &mut Drag, state: &mut State, (x, y): (i64, i64)) -> bool {
     // `m_draggingTiled`.
     let moved = if drag.resizing {
         state.drag_resize_window_pixel(drag.window, &by, drag.corner)
-    } else if drag.lifted {
-        state.move_window_pixel(drag.window, &by)
     } else {
-        state.drag_window_pixel(drag.window, &by)
+        state.move_window_pixel(drag.window, &by)
     };
     moved.is_ok_and(|changes| !changes.is_empty()) || unsnapped
+}
+
+/// Where `window` is on the screen now, if it is on one.
+fn placed_rect(state: &State, window: WindowId) -> Option<compositor_layout::Rect> {
+    state
+        .layout()
+        .iter()
+        .flat_map(|output| output.windows.iter())
+        .find(|placed| placed.window == window)
+        .map(|placed| placed.rect)
 }
 
 /// The window id the tile preview is drawn as: no client's window is ever
@@ -966,6 +1008,143 @@ pub fn pick(which: Option<&str>, state: &State, around: &mut Around<'_>) -> Opti
     window
 }
 
+/// What `suspend` and `resume` name: `pid:<n>`, or a window -- the focused
+/// one when nothing is named. A window Proton made, whose class is
+/// `steam_app_<id>`, names Steam's game; any other window, the process on
+/// the other end of its connection, unless that is the X server, which
+/// serves more than one program.
+fn suspend_target(
+    argument: &str,
+    state: &State,
+    around: &mut Around<'_>,
+) -> Option<crate::suspend::Target> {
+    use crate::suspend::{Target, steam_app};
+    let argument = argument.trim();
+    if let Some(number) = argument.strip_prefix("pid:") {
+        let Ok(pid) = number.trim().parse::<u32>() else {
+            around.say("hyprix: pid: takes a number");
+            return None;
+        };
+        return Some(Target::Pid(pid));
+    }
+    let window = pick(Some(argument), state, around)?;
+    let class = crate::state::as_seen(state, around.slots, around.sources)
+        .iter()
+        .find(|seen| seen.window == window)
+        .map(|seen| seen.initial_class.to_owned())
+        .unwrap_or_default();
+    if let Some(id) = steam_app(&class) {
+        return Some(Target::Steam(id));
+    }
+    let Some(pid) = pid_of(window, around).and_then(|pid| u32::try_from(pid).ok()) else {
+        around.say("hyprix: the window's connection has no process");
+        return None;
+    };
+    let comm = std::fs::read_to_string(format!("/proc/{pid}/comm")).unwrap_or_default();
+    if comm.trim_end() == "yserver" {
+        around.say(&format!(
+            "hyprix: {class:?} is an X window, and the X server serves other programs too; \
+             suspend pid:<its pid> instead"
+        ));
+        return None;
+    }
+    Some(Target::Pid(pid))
+}
+
+/// `suspend [window|pid:<n>]`: freeze a program where it is, every process
+/// of it, and park its connections (`crate::suspend`, `docs/APP-SUSPEND.md`
+/// §3.1).
+fn suspend(argument: &str, state: &State, around: &mut Around<'_>) -> bool {
+    let Some(target) = suspend_target(argument, state, around) else {
+        return false;
+    };
+    let procs = crate::suspend::snapshot();
+    let root = match crate::suspend::root_of(&target, &procs) {
+        Ok(root) => root,
+        Err(why) => {
+            around.say(&format!("hyprix: suspend: {why}"));
+            return false;
+        }
+    };
+    if let Some(frozen) = around.suspended.holding(root) {
+        let root = frozen.root;
+        around.say(&format!(
+            "hyprix: suspend: process {root}'s program is frozen already"
+        ));
+        return false;
+    }
+    let frozen = match crate::suspend::freeze(root, std::process::id()) {
+        Ok(frozen) => frozen,
+        Err(why) => {
+            around.say(&format!("hyprix: suspend: {why}"));
+            return false;
+        }
+    };
+    let windows = park(&frozen.pids, true, around);
+    around.say(&format!(
+        "hyprix: suspended process {root} and {} more in {} ({windows} windows)",
+        frozen.pids.len().saturating_sub(1),
+        frozen.cgroup
+    ));
+    around.suspended.insert(frozen);
+    windows > 0
+}
+
+/// `resume [window|pid:<n>|all]`: thaw what `suspend` froze.
+fn resume(argument: &str, state: &State, around: &mut Around<'_>) -> bool {
+    let roots: Vec<u32> = if argument.trim() == "all" {
+        around.suspended.all().map(|frozen| frozen.root).collect()
+    } else {
+        let Some(target) = suspend_target(argument, state, around) else {
+            return false;
+        };
+        let procs = crate::suspend::snapshot();
+        let found = crate::suspend::root_of(&target, &procs)
+            .ok()
+            .and_then(|root| around.suspended.holding(root))
+            .map(|frozen| frozen.root);
+        let Some(root) = found else {
+            around.say("hyprix: resume: that program is not suspended");
+            return false;
+        };
+        vec![root]
+    };
+    let mut changed = false;
+    for root in roots {
+        let Some(frozen) = around.suspended.remove(root) else {
+            continue;
+        };
+        // Thawed before its connections are woken, so that what they are
+        // sent next is read.
+        match crate::suspend::thaw(&frozen) {
+            Ok(()) => around.say(&format!("hyprix: resumed process {root}")),
+            Err(why) => around.say(&format!("hyprix: resume: {why}")),
+        }
+        if let Err(why) = crate::suspend::release(&frozen) {
+            around.say(&format!("hyprix: resume: left in {}: {why}", frozen.cgroup));
+        }
+        changed |= park(&frozen.pids, false, around) > 0;
+    }
+    changed
+}
+
+/// Park or wake every connection opened by one of `pids`, half its windows'
+/// opacity while parked: how many windows that touched.
+fn park(pids: &std::collections::BTreeSet<u32>, parked: bool, around: &mut Around<'_>) -> usize {
+    let mut windows = Vec::new();
+    for slot in around.slots.iter_mut() {
+        if u32::try_from(slot.pid()).is_ok_and(|pid| pids.contains(&pid)) {
+            slot.park(parked);
+            windows.extend(slot.windows().iter().map(|&(_, window)| window));
+        }
+    }
+    let opacity = if parked { "0.5" } else { "unset" };
+    for &window in &windows {
+        let _ = around.rules.set_property(window, "opacity", opacity);
+    }
+    windows.len()
+}
+
 /// The process on the other end of a window's connection.
 fn pid_of(window: WindowId, around: &Around<'_>) -> Option<i32> {
     let source = around.sources.get(&window)?;
@@ -1047,6 +1226,7 @@ mod tests {
                 from: (508, 400),
                 lifted: false,
                 edge: None,
+                owed: (0, 0),
             })
         );
 
@@ -1180,6 +1360,7 @@ mod tests {
             from: (0, 0),
             lifted: false,
             edge: None,
+            owed: (0, 0),
         };
         let mut outputs = state.layout();
         let mut styles = std::collections::BTreeMap::new();
@@ -1237,5 +1418,80 @@ mod tests {
         let _ = press(&mut seat, false);
         assert!(!client_drag(WindowId(2), 0, &state, &seat, &mut drag));
         assert_eq!(drag, None);
+    }
+
+    /// A drag moves a window by the pointer's distance, snapping or not:
+    /// Settings, nearly as tall as the screen above Yoru's dock, has its
+    /// bottom snapped to the dock's edge, and dragged up a few pixels at a
+    /// time it goes up with the pointer, as far as the pointer goes. Each
+    /// step on its own was snapped back to the dock, and the window did
+    /// not move (the customer on the N150, 2026-10-28).
+    #[test]
+    fn a_dragged_window_follows_the_pointer_out_of_a_snap() {
+        let config = compositor_config::parse(
+            "test",
+            "general:layout = floating\ngeneral:snap:enabled = true\n\
+             general:snap:window_gap = 14\ngeneral:snap:monitor_gap = 14\n",
+            &mut NoSources,
+        )
+        .config;
+        let mut state = State::from_config(&config);
+        let _changes = state
+            .add_monitor(Monitor {
+                scale: 1.0,
+                transform: Default::default(),
+                name: "DVI-D-1".to_owned(),
+                id: MonitorId(1),
+                rect: Rect::new(0, 0, 1920, 1080),
+                reserved: compositor_layout::Gaps {
+                    top: 0,
+                    right: 0,
+                    bottom: 76,
+                    left: 0,
+                },
+                description: String::new(),
+                made: <(String, String, String)>::default(),
+            })
+            .unwrap();
+        let settings = WindowId(1);
+        // Its bottom on the dock's edge, 1080 - 76.
+        let _changes = state
+            .open_floating(settings, Rect::new(1200, 100, 700, 904))
+            .unwrap();
+        let rect = |state: &State| {
+            state
+                .layout()
+                .iter()
+                .flat_map(|output| output.windows.iter())
+                .find(|placed| placed.window == settings)
+                .map(|placed| placed.rect)
+                .unwrap()
+        };
+        let start = rect(&state);
+        let mut drag = Drag {
+            window: settings,
+            resizing: false,
+            corner: Corner::NONE,
+            began: Began::Border,
+            from: (1500, 80),
+            lifted: false,
+            edge: None,
+            owed: (0, 0),
+        };
+        // Up by 3 a step, 20 steps: 60 pixels, clear of the top's snap.
+        for step in 1..=20 {
+            let _ = dragged(&mut drag, &mut state, (1500, 80 - 3 * step));
+        }
+        let end = rect(&state);
+        assert_eq!(
+            (end.x, end.y),
+            (start.x, start.y - 60),
+            "the window went up with the pointer"
+        );
+        // And back down by as much: onto the dock's edge again.
+        for step in 1..=20 {
+            let _ = dragged(&mut drag, &mut state, (1500, 20 + 3 * step));
+        }
+        assert_eq!(rect(&state).y, start.y, "and back onto the dock's edge");
     }
 }

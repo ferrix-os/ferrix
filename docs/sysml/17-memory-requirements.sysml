@@ -22,6 +22,11 @@
  * each, the package gives the file, and they are never renumbered once a
  * check names them.
  *
+ * L.user.173 was reserved for the tmpfs root's release after a switch to a
+ * root disk (docs/RAM-RELEASE.md §2) and released unwritten: that is
+ * fs/mod.rs and ferrix-vfs, the load ring and no ring, and no item code
+ * relies on what the tmpfs holds after it (consultant ruling, ledger 5038).
+ *
  * The frame, heap, paging and vma arithmetic itself is src/lib/kernel/frame,
  * heap, paging and vma, whose host tests verify it; nothing here restates
  * them. What is here is what the kernel does with them.
@@ -429,16 +434,303 @@ package FerrixMemoryRequirements {
             attribute :>> parent = "H.MEM.14";
             attribute :>> unit = "mm::reclaim_boot_memory";
         }
+        requirement <'L.mm.91'> aRetiredFrameIsNeverAllocatedAgain : ItemLowLevel {
+            doc /* docs/MACHINE-CHECK.md §3.4: retirement by late kill; the
+                insert, the claim and the free paths' test are under the frame
+                allocator's lock (the consultant's M4). */
+            attribute :>> statement = "retire_frame shall, in one hold of the
+                frame allocator's lock, record the frame and take it off the free
+                lists if it is free; release_frame and deallocate_frames shall,
+                under that lock, keep a recorded frame allocated and charged to
+                nobody instead of freeing it, freeing the rest of a block that
+                holds one frame by frame; and a frame the allocator does not
+                cover shall not be recorded.";
+            attribute :>> criterion = "Stage 2: a frame retired while shared stays
+                allocated after both releases and cannot be claimed; one retired
+                inside a two-frame block stays allocated when the block is freed
+                and its neighbour is free; one retired while free is allocated at
+                once; a second retirement answers already. Negative control: the
+                free paths' test removed, stage 2 stops. test-mce-driver: a pinned retired
+                frame is still listed after quarantine_release; its keep is stage
+                2's check (control: the keep removed, stage 2 stops)";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("mm::retire_frame",
+                "mm::holds_retired",
+                "mm::keep_retired",
+                "mm::is_retired",
+                "mm::release_frame",
+                "mm::deallocate_frames",
+                "mm::retired_frames");
+        }
+        requirement <'L.mm.92'> theRetiredSetRefusesWhenFull : ItemLowLevel {
+            attribute :>> statement = "Once 256 frames are retired, retire_frame
+                shall record no further frame and change nothing, answering full,
+                and shall print the set's fullness once.";
+            attribute :>> criterion = "Stage 2, the set's room lowered to what the
+                check has used: a further frame is refused twice and not retired,
+                and the line was printed; the room and the line are given back.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("mm::retire_frame");
+        }
+        // docs/HEAP-CACHES.md: each processor's cache of free heap objects in
+        // front of the heap's lock (the consultant's OK IF 1-10, ledger 4914).
+        requirement <'L.mm.93'> anAllocationIsServedByItsProcessorsCache : ItemLowLevel {
+            attribute :>> statement = "An allocation of a size class shall take an
+                object its processor's cache holds without the heap's lock, and an
+                empty cache shall refill REFILL objects of the class under one hold of
+                it.";
+            attribute :>> criterion = "On one processor with its 2 KiB cache drained,
+                the first allocation raises the heap's count by exactly REFILL objects
+                and the next REFILL - 1 do not move it.";
+            attribute :>> parent = "H.MEM.11";
+            attribute :>> unit = ("mm::allocate_through_caches", "mm::with_cache");
+        }
+        requirement <'L.mm.94'> aFreeGoesToItsProcessorsCache : ItemLowLevel {
+            attribute :>> statement = "A free of a size class shall go to its
+                processor's cache while the cache has room; a full cache shall give
+                back REFILL of its objects and the freed one under one hold of the
+                heap's lock.";
+            attribute :>> criterion = "REFILL frees into an empty 2 KiB cache leave
+                the heap's count unchanged and the cache holding REFILL; with the
+                cache full, one more free lowers the count by exactly REFILL + 1
+                objects and leaves CACHE_DEPTH - REFILL held.";
+            attribute :>> parent = "H.MEM.9";
+            attribute :>> unit = "mm::KernelAllocator::dealloc";
+        }
+        requirement <'L.mm.95'> aRefusalDrainsTheCachesFirst : ItemLowLevel {
+            attribute :>> statement = "Every refusal of the heap -- a refill, a large
+                request, a reserve's fill -- shall drain every processor's cache and
+                try once more before it refuses; a reserved section then draws on its
+                reserve as before.";
+            attribute :>> criterion = "With every free frame held and this
+                processor's cache holding 2 KiB objects made one after another, whole
+                pages of them, an allocation of one page is served, and the cached
+                bytes have fallen; so is a reserved section whose fill needs one 2 KiB
+                object, every free one of that class taken from the heap, and one
+                that holds a page, each with the cached bytes fallen and the reserve
+                full after it.";
+            attribute :>> parent = "H.MEM.11";
+            attribute :>> unit = ("mm::heap_or_drain", "mm::reserve::enter");
+        }
+        requirement <'L.mm.96'> theHeapCountLeavesTheCachesOut : ItemLowLevel {
+            attribute :>> statement = "heap_allocated() and the held-memory window's
+                heap bytes shall be the heap's allocated bytes less the bytes the
+                processors' caches hold.";
+            attribute :>> criterion = "With a 2 KiB cache full, heap_allocated() is
+                the heap's own count less the cached bytes, and the cached bytes are
+                at least CACHE_DEPTH objects.";
+            attribute :>> parent = "H.MEM.9";
+            attribute :>> unit = "mm::heap_allocated";
+        }
+        requirement <'L.mm.97'> theDrainEmptiesEveryCache : ItemLowLevel {
+            attribute :>> statement = "The drain shall give every processor's cached
+                objects back to the heap, taking one cache lock at a time, and shall
+                stop the machine (FX-0012) when entered with this processor's cache
+                lock held.";
+            attribute :>> criterion = "After a drain this processor's cache holds
+                nothing and the heap's count is where it was before the objects were
+                cached; every processor allocating, freeing across processors and
+                draining at once finishes within 20 s with no allocation refused, every
+                object they made freed and the caches empty after a drain.";
+            attribute :>> parent = "H.MEM.9";
+            attribute :>> unit = "mm::drain_caches";
+        }
+        requirement <'L.mm.98'> anInjectedRefusalIsNotRetried : ItemLowLevel {
+            attribute :>> statement = "A refusal the failure injection made shall be
+                answered without a drain or a retry.";
+            attribute :>> criterion = "With warm caches, an injection refusing the
+                next frame makes the next allocation of one page return null, and the
+                injection counts exactly one failure.";
+            attribute :>> parent = "H.MEM.11";
+            attribute :>> unit = ("mm::heap_or_drain", "fallible::injected_failures");
+        }
+        // docs/RAM-RELEASE.md §2, R1 (consultant ledger 4971, 5022).
+        requirement <'L.mm.99'> theArchivesPagesComeBack : ItemLowLevel {
+            attribute :>> statement = "Once the root is final, at most once a boot, the
+                frames the initramfs archive fills whole and the frame allocator
+                describes shall be given to it, in batches of at most 1024 frames a
+                hold, and MemTotal and the watermark shall be computed from the
+                frames managed after.";
+            attribute :>> criterion = "On every boot whose checks run, the frames
+                managed grow by exactly the archive's whole pages inside the frame
+                array, none of them is Reserved after, and the watermark is
+                watermark_for of the new count, in one hold per aligned batch of
+                1024 frames it touches and no more than 1024 frames a hold; and
+                whole_frames counts an archive unaligned at both ends, an aligned
+                one, one the frame array ends inside, one at frame 0 and one
+                filling no page whole as inward and inside the array (the
+                `release  checked` line). No release, the watermark left as it
+                was, or the first page rounded down stops the boot there.";
+            attribute :>> parent = "H.MEM.9";
+            attribute :>> unit = ("mm::give_back_initrd", "mm::initrd_frames",
+                "mm::whole_frames");
+        }
+        requirement <'L.mm.100'> noReaderOutlivesTheArchive : ItemLowLevel {
+            attribute :>> statement = "The initramfs archive shall be kept only when it
+                lies in one Initrd region inside the direct map, read only under
+                its lock, lent to a closure whose answer cannot borrow it, and
+                give_back_initrd shall take it out under that lock before any of its
+                frames is given away; after that it shall answer nothing.";
+            attribute :>> criterion = "After the release with_initrd and initrd_span
+                answer None on every boot whose checks run, and initrd_readable
+                takes an archive unaligned at both ends inside an Initrd region and
+                refuses one across the region's end, one in a region of another
+                kind or in none, and one past the direct map (the `release
+                checked` line). A release that leaves the archive kept, or a range
+                test that takes every range, stops the boot there.";
+            attribute :>> parent = "H.MEM.9";
+            attribute :>> unit = ("mm::keep_initrd", "mm::initrd_readable", "mm::with_initrd",
+                "mm::give_back_initrd");
+        }
+        requirement <'L.mm.101'> aScrubClaimLeavesEveryOrder : ItemLowLevel {
+            attribute :>> statement = "The scrubber shall claim a frame only in one hold of the frame
+                allocator's lock in which the frame is free, not retired, free
+                memory is at least twice the watermark, and another free block
+                of the claimed block's order or larger exists; otherwise it
+                shall skip the frame, and stop the batch at the watermark.";
+            attribute :>> criterion = "ferrix-frame's host test
+                a_claim_leaves_another_block_of_its_order; check_scrubber: a
+                frame the check holds is skipped, its contents untouched, and
+                a clean frame's batch leaves the free count and every order's
+                free-block count as they were. Control: the claim's free test
+                removed -- the held frame changes.";
+            attribute :>> parent = "H.FAIL.9";
+            attribute :>> unit = ("mm::scrub::claim", "mm::scrub::run", "mm::scrub::test_batch");
+        }
+        requirement <'L.mm.102'> aScrubbedFrameGoesBackUncounted : ItemLowLevel {
+            attribute :>> statement = "A frame the scrubber found good shall be zeroed and freed
+                through the path that keeps a retired frame held, moving none
+                of the allocator's counters, as its claim moved none.";
+            attribute :>> criterion = "check_scrubber: the free count and the free-block counts after
+                a clean frame's batch equal those before.";
+            attribute :>> parent = "H.FAIL.9";
+            attribute :>> unit = ("mm::scrub::release", "mm::scrub::zero");
+        }
+        requirement <'L.mm.103'> fourPatternsEachReadBack : ItemLowLevel {
+            attribute :>> statement = "Each test shall write the frame four times -- 0x5555..,
+                0xAAAA.., each word its physical address, and that inverted --
+                each with writes that read nothing, evict it to the point of
+                coherency, and read every word back and compare; it shall read
+                no line whose memory contents it has not itself written in the
+                current pass.";
+            attribute :>> criterion = "test-scrub: a full sweep of good memory finds nothing bad;
+                check_scrubber's injected failure is seen on a read-back; the
+                arch requirements L.x86_64.243, L.aarch64.68 and L.armv7a.29
+                for the writes and the eviction.";
+            attribute :>> parent = "H.FAIL.9";
+            attribute :>> unit = ("mm::scrub::test", "mm::scrub::injected");
+        }
+        requirement <'L.mm.104'> aFrameIsBadOnlyAfterItsRetest : ItemLowLevel {
+            attribute :>> statement = "A frame that fails a test shall be tested again at once; it is
+                bad if the retest fails or if it failed before as one of the
+                last 64 suspects; one that passes its retest shall be
+                remembered as a suspect and released.";
+            attribute :>> criterion = "check_scrubber: an injected one-off makes a suspect, released;
+                the same frame failing again later is retired; an injected
+                stuck bit is retired after its retest. Control: retirement
+                after one failure -- the one-off retires a good frame.";
+            attribute :>> parent = "H.FAIL.9";
+            attribute :>> unit = ("mm::scrub::judge", "mm::scrub::was_suspect", "mm::scrub::remember_suspect");
+        }
+        requirement <'L.mm.105'> aBadFrameIsKeptAndTheShareHeld : ItemLowLevel {
+            attribute :>> statement = "A bad frame shall be retired and freed through the
+                retired-frame decision, so that it stays allocated, owned by
+                nobody and retired; where the retired set is full or the
+                scrubber's share of 192 used, it shall be held claimed, not
+                released, and the batch shall stop, so that at most one frame
+                is held out.";
+            attribute :>> criterion = "check_scrubber: the retired frames are allocated, owned by
+                nobody and in the set; with the set full a bad frame is held
+                out and the batch stops after it. Control: a bad frame
+                released when the set is full.";
+            attribute :>> parent = "H.FAIL.9";
+            attribute :>> unit = ("mm::scrub::keep_bad", "mm::scrub::share_used");
+        }
+        requirement <'L.mm.106'> theScrubberStandsDownWhereItMust : ItemLowLevel {
+            attribute :>> statement = "At boot the kernel shall decide once, from SMBIOS type 16's
+                system memory arrays, whether the scrubber runs: where every
+                array says None; and where they say Other or Unknown or none
+                exists only if the processor writes without reading; never
+                where one says Parity, ECC or CRC or a type 16 cannot be read,
+                nor as a guest (or where AArch64 firmware names no PSCI
+                conduit); the gate's override, test-only and refused in a
+                certified profile's command line, is honoured only where a
+                hypervisor is positively seen (x86-64's hypervisor bit,
+                AArch64's hvc conduit or /hypervisor node).";
+            attribute :>> criterion = "ferrix-smbios's host test
+                the_memory_arrays_say_whether_memory_corrects; test-scrub: the
+                boot without the override stands down for QEMU's multi-bit
+                ECC, the override taken under QEMU's hypervisor, ARMv7-A's
+                stand-down. Control: the type-16 stand-down removed -- the
+                boot without the override runs.";
+            attribute :>> parent = "H.FAIL.9";
+            attribute :>> unit = ("mm::scrub::decide", "mm::scrub::verdict", "mm::scrub::standing", "mm::scrub::override_asked", "mm::scrub::Standing::reason", "mm::scrub::Standing::from_number");
+        }
+        requirement <'L.mm.107'> theScrubbersCountsShowCoverage : ItemLowLevel {
+            attribute :>> statement = "/proc/ferrix-scrub, readable by all, shall give the frames
+                managed, the frames tested in all and this sweep, the sweeps,
+                the suspects, bad, retired and held counts, and the standing
+                with its reason, and no address.";
+            attribute :>> criterion = "test-scrub: the guest reads tested against managed after a
+                sweep and the standing in both boots.";
+            attribute :>> parent = "H.FAIL.9";
+            attribute :>> unit = ("mm::scrub::render");
+        }
+        requirement <'L.mm.109'> aRetirementIsRecordedForTheNextBoot : ItemLowLevel {
+            doc /* docs/MACHINE-CHECK-RESTART.md §2.3. */
+            attribute :>> statement = "retire_frame shall record each frame it newly retires --
+                Claimed or Marked, never Already or Full -- in the pstore bad-frame
+                table, a slot claimed by one fetch_add and the entry stored and
+                written back after the claim, past 64 said once; and no boot check's
+                retirement shall reach the live table.";
+            attribute :>> criterion = "Stage 2's check_kept_out: the checked retirements leave
+                the live table's count as it was; test-mce-restart: boot 2's loader
+                keeps the page out from the table. Negative control: the table write
+                removed, the judge fails.";
+            attribute :>> parent = "H.FAIL.12";
+            attribute :>> unit = ("mm::retire_frame", "mm::table_held", "mm::hold_table");
+        }
+        requirement <'L.mm.110'> badFramesAreLeftOut : ItemLowLevel {
+            doc /* docs/MACHINE-CHECK-RESTART.md §2.8. */
+            attribute :>> statement = "The frame allocator shall give no BadFrame page to its
+                free lists, shall enter each in the retired set before the first
+                allocation and say how many, and the pstore attach shall write each
+                into the new table again; retire_frame shall answer Already for such
+                a frame before NotCovered.";
+            attribute :>> criterion = "Stage 2's check_kept_out: a frame the allocator does not
+                manage, entered as init enters a BadFrame page, answers Already;
+                test-mce-restart: boot 2 says 1 frames left out as bad and its poll
+                finds the frame already retired; boots after it keep it out from the
+                rewritten table. Negative control: the leave-out removed, the gate
+                fails.";
+            attribute :>> parent = "H.FAIL.12";
+            attribute :>> unit = ("mm::keep_out", "mm::init", "console::pstore::attach");
+        }
+        requirement <'L.mm.108'> oneBatchAtATime : ItemLowLevel {
+            attribute :>> statement = "Only one batch shall run at a time machine-wide, of at most 64
+                frames; a batch asked for while one runs shall be refused, and
+                a budget of 0 or past 64 refused, with nothing tested.";
+            attribute :>> criterion = "The native boot check: a budget of 0 and of 65 refused
+                INVALID_ARGS; test-scrub's memscrub batches answered.";
+            attribute :>> parent = "H.FAIL.9";
+            attribute :>> unit = ("mm::scrub::test_batch", "mm::scrub::batch_for_check");
+        }
+        // Restated by docs/RAM-RELEASE.md R1 (consultant ledger 5022, condition 1):
+        // the archive's release sets it a second time.
         requirement <'L.mm.71'> theWatermarkIsSizedOnce : ItemLowLevel {
-            attribute :>> statement = "init shall set the watermark once, to the
-                frames the allocator manages divided by 128, and no fewer than 256
-                frames nor more than 8192.";
+            attribute :>> statement = "init shall set the watermark to the frames the
+                allocator manages divided by 128, and no fewer than 256 frames nor
+                more than 8192; give_back_initrd shall set it once more, the same
+                way, from the frames managed after the initramfs's release, in the
+                hold of the frame allocator that inserts the release's last frames.";
             attribute :>> criterion = "The watermark equals watermark_for of the
                 frames managed at init, and watermark_for gives 256 for 0 frames,
                 300 for 38400 and 8192 for the largest count (the `watermark`
-                line).";
+                line); after the release it equals watermark_for of the frames
+                managed then (the `release` line).";
             attribute :>> parent = "H.QUOTA.13";
-            attribute :>> unit = ("mm::init", "mm::watermark_for", "mm::watermark");
+            attribute :>> unit = ("mm::init", "mm::watermark_for", "mm::watermark",
+                "mm::give_back_initrd");
         }
         requirement <'L.mm.72'> aProgramsFramesStopAtTheWatermark : ItemLowLevel {
             attribute :>> statement = "allocate_user_frame and allocate_user_run
@@ -1930,9 +2222,10 @@ package FerrixMemoryRequirements {
                  * interrupted and running INVLPG, waited for in
                  * invalidate_pages); a processor leaves a space's set only
                  * after AddressSpace::install or uninstall has loaded another
-                 * root into CR3. The interrupt, INVLPG and the CR3 load each
-                 * drain the write-combining buffers (SDM Vol. 3A 11.3.1), so
-                 * no buffered store reaches a frame after it is reused. */
+                 * root into CR3, with or without a PCID's flush (docs/PCID.md).
+                 * The interrupt, INVLPG and the CR3 load each drain the
+                 * write-combining buffers (SDM Vol. 3A 11.3.1), so no buffered
+                 * store reaches a frame after it is reused. */
             attribute :>> statement = "Every user mapping of a page of a
                 write-combining VMO shall be write-combining; each of its frames
                 shall have its cache lines written back and invalidated after
@@ -2559,6 +2852,110 @@ package FerrixMemoryRequirements {
                 page scenario, the `sweep` line).";
             attribute :>> parent = "H.MEM.18";
             attribute :>> unit = "user::space::AddressSpace::map_code_page";
+        }
+        requirement <'L.user.169'> aSpaceIsLeftOnlyInAnOrderAShootdownSees : ItemLowLevel {
+            doc /* docs/PCID.md section 3; the consultant's P2, ledger line 4734. */
+            attribute :>> statement = "begin_shootdown shall count a shootdown before
+                it reads the space's set, and install shall join the set before it
+                reads the count, both sequentially consistent, so that a processor
+                that left the set with the space's translations kept under a PCID
+                is either interrupted by a shootdown or flushes the PCID before it
+                uses the space again.";
+            attribute :>> criterion = "The loom model of the two orders
+                (src/tests/loom/tests/pcid.rs, `cargo xtask loom`) finds no
+                interleaving in which a processor uses a translation after the
+                shootdown that took it down has returned; with either order
+                reversed, or the slot's comparison left out, it finds one. The
+                switch-back check runs both orders on every boot.";
+            attribute :>> parent = "H.MEM.17";
+            attribute :>> unit = ("user::space::AddressSpace::install",
+                "user::space::AddressSpace::begin_shootdown");
+        }
+        requirement <'L.user.170'> aSpaceSwitchedBackToSeesItsShootdowns : ItemLowLevel {
+            attribute :>> statement = "A space installed again on a processor after
+                a shootdown of it began while it was installed elsewhere shall be
+                translated through its tables as they are, never through a
+                translation the shootdown took down.";
+            attribute :>> criterion = "A page moved to a new frame while its space
+                is not installed is read, after the switch back, as the new
+                frame's marker: decisive on PCID hardware (the N150), where a kept
+                tag would read the old frame.";
+            attribute :>> parent = "H.MEM.17";
+            attribute :>> unit = ("user::space::AddressSpace::install",
+                "user::space::AddressSpace::uninstall");
+        }
+        // The parent is the requirement whose quantity the report counts: the
+        // frames a space holds, as L.object.189 takes the cache's. No
+        // high-level requirement covers /proc's reports as such.
+        requirement <'L.user.171'> theResidentSetSplitsByKind : ItemLowLevel {
+            attribute :>> statement = "/proc/<pid>/status shall report VmRSS, RssAnon,
+                RssFile and RssShmem from each region's committed pages inside its own
+                range: private anonymous memory as RssAnon, shared anonymous memory
+                and a memory filesystem's file as RssShmem, a page a private file
+                mapping has copied once, as RssAnon and not as its file's, and VmRSS
+                their sum; /proc/<pid>/stat's rss shall be VmRSS in pages.";
+            attribute :>> criterion = "In the procfs check process, VmRSS equals the
+                three parts; two stack pages written for the first time add exactly 8
+                kB to RssAnon and nothing to the others; one page of a shared
+                anonymous mapping written adds exactly 4 kB to RssShmem alone; a page
+                of a tmpfs file mapped shared adds 4 kB to RssShmem alone, and mapped
+                shared twice 8 kB; a tmpfs file of eight pages
+                with pages 0, 1 and 7 written, mapped as pages 0 and 2 to 7, adds 8 kB
+                and not the page in the gap; mapped
+                private and then written, it moves 4 kB from RssShmem to RssAnon with
+                VmRSS unchanged; stat's field 24 times 4 kB is VmRSS.";
+            attribute :>> parent = "H.MEM.9";
+            attribute :>> unit = ("user::space::AddressSpace::resident_split",
+                "user::space::Resident::total",
+                "user::space::Resident::add",
+                "user::space::Resident::take",
+                "user::space::Counted::kind",
+                "user::space::AddressSpace::list_counted",
+                "user::space::count_object",
+                "user::vmo::Vmo::committed_in",
+                "user::vmo::Vmo::committed_in_both");
+        }
+        // As L.user.171's, the parent is the frames a space holds.
+        requirement <'L.user.172'> aDiskFilesMappedPagesAreItsRss : ItemLowLevel {
+            attribute :>> statement = "A disk file's pages inside a region's range shall
+                count as RssFile, the file's other cached pages not at all, and a page
+                a private mapping of it has written as RssAnon instead.";
+            attribute :>> criterion = "With an eight-page file on the stage 12 disk all
+                in the cache, a read-only mapping of pages 2 to 5 counts exactly 4
+                file pages and no others; a private mapping of page 0, written,
+                counts 1 anonymous page and no file page.";
+            attribute :>> parent = "H.MEM.9";
+            attribute :>> unit = ("user::space::AddressSpace::resident_split",
+                "user::vmo::Vmo::is_disk_file");
+        }
+        // docs/RAM-RELEASE.md §3: the clean btrfs nodes, reclaimable heap.
+        requirement <'L.user.175'> cleanBtrfsNodesAreAvailable : ItemLowLevel {
+            attribute :>> statement = "/proc/meminfo's SReclaimable shall be the bytes the
+                writable btrfs mounts' clean tree nodes hold, and MemAvailable shall
+                count them besides the free frames and the clean page cache.";
+            attribute :>> criterion = "With a wide directory read on the stage 12 disk,
+                SReclaimable is the mounts' count in KiB, and MemAvailable exceeds
+                the free frames and reclaimable pages by that count within half the
+                volume's clean bytes (the `reclaim` line of test-btrfs).";
+            attribute :>> parent = "H.QUOTA.12";
+            attribute :>> unit = "ferrix_btrfs_write::volume::WriteVolume::clean_bytes";
+        }
+        // docs/RAM-RELEASE.md §2, R1 (consultant ledger 4971, 5022, 5038).
+        requirement <'L.user.174'> devmgrStartsAgainFromTheKeptSet : ItemLowLevel {
+            attribute :>> statement = "Under ferrix.devmgr=init every devmgr start
+                after the first shall be made from the program, names and driver
+                images the first start read, kept by the kernel, never from a path,
+                and shall be refused when their fingerprint is not the one taken
+                when they were kept.";
+            attribute :>> criterion = "After the release, svc restart
+                devmgr.service starts a second devmgr whose line says it came from
+                the kept set, and / written, synced and read back afterwards answers
+                what was written; a kept set whose stored fingerprint differs is
+                refused with the line saying it is not as it was kept, and no
+                second devmgr starts (test-init and its control).";
+            attribute :>> parent = "H.DEV.4";
+            attribute :>> unit = ("discovery::devmgr::read_files",
+                "discovery::devmgr::read_set", "discovery::devmgr::fingerprint");
         }
     }
 }

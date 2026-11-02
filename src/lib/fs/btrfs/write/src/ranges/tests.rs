@@ -91,3 +91,37 @@ fn extract_takes_exactly_the_shared_bytes() {
     );
     assert!(set.extract(&other).is_empty(), "nothing shared is left");
 }
+
+/// `holds_at_least` answers what comparing the whole total answers, for
+/// every amount around the total, through random edits.
+#[test]
+fn holds_at_least_agrees_with_the_total() {
+    let mut set = RangeSet::new();
+    let mut state: u64 = 0x9e37_79b9_7f4a_7c15;
+    let mut next = |below: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state % below
+    };
+    for _ in 0..2_000 {
+        let start = next(4_096) * 16;
+        let len = (next(64) + 1) * 16;
+        if next(3) == 0 {
+            let _ = set.remove(start, len);
+        } else {
+            set.add(start, len);
+        }
+        let total = set.total();
+        for want in [
+            0,
+            1,
+            total.saturating_sub(16),
+            total,
+            total + 1,
+            total + 4096,
+        ] {
+            assert_eq!(set.holds_at_least(want), total >= want, "{want} of {total}");
+        }
+    }
+}

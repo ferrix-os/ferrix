@@ -100,6 +100,7 @@ static RETURN_PATH: crate::trap::ReturnPath = crate::trap::ReturnPath {
     return_to_user,
     sigreturn,
     fault_signal,
+    fault_end,
 };
 
 /// Force `signal` on the running program for a fault, and say what became of
@@ -134,6 +135,30 @@ fn fault_signal(signal: u32, code: i32, address: u64, pc: u64) -> crate::trap::F
         }
         Some(Posted::Discarded | Posted::Pending) => FaultOutcome::Delivered,
     }
+}
+
+/// End the running program with `signal` for a fault it cannot be resumed
+/// after, running no handler (`L.x86_64.228`): the signal recorded as raised,
+/// as [`fault_signal`] records it, and the process ended with it as its
+/// status, whatever its handler or mask -- Linux's `force_fatal_sig`.
+fn fault_end(signal: u32, code: i32, address: u64, pc: u64) -> crate::trap::FaultOutcome {
+    use crate::trap::FaultOutcome;
+
+    let Some(thread) = thread::current() else {
+        return FaultOutcome::NoProcess;
+    };
+    let origin = Origin::Fault { code, address };
+    let _ = thread.with_signals(|shared, own| signal::force(shared, own, signal, origin));
+    crate::sched::work::post_own(crate::sched::work::SIGNAL);
+    let process = thread.process();
+    let who = crate::fs::procfs::crash_identity(process, pc);
+    crate::println!(
+        "  signal   pid {} is {}",
+        process.pid(),
+        alloc::string::String::from_utf8_lossy(&who)
+    );
+    process::kill(process, 128 + signal as i32);
+    FaultOutcome::Ended { pid: process.pid() }
 }
 
 /// Hand the core this personality's return path.

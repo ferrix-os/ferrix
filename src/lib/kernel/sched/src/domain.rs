@@ -83,7 +83,7 @@ impl Mode {
 pub const MAX_CPUS: usize = 256;
 
 /// Words of [`CpuSet`]'s bitmap.
-const WORDS: usize = MAX_CPUS / 64;
+pub const WORDS: usize = MAX_CPUS / 64;
 
 /// A set of logical CPU numbers.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -165,6 +165,29 @@ impl CpuSet {
     /// The CPUs in the set, lowest first.
     pub fn iter(&self) -> impl Iterator<Item = usize> + '_ {
         (0..MAX_CPUS).filter(|cpu| self.contains(*cpu))
+    }
+
+    /// The set as its [`WORDS`] words, CPU `64 * i + b` at bit `b` of word
+    /// `i`: what a task's affinity is stored as, one atomic a word.
+    #[must_use]
+    pub const fn words(&self) -> [u64; WORDS] {
+        self.words
+    }
+
+    /// The set whose words are `words`, as [`CpuSet::words`] gives them.
+    #[must_use]
+    pub const fn from_words(words: [u64; WORDS]) -> CpuSet {
+        CpuSet { words }
+    }
+
+    /// The CPUs in both sets.
+    #[must_use]
+    pub fn intersection(&self, other: &CpuSet) -> CpuSet {
+        let mut words = self.words;
+        for (word, theirs) in words.iter_mut().zip(other.words) {
+            *word &= theirs;
+        }
+        CpuSet { words }
     }
 }
 

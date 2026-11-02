@@ -52,6 +52,10 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use ferrix_sync::Once;
 
+mod chunks;
+
+pub use chunks::{BLOCK, Chunks, Meter};
+
 /// An allocation could not be made.
 ///
 /// Carries nothing: which allocation failed is the caller's business, and the

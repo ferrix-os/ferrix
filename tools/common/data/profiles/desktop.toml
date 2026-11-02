@@ -8,7 +8,7 @@ level = "none"
 claim = "none"
 claim_architectures = []
 buildable_from = "today"
-image = { driver_updates = "absent", settings_writer = "present", slot_signing = "off" }
+image = { driver_updates = "absent", settings_writer = "present", slot_signing = "off", bad_frames = "choice" }
 # The families its loader accepts a slot manifest for (docs/SIGNING.md §1.4, §10.6).
 slot_families = ["x86_64-uefi-pc", "x86_64-n150", "aarch64-uefi-virt", "armv7a-uefi-virt", "armv7a-stm32mp157"]
 exceptions = []
@@ -33,6 +33,7 @@ runtime_settings = "live"
 # No claim, so every option the registry declares, with any of its values.
 [boot_options]
 "ferrix.checks" = ["run", "skip"]
+"ferrix.badframes" = ["persist", "reset", "off"]
 "ferrix.root" = ["*"]
 "ferrix.init" = ["*"]
 "ferrix.onexit" = ["*"]

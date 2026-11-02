@@ -15,6 +15,9 @@
 //!   systemd counts it. Given no clock, it is a plain count of starts.
 //!
 //! [`Policy`] puts them together: restart now, restart at `t`, or give up.
+//! [`Escalation`] is `devmgr`'s alone, over a [`Policy`]: a driver that keeps
+//! dying at its start is restarted twice, then started once more on a
+//! reinitialised device, then its device is quarantined.
 //! [`Instant`], [`Signal`], [`Exit`] and [`Restart`] are the words it is
 //! decided in.
 
@@ -417,5 +420,111 @@ impl Policy {
     pub fn reset(&mut self) {
         self.backoff.reset();
         self.budget.reset();
+    }
+}
+
+/// What to do about a driver's death, once [`Escalation`] has weighed it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Next {
+    /// Leave it stopped: `Restart=` does not restart this end.
+    Stay,
+    /// Start it again, at this time, or now for `None`.
+    Restart(Option<Instant>),
+    /// Reinitialise the device, then start it again, at this time, or now
+    /// for `None`: the last start before quarantine.
+    Reinit(Option<Instant>),
+    /// Start nothing on it again: the start on a reinitialised device died
+    /// too.
+    Quarantine,
+    /// The start limit is spent.
+    GiveUp,
+}
+
+/// A crash loop's escalation, for one device (the customer, 2026-10-30): a
+/// driver that dies within [`Escalation::settle`] of coming up -- or before
+/// it came up at all -- has failed its start. After
+/// [`Escalation::FAILED_RESTARTS`] failed restarts in a row the next start
+/// is made on a reinitialised device, and if that one fails as well the
+/// device is quarantined. A driver that stayed up for the whole window ends
+/// the streak: its death is restarted as a first one.
+///
+/// The delays and the start limit are the [`Policy`]'s: every start it
+/// decides on is counted against the budget, and the backoff doubles along
+/// the streak and starts again with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Escalation {
+    /// How long a driver must stay up for its death not to count as a
+    /// failed start.
+    settle: Duration,
+    /// Restarts since the streak began.
+    restarts: u32,
+    /// Whether the last start was on a reinitialised device.
+    reinitialised: bool,
+}
+
+impl Escalation {
+    /// Failed restarts in a row before the device is reinitialised.
+    pub const FAILED_RESTARTS: u32 = 2;
+
+    /// An escalation that counts a death within `settle` of coming up as a
+    /// failed start.
+    pub const fn new(settle: Duration) -> Self {
+        Self {
+            settle,
+            restarts: 0,
+            reinitialised: false,
+        }
+    }
+
+    /// The window a driver must stay up for.
+    pub const fn settle(&self) -> Duration {
+        self.settle
+    }
+
+    /// Restarts since the streak began.
+    pub const fn restarts(&self) -> u32 {
+        self.restarts
+    }
+
+    /// Decide about a death at `now` of a driver that came up at `up`
+    /// (`None`: it never did), under `policy`. With no clock every death is
+    /// a failed start, and every start is made at once.
+    pub fn decide(
+        &mut self,
+        policy: &mut Policy,
+        ended: Ended,
+        now: Option<Instant>,
+        up: Option<Instant>,
+    ) -> Next {
+        let settled = match (now, up) {
+            (Some(now), Some(up)) => now.saturating_since(up) >= self.settle,
+            _ => false,
+        };
+        if settled {
+            self.restarts = 0;
+            self.reinitialised = false;
+            policy.backoff.reset();
+        } else if self.reinitialised {
+            return Next::Quarantine;
+        }
+        let at = match policy.decide(ended, now) {
+            Decision::Stay => return Next::Stay,
+            Decision::GiveUp => return Next::GiveUp,
+            Decision::Now => None,
+            Decision::At(at) => Some(at),
+        };
+        self.restarts = self.restarts.saturating_add(1);
+        if self.restarts > Self::FAILED_RESTARTS {
+            self.reinitialised = true;
+            Next::Reinit(at)
+        } else {
+            Next::Restart(at)
+        }
+    }
+
+    /// Begin again: a start was asked for (a BIND), not decided on.
+    pub fn reset(&mut self) {
+        self.restarts = 0;
+        self.reinitialised = false;
     }
 }

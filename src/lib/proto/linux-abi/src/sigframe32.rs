@@ -213,7 +213,28 @@ pub fn siginfo_from_64(info: &[u8; SIGINFO_SIZE]) -> [u8; SIGINFO_SIZE] {
     if let (Some(to), Some(from)) = (out.get_mut(12..SIGINFO_SIZE - 4), info.get(16..)) {
         to.copy_from_slice(from);
     }
+    // A machine check's `SIGBUS` carries `_addr_lsb`, a `short` after the
+    // address: at 24 here, after an eight-byte pointer, and at 16 there.
+    if is_machine_check_bus(info) {
+        if let Some(to) = out.get_mut(20..22) {
+            to.fill(0);
+        }
+        if let (Some(to), Some(from)) = (out.get_mut(16..18), info.get(24..26)) {
+            to.copy_from_slice(from);
+        }
+    }
     out
+}
+
+/// Whether `info` is a machine check's `SIGBUS` (7): `si_code`
+/// `BUS_MCEERR_AR` (4) or `BUS_MCEERR_AO` (5), which carry `_addr_lsb`.
+fn is_machine_check_bus(info: &[u8; SIGINFO_SIZE]) -> bool {
+    let word = |at: usize| {
+        info.get(at..at + 4)
+            .and_then(|bytes| <[u8; 4]>::try_from(bytes).ok())
+            .map(i32::from_le_bytes)
+    };
+    word(0) == Some(7) && matches!(word(8), Some(4 | 5))
 }
 
 /// Whether `info` is the `siginfo` of a system call taken away as a signal:

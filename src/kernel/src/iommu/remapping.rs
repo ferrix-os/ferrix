@@ -607,6 +607,38 @@ pub(crate) fn remap_message(
     }
 }
 
+/// Aim `vector`'s entry on `unit` for the function `requester` at
+/// `apic_id` instead (`docs/CORE-QUARANTINE.md` §3.3): the message the
+/// function writes is unchanged, only the entry it names.
+///
+/// # Errors
+///
+/// A destination past APIC ID 255, or what the unit's `retarget` refused.
+#[cfg_attr(
+    not(target_arch = "x86_64"),
+    expect(dead_code, reason = "only x86-64 routes messages through an IOMMU")
+)]
+pub(crate) fn retarget_message(
+    unit: Remapper,
+    requester: u16,
+    vector: u8,
+    apic_id: u32,
+) -> Result<(), &'static str> {
+    let handle = u16::from(vector.wrapping_sub(FIRST_VECTOR));
+    match unit {
+        Remapper::VtD(unit) => unit.retarget(
+            handle,
+            remap::destination(apic_id).ok_or("a destination above APIC ID 255")?,
+        ),
+        Remapper::AmdVi(unit) => unit.retarget(
+            requester,
+            handle,
+            ferrix_paging::amdvi::table::destination(apic_id)
+                .ok_or("a destination above APIC ID 255")?,
+        ),
+    }
+}
+
 /// Whether the function at `function` has its interrupts isolated: the
 /// machine's are, and the unit it is placed behind remaps.
 pub(crate) fn function_isolated(function: Address) -> bool {

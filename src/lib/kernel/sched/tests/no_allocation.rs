@@ -110,3 +110,26 @@ fn a_timeline_gives_entities_back_in_order_and_by_name() {
     assert_eq!(timeline.len(), 1);
     assert_eq!(timeline.check(), Ok(1));
 }
+
+#[test]
+fn a_timeline_gives_up_the_latest_entity_a_test_accepts_with_its_instant() {
+    let mut timeline: Timeline<&str> = Timeline::new();
+    timeline.insert(30, 3, "pinned", Slot::new().unwrap());
+    timeline.insert(10, 1, "movable", Slot::new().unwrap());
+    timeline.insert(20, 2, "movable", Slot::new().unwrap());
+    let (at, payload, _) = timeline.take_last_where(|name| *name == "movable").unwrap();
+    assert_eq!((at, payload), (20, "movable"));
+    let (at, _, _) = timeline.take_last_where(|name| *name == "movable").unwrap();
+    assert_eq!(at, 10);
+    assert!(
+        timeline
+            .take_last_where(|name| *name == "movable")
+            .is_none()
+    );
+    assert_eq!(
+        timeline.first_due(),
+        Some(30),
+        "the entity the test refused stays"
+    );
+    assert_eq!(timeline.check(), Ok(1));
+}

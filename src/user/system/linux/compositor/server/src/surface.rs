@@ -196,6 +196,10 @@ pub struct Surface {
     /// How many commits it has had, which is how a test says a commit
     /// happened without reading the state.
     pub commits: u64,
+    /// Whether `wl_surface.attach` has been sent since the last commit: the
+    /// pending buffer carries the current one forward, so it alone cannot
+    /// tell a new frame from a commit of state.
+    pub attached: bool,
 }
 
 impl Default for Surface {
@@ -216,6 +220,11 @@ pub struct Committed {
     pub mapped: bool,
     /// Whether it went from showing something to showing nothing.
     pub unmapped: bool,
+    /// Whether the commit shows a buffer attached for it: a new frame of
+    /// the client's, the same `wl_buffer` drawn into again included, and
+    /// not a commit of state alone -- a frame callback, an input region,
+    /// damage with nothing new under it.
+    pub attached: bool,
 }
 
 impl Surface {
@@ -228,6 +237,7 @@ impl Surface {
             frame_callbacks: Vec::new(),
             committed_callbacks: Vec::new(),
             commits: 0,
+            attached: false,
         }
     }
 
@@ -247,6 +257,7 @@ impl Surface {
     pub fn commit(&mut self) -> Committed {
         let was = self.current.buffer;
         let now = self.pending.buffer;
+        let attached = std::mem::take(&mut self.attached) && now.is_some();
         // A buffer the surface is no longer showing is the client's again.
         // The same buffer attached twice is not released: the client never
         // got it back.
@@ -282,6 +293,7 @@ impl Surface {
             released,
             mapped: was.is_none() && now.is_some(),
             unmapped: was.is_some() && now.is_none(),
+            attached,
         }
     }
 

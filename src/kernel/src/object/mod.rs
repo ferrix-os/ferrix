@@ -87,6 +87,16 @@ pub enum Object {
     /// is, with `READ` and no other right, so it is neither duplicated nor
     /// sent; `audit_read` answers the holder, and nobody else can ask.
     Audit,
+    /// The capability to take a processor out of service or bring it back
+    /// (`docs/CORE-QUARANTINE.md` §4): a token with nothing in it, the one
+    /// there is given to pid 1, which gives lode a copy; `cpu_service`
+    /// answers a holder with `MANAGE`.
+    CpuService,
+    /// The capability to run the RAM scrubber (`docs/RAM-SCRUBBER.md` §4): a
+    /// token with nothing in it, the one there is given to pid 1, which
+    /// grants `memscrub` a copy; `memory_scrub` answers a holder with
+    /// `MANAGE`.
+    MemoryScrub,
 }
 
 /// A queue nothing is woken on, for objects whose signals never change.
@@ -112,7 +122,9 @@ impl Object {
             | Object::Process(_)
             | Object::Port(_)
             | Object::Starter
-            | Object::Audit => Signals::NONE,
+            | Object::Audit
+            | Object::CpuService
+            | Object::MemoryScrub => Signals::NONE,
         }
     }
 
@@ -134,7 +146,9 @@ impl Object {
             | Object::IoMapping(_)
             | Object::Pin(_)
             | Object::Starter
-            | Object::Audit => &QUIET,
+            | Object::Audit
+            | Object::CpuService
+            | Object::MemoryScrub => &QUIET,
         }
     }
 }
@@ -304,7 +318,9 @@ impl Object {
             | Object::Pin(_)
             | Object::Port(_)
             | Object::Starter
-            | Object::Audit => true,
+            | Object::Audit
+            | Object::CpuService
+            | Object::MemoryScrub => true,
             Object::Channel(_) | Object::Job(_) | Object::Process(_) => false,
         }
     }

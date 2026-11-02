@@ -1,0 +1,80 @@
+# hyprix-gpu: the compositor's frames drawn by Vulkan, in a process of its
+# own (docs/GPU-COMPOSITOR.md). hyprix is a static program and cannot load
+# a Vulkan driver; this is a glibc program that can, and that hyprix hands
+# each frame's display list over a socket.
+#
+# A workspace of its own, like tole's: it is built for
+# x86_64-unknown-linux-gnu against a Debian sysroot, never for the musl
+# target the compositor's workspace is built for. It reaches the
+# compositor's crates and tole by path.
+[workspace]
+resolver = "3"
+members = ["."]
+
+[package]
+name = "hyprix-gpu"
+description = "The compositor's GPU painter as a helper process: hyprix's display lists drawn by Vulkan into dmabufs"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "hyprix-gpu"
+path = "src/main.rs"
+
+[lib]
+name = "hyprix_gpu"
+path = "src/lib.rs"
+
+[dependencies]
+# Vulkan's bindings (MIT or Apache-2.0), the same pin as tole's. `loaded`
+# opens libvulkan.so.1 at run time, through libloading (ISC).
+ash = { version = "=0.38.0", default-features = false, features = ["loaded", "debug", "std"] }
+# The records hyprix and the helper exchange.
+compositor-gpu-protocol = { path = "../compositor/gpu-protocol" }
+# The shapes: the GPU painter's quads and constants, over a backend.
+compositor-render = { path = "../compositor/render" }
+# Descriptors over the socket, mmap of the arena, memfd in the tests.
+libc = "0.2.189"
+# The device: tole's choice of GPU and its extensions (`tole::gpu::Core`).
+tole = { path = "../tole/tole", features = ["gpu"] }
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_docs = "deny"
+missing_debug_implementations = "deny"
+unused_results = "deny"
+unreachable_pub = "warn"
+unused_qualifications = "warn"
+
+[lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "deny"
+missing_safety_doc = "deny"
+multiple_unsafe_ops_per_block = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unreachable = "deny"
+indexing_slicing = "deny"
+string_slice = "deny"
+allow_attributes_without_reason = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+print_stdout = "deny"
+uninlined_format_args = "warn"
+semicolon_if_nothing_returned = "warn"
+doc_markdown = "warn"
+
+[profile.dev]
+overflow-checks = true
+opt-level = 2
+
+[profile.release]
+overflow-checks = true

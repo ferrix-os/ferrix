@@ -112,6 +112,27 @@ alone is over a gigabyte. For the GPL packages in that list a pointer to a
 third party's archive is weaker than carrying the source, and attaching
 the source packages of the GPL and LGPL ones is the open step.
 
+## hyprix-gpu's Mesa
+
+An image built with `FERRIX_GPU_HELPER=1` (the N150 box's, and
+`test-compositor --boot gpu-helper`'s; not the default image or the ISO,
+the product owner, 2026-10-28) carries the compositor's Vulkan helper at
+`/usr/libexec/hyprix-gpu` with what it draws with under
+`/usr/lib/hyprix-gpu/` (`docs/GPU-COMPOSITOR.md` §10): anv
+(`libvulkan_intel.so`, Mesa, MIT) and the Vulkan loader (`libvulkan.so.1`,
+Apache-2.0), with glibc and its loader (LGPL-2.1-or-later), libgcc_s and
+libstdc++ (GPL-3.0-or-later WITH GCC-exception-3.1), libdrm, expat,
+libffi, wayland-client, libxcb and its extensions, libX11-xcb,
+libxshmfence, libXau and libXdmcp (MIT or X11-style), zlib (Zlib) and
+zstd (BSD-3-Clause), all linked dynamically and unchanged. They are Debian
+13's packages as `tools/common/fetch/fetch-intel-uapi.sh` pins them (Mesa
+25.0.7-2+deb13u1, glibc 2.41-12+deb13u4), the list being
+`tools/common/xtask/src/hyprix_gpu.rs`'s `LIBRARIES`, and each package's
+`copyright` file goes with them, under `/usr/share/doc/hyprix-gpu/`. When
+the helper reaches the default image, the release's inventory takes these
+packages as the Pixel 7's Chromium volume's are taken above, with the
+glibc and GCC sources owed for the LGPL and GPL parts.
+
 ## Not covered yet
 
 - **oh-my-zsh's plugins and themes** are listed as the tree's MIT licence;

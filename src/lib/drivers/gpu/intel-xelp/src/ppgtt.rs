@@ -18,20 +18,33 @@
 //! is the caller's, through [`PtMemory`]: the driver process backs it with
 //! pinned pages, a test with a map.
 //!
+//! Large pages are `gen8_ppgtt_insert_huge`'s ([`Ppgtt::insert_huge`],
+//! `docs/INTEL-GPU.md` §14): a level-1 entry with [`gtt::GEN8_PDE_PS_2M`]
+//! maps 2 MiB itself and is a leaf every walk here stops at; one with
+//! [`gtt::GEN8_PDE_IPS_64K`] names a leaf table whose 512 entries are all
+//! written as 4 KiB entries, of which the hardware reads every 16th as a
+//! 64 KiB page. Below 12.50 there is no 64 KiB scratch, so IPS is set only
+//! on a table one run of pages fills, as i915 sets it (`index ==
+//! I915_PDES`), and any clear in such a table drops IPS first.
+//!
 //! Left out, as ADL-P/N never takes them: the 3-level (32-bit) layout and
-//! its preallocated PDPs, 64 KiB and 2 MiB pages (`HAS_64K_PAGES` is
-//! 12.50+, and i915 uses 2 MiB pages only for huge objects), local memory,
-//! vGPU notification and `Wa_16018031267`'s reserved page (12.55+). Gen12
-//! has no read-only PTEs (`has_read_only` is false on 11 and 12,
-//! "HSDES#:1807136187"), so [`gtt::PTE_READ_ONLY`] is never given here.
+//! its preallocated PDPs, the 12.50+ 64 KiB layout (`HAS_64K_PAGES`: 32
+//! entries a table and a 64 KiB scratch), local memory, vGPU notification
+//! and `Wa_16018031267`'s reserved page (12.55+). Gen12 has no read-only
+//! PTEs (`has_read_only` is false on 11 and 12, "HSDES#:1807136187"), so
+//! [`gtt::PTE_READ_ONLY`] is never given here.
 
 use crate::gtt::{
-    self, CacheLevel, GEN8_PDES, GEN8_PTE_SHIFT, PPGTT_TOP_48, gen8_pd_shift, gen8_pde_encode,
-    gen12_pte_encode,
+    self, CacheLevel, GEN8_PDE_IPS_64K, GEN8_PDE_PS_2M, GEN8_PDES, GEN8_PTE_SHIFT, PPGTT_TOP_48,
+    gen8_pd_shift, gen8_pde_encode, gen12_pte_encode,
 };
 
 /// `I915_GTT_PAGE_SIZE_4K` as a table's size.
 pub const PT_BYTES: u64 = 4096;
+/// `I915_GTT_PAGE_SIZE_64K`.
+pub const PAGE_64K: u64 = 64 << 10;
+/// `I915_GTT_PAGE_SIZE_2M`: what one level-1 entry covers.
+pub const PAGE_2M: u64 = 2 << 20;
 /// `vm->total` for a 4-level VM: 48 bits.
 pub const PPGTT_TOTAL_48: u64 = 1 << 48;
 /// The address bits of an entry at any level (bits 47..12).
@@ -230,6 +243,10 @@ impl Ppgtt {
         let lvl = lvl - 1;
         for idx in idx..idx + len {
             let mut entry = mem.read_entry(pd, idx);
+            if lvl == 0 && entry & GEN8_PDE_PS_2M != 0 {
+                // A 2 MiB page is there: an overlapping bind.
+                return Err(PpgttError::Range);
+            }
             if entry == self.scratch_at(lvl + 1) {
                 let pt = mem.alloc_pt().ok_or(PpgttError::NoMemory)?;
                 fill_px(mem, pt, self.scratch_at(lvl));
@@ -249,9 +266,28 @@ impl Ppgtt {
     /// The leaf table holding page index `page`, if allocated: the walk of
     /// `gen8_ppgtt_insert_entry` (`gen8_pdp_for_page_index`, then levels 2
     /// and 1).
+    ///
+    /// A 2 MiB page at level 1 has no leaf table: `None`. A table whose
+    /// level-1 entry has IPS is its 64 KiB layout no more after this, which
+    /// only an overlapping 4 KiB insert asks: IPS is dropped first.
     fn leaf<M: PtMemory + ?Sized>(&self, mem: &mut M, page: u64) -> Option<u64> {
+        let pd = self.directory(mem, page)?;
+        let index = gen8_pd_index(page, 1);
+        let entry = mem.read_entry(pd, index);
+        if entry == self.scratch_at(1) || entry & GEN8_PDE_PS_2M != 0 {
+            return None;
+        }
+        if entry & GEN8_PDE_IPS_64K != 0 {
+            mem.write_entry(pd, index, entry & !GEN8_PDE_IPS_64K);
+        }
+        Some(entry & PTE_ADDR_MASK)
+    }
+
+    /// The level-1 table (the leaf tables' directory) holding page index
+    /// `page`'s entry, if allocated.
+    fn directory<M: PtMemory + ?Sized>(&self, mem: &mut M, page: u64) -> Option<u64> {
         let mut table = self.pml4;
-        for lvl in (1..=PPGTT_TOP_48).rev() {
+        for lvl in (2..=PPGTT_TOP_48).rev() {
             let entry = mem.read_entry(table, gen8_pd_index(page, lvl));
             if entry == self.scratch_at(lvl) {
                 return None;
@@ -313,6 +349,112 @@ impl Ppgtt {
         Ok(written)
     }
 
+    /// `gen8_ppgtt_insert_huge` for one 2 MiB window: `pages` (device
+    /// addresses, in order) mapped from `offset` on, all inside the 2 MiB
+    /// that `offset` is in, with the tables they need allocated here.
+    ///
+    /// * A whole window from a 2 MiB-aligned address, in one run, is one
+    ///   2 MiB entry at level 1 (`GEN8_PDE_PS_2M`), with no leaf table; a
+    ///   leaf table there that holds only scratch is given back.
+    /// * A whole window whose every 64 KiB is one run from a 64 KiB-aligned
+    ///   address is 512 4 KiB entries, then `GEN8_PDE_IPS_64K`.
+    /// * Anything else is 4 KiB entries.
+    ///
+    /// Returns the page size used.
+    ///
+    /// # Errors
+    ///
+    /// As [`Ppgtt::alloc_va_range`] and [`Ppgtt::insert_entry`];
+    /// [`PpgttError::Range`] for pages past the window, and for a 2 MiB
+    /// entry over a leaf table that maps anything (an overlapping bind).
+    pub fn insert_huge<M: PtMemory + ?Sized>(
+        &self,
+        mem: &mut M,
+        pages: &[u64],
+        offset: u64,
+        pat_index: u32,
+    ) -> Result<u64, PpgttError> {
+        let bytes = pages.len() as u64 * PT_BYTES;
+        let (page, end) = Self::pages(offset, bytes)?;
+        if (page ^ (end - 1)) >> gen8_pd_shift(1) != 0
+            || pat_index > gtt::MAX_PAT_INDEX
+            || pages.iter().any(|addr| addr & !PTE_ADDR_MASK != 0)
+        {
+            return Err(PpgttError::Range);
+        }
+        let whole = bytes == PAGE_2M;
+        // Whether `len` pages from `from` are one run from an `align`-aligned
+        // address.
+        let run = |from: usize, len: usize, align: u64| {
+            pages.get(from).is_some_and(|&first| {
+                first.is_multiple_of(align)
+                    && pages
+                        .iter()
+                        .skip(from)
+                        .take(len)
+                        .zip(0..)
+                        .all(|(&addr, n)| addr == first + n * PT_BYTES)
+            })
+        };
+        let per_64k = (PAGE_64K / PT_BYTES) as usize;
+        if let Some(&first) = pages.first()
+            && whole
+            && run(0, pages.len(), PAGE_2M)
+        {
+            self.insert_2m(mem, first, offset, pat_index)?;
+            return Ok(PAGE_2M);
+        }
+        self.alloc_va_range(mem, offset, bytes)?;
+        let leaf = self.leaf(mem, page).ok_or(PpgttError::NotAllocated)?;
+        let first = gen8_pd_index(page, 0);
+        for (n, &addr) in pages.iter().enumerate() {
+            mem.write_entry(leaf, first + n, gen12_pte_encode(addr, pat_index, 0));
+        }
+        let ips = whole
+            && (0..pages.len())
+                .step_by(per_64k)
+                .all(|n| run(n, per_64k, PAGE_64K));
+        if !ips {
+            return Ok(PT_BYTES);
+        }
+        let pd = self.directory(mem, page).ok_or(PpgttError::NotAllocated)?;
+        let index = gen8_pd_index(page, 1);
+        let entry = mem.read_entry(pd, index);
+        mem.write_entry(pd, index, entry | GEN8_PDE_IPS_64K);
+        Ok(PAGE_64K)
+    }
+
+    /// One 2 MiB entry for the window at `offset`, from `addr`.
+    fn insert_2m<M: PtMemory + ?Sized>(
+        &self,
+        mem: &mut M,
+        addr: u64,
+        offset: u64,
+        pat_index: u32,
+    ) -> Result<(), PpgttError> {
+        // The tables above level 1: allocating the window's first page
+        // makes them, and a leaf table for it, which goes again below.
+        self.alloc_va_range(mem, offset, PT_BYTES)?;
+        let page = offset >> GEN8_PTE_SHIFT;
+        let pd = self.directory(mem, page).ok_or(PpgttError::NotAllocated)?;
+        let index = gen8_pd_index(page, 1);
+        let entry = mem.read_entry(pd, index);
+        if entry != self.scratch_at(1) {
+            let pt = entry & PTE_ADDR_MASK;
+            if !self.is_all_scratch(mem, pt, 0) {
+                return Err(PpgttError::Range);
+            }
+            mem.write_entry(pd, index, self.scratch_at(1));
+            mem.free_pt(pt);
+        }
+        mem.write_entry(
+            pd,
+            index,
+            gen12_pte_encode(addr, pat_index, 0) | GEN8_PDE_PS_2M,
+        );
+        Ok(())
+    }
+
     /// `gen8_ppgtt_clear`: every page of `[start, start + length)` back to
     /// the scratch page, and every table left holding only scratch entries
     /// released (`release_pd_entry`, `free_px`).
@@ -351,6 +493,19 @@ impl Ppgtt {
                 start = (start & !(span - 1)) + span;
                 continue;
             }
+            if lvl == 0 && entry & GEN8_PDE_PS_2M != 0 {
+                // A 2 MiB page goes whole: one binding alone ever covers it.
+                mem.write_entry(pd, idx, scratch);
+                let span = 1_u64 << gen8_pd_shift(1);
+                start = (start & !(span - 1)) + span;
+                continue;
+            }
+            if lvl == 0 && entry & GEN8_PDE_IPS_64K != 0 {
+                // Back to 4 KiB pages before any entry turns scratch: a
+                // scratch entry read as 64 KiB would reach past the
+                // scratch page.
+                mem.write_entry(pd, idx, entry & !GEN8_PDE_IPS_64K);
+            }
             let pt = entry & PTE_ADDR_MASK;
             if lvl > 0 {
                 start = self.clear_level(mem, pt, start, end, lvl);
@@ -381,14 +536,25 @@ impl Ppgtt {
     pub fn translate<M: PtMemory + ?Sized>(&self, mem: &mut M, offset: u64) -> Option<u64> {
         let page = offset >> GEN8_PTE_SHIFT;
         let mut table = self.pml4;
+        let mut within = PT_BYTES;
         for lvl in (0..=PPGTT_TOP_48).rev() {
-            let entry = mem.read_entry(table, gen8_pd_index(page, lvl));
+            let mut index = gen8_pd_index(page, lvl);
+            if lvl == 0 && within == PAGE_64K {
+                index &= !((PAGE_64K / PT_BYTES) as usize - 1);
+            }
+            let entry = mem.read_entry(table, index);
             if entry & gtt::GEN8_PAGE_PRESENT == 0 || entry == self.scratch_at(lvl) {
                 return None;
             }
+            if lvl == 1 && entry & GEN8_PDE_PS_2M != 0 {
+                return Some((entry & PTE_ADDR_MASK) | (offset & (PAGE_2M - 1)));
+            }
+            if lvl == 1 && entry & GEN8_PDE_IPS_64K != 0 {
+                within = PAGE_64K;
+            }
             table = entry & PTE_ADDR_MASK;
         }
-        Some(table | (offset & (PT_BYTES - 1)))
+        Some(table | (offset & (within - 1)))
     }
 
     /// `gen8_ppgtt_cleanup` for a VM that [`Ppgtt::clear_range`] emptied:

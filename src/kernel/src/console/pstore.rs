@@ -34,7 +34,10 @@
 
 use core::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 
-use ferrix_bootinfo::pstore::{self, HEADER_BYTES, STOP_OFFSET, Stop, WRITTEN_OFFSET};
+use ferrix_bootinfo::pstore::{
+    self, HEADER_BYTES, STOP_OFFSET, Stop, TABLE_COUNT_OFFSET, TABLE_ENTRIES, TABLE_OFFSET,
+    WRITTEN_OFFSET,
+};
 use ferrix_bootinfo::{BootView, MemKind, PAGE_SIZE};
 use ferrix_sync::Once;
 
@@ -50,6 +53,10 @@ struct Region {
     written: &'static AtomicU64,
     /// The header's stop word.
     stop: &'static AtomicU64,
+    /// The bad-frame table's count of claimed slots (version 3).
+    table_count: &'static AtomicU64,
+    /// The bad-frame table's entries.
+    table: &'static [AtomicU64],
     /// The region's physical address and length, for the reports and the
     /// boot check.
     phys: u64,
@@ -88,31 +95,87 @@ pub(crate) fn write_back() -> bool {
 /// the architecture's reset, power-off or halt: the lines those print, and
 /// any another processor logs meanwhile, may miss the region's RAM.
 ///
-/// A panic's word is never replaced: a stop racing a failure report on
-/// another processor is not how the boot ended. Takes no lock and allocates
-/// nothing.
+/// A failure's word -- a panic's, a machine check's -- is never replaced: a
+/// stop racing a failure report on another processor is not how the boot
+/// ended. Takes no lock and allocates nothing.
 pub fn stop(stop: Stop) -> bool {
     REGION.get().is_some_and(|region| {
         let word = stop.word();
-        let panic = Stop::Panic.word();
         let _ = region
             .stop
             .fetch_update(Ordering::Release, Ordering::Relaxed, |now| {
-                (now != panic).then_some(word)
+                (!is_failure(now)).then_some(word)
             });
         arch::write_back_for_reset(region.virt, region.len);
         true
     })
 }
 
-/// Record a panic as how this boot stopped: the first failure report, as it
-/// begins, so that a report that faults on its way still says so. The
-/// report's own write-back ([`write_back`]) comes later. One store, no lock,
-/// no allocation.
-pub(crate) fn panicked() {
+/// Whether `word` records a failure: a panic or a machine check, which
+/// nothing replaces.
+fn is_failure(word: u64) -> bool {
+    word == Stop::Panic.word() || word == Stop::MachineCheck.word()
+}
+
+/// Record how this boot stopped at its first failure report, as it begins
+/// -- `stop`, a panic or a machine check (`L.console.58`) -- so that a
+/// report that faults on its way still says so; a failure's word already
+/// there stands. The report's own write-back ([`write_back`]) comes later.
+/// One compare-and-swap, no lock, no allocation.
+pub(crate) fn panicked(stop: Stop) {
     if let Some(region) = REGION.get() {
-        region.stop.store(Stop::Panic.word(), Ordering::Release);
+        let word = stop.word();
+        let _ = region
+            .stop
+            .fetch_update(Ordering::Release, Ordering::Relaxed, |now| {
+                (!is_failure(now)).then_some(word)
+            });
     }
+}
+
+/// What [`record_bad_frame`] did.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Recorded {
+    /// The frame is in the table for the next boot's loader.
+    Kept,
+    /// The table's 64 slots were claimed already: the frame is not.
+    Full,
+    /// No region is attached: nothing is recorded across a reset.
+    NoRegion,
+}
+
+/// Record frame `frame` in the bad-frame table for the next boot's loader,
+/// which keeps it out of that boot (`L.mm.109`, `L.x86_64.254`,
+/// `docs/MACHINE-CHECK-RESTART.md` §2.3): a slot claimed by one `fetch_add`
+/// on the count, the entry stored after the claim, both written back from
+/// the caches. Lock-free and allocation-free, so the machine check's own
+/// stop may call it on its stack; the kernel reads only its own count.
+pub(crate) fn record_bad_frame(frame: u64) -> Recorded {
+    let Some(region) = REGION.get() else {
+        return Recorded::NoRegion;
+    };
+    let Ok(frame) = u32::try_from(frame) else {
+        return Recorded::Full;
+    };
+    let slot = region.table_count.fetch_add(1, Ordering::AcqRel);
+    let Some(entry) = usize::try_from(slot)
+        .ok()
+        .and_then(|slot| region.table.get(slot))
+    else {
+        return Recorded::Full;
+    };
+    entry.store(pstore::table_entry(frame), Ordering::Release);
+    arch::flush_cache_lines(core::ptr::from_ref(entry) as u64, 8);
+    arch::flush_cache_lines(core::ptr::from_ref(region.table_count) as u64, 8);
+    Recorded::Kept
+}
+
+/// The bad-frame table's count of claimed slots, if a region is attached:
+/// for stage 2's check that no checked retirement reaches it.
+pub(crate) fn table_claimed() -> Option<u64> {
+    REGION
+        .get()
+        .map(|region| region.table_count.load(Ordering::Acquire))
 }
 
 /// The attached region's physical address and length: for the boot check
@@ -133,7 +196,28 @@ pub fn attach(view: &BootView<'_>) {
         return;
     };
     match check(view, phys, len) {
-        Ok((virt, sequence)) => adopt(phys, len, virt, sequence),
+        Ok((virt, sequence)) => {
+            adopt(phys, len, virt, sequence);
+            // The pages the loader kept out as bad go into this boot's table
+            // again, so they stay out across the next warm reset too
+            // (`L.mm.110`).
+            let mut said = false;
+            for region in view
+                .regions()
+                .iter()
+                .filter(|r| r.kind == MemKind::BadFrame)
+            {
+                for page in 0..region.len / PAGE_SIZE {
+                    let frame = (region.base / PAGE_SIZE).saturating_add(page);
+                    if record_bad_frame(frame) == Recorded::Full && !said {
+                        said = true;
+                        println!(
+                            "  pstore   the bad-frame table is full: not every kept-out frame is recorded again"
+                        );
+                    }
+                }
+            }
+        }
         Err(why) => println!("  pstore   not attached: {why} ({phys:#x}, {len} bytes)"),
     }
 }
@@ -208,6 +292,22 @@ fn adopt(phys: u64, len: u64, virt: u64, sequence: u64) {
     // plus 72) inside the same checked region, and from here on it is
     // reached only through this reference.
     let stop = unsafe { &*core::ptr::with_exposed_provenance::<AtomicU64>(stop_at as usize) };
+    let table_count_at = virt + TABLE_COUNT_OFFSET as u64;
+    // SAFETY: (KMEM) as for the count: eight-byte aligned (a page plus 128)
+    // inside the same checked region, the loader's fresh table zero
+    // (`pstore::fresh`), and from here on reached only through this
+    // reference.
+    let table_count =
+        unsafe { &*core::ptr::with_exposed_provenance::<AtomicU64>(table_count_at as usize) };
+    let table_at = virt + TABLE_OFFSET as u64;
+    // SAFETY: (KMEM) as above, for the table's `TABLE_ENTRIES` eight-byte
+    // aligned words after the count, inside the header page.
+    let table = unsafe {
+        core::slice::from_raw_parts(
+            core::ptr::with_exposed_provenance::<AtomicU64>(table_at as usize),
+            TABLE_ENTRIES,
+        )
+    };
     // SAFETY: (KMEM) as above, for the `capacity` ring bytes after the header page,
     // inside the same region; `AtomicU8` has `u8`'s layout.
     let slots = unsafe {
@@ -234,6 +334,8 @@ fn adopt(phys: u64, len: u64, virt: u64, sequence: u64) {
         slots,
         written,
         stop,
+        table_count,
+        table,
         phys,
         len,
         virt,

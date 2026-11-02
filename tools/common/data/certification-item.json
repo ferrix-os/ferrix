@@ -77,6 +77,16 @@
       "images that boot /sbin/init use it, and no claim is made of it",
       "(ITEM.md 5, SAFETY-MANUAL AoU-8 and AoU-13)."
     ],
+    "bad_frames": "persist",
+    "bad_frames_why": [
+      "An image key changes what the loader keeps out across a restart:",
+      "`bad_frames = persist`, the reference, keeps every frame the machine",
+      "checks retired out across a warm reset and a power cycle, and its loader",
+      "compiles no read of `ferrix.badframes`; `choice` (desktop alone, no",
+      "claim) lets that boot word choose persist, reset or off. H.FAIL.12 and",
+      "H.FAIL.13 are claimed of a persist image (docs/MACHINE-CHECK-RESTART.md",
+      "10, SAFETY-MANUAL AoU-39, ledger 5579)."
+    ],
     "pstore": "on",
     "pstore_settings": [
       "on",
@@ -664,7 +674,8 @@
           "sysctl_hostname",
           "sysctl_domainname",
           "sysctl_memfd_noexec",
-          "driver_bind"
+          "driver_bind",
+          "cpu_online"
         ],
         "seam_symbols": [
           "__ferrix_setters_sethostname",
@@ -678,7 +689,8 @@
           "__ferrix_setters_sysctl_hostname",
           "__ferrix_setters_sysctl_domainname",
           "__ferrix_setters_sysctl_memfd_noexec",
-          "__ferrix_setters_driver_bind"
+          "__ferrix_setters_driver_bind",
+          "__ferrix_setters_cpu_online"
         ],
         "calls": [
           "fs/memfd_check.rs",
@@ -872,12 +884,22 @@
         "crate": "ferrix-kernel-load"
       },
       {
+        "file": "iommu/blocks_check.rs",
+        "file_ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
         "file": "iommu/domain_check.rs",
         "file_ring": "core",
         "crate": "ferrix-kernel-load"
       },
       {
         "file": "object/alloc_check.rs",
+        "file_ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "object/blocks_check.rs",
         "file_ring": "core",
         "crate": "ferrix-kernel-load"
       },

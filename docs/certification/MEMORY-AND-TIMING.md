@@ -18,12 +18,14 @@ the second half, time, is unchanged.
 
 ### 1.1 What the item allocates
 
-The item carries four allocators:
+The item carries four allocators, and in front of the heap one cache per
+processor (§1.8):
 
 | Allocator | Role |
 |---|---|
 | Buddy (`src/lib/kernel/frame`) | physical frames |
 | Kernel heap (`src/lib/kernel/heap`) | `GlobalAlloc` behind `Box`, `Vec`, `Arc`, the maps |
+| Per-processor heap caches (`mm::CACHES`, `ferrix_heap::CpuCache`) | free heap objects of each size class kept by each processor, in front of the heap's lock; `MAX_CPUS` `IrqSpinLock`s of static storage, about 300 KiB |
 | `vmap` arena | kernel virtual address space for device windows and stacks |
 | Demand paging / CoW (`user/vmo.rs`) | a program's pages, on first touch |
 
@@ -111,9 +113,12 @@ stable parts, in two kinds:
   section* (`src/kernel/src/mm/reserve.rs`). Entering the section masks this
   processor's interrupts, then fills its reserve to 16 objects of every heap
   size class, plus one block for an `Arc` too large for a class. It fails
-  with `AllocError` if the heap cannot supply them, and that failure is the
-  one the caller reports. Inside the section, an allocation the heap refuses
-  is served from the reserve. So the operation either never starts, or it
+  with `AllocError` if the heap cannot supply them even after the
+  processors' heap caches are drained into it (§1.8), and that failure is
+  the one the caller reports; that drain runs with this processor's
+  interrupts masked across every cache (§1.8). Inside the section, an
+  allocation the heap refuses -- after a drain of its own -- is served from
+  the reserve. So the operation either never starts, or it
   runs to the end on memory set aside for it. The depth argument: an `Arc` is
   one allocation of `arc_layout::<T>()`, and a B-tree insert is at most height
   + 2 nodes of at most `btree_node_bound`. The host tests measure both against
@@ -200,6 +205,18 @@ refused, and reports **FX-0007** before the boot completes.
 shares the heap. One that fails after boot stops the machine with **FX-0008**.
 That is an application condition, AoU-5, not a property of the item.
 
+*`/proc/<pid>/maps` no longer stops it* (F-97, closed 2026-10-27). Its text
+was rendered at open into one `Vec<u8>` grown infallibly, and a single
+request past the heap's largest block (4 MiB, order 10) fails however much
+memory is free: an unprivileged program with enough regions, or long
+enough mapped paths, stopped the machine by reading its own maps, and no job
+limit helped, since the snapshot was charged only after the render. Now
+each line is formatted into room reserved for its longest form, and the
+text is kept in page-sized blocks (`ferrix_fallible::Chunks`), each charged
+to the opener's job before it is taken; a refusal answers the open
+`ENOMEM`. mountinfo, mounts, `/proc/net/tcp`, `udp` and `unix`, and the
+cgroupfs listings still render into one buffer (F-97's residual, F-98).
+
 **The kernel's watermark** (`H.QUOTA.13`, L.mm.71 to 74; since 2026-10-13).
 The heap takes its pages from the same frame allocator as a program's
 memory, so a program in a job with no limit could take the last free frame,
@@ -250,6 +267,30 @@ frames always took: clean cache reclaimed first, then the fault fails
   filling cache again, ends only on a signal to the writer, which is looked
   for before every round: preemptible, and paid for by the writer, since
   the file is 0200 and the root has none.
+* **A fault with the machine out of frames, and the machine-wide OOM kill**
+  (`object::oom`, since 2026-10-31, `H.QUOTA.22`, `L.object.102`). A fault
+  refused with no memory limit full is retried in the kernel, from
+  `oom::user_fault` and `oom::fault` alike, its answers counted: at most
+  `MACHINE_RECLAIMS` (16) machine-wide reclaims, each of `RECLAIM_PAGES`
+  (32) and what the free count lacks of the watermark (at most 8192), so at
+  most 16 x 8224 pages; then, once a reclaim gave nothing or those are
+  spent, the machine-wide kill; and at most `MOST_ANSWERS` (1024) answers
+  in all, the waits for an ending victim and while another fault chooses
+  each 1 ms (`PAUSE_NANOS`), about a second, after which the fault fails as
+  it did before (`SIGSEGV`, `EFAULT`). The choice walks `process::live()`'s
+  copy of the list with no spin lock held (`CHOOSING` is a flag, not a
+  lock), one look per process. No second machine-wide kill is made within
+  `KILL_GRACE_NANOS` (250 ms) of one: a victim its parent reaped leaves the
+  list before its memory is back.
+* **A pin's reclaim** (`syscall::native::hold_reclaiming`, since
+  2026-10-31, `L.object.257`). A `vmo_pin` whose commit or hold finds no
+  frame reclaims clean cache (`oom::reclaim_for`), in the job whose
+  `memory.max` is full or machine-wide, and tries again while a reclaim
+  gives back: at most 16 reclaims (`PIN_RECLAIMS`), each of at most
+  `RECLAIM_FOR_MOST` (16384) pages and, machine-wide, the watermark's
+  shortfall (at most 8192), so one pin call reclaims at most 16 x 24576 =
+  393216 pages, with no lock held across a reclaim. A pin kills nobody: it
+  answers `NO_MEMORY`.
 * **The kernel's own users of the program routes**, which the watermark
   now refuses earlier than an empty allocator would, and why each is
   handled: a page-cache fill (`fs/pages.rs`, `allocate_reclaiming`), made
@@ -289,15 +330,30 @@ frames always took: clean cache reclaimed first, then the fault fails
   sequential stream also waits for a whole run of 32 pages from the
   source, as a fault did, with no lock held while it waits (ledger line
   1700); a fault's
-  own retry after it is `oom::out_of_memory`'s, so 8 is not the fault's
-  whole bound; a file's write (`fs/pages.rs`,
+  own retry after it is `oom::out_of_memory_at`'s, whose bound is below
+  (the machine-wide OOM kill); a file's write (`fs/pages.rs`,
   `write_reclaiming` over `Vmo::commit_and_write`, since 2026-10-15)
   reclaims the same way, in the job whose `memory.max` refused it or
   machine-wide, at most 8 times while a reclaim gives pages back, and then
   answers `ENOSPC`, as Linux's tmpfs does when it is full -- a memory
   filesystem's write finds nothing to reclaim and answers it at once; `Vmo::commit_run` behind `PIN_CONTIGUOUS`
   (`syscall/native.rs`) is a ring-3 driver's request and answers
-  `NO_MEMORY`. Faults, copy-on-write and a fork's copies (`user/space.rs`,
+  `NO_MEMORY`, and behind `PIN_BLOCKS` (`Vmo::commit_blocks`, since
+  2026-10-30, ledger 5088) it is asked once a block, best effort: a refusal
+  lowers the order for good and a refused single frame ends the pre-commit,
+  which the hold after it then answers as any pin's (`L.object.256`).
+  Its cost: for each block one probe of the range under the pages lock and
+  `commit_run`'s own probe and insert under it, the frames zeroed with no
+  spin lock held; at most `pages + MAX_ORDER + 1` asks of `commit_run`, and
+  at most `MAX_ORDER + 1` probes a page (a committed page is probed once
+  for each order down to 0), each one pages-lock hold of an O(log n)
+  range lookup, so the call's length is a plain hold of the
+  same range plus `(MAX_ORDER + 1) * pages` probes and those asks. Each ask
+  also takes the `BlockHook`'s leaf spin lock once to read it, as the
+  reclaim hook's is read, armed or not. The large blocks it takes are blocks no later `PIN_CONTIGUOUS` or
+  high-order kernel allocation gets, bounded by the device's pin budget
+  (for the Intel GPU at most a quarter of the usable RAM above the
+  watermark, and its cap). Faults, copy-on-write and a fork's copies (`user/space.rs`,
   `user/vmo.rs`) are a program's own demand. `quota::charging_nobody`
   changes whom a frame is charged to, not which route takes it, and its
   one user, the console's descriptor table, takes heap, not frames. Every
@@ -487,6 +543,51 @@ refusal and back to zero, and its `kmem` line fills a limited job with each
 kind of heap in turn until `ENOMEM`, with a sibling unrefused and every
 byte given back.
 
+### 1.8 The per-processor heap caches (docs/HEAP-CACHES.md)
+
+Each processor keeps up to `CACHE_DEPTH` (16) free objects of each of the 9
+size classes in a `CpuCache` behind an `IrqSpinLock` of its own. An
+allocation or free of a class takes that lock, not the heap's; an empty cache
+refills `REFILL` (8) objects under one hold of the heap's lock, a full one
+gives back 8 and the freed one under one hold. Every heap refusal -- a
+refill, a large request, a reserve's fill -- drains every cache into the
+heap and tries once more before it refuses (L.mm.95); a refusal the failure
+injection made is answered as it stands (L.mm.98), so the sweep's runs still
+reach their refusals. `heap_allocated()` and the held-memory window count
+what callers hold: the heap's allocated bytes less the cached bytes (L.mm.96).
+
+* **Lock order.** A processor's cache lock, then the heap's, then `FRAMES`
+  (a refill or a large request reaches the buddy). Never the other way. The
+  drain (`mm::drain_caches`) starts with no cache lock held -- one held on
+  this processor stops the machine, FX-0012 -- and takes one cache lock at
+  a time with the heap's under it.
+* **Pages held.** At most 144 objects a processor; in the worst case each
+  keeps a slab page of its own from going back: 144 pages, 576 KiB a
+  processor, 2.25 MiB on the N150's four. They are heap pages, as a slab
+  page with free objects in it always was, and only a heap refusal drains
+  them: a program's frame, a page table or a VMO commit refused at the
+  watermark (L.mm.71) does not. So a program can be refused up to 144 pages
+  a processor sooner than with no caches -- more than `WATERMARK_LEAST`'s
+  256 frames on a machine of four processors or more. That is memory a
+  program does not get, never memory the kernel cannot get: the watermark
+  keeps frames for the kernel's own allocations, the heap's pages among
+  them, and every heap refusal drains the caches before it refuses. On the
+  N150 it is under 1 % of the watermark's 8,192 frames.
+* **The heap lock's hold.** A refill is up to 8 allocations under one hold:
+  each a free-list pop, and when the class's list is empty a page take from
+  the buddy under `FRAMES` -- at most 4 page takes for the 2 KiB class, two
+  objects a page. An overflow is 9 frees under one hold; a free that empties
+  a page walks its class's free list to unlink it (`give_back_if_empty`), as
+  every free that empties a page always has.
+* **A cache lock's hold.** One push or pop, or a refill or overflow above.
+* **The drain's masked time.** `MAX_CPUS` cache locks, one at a time, each
+  with interrupts masked for at most 144 frees under the heap's lock, each
+  of which may walk a free list as above. A drain runs only after a refusal,
+  and in the boot and sweep checks. Entering a reserved section masks
+  interrupts first (§1.2), so a drain a section's fill or large hold makes
+  runs masked from end to end: every processor's share in turn, at most
+  `MAX_CPUS` times 144 frees, before the retry.
+
 ### 1.7 The audit record — F-21b
 
 The audit record ([AUDIT.md](AUDIT.md)) allocates nothing: its two rings and
@@ -565,7 +666,7 @@ T.EXHAUST).
 
 | What | Bound | Where it is set |
 |---|---|---|
-| Clean nodes cached | 4,096 nodes, then dropped (`CLEAN_NODES`): 64 MiB of 16 KiB nodes, before the in-memory form's overhead | the item, `volume.rs` |
+| Clean nodes cached | 4,096 nodes between operations (`CLEAN_NODES`): 64 MiB of 16 KiB nodes, before the in-memory form's overhead; within one operation, that and what the operation loads (below) | the item, `volume.rs`, `clean.rs`; trimmed by the load's `rw.rs` |
 | Nodes a transaction holds (`dirty`) | none in the item; the glue commits once `dirty_bytes()` or the data written reaches 32 MiB (`COMMIT_THRESHOLD`) | the load, `ferrix-btrfs-vfs` `rw.rs` |
 | A writeback's copy buffer | 256 pages, 1 MiB (`WRITEBACK_PAGES`) | the load, `rw.rs` |
 | Delayed references, ranges per block group | none: they grow with the transaction's edits and the volume's fragmentation | -- |
@@ -576,6 +677,39 @@ So the write path's memory is bounded only by the load's commit threshold,
 and between commits by nothing the item sets; a job driving btrfs writes is
 charged for its pages, not for the transaction's nodes (V-05's "a btrfs
 transaction's changed nodes").
+
+**The clean nodes' bound is per operation (finding F-99, 2026-10-30).**
+Until then `load` cleared the whole cache when it held 4,096 nodes, in the
+middle of a walk whose path still named the nodes it cleared, and a range
+scan ended early or skipped items. Now `load` drops nothing; the cache is
+brought back to `CLEAN_NODES`, oldest first, only between operations, by the
+load's `Shared::lock` each time it takes the volume (`L.btrfs.119`). Of the
+two ways the consultant offered (F2), this is the first: the overshoot is
+argued per operation rather than evicting what the operation has not
+touched, since an operation's walks are what overshoot, and a range touches
+every leaf it returns from either way. Within one operation the cache holds
+`CLEAN_NODES` and what that operation loads, and each load is one node of a
+walk: a lookup's at most eight; a range's, one path to its first item and
+then each leaf it crosses, at least one item of which it copies into the
+`Vec` it returns -- so a range holds no more nodes than items it hands back,
+plus a path; a commit's, the paths its delayed references reach, which turn
+into dirty nodes it has already counted against the commit threshold, and
+the nodes it wrote, which join the clean ones at its end. Opening a volume
+loads its chunk, root and block-group items and the free-space tree before
+the mount's first hold trims them. What overshoots is given back at the
+next hold of the lock, and to a reclaim of the machine meanwhile (§2.2d).
+
+**Clean nodes are reclaimable, and counted** (`docs/RAM-RELEASE.md` §3).
+The nodes are kernel heap charged to no job: neither btrfs crate makes a
+`ferrix_kmem` charge. So the filesystem's shrinker takes them only for a
+reclaim whose `takes` admits the kernel's owner, `quota::NONE` -- a reclaim
+of the whole machine -- and a job's `memory.max` reclaim never does
+(`L.btrfs.120`). Each volume keeps the heap its clean nodes hold as an exact
+running count, changed as each node is loaded, copied, dropped or committed
+(`L.btrfs.121`), and `/proc/meminfo` reports the mounts' sum as
+`SReclaimable` and counts it in `MemAvailable` (`L.user.175`). Nothing in
+the kernel reads `MemAvailable` but `/proc/meminfo`'s render: `sysinfo`
+reports the free frames, and no policy decides on it.
 
 **Space on the volume** is a separate budget with its own reserves, kept so
 that a full volume refuses before it changes anything (`H.STORE.6`): an
@@ -590,6 +724,43 @@ The first 1 MiB of the device is never allocated (`DEVICE_RESERVED`), nor is
 any superblock copy's stripe (`L.btrfs.16`, `L.btrfs.92`).
 
 ---
+
+### 1.9 The initramfs's release (docs/RAM-RELEASE.md §2)
+
+Once the root is final, `mm::give_back_initrd` gives the frame allocator
+the frames the initramfs archive fills whole (`L.mm.99`), once a boot: 23,343
+on the N150 box's image, 18,794 on `test-restart --boot blk`'s, 9,013 on
+`test-boot`'s. It takes the archive out of `INITRD` first, under the
+sleeping lock every reader holds (`mm::with_initrd`, `L.mm.100`), so no
+reader has the bytes when a frame goes.
+
+* **The hold.** The frames go in batches of at most 1024 (`GIVE_BACK_BATCH`,
+  the allocator's largest block, aligned to it), one hold of `FRAMES` each,
+  the lock dropped between them: a hold writes the state of at most 1024
+  frame entries and pushes at most a handful of free blocks. Measured, the
+  longest hold of a boot (the `release` line's "the longest"): 1-2 us
+  under KVM on x86-64 (`test-boot`, about 9,000 frames in nine or ten
+  holds), and 87-93 us on armv7a under TCG, which emulates every
+  instruction. `FRAMES` masks interrupts while held, so this is also the
+  masked time. In a build whose checks run, the release check's
+  `mm::reserved_in` reads the state of every one of the archive's frames
+  in one hold as well -- up to 23,343 on the box's image -- once a boot, as
+  a check.
+* **The watermark.** Recomputed from the new managed count in the hold that
+  inserts the last batch (`L.mm.71`). Between two batches the free count has
+  grown and the watermark is still the old one, computed from fewer frames:
+  lower by at most 23,343/128 = 182 frames on the box, and only for the few
+  microseconds the batches take; a program can take that much more before
+  it is refused, never less.
+* **The tmpfs.** After a switch the archive's names are removed from the
+  tmpfs root (`fs::release`, load ring, carrying no claim: `L.user.173` was
+  released unwritten, ledger 5038). Each removal is the namespace's own
+  `unlink` or `rmdir`, under the locks those take; a file still open or
+  mapped keeps its pages until its last reference goes (`H.MEM.9`).
+* **What it leaves.** On the kernel path nothing is kept for `devmgr`. Under
+  `ferrix.devmgr=init` the kernel keeps devmgr's program and its drivers'
+  images for the boot (`L.user.174`): 398 pages on the box's image, 378 of
+  them the driver images a running devmgr holds anyway.
 
 ## 2. Worst-case execution time — F-24
 
@@ -1042,6 +1213,30 @@ What bounds the work in them:
   makes at most height + 2 nodes of at most 2 KiB each. A commit makes many
   such inserts, each its own window, all in task context under the volume's
   sleeping lock; none waits. This adds to the masked windows AoU-4 budgets.
+* **Clean nodes given back.** Each hold of a volume's lock by a reclaim
+  (`WriteVolume::drop_clean`) drops at most 64 nodes (`DROP_BATCH`), each a
+  remove from the map and the frees of its lists, and the lock is taken only
+  if it is free: a reclaim never waits for an operation, which may itself be
+  allocating. The shrinker asks each writable mount once per reclaim, so one
+  reclaim drops at most 64 nodes a mount. The hold is the volume's sleeping
+  lock: it can be preempted, and nothing is masked across it but each
+  free's own window in the heap, so no worst hold is measured for it
+  (the consultant's ruling, ledger line 5011). The trim at each hold
+  (`WriteVolume::trim_clean`) drops what the operations since the last
+  overshot `CLEAN_NODES` by: at most what they loaded, each node once, paid
+  for by the read that loaded it. A place in the queue of loads is skipped
+  in O(1) when its node has left; the queue is closed up, with no
+  allocation, when it holds more stale places than live ones.
+* **A reclaim that frees heap and no frame.** The callers that retry on a
+  reclaim that gave anything: `fs::pages`' fill and write, at most
+  `RECLAIMS` (8) times each; `memory.reclaim`'s rounds, which count the
+  bytes given towards what was asked; and the machine's fault path
+  (`oom::out_of_memory`), which retries the fault while a reclaim gave
+  anything. A freed node's list larger than 2 KiB gives its pages back at
+  once, and a slab page goes when its last object does (stage 12's check
+  saw 475 KB of nodes free 124 frames), but a round could free heap and no
+  frame; the retries still end, since each gives up at least one node of a
+  cache that only operations refill, as the dentry cache's do.
 
 ### 2.2e The IOMMU's bridge table (`iommu::BRIDGES`)
 
@@ -1055,6 +1250,64 @@ each a pass over the bridges -- at most scopes × (hops + 256) × bridges
 comparisons, a few thousand on any machine Ferrix boots, with no
 allocation and no wait. Placement at boot (`iommu::discover`) holds it the
 same way once per function.
+
+### 2.2e2 Core quarantine's walks (`docs/CORE-QUARANTINE.md`)
+
+Taking a processor out moves its tasks one at a time
+(`sched::move_one_off`), each move under the two run queues' locks taken
+lower first **with interrupts masked**. One move is not one detach and one
+insert: it first looks for a candidate on the parking processor's queue
+(`steal_candidate`, a walk of that queue for a task allowed on the
+receiver), and failing that for a movable sleeper
+(`take_movable_sleeper`, a walk of the sleeper timeline from its latest
+entry back), then detaches it and inserts it on the receiver. So one hold
+is bounded by one queue walk and one timeline walk of the parking
+processor -- both bounded by the tasks homed there, each a task's own slot
+-- plus one insert. The walk repeats, one hold at a time, until nothing
+moves.
+
+**Measured** (ledger 4932 (B4)): `/proc/ferrix-service`'s `move-hold-max-ns`
+is the longest such hold since boot. In `test-quarantine` -- four
+CPU-bound loops, 24 readers blocked on pipes, then fifty times processors
+1 to 3 out and back -- it read 3.0 to 31.2 µs across fourteen runs under
+KVM on nazuna (`-smp 4` and `-smp 2`, negative controls included); one
+run with debugging prints inside the hold, since removed, read 1 ms. That is the interval interrupts stay masked on the two
+processors for one move; it grows with the number of tasks homed on the
+parking processor, which the job quotas bound.
+
+The retarget after the park walks at most the 64 message vectors once,
+each a single entry store and an invalidation waited for, with no spin
+lock held across the wait (the vectors' routes are copied out first). Both
+run in the asking task, under the service's sleeping lock, never in an
+interrupt; the park itself runs in the idle task with interrupts on.
+
+### 2.2e3 The RAM scrubber's batch (`docs/RAM-SCRUBBER.md`)
+
+`MEMORY_SCRUB` tests at most 64 free frames a call. One batch runs at a
+time machine-wide: a try-flag (`BUSY`, an atomic swap), and a second caller
+is answered `SHOULD_WAIT` at once, never made to wait. A call walks the
+frames from its cursor and stops at its budget, at the first claim refused
+for the watermark, at a full retired set, or when it has **looked at every
+managed frame once**: so one call may look at up to every managed frame,
+each look one `FRAMES` hold of `O(MAX_ORDER)` -- the free test, the
+watermark, the look for another free block of its order (the first two
+entries of each list of that order or above), and for a frame taken, the
+detach -- and a frame tested is released in one more such hold. No spin lock
+is held across a frame's test. One frame's test is four passes, each 512
+word stores that read nothing, an eviction of every line (64 lines of 64
+bytes on x86-64, `clflush` then `mfence`; `DC CIVAC` then `DSB SY` on
+AArch64) and 512 word reads: 2048 stores, 256 evictions and 2048 reads,
+twice over for a frame that fails once. On x86-64 interrupts are masked for
+one line's eight `movnti`s at a time, never longer. Between those holds the
+calling task holds no lock that raises its preemption count, so the timer's
+interrupt preempts it on its way out (`sched::preempt_on_irq_exit`, the
+kernel's preemption point, `sched/mod.rs` "Where preemption happens"): a
+call delays other tasks, it does not block them. So a call's worst case is
+64 frames' tests (128 for frames all failing once) plus one look at each
+managed frame, and the allocator waits at most one look, one claim or one
+release. The pace is `memscrub`'s (`period`, `idle`, `batch` in its unit's
+configuration), and it calls only while the machine has been idle the share
+it asks.
 
 ### 2.2f Device memory types (`user::memory_type::CLAIMS`)
 
@@ -1119,7 +1372,12 @@ entries off it -- a pass over every quarantined pin on the machine, which
 the budgets bound at twice each device's budget in pages, with no
 allocation; the unpins and the frames' release come after the lock is
 dropped. A quarantined pin's own record is allocated with the pin, outside
-the lock (finding F-23), so a death allocates nothing.
+the lock (finding F-23), so a death allocates nothing. The close's and the
+release's test of each page for a retired frame (`L.object.262`,
+`docs/MACHINE-CHECK-DRIVER.md` §2.1) is one hold of the allocator's
+`FRAMES` per page, outside this lock, bounded by the pin's pages, beside
+the `disown_frame` and `release_frame` holds those paths already make; a
+retired page skips the fold's flush and read.
 
 **The Intel integrated GPU's budget** (`L.object.194`-`196`; the
 consultant's K3 (3), ledger 2352). Counted at stage 10 with the ceiling,
@@ -1782,6 +2040,93 @@ processor ending a task at once, whether or not any processor is idle, and
 its checks are `docs/PREEMPTIBLE-WAITS.md`'s, under the consultant's
 verdict of ledger line 3950.
 
+### 2.2z2 The machine check (`arch::x86_64::mce`, 2026-10-30)
+
+* **On the IST stack** (`on_kernel_stack`, and `from_user` before its
+  frame's interrupts open): no lock, no allocation, no print except on the
+  way to a halt. Two passes over at most 32 banks, each an `rdmsr` of
+  `MCi_STATUS` and, where valid, `MCi_MISC` and `MCi_ADDR`; at most 32
+  `wrmsr`s clearing banks and one clearing `MCG_STATUS`; 8 compare-and-swaps
+  at most to find a pending slot.
+* **The frame allocator's lock** (`FRAMES`): `retire_frame` holds it for one
+  look at the frame's state, a scan of at most 256 retired entries and one
+  `claim`, which is a walk down at most `MAX_ORDER` splits. The free paths'
+  added test is one relaxed load while nothing is retired, and a scan of
+  at most 256 entries per frame after; a block freed with a retired frame
+  in it is split and freed frame by frame, at most `2^MAX_ORDER` frees.
+* **An address space's lock** (`AddressSpace::find_frame`): held across a
+  walk of the program half's leaves in address order, stopping at the
+  first match, at the half's end or after `FIND_FRAME_LEAVES` (2^18)
+  leaves. Run only after a ring-3 machine check, with interrupts open. Its
+  worst case is the walk of 2^18 leaves and their tables, measured on no
+  hardware yet: a row of `docs/BACKLOG.md`.
+* **The poll**: a task per processor, every `ferrix.mce.poll` seconds, at
+  most 32 bank reads and 32 lines; no lock while it reads a bank.
+* **The bad-frame table** (`docs/MACHINE-CHECK-RESTART.md` §2.3, §2.4): each
+  newly retired frame costs one `fetch_add` on the table's count, one store
+  and two cache-line write-backs (the entry and the count), no lock; the
+  fatal machine check's stop makes the same per uncorrected record before
+  its report, on its stack. The pstore attach writes the loader's kept-out
+  frames back, at most 64, once per boot. The event log's set (§9, slice 8b)
+  costs the kernel nothing: the loader reads one block twice per boot, and
+  writes one block twice only on a boot that adds a frame.
+* **CMCI** (`docs/MACHINE-CHECK-CMCI.md`): the handler masks the LVT entry
+  (one APIC write), counts, sets and swaps one flag and wakes one wait
+  queue; it reads no bank and takes no lock but the queue's. The claim
+  holds `CLAIM` (preemption off, interrupts open, no handler takes it) for
+  at most 3 x 32 MSR accesses, once per processor, at its poll task's
+  start. After an unmask the task reads each claimed bank's status once
+  more (at most 32 reads). A storm costs at most 16 interrupts and 16
+  rounds in its first second and one round a second after.
+* **A system call's copy that consumed poison** (`docs/MACHINE-CHECK-COPY.md`,
+  H.FAIL.10): the IST path adds one comparison of `rip` with the copy's
+  symbol, the RAM test of `rsi` (a scan of at most `MOST_RAM_RUNS` (128)
+  runs, atomics only) and two frame writes; still no lock. The copy itself
+  is the `rep movsb` the compiler emitted before, so a copy costs what it
+  did. The caller's record is one compare-and-swap under whatever lock it
+  holds (the space's, or futex's bucket); the retirement and the signal run
+  at the call's way out with no lock held, the retirement's `FRAMES` hold
+  as above. A call with no poison pays one load of its task's record on its
+  way out.
+* **Poison in a clean cached page** (`docs/MACHINE-CHECK-PAGECACHE.md`,
+  H.FAIL.11): `cache::drop_poisoned` walks the cache list under its walker
+  count (one hold of the list's lock per entry) and scans each object's page
+  map at most 32 entries a hold of its pages lock, let go between chunks: the
+  walk is bounded by the pages the cache holds, and runs only after a
+  machine check, with interrupts open and no spin lock held. The take is
+  reclaim's: one page out of the object and every space mapping it, one
+  shootdown. Every file read now copies a cached page through `copy_mc`'s
+  `rep movsb`: the same `rep` instruction class `copy_from_slice` reached
+  before, through compiler_builtins' `rep` path in this kernel built without
+  SSE (seen in test-mce-copy's TCG `rip` histogram), so no figure is owed
+  (ledger 5311 (6)).
+* **An address space's lock, then an object's pages lock**
+  (`AddressSpace::resident_split`, `Vmo::committed_in`,
+  `Vmo::committed_in_both`; L.user.171, L.user.172): whoever may read a
+  process's `/proc/<pid>/status` or `stat` -- `ps` and `top` read them for
+  every process -- holds that process's space lock for one pass over its
+  regions, one entry each, into a list allocated fallibly first: the pass
+  `/proc/<pid>/maps` already makes. The lock is let go before any page is
+  counted. What is still walked page by page: for an object whose regions
+  do not overlap and are of one kind, the shorter of its regions' spans and
+  the gaps between them -- the gaps (its committed pages, one count, less
+  them) when its regions span at least as many pages as it holds, its
+  regions when they span fewer, as a disk file read with `read` and mapped
+  in part does; every region of an object whose regions overlap or are of
+  more than one kind; and every private file mapping's shadow, which holds
+  only the mapping's copies. Each object's pages lock is held for at
+  most `COUNT_CHUNK` (256) entries of a range walk, and let go between chunks;
+  `committed_in_both` holds one object's for at most 64 entries, then the
+  other's for one lookup at a time, never both. A program's own page count
+  sets how many holds a read takes, never how long one is, so a fault on
+  the program's objects waits behind at most one chunk. The order, space
+  lock then pages lock, is `resident_pages`'s already; here the two are
+  never held together. Measured under KVM on nazuna (the procfs check's
+  line, 2026-10-30): 4,098 pages counted in 5 µs, where the walk page by
+  page took 164 µs. The worst case the review asks for -- an object of 1 GiB or
+  more mapped in part, `status` read in a loop, and the target's fault
+  latency meanwhile -- is not measured yet: a row of `docs/backlog/p2.md`.
+
 ### 2.3 What is missing, per standard
 
 * **DO-178C DAL C** does not require WCET as such, but does require that
@@ -1809,6 +2154,86 @@ would have to be made is named.
 
 ---
 
+### 2.2z3 A task's slice request (`sched::set_request`, F7, 2026-10-30)
+
+`L.sched.107` to `L.sched.109`; the certification consultant's design
+review, ledger 5156 ((A5) to (A7), (A10)); design in
+`docs/GAME-MODE-SCHED.md` §2.2.
+
+* **Memory.** None allocated. One word a task (`Task::request_ns`), one a
+  Linux thread (`Thread::slice_request`), and one an entity on a queue
+  (`Entity::request_ns`, carried in `EntityState` between queues). A
+  `sched_setattr` reads at most a page of a larger structure's unknown
+  tail into a buffer of its size (load ring, `syscall/limits.rs`), as it
+  reads every other system call's argument.
+* **Time, the setter** (`sched::set_request`, interrupts masked): one
+  queue lock, the task's home, found and re-read as `set_weight` finds it,
+  retried if the task moved; under it two stores, and for an entity on
+  the queue one `Tree::find` walk of that queue's tree (at most that
+  queue's entities, as for `set_weight`), then one O(log n) removal and
+  insertion. No other lock is taken under it, and no new lock exists: the
+  order is `set_weight`'s (ledger 5232 (3)).
+* **Time, each new request:** one call of `effective_request`, two
+  comparisons, in place of reading the queue's slice. No walk.
+* **The bound on decisions** ((A7)). A request is never shorter than
+  `MIN_REQUEST_NS` (100 µs, Linux's floor), so a task can make its
+  processor decide at most once per `MIN_REQUEST_NS` of its own running
+  through its request, beside the decisions the queue makes anyway. That is
+  a bound on decisions, not a time claim.
+* **The per-task bound.** A request is never longer than the queue's slice
+  (L.sched.108), and the lag limit, the placement of an arriving entity and
+  the decision interval keep the queue's slice; so H.SCHED.2 and its `fair`
+  line are unchanged by any request.
+
+### 2.2z4 A task's mask (`sched::set_affinity`, F3, 2026-10-30)
+
+`L.sched.96` to `L.sched.101` and `L.sched.123`; the certification
+consultant's design reviews, ledger 4446 ((D1), (D2), (D6), (D7)) and
+5156 ((A1)-(A5), (A10)); design in `docs/GAME-MODE-SCHED.md` §2.1, the
+readers and their locks in `sched/affinity.rs`'s module comment.
+
+* **Memory.** None allocated. A task's stored mask is its `CpuSet`'s four
+  words, one atomic each, and a sequence word (`task::Affinity`); a Linux
+  thread holds the mask its task is made with (`Thread::start_affinity`,
+  32 bytes, set once); one flag a processor (`affinity::PUSHING`, 256
+  bytes) and one counter. `sched_setaffinity` reads at most the kernel's
+  mask size from the caller (load ring).
+* **The stored mask** is written only by `set_mask`, under the lock of
+  the queue that owns the task, with interrupts masked: four stores
+  between two of the sequence word. A reader copies the four words between
+  two loads of it and retries when they differ or the first was odd, at
+  most once for each write that overlaps it; a write is four stores long
+  and writers are serialised. No `unsafe`.
+* **The lock order.** The setter takes one queue lock, the task's home,
+  found and re-read as `set_request` finds it, and no other lock under it;
+  its wait (`wait_until_off`, L.sched.100) holds none, yields between looks
+  and ends after at most 100 ms (`SETTER_WAIT_NANOS`), at the target's
+  death, or once it is off the excluded processor. The pick push
+  (`push_picked`, L.sched.98) holds the picking processor's lock and takes
+  a destination's: waited for when it is above, which the lowest-first
+  order allows, only tried when below, as `place_on_idle` tries its; one
+  push a queued task, then the pick again. The push at a switch's tail
+  (`push_off`, L.sched.99) is made after `finish_switch` has let the home
+  lock go and takes the two queues' locks lower first, as `steal_from`
+  does, waiting, so it cannot fail. No new nesting with any lock outside
+  `sched`.
+* **The way out** (`keep_inside`, L.sched.99): with `PLACE` posted, one
+  look at the mask a way out; outside, one decision (`schedule`, with no
+  lock held and the preemption count zero, as FX-0503 asserts), whose
+  switch takes the task off its queue and whose tail queues it where its
+  mask allows. Repeated only for a mask set again, or a processor leaving
+  service, while it moved: one round each. A task whose mask is the whole
+  domain carries no bit and pays one load, as before.
+* **The walk** is over a mask's `WORDS` (4) words and, for a push's
+  destination, the 256 processor numbers a `CpuSet` can name: constant.
+* **A return to service walks nothing** (L.sched.123, (A10)): a task whose
+  stored mask names the returning processor again is moved at its next
+  placement, pick, or way out, which `PLACE` makes it look at.
+* **The fallback** (L.sched.123) is one comparison more at each placement:
+  the stored mask against the in-service set, the domain when they do not
+  meet. `PINNED_PROGRAMS` counts spawn pins only (`Task::spawn_pin`, set
+  once at `Task::new`).
+
 ### 2.2r An RMRR's identity domain at bring-up (`iommu::bring_up_vtd`, K2)
 
 Before any program runs, once per VT-d unit whose RMRRs are honoured
@@ -1828,7 +2253,15 @@ command gate across the flush and its wait, which is bounded as 2.2i
 says. Nothing else runs then, so this is boot time, not a bound any
 program waits on. At run time an identity domain adds to `Domain::pin`
 and `unpin` one comparison of each page against its RMRRs (one range on
-the N150), outside every lock.
+the N150), outside every lock. Since 2026-10-31 (`L.iommu.106`-`108`,
+ledger 5366) a run of 512 of a pin's pages on a unit with `CAP.SLLPS` is
+one entry write instead of 512, and its take-down one `unmap_range` of
+2 MiB clearing at most 512 leaf entries (one, for a block), with the
+domain's gate held and no spin lock; the walk's record cleans early every
+8 noted writes (`Unpublished`'s `SPANS`), so on a unit that does not snoop
+(the N150's `dmar0`, `ECAP.C` 0) a run's take-down costs at most 64 cleans
+before the flush. A run is never longer than 512 of its pages mapped one
+by one, so the pin's and the unpin's time only shrink.
 
 ### 2.2s An AMD-Vi unit (`iommu::amdvi`, 2026-10-24)
 

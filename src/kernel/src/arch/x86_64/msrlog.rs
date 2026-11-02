@@ -30,7 +30,7 @@ const FLAG: &str = "ferrix.msrlog";
 const PERIOD_OPTION: &str = "ferrix.msrlog.period";
 /// Seconds between reads where `ferrix.msrlog.period` names none, or names
 /// one that is not understood.
-const DEFAULT_PERIOD: u64 = 5;
+pub(super) const DEFAULT_PERIOD: u64 = 5;
 /// The longest period understood, an hour.
 const MAX_PERIOD: u64 = 3600;
 

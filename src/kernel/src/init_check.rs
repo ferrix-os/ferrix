@@ -9,7 +9,7 @@ use crate::init::{
 
 /// A case of [`check`]: the entries, the program, script and commands they
 /// should give, and how many of them should be refused.
-type Case<'a> = (&'a [InputEntry], &'a [u8], &'a [u8], &'a [u8], u32);
+type Case<'a> = (&'a [InputEntry<'static>], &'a [u8], &'a [u8], &'a [u8], u32);
 
 /// What [`check`] found.
 #[derive(Debug, Clone, Copy)]
@@ -27,7 +27,7 @@ const fn made_up(
     directory: bool,
     links: u32,
     data: &'static [u8],
-) -> InputEntry {
+) -> InputEntry<'static> {
     InputEntry {
         name,
         regular,
@@ -38,7 +38,7 @@ const fn made_up(
 }
 
 /// [`judge`] over `entries`, and how many it refused.
-fn judged(entries: &[InputEntry]) -> (Inputs, u32) {
+fn judged(entries: &[InputEntry<'static>]) -> (Inputs<'static>, u32) {
     let mut refused = 0_u32;
     let inputs = judge(entries.iter().copied(), &mut |_, _| {
         refused = refused.saturating_add(1);
@@ -53,7 +53,7 @@ fn judged(entries: &[InputEntry]) -> (Inputs, u32) {
 ///
 /// Verifies: L.init.2, L.init.3, H.BOOT.15
 pub fn check() -> Result<CheckReport, &'static str> {
-    const DIRS: [InputEntry; 2] = [
+    const DIRS: [InputEntry<'static>; 2] = [
         made_up(b".ferrix", false, true, 2, b""),
         made_up(b".ferrix/init", false, true, 2, b""),
     ];

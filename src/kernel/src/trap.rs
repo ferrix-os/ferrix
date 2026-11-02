@@ -511,11 +511,35 @@ pub fn system_call(args: &SyscallArgs, regs: Option<&arch::UserRegs>) -> Outcome
     // As on the way back from a trap: a call that moved its own process
     // (`echo $$ > cgroup.procs`) runs in the new job from here.
     if regs.is_some() {
+        copy_poisoned();
         crate::sched::regroup_current();
         crate::sched::throttle_current(must_attend);
         crate::sched::call_left();
     }
     outcome
+}
+
+/// `si_code` `BUS_MCEERR_AR`: a machine check, action required.
+const BUS_MCEERR_AR: i32 = 4;
+
+/// Act on a copy of the call that consumed poison (`L.syscall.25`,
+/// `docs/MACHINE-CHECK-COPY.md` §3.3), here at the call's way out, where no
+/// lock is held: retire the frame, then, where the memory was the program's
+/// own, raise `SIGBUS` `BUS_MCEERR_AR` at its page as a ring-3 consumption
+/// with `RIPV` set raises it -- through the personality's `fault_signal`, so
+/// a handler runs and a blocked or ignored one ends the program. One word
+/// read when there is none.
+fn copy_poisoned() {
+    let Some(Some((page, at))) = crate::sched::with_current(crate::sched::Task::take_copy_poison)
+    else {
+        return;
+    };
+    arch::retire_poisoned(page);
+    if let (Some(at), Some(path)) = (at, return_path()) {
+        // No instruction consumed it, the call did: `pc` 0, which only a
+        // fatal signal's crash line reads.
+        let _ = (path.fault_signal)(ferrix_linux_abi::types::SIGBUS, BUS_MCEERR_AR, at, 0);
+    }
 }
 
 /// What the way back to user mode does before the program runs again.
@@ -574,6 +598,11 @@ pub struct ReturnPath {
     /// `SIGSEGV` is the personality's policy, but deciding that a fault *is*
     /// the program's problem is the trap path's, and the trap path is core.
     pub fault_signal: fn(u32, i32, u64, u64) -> FaultOutcome,
+    /// End the running program with a signal it took for a fault, running no
+    /// handler: for a fault the instruction cannot be restarted after (a
+    /// machine check with `RIPV` clear, `L.x86_64.228`). Arguments as
+    /// [`ReturnPath::fault_signal`]'s.
+    pub fault_end: fn(u32, i32, u64, u64) -> FaultOutcome,
 }
 
 /// The registered return path, or null until the personality registers one.
@@ -602,7 +631,9 @@ pub fn set_return_path(path: &'static ReturnPath) {
 /// self-checks on, when none is, to show that none should have been
 /// (`sched::work::audit`).
 pub fn attention_due(path: &ReturnPath) -> bool {
-    if crate::sched::work::wants_attention(crate::sched::work::look()) {
+    // `look_placed`: a task given a mask is moved inside it first, before
+    // any signal frame is built and any user instruction runs (L.sched.99).
+    if crate::sched::work::wants_attention(crate::sched::work::look_placed()) {
         return (path.needs_attention)();
     }
     crate::sched::work::auditing() && crate::sched::work::audit(path.needs_attention)
@@ -627,14 +658,40 @@ pub(crate) fn return_path() -> Option<&'static ReturnPath> {
 /// it or ends with it as its status. Never a kernel panic -- a program cannot
 /// be allowed to stop the machine with `hlt` -- unless the kernel entered user
 /// mode with no process to blame.
-fn user_fault(frame: &arch::TrapFrame, trap: &Trap) {
+fn user_fault(frame: &mut arch::TrapFrame, trap: &Trap) {
+    // x86-64's machine check from ring 3, marked by its entry for `SIGBUS`:
+    // the frame's retirement and the program's address for it take locks,
+    // so they are found with interrupts open (`docs/MACHINE-CHECK.md` §3.5).
+    if arch::machine_check_marked(frame) {
+        arch::enable_interrupts();
+        let raised = arch::machine_check_signal(frame);
+        arch::disable_interrupts();
+        // None: a clean cached page, dropped, which the program faults in
+        // again from the disk when it re-runs the load
+        // (`docs/MACHINE-CHECK-PAGECACHE.md` §3.3).
+        if let Some((signal, code, address, end)) = raised {
+            user_fault_ending(frame, trap, (signal, code, address), end);
+        }
+        return;
+    }
     user_fault_as(frame, trap, arch::fault_signal(frame, trap));
 }
 
 /// [`user_fault`] with the signal, `si_code` and address already decided, for
 /// a fault the architecture cannot classify alone: a touch of a file mapping
 /// past the end of its file is `SIGBUS`, which only the address space knows.
-fn user_fault_as(frame: &arch::TrapFrame, trap: &Trap, (signal, code, address): (u32, i32, u64)) {
+fn user_fault_as(frame: &arch::TrapFrame, trap: &Trap, raised: (u32, i32, u64)) {
+    user_fault_ending(frame, trap, raised, false);
+}
+
+/// [`user_fault_as`], ending the program without a handler when `end`
+/// ([`ReturnPath::fault_end`]).
+fn user_fault_ending(
+    frame: &arch::TrapFrame,
+    trap: &Trap,
+    (signal, code, address): (u32, i32, u64),
+    end: bool,
+) {
     let Some(path) = return_path() else {
         // No personality registered, so nothing can turn a fault into a
         // signal. A kernel built that way has no user programs to fault.
@@ -653,7 +710,12 @@ fn user_fault_as(frame: &arch::TrapFrame, trap: &Trap, (signal, code, address): 
     // the personality's return path open them from this same dispatch; they
     // are masked again before anything else here runs.
     arch::enable_interrupts();
-    let outcome = (path.fault_signal)(signal, code, address, frame.instruction_pointer());
+    let raise = if end {
+        path.fault_end
+    } else {
+        path.fault_signal
+    };
+    let outcome = raise(signal, code, address, frame.instruction_pointer());
     arch::disable_interrupts();
     match outcome {
         FaultOutcome::NoProcess => fatal(
@@ -813,7 +875,14 @@ fn report(
     headline: core::fmt::Arguments<'_>,
     entry: &'static crate::panic::catalog::Explanation,
 ) -> ! {
-    let first = crate::panic::begin_report();
+    // A machine check's stop is a stop word of its own for the next boot's
+    // loader (`L.console.58`); every other fatal trap is a panic's.
+    let stop = if ptr::eq(entry, &raw const crate::panic::catalog::MACHINE_CHECK) {
+        ferrix_bootinfo::pstore::Stop::MachineCheck
+    } else {
+        ferrix_bootinfo::pstore::Stop::Panic
+    };
+    let first = crate::panic::begin_report(stop);
     println!();
     crate::console::println_unlogged!("FERRIX-PANIC {headline}");
     arch::report_trap(frame);

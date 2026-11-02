@@ -184,9 +184,11 @@ it beside `IBPB`). Why that gives the protection the refill gave (§9.3a's A2),
 an argument and not a check, since no boot can see the predictor:
 - AMD's APM vol. 2 (as quoted in the KVM ERAPS series, v6, 2025-11) has the
   predictor cleared at every `MOV CR3`, every `INVPCID` but type 0, and every
-  implicit TLB invalidation. Ferrix's `install_user_root` is a plain
-  `MOV CR3` with no PCID, and the skip is taken only with `CR4.PCIDE` clear,
-  which is stricter than the APM asks.
+  implicit TLB invalidation. Without PCIDs Ferrix's `install_user_root` is
+  a plain `MOV CR3`, and the skip is taken only with `CR4.PCIDE` clear,
+  which is stricter than the APM asks. Where PCIDs are on
+  (`docs/PCID.md`), `CR4.PCIDE` is set before the plan is made, so ERAPS is
+  never claimed and the refill runs at every switch (`L.x86_64.220`).
 - Under KVM with nested paging the guest's `MOV CR3` is not intercepted and
   runs on the hardware. KVM offers ERAPS to a guest only where it virtualises
   it (Linux 6.20 and later; the reference host runs 7.0).
@@ -878,6 +880,12 @@ instructions per clamp.
   a file's page cache, a shared VMO — can Flush+Reload it. Nothing here
   partitions a cache; cache colouring or core partitioning is the defence, and
   it is an integrator's (AoU-11).
+* **TLB state across a switch.** With PCIDs on (`docs/PCID.md`), a
+  space's translations survive a switch to another program's space, across
+  speculation domains too, under a PCID that is not current. They translate
+  nothing for the other program, but whether they are there can be timed,
+  as caches can: the same class as the cache timing above, and the
+  integrator's (AoU-11). Without PCIDs every switch drops them.
 * **Sibling hyperthreads on an MDS-affected part.** `VERW` clears buffers on
   the way out of the kernel, not while a sibling runs. Such a part is to run
   with SMT off (AoU-11).

@@ -515,6 +515,29 @@ impl CpuQueue {
         let _ = self.fair.set_weight(task.id, weight);
     }
 
+    /// Task `id`'s request as the fair class holds it, for stage 5's check of
+    /// slice requests (L.sched.107-108): its deadline less its virtual
+    /// runtime, its weight, what it asked for, whether it is running, and
+    /// the queue's slice now. `None` if it is not on this queue.
+    pub(crate) fn request_sample(&self, id: TaskId) -> Option<(i64, u32, u64, bool, u64)> {
+        let view = self.fair.get(id)?;
+        Some((
+            view.deadline.wrapping_sub(view.vruntime) as i64,
+            view.weight,
+            view.request_ns,
+            view.running,
+            self.fair.slice_ns(),
+        ))
+    }
+
+    /// Give a task a new slice request, whether it is running here, queued
+    /// here or neither (L.sched.107). Its own record is set either way; the
+    /// fair class keeps the deadline it has and measures the next with it.
+    pub(crate) fn set_request(&mut self, task: &Arc<Task>, request_ns: u64) {
+        task.set_request(request_ns);
+        let _ = self.fair.set_request(task.id, request_ns);
+    }
+
     /// Take the running task out of the fair class, keeping what it needs to
     /// come back with.
     pub(crate) fn detach_current(&mut self) {
@@ -523,6 +546,33 @@ impl CpuQueue {
             task.store_entity_state(state);
             task.set_queued(false);
         }
+    }
+
+    /// What runs on a processor asked to park (`docs/CORE-QUARANTINE.md`
+    /// §3.2): its idle task, the running task, if it is another and still
+    /// runnable, put back on the queue first, to be moved off by the park.
+    pub(crate) fn park_pick(&mut self) -> Option<Arc<Task>> {
+        if let Some(current) = self.current.clone()
+            && !self.is_running_idle()
+            && current.state() == RUNNABLE
+        {
+            self.detach_current();
+            // NOALLOC: `CpuQueue::insert` queues the task in its own run slot,
+            // which `detach_current` just gave back to it.
+            self.insert(&current);
+        }
+        self.idle.clone()
+    }
+
+    /// Take out one sleeper that may run on `to` and is not pinned: its
+    /// instant and the task, its sleep slot given back so that `to`'s
+    /// timeline can file it again (`docs/CORE-QUARANTINE.md` §3.2).
+    pub(crate) fn take_movable_sleeper(&mut self, to: usize) -> Option<(u64, Arc<Task>)> {
+        let (at, task, slot) = self
+            .sleepers
+            .take_last_where(|task| !super::pinned(task) && super::allowed(task, to))?;
+        task.return_sleep_slot(slot);
+        Some((at, task))
     }
 
     /// What should run now: the fair class's choice, or the idle task.
@@ -626,13 +676,15 @@ impl CpuQueue {
 
     /// The task another CPU should take from this one, if any may be moved.
     pub(crate) fn steal_candidate(&self, to: usize) -> Option<TaskId> {
-        // `may_run_on` is the one that matters now that affinity is a set:
-        // a task allowed on processors 0 and 1 must not be moved to 2 however
-        // idle 2 is. `is_pinned` stays because it says something different —
-        // a task with exactly one home should not be moved even *to* that
-        // home, since it is already there.
+        // `allowed` is the one that matters now that affinity is a set: a
+        // task allowed on processors 0 and 1 must not be moved to 2 however
+        // idle 2 is (L.sched.97; read exactly, under this queue's lock, the
+        // mask's writer's). `pinned` stays because it says something
+        // different -- a task with exactly one home should not be moved even
+        // *to* that home, since it is already there; one queued elsewhere is
+        // the pick push's (L.sched.98).
         self.fair.latest_where(|task| {
-            !task.is_pinned() && task.may_run_on(to) && task.state() == RUNNABLE
+            !super::pinned(task) && super::allowed(task, to) && task.state() == RUNNABLE
         })
     }
 

@@ -32,10 +32,19 @@
 //!   no processor walks these tables and caches an entry while outside the
 //!   set.
 //! * It **leaves only after** the root write that took its translations out
-//!   of its TLB: [`AddressSpace::uninstall`]'s, or the `install` of the next
-//!   space. On x86-64 that is the `CR3` write — without `PCID` it drops every
-//!   entry not marked global, and no user mapping is ever global: every
-//!   `map_in` in this file passes `global: false`. On `AArch64` and ARMv7-A a
+//!   of its TLB, or out of use: [`AddressSpace::uninstall`]'s, or the
+//!   `install` of the next space. On x86-64 that is the `CR3` write — without
+//!   `PCID` it drops every entry not marked global, and no user mapping is
+//!   ever global: every `map_in` in this file passes `global: false`. With
+//!   `PCID` (`docs/PCID.md`) the write may keep them, tagged with a PCID that
+//!   is no longer current and so used for nothing; before that PCID is
+//!   current for this space again, `install` flushes it if a shootdown of
+//!   the space has begun since it was last flushed. That rests on two
+//!   sequentially consistent orders: a shootdown counts itself (`begun`)
+//!   before it reads the set, and `install` joins the set before it reads
+//!   the count. Either the set read sees the join, and the processor is
+//!   interrupted, or the count read sees the shootdown, and the slot is
+//!   flushed. On `AArch64` and ARMv7-A a
 //!   write to `TTBR0` drops nothing and `EPD0` stops walks rather than TLB
 //!   hits, so both `install_user_root` and `uninstall_user_root` invalidate
 //!   `ASID` zero, which every user translation carries and no kernel one does.
@@ -240,11 +249,27 @@ impl Inner {
     }
 }
 
+/// The most leaves [`AddressSpace::find_frame`] visits: a gibibyte of
+/// four-kilobyte pages. A program that maps more, and consumed poison past
+/// them, is told address 0.
+#[cfg_attr(
+    not(target_arch = "x86_64"),
+    expect(
+        dead_code,
+        reason = "only x86-64's machine check finds a poisoned frame's address"
+    )
+)]
+pub(crate) const FIND_FRAME_LEAVES: usize = 1 << 18;
+
 /// One process's address space.
 #[derive(Debug)]
 pub struct AddressSpace {
     /// Physical frame of the root table.
     root: Frame,
+    /// This space's number, never given to another: what a processor's PCID
+    /// slot records, so that a space made over a freed root's frame never
+    /// finds a dead space's translations (`docs/PCID.md`).
+    id: u64,
     /// This space, as the objects it maps record it.
     me: Weak<AddressSpace>,
     /// The processors whose TLB may still hold this space's translations.
@@ -331,6 +356,42 @@ impl AddressSpace {
         self.inner.lock().map.high()
     }
 
+    /// The lowest address in this space's program half at which `frame` is
+    /// mapped, or `None` (`docs/MACHINE-CHECK.md` §3.5): where a program
+    /// consumed a poisoned frame, for its `SIGBUS`. The tables have no map
+    /// from a frame back to its pages, so the walk visits the program's
+    /// leaves in address order under the space's own lock, stopping at the
+    /// first match, at the program half's end, or after [`FIND_FRAME_LEAVES`]
+    /// leaves -- the bound its hold of the lock has (MEMORY-AND-TIMING).
+    #[cfg_attr(
+        not(target_arch = "x86_64"),
+        expect(
+            dead_code,
+            reason = "only x86-64's machine check finds a poisoned frame's address"
+        )
+    )]
+    pub(crate) fn find_frame(&self, frame: Frame) -> Option<u64> {
+        let wanted = frame * PAGE_SIZE;
+        let inner = self.inner.lock();
+        let end = inner.map.high();
+        let mut found = None;
+        let mut visited = 0_usize;
+        mm::for_each_leaf_in(self.root * PAGE_SIZE, |leaf| {
+            visited += 1;
+            if leaf.virt.0 >= end || visited > FIND_FRAME_LEAVES {
+                return false;
+            }
+            let start = leaf.phys.0;
+            if (start..start + leaf.bytes()).contains(&wanted) {
+                found = Some(leaf.virt.0 + (wanted - start));
+                return false;
+            }
+            true
+        });
+        drop(inner);
+        found
+    }
+
     /// The physical address of the root table, for whoever installs it.
     pub fn root_table(&self) -> u64 {
         self.root * PAGE_SIZE
@@ -353,7 +414,9 @@ impl AddressSpace {
     /// The processor joins this space's set before the root is loaded, and
     /// leaves `replacing`'s only after, for the reasons the module gives. A
     /// `replacing` that was not in fact installed here costs nothing: the
-    /// root write just made has dropped whatever of it this TLB held.
+    /// root write just made has dropped whatever of it this TLB held, or,
+    /// with PCIDs, left it under a PCID that is not current, which the
+    /// module's last rule covers.
     ///
     /// # Safety
     ///
@@ -377,10 +440,14 @@ impl AddressSpace {
         let cpu = this_logical_cpu();
         // NOALLOC: a `CpuMask` is a fixed bitmap; joining sets a bit.
         self.cpus.join(cpu);
+        // After the join, for the order the module gives: a shootdown whose
+        // set read missed the join is one whose count this read sees.
+        let begun = self.flushes.begun.load(Ordering::SeqCst);
         // SAFETY: (TRANSLATE) the root was made by `new`, so `prepare_user_root` has run
         // on it and the kernel is reachable through it on the architecture
-        // that needs that; the caller guarantees it outlives the installation.
-        unsafe { arch::install_user_root(self.root * PAGE_SIZE) };
+        // that needs that; the caller guarantees it outlives the installation,
+        // and masks interrupts on `cpu`, the processor running this.
+        unsafe { arch::install_user_root(self.root * PAGE_SIZE, self.id, begun, cpu) };
         crate::sched::trip::count(crate::sched::trip::Count::RootInstall);
         if let Some(previous) = replacing
             && !core::ptr::eq(previous, self)
@@ -393,7 +460,12 @@ impl AddressSpace {
     ///
     /// After this no user address translates here, which is the state a kernel
     /// thread runs in. The processor leaves the set after the root write,
-    /// which on every architecture drops the user translations it had cached.
+    /// which on every architecture drops the user translations it had cached
+    /// or, on x86-64 with PCIDs, takes them out of use: the kernel's root is
+    /// loaded with PCID 0, whose flush does not reach the space's own PCID,
+    /// and the space's translations stay under that PCID, used for nothing,
+    /// until `install` flushes it or keeps it by the rule the module gives
+    /// for a switch to another space (`docs/PCID.md` §3).
     ///
     /// # Safety
     ///
@@ -418,6 +490,7 @@ impl AddressSpace {
     fn assemble(root: Frame, me: &Weak<AddressSpace>, inner: Inner) -> AddressSpace {
         AddressSpace {
             root,
+            id: next_id(),
             me: me.clone(),
             cpus: CpuMask::new(),
             flushes: Flushes::new(),
@@ -425,6 +498,22 @@ impl AddressSpace {
             inner: SpinLock::new(inner),
             domain: AtomicU64::new(UNCLAIMED),
         }
+    }
+}
+
+/// The next [`AddressSpace`]'s id. From one: zero is a PCID slot holding no
+/// space.
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+/// A new space's id, never given before: the counter only moves up, and the
+/// kernel stops rather than wrap it to an id already given or to zero.
+fn next_id() -> u64 {
+    match NEXT_ID.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1)) {
+        Ok(id) if id != 0 => id,
+        _ => crate::panic::fatal!(
+            crate::panic::catalog::SPACE_IDS_EXHAUSTED,
+            "no address space id is left that was never given"
+        ),
     }
 }
 
@@ -1871,13 +1960,16 @@ impl AddressSpace {
     /// translations it is for are out of the tables, never before.
     fn begin_shootdown(&self, _locked: &Inner) -> CpuSet {
         let _ = self.flushes.pending.fetch_add(1, Ordering::SeqCst);
-        let _ = self.flushes.begun.fetch_add(1, Ordering::Relaxed);
+        // Sequentially consistent, and before the set is read: what lets a
+        // processor leave the set with this space's translations still in
+        // its TLB under a PCID (`install`, and the module's last section).
+        let _ = self.flushes.begun.fetch_add(1, Ordering::SeqCst);
         self.cpus.snapshot()
     }
 
     /// How many shootdowns of this space have begun: see the field.
     pub(crate) fn shootdowns_begun(&self) -> u64 {
-        self.flushes.begun.load(Ordering::Relaxed)
+        self.flushes.begun.load(Ordering::SeqCst)
     }
 
     /// A shootdown [`AddressSpace::begin_shootdown`] or
@@ -1899,8 +1991,9 @@ impl AddressSpace {
 struct Flushes {
     /// Counted under the space's lock and not yet returned.
     pending: AtomicU64,
-    /// Ever begun, for the checks: what a change that should have taken
-    /// nothing down is held to.
+    /// Ever begun: what a change that should have taken nothing down is
+    /// held to, and what a PCID slot is compared with before it is kept
+    /// (`install`).
     begun: AtomicU64,
 }
 
@@ -3817,7 +3910,10 @@ impl Drop for AddressSpace {
 
         // Unwalked: no processor is in this space's set, and each left it
         // through the root write that dropped its entries, walk caches and
-        // all -- the module's second rule.
+        // all, or, with PCIDs, left them under a PCID that is not current --
+        // the module's second rule. Those are used for nothing: this space's
+        // id is never given again, so no install finds its slot, and the
+        // slot's next owner flushes it (`docs/PCID.md` §3).
         for region in inner.map.iter() {
             let _ = mm::unmap_unwalked(
                 self.root * PAGE_SIZE,
@@ -3853,6 +3949,143 @@ impl Drop for AddressSpace {
         // `unmap_unwalked` only ever walked the ranges above, all of which are in
         // the user half, so nothing of the kernel's was ever reached.
         mm::deallocate_frames(self.root, 0);
+    }
+}
+
+/// One object's pages in [`AddressSpace::resident_split`], from its
+/// regions, `group`, lowest first: for regions that do not overlap and are
+/// of one kind, the shorter walk -- the regions when they span fewer pages
+/// than the object holds (a file read with `read` and mapped in part), else
+/// its pages less those in the gaps between them, which normally hold none;
+/// otherwise each region over its own range. Then each private file
+/// mapping's copies, by walking its shadow.
+fn count_object(group: &[Counted], resident: &mut Resident) {
+    let Some(head) = group.first() else {
+        return;
+    };
+    let kind = head.kind();
+    let disjoint = group.windows(2).all(|pair| {
+        pair.first()
+            .zip(pair.get(1))
+            .is_some_and(|(low, high)| low.end <= high.first)
+    }) && group.iter().all(|counted| counted.kind() == kind);
+    let spans = group.iter().fold(0u64, |sum, counted| {
+        sum.saturating_add(counted.end.saturating_sub(counted.first))
+    });
+    let committed = head.vmo.committed() as u64;
+    if !disjoint || spans < committed {
+        for counted in group {
+            resident.add(
+                counted.kind(),
+                counted.vmo.committed_in(counted.first, counted.end),
+            );
+        }
+    } else {
+        let mut outside = 0u64;
+        let mut from = 0u64;
+        for counted in group {
+            outside = outside.saturating_add(head.vmo.committed_in(from, counted.first));
+            from = counted.end;
+        }
+        outside = outside.saturating_add(head.vmo.committed_in(from, u64::MAX));
+        let inside = committed.saturating_sub(outside);
+        resident.add(kind, inside);
+    }
+    // A private file mapping's copies: anonymous, and no longer its file's.
+    // Counted by walking the shadow, which holds only them.
+    for counted in group {
+        if let Some(shadow) = &counted.shadow {
+            let (first, end) = (counted.first, counted.end);
+            resident.add(Kind::Anon, shadow.committed_in(first, end));
+            resident.take(
+                counted.kind(),
+                shadow.committed_in_both(&counted.vmo, first, end),
+            );
+        }
+    }
+}
+
+/// One region's part of an object, as [`AddressSpace::resident_split`]
+/// lists it under the space's lock to count after.
+struct Counted {
+    /// The region's object.
+    vmo: Arc<Vmo>,
+    /// A private file mapping's shadow: the pages it has copied.
+    shadow: Option<Arc<Vmo>>,
+    /// The region's first page index in the object.
+    first: u64,
+    /// One past its last.
+    end: u64,
+    /// Whether it maps a file.
+    file: bool,
+    /// Whether the mapping is shared.
+    shared: bool,
+}
+
+/// A space's resident pages by kind: [`AddressSpace::resident_split`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Resident {
+    /// Private memory, and private file mappings' copied pages.
+    pub anon: u64,
+    /// A disk file's pages.
+    pub file: u64,
+    /// A memory filesystem's file's pages, and shared anonymous memory.
+    pub shmem: u64,
+}
+
+/// Which of [`Resident`]'s counts a region's pages go to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kind {
+    /// `RssAnon`.
+    Anon,
+    /// `RssFile`.
+    File,
+    /// `RssShmem`.
+    Shmem,
+}
+
+impl Counted {
+    /// Which count this region's own pages go to: private memory is
+    /// anonymous, shared anonymous memory and a memory filesystem's file
+    /// shared memory, a disk file's pages a file's.
+    fn kind(&self) -> Kind {
+        if !self.file {
+            if self.shared { Kind::Shmem } else { Kind::Anon }
+        } else if self.vmo.is_disk_file() {
+            Kind::File
+        } else {
+            Kind::Shmem
+        }
+    }
+}
+
+impl Resident {
+    /// Add `pages` to the count `kind` names.
+    fn add(&mut self, kind: Kind, pages: u64) {
+        let slot = match kind {
+            Kind::Anon => &mut self.anon,
+            Kind::File => &mut self.file,
+            Kind::Shmem => &mut self.shmem,
+        };
+        *slot = slot.saturating_add(pages);
+    }
+
+    /// Take `pages` off the count `kind` names.
+    fn take(&mut self, kind: Kind, pages: u64) {
+        let slot = match kind {
+            Kind::Anon => &mut self.anon,
+            Kind::File => &mut self.file,
+            Kind::Shmem => &mut self.shmem,
+        };
+        *slot = slot.saturating_sub(pages);
+    }
+
+    /// All of it: `VmRSS`.
+    #[must_use]
+    pub const fn total(&self) -> u64 {
+        self.anon
+            .saturating_add(self.file)
+            .saturating_add(self.shmem)
     }
 }
 
@@ -3901,6 +4134,88 @@ impl AddressSpace {
         visit(&mut regions)
     }
 
+    /// The resident set split as Linux's `RssAnon`, `RssFile` and
+    /// `RssShmem` split it: each region's object's committed pages inside the
+    /// region's own range. Private memory, and the pages a private file
+    /// mapping has copied into its shadow, are anonymous; a disk file's pages
+    /// are a file's; a memory filesystem's file (tmpfs, `memfd`) and shared
+    /// anonymous memory are shared memory. A device region's pages are the
+    /// device's and counted in none. A page a private file mapping copied is
+    /// counted once, as anonymous: the mapping shows the copy, not the file's
+    /// page.
+    ///
+    /// Every region counts its own range, so an object mapped twice counts
+    /// twice, as Linux counts a page once per mapping of it.
+    ///
+    /// The space's lock is held only to list the regions' objects and
+    /// ranges, one entry per region; the pages are counted after it is let go,
+    /// a bounded number per hold of each object's own lock
+    /// ([`Vmo::committed_in`]). So a reader of another process's
+    /// `/proc/<pid>/status` holds that process's space lock for one pass over
+    /// its regions, as `/proc/<pid>/maps` does, and never for its pages.
+    ///
+    /// # Errors
+    ///
+    /// [`fallible::AllocError`] when there is no memory to list the regions
+    /// in.
+    pub fn resident_split(&self) -> Result<Resident, fallible::AllocError> {
+        let mut listed = self.list_counted()?;
+        // Each object's regions together, lowest first: an object whose
+        // regions do not overlap and are of one kind is counted the shorter
+        // way rather than page by page (`count_object`). A program of
+        // gigabytes reads its own `stat` often (Wine does), and walking every
+        // page on each read was most of its kernel time (the N150,
+        // 2026-10-30).
+        listed.sort_unstable_by_key(|counted| (Arc::as_ptr(&counted.vmo) as usize, counted.first));
+        let mut resident = Resident::default();
+        let mut start = 0;
+        while let Some(head) = listed.get(start) {
+            let object = Arc::as_ptr(&head.vmo);
+            let count = listed
+                .get(start..)
+                .unwrap_or_default()
+                .iter()
+                .take_while(|counted| Arc::as_ptr(&counted.vmo) == object)
+                .count();
+            let group = listed.get(start..start + count).unwrap_or_default();
+            start += count;
+            count_object(group, &mut resident);
+        }
+        Ok(resident)
+    }
+
+    /// [`AddressSpace::resident_split`]'s list: one entry per region that
+    /// maps an object, made under the space's lock and nothing counted.
+    fn list_counted(&self) -> Result<Vec<Counted>, fallible::AllocError> {
+        let inner = self.inner.lock();
+        let mut listed: Vec<Counted> = fallible::try_with_capacity(inner.map.iter().len())?;
+        for vma in inner.map.iter() {
+            let pages = (vma.range.end() - vma.range.start()) / PAGE_SIZE;
+            let (id, offset, file) = match vma.backing {
+                Backing::Anonymous { id, offset } => (id, offset, false),
+                Backing::File { id, offset } => (id, offset, true),
+                Backing::Device { .. } => continue,
+            };
+            let Some(vmo) = inner.objects.get(&id) else {
+                continue;
+            };
+            let first = offset / PAGE_SIZE;
+            let shadow = (file && !vma.flags.shared)
+                .then(|| inner.shadows.get(&id).cloned())
+                .flatten();
+            // NOALLOC: room for every region was had above.
+            listed.push(Counted {
+                vmo: Arc::clone(vmo),
+                shadow,
+                first,
+                end: first.saturating_add(pages),
+                file,
+                shared: vma.flags.shared,
+            });
+        }
+        Ok(listed)
+    }
+
     /// Pages the objects this space maps have committed: its resident set.
     ///
     /// A page shared with another space after `fork` is counted in both, as
@@ -3911,7 +4226,7 @@ impl AddressSpace {
     ///
     /// [`fallible::AllocError`] when there is no memory to list the objects
     /// in.
-    pub fn resident_pages(&self) -> Result<u64, fallible::AllocError> {
+    pub(crate) fn resident_pages(&self) -> Result<u64, fallible::AllocError> {
         let inner = self.inner.lock();
         let mut objects = fallible::try_collect(inner.objects.values())?;
         objects.sort_unstable_by_key(|vmo| Arc::as_ptr(vmo));

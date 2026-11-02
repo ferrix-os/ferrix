@@ -1,7 +1,9 @@
 //! The frame being drawn: a tiny-skia pixmap in the canvas byte order the
 //! crate docs describe, and the drawing operations clipped to damage.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::rc::Rc;
 
 use tiny_skia::{BlendMode, FilterQuality, Paint, Pattern, Pixmap, PixmapRef, Shader, SpreadMode};
 
@@ -684,9 +686,9 @@ impl Canvas {
             color: shadow.color,
             colour,
             inset,
-            inside: Blended::of(colour, alpha),
+            inside: Blended::kept(colour, alpha),
             rows: BTreeMap::new(),
-            columns: BTreeMap::new(),
+            columns: Vec::new(),
         };
         for clip in clips {
             for y in clip.y..clip.bottom() {
@@ -935,11 +937,13 @@ impl Canvas {
     /// `XRGB8888` surface drawn at less than full opacity is blended as
     /// opaque, its X byte read as a full alpha, as it always was.
     fn blend(&mut self, surface: &Surface<'_>, rect: Rect, opacity: f32, clips: &[Rect]) {
+        let fade = Fade::kept(opacity);
         let blend = Blend {
             surface,
             rect,
             opaque: surface.format() == Format::Xrgb8888,
             opacity,
+            fade: fade.as_deref(),
             width: index(i64::from(self.width())),
         };
         self.in_bands(clips, |band, top, local| {
@@ -1102,7 +1106,7 @@ pub fn blend_onto_target(
             ) else {
                 continue;
             };
-            over_row(dst, src, opaque, 1.0);
+            over_row(dst, src, opaque, 1.0, None);
         }
     }
 }
@@ -1485,11 +1489,12 @@ struct Shade {
     /// How far in the corners and the fade end.
     inset: i64,
     /// The middle's table, at the full alpha.
-    inside: Option<Blended>,
+    inside: Option<Rc<Blended>>,
     /// The top and bottom bands' tables, by canvas row.
-    rows: BTreeMap<i64, Option<Blended>>,
-    /// The side bands' tables, by canvas column.
-    columns: BTreeMap<i64, Option<Blended>>,
+    rows: BTreeMap<i64, Option<Rc<Blended>>>,
+    /// The side bands' tables, by column from the box's left edge: looked
+    /// up for every pixel of a side band, so by index, not by search.
+    columns: Vec<Option<Option<Rc<Blended>>>>,
 }
 
 impl Shade {
@@ -1525,14 +1530,17 @@ impl Shade {
                     let (shape, full, inset, alpha, colour) =
                         (self.shape, self.full, self.inset, self.alpha, self.colour);
                     let table = self.rows.entry(y).or_insert_with(|| {
-                        Blended::of(colour, shape.at(inset, y.saturating_sub(full.y)) * alpha)
+                        Blended::kept(colour, shape.at(inset, y.saturating_sub(full.y)) * alpha)
                     });
-                    through(table.as_ref(), canvas.pixmap.data_mut().get_mut(start..end));
+                    through(
+                        table.as_deref(),
+                        canvas.pixmap.data_mut().get_mut(start..end),
+                    );
                 }
                 // The middle: the full alpha.
                 (false, 1) => {
                     through(
-                        self.inside.as_ref(),
+                        self.inside.as_deref(),
                         canvas.pixmap.data_mut().get_mut(start..end),
                     );
                 }
@@ -1541,10 +1549,10 @@ impl Shade {
                     let (shape, full, inset, alpha, colour) =
                         (self.shape, self.full, self.inset, self.alpha, self.colour);
                     let make = |x: i64| {
-                        Blended::of(colour, shape.at(x.saturating_sub(full.x), inset) * alpha)
+                        Blended::kept(colour, shape.at(x.saturating_sub(full.x), inset) * alpha)
                     };
                     let pixels = canvas.pixmap.data_mut().get_mut(start..end);
-                    by_column(pixels, from, &mut self.columns, make);
+                    by_column(pixels, from, full.x, &mut self.columns, make);
                 }
             }
         }
@@ -1563,17 +1571,35 @@ fn through(table: Option<&Blended>, pixels: Option<&mut [u8]>) {
 fn by_column(
     pixels: Option<&mut [u8]>,
     from: i64,
-    tables: &mut BTreeMap<i64, Option<Blended>>,
-    make: impl Fn(i64) -> Option<Blended>,
+    left: i64,
+    tables: &mut Vec<Option<Option<Rc<Blended>>>>,
+    make: impl Fn(i64) -> Option<Rc<Blended>>,
 ) {
     let Some(pixels) = pixels else {
         return;
     };
     for (x, pixel) in (from..).zip(pixels.chunks_exact_mut(4)) {
-        if let Some(table) = tables.entry(x).or_insert_with(|| make(x)).as_ref() {
+        let Ok(at) = usize::try_from(x.saturating_sub(left)) else {
+            continue;
+        };
+        if tables.len() <= at {
+            tables.resize(at + 1, None);
+        }
+        let Some(slot) = tables.get_mut(at) else {
+            continue;
+        };
+        if let Some(table) = slot.get_or_insert_with(|| make(x)).as_deref() {
             table.apply(pixel);
         }
     }
+}
+
+/// [`Blended::kept`]'s tables, by colour and the alpha's bits.
+type Kept = BTreeMap<([u8; 3], u32), Rc<Blended>>;
+
+thread_local! {
+    /// [`Blended::kept`]'s tables.
+    static BLENDS: RefCell<Kept> = const { RefCell::new(BTreeMap::new()) };
 }
 
 /// What [`over`] makes of every byte a canvas pixel can hold, for one
@@ -1586,8 +1612,34 @@ struct Blended([[u8; 256]; 3]);
 impl Blended {
     /// The table for `colour` at `alpha`, or `None` where the alpha is
     /// nothing, which [`over`] is never called for.
-    fn of(colour: [u8; 3], alpha: f32) -> Option<Self> {
-        (alpha > 0.0).then(|| Self::new(colour, alpha))
+    /// The table for `colour` at `alpha`, or none at no alpha, kept from one shadow to the next on this thread.
+    ///
+    /// A table is a function of the colour and the alpha alone, and a
+    /// shadow's band tables are the same few dozen alphas every frame and
+    /// for every window of one style. Made afresh for each shadow drawn,
+    /// they were 256 blends each, some two hundred tables a window's shadow
+    /// and as many for its glow: on the N150 most of a frame dragged under
+    /// Yoru (2026-10-28). The bytes are the ones made afresh.
+    fn kept(colour: [u8; 3], alpha: f32) -> Option<Rc<Self>> {
+        if alpha <= 0.0 {
+            return None;
+        }
+        /// Tables kept at most: Yoru's shadow and glow, focused and not,
+        /// are a few hundred.
+        const KEPT: usize = 4096;
+        BLENDS.with(|kept| {
+            let mut kept = kept.borrow_mut();
+            let key = (colour, alpha.to_bits());
+            if let Some(table) = kept.get(&key) {
+                return Some(Rc::clone(table));
+            }
+            if kept.len() >= KEPT {
+                kept.clear();
+            }
+            let table = Rc::new(Self::new(colour, alpha));
+            let _ = kept.insert(key, Rc::clone(&table));
+            Some(table)
+        })
     }
 
     fn new(colour: [u8; 3], alpha: f32) -> Self {
@@ -1626,6 +1678,8 @@ struct Blend<'a> {
     /// Whether it is `XRGB8888`, whose fourth byte is read as opaque.
     opaque: bool,
     opacity: f32,
+    /// [`Fade`]'s table for the opacity, where it is less than one.
+    fade: Option<&'a Fade>,
     /// The canvas's width in pixels.
     width: usize,
 }
@@ -1646,7 +1700,7 @@ impl Blend<'_> {
             if let (Some(pixels), Some(into)) =
                 (row.get(from..from + len), band.get_mut(start..start + len))
             {
-                over_row(into, pixels, self.opaque, self.opacity);
+                over_row(into, pixels, self.opaque, self.opacity, self.fade);
             }
         }
     }
@@ -1669,7 +1723,13 @@ impl Blend<'_> {
 /// and an empty one, whose blend is what is under it. Both are exact: the
 /// pipeline's result for them rounds to exactly those bytes, as the test
 /// against tiny-skia over every alpha, colour and background shows.
-fn over_row(into: &mut [u8], pixels: &[u8], opaque: bool, opacity: f32) {
+///
+/// `fade` is [`Fade`]'s table for `opacity`, when it is less than one: an
+/// opaque pixel -- every pixel of an `XRGB8888` window, most of any other --
+/// is then four lookups rather than four channels of that arithmetic, and
+/// the same bytes, since the table is that arithmetic run once for every
+/// pair of bytes.
+fn over_row(into: &mut [u8], pixels: &[u8], opaque: bool, opacity: f32, fade: Option<&Fade>) {
     const FACTOR: f32 = 1.0 / 255.0;
     let whole = opacity >= 1.0;
     for (into, pixel) in into.chunks_exact_mut(4).zip(pixels.chunks_exact(4)) {
@@ -1680,6 +1740,12 @@ fn over_row(into: &mut [u8], pixels: &[u8], opaque: bool, opacity: f32) {
         };
         if opaque {
             source[3] = 0xFF;
+        }
+        if let Some(fade) = fade.filter(|_| !whole && source[3] == 0xFF) {
+            for (out, from) in into.iter_mut().zip(source) {
+                *out = fade.over(*out, from);
+            }
+            continue;
         }
         if whole {
             if source[3] == 0xFF {
@@ -1698,6 +1764,75 @@ fn over_row(into: &mut [u8], pixels: &[u8], opaque: bool, opacity: f32) {
         for (out, from) in into.iter_mut().zip(source) {
             *out = unnorm((f32::from(*out) * FACTOR) * keep + load(from));
         }
+    }
+}
+
+/// What [`over_row`] makes of an opaque source pixel's channel over a canvas
+/// pixel's, at one opacity less than one: a byte for every pair, by the
+/// canvas byte and then the source byte.
+///
+/// A window drawn at `decoration:inactive_opacity` -- Yoru's see-through
+/// windows -- is blended whole, every frame it changes, and on a screen
+/// drawn in software the arithmetic for each channel of each pixel was most
+/// of a frame: a 1878x966 game window behind the focused one took 40 to 85
+/// ms on the N150. The table is 64 KiB, made once for each opacity and kept
+/// on the drawing thread.
+pub(crate) struct Fade(Box<[[u8; 256]; 256]>);
+
+thread_local! {
+    /// [`Fade::kept`]'s tables, by the opacity's bits: the few opacities a
+    /// configuration names.
+    static FADES: RefCell<Vec<(u32, Rc<Fade>)>> = const { RefCell::new(Vec::new()) };
+}
+
+impl Fade {
+    /// The table for `opacity`, kept from one frame to the next on this
+    /// thread; none at full opacity, where an opaque pixel is a copy.
+    fn kept(opacity: f32) -> Option<Rc<Self>> {
+        /// Tables kept at most: the active, inactive and fullscreen
+        /// opacities, and a window rule or two.
+        const KEPT: usize = 8;
+        if opacity >= 1.0 || opacity.is_nan() {
+            return None;
+        }
+        FADES.with(|kept| {
+            let mut kept = kept.borrow_mut();
+            let key = opacity.to_bits();
+            if let Some((_, table)) = kept.iter().find(|(bits, _)| *bits == key) {
+                return Some(Rc::clone(table));
+            }
+            if kept.len() >= KEPT {
+                kept.clear();
+            }
+            let table = Rc::new(Self::new(opacity));
+            kept.push((key, Rc::clone(&table)));
+            Some(table)
+        })
+    }
+
+    /// [`over_row`]'s arithmetic for an opaque source at `opacity`, for
+    /// every canvas byte and source byte.
+    fn new(opacity: f32) -> Self {
+        let mut table = Box::new([[0u8; 256]; 256]);
+        for (under, row) in (0..=255u8).zip(table.iter_mut()) {
+            for (from, slot) in (0..=255u8).zip(row.iter_mut()) {
+                let mut into = [under; 4];
+                over_row(&mut into, &[from, from, from, 0xFF], false, opacity, None);
+                let [blue, ..] = into;
+                *slot = blue;
+            }
+        }
+        Self(table)
+    }
+
+    /// The canvas byte `under` with the source byte `from` over it.
+    #[inline]
+    fn over(&self, under: u8, from: u8) -> u8 {
+        self.0
+            .get(usize::from(under))
+            .and_then(|row| row.get(usize::from(from)))
+            .copied()
+            .unwrap_or(under)
     }
 }
 
