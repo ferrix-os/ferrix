@@ -653,13 +653,18 @@ pub(crate) fn pinned_programs(cpu: usize) -> u32 {
         .map_or(0, |count| count.load(Ordering::Acquire))
 }
 
-/// The processor a program task's affinity pins it to, if it is one alone.
-fn pinned_program_cpu(affinity: &CpuSet, program: bool) -> Option<usize> {
-    if program && affinity.len() == 1 {
+/// The processor a program task's affinity pins it to, if it is one alone,
+/// counted among that processor's pinned programs as the task is made.
+fn pin_program(affinity: &CpuSet, program: bool) -> Option<usize> {
+    let cpu = if program && affinity.len() == 1 {
         affinity.iter().next()
     } else {
         None
+    };
+    if let Some(count) = cpu.and_then(|cpu| PINNED_PROGRAMS.get(cpu)) {
+        let _ = count.fetch_add(1, Ordering::AcqRel);
     }
+    cpu
 }
 
 impl Drop for Task {
@@ -776,33 +781,21 @@ impl Task {
     /// registers.
     pub(crate) fn new(new: NewTask) -> Result<Task, AllocError> {
         let NewTask {
-            id,
-            name,
-            entry,
-            argument,
-            stack,
-            stack_pointer,
-            weight,
-            cpu,
             affinity,
-            address_space,
             thread,
             user_state,
+            ..
         } = new;
         let (user, core) = user_parts(thread.as_ref(), user_state)?;
         let (run_slot, sleep_slot) = slots()?;
-        let spawn_pin = pinned_program_cpu(&affinity, thread.is_some());
-        if let Some(count) = spawn_pin.and_then(|cpu| PINNED_PROGRAMS.get(cpu)) {
-            let _ = count.fetch_add(1, Ordering::AcqRel);
-        }
         Ok(Task {
-            id,
-            name,
-            entry: Some((entry, argument)),
-            stack: Some(stack),
-            stack_pointer: UnsafeCell::new(stack_pointer),
+            id: new.id,
+            name: new.name,
+            entry: Some((new.entry, new.argument)),
+            stack: Some(new.stack),
+            stack_pointer: UnsafeCell::new(new.stack_pointer),
             state: AtomicU8::new(RUNNABLE),
-            cpu: AtomicU64::new(cpu as u64),
+            cpu: AtomicU64::new(new.cpu as u64),
             queued: AtomicBool::new(false),
             on_cpu: AtomicBool::new(false),
             in_call: AtomicBool::new(false),
@@ -810,14 +803,14 @@ impl Task {
             wakees: Wakees::new(crate::timer::now_nanos()),
             // Before `thread` and `affinity` move in.
             domain: AtomicU8::new(first_domain(thread.is_none(), &affinity)),
+            spawn_pin: pin_program(&affinity, thread.is_some()),
             affinity: Affinity::new(affinity),
-            spawn_pin,
-            address_space,
+            address_space: new.address_space,
             thread,
             core,
             user,
-            weight: AtomicU32::new(weight),
-            base_weight: AtomicU32::new(weight),
+            weight: AtomicU32::new(new.weight),
+            base_weight: AtomicU32::new(new.weight),
             group: AtomicU64::new(ungrouped()),
             seen_moves: AtomicU64::new(0),
             vlag: AtomicI64::new(0),

@@ -2568,6 +2568,12 @@ fn kick_after_wake(queue: &mut CpuQueue, cpu: usize, deferred: bool) -> Option<u
     (queue.should_preempt() || queue.is_running_idle() || queue.waiting() == 1).then_some(cpu)
 }
 
+/// Whether `cpu`, `task`'s home, may take its wake: it is in service and
+/// the task's mask and domain allow it (`allowed`; L.sched.97, D-1).
+fn home_takes(task: &Task, cpu: usize) -> bool {
+    in_service(cpu) && allowed(task, cpu)
+}
+
 /// [`wake`], and with `defer`, for a waker that blocks next ([`Wake::Sync`]):
 /// a task made runnable on the waker's own processor asks for no decision
 /// now. The waker's block is the decision, and until then this processor's
@@ -2588,8 +2594,7 @@ fn wake_at_home(task: &Arc<Task>, defer: bool) {
         // this is where it is found. And a home its mask no longer allows,
         // the second conjunct beside the first: the same move, onto a
         // processor it does (L.sched.97).
-        let mask_allows_home = allowed(task, cpu);
-        if !(in_service(cpu) && mask_allows_home) && rehome_blocked(task, cpu) {
+        if !home_takes(task, cpu) && rehome_blocked(task, cpu) {
             continue;
         }
         let Some(lock) = queue_of(cpu) else {
@@ -2632,6 +2637,13 @@ fn wake_at_home(task: &Arc<Task>, defer: bool) {
         kick_cpu = kick_after_wake(&mut queue, cpu, defer && here == Some(cpu));
         break;
     }
+    end_wake(here, kick_cpu, saved, moved);
+}
+
+/// The end of [`wake_at_home`], with no queue lock held: the processor the
+/// wake asked to decide, `kick_cpu`, told; interrupts as they were,
+/// `saved`; and a task `moved` to the moving list for its domain placed.
+fn end_wake(here: Option<usize>, kick_cpu: Option<usize>, saved: usize, moved: bool) {
     // As `spawn_task`: a wake-up onto this processor arms this processor's
     // timer, so it is decided and done before interrupts come back.
     let remote = match kick_cpu {

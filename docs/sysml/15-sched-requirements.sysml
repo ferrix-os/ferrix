@@ -1119,7 +1119,8 @@ package FerrixSchedRequirements {
                 the woken readers are queued on the target and drained, and
                 it fires.";
             attribute :>> parent = "H.SCHED.18";
-            attribute :>> unit = ("sched::wake_at_home", "sched::rehome_blocked");
+            attribute :>> unit = ("sched::wake_at_home", "sched::rehome_blocked",
+                "sched::home_takes");
         }
         requirement <'L.sched.104'> evacuationLeavesNothingBehind : ItemLowLevel {
             attribute :>> statement = "A processor parking shall move every
@@ -1624,7 +1625,7 @@ package FerrixSchedRequirements {
                 wake_at_home and wake_sleepers_placing.";
             attribute :>> parent = "H.SCHED.23";
             attribute :>> unit = ("sched::sent_to_domain", "sched::wake_at_home",
-                "sched::wake_sleepers_placing");
+                "sched::end_wake", "sched::wake_sleepers_placing");
         }
         requirement <'L.sched.146'> admissionMovesTheJob : ItemLowLevel {
             attribute :>> statement = "Admitting a job to the SoftRt domain shall
