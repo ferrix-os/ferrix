@@ -6,6 +6,8 @@ items 1 and 6 are `docs/MACHINE-CHECK-AMD.md` and `docs/CORE-QUARANTINE.md`).
 Design v2.1: v2 answered the consultant's NOT YET (B1)-(B6), ledger 5045;
 v2.1 carries the re-review's conditions, OK IF (1)-(9), ledger 5057.
 
+**Landed:** on `develop` as 37b8a6701 (2026-10-30). Reconciled 2026-11-02.
+
 ## 1. Why
 
 Memory without ECC -- most desktops, and every overclocked one -- reports

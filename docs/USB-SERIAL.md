@@ -8,7 +8,8 @@ what works on what evidence, what is still worse than Linux and why, and
 -- because the customer asked for it plainly -- what in Ferrix's design
 made the job harder than it should be.
 
-Branch `ftdi-driver`, 2026-10-25. Built so far: the ring-3 driver and its
+Branch `ftdi-driver`, 2026-10-25, on `develop` since the same day (97de20f7a to
+23158676a; reconciled 2026-11-02). Built so far: the ring-3 driver and its
 interface export (R1, R2), and three kernel items under the certification
 consultant's OK IF, ledger 4317: numeric speeds (K3), back-pressure and
 flow control (K1), hang-up on the master's close (K6). Designed and not
