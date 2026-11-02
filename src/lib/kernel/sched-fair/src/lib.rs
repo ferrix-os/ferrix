@@ -1608,7 +1608,7 @@ pub trait StackTiers<T>: FairTier<T> {
     /// The stack's configuration, from the fair tier's: the tiers above
     /// fair take none.
     fn stack_config(fair: Config) -> Self::Config;
-    /// [`SchedClass::remove`] from the tier the caller says the entity is
+    /// [`ferrix_sched_class::SchedClass::remove`] from the tier the caller says the entity is
     /// in: the one above fair with `upper`, fair's otherwise; no other
     /// tier's queue is walked (line 30, B3).
     fn remove_in(queue: &mut Self::Queue, id: u64, upper: bool) -> Option<(T, Self::Entity)>;
