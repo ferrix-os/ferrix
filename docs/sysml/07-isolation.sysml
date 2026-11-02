@@ -22,7 +22,7 @@ package FerrixIsolation {
         Pid; Mount; Uts; Ipc; Net; User; Cgroup; Time;
     }
 
-    #inProgress part def Namespace {
+    #implemented part def Namespace {
         @stage { number = 13; }
         attribute kind : NamespaceKind;
         part parent : Namespace[0..1];
@@ -36,7 +36,7 @@ package FerrixIsolation {
         ref part namespaces : Namespace[8];
     }
 
-    #inProgress part def Namespaces {
+    #implemented part def Namespaces {
         @stage { number = 13; }
         doc /* Steam's user and mount namespaces first (docs/NAMESPACES.md,
              * N1 to N6). N1 (2026-09-28): every mount's own flags enforced,
@@ -45,10 +45,14 @@ package FerrixIsolation {
              * subtree, and a superblock per filesystem. N3 (2026-09-30):
              * mount namespaces, copied by unshare and clone, pivot_root, a
              * native child kept in its creator's, and openat2's resolve
-             * flags. N4, user namespaces, is next. Network namespaces
+             * flags. N4, user namespaces (2026-10-01), the small namespaces
+             * with setns, and pid namespaces are in. Network namespaces
              * (docs/NETNS.md): a stack
              * per namespace, a down loopback, veth pairs, devices that move
-             * with their ring, CAP_NET_ADMIN and CAP_NET_RAW over the owner. */
+             * with their ring, CAP_NET_ADMIN and CAP_NET_RAW over the owner.
+             * Time namespaces (CLONE_NEWTIME, shifted clocks) and N5,
+             * unprivileged mounting, landed on 2026-10-26
+             * (docs/roadmap/follow-ons.md). */
         part every : Namespace[8..*];
         action unshare;
         action setns;
@@ -61,7 +65,7 @@ package FerrixIsolation {
         Pids;
     }
 
-    #inProgress part def Cgroup {
+    #implemented part def Cgroup {
         @stage { number = 13; }
         attribute controllers : CgroupController[0..*];
         part children : Cgroup[0..*];
@@ -70,7 +74,7 @@ package FerrixIsolation {
         attribute pidsMax : Natural[0..1];
     }
 
-    #inProgress part def Cgroups {
+    #implemented part def Cgroups {
         @stage { number = 13; }
         doc /* One unified hierarchy (v2), exposed as cgroupfs. cpu is not a
              * separate mechanism: it is bandwidth and weight handed to the
@@ -80,13 +84,14 @@ package FerrixIsolation {
              * as cgroup2, cgroup.events, clone3 into a cgroup, delegation by
              * chown; pids, memory's charging, its reclaim, memory.high and its
              * scoped OOM kill, cgroup.freeze, cpu.weight and cpu.max, and io,
-             * over the certification's job quotas. Left: the rest of
-             * memory.stat, io.weight, io.latency, cpu.idle and
-             * cpu.max.burst. */
+             * over the certification's job quotas. memory.reclaim,
+             * memory.stat's anon and pagetables, io.weight, io.latency,
+             * cpu.idle and cpu.max.burst landed on 2026-10-26, with the
+             * dentry and inode caches' reclaim. */
         part root : Cgroup;
     }
 
-    #inProgress part def Seccomp {
+    #implemented part def Seccomp {
         @stage { number = 13; }
         doc /* Classic BPF filters evaluated on syscall entry. The interpreter
              * is a pure function over bytes in src/lib/, fuzzable and Miri-able.

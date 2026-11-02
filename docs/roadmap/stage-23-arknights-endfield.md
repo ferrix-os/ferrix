@@ -16,6 +16,21 @@ in CI, because the game is closed, needs an account and needs the card; the
 gates that stay are those of steps 1 to 3, which need neither the game nor an
 account.
 
+**Since 2026-10-21 (reconciled 2026-11-02).** The steps below were written
+against the RTX 3060, and the game has since run elsewhere: on the customer's
+N150 box ([`docs/N150.md`](../N150.md)), on its Intel GPU's driver, with
+Endfield started from Steam and drawn by DXVK on `anv` through yserver. A
+capture of 2026-10-23 shows it windowed on Ferrix's desktop; on 2026-10-24 its
+start reached the world on 5 of 11 tries (`docs/BACKLOG.md`, fl-081), and in
+the world it renders about 25 frames a second at 720p, limited by the GPU
+(`docs/GAME-MODE.md` §2.3), or about 21 rendered and 42 shown at 1024x600 with
+frame generation (`docs/INTEL-GPU.md` §13). Loading into the world while the
+game is scanned out directly died 2 of 2 times on 2026-10-31 (BACKLOG). What
+the box's runs did to steps 4 to 6 below (the login, the anti-cheat, the
+frame rate) this page does not record; the exit above, on the RTX 3060, is
+not met, and `docs/GAME-MODE.md` carries the work for the frame rate on the
+box.
+
 ## How it relates to stage 22
 
 [Stage 22](stage-22-steam.md)'s third exit step is "a Windows game runs

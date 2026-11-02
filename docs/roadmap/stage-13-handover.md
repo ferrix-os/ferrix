@@ -18,7 +18,11 @@ controllers on 2026-10-07, `stage13-container` as `cargo xtask test-container`
 on 2026-10-14 (f231cdf09, `docs/CGROUPS.md` §15) and S4 to S6 on 2026-10-18.
 The rows below keep the state they were written in unless they are marked.
 Still branches: time namespaces (`stage13-timens`), unprivileged mounting
-(`stage13-n5`, `stage13-bwrap-user`).*
+(`stage13-n5`, `stage13-bwrap-user`). Reconciled 2026-11-02: those three
+were ported onto `develop` and landed on 2026-10-26 (2daef95d2, 3a65627b9,
+from `park/stage13-timens`, `park/po6/n5` and `park/po6/bwrap-user`), with the
+dentry and inode caches' reclaim and the `seccomp_bpf` selftest
+([follow-ons](follow-ons.md)); the parked branches are history.*
 
 ## On main
 
