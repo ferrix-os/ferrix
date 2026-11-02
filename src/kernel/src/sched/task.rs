@@ -414,7 +414,7 @@ pub struct Task {
     /// admission or dissolution and as it moves between jobs.
     domain: AtomicU8,
     /// Whether a decision took it off its processor, still runnable, for
-    /// running outside its domain (`sched::settle_previous`): the switch
+    /// running outside its domain (`sched::depart`): the switch
     /// away from it moves it into its domain once its context is saved
     /// (`sched::finish_switch`, V4).
     evicted: AtomicBool,

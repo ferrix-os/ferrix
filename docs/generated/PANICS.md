@@ -1371,11 +1371,18 @@ empty cell has broken that rule. Queued as fair, it would run at the wrong tier
 while every test of its policy says it is real-time, so the machine is stopped
 (L.sched.129, ledger 5684's C3).
 
-1. A path stored a real-time policy before it put the node in the cell
-   (`sched::set_policy`, `sched::prepare_user`).
-2. A task was queued while a queue still held it, so that queue holds the node.
+1. A path queued a task on a processor without asking `domains::admits` under
+   that processor's lock: a new placement, steal or wake that bypassed
+   `may_place`.
+2. A processor leaving the boot domain did not move what it held before its pick
+   (`sched::rehome_waiting`), or a running task outside its domain was picked
+   again rather than taken off (`sched::depart`).
+3. A task's domain, or a processor's, was changed without the queue lock that
+   owns it (`domains::settle_task`, `domains::set_slots`).
 
-See: src/kernel/src/sched/task.rs Task::entity_with; docs/SCHED-CLASSES.md §9e.
+See: src/kernel/src/sched/domains.rs; src/kernel/src/sched/mod.rs move_onto,
+depart and require_admitted; src/kernel/src/sched/direct.rs;
+docs/SCHED-CLASSES.md §9f.
 
 <a id="fx-0601"></a>
 
