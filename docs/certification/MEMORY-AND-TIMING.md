@@ -953,7 +953,7 @@ spin lock. Every removal is routed by the task's tier
 (`StackTiers::remove_in`, the review's line 30, B3), so the removal of a
 fair task, a steal's among them, never walks this tree, and the walk serves
 one caller alone: a change of policy on a queued real-time task that does
-not run (L.sched.112), at the call or at its processor's next decision. A
+not run (L.sched.134), at the call or at its processor's next decision. A
 `present` build has no such tier, and its paths are as below.
 
 Two decisions the round trip's wakes defer are bounded, though no check

@@ -428,7 +428,7 @@ fn policy_of(thread: &crate::syscall::thread::Thread) -> (i32, u32, bool) {
 /// A policy and priority as the calls take them, checked as Linux's
 /// `__sched_setscheduler` checks them (test-rtsched's errors step): `SCHED_OTHER` at 0,
 /// `SCHED_FIFO` and `SCHED_RR` at 1 to 99, and only in a build with a tier
-/// above fair (L.sched.116); every other policy -- `SCHED_BATCH`,
+/// above fair (L.sched.138); every other policy -- `SCHED_BATCH`,
 /// `SCHED_IDLE`, `SCHED_DEADLINE`, `SCHED_EXT` -- is `EINVAL`.
 fn checked_params(policy: i32, priority: u32) -> Result<Option<RtParams>, Errno> {
     let rt = |policy| {
@@ -487,7 +487,7 @@ fn may_set_policy(
     Ok(())
 }
 
-/// Apply a checked policy to `thread`'s task (L.sched.112): moved between
+/// Apply a checked policy to `thread`'s task (L.sched.134): moved between
 /// tiers under its queue's lock, at the tail of its new place.
 fn apply_policy(
     thread: &crate::syscall::thread::Thread,

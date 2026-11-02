@@ -365,7 +365,7 @@ fn yielding_lets_the_next_deadline_go_first() {
 /// and 1.8 seconds of request was what the next arrival waited behind
 /// (FX-0502).
 ///
-/// Verifies: L.sched.2, L.sched.106
+/// Verifies: L.sched.2, L.sched.128
 #[test]
 fn yielding_alone_leaves_the_request_as_it_was() {
     let mut queue = queue();
@@ -390,7 +390,7 @@ fn yielding_alone_leaves_the_request_as_it_was() {
 /// queue still asks for a decision within one slice. Armed for the whole
 /// request instead, the waiting entity sat out seconds (FX-0502).
 ///
-/// Verifies: L.sched.1, L.sched.103
+/// Verifies: L.sched.1, L.sched.125
 #[test]
 fn something_waiting_is_decided_on_within_a_slice() {
     let mut queue = queue();
@@ -1669,7 +1669,7 @@ fn the_class_interface_hands_back_what_the_queue_does() {
 /// through [`FairTier`], compile and forward for a stack with a tier above
 /// fair (here the empty class, until step 4b's first real one).
 ///
-/// Verifies: L.sched.105
+/// Verifies: L.sched.127
 #[test]
 fn a_stack_with_a_tier_above_fair_reaches_the_fair_tier() {
     use ferrix_sched_class::{Empty, Over, SchedClass, Tier};

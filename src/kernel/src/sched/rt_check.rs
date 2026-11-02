@@ -8,7 +8,7 @@
 //! processor (`spin_for`): a gap of more than [`GAP_NANOS`] between two
 //! looks at the clock is time it did not run.
 //!
-//! * **Order** (H.SCHED.19, L.sched.109): behind a priority-99 holder, tasks
+//! * **Order** (H.SCHED.21, L.sched.131): behind a priority-99 holder, tasks
 //!   of priorities 10, 20 and 20 run 20, 20, 10 once it leaves, the two 20s
 //!   in arrival order, and a fair task spinning there runs only after all
 //!   three. A task woken from another processor while a fair task spins
@@ -16,7 +16,7 @@
 //!   a fair task on its own processor, which then spins on: the wake asks
 //!   that processor for a decision, taken at its timer armed a moment away
 //!   (`resched_here`), or at once on the way out of a system call.
-//! * **Placement** (L.sched.110): a real-time task woken from another
+//! * **Placement** (L.sched.132): a real-time task woken from another
 //!   processor while its own is busy and a third idle runs on its own; a
 //!   fair one, the control, is placed on the idle one.
 //! * **FIFO keeps its place**: a `SCHED_FIFO` task preempted by a higher
@@ -25,11 +25,11 @@
 //! * **Round-robin**: two `SCHED_RR` tasks of one priority share the
 //!   processor at the quantum; two `SCHED_FIFO` ones, the control, do not;
 //!   a `SCHED_FIFO` task that yields lets its peer run.
-//! * **The floor** (H.SCHED.20): a fair task beside a spinning `SCHED_FIFO`
+//! * **The floor** (H.SCHED.22): a fair task beside a spinning `SCHED_FIFO`
 //!   task is given between [`FLOOR_LEAST_NANOS`] and [`FLOOR_MOST_NANOS`] of
 //!   [`FLOOR_WINDOW_NANOS`], and the `SCHED_FIFO` task the rest, unthrottled
 //!   at each period's end.
-//! * **The move** (L.sched.112, L.sched.107, L.sched.108): a fair task made
+//! * **The move** (L.sched.134, L.sched.129, L.sched.130): a fair task made
 //!   `SCHED_FIFO` while it runs beside another fair task takes the processor
 //!   from it, and given back to fair shares it again; it keeps its node
 //!   across the return, and a weight set while it was real-time is its fair
@@ -38,7 +38,7 @@
 //!   fair 200 times beside a waiting one, with processors idle to steal:
 //!   the running task is moved only at its processor's next decision
 //!   (line 30, B1; its control is the move made at the call, FX-0537).
-//! * **The modes** (L.sched.115, L.sched.116): a `SoftRt` domain is refused
+//! * **The modes** (L.sched.137, L.sched.138): a `SoftRt` domain is refused
 //!   by name where the tier is built, `ModeUnavailable` where it is not, and
 //!   a real-time policy refused there too.
 
@@ -182,9 +182,9 @@ pub(super) fn run() -> Result<&'static str, &'static str> {
 }
 
 /// The modes, and the policy refused where the tier is not built
-/// (L.sched.115, L.sched.116).
+/// (L.sched.137, L.sched.138).
 ///
-/// Verifies: L.sched.115, L.sched.116
+/// Verifies: L.sched.137, L.sched.138
 fn modes() -> Result<(), &'static str> {
     let made = super::make_domain(CpuSet::of(0), Mode::SoftRt);
     if super::realtime_built() {
@@ -353,7 +353,7 @@ fn stop() {
 
 /// Priority order, and preemption on a remote and a local wake.
 ///
-/// Verifies: H.SCHED.19, L.sched.109
+/// Verifies: H.SCHED.21, L.sched.131
 fn order(c: usize) -> Result<(), &'static str> {
     reset();
     let _fair = super::spawn_on("rt-fair", fair_spinner, 0, NICE_0_WEIGHT, c, CpuSet::of(c))?;
@@ -415,7 +415,7 @@ fn order(c: usize) -> Result<(), &'static str> {
 /// [`order`]'s wakes, with its fair task still spinning on `c`: a remote
 /// one and a local one.
 ///
-/// Verifies: L.sched.109
+/// Verifies: L.sched.131
 fn wakes(c: usize) -> Result<(), &'static str> {
     // The remote wake: the fair task spins alone on `c`, tickless.
     WOKEN.store(false, Ordering::Release);
@@ -498,7 +498,7 @@ static RAN_ON: AtomicUsize = AtomicUsize::new(usize::MAX);
 /// stays there, though another is idle; a fair one, the control, does not.
 /// Only with three processors or more, so that one is idle.
 ///
-/// Verifies: L.sched.110
+/// Verifies: L.sched.132
 fn placement(c: usize) -> Result<(), &'static str> {
     let online = super::QUEUES.get().map_or(0, Vec::len);
     if online < 3 {
@@ -645,7 +645,7 @@ fn round_robin(c: usize) -> Result<(), &'static str> {
 
 /// The floor: a fair task beside a spinning `SCHED_FIFO` one.
 ///
-/// Verifies: H.SCHED.20
+/// Verifies: H.SCHED.22
 fn floor(c: usize) -> Result<(), &'static str> {
     // A period of its own: whatever the cases before took of this one is
     // over.
@@ -684,7 +684,7 @@ fn floor(c: usize) -> Result<(), &'static str> {
 
 /// The move between tiers, the node kept, and a weight kept.
 ///
-/// Verifies: L.sched.107, L.sched.108, L.sched.112
+/// Verifies: L.sched.129, L.sched.130, L.sched.134
 fn the_move(c: usize) -> Result<(), &'static str> {
     reset();
     let mover = super::spawn_on("rt-mover", spinner, 0, NICE_0_WEIGHT, c, CpuSet::of(c))?;
@@ -707,7 +707,7 @@ fn the_move(c: usize) -> Result<(), &'static str> {
 /// the machine (FX-0537): that change is this case's control. Only with
 /// three processors or more, so that one is idle to steal.
 ///
-/// Verifies: L.sched.112
+/// Verifies: L.sched.134
 fn flips(c: usize) -> Result<(), &'static str> {
     let online = super::QUEUES.get().map_or(0, Vec::len);
     if online < 3 {

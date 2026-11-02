@@ -578,7 +578,7 @@ unconditional use reading `FIRED` (a fixture class crate if no real absent
 crate exists). 3b lands before any class crate other than fair enters the
 tree, and before any profile with an absent tier whose crate is in the
 tree builds or claims. The `classes` boot line's comparison with the
-profile, and its requirement from L.sched.102, come with 3b.
+profile, and its requirement from L.sched.124, come with 3b.
 
 **Ids** (D12): none for 3a.
 
@@ -660,17 +660,17 @@ the plant statically first, and has a control of its own); (ii)
 are written, released at landing. Absence is configuration evidence, as
 KERNEL-CRATES §6's removable crates are, and takes no id. The classes line
 is item behaviour:
-* **H.SCHED.18**: "A kernel shall run the scheduling classes its build
+* **H.SCHED.20**: "A kernel shall run the scheduling classes its build
   flags select and no other, and shall name them as it starts." Its
   criterion names test-removable's class-crate half on every architecture
-  and buildable profile, and L.sched.102's check.
-* **L.sched.102**, unit `sched::init`: "Once every processor is in the
+  and buildable profile, and L.sched.124's check.
+* **L.sched.124**, unit `sched::init`: "Once every processor is in the
   scheduler, sched::init shall print `sched    classes` and the names of
   the classes the build flags compose, outermost first, joined by '+'."
   Its criterion: check-boot-line compares that line, on every boot, with
   the name the profile's tiers compose; its control changes Eevdf's `NAME`
   and reads `FIRED`.
-The real-time ids S13 set aside start at H.SCHED.19; `mode_available`'s
+The real-time ids S13 set aside start at H.SCHED.21; `mode_available`'s
 owed requirement (line 21, ruling 2) takes the next free L.sched id.
 
 **check-boot-line** (G9) takes the expected classes name from the
@@ -787,7 +787,7 @@ personality (C7). The design review is asked to name any other value of
   profiles and five levels (of sixteen each), `sched_windows` three values
   (of eight), the flag word 54 of 64.
 * **E9.** No ids for this step; the table's code reserves its own (from
-  H.SCHED.19); a level and a profile are configuration and take none.
+  H.SCHED.21); a level and a profile are configuration and take none.
 * **E11, the countermeasure floor.** The barest value is chosen among the
   values that allow `sc4`; a value whose code is a countermeasure or its
   check stays (`mitigations = on`, `checks = on` with `ferrix.checks` pinned
@@ -885,7 +885,7 @@ hand-over between tiers goes through `Over::hand_over`, which falls back
 to `enqueue` + `pick` when the arriving and leaving tasks are in different
 tiers, and the fold applies only when both are fair. Ids for the
 restatement, and for the four new operations' requirements, are reserved
-from L.sched.103 before 4a's code (S13).
+from L.sched.125 before 4a's code (S13).
 
 **The field's name** (C1 of line 13): `CpuQueue::fair` becomes
 `CpuQueue::stack`, in its own commit, path-only.
@@ -981,12 +981,12 @@ ids below):
   test there instantiating `Over<Toy, Eevdf>` against every operation the
   core calls (proposed; for the consultant to accept).
 * **F12, ids**, reserved by a docs landing before code, each unit a core
-  function: L.sched.103 the timer armed for the stack's `decision_in_ns`
-  (`CpuQueue::arm_timer`); L.sched.104 tick preemption through
-  `Stack::should_preempt`; L.sched.105 the processor's load through
-  `Stack::load_weight`; L.sched.106 yield through `Stack::yield_current`;
-  L.sched.107 the upper cell taken only under its queue's lock;
-  L.sched.108 a weight kept for a task outside the fair tier.
+  function: L.sched.125 the timer armed for the stack's `decision_in_ns`
+  (`CpuQueue::arm_timer`); L.sched.126 tick preemption through
+  `Stack::should_preempt`; L.sched.127 the processor's load through
+  `Stack::load_weight`; L.sched.128 yield through `Stack::yield_current`;
+  L.sched.129 the upper cell taken only under its queue's lock;
+  L.sched.130 a weight kept for a task outside the fair tier.
   L.sched.64-66 restated in place. Wake preemption (F4), inheritance (F9)
   and the cpu.max term (F15) take theirs with 4b.
 * **F13**: the rename landed as 62b1607b5, path-only (its four boots'
@@ -1026,7 +1026,7 @@ The first class above fair: `SCHED_FIFO` and `SCHED_RR`, as Linux has them,
 in `ferrix-sched-fifo`, selected by `sched_realtime = "fifo_rr"` in
 `desktop` (the value allows `none` alone, so no claimed profile takes it).
 It carries the parts of 4a that need an upper tier to mean anything (F5,
-F6, F7's nesting, F10, L.sched.107-108).
+F6, F7's nesting, F10, L.sched.129-130).
 
 **The class**, `FifoRr` (its `NAME` `fifo_rr`), pure, `no_std`, no `unsafe`,
 host tested:
@@ -1053,7 +1053,7 @@ host tested:
 * **Load**: each task counts one `LOAD_UNIT` (answer 4; C2: `/proc`'s load
   figures then count real-time tasks, said in `/proc`'s documentation).
 
-**The starvation floor** (C4: the fair server; H.SCHED.19). Without a
+**The starvation floor** (C4: the fair server; H.SCHED.21). Without a
 floor a spinning FIFO task owns its processor for good. As Linux's
 `sched_rt_runtime_us` does by default, the class throttles itself per
 processor: at most 950 ms of every 1 s period on real-time tasks, then
@@ -1071,12 +1071,12 @@ group whatever its tier, a safety net as `rt_runtime` is).
 **The task** (S4's full form, F6, F7): the fair parts stay where they are;
 `Task` gains its policy and priority (atomics, read by
 `sched_getscheduler` without the queue's lock), and the upper cell, the
-`FifoSlot` behind a cell only the queue's lock holder takes (L.sched.107).
+`FifoSlot` behind a cell only the queue's lock holder takes (L.sched.129).
 `entity_with` builds `Tier::Upper` from the cell for a real-time task and
 `Tier::Lower` from the fair parts otherwise; the fair-only stack's
 `StackEntity` stays `FairEntity` (N2's const, restated as "the innermost
 entity is `FairEntity`"). A weight set on a real-time task goes into its
-kept fair record and applies when it returns to fair (F5, L.sched.108).
+kept fair record and applies when it returns to fair (F5, L.sched.130).
 The direct switch's job fold is gated in the core on both tasks being fair
 (F10; L.sched.64-66 restated in place).
 
@@ -1118,13 +1118,13 @@ absent from `present` and present in `desktop`; the classes line reads
 before and after (unchanged expected), and the round trip on the landing
 hash.
 
-**Requirements** (ids reserved before code): H.SCHED.19, "a runnable task
+**Requirements** (ids reserved before code): H.SCHED.21, "a runnable task
 of a real-time policy runs before every task of a lower priority and
 every fair task on its processor, and fair tasks keep at least 50 ms of
-every second there"; L.sched ids from 109 for the core's parts (wake
+every second there"; L.sched ids from 131 for the core's parts (wake
 preemption through the stack, the policy calls and their permission,
 the move between tiers, inheritance, the cpu.max cut, the classes line
-on `desktop`); L.sched.107-108 as reserved. Boot checks, each with a
+on `desktop`); L.sched.129-130 as reserved. Boot checks, each with a
 control: priority order and preemption on a wake; FIFO keeps its place
 when preempted; RR rotates at its quantum; the floor gives fair its
 50 ms; `sched_setscheduler` refused without `CAP_SYS_NICE` and with
@@ -1178,14 +1178,14 @@ guarantee stated narrowly; the checks split below):
   is a timer, not an unrelated event. Idle time does not advance it, which
   matters only when nothing below waits, when the throttle does not bind.
 * **R5, the wake.** Preemption on a wake, local and remote, goes through
-  `Stack::should_preempt` (L.sched.109). A woken real-time task stays on
+  `Stack::should_preempt` (L.sched.131). A woken real-time task stays on
   the processor its affinity and its last run give it, as a fair one
   does; it is never pushed to another (no scan, no cross-processor lock),
-  stated as a requirement (L.sched.110) with its consequence: a higher
+  stated as a requirement (L.sched.132) with its consequence: a higher
   priority task on a busy processor waits for that processor even when
   another is idle, in `desktop`'s boot domain.
 * **R6, 4a's carry-overs**, each with its requirement and check: the upper
-  cell (F6, L.sched.107), a weight kept (F5, L.sched.108), N2's const
+  cell (F6, L.sched.129), a weight kept (F5, L.sched.130), N2's const
   restated so a two-tier entity nests down to `FairEntity` and the
   fair-only const is unchanged (F7), the sleepers' and the dead's
   timelines and `move_onto` for a real-time task (F8: a real-time task
@@ -1195,27 +1195,27 @@ guarantee stated narrowly; the checks split below):
   (F10).
 * **R7, the calls fail closed with Linux's errno**: the target pid,
   `sched_attr`'s size and flags, and the priority range per policy
-  (L.sched.117). **No priority inheritance**: `FUTEX_LOCK_PI` answers
-  `ENOSYS` as today, and H.SCHED.19 excludes inversion through user locks.
+  (L.sched.139). **No priority inheritance**: `FUTEX_LOCK_PI` answers
+  `ENOSYS` as today, and H.SCHED.21 excludes inversion through user locks.
   On `present` the `EINVAL` refusal of `SCHED_FIFO` and `SCHED_RR` is its
-  own behaviour, with its requirement (L.sched.116) and a check there.
+  own behaviour, with its requirement (L.sched.138) and a check there.
 * **R8, inheritance through one function**: `fork`, `clone` and
-  `launch::load_native` all go through one (L.sched.113); boot checks for
+  `launch::load_native` all go through one (L.sched.135); boot checks for
   a fork and a native launch under a real-time parent, with and without
   reset-on-fork.
 * **R9, `SoftRt` refused by name.** `Domain::new(SoftRt)` on `desktop`
   answers a refusal of its own, "compiled, not yet creatable", with its
-  requirement (L.sched.115) and a check. The boot domain's real-time
+  requirement (L.sched.137) and a check. The boot domain's real-time
   guarantee is priority order and the floor only: no isolation, no bound
   on the kernel's non-preemptible sections, no interrupt threading; said
   here and in REALTIME.md.
-* **R10, the ids**, reserved by a docs landing before code: H.SCHED.19,
-  priority order and preemption; H.SCHED.20, the floor "while fair tasks
-  are runnable"; L.sched.109 wake preemption through the stack, 110 wake
+* **R10, the ids**, reserved by a docs landing before code: H.SCHED.21,
+  priority order and preemption; H.SCHED.22, the floor "while fair tasks
+  are runnable"; L.sched.131 wake preemption through the stack, 110 wake
   placement, 111 the calls' permission rule, 112 the move between tiers,
   113 inheritance, 114 the cpu.max cut on every tier, 115 the `SoftRt`
   refusal, 116 `present`'s `EINVAL`, 117 the calls' argument checks;
-  L.sched.107-108 as reserved.
+  L.sched.129-130 as reserved.
 * **R11, selection and evidence**: `fifo_rr` becomes built only in the
   commit that lands R6; `class_crates` gains its entry, and the selection
   crate's `unclassified_deps` entry for `ferrix-sched-fifo` cites ledger
@@ -1312,7 +1312,7 @@ GAME-PATH.md's G1, as stage 14's first domain slice (REALTIME.md §3.1,
 the jobs admitted to it, with the same class stack (`fifo_rr+eevdf` on
 `desktop`), and given back when the handle closes. No interrupt placement
 (G3), no budgets beyond `cpu.max` (G2's), no `HardRt`, no new class. It
-lifts 4b's `NotCreatable` for `SoftRt` (L.sched.115 restated), on
+lifts 4b's `NotCreatable` for `SoftRt` (L.sched.137 restated), on
 `desktop` alone; `present` has no realtime tier and `SoftRt` stays
 `ModeUnavailable` there.
 
@@ -1398,11 +1398,11 @@ check that the processors are back fails); D-3's refusals; a second domain
 refused. A native program (the session service's shape) makes, admits and
 closes. On `present`: `domain_create` refused, `ModeUnavailable`.
 
-**Requirements** (ids to reserve before code): H.SCHED.21 (the partition:
-a task runs only on its domain's processors), H.SCHED.22 (a domain lives
+**Requirements** (ids to reserve before code): H.SCHED.23 (the partition:
+a task runs only on its domain's processors), H.SCHED.24 (a domain lives
 while its handle does, and leaves the rest at least two processors);
-L.sched ids from 118 for D-1 to D-5, the switch's steps, admission, and
-L.sched.115 restated.
+L.sched ids from 140 for D-1 to D-5, the switch's steps, admission, and
+L.sched.137 restated.
 
 **Questions for the review:**
 1. The authority: a `DOMAIN` right on the root job's handle (above), or a
@@ -1463,10 +1463,10 @@ they differ:
 * **V11** a wake whose home is outside the task's domain places it inside;
   `SoftRt` processors steal nothing; balance and pull never cross; each
   checked with a control.
-* **V12** ids before code, every unit an item function: H.SCHED.21 the
-  partition, 22 the handle's life and dissolution, 23 the floor; L.sched
-  from 118 for D-1 to D-5, the switch (V4-V6), admission, the exemption,
-  `present`'s refusal; L.sched.115 restated.
+* **V12** ids before code, every unit an item function: H.SCHED.23 the
+  partition, 24 the handle's life and dissolution, 25 the floor; L.sched
+  from 140 for D-1 to D-5, the switch (V4-V6), admission, the exemption,
+  `present`'s refusal; L.sched.137 restated.
 * **V13** the FX code and any `unsafe` traced; MEMORY-AND-TIMING bounds each
   leaving processor's walk under its lock and the switch's length (F-95 a
   reference, not a bound claimed here, C2).
@@ -1537,11 +1537,11 @@ into this design before step 2's code.
   the kernel enforces; the two-sided rule keeps its two controls; each
   allowed mode is exercised by that profile's rows.
 * **S13, requirement ids.** L.sched.96-101 and H.SCHED.17 are taken; new
-  ids start at L.sched.102 and H.SCHED.18. Step 1 (this design): none.
+  ids start at L.sched.124 and H.SCHED.20. Step 1 (this design): none.
   Step 2: none if behaviour is unchanged and only units are restated; any
-  new boot check or refusal takes from L.sched.102. Step 3: ids only if
+  new boot check or refusal takes from L.sched.124. Step 3: ids only if
   `Mode`'s refusal is restated. Each class (step 4) and the switch (step 5)
-  reserves at its own design review: H.SCHED.19 on (G7 took H.SCHED.18) for SoftRt's starvation
+  reserves at its own design review: H.SCHED.21 on (G7 took H.SCHED.20) for SoftRt's starvation
   bound and HardRt's admission (ASR-8), L.sched ids for the core's
   dispatch, and a prefix of its own for each class crate.
 * **S14, where it stands**: below, and REALTIME.md §4 points here.
@@ -1710,7 +1710,7 @@ ledger line 15, OK IF 1-4: the marker in the Arm release kernels (met),
 the line named at landing, and with line 13's 1 and 3 the boots as gate
 rows showing the classes line and S5's measurement on a hash including
 it. The line is informational until step 3 gives the stack a flag to be
-compared with, when it takes a requirement reserved from L.sched.102; the
+compared with, when it takes a requirement reserved from L.sched.124; the
 selection crate then also asserts at compile time that the name is not
 empty.
 
@@ -1764,7 +1764,7 @@ line), written in as §9a.
   `mode_available` is named by no requirement (937 named by none, from
   936), nor is `sched::init`'s refusal it guards, which every buildable
   profile folds away: no id for 3a (D12). **Owed**: a requirement from
-  the next free L.sched id (L.sched.102 is the classes line's, §9b) naming
+  the next free L.sched id (L.sched.124 is the classes line's, §9b) naming
   both, with the first buildable profile that has fair
   absent or allows a mode beside Throughput (ledger line 21, ruling 2).
 * The `classes` boot line moved from `main.rs`'s `start_scheduler` into
@@ -1777,16 +1777,16 @@ its message; 6 owed on the gate host (below, with the desktop build's
 `build` line and condition 1's control).
 
 **Step 4a built, reviewed**: ledger line 28, OK IF 1-7 (65b401692; the
-three deviations accepted: F5, F6, F10 and L.sched.107-108 move to 4b
+three deviations accepted: F5, F6, F10 and L.sched.129-130 move to 4b
 with the first upper tier, and F11's and F7's two-tier proofs come with
 4b's first two-tier build, which N2's const refuses until then). Met on
 the branch: (1) rule (e) also refuses a method called on a CpuQueue's
 `stack` and a `&mut StackQueue` handed out, with self-tests; (2) each of
-L.sched.103-106 names a check on the fair-only stack besides the host
+L.sched.125-128 names a check on the fair-only stack besides the host
 tests (L.sched.1's and 2's fair host tests for 103 and 106, the boot
 checks of L.sched.52 and L.sched.90 for 104 and 105, tagged); (3)
 `sched_realtime.fifo_rr` stays built no until F5, F6, F10 and
-L.sched.107-108 land, its `lands` saying so; (4) `Over::decision_in_ns`
+L.sched.129-130 land, its `lands` saying so; (4) `Over::decision_in_ns`
 answers `None` when nothing runs and an upper entity waits (the wake asks
 for the pick, so no timer can re-arm at once for ever), with a host-test
 case; (7) this line. Owed: (5) S5's release ELF table on three
@@ -1796,9 +1796,9 @@ the gate host: the round trip, the controls of rule (e) and condition 1,
 coverage after the final rebase.
 
 **Step 4b reviewed**: ledger line 31, OK IF 1-7, at db558fd63 (B1-B3 of
-line 30 met). Met on the branch: (2) the withdrawn L.sched.111 and 117
+line 30 met). Met on the branch: (2) the withdrawn L.sched.133 and 139
 recorded in requirement-reservations.json as never to be reused, and
-TRACEABILITY.md regenerated; (3) L.sched.109's 100 ms restated as a bound
+TRACEABILITY.md regenerated; (3) L.sched.131's 100 ms restated as a bound
 that shows the preemption happens, not a latency claim (F-95's and the
 gate host's); (4) `Task::on_cpu`'s doc says the mark is cleared under the
 lock of the queue the task was switched away from, and that a task moved
@@ -1809,7 +1809,7 @@ as §9d records; (7) this line, and the landing names line 31. Owed on the
 gate host: (1) the FX-0537 control through `gate.sh control --expect
 FX-0537` on desktop x86-64 with the patch §9e quotes, and the flips check
 in the desktop boots' rows on three architectures; (5) the develop
-reservations (H.SCHED.18-20 and this branch's L.sched ids, after which
+reservations (H.SCHED.20-22 and this branch's L.sched ids, after which
 `--check` is clean), S5's ELF table for `present` before and after on
 three architectures, the class-crate half on three architectures, the
 round trip on the landing hash, coverage after the final rebase, the
@@ -1835,27 +1835,27 @@ whose classes line reads `fifo_rr+eevdf` on all three architectures;
   real-time tree; a steal releases from fair's alone.
 * R3, R4: `ready` and `elapse`; and `Over::decision_in_ns` arms the timer
   for a throttled upper tier's period end while the lower runs (the floor
-  check found its absence), accepted, L.sched.103 restated.
-* R5: wake preemption through `Stack::should_preempt` (L.sched.109) and no
-  placement, pull or steal of a real-time task (L.sched.110), each with a
+  check found its absence), accepted, L.sched.125 restated.
+* R5: wake preemption through `Stack::should_preempt` (L.sched.131) and no
+  placement, pull or steal of a real-time task (L.sched.132), each with a
   check, the placement's with a fair control.
-* R6: the upper cell and the parked run slot (L.sched.107; the move check
-  reads both), a weight kept (L.sched.108), N2's consts restated, the fold
+* R6: the upper cell and the parked run slot (L.sched.129; the move check
+  reads both), a weight kept (L.sched.130), N2's consts restated, the fold
   gate with L.sched.64-66 restated and the fast path's fifth job case; and
   B1 (§9e): the running task moved at its next decision, the on-processor
   mark and FX-0537, the flips check and its control, the audit.
-* R7, R8, R9: `present`'s refusal (L.sched.116, now `set_policy`'s
+* R7, R8, R9: `present`'s refusal (L.sched.138, now `set_policy`'s
   `NoTier` and `realtime_built`), inheritance in `prepare_user`
-  (L.sched.113), `SoftRt` refused by name (L.sched.115). The Linux layer's
-  permission rule and argument checks are the load ring's: L.sched.111 and
-  117 are dropped (line 30, B2), and `test-rtsched` shows both.
-* R10: H.SCHED.19-20 and L.sched.107-110 and 112-116 written, the
+  (L.sched.135), `SoftRt` refused by name (L.sched.137). The Linux layer's
+  permission rule and argument checks are the load ring's: L.sched.133 and
+  139 are dropped (line 30, B2), and `test-rtsched` shows both.
+* R10: H.SCHED.21-22 and L.sched.129-132 and 134-138 written, the
   reservation entry released. `check-traceability --check` fails on one
   thing only: these ids, and 4a's, are not yet reserved on `develop`.
 * R11: the arm, `unclassified_deps` citing line 29, `desktop` taking it.
 * R12: `sched/rt_check.rs` (order, wakes, placement, FIFO's place, RR and
   its FIFO control, a yield, the floor, flips, the move), the `cpu.max`
-  cut on a `SCHED_FIFO` program (L.sched.114), `test-rtsched` on
+  cut on a `SCHED_FIFO` program (L.sched.136), `test-rtsched` on
   `desktop` and on `present` with its negative control, the native
   launch's check.
 * R13, R14, C2: REALTIME.md and `/proc/loadavg`'s documentation.
@@ -1897,7 +1897,7 @@ this line and the landing's; the controls of E13 on the gate host. E13's
 while pending, for the consultant to confirm.
 
 **Step 3b's design** reviewed, ledger line 22, OK IF G1-G10 (G10: this
-line), written in as §9b; H.SCHED.18 and L.sched.102 reserved.
+line), written in as §9b; H.SCHED.20 and L.sched.124 reserved.
 
 D3's release ELF table, the stack the fair class alone through the
 selection crate:
@@ -1929,9 +1929,9 @@ selection crate:
   on each architecture, the map's link made through `FERRIX_LINK_MAP`
   (LTO off, its own target directory). KERNEL-CRATES.md §6 states the LTO
   argument; S1 is restated (§10).
-* G7: H.SCHED.18 (parent ASR-8) and L.sched.102 (unit `sched::init`)
-  written, their reservation released in the same commit; L.sched.102 is
-  verified by xtask's `boot_line`, H.SCHED.18 by test-removable's
+* G7: H.SCHED.20 (parent ASR-8) and L.sched.124 (unit `sched::init`)
+  written, their reservation released in the same commit; L.sched.124 is
+  verified by xtask's `boot_line`, H.SCHED.20 by test-removable's
   class-crate half.
 * G9: check-boot-line composes the expected classes line from
   `class_crates` and the profile's tier values and refuses a boot whose
@@ -1948,12 +1948,12 @@ deletes a stale map before its non-LTO link; (2) `Joined::as_str` refuses
 a non-UTF-8 name at compile time again, its panic expected with an audit
 reason; (3) check-build-flags holds Stack's nesting to the flag file's
 tier order, with self-tests; (4) rule (c)'s text names the load; (8) this
-line. Owed: (5) the reservation of H.SCHED.18 and L.sched.102, commit
+line. Owed: (5) the reservation of H.SCHED.20 and L.sched.124, commit
 25efdb079 on this branch (4287d870 before the rebase, as 8f5f375dd's
 message names it), landed docs-only on develop, the branch rebased and
 traceability --check clean with TRACEABILITY.md regenerated, before
 land.sh take; (6) the controls with gate.sh, each `FIRED`: G6 (i)-(iii),
-L.sched.102's (Eevdf's NAME changed) and condition 1's; (7) the rows on
+L.sched.124's (Eevdf's NAME changed) and condition 1's; (7) the rows on
 the landing hash: G8's class-crate half on all three architectures for
 `present` and `desktop`, the four boots with check-boot-line on both
 lines, coverage after the final rebase (the 7 anchors dropped in the

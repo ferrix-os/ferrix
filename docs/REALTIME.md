@@ -316,14 +316,14 @@ the quantum.
 
 **The guarantee is narrow.** Real-time tasks run in `desktop`'s boot
 domain, `Throughput`, beside fair ones (the review's answer 3): what holds
-is priority order, preemption on a wake (L.sched.109) and the floor
-(H.SCHED.19, H.SCHED.20), and nothing more: no isolation of processors, no
+is priority order, preemption on a wake (L.sched.131) and the floor
+(H.SCHED.21, H.SCHED.22), and nothing more: no isolation of processors, no
 bound on the kernel's non-preemptible sections (F-95), no threaded
 interrupts, and no priority inheritance through user locks
 (`FUTEX_LOCK_PI` stays `ENOSYS`). A woken real-time task stays on its own
-processor (L.sched.110): a higher priority waits for that processor even
+processor (L.sched.132): a higher priority waits for that processor even
 while another is idle. A `SoftRt` domain is compiled in and refused by name,
-"compiled, not yet creatable", until those land (L.sched.115).
+"compiled, not yet creatable", until those land (L.sched.137).
 
 **C2.** A `SCHED_FIFO` task at priority 99 starves the kernel's own fair
 worker tasks -- the reaper, the network's -- on its processor for 950 ms of
