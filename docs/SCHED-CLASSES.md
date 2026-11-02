@@ -1211,10 +1211,10 @@ guarantee stated narrowly; the checks split below):
   here and in REALTIME.md.
 * **R10, the ids**, reserved by a docs landing before code: H.SCHED.21,
   priority order and preemption; H.SCHED.22, the floor "while fair tasks
-  are runnable"; L.sched.131 wake preemption through the stack, 110 wake
-  placement, 111 the calls' permission rule, 112 the move between tiers,
-  113 inheritance, 114 the cpu.max cut on every tier, 115 the `SoftRt`
-  refusal, 116 `present`'s `EINVAL`, 117 the calls' argument checks;
+  are runnable"; L.sched.131 wake preemption through the stack, 132 wake
+  placement, 133 the calls' permission rule, 134 the move between tiers,
+  135 inheritance, 136 the cpu.max cut on every tier, 137 the `SoftRt`
+  refusal, 138 `present`'s `EINVAL`, 139 the calls' argument checks;
   L.sched.129-130 as reserved.
 * **R11, selection and evidence**: `fifo_rr` becomes built only in the
   commit that lands R6; `class_crates` gains its entry, and the selection
@@ -1792,8 +1792,8 @@ with the first upper tier, and F11's and F7's two-tier proofs come with
 the branch: (1) rule (e) also refuses a method called on a CpuQueue's
 `stack` and a `&mut StackQueue` handed out, with self-tests; (2) each of
 L.sched.125-128 names a check on the fair-only stack besides the host
-tests (L.sched.1's and 2's fair host tests for 103 and 106, the boot
-checks of L.sched.52 and L.sched.90 for 104 and 105, tagged); (3)
+tests (L.sched.1's and 2's fair host tests for 125 and 128, the boot
+checks of L.sched.52 and L.sched.90 for 126 and 127, tagged); (3)
 `sched_realtime.fifo_rr` stays built no until F5, F6, F10 and
 L.sched.129-130 land, its `lands` saying so; (4) `Over::decision_in_ns`
 answers `None` when nothing runs and an upper entity waits (the wake asks
