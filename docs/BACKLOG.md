@@ -60,8 +60,8 @@ consultant, 2026-10-01).
 
 **Landing on `develop`.** Since the switch of 2026-10-23 (customer;
 `docs/REPO-FLOW.md`) the landing branch is `develop`, and `main` moves only
-by promotion pull requests that merge themselves when CI and the
-certification verdict pass. In the rules below, and wherever a landing step
+by promotion, a fast-forward the Promote workflow pushes when CI and the
+certification verdict pass (no pull request since 2026-10-24). In the rules below, and wherever a landing step
 says `main` -- rebase onto it, fast-forward it, boot it, push it -- read
 `develop`; `fleet/land-branch` holds the branch `land.sh` and `batch.sh`
 use. Before `batch.sh join`, a branch that touches the certified item runs
@@ -379,7 +379,7 @@ what is left, ordered by what blocks what.
 | **Pressure runs for the gates (customer, 2026-10-18).** Run the gates' guest tests starved as well as at full speed: the guest on one processor with a CPU quota as low as 10 %, and under a memory limit, the way `test-btrfs-pressure`'s starved form already does (`--smp 2 --cpu-quota 40 --pin`). On Linux the same tests can run in a namespace with a cgroup's `cpu.max` and `memory.max`, so a failure that shows only under pressure can be compared with Linux's behaviour. The N150 box found the ENOSPC at the floor (F-86 to F-89) and the network drop only under load, which the full-speed rows never met. Choose which gates get a starved form, as manual checks first and as rows only where the time allows (gate time is priority one) | unassigned | 5 |
 | **Gate slots without sshdt (2026-10-18).** `test-init --arch all` failed twice on 2026-10-17 (sudS4-r6 and a sud row) only because the gate slot it ran on had no `sshdt` built ("cargo xtask build-apps --app sshdt builds it"); it passed on a slot that had one. Make the row build what it needs (or `gate.sh` prepare each slot with `sshdt`), so a row's result depends on the change and not on the slot | unassigned | 2 |
 | **Open (2026-10-17, fx1006; F-82, consultant ledger 2247).** Detection half of F-82: nothing short of a boot finds an image whose `lib/drivers` holds more than `ferrix_devmgr_proto::MAX_DRIVERS` (32), and `test-nvrm`, whose image went over 16 at ee2d5bf0f and left `main` red for two days, runs in no landing's row set. Preferred, no gate time: `check` builds the driver set of every image `xtask` makes (each `test-*`'s, `test-nvrm`'s and `test-restart --update`'s included) and holds each to `MAX_DRIVERS` without booting; otherwise the PO puts `test-nvrm` in a regular row set. Closes F-82 | n150 | 10 |
-| The installer's live medium, I6 of `docs/INSTALLER.md` §9. I6a (the `.img` on GPT, `cargo xtask live`) done 2026-10-07, 5 points. Left: I6b, the hybrid `.iso` (`xtask/src/iso.rs`), and `test-install` on AArch64. [more](backlog/p1.md#p1-028) | po10-install | — |
+| The installer's live medium, I6 of `docs/INSTALLER.md` §9. I6a (the `.img` on GPT, `cargo xtask live`) done 2026-10-07, 5 points. I6b, the hybrid `.iso` (`cargo xtask iso`, `xtask/src/iso.rs`), done 2026-10-25 (dc95c66f8); v0.2.0 ships it. Left: `test-install` on AArch64. [more](backlog/p1.md#p1-028) | po10-install | — |
 | **Open (2026-10-19, install-guide).** `cargo xtask test-install` fails in the live medium's boot (`main` 8cb1dc24a plus the release-image commit, `--release`): q35's AHCI holds only QEMU's CD-ROM there, `ahci` exits 5 ("did not come up: NoDrive"), and xtask stops on "4 started, 1 failed". Not in `check`. Logs: nazuna `~/.local/share/ferrix/logs/install-guide/install/` | unassigned | 2 |
 
 ### P1 flakes — seen on a gate, each with its log
