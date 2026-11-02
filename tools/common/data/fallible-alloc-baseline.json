@@ -9,6 +9,9 @@
     "being re-recorded. The target is an empty map."
   ],
   "files": {
+    "syscall/exec.rs": 13,
+    "syscall/launch.rs": 1,
+    "syscall/load.rs": 16,
     "syscall/process.rs": 11
   },
   "//crates": [
