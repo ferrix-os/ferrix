@@ -5,9 +5,9 @@
 //! [`Stack`], named here once as a type, so the compiler monomorphises and
 //! inlines it: the choice costs nothing at run time. The selection crate
 //! below the core chooses it by the per-tier build flags
-//! (`ferrix_kernel_sched_select`, S2, §9a); this file reads none. Every
-//! buildable profile has the fair tier alone, so `Stack` is
-//! [`ferrix_sched_fair::Eevdf`] and its queue is EEVDF's `RunQueue`.
+//! (`ferrix_kernel_sched_select`, S2, §9a); this file reads none. On
+//! `present` it has the fair tier alone, so `Stack` is
+//! [`ferrix_sched_fair::Eevdf`]; on `desktop`, `SCHED_FIFO` over it (§9e).
 //!
 //! **The fair tier's own calls.** The scheduler's fair-only calls --
 //! weights, the picture `/proc` and the checks read, the slice, the

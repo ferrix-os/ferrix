@@ -112,6 +112,12 @@ run's own architecture and processor count (`3f7b09345`, 2026-10-21).
 
 Not on `main`; none is written up above as landed.
 
+**PR #38, scheduler classes, on `present` (2026-11-03, `feature/ferrix-roadmap-completion-hkxlpp`; not landed).**
+Against its merge base 3afb272b5, x86_64 under kvm, 5 rounds, load under 1: fast
+path off 1747 to 1757 ns, 1.000 (1.000 to 1.006); fast path on 918 to 928 ns against
+898 to 908, 1.022 (1.011 to 1.273), a cost waiting on a decision
+(`docs/SCHED-CLASSES.md`, the 2026-11-03 entry).
+
 - The scheduler's K and the slots are branches (`open-branches.md`).
 
 Ids reserved on `main` and not written: L.sched.69-70 (the direct switch's

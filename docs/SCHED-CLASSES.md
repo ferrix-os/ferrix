@@ -1841,8 +1841,8 @@ round trip on the landing hash, coverage after the final rebase, the
 29, R1-R15; commits 5af67ba86, 4a123dda1, 229cf6b7e; reviewed at
 229cf6b7e, container review 30, NOT YET on B1-B3, answered in 8c9620fd5 and
 db558fd63): the core half and `ferrix-sched-fifo` selected on `desktop`,
-whose classes line reads `fifo_rr+eevdf` on all three architectures;
-`present` unchanged.
+whose classes line reads `fifo_rr+eevdf` on all three architectures.
+`present` is not unchanged: the figures are in the 2026-11-03 entry below.
 * R1: a task's `FifoSlot` is allocated by `sched::set_policy` before any
   lock (`ENOMEM`, nothing changed), and by `prepare_user` for a real-time
   parent's child; kept on the return to fair (the move check), freed with
@@ -2007,3 +2007,133 @@ are one, the policy calls' with game mode's `sched_runtime` for a
 `SCHED_OTHER` thread and `sched_getattr` answering it. Owed: the
 consultant's look at the joined `sched_setattr` and at real-time tasks
 leaving a processor going out of service.
+
+**2026-11-03: the round after ledger 5684** (NOT YET on B1-B4, with its
+corrections at 5705). What was done, and on which hash. No new review is
+recorded here: the next verdict is the consultant's. Every log is
+`~/.local/share/ferrix/logs/queue/<tag>.log` on the gate host, with its line in
+`INDEX`.
+
+* **develop merged**, 3afb272b5, conflicts only in `docs/roadmap` and
+  `docs/generated`, which was regenerated (5705, item 7), and again at the end,
+  fbae70aed, a status commit, conflict only in `docs/roadmap/status.md`. Ids
+  against develop's reservations: `check-traceability.py --check` clean. The
+  table and the figures below are against 3afb272b5; fbae70aed holds no kernel
+  code.
+* **B1, C2: the quantum.** It lives on the node and restarts only when spent.
+  That goes further than "reset when the running entity changes", because the
+  source says so: `task_tick_rt` in Linux 6.18.54's `kernel/sched/rt.c` is the
+  one refill after the fork, `yield_task_rt` leaves `time_slice` alone, and
+  sched(7) says a preempted thread completes the unexpired portion. Host test
+  `an_early_decision_does_not_restart_the_quantum` is the ledger's probe; its
+  control, the reset at the pick restored, FIRED: `pr38fix-w2c-b1-quantum`.
+* **C1: the floor's clock over idle.** Fixed in the code: `account_with` gives
+  the time to `Stack::elapse` when nothing ran, so "of real time" is true. The
+  boot case `floor_clock`; control `pr38fix-w2c-c1-clock` FIRED, x86_64 kvm.
+* **Found here, not in the ledger: a charge across a period's end.** `charge`
+  added all of a charge to the new period's `spent`, so a task running tickless
+  read as throttled far too early and the fair tier kept the processor for the
+  rest of that period. In the floor case, x86_64 kvm, the fair task had 420 ms of
+  2100 at 9911d76cf (`pr38fix-baseline-9911-desktop-x86_64-kvm`), 517 ms at
+  6343d5e52 and 893 ms in a probe, against the 50 ms a period meant; 713 ms on
+  armv7a tcg failed that row (`pr38fix-boot-desktop-armv7a-smp2-r2`). H.SCHED.22's
+  floor held throughout: the real-time task paid. The window grew to 3.1 s, since
+  the periods are fixed and 2.1 s can hold one throttle. After the fix, of 3100
+  ms: fair 74 ms, SCHED_FIFO 2253 ms on x86_64 kvm (the host's load took the rest
+  from the spinners' own count); 89 and 2667 on aarch64 tcg; 99 and 2960 on armv7a
+  tcg. Control `pr38fix-w2c-straddle` FIRED.
+* **C3.** `Task::entity_with` stops the machine, FX-0539, under L.sched.129
+  restated. Control `pr38fix-w3c-c3-node` FIRED, x86_64 kvm.
+* **C4: no defect.** Thread numbers are named in the process table
+  (`registry::allocate_thread_in`), so `find_in` does find another process's
+  non-leader thread, as `find_process_by_pid` does. Shown by `test-rtsched`'s new
+  neighbour step (control `pr38fix-w3c-c4-neighbour` FIRED) and by the /proc
+  access check that already covered it (`pr38fix-w3c-c4-robust` FIRED).
+* **C5.** `docs/BACKLOG.md`, the row dated 2026-11-03.
+
+Rows. On c5fdb85ef: `pr38fix-w2-boot-desktop-x86_64-kvm` (x86_64 kvm),
+`-aarch64` (aarch64 tcg), `-armv7a-smp2` (armv7a tcg, `--smp 2`), each with
+`classes fifo_rr+eevdf` and check-boot-line; `pr38fix-w2-rtsched-desktop-all` and
+`pr38fix-w2-rtsched-present-all` (x86_64 kvm, aarch64 tcg, armv7a tcg), the first
+with its built-in negative control. On 1cd9dc06c: `pr38fix-w4-check`,
+`pr38fix-w4-boot-x86_64-kvm`, `-x86_64-tcg`, `-aarch64`, `-armv7a`,
+`-armv7a-smp2`, `pr38fix-w4-boot-desktop-x86_64-tcg`,
+`pr38fix-w4-build-release-all`, `pr38fix-w4-threads-all`,
+`pr38fix-w4-quarantine-kvm`. On c39f5d6bb: `pr38fix-w6-check`,
+`pr38fix-w6-removable-all` (G8's class-crate half), and three more desktop armv7a
+boots, `pr38fix-w6-boot-desktop-armv7a-smp2-1` to `-3`, because of the one failure
+below. The kernel's code is the same on all three hashes; only check code and its
+record changed after c5fdb85ef.
+
+One failure not explained: `pr38fix-boot-desktop-armv7a-smp2` at 6343d5e52 read
+"RR ran 113765872 and 90861312 ns of 400000000", under the 100 ms bound. It came
+before the straddle's fix and did not return in the runs above. That the fix
+cured it is plausible and not shown.
+
+Controls, each with marker, sabotage and failure in its log. On c5fdb85ef,
+`pr38fix-w2c-`: `b1-quantum`, `straddle`, `c1-clock`; R12's `r12-order`,
+`r12-placement`, `r12-place`, `r12-rr`, `r12-fifoctl`, `r12-yield`, `r12-floor`,
+`r12-unthrottle`, `r12-modes`, `r12-cpumax`; rule (e) and condition 1's
+`rule-e-mut`, `rule-e-method`; D6's `d6-cfg`, `d6-noarm`, `d6-twoarms`; D9's
+`d9-mode-absent`, `d9-mode-left`; D10's `d10-dispatch`; E13's `e13-noname`,
+`e13-notsc4`, `e13-otherallows`, `e13-notbarest`, `e13-bootoption`; G6's
+`g6-i-fixture`, `g6-ii-inline`, `g6-iii-present`. On fcc9620d5, `pr38fix-w3c-`:
+`b1-flips` (FX-0537, the patch §9e quotes), `c3-node`, `c4-neighbour`, `c4-robust`,
+`r12-inherit` (the native launch's check), `r12-wake`, `l124-name`, `cond1-map`. On
+1cd9dc06c: `pr38fix-w4c-r12-move`. All FIRED. Kernel cases ran on x86_64 under kvm;
+static and host cases name no accelerator.
+
+Seven read DID NOT FIRE first, all on c5fdb85ef, and each was looked into. Five
+were the expected text: `--expect` needs its text on the FERRIX-PANIC line, which holds the
+message and not the FX code (`c3-node`, `b1-flips`; the code is two lines below,
+in each log), or the sabotage failed an earlier check than the one named (`r12-move`,
+`r12-inherit`, `c4-neighbour`). `r12-wake`'s first sabotage changed nothing, since
+`decision_in_ns` and `charge` also carry a wake's decision, so it now makes the tier
+never ready while a fair task runs. `cond1-map` found a gap: `check-removable-symbols
+--self-test` ran in no gate, and now runs in `check`. `r12-wake` fired on "a task of
+a real-time case never started", not on the wake case's own sentence, because the
+sabotage stops the first case; `r12-move`'s sentence varies between its two run-slot
+checks, and its text is "run slot".
+
+**S5, `present`, x86-64, AArch64, ARMv7-A.** Release ELF symbol sizes, at the merge
+base 3afb272b5 and at this head's kernel:
+
+| Function | x86-64 | AArch64 | ARMv7-A |
+|---|---|---|---|
+| `ferrix_fast_write_read` | 0x27e4 to 0x2910 (+300) | no such function | no such function |
+| `sched::choose_next` | 0xa49 to 0xc75 (+556) | 0xb2c to 0xd2c (+512) | 0xfb8 to 0x1208 (+592) |
+| `sched::switch_chosen` | 0x735 to 0x73d (+8) | 0x488 to 0x494 (+12) | 0x87c to 0x88c (+16) |
+| `sched::finish_switch` | 0x580 to 0x58c (+12) | 0x604 to 0x608 (+4) | 0x76c to 0x708 (-100) |
+| `sched::enqueue` | 0x1de to 0x1fd (+31) | 0x318 to 0x33c (+36) | 0x4dc to 0x51c (+64) |
+| `RunQueue::enqueue` | 0x4e7 to 0x4f3 (+12) | 0x390 to 0x390 | 0x19bc to 0x19b8 (-4) |
+| `RunQueue::set_weight` | 0x331 to 0x33e (+13) | 0x208 to 0x208 | 0xcf4 to 0xcfc (+8) |
+
+**B4, the round trip, `optimize-ipc-round-trip` §2**, `present`, x86_64 under kvm,
+`--smp 1` pinned to core 11, QEMU 9.2.4, every mitigation on, 5 rounds this tree
+first, load under 1, the SMT sibling 0% busy, hardware 55af03d68d77, this tree's
+kernel against the merge base 3afb272b5:
+
+* The fast path off, the certified configuration: 1747 to 1757 ns against 1747 to
+  1757 ns, 1.000, spread 1.000 to 1.006. No change.
+* The fast path on, `ferrix.fastpath=on`: 918 to 928 ns against 898 to 908 ns (one
+  base round read 729), **1.022, spread 1.011 to 1.273**. A cost of about 20 ns a
+  round trip, 2.2%, outside the 1% an A/A run allows. The 729 is the fast clock mode
+  the skill describes, seen once on the base side and not on this side; the other
+  four rounds alone read 1.011 to 1.022.
+
+So "present unchanged" is untrue for the fast path, whose code grew 300 bytes for
+the `on_cpu` stores, `is_fair`, Stack's indirection and a larger Task. **Not
+accepted here; it waits on a decision**, as the customer's brief for this round
+asks. Not attributed to any one of those: no ablation was run. Instructions and
+cycles per trip (§7.4) were not taken: the long bench lives on `os76/p0-measure`,
+which no longer exists on the gate host. Records:
+`docs/hotpaths/results/ipc-round-trip/55af03d68d77/20261103T212408Z-1cd9dc06ce52-2263a54d.json`
+and `.../20261103T212923Z-1cd9dc06ce52-4c19b068.json`; logs under
+`~/.local/share/ferrix/logs/pr38fix/`.
+
+**Not done or not shown.** R12's `test-rtsched` fork and thread inheritance has its
+built-in negative control and the native launch's control, and no control of its
+own through `gate.sh`, because the boot's own check fails first. The container's
+control runs are not counted. The rows and controls above stand on the hashes named;
+the docs and evidence commits after them change no code.
+
