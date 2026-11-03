@@ -80,6 +80,10 @@ fn decodes_an_inline_extent_mkfs_wrote() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "255 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
+)]
 fn decodes_a_sector_padded_regular_extent_mkfs_wrote() {
     let file = yes("compressible line of text", 500_000);
     let plain = &file[393_216..];
@@ -94,6 +98,10 @@ fn decodes_a_sector_padded_regular_extent_mkfs_wrote() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "47 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
+)]
 fn decodes_a_mixed_extent_as_miniz_oxide_does() {
     let expected = decompress_to_vec_zlib(MIXED_REGULAR).expect("miniz_oxide decodes the fixture");
     assert_eq!(expected.len(), MIXED_RAM_BYTES, "oracle length");
@@ -219,6 +227,10 @@ fn first_block_type(stream: &[u8]) -> usize {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "37 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
+)]
 fn reproduces_every_input_miniz_oxide_compresses() {
     let mut rng = Rng(0x5EED);
     let mut seen = [false; 3];
@@ -861,6 +873,10 @@ fn victims() -> Vec<(Vec<u8>, Vec<u8>)> {
 
 /// Verifies: L.btrfs.56
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "118 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
+)]
 fn every_truncation_before_the_trailer_is_refused() {
     for (stream, plain) in victims() {
         let deflate_end = stream.len() - 4;
@@ -880,6 +896,10 @@ fn every_truncation_before_the_trailer_is_refused() {
 
 /// Verifies: L.btrfs.5
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "79 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
+)]
 fn bit_flips_give_an_error_or_what_miniz_oxide_decodes() {
     #[cfg(not(miri))]
     const STRIDE: usize = 1;

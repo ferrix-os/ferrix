@@ -123,7 +123,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 | `FerrixSigningRequirements` | `26-signing-requirements.sysml` | docs/SIGNING.md is the design (the certification consultant's OK IF at ledger lines 3667 and 3738; the customer's decisions at 3731). Slice S1 builds the verify-only crate `ferrix-sigverify` (src/lib/crypto/sigverify) and the hash it rests on, `ferrix-sha256` (src/lib/crypto/sha256), both in the item ring (certification-item.json's crates). What the UEFI loader, init's configuration verifier and devmgr do with the verifier's answer is theirs, and gets ids in their own slices (S4, S8, S9). |
 
-27 files, 151 packages, 8568 elements, 220 relations. Model digest `47ec880dd451d9b5`.
+27 files, 151 packages, 8568 elements, 220 relations. Model digest `a08e2bbf9d8a3468`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -3588,7 +3588,7 @@ flowchart LR
 | `hostTests` | `cargo test --workspace --exclude ferrix-kernel --exclude ferrix-boot` | — | 1950 unit tests across src/lib/ on 2026-09-23 (about 520 when this gate was first written down), plus doc tests and xtask's 242. |
 | `cargoDeny` | `cargo deny check` | — |  |
 | `docsBuild` | `cargo doc` | — | Broken intra-doc links are denied. |
-| `miri` | `cargo miri test` | — | src/lib/platform/elf, bootinfo, ustack, objects, vfs, pci, block, blkring, native, virtio-blk, frame, heap and paging. cargo xtask check --miri runs the same list, and an xtask test holds it to the workflow. |
+| `miri` | `cargo miri test` | — | The src/lib crates MIRI_PACKAGES names in tools/common/xtask/src/check.rs. |
 | `fuzz` | `cargo fuzz run <target>, for every target cargo fuzz list names` | — | Replays the committed corpus first, searches second: an input that crashed once fails again in seconds. ustack_build asserts a round trip rather than the absence of a crash -- whatever the builder accepts, a walk that knows only the stack pointer must… |
 | `buildImages` | `cargo xtask build --arch all --release` | — | One bootable FAT32 image per architecture, byte-for-byte reproducible, uploaded as a CI artifact. xtask refuses to build a kernel with RUSTFLAGS set, because cargo lets that variable replace the per-target flags and silently drop the linker script. |
 | `bootTest` | `cargo xtask test-boot --arch all` | `everyStageEndsInSomethingThatRuns` and `provedOnEveryBoot` | The gate that answers the question the others cannot. |

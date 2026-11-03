@@ -628,7 +628,8 @@ jobs:
   #
   # Three runners, each taking about a third of the time: in one job the
   # crates were an hour, interpretation being one thread per crate. Each
-  # step names its part, balanced by the times measured on 2026-09-28;
+  # step names its part, balanced by the times measured on 2026-09-28; a
+  # fourth holds btrfs's reader alone (2026-11-02);
   # `cargo xtask miri` runs the same crates side by side locally.
   # ----------------------------------------------------------------
   miri:
@@ -637,7 +638,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        part: [1, 2, 3]
+        part: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v6
 
@@ -780,6 +781,29 @@ jobs:
       - name: Miri (seccomp)
         if: matrix.part == 2
         run: cargo +nightly miri test -p ferrix-seccomp --lib
+
+      # btrfs's reader, which parses a volume someone else wrote: its trees,
+      # chunks and extents, and the three decompressors (zlib, LZO, zstd)
+      # that expand what the disk holds. The crate forbids unsafe and has no
+      # runtime dependencies, so an index out of bounds panics under plain
+      # cargo test as well. What Miri adds is a check of the unsafe in core
+      # and alloc under the crate's calls, and of the test-only oracle
+      # crates (miniz_oxide, ruzstd, and lzokay-native's decoder; a test of
+      # its compressor is ignored for that compressor's own undefined
+      # behaviour). A part of its own, with a budget of 15 minutes of real
+      # time for this job, read off the run. Every other figure here and in
+      # the tests' ignore labels is libtest's "finished in", which under
+      # Miri's isolation is Miri's virtual clock and not time: at c158bd2f4,
+      # 883.83 s by libtest took 837 s here, and the job 15 min 37 s, over
+      # budget, so the set was cut. By that clock a test over 25 s
+      # is ignored here (measured 2026-11-03; the slowest did not finish in
+      # half an hour) unless it reaches what nothing cheaper does. Four such
+      # are kept, of 32 to 78 s: docs/RELIABILITY.md, Miri, names them. The
+      # set takes 732 s by libtest. docs/certification/TODO.md, section 4,
+      # item 7, says what it does not reach. Plain cargo test runs them all.
+      - name: Miri (btrfs reader)
+        if: matrix.part == 4
+        run: cargo +nightly miri test -p ferrix-btrfs --lib
 
   # ----------------------------------------------------------------
   # Fuzz the surfaces that parse bytes somebody else chose.

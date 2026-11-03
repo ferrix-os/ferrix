@@ -105,12 +105,20 @@ fn an_inline_extent_from_mkfs_decodes() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "248 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
+)]
 fn a_regular_extent_from_mkfs_decodes() {
     assert_eq!(segments(TEXT, 4096).len(), 27, "one segment per sector");
     assert_eq!(decode(TEXT, 106_784, SECTOR), Ok(text_plain()));
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "35 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
+)]
 fn a_many_sector_extent_from_mkfs_decodes() {
     let found = segments(MIXED, 4096);
     assert_eq!(found.len(), 13);
@@ -124,6 +132,10 @@ fn a_many_sector_extent_from_mkfs_decodes() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "248 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
+)]
 fn padding_after_the_total_length_is_ignored() {
     // The rest of the last sector is not part of the extent, so whatever it
     // holds, the decoder must not read it.
@@ -260,6 +272,10 @@ fn a_segment_expands_to_at_most_one_sector() {
 
 /// Verifies: L.btrfs.61
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "249 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
+)]
 fn the_output_bounds_the_decode() {
     let plain = text_plain();
     assert_eq!(decode(TEXT, plain.len() - 1, SECTOR), Err(CORRUPT));
@@ -507,6 +523,10 @@ const RANDOM_CASES: usize = if cfg!(miri) { 2 } else { 120 };
 const MAX_LEN: usize = if cfg!(miri) { 4096 } else { 128 * 1024 };
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "64 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
+)]
 fn raw_streams_round_trip_through_the_test_encoder() {
     let mut rng = Rng(0x5EED_0000_0000_0001);
     let mut stats = Stats::default();
@@ -546,6 +566,10 @@ fn raw_streams_round_trip_through_the_test_encoder() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "119 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
+)]
 fn extents_round_trip_through_the_test_encoder() {
     let mut rng = Rng(0x5EED_0000_0000_0002);
     let mut skips = 0;
@@ -598,6 +622,10 @@ const VECTORS: [(&[u8], usize); 3] = [(INLINE, 1800), (TEXT, 106_784), (MIXED, M
 
 /// Verifies: L.btrfs.60
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "145 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
+)]
 fn every_truncation_answers() {
     for (extent, len) in VECTORS {
         // Under Miri a 53 KiB decode is slow, so the sweep samples instead.
@@ -621,6 +649,10 @@ fn every_truncation_answers() {
 
 /// Verifies: L.btrfs.59
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "319 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
+)]
 fn single_bit_flips_answer() {
     for (extent, len) in VECTORS {
         let total = u32::from_le_bytes(extent[..4].try_into().unwrap()) as usize;

@@ -165,10 +165,6 @@ fn manifest_entries() -> usize {
 }
 
 #[test]
-#[cfg_attr(
-    miri,
-    ignore = "walks all four real images key by key; plain cargo test covers it"
-)]
 fn every_image_mounts_and_finds_its_fs_tree() {
     for (name, packed) in IMAGES {
         with_volume(packed, |_, volume, _| {
@@ -200,7 +196,7 @@ fn every_image_mounts_and_finds_its_fs_tree() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "walks all four real images key by key; plain cargo test covers it"
+    ignore = "276 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn a_walk_visits_every_key_once_in_order() {
     for (name, packed) in IMAGES {
@@ -249,7 +245,7 @@ fn a_walk_stops_when_the_visitor_breaks() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "walks all four real images key by key; plain cargo test covers it"
+    ignore = "did not finish in 1,800 s of real time under Miri on 2026-11-03, so libtest gave no figure, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn the_last_key_at_or_before_is_found_across_leaf_boundaries() {
     for (name, packed) in IMAGES {
@@ -586,6 +582,10 @@ fn without_a_default_entry_the_top_level_tree_is_mounted() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "59 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
+)]
 fn a_default_entry_that_names_no_subvolume_is_refused() {
     assert_eq!(
         open_with_default_entry(|_, _| {}),

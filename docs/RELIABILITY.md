@@ -174,7 +174,7 @@ becomes a boot test and stays in CI forever after.
 Miri interprets the host tests of the `src/lib/` crates the kernel leans on
 hardest, checking every borrow, index and pointer against the allocation it
 came from. CI's Miri job names each crate in its own step, with the reason it
-is there, split over three runners; `cargo xtask miri` runs the same list
+is there, split over four runners; `cargo xtask miri` runs the same list
 locally, the crates side by side and nothing else built (`cargo xtask check
 --miri` runs it after the whole gate), and an xtask test fails when the list
 and the workflow disagree. On 2026-09-28 the local run took four minutes,
@@ -186,9 +186,32 @@ data a byte at a time can cost more than the code under test, and a slice
 copy or comparison costs one step. The pipe's model test went from hours to
 seconds that way and now runs its full length under Miri. What is still slow
 runs shorter under `cfg(miri)` rather than being skipped: the frame
-allocator's random workload runs 2,000 of its 20,000 steps there. A test that
-cannot run under Miri at all gets `#[cfg_attr(miri, ignore)]` with the reason
-beside it, never a blanket skip of the crate.
+allocator's random workload runs 2,000 of its 20,000 steps there.
+
+Only then is a test ignored with `#[cfg_attr(miri, ignore = "...")]`, never a
+blanket skip of the crate, and only with its reason beside it: that it cannot
+run under Miri at all, or that it would break a budget the job names, with
+what stays reached stated where the budget is.
+
+`ferrix-btrfs` is the crate this has happened to. Its part of CI's job has a
+budget of 15 minutes of real time, read off the run. Every other figure for it
+is on one clock, libtest's `finished in`, which under Miri's isolation is
+Miri's virtual clock and not time: it counts the work interpreted and reads
+about the same on any host, where real time does not (on CI, 503.51 s by
+libtest took 411 s at 7c5eda2d5 and 883.83 s took 837 s at c158bd2f4; on the
+gate host 890.89 s took 448 s). A test over 25 s by libtest is ignored
+there, its label giving its figure or saying that the run did not finish. A
+test is kept above that only as the cheapest reach of something:
+`parsing_never_panics_on_corrupt_input` (78 s, every 127th index; every 37th
+took the job to 15 min 37 s and reached no more product lines),
+`the_zlib_image_reads_back_exactly` (61 s, a part of the image),
+`every_truncation_is_corrupt_and_total` in zstd (40 s) and
+`a_data_sector_that_fails_its_checksum_is_an_error_not_bytes` (32 s). On
+2026-11-03 the other kept tests were at most 25 s and the ignored ones at
+least 35 s. What stays reached and what does not is item 7 of section 4 of
+[TODO.md](certification/TODO.md). A test left ignored keeps its shorter body,
+because that body is what its label's figure measures, and
+`cargo miri test -- --ignored` is how the list is measured again.
 
 ## Fuzzing
 
