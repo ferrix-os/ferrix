@@ -403,8 +403,9 @@ check must stop at *"a device window over the kernel image was mapped"*.
 own allocations. What it does not cover is AoU-5 and V-05.
 
 To re-audit: run `python3 tools/common/check/check-fallible-alloc.py --report`. It must
-say 0 unmarked in the item, and no more than the baseline's 14 in the load
-files it reaches (`process.rs`), and list the `FATAL-ALLOC` sites, which must
+say 0 unmarked in the item, and no more than the baseline's counts in the
+load files it reaches (41 on 2026-11-02: `process.rs` 11, `load.rs` 16,
+`exec.rs` 13, `launch.rs` 1), and list the `FATAL-ALLOC` sites, which must
 all be bring-up. Check that `REACHED` still names what `process_create` and
 `process_start` run (MEMORY-AND-TIMING.md §1.3), and read stage 7's
 `sigpaths` line, which ends with the signal tables refused with no memory.

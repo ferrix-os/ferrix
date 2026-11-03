@@ -18,7 +18,7 @@ changed from version 1 and why, for the consultant's review of the code.
 ## 1. Why
 
 `ferrix.vrcurrent` works: on the N150 box, 40 A in `MSR_VR_CURRENT_CONFIG`
-(0x601) -- written by the unlanded box-test branch `vr36`, whose ceiling
+(0x601) -- written by the box-test branch `vr36` (never landed), whose ceiling
 the customer raised for that run, since `main`'s `ferrix.vrcurrent` stops
 at 32 A -- lifted the CPU ratio from 22 to 26 under full GPU load at 80-82 C,
 where 36 A and below left it held by "amps/pl4". But every decision -- the

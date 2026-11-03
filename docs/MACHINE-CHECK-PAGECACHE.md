@@ -8,6 +8,8 @@ narrows the residual `MACHINE-CHECK.md` §6 and SAFETY-MANUAL AoU-36 name: "a
 page-cache read ... is a machine check in ring 0, which halts", and "the
 frame stays mapped in the consumer until it exits and in every other mapper".
 
+**Landed:** on `develop` as 2464379ed (2026-10-31). Reconciled 2026-11-02.
+
 ## 1. What is there today
 
 A page of a file on a disk lives in the file's VMO, the page cache

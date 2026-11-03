@@ -494,7 +494,7 @@ package FerrixRoadmap {
              * scope on 2026-10-21 to what main holds; time namespaces,
              * unprivileged mounting, the dentry and inode caches' reclaim
              * and Linux's seccomp_bpf selftest were follow-ons, all built
-             * on 2026-10-26 on a branch, landing owed
+             * on 2026-10-26 and are on main since then
              * (docs/roadmap/follow-ons.md). Exit: an unprivileged user namespace runs
              * pid 1 under a memory limit that triggers scoped reclaim and a
              * scoped OOM kill, with a seccomp filter blocking a syscall.
@@ -762,7 +762,12 @@ package FerrixRoadmap {
              * on it on 2026-10-15, its drivers (AHCI, the YT6801, a
              * firmware framebuffer, VT-d, SMBIOS, an event log) and a render
              * driver for its Intel GPU (docs/INTEL-GPU.md) are on main, and
-             * the kernel bring-up is evidenced on QEMU only.
+             * the kernel bring-up is evidenced on QEMU only. Since
+             * 2026-10-21 main also holds that driver's 2 MiB and 64 KiB GPU
+             * pages and 2 MiB VT-d entries for a pin's aligned runs, a
+             * modeset of the second HDMI port with hot-plug and the
+             * monitor's EDID, and a ring-3 power driver; several of their
+             * box runs are BACKLOG rows.
              * Exit: the stage 19 exit on real hardware, drawn by the card. */
     }
 
@@ -828,8 +833,12 @@ package FerrixRoadmap {
              * its install dialog in Debian's Wine and in GE-Proton11-7's;
              * the game's download stopped on ENOSPC from Ferrix's btrfs,
              * whose cause, a writable mount's page cache never reclaimed, is
-             * fixed on main since 2026-10-15, and no download has run since;
-             * Syscall User Dispatch and seccomp's TRAP are on main. Eight
+             * fixed on main since 2026-10-15; Syscall User Dispatch and
+             * seccomp's TRAP are on main. Since 2026-10-23 the game, started
+             * from Steam, has run on the customer's N150 box on its Intel
+             * GPU's driver and reaches its world on about half its starts,
+             * at about 25 frames a second at 720p (docs/GAME-MODE.md); the
+             * steps below are not brought up to those runs. Eight
              * steps in the order they can be proved: the game on plain
              * Linux in the same VM shape, which costs no Ferrix work and
              * answers whether its anti-cheat accepts a virtual machine;

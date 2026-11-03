@@ -174,10 +174,11 @@ names the part of Hyprland or hyprlang it follows.
   rather than a toolkit, that draws one of `render`'s test patterns. It is
   what the compositor's tests put on screen, and it exercises the same crates
   from the client's side.
-* **`term`** is the terminal: a character grid with the escape sequences a
+* **`term`** (an app since 2026-10-04, in the apps repository, beside the
+  workspace) is the terminal: a character grid with the escape sequences a
   shell and its programs actually send, drawn with Hack -- rasterised from
-  the TrueType faces in `term/font/` into coverage cells by
-  the term app's `tools/gen-font.py`, and blended a pixel at a time -- into a
+  the TrueType faces in the app's `font/` into coverage cells by
+  its `tools/gen-font.py`, and blended a pixel at a time -- into a
   `wl_shm` buffer. It starts a program on a pseudoterminal with
   the slave for its session and its three descriptors, and `--headless` runs
   one with no window at all, which is what `cargo xtask test-pty` boots.
@@ -253,12 +254,26 @@ names the part of Hyprland or hyprlang it follows.
   test-audio` (`docs/AUDIO.md` §4). **`reboot`** is systemd's `reboot`,
   whose word reaches the firmware through `LINUX_REBOOT_CMD_RESTART2`; on
   the DK1 board that word picks U-Boot's prompt, `ums` or fastboot.
+* **`sessiond`** owns seat0's devices and starts the graphical session as its
+  user, handing the compositor its devices over a socket (**`seat`** is the
+  shape of that handover); **`portald`** answers
+  `org.freedesktop.portal.Settings` and the file chooser for GTK and Chrome
+  (`docs/DESKTOP.md` §6); **`desktop`** is what the desktop knows of its
+  applications: the `.desktop` entries a launcher lists, their icons and the
+  mark for game mode; **`gpu-protocol`** is what `hyprix` and `hyprix-gpu`
+  say to each other (`docs/GPU-COMPOSITOR.md`; the helper is
+  `src/user/system/linux/hyprix-gpu`, a workspace of its own).
+  **`vptr`**, **`xlatency`** and **`xmoveresize`** are programs for tests
+  and probes: a virtual pointer, the input-to-scan-out probe of
+  `docs/GAME-PATH.md`, and `_NET_WM_MOVERESIZE`.
 
 ## The desktop's own clients
 
 waybar, fuzzel, hyprlock and hypridle, ported to Rust and reading their
-users' files unchanged (`docs/DESKTOP-CLIENTS.md`, which says what of each
-file works on Ferrix and what cannot):
+users' files unchanged -- apps in `ferrix-os/apps` (`src/user/apps`) since
+2026-10-04, built by xtask from their folders, standing on the crates below
+(`docs/DESKTOP-CLIENTS.md`, which says what of each file works on Ferrix and
+what cannot):
 
 * **`toolkit`** is the Wayland client runtime they share: the connection
   and everything bound on it, surfaces on every screen as screens come and
@@ -281,7 +296,7 @@ file works on Ferrix and what cannot):
   `--render` draws the picture a boot of the same files must show.
   **`fuzzel`** is the launcher: `fuzzel.ini`, the `.desktop` entries, fuzzel's
   ranking and its window. **`hyprlock`** is the lock screen, its widgets drawn
-  from `hyprlock.conf`; its backend over `authd` is on branch `hyprlock`.
+  from `hyprlock.conf`; its backend over `authd` landed on 2026-10-03.
   **`hypridle`** runs each `listener`'s commands through
   `ext-idle-notify-v1`, with a socket of its own playing logind's part.
   **`caption`** is the smallest program on the whole foundation, a line of

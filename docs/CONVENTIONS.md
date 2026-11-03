@@ -45,9 +45,10 @@ refuses a message, fix the message.
 
 ## Where a landing goes
 
-Landings go to `develop`; `main` moves only by pull request
-([REPO-FLOW.md](REPO-FLOW.md), customer, 2026-10-23). The fleet's
-promotions and the owner's pull requests merge themselves once `CI
+Landings go to `develop`; `main` moves only by promotion, a
+fast-forward to the `promote/<sha>` branch cut from `develop`
+([REPO-FLOW.md](REPO-FLOW.md), customer, 2026-10-23; no pull request is
+opened for it since 2026-10-24). The workflow pushes it once `CI
 result`, `flow/lane` and `certification/verdict` pass; an outside pull
 request is reviewed by the consultant, a security review and the owner,
 and merged by hand. Name a branch for what it is: `feature/`, `bugfix/`,

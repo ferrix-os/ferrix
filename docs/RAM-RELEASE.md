@@ -1,6 +1,6 @@
 # Memory the kernel keeps after boot and after a game
 
-Status: R1 built (§2; design OK IF 1-10, ledger 5022, ruling 5038); R2 built (§3, "How it was built"). The certification consultant, ledger line 4971 (2026-10-30): R1 NOT YET (B1-B4), R2 OK IF R2.1-R2.6; F-99 (ledger 4988) found while reviewing R2, fixed with R2 under F1-F4.
+Status: R1 built (§2; design OK IF 1-10, ledger 5022, ruling 5038); R2 built (§3, "How it was built"). Both are on `develop` (R1 7d25922f3; R2 d0b034524 with F-99's fix 60559327d), reconciled 2026-11-02. The certification consultant, ledger line 4971 (2026-10-30): R1 NOT YET (B1-B4), R2 OK IF R2.1-R2.6; F-99 (ledger 4988) found while reviewing R2, fixed with R2 under F1-F4.
 
 ## 1. Why
 
@@ -423,8 +423,10 @@ under pressure and counted as available meanwhile.
 
 ## R1, where it stands
 
-Built on `claude/ram-release-r1-ee0624`, on origin/develop 76130433e, not
-landed:
+Built on `claude/ram-release-r1-ee0624`, on origin/develop 76130433e. On
+`develop` since 2026-10-30 as 7d25922f3, 6884eb8bb, 4102bc77d and 49ac58cf5
+(with coverage carried by 1d95e19dc, 1719ccaa6 and 590bc3933); the hashes
+below are the branch's:
 
 * ed6da128c, the design (§2); 5ff5e73ee, the reservation re-owned;
   cea00f56a, the release (mm keeps and gives back the archive, pid 1's

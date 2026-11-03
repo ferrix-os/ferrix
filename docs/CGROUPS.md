@@ -1035,8 +1035,9 @@ puts a child in it. That child, the owner:
 | `oom ok` | pid 1 ends by `SIGKILL`, `memory.events` counts `oom_kill 1`, and the owner, in the same cgroup with nothing of its own, is alive to say so |
 | `isolation ok` | init, outside the cgroup, sees its own host name and the owner's exit 0 |
 
-The time namespace is not among them: `CLONE_NEWTIME` is not on `main` (the
-`stage13-timens` branch, `docs/BACKLOG.md`). The criterion does not need it.
+The time namespace is not among them: `CLONE_NEWTIME` was not on `main` when
+the test passed (it landed on 2026-10-26, 2daef95d2, `docs/NAMESPACES.md`
+§12.1). The criterion does not need it.
 
 Passed in direct runs on 2026-10-12, and through the gate pool on
 2026-10-14 on f231cdf09 with no kernel change (INDEX tags `s13fx-*`, logs
