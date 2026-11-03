@@ -1781,9 +1781,11 @@ pub static SMBIOS: Explanation = Explanation {
          src/lib/platform/smbios; docs/DMI.md",
 };
 
+// CHECKS-ONLY: stages_check.rs
 /// For `check_exceptions` in `stages_check.rs`, when `object::exception_check::run`
 /// fails (`docs/microkernel/K4.md` §5).
-pub(crate) static STAGE9_EXCEPTIONS: Explanation = Explanation {
+#[doc(hidden)]
+pub static STAGE9_EXCEPTIONS: Explanation = Explanation {
     code: "FX-0917",
     title: "an exception channel was attached where it must be refused, or refused where it \
             must be attached",

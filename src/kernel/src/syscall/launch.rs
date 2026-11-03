@@ -153,6 +153,13 @@ pub(crate) fn load_native(
             process::kill(&child, 137);
             return Err(status::NO_MEMORY);
         }
+        // And the creator's refusal of supervisors: a native child of a
+        // process no supervisor may hear runs with its ids, and no
+        // supervisor hears it either (`docs/microkernel/K4.md` §13, the
+        // consultant's ledger 3011).
+        if creator.supervisor().is_refused() {
+            child.supervisor().refuse();
+        }
     }
     let process: Arc<dyn Host> = child;
     Ok(process)
