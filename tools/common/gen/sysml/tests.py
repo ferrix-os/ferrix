@@ -397,6 +397,24 @@ class Successions(unittest.TestCase):
 
 
 class Resolution(unittest.TestCase):
+    def test_a_replaced_list_of_roots_is_what_names_are_found_in(self):
+        def roots_of(text):
+            root, _, _ = parse_text("test.sysml", text)
+            for element in root.children:
+                element.parent = None
+            return root.children
+
+        model = load([], ROOT)
+        model.roots = roots_of("package Before { requirement one; }")
+        self.assertIsNotNone(model.find("Before::one"))
+        self.assertIsNotNone(model.resolve("one"))
+        # A lookup has made the table; replacing the roots must not leave it.
+        model.roots = roots_of("package After { requirement two; }")
+        self.assertIsNone(model.find("Before::one"))
+        self.assertIsNone(model.resolve("one"))
+        self.assertEqual(model.find("After::two").qualified_name, "After::two")
+        self.assertEqual(model.resolve("two").qualified_name, "After::two")
+
     def test_a_reference_resolves_inside_the_package_that_wrote_it(self):
         model = load([], ROOT)
         root, _, _ = parse_text(
