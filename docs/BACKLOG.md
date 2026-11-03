@@ -601,6 +601,7 @@ taken.
 
 ## Waiting on the customer
 
+* **Host tests on the host's GPUs** (2026-11-04, mk-gpu; `docs/TEST-TIME.md`, *Can a GPU speed this up?*): `check`'s `tole` and virgl tests draw on the 3090 or the 3060. Does DECISIONS' "the 3090 is never touched" (2026-10-02) reach them, and the bench that ran on it? The customer's, through the product owner.
 * **F-76, the core's and the item's unclassified libraries** (2026-10-23,
   filed with the kernel split, `docs/KERNEL-CRATES.md` §5.1; ledger 1585 Q1):
   the core links 21 first-party libraries and the item 16 that no ring
