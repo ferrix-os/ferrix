@@ -123,7 +123,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 | `FerrixSigningRequirements` | `26-signing-requirements.sysml` | docs/SIGNING.md is the design (the certification consultant's OK IF at ledger lines 3667 and 3738; the customer's decisions at 3731). Slice S1 builds the verify-only crate `ferrix-sigverify` (src/lib/crypto/sigverify) and the hash it rests on, `ferrix-sha256` (src/lib/crypto/sha256), both in the item ring (certification-item.json's crates). What the UEFI loader, init's configuration verifier and devmgr do with the verifier's answer is theirs, and gets ids in their own slices (S4, S8, S9). |
 
-27 files, 151 packages, 8568 elements, 220 relations. Model digest `47ec880dd451d9b5`.
+27 files, 166 packages, 9125 elements, 220 relations. Model digest `b8c3f31d90f8746f`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -250,10 +250,14 @@ Address spaces, the frames under them and the mappings that reach them: O.ISOLAT
 | `H.MEM.15` | A mapping the kernel makes in its own address space shall translate each page to the frame or register asked for, with the permissions and memory type asked for. | Each page of an 8-page arena range translates to a frame, none to its neighbour's; a page protected read-only reads back not writable in the descriptors and still translates; a device window at offset 0x40 translates to the register asked for, offset included, as device memory and not executable, and is gone once unmapped. | `O.ISOLATE, ASR-1` |
 | `H.MEM.16` | After a fork, a write by the child to a MAP_SHARED mapping shall be visible to the parent, and its write to a MAP_PRIVATE mapping shall not. | The `shared` program exits 62 (its MAP_SHARED write reached the parent and its MAP_PRIVATE write did not). | `O.ISOLATE, ASR-1` |
 | `H.MEM.17` | A frame taken out of a translation, of a user address space or of the kernel's, shall not return to the frame allocator until the TLB invalidation that covers it has been made on every processor that may still use the translation. | A frame an unmap, a decommit or a replace takes out of a translation that another processor has cached is still allocated until that processor's shootdown returns: 0 frames freed before it, on every architecture. | `O.ISOLATE, ASR-1` |
-| `H.MEM.18` | The kernel shall refuse to map a device window or a native VMO executable into a user address space, and shall map the vDSO's data page read-only. | An executable device window and an executable vmo_map are each refused, 0 mapped; the vDSO's data page reads back not writable, and a write to it faults. | `O.WXN, O.ISOLATE` |
+| `H.MEM.18` | The kernel shall refuse to map a device window executable into a user address space, and a native VMO executable except through space_map with EXECUTE on both the space handle and the VMO handle (H.MEM.24), and shall map the vDSO's data page read-only. | An executable device window and an executable vmo_map are each refused, 0 mapped; the vDSO's data page reads back not writable, and a write to it faults. | `O.WXN, O.ISOLATE` |
 | `H.MEM.19` | Once a grace period the kernel waits for has ended, no read-side section that was running on any processor when the wait began shall still be running. | A writer that replaces an object every other online processor is reading, waits a grace period and poisons the replaced one, 100 times over, leaves 0 reads of a poisoned object among more than 0 reads (the `grace` line). | `O.ISOLATE, ASR-1` |
+| `H.MEM.24` | An address space reached by handle shall be mapped, unmapped, protected and read only as that handle's rights allow; no mapping made by handle shall be both writable and executable; an executable mapping by handle shall need EXECUTE on the space handle and on the VMO handle; and a process's space shall be given by handle only to its creator, before it starts. | Stage 9's `space` line: every by-handle call refused without its right, an executable mapping refused without EXECUTE on either handle and made with both, a writable and executable protection refused by the decoder and by the space itself, process_space refused without MANAGE, for a process its handle cannot reach and after the start, and the sweep of every user root the check reached finding 0 leaves writable and executable and more than 0 executable. | `O.ISOLATE, O.WXN, O.CAPABILITY, ASR-2, ASR-3` |
+| `H.MEM.25` | A copy-on-write clone of an address space made by handle shall never see a write its source makes after the clone, by any path, nor the source one the clone makes; memory both map shared shall stay shared. | Stage 9's `space` line, clone: the source's writable translation of a private page gone and a shootdown begun before space_clone answers; a write after the clone by either side, by a kernel copy and to a page made read-only before the clone and writable after it (F-41), unseen by the other; a shared mapping's write seen by both; a page both hold given back to one as the clone goes. A program's own store through a stale translation after a fork is stage 6's USER_COW_PROGRAM check (H.MEM.8, L.user.61; F-41 itself is L.user.60), through the same AddressSpace::fork. | `O.ISOLATE, ASR-1` |
+| `H.MEM.22` | An absent page of a pager-backed VMO shall become present only by its pager's supply. A thread shall wait on a pager only for a fault on, or a kernel copy into, a pager-backed VMO its own process maps or names, and the wait shall end on the supply, the pager's failure, the process's end, the pager's close, or the pager's bound of at most 30 s; every ending but the supply shall give the faulting process SIGBUS or its call an error, and none shall stop the kernel. | Stage 9's pager check (the `pager` line): faults forwarded and supplied, shared within a job and apart across jobs; failed, timed-out, closed and killed waits ended without their page, the bound held from below, the failures audited; copies waiting or refused; each with its negative control (K3.md section 6). | `O.FAILSAFE, O.ISOLATE` |
+| `H.MEM.23` | A write to a page of a pager-backed VMO shall keep the page in the dirty set until a write-back that began after the write ends; a page in the dirty set shall never be decommitted or reclaimed. | Stage 9's pager check (the `pager` line): a Clean page is never mapped writable, a write-back takes the write right away before it returns, a write after it is Dirty after its end, and a decommit takes Clean pages only; each with its negative control (K3.md section 6). | `O.ISOLATE, ASR-1` |
 
-19 requirements.
+23 requirements.
 
 ### Objects
 
@@ -280,8 +284,11 @@ Handles, rights and the objects they name: O.CAPABILITY and ASR-3 (FDP_ACC.1, FD
 | `H.OBJ.17` | A port registration shall queue exactly one packet, with its key and the asserted signals it asked for, when one of them is first asserted, at once if one already is. | A registration does not fire before its signal, fires once on the message that asserts it and not on a second, fires at once for a state already true, and fires when the peer closes for PEER_CLOSED, each packet with its key. | `G.7, O.CAPABILITY` |
 | `H.OBJ.18` | Every result of channel_write_read answered by the fast path shall be a result the general path gives in the same circumstances, and the fast path shall bypass no filter, audit record or speculation barrier. x86-64 only, behind ferrix.fastpath. | ipc-equiv's transcripts with the fast path on and off are the same line for line, with trips taken on and no counter moved off (`cargo xtask test-ipc-equiv`); stage 9's fast path cases hold both boots to the general path's results (the `fastcase` line); a filtered call is refused with the filter's errno. | `G.7, O.CAPABILITY` |
 | `H.OBJ.22` | A process in a sealed job shall leave that job's tree only by ending and shall start no process outside it; a job made inside a sealed job shall be sealed, and no job shall be unsealed. | Stage 13's cgroupfs check: root's moves out of, within and into a sealed tree are refused EPERM and every process stays; a sealed member's starts outside its tree are refused; jobs made inside a sealed one read as sealed; and every job in drivers.slice reads as sealed (the sysfs check); test-restart --boot intel-keeper's root move of the GPU's worker out of its driver job is refused (INTEL-GPU.md §12.11 S1). | `G.8, O.QUOTA, O.CAPABILITY` |
+| `H.OBJ.19` | Every channel message shall carry the identity of the process that wrote it and of the job that process was in at the write, written by the kernel at the write and never taken from the message or the writer's arguments, and readable by its reader with the message; a process's identity shall never be given to another process while the kernel runs. A message the kernel writes shall carry zero and zero, which attest that the kernel wrote it, not that its content is the kernel's own. The identity is the writer's, not its credentials (docs/microkernel/K6.md, MICROKERNEL.md §3 K6). | Stage 9's `sender` line: messages read with channel_read_attested carry their writer's process and job ids, which object_id confirms, whatever the body says, through the slot, either end's transfer, the writer's end and a move between jobs; the kernel's read as zero and zero; every process made has an id above every earlier one; channel_write_read answers none. Stage 8's exec check: a process's id survives its execve. Each with its negative control (K6.md §7). | `G.7, O.CAPABILITY` |
+| `H.OBJ.21` | A timer object shall signal its waiters and the ports registered on it no earlier than its deadline and within its slack plus the lateness MEMORY-AND-TIMING.md §2.2ab states, at most once a set; never for an arm a later set or cancel superseded, nor after its last handle closed; and shall be charged to the job that made it, one object and its heap as kernel memory. | Stage 9's `timers` line on every boot: a timer is heard no earlier than its deadline, a cancelled or superseded arm and a closed timer are never heard, and a timer is charged to its job and refused past its object limit (object::timer_check). | `G.7, O.CAPABILITY, O.QUOTA` |
+| `H.OBJ.20` | A wait on a word of user memory shall sleep only while the word holds the value its caller gave, shall end when a wake of its word takes it, when its deadline passes or when its caller must leave, and shall be charged to its caller's job; a wake shall end at most the number of waits it names. A woken wait may find its word unchanged. | Stage 9's address-wait check: waits by mapping and by handle woken across processes, changed words refused, counts, bitsets, a requeue, a wait on many words, a deadline, an ended process and a job's limit (the `addrwait` line). | `G.7, O.QUOTA` |
 
-19 requirements.
+22 requirements.
 
 ### Scheduling
 
@@ -4020,6 +4027,17 @@ flowchart LR
 | `L.object.187` | `anIdleJobRefusesANativeWeight` | — | — | — |
 | `L.object.160` | `theCarriedWeightIsTheWideFormula` | — | — | — |
 | `L.object.161` | `everyEntityWeightIsBelowTwoToThe32` | — | — | — |
+| `L.object.221` | `aReservationNeedsReserve` | — | — | — |
+| `L.object.222` | `aReservationIsOneLevel` | — | — | — |
+| `L.object.223` | `aReservationIsBesideItsLimit` | — | — | — |
+| `L.object.224` | `aReservationReadsBack` | — | — | — |
+| `L.object.225` | `aReservationEndsWithItsSlot` | — | — | — |
+| `L.object.207` | `aTicketNamesItsIssuer` | — | — | — |
+| `L.object.208` | `aTicketIsAdoptedFromThePeer` | — | — | — |
+| `L.object.209` | `anAdoptedCallChargesTheClient` | — | — | — |
+| `L.object.210` | `aTicketEndsForGood` | — | — | — |
+| `L.object.211` | `whatATicketChargedComesBack` | — | — | — |
+| `L.object.212` | `ticketsAreBoundedPerEnd` | — | — | — |
 | `L.object.63` | `everyProcessInOneJob` | — | — | — |
 | `L.object.64` | `aChildsQuotaIsInsideItsParents` | — | — | — |
 | `L.object.65` | `aChildIsAnObjectAndRefusedWhenKilled` | — | — | — |
@@ -4114,6 +4132,50 @@ flowchart LR
 | `L.object.256` | `pinBlocksFallBack` | — | — | — |
 | `L.object.257` | `pinBlocksBudgetAndFailure` | — | — | — |
 | `L.object.258` | `pinBlocksLeaveFilesAlone` | — | — | — |
+| `L.object.197` | `everyWriteIsStamped` | — | — | — |
+| `L.object.198` | `aProcessIdIsGivenOnce` | — | — | — |
+| `L.object.199` | `aReadSaysWhoWrote` | — | — | — |
+| `L.object.200` | `anIdNamesAProcessOrAJob` | — | — | — |
+| `L.object.201` | `theJobIsTheJobAtTheWrite` | — | — | — |
+| `L.object.202` | `theRoundTripAnswersNoSender` | — | — | — |
+| `L.object.213` | `aTimerIsChargedToItsJob` | — | — | — |
+| `L.object.214` | `aSetIsOneShotInItsWindow` | — | — | — |
+| `L.object.215` | `aCancelledArmNeverSignals` | — | — | — |
+| `L.object.216` | `aFireIsTheInterruptsAndNeverEarly` | — | — | — |
+| `L.object.217` | `anOpenWindowFiresWithTheHead` | — | — | — |
+| `L.object.218` | `timersShareTheSleeperSet` | — | — | — |
+| `L.object.219` | `aSupersededArmSignalsNothing` | — | — | — |
+| `L.object.220` | `aClosedTimerIsDisarmed` | — | — | — |
+| `L.object.241` | `anExceptionChannelIsAttachedOnlyBySupervise` | — | — | — |
+| `L.object.242` | `closingTheReadEndDetaches` | — | — | — |
+| `L.object.246` | `superviseIsOnlyACreators` | — | — | — |
+| `L.trap.9` | `theChainIsNearestFirst` | — | — | — |
+| `L.trap.10` | `theWaitIsBounded` | — | — | — |
+| `L.trap.11` | `anExpiryIsTheDefault` | — | — | — |
+| `L.trap.12` | `theVerdictsAreKept` | — | — | — |
+| `L.trap.13` | `nestingRaisesNothing` | — | — | — |
+| `L.object.243` | `aReportIsTheKernels` | — | — | — |
+| `L.object.244` | `registersAreCheckedBeforeStored` | — | — | — |
+| `L.object.245` | `aVerdictIsGivenOnce` | — | — | — |
+| `L.object.203` | `addressWaitDecodes` | — | — | — |
+| `L.object.204` | `addressWakeDecodes` | — | — | — |
+| `L.object.205` | `addressRequeueDecodes` | — | — | — |
+| `L.object.206` | `addressWaitAnyDecodes` | — | — | — |
+| `L.object.232` | `aMadeSpaceIsEmptyAndItsMakers` | — | — | — |
+| `L.object.233` | `onlyTheCreatorBeforeTheStart` | — | — | — |
+| `L.object.234` | `anExecutableMappingNeedsBothHandles` | — | — | — |
+| `L.object.235` | `anUnmapByHandleNeedsMap` | — | — | — |
+| `L.object.236` | `aProtectionStaysWithinItsHandle` | — | — | — |
+| `L.object.237` | `privateMemoryByHandle` | — | — | — |
+| `L.object.238` | `aCopyByHandleNeedsItsRightAndChargesTheOwner` | — | — | — |
+| `L.object.239` | `aCloneCarriesItsSourcesRights` | — | — | — |
+| `L.object.240` | `anExecutableVmoHandleCannotWrite` | — | — | — |
+| `L.object.226` | `aPagerHasOneHandle` | — | — | — |
+| `L.object.227` | `aPagerVmoIsMadeOverItsPager` | — | — | — |
+| `L.object.228` | `aSupplyIsChecked` | — | — | — |
+| `L.object.229` | `aPagerOpIsChecked` | — | — | — |
+| `L.object.230` | `aPageRequestSaysWhatItAsks` | — | — | — |
+| `L.object.231` | `noPagerMapsWhenAsked` | — | — | — |
 | `L.sched.1` | `aDecisionWithinASlice` | — | — | — |
 | `L.sched.2` | `aLoneYieldAsksNothing` | — | — | — |
 | `L.sched.3` | `aThrottledTaskLeavesForAKill` | — | — | — |
@@ -4185,6 +4247,7 @@ flowchart LR
 | `L.sched.100` | `theSetterWaitsForARunningTarget` | — | — | — |
 | `L.sched.101` | `aThreadStartsWithItsCreatorsMask` | — | — | — |
 | `L.sched.123` | `aMaskNeverVetoesAPark` | — | — | — |
+| `L.sched.84` | `aSleeperLeavesByItsKey` | — | — | — |
 | `L.iommu.1` | `unitsAreFoundOnce` | — | — | — |
 | `L.iommu.2` | `placementsAreCounted` | — | — | — |
 | `L.iommu.3` | `dmarEndpointsArePlaced` | — | — | — |
@@ -4351,6 +4414,14 @@ flowchart LR
 | `L.mm.72` | `aProgramsFramesStopAtTheWatermark` | — | — | — |
 | `L.mm.73` | `aProgramsTablesStopAtTheWatermark` | — | — | — |
 | `L.mm.74` | `theKernelIsServedBelowTheWatermark` | — | — | — |
+| `L.mm.76` | `aReservationIsAdmittedUnderTheLock` | — | — | — |
+| `L.mm.77` | `aProgramStopsAtThePromise` | — | — | — |
+| `L.mm.78` | `theKernelStopsAtThePromise` | — | — | — |
+| `L.mm.79` | `aReservationsFramesAreDrawn` | — | — | — |
+| `L.mm.80` | `aFreedFrameGoesBackToItsPromise` | — | — | — |
+| `L.mm.81` | `aReservationHasItsOwnHeap` | — | — | — |
+| `L.mm.82` | `aReclaimLiftsOverThePromise` | — | — | — |
+| `L.user.145` | `aReclaimSparesAnothersReservation` | — | — | — |
 | `L.mm.35` | `aSectionCompletesOnTheReserve` | — | — | — |
 | `L.mm.36` | `aSectionThatCannotFillIsRefused` | — | — | — |
 | `L.mm.37` | `theReserveServesOnlyItsSections` | — | — | — |
@@ -4503,6 +4574,32 @@ flowchart LR
 | `L.user.172` | `aDiskFilesMappedPagesAreItsRss` | — | — | — |
 | `L.user.175` | `cleanBtrfsNodesAreAvailable` | — | — | — |
 | `L.user.174` | `devmgrStartsAgainFromTheKeptSet` | — | — | — |
+| `L.user.135` | `aWordIsKeyedByItsSpaceOrItsObject` | — | — | — |
+| `L.user.136` | `noWakeIsLost` | — | — | — |
+| `L.user.137` | `theReadUnderTheLockNeverFaults` | — | — | — |
+| `L.user.138` | `aWakeTakesTheOldestByItsBitset` | — | — | — |
+| `L.user.139` | `aRequeueMovesAcrossBuckets` | — | — | — |
+| `L.user.140` | `aWaitOnManyWordsAnswersWhich` | — | — | — |
+| `L.user.141` | `aDeadlineEndsAWaitNeverEarly` | — | — | — |
+| `L.user.142` | `anEndingCallerLeaves` | — | — | — |
+| `L.user.143` | `aWaitOutlivesItsMapping` | — | — | — |
+| `L.user.144` | `aWaiterIsChargedAndBucketsShrink` | — | — | — |
+| `L.user.158` | `aRegionByHandleKeepsItsCeiling` | — | — | — |
+| `L.user.159` | `noRegionByHandleIsWritableAndExecutable` | — | — | — |
+| `L.user.160` | `aCloneByHandleCopiesOnWrite` | — | — | — |
+| `L.user.161` | `aCopyBetweenSpacesHonoursTheRegion` | — | — | — |
+| `L.user.162` | `anUnmapByHandleReachesARunningSpace` | — | — | — |
+| `L.user.146` | `anAbsentPagerPageIsAsked` | — | — | — |
+| `L.user.147` | `aRequestIsListedWithoutAllocating` | — | — | — |
+| `L.user.148` | `aSuppliedFaultIsRetried` | — | — | — |
+| `L.user.149` | `aFailedFaultIsABusError` | — | — | — |
+| `L.user.150` | `aWaitIsBounded` | — | — | — |
+| `L.user.151` | `aKillEndsTheWait` | — | — | — |
+| `L.user.152` | `aCopyWaitsOrIsRefused` | — | — | — |
+| `L.user.153` | `aSupplyMovesThePagersOwnPages` | — | — | — |
+| `L.user.154` | `aCleanPageIsNeverWritable` | — | — | — |
+| `L.user.155` | `aWriteBackKeepsLaterWrites` | — | — | — |
+| `L.user.156` | `aPagersCloseEndsItsFaults` | — | — | — |
 | `L.x86_64.1` | `selectorsRing3MayHoldAreLoadable` | — | — | — |
 | `L.x86_64.2` | `compatUserSegmentsInGdt` | — | — | — |
 | `L.x86_64.3` | `istStacksPerProcessor` | — | — | — |
@@ -4591,6 +4688,9 @@ flowchart LR
 | `L.x86_64.42` | `nativeSignalRoundTrip` | — | — | — |
 | `L.x86_64.174` | `faultInTheSignalContext` | — | — | — |
 | `L.x86_64.175` | `machineCheckTakenOnEveryProcessor` | — | — | — |
+| `L.x86_64.183` | `threadsOfACoreFromCpuid` | — | — | — |
+| `L.x86_64.184` | `siblingsParkedByTheKernel` | — | — | — |
+| `L.x86_64.185` | `oneThreadACoreRunsWork` | — | — | — |
 | `L.x86_64.43` | `nativeForgedFrameRefused` | — | — | — |
 | `L.x86_64.44` | `sanitisedContext` | — | — | — |
 | `L.x86_64.45` | `fpStateRoundTrip` | — | — | — |
@@ -4747,6 +4847,7 @@ flowchart LR
 | `L.x86_64.130` | `theConsoleLineIsConverted` | — | — | — |
 | `L.x86_64.131` | `x2apicIsLeftOnEveryProcessor` | — | — | — |
 | `L.x86_64.132` | `oneDestinationEncoder` | — | — | — |
+| `L.x86_64.186` | `aSupervisorsRegistersAreAProgramsOnly` | — | — | — |
 | `L.aarch64.1` | `syndromesAreDecoded` | — | — | — |
 | `L.aarch64.2` | `faultsGetLinuxsSignal` | — | — | — |
 | `L.aarch64.3` | `programsFaultToTheirSignal` | — | — | — |
@@ -4801,6 +4902,8 @@ flowchart LR
 | `L.aarch64.48` | `watchdogsAreFed` | — | — | — |
 | `L.aarch64.50` | `registerAccessesAreEmulable` | — | — | — |
 | `L.aarch64.51` | `theFilterIsAskedFirstAtTheSvc` | — | — | — |
+| `L.aarch64.65` | `noTwoThreadsOfACoreFromThePptt` | — | — | — |
+| `L.aarch64.66` | `aSupervisorsRegistersAreAProgramsOnly` | — | — | — |
 | `L.claim.1` | `aNodeIsClaimedOnce` | — | — | — |
 | `L.claim.2` | `aSharedNodeUpToItsLimit` | — | — | — |
 | `L.claim.3` | `refusedUnderAnyLiveDriver` | — | — | — |
@@ -4892,6 +4995,8 @@ flowchart LR
 | `L.armv7a.25` | `theRecordIsTheStateWhileOff` | — | — | — |
 | `L.armv7a.26` | `aVfpUserIsResumedWhole` | — | — | — |
 | `L.armv7a.29` | `scrubStandsDownOnArmv7a` | — | — | — |
+| `L.armv7a.27` | `noTwoThreadsOfACoreFromTheCpuMap` | — | — | — |
+| `L.armv7a.28` | `aSupervisorsRegistersAreAProgramsOnly` | — | — | — |
 | `L.smp.1` | `impossibleListsAreRefused` | — | — | — |
 | `L.smp.2` | `theBootProcessorIsZero` | — | — | — |
 | `L.smp.3` | `eachProcessorFindsItsOwnRecord` | — | — | — |

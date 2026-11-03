@@ -108,6 +108,13 @@ Causes are listed most likely first.
 | [FX-0908](#fx-0908) | a check's hook inside the item was still armed after stage 9 |
 | [FX-0909](#fx-0909) | the SMBIOS copy's acceptance took a forged copy, or refused a good one |
 | [FX-0910](#fx-0910) | A time namespace failed its self-check |
+| [FX-0911](#fx-0911) | the waits on a user address failed their self-check |
+| [FX-0912](#fx-0912) | a server's charges did not follow the client's ticket |
+| [FX-0913](#fx-0913) | the timer objects failed their self-check |
+| [FX-0914](#fx-0914) | a job's memory reservation did not hold what it promises |
+| [FX-0915](#fx-0915) | a pager-backed VMO's fault, wait or dirty tracking was not as K3 states |
+| [FX-0916](#fx-0916) | an address space reached by handle was not held to the handle's rights |
+| [FX-0917](#fx-0917) | an exception channel was attached where it must be refused, or refused where it must be attached |
 | [FX-1001](#fx-1001) | PCI enumeration failed its self-check |
 | [FX-1002](#fx-1002) | a device node handed out memory or an interrupt it does not have |
 | [FX-1003](#fx-1003) | an IOMMU domain gave a device the wrong addresses |
@@ -2655,6 +2662,210 @@ alone (docs/NAMESPACES.md §12.1).
 See: src/kernel/src/fs/timens_check.rs; src/kernel/src/syscall/timens.rs;
 src/kernel/src/syscall/time.rs; src/kernel/src/syscall/vdso.rs;
 src/kernel/src/syscall/namespace.rs.
+
+<a id="fx-0911"></a>
+
+## FX-0911 — the waits on a user address failed their self-check
+
+`user::address_wait_check::run` (docs/microkernel/K5.md §6) drives the native
+calls `address_wait`, `address_wake`, `address_requeue` and `address_wait_any`
+between processes it builds. A wait must sleep while its word holds the value
+given and be woken by a wake of the same word, through a private key in its own
+space or a shared key by VMO and offset, whichever process and address or handle
+names it; a wake must rouse at most its count, oldest first, by bitset; a
+requeue must move waiters to a word in another bucket; a wait on many words must
+answer which; a deadline must end a wait and never early; an ending process must
+end its waits; a wait must be charged to its job and refused at its limit; and a
+bucket must give its room back. Without these, a program's locks and condition
+variables lose wakes or sleep for ever.
+
+1. `user::address_wait::list` stopped reading the word under its bucket's lock,
+   so a wake that came between the read and the listing was lost.
+2. `Key::new` or `Key::in_object` keyed a shared word by its address rather than
+   by its VMO and offset.
+3. A wake, requeue or leaving in `user::address_wait` stopped looking in the
+   bucket an entry is recorded in.
+4. The waiter's charge was dropped or the deadline not passed to the sleep.
+
+See: src/kernel/src/user/address_wait.rs;
+src/kernel/src/user/address_wait_check.rs; src/kernel/src/syscall/native.rs
+address_wait; docs/microkernel/K5.md.
+
+<a id="fx-0912"></a>
+
+## FX-0912 — a server's charges did not follow the client's ticket
+
+`object::ticket_check::run` drives charging that follows the client
+(`docs/microkernel/K7.md`): a client issues a ticket on its end of a channel,
+and a server thread that adopts it through the other end has the VMO commits and
+new objects of its native calls charged to the client's job while the ticket is
+live. The check requires the ticket to name its issuer's own process and job,
+adoptions through any other end or of ended or unknown ids to be refused and
+audited, the server's own faults and heap to stay the server's, a refusal at the
+client's limit to cost the server no wait and no kill, every end (either side's
+`END`, a close) to stop the charging at the next call, at most 64 live tickets
+per end, and every counter to come back. A kernel failing this lets a server
+charge a job that did not ask it to, or a client fill a shared server
+(T.EXHAUST).
+
+1. `quota::charge_target` stopped answering the adopted ticket's slot, or a
+   charge site stopped reading it (`mm::allocate_user_frame`,
+   `quota::Charge::running`).
+2. `ticket::charging_for_call` set the target from an ended ticket, or did not
+   clear it as the call returned.
+3. The channel's ticket registry honoured an id from the wrong end or channel,
+   or an end's close stopped ending its tickets.
+4. A fault path stopped suspending the target (`quota::charging_own`), so a
+   server's own memory was charged to its client.
+
+See: src/kernel/src/object/ticket.rs; src/kernel/src/object/ticket_check.rs;
+src/kernel/src/object/quota.rs; docs/microkernel/K7.md.
+
+<a id="fx-0913"></a>
+
+## FX-0913 — the timer objects failed their self-check
+
+`object::timer_check::run` drives `timer_create`, `timer_set` and `timer_cancel`
+through the native dispatch from a check process (`docs/microkernel/K10.md` §5).
+A timer must be heard on its port no earlier than its deadline; a deadline past
+2^32 ns must reach it whole; a cancelled timer must stay quiet; an arm
+superseded while in flight must signal nothing, and the newer arm fire once; a
+timer whose window is open must fire in the same interrupt pass as the one due
+beside it; a past deadline must fire in the call; no pass may fire more than a
+batch, and none may be lost; a closed timer must never fire; a timer must be
+charged to its job; the calls must refuse what they specify; and a sleeping task
+woken early must take out its own sleeper-set entry and nothing else. A kernel
+failing any of these would give the Linux personality timers that fire early,
+late, twice or after they were cancelled.
+
+1. `TimerCore::set` or `cancel` stopped moving the timer to a new generation, or
+   `fire` stopped comparing it, so a superseded arm signals.
+2. `CpuQueue::wake_sleepers` lost a timer arm when the fired buffer was full, or
+   stopped taking an arm whose window had opened.
+3. `CpuQueue::remove_sleeper` took out an entry by the wrong key, or the task's
+   filed key was not kept where it was filed.
+4. `Timer::new` stopped charging its job, or its drop stopped cancelling.
+
+See: src/kernel/src/object/timer_check.rs run; src/kernel/src/object/timer.rs;
+src/kernel/src/sched/queue.rs; docs/microkernel/K10.md.
+
+<a id="fx-0914"></a>
+
+## FX-0914 — a job's memory reservation did not hold what it promises
+
+`object::reserve_check::run` reserves memory for a job in a tree of its own
+beside a QM sibling (`docs/microkernel/K12.md`). Its rules must refuse a
+reservation above the job's own limit, under a limit or `memory.high` above it,
+beneath another reservation and on a job that is not empty, and must refuse a
+limit or mark above a reserved job and a limit below its reservation. The job's
+frames must be drawn from its reservation and tagged with it up to its size and
+not past it, a frame taken while an interrupt is serviced must never be drawn, a
+reclaim for anyone else must spare a drawn frame, and once the tree is gone its
+reservation must promise nothing and every quota slot be given back. A kernel
+failing this lets a QM partition take the memory a certified one was promised.
+
+1. A rule of the reservation stopped being tested, or tested under the wrong
+   lock (`quota::Quota::set_reservation`, `quota::limit_allowed`).
+2. A frame route stopped asking `mm::reservation::take` with the job's
+   reservation, or asked it in interrupt context (`mm::reservation_for`).
+3. A free path stopped calling `mm::reservation::freed`, so the drawn count or
+   the promise did not come back.
+4. A slot was freed without unbinding its reservation, or a sub-job did not copy
+   it.
+
+See: src/kernel/src/mm/reservation.rs; src/kernel/src/object/quota.rs;
+src/kernel/src/object/reserve_check.rs; docs/microkernel/K12.md.
+
+<a id="fx-0915"></a>
+
+## FX-0915 — a pager-backed VMO's fault, wait or dirty tracking was not as K3 states
+
+`object::pager_check::run` (docs/microkernel/K3.md section 6) serves pagers from
+a check process and faults their VMOs from threads of client processes in two
+jobs: a fault on an absent page must send one page request, shared by threads of
+one job and not across jobs, and be resumed by a supply with the bytes supplied;
+a failed, timed-out, closed or killed wait must end without its page and never
+before the pager's bound, the first three audited; a kernel copy must wait, or
+fail at once for a NO_COPY_WAIT VMO; a Clean page must never be mapped writable,
+a write-back must take the write right away before it returns, and only Clean
+pages may be cleaned or decommitted; and the calls must refuse as specified. A
+kernel failing this lets a pager stall a process for ever, hand it zeros for a
+file's page, or lose a write from the dirty set (H.MEM.22, H.MEM.23).
+
+1. An absent page of a pager-backed VMO was committed as zeros: `Vmo::sourced`
+   or `commit_page` no longer treats it as the pager's.
+2. A request's wait ignores its deadline, the pager's close, or the process's
+   end (`object::pager`'s `PagerLink::wait`, `PagerCore::close`).
+3. Requests are coalesced across jobs, or `PAGER_OP_FAIL` fails requests it was
+   not named for.
+4. A Clean page is installed writable, or `writeback_begin` leaves a translation
+   writable, so a write marks nothing (`user/space.rs`'s `resolve`,
+   `Vmo::writeback_begin`).
+5. A supply moved a page it must refuse (held, shared, uncommitted) or took one
+   from a VMO that is not anonymous.
+
+See: src/kernel/src/object/pager.rs; src/kernel/src/object/pager_check.rs;
+src/kernel/src/user/vmo.rs; src/kernel/src/user/space.rs;
+docs/microkernel/K3.md.
+
+<a id="fx-0916"></a>
+
+## FX-0916 — an address space reached by handle was not held to the handle's rights
+
+`object::space_check::run` (docs/microkernel/K2.md) drives the native calls that
+act on an address space by handle from a thread of a check's process, through
+the architecture's system call entry: `space_create`, `space_map`,
+`space_protect`, `space_unmap`, `space_read`, `process_space`, `vmo_executable`,
+`space_allocate`, `space_write` and `space_clone`. Each must be refused without
+its right, an executable mapping must need EXECUTE on the space handle and on
+the VMO handle, no mapping by handle may be writable and executable (ASR-2), a
+protection must stay within what the region's handle allowed, a process's space
+must be reachable only by its creator before it starts, what a by-handle copy
+commits must be charged to the space's owner and never to the caller, the W^X
+sweep of every user root the check reached must find no leaf writable and
+executable, and a copy-on-write clone must never see a write its source makes
+after the clone, nor the source one the clone makes, F-41's page included. The
+message names the case.
+
+1. `space_protection` in src/kernel/src/syscall/native.rs took a protection word
+   it should refuse, or a call stopped asking for a right.
+2. `Ceiling::admits` in src/kernel/src/user/space.rs stopped refusing writable
+   and executable, or a ceiling recorded more than the handle carried.
+3. `process_space` answered without `Control`, without `MANAGE`, or after the
+   start.
+4. `quota::charging_to` no longer moves the target-side half of a by-handle copy
+   to the space's owner.
+5. `AddressSpace::fork` no longer takes the source's writable translations down
+   before it answers, or `ferrix_vma`'s `protect` no longer marks a private
+   region made writable copy-on-write (F-41).
+
+See: src/kernel/src/object/space_check.rs; src/kernel/src/object/space.rs;
+src/kernel/src/user/space.rs; src/kernel/src/syscall/native.rs;
+docs/microkernel/K2.md.
+
+<a id="fx-0917"></a>
+
+## FX-0917 — an exception channel was attached where it must be refused, or refused where it must be attached
+
+`object::exception_check::run` attaches exception channels to a job and to a
+process it made, through `exception_channel_create` as a program would: one each
+is attached, a second is `ALREADY_BOUND`, closing the read end detaches, a
+process that has ended is `BAD_STATE` and its supervisor saw `PEER_CLOSED`, a
+handle without `SUPERVISE` is `ACCESS_DENIED`, a bad timeout or option is
+`INVALID_ARGS`, the read end cannot be written, and the channel pair is charged
+to the caller's job and refused at its limit. A failure means a supervisor --
+which may come to control how the faults beneath it end -- could be attached
+without the right, twice, or past a limit.
+
+1. `exception_channel_create` in src/kernel/src/syscall/native.rs stopped
+   checking `SUPERVISE`, the timeout or the options.
+2. `Supervisor::attach` in src/kernel/src/object/exception.rs replaced a live
+   channel, or a process's slot was not closed as it ended.
+3. `process_create` or `job_create` stopped answering `Rights::PROCESS_CREATED`
+   or `Rights::JOB_CREATED`.
+
+See: src/kernel/src/object/exception.rs;
+src/kernel/src/object/exception_check.rs; docs/microkernel/K4.md.
 
 <a id="fx-1001"></a>
 

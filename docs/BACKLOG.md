@@ -685,19 +685,10 @@ Spent about 33 points of about 70 estimated.
 - `mk/k5` (56f1ddbac, WIP, partly built): wait on a user address, K5.md,
   OK IF ledger 2498. Next: build the native calls, sysml ids, FX-0911's check,
   controls C1-C7, the futex ABAB. About 12 points left.
-<<<<<<< HEAD
-- `mk/k7` (no code yet): charging that follows the client, K7.md, OK IF 2525.
-  About 9 points left; it lands on K6, and whichever of K7 and K12 lands second
-=======
-- `mk/k6` (5dc0dc337, WIP, `cargo check` on three architectures, host tests
-  pass, never booted): attested sender, K6.md, OK IF 2485 and 2524. Next: sysml
-  ids, five boots, controls C1-C6, the round-trip ABAB with the fast path off
-  and on. About 6 points left. K7 lands on it.
 - `mk/k7` (13 commits of code, found 2026-11-03; the "no code yet" this row
   once said was false): charging that follows the client, K7.md, OK IF 2525.
   Rebased onto `develop` as `d9b014bfc` on the local `feature/mk-base`
   (2026-11-03, unlanded, not yet on `develop`). About 9 points left; it lands on K6, and whichever of K7 and K12 lands second
->>>>>>> origin/develop
   wires K12's lookup to `charge_target`.
 - `mk/k10` (5509676d1, WIP, unbuilt): timer objects, K10.md, OK IF 2538.
   Next: the native handlers, `timer_check.rs`, sysml, boots, controls N1-N8,
