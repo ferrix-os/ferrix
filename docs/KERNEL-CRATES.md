@@ -823,8 +823,8 @@ flag is the configuration record of it (3558 addendum (a)).
      objdump reads every architecture's ELF) (3934 (4)). `cargo xtask test-removable` links the release kernel
      with each value on the three architectures, keeps each ELF under
      `target/removable/` and runs the check on it.
-   * **The scheduling-class crates** (`docs/SCHED-CLASSES.md` §9b; ledger
-     line 22 of the sched-classes container ledger) are removable the same
+   * **The scheduling-class crates** (`docs/SCHED-CLASSES.md` §9b; container
+     review 22 (not on record; ledger 5684)) are removable the same
      way, chosen by the scheduler's tier flags in the selection crate's
      arms file rather than by `main.rs`, and recorded in `class_crates`.
      Their evidence has two halves, because the release link is fat LTO

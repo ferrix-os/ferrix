@@ -1,6 +1,6 @@
 //! The scheduler stack this kernel is built with, chosen by the build flags
 //! before the core (docs/SCHED-CLASSES.md §5 and §9a; the consultant's design
-//! review of step 3, ledger line 20, D1-D13).
+//! review of step 3, container review 20 (not on record; ledger 5684), D1-D13).
 //!
 //! This file is the arms file: the one file that selects code by a `sched_*`
 //! build flag (D6, rule 6e's one exception, S2). Each value of each tier flag
@@ -195,7 +195,7 @@ pub const REALTIME: Value = Value {
     present: true,
 };
 /// The realtime tier over `L`: `SCHED_FIFO` and `SCHED_RR` above it
-/// (ferrix-sched-fifo, SCHED-CLASSES.md §9e, ledger line 29).
+/// (ferrix-sched-fifo, SCHED-CLASSES.md §9e, container review 29).
 #[cfg(ferrix_sched_realtime = "fifo_rr")]
 pub type Realtime<L> = ferrix_sched_class::Over<ferrix_sched_fifo::FifoRr, L>;
 /// `sched_realtime` as this build has it.
@@ -240,7 +240,7 @@ pub type Stack = Windows<Deadline<Realtime<Fair>>>;
 struct Probe;
 
 /// A stack with no tier present has nothing to run and no name to print
-/// (line 15's C1).
+/// (container review 15's C1).
 const _: () = assert!(
     !<Stack as SchedClass<Probe>>::NAME.is_empty(),
     "the build flags leave every scheduler tier absent"

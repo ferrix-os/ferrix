@@ -335,7 +335,7 @@ claim's target in some standard.
 
 **`max_plus` ("Max+")** (SCHED-CLASSES.md §9c; the customer, 2026-10-27,
 "the most bare microkernel possible"; the consultant's OK IF E1-E13,
-ledger line 24 of the sched-classes ledger) is the barest kernel Ferrix
+container review 24 (not on record; ledger 5684)) is the barest kernel Ferrix
 can build: every flag and image key in the flag file names its `barest`
 value, the one that links the least code and leaves the least to decide
 at run time among those that allow `sc4`, a countermeasure or its check
@@ -350,7 +350,7 @@ of it. xtask's own rule 3 does not read `pending`: it refuses to build
 no disagreement with the Python checks' "not claimable". Signed slots
 only with no board family named also makes it unbuildable, in both. Its
 boot-option pinning is recorded in the profile, not enforced by the
-kernel, until M5 (SCHED-CLASSES.md §9c, ledger line 25 (3)).
+kernel, until M5 (SCHED-CLASSES.md §9c, container review 25 (3)).
 
 ## 5. Files and commands
 

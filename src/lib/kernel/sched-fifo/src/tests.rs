@@ -1,4 +1,4 @@
-//! The class's rules, on the host (the consultant's ledger line 29, R2).
+//! The class's rules, on the host (container review 29 (not on record; ledger 5684), R2).
 
 extern crate std;
 
