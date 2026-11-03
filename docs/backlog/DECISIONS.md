@@ -7,6 +7,11 @@ Moved out of [`docs/BACKLOG.md`](../BACKLOG.md) on 2026-10-16. A decision is rec
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-11-03 (customer)** **The microkernel run**: five agents, each with its
+  own consultant, this session as product owner, until 13:00 on 2026-11-04,
+  for "everything that makes ferrix a microkernel". The certification streams
+  (V1, V2, T1, F1, F2) are outside the run. Requirement ids are allotted up
+  front in `requirement-reservations.json`, so the streams do not conflict.
 * **2026-10-30 (customer)** **Game mode: build the GPU path, the cheap
   fixed-hardware tricks and the scheduler tiers** (`docs/GAME-MODE.md` §9,
   §10 question 1). Chosen: T0g (the GPU path, large GPU pages first), T0h

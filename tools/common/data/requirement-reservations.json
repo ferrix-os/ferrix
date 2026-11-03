@@ -13,6 +13,56 @@
   "reservations": [
     {
       "ids": [
+        "H.MEM.26-28",
+        "H.OBJ.27-29",
+        "L.object.290-309",
+        "L.user.200-219"
+      ],
+      "owner": "mk-m2",
+      "branch": "feature/mk-m2",
+      "date": "2026-11-03",
+      "purpose": "MICROKERNEL.md K13, K15, the page cache on K3 and B5's re-homing; blocks allotted up front by the product owner so the night's streams never conflict"
+    },
+    {
+      "ids": [
+        "H.TRAP.21-24",
+        "H.OBJ.23-26",
+        "L.trap.14-30",
+        "L.object.270-289",
+        "L.user.180-199",
+        "L.x86_64.260-285",
+        "L.aarch64.70-90"
+      ],
+      "owner": "mk-restricted",
+      "branch": "feature/mk-restricted",
+      "date": "2026-11-03",
+      "purpose": "MICROKERNEL.md K1, K11 and K17, restricted mode, shared processes, criticality levels; blocks allotted up front by the product owner so the night's streams never conflict"
+    },
+    {
+      "ids": [
+        "L.object.310-319",
+        "H.OBJ.30-33"
+      ],
+      "owner": "mk-lift",
+      "branch": "feature/mk-lift",
+      "date": "2026-11-03",
+      "purpose": "MICROKERNEL.md M5, linuxd's calls into the kernel; blocks allotted up front by the product owner so the night's streams never conflict"
+    },
+    {
+      "ids": [
+        "H.DEV.8-12",
+        "L.device.61-80",
+        "H.MEM.29-33",
+        "L.mm.111-130",
+        "L.object.320-339"
+      ],
+      "owner": "mk-authority",
+      "branch": "feature/mk-authority",
+      "date": "2026-11-03",
+      "purpose": "MICROKERNEL.md K8, K14, K16, the partition manager and M6; blocks allotted up front by the product owner so the night's streams never conflict"
+    },
+    {
+      "ids": [
         "H.QUOTA.18-21",
         "L.mm.83-90"
       ],
