@@ -56,7 +56,7 @@
     },
     "discovery/devmgr.rs::write_devices": {
       "complexity": 17,
-      "lines": 55,
+      "lines": 57,
       "recursive": false
     },
     "discovery/pci.rs::check_function": {
@@ -365,13 +365,13 @@
       "recursive": false
     },
     "syscall/native.rs::answer": {
-      "complexity": 32,
-      "lines": 84,
+      "complexity": 33,
+      "lines": 88,
       "recursive": false
     },
     "syscall/native.rs::channel_read": {
       "complexity": 15,
-      "lines": 53,
+      "lines": 52,
       "recursive": false
     },
     "syscall/native.rs::channel_write": {
@@ -380,8 +380,8 @@
       "recursive": false
     },
     "syscall/native.rs::vmo_pin": {
-      "complexity": 20,
-      "lines": 28,
+      "complexity": 17,
+      "lines": 24,
       "recursive": false
     },
     "syscall/uaccess.rs::copy_from_user_through": {

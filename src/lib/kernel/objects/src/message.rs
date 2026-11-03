@@ -22,13 +22,20 @@
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 
-/// A message: bytes, and objects travelling with them.
+/// A message: bytes, objects travelling with them, and who sent it.
+///
+/// `S` is the sender's identity as the queue's owner records it: the
+/// kernel's channels stamp it at the write (`docs/microkernel/K6.md`), and
+/// the queue only carries it. Every message is made with one, so none is
+/// queued without it, and no operation here changes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Message<H> {
+pub struct Message<H, S = ()> {
     /// The data.
     pub bytes: Vec<u8>,
     /// The objects, in the order the sender listed their handles.
     pub handles: Vec<H>,
+    /// Who wrote it, as the writer's side recorded it.
+    pub sender: S,
 }
 
 /// How much a queue carries.
@@ -70,17 +77,17 @@ pub enum ReceiveError {
 
 /// A bounded queue of messages.
 #[derive(Debug)]
-pub struct MessageQueue<H> {
+pub struct MessageQueue<H, S = ()> {
     /// Oldest first.
-    queue: VecDeque<Message<H>>,
+    queue: VecDeque<Message<H, S>>,
     /// What it will accept.
     limits: Limits,
 }
 
-impl<H> MessageQueue<H> {
+impl<H, S> MessageQueue<H, S> {
     /// An empty queue.
     #[must_use]
-    pub fn new(limits: Limits) -> MessageQueue<H> {
+    pub fn new(limits: Limits) -> MessageQueue<H, S> {
         MessageQueue {
             queue: VecDeque::new(),
             limits,
@@ -131,7 +138,7 @@ impl<H> MessageQueue<H> {
     /// # Errors
     ///
     /// The reason, and the message back untouched.
-    pub fn push(&mut self, message: Message<H>) -> Result<(), (SendError, Message<H>)> {
+    pub fn push(&mut self, message: Message<H, S>) -> Result<(), (SendError, Message<H, S>)> {
         if !self.accepts(message.bytes.len(), message.handles.len()) {
             return Err((SendError::TooBig, message));
         }
@@ -149,7 +156,7 @@ impl<H> MessageQueue<H> {
     ///
     /// For the kernel's cycle check, which has to see which objects a queue
     /// is holding.
-    pub fn iter(&self) -> impl Iterator<Item = &Message<H>> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = &Message<H, S>> + '_ {
         self.queue.iter()
     }
 
@@ -172,7 +179,7 @@ impl<H> MessageQueue<H> {
         &mut self,
         byte_capacity: usize,
         handle_capacity: usize,
-    ) -> Result<Message<H>, ReceiveError> {
+    ) -> Result<Message<H, S>, ReceiveError> {
         let (bytes, handles) = self.peek_sizes().ok_or(ReceiveError::Empty)?;
         if bytes > byte_capacity || handles > handle_capacity {
             return Err(ReceiveError::TooSmall { bytes, handles });
@@ -192,7 +199,7 @@ impl<H> MessageQueue<H> {
     ///
     /// The message back, when the queue had to grow to take it and there was
     /// no memory: a writer took its slot meanwhile.
-    pub fn unpop(&mut self, message: Message<H>) -> Result<(), Message<H>> {
+    pub fn unpop(&mut self, message: Message<H, S>) -> Result<(), Message<H, S>> {
         // A write may have taken the slot the message came out of, so the
         // queue can need to grow to take it back.
         if ferrix_fallible::try_reserve_deque(&mut self.queue, 1).is_err() {
@@ -205,7 +212,7 @@ impl<H> MessageQueue<H> {
     /// Take everything, for when the reading endpoint closes and no one will
     /// ever read these. The caller drops them, and the objects with them,
     /// outside whatever lock guards the queue.
-    pub fn drain(&mut self) -> VecDeque<Message<H>> {
+    pub fn drain(&mut self) -> VecDeque<Message<H, S>> {
         // Moved out whole rather than collected: this runs as an endpoint
         // closes, where there is nobody to tell that memory ran out.
         core::mem::take(&mut self.queue)

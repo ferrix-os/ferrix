@@ -63,6 +63,26 @@ pub struct ReadActual {
     pub handles: u32,
 }
 
+/// What a `channel_read_attested` found: a [`ReadActual`]'s sizes, then
+/// who wrote the message (`docs/microkernel/K6.md`).
+///
+/// The sizes are written on success and on `BUFFER_TOO_SMALL`; the writer
+/// only on success. Laid out so that its first eight bytes are a
+/// [`ReadActual`]'s.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(C)]
+pub struct ReadAttested {
+    /// The message's size in bytes.
+    pub bytes: u32,
+    /// How many handles it carries.
+    pub handles: u32,
+    /// The writing process's id, or zero for the kernel.
+    pub process: u64,
+    /// The id of the job the writer was in at the write, or zero for the
+    /// kernel.
+    pub job: u64,
+}
+
 /// `vmo_pin`'s option: the device may read the pinned pages but not write
 /// them.
 pub const PIN_READ_ONLY: u64 = 1;

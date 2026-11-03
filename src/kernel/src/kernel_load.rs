@@ -141,6 +141,8 @@ pub mod object {
     #[cfg(ferrix_linux_abi = "on")]
     pub mod quota_check;
     #[cfg(ferrix_linux_abi = "on")]
+    pub mod sender_check;
+    #[cfg(ferrix_linux_abi = "on")]
     pub mod write_read_check;
     /// Pinned memory (the core's), with its check raised to this crate.
     pub mod pin {
