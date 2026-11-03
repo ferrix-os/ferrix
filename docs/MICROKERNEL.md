@@ -1370,6 +1370,10 @@ profiles to certify and whether `desktop` keeps the in-kernel Linux layer.
 
 Draft on branch `microkernel-plan`.
 
+(2026-11-03: the plan and the M0 flag system are on `develop`; for what M1
+and M2 hold, and which of it is landed, see `docs/roadmap/microkernel-m0.md`.
+The list below is the plan's review history.)
+
 * Revision 1 (060d59ce0): the certification consultant's design review,
   **NOT YET** (B1 to B7, C1 to C16), ledger line 812 of
   `~/.local/share/ferrix/cert-consultant/reviews.md`, 2026-10-13. It accepted
