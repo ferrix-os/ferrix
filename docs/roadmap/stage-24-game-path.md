@@ -38,6 +38,37 @@ card, not a boot that stays in CI; what stays in CI is each row's gate that
 needs no card, which the design gives for R1 to R3, P2, I1, P5 and G0 to
 G5.
 
+## What the N150 box has shown (reconciled 2026-11-02)
+
+This page was written for the RTX 3060; the game path has since been run, in
+part, on the customer's N150 box and its Intel GPU, with Endfield
+(`docs/BACKLOG.md` fl-081; `docs/GAME-MODE.md`):
+
+* **Direct scanout** (`docs/DISPLAY.md` §8.2, 82d25c13e and 140f521a4,
+  2026-10-22): hyprix shows a fullscreen client's own buffer on a card whose
+  driver copies. With `card0` blending the pointer into its plane (f26fb6da6,
+  2026-10-31), hyprix hands a fullscreen game's buffer to `card0`; switching to
+  direct scanout in the world held 5 minutes with hyprix at 3% instead of 8%
+  and the frame rate unchanged at about 27, and loading into the world while
+  scanned out died 2 of 2 times (`docs/backlog/desktop.md`), so the box runs
+  with `HYPRIX_DIRECT_SCANOUT=0`.
+* **Flip in the blank** (da674893d, 2026-10-24): `card0` copies a frame in
+  pipe A's vertical blank.
+* **Where the frame goes at 720p**: the GPU is the limit, 99.9% busy at about
+  25 frames a second; freezing the background, nice values and the speculation
+  protections buy at most 1% of a core and no frame (`docs/GAME-MODE.md`
+  §2.3, §3), and the GPU's 4 KiB page size costs 15 to 25% of its shader
+  bandwidth (§4.1), which the large pages and 2 MiB VT-d entries went after
+  without a change in the frame rate (2026-10-31).
+* **Stalls under load** (fl-081, 2026-10-24): woken programs waited 0.9 to
+  3.2 s while syscalls and the kernel's own timers kept time; F-95's
+  landings so far are a stall test (3fbfd5f34) and freeing the dead while no
+  processor is idle (7fdc1c99d); the stalls are not recorded as fixed.
+
+None of this is the exit's measurement (M1 to M5 on the RTX 3060 with the
+rig's R4 and R5, which need that card); `docs/GAME-PATH.md`'s questions stay
+open.
+
 ## Where it stands in the order
 
 After [stage 21](stage-21-bare-metal-gpu-ferrix.md)'s zero-copy landings,

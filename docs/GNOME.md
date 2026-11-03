@@ -12,7 +12,10 @@ and not a stage.
 
 ## Where it stands, 2026-10-22 (evening): G1 built, gaps 1 and 2 fixed
 
-Branch `gnome-probe`, not landed (no landing lock was taken). The customer
+Built on the branch `gnome-probe`, which origin no longer has, and on
+`develop` since 2026-10-22 (the render core's gaps 1 and 2, 0666a13f2 to
+6ebbeeffa; the volume, 993972421; the session's bus and `test-gnome-apps`,
+6e3c780b1; the consultant's conditions, 98555b706). The customer
 asked for the gaps to be fixed ("start gnome agent to fix the issues"), and
 on the same day: *keep the kernel slim, we need that for certifications* --
 ring-3 answers for every gap, kernel changes only where unavoidable and as
@@ -423,7 +426,8 @@ B5 partly applies.
 ## 5. A staged plan
 
 **G1: GTK 4 and libadwaita apps on hyprix -- about 8 points; built
-2026-10-22 (774d9f09b, 4fc0770d4), not landed.** To the consultant's
+2026-10-22 (774d9f09b, 4fc0770d4 on the branch; on `develop` since
+2026-10-22 as 993972421, 6e3c780b1 and 98555b706).** To the consultant's
 conditions of ledger lines 3100 and 3123:
 
 * **The volume.** `tools/common/fetch/fetch-gnome-apps.sh`: 171 Debian 13

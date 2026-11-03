@@ -8,8 +8,8 @@ wind-down's branches are in the sections after this introduction, and
 has landed since, and which branches origin no longer has; *2026-10-05,
 wind-down* and *2026-10-07* say the rest; *2026-10-09* says what landed on the
 night of 2026-10-08; *2026-10-15* lists the branches of the night of
-2026-10-14, and *2026-10-21* says what became of them. It is where the next
-session starts.
+2026-10-14, *2026-10-21* says what became of them, and *2026-11-02* counts
+every branch against `develop`. It is where the next session starts.
 The *what* of each line of work is in its design document and in
 `docs/BACKLOG.md`; this page says which branch carries it and which of a
 family's branches to resume from.
@@ -35,6 +35,88 @@ Every landing still follows `docs/CONVENTIONS.md` and *What a landing runs* in
 `docs/BACKLOG.md`: rebase onto `main`, `cargo xtask gate-rows --since main`
 for the rows, gate on nazuna (`fleet/gate.sh`), the certification consultant
 for the item, `land.sh`.
+
+## 2026-11-02: against `develop` e51fc67fd
+
+`main` and `develop` are the same commit now, and the landing branch is
+`develop` (`docs/REPO-FLOW.md`), so the counts below are `git cherry
+origin/develop origin/<branch>` against this clone's remote-tracking refs after
+`git fetch --prune` on 2026-11-02. The sweep of 2026-10-23 archived the idle
+branches (`docs/backlog/branches.md`); 120 remain on origin besides `develop`
+and `main`: 21 count 0 (their change is on `develop`, under their own hash or
+another, and the branch can go), and the rest carry commits `develop` lacks by
+patch id. A branch rebased before it landed counts as unlanded by patch id
+although its change is on `develop`; the table says so where it is known.
+
+**Work in flight, not landed** (the two lines of work running at this writing;
+the rest of the table is not for the next session to resume from unless the
+note says so):
+
+| Branch | Ahead | State |
+|---|---|---|
+| `feature/ferrix-roadmap-completion-hkxlpp` | 61 | the roadmap agent's branch: stage 14 (the scheduler's classes) past the stage 13 follow-ons, which are on `develop`; its `SoftRt` domain made at run time (35bd297ec) is the newest; 163 commits behind `develop` |
+| `feature/sched-softrt-domain` | 62 | the same line of work, one commit further; resume from one of the two, not both |
+| `docs/sched-classes-reservations` | 1 | `H.SCHED.18-23` and `L.sched.102-130` for stage 14's classes (99bbdd0d0), a reservation `develop` does not have yet |
+| `feature/hyprix-gpu-backend`, `-r2`, `land/hyprix-gpu-backend` | 3 each | hyprix's `hyprix:gpu` option and the helper's environment lines, and `test-compositor --boot helper-desktop`; the helper, its protocol and its renderer are on `develop` (`docs/GPU-COMPOSITOR.md`) |
+| `feature/gpu-compositor`, `wip/vtest-intel-scanout` | 2, 3 | the design page and an experiment (vtest frames into i915 buffers) |
+| `feature/csd-decorations` | 1 | a program that draws its own title bar gets none from hyprix (333c58ae3) |
+| `intel-large-pages/vtd-v1` | 1 | 2 MiB VT-d entries: on `develop` as c735f308e (rebased, so it counts); `vtd-v2` counts 0 |
+| `wip/stability-try` | 2 | the nightly stability workflow and `test-kmem`, `test-stall`; one commit tries it on push |
+| `park/f95-option-a` | 2 | F-95's second landing with the consultant's L1-L12 written (the landing itself is 7fdc1c99d on `develop`) |
+| `docs/enclave-design`, `docs/fx0830-recurrence`, `docs/intel-display` | 1 each | a design page, a BACKLOG row, and a paused modeset design (3h's code is on `develop`) |
+| `land/everything-yoru` | 1 | `--everything` merges Chrome's volume 4: on `develop` as d789924e2 (rebased, so it counts) |
+
+**The microkernel's M1 and M2** (`feature/mk/k2`, `k2b`, `k3`, `k4`, `k5`, `k6`,
+`k6-r`, `k7`, `k10`, `k12`, `k12b`, `mk-m0rest/*`, `mk/smt-off`,
+`mk/oom-uncharge`) have not moved since 2026-10-21 and are 620 to 660 commits
+behind `develop`; their designs are on `develop` (`docs/microkernel/`), their
+code is a rebase away and none of it is gated. Resume from `microkernel-m0.md`.
+
+**Parked** (`park/*`, 58 branches, none newer than 2026-10-24): the older
+sections below describe the families as far as they were described -- the
+channel round trip's `park/os-ipc/*`, `park/os-35/*` and `park/po10-*`,
+`park/os07/asid`, NVIDIA's `park/nvidia-*`, ferrousli's `park/ferrousli-*`,
+`park/po7/*` and `park/steam-y5-wip`.
+Of the stage 13 family, `park/stage13-timens`, `park/po6/n5` and
+`park/po6/bwrap-user` were ported onto `develop` on 2026-10-26 and are history
+now (they still count 6, 11 and 14 by patch id, because the port rebased them).
+
+**Landed and still on origin.** The 21 branches that count 0 by patch id,
+checked on 2026-11-02 against `origin/develop` e51fc67fd with `git merge-base
+--is-ancestor`, and against GitHub's open pull requests (three: #38 from
+`feature/ferrix-roadmap-completion-hkxlpp`, #39 from
+`docs/sched-classes-reservations` and #40 from `feature/sched-softrt-domain`;
+none uses a branch below). "Contained" is whether the tip is an ancestor of
+`develop`. Where it is not, the branch's single commit has an equivalent on
+`develop` under another hash, so nothing is lost either way. Nothing was
+deleted; deleting is the customer's decision, and all 21 are safe to delete
+on this evidence.
+
+| Branch | Tip | Contained in `develop` | Open PR | Safe to delete |
+|---|---|---|---|---|
+| `bugfix/chardev-signal-race` | 908378300 | yes | none | yes |
+| `bugfix/futex-timed-eintr` | 503d4c5af | yes | none | yes |
+| `bugfix/intel-card-copy-evict` | f6d417550 | no: its one commit is `develop`'s eb555dc28 rebased (`git cherry` says landed) | none | yes |
+| `bugfix/kmsg-whole-lines` | 722824a8d | yes | none | yes |
+| `bugfix/oom-no-panic` | 86b79a87d | yes (it is `develop`'s 86b79a87d) | none | yes |
+| `bugfix/release-dry-run` | 99825b881 | no: its one commit is `develop`'s 90432209d rebased | none | yes |
+| `bugfix/release-v0.2.0` | 93b0f3950 | yes | none | yes |
+| `bugfix/tsc-aux` | 5946ae34b | yes | none | yes |
+| `feature/amd-vi` | 63b9f67d4 | yes | none | yes |
+| `feature/devmgr-isolation-gate` | 1ecd103da | yes | none | yes |
+| `feature/lode-budget` | 3e3457322 | yes | none | yes |
+| `feature/lode-compress` | 9e783e63b | yes | none | yes |
+| `feature/lode-crashd` | abc82f5d5 | yes | none | yes |
+| `feature/lode-fields` | 9d54912c7 | yes | none | yes |
+| `feature/lode-step3` | a083a613f | yes | none | yes |
+| `feature/lode-step4` | 0d4014c6b | yes | none | yes |
+| `feature/lode-step5` | 4e1ae8bdd | yes | none | yes |
+| `feature/lode-upload` | 44c99c4f2 | yes | none | yes |
+| `feature/power-adaptive` | 1af3292dc | yes | none | yes |
+| `fix/power-adaptive-trend` | d5cf8796b | yes | none | yes |
+| `intel-large-pages/vtd-v2` | aae2217ff | no: its one commit is `develop`'s c735f308e rebased | none | yes |
+
+None of the 21 has a `refs/archive/` copy; after a delete the three rebased commits live on only as their `develop` equivalents.
 
 ## 2026-10-21: what became of the night's branches, and the microkernel's
 

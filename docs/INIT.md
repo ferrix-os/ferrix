@@ -1248,7 +1248,7 @@ on the forking service, which must leave the grandchild alive and fail that
 stage's check. `test-jobs` moves onto a getty under init, and then it tests
 the system people will actually use.
 
-## 16. Where it stands (2026-09-26)
+## 16. Where it stands (2026-09-26, rows reconciled 2026-11-02)
 
 | | State | On `main` as |
 |---|---|---|
@@ -1261,9 +1261,9 @@ the system people will actually use.
 | L10 | done, 2026-09-26 | "Boot the images through init, and the compositor as its service" |
 | L11 | done, 2026-09-26, by ferrix-55b with T0 | "Give the restart policy a crate of its own that allocates nothing"; "Restart drivers by the service manager's policy, and report how they died" |
 | L12 | done, 2026-09-27, as built in §7.3 | "Let pid 1 start devmgr, through a starter the kernel gives it" |
-| L13a | built 2026-10-04 on branch `l13-init`, gating (below) | |
+| L13a | landed 2026-10-04 (1e1f2543a), reconciled 2026-11-02 | "init: carry out NoNewPrivileges=, PrivateTmp= and ProtectSystem= in the child" |
 | L13b | landed 2026-10-05 (3349682db) | |
-| L13c | built 2026-10-04 on branch `l13c`, gated 2026-10-05, rebased onto `main` 4466212c3 on 2026-10-07 (branch `po10-l13c/l13c`, below) | |
+| L13c | built 2026-10-04, gated 2026-10-05, on `main` since 2026-10-07 (c6c3e3b13 records it; reconciled 2026-11-02) | "init: install the seccomp filter as the child's last step" (6f957d4fa) |
 
 All of L1 to L12's 81 points are spent. L11 put `devmgr` on the restart
 policy, which moved into `src/lib/init/restart` because `devmgr` has no
@@ -1273,8 +1273,10 @@ counts the init done at L11 (2026-09-26). L12 (2026-09-27) has pid 1 start
 that boots init now sets. `sshd` runs under socket activation in L9's gate
 since 2026-09-27. L13a, the sandboxing keys that need only mount namespaces and
 `prctl`, is built (2026-10-04); L13b, `PrivateNetwork=`, is built over
-network namespaces, and L13c's filters over seccomp's S3 (2026-10-05, on
-branches).
+network namespaces, and L13c's filters over seccomp's S3 (2026-10-05); all
+three are on `main` (table above). Since 2026-10-23 init also starts `lode`'s
+services, sets the host name and `/etc/machine-id`, and lets the seat's person
+restart and power off (§10.1).
 
 **L1, as built (5 points).** `src/lib/init/svc` is on `main`: `no_std` with
 `alloc`, `forbid(unsafe_code)`, 52 host tests, a Miri step in CI and in

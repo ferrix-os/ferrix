@@ -123,12 +123,12 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 | `FerrixSigningRequirements` | `26-signing-requirements.sysml` | docs/SIGNING.md is the design (the certification consultant's OK IF at ledger lines 3667 and 3738; the customer's decisions at 3731). Slice S1 builds the verify-only crate `ferrix-sigverify` (src/lib/crypto/sigverify) and the hash it rests on, `ferrix-sha256` (src/lib/crypto/sha256), both in the item ring (certification-item.json's crates). What the UEFI loader, init's configuration verifier and devmgr do with the verifier's answer is theirs, and gets ids in their own slices (S4, S8, S9). |
 
-27 files, 151 packages, 8566 elements, 220 relations. Model digest `f564bb2da3f5b004`.
+27 files, 151 packages, 8568 elements, 220 relations. Model digest `47ec880dd451d9b5`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
-| `#implemented` | 285 | The code exists and the QEMU boot test exercises it on every architecture it applies to. |
-| `#inProgress` | 31 | The owning stage has started; part of the element runs. |
+| `#implemented` | 295 | The code exists and the QEMU boot test exercises it on every architecture it applies to. |
+| `#inProgress` | 23 | The owning stage has started; part of the element runs. |
 | `#writtenAhead` | 1 | A src/lib/ crate exists and passes its host tests, but nothing in src/kernel/ calls it yet. |
 | `#planned` | 24 | Only the design exists, in docs/ARCHITECTURE.md. Nothing stands in for it. |
 | `@deferred` | 20 | Work a finished stage explicitly left behind, carrying the reason that stage gave. |
@@ -423,12 +423,12 @@ kernel : Kernel
     queues : RequestQueue
     ioScheduler : IoScheduler
   netCore : NetCore  [implemented]
-  namespaces : Namespaces  [in progress]
+  namespaces : Namespaces  [implemented]
     every : Namespace
       parent : Namespace
-  cgroups : Cgroups  [in progress]
+  cgroups : Cgroups  [implemented]
     root : Cgroup
-  seccomp : Seccomp  [in progress]
+  seccomp : Seccomp  [implemented]
     interpreter : ClassicBpfInterpreter
   devices : DeviceEnumeration  [implemented]
     nodes : DeviceNode
@@ -449,6 +449,8 @@ userland : Userland  [in progress]
   shell : UserProcess  [implemented]
   devmgr : UserProcess  [implemented]
   lode : UserProcess  [in progress]
+  settingsd : UserProcess  [implemented]
+  notifyd : UserProcess  [implemented]
   portald : UserProcess  [implemented]
   drivers : DriverProcess  [implemented]
     job : Job
@@ -575,9 +577,9 @@ src/kernel/: monolithic core, capability seams, userspace device drivers. Entere
 | `filesystems` | `Filesystems` | `#implemented` | — |  |
 | `blockCore` | `BlockCore` | `#implemented` | — |  |
 | `netCore` | `NetCore` | `#implemented` | — |  |
-| `namespaces` | `Namespaces` | `#inProgress` | — |  |
-| `cgroups` | `Cgroups` | `#inProgress` | — |  |
-| `seccomp` | `Seccomp` | `#inProgress` | — |  |
+| `namespaces` | `Namespaces` | `#implemented` | — |  |
+| `cgroups` | `Cgroups` | `#implemented` | — |  |
+| `seccomp` | `Seccomp` | `#implemented` | — |  |
 | `devices` | `DeviceEnumeration` | `#implemented` | — |  |
 | `iommu` | `IommuDomains` | `#implemented` | — |  |
 
@@ -645,9 +647,7 @@ flowchart LR
   n0_FerrixStructure_Kernel -- "part of" --> n29_FerrixStructure_Kernel_devices
   n0_FerrixStructure_Kernel -- "part of" --> n30_FerrixStructure_Kernel_iommu
   classDef implemented fill:#dceae2,stroke:#2c6e4e,color:#16191d
-  classDef inProgress fill:#dae5f0,stroke:#2a5f8f,color:#16191d
-  class n2_FerrixStructure_Kernel_printer,n3_FerrixStructure_Kernel_early,n4_FerrixStructure_Kernel_trap,n5_FerrixStructure_Kernel_mm,n6_FerrixStructure_Kernel_vmap,n7_FerrixStructure_Kernel_mmio,n8_FerrixStructure_Kernel_irq,n9_FerrixStructure_Kernel_timer,n10_FerrixStructure_Kernel_smp,n11_FerrixStructure_Kernel_acpi,n12_FerrixStructure_Kernel_fdt,n13_FerrixStructure_Kernel_tasks,n14_FerrixStructure_Kernel_sched,n15_FerrixStructure_Kernel_vm,n16_FerrixStructure_Kernel_syscalls,n17_FerrixStructure_Kernel_native,n18_FerrixStructure_Kernel_futex,n19_FerrixStructure_Kernel_signals,n20_FerrixStructure_Kernel_ipc,n21_FerrixStructure_Kernel_vfs,n22_FerrixStructure_Kernel_pageCache,n23_FerrixStructure_Kernel_filesystems,n24_FerrixStructure_Kernel_blockCore,n25_FerrixStructure_Kernel_netCore,n29_FerrixStructure_Kernel_devices,n30_FerrixStructure_Kernel_iommu implemented
-  class n26_FerrixStructure_Kernel_namespaces,n27_FerrixStructure_Kernel_cgroups,n28_FerrixStructure_Kernel_seccomp inProgress
+  class n2_FerrixStructure_Kernel_printer,n3_FerrixStructure_Kernel_early,n4_FerrixStructure_Kernel_trap,n5_FerrixStructure_Kernel_mm,n6_FerrixStructure_Kernel_vmap,n7_FerrixStructure_Kernel_mmio,n8_FerrixStructure_Kernel_irq,n9_FerrixStructure_Kernel_timer,n10_FerrixStructure_Kernel_smp,n11_FerrixStructure_Kernel_acpi,n12_FerrixStructure_Kernel_fdt,n13_FerrixStructure_Kernel_tasks,n14_FerrixStructure_Kernel_sched,n15_FerrixStructure_Kernel_vm,n16_FerrixStructure_Kernel_syscalls,n17_FerrixStructure_Kernel_native,n18_FerrixStructure_Kernel_futex,n19_FerrixStructure_Kernel_signals,n20_FerrixStructure_Kernel_ipc,n21_FerrixStructure_Kernel_vfs,n22_FerrixStructure_Kernel_pageCache,n23_FerrixStructure_Kernel_filesystems,n24_FerrixStructure_Kernel_blockCore,n25_FerrixStructure_Kernel_netCore,n26_FerrixStructure_Kernel_namespaces,n27_FerrixStructure_Kernel_cgroups,n28_FerrixStructure_Kernel_seccomp,n29_FerrixStructure_Kernel_devices,n30_FerrixStructure_Kernel_iommu implemented
 ```
 
 **Figure 4 — Kernel and its parts.** The parts `Kernel` is made of, coloured by the lifecycle keyword each carries. [SVG](diagrams/ferrix-structure-kernel.svg) Source: `02-structure.sysml`.
@@ -2170,7 +2170,7 @@ docs/ARCHITECTURE.md §6: namespaces, cgroups v2, seccomp, credentials. Stage 13
 
 #### Namespace
 
-`#inProgress`  ·  stage 13
+`#implemented`  ·  stage 13
 
 | Feature | Kind | Type | Maturity | Note |
 | --- | --- | --- | --- | --- |
@@ -2189,9 +2189,9 @@ One namespace of each kind, held by every task. Every table that would otherwise
 
 #### Namespaces
 
-`#inProgress`  ·  stage 13
+`#implemented`  ·  stage 13
 
-Steam's user and mount namespaces first (docs/NAMESPACES.md, N1 to N6). N1 (2026-09-28): every mount's own flags enforced, MS_REMOUNT, and mountinfo. N2 (2026-09-30): binds of directories, files and sockets, MS_REC, MNT_DETACH of a subtree, and a superblock per filesystem. N3 (2026-09-30): mount namespaces, copied by unshare and clone, pivot_root, a native child kept in its creator's, and openat2's resolve flags. N4, user namespaces, is next. Network namespaces (docs/NETNS.md): a stack per namespace, a down loopback, veth pairs, devices that move with their ring, CAP_NET_ADMIN and CAP_NET_RAW over the owner.
+Steam's user and mount namespaces first (docs/NAMESPACES.md, N1 to N6). N1 (2026-09-28): every mount's own flags enforced, MS_REMOUNT, and mountinfo. N2 (2026-09-30): binds of directories, files and sockets, MS_REC, MNT_DETACH of a subtree, and a superblock per filesystem. N3 (2026-09-30): mount namespaces, copied by unshare and clone, pivot_root, a native child kept in its creator's, and openat2's resolve flags. N4, user namespaces (2026-10-01), the small namespaces with setns, and pid namespaces are in. Network namespaces (docs/NETNS.md): a stack per namespace, a down loopback, veth pairs, devices that move with their ring, CAP_NET_ADMIN and CAP_NET_RAW over the owner. Time namespaces (CLONE_NEWTIME, shifted clocks) and N5, unprivileged mounting, landed on 2026-10-26 (docs/roadmap/follow-ons.md).
 
 | Feature | Kind | Type | Maturity | Note |
 | --- | --- | --- | --- | --- |
@@ -2203,7 +2203,7 @@ Steam's user and mount namespaces first (docs/NAMESPACES.md, N1 to N6). N1 (2026
 
 #### Cgroup
 
-`#inProgress`  ·  stage 13
+`#implemented`  ·  stage 13
 
 | Feature | Kind | Type | Maturity | Note |
 | --- | --- | --- | --- | --- |
@@ -2215,11 +2215,11 @@ Steam's user and mount namespaces first (docs/NAMESPACES.md, N1 to N6). N1 (2026
 
 #### Cgroups
 
-`#inProgress`  ·  stage 13
+`#implemented`  ·  stage 13
 
 One unified hierarchy (v2), exposed as cgroupfs. cpu is not a separate mechanism: it is bandwidth and weight handed to the scheduling classes. memory scopes reclaim and the OOM kill.
 
-Built (docs/CGROUPS.md): every cgroup a Job, cgroupfs mounted as cgroup2, cgroup.events, clone3 into a cgroup, delegation by chown; pids, memory's charging, its reclaim, memory.high and its scoped OOM kill, cgroup.freeze, cpu.weight and cpu.max, and io, over the certification's job quotas. Left: the rest of memory.stat, io.weight, io.latency, cpu.idle and cpu.max.burst.
+Built (docs/CGROUPS.md): every cgroup a Job, cgroupfs mounted as cgroup2, cgroup.events, clone3 into a cgroup, delegation by chown; pids, memory's charging, its reclaim, memory.high and its scoped OOM kill, cgroup.freeze, cpu.weight and cpu.max, and io, over the certification's job quotas. memory.reclaim, memory.stat's anon and pagetables, io.weight, io.latency, cpu.idle and cpu.max.burst landed on 2026-10-26, with the dentry and inode caches' reclaim.
 
 | Feature | Kind | Type | Maturity | Note |
 | --- | --- | --- | --- | --- |
@@ -2227,7 +2227,7 @@ Built (docs/CGROUPS.md): every cgroup a Job, cgroupfs mounted as cgroup2, cgroup
 
 #### Seccomp
 
-`#inProgress`  ·  stage 13
+`#implemented`  ·  stage 13
 
 Classic BPF filters evaluated on syscall entry. The interpreter is a pure function over bytes in src/lib/, fuzzable and Miri-able. Built: seccomp(2), prctl(PR_SET_SECCOMP), a chain of filters per thread, every action but TRACE and USER_NOTIF (ENOSYS), TSYNC under the thread-list lock, and the hook at all four entries; the fast path's quiet predicate reads a live count of watched threads. Syscall User Dispatch is judged first in the same look and answers Trap, so it too only takes calls away; its settings are per thread, never inherited, cleared by execve.
 
@@ -3368,7 +3368,7 @@ btrfs stage B. Exit, strict: Ferrix writes a tree and host btrfs check finds not
 
 **Done**  ·  size month  ·  `#implemented`
 
-Seven namespaces (mount, user, UTS, IPC, cgroup, pid, network), the unified cgroup hierarchy with cpu, memory, io and pids as built, cgroupfs, classic-BPF seccomp with the interpreter in src/lib/, and Syscall User Dispatch. The customer set this scope on 2026-10-21 to what main holds; time namespaces, unprivileged mounting, the dentry and inode caches' reclaim and Linux's seccomp_bpf selftest were follow-ons, all built on 2026-10-26 on a branch, landing owed (docs/roadmap/follow-ons.md). Exit: an unprivileged user namespace runs pid 1 under a memory limit that triggers scoped reclaim and a scoped OOM kill, with a seccomp filter blocking a syscall.
+Seven namespaces (mount, user, UTS, IPC, cgroup, pid, network), the unified cgroup hierarchy with cpu, memory, io and pids as built, cgroupfs, classic-BPF seccomp with the interpreter in src/lib/, and Syscall User Dispatch. The customer set this scope on 2026-10-21 to what main holds; time namespaces, unprivileged mounting, the dentry and inode caches' reclaim and Linux's seccomp_bpf selftest were follow-ons, all built on 2026-10-26 and are on main since then (docs/roadmap/follow-ons.md). Exit: an unprivileged user namespace runs pid 1 under a memory limit that triggers scoped reclaim and a scoped OOM kill, with a seccomp filter blocking a syscall.
 
 Cgroups first (customer, 2026-09-23): stage 15's init is planned as if they exist, so the cgroup half is built before namespaces and seccomp. docs/INIT.md section 0.1 lists what init needs, C1-C5 before its first boot. C8, accepted the same day: every cgroup is backed by a Job. docs/CGROUPS.md is the design: landings G1-G5 (27 points) for init, then the controllers (58), 85 for the cgroup half. G1 done on 2026-09-23: every process in exactly one job, fork inheriting it, populated counted exactly, the two kills apart. G2 done the same day: cgroupfs mounts as cgroup2, over src/lib/fs/common/cgroupfs. G3 and G4 done on 2026-09-24: cgroup.events wakes poll, select and epoll with POLLPRI; clone3 starts a child in a cgroup; chown delegates a subtree under cgroup v2's common-ancestor rule. C1-C5 and C7 are met. G5 done on 2026-09-24. P1, M1's charging and S1 done on 2026-09-26, as the certification's job quotas (F-35): a quota slot per job, charged for tasks, memory and native objects, a weight per job scaling its tasks', and cgroupfs's cpu, memory and pids files over the same slot. M1's scoped OOM kill done on 2026-09-26: a fault past a cgroup's memory.max kills the process with the most resident pages in that cgroup, counted in memory.events with POLLPRI. M2's reclaim of a read-only mount's clean pages, memory.high, cgroup.freeze, cpu.max with cpu.stat and the io controller with io.max landed on 2026-10-07; on 2026-10-08 cpu.stat's charge is kept back in a run queue's own record and moved into the jobs' slots once, and cpu.max's walk is made only while one is set (L.object.180).
 
@@ -3452,7 +3452,7 @@ The Yoru desktop (docs/DESKTOP.md section 6) carries Nocturne for GTK 3 and GTK 
 
 **InProgress**  ·  size unsized, over 100 points  ·  `#inProgress`
 
-Ferrix on bare metal with an NVIDIA card driven by Ferrix itself: Path B of the GPU decision of 2026-09-18, opened when the customer wants real hardware. NVIDIA's open kernel modules as a ring-3 driver process behind an OS interface layer written for Ferrix, their GSP firmware, and a userspace that is either glibc-built closed libraries or Mesa's NVK over a Rust driver such as Linux's Nova, weighed when the stage opens. The customer chose NVIDIA's own driver and userspace on 2026-10-02 (docs/NVIDIA.md): N0, the kernel prerequisites, and N1, nvrm booting the RTX 3060's GSP with nvidia-smi, are on main (2026-10-03), and the chardev core's queue bound (F-63) with stage 10's chardev self-check since 2026-10-05. N2 to N4 and the screen on the customer's TV landed on 2026-10-05, and N3b's kernel half (a chardev render node, dmabufs and sync-file fences) on 2026-10-11. N3c, hyprix compositing on the card, is on main; run-compositor --nvidia keeps the software compositor unless FERRIX_NVIDIA_VTEST=1, because Chrome's WebGL page is faster under it (2026-10-25). nvrm follows a monitor plugged, unplugged or swapped, answers IMPORT_SYNC_FILE on its dmabufs, and quiesces its adapter when /run/nvrm-quiesce appears (docs/NVIDIA.md section 13): on the card it shut the adapter down in 1.45 s with NV_PMC_BOOT_0 unchanged and no Xid, and the kept card VMs quiesce on stop or yield; the monitor following and the sync-file import ran on the card too. The customer's Intel N150 box is the stage's first bare-metal machine (docs/N150.md): Ferrix booted on it on 2026-10-15, its drivers (AHCI, the YT6801, a firmware framebuffer, VT-d, SMBIOS, an event log) and a render driver for its Intel GPU (docs/INTEL-GPU.md) are on main, and the kernel bring-up is evidenced on QEMU only. Exit: the stage 19 exit on real hardware, drawn by the card.
+Ferrix on bare metal with an NVIDIA card driven by Ferrix itself: Path B of the GPU decision of 2026-09-18, opened when the customer wants real hardware. NVIDIA's open kernel modules as a ring-3 driver process behind an OS interface layer written for Ferrix, their GSP firmware, and a userspace that is either glibc-built closed libraries or Mesa's NVK over a Rust driver such as Linux's Nova, weighed when the stage opens. The customer chose NVIDIA's own driver and userspace on 2026-10-02 (docs/NVIDIA.md): N0, the kernel prerequisites, and N1, nvrm booting the RTX 3060's GSP with nvidia-smi, are on main (2026-10-03), and the chardev core's queue bound (F-63) with stage 10's chardev self-check since 2026-10-05. N2 to N4 and the screen on the customer's TV landed on 2026-10-05, and N3b's kernel half (a chardev render node, dmabufs and sync-file fences) on 2026-10-11. N3c, hyprix compositing on the card, is on main; run-compositor --nvidia keeps the software compositor unless FERRIX_NVIDIA_VTEST=1, because Chrome's WebGL page is faster under it (2026-10-25). nvrm follows a monitor plugged, unplugged or swapped, answers IMPORT_SYNC_FILE on its dmabufs, and quiesces its adapter when /run/nvrm-quiesce appears (docs/NVIDIA.md section 13): on the card it shut the adapter down in 1.45 s with NV_PMC_BOOT_0 unchanged and no Xid, and the kept card VMs quiesce on stop or yield; the monitor following and the sync-file import ran on the card too. The customer's Intel N150 box is the stage's first bare-metal machine (docs/N150.md): Ferrix booted on it on 2026-10-15, its drivers (AHCI, the YT6801, a firmware framebuffer, VT-d, SMBIOS, an event log) and a render driver for its Intel GPU (docs/INTEL-GPU.md) are on main, and the kernel bring-up is evidenced on QEMU only. Since 2026-10-21 main also holds that driver's 2 MiB and 64 KiB GPU pages and 2 MiB VT-d entries for a pin's aligned runs, a modeset of the second HDMI port with hot-plug and the monitor's EDID, and a ring-3 power driver; several of their box runs are BACKLOG rows. Exit: the stage 19 exit on real hardware, drawn by the card.
 
 ### S22 — Stage 22 steam
 
@@ -3466,7 +3466,7 @@ Under way since 2026-09-26. Sound's playback is done (docs/AUDIO.md, 24 points):
 
 **InProgress**  ·  size about 205 points as a first guess, step 5 unknown  ·  `#inProgress`
 
-The Windows game Arknights: Endfield on Ferrix, through Wine with DXVK on NVIDIA's Vulkan, put on the roadmap by the customer on 2026-10-10 as the road after Steam. A feasibility study was written the same day; step 0 answered on 2026-10-13 (the anti-cheat refuses a virtual machine), Wine, DXVK and a Unity game run on Ferrix with no card, and Endfield's launcher draws its install dialog in Debian's Wine and in GE-Proton11-7's; the game's download stopped on ENOSPC from Ferrix's btrfs, whose cause, a writable mount's page cache never reclaimed, is fixed on main since 2026-10-15, and no download has run since; Syscall User Dispatch and seccomp's TRAP are on main. Eight steps in the order they can be proved: the game on plain Linux in the same VM shape, which costs no Ferrix work and answers whether its anti-cheat accepts a virtual machine; plain Wine starts on Ferrix, which needs arch_prctl(ARCH_SET_GS) first; a Direct3D 11 program draws through DXVK on the card, on stage 21's unlanded branches; a Unity DirectX 11 game without anti-cheat; the game's installer, launcher and login; past the anti-cheat, unknown until it is run; playable; and, optional, by way of Steam's own Proton, which is also stage 22's third exit step. What Wine needs of the kernel is sized here and not in stage 22. The anti-cheat's tolerance of Wine and of a virtual machine, an account ban and the game's terms are outside Ferrix's engineering and can stop it. Exit: the game reaches its world past the login and is playable at 1920x1080 and 60 frames a second on the RTX 3060; a recorded run on the card with the customer's account, not a boot in CI.
+The Windows game Arknights: Endfield on Ferrix, through Wine with DXVK on NVIDIA's Vulkan, put on the roadmap by the customer on 2026-10-10 as the road after Steam. A feasibility study was written the same day; step 0 answered on 2026-10-13 (the anti-cheat refuses a virtual machine), Wine, DXVK and a Unity game run on Ferrix with no card, and Endfield's launcher draws its install dialog in Debian's Wine and in GE-Proton11-7's; the game's download stopped on ENOSPC from Ferrix's btrfs, whose cause, a writable mount's page cache never reclaimed, is fixed on main since 2026-10-15; Syscall User Dispatch and seccomp's TRAP are on main. Since 2026-10-23 the game, started from Steam, has run on the customer's N150 box on its Intel GPU's driver and reaches its world on about half its starts, at about 25 frames a second at 720p (docs/GAME-MODE.md); the steps below are not brought up to those runs. Eight steps in the order they can be proved: the game on plain Linux in the same VM shape, which costs no Ferrix work and answers whether its anti-cheat accepts a virtual machine; plain Wine starts on Ferrix, which needs arch_prctl(ARCH_SET_GS) first; a Direct3D 11 program draws through DXVK on the card, on stage 21's unlanded branches; a Unity DirectX 11 game without anti-cheat; the game's installer, launcher and login; past the anti-cheat, unknown until it is run; playable; and, optional, by way of Steam's own Proton, which is also stage 22's third exit step. What Wine needs of the kernel is sized here and not in stage 22. The anti-cheat's tolerance of Wine and of a virtual machine, an account ban and the game's terms are outside Ferrix's engineering and can stop it. Exit: the game reaches its world past the login and is playable at 1920x1080 and 60 frames a second on the RTX 3060; a recorded run on the card with the customer's account, not a boot in CI.
 
 ### S24 — Stage 24 game path
 
@@ -3739,8 +3739,8 @@ flowchart LR
   classDef implemented fill:#dceae2,stroke:#2c6e4e,color:#16191d
   classDef inProgress fill:#dae5f0,stroke:#2a5f8f,color:#16191d
   classDef planned fill:#e4e7ea,stroke:#6a737e,color:#16191d
-  class n0_FerrixRoadmap_stage1Boot,n2_FerrixRoadmap_stage2Memory,n3_FerrixStructure_Kernel_mm,n4_FerrixStructure_Kernel_vmap,n5_FerrixRoadmap_stage3TrapsInterruptsTime,n6_FerrixStructure_Kernel_trap,n7_FerrixStructure_Kernel_irq,n8_FerrixStructure_Kernel_timer,n9_FerrixRoadmap_stage4Smp,n10_FerrixStructure_Kernel_smp,n11_FerrixRoadmap_armv7aPort,n13_FerrixRoadmap_stage5Scheduler,n14_FerrixStructure_Kernel_sched,n15_FerrixStructure_Kernel_tasks,n16_FerrixRoadmap_stage6UserMode,n17_FerrixStructure_Kernel_vm,n18_FerrixRoadmap_stage7LinuxAbi,n19_FerrixStructure_Kernel_syscalls,n20_FerrixStructure_Kernel_signals,n21_FerrixStructure_Kernel_futex,n22_FerrixRoadmap_stage8Vfs,n23_FerrixStructure_Kernel_vfs,n24_FerrixStructure_Kernel_filesystems,n25_FerrixRoadmap_stageSysfs,n29_FerrixRoadmap_stage9NativeAbi,n30_FerrixStructure_Kernel_native,n31_FerrixRoadmap_stage10UserspaceDrivers,n34_FerrixRoadmap_stage11BtrfsRead,n35_FerrixStructure_Kernel_blockCore,n36_FerrixRoadmap_stageNetworking,n37_FerrixStructure_Kernel_netCore,n38_FerrixRoadmap_stageDynamicLinking,n39_FerrixRoadmap_stage13Isolation,n45_FerrixRoadmap_stage16Rustc,n46_FerrixStructure_Userland_rustc implemented
-  class n26_FerrixRoadmap_stageChrome,n27_FerrixStructure_Ferrix_userland,n28_FerrixRoadmap_stage25Yoru,n40_FerrixStructure_Kernel_namespaces,n41_FerrixStructure_Kernel_cgroups,n42_FerrixStructure_Kernel_seccomp,n44_FerrixRoadmap_stage15Userland inProgress
+  class n0_FerrixRoadmap_stage1Boot,n2_FerrixRoadmap_stage2Memory,n3_FerrixStructure_Kernel_mm,n4_FerrixStructure_Kernel_vmap,n5_FerrixRoadmap_stage3TrapsInterruptsTime,n6_FerrixStructure_Kernel_trap,n7_FerrixStructure_Kernel_irq,n8_FerrixStructure_Kernel_timer,n9_FerrixRoadmap_stage4Smp,n10_FerrixStructure_Kernel_smp,n11_FerrixRoadmap_armv7aPort,n13_FerrixRoadmap_stage5Scheduler,n14_FerrixStructure_Kernel_sched,n15_FerrixStructure_Kernel_tasks,n16_FerrixRoadmap_stage6UserMode,n17_FerrixStructure_Kernel_vm,n18_FerrixRoadmap_stage7LinuxAbi,n19_FerrixStructure_Kernel_syscalls,n20_FerrixStructure_Kernel_signals,n21_FerrixStructure_Kernel_futex,n22_FerrixRoadmap_stage8Vfs,n23_FerrixStructure_Kernel_vfs,n24_FerrixStructure_Kernel_filesystems,n25_FerrixRoadmap_stageSysfs,n29_FerrixRoadmap_stage9NativeAbi,n30_FerrixStructure_Kernel_native,n31_FerrixRoadmap_stage10UserspaceDrivers,n34_FerrixRoadmap_stage11BtrfsRead,n35_FerrixStructure_Kernel_blockCore,n36_FerrixRoadmap_stageNetworking,n37_FerrixStructure_Kernel_netCore,n38_FerrixRoadmap_stageDynamicLinking,n39_FerrixRoadmap_stage13Isolation,n40_FerrixStructure_Kernel_namespaces,n41_FerrixStructure_Kernel_cgroups,n42_FerrixStructure_Kernel_seccomp,n45_FerrixRoadmap_stage16Rustc,n46_FerrixStructure_Userland_rustc implemented
+  class n26_FerrixRoadmap_stageChrome,n27_FerrixStructure_Ferrix_userland,n28_FerrixRoadmap_stage25Yoru,n44_FerrixRoadmap_stage15Userland inProgress
   class n43_FerrixRoadmap_stage14RealTime planned
 ```
 
@@ -5362,12 +5362,12 @@ Every element carrying @stage, which names the roadmap stage that owns it. An el
 | 13 | `FerrixMemory::Reclaim` | part | `#planned` |
 | 13 | `FerrixObjects::JobQuota` | part | `#implemented` |
 | 13 | `FerrixObjects::LinuxSyscallLayer::seccompCheck` | action | `#planned` |
-| 13 | `FerrixIsolation::Namespace` | part | `#inProgress` |
+| 13 | `FerrixIsolation::Namespace` | part | `#implemented` |
 | 13 | `FerrixIsolation::NsSet` | part | `#planned` |
-| 13 | `FerrixIsolation::Namespaces` | part | `#inProgress` |
-| 13 | `FerrixIsolation::Cgroup` | part | `#inProgress` |
-| 13 | `FerrixIsolation::Cgroups` | part | `#inProgress` |
-| 13 | `FerrixIsolation::Seccomp` | part | `#inProgress` |
+| 13 | `FerrixIsolation::Namespaces` | part | `#implemented` |
+| 13 | `FerrixIsolation::Cgroup` | part | `#implemented` |
+| 13 | `FerrixIsolation::Cgroups` | part | `#implemented` |
+| 13 | `FerrixIsolation::Seccomp` | part | `#implemented` |
 | 13 | `FerrixIsolation::ClassicBpfInterpreter` | part | `#implemented` |
 | 13 | `FerrixStorage::Cgroupfs` | part | `#implemented` |
 | 14 | `FerrixScheduling::Task::schedClass` | attribute | `#planned` |

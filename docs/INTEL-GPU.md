@@ -423,8 +423,9 @@ allocate, and the box is reached over ssh (`fx.sh`).
 * **Device to memory.** Every GEM object is a VMO pinned into the device's
   IOMMU domain (`vmo_pin`, addresses identity-mapped, `iommu.rs`), so the
   GPU reaches only pinned pages. That holds only when `dmar0` translates.
-  On the box today neither unit is driven (degraded trusted mode,
-  `n150-linux/FINDINGS.md` item 3). `vtd-n150` (unlanded) brings `dmar0` up
+  On the box when this was written neither unit was driven (degraded trusted
+  mode, `n150-linux/FINDINGS.md` item 3). `vtd-n150` (on `main` since
+  2026-10-17, 16e113583) brings `dmar0` up
   for interrupt remapping with translation **off**, because of the RMRR
   (`vtd-design.md` §3.9(a)). Its slice 2, an identity-mapped RMRR domain
   for `00:02.0` with the driver's pins added to it, is this design's K2.
@@ -493,7 +494,7 @@ allocate, and the box is reached over ssh (`fx.sh`).
 
 | # | Change | Ring | Points |
 |---|---|---|---|
-| K1 | `vtd-n150` on the box (designed, reviewed OK IF, branch unlanded) | core | not counted: its own row |
+| K1 | `vtd-n150` on the box (designed, reviewed OK IF; on `main` since 2026-10-17, 16e113583) | core | not counted: its own row |
 | K2 | `dmar0` translating: an RMRR identity domain for `00:02.0`, refused when it overlaps usable RAM, never detached; the driver's pins added to it (`vtd-design.md` §3.9(b)) | core | 5 |
 | K3 | A render-only chardev driver: devmgr's `Gpu` kind for Intel, the ADL-N match under `ferrix.intelgpu`, a HELLO of `RENDER_MINOR` alone, the budget sized for an iGPU | load (chardev), devmgr outside | 3 |
 | K4 | The screen's hand-over: under `ferrix.intelgpu`, the function is not yielded, the Intel node may be a copying card (`display::check`'s rule), and the lent range's GGTT entries and the panic screen's hold are argued | load (display) and item (device yield) | 5 |

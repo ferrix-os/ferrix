@@ -8,6 +8,8 @@ narrows the residual `MACHINE-CHECK.md` §6 and SAFETY-MANUAL AoU-36 name: "the
 kernel consuming it -- a system call's copy, ... -- is a ring-0 machine check
 and stops as FX-9005".
 
+**Landed:** on `develop` as 1308245de (2026-10-30). Reconciled 2026-11-02.
+
 ## 1. What is there today
 
 A program that reads a poisoned page itself takes the machine check in ring

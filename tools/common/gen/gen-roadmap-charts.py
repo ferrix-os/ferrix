@@ -15,7 +15,7 @@ from pathlib import Path
 
 OUT = Path(__file__).resolve().parent.parent.parent.parent / "docs" / "img"
 
-TODAY = date(2026, 10, 8)
+TODAY = date(2026, 10, 31)
 
 # Points landed per day (docs/BACKLOG.md, *Velocity*). 09-18 to 09-23 were
 # sized afterwards from `git log`; 09-23 is what is left of that backfill.
@@ -44,15 +44,60 @@ LANDED = [
     (date(2026, 10, 3), 153),
     (date(2026, 10, 4), 55),
     (date(2026, 10, 5), 115),
+    # 2026-10-06 to 10-31, counted on 2026-11-02 (docs/backlog/VELOCITY.md,
+    # "Update, 2026-11-02"): 1.1 points a commit that is not documentation,
+    # a reservation, a pin or coverage, replaced by the design documents'
+    # estimates where they exist and by cluster sizes on 10-26, 10-27, 10-29,
+    # 10-30 and 10-31. Dated by the commit's date on develop.
+    (date(2026, 10, 6), 63),
+    (date(2026, 10, 7), 57),
+    (date(2026, 10, 8), 37),
+    (date(2026, 10, 9), 1),
+    (date(2026, 10, 10), 11),
+    (date(2026, 10, 11), 79),
+    (date(2026, 10, 12), 23),
+    (date(2026, 10, 13), 29),
+    (date(2026, 10, 14), 31),
+    (date(2026, 10, 15), 75),
+    (date(2026, 10, 16), 102),
+    (date(2026, 10, 17), 43),
+    (date(2026, 10, 18), 62),
+    (date(2026, 10, 19), 13),
+    (date(2026, 10, 20), 24),
+    (date(2026, 10, 21), 34),
+    (date(2026, 10, 22), 54),
+    (date(2026, 10, 23), 217),
+    (date(2026, 10, 24), 69),
+    (date(2026, 10, 25), 107),
+    (date(2026, 10, 26), 50),
+    (date(2026, 10, 27), 3),
+    (date(2026, 10, 28), 32),
+    (date(2026, 10, 29), 15),
+    (date(2026, 10, 30), 80),
+    (date(2026, 10, 31), 59),
 ]
 BACKFILLED = {date(2026, 9, d) for d in range(18, 24)}
 AFTERWARDS = {date(2026, 9, 24): 27, date(2026, 9, 25): 26, date(2026, 9, 26): 175,
               date(2026, 9, 27): 150, date(2026, 9, 28): 44, date(2026, 9, 29): 26,
               date(2026, 9, 30): 83, date(2026, 10, 1): 94, date(2026, 10, 2): 128,
               date(2026, 10, 3): 115, date(2026, 10, 4): 55,
-              date(2026, 10, 5): 29}
+              date(2026, 10, 5): 29,
+              date(2026, 10, 6): 4, date(2026, 10, 7): 14, date(2026, 10, 8): 10, date(2026,
+              10, 9): 1, date(2026, 10, 10): 11, date(2026, 10, 11): 74, date(2026, 10, 12):
+              23, date(2026, 10, 13): 29, date(2026, 10, 14): 18, date(2026, 10, 15): 70,
+              date(2026, 10, 16): 90, date(2026, 10, 17): 43, date(2026, 10, 18): 62,
+              date(2026, 10, 19): 13, date(2026, 10, 20): 24, date(2026, 10, 21): 34,
+              date(2026, 10, 22): 54, date(2026, 10, 23): 38, date(2026, 10, 24): 36,
+              date(2026, 10, 25): 85, date(2026, 10, 26): 50, date(2026, 10, 27): 3,
+              date(2026, 10, 28): 32, date(2026, 10, 29): 15, date(2026, 10, 30): 80,
+              date(2026, 10, 31): 59}
 
-# The status table's sized, unfinished rows after 2026-10-08's landings.
+# The status table's sized, unfinished rows on 2026-10-31 (e51fc67fd). Nothing
+# sized came off between 10-08 and 10-31: the landings of those weeks (stage 13's
+# follow-ons, N3c, lode and tole, the machine-check family, signing S1 to S4)
+# were unsized or outside the table. The bubblewrap row's N5 and bwrap-user
+# landed 2026-10-26 (3a65627b9) but N6 and N7 are not split out of its 16.
+# (Rows as of 2026-10-08 follow.)
 # The state says why a row is not moving: "unlanded" is built and waits on a
 # landing (controls, `check`, a batch), "idle" has had no session on it since
 # 2026-09-26 or longer, "added" came into scope after the 09-26 baseline.
@@ -140,6 +185,12 @@ DONE = [
     ("Authentication P1, P2 (desktop as a user)", D(2026, 9, 27), D(2026, 10, 4)),
     ("Network namespaces", D(2026, 10, 1), D(2026, 10, 4)),
     ("Components and apps in repositories", D(2026, 10, 3), D(2026, 10, 4)),
+    ("Stage 13 follow-ons, N5, time namespaces (unsized)", D(2026, 10, 26), D(2026, 10, 26)),
+    ("N3c: hyprix on the 3060 (8)", D(2026, 10, 25), D(2026, 10, 25)),
+    ("lode, steps 1 to 6 and tombstones", D(2026, 10, 23), D(2026, 10, 24)),
+    ("tole U1 to U9 (48 + 13)", D(2026, 10, 23), D(2026, 10, 24)),
+    ("GNOME-like desktop, parts 1 to 4 (70)", D(2026, 10, 23), D(2026, 10, 24)),
+    ("Machine-check family, 8 items", D(2026, 10, 30), D(2026, 10, 31)),
 ]
 # Each row: name, first day, and the REMAINING entries its unfinished work is
 # (by name), or None when the row has no size. The remainder is drawn to the
