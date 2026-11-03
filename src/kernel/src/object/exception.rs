@@ -58,7 +58,7 @@ use ferrix_native_abi::types::EXCEPTION_TIMEOUT_MAX_MS;
 use crate::arch;
 use crate::audit;
 use crate::fallible::{self, AllocError};
-use crate::object::channel::Endpoint;
+use crate::object::channel::{Endpoint, Sender};
 use crate::object::job::{self, Job};
 use crate::object::process::Process;
 use crate::object::{self, Object};
@@ -78,7 +78,7 @@ struct Attached {
 
 /// Why an attach was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AttachRefused {
+pub enum AttachRefused {
     /// A channel whose read end is open is attached already.
     Bound,
     /// The process has ended, and its slot was closed for good.
@@ -88,7 +88,7 @@ pub(crate) enum AttachRefused {
 /// The supervisor slot of a process or a job: empty, or one attached
 /// channel.
 #[derive(Debug)]
-pub(crate) struct Supervisor {
+pub struct Supervisor {
     /// The attached channel, if any. A channel whose read end has closed
     /// stays here until the slot is next asked.
     slot: SpinLock<Slot>,
@@ -150,7 +150,7 @@ impl Supervisor {
     /// # Errors
     ///
     /// [`AttachRefused`], with `end` handed back.
-    pub(crate) fn attach(
+    pub fn attach(
         &self,
         end: Arc<Endpoint>,
         timeout_ms: u64,
@@ -193,17 +193,17 @@ impl Supervisor {
     /// `PR_SET_DUMPABLE` 0 call, as Linux's `ptrace_may_access` refuses a
     /// tracer such a process. For good: a supervisor attached later, to the
     /// process or to a job above it, hears nothing of it.
-    pub(crate) fn refuse(&self) {
+    pub fn refuse(&self) {
         self.refused.store(true, Ordering::Release);
     }
 
     /// Whether [`Supervisor::refuse`] was called.
-    pub(crate) fn is_refused(&self) -> bool {
+    pub fn is_refused(&self) -> bool {
         self.refused.load(Ordering::Acquire)
     }
 
     /// Whether a channel whose read end is open is attached.
-    pub(crate) fn is_live(&self) -> bool {
+    pub fn is_live(&self) -> bool {
         match &*self.slot.lock() {
             Slot::Open(Some(attached)) => !attached.end.peer_closed(),
             Slot::Open(None) | Slot::Closed => false,
@@ -213,7 +213,7 @@ impl Supervisor {
     /// Let go of the attached channel if its read end has closed, and
     /// answer its kernel end for the caller to dispose of with no lock held:
     /// what an attach whose read end could not be placed does.
-    pub(crate) fn let_go_if_dead(&self) -> Option<Object> {
+    pub fn let_go_if_dead(&self) -> Option<Object> {
         let mut slot = self.slot.lock();
         let Slot::Open(attached) = &mut *slot else {
             return None;
@@ -234,7 +234,7 @@ impl Supervisor {
     /// supervisor sees `PEER_CLOSED` then, and an attach after it is
     /// refused. Answers the kernel end for the caller to dispose of with no
     /// lock held.
-    pub(crate) fn close(&self) -> Option<Object> {
+    pub fn close(&self) -> Option<Object> {
         match core::mem::replace(&mut *self.slot.lock(), Slot::Closed) {
             Slot::Open(attached) => attached.map(|attached| Object::Channel(attached.end)),
             Slot::Closed => None,
@@ -245,14 +245,14 @@ impl Supervisor {
 /// Whether `process` is under a supervisor: a live channel on it or on any
 /// job above it. What `execve` asks before it raises credentials
 /// (`docs/microkernel/K4.md` §11 (1)).
-pub(crate) fn supervised(process: &Process) -> bool {
+pub fn supervised(process: &Process) -> bool {
     process.supervisor().is_live() || job_supervised(&process.job())
 }
 
 /// Whether `job` or any job above it holds a live channel: what a
 /// `cgroup.procs` move asks of its destination (`docs/microkernel/K4.md`
 /// §11 (2)).
-pub(crate) fn job_supervised(job: &Arc<Job>) -> bool {
+pub fn job_supervised(job: &Arc<Job>) -> bool {
     let mut at = Some(Arc::clone(job));
     while let Some(job) = at {
         if job.supervisor().is_live() {
@@ -265,7 +265,7 @@ pub(crate) fn job_supervised(job: &Arc<Job>) -> bool {
 
 /// A supervisor's decision on one exception (`docs/microkernel/K4.md` §2.5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Verdict {
+pub enum Verdict {
     /// Resume the thread with its registers as they now stand.
     Resume,
     /// End its process, as a job kill ends it.
@@ -318,14 +318,14 @@ impl ExceptionCore {
 /// An exception as its handle holds it. Its drop, the last handle gone
 /// undecided, hands the fault on.
 #[derive(Debug)]
-pub(crate) struct Exception {
+pub struct Exception {
     /// The exception.
     core: Arc<ExceptionCore>,
 }
 
 /// Why an exception call was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Refused {
+pub enum Refused {
     /// A verdict was given already.
     Decided,
     /// Its wait expired: the default action was taken.
@@ -340,7 +340,7 @@ impl Exception {
     /// # Errors
     ///
     /// [`Refused::Decided`], [`Refused::Expired`].
-    pub(crate) fn registers(&self) -> Result<Registers, Refused> {
+    pub fn registers(&self) -> Result<Registers, Refused> {
         let held = self.core.held.lock();
         pending(held.state)?;
         Ok(held.context.supervised())
@@ -353,7 +353,7 @@ impl Exception {
     ///
     /// [`Refused::Registers`] with nothing changed; [`Refused::Decided`],
     /// [`Refused::Expired`].
-    pub(crate) fn set_registers(&self, written: &Registers) -> Result<(), Refused> {
+    pub fn set_registers(&self, written: &Registers) -> Result<(), Refused> {
         let mut held = self.core.held.lock();
         pending(held.state)?;
         let context = held
@@ -370,7 +370,7 @@ impl Exception {
     /// # Errors
     ///
     /// [`Refused::Decided`], [`Refused::Expired`].
-    pub(crate) fn resolve(&self, verdict: Verdict) -> Result<(), Refused> {
+    pub fn resolve(&self, verdict: Verdict) -> Result<(), Refused> {
         {
             let mut held = self.core.held.lock();
             pending(held.state)?;
@@ -415,12 +415,12 @@ static REPORTED: AtomicU64 = AtomicU64::new(0);
 static SKIPPED: AtomicU64 = AtomicU64::new(0);
 
 /// Reports written since boot, for the checks.
-pub(crate) fn reported() -> u64 {
+pub fn reported() -> u64 {
     REPORTED.load(Ordering::Relaxed)
 }
 
 /// Levels skipped since boot, for the checks.
-pub(crate) fn skipped() -> u64 {
+pub fn skipped() -> u64 {
     SKIPPED.load(Ordering::Relaxed)
 }
 
@@ -607,7 +607,10 @@ fn ask(end: &Endpoint, report: &Report, context: arch::UserContext, deadline: u6
         return Asked::Skipped;
     };
     let (core, bytes, transfers) = made;
-    if end.write(bytes, 1, move || Ok::<_, ()>(transfers)).is_err() {
+    if end
+        .write(Sender::KERNEL, bytes, 1, move || Ok::<_, ()>(transfers))
+        .is_err()
+    {
         // The exception went with the refused write, handed on with nobody
         // waiting on it; this level is skipped.
         return Asked::Skipped;

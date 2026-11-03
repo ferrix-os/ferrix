@@ -88,7 +88,9 @@ pub use preempt::{preempt_disable, preempt_enable};
 /// The slice a task alone on its queue is given: what `sched_getattr`
 /// answers for a thread that asked for none of its own.
 pub const BASE_SLICE_NS: u64 = SLICE_NS;
-pub(crate) use queue::{Due, FIRE_BATCH, Fired, MIN_SLICE_NS, SLICE_NS, take_next};
+#[cfg(ferrix_checks = "on")]
+pub use queue::{FIRE_BATCH, Fired, take_next};
+pub use queue::{Due, MIN_SLICE_NS, SLICE_NS};
 pub(crate) use task::SleepSlot;
 pub use task::Task;
 pub use task::{TaskId, UserThread};
@@ -2618,9 +2620,15 @@ pub(crate) fn put_back_in_service(cpu: usize, deadline: u64) -> Result<(), Servi
     Ok(())
 }
 
-/// Move every movable task off processor `me` to processors in service,
-/// one at a time under both queues' locks, lower first; how many moved.
+/// Move every movable task and timer arm off processor `me` to processors
+/// in service, one at a time under both queues' locks, lower first; how many
+/// moved. First the arms a decision's pass already took into the fired
+/// buffer are fired: the interrupt that would have is one this processor,
+/// its timer about to stop, may never take (L.sched.104).
 fn evacuate(me: usize) -> u64 {
+    let saved = <arch::Irq as IrqControl>::disable();
+    fire_timers(me);
+    <arch::Irq as IrqControl>::restore(saved);
     let mut tasks = 0;
     let Some(count) = QUEUES.get().map(Vec::len) else {
         return 0;
@@ -2675,6 +2683,14 @@ fn move_one_off(me: usize, to: usize) -> bool {
             // NOALLOC: `CpuQueue::insert` queues the task in its own run slot.
             theirs_queue.insert(&task);
         }
+        true
+    } else if let Some((at, armed, slot)) = mine_queue.take_timer_arm() {
+        // A parked processor's timer is stopped, so an arm left on it would
+        // not fire until it came back (L.sched.104). The new home is written
+        // under both locks, so a `take_back` that loses the race finds it.
+        armed.timer.filed_on(to);
+        let id = armed.timer.timeline_id();
+        theirs_queue.file_timer(at, id, armed, slot);
         true
     } else {
         false
@@ -3044,7 +3060,7 @@ pub(crate) fn unfile_timer(
 
 /// How many entries, tasks and timer arms, this processor's sleeper set
 /// holds, and how many arms wait in its fired buffer: for the checks.
-pub(crate) fn sleepers_here() -> (usize, usize) {
+pub fn sleepers_here() -> (usize, usize) {
     let saved = <arch::Irq as IrqControl>::disable();
     let counts = this_cpu().and_then(queue_of).map_or((0, 0), |lock| {
         let queue = lock.lock();

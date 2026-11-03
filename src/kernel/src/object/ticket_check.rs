@@ -64,26 +64,26 @@ const PAGES: u64 = 4;
 
 /// What the boot line counts.
 #[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct Report {
+pub struct Report {
     /// Refused calls, each audited.
-    pub(crate) refused: u32,
+    pub refused: u32,
     /// Pages an adopted call committed to the client.
-    pub(crate) pages: u64,
+    pub pages: u64,
     /// Objects an adopted call made for the client.
-    pub(crate) objects: u64,
+    pub objects: u64,
     /// Pages the server faulted in under an adoption, charged to itself.
-    pub(crate) own_pages: u64,
+    pub own_pages: u64,
     /// Tickets live on one end at the bound.
-    pub(crate) bound: usize,
+    pub bound: usize,
     /// Kernel heap the server's own job was charged for during the adopted
     /// calls that made the client's objects: its own structures, a handle
     /// table's room (K7.md §2.3).
-    pub(crate) server_heap: u64,
+    pub server_heap: u64,
     /// The most kernel heap one native object an adopted call can make takes
     /// for its own record (a VMO, a channel, a port, a job), which no job is
     /// charged for as heap: the client's object limit times this bounds the
     /// heap K7 leaves unmoved (the consultant's 2925 (1)).
-    pub(crate) largest_object: usize,
+    pub largest_object: usize,
 }
 
 /// One check's world: the jobs, the processes, the channels.
@@ -113,7 +113,7 @@ struct World {
 /// Which property failed.
 ///
 /// Verifies: H.QUOTA.14
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let slots = quota::live_slots();
     let mut report = Report::default();
     {

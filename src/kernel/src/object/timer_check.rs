@@ -60,13 +60,13 @@ const MS: u64 = 1_000_000;
 
 /// What the checks counted, for the boot's line.
 #[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct Report {
+pub struct Report {
     /// Timers that fired.
-    pub(crate) fired: u64,
+    pub fired: u64,
     /// Interrupt passes the batch case took.
-    pub(crate) passes: u64,
+    pub passes: u64,
     /// Refusals as specified.
-    pub(crate) refusals: u64,
+    pub refusals: u64,
 }
 
 /// Run every case.
@@ -74,7 +74,7 @@ pub(crate) struct Report {
 /// # Errors
 ///
 /// The first case that failed, as a sentence.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let boot = sched::current()
         .ok_or("the checking task is not running")?
         .cpu();

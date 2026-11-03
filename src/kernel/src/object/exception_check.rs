@@ -65,20 +65,20 @@ const EXPIRY_SLACK_NANOS: u64 = 5_000_000_000;
 
 /// What the check measured, for the boot log.
 #[derive(Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// Channels attached.
-    pub(crate) attached: u32,
+    pub attached: u32,
     /// Channels detached, by closing their read end or by their process's
     /// end.
-    pub(crate) detached: u32,
+    pub detached: u32,
     /// Calls refused with exactly the status they had to be refused with.
-    pub(crate) refusals: u32,
+    pub refusals: u32,
     /// Objects one attach charged to the caller's job.
-    pub(crate) charged: u64,
+    pub charged: u64,
     /// Faults reported to the check and decided by it, or left to expire.
-    pub(crate) faults: u32,
+    pub faults: u32,
     /// Register sets a write refused, every one of them forged.
-    pub(crate) forged: u32,
+    pub forged: u32,
 }
 
 /// Run every case of §5 but o, which is cgroupfs's (`fs::cgroupfs`'s check).
@@ -88,7 +88,7 @@ pub(crate) struct Report {
 /// # Errors
 ///
 /// The first case that did not hold.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let mut report = Report::default();
     let side = Side::new()?;
     let root = Job::new_root().map_err(|_| "no memory for the check's job")?;

@@ -40,16 +40,16 @@ use crate::user::vmo::Vmo;
 
 /// What the check reports for its boot line.
 #[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct Report {
+pub struct Report {
     /// Waits woken by a wake, a requeue's wake or a wake through another
     /// process.
-    pub(crate) woken: u32,
+    pub woken: u32,
     /// Processes the waits and wakes were made from.
-    pub(crate) processes: u32,
+    pub processes: u32,
     /// Calls refused as the ABI says.
-    pub(crate) refusals: u32,
+    pub refusals: u32,
     /// A wake's walk over a bucket, nanoseconds per entry it looked at.
-    pub(crate) walk_ns: u64,
+    pub walk_ns: u64,
 }
 
 /// Private words in the scratch region, each in the first page.
@@ -202,7 +202,7 @@ fn refused(
 }
 
 /// Run every case and report.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let mut report = Report::default();
     let a = Side::new()?;
     let b = Side::new()?;

@@ -114,20 +114,20 @@ const POLL_NANOS: u64 = 1_000_000;
 
 /// What the check found, for the boot line.
 #[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct Report {
+pub struct Report {
     /// Maps, protects and unmaps made by handle that succeeded.
-    pub(crate) changes: u32,
+    pub changes: u32,
     /// Refusals, each as specified.
-    pub(crate) refusals: u32,
+    pub refusals: u32,
     /// User leaves the W^X sweep walked.
-    pub(crate) leaves: u64,
+    pub leaves: u64,
     /// Of them, executable.
-    pub(crate) executable: u64,
+    pub executable: u64,
     /// Bytes the owner's job rose by for one by-handle read.
-    pub(crate) owner_bytes: u64,
+    pub owner_bytes: u64,
     /// Clone cases that held: no write crossed between a source and its
     /// clone, and the shared mapping stayed shared.
-    pub(crate) clone_cases: u32,
+    pub clone_cases: u32,
 }
 
 /// Handed to the check's thread.
@@ -159,7 +159,7 @@ static FOUND: SpinLock<Option<Result<Report, &'static str>>> = SpinLock::new(Non
 /// Verifies: L.object.235, L.object.236, L.object.238, L.object.240
 /// Verifies: L.user.158, L.user.159, L.user.162
 /// Verifies: H.MEM.25, L.object.237, L.object.239, L.user.160, L.user.161
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let tree = Job::new_root().map_err(|_| "no memory for the space check's jobs")?;
     let caller = tree
         .new_child()

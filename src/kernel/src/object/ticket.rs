@@ -54,7 +54,7 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 /// One ticket: a charge the kernel lets a server make to the client that
 /// issued it, for as long as it is live.
 #[derive(Debug)]
-pub(crate) struct Ticket {
+pub struct Ticket {
     /// Its id, never issued twice.
     id: u64,
     /// Who issued it: the process and its job at the issue (K6's `Sender`).
@@ -74,7 +74,7 @@ pub(crate) struct Ticket {
 
 impl Ticket {
     /// Who issued it.
-    pub(crate) fn issuer(&self) -> Sender {
+    pub fn issuer(&self) -> Sender {
         self.issuer
     }
 
@@ -96,7 +96,7 @@ impl Ticket {
 
 /// Why an issue was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum IssueError {
+pub enum IssueError {
     /// [`MAX_TICKETS`] are live on this end already.
     Full,
     /// The other end has gone.
@@ -191,7 +191,7 @@ enum Target {
 /// its charges of VMO commits and new objects go to the adopted ticket's job
 /// while the ticket is live at the call's entry, and to the task's own
 /// otherwise. An adoption whose ticket has ended is dropped here.
-pub(crate) fn charging_for_call<R>(answer: impl FnOnce() -> R) -> R {
+pub fn charging_for_call<R>(answer: impl FnOnce() -> R) -> R {
     let target = crate::sched::with_current(|task| {
         if !task.has_adoption() {
             return (Target::Own, None);
@@ -217,14 +217,14 @@ pub(crate) fn charging_for_call<R>(answer: impl FnOnce() -> R) -> R {
 }
 
 /// The running task adopts `ticket`, in place of whatever it had.
-pub(crate) fn adopt(ticket: Arc<Ticket>) {
+pub fn adopt(ticket: Arc<Ticket>) {
     let old = crate::sched::with_current(|task| task.replace_adoption(Some(ticket)));
     drop(old);
 }
 
 /// The running task gives up its adoption, if it has one: `LEAVE`, `exec`
 /// and a task's exit.
-pub(crate) fn leave() {
+pub fn leave() {
     // One load for the task that adopted nothing, as every task's exit and
     // every `exec` ask: no lock is taken where there is nothing to give up.
     let old = crate::sched::with_current(|task| {

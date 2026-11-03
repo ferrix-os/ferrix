@@ -24,7 +24,7 @@ use crate::user::space::AddressSpace;
 
 /// What a space handle names.
 #[derive(Debug)]
-pub(crate) struct SpaceRef {
+pub struct SpaceRef {
     /// The space.
     space: Arc<AddressSpace>,
     /// The job that pays for what by-handle calls commit there, held for as
@@ -46,7 +46,7 @@ impl SpaceRef {
     /// # Errors
     ///
     /// [`AllocError`] for no memory, no root, or a job at its object limit.
-    pub(crate) fn create() -> Result<Arc<SpaceRef>, AllocError> {
+    pub fn create() -> Result<Arc<SpaceRef>, AllocError> {
         let charge = Charge::running(Resource::Objects, 1).map_err(|_| AllocError)?;
         let owner = crate::sched::running_group();
         let space = AddressSpace::new().map_err(|_| AllocError)?;
@@ -63,7 +63,7 @@ impl SpaceRef {
     /// # Errors
     ///
     /// [`AllocError`].
-    pub(crate) fn of(space: Arc<AddressSpace>, owner: u32) -> Result<Arc<SpaceRef>, AllocError> {
+    pub fn of(space: Arc<AddressSpace>, owner: u32) -> Result<Arc<SpaceRef>, AllocError> {
         // Nothing charged, and the owner's slot held all the same.
         let charge = Charge::to(owner, Resource::Objects, 0).map_err(|_| AllocError)?;
         fallible::try_arc(SpaceRef {
@@ -79,7 +79,7 @@ impl SpaceRef {
     /// # Errors
     ///
     /// [`AllocError`] for no memory, or a job at its object limit.
-    pub(crate) fn clone_space(&self) -> Result<Arc<SpaceRef>, AllocError> {
+    pub fn clone_space(&self) -> Result<Arc<SpaceRef>, AllocError> {
         let charge = Charge::running(Resource::Objects, 1).map_err(|_| AllocError)?;
         let owner = crate::sched::running_group();
         let space = self.space.fork().map_err(|_| AllocError)?;
@@ -91,14 +91,14 @@ impl SpaceRef {
     }
 
     /// The space.
-    pub(crate) fn space(&self) -> &Arc<AddressSpace> {
+    pub fn space(&self) -> &Arc<AddressSpace> {
         &self.space
     }
 
     /// Run `work`, the target-side half of a by-handle call, with every frame
     /// and table it commits charged to the space's owner rather than to the
     /// caller.
-    pub(crate) fn charging_owner<R>(&self, work: impl FnOnce() -> R) -> R {
+    pub fn charging_owner<R>(&self, work: impl FnOnce() -> R) -> R {
         quota::charging_to(self.owner, work)
     }
 }

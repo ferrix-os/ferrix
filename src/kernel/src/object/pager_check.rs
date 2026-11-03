@@ -96,17 +96,17 @@ const POLL_NANOS: u64 = 1_000_000;
 
 /// What the boot line counts.
 #[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct Report {
+pub struct Report {
     /// Faults forwarded and supplied.
-    pub(crate) supplied: u32,
+    pub supplied: u32,
     /// Waits ended without their page: failed, timed out, closed, killed.
-    pub(crate) ended: u32,
+    pub ended: u32,
     /// `PAGER` records the refusal ring gained.
-    pub(crate) audited: u64,
+    pub audited: u64,
     /// Calls refused as specified.
-    pub(crate) refused: u32,
+    pub refused: u32,
     /// How long case d's wait took, in microseconds, against its 5 ms bound.
-    pub(crate) timed_out_micros: u64,
+    pub timed_out_micros: u64,
 }
 
 /// What a faulting thread is to do.
@@ -195,7 +195,7 @@ struct Served {
 /// Which property failed.
 ///
 /// Verifies: H.MEM.22, H.MEM.23
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let tree = Job::new_root().map_err(|_| "no memory for a job")?;
     let parent = tree.new_child().map_err(|_| "a job refused a child")?;
     let world = World {

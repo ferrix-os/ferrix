@@ -3093,7 +3093,7 @@ package FerrixObjectRequirements {
     }
 
     package AddressWaitCalls {
-        doc /* K5's native calls, 0x1069 to 0x106C (docs/microkernel/K5.md
+        doc /* K5's native calls, 0x106B to 0x106E (docs/microkernel/K5.md
              * section 3): their decoding and refusals, over the core's table
              * (L.user.135-144). */
 

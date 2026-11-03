@@ -357,7 +357,7 @@ pub static STAGE9_QUOTAS: Explanation = Explanation {
 
 /// For `check_pager` in `stages_check.rs`, when `object::pager_check::run`
 /// fails.
-pub(crate) static STAGE9_PAGER: Explanation = Explanation {
+pub static STAGE9_PAGER: Explanation = Explanation {
     code: "FX-0915",
     title: "a pager-backed VMO's fault, wait or dirty tracking was not as K3 states",
     meaning: "`object::pager_check::run` (docs/microkernel/K3.md section 6) serves pagers from \
@@ -385,8 +385,10 @@ pub(crate) static STAGE9_PAGER: Explanation = Explanation {
     ],
     see: "src/kernel/src/object/pager.rs; src/kernel/src/object/pager_check.rs; \
           src/kernel/src/user/vmo.rs; src/kernel/src/user/space.rs; docs/microkernel/K3.md",
+};
+
 /// For `check_reservations` in `stages_check.rs`.
-pub(crate) static STAGE9_RESERVE: Explanation = Explanation {
+pub static STAGE9_RESERVE: Explanation = Explanation {
     code: "FX-0914",
     title: "a job's memory reservation did not hold what it promises",
     meaning: "`object::reserve_check::run` reserves memory for a job in a tree of its own \
@@ -414,7 +416,7 @@ pub(crate) static STAGE9_RESERVE: Explanation = Explanation {
 };
 
 /// For `check_tickets` in `stages_check.rs`, when `object::ticket_check::run` fails.
-pub(crate) static STAGE9_TICKETS: Explanation = Explanation {
+pub static STAGE9_TICKETS: Explanation = Explanation {
     code: "FX-0912",
     title: "a server's charges did not follow the client's ticket",
     meaning: "`object::ticket_check::run` drives charging that follows the client \
@@ -1776,7 +1778,7 @@ pub static STAGE13_USER_DISPATCH: Explanation = Explanation {
 
 /// For `check_address_waits` in `stages_check.rs`, when
 /// `user::address_wait_check::run` fails.
-pub(crate) static STAGE9_ADDRESS_WAIT: Explanation = Explanation {
+pub static STAGE9_ADDRESS_WAIT: Explanation = Explanation {
     code: "FX-0911",
     title: "the waits on a user address failed their self-check",
     meaning: "`user::address_wait_check::run` (docs/microkernel/K5.md §6) drives the native \
@@ -1825,7 +1827,7 @@ pub static SMBIOS: Explanation = Explanation {
 
 /// For `check_exceptions` in `stages_check.rs`, when `object::exception_check::run`
 /// fails (`docs/microkernel/K4.md` §5).
-pub(crate) static STAGE9_EXCEPTIONS: Explanation = Explanation {
+pub static STAGE9_EXCEPTIONS: Explanation = Explanation {
     code: "FX-0917",
     title: "an exception channel was attached where it must be refused, or refused where it \
             must be attached",
@@ -2559,7 +2561,7 @@ pub static STAGE8_PATH_CALLS: Explanation = Explanation {
 
 /// For `check_spaces` in `stages_check.rs`, when `object::space_check::run`
 /// fails.
-pub(crate) static STAGE9_SPACES: Explanation = Explanation {
+pub static STAGE9_SPACES: Explanation = Explanation {
     code: "FX-0916",
     title: "an address space reached by handle was not held to the handle's rights",
     meaning: "`object::space_check::run` (docs/microkernel/K2.md) drives the native calls \
@@ -2646,7 +2648,7 @@ pub static STAGE9_OBJECTS: Explanation = Explanation {
 
 /// For `check_timers` in `stages_check.rs`, when `object::timer_check::run`
 /// fails.
-pub(crate) static STAGE9_TIMERS: Explanation = Explanation {
+pub static STAGE9_TIMERS: Explanation = Explanation {
     code: "FX-0913",
     title: "the timer objects failed their self-check",
     meaning: "`object::timer_check::run` drives `timer_create`, `timer_set` and \

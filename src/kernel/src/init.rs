@@ -306,7 +306,9 @@ fn give_cpu_service(kernel_end: &Arc<Endpoint>) {
         .and_then(|(message, mut transfers): (Vec<u8>, Vec<Transfer>)| {
             let _ = fallible::push_within(&mut transfers, (Object::CpuService, CPU_SERVICE_RIGHTS));
             kernel_end
-                .write(message, 1, || Ok::<Vec<Transfer>, Infallible>(transfers))
+                .write(Sender::KERNEL, message, 1, || {
+                    Ok::<Vec<Transfer>, Infallible>(transfers)
+                })
                 .map_err(|_| ())
         });
     if written.is_err() {
@@ -343,7 +345,9 @@ fn give_memory_scrub(kernel_end: &Arc<Endpoint>) {
             let _ =
                 fallible::push_within(&mut transfers, (Object::MemoryScrub, MEMORY_SCRUB_RIGHTS));
             kernel_end
-                .write(message, 1, || Ok::<Vec<Transfer>, Infallible>(transfers))
+                .write(Sender::KERNEL, message, 1, || {
+                    Ok::<Vec<Transfer>, Infallible>(transfers)
+                })
                 .map_err(|_| ())
         });
     if written.is_err() {

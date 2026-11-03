@@ -39,7 +39,7 @@ use crate::object::timer::Armed;
 /// [`CpuQueue::arm_timer`] for the set's first key, serves them all
 /// (`docs/microkernel/K10.md` §2.1).
 #[derive(Debug)]
-pub(crate) enum Due {
+pub enum Due {
     /// A sleeping task, made runnable at its instant.
     Wake(Arc<Task>),
     /// A timer object's arm, keyed by the latest instant of its window.
@@ -49,7 +49,7 @@ pub(crate) enum Due {
 /// The most timer arms one processor holds between being taken off its
 /// sleeper set and being fired by its timer interrupt, and the most a pass
 /// re-files when that is full (`L.object.218`).
-pub(crate) const FIRE_BATCH: usize = 16;
+pub const FIRE_BATCH: usize = 16;
 
 /// The most a task under a `cpu.max` runs before the quota is looked at
 /// again, however much is left: with `n` tasks of one job running at once on
@@ -76,11 +76,11 @@ pub(crate) const TARGET_LATENCY_NS: u64 = 3_000_000;
 /// the same number `sched_min_granularity`, and the ratio between it and the
 /// target latency is what decides how many runnable tasks it takes before
 /// latency has to give: eight, here.
-pub(crate) const MIN_SLICE_NS: u64 = TARGET_LATENCY_NS / 8;
+pub const MIN_SLICE_NS: u64 = TARGET_LATENCY_NS / 8;
 
 /// The largest slice, which is what one runnable task gets and what the
 /// fairness bound is stated in.
-pub(crate) const SLICE_NS: u64 = TARGET_LATENCY_NS;
+pub const SLICE_NS: u64 = TARGET_LATENCY_NS;
 
 /// The shortest interval worth arming the timer for: below this the interrupt
 /// costs more than the time it measures.
@@ -159,16 +159,16 @@ pub(crate) struct Pick {
 /// fired yet: at most [`FIRE_BATCH`], in a fixed array, so that a pass
 /// allocates nothing.
 #[derive(Debug)]
-pub(crate) struct Fired {
+pub struct Fired {
     /// The arms and their slots; the first `len` are full.
-    pub(crate) slots: [Option<(Armed, SleepSlot)>; FIRE_BATCH],
+    pub slots: [Option<(Armed, SleepSlot)>; FIRE_BATCH],
     /// How many are full.
-    pub(crate) len: usize,
+    pub len: usize,
 }
 
 impl Fired {
     /// None.
-    pub(crate) const fn new() -> Fired {
+    pub const fn new() -> Fired {
         Fired {
             slots: [const { None }; FIRE_BATCH],
             len: 0,
@@ -176,7 +176,7 @@ impl Fired {
     }
 
     /// Every arm held, emptying it.
-    pub(crate) fn take(&mut self) -> [Option<(Armed, SleepSlot)>; FIRE_BATCH] {
+    pub fn take(&mut self) -> [Option<(Armed, SleepSlot)>; FIRE_BATCH] {
         self.len = 0;
         core::mem::replace(&mut self.slots, [const { None }; FIRE_BATCH])
     }
@@ -201,7 +201,7 @@ impl Fired {
 /// out not. `None` when nothing more is due. A free function over the set
 /// and the buffer so that stage 9's coalescing case runs this same code over
 /// a set it built (`object::timer_check`).
-pub(crate) fn take_next(
+pub fn take_next(
     sleepers: &mut Timeline<Due>,
     fired: &mut Fired,
     now: u64,
@@ -784,11 +784,46 @@ impl CpuQueue {
     /// instant and the task, its sleep slot given back so that `to`'s
     /// timeline can file it again (`docs/CORE-QUARANTINE.md` §3.2).
     pub(crate) fn take_movable_sleeper(&mut self, to: usize) -> Option<(u64, Arc<Task>)> {
-        let (at, task, slot) = self
+        let (at, due, slot) = self.sleepers.take_last_where(|due| match due {
+            Due::Wake(task) => !super::pinned(task) && super::allowed(task, to),
+            Due::Fire(_) => false,
+        })?;
+        match due {
+            Due::Wake(task) => {
+                task.return_sleep_slot(slot);
+                Some((at, task))
+            }
+            // The test above refused these; if it had not, the arm goes back
+            // where it was.
+            Due::Fire(armed) => {
+                let id = armed.timer.timeline_id();
+                // NOALLOC: back into the slot it was taken out with.
+                self.sleepers.insert(at, id, Due::Fire(armed), slot);
+                None
+            }
+        }
+    }
+
+    /// Take out one timer arm, with the key it is filed under and its slot,
+    /// for a processor leaving service to file on one in service: an arm is
+    /// nobody's to pin (`docs/CORE-QUARANTINE.md` §3.2, L.sched.104). Under
+    /// this queue's lock and the destination's.
+    pub(crate) fn take_timer_arm(&mut self) -> Option<(u64, Armed, SleepSlot)> {
+        let (at, due, slot) = self
             .sleepers
-            .take_last_where(|task| !super::pinned(task) && super::allowed(task, to))?;
-        task.return_sleep_slot(slot);
-        Some((at, task))
+            .take_last_where(|due| matches!(due, Due::Fire(_)))?;
+        match due {
+            Due::Fire(armed) => Some((at, armed, slot)),
+            // The test above refused these.
+            wake @ Due::Wake(_) => {
+                if let Due::Wake(task) = &wake {
+                    let id = task.id;
+                    // NOALLOC: back into the slot it was taken out with.
+                    self.sleepers.insert(at, id, wake, slot);
+                }
+                None
+            }
+        }
     }
 
     /// What should run now: the fair class's choice, or the idle task.

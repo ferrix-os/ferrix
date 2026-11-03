@@ -21,18 +21,18 @@ const RESERVED: u64 = 16;
 
 /// What the check saw, for the boot line.
 #[derive(Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// Pages reserved, and drawn by the reserved job's frames.
-    pub(crate) reserved: u64,
+    pub reserved: u64,
     /// Rules refused as they must be.
-    pub(crate) rules: u32,
+    pub rules: u32,
     /// The promise before the check, which it must leave as it found it.
-    pub(crate) promise: u64,
+    pub promise: u64,
     /// Interrupts dispatched since boot, every one marked as interrupt
     /// context (ledger 2783 (2)).
-    pub(crate) interrupts: u64,
+    pub interrupts: u64,
     /// Heap pages the reserved job's objects were drawn on.
-    pub(crate) heap_pages: u64,
+    pub heap_pages: u64,
 }
 
 /// Run every check.
@@ -47,7 +47,7 @@ pub(crate) struct Report {
 /// Verifies: L.object.225
 /// Verifies: L.user.145
 /// Verifies: L.mm.81
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let slots = quota::live_slots();
     let promise = mm::outstanding_promise();
     let mut report = Report {

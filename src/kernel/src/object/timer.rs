@@ -83,7 +83,7 @@ static NEXT_SERIAL: AtomicU64 = AtomicU64::new(1);
 /// Which counter a timer's deadlines are on. Both are the free-running
 /// counter while nothing suspends (`docs/microkernel/K10.md` §2.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Clock {
+pub enum Clock {
     /// `TIMER_CLOCK_MONOTONIC`.
     Monotonic,
     /// `TIMER_CLOCK_BOOT`.
@@ -92,7 +92,7 @@ pub(crate) enum Clock {
 
 /// One arm of a timer, as its processor's sleeper set holds it.
 #[derive(Debug)]
-pub(crate) struct Armed {
+pub struct Armed {
     /// The timer.
     pub(crate) timer: Arc<TimerCore>,
     /// The generation it was armed in.
@@ -131,7 +131,7 @@ struct State {
 
 /// A timer, as its processor's sleeper set and its handles share it.
 #[derive(Debug)]
-pub(crate) struct TimerCore {
+pub struct TimerCore {
     /// The id its arms are filed under: a serial with [`TIMER_ID_BIT`].
     id: u64,
     /// Its clock.
@@ -151,7 +151,7 @@ pub(crate) struct TimerCore {
 
 /// A timer, as a handle names it: the timer and what its job is charged.
 #[derive(Debug)]
-pub(crate) struct Timer {
+pub struct Timer {
     /// The timer.
     core: Arc<TimerCore>,
     /// One kernel object, charged to the job that made it (F-35).
@@ -170,7 +170,7 @@ pub(crate) struct Timer {
 
 /// Why a timer call was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TimerError {
+pub enum TimerError {
     /// No memory, or its job's object or memory limit.
     NoMemory,
 }
@@ -183,7 +183,7 @@ impl From<AllocError> for TimerError {
 
 /// The kernel heap one timer holds: what its job is charged as kernel
 /// memory (`L.object.213`).
-pub(crate) fn heap_bytes() -> usize {
+pub fn heap_bytes() -> usize {
     ferrix_kmem::arc_footprint::<TimerCore>()
         .saturating_add(ferrix_kmem::arc_footprint::<Timer>())
         .saturating_add(ferrix_kmem::boxed_footprint::<ferrix_sched::Node<sched::Due>>())
@@ -203,7 +203,7 @@ impl Timer {
     ///
     /// [`TimerError::NoMemory`] at either limit or with no memory, with
     /// nothing made and nothing charged.
-    pub(crate) fn new(clock: Clock) -> Result<Arc<Timer>, TimerError> {
+    pub fn new(clock: Clock) -> Result<Arc<Timer>, TimerError> {
         let object = Charge::running(Resource::Objects, 1).map_err(|_| TimerError::NoMemory)?;
         let heap = ferrix_kmem::Charge::bytes(heap_bytes()).map_err(|_| TimerError::NoMemory)?;
         let slot = SleepSlot::new()?;
@@ -234,7 +234,7 @@ impl Timer {
     }
 
     /// The timer itself.
-    pub(crate) fn core(&self) -> &Arc<TimerCore> {
+    pub fn core(&self) -> &Arc<TimerCore> {
         &self.core
     }
 }
@@ -262,7 +262,7 @@ impl TimerCore {
     /// superseded wherever it is, and a one-shot at `deadline` (on its
     /// clock, or from now with `relative`) with `slack`. A deadline already
     /// past fires here (`L.object.214`).
-    pub(crate) fn set(self: &Arc<Self>, deadline: u64, slack: u64, relative: bool) {
+    pub fn set(self: &Arc<Self>, deadline: u64, slack: u64, relative: bool) {
         let mut state = self.state.lock();
         // Read once, under the lock: a relative deadline is from here.
         let now = self.now();
@@ -299,7 +299,7 @@ impl TimerCore {
 
     /// Cancel it: a new generation, `READABLE` cleared, and nothing the
     /// cancelled arm filed or had in flight signals (`L.object.215`).
-    pub(crate) fn cancel(self: &Arc<Self>) {
+    pub fn cancel(self: &Arc<Self>) {
         let mut state = self.state.lock();
         self.disarm(&mut state);
         let spent = self.spend(state);
@@ -340,11 +340,21 @@ impl TimerCore {
         if state.slot.is_some() {
             return;
         }
-        let cpu = self.filed_cpu.load(Ordering::Relaxed);
-        if let Some((armed, slot)) = sched::unfile_timer(cpu, self) {
-            state.slot = Some(slot);
-            // Not its last reference: the caller holds the timer.
-            drop(armed);
+        // A processor leaving service moves arms under both queues' locks
+        // (`sched::move_one_off`), so a look that loses to a move finds
+        // `filed_cpu` changed once it has that lock, and looks there. At most
+        // once per processor leaving service while this runs.
+        loop {
+            let cpu = self.filed_cpu.load(Ordering::Relaxed);
+            if let Some((armed, slot)) = sched::unfile_timer(cpu, self) {
+                state.slot = Some(slot);
+                // Not its last reference: the caller holds the timer.
+                drop(armed);
+                return;
+            }
+            if self.filed_cpu.load(Ordering::Relaxed) == cpu {
+                return;
+            }
         }
     }
 
@@ -423,7 +433,7 @@ impl TimerCore {
 
     /// Register `observer`: at once if `READABLE` already is, else listed in
     /// the room made with the timer, allocating nothing.
-    pub(crate) fn observe(&self, observer: Observer) -> Result<(), PortError> {
+    pub fn observe(&self, observer: Observer) -> Result<(), PortError> {
         let mut state = self.state.lock();
         if state.signalled && observer.wants(Signals::READABLE) {
             let spent = self.spend(state);
@@ -483,7 +493,7 @@ impl TimerCore {
     }
 
     /// Its timeline id.
-    pub(crate) fn timeline_id(&self) -> u64 {
+    pub fn timeline_id(&self) -> u64 {
         self.id
     }
 
@@ -491,6 +501,12 @@ impl TimerCore {
     /// queue it is filed on.
     pub(crate) fn filed_key(&self) -> u64 {
         self.filed_key.load(Ordering::Relaxed)
+    }
+
+    /// Its arm is being moved to processor `cpu`'s sleeper set: under both
+    /// run queues' locks.
+    pub(crate) fn filed_on(&self, cpu: usize) {
+        self.filed_cpu.store(cpu, Ordering::Relaxed);
     }
 
     /// Its arm left its sleeper set: under that run queue's lock.
@@ -506,7 +522,7 @@ impl TimerCore {
     /// For the checks: when it last fired, the interrupt pass that fired it
     /// (zero for a set), how many times it has fired, and its current
     /// window.
-    pub(crate) fn report(&self) -> Report {
+    pub fn report(&self) -> Report {
         let state = self.state.lock();
         Report {
             fired_at: state.fired_at,
@@ -535,12 +551,12 @@ impl Drop for TimerCore {
 /// and seen only by `object` (the K10 delta review, ledger 2919, (1)):
 /// the product never takes an arm off its sleeper set without its lock.
 #[cfg(ferrix_checks = "on")]
-pub(in crate::object) mod sabotage {
+pub mod sabotage {
     use super::{Armed, Ordering, SleepSlot, TimerCore, sched};
 
     /// Take `timer`'s arm off its sleeper set as a pass would, without its
     /// lock, leaving the slot out: an arm in flight.
-    pub(in crate::object) fn take_arm(timer: &TimerCore) -> Option<(Armed, SleepSlot)> {
+    pub fn take_arm(timer: &TimerCore) -> Option<(Armed, SleepSlot)> {
         sched::unfile_timer(timer.filed_cpu.load(Ordering::Relaxed), timer)
     }
 }
@@ -551,17 +567,17 @@ struct Spent([Option<Arc<Port>>; TIMER_OBSERVERS]);
 
 /// What [`TimerCore::report`] tells the checks.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Report {
+pub struct Report {
     /// When it last fired.
-    pub(crate) fired_at: u64,
+    pub fired_at: u64,
     /// The interrupt pass that fired it last, or zero for a set.
-    pub(crate) fired_in: u64,
+    pub fired_in: u64,
     /// Times it has fired.
-    pub(crate) fires: u64,
+    pub fires: u64,
     /// Its current window.
-    pub(crate) armed: Option<(u64, u64)>,
+    pub armed: Option<(u64, u64)>,
     /// Whether its slot is home.
-    pub(crate) home: bool,
+    pub home: bool,
 }
 
 /// Fire `armed`, which a run queue's pass took off its sleeper set with
@@ -572,7 +588,7 @@ pub(crate) struct Report {
 /// nothing, and files the newer arm on this processor if one is waiting. A
 /// current one asserts `READABLE`, delivers its registrations and wakes its
 /// waiters. Allocates nothing.
-pub(crate) fn fire(armed: Armed, slot: SleepSlot, pass: u64) {
+pub fn fire(armed: Armed, slot: SleepSlot, pass: u64) {
     let Armed {
         timer, generation, ..
     } = armed;

@@ -21,7 +21,7 @@ use ferrix_native_abi::exception::X86_64Registers as Registers;
 ///   int3
 ///   movl $231, %eax ; movl $97, %edi ; syscall
 /// ```
-pub(crate) const BREAKPOINT_PROGRAM: &[u8] = &[
+pub const BREAKPOINT_PROGRAM: &[u8] = &[
     0xcc, // int3
     0xb8, 0xe7, 0x00, 0x00, 0x00, // movl $231, %eax
     0xbf, 0x61, 0x00, 0x00, 0x00, // movl $97, %edi
@@ -30,38 +30,38 @@ pub(crate) const BREAKPOINT_PROGRAM: &[u8] = &[
 
 /// How a program's breakpoint instruction is reported here: as the general
 /// protection fault the DPL 0 gate makes it.
-pub(crate) const BREAKPOINT_KIND: u32 = ferrix_native_abi::exception::KIND_OTHER;
+pub const BREAKPOINT_KIND: u32 = ferrix_native_abi::exception::KIND_OTHER;
 
 /// The architecture's code a breakpoint's report carries: vector 13 over
 /// the error code naming IDT vector 3 (`3 << 3 | 2`).
-pub(crate) const BREAKPOINT_CODE: Option<u64> = Some(13 << 32 | 0x1a);
+pub const BREAKPOINT_CODE: Option<u64> = Some(13 << 32 | 0x1a);
 
 /// How far past a breakpoint's own address a supervisor resumes: the
 /// `int3`'s one byte.
-pub(crate) const BREAKPOINT_SKIP: u64 = 1;
+pub const BREAKPOINT_SKIP: u64 = 1;
 
 /// Whether a breakpoint's report says its pc is the trapping instruction's.
-pub(crate) const BREAKPOINT_PC_AT_TRAP: bool = true;
+pub const BREAKPOINT_PC_AT_TRAP: bool = true;
 
 /// In `USER_FAULT_PROGRAM`: the faulting store's offset, and its `syscall`'s.
-pub(crate) const FAULT_AT: u64 = 2;
+pub const FAULT_AT: u64 = 2;
 /// See [`FAULT_AT`].
-pub(crate) const FAULT_EXIT_AT: u64 = 15;
+pub const FAULT_EXIT_AT: u64 = 15;
 
 /// Point `registers` at an `exit_group(status)` instruction at `pc`.
-pub(crate) fn exit_with(registers: &mut Registers, pc: u64, status: u64) {
+pub fn exit_with(registers: &mut Registers, pc: u64, status: u64) {
     registers.rip = pc;
     registers.general[0] = 231;
     registers.general[5] = status;
 }
 
 /// The program counter.
-pub(crate) fn pc(registers: &Registers) -> u64 {
+pub fn pc(registers: &Registers) -> u64 {
     registers.rip
 }
 
 /// Set the program counter.
-pub(crate) fn set_pc(registers: &mut Registers, pc: u64) {
+pub fn set_pc(registers: &mut Registers, pc: u64) {
     registers.rip = pc;
 }
 
@@ -81,7 +81,7 @@ const ALLOWED_FLAGS: u64 = (1 << 0)
 /// Register sets a supervisor's write must be refused, each named, made
 /// from the thread's own `base` (L.x86_64.186; the consultant's condition 5,
 /// ledger 2871).
-pub(crate) fn forgeries(base: &Registers) -> Vec<(Registers, &'static str)> {
+pub fn forgeries(base: &Registers) -> Vec<(Registers, &'static str)> {
     let mut forged = Vec::new();
     let with = |change: &dyn Fn(&mut Registers)| {
         let mut registers = *base;
@@ -125,7 +125,7 @@ pub(crate) fn forgeries(base: &Registers) -> Vec<(Registers, &'static str)> {
 }
 
 /// Register sets a supervisor's write must be accepted.
-pub(crate) fn accepted(base: &Registers) -> Vec<(Registers, &'static str)> {
+pub fn accepted(base: &Registers) -> Vec<(Registers, &'static str)> {
     let mut accepted = Vec::new();
     let mut ac = *base;
     ac.rflags |= 1 << 18;

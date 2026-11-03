@@ -72,11 +72,15 @@ mod unlinked;
 pub(crate) use reservation::{Entry as Reservation, Refused, drawn_from};
 
 /// No reservation: what a job that draws from none draws from.
-pub(crate) const NO_RESERVATION: Reservation = reservation::NONE;
+pub const NO_RESERVATION: Reservation = reservation::NONE;
 
 /// The largest buddy block's order, for the calls that name one
 /// (`vmo_pin`'s `PIN_BLOCKS`).
 pub const MAX_ORDER: u8 = ferrix_frame::MAX_ORDER;
+
+/// The kernel heap's size classes: for the check that a reserved heap keeps at
+/// most a page a class of what its job freed.
+pub const HEAP_CLASSES: usize = ferrix_heap::CLASSES;
 pub use reserve::fill_reserve;
 pub(crate) use reserve::{Reserved, reserve};
 pub use reserve::{bypass_heap_in_sections, refuse_reserve_fills, reserve_counts};
@@ -532,7 +536,7 @@ pub(crate) fn reservation_unbind(entry: Reservation) {
 }
 
 /// The outstanding promise: free frames that belong to a reservation.
-pub(crate) fn outstanding_promise() -> u64 {
+pub fn outstanding_promise() -> u64 {
     reservation::outstanding()
 }
 
@@ -544,7 +548,7 @@ pub(crate) fn reservation_usage(entry: Reservation) -> (u64, u64) {
 /// The least free count a program's frame not drawn from a reservation is
 /// given at: the watermark beyond the outstanding promise (`L.mm.77`), which
 /// is what a reclaim for one has to lift the free count over (`L.mm.82`).
-pub(crate) fn program_floor() -> u64 {
+pub fn program_floor() -> u64 {
     WATERMARK
         .load(Ordering::Relaxed)
         .saturating_add(reservation::outstanding())
@@ -1211,7 +1215,7 @@ fn reserved_heap(entry: Reservation) -> Option<&'static IrqSpinLock<Heap, crate:
 /// cleared after it gives the page back, so it cannot change under a live
 /// object.
 pub(crate) fn heap_drawn_from(address: u64) -> Reservation {
-    reservation::drawn_from(unmap(address & !(PAGE_SIZE - 1)) / PAGE_SIZE)
+    drawn_from(unmap(address & !(PAGE_SIZE - 1)) / PAGE_SIZE)
 }
 
 /// The kernel's `alloc` implementation.

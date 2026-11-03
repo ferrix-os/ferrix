@@ -214,14 +214,14 @@ pub const EXCEPTION_STATE: usize = 0x1082;
 /// [`NativeCall::ExceptionResolve`].
 pub const EXCEPTION_RESOLVE: usize = 0x1083;
 
-/// [`NativeCall::AddressWait`]. `0x106D..=0x106F` are left for the family.
-pub const ADDRESS_WAIT: usize = 0x1069;
+/// [`NativeCall::AddressWait`]. `0x106F` is left for the family.
+pub const ADDRESS_WAIT: usize = 0x106B;
 /// [`NativeCall::AddressWake`].
-pub const ADDRESS_WAKE: usize = 0x106A;
+pub const ADDRESS_WAKE: usize = 0x106C;
 /// [`NativeCall::AddressRequeue`].
-pub const ADDRESS_REQUEUE: usize = 0x106B;
+pub const ADDRESS_REQUEUE: usize = 0x106D;
 /// [`NativeCall::AddressWaitAny`].
-pub const ADDRESS_WAIT_ANY: usize = 0x106C;
+pub const ADDRESS_WAIT_ANY: usize = 0x106E;
 /// [`NativeCall::SpaceCreate`]. `0x1079..=0x1080` is the address space's
 /// block (`docs/microkernel/K2.md`).
 pub const SPACE_CREATE: usize = 0x1079;
@@ -934,7 +934,7 @@ pub enum NativeCall {
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 96] = [
+pub const ALL: [NativeCall; 98] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,

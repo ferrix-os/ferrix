@@ -1413,7 +1413,7 @@ fn a_reservation_needs_reserve(side: &Side, report: &mut Report) -> Result<(), &
     // the reservation's heap kept from a job it served before
     // (`mm::reservation::bind`), never more than a page a size class.
     let [size, drawn, refusals] = quota(side, reserving, JOB_RESERVE)?;
-    if size != pages || refusals != 0 || drawn > ferrix_heap::CLASSES as u64 * PAGE_SIZE {
+    if size != pages || refusals != 0 || drawn > crate::mm::HEAP_CLASSES as u64 * PAGE_SIZE {
         return Err("a reservation did not read back in whole pages");
     }
     refused(

@@ -158,7 +158,7 @@ pub fn is_charge_refusal(error: &SpaceError) -> bool {
 ///
 /// As [`AddressSpace::fault`], and the refusal itself when nothing could be
 /// killed.
-pub(crate) fn user_fault(
+pub fn user_fault(
     space: &AddressSpace,
     address: u64,
     access: Access,

@@ -82,12 +82,12 @@ pub use ferrix_audit::{
     CGROUP_KILLED, CGROUP_LIMIT, DEVICE_LIMIT, DEVICE_LIMIT_SET, Event, NO_UID, saturated,
 };
 pub(crate) use ferrix_audit::{
-    CONFIG, CPU_SERVICE, Class, DMA_FAULT, EXCEPTION_ATTACHED, EXCEPTION_CONTEXT, EXCEPTION_KILLED,
-    INTERRUPT_FAULT, LIMIT, OOM_KILLED, PAGER, POWER, SUPPRESSED, TICKET,
+    CONFIG, CPU_SERVICE, Class, DMA_FAULT, INTERRUPT_FAULT, LIMIT, OOM_KILLED, POWER, SUPPRESSED,
 };
 pub use ferrix_audit::{
-    CONTROL, DELEGATED, DEVMGR_STARTED, DOMAIN, JOB_KILLED, LIMIT_SET, Outcome, PROCESS_MADE,
-    QUIESCED, READER_GIVEN, RIGHTS, ROOT_SWITCHED, Record, STARTER_GIVEN, WIDEN, target,
+    CONTROL, DELEGATED, DEVMGR_STARTED, DOMAIN, EXCEPTION_ATTACHED, EXCEPTION_CONTEXT,
+    EXCEPTION_KILLED, JOB_KILLED, LIMIT_SET, Outcome, PAGER, PROCESS_MADE, QUIESCED, READER_GIVEN, RIGHTS, ROOT_SWITCHED, Record, STARTER_GIVEN, TICKET,
+    WIDEN, target,
 };
 use ferrix_sync::IrqSpinLock;
 
@@ -695,7 +695,7 @@ pub(crate) fn limit_refused(
 /// want of free memory, `free` bytes being free beyond the watermark and the
 /// outstanding promise (`docs/microkernel/K12.md` §2.6): [`LIMIT`] against
 /// `resource::RESERVE`.
-pub(crate) fn reservation_refused(subject: Subject, job: u64, asked: u64, free: u64) {
+pub fn reservation_refused(subject: Subject, job: u64, asked: u64, free: u64) {
     let target = Target {
         kind: target::RESOURCE,
         id: ferrix_audit::resource::RESERVE,

@@ -6,7 +6,7 @@
 //! in user memory with this behind it for the slow path: sleep while the word
 //! still holds the value the caller saw, until somebody who changed it wakes
 //! the word. The native calls `address_wait`, `address_wake`,
-//! `address_requeue` and `address_wait_any` (0x1069 to 0x106C) are answered
+//! `address_requeue` and `address_wait_any` (0x106B to 0x106E) are answered
 //! here, and so is the Linux personality's `futex`, which only decodes Linux's
 //! arguments and calls in. There is one table, not two.
 //!
@@ -107,11 +107,11 @@ use crate::user::space::AddressSpace;
 use crate::user::vmo::Vmo;
 
 /// A bitset that matches every waiter.
-pub(crate) const MATCH_ANY: u32 = 0xFFFF_FFFF;
+pub const MATCH_ANY: u32 = 0xFFFF_FFFF;
 
 /// Which word a waiter sleeps on. See the module documentation.
 #[derive(Debug, Clone)]
-pub(crate) enum Key {
+pub enum Key {
     /// A word only one address space can name.
     Private {
         /// The address space, by address.
@@ -162,7 +162,7 @@ static HASH_KEY: [AtomicU64; 2] = [
 /// Set the key [`Key::bucket`] hashes with: the item, once, from the boot's
 /// random bytes, before any wait is listed (a wait listed before would be
 /// looked for in another bucket by its wakers).
-pub(crate) fn seed(key: [u64; 2]) {
+pub fn seed(key: [u64; 2]) {
     for (held, value) in HASH_KEY.iter().zip(key) {
         held.store(value, Ordering::Relaxed);
     }
@@ -179,7 +179,7 @@ impl Key {
     /// The key for `address` in `space`: shared if `shared` asks for one and
     /// a shared region holds the word, private otherwise. Takes the space's
     /// lock, so never with a bucket's lock held.
-    pub(crate) fn new(space: &Arc<AddressSpace>, address: u64, shared: bool) -> Key {
+    pub fn new(space: &Arc<AddressSpace>, address: u64, shared: bool) -> Key {
         if shared && let Some((object, offset)) = space.shared_object_at(address) {
             return Key::Shared { object, offset };
         }
@@ -191,7 +191,7 @@ impl Key {
 
     /// The key for the word `offset` bytes into `object`: the key a wait by
     /// address gets for the same byte through any shared mapping of it.
-    pub(crate) fn in_object(object: Arc<Vmo>, offset: u64) -> Key {
+    pub fn in_object(object: Arc<Vmo>, offset: u64) -> Key {
         Key::Shared { offset, object }
     }
 
@@ -215,7 +215,7 @@ impl Key {
 
 /// Where a word is read from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Place {
+pub enum Place {
     /// At this user address in the waiter's space.
     User(u64),
     /// Through its key's object, which must be [`Key::Shared`].
@@ -225,20 +225,20 @@ pub(crate) enum Place {
 /// One word a wait sleeps on: where it is read, the value it must still
 /// hold, its key and the bitset its wakes must share a bit with.
 #[derive(Debug, Clone)]
-pub(crate) struct Word {
+pub struct Word {
     /// Where it is read.
-    pub(crate) place: Place,
+    pub place: Place,
     /// What it must hold for the wait to sleep.
-    pub(crate) expected: u32,
+    pub expected: u32,
     /// What it is keyed by.
-    pub(crate) key: Key,
+    pub key: Key,
     /// Which wakes rouse it; never zero.
-    pub(crate) bitset: u32,
+    pub bitset: u32,
 }
 
 /// Why a wait, wake or requeue answers without what was asked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum WaitError {
+pub enum WaitError {
     /// A word did not hold the value given.
     Changed,
     /// A word could not be read.
@@ -340,7 +340,7 @@ pub(crate) const BUCKETS: usize = 1 << BUCKET_BITS;
 
 /// The least room a bucket keeps once it has had any: [`shrink`] goes no
 /// lower.
-pub(crate) const MIN_ROOM: usize = 4;
+pub const MIN_ROOM: usize = 4;
 
 /// The most entries a wake takes off a bucket under one hold of its lock.
 pub(crate) const ROUND: usize = 32;
@@ -556,7 +556,7 @@ fn list_every(
 /// [`WaitError::NoMemory`] if the waiter cannot be made or charged, or a
 /// bucket cannot grow; [`WaitError::Interrupted`]; [`WaitError::TimedOut`]
 /// once `deadline` passes.
-pub(crate) fn wait_on(
+pub fn wait_on(
     space: &AddressSpace,
     words: &[Word],
     deadline: Option<u64>,
@@ -675,7 +675,7 @@ fn leave(sleeper: &Arc<Sleeper>, slot: usize) {
 
 /// Rouse up to `limit` waiters on `key` whose bitset shares a bit with
 /// `bitset`, oldest first, and answer how many. A `limit` of zero rouses none.
-pub(crate) fn wake(key: &Key, limit: usize, bitset: u32) -> usize {
+pub fn wake(key: &Key, limit: usize, bitset: u32) -> usize {
     rouse(core::slice::from_ref(key), limit, bitset, rouse_entry)
 }
 
@@ -752,7 +752,7 @@ fn rouse(keys: &[Key], limit: usize, bitset: u32, with: With) -> usize {
 /// [`WaitError::Changed`] if the compared word holds another value,
 /// [`WaitError::Fault`] if it cannot be read, [`WaitError::NoMemory`] if the
 /// room cannot be had.
-pub(crate) fn requeue(
+pub fn requeue(
     space: &AddressSpace,
     source: &Key,
     target: &Key,
@@ -940,7 +940,7 @@ fn take_and_move(
 /// How many waiters are listed on `key` right now: for the self-checks,
 /// which have to know a waiter is asleep before they can tell a wake that
 /// works from one that arrived first.
-pub(crate) fn waiters_on(keys: &[Key]) -> usize {
+pub fn waiters_on(keys: &[Key]) -> usize {
     let mut count = 0;
     for (at, key) in keys.iter().enumerate() {
         let bucket = key.bucket();
@@ -963,14 +963,14 @@ pub(crate) fn waiters_on(keys: &[Key]) -> usize {
 
 /// The bucket a key is listed in: for the self-checks, which need two words
 /// in different buckets.
-pub(crate) fn bucket_of(key: &Key) -> usize {
+pub fn bucket_of(key: &Key) -> usize {
     key.bucket()
 }
 
 /// The entries and room of bucket `index`: for the self-check of the bound on
 /// a bucket's uncharged room, which only a kernel with its checks runs.
 #[cfg(ferrix_checks = "on")]
-pub(crate) fn bucket_room(index: usize) -> (usize, usize) {
+pub fn bucket_room(index: usize) -> (usize, usize) {
     let table = bucket_lock(index).lock();
     (table.len(), table.capacity())
 }
@@ -980,13 +980,13 @@ pub(crate) fn bucket_room(index: usize) -> (usize, usize) {
 /// Compiled only into a kernel with its self-checks, and seen only by them
 /// (K5's review, condition 4).
 #[cfg(ferrix_checks = "on")]
-pub(crate) mod sabotage {
+pub mod sabotage {
     use super::{Arc, AtomicUsize, Charge, Entry, Key, MATCH_ANY, Sleeper};
     use super::{bucket_lock, fallible, leave, rouse};
 
     /// Take up to `limit` waiters off `keys` and report them woken without
     /// rousing them: a wake with the one bug a count cannot see.
-    pub(crate) fn forget_waiters(keys: &[Key], limit: usize) -> usize {
+    pub fn forget_waiters(keys: &[Key], limit: usize) -> usize {
         rouse(keys, limit, MATCH_ANY, |_| true)
     }
 
@@ -994,7 +994,7 @@ pub(crate) mod sabotage {
     /// table in buckets invites: each entry's key is changed where it lies,
     /// and the entry is left in `source`'s bucket, where a wake on `target`
     /// never looks. Answers how many it re-keyed.
-    pub(crate) fn requeue_without_moving(source: &Key, target: &Key) -> usize {
+    pub fn requeue_without_moving(source: &Key, target: &Key) -> usize {
         let mut gone = alloc::vec::Vec::new();
         let mut table = bucket_lock(source.bucket()).lock();
         let count = table.iter().filter(|entry| entry.key == *source).count();
@@ -1020,11 +1020,11 @@ pub(crate) mod sabotage {
     /// through another of its words, and that has not yet taken this one off:
     /// what a stale entry is between the wake and its waiter's own leaving.
     #[derive(Debug)]
-    pub(crate) struct StaleEntry(Arc<Sleeper>);
+    pub struct StaleEntry(Arc<Sleeper>);
 
     impl StaleEntry {
         /// Whether it was still on the table, taking it off if it was.
-        pub(crate) fn remove(self) -> bool {
+        pub fn remove(self) -> bool {
             let listed = super::waiters_of(&self.0, 1);
             leave(&self.0, 1);
             listed
@@ -1037,7 +1037,7 @@ pub(crate) mod sabotage {
     /// # Errors
     ///
     /// `Err(())` when memory is refused.
-    pub(crate) fn list_stale_entry(key: Key) -> Result<StaleEntry, ()> {
+    pub fn list_stale_entry(key: Key) -> Result<StaleEntry, ()> {
         let bucket = key.bucket();
         let mut buckets = fallible::try_with_capacity(2).map_err(|_| ())?;
         // NOALLOC: reserved just above.

@@ -76,7 +76,7 @@ static NEXT_REQUEST: AtomicU64 = AtomicU64::new(1);
 /// How a fault came to ask: what decides whether it may wait and what may end
 /// its wait (K3.md §2.4).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum FaultMode {
+pub enum FaultMode {
     /// A program's own fault, from the trap path: it always may wait.
     Program,
     /// A kernel copy, or the kernel's own touch of a page: into a
@@ -88,7 +88,7 @@ pub(crate) enum FaultMode {
 
 /// What a request asks of the pager.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Command {
+pub enum Command {
     /// The run is absent.
     Read,
     /// A Clean page of a trap-dirty VMO is about to be written.
@@ -107,7 +107,7 @@ impl Command {
 
 /// Why a page could not be had from its pager.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Refusal {
+pub enum Refusal {
     /// The pager failed the request, with this errno.
     Failed(Errno),
     /// The pager's bound passed first.
@@ -185,7 +185,7 @@ impl Request {
 /// A pager, as its one handle holds it. Closing the handle is the pager's
 /// death (K3.md §2.8).
 #[derive(Debug)]
-pub(crate) struct Pager {
+pub struct Pager {
     /// What its VMOs and their requests share.
     core: Arc<PagerCore>,
     /// The kernel object it is, charged to the job that made it.
@@ -202,7 +202,7 @@ impl Drop for Pager {
 
 /// A pager's state, shared by its handle and every VMO made over it.
 #[derive(Debug)]
-pub(crate) struct PagerCore {
+pub struct PagerCore {
     /// Where its requests go.
     port: Arc<Port>,
     /// How long a fault waits for it, in nanoseconds.
@@ -215,7 +215,7 @@ pub(crate) struct PagerCore {
 
 /// A pager-backed VMO's tie to its pager.
 #[derive(Debug)]
-pub(crate) struct PagerLink {
+pub struct PagerLink {
     /// The pager.
     core: Arc<PagerCore>,
     /// This link's own id, never reused: requests name it.
@@ -236,7 +236,7 @@ impl Pager {
     /// # Errors
     ///
     /// [`AllocError`] at the job's limits or with no memory.
-    pub(crate) fn new(port: Arc<Port>, wait_ns: u64) -> Result<Pager, AllocError> {
+    pub fn new(port: Arc<Port>, wait_ns: u64) -> Result<Pager, AllocError> {
         let charge = Charge::running(Resource::Objects, 1).map_err(|_| AllocError)?;
         let heap = ferrix_kmem::Charge::bytes(
             ferrix_kmem::arc_footprint::<PagerCore>().saturating_add(4 * size_of::<Arc<Request>>()),
@@ -257,14 +257,14 @@ impl Pager {
     }
 
     /// What its VMOs share.
-    pub(crate) fn core(&self) -> &Arc<PagerCore> {
+    pub fn core(&self) -> &Arc<PagerCore> {
         &self.core
     }
 }
 
 /// A pager's bound, clamped to `[PAGER_WAIT_MIN_NS, PAGER_WAIT_MAX_NS]`, 0
 /// asking for the maximum.
-pub(crate) const fn clamp_wait(wait_ns: u64) -> u64 {
+pub const fn clamp_wait(wait_ns: u64) -> u64 {
     if wait_ns == 0 || wait_ns > PAGER_WAIT_MAX_NS {
         PAGER_WAIT_MAX_NS
     } else if wait_ns < PAGER_WAIT_MIN_NS {
@@ -280,7 +280,7 @@ impl PagerCore {
     /// # Errors
     ///
     /// [`AllocError`] with no memory.
-    pub(crate) fn link(
+    pub fn link(
         self: &Arc<Self>,
         key: u64,
         options: u64,
@@ -295,22 +295,22 @@ impl PagerCore {
     }
 
     /// Whether `link` is one of this pager's.
-    pub(crate) fn serves(self: &Arc<Self>, link: &PagerLink) -> bool {
+    pub fn serves(self: &Arc<Self>, link: &PagerLink) -> bool {
         Arc::ptr_eq(self, &link.core)
     }
 
     /// Its bound, in nanoseconds.
-    pub(crate) fn wait_ns(&self) -> u64 {
+    pub fn wait_ns(&self) -> u64 {
         self.wait_ns
     }
 
     /// Requests outstanding.
-    pub(crate) fn outstanding(&self) -> usize {
+    pub fn outstanding(&self) -> usize {
         self.requests.lock().len()
     }
 
     /// Threads waiting on its requests: for the boot check.
-    pub(crate) fn waiting(&self) -> usize {
+    pub fn waiting(&self) -> usize {
         self.requests
             .lock()
             .iter()
@@ -426,7 +426,7 @@ impl PagerCore {
 
 impl PagerLink {
     /// Whether a write to a Clean page asks the pager first.
-    pub(crate) fn traps_dirty(&self) -> bool {
+    pub fn traps_dirty(&self) -> bool {
         self.options & PAGER_VMO_TRAP_DIRTY != 0
     }
 
@@ -436,7 +436,7 @@ impl PagerLink {
     }
 
     /// Whether the VMO is detached, or its pager closed.
-    pub(crate) fn is_gone(&self) -> bool {
+    pub fn is_gone(&self) -> bool {
         self.detached.load(Ordering::Acquire) || self.core.closed.load(Ordering::Acquire)
     }
 
@@ -448,7 +448,7 @@ impl PagerLink {
     /// # Errors
     ///
     /// As [`Refusal`].
-    pub(crate) fn request(
+    pub fn request(
         &self,
         vmo: &Vmo,
         index: u64,
@@ -539,7 +539,7 @@ impl PagerLink {
 
     /// End the read requests whose first page lies in `[first, first +
     /// count)`, now present: what a supply does once its pages are in.
-    pub(crate) fn supplied(&self, first: u64, count: u64) -> usize {
+    pub fn supplied(&self, first: u64, count: u64) -> usize {
         let id = self.id;
         self.core.end_where(
             &|request| {
@@ -555,7 +555,7 @@ impl PagerLink {
 
     /// End the dirty requests whose page lies in `[first, first + count)`,
     /// now Dirty: `PAGER_OP_DIRTY`.
-    pub(crate) fn dirtied(&self, first: u64, count: u64) -> usize {
+    pub fn dirtied(&self, first: u64, count: u64) -> usize {
         let id = self.id;
         self.core.end_where(
             &|request| {
@@ -573,7 +573,7 @@ impl PagerLink {
     /// `PAGER_OP_FAIL`. Only the one whose id is `only`, unless that is 0:
     /// a pager fails one job's request without failing another job's fault
     /// on the same pages (2858 (1)).
-    pub(crate) fn fail(&self, first: u64, count: u64, errno: Errno, only: u64) -> usize {
+    pub fn fail(&self, first: u64, count: u64, errno: Errno, only: u64) -> usize {
         let id = self.id;
         self.core.end_where(
             &|request| {
@@ -589,7 +589,7 @@ impl PagerLink {
     /// Detach the VMO: no request opens for it again, and every outstanding
     /// one ends at once. `PAGER_OP_DETACH`; run where it may block, as the
     /// close (2858 (4)).
-    pub(crate) fn detach(&self) {
+    pub fn detach(&self) {
         debug_assert!(
             sched::may_block(),
             "a pager VMO was detached where nothing may block"

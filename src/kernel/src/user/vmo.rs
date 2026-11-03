@@ -388,7 +388,7 @@ pub(crate) enum Source {
 /// A present page of a pager-backed object, as dirty tracking sees it
 /// (K3.md §2.5). A page with no entry in [`Pages::states`] is Clean.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum PageState {
+pub enum PageState {
     /// Not present.
     Absent,
     /// Present, unwritten since it was supplied or last cleaned: never mapped
@@ -402,7 +402,7 @@ pub(crate) enum PageState {
 
 /// Why a supply moved nothing.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum SupplyError {
+pub enum SupplyError {
     /// A page of the aux range is absent, or held in place.
     BadAux,
     /// The range is past either object's end, or longer than
@@ -627,13 +627,13 @@ impl Vmo {
     /// # Errors
     ///
     /// [`AllocError`] at the job's object limit or with no memory.
-    pub(crate) fn new_paged(pages: u64, link: Arc<PagerLink>) -> Result<Arc<Vmo>, AllocError> {
+    pub fn new_paged(pages: u64, link: Arc<PagerLink>) -> Result<Arc<Vmo>, AllocError> {
         let charge = Charge::running(Resource::Objects, 1).map_err(|_| AllocError)?;
         crate::fallible::try_arc(Vmo::unfilled(pages, Some(Source::Pager(link)), charge))
     }
 
     /// The pager its absent pages come from, if it is pager-backed.
-    pub(crate) fn pager(&self) -> Option<&Arc<PagerLink>> {
+    pub fn pager(&self) -> Option<&Arc<PagerLink>> {
         match &self.source {
             Some(Source::Pager(link)) => Some(link),
             _ => None,
@@ -641,7 +641,7 @@ impl Vmo {
     }
 
     /// Whether its absent pages are a pager's.
-    pub(crate) fn is_pager_backed(&self) -> bool {
+    pub fn is_pager_backed(&self) -> bool {
         self.pager().is_some()
     }
 
@@ -1398,7 +1398,7 @@ impl Vmo {
         if !self.reclaimable() {
             return PoisonTake::Kept;
         }
-        let Some(filler) = self.filler.as_ref() else {
+        let Some(filler) = self.filler() else {
             return PoisonTake::Kept;
         };
         let mut picked = Vec::new();
@@ -1811,7 +1811,7 @@ impl Vmo {
     /// Must not be called holding a spin lock.
     pub fn commit_blocks(&self, first: u64, pages: u64, order: u8) -> (u64, u64) {
         let mut done = Blocks::default();
-        if self.filler.is_some() || self.bound.load(Ordering::SeqCst) != u64::MAX {
+        if self.source.is_some() || self.bound.load(Ordering::SeqCst) != u64::MAX {
             return (0, 0);
         }
         let end = first.saturating_add(pages).min(self.len_pages());
@@ -2725,7 +2725,7 @@ fn flush_frame(frame: Frame) {
 
 /// What [`Vmo::write_paged`] found.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum PagedWrite {
+pub enum PagedWrite {
     /// Written, and the page is Dirty.
     Done,
     /// The page is absent: the pager is to be asked for it.
@@ -2761,7 +2761,7 @@ impl Vmo {
     }
 
     /// Page `index`'s state.
-    pub(crate) fn page_state(&self, index: u64) -> PageState {
+    pub fn page_state(&self, index: u64) -> PageState {
         state_of(&self.pages.lock(), index)
     }
 
@@ -2799,7 +2799,7 @@ impl Vmo {
     /// # Errors
     ///
     /// As [`Vmo::write_page`].
-    pub(crate) fn write_paged(
+    pub fn write_paged(
         &self,
         index: u64,
         offset: usize,
@@ -2844,7 +2844,7 @@ impl Vmo {
     /// # Errors
     ///
     /// [`SupplyError`]; nothing moved.
-    pub(crate) fn supply_from(
+    pub fn supply_from(
         &self,
         aux: &Vmo,
         aux_first: u64,
@@ -2958,7 +2958,7 @@ impl Vmo {
     ///
     /// [`VmoError::OutOfMemory`] with no room to record a mark (those already
     /// made stay: more dirty is safe).
-    pub(crate) fn dirty_range(&self, first: u64, count: u64) -> Result<bool, VmoError> {
+    pub fn dirty_range(&self, first: u64, count: u64) -> Result<bool, VmoError> {
         let mut pages = self.pages.lock();
         let end = first.saturating_add(count);
         if pages.frames.range(first..end).count() as u64 != count {
@@ -2976,7 +2976,7 @@ impl Vmo {
     /// translations, with one shootdown, before this returns, so that a
     /// write after it faults and makes its page Dirty again (H.MEM.23).
     /// How many began. Must not be called holding a spin lock.
-    pub(crate) fn writeback_begin(&self, first: u64, count: u64) -> u64 {
+    pub fn writeback_begin(&self, first: u64, count: u64) -> u64 {
         let end = first.saturating_add(count);
         let mut began = 0;
         {
@@ -2995,7 +2995,7 @@ impl Vmo {
     /// `PAGER_OP_WRITEBACK_END`: the awaiting-clean pages of `[first, first +
     /// count)` become Clean; a page written since its write-back began is
     /// Dirty and stays so. How many were cleaned.
-    pub(crate) fn writeback_end(&self, first: u64, count: u64) -> u64 {
+    pub fn writeback_end(&self, first: u64, count: u64) -> u64 {
         let end = first.saturating_add(count);
         let mut pages = self.pages.lock();
         let before = pages.states.len();
@@ -3012,7 +3012,7 @@ impl Vmo {
     /// # Errors
     ///
     /// [`AllocError`] with no room to list them; nothing taken.
-    pub(crate) fn decommit_clean(&self, first: u64, count: u64) -> Result<u64, AllocError> {
+    pub fn decommit_clean(&self, first: u64, count: u64) -> Result<u64, AllocError> {
         let end = first.saturating_add(count);
         let clean = |pages: &Pages, index: u64| {
             !pages.held.contains_key(&index) && !pages.states.contains_key(&index)
@@ -3057,7 +3057,7 @@ impl Vmo {
     /// # Errors
     ///
     /// [`AllocError`] with no memory for the list.
-    pub(crate) fn dirty_runs(
+    pub fn dirty_runs(
         &self,
         first: u64,
         count: u64,

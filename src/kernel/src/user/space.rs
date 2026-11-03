@@ -245,7 +245,7 @@ struct Inner {
 
 /// The most a region a handle or the kernel mapped may be protected to.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Ceiling {
+pub enum Ceiling {
     /// The kernel's own pages, mapped into every process (the vDSO, the
     /// ARMv7-A signal page): no call may change their protection.
     Kernel,
@@ -299,7 +299,7 @@ fn within_ceilings(inner: &Inner, range: PageRange, flags: VmaFlags) -> Result<(
 
 /// Why [`AddressSpace::protect_by_handle`] refused.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum ProtectRefused {
+pub enum ProtectRefused {
     /// As the space refuses any change: a malformed range, or one not wholly
     /// mapped.
     Space(SpaceError),
@@ -2163,7 +2163,7 @@ impl AddressSpace {
     }
 
     /// How many shootdowns of this space have begun: see the field.
-    pub(crate) fn shootdowns_begun(&self) -> u64 {
+    pub fn shootdowns_begun(&self) -> u64 {
         self.flushes.begun.load(Ordering::SeqCst)
     }
 
@@ -3329,7 +3329,7 @@ impl AddressSpace {
     /// pages, a range past the object's end, or one that overlaps a mapping;
     /// [`SpaceError::NotUserRange`] outside the user half; and
     /// [`SpaceError::OutOfMemory`] if no free range is long enough.
-    pub(crate) fn map_by_handle(
+    pub fn map_by_handle(
         &self,
         at: Option<u64>,
         len: u64,
@@ -3775,7 +3775,7 @@ impl AddressSpace {
     /// [`SpaceError::BadRange`] for a length that is not whole pages or a
     /// range over a mapping; [`SpaceError::NotUserRange`] outside the user
     /// half; [`SpaceError::OutOfMemory`] for no room or no memory.
-    pub(crate) fn allocate_by_handle(
+    pub fn allocate_by_handle(
         &self,
         at: Option<u64>,
         len: u64,
@@ -3848,7 +3848,7 @@ impl AddressSpace {
     /// mapped; [`ProtectRefused::NotByHandle`] for one that reaches a region no
     /// handle mapped; [`ProtectRefused::Beyond`] for a protection past a
     /// region's ceiling.
-    pub(crate) fn protect_by_handle(
+    pub fn protect_by_handle(
         &self,
         at: u64,
         len: u64,
@@ -4638,7 +4638,7 @@ impl AddressSpace {
     ///
     /// [`fallible::AllocError`] when there is no memory to list the objects
     /// in.
-    pub(crate) fn resident_pages(&self) -> Result<u64, fallible::AllocError> {
+    pub fn resident_pages(&self) -> Result<u64, fallible::AllocError> {
         let inner = self.inner.lock();
         let mut objects = fallible::try_collect(inner.objects.values())?;
         objects.sort_unstable_by_key(|vmo| Arc::as_ptr(vmo));

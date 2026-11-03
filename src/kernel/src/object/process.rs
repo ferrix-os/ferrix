@@ -407,7 +407,7 @@ impl Process {
     }
 
     /// Its job's quota slot, read without a lock.
-    pub(crate) fn quota_slot(&self) -> u32 {
+    pub fn quota_slot(&self) -> u32 {
         self.slot.load(Ordering::Acquire)
     }
 
@@ -415,7 +415,7 @@ impl Process {
     /// `membership`, which every move between jobs holds: so the job a
     /// ticket names and the slot it charges are the same job's
     /// (`object::ticket`, L.object.207).
-    pub(crate) fn issuer_and_slot(&self) -> (crate::object::channel::Sender, u32) {
+    pub fn issuer_and_slot(&self) -> (crate::object::channel::Sender, u32) {
         let _membership = self.membership.lock();
         (crate::object::channel::Sender::of(self), self.quota_slot())
     }
@@ -473,14 +473,14 @@ impl Process {
     /// Its id: given once, as it was made, and never to another process
     /// while the kernel runs; kept across `execve`, a set-id one included
     /// (`docs/microkernel/K6.md` §2). Never zero.
-    pub(crate) fn id(&self) -> u64 {
+    pub fn id(&self) -> u64 {
         self.id
     }
 
     /// The id of the job it is in now, read without the membership lock:
     /// the job before or after a move that races the read, each of which it
     /// was in during the read.
-    pub(crate) fn job_id(&self) -> u64 {
+    pub fn job_id(&self) -> u64 {
         self.job_id.load(Ordering::Acquire)
     }
 
@@ -760,7 +760,7 @@ impl Process {
     }
 
     /// Its supervisor slot (`docs/microkernel/K4.md`).
-    pub(crate) fn supervisor(&self) -> &Supervisor {
+    pub fn supervisor(&self) -> &Supervisor {
         &self.supervisor
     }
 
@@ -929,12 +929,12 @@ impl Exit {
 
     /// Whether it has terminated, by exiting or by being killed. True from the
     /// moment it starts to end, before it has let go of anything.
-    pub(crate) fn is_terminated(&self) -> bool {
+    pub fn is_terminated(&self) -> bool {
         self.terminated.load(Ordering::Acquire)
     }
 
     /// The process's id, before and after it ends (`object_id`'s answer).
-    pub(crate) fn id(&self) -> u64 {
+    pub fn id(&self) -> u64 {
         self.id
     }
 
@@ -1104,7 +1104,7 @@ impl Control {
 
     /// Whether no start has let go of the reference that kept it: true from
     /// `process_create` until `process_start` hands it to the task.
-    pub(crate) fn is_unstarted(&self) -> bool {
+    pub fn is_unstarted(&self) -> bool {
         self.unstarted.lock().is_some()
     }
 

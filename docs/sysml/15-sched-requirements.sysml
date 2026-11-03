@@ -1049,10 +1049,10 @@ package FerrixSchedRequirements {
         }
         requirement <'L.sched.104'> evacuationLeavesNothingBehind : ItemLowLevel {
             attribute :>> statement = "A processor parking shall move every
-                queued task and every sleeper of its own off to processors in
-                service, under the two queues' locks, keeping each sleeper's due
-                time; a task found there while parked shall be drained and
-                counted.";
+                queued task, every sleeper of its own and every timer object's
+                arm off to processors in service, under the two queues' locks,
+                keeping each sleeper's and arm's due time; a task found there
+                while parked shall be drained and counted.";
             attribute :>> criterion = "test-quarantine: /proc/ferrix-service says
                 service out drained 0 for the target after the CPU-bound
                 loops and the readers; the loops go on on the others; fifty
@@ -1060,7 +1060,8 @@ package FerrixSchedRequirements {
                 longest move's hold printed (MEMORY-AND-TIMING 2.2e2).";
             attribute :>> parent = "H.SCHED.18";
             attribute :>> unit = ("sched::evacuate", "sched::move_one_off",
-                "sched::queue::CpuQueue::take_movable_sleeper", "sched::park",
+                "sched::queue::CpuQueue::take_movable_sleeper",
+                "sched::queue::CpuQueue::take_timer_arm", "sched::park",
                 "sched::drained", "sched::pick_or_park", "sched::steal_from",
                 "sched::move_hold_max");
         }

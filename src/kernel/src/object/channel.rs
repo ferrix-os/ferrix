@@ -110,7 +110,7 @@ pub(crate) const SMALL_BYTES: usize = ferrix_native_abi::nr::CHANNEL_WRITE_READ_
 /// Made only by [`Sender::of`] and [`Sender::KERNEL`], and read only by the
 /// accessors: nothing outside this module builds one from numbers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Sender {
+pub struct Sender {
     /// The process's id, or zero for the kernel.
     process: u64,
     /// The job's id at the write, or zero for the kernel.
@@ -119,10 +119,10 @@ pub(crate) struct Sender {
 
 impl Sender {
     /// The kernel's own writes: zero is neither a process's id nor a job's.
-    pub(crate) const KERNEL: Sender = Sender { process: 0, job: 0 };
+    pub const KERNEL: Sender = Sender { process: 0, job: 0 };
 
     /// A write by `process`, from its own record: its id, and its job now.
-    pub(crate) fn of(process: &crate::object::process::Process) -> Sender {
+    pub fn of(process: &crate::object::process::Process) -> Sender {
         Sender {
             process: process.id(),
             job: process.job_id(),
@@ -130,12 +130,12 @@ impl Sender {
     }
 
     /// The writer's process id; zero for the kernel.
-    pub(crate) fn process(&self) -> u64 {
+    pub fn process(&self) -> u64 {
         self.process
     }
 
     /// The writer's job id at the write; zero for the kernel.
-    pub(crate) fn job(&self) -> u64 {
+    pub fn job(&self) -> u64 {
         self.job
     }
 }
@@ -1293,7 +1293,7 @@ impl Drop for Endpoint {
 /// it is one of the two objects its maker's job is counted for (F-35). Read
 /// by the ticket check, for K7's stated bound (`docs/microkernel/K7.md`
 /// §2.3).
-pub(crate) fn heap_footprint() -> usize {
+pub fn heap_footprint() -> usize {
     ferrix_kmem::arc_footprint::<Channel>()
         .saturating_add(2 * ferrix_kmem::arc_footprint::<Endpoint>())
 }
@@ -1306,7 +1306,7 @@ impl Endpoint {
     ///
     /// [`IssueError`]: this end has [`ferrix_native_abi::types::MAX_TICKETS`]
     /// live, the other end has gone, or the issuer cannot pay.
-    pub(crate) fn issue_ticket(&self, issuer: Sender, slot: u32) -> Result<u64, IssueError> {
+    pub fn issue_ticket(&self, issuer: Sender, slot: u32) -> Result<u64, IssueError> {
         let mut tickets = self.channel.tickets.lock();
         // Under the registry's lock, which the other end's close takes after
         // marking itself closed: a ticket issued here is either refused or
@@ -1319,7 +1319,7 @@ impl Endpoint {
 
     /// The live ticket `id`, if the other end issued it: the only end a
     /// ticket is adopted through (L.object.208).
-    pub(crate) fn adoptable_ticket(&self, id: u64) -> Option<Arc<Ticket>> {
+    pub fn adoptable_ticket(&self, id: u64) -> Option<Arc<Ticket>> {
         self.channel
             .tickets
             .lock()
@@ -1327,7 +1327,7 @@ impl Endpoint {
     }
 
     /// End the live ticket `id`, issued by either end. Whether there was one.
-    pub(crate) fn end_ticket(&self, id: u64) -> bool {
+    pub fn end_ticket(&self, id: u64) -> bool {
         let ended = self.channel.tickets.lock().end(id);
         ended.is_some()
     }
