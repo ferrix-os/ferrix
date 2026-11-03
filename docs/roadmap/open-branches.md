@@ -71,6 +71,12 @@ note says so):
 `mk/oom-uncharge`) have not moved since 2026-10-21 and are 620 to 660 commits
 behind `develop`; their designs are on `develop` (`docs/microkernel/`), their
 code is a rebase away and none of it is gated. Resume from `microkernel-m0.md`.
+On 2026-11-03 the overnight microkernel run began: the local (not pushed)
+`feature/mk-base` carries the M1 and K2 to K4 stack rebased onto `develop`
+(K2 to K7, K10, K12a/b, `smt=off`; none landed, none gated by this page's
+author), and `feature/mk-reserve` (`bfc8a5f00`, unlanded) reserves the run's id
+blocks. `feature/mk-m2`, `-restricted`, `-lift` and `-authority` held nothing
+beyond that reserve commit at 23:15.
 
 **Parked** (`park/*`, 58 branches, none newer than 2026-10-24): the older
 sections below describe the families as far as they were described -- the
@@ -161,7 +167,7 @@ The microkernel program's branches (the wind-down of 2026-10-19 in
 | `mk/f73`, `mk/f64`, `mk/baselines` | 0 of 1 each | landed: d9c93c7c9, 505c5aa1b (2026-10-21), 40996829f |
 | `mk/k5` | 5 of 5 | wait on a user address, partly built, about 12 points left |
 | `mk/k6` | 4 of 4 | kernel-attested sender, `cargo check` on three architectures, never booted, about 6 points left; `mk/k7` lands on it |
-| `mk/k7` | 13 of 13 | charging that follows the client; the BACKLOG row says no code yet |
+| `mk/k7` | 13 of 13 | charging that follows the client; has code (the BACKLOG row once said none); its rebase is `d9b014bfc` on the local `feature/mk-base`, unlanded |
 | `mk/k10` | 1 of 3 | timer objects, unbuilt, about 5 points left |
 | `mk/k12` | 2 of 2 | a job's reserved kernel memory, most of K12a, never compiled, about 9 points left |
 | `mk/smt-off` | 2 of 2 | superseded by the plan on `main` (044e263d9); no code lands from it |
