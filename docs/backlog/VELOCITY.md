@@ -258,4 +258,21 @@ Work built and not on `develop` is not counted: stage 14's scheduler classes
 (pull requests #38 and #40), the microkernel's M1 branches, `hyprix:gpu`. Each
 is counted on the day it lands.
 
+### Update, 2026-11-03
+
+Counted from `develop`'s e51fc67fd to 3afb272b5, three calendar days, by the
+rule above. Of the commits since, two count, at about a point each: the rest are
+reservations, BACKLOG and the roll-ups' documents.
+
+| day | estimated before | sized afterwards | what |
+|---|---|---|---|
+| 2026-11-01 | 0 | 0 | nothing landed |
+| 2026-11-02 | 0 | 1 | `check-fallible-alloc` reaches `process_create`'s load (782dd08d4) |
+| 2026-11-03 | 0 | 1 | one fetch at a time per component mirror (4379d9b3e) |
+
+The running total is **≈ 3,586 points in 51 calendar days, ≈ 70 a day**, or
+≈ 1,662 (≈ 33 a day) counting only what had an estimate. Nothing sized came off
+the status table; the same day its rows outside the scope were estimated, ≈ 2,554
+points, which took the scope to ≈ 3,072 (`docs/roadmap/status.md`).
+
 ---
