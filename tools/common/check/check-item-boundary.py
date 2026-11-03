@@ -1825,7 +1825,8 @@ def kernel_dependency_problems(manifest: dict, cargo_of, workspace: dict,
     since, when the manifest no longer depends on it, or when no file of the
     crate names it (`named`: package -> the library names its files name).
     No other kernel crate keeps such a list. A fixture class crate
-    (`class_crates`, SCHED-CLASSES.md §9b, ledger line 22, G1) is the
+    (`class_crates`, SCHED-CLASSES.md §9b, container review 22 (not on record;
+    ledger 5684), G1) is the
     selection crate's alone and named by no file, which its own rule (d)
     holds: no register entry stands for it."""
     entries = {k: v for k, v in manifest.get("kernel_crates", {}).items() if not k.startswith("//")}
@@ -2802,7 +2803,7 @@ _FAMILIES: dict | None = None
 
 def _family_recorded(name: str) -> bool:
     """Whether the hardware-family registry records `name`'s recognition
-    rule (`recorded` absent or true; ledger line 26)."""
+    rule (`recorded` absent or true; container review 26)."""
     global _FAMILIES
     if _FAMILIES is None:
         with FAMILY_FILE.open("rb") as handle:
@@ -2852,7 +2853,7 @@ def profile_problems(name: str, profile: dict, flags: dict) -> tuple[list[str], 
     for exception in profile.get("exceptions", []):
         if not exception.get("ends") or not exception.get("why"):
             problems.append(f"exception {exception.get('flag')}={exception.get('value')} names no end or reason")
-    # `pending` (SCHED-CLASSES.md section 9c, E3; ledger line 24): a value a
+    # `pending` (SCHED-CLASSES.md section 9c, E3; container review 24): a value a
     # target-only profile names before it allows the profile's level, each
     # with what it waits on. It is no claim's to carry: the profile is
     # reported not claimable while one is listed, and one that excuses
@@ -2860,13 +2861,13 @@ def profile_problems(name: str, profile: dict, flags: dict) -> tuple[list[str], 
     pending = {(e.get("flag"), e.get("value")) for e in profile.get("pending", [])}
     if pending and (claims_more_than_a_target(profile) or level != "sc4_plus"):
         problems.append("only a profile at sc4_plus whose claim is a target may list pending values "
-                        "(E3; ledger line 25 (1))")
+                        "(E3; container review 25 (1))")
     for entry in profile.get("pending", []):
         if not entry.get("until") or not entry.get("ledger"):
             problems.append(f"pending {entry.get('flag')}={entry.get('value')} names nothing it waits on, "
                             "or no ledger line (the list grows only with one)")
     # Signed slots only and no board named: the image boots nothing, so the
-    # profile is not buildable (ledger line 25 (2)).
+    # profile is not buildable (container review 25 (2)).
     recorded = [family for family in profile.get("slot_families", []) if _family_recorded(family)]
     if profile.get("image", {}).get("slot_signing") == "required" and not recorded:
         waiting.append("slot_families names no board whose recognition rule is recorded, and "
@@ -3121,7 +3122,7 @@ def run_removable(manifest: dict, files: list[str], root: str | None) -> list[st
 
 
 # The class crates (docs/SCHED-CLASSES.md §9b; the consultant's design review
-# of step 3b, ledger line 22, G4, G5): `class_crates` in
+# of step 3b, container review 22, G4, G5): `class_crates` in
 # certification-item.json records each scheduling-class crate, the tier flag
 # and value that link it or `fixture: true`, and the marker a present one
 # leaves in the ELF. `named_outside` lists the kernel crates that still name a
@@ -3200,7 +3201,7 @@ def class_crate_problems(record: dict, packages: dict[str, tuple[str, dict]], so
                                 "may, or a named_outside entry with its N7 row")
     # (e) the kernel changes the fair tier only through the stack or the
     # fair tier's named forwarders, never through a `&mut RunQueue` of its
-    # own (SCHED-CLASSES.md section 9d, F1; ledger line 26).
+    # own (SCHED-CLASSES.md section 9d, F1; container review 26).
     for rel, text in sorted(sources.items()):
         if not rel.startswith("src/kernel/"):
             continue
@@ -3211,13 +3212,13 @@ def class_crate_problems(record: dict, packages: dict[str, tuple[str, dict]], so
                             "and FairTier's forwarders may (SCHED-CLASSES.md section 9d, F1)")
         # While StackQueue is RunQueue in every profile, a method called on a
         # CpuQueue's `stack`, or a `&mut StackQueue` handed out, would compile
-        # and pass by Over (ledger line 28, condition 1): the queue is reached
+        # and pass by Over (container review 28, condition 1): the queue is reached
         # as `Stack::op(&queue.stack)` and `FairTier`'s alone.
         if rel.startswith("src/kernel/src/sched/") and not rel.endswith("/task.rs"):
             for match in re.finditer(r"\b(?:self|queue|q)\s*\.\s*stack\s*\.\s*[a-z_]+\s*\(|&\s*mut\s+StackQueue\b", code):
                 line = text.count("\n", 0, match.start()) + 1
                 problems.append(f"{rel}:{line}: reaches the class stack's queue other than through Stack's "
-                                "operations or FairTier (SCHED-CLASSES.md section 9d; ledger line 28 (1))")
+                                "operations or FairTier (SCHED-CLASSES.md section 9d; container review 28 (1))")
     for package, kernels in sorted(outside.items()):
         if package.startswith("//"):
             continue
@@ -3698,7 +3699,7 @@ def main() -> int:
     if class_found:
         print(
             f"item-boundary: {len(class_found)} problem(s) with the scheduling-class crates\n"
-            f"  (class_crates, docs/SCHED-CLASSES.md section 9b; ledger line 22):",
+            f"  (class_crates, docs/SCHED-CLASSES.md section 9b; container review 22):",
             file=sys.stderr,
         )
         for problem in class_found:

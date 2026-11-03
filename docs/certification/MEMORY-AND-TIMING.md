@@ -1242,7 +1242,8 @@ queue is a balanced tree: `pick`, an enqueue and the removal of the running
 entity are O(log n) or better in the processor's real-time tasks; `remove`
 of a waiting entity by identifier walks the tree, O(n), under the queue's
 spin lock. Every removal is routed by the task's tier
-(`StackTiers::remove_in`, the review's line 30, B3), so the removal of a
+(`StackTiers::remove_in`, container review 30 (not on record; ledger 5684),
+B3), so the removal of a
 fair task, a steal's among them, never walks this tree, and the walk serves
 one caller alone: a change of policy on a queued real-time task that does
 not run (L.sched.134), at the call or at its processor's next decision. A
