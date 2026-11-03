@@ -46,7 +46,7 @@ use ferrix_native_abi::status;
 use ferrix_seccomp::SeccompData;
 
 use super::Object;
-use super::channel::Endpoint;
+use super::channel::{Endpoint, Sender};
 use super::job::KILLED_STATUS;
 use super::process::Host as _;
 use crate::arch;
@@ -556,7 +556,7 @@ fn check_two_readers_of_one_end(on: bool) -> Result<(), &'static str> {
         || READ.lock().iter().flatten().next().is_some() || SENT.lock().is_some(),
     )?;
     theirs
-        .write_small(b"y")
+        .write_small(Sender::KERNEL, b"y")
         .map_err(|_| "case 4: the check could not write its message")?;
     let second_answered = wait_until(bound, "case 4: a second waiter was never answered", || {
         let answered = READ.lock().iter().flatten().count() + usize::from(SENT.lock().is_some());
@@ -931,7 +931,7 @@ fn attempt_a_parked_caller(ending: Ending) -> Result<(), &'static str> {
         Ending::Message => theirs
             .as_ref()
             .ok_or("the continuation's end is gone")?
-            .write_small(b"m")
+            .write_small(Sender::KERNEL, b"m")
             .map_err(|_| "the continuation's check could not write its message")?,
         // The sink leaves, and with it the last holder of its end but this.
         Ending::Close => {
@@ -1106,7 +1106,7 @@ fn check_a_queued_write_takes_the_park() -> Result<(), &'static str> {
         mine.reader_waiting()
     })?;
     theirs
-        .write(b"q".to_vec(), 0, || {
+        .write(Sender::KERNEL, b"q".to_vec(), 0, || {
             Ok::<alloc::vec::Vec<super::Transfer>, core::convert::Infallible>(alloc::vec::Vec::new())
         })
         .map_err(|_| "A2's case: the check could not queue its message")?;
@@ -1256,7 +1256,7 @@ fn attempt_the_last_reference(how: LastDrop) -> Result<bool, &'static str> {
     match how {
         LastDrop::Tail => RELEASE.store(true, core::sync::atomic::Ordering::Release),
         LastDrop::Done => theirs
-            .write_small(b"m")
+            .write_small(Sender::KERNEL, b"m")
             .map_err(|_| "case 16: the check could not write its message")?,
     }
     let bound = crate::timer::now_nanos().saturating_add(WOKEN_WITHIN_NANOS);

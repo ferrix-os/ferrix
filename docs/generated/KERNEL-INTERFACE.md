@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2526 declarations in the core's files, 179 in the item's; 123 checks-only.
+2535 declarations in the core's files, 179 in the item's; 123 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1991,6 +1991,7 @@ checks above is `pub` for raised checks (F3).
 | `check_carry` | fn | item |  |
 | `check` | mod | load (checks) | pub for raised checks |
 | `Endpoint` | struct | item, load |  |
+| `Sender` | struct | item, load |  |
 | `Small` | struct | - |  |
 | `ChannelMessage` | type | item, load |  |
 | `Endpoint::observe` | method | item, load |  |
@@ -2000,7 +2001,7 @@ checks above is `pub` for raised checks (F3).
 | `Endpoint::peer_has_room` | method | load |  |
 | `Endpoint::read` | method | item, load, bin |  |
 | `Endpoint::read_small` | method | item, load |  |
-| `Endpoint::readable_or_closed` | method | item |  |
+| `Endpoint::readable_or_closed` | method | item, load |  |
 | `Endpoint::reader_waiting` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Endpoint::send_direct` | method | item |  |
 | `Endpoint::signals` | method | item, load, bin |  |
@@ -2009,6 +2010,10 @@ checks above is `pub` for raised checks (F3).
 | `Endpoint::waiters` | method | item, load |  |
 | `Endpoint::write` | method | item, load |  |
 | `Endpoint::write_small` | method | item, load |  |
+| `Sender::KERNEL` | associated const | item, load, bin |  |
+| `Sender::job` | method | item, load |  |
+| `Sender::of` | method | item, load, bin |  |
+| `Sender::process` | method | item, load |  |
 | `Small::bytes` | field | item, load, bin |  |
 | `Small::len` | field | item, load, bin |  |
 | `Small::as_bytes` | method | item, load |  |
@@ -2239,7 +2244,9 @@ checks above is `pub` for raised checks (F3).
 | `Control::started` | method | item, load, bin |  |
 | `Exit::close` | method | load |  |
 | `Exit::for_check` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Exit::id` | method | item, load, bin |  |
 | `Exit::is_closed` | method | item |  |
+| `Exit::is_terminated` | method | item, load |  |
 | `Exit::observe` | method | item, load |  |
 | `Exit::signal` | method | item, load |  |
 | `Exit::status` | method | item, load, bin |  |
@@ -2250,9 +2257,11 @@ checks above is `pub` for raised checks (F3).
 | `Process::exit_record` | method | item |  |
 | `Process::exit_status` | method | load |  |
 | `Process::exited` | method | load |  |
+| `Process::id` | method | item, load, bin |  |
 | `Process::is_frozen` | method | load |  |
 | `Process::is_terminated` | method | item, load |  |
 | `Process::job` | method | item, load |  |
+| `Process::job_id` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Process::leave_job` | method | load |  |
 | `Process::leave_speculation_domain` | method | load |  |
 | `Process::leave_speculation_domain_unstarted` | method | load |  |

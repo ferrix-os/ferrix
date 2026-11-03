@@ -15,6 +15,7 @@ use crate::status;
 use crate::types::{
     APERTURE_INFO_BYTES, ApertureInfo, DEVICE_INFO_BYTES, DeviceInfo, IoMappingSpec,
     PROCESS_EXITED, PROCESS_KILLED, PROCESS_RUNNING, PortPacket, ProcessStatus, ReadActual,
+    ReadAttested,
 };
 
 #[test]
@@ -224,6 +225,11 @@ fn layouts_have_no_padding_and_match_on_every_target() {
 
     assert_eq!(size_of::<ReadActual>(), 8, "ReadActual");
     assert_eq!(offset_of!(ReadActual, handles), 4, "handles");
+
+    assert_eq!(size_of::<ReadAttested>(), 24, "ReadAttested");
+    assert_eq!(offset_of!(ReadAttested, handles), 4, "handles");
+    assert_eq!(offset_of!(ReadAttested, process), 8, "process");
+    assert_eq!(offset_of!(ReadAttested, job), 16, "job");
 
     assert_eq!(size_of::<IoMappingSpec>(), 16, "IoMappingSpec");
     assert_eq!(offset_of!(IoMappingSpec, len), 8, "len");
