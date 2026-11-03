@@ -4226,7 +4226,7 @@ impl AddressSpace {
     ///
     /// [`fallible::AllocError`] when there is no memory to list the objects
     /// in.
-    pub(crate) fn resident_pages(&self) -> Result<u64, fallible::AllocError> {
+    pub fn resident_pages(&self) -> Result<u64, fallible::AllocError> {
         let inner = self.inner.lock();
         let mut objects = fallible::try_collect(inner.objects.values())?;
         objects.sort_unstable_by_key(|vmo| Arc::as_ptr(vmo));
