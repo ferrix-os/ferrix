@@ -289,6 +289,8 @@ pub mod syscall {
 pub mod user {
     pub use ferrix_kernel_core::user::*;
     #[cfg(ferrix_linux_abi = "on")]
+    pub mod address_wait_check;
+    #[cfg(ferrix_linux_abi = "on")]
     pub mod alloc_check;
     #[cfg(ferrix_linux_abi = "on")]
     pub mod madvise_check;
