@@ -12,7 +12,9 @@ missing, the order, the points) and its "where it stands".
 
 ## Where it stands, 2026-10-23
 
-Branch `hyprix-gnome`, not landed. Kernel lines for all four parts: **0**
+All four parts are on `develop` since 2026-10-23 (part 1 f14cceab7 to 5710c373d, part 2
+e1f4034e4 to 0d1a18248, parts 3 to 3g c2d8ab4f3 to 5a8ce392b, 3h's h1 and h2
+57ce6f566 and a1d806b4a, part 4 1f92468ad to ec382429d); the branch `hyprix-gnome` is gone from origin. Kernel lines for all four parts: **0**
 (each part's section says why). Nothing touches the certified item, so no
 consultant review is owed.
 
@@ -148,7 +150,7 @@ Neither DRM hotplug nor the Intel steps can be run in QEMU (no device
 unplugs a virtio-gpu head from outside, and none has the Intel display
 registers); the N150 box test of §3.4 is what shows them.
 
-**3h is under way as agreed with the coordinator**: h1, the planner,
+**3h was agreed with the coordinator as three steps, and its h1 and h2 are on `develop`**: h1, the planner,
 printed under `ferrix.intelgpu.modeset=dry` and writing nothing; then a
 read-only register dump of the same registers while Linux drives the
 second HDMI port, the ground truth; then h2, the writes, behind

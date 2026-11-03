@@ -264,7 +264,7 @@ package FerrixStructure {
         #implemented part tasks : Tasks;
         #implemented part sched : Scheduler;
 
-        // -- Stages 6 to 12 and networking run today; stage 13's do not -----
+        // -- Stages 6 to 13 and networking run today ------------------------
         #implemented part vm : VirtualMemory;
         #implemented part syscalls : LinuxSyscallLayer;
         #implemented part native : NativeAbi;
@@ -276,9 +276,9 @@ package FerrixStructure {
         #implemented part filesystems : Filesystems;
         #implemented part blockCore : BlockCore;
         #implemented part netCore : NetCore;
-        #inProgress part namespaces : Namespaces;
-        #inProgress part cgroups : Cgroups;
-        #inProgress part seccomp : Seccomp;
+        #implemented part namespaces : Namespaces;
+        #implemented part cgroups : Cgroups;
+        #implemented part seccomp : Seccomp;
         #implemented part devices : DeviceEnumeration;
         #implemented part iommu : IommuDomains;
 
@@ -423,6 +423,23 @@ package FerrixStructure {
                  * lode-receive, crash records and the blob container; its
                  * gates are cargo xtask test-log and test-log-remote. Still
                  * to come: the indexes, RFC 5424 and OTLP. */
+        }
+        #implemented part settingsd : UserProcess {
+            doc /* The settings writer (src/user/system/linux/settingsd,
+                 * docs/SETTINGS-WRITER.md): root, socket-activated on
+                 * /run/ferrix/settings. One typed request a connection from
+                 * a closed enum (set-hostname, set-timezone,
+                 * service-enable-persistent), an authd conversation naming
+                 * the peer's account, a trusted prompt that hyprix draws
+                 * and no client can fake, one atomic write and one audit
+                 * line. Since 2026-10-24. */
+        }
+        #implemented part notifyd : UserProcess {
+            doc /* The desktop's notifications
+                 * (src/user/system/linux/compositor/notifyd):
+                 * org.freedesktop.Notifications on the session bus, with the
+                 * banners of drivers that crashed, from devmgr-events
+                 * (src/user/system/native/devmgr-events). Since 2026-10-23. */
         }
         #implemented part portald : UserProcess {
             doc /* The settings portal (src/user/system/linux/compositor/portald):

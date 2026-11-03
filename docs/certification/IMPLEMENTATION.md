@@ -1521,12 +1521,16 @@ with it.
 `process_start` make a POSIX process and its first thread in the load, and
 `Signals::default` there allocated with `vec!`: a refused frame stopped the
 kernel on an item call. The signal tables are now fallible, and the gate
-reads the three load files those calls lean on (`REACHED` in the script),
+reads the load files those calls lean on (`REACHED` in the script),
 finds a `Default` that allocates in any kernel file and flags a call of it,
-and flags a derived `Clone` over an owned heap field. `process.rs` has 14
-sites left, recorded in the baseline; the rest of the load those calls reach
-is MEMORY-AND-TIMING.md §1.3's table. When the item comes to lean on another
-load file, add it to `REACHED`.
+and flags a derived `Clone` over an owned heap field. `process.rs` has 11
+sites left (14 when first recorded, 11 since 31407427d), recorded in the
+baseline. On 2026-11-02 `REACHED` grew from
+three files to six, adding `process_create`'s load -- `launch.rs`,
+`exec.rs` and `load.rs`, 30 sites recorded the same way (consultant ledger
+5546, answer A); the baseline holds 41 in four files. The rest of the load
+those calls reach is MEMORY-AND-TIMING.md §1.3's table. When the item comes
+to lean on another load file, add it to `REACHED`.
 
 **Verify:** `cargo xtask check` (the "fallible allocation" step), and the
 `no-mem` line of any boot, which reads the same on every architecture.

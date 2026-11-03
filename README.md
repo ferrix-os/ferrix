@@ -104,8 +104,9 @@ roles, and one person, the customer, above them ([AGENTS.md](AGENTS.md)).
 - **Worker agents** each work in a git worktree of their own, build and boot
   their change in QEMU, and send it to a shared **gate pool** that runs the
   tests a change needs.
-- **A landing lock** lets one session at a time move `main`, fast-forward
-  only, once its tests passed.
+- **A landing lock** lets one session at a time move `develop`, fast-forward
+  only, once its tests passed; `main` follows by promotion once CI and the
+  certification verdict are green.
 - **The certification consultant**, another Claude session, reviews every
   change to the kernel's certified core before it lands, and asks for a
   negative control: the check is broken on purpose and must fail.

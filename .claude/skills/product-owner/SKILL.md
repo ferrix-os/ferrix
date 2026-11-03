@@ -66,12 +66,13 @@ table are in `docs/BACKLOG.md`. This skill does not repeat them.
   branches could join, and is any branch running its full row alone that a
   batch would have carried?
 * *The promotion* (since 2026-10-23, `docs/REPO-FLOW.md`): is the open
-  `promote/<sha>` pull request green, or merged? A red one, or one whose
+  `promote/<sha>` branch (no pull request since 2026-10-24) green, or already
+  pushed to `main`? A red one, or one whose
   `certification/verdict` waits, holds every landing back from `main`: give
   the CI failure to the landing that caused it, and the waiting verdict to a
   consultant subagent (`cert-verdict.py <range> --verdict OK --note "ledger
   <line>" --post <sha>`). Fast-forward the root checkout's `main` to
-  `origin/main` after a promotion merges.
+  `origin/main` after a promotion reaches `main`.
 * *Red on `main`*: is any gate failing on `main` itself? A working `main`
   comes before every other row. When one is, find the landing that broke it
   and give its fix to the session that landed it (*A red `main` goes back to

@@ -1,4 +1,4 @@
-# Namespace and cgroup follow-ons  ·  *unsized*  ·  built 2026-10-26, landing owed
+# Namespace and cgroup follow-ons ✅  ·  *unsized*  ·  built and landed 2026-10-26
 
 What [stage 13](stage-13-namespaces-cgroups-v2-seccomp.md) was first written to
 hold and does not, since the customer set its scope on 2026-10-21 to what is on
@@ -8,11 +8,13 @@ was checked against `main`'s code on that day and is not built.
 `memory.reclaim`, `cpu.max.burst`, `cpu.idle`, `io.weight`, `io.latency`, and
 `anon` and `pagetables` in `memory.stat` were built since, on 2026-10-26
 (`docs/CGROUPS.md` §10, §12 and §13, L.object.182 to 185), and so, the same
-day, was every row below, on the branch `claude/ferrix-roadmap-completion-hkxlpp`: **all of
-stage 13's follow-ons are built.** None is counted in the sized scope.
+day, was every row below, on the branch `claude/ferrix-roadmap-completion-hkxlpp`:
+**all of stage 13's follow-ons are built, and on `main` since 2026-10-26**
+(3a65627b9 to 71a51fc11, on `develop` first and in `main` by 700373fb5). None
+is counted in the sized scope.
 
-What each still owes before it lands on `develop` is the gate host's, which
-this container cannot reach: the `gate.sh control --expect` runs of the
+What each owed before it landed was the gate host's, which the container that
+built them could not reach, and which this tree does not record as done: the `gate.sh control --expect` runs of the
 negative controls (each fired here with `test-boot`), the gate rows on the
 landing hash with the accelerator named, the reviews' ledger lines copied
 to the gate host's ledger, `test-vfs` and `test-init` (busybox), and

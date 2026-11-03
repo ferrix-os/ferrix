@@ -36,7 +36,8 @@ acts for the customer between the customer's words: who works on what, when
 a row is done, the landing order, hardware use, and disagreements between
 sessions. Scope and priority stay the customer's. It holds the landing lock,
 lands PASSED batch stacks and pushes `develop`; `main` moves by itself
-through promotion pull requests (`docs/REPO-FLOW.md`), and a red promotion
+by promotion, a fast-forward to a green `promote/<sha>` branch, with no pull
+request since 2026-10-24 (`docs/REPO-FLOW.md`), and a red promotion
 is the product owner's first job in a round.
 
 The role itself is the project skill
