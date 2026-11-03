@@ -693,6 +693,9 @@
           "__ferrix_setters_driver_bind",
           "__ferrix_setters_cpu_online"
         ],
+        "seam_symbols_x86_64_only": [
+          "__ferrix_setters_cpu_online"
+        ],
         "calls": [
           "fs/memfd_check.rs",
           "fs/procfs.rs",
