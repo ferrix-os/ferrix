@@ -770,7 +770,7 @@ impl Job {
     }
 
     /// Its supervisor slot (`docs/microkernel/K4.md`).
-    pub(crate) fn supervisor(&self) -> &Supervisor {
+    pub fn supervisor(&self) -> &Supervisor {
         &self.supervisor
     }
 

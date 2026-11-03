@@ -343,6 +343,13 @@ impl UserRegs {
     }
 }
 
+/// The architecture's own word for a trap, as an exception report carries
+/// it (`docs/microkernel/K4.md` §3.1): the fault status register of the
+/// abort, `DFSR` or `IFSR`, zero for an undefined instruction.
+pub(crate) const fn exception_code(frame: &TrapFrame) -> u64 {
+    frame.fsr as u64
+}
+
 /// The signal Linux raises for a trap a program's own instruction took and
 /// nothing resolved, as `(signal, si_code, si_addr)`: a translation or
 /// permission fault `SIGSEGV`, an alignment fault `SIGBUS` with

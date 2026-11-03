@@ -204,9 +204,11 @@ pub const TIMER_SET: usize = 0x1072;
 /// [`NativeCall::TimerCancel`].
 pub const TIMER_CANCEL: usize = 0x1073;
 /// [`NativeCall::ExceptionChannelCreate`] (`docs/microkernel/K4.md`).
-/// `0x1082` and `0x1083` are the exception calls that act on a reported
-/// fault, which come with the fault chain.
 pub const EXCEPTION_CHANNEL_CREATE: usize = 0x1081;
+/// [`NativeCall::ExceptionState`].
+pub const EXCEPTION_STATE: usize = 0x1082;
+/// [`NativeCall::ExceptionResolve`].
+pub const EXCEPTION_RESOLVE: usize = 0x1083;
 /// The most records one [`NativeCall::AuditRead`] copies.
 pub const AUDIT_READ_MAX: u64 = 64;
 /// The largest name [`NativeCall::ProcessCreate`] takes, in bytes.
@@ -734,10 +736,24 @@ pub enum NativeCall {
     /// `BAD_STATE` for a process that has ended. Closing every handle to the
     /// read end detaches it.
     ExceptionChannelCreate,
+    /// `(exception, op, buffer, length)`. Read the faulting thread's
+    /// registers into `buffer` (`STATE_READ`, needs `READ`), or replace them
+    /// from it (`STATE_WRITE`, needs `WRITE`), as
+    /// [`crate::exception::Registers`]; `length` must be its size. A write is
+    /// checked as `sigreturn` checks a frame and refused whole
+    /// (`INVALID_ARGS`) if any field is one a program may not hold. Only
+    /// while the exception is unresolved: `BAD_STATE` after a verdict,
+    /// `TIMED_OUT` after its wait expired.
+    ExceptionState,
+    /// `(exception, verdict)`. Resume the faulting thread, end its process,
+    /// or hand the fault on (`docs/microkernel/K4.md` §2.5). Needs `MANAGE`;
+    /// once: `BAD_STATE` after a verdict, `TIMED_OUT` after its wait
+    /// expired; `INVALID_ARGS` for any other verdict.
+    ExceptionResolve,
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 75] = [
+pub const ALL: [NativeCall; 78] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,
@@ -814,6 +830,8 @@ pub const ALL: [NativeCall; 75] = [
     NativeCall::TimerSet,
     NativeCall::TimerCancel,
     NativeCall::ExceptionChannelCreate,
+    NativeCall::ExceptionState,
+    NativeCall::ExceptionResolve,
 ];
 
 /// Whether `number` is in the native range at all.
@@ -905,6 +923,8 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         TIMER_SET => NativeCall::TimerSet,
         TIMER_CANCEL => NativeCall::TimerCancel,
         EXCEPTION_CHANNEL_CREATE => NativeCall::ExceptionChannelCreate,
+        EXCEPTION_STATE => NativeCall::ExceptionState,
+        EXCEPTION_RESOLVE => NativeCall::ExceptionResolve,
         _ => return None,
     };
     Some(call)
@@ -990,5 +1010,7 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::TimerSet => TIMER_SET,
         NativeCall::TimerCancel => TIMER_CANCEL,
         NativeCall::ExceptionChannelCreate => EXCEPTION_CHANNEL_CREATE,
+        NativeCall::ExceptionState => EXCEPTION_STATE,
+        NativeCall::ExceptionResolve => EXCEPTION_RESOLVE,
     }
 }

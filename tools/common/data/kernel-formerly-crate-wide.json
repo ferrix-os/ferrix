@@ -541,6 +541,11 @@
       "before": "pub(crate)"
     },
     {
+      "item": "arch/mod.rs: exception_check (re-export)",
+      "born": "K4",
+      "ledger": 6131
+    },
+    {
       "item": "arch/mod.rs: forget_root (re-export)",
       "before": "pub(crate)"
     },
@@ -1001,6 +1006,16 @@
       "before": "pub(crate)"
     },
     {
+      "item": "audit.rs: EXCEPTION_CONTEXT (re-export)",
+      "born": "K4",
+      "ledger": 6131
+    },
+    {
+      "item": "audit.rs: EXCEPTION_KILLED (re-export)",
+      "born": "K4",
+      "ledger": 6131
+    },
+    {
       "item": "audit.rs: Event (re-export)",
       "before": "pub(crate)"
     },
@@ -1443,6 +1458,11 @@
     {
       "item": "object/channel/check.rs: run (fn)",
       "before": "pub(crate)"
+    },
+    {
+      "item": "object/exception.rs: Supervisor::is_live (method)",
+      "born": "K4",
+      "ledger": 6131
     },
     {
       "item": "object/interrupt.rs: Interrupt::coalesces (method)",
@@ -2147,6 +2167,11 @@
     {
       "item": "trap.rs: MAX_ERRNO (const)",
       "before": "pub(crate)"
+    },
+    {
+      "item": "trap.rs: Poison (enum)",
+      "born": "K4",
+      "ledger": 6131
     },
     {
       "item": "trap.rs: SyscallFilter (type)",

@@ -16,8 +16,8 @@
 #      by name. Generic kernel code that says `arch::x86_64::` compiles on one
 #      machine and breaks the other, and the break is discovered by whoever
 #      next builds for AArch64 rather than by whoever wrote it.
-#   4. `#[cfg(target_arch)]` appears only under `src/kernel/src/arch/` and
-#      `src/boot/common/uefi/src/arch/`. This is rule 3's teeth: without it, "the facade" is a
+#   4. `#[cfg(target_arch)]` appears only under `src/kernel/src/arch/`,
+#      `src/boot/common/uefi/src/arch/` and `src/lib/proto/native-abi/src/arch/`. This is rule 3's teeth: without it, "the facade" is a
 #      naming convention that erodes one conditional at a time.
 #   5. Every workspace member inherits the workspace lint table.
 #
@@ -211,7 +211,7 @@ fi
 # ---------------------------------------------------------------------------
 offenders=$(grep -rnE 'cfg[^)]*target_arch' src/kernel/src src/boot/common/uefi/src src/lib src/user/system/native 2>/dev/null \
     --include='*.rs' \
-    | grep -vE '^(src/kernel/src/arch/|src/boot/common/uefi/src/arch/|src/user/system/native/(drivers/[^/]+/)?[^/]+/src/arch/)' || true)
+    | grep -vE '^(src/kernel/src/arch/|src/boot/common/uefi/src/arch/|src/lib/proto/native-abi/src/arch/|src/user/system/native/(drivers/[^/]+/)?[^/]+/src/arch/)' || true)
 if [[ -n "$offenders" ]]; then
     echo "LAYERING VIOLATION: target_arch conditional outside an arch directory:" >&2
     echo "$offenders" | sed 's/^/    /' >&2
