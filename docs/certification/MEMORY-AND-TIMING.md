@@ -2292,6 +2292,18 @@ lock (`sched::wake`) under a bucket's lock, as before K5. A VMO's pages
 that need filling (and, after K3, a pager's) are filled with no bucket's
 lock held, and the read is done again.
 
+### 2.2ae A copy out of an address space by handle (`space_read`, K2, 2026-10-21)
+
+`space_read` copies at most `SPACE_COPY_MAX`, 64 KiB, per call, a page step
+at a time: at most sixteen steps. Each step holds one address space's lock,
+the target's while it reads the page into the bounce buffer and then the
+caller's while it copies the buffer out, and never two at once, so it adds
+no ordering between spaces. A step that must fault the page in does so with
+the target's own fault, no lock held, at most four times before it gives
+up. The bounce buffer is one page from the kernel heap, a fallible
+allocation charged to the caller's job for the length of the call; a
+refusal is `NO_MEMORY`. Nothing of it is on the kernel stack.
+
 ### 2.3 What is missing, per standard
 
 * **DO-178C DAL C** does not require WCET as such, but does require that
