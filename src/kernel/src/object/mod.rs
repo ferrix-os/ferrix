@@ -21,6 +21,7 @@
 //! deep the chain, the stack holds one drop at a time.
 
 pub mod channel;
+pub mod exception;
 pub mod interrupt;
 pub mod io_mapping;
 pub mod job;

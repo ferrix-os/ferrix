@@ -203,6 +203,10 @@ pub const TIMER_CREATE: usize = 0x1071;
 pub const TIMER_SET: usize = 0x1072;
 /// [`NativeCall::TimerCancel`].
 pub const TIMER_CANCEL: usize = 0x1073;
+/// [`NativeCall::ExceptionChannelCreate`] (`docs/microkernel/K4.md`).
+/// `0x1082` and `0x1083` are the exception calls that act on a reported
+/// fault, which come with the fault chain.
+pub const EXCEPTION_CHANNEL_CREATE: usize = 0x1081;
 /// The most records one [`NativeCall::AuditRead`] copies.
 pub const AUDIT_READ_MAX: u64 = 64;
 /// The largest name [`NativeCall::ProcessCreate`] takes, in bytes.
@@ -720,6 +724,16 @@ pub enum NativeCall {
     /// `(timer)`. Disarm `timer` (`WRITE`) and clear `READABLE`; nothing
     /// the cancelled arm would have fired signals afterwards.
     TimerCancel,
+    /// `(task, timeout_ms, options)` → handle. Attach an exception channel
+    /// to a process or a job (`docs/microkernel/K4.md` §2.2), and answer its
+    /// read end, with [`crate::rights::Rights::EXCEPTION_CHANNEL`]. The
+    /// kernel keeps the only writing end, so everything read from it is the
+    /// kernel's. Needs `SUPERVISE` on `task`; `timeout_ms` in
+    /// `1..=EXCEPTION_TIMEOUT_MAX_MS` and `options` 0, else `INVALID_ARGS`;
+    /// `ALREADY_BOUND` while a channel whose read end is open is attached;
+    /// `BAD_STATE` for a process that has ended. Closing every handle to the
+    /// read end detaches it.
+    ExceptionChannelCreate,
 }
 
 /// Every native call, in number order.
@@ -799,6 +813,7 @@ pub const ALL: [NativeCall; 75] = [
     NativeCall::TimerCreate,
     NativeCall::TimerSet,
     NativeCall::TimerCancel,
+    NativeCall::ExceptionChannelCreate,
 ];
 
 /// Whether `number` is in the native range at all.
@@ -889,6 +904,7 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         TIMER_CREATE => NativeCall::TimerCreate,
         TIMER_SET => NativeCall::TimerSet,
         TIMER_CANCEL => NativeCall::TimerCancel,
+        EXCEPTION_CHANNEL_CREATE => NativeCall::ExceptionChannelCreate,
         _ => return None,
     };
     Some(call)
@@ -973,5 +989,6 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::TimerCreate => TIMER_CREATE,
         NativeCall::TimerSet => TIMER_SET,
         NativeCall::TimerCancel => TIMER_CANCEL,
+        NativeCall::ExceptionChannelCreate => EXCEPTION_CHANNEL_CREATE,
     }
 }

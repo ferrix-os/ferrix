@@ -135,6 +135,8 @@ pub mod object {
     #[cfg(ferrix_linux_abi = "on")]
     pub mod edge_check;
     #[cfg(ferrix_linux_abi = "on")]
+    pub mod exception_check;
+    #[cfg(ferrix_linux_abi = "on")]
     pub mod fast_path_check;
     #[cfg(ferrix_linux_abi = "on")]
     pub mod format_check;

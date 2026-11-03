@@ -43,6 +43,7 @@ pub mod channel;
 pub mod chardev;
 pub mod device;
 pub mod error;
+pub mod exception;
 pub mod handle;
 pub mod job;
 pub mod pending;

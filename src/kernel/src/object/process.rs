@@ -63,6 +63,7 @@ use ferrix_native_abi::rights::Rights;
 use ferrix_native_abi::signals::Signals as ObjectSignals;
 
 use crate::fallible::{self, AllocError};
+use crate::object::exception::Supervisor;
 use crate::object::job::{self, Job, JobError};
 use crate::object::port::{self, Observer, Observers, PortError};
 use crate::object::quota::{self, Resource};
@@ -132,6 +133,9 @@ pub struct Process {
     /// ([`Process::list_task`]). The core's, so that the core itself tells
     /// every one of them the process has ended ([`Process::end_record`]).
     task_list: SpinLock<TaskList>,
+    /// Its supervisor slot (`docs/microkernel/K4.md` §2.2): the exception
+    /// channel attached to it, if any. Emptied as it ends.
+    supervisor: Supervisor,
 }
 
 /// Take the live tasks of `tasks` from `next` into the empty `batch`, calling
@@ -308,6 +312,7 @@ impl Process {
                 tasks: Vec::new(),
                 version: 0,
             }),
+            supervisor: Supervisor::new(),
         })
     }
 
@@ -743,6 +748,11 @@ impl Process {
             Bootstrap::Held(object, _) => Some(object),
             _ => None,
         }
+    }
+
+    /// Its supervisor slot (`docs/microkernel/K4.md`).
+    pub(crate) fn supervisor(&self) -> &Supervisor {
+        &self.supervisor
     }
 
     /// A reference to how it ends, which outlives it.
