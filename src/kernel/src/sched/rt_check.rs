@@ -75,16 +75,18 @@ const RR_LEAST_NANOS: u64 = 100_000_000;
 /// The most the second `SCHED_FIFO` task of the control may have run.
 const FIFO_CONTROL_MOST_NANOS: u64 = 5_000_000;
 
-/// The floor's window: two periods and a little.
-const FLOOR_WINDOW_NANOS: u64 = 2_100_000_000;
+/// The floor's window: three periods and a little. The periods are fixed, so
+/// the tier may spend a whole budget only in a whole period: a window that
+/// starts just past 50 ms into one has no throttle until nearly two have gone,
+/// and holds two throttles only in this length.
+const FLOOR_WINDOW_NANOS: u64 = 3_100_000_000;
 
 /// The least a fair task must be given of it: 50 ms a period over two
-/// periods, less a margin for where the window falls.
+/// periods, less a margin.
 const FLOOR_LEAST_NANOS: u64 = 60_000_000;
 
-/// The most: well short of the half a fair share would give. An emulated
-/// processor's timer comes late enough to give it several times the floor
-/// (ARMv7-A under `tcg`: 334 ms, 2026-10-27).
+/// The most: well short of the half a fair share would give, for an emulated
+/// processor's late timer.
 const FLOOR_MOST_NANOS: u64 = 700_000_000;
 
 /// The least the spinning `SCHED_FIFO` task must be given of it: more than
