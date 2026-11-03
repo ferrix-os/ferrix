@@ -374,7 +374,7 @@ def register_key(e) -> str:
 
 # The split's own entries: `formerly_crate_wide` was generated with these, and they
 # only shrink. Anything later is `born` with a mechanism and a ledger line (6137).
-BORNLESS_MOST = 545
+BORNLESS_MOST = 544
 
 
 def analyse(manifest, files, read, exists, register=None):
