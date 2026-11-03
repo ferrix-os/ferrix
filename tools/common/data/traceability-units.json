@@ -149,6 +149,14 @@
     "iommu::vtd::Unit::link_empty_table": "The unit's half of Domain::link_empty_table: the walk chosen and the writes published, for stage 10's fallback case (L.iommu.107). Nothing in product code calls it.",
     "mm::link_empty_io_table": "Maps one page and clears its leaf alone, the table kept linked, for stage 10's fallback case (L.iommu.107) through vtd::Unit::link_empty_table. Nothing in product code calls it.",
     "mm::LeafOnly::write": "link_empty_io_table's memory, which lets the leaf's clear through and drops the prune's write. Nothing in product code uses it.",
-    "iommu::Domain::entry_span": "The span of the entry mapping an address in a VT-d domain, for stage 10's run cases (iommu/blocks_check.rs, L.iommu.106-108). Product code asks vtd::Unit::entry_span directly; nothing in it calls this."
+    "iommu::Domain::entry_span": "The span of the entry mapping an address in a VT-d domain, for stage 10's run cases (iommu/blocks_check.rs, L.iommu.106-108). Product code asks vtd::Unit::entry_span directly; nothing in it calls this.",
+    "user::address_wait::list_stale_entry": "Lists a dormant entry of a sleeper already woken (K5's sabotage hooks, the consultant's condition 4): compiled only under cfg(ferrix_checks = \"on\"), called only by the load ring's stale-entry futex check and stage 9's addrwait walk (case 13, L.user.138). Lists into the table, so it stays beside it.",
+    "user::address_wait::StaleEntry::remove": "Takes a dormant entry list_stale_entry made off the table again: K5's sabotage hooks, compiled only under cfg(ferrix_checks = \"on\"), called only by the same two checks.",
+    "user::address_wait::waiters_of": "Whether a dormant entry is still listed, for StaleEntry::remove: K5's sabotage hooks, compiled only under cfg(ferrix_checks = \"on\").",
+    "user::address_wait::waiters_on": "How many waiters are listed on some keys: observes only, for the checks that must see a waiter asleep before they wake it (stage 9's addrwait, the load ring's futex checks through syscall::futex::waiters_on). Reads the table under its locks, so it stays beside it (the consultant's condition 4: observers may stay as traced verification support).",
+    "user::address_wait::bucket_of": "The bucket a key is listed in: observes only, for the requeue checks that need two words in different buckets (stage 9's addrwait case 6, the load ring's futex requeue check).",
+    "user::address_wait::bucket_room": "A bucket's entries and room: observes only, for stage 9's addrwait case 13, which requires a bucket to give its room back (L.user.144).",
+    "user::address_wait::requeue_without_moving": "K5's sabotage hook for the load ring's futex requeue control: compiled only under cfg(ferrix_checks = \"on\") (the consultant's condition 4), and called by nothing else.",
+    "user::address_wait::forget_waiters": "K5's sabotage hook for the load ring's futex wake controls: compiled only under cfg(ferrix_checks = \"on\") (the consultant's condition 4), and called by nothing else."
   }
 }
