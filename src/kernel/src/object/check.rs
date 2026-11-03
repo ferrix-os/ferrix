@@ -28,7 +28,8 @@ use ferrix_native_abi::rights::Rights;
 use ferrix_native_abi::signals::Signals;
 use ferrix_native_abi::status;
 use ferrix_native_abi::types::{
-    CHANNEL_MAX_BYTES, MAP_READ, MAP_WRITE, PACKET_INTERRUPT, PACKET_SIGNAL, PACKET_USER,
+    CHANNEL_MAX_BYTES, JOB_MEMORY, MAP_READ, MAP_WRITE, PACKET_INTERRUPT, PACKET_SIGNAL,
+    PACKET_USER,
 };
 use ferrix_vma::VmaFlags;
 
@@ -323,6 +324,7 @@ fn check_a_process_starts_another(counter: &mut Counter) -> Result<(), &'static 
     check_what_process_create_refuses(&spawner, counter)?;
     check_process_create_survives_each_failure(&spawner)?;
     check_a_child_finds_its_bootstrap(&spawner, counter)?;
+    check_a_childs_end_leaves_nothing_charged(&spawner, counter)?;
     check_a_killed_child_is_not_started(&spawner, counter)?;
     check_an_unstarted_child_ends_with_its_handles(&spawner, counter)?;
     side.close_everything();
@@ -563,6 +565,45 @@ fn check_process_create_survives_each_failure(spawner: &Spawner<'_>) -> Result<(
         }
     }
     Err("process_create made more allocations than its check allows")
+}
+
+/// A native process's end is not heard while its memory is still charged
+/// (F-91, ledger 2962 (1)): with its handle held, so nothing has reaped it,
+/// its job's memory is as low as the job's when the watch on it fires, as a
+/// Linux program's is when `wait4` returns (`fs/cgroupfs/oom_check.rs`).
+fn check_a_childs_end_leaves_nothing_charged(
+    spawner: &Spawner<'_>,
+    counter: &mut Counter,
+) -> Result<(), &'static str> {
+    let side = spawner.side;
+    let job = side.handle(nr::JOB_CREATE, &[reg(spawner.root), 0], "job_create failed")?;
+    let child = spawner.made(job, "process_create in a job of its own failed")?;
+    spawner.watch(child, 73, "watching a process in a job of its own failed")?;
+    let (near, far) = side.channel()?;
+    let _ = side
+        .call(nr::PROCESS_START, &[reg(child), reg(far)])
+        .map_err(|_| "process_start in a job of its own failed")?;
+    spawner.heard(
+        73,
+        "a process in a job of its own was not heard to end",
+        counter,
+    )?;
+    let _ = side
+        .call(nr::JOB_GET_QUOTA, &[reg(job), JOB_MEMORY, INBOX])
+        .map_err(|_| "job_get_quota failed")?;
+    let used = side.get(INBOX, 8)?;
+    let used = u64::from_ne_bytes(used.try_into().map_err(|_| "a short quota")?);
+    // What is left is the handle's record of the process, in the heap: no
+    // whole frame. Unmapped late, the program's stack and data would be here.
+    if used >= PAGE_SIZE {
+        return Err("a native process's end could be heard before its memory was given back");
+    }
+    for handle in [near, child, job] {
+        let _ = side
+            .call(nr::HANDLE_CLOSE, &[reg(handle)])
+            .map_err(|_| "closing a handle of the native end's case failed")?;
+    }
+    Ok(())
 }
 
 /// A child started with a channel end finds the end's value in its first
