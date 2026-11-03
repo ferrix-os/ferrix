@@ -413,6 +413,10 @@ fn wanted(mode: Mode) -> Vec<(String, String)> {
     let (without, all) = (mode.without_target(), mode.all());
     let mut wanted = vec![
         (
+            "arms moved off a processor leaving service".to_owned(),
+            "stage 9 moved no timer's arm off a processor (L.sched.104)".to_owned(),
+        ),
+        (
             format!("cpu: {t} out of service (by lode)"),
             format!("lode never took processor {t} out"),
         ),

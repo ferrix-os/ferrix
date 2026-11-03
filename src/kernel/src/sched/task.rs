@@ -25,6 +25,7 @@ use core::sync::atomic::{
 use ferrix_sched::{CpuSet, EntityState, Node, Slot, WORDS};
 use ferrix_sync::IrqControl;
 
+use super::queue::Due;
 use crate::arch;
 use crate::fallible::{self, AllocError};
 use crate::object::process::Host;
@@ -306,10 +307,17 @@ pub struct Task {
     /// Lent to a queue as the task is queued and handed back as it leaves,
     /// so that queueing, which a wake-up does from an interrupt handler,
     /// allocates nothing (finding F-23). Allocated with the task.
-    run_slot: SlotCell,
+    run_slot: SlotCell<Arc<Task>>,
     /// The node a processor's sleeper set, or the reaper's list, holds it
     /// in, while neither does. As `run_slot`, for sleeping and for dying.
-    sleep_slot: SlotCell,
+    /// A sleeper set's node carries a [`Due`], since timer objects are filed
+    /// in the same set (`object::timer`).
+    sleep_slot: SlotCell<Due>,
+    /// The instant its sleep slot is filed under in its home's sleeper set,
+    /// or zero while it is not filed: written under that queue's lock as it
+    /// is filed and taken under it as it leaves, so that an early wake takes
+    /// the entry out by its key instead of walking the set (`L.sched.84`).
+    filed_at: AtomicU64,
 }
 
 /// One of a task's slots, while the task holds it: a node pointer, null
@@ -329,9 +337,9 @@ pub struct Task {
 /// `SpinLock<Option<TaskSlot>>`, about 5 ns a take or give-back against
 /// about 4 for one locked operation and 0.3 for a load, and the fast path
 /// made three a direction (`docs/OPAQUE-KERNEL.md` §9.7, "as built", 14).
-struct SlotCell(AtomicPtr<Node<Arc<Task>>>);
+struct SlotCell<T>(AtomicPtr<Node<T>>);
 
-impl fmt::Debug for SlotCell {
+impl<T> fmt::Debug for SlotCell<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(if self.holds() {
             "SlotCell(held)"
@@ -341,14 +349,14 @@ impl fmt::Debug for SlotCell {
     }
 }
 
-impl SlotCell {
+impl<T> SlotCell<T> {
     /// A cell holding `slot`.
-    fn new(slot: TaskSlot) -> SlotCell {
+    fn new(slot: Slot<T>) -> SlotCell<T> {
         SlotCell(AtomicPtr::new(Box::into_raw(slot.into_box())))
     }
 
     /// Take the slot, if the cell holds it.
-    fn take(&self) -> Option<TaskSlot> {
+    fn take(&self) -> Option<Slot<T>> {
         let node = self.0.swap(core::ptr::null_mut(), Ordering::AcqRel);
         if node.is_null() {
             return None;
@@ -360,7 +368,7 @@ impl SlotCell {
     }
 
     /// Give the slot back, into a cell that must be empty (FX-0534).
-    fn put(&self, slot: TaskSlot) {
+    fn put(&self, slot: Slot<T>) {
         let node = Box::into_raw(slot.into_box());
         if self
             .0
@@ -385,7 +393,7 @@ impl SlotCell {
     }
 }
 
-impl Drop for SlotCell {
+impl<T> Drop for SlotCell<T> {
     /// Free the node, if the cell holds it. A task is dropped only when
     /// nothing holds it, so then nothing holds its slots either.
     fn drop(&mut self) {
@@ -424,9 +432,11 @@ fn user_parts(
     let core = thread.map(|thread| Arc::clone(thread.process().core_arc()));
     Ok((user, core))
 }
+/// The node a processor's sleeper set holds a task in, beside timers.
+pub(crate) type SleepSlot = Slot<Due>;
 
 /// The two slots a task needs, allocated together.
-fn slots() -> Result<(TaskSlot, TaskSlot), AllocError> {
+fn slots() -> Result<(TaskSlot, SleepSlot), AllocError> {
     Ok((Slot::new()?, Slot::new()?))
 }
 
@@ -705,6 +715,7 @@ impl Task {
             reply: [const { AtomicU64::new(0) }; 4],
             run_slot: SlotCell::new(run_slot),
             sleep_slot: SlotCell::new(sleep_slot),
+            filed_at: AtomicU64::new(0),
         })
     }
 
@@ -766,6 +777,7 @@ impl Task {
             reply: [const { AtomicU64::new(0) }; 4],
             run_slot: SlotCell::new(run_slot),
             sleep_slot: SlotCell::new(sleep_slot),
+            filed_at: AtomicU64::new(0),
         })
     }
 
@@ -782,13 +794,29 @@ impl Task {
 
     /// Take the slot a sleeper set or the reaper holds this task in. `None`
     /// if one already holds it.
-    pub(crate) fn take_sleep_slot(&self) -> Option<TaskSlot> {
+    pub(crate) fn take_sleep_slot(&self) -> Option<SleepSlot> {
         self.sleep_slot.take()
     }
 
     /// Have back the slot a sleeper set or the reaper held this task in.
-    pub(crate) fn return_sleep_slot(&self, slot: TaskSlot) {
+    pub(crate) fn return_sleep_slot(&self, slot: SleepSlot) {
         self.sleep_slot.put(slot);
+    }
+
+    /// Record the instant its sleep slot is filed under, or zero as the
+    /// entry leaves: by the sleeper set that files it or takes it out, under
+    /// that queue's lock.
+    pub(crate) fn set_filed_at(&self, at: u64) {
+        self.filed_at.store(at, Ordering::Relaxed);
+    }
+
+    /// The instant its sleep slot is filed under, or zero while it is not.
+    ///
+    /// One load: a task that blocked with no deadline, the round trip's
+    /// case, was never filed, and its wake pays this load where it used to
+    /// walk the set.
+    pub fn filed_at(&self) -> u64 {
+        self.filed_at.load(Ordering::Relaxed)
     }
 
     /// Hand it a reply of `len` bytes in `words`, the bytes past `len`
