@@ -1049,10 +1049,10 @@ package FerrixSchedRequirements {
         }
         requirement <'L.sched.104'> evacuationLeavesNothingBehind : ItemLowLevel {
             attribute :>> statement = "A processor parking shall move every
-                queued task and every sleeper of its own off to processors in
-                service, under the two queues' locks, keeping each sleeper's due
-                time; a task found there while parked shall be drained and
-                counted.";
+                queued task, every sleeper of its own and every timer object's
+                arm off to processors in service, under the two queues' locks,
+                keeping each sleeper's and arm's due time; a task found there
+                while parked shall be drained and counted.";
             attribute :>> criterion = "test-quarantine: /proc/ferrix-service says
                 service out drained 0 for the target after the CPU-bound
                 loops and the readers; the loops go on on the others; fifty
@@ -1060,7 +1060,8 @@ package FerrixSchedRequirements {
                 longest move's hold printed (MEMORY-AND-TIMING 2.2e2).";
             attribute :>> parent = "H.SCHED.18";
             attribute :>> unit = ("sched::evacuate", "sched::move_one_off",
-                "sched::queue::CpuQueue::take_movable_sleeper", "sched::park",
+                "sched::queue::CpuQueue::take_movable_sleeper",
+                "sched::queue::CpuQueue::take_timer_arm", "sched::park",
                 "sched::drained", "sched::pick_or_park", "sched::steal_from",
                 "sched::move_hold_max");
         }
@@ -1308,6 +1309,27 @@ package FerrixSchedRequirements {
             attribute :>> parent = "H.SCHED.18";
             attribute :>> unit = ("sched::affinity::mask_for",
                 "sched::affinity::effective_mask", "sched::task::Task::new");
+        }
+        requirement <'L.sched.84'> aSleeperLeavesByItsKey : ItemLowLevel {
+            doc /* Rationale: the sleeper set holds timer arms beside sleeping
+                tasks since K10 (docs/microkernel/K10.md §9, condition 2), so a
+                walk of it on every early wake would let one job's timers
+                lengthen every other job's wakes; a removal by key is a descent of
+                the AVL tree. */
+            attribute :>> statement = "A task filed in its processor's sleeper set
+                shall keep the instant it was filed under, and an early wake shall
+                take it out by that instant and its id, never by a walk of the set;
+                a removal under any other key shall take nothing out.";
+            attribute :>> criterion = "Stage 9's early-wake case: a task asleep
+                among three armed timers on its processor, woken early, takes the
+                set from n to n - 1 entries with every timer's arm still filed;
+                with the removal's key made wrong, the case fails with its
+                sentence. The sched crate's host test removes by key and refuses
+                a wrong instant and a wrong id.";
+            attribute :>> parent = "H.SCHED.5";
+            attribute :>> unit = ("sched::queue::CpuQueue::remove_sleeper",
+                "sched::queue::CpuQueue::file_sleeper",
+                "sched::task::Task::set_filed_at", "sched::task::Task::filed_at");
         }
     }
 }
