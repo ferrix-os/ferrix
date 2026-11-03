@@ -944,6 +944,11 @@
         "crate": "ferrix-kernel-load"
       },
       {
+        "file": "object/sender_check.rs",
+        "file_ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
         "file": "object/write_read_check.rs",
         "file_ring": "core",
         "crate": "ferrix-kernel-load"

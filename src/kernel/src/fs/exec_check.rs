@@ -28,6 +28,12 @@
 //! the file's name has been removed, and the program runs again to its status.
 //! That needs the child to know what its parent was started from, and
 //! `/proc/<pid>/exe` to lead to the file rather than to its old name.
+//!
+//! **A process keeps its id across `execve`** (`docs/microkernel/K6.md` §6,
+//! case 4, the consultant's condition 5 at ledger 2485). Before its
+//! `execve` the fork is given a channel end; after it, the fork writes an
+//! empty message through it and ends. The message, read once the fork has
+//! ended, carries the fork's process id from before the `execve`.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -41,6 +47,8 @@ use ferrix_vfs::{Errno, FileType, Inode, Metadata, OpenFile, OpenFlags};
 
 use crate::arch;
 use crate::fs::pages::VmoStorage;
+use crate::object::Object;
+use crate::object::channel::Endpoint;
 use crate::sync::SpinLock;
 use crate::syscall::attributes;
 use crate::syscall::exec::{self, Executable, ExecveError};
@@ -50,7 +58,11 @@ use crate::syscall::process::{self, Process};
 use crate::syscall::program::ProgramFile;
 use crate::syscall::thread::Thread;
 use crate::syscall::uaccess;
+use crate::syscall::{SyscallArgs, native};
 use crate::user::space::{Access, AddressSpace};
+use ferrix_native_abi::handle::Handle;
+use ferrix_native_abi::nr;
+use ferrix_native_abi::rights::Rights;
 
 /// The name the counted program goes by: an empty file under `/tmp`, whose
 /// contents the check supplies through the open file.
@@ -112,6 +124,12 @@ static REFUSED: SpinLock<Option<i32>> = SpinLock::new(None);
 /// `no_new_privs` and `dumpable` as the fork's `execve` left them, read by
 /// its task before the program runs.
 static AFTER_EXEC: SpinLock<Option<(bool, bool)>> = SpinLock::new(None);
+
+/// The end the fork writes through after its `execve`, and what its id read
+/// then and what that write answered (K6, case 4).
+static SENDER_END: SpinLock<Option<Handle>> = SpinLock::new(None);
+/// See [`SENDER_END`].
+static SENT_AFTER_EXEC: SpinLock<Option<(u64, bool)>> = SpinLock::new(None);
 
 /// What the check measured, for the boot log.
 #[derive(Debug, Clone, Copy)]
@@ -449,6 +467,15 @@ fn fork_and_exec_self() -> Result<i32, &'static str> {
     *STAGED_CALL.lock() = Some((STAGED, argv));
     *REFUSED.lock() = None;
     *AFTER_EXEC.lock() = None;
+    // K6's case 4: an end in the fork's table, which `execve` keeps.
+    let (kept, read_here) =
+        Endpoint::pair().map_err(|_| "no memory for the execve id check's channel")?;
+    let end = child
+        .with_handles(|table| table.insert(Object::Channel(kept), Rights::CHANNEL))
+        .map_err(|_| "no room in the fork's table for the execve id check")?;
+    let id_before = child.id();
+    *SENDER_END.lock() = Some(end);
+    *SENT_AFTER_EXEC.lock() = None;
     let task = crate::sched::spawn_user(
         "exec-self",
         exec_self,
@@ -485,6 +512,7 @@ fn fork_and_exec_self() -> Result<i32, &'static str> {
     if child.exe() != SELF_PATH {
         return Err("a fork that ran /proc/self/exe was not recorded as the program's file");
     }
+    check_the_id_survived(id_before, &read_here)?;
     // The parent has never run; it runs now, from the pages the fork shared.
     let _ = run_to_its_end(&parent)?;
     Ok(status)
@@ -505,6 +533,7 @@ fn exec_self(_argument: usize) {
             if let Some(me) = process::current() {
                 let left = attributes::get(&me);
                 *AFTER_EXEC.lock() = Some((left.no_new_privs, left.dumpable));
+                write_after_exec(&me);
             }
             process::run_program(0);
         }
@@ -517,6 +546,43 @@ fn exec_self(_argument: usize) {
             process::exit_current(EXEC_FAILED)
         }
     }
+}
+
+/// K6's case 4, in the fork after its `execve`: an empty `channel_write`
+/// through the end it was given before, as a program makes one, and its id
+/// as the kernel holds it now.
+fn write_after_exec(me: &Arc<Process>) {
+    let Some(end) = SENDER_END.lock().take() else {
+        return;
+    };
+    let args = SyscallArgs {
+        abi: crate::trap::Abi::Native,
+        number: nr::CHANNEL_WRITE,
+        args: [u64::from(end.0), 0, 0, 0, 0, 0],
+        ip: 0,
+    };
+    let host: &dyn crate::object::process::Host = &**me;
+    let written = native::dispatch(&args, Some(host)).is_ok();
+    *SENT_AFTER_EXEC.lock() = Some((me.id(), written));
+}
+
+/// K6's case 4, read once the fork has ended: its id did not change across
+/// the `execve`, and the message it wrote after it reads as that id.
+fn check_the_id_survived(id_before: u64, read_here: &Endpoint) -> Result<(), &'static str> {
+    match SENT_AFTER_EXEC.lock().take() {
+        Some((id_after, true)) if id_after == id_before => {}
+        Some((_, true)) => return Err("sender case 4: a process's id changed across its execve"),
+        _ => return Err("sender case 4: the fork could not write after its execve"),
+    }
+    let message = read_here
+        .read(0, 0, false)
+        .map_err(|_| "sender case 4: the fork's message after its execve was not there")?;
+    if message.sender.process() != id_before {
+        return Err(
+            "sender case 4: a message written after an execve did not read as the process's id",
+        );
+    }
+    Ok(())
 }
 
 /// What the check writes into the large segment: a byte the file never

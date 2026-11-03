@@ -1103,6 +1103,8 @@ fn every_call_in_the_native_table_has_a_wrapper() {
     let _ = channel::create(&sys);
     let _ = channel.write(b"");
     let _ = channel.read(&mut [], &mut []);
+    let _ = channel.read_attested(&mut [], &mut []);
+    let _ = channel.object_id();
     let _ = channel.write_read(None);
     let _ = port::create(&sys);
     let _ = port.queue(0, [0, 0]);
