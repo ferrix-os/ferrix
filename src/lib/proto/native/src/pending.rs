@@ -180,6 +180,59 @@ pub fn cpu_service<S: Syscall>(
     )
 }
 
+/// A disarmed timer on `clock`, with `Rights::TIMER`'s rights
+/// (`docs/microkernel/K10.md`).
+///
+/// # Errors
+///
+/// [`Error::InvalidArgs`] for another clock, [`Error::NoMemory`] at a limit.
+pub fn timer_create<S: Syscall>(sys: S, clock: u64) -> Result<Handle, Error> {
+    decode_handle(
+        Call::new(nr::TIMER_CREATE)
+            .value(usize::try_from(clock).map_err(|_| Error::InvalidArgs)?)
+            .value(0)
+            .make(sys),
+    )
+}
+
+/// Arm `timer` once at `spec`, from now with `relative`.
+///
+/// # Errors
+///
+/// [`Error::AccessDenied`] without `WRITE`.
+pub fn timer_set<S: Syscall>(
+    sys: S,
+    timer: &OwnedHandle<S>,
+    spec: types::TimerSpec,
+    relative: bool,
+) -> Result<(), Error> {
+    let bytes = spec.to_bytes();
+    decode_unit(
+        Call::new(nr::TIMER_SET)
+            .value(register(timer.raw()))
+            .input(&bytes)
+            .value(if relative {
+                usize::try_from(types::TIMER_RELATIVE).map_err(|_| Error::InvalidArgs)?
+            } else {
+                0
+            })
+            .make(sys),
+    )
+}
+
+/// Disarm `timer`.
+///
+/// # Errors
+///
+/// [`Error::AccessDenied`] without `WRITE`.
+pub fn timer_cancel<S: Syscall>(sys: S, timer: &OwnedHandle<S>) -> Result<(), Error> {
+    decode_unit(
+        Call::new(nr::TIMER_CANCEL)
+            .value(register(timer.raw()))
+            .make(sys),
+    )
+}
+
 /// What one [`memory_scrub`] batch did (`docs/RAM-SCRUBBER.md` §4).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ScrubBatch {

@@ -695,9 +695,10 @@ Spent about 33 points of about 70 estimated.
   Rebased onto `develop` as `d9b014bfc` on the local `feature/mk-base`
   (2026-11-03, unlanded, not yet on `develop`). About 9 points left; it lands on K6, and whichever of K7 and K12 lands second
   wires K12's lookup to `charge_target`.
-- `mk/k10` (5509676d1, WIP, unbuilt): timer objects, K10.md, OK IF 2538.
-  Next: the native handlers, `timer_check.rs`, sysml, boots, controls N1-N8,
-  the ABAB. About 5 points left.
+- K10's fast path on a quiet host: `bench-ipc --release --accel kvm --smp 1 --arch x86_64
+  --alternate <before K10> --rounds 9 --kernel-option ferrix.fastpath=on` under
+  `fleet/bench.lock` read 1.013 with A/A 1.000 (0.805 to 1.040), load about 35: not shown
+  either way (ledger 5860 (ii)). Limit 1.01, fix or revert past it on a quiet host.
 - `mk/k12` (8af71f23d, WIP, never compiled, most of K12a): kernel-memory
   reservation, K12.md, OK IF 2550, split into K12a (frames) and K12b (heap).
   About 9 points left.
