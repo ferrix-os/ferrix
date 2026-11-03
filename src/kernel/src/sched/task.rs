@@ -225,7 +225,7 @@ pub struct Task {
     /// from, which the switch hands over). A task moved between queues
     /// carries it false: a move of one with it set, or a pick of one another
     /// processor runs, stops the machine (FX-0537, docs/SCHED-CLASSES.md
-    /// §9e, line 30 B1).
+    /// §9e, container review 30 (not on record; ledger 5684) B1).
     on_cpu: AtomicBool,
     /// Whether it is inside a system call, as the processor running it last
     /// had it (`crate::sched::IN_CALL`): kept here while it does not run.
@@ -967,7 +967,7 @@ impl Task {
     }
 
     /// Whether the entity its queue holds is the tier above fair's: what a
-    /// removal is routed by (`CpuQueue::release`, line 30, B3). Read under
+    /// removal is routed by (`CpuQueue::release`, container review 30, B3). Read under
     /// that queue's lock, which `entity_with` writes it under.
     pub(crate) fn queued_upper(&self) -> bool {
         self.entity_rt.load(Ordering::Relaxed) != 0

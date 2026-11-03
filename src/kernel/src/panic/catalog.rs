@@ -2973,7 +2973,7 @@ pub(crate) static RUNNING_TASK_QUEUED: Explanation = Explanation {
               steal, a placement or a pick that finds a waiting task with the mark set has \
               found one context about to run on two processors, or on one before it was \
               saved, and the machine is stopped before it does (docs/SCHED-CLASSES.md §9e, \
-              the certification consultant's ledger line 30, B1).",
+              the certification consultant's container review 30 (not on record; ledger 5684), B1).",
     causes: &[
         "A path enqueued a running task as a waiting one outside a decision: a change of \
          policy that moved the running task at once, rather than at its processor's next \

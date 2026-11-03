@@ -1387,7 +1387,8 @@ package FerrixSchedRequirements {
 
     package Realtime {
         doc /* The realtime tier in the core (docs/SCHED-CLASSES.md section 9e,
-             * step 4b; the consultant's OK IF R1-R15, ledger line 29): the task's
+             * step 4b; the consultant's OK IF R1-R15, container review 29 (not on record;
+             * ledger 5684)): the task's
              * upper cell, the move between tiers, wakes, inheritance, the Linux
              * calls, and the modes. */
 

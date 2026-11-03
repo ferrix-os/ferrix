@@ -2986,7 +2986,8 @@ pub fn rehomed(cpu: usize) -> u64 {
 /// fair class alone offers, nor by a wake's placement, which declines one.
 fn move_onto(task: &Arc<Task>, to: usize, queue: &mut CpuQueue) {
     // A task a processor runs is never waiting in a queue to be moved: one
-    // that is means two processors would run one context (line 30, B1).
+    // that is means two processors would run one context (container review 30 (not
+    // on record; ledger 5684), B1).
     if task.is_on_cpu() {
         crate::panic::fatal!(
             crate::panic::catalog::RUNNING_TASK_QUEUED,

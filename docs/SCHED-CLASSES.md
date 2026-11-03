@@ -1,8 +1,18 @@
 # Scheduling classes as removable crates
 
-**Design reviewed, 2026-10-26: OK IF S1-S14** (§10; ledger line 11 of
-this container's consultant ledger, still to be copied to the gate
-host's). Not built. The customer asked
+**The reviews cited here are not on record.** This work was built in a
+container, whose session kept its own consultant ledger. The customer does not
+have that ledger and it could not be found (ledger 5684 on the gate host,
+`~/.local/share/ferrix/cert-consultant/reviews.md`, lists where it looked; its
+corrections are at 5705). This document calls those reviews "container review
+N", N from 11 to 32, and never "line N", because the gate host's ledger lines
+11 to 32 are 2026-09-26 reviews of other work. A container review, and the
+conditions quoted from it (S1-S14, D1-D13, G1-G10, F1-F16, R1-R15, E1-E13), is
+the author's statement of what was asked, not a review anyone can read. The
+review on record of everything below is ledger 5684, with 5705.
+
+**Design reviewed, 2026-10-26: OK IF S1-S14** (§10; container review 11). Not
+built. The customer asked
 (2026-10-26): "design all our schedulers to be crates with one common
 compile-time trait interface between the kernel, so that we can select our
 desired schedulers by enabling or disabling a crate via a flag … and that
@@ -454,8 +464,7 @@ at the price of the configuration space the item was built to avoid.
 
 ## 9a. Step 3, as its design review has it (OK IF D1-D13, 2026-10-27)
 
-A design review before code, ledger line 20 of the container's ledger (to
-be copied to the gate host's). Step 3 is split: **3a**, the flags, the
+A design review before code, container review 20. Step 3 is split: **3a**, the flags, the
 selection crate, the profiles, the audit words and the modes; **3b**, S3's
 record kind for the class crates and S1's absence evidence. 3a may land
 before 3b (D11).
@@ -510,18 +519,19 @@ The fair-only stack is exactly `Eevdf`: N2's const holds unchanged, no
 `Empty` tier nests, and `Over` costs only where two tiers are present. A
 built value's arm becomes `Over<Its, L>`. Every built-no value's arm is a
 `compile_error!` naming it, besides xtask's refusal (D7). A const asserts
-the stack's name is not empty (line 15's C1). S5's evidence: the release
+the stack's name is not empty (container review 15's C1). S5's evidence: the release
 ELF table (`choose_next`, `ferrix_fast_write_read`) before and after on
-all three architectures, and the round trip on the landing hash with line
-13's. If the table shows `Over`'s stored `running_upper` costing, it is
+all three architectures, and the round trip on the landing hash with container
+review 13's. If the table shows `Over`'s stored `running_upper` costing, it is
 derived from `U::current` instead (C2).
 
 **The selection crate** (D4): `ferrix-kernel-sched-select`,
 `src/kernel/sched-select/Cargo.toml`, built by the one build script, its
 root `src/kernel/src/sched_select.rs` the arms file. A `kernel_crates`
 entry, ring core, in `certification-item.json`; `unclassified_deps`
-ferrix-sched-class and ferrix-sched-fair (F-76's register grows under line
-20); a layering rule that it links none of ferrix-kernel, -core, -item,
+ferrix-sched-class and ferrix-sched-fair (F-76's register grows under
+container review 20); a layering rule that it links none of ferrix-kernel,
+-core, -item,
 -load or ferrix-boot; check-item-boundary passing; only crates that name
 it depend on it. `build_flag_word!` and `flag_word` move into it, one
 list, the core re-exporting both, and the binary asserts its word equal to
@@ -558,7 +568,7 @@ tier, is that design's: C1). A profile with both the deadline and the
 windows tier runs both under HardRt, as intended: the windows partition
 time between domains, and the deadline tier is the EDF of a domain whose
 processors are its own, outside the windows; no profile has both today,
-and the one that first does says which domains each serves (ledger line
+and the one that first does says which domains each serves (container review
 21, C1). `Mode` lives below the selection crate, so
 availability is a const of the selection crate the domain's refusal
 consults. Profiles gain a `modes` key; check-build-flags holds it equal to
@@ -584,8 +594,8 @@ profile, and its requirement from L.sched.124, come with 3b.
 
 ## 9b. Step 3b, as its design review has it (OK IF G1-G10, 2026-10-27)
 
-A design review before code, ledger line 22 of the container's ledger (to
-be copied to the gate host's): S1's absence evidence and S3's record kind.
+A design review before code, container review 22: S1's absence evidence and
+S3's record kind.
 
 **Why a fixture** (G1). No buildable profile can leave a class crate out
 before step 4: `sched_fair = "absent"` cannot build while the core uses
@@ -615,8 +625,8 @@ self-test:
 * (a) every crate under `src/lib/kernel/sched-*` that implements
   `SchedClass` has an entry (a class crate elsewhere, or an `impl` whose
   generic bounds take their own angle brackets, is not seen: class crates
-  live under that path, and a reviewer reads a new one's `impl`; ledger
-  line 23, C1), the interface crate `ferrix-sched-class`
+  live under that path, and a reviewer reads a new one's `impl`; container
+  review 23, C1), the interface crate `ferrix-sched-class`
   excepted (it implements it for `Empty` and `Over`), and every entry's
   package exists;
 * (b) an entry's flag and value are declared, and the arms file's arm for
@@ -671,7 +681,7 @@ is item behaviour:
   the name the profile's tiers compose; its control changes Eevdf's `NAME`
   and reads `FIRED`.
 The real-time ids S13 set aside start at H.SCHED.21; `mode_available`'s
-owed requirement (line 21, ruling 2) takes the next free L.sched id.
+owed requirement (container review 21, ruling 2) takes the next free L.sched id.
 
 **check-boot-line** (G9) takes the expected classes name from the
 `class_crates` record and the profile's tier values, with a self-test for
@@ -686,8 +696,8 @@ window. The more conservative scheduling, which some DAL A and railway
 SIL 4 systems use, makes no run-time choice at all: a time-triggered table
 (a cyclic executive) inside each window, each slot naming the one task
 that runs in it: a cyclic executive inside ARINC windows, not APEX's
-priority scheduling, and never to be read as that (ledger line 24, C1).
-Reviewed before code: ledger line 24, OK IF E1-E13.
+priority scheduling, and never to be read as that (container review 24, C1).
+Reviewed before code: container review 24, OK IF E1-E13.
 
 **What "technically build" means here, and what it does not.** A profile
 selects code: `max+` would compile the kernel with the most conservative
@@ -748,7 +758,7 @@ personality (C7). The design review is asked to name any other value of
   `max_plus` can be more than a target, and `linux_abi = "off"` would have
   to allow `sc4_plus`.
 
-**As the review has it (ledger line 24):**
+**As the review has it (container review 24):**
 * **E1, a target.** `sc4_plus` lists sc4's targets with EAL7, its `why`
   says no formal model, no formal correspondence and no evaluation stand
   behind it, `max_plus`'s claim starts "target", CLAIM.md holds neither,
@@ -887,7 +897,7 @@ tiers, and the fold applies only when both are fair. Ids for the
 restatement, and for the four new operations' requirements, are reserved
 from L.sched.125 before 4a's code (S13).
 
-**The field's name** (C1 of line 13): `CpuQueue::fair` becomes
+**The field's name** (C1 of container review 13): `CpuQueue::fair` becomes
 `CpuQueue::stack`, in its own commit, path-only.
 
 **Questions for the review:**
@@ -901,7 +911,7 @@ from L.sched.125 before 4a's code (S13).
 4. A fixed-priority task's load weight as `NICE_0_WEIGHT`, or its own?
 5. Which ids 4a takes.
 
-**As the review has it** (ledger lines 26 and 27, OK IF F1-F16; the
+**As the review has it** (container reviews 26 and 27, OK IF F1-F16; the
 answers to the questions above: FairTier accepted on the innermost tier,
 narrowed; the operations required, with no default; the upper cell
 accepted; a fixed-priority task's load weight a constant of its own; the
@@ -990,7 +1000,7 @@ ids below):
   L.sched.64-66 restated in place. Wake preemption (F4), inheritance (F9)
   and the cpu.max term (F15) take theirs with 4b.
 * **F13**: the rename landed as 62b1607b5, path-only (its four boots'
-  identical lines owed on the gate host); where it stands names lines 26
+  identical lines owed on the gate host); where it stands names container reviews 26
   and 27.
 * **F14, `Over::decision_in_ns`**: the upper tier's answer while it runs
   (lower tasks waiting cannot displace it); `Some(0)` while the lower runs
@@ -1011,7 +1021,7 @@ ids below):
   load figures change meaning once a higher tier exists, documented
   then).
 
-**Rule (e) after 4b** (line 31, condition 6). Line 28 widened
+**Rule (e) after 4b** (container review 31, condition 6). Container review 28 widened
 check-item-boundary's rule (e) to refuse a `&mut RunQueue`, `fair_mut`, a
 method called on a `CpuQueue`'s `stack` and a `&mut StackQueue` handed out,
 while the fair-only stack let the compiler accept a direct `RunQueue` call.
@@ -1141,7 +1151,7 @@ moving itself to `SCHED_FIFO` and back, on `desktop`.
 4. Which of the boot checks above need a Linux program, and which can be
    kernel tasks.
 
-**As the review has it** (ledger line 29, OK IF R1-R15; the answers: the
+**As the review has it** (container review 29, OK IF R1-R15; the answers: the
 class's own tree accepted, fair's being EEVDF's own; the throttle inside
 the class accepted, a fair server needing an EDF tier `desktop` lacks;
 real-time tasks in `desktop`'s `Throughput` boot domain accepted, the
@@ -1218,8 +1228,8 @@ guarantee stated narrowly; the checks split below):
   L.sched.129-130 as reserved.
 * **R11, selection and evidence**: `fifo_rr` becomes built only in the
   commit that lands R6; `class_crates` gains its entry, and the selection
-  crate's `unclassified_deps` entry for `ferrix-sched-fifo` cites ledger
-  line 29 for F-76; the class-crate half shows it absent from `present` and
+  crate's `unclassified_deps` entry for `ferrix-sched-fifo` cites container
+  review 29 for F-76; the class-crate half shows it absent from `present` and
   present in `desktop` on all three architectures; `desktop`'s classes line
   reads `fifo_rr+eevdf`; S5: `present`'s ELF table unchanged, the round trip
   on the landing hash.
@@ -1239,12 +1249,12 @@ guarantee stated narrowly; the checks split below):
   it was preempted, as Linux's does (C1).
 * **R14**: `/proc`'s documentation says its load figures count real-time
   tasks.
-* **R15**: where it stands names line 29, and so does the landing.
+* **R15**: where it stands names container review 29, and so does the landing.
 * **C2**: a FIFO task at priority 99 starves the kernel's fair worker
   tasks (the reaper, the network's) for 950 ms of every second; said beside
   the floor.
 
-**A running task is never a waiting entity (the code review's line 30,
+**A running task is never a waiting entity (the code review's container review 30,
 B1).** Outside a decision -- `choose_next` and the direct switch's
 `hand_over`, each under its queue's lock from its first change to its pick
 -- a run queue holds the task its processor runs only as its running
@@ -1426,7 +1436,7 @@ L.sched.137 restated.
 4. One `SoftRt` domain at a time, `MAX_DOMAINS` four: the table sized for
    `HardRt` later, or exactly two now?
 
-**As the review has it** (ledger line 32, OK IF V1-V16). The answers: (1) the
+**As the review has it** (container review 32, OK IF V1-V16). The answers: (1) the
 authority is a kernel object of its own, made once at boot and put in
 init's handle table, not a right on the root job; (2) queued tasks move at
 their processor's decision, a running one only after the switch away from
@@ -1484,15 +1494,15 @@ they differ:
 * **V15** every check above with a `gate.sh` control; the native
   session-service-shaped program on `desktop`; `domain_create` refused on
   `present`.
-* **V16** where it stands names line 32, and so does the landing.
+* **V16** where it stands names container review 32, and so does the landing.
 * **C1** until G3 a `SoftRt` domain's processors take every device
   interrupt, said beside the guarantee in REALTIME.md.
 
 ## 10. The review's conditions (OK IF S1-S14, 2026-10-26)
 
-A certification-consultant subagent of the customer's session, ledger line
-11 of the ledger it keeps in this container (to be copied to the gate
-host's). Each is a condition on the step named; S1-S12 and S14 are written
+A certification-consultant subagent of the customer's session, container
+review 11 (not on record, see the top of this document). Each is a condition on
+the step named; S1-S12 and S14 are written
 into this design before step 2's code.
 
 * **S1, absent code, evidence.** `cargo tree` and Cargo metadata are not
@@ -1502,7 +1512,7 @@ into this design before step 2's code.
   crate; `check-removable-symbols` finds none of its symbols in the ELF; a
   present build shows a marker inlining cannot remove (the boot line's
   stack names, and `check()` kept out of line); and a planted unconditional
-  use of the crate, run as a control, reads `FIRED`. *Restated by line 22
+  use of the crate, run as a control, reads `FIRED`. *Restated by container review 22
   (G3):* the release link is fat LTO with one codegen unit, so no rlib
   reaches its link line; "the link line" is that of a link with the same
   architecture, profile and flags and LTO alone turned off, whose map
@@ -1608,7 +1618,7 @@ the stage checks, quota, spawns), 30 of `CpuSet` and `MAX_CPUS` (mm, arch, user,
 core scheduler's own imports in `sched/{mod,queue,task,direct,check}.rs`.
 
 **What the core keeps of the fair crate outside `Stack`** (the split's
-review, N7, ledger line 19; counted at 1c725245 by `git grep` over
+review, N7, container review 19; counted at 1c725245 by `git grep` over
 `src/kernel`, a use being one line naming it). Each
 fixes the fair class in every profile until it goes through `Stack`; since
 `max` has no fair tier (C3, §7a), every row must before `max` can build:
@@ -1630,7 +1640,7 @@ none a library item, so no unit was re-pointed by the move. Two statements
 named the library in prose (L.object.160's `ferrix_sched::carried_weight`,
 and the criteria of L.sched.55 and its high-level parent naming "the
 ferrix-sched host test"); the split restated them as `ferrix-sched-fair`
-(b829273f, 8062be55; ledger line 12). `certification-item.json`'s
+(b829273f, 8062be55; container review 12). `certification-item.json`'s
 `unclassified_deps` entries for `ferrix-sched` became entries for the two
 new crates (the core both, the item the fair one) until S7's gates pass,
 and F-76 was recounted (26 libraries, 22 core, 16 item).
@@ -1650,24 +1660,24 @@ load tracking and balancing and `DomainError`; `ferrix-sched-fair` holds
 EEVDF, the tree, the timeline, the weights, the fold and `slice_for`, and
 implements `SchedClass` as `Eevdf` (one host test holds the interface to
 the queue). The kernel's 70 files re-pointed by path only; booted on
-x86-64, AArch64 and ARMv7-A. Its code review: OK IF 1-10, ledger line 12
-of the container's ledger (to be copied to the gate host's); 1-3, 5, 6, 9
+x86-64, AArch64 and ARMv7-A. Its code review: OK IF 1-10, container review 12
+; 1-3, 5, 6, 9
 and 10 met (8062be55), 4 (coverage after the final rebase), 7 (gate rows
 on the landing hash) and 8 (S5's evidence) owed: the release ELF's IPC-path functions are not identical
 (below).
 
 **The core through `Stack` (2026-10-26, 7fd2b9ea; its code review OK IF
-1-6, ledger line 13 of the container's ledger, to be copied to the gate
-host's).** `src/kernel/src/sched/stack.rs` names `Stack = Eevdf` once; the
+1-6, container review 13).** `src/kernel/src/sched/stack.rs` names `Stack = Eevdf` once; the
 core's queue is `StackQueue`, and the operations the trait has --
 enqueue, remove, remove the running one, pick, current, the hand-over,
 charge, the remaining slice, the length, the check -- go through
-`Stack::` (with `current`, `len` and the emptiness test routed too, line
-13's condition 4); the EEVDF-only calls `stack.rs` lists stay on the
+`Stack::` (with `current`, `len` and the emptiness test routed too, container
+review 13's condition 4); the EEVDF-only calls `stack.rs` lists stay on the
 queue. The
 fair queue's `remove`, `remove_curr`, `detach` and `hand_over` now answer
 the entity as one value, `(EntityState, Slot)`, the trait's shape, so the
-adapter is a pass-through. No flag reads it yet. **The interim, as line 13 accepts it** (N1): (a)
+adapter is a pass-through. No flag reads it yet. **The interim, as container
+review 13 accepts it** (N1): (a)
 `src/kernel/src/sched/stack.rs` reads no cfg and is the only file naming
 the class type; (b) no `sched_*` flag or value enters `build-flags.toml`
 or a profile while `Stack` is in the core -- the selection crate as S2
@@ -1696,14 +1706,14 @@ owed: the round trip measured before and after under the
 `optimize-ipc-round-trip` protocol on the gate host, or the fast path's
 remaining difference removed.
 
-**N2, the entity in `Task`** (ledger line 14, OK IF 1-4): what a task is
+**N2, the entity in `Task`** (container review 14, OK IF 1-4): what a task is
 queued with is `StackEntity`, `<Stack as SchedClass<Arc<Task>>>::Entity`,
 assembled by `Task::entity_with` from the record's atomics and the run
 slot behind L.sched.63's cell, and kept by `Task::keep_entity` and
 `Task::keep_refused`. A const in `stack.rs` requires it to be
 `FairEntity<Arc<Task>>`; it may go only with the change S4's full form
 makes when a stack's entity first differs (step 4), and the commit adding
-a second class says so. Owed with line 13's: `sched/queue.rs:747`, the
+a second class says so. Owed with container review 13's: `sched/queue.rs:747`, the
 hand-over's entity line, measured on the gate host after the final
 rebase; S5's round trip and the four boots taken on a hash that includes
 it.
@@ -1715,20 +1725,20 @@ the fair-only stack), and every class's `check` and `Over`'s are
 `#[inline(never)]`, so a present class shows in the release ELF as its
 check (`<Eevdf as SchedClass<Arc<Task>>>::check`, a local text symbol in
 the x86_64, aarch64 and armv7a release kernels by `llvm-nm -C`). Reviewed,
-ledger line 15, OK IF 1-4: the marker in the Arm release kernels (met),
-the line named at landing, and with line 13's 1 and 3 the boots as gate
+container review 15, OK IF 1-4: the marker in the Arm release kernels (met),
+the line named at landing, and with container review 13's 1 and 3 the boots as gate
 rows showing the classes line and S5's measurement on a hash including
 it. The line is informational until step 3 gives the stack a flag to be
 compared with, when it takes a requirement reserved from L.sched.124; the
 selection crate then also asserts at compile time that the name is not
 empty.
 
-**N7** reviewed, ledger line 19, OK IF 1-4, met in f9165ad1.
+**N7** reviewed, container review 19, OK IF 1-4, met in f9165ad1.
 
-**Step 3's design** reviewed, ledger line 20, OK IF D1-D13 (D13: this
+**Step 3's design** reviewed, container review 20, OK IF D1-D13 (D13: this
 line), written in as §9a.
 
-**Step 3a, built** (for the consultant's code review against line 20):
+**Step 3a, built** (for the consultant's code review against container review 20):
 * The flags (D1): `schedule` gone; `sched_dispatch`, `sched_windows`,
   `sched_deadline`, `sched_realtime` and `sched_fair` in its place with the
   allows §9a gives. **`sched_ext` is not declared**: the flag file's rule
@@ -1745,7 +1755,7 @@ line), written in as §9a.
   `Stack = Windows<Deadline<Realtime<Fair>>>` under `fixed`, which today
   is `Eevdf` itself, the stack's name asserted not empty, and
   `mode_available`. Ring core in `certification-item.json` with its two
-  `unclassified_deps` under line 20; a layering rule; built by the one
+  `unclassified_deps` under container review 20; a layering rule; built by the one
   build script; the core, the item (`build_flags.rs`) and the binary
   depend on it. `sched/stack.rs` re-exports its `Stack`; N2's const holds
   unchanged.
@@ -1775,17 +1785,17 @@ line), written in as §9a.
   profile folds away: no id for 3a (D12). **Owed**: a requirement from
   the next free L.sched id (L.sched.124 is the classes line's, §9b) naming
   both, with the first buildable profile that has fair
-  absent or allows a mode beside Throughput (ledger line 21, ruling 2).
+  absent or allows a mode beside Throughput (container review 21, ruling 2).
 * The `classes` boot line moved from `main.rs`'s `start_scheduler` into
   `sched::init`'s end, the same place in the boot: printed from
   `start_scheduler` it made that function 72 lines against the complexity
   baseline's 71, a failure 94e9edf6 brought and this repairs.
 
-**3a reviewed**: ledger line 21, OK IF 1-7; 1-5 met in 7d26af03, 7 by
+**3a reviewed**: container review 21, OK IF 1-7; 1-5 met in 7d26af03, 7 by
 its message; 6 owed on the gate host (below, with the desktop build's
 `build` line and condition 1's control).
 
-**Step 4a built, reviewed**: ledger line 28, OK IF 1-7 (65b401692; the
+**Step 4a built, reviewed**: container review 28, OK IF 1-7 (65b401692; the
 three deviations accepted: F5, F6, F10 and L.sched.129-130 move to 4b
 with the first upper tier, and F11's and F7's two-tier proofs come with
 4b's first two-tier build, which N2's const refuses until then). Met on
@@ -1804,17 +1814,17 @@ traceability clean once the ids land on develop, the boots' rows; (6) on
 the gate host: the round trip, the controls of rule (e) and condition 1,
 coverage after the final rebase.
 
-**Step 4b reviewed**: ledger line 31, OK IF 1-7, at db558fd63 (B1-B3 of
-line 30 met). Met on the branch: (2) the withdrawn L.sched.133 and 139
+**Step 4b reviewed**: container review 31, OK IF 1-7, at db558fd63 (B1-B3 of
+container review 30 met). Met on the branch: (2) the withdrawn L.sched.133 and 139
 recorded in requirement-reservations.json as never to be reused, and
 TRACEABILITY.md regenerated; (3) L.sched.131's 100 ms restated as a bound
 that shows the preemption happens, not a latency claim (F-95's and the
 gate host's); (4) `Task::on_cpu`'s doc says the mark is cleared under the
 lock of the queue the task was switched away from, and that a task moved
-between queues carries it false; (6) line 28's conditions 1 and 4 are met
+between queues carries it false; (6) container review 28's conditions 1 and 4 are met
 (rule (e)'s widening with its self-tests, `Over::decision_in_ns`'s `None`
 with its host test, both above), and rule (e) stays as widened for now,
-as §9d records; (7) this line, and the landing names line 31. Owed on the
+as §9d records; (7) this line, and the landing names container review 31. Owed on the
 gate host: (1) the FX-0537 control through `gate.sh control --expect
 FX-0537` on desktop x86-64 with the patch §9e quotes, and the flips check
 in the desktop boots' rows on three architectures; (5) the develop
@@ -1824,9 +1834,9 @@ three architectures, the class-crate half on three architectures, the
 round trip on the landing hash, coverage after the final rebase, the
 `gate.sh` controls of R12's checks, the boots as rows.
 
-**Step 4b built** (for the consultant's code review against ledger line
+**Step 4b built** (for the consultant's code review against container review
 29, R1-R15; commits 5af67ba86, 4a123dda1, 229cf6b7e; reviewed at
-229cf6b7e, line 30, NOT YET on B1-B3, answered in 8c9620fd5 and
+229cf6b7e, container review 30, NOT YET on B1-B3, answered in 8c9620fd5 and
 db558fd63): the core half and `ferrix-sched-fifo` selected on `desktop`,
 whose classes line reads `fifo_rr+eevdf` on all three architectures;
 `present` unchanged.
@@ -1834,7 +1844,7 @@ whose classes line reads `fifo_rr+eevdf` on all three architectures;
   lock (`ENOMEM`, nothing changed), and by `prepare_user` for a real-time
   parent's child; kept on the return to fair (the move check), freed with
   the task. No scheduler path allocates.
-* R2, as line 30 rules: `FifoRr::remove` of a waiting entity walks the
+* R2, as container review 30 rules: `FifoRr::remove` of a waiting entity walks the
   tree, O(n), accepted on its one caller, a change of policy on a queued
   real-time task that does not run (its doc and MEMORY-AND-TIMING.md say
   so); `check()` holds order and balance; the crate's nine host tests cover
@@ -1857,11 +1867,11 @@ whose classes line reads `fifo_rr+eevdf` on all three architectures;
   `NoTier` and `realtime_built`), inheritance in `prepare_user`
   (L.sched.135), `SoftRt` refused by name (L.sched.137). The Linux layer's
   permission rule and argument checks are the load ring's: L.sched.133 and
-  139 are dropped (line 30, B2), and `test-rtsched` shows both.
+  139 are dropped (container review 30, B2), and `test-rtsched` shows both.
 * R10: H.SCHED.21-22 and L.sched.129-132 and 134-138 written, the
   reservation entry released. `check-traceability --check` fails on one
   thing only: these ids, and 4a's, are not yet reserved on `develop`.
-* R11: the arm, `unclassified_deps` citing line 29, `desktop` taking it.
+* R11: the arm, `unclassified_deps` citing container review 29, `desktop` taking it.
 * R12: `sched/rt_check.rs` (order, wakes, placement, FIFO's place, RR and
   its FIFO control, a yield, the floor, flips, the move), the `cpu.max`
   cut on a `SCHED_FIFO` program (L.sched.136), `test-rtsched` on
@@ -1869,7 +1879,7 @@ whose classes line reads `fifo_rr+eevdf` on all three architectures;
   launch's check.
 * R13, R14, C2: REALTIME.md and `/proc/loadavg`'s documentation.
 * R15: this line.
-* Owed, with line 30's C3: the reservations on `develop`, S5's ELF table
+* Owed, with container review 30's C3: the reservations on `develop`, S5's ELF table
   for `present`, the class-crate half on three architectures, the round
   trip, coverage, every control through `gate.sh` (R12's negative
   controls and B1's), the boots' rows.
@@ -1880,7 +1890,7 @@ Orion O6, whose family 0x0203 is retired unrecorded. Its in-order
 Cortex-A53 cores suit the barest build; its IOMMU is an SMMU-500, which
 Ferrix does not drive yet, owed with its recognition rule before it boots.
 
-**`max+` built, reviewed**: ledger line 25, OK IF 1-6 (E13's waiver of
+**`max+` built, reviewed**: container review 25, OK IF 1-6 (E13's waiver of
 the three pending values confirmed as intended). Met: (1) `pending` only
 at `sc4_plus` on a target-only claim, each entry naming its ledger line,
 and never on a countermeasure's flag (check-build-flags), with
@@ -1898,14 +1908,14 @@ control. C2: the rings and crates at level `present`, below `sc4_plus`,
 are the gap `max` has at `sc4`, and close with it. (5) owed on the gate
 host: the four boots, the Arm builds, the controls.
 
-**`max+` reviewed**: ledger line 24, OK IF E1-E13, §9c. Built here (the
+**`max+` reviewed**: container review 24, OK IF E1-E13, §9c. Built here (the
 level, the value, the profile, the `barest` keys, `pending`, the checks):
 E1-E3, E6-E8, E11-E13; owed: E4 and E5 with the table crate (M3), E10
 this line and the landing's; the controls of E13 on the gate host. E13's
 "the barest value allows `sc4`" is read as excusing the three E3 values
 while pending, for the consultant to confirm.
 
-**Step 3b's design** reviewed, ledger line 22, OK IF G1-G10 (G10: this
+**Step 3b's design** reviewed, container review 22, OK IF G1-G10 (G10: this
 line), written in as §9b; H.SCHED.20 and L.sched.124 reserved.
 
 D3's release ELF table, the stack the fair class alone through the
@@ -1918,7 +1928,7 @@ selection crate:
 | `choose_next`, AArch64 | 0x74c | 0x74c |
 | `choose_next`, ARMv7-A | 0xac4 | 0xac4 |
 
-**Step 3b, built** (for the consultant's code review against line 22):
+**Step 3b, built** (for the consultant's code review against container review 22):
 * G1: `ferrix-sched-fixture`, `src/lib/kernel/sched-fixture`: a FIFO class
   of at most sixteen entities, `no_std`, `forbid(unsafe_code)`,
   `publish = false`, no `ferrix_` cfg, four host tests; a dependency of
@@ -1947,7 +1957,7 @@ selection crate:
   line differs, with self-tests for a stack of two tiers and an absent
   one.
 
-**3b reviewed**: ledger line 23, OK IF 1-8; G3's deviation accepted (a
+**3b reviewed**: container review 23, OK IF 1-8; G3's deviation accepted (a
 crate of generics alone has no object of its own in the non-LTO map, so
 its code is read there as its functions monomorphised into another
 crate's member; the ELF marker stays the positive proof). Met on the
@@ -1967,11 +1977,11 @@ the landing hash: G8's class-crate half on all three architectures for
 `present` and `desktop`, the four boots with check-boot-line on both
 lines, coverage after the final rebase (the 7 anchors dropped in the
 rebase: the sched/queue.rs, sched/direct.rs and gs201 watchdog.rs lines
-of line 13's condition 2), and lines 20's and 21's owed items. The
+of container review 13's condition 2), and container reviews 20's and 21's owed items. The
 container's x86_64 run of the class-crate half is development evidence,
 not a row.
 
-Owed on the gate host with line 20's: the controls of D6 and D10 run as
+Owed on the gate host with container review 20's: the controls of D6 and D10 run as
 `gate.sh control` with `FIRED` (a `cfg!(ferrix_sched_fair = ..)` planted
 in a core file, a declared value with no arm, a value with two arms,
 `switchable` planted in `fast.toml`), the four boots as rows with the new

@@ -450,7 +450,7 @@ pub struct Stacked<UQ, LQ> {
 impl<U, L> Over<U, L> {
     /// [`SchedClass::remove`] from the one tier the caller says the entity
     /// is in, `upper` or not, so that a removal walks no other tier's queue
-    /// (docs/SCHED-CLASSES.md §9e, the review's line 30, B3).
+    /// (docs/SCHED-CLASSES.md §9e, container review 30 (not on record; ledger 5684), B3).
     pub fn remove_from<T>(
         queue: &mut <Self as SchedClass<T>>::Queue,
         id: u64,
@@ -521,7 +521,7 @@ impl Joined {
         match core::str::from_utf8(self.bytes.split_at(self.len).0) {
             Ok(name) => name,
             // Two `str`s and a `+` joined at whole characters are UTF-8; were
-            // it not, the stack would not compile (ledger line 23 (2)).
+            // it not, the stack would not compile (container review 23 (2)).
             Err(_) => panic!("a stack's name is not UTF-8"),
         }
     }
@@ -721,8 +721,8 @@ impl<T, U: SchedClass<T>, L: SchedClass<T>> SchedClass<T> for Over<U, L> {
         } else if upper_ready::<T, U, L>(queue) {
             // Nothing runs: the wake or the enqueue that queued the upper
             // entity asks for the pick itself, so no timer is armed for it,
-            // and a timer re-armed at once for ever is not possible (the
-            // consultant's ledger line 28, condition 4).
+            // and a timer re-armed at once for ever is not possible (container review 28,
+            // condition 4).
             None
         } else {
             // The upper tier holds nothing ready: nothing, or tasks a throttle

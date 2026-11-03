@@ -797,9 +797,9 @@
         "core"
       ],
       "unclassified_deps": {
-        "ferrix-sched-class": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement (the scheduler selection's class crates, docs/SCHED-CLASSES.md §9a; grown under the consultant's ledger line 20, D4; classified under S7)",
-        "ferrix-sched-fair": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement (the scheduler selection's class crates, docs/SCHED-CLASSES.md §9a; grown under the consultant's ledger line 20, D4; classified under S7)",
-        "ferrix-sched-fifo": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement (SCHED_FIFO and SCHED_RR, named only by the fifo_rr arm, docs/SCHED-CLASSES.md §9e; grown under the consultant's ledger line 29, R11; classified under S7)"
+        "ferrix-sched-class": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement (the scheduler selection's class crates, docs/SCHED-CLASSES.md §9a; grown under container review 20 (not on record; ledger 5684), D4; classified under S7)",
+        "ferrix-sched-fair": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement (the scheduler selection's class crates, docs/SCHED-CLASSES.md §9a; grown under container review 20 (not on record; ledger 5684), D4; classified under S7)",
+        "ferrix-sched-fifo": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement (SCHED_FIFO and SCHED_RR, named only by the fifo_rr arm, docs/SCHED-CLASSES.md §9e; grown under container review 29 (not on record; ledger 5684), R11; classified under S7)"
       }
     },
     "ferrix-kernel-item": {
@@ -845,8 +845,8 @@
   "class_crates": {
     "//": [
       "The scheduling-class crates (docs/SCHED-CLASSES.md section 9b; the",
-      "certification consultant's design review of step 3b, ledger line 22 of",
-      "the sched-classes container ledger, G1-G5). One entry a class crate under",
+      "certification consultant's design review of step 3b, container review 22, not on",
+      "record: ledger 5684; G1-G5). One entry a class crate under",
       "src/lib/kernel/sched-*, the interface crate ferrix-sched-class excepted:",
       "the tier flag and the value whose arm in sched_select.rs links it",
       "(`present_when`), or `fixture: true` for the crate no value links, and the",

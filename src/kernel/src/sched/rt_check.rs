@@ -37,7 +37,8 @@
 //! * **Flips**: an unpinned running task flipped between `SCHED_FIFO` and
 //!   fair 200 times beside a waiting one, with processors idle to steal:
 //!   the running task is moved only at its processor's next decision
-//!   (line 30, B1; its control is the move made at the call, FX-0537).
+//!   (container review 30 (not on record; ledger 5684), B1; its control is the move
+//!   made at the call, FX-0537).
 //! * **The modes** (L.sched.137, L.sched.138): a `SoftRt` domain is refused
 //!   by name where the tier is built, `ModeUnavailable` where it is not, and
 //!   a real-time policy refused there too.
@@ -698,7 +699,7 @@ fn the_move(c: usize) -> Result<(), &'static str> {
 }
 
 /// The running task's move between tiers is made at its processor's next
-/// decision, never while it runs (line 30, B1): an unpinned task spinning
+/// decision, never while it runs (container review 30, B1): an unpinned task spinning
 /// on `c` beside a pinned one, so that `c` has a task waiting for an idle
 /// processor to steal, is flipped between `SCHED_FIFO` and fair 200 times,
 /// 10 ms after each flip to fair,

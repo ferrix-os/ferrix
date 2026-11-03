@@ -1,5 +1,6 @@
 //! A scheduling class no build flag selects (docs/SCHED-CLASSES.md §9b; the
-//! consultant's design review of step 3b, ledger line 22, G1).
+//! consultant's design review of step 3b, container review 22 (not on record;
+//! ledger 5684), G1).
 //!
 //! The selection crate depends on it and no file names it, so rustc never
 //! loads it and no kernel links it: test-removable's class-crate half shows
@@ -8,8 +9,8 @@
 //! step 4 until a ledger line retires it. A first-in, first-out list of at
 //! most [`CAPACITY`] entities, charging a fixed quantum, without
 //! preemption: `pick` keeps the running entity rather than letting it
-//! compete with the waiting ones, as a class that schedules would (ledger
-//! line 23, C3). No flag value names it, so it is never a scheduler a
+//! compete with the waiting ones, as a class that schedules would (container
+//! review 23, C3). No flag value names it, so it is never a scheduler a
 //! profile can choose.
 
 #![no_std]

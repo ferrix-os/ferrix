@@ -1691,7 +1691,7 @@ fn the_class_interface_hands_back_what_the_queue_does() {
     );
 }
 
-/// F11 and F1 of the consultant's ledger lines 26-27: every operation the
+/// F11 and F1 of container reviews 26-27 (not on record; ledger 5684): every operation the
 /// kernel calls on its class stack, and every fair-only call it makes
 /// through [`FairTier`], compile and forward for a stack with a tier above
 /// fair (here the empty class, until step 4b's first real one).

@@ -360,7 +360,7 @@ fn the_stack_check_finds_a_tier_running_out_of_turn() {
     assert!(Stack::check(&q).is_err());
 }
 
-/// F4 and F14 of the consultant's ledger lines 26-27 on a two-tier stack:
+/// F4 and F14 of container reviews 26-27 (not on record; ledger 5684) on a two-tier stack:
 /// the tick's `charge` and `should_preempt` agree, and `decision_in_ns` is
 /// `None` only when no decision can be due and never later than
 /// `remaining_ns`, through every state a short run of arrivals, charges,
@@ -423,7 +423,7 @@ fn the_stacks_decisions_agree_with_its_charge() {
     check(&q);
 }
 
-/// R3 and R4 of the consultant's ledger line 29: a throttled upper tier
+/// R3 and R4 of container review 29: a throttled upper tier
 /// neither preempts the lower one, nor arms a timer for itself, nor is
 /// picked while the lower has work; the lower tier's run advances the upper
 /// tier's clock, and the timer is armed for the throttle's end, so the
@@ -471,7 +471,7 @@ fn a_throttled_upper_tier_does_not_spin() {
     assert!(Stack::check(&q).is_ok());
 }
 
-/// Line 30's B3: a removal routed to one tier finds an entity there and
+/// container review 30's B3: a removal routed to one tier finds an entity there and
 /// walks no other: an upper entity asked for in the lower tier, or a lower
 /// one in the upper, is not found, and each is found in its own.
 #[test]
