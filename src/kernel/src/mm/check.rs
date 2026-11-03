@@ -2033,13 +2033,13 @@ fn caches_on_every_processor() -> Result<(), &'static str> {
         .try_reserve(online)
         .map_err(|_| "no room for the workers")?;
     for cpu in 0..online {
-        let mut only = ferrix_sched::CpuSet::empty();
+        let mut only = ferrix_sched_class::CpuSet::empty();
         only.insert(cpu).map_err(|_| "no such processor")?;
         tasks.push(crate::sched::spawn_on(
             "heap-cache",
             cache_worker,
             cpu,
-            ferrix_sched::NICE_0_WEIGHT,
+            ferrix_sched_fair::NICE_0_WEIGHT,
             cpu,
             only,
         )?);

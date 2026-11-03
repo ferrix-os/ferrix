@@ -321,7 +321,7 @@ pub(crate) fn create(node: &Arc<DeviceNode>) -> Result<Arc<Endpoint>, CreateErro
         location,
         announce,
     });
-    if sched::spawn("input", run, id, ferrix_sched::NICE_0_WEIGHT).is_err() {
+    if sched::spawn("input", run, id, ferrix_sched_fair::NICE_0_WEIGHT).is_err() {
         let _ = take_start(id);
         CLAIMS.release_one(node, &kernel_end);
         return Err(CreateError::NoMemory);

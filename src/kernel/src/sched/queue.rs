@@ -27,9 +27,12 @@
 
 use alloc::sync::Arc;
 
-use ferrix_sched::{
-    Config, CpuLoad, EntityState, JobPlan, Load, RunQueue, Timeline, settle_job_fold, slice_for,
+use ferrix_sched_class::{CpuLoad, Load, RtParams, SchedClass};
+use ferrix_sched_fair::{
+    Config, FairTier, JobPlan, StackTiers, Timeline, settle_job_fold, slice_for,
 };
+
+use super::stack::{Stack, StackQueue};
 
 use super::task::{BLOCKED, RUNNABLE, Task, TaskId};
 
@@ -145,10 +148,11 @@ const fn before(a: u64, b: u64) -> bool {
 /// One CPU's queue.
 #[derive(Debug)]
 pub(crate) struct CpuQueue {
-    /// The fair class. The idle task is not in it: it is what runs when this
-    /// is empty, which is what makes it the bottom of the class stack rather
+    /// The class stack's queue (`sched::stack`; today the fair class
+    /// alone). The idle task is not in it: it is what runs when this is
+    /// empty, which is what makes it the bottom of the class stack rather
     /// than a task with a very small weight.
-    pub(crate) fair: RunQueue<Arc<Task>>,
+    pub(crate) stack: StackQueue,
     /// What is running, which is the idle task when the fair class is empty.
     pub(crate) current: Option<Arc<Task>>,
     /// This CPU's idle task.
@@ -183,12 +187,12 @@ pub(crate) struct CpuQueue {
 impl CpuQueue {
     /// An empty queue.
     pub(crate) fn new() -> Result<CpuQueue, &'static str> {
-        let fair = RunQueue::new(Config {
+        let stack = Stack::new_queue(<Stack as StackTiers<Arc<Task>>>::stack_config(Config {
             slice_ns: TARGET_LATENCY_NS,
-        })
+        }))
         .map_err(|_| "the scheduler's slice is not a slice")?;
         Ok(CpuQueue {
-            fair,
+            stack,
             current: None,
             idle: None,
             previous: None,
@@ -217,20 +221,20 @@ impl CpuQueue {
     /// so that a failure prints what every entity looked like when it was
     /// passed over.
     pub(crate) fn note_pick(&mut self, now: u64) {
-        let Some(picked) = self.fair.current_id() else {
+        let Some(picked) = Stack::fair(&self.stack).current_id() else {
             return;
         };
         let mut pick = Pick {
             at: now,
             picked,
             scanned: picked,
-            avg: self.fair.avg_vruntime(),
+            avg: Stack::fair(&self.stack).avg_vruntime(),
             seen: [Seen::default(); TRACE_ENTITIES],
             count: 0,
         };
         let mut best_eligible: Option<Seen> = None;
         let mut best_any: Option<Seen> = None;
-        self.fair.for_each(|view| {
+        Stack::fair(&self.stack).for_each(|view| {
             let seen = Seen {
                 id: view.id,
                 vruntime: view.vruntime,
@@ -304,18 +308,23 @@ impl CpuQueue {
         if delta == 0 {
             return None;
         }
-        if let Some(task) = self.fair.current() {
+        if let Some(task) = Stack::current(&self.stack) {
             self.stats.busy_ns += delta;
             // Its job's `cpu.stat`, and its `cpu.max` (`object::quota`).
             crate::object::quota::charge_cpu(&mut self.pending, task.group(), now, delta, user);
         } else {
             self.stats.idle_ns += delta;
         }
-        let remaining = self.fair.remaining_ns()?;
-        if let Some(task) = self.fair.current() {
+        let Some(remaining) = Stack::remaining_ns(&self.stack) else {
+            // Nothing ran. The time passed all the same for a tier whose
+            // budget is counted per period of real time (ledger 5684's C1).
+            Stack::elapse(&mut self.stack, delta);
+            return None;
+        };
+        if let Some(task) = Stack::current(&self.stack) {
             task.add_runtime(delta);
         }
-        if self.fair.update_curr(delta) {
+        if Stack::charge(&mut self.stack, delta) {
             let overrun = delta.saturating_sub(remaining);
             self.stats.worst_overrun = self.stats.worst_overrun.max(overrun);
             if self.stats.measuring {
@@ -329,6 +338,12 @@ impl CpuQueue {
         share
     }
 
+    /// What is left of the running entity's slice or budget, as a charge
+    /// reads it: for the real-time tier's floor check.
+    pub(super) fn remaining_for_check(&self) -> Option<u64> {
+        Stack::remaining_ns(&self.stack)
+    }
+
     /// Give the running task the weight its job's share says it should have
     /// now, if that has moved by more than an eighth: the other tasks of its
     /// job came and went since it was queued (`object::quota::effective`).
@@ -336,7 +351,7 @@ impl CpuQueue {
     /// [`CpuQueue::account_with`]'s. Answers the base weight and the weight
     /// the share gave, kept or not.
     fn follow_group_share(&mut self, extra: Option<(u32, i64)>) -> Option<(u32, u32)> {
-        let task = self.fair.current()?;
+        let task = Stack::current(&self.stack)?;
         if task.group() == crate::object::quota::NONE {
             return None;
         }
@@ -348,7 +363,7 @@ impl CpuQueue {
         task.set_weight(due);
         // The only refusal is a weight of zero, which `effective` never
         // answers.
-        let _ = self.fair.set_weight(id, due);
+        let _ = Stack::set_weight(&mut self.stack, id, due);
         Some((base, due))
     }
 
@@ -364,7 +379,7 @@ impl CpuQueue {
             return (self.stats.busy_ns, self.stats.idle_ns);
         }
         let since = now.saturating_sub(self.exec_start);
-        if self.fair.current().is_some() {
+        if Stack::current(&self.stack).is_some() {
             (self.stats.busy_ns.saturating_add(since), self.stats.idle_ns)
         } else {
             (self.stats.busy_ns, self.stats.idle_ns.saturating_add(since))
@@ -383,7 +398,7 @@ impl CpuQueue {
     fn measure(&mut self) {
         let mut total = 0u128;
         let mut weights = 0u128;
-        self.fair.for_each(|view| {
+        Stack::fair(&self.stack).for_each(|view| {
             if view.payload.is_measured() {
                 total += u128::from(view.payload.since_baseline(view.sum_exec));
                 weights += u128::from(view.weight);
@@ -394,7 +409,7 @@ impl CpuQueue {
         }
 
         let mut worst = 0u64;
-        self.fair.for_each(|view| {
+        Stack::fair(&self.stack).for_each(|view| {
             if !view.payload.is_measured() {
                 return;
             }
@@ -481,14 +496,16 @@ impl CpuQueue {
         // job's share of it as things stand now.
         task.join_group();
         task.set_weight(task.effective_weight());
-        if let Err(refused) =
-            self.fair
-                .enqueue(task.id, Arc::clone(task), task.entity_state(), slot)
-        {
+        if let Err(refused) = Stack::enqueue(
+            &mut self.stack,
+            task.id,
+            Arc::clone(task),
+            task.entity_with(slot),
+        ) {
             // The only refusals are a duplicate identifier and a zero weight,
             // neither of which this kernel can produce; dropping the clone is
             // what keeps the task alive in the table regardless.
-            task.return_run_slot(refused.slot);
+            task.keep_refused(refused.entity);
             drop(refused.payload);
             return;
         }
@@ -512,7 +529,56 @@ impl CpuQueue {
         task.set_weight(weight);
         // The only refusal is a weight of zero, which `weight_of_nice` never
         // answers and no caller here passes.
-        let _ = self.fair.set_weight(task.id, weight);
+        let _ = Stack::set_weight(&mut self.stack, task.id, weight);
+    }
+
+    /// Give `task` a new policy (`sched::set_policy`), whether it is running
+    /// here, queued here or on no queue: one queued here and not running is
+    /// taken off its tier and enqueued again at the tail of its new place
+    /// at once (L.sched.134); the running one is moved at this processor's
+    /// next decision ([`CpuQueue::requeue_if_moved`]), so that the stack's
+    /// running entity is the processor's running task at every moment
+    /// outside a decision. Answers whether a decision is due now: the
+    /// running task is to move, or something now outranks it.
+    pub(crate) fn set_policy(
+        &mut self,
+        task: &Arc<Task>,
+        params: Option<RtParams>,
+        reset_on_fork: bool,
+    ) -> bool {
+        task.store_policy(params, reset_on_fork);
+        if !task.is_queued() || task.entity_is_current() {
+            // On no queue, it is enqueued with its new policy next time;
+            // unchanged, nothing moves, as Linux's `__sched_setscheduler`
+            // returns before its requeue.
+            return false;
+        }
+        let running = self
+            .current
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, task));
+        if running {
+            return true;
+        }
+        if let Some(task) = self.release(task.id, task.queued_upper()) {
+            // NOALLOC: `CpuQueue::insert` queues the task in its own run slot,
+            // or in its node of the tier above fair, given before its policy.
+            self.insert(&task);
+        }
+        self.should_preempt()
+    }
+
+    /// At a decision (`choose_next`, before its pick): move `task`, the
+    /// running one, still runnable, to the tier and place its policy names,
+    /// if a change of policy left it in its old one (L.sched.134).
+    pub(crate) fn requeue_if_moved(&mut self, task: &Arc<Task>) {
+        if !task.is_queued() || task.entity_is_current() {
+            return;
+        }
+        if let Some(task) = self.release(task.id, task.queued_upper()) {
+            // NOALLOC: as `set_policy`'s.
+            self.insert(&task);
+        }
     }
 
     /// Task `id`'s request as the fair class holds it, for stage 5's check of
@@ -520,13 +586,13 @@ impl CpuQueue {
     /// runtime, its weight, what it asked for, whether it is running, and
     /// the queue's slice now. `None` if it is not on this queue.
     pub(crate) fn request_sample(&self, id: TaskId) -> Option<(i64, u32, u64, bool, u64)> {
-        let view = self.fair.get(id)?;
+        let view = Stack::fair(&self.stack).get(id)?;
         Some((
             view.deadline.wrapping_sub(view.vruntime) as i64,
             view.weight,
             view.request_ns,
             view.running,
-            self.fair.slice_ns(),
+            Stack::fair(&self.stack).slice_ns(),
         ))
     }
 
@@ -535,15 +601,14 @@ impl CpuQueue {
     /// fair class keeps the deadline it has and measures the next with it.
     pub(crate) fn set_request(&mut self, task: &Arc<Task>, request_ns: u64) {
         task.set_request(request_ns);
-        let _ = self.fair.set_request(task.id, request_ns);
+        let _ = Stack::set_request(&mut self.stack, task.id, request_ns);
     }
 
     /// Take the running task out of the fair class, keeping what it needs to
     /// come back with.
     pub(crate) fn detach_current(&mut self) {
-        if let Some((_, task, state, slot)) = self.fair.remove_curr() {
-            task.return_run_slot(slot);
-            task.store_entity_state(state);
+        if let Some((_, task, entity)) = Stack::remove_current(&mut self.stack) {
+            task.keep_entity(entity);
             task.set_queued(false);
         }
     }
@@ -577,7 +642,21 @@ impl CpuQueue {
 
     /// What should run now: the fair class's choice, or the idle task.
     pub(crate) fn pick_next(&mut self) -> Option<Arc<Task>> {
-        if let Some(task) = self.fair.pick_next() {
+        if let Some(task) = Stack::pick(&mut self.stack) {
+            // Only this processor's own running task may be picked while a
+            // processor runs it (container review 30 (not on record; ledger 5684), B1): any
+            // other would be run twice.
+            let here = self
+                .current
+                .as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, task));
+            if task.is_on_cpu() && !here {
+                crate::panic::fatal!(
+                    crate::panic::catalog::RUNNING_TASK_QUEUED,
+                    "a task another processor runs was picked to run here: task {}",
+                    task.id
+                );
+            }
             return Some(Arc::clone(task));
         }
         self.idle.clone()
@@ -585,7 +664,7 @@ impl CpuQueue {
 
     /// Whether this CPU has anything to run besides its idle task.
     pub(crate) fn has_work(&self) -> bool {
-        !self.fair.is_empty()
+        Stack::len(&self.stack) != 0
     }
 
     /// Fold the time since the last call into the load average.
@@ -603,7 +682,8 @@ impl CpuQueue {
         // runnable tasks reads four times one with a single task rather than
         // the same "busy". The idle task is not in the fair queue, so an idle
         // processor contributes nothing without a special case.
-        self.load.accumulate(elapsed, self.fair.load_weight());
+        self.load
+            .accumulate(elapsed, Stack::load_weight(&self.stack));
     }
 
     /// This processor as the balancer sees it.
@@ -651,19 +731,14 @@ impl CpuQueue {
         // nothing, and this is where tickless comes from. With something
         // waiting, a decision at least once a slice, however long a request
         // the running task holds: see `RunQueue::decision_in_ns`.
-        let slice = self
-            .fair
-            .decision_in_ns()
-            .map(|left| now.saturating_add(left));
+        let slice = Stack::decision_in_ns(&self.stack).map(|left| now.saturating_add(left));
 
         // A task under a `cpu.max` is cut when its quota is used up, however
         // alone it is: nothing else would interrupt it to throttle it. The
         // task the fair class runs, which is the one charged (`account_in`):
         // a switch arms the timer before it stores its pick in `current`
         // (`switch_chosen`), so `current` there is still the outgoing task.
-        let bandwidth = self
-            .fair
-            .current()
+        let bandwidth = Stack::current(&self.stack)
             .filter(|_| crate::object::quota::bandwidth_in_use())
             .and_then(|task| crate::object::quota::runtime_left(task.group(), now))
             .map(|left| now.saturating_add(left.min(BANDWIDTH_SLICE_NS)));
@@ -683,24 +758,38 @@ impl CpuQueue {
         // different -- a task with exactly one home should not be moved even
         // *to* that home, since it is already there; one queued elsewhere is
         // the pick push's (L.sched.98).
-        self.fair.latest_where(|task| {
+        Stack::fair(&self.stack).latest_where(|task| {
             !super::pinned(task) && super::allowed(task, to) && task.state() == RUNNABLE
         })
     }
 
-    /// Take a queued task off this queue, for another one to run.
-    pub(crate) fn release(&mut self, id: TaskId) -> Option<(Arc<Task>, EntityState)> {
+    /// A waiting real-time task processor `to` may take when this one goes
+    /// out of service (`docs/CORE-QUARANTINE.md`), by the rules
+    /// [`CpuQueue::steal_candidate`] applies to a fair one. A walk of the
+    /// tier above fair, never a steal: real-time tasks are not stolen
+    /// (`docs/SCHED-CLASSES.md` §9e, R5).
+    pub(crate) fn upper_evacuee(&self, to: usize) -> Option<TaskId> {
+        Stack::upper_waiting_where(&self.stack, |task| {
+            !super::pinned(task) && super::allowed(task, to) && task.state() == RUNNABLE
+        })
+    }
+
+    /// Take a queued task off this queue, for another one to run: from the
+    /// tier above fair with `upper`, from fair's otherwise, walking no other
+    /// tier's queue (container review 30, B3).
+    pub(crate) fn release(&mut self, id: TaskId, upper: bool) -> Option<Arc<Task>> {
         // Charged first for the reason `insert` is: the lag the leaving task
         // takes with it is measured against a virtual time that must include
         // everything the running task has had.
         if self.current.is_some() {
             self.account(crate::timer::now_nanos());
         }
-        let (task, state, slot) = self.fair.remove(id)?;
-        task.return_run_slot(slot);
+        let (task, entity) =
+            <Stack as StackTiers<Arc<Task>>>::remove_in(&mut self.stack, id, upper)?;
+        task.keep_entity(entity);
         task.set_queued(false);
         self.rescale_slice();
-        Some((task, state))
+        Some(task)
     }
 
     /// Share the target latency out among however many are runnable now.
@@ -711,20 +800,20 @@ impl CpuQueue {
     /// one is looked at. Scaling the slice makes the wait the target latency
     /// instead, until the floor stops it.
     fn rescale_slice(&mut self) {
-        let slice = slice_for(TARGET_LATENCY_NS, MIN_SLICE_NS, self.fair.len());
+        let slice = slice_for(TARGET_LATENCY_NS, MIN_SLICE_NS, Stack::len(&self.stack));
         // The only refusal is a slice of zero, and `slice_for` floors at
         // `MIN_SLICE_NS`, which is not zero.
-        let _ = self.fair.set_slice_ns(slice);
+        let _ = Stack::set_slice_ns(&mut self.stack, slice);
     }
 
     /// The slice this queue is currently handing out.
     pub(crate) fn slice_ns(&self) -> u64 {
-        self.fair.config().slice_ns
+        Stack::fair(&self.stack).config().slice_ns
     }
 
     /// Whether the running task should give way to something queued.
     pub(crate) fn should_preempt(&self) -> bool {
-        self.fair.should_preempt()
+        Stack::should_preempt(&self.stack)
     }
 
     /// Whether a sleeper's time has come by `now`: whether
@@ -792,18 +881,17 @@ impl CpuQueue {
         };
         peer.set_weight(weight);
         // `rescale_slice` as `insert` makes it, with the peer counted.
-        let slice_after = slice_for(TARGET_LATENCY_NS, MIN_SLICE_NS, self.fair.len() + 1);
-        let (id, state) = (peer.id, peer.entity_state());
+        let slice_after = slice_for(TARGET_LATENCY_NS, MIN_SLICE_NS, Stack::len(&self.stack) + 1);
+        let (id, entity) = (peer.id, peer.entity_with(slot));
         // The peer's own reference goes into the queue, and the caller's
         // comes out of it into `between`: moved, not counted up and down.
-        match self.fair.hand_over(id, peer, state, slot, slice_after) {
+        match Stack::hand_over(&mut self.stack, id, peer, entity, slice_after) {
             Ok(left) => {
-                if let Some(next) = self.fair.current() {
+                if let Some(next) = Stack::current(&self.stack) {
                     next.set_queued(true);
                 }
-                if let Some((_, task, state, slot)) = left {
-                    task.return_run_slot(slot);
-                    task.store_entity_state(state);
+                if let Some((_, task, entity)) = left {
+                    task.keep_entity(entity);
                     task.set_queued(false);
                     // Under a fold, the caller's state and word here, the
                     // store first as `set_state_from` makes them, and the
@@ -821,11 +909,11 @@ impl CpuQueue {
             Err(refused) => {
                 // A duplicate or a weight of zero, neither of which this
                 // kernel makes: as `insert` refuses.
-                refused.payload.return_run_slot(refused.slot);
+                refused.payload.keep_refused(refused.entity);
                 return None;
             }
         }
-        self.fair.current().cloned()
+        Stack::current(&self.stack).cloned()
     }
 
     /// Take `id` out of this processor's sleeper set, if it is in it.
@@ -854,18 +942,20 @@ impl CpuQueue {
     /// The number `arm_timer` decides on, so it is also the number that says
     /// whether this processor's timer needs to exist at all.
     pub(crate) fn waiting(&self) -> usize {
-        self.fair.queued()
+        // Derived over the whole stack (docs/SCHED-CLASSES.md §9d, F3):
+        // everything queued less the running one, of any tier.
+        Stack::len(&self.stack).saturating_sub(usize::from(Stack::current(&self.stack).is_some()))
     }
 
     /// Tasks on this queue, the running one included.
     pub(crate) fn len(&self) -> usize {
-        self.fair.len()
+        Stack::len(&self.stack)
     }
 
     /// Check the fair class's own bookkeeping.
     pub(crate) fn check_invariants(&self) -> Result<(), &'static str> {
-        self.fair.check_invariants()?;
-        let running_is_current = match (self.fair.current(), self.current.as_ref()) {
+        Stack::check(&self.stack)?;
+        let running_is_current = match (Stack::current(&self.stack), self.current.as_ref()) {
             (Some(fair), Some(current)) => Arc::ptr_eq(fair, current),
             // Nothing in the fair class: the idle task is what runs.
             (None, Some(current)) => self
@@ -916,7 +1006,7 @@ impl PendingJoin {
     }
 
     /// The caller's leave answered `left`: the load's change, once, by
-    /// `ferrix_sched::settle_job_fold`. A leave that did not answer as
+    /// `ferrix_sched_fair::settle_job_fold`. A leave that did not answer as
     /// planned -- which `Task::set_group`'s callers rule out -- is counted,
     /// and the stage-9 check requires none.
     fn settle(&mut self, left: Option<(u32, u32)>) {

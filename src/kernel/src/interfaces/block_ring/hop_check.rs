@@ -229,7 +229,7 @@ fn depth_many(disk: &Arc<dyn BlockDevice>, sectors: u64) -> Result<Run, &'static
             "seam reader",
             reader_task,
             reader,
-            ferrix_sched::NICE_0_WEIGHT,
+            ferrix_sched_fair::NICE_0_WEIGHT,
         )
         .is_ok()
         {

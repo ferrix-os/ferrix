@@ -545,8 +545,13 @@ fn check_a_packet_wakes_the_wait(
     let the_set = crate::fs::epoll::of(&set_file).ok_or("an epoll set is not one")?;
     let wakes_before = the_set.queue().waits_ended_by_a_wake();
     *LATE_PORT.lock() = Some(Arc::clone(the_port));
-    let task = crate::sched::spawn("port-fd check", queue_late, 0, ferrix_sched::NICE_0_WEIGHT)
-        .map_err(|_| "no task to queue a packet from")?;
+    let task = crate::sched::spawn(
+        "port-fd check",
+        queue_late,
+        0,
+        ferrix_sched_fair::NICE_0_WEIGHT,
+    )
+    .map_err(|_| "no task to queue a packet from")?;
     let started = crate::timer::now_nanos();
     let reported = events(side, set, 5_000)?;
     let took = crate::timer::now_nanos().saturating_sub(started);

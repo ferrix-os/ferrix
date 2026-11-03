@@ -116,7 +116,7 @@ pub(crate) struct Thread {
     /// Linux's `dup_task_struct` copies `cpus_mask`; `None`, the whole
     /// domain, for a process's first thread made any other way. Read once,
     /// by `sched::prepare_user`; the task's own mask is what changes after.
-    start_affinity: Option<ferrix_sched::CpuSet>,
+    start_affinity: Option<ferrix_sched_class::CpuSet>,
 }
 
 /// The mask of the task running `creator`, if `creator` is the running
@@ -124,7 +124,7 @@ pub(crate) struct Thread {
 /// whole, never half of one mask and half of another (`sched::task`'s
 /// `Affinity`). `None` where `creator` is not running here, as for a boot
 /// check's thread, which makes a thread with the whole domain.
-fn creator_mask(creator: &Thread) -> Option<ferrix_sched::CpuSet> {
+fn creator_mask(creator: &Thread) -> Option<ferrix_sched_class::CpuSet> {
     sched::with_current(|task| {
         of_task(task)
             .filter(|running| core::ptr::eq(*running, creator))
@@ -531,7 +531,7 @@ impl UserThread for Thread {
         Thread::slice_request(self)
     }
 
-    fn start_affinity(&self) -> Option<ferrix_sched::CpuSet> {
+    fn start_affinity(&self) -> Option<ferrix_sched_class::CpuSet> {
         self.start_affinity
     }
 }

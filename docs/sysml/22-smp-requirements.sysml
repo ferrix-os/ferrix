@@ -516,7 +516,8 @@ package FerrixSmpRequirements {
                 reachable while the boot processor never goes, argued.";
             attribute :>> parent = "H.SCHED.18";
             attribute :>> unit = ("smp::service::Refusal::number", "smp::service::Refusal::reason",
-                "sched::service_refusal", "sched::task::pinned_programs");
+                "sched::service_refusal", "sched::task::pinned_programs",
+                "sched::task::pin_program");
         }
         requirement <'L.smp.37'> everyChangeIsAudited : ItemLowLevel {
             attribute :>> statement = "Every change and every refusal through

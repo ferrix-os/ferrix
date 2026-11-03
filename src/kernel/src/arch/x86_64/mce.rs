@@ -34,7 +34,8 @@ use core::fmt::Write;
 use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 
 use ferrix_bootinfo::BootView;
-use ferrix_sched::{CpuSet, NICE_0_WEIGHT};
+use ferrix_sched_class::CpuSet;
+use ferrix_sched_fair::NICE_0_WEIGHT;
 
 use super::trap::TrapFrame;
 use super::{copy_mc, cpu};
@@ -54,7 +55,7 @@ const MC0_CTL: u32 = 0x400;
 /// 255; no part has more than 32, and a count above is clamped and said.
 pub(super) const MAX_BANKS: usize = 32;
 /// The processors the per-processor state covers: the scheduler's limit.
-const PROCESSORS: usize = ferrix_sched::MAX_CPUS;
+const PROCESSORS: usize = ferrix_sched_class::MAX_CPUS;
 /// Pending records per processor, handed from a machine check or the
 /// bring-up to the poll (`L.x86_64.226`).
 pub(super) const SLOTS: usize = 8;

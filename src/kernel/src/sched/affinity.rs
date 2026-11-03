@@ -49,7 +49,7 @@
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use ferrix_sched::{CpuSet, MAX_CPUS};
+use ferrix_sched_class::{CpuSet, MAX_CPUS};
 use ferrix_sync::IrqControl;
 
 use super::queue::CpuQueue;
@@ -302,10 +302,10 @@ pub(super) fn push_picked(queue: &mut CpuQueue, home: usize, task: &Arc<Task>) -
         let Some(mut theirs) = theirs else {
             continue;
         };
-        let Some((task, state)) = queue.release(task.id) else {
+        let Some(task) = queue.release(task.id, task.queued_upper()) else {
             return false;
         };
-        move_onto(&task, Some(state), to, &mut theirs);
+        move_onto(&task, to, &mut theirs);
         drop(theirs);
         let _ = PUSHED.fetch_add(1, Ordering::Relaxed);
         kick(to);
@@ -328,7 +328,7 @@ pub(super) fn push_off(task: &Arc<Task>, home: usize) {
     };
     if to == home {
         let mut queue = mine.lock();
-        move_onto(task, None, home, &mut queue);
+        move_onto(task, home, &mut queue);
         return;
     }
     let (first, second) = if home < to {
@@ -343,7 +343,7 @@ pub(super) fn push_off(task: &Arc<Task>, home: usize) {
     } else {
         &mut *first_queue
     };
-    move_onto(task, None, to, destination);
+    move_onto(task, to, destination);
     drop(second_queue);
     drop(first_queue);
     let _ = PUSHED.fetch_add(1, Ordering::Relaxed);

@@ -52,7 +52,7 @@
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering};
 
-use ferrix_sched::NICE_0_WEIGHT;
+use ferrix_sched_fair::NICE_0_WEIGHT;
 use ferrix_sync::Once;
 
 use crate::fallible::{self, AllocError};
@@ -1328,7 +1328,7 @@ pub(crate) fn adjust(index: u32, delta: i64) {
 /// The weight a task of weight `base` in `index` runs at: `base` times, at
 /// each level from `index` up, that job's weight over its load.
 ///
-/// The arithmetic is `ferrix_sched::carried_weight`'s, in 64 bits, which is
+/// The arithmetic is `ferrix_sched_fair::carried_weight`'s, in 64 bits, which is
 /// the 128-bit formula's exactly while every entity weight is below 2^32
 /// (the assertion below): a task's base is a `u32`, and a job's is
 /// `cpu.weight` clamped to [`MAX_WEIGHT`] and scaled to task units.
@@ -1339,7 +1339,7 @@ pub fn effective(index: u32, base: u32) -> u32 {
 /// [`effective`], with `extra` added to `index`'s own load and to no other
 /// level's: the direct switch's weights, made while the peer's weight is
 /// counted in its word and not yet in the load it shares with the caller
-/// (`docs/OPAQUE-KERNEL.md` §9.11, J2; `ferrix_sched::carried_weight_with`).
+/// (`docs/OPAQUE-KERNEL.md` §9.11, J2; `ferrix_sched_fair::carried_weight_with`).
 /// One walk, each level read once, as `effective`'s.
 pub fn effective_with(index: u32, base: u32, extra: i64) -> u32 {
     let mut at = index;
@@ -1354,8 +1354,8 @@ pub fn effective_with(index: u32, base: u32, extra: i64) -> u32 {
         at = slot.parent.load(Ordering::Acquire);
         Some((own, load))
     });
-    let clamped =
-        ferrix_sched::carried_weight_with(base, levels, extra).clamp(MIN_EFFECTIVE, MAX_EFFECTIVE);
+    let clamped = ferrix_sched_fair::carried_weight_with(base, levels, extra)
+        .clamp(MIN_EFFECTIVE, MAX_EFFECTIVE);
     u32::try_from(clamped).unwrap_or(NICE_0_WEIGHT)
 }
 

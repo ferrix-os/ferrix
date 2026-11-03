@@ -765,9 +765,9 @@ fn wake_from(
         "write_read sync writer",
         write_from_another_processor,
         0,
-        ferrix_sched::NICE_0_WEIGHT,
+        ferrix_sched_fair::NICE_0_WEIGHT,
         writer_cpu,
-        ferrix_sched::CpuSet::of(writer_cpu),
+        ferrix_sched_class::CpuSet::of(writer_cpu),
     )?;
     // Asleep while the writer writes: a move needs nothing else queued on
     // the writer's processor, and at two processors this check's own task,

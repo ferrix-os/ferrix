@@ -40,7 +40,8 @@ use alloc::sync::Arc;
 use ferrix_bootinfo::PAGE_SIZE;
 use ferrix_elf::Class;
 use ferrix_frame::Frame;
-use ferrix_sched::{CpuSet, NICE_0_WEIGHT};
+use ferrix_sched_class::CpuSet;
+use ferrix_sched_fair::NICE_0_WEIGHT;
 use ferrix_vma::VmaFlags;
 
 use crate::arch;
