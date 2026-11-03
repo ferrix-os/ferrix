@@ -2562,3 +2562,14 @@ pub(crate) fn check_machine_check_enabled() -> Result<(), &'static str> {
 
 // What `sched::inspect` reads of a task that is not running (`docs/DEBUG.md`).
 pub(crate) mod inspect;
+
+/// Stage 4's look at how many threads of a core run work: see
+/// [`smp::check::check_smt`].
+///
+/// # Errors
+///
+/// Two online processors of one core under `smt=off`, or a parked thread
+/// that did not park with `CR4.MCE` set.
+pub(crate) fn check_smt() -> Result<(), &'static str> {
+    smp::check::check_smt()
+}

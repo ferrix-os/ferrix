@@ -8,6 +8,7 @@
     "of 2026-10-23, kept with the landing's evidence). kernel-interface.py --check fails on a pub declaration used above only by",
     "checks that is neither CHECKS-ONLY nor listed, and on an entry that is no longer pub,",
     "is used by a higher crate's product code now (a change to the interface), is used by",
+    "for what no CHECKS-ONLY marker stands on, says `born` (its mechanism) and `ledger` (ledger 6137).",
     "The 545 entries the split generated may shrink and never grow. An entry born after it,",
     "for what no CHECKS-ONLY marker stands on, says `born` (its mechanism) and `ledger` (ledger 6137)."
   ],
