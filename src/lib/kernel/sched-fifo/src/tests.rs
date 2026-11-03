@@ -229,6 +229,34 @@ fn time_passing_with_nothing_running_refills_the_budget() {
     assert_eq!(FifoRr::remaining_ns(&q), Some(RUNTIME_NS));
 }
 
+/// A charge that crosses a period's end counts in the new period only for
+/// the part inside it. Charged whole to the new period, a task that ran 950 ms
+/// from 500 ms into a period read as throttled 450 ms into the next, and the
+/// tier below kept the processor for the 550 ms left of it, not 50.
+#[test]
+fn a_charge_across_a_period_end_counts_only_its_part_in_the_new_period() {
+    let mut q = queue();
+    FifoRr::enqueue(&mut q, 1, 1, fifo(30)).unwrap();
+    let _ = FifoRr::pick(&mut q);
+    FifoRr::elapse(&mut q, PERIOD_NS / 2);
+    assert!(!FifoRr::charge(&mut q, RUNTIME_NS));
+    assert!(FifoRr::ready(&q, true));
+    assert_eq!(
+        FifoRr::remaining_ns(&q),
+        Some(RUNTIME_NS - (RUNTIME_NS - PERIOD_NS / 2))
+    );
+    // Run to the budget's end: throttled with the period's last 50 ms left.
+    assert!(FifoRr::charge(&mut q, PERIOD_NS / 2));
+    assert!(!FifoRr::ready(&q, true));
+    assert_eq!(FifoRr::decision_in_ns(&q), Some(PERIOD_NS - RUNTIME_NS));
+    // Whole periods inside one charge: the same, the part after the last end.
+    let mut long = queue();
+    FifoRr::enqueue(&mut long, 1, 1, fifo(30)).unwrap();
+    let _ = FifoRr::pick(&mut long);
+    assert!(!FifoRr::charge(&mut long, 3 * PERIOD_NS + 1));
+    assert_eq!(FifoRr::remaining_ns(&long), Some(RUNTIME_NS - 1));
+}
+
 #[test]
 fn a_yield_goes_to_the_tail_of_its_priority() {
     let mut q = queue();
