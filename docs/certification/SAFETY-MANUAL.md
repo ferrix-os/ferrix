@@ -316,7 +316,10 @@ as unaffected by Spectre v2 (Cortex-A35, A53, A55), or firmware implementing
 SMCCC `ARCH_WORKAROUND_1`, `SSBS` or `ARCH_WORKAROUND_2`, and a core Arm lists as
 unaffected by Meltdown or reporting `CSV3`; on ARMv7-A, a core Arm lists as
 unaffected, or firmware that set `ACTLR.IBE` on one that is not. On an
-MDS-affected x86-64 part the integrator shall disable SMT. Partitions that
+MDS-affected x86-64 part the integrator shall disable SMT, in firmware or by
+building `smt=off`, under which the boot line `smt      off:` must say the
+siblings are parked by the kernel with `CR4.MCE` set, or that firmware runs
+one thread per core. Partitions that
 must not learn each other's cache access patterns shall not share a cache: no
 cache is partitioned (V-06). QEMU's TCG, on which CI's gates and every Arm gate run, offers no
 speculation controls and executes no speculation, so its log lines are not a
@@ -835,6 +838,13 @@ every machine check halts (L.x86_64.231). Either way:
   SMCA. On an SMCA processor the kernel sets `MCA_CONFIG.McaX` on every
   bank, which AMD requires before an uncorrectable error can be survived;
   `ferrix.mce.recover=off` halts on AMD as on Intel.
+
+Under `smt=off` a machine check taken on a parked thread stops the machine: such a
+thread has no bring-up record to recover with, and the kernel has no local machine
+check. So on hardware that broadcasts a machine check to every thread, a recoverable
+one stops the machine under `smt=off` even with recovery on, where `stibp` would
+recover. That fails safe, and `max` accepts it (ledger 6135, S1). Nobody polls a
+parked thread's thread-scoped banks either.
 
 ### AoU-37 — core quarantine is an availability aid, not a safety mechanism (x86-64)
 lode takes a physical core out of service once it has reported enough

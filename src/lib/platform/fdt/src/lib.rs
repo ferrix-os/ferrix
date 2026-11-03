@@ -1572,6 +1572,9 @@ impl Iterator for MemoryRegions<'_> {
     }
 }
 
+mod cpu_map;
+pub use cpu_map::{CpuMap, CpuMapError};
+
 #[cfg(test)]
 mod tests;
 
