@@ -13,5 +13,6 @@
 
 pub(super) mod gicv2;
 pub(super) mod pl011;
+pub(super) mod smt;
 #[cfg(target_arch = "arm")]
 pub(super) mod stm32_usart;
