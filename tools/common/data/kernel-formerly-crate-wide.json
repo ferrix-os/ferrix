@@ -2136,6 +2136,10 @@
       "before": "pub(crate)"
     },
     {
+      "item": "user/space.rs: AddressSpace::resident_pages (method)",
+      "before": "pub(crate)"
+    },
+    {
       "item": "user/space.rs: AddressSpace::uninstall (method)",
       "before": "pub(crate)"
     },
