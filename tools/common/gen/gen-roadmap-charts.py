@@ -15,7 +15,7 @@ from pathlib import Path
 
 OUT = Path(__file__).resolve().parent.parent.parent.parent / "docs" / "img"
 
-TODAY = date(2026, 10, 31)
+TODAY = date(2026, 11, 3)
 
 # Points landed per day (docs/BACKLOG.md, *Velocity*). 09-18 to 09-23 were
 # sized afterwards from `git log`; 09-23 is what is left of that backfill.
@@ -75,6 +75,11 @@ LANDED = [
     (date(2026, 10, 29), 15),
     (date(2026, 10, 30), 80),
     (date(2026, 10, 31), 59),
+    # 2026-11-03's count (VELOCITY.md, "Update, 2026-11-03"): one commit a day
+    # that counts, the fallible-allocation gate and the mirrors' lock.
+    (date(2026, 11, 1), 0),
+    (date(2026, 11, 2), 1),
+    (date(2026, 11, 3), 1),
 ]
 BACKFILLED = {date(2026, 9, d) for d in range(18, 24)}
 AFTERWARDS = {date(2026, 9, 24): 27, date(2026, 9, 25): 26, date(2026, 9, 26): 175,
@@ -90,10 +95,12 @@ AFTERWARDS = {date(2026, 9, 24): 27, date(2026, 9, 25): 26, date(2026, 9, 26): 1
               date(2026, 10, 22): 54, date(2026, 10, 23): 38, date(2026, 10, 24): 36,
               date(2026, 10, 25): 85, date(2026, 10, 26): 50, date(2026, 10, 27): 3,
               date(2026, 10, 28): 32, date(2026, 10, 29): 15, date(2026, 10, 30): 80,
-              date(2026, 10, 31): 59}
+              date(2026, 10, 31): 59, date(2026, 11, 2): 1, date(2026, 11, 3): 1}
+# A day of the lower chart gets its number from this many points.
+LABEL_FROM = 100
 
-# The status table's sized, unfinished rows on 2026-10-31 (e51fc67fd). Nothing
-# sized came off between 10-08 and 10-31: the landings of those weeks (stage 13's
+# The status table's sized, unfinished rows on 2026-11-03 (3afb272b5). Nothing
+# sized came off between 10-08 and 11-03: the landings of those weeks (stage 13's
 # follow-ons, N3c, lode and tole, the machine-check family, signing S1 to S4)
 # were unsized or outside the table. The bubblewrap row's N5 and bwrap-user
 # landed 2026-10-26 (3a65627b9) but N6 and N7 are not split out of its 16.
@@ -111,7 +118,9 @@ REMAINING = [
     # Of 50: the armhf volume 3 and the SD card's driver 13 landed 2026-10-08
     # (aae4c0eb1, 03fce4f81); the board run waits for the product owner.
     ("Chrome on the DK1", 34, "idle"),
-    ("Stage 14, real-time", 40, "idle"),
+    # Not idle since 2026-10-26: the scheduler's classes are built on pull
+    # requests #38 and #40, not landed, with no share of the 40 sized for them.
+    ("Stage 14, real-time", 40, ""),
     # Of 48: zwp_linux_dmabuf_v1 and the GBM-shaped allocator (8) landed
     # 2026-10-08 (03fce4f81); Mesa's virgl is not started.
     ("dmabuf and virgl", 40, "idle"),
@@ -133,6 +142,32 @@ REMAINING = [
     # and step 4's fast path (59) landed 2026-10-06, so 10 are left, step 5's
     # squeeze by the profile (range 60-90 for the whole row).
     ("IPC round trip to seL4's figure", 10, "added"),
+    # Every row outside the old sized scope, estimated 2026-11-03 (status.md,
+    # *Estimated 2026-11-03*, says each one's range and basis).
+    ("Stage 23, Endfield's rest", 101, "est"),
+    ("Stage 24, the game path's rest", 175, "est"),
+    ("Stage 25, Yoru's rest", 46, "est"),
+    ("Developing Ferrix on Ferrix, the rest", 39, "est"),
+    ("Microkernel, M1's rest to M8", 477, "est"),
+    ("Microkernel, maximum-certification streams", 950, "est"),
+    ("Certification, ring-0 interference", 125, "est"),
+    ("Installer, the rest", 128, "est"),
+    ("Product signing, S5 and S6", 21, "est"),
+    ("Game mode, the rest", 115, "est"),
+    ("Program suspend, S2 to S4", 178, "est"),
+    ("lode's rest, tole's U10", 37, "est"),
+    ("Stage 21, NVIDIA's rest", 15, "est"),
+    ("Chrome: GPU compositing", 8, "est"),
+    ("Stage 21, the N150 and its Intel GPU, the rest", 30, "est"),
+    ("--everything, the rest", 5, "est"),
+    ("Desktop clients, the rest", 5, "est"),
+    ("Claude Code, i386's AVX state", 5, "est"),
+    ("Claude desktop app, C5 to C7", 12, "est"),
+    ("Init, L12 and later", 16, "est"),
+    ("Authentication, phase 3", 32, "est"),
+    ("Live driver update, the other kinds", 13, "est"),
+    ("Stage 20 on ARMv7-A", 13, "est"),
+    ("IPC round trip, step 4b", 8, "est"),
 ]
 # The queue's order (customer, 2026-10-04): built rows first, those that only
 # need landing ("unlanded"), then every other sized row, smallest points first
@@ -147,8 +182,10 @@ SCOPE = sum(p for _, p, _ in REMAINING)
 # landed and 205 of them had an estimate first; the rest was work outside the
 # table, which takes nothing off it.
 BURN_RATE = 20
+# With every row in the scope, what lands all comes off it: 1,370 points in the
+# 26 days of 10-06 to 10-31, all but the unsized work's rate being unmeasured.
 RATES = [(BURN_RATE, f"{BURN_RATE} a day, what came off the 09-26 scope, 09-27 to 10-04"),
-         (56, "56 a day, if every estimated point came off it")]
+         (53, "53 a day, everything that landed 10-06 to 10-31")]
 FORECAST_RATE = BURN_RATE
 
 D = date
@@ -191,27 +228,43 @@ DONE = [
     ("tole U1 to U9 (48 + 13)", D(2026, 10, 23), D(2026, 10, 24)),
     ("GNOME-like desktop, parts 1 to 4 (70)", D(2026, 10, 23), D(2026, 10, 24)),
     ("Machine-check family, 8 items", D(2026, 10, 30), D(2026, 10, 31)),
+    ("Stage 13, its exit criterion met", D(2026, 9, 23), D(2026, 10, 14)),
 ]
 # Each row: name, first day, and the REMAINING entries its unfinished work is
-# (by name), or None when the row has no size. The remainder is drawn to the
+# (by name). The remainder is drawn to the
 # end of the last matching entry in the forecast queue, so the two agree.
 ACTIVE = [
     ("Stage 19, the rest", D(2026, 9, 17),
      ["Client pages as texture backing"]),
-    ("Stage 20, self-hosting", D(2026, 9, 22), ["Stage 20, self-hosting"]),
-    ("Stage 13: controllers in; rest unsized", D(2026, 9, 23), None),
+    ("Stage 20, self-hosting", D(2026, 9, 22),
+     ["Stage 20, self-hosting", "Stage 20 on ARMv7-A"]),
     ("Gears (50 of 71)", D(2026, 9, 24), ["GC400, the rest"]),
     ("Certification findings", D(2026, 9, 25),
-     ["Certification findings, in-repository work"]),
+     ["Certification findings, in-repository work", "Certification, ring-0 interference"]),
     ("Pixel 7: USB beyond the console driver", D(2026, 9, 26),
      ["Pixel 7, the USB driver's rest"]),
     ("Steam: the game step", D(2026, 9, 30),
      ["Stage 22, bubblewrap's rest", "Stage 22, the rest (guess)"]),
-    ("Auth P2, the rest (P2.1 landed)", D(2026, 10, 4), ["Stage 15, auth's rest"]),
+    ("Auth P2, the rest (P2.1 landed)", D(2026, 10, 4), ["Stage 15, auth's rest", "Authentication, phase 3"]),
     ("IPC round trip (steps 1 to 4 landed)", D(2026, 10, 1),
-     ["IPC round trip to seL4's figure"]),
-    ("Live driver update (display kind landed)", D(2026, 10, 7), ["Live driver update"]),
-    ("Installer, the rest (I6a landed)", D(2026, 9, 28), None),
+     ["IPC round trip to seL4's figure", "IPC round trip, step 4b"]),
+    ("Live driver update (display kind landed)", D(2026, 10, 7), ["Live driver update", "Live driver update, the other kinds"]),
+    ("Installer, the rest", D(2026, 9, 28), ["Installer, the rest"]),
+    ("Stage 21: NVIDIA's driver", D(2026, 10, 2), 
+     ["NVIDIA N5, CUDA", "Stage 21, NVIDIA's rest", "Chrome: GPU compositing"]),
+    ("Stage 23, Endfield", D(2026, 10, 10), ["Stage 23, Endfield's rest"]),
+    ("Stage 24, the game path", D(2026, 10, 10), ["Stage 24, the game path's rest"]),
+    ("Developing Ferrix on Ferrix", D(2026, 10, 10),
+     ["Developing Ferrix on Ferrix, the rest"]),
+    ("Game mode", D(2026, 10, 11), ["Game mode, the rest", "Program suspend, S2 to S4"]),
+    ("Stage 21: the N150 box, its Intel GPU", D(2026, 10, 13),
+     ["Stage 21, the N150 and its Intel GPU, the rest"]),
+    ("Microkernel", D(2026, 10, 13),
+     ["Microkernel, M1's rest to M8", "Microkernel, maximum-certification streams"]),
+    ("lode's rest, tole's U10", D(2026, 10, 23), ["lode's rest, tole's U10"]),
+    ("Stage 25, Yoru", D(2026, 10, 24), ["Stage 25, Yoru's rest"]),
+    ("Product signing, S5 and S6", D(2026, 10, 24), ["Product signing, S5 and S6"]),
+    ("Stage 14: classes on PRs #38, #40", D(2026, 10, 26), ["Stage 14, real-time"]),
 ]
 
 FONT = "system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"
@@ -286,85 +339,107 @@ def label(d):
 
 
 def burndown():
-    w, h = 880, 640
+    w, h = 1040, 800
     svg = Svg(w, h, "Ferrix burndown")
-    left, right = 70, w - 70
+    left, right = 56, w - 24
 
     # Panel 1: sized points remaining, forecast from today.
-    top, bottom = 60, 290
+    top, bottom = 60, 270
     svg.text(left, 28, f"Sized points remaining at the end of each day, from {label(TODAY)}",
              size=16, weight="bold")
-    added = sum(p for _, p, s in REMAINING if "added" in s)
-    svg.text(left, 46, f"{SCOPE} points in the status table's sized, unfinished rows, "
-             f"{added} of them added since 09-26; unsized work is outside it, and "
-             "scope added later moves the date",
+    est = sum(p for _, p, s in REMAINING if "est" in s)
+    svg.text(left, 46, f"{SCOPE:,} points in the status table's unfinished rows, {est:,} of "
+             "them estimated on 11-03, many as guesses; scope added later moves the date",
              size=12, fill=MUTED)
     days = math.ceil(SCOPE / FORECAST_RATE) + 2
-    ymax = -(-SCOPE // 100) * 100  # the axis reaches the scope, in hundreds
+    ystep = 100 if SCOPE <= 1000 else 500
+    ymax = -(-SCOPE // ystep) * ystep  # the axis reaches the scope, in whole steps
     x = lambda i: left + (right - left) * i / (days - 1)
     y = lambda v: bottom - (bottom - top) * v / ymax
-    for v in range(0, ymax + 1, 100):
+    for v in range(0, ymax + 1, ystep):
         svg.line(left, y(v), right, y(v), GRID)
-        svg.text(left - 8, y(v) + 4, str(v), anchor="end", fill=MUTED)
-    for i in range(0, days, 2):
+        svg.text(left - 8, y(v) + 4, f"{v:,}", anchor="end", fill=MUTED)
+    for i in range(0, days, 2 if days <= 40 else 14):
         svg.text(x(i), bottom + 18, label(TODAY + timedelta(days=i)),
                  anchor="middle", fill=MUTED)
-    svg.text(18, (top + bottom) / 2, "points", fill=MUTED,
-             anchor="middle")
     for (rate, name), colour, ly in zip(RATES, LINE_C, (top + 8, top + 26)):
         # Whole days while work is left, then the day it runs out, exactly.
         pts = [(x(i), y(SCOPE - rate * i)) for i in range(days) if SCOPE - rate * i > 0]
         pts.append((x(SCOPE / rate), y(0)))
-        svg.polyline(pts, colour, width=2.5)
-        for px, py in pts:
-            svg.dot(px, py, colour)
+        svg.polyline(pts, colour)
+        svg.dot(*pts[-1], colour, r=4)
         # A tick is the end of its day, so the work runs out during the day
         # after the last tick it has passed.
         end = TODAY + timedelta(days=math.ceil(SCOPE / rate))
-        svg.line(right - 420, ly, right - 396, ly, colour, width=2.5)
+        svg.line(right - 420, ly, right - 396, ly, colour, width=2)
         svg.text(right - 388, ly + 4, f"{name}: done {label(end)}")
+    svg.dot(x(0), y(SCOPE), INK, r=4)
 
-    # Panel 2: what has landed, per day and in total.
-    top, bottom = 390, 590
-    svg.text(left, 350, "Points landed per day, and the running total", size=16,
-             weight="bold")
-    svg.text(left, 368, "hatched: sized afterwards from git log, "
-             "not estimated before the work started", size=12, fill=MUTED)
+    # The two panels below share one x axis, a slot a day.
+    n = len(LANDED)
+    slot = (right - left) / n
+    cx = lambda i: left + slot * (i + 0.5)
+
+    def weeks(bottom):
+        for i, (d, _) in enumerate(LANDED):
+            if i % 7 == 0:
+                svg.text(cx(i), bottom + 18, label(d), anchor="middle", fill=MUTED)
+
+    # Panel 2: what has landed, per day. The peaks carry a number, biggest
+    # first, and none that would touch a number already placed; every day's
+    # figure is in docs/backlog/VELOCITY.md.
+    top, bottom = 366, 546
+    svg.text(left, 324, "Points landed per day", size=16, weight="bold")
+    svg.rect(left, 337, 12, 12, ACTIVE_C)
+    svg.text(left + 17, 347, "estimated before the work started", fill=MUTED)
     svg.add('<defs><pattern id="hatch" width="6" height="6" '
             'patternUnits="userSpaceOnUse" patternTransform="rotate(45)">'
             f'<rect width="6" height="6" fill="{FORECAST_C}"/>'
             '<line x1="0" y1="0" x2="0" y2="6" stroke="#ffffff" stroke-width="2"/>'
             '</pattern></defs>')
-    n = len(LANDED)
-    slot = (right - left) / n
-    bmax, cmax = 300, 2400
+    svg.rect(left + 222, 337, 12, 12, "url(#hatch)")
+    svg.text(left + 239, 347, "sized afterwards from git log; a number on days of "
+             f"{LABEL_FROM} or more", fill=MUTED)
+    peak = max(p for _, p in LANDED)
+    bmax = -(-peak // 50) * 50
     yb = lambda v: bottom - (bottom - top) * v / bmax
-    yc = lambda v: bottom - (bottom - top) * v / cmax
-    for v in range(0, bmax + 1, 50):
+    for v in range(0, bmax + 1, 100):
         svg.line(left, yb(v), right, yb(v), GRID)
         svg.text(left - 8, yb(v) + 4, str(v), anchor="end", fill=MUTED)
-    for v in range(0, cmax + 1, 400):
-        svg.text(right + 8, yc(v) + 4, str(v), fill=LINE_C[1])
-    svg.text(18, (top + bottom) / 2, "a day", fill=MUTED, anchor="middle")
-    svg.text(w - 18, (top + bottom) / 2, "total", fill=LINE_C[1], anchor="middle")
-    total, pts = 0, []
     for i, (d, p) in enumerate(LANDED):
-        cx = left + slot * (i + 0.5)
         after = p if d in BACKFILLED else AFTERWARDS.get(d, 0)
         est = p - after
         if est:
-            svg.rect(cx - slot * 0.32, yb(est), slot * 0.64, yb(0) - yb(est), ACTIVE_C)
+            svg.rect(cx(i) - slot * 0.32, yb(est), slot * 0.64, yb(0) - yb(est), ACTIVE_C)
         if after:
-            svg.rect(cx - slot * 0.32, yb(p), slot * 0.64, yb(est) - yb(p), "url(#hatch)")
-        svg.text(cx, yb(p) - 5, str(p), anchor="middle", size=10)
-        svg.text(cx, bottom + 18, label(d), anchor="middle", fill=MUTED, size=9)
-        total += p
-        pts.append((cx, yc(total)))
-    svg.polyline(pts, LINE_C[1], width=2.5)
-    for px, py in pts:
-        svg.dot(px, py, LINE_C[1])
-    svg.text(pts[-1][0] - 8, pts[-1][1] - 8, f"≈ {total}", anchor="end",
-             fill=LINE_C[1], weight="bold")
+            svg.rect(cx(i) - slot * 0.32, yb(p), slot * 0.64, yb(est) - yb(p), "url(#hatch)")
+    placed = []
+    for i, (_, p) in sorted(enumerate(LANDED), key=lambda e: -e[1][1]):
+        half = 3 * len(str(p))
+        if p >= LABEL_FROM and all(
+                abs(cx(i) - qx) >= half + qh or abs(yb(p) - qy) >= 12
+                for qx, qy, qh in placed):
+            svg.text(cx(i), yb(p) - 5, str(p), anchor="middle", size=10)
+            placed.append((cx(i), yb(p), half))
+    weeks(bottom)
+
+    # Panel 3: the running total, on its own axis because it is another scale.
+    top, bottom = 630, 762
+    svg.text(left, 604, "Running total of points landed", size=16, weight="bold")
+    total = sum(p for _, p in LANDED)
+    tmax = -(-total // 1000) * 1000
+    yc = lambda v: bottom - (bottom - top) * v / tmax
+    for v in range(0, tmax + 1, 1000):
+        svg.line(left, yc(v), right, yc(v), GRID)
+        svg.text(left - 8, yc(v) + 4, f"{v:,}", anchor="end", fill=MUTED)
+    run, pts = 0, []
+    for i, (_, p) in enumerate(LANDED):
+        run += p
+        pts.append((cx(i), yc(run)))
+    svg.polyline(pts, LINE_C[1])
+    svg.dot(*pts[-1], LINE_C[1], r=4)
+    svg.text(pts[-1][0] - 8, pts[-1][1] - 8, f"≈ {total:,}", anchor="end", weight="bold")
+    weeks(bottom)
     svg.write(OUT / "burndown.svg")
 
 
@@ -385,7 +460,7 @@ def gantt():
     row_h, sec_h = 22, 30
     w = 1040
     left, right = 310, w - 140
-    top = 82
+    top = 94
     h = top + rows * row_h + 3 * sec_h + 50
     svg = Svg(w, h, "Ferrix Gantt")
     svg.text(24, 28, "Ferrix: done, in progress, and a forecast", size=16,
@@ -394,17 +469,17 @@ def gantt():
              "built rows first, then shortest first: the size of the work, not a plan; "
              "hollow rows have no session on them",
              fill=MUTED)
-    svg.text(24, 60, "In progress: solid is done; the faint bar is the wait for the queue "
-             "below (built rows first, then shortest first), the light dashed bar "
-             "the work itself; a dotted bar to the edge is unsized work",
+    svg.text(24, 62, "In progress: solid is the time since it started; the faint bar is the "
+             "wait for the queue below, the light dashed bar the work itself",
              fill=MUTED)
     x = lambda days: left + (right - left) * days / span
     bottom = h - 40
-    for i in range(span + 1):
-        d = start_day + timedelta(days=i)
-        svg.line(x(i), top, x(i), bottom, GRID if i % 7 else "#afb8c1")
-        if i % 2 == 0 and i < span:
-            svg.text(x(i) + 2, bottom + 16, label(d), fill=MUTED, size=11)
+    every = 7 * math.ceil(40 * span / (right - left) / 7)  # weeks a date's label fits in
+    for i in range(0, span + 1, every):
+        svg.line(x(i), top, x(i), bottom, GRID)
+        if i < span:
+            svg.text(x(i), bottom + 16, label(start_day + timedelta(days=i)),
+                     anchor="middle", fill=MUTED, size=11)
     tx = x((queue_start - start_day).days)
     svg.line(tx, top - 6, tx, bottom, TODAY_C, width=1.5, dash="4 3")
     svg.text(tx, top - 10, f"today, {label(TODAY)}", anchor="middle", fill=TODAY_C,
@@ -432,31 +507,25 @@ def gantt():
     sched = {r[0]: (f[1], f[2]) for r, f in zip(REMAINING, forecast)}
     pts_of = {n: p for n, p, _ in REMAINING}
     def remainder_end(items):
-        return (span if items is None
-                else max(sched[n][1] for n in items) + qd)
+        return max(sched[n][1] for n in items) + qd
     # Drawn by start day, ties by where the remainder ends; the data's order
     # and the forecast queue's order (the status table's) are not changed.
     for name, a, items in sorted(ACTIVE, key=lambda r: (r[1], remainder_end(r[2]))):
         bar(name, day(a), qd, ACTIVE_C)
         by = yy - row_h
-        if items is None:
-            svg.rect(x(qd), by + 4, x(span) - x(qd), row_h - 8, "#ddf4ff", ACTIVE_C, "1 3")
-            svg.text(x(qd) + 6, by + row_h / 2 + 4, "remaining unknown (unsized)",
-                     fill=ACTIVE_C, size=11)
-        else:
-            segs = sorted(sched[n] for n in items)
-            s0, e = qd + segs[0][0], qd + segs[-1][1]
-            left_pts = sum(pts_of[n] for n in items)
-            # The wait: from today to where the row's work starts in the queue.
-            if s0 > qd:
-                svg.rect(x(qd), by + 4, x(s0) - x(qd), row_h - 8, "#eef6fd",
-                         "#b6d4f2", "1 3")
-            for t0, t1 in segs:
-                svg.rect(x(qd + t0), by + 4, max(x(qd + t1) - x(qd + t0), 3),
-                         row_h - 8, "#b6e3ff", ACTIVE_C, "4 2")
-            svg.text(x(e) + 6, by + row_h / 2 + 4,
-                     f"{left_pts} pts left, ~{label(start_day + timedelta(days=math.ceil(e)))}",
-                     fill=ACTIVE_C, size=11)
+        segs = sorted(sched[n] for n in items)
+        s0, e = qd + segs[0][0], qd + segs[-1][1]
+        left_pts = sum(pts_of[n] for n in items)
+        # The wait: from today to where the row's work starts in the queue.
+        if s0 > qd:
+            svg.rect(x(qd), by + 4, x(s0) - x(qd), row_h - 8, "#eef6fd",
+                     "#b6d4f2", "1 3")
+        for t0, t1 in segs:
+            svg.rect(x(qd + t0), by + 4, max(x(qd + t1) - x(qd + t0), 3),
+                     row_h - 8, "#b6e3ff", ACTIVE_C, "4 2")
+        svg.text(x(e) + 6, by + row_h / 2 + 4,
+                 f"{left_pts:,} pts left, ~{label(start_day + timedelta(days=math.ceil(e)))}",
+                 fill=ACTIVE_C, size=11)
     section(f"Forecast, {FORECAST_RATE} a day, one queue")
     q = day(queue_start)
     for name, a, b, state in forecast:
