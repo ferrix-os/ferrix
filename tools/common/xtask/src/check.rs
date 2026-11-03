@@ -333,7 +333,10 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
     // tags; an id whose only check is a host test or an xtask row is outside.
     (
         "evidence homes",
-        &[&["tools/common/check/check-evidence-homes.py"]],
+        &[
+            &["tools/common/check/check-evidence-homes.py", "--self-test"],
+            &["tools/common/check/check-evidence-homes.py"],
+        ],
     ),
     // A coding standard with metrics, which EN 50716 requires and the
     // other gates did not supply: how complicated one function in the
