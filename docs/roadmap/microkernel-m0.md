@@ -236,3 +236,12 @@ call numbers and panic codes are reserved (f5c048964). Their code is on the
 branches `mk/k5`, `mk/k6`, `mk/k7`, `mk/k10` and `mk/k12`, none of it gated;
 about 33 of the program's about 70 points were spent at the wind-down of
 2026-10-19 (`docs/BACKLOG.md`).
+
+**The overnight run, 2026-11-03 to 2026-11-04** (the customer's order: work on
+everything that makes Ferrix a microkernel until 13:00). Nothing of it is on
+`develop` at 23:15 on 2026-11-03. The M1 and K2 to K4 stack is rebased onto
+`develop` on the local `feature/mk-base` (K2 slices A and B, K3 slice A, K4
+landings 1 and 2, K5, K6, K7, K10, K12a and K12b, `smt=off`), unlanded and
+ungated; `feature/mk-reserve` (`bfc8a5f00`) reserves the id blocks of the other
+four agents' work (K13, K15, K1, K11, K17, `linuxd`, K8, K14, K16 and the
+partition manager). This page is updated as those land.
