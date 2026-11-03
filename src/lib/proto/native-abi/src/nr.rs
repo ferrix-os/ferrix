@@ -222,10 +222,8 @@ pub const ADDRESS_WAKE: usize = 0x106C;
 pub const ADDRESS_REQUEUE: usize = 0x106D;
 /// [`NativeCall::AddressWaitAny`].
 pub const ADDRESS_WAIT_ANY: usize = 0x106E;
-pub const ADDRESS_WAIT_ANY: usize = 0x106C;
 /// [`NativeCall::SpaceCreate`]. `0x1079..=0x1080` is the address space's
-/// block (`docs/microkernel/K2.md`); `0x107D`, `0x107F` and `0x1080` are
-/// held for its allocate, write and clone.
+/// block (`docs/microkernel/K2.md`).
 pub const SPACE_CREATE: usize = 0x1079;
 /// [`NativeCall::SpaceMap`].
 pub const SPACE_MAP: usize = 0x107A;
@@ -233,10 +231,17 @@ pub const SPACE_MAP: usize = 0x107A;
 pub const SPACE_UNMAP: usize = 0x107B;
 /// [`NativeCall::SpaceProtect`].
 pub const SPACE_PROTECT: usize = 0x107C;
+/// [`NativeCall::SpaceAllocate`].
+pub const SPACE_ALLOCATE: usize = 0x107D;
 /// [`NativeCall::SpaceRead`].
 pub const SPACE_READ: usize = 0x107E;
-/// The most bytes one [`NativeCall::SpaceRead`] copies: sixteen pages, each
-/// a step that holds one address space's lock and never two.
+/// [`NativeCall::SpaceWrite`].
+pub const SPACE_WRITE: usize = 0x107F;
+/// [`NativeCall::SpaceClone`].
+pub const SPACE_CLONE: usize = 0x1080;
+/// The most bytes one [`NativeCall::SpaceRead`] or [`NativeCall::SpaceWrite`]
+/// copies: sixteen pages, each a step that holds one address space's lock
+/// and never two.
 pub const SPACE_COPY_MAX: usize = 64 * 1024;
 /// The most records one [`NativeCall::AuditRead`] copies.
 pub const AUDIT_READ_MAX: u64 = 64;
@@ -858,10 +863,27 @@ pub enum NativeCall {
     /// space's owner, and refused at the owner's limit with `NO_MEMORY`.
     /// Needs `READ`.
     SpaceRead,
+    /// `(space, address, length, protection)` → address. Map fresh private
+    /// anonymous memory, zero until written, at `address` or wherever there
+    /// is room if it is zero: a clone copies it on write. `protection` as
+    /// [`NativeCall::SpaceMap`]'s. Needs `MAP`, and `EXECUTE` for an
+    /// executable protection.
+    SpaceAllocate,
+    /// `(space, address, buffer, length)` → bytes. Copy the caller's buffer
+    /// into the space, at most [`SPACE_COPY_MAX`] bytes, short at the first
+    /// page that cannot be written (`FAULT` if that is the first). Only
+    /// through writable regions; a copy-on-write page is copied first. What it
+    /// commits is charged to the space's owner. Needs `WRITE`.
+    SpaceWrite,
+    /// `(space)` → handle. A copy-on-write clone of the space, as `fork`
+    /// clones one: private memory copied on the first write by either side,
+    /// shared mappings shared. The new handle carries the given one's rights,
+    /// never more; the clone is owned by the caller's job. Needs `READ`.
+    SpaceClone,
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 82] = [
+pub const ALL: [NativeCall; 92] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,
@@ -943,14 +965,17 @@ pub const ALL: [NativeCall; 82] = [
     NativeCall::TimerCreate,
     NativeCall::TimerSet,
     NativeCall::TimerCancel,
-    NativeCall::ExceptionChannelCreate,
-    NativeCall::ExceptionState,
-    NativeCall::ExceptionResolve,
     NativeCall::SpaceCreate,
     NativeCall::SpaceMap,
     NativeCall::SpaceUnmap,
     NativeCall::SpaceProtect,
+    NativeCall::SpaceAllocate,
     NativeCall::SpaceRead,
+    NativeCall::SpaceWrite,
+    NativeCall::SpaceClone,
+    NativeCall::ExceptionChannelCreate,
+    NativeCall::ExceptionState,
+    NativeCall::ExceptionResolve,
 ];
 
 /// Whether `number` is in the native range at all.
@@ -1054,7 +1079,10 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         SPACE_MAP => NativeCall::SpaceMap,
         SPACE_UNMAP => NativeCall::SpaceUnmap,
         SPACE_PROTECT => NativeCall::SpaceProtect,
+        SPACE_ALLOCATE => NativeCall::SpaceAllocate,
         SPACE_READ => NativeCall::SpaceRead,
+        SPACE_WRITE => NativeCall::SpaceWrite,
+        SPACE_CLONE => NativeCall::SpaceClone,
         _ => return None,
     };
     Some(call)
@@ -1152,6 +1180,9 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::SpaceMap => SPACE_MAP,
         NativeCall::SpaceUnmap => SPACE_UNMAP,
         NativeCall::SpaceProtect => SPACE_PROTECT,
+        NativeCall::SpaceAllocate => SPACE_ALLOCATE,
         NativeCall::SpaceRead => SPACE_READ,
+        NativeCall::SpaceWrite => SPACE_WRITE,
+        NativeCall::SpaceClone => SPACE_CLONE,
     }
 }

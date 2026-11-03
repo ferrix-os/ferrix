@@ -34,6 +34,18 @@
 //!    killed by `SIGSEGV`.
 //! 8. The sweep of every user root the check reached finds no leaf writable
 //!    and executable, and some executable.
+//!
+//! Slice B (`space_allocate`, `space_write`, `space_clone`):
+//! 9. Private memory by handle reads zero, is refused executable without the
+//!    space's `EXECUTE`, and never writable and executable; a write needs
+//!    `WRITE`, a writable region, and charges the owner, never the caller.
+//! 10. A clone has its source handle's rights and no more, and needs `READ`.
+//! 11. The F-41 lesson by handle: after a clone the source's writable
+//!     translation of a private page is gone and a shootdown begun before the
+//!     call answers; neither side then sees the other's writes, through a
+//!     kernel copy or a page made read-only before the clone and writable
+//!     after it; a shared mapping stays shared; and a page both still hold is
+//!     given back to one holder when the clone goes.
 
 use alloc::sync::Arc;
 use alloc::vec;
@@ -54,9 +66,11 @@ use super::job::Job;
 use super::process::{Host, ProcessRef};
 use super::quota::Resource;
 use crate::arch;
+use crate::fs::SetIds;
 use crate::sched::Task;
 use crate::sync::SpinLock;
 use crate::syscall::check::spawn_in;
+use crate::syscall::exec::ids_it_may_raise;
 use crate::syscall::image::{self, Shape};
 use crate::syscall::process::{self, Process};
 use crate::syscall::uaccess;
@@ -102,17 +116,20 @@ const POLL_NANOS: u64 = 1_000_000;
 
 /// What the check found, for the boot line.
 #[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct Report {
+pub struct Report {
     /// Maps, protects and unmaps made by handle that succeeded.
-    pub(crate) changes: u32,
+    pub changes: u32,
     /// Refusals, each as specified.
-    pub(crate) refusals: u32,
+    pub refusals: u32,
     /// User leaves the W^X sweep walked.
-    pub(crate) leaves: u64,
+    pub leaves: u64,
     /// Of them, executable.
-    pub(crate) executable: u64,
+    pub executable: u64,
     /// Bytes the owner's job rose by for one by-handle read.
-    pub(crate) owner_bytes: u64,
+    pub owner_bytes: u64,
+    /// Clone cases that held: no write crossed between a source and its
+    /// clone, and the shared mapping stayed shared.
+    pub clone_cases: u32,
 }
 
 /// Handed to the check's thread.
@@ -143,7 +160,8 @@ static FOUND: SpinLock<Option<Result<Report, &'static str>>> = SpinLock::new(Non
 /// Verifies: H.MEM.24, L.object.232, L.object.233, L.object.234
 /// Verifies: L.object.235, L.object.236, L.object.238, L.object.240
 /// Verifies: L.user.158, L.user.159, L.user.162
-pub(crate) fn run() -> Result<Report, &'static str> {
+/// Verifies: H.MEM.25, L.object.237, L.object.239, L.user.160, L.user.161
+pub fn run() -> Result<Report, &'static str> {
     let tree = Job::new_root().map_err(|_| "no memory for the space check's jobs")?;
     let caller = tree
         .new_child()
@@ -299,6 +317,55 @@ fn read(space: Handle, at: u64, len: u64) -> Result<usize, Errno> {
     call(nr::SPACE_READ, &[reg(space), at, BUFFER, len])
 }
 
+/// `space_write` of `len` bytes from `from` in the check's scratch to `at`.
+fn write(space: Handle, at: u64, from: u64, len: u64) -> Result<usize, Errno> {
+    call(nr::SPACE_WRITE, &[reg(space), at, from, len])
+}
+
+/// One byte of `space` at `at`, read by handle.
+fn byte_at(scratch: &Scratch<'_>, space: Handle, at: u64) -> Result<u8, &'static str> {
+    if read(space, at, 1) != Ok(1) {
+        return Err("space self-check failed: a byte could not be read by handle");
+    }
+    scratch
+        .get(BUFFER, 1)?
+        .first()
+        .copied()
+        .ok_or("space self-check failed: the scratch read back nothing")
+}
+
+/// Write `value` into `space` at `at` by handle.
+fn put_byte(scratch: &Scratch<'_>, space: Handle, at: u64, value: u8) -> Result<(), &'static str> {
+    scratch.put(BUFFER + PAGE_SIZE, &[value])?;
+    if write(space, at, BUFFER + PAGE_SIZE, 1) != Ok(1) {
+        return Err("space self-check failed: a byte could not be written by handle");
+    }
+    Ok(())
+}
+
+/// The kernel's own reference to the space a handle in this process names.
+fn space_of(handle: Handle) -> Result<Arc<AddressSpace>, &'static str> {
+    let process = crate::syscall::thread::current()
+        .map(|thread| Arc::clone(thread.process()))
+        .ok_or("space self-check failed: the check's thread has no process")?;
+    process
+        .with_handles(|table| match table.get(handle) {
+            Ok((Object::Space(space), _)) => Some(Arc::clone(space.space())),
+            _ => None,
+        })
+        .ok_or("space self-check failed: a handle did not name a space")
+}
+
+/// The rights a handle in this process carries.
+fn rights_of(handle: Handle) -> Result<Rights, &'static str> {
+    let process = crate::syscall::thread::current()
+        .map(|thread| Arc::clone(thread.process()))
+        .ok_or("space self-check failed: the check's thread has no process")?;
+    process
+        .with_handles(|table| table.get(handle).ok().map(|(_, rights)| rights))
+        .ok_or("space self-check failed: a handle named nothing")
+}
+
 /// The cases. See the module.
 fn cases(setup: &Setup) -> Result<Report, &'static str> {
     let mut report = Report::default();
@@ -324,7 +391,13 @@ fn cases(setup: &Setup) -> Result<Report, &'static str> {
         return Err("space self-check failed: the user-root sweep found nothing executable");
     }
     a_running_childs_text_unmapped(setup, &scratch, &mut report)?;
+    an_ended_processs_space_charges_its_owner(setup, &scratch, &mut report)?;
+    a_space_handle_stops_a_raise(setup, &scratch)?;
+    protection_zero(&scratch, &mut report)?;
     let _ = call(nr::HANDLE_CLOSE, &[reg(space)]);
+    private_memory_by_handle(&scratch, &mut report)?;
+    clone_rights(&mut report)?;
+    copy_on_write_by_handle(&scratch, &mut report)?;
     Ok(report)
 }
 
@@ -681,6 +754,192 @@ fn each_call_needs_its_right(
     Ok(())
 }
 
+/// A created process, its handle, and its image's VMO closed: for the cases
+/// after [`a_created_process`].
+fn another_child(setup: &Setup, scratch: &Scratch<'_>) -> Result<Handle, &'static str> {
+    let image = child_image();
+    scratch.put(IMAGE, &image)?;
+    let vmo = made(
+        nr::VMO_CREATE,
+        &[image.len() as u64],
+        "space self-check failed: vmo_create for a child's image failed",
+    )?;
+    scratch.put(OFFSET, &0_u64.to_ne_bytes())?;
+    let _ = call(
+        nr::VMO_WRITE,
+        &[reg(vmo), IMAGE, image.len() as u64, OFFSET],
+    )
+    .map_err(|_| "space self-check failed: a child's image could not be written")?;
+    scratch.put(NAME, CHILD_NAME)?;
+    let child = made(
+        nr::PROCESS_CREATE,
+        &[
+            reg(setup.owner_handle),
+            reg(vmo),
+            NAME,
+            CHILD_NAME.len() as u64,
+        ],
+        "space self-check failed: process_create failed",
+    )?;
+    let _ = call(nr::HANDLE_CLOSE, &[reg(vmo)]);
+    Ok(child)
+}
+
+/// The process a handle names.
+fn process_of(setup: &Setup, handle: Handle) -> Result<Arc<Process>, &'static str> {
+    setup.process.with_handles(|table| match table.get(handle) {
+        Ok((Object::Process(child), _)) => child
+            .control()
+            .and_then(|control| control.process::<Process>())
+            .ok_or("space self-check failed: a made process has gone"),
+        _ => Err("space self-check failed: that handle names no process"),
+    })
+}
+
+/// While a space handle names a process's space, no file gives it ids, because
+/// the holder may write into what runs on them; it may again once the last is
+/// closed. A fork of such a space, and a native child of a process on one, stay
+/// refused (ledger 5727 (1)).
+///
+/// Verifies: L.object.309
+fn a_space_handle_stops_a_raise(setup: &Setup, scratch: &Scratch<'_>) -> Result<(), &'static str> {
+    const RAISED: SetIds = SetIds {
+        uid: Some(0),
+        gid: None,
+    };
+    let child = another_child(setup, scratch)?;
+    let process = process_of(setup, child)?;
+    let held = made(
+        nr::PROCESS_SPACE,
+        &[reg(child), u64::from(SAME_RIGHTS)],
+        "space self-check failed: process_space failed",
+    )?;
+    if ids_it_may_raise(&process, RAISED) != SetIds::NONE {
+        return Err("a set-id file raised a process a space handle names");
+    }
+    let forked = process
+        .space()
+        .fork()
+        .map_err(|_| "space self-check failed: a fork failed")?;
+    if !forked.raises_refused() {
+        return Err("a fork of a space a handle names could be raised");
+    }
+    let _ = call(nr::HANDLE_CLOSE, &[reg(held)]);
+    if ids_it_may_raise(&process, RAISED) != RAISED {
+        return Err("a process no space handle names was not raised by a set-id file");
+    }
+    if !forked.raises_refused() {
+        return Err("a fork of a space a handle named stopped being refused");
+    }
+    let _ = call(nr::HANDLE_CLOSE, &[reg(child)]);
+    // A native child of a process on such a space: this one, through a handle
+    // to its own space held for the call.
+    let own = setup.process.space();
+    let mine = super::space::SpaceRef::of(Arc::clone(own), setup.process.quota_slot())
+        .map_err(|_| "space self-check failed: no memory for a handle")?;
+    let refused_child = another_child(setup, scratch)?;
+    let inherited = process_of(setup, refused_child)?.space().raises_refused();
+    drop(mine);
+    let _ = call(nr::HANDLE_CLOSE, &[reg(refused_child)]);
+    if !inherited {
+        return Err("a native child of a process a handle names could be raised");
+    }
+    Ok(())
+}
+
+/// A process that has ended leaves its space to the handles on it, and what
+/// they commit there is still its job's, not the caller's (ledger 2962 C1).
+///
+/// Verifies: L.user.161
+fn an_ended_processs_space_charges_its_owner(
+    setup: &Setup,
+    scratch: &Scratch<'_>,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    let child = another_child(setup, scratch)?;
+    let space = made(
+        nr::PROCESS_SPACE,
+        &[reg(child), u64::from(SAME_RIGHTS)],
+        "space self-check failed: process_space failed",
+    )?;
+    let ended = process_of(setup, child)?;
+    process::kill(&ended, 137);
+    drop(ended);
+    let mapped = call(
+        nr::SPACE_ALLOCATE,
+        &[
+            reg(space),
+            AT_ENDED,
+            PAGE_SIZE,
+            u64::from(MAP_READ | MAP_WRITE),
+        ],
+    );
+    if mapped != Ok(AT_ENDED as usize) {
+        return Err("space self-check failed: space_allocate in an ended process's space failed");
+    }
+    let (owner_before, caller_before) = (memory(&setup.owner)?, memory(&setup.caller)?);
+    if read(space, AT_ENDED, 8) != Ok(8) {
+        return Err("space self-check failed: a read in an ended process's space failed");
+    }
+    if memory(&setup.owner)? < owner_before + PAGE_SIZE || memory(&setup.caller)? != caller_before {
+        return Err("a page committed in an ended process's space was not charged to its job");
+    }
+    report.changes += 1;
+    let _ = call(nr::HANDLE_CLOSE, &[reg(space)]);
+    let _ = call(nr::HANDLE_CLOSE, &[reg(child)]);
+    Ok(())
+}
+
+/// Protection 0 makes a region with no access on `SPACE_ALLOCATE` alone: a
+/// read through the handle stops short of it, and `SPACE_MAP` and
+/// `SPACE_PROTECT` refuse it (K15, ledger 5729 (3)).
+///
+/// Verifies: L.object.297
+fn protection_zero(scratch: &Scratch<'_>, report: &mut Report) -> Result<(), &'static str> {
+    let space = made(
+        nr::SPACE_CREATE,
+        &[],
+        "space self-check failed: space_create failed",
+    )?;
+    let vmo = made(
+        nr::VMO_CREATE,
+        &[PAGE_SIZE],
+        "space self-check failed: vmo_create failed",
+    )?;
+    if call(nr::SPACE_ALLOCATE, &[reg(space), AT_NONE, PAGE_SIZE, 0]) != Ok(AT_NONE as usize) {
+        return Err("space_allocate refused protection 0");
+    }
+    if read(space, AT_NONE, 8).is_ok_and(|got| got != 0) {
+        return Err("a read through a space handle reached a region with no access");
+    }
+    refused(
+        call(nr::SPACE_PROTECT, &[reg(space), AT_NONE, PAGE_SIZE, 0]),
+        status::INVALID_ARGS,
+        "space_protect took protection 0",
+        report,
+    )?;
+    scratch.put(OFFSET, &0_u64.to_ne_bytes())?;
+    refused(
+        call(
+            nr::SPACE_MAP,
+            &[
+                reg(space),
+                reg(vmo),
+                AT_NONE + 2 * PAGE_SIZE,
+                PAGE_SIZE,
+                0,
+                OFFSET,
+            ],
+        ),
+        status::INVALID_ARGS,
+        "space_map took protection 0",
+        report,
+    )?;
+    let _ = call(nr::HANDLE_CLOSE, &[reg(vmo)]);
+    let _ = call(nr::HANDLE_CLOSE, &[reg(space)]);
+    Ok(())
+}
+
 /// The image the child runs: it spins, so it is still running when its
 /// creator reads it, until its text is taken away.
 fn child_image() -> Vec<u8> {
@@ -822,8 +1081,304 @@ fn after_the_start(
         "space self-check failed: a READ-only space handle mapped into a running child",
         report,
     )?;
+    refused(
+        write(reader, image::ENTRY, BUFFER, 1),
+        status::ACCESS_DENIED,
+        "space self-check failed: a READ-only space handle wrote into a running child",
+        report,
+    )?;
     for closing in [vmo, reader] {
         let _ = call(nr::HANDLE_CLOSE, &[reg(closing)]);
+    }
+    Ok(())
+}
+
+/// Where the private memory of cases 9 and 11 goes.
+const AT_PRIVATE: u64 = 0x5010_0000;
+/// Where the ended process's case allocates.
+const AT_ENDED: u64 = 0x5020_0000;
+/// Where protection 0's case allocates.
+const AT_NONE: u64 = 0x5021_0000;
+/// Where the shared mapping of case 11 goes.
+const AT_SHARED: u64 = 0x5011_0000;
+
+/// Case 9: private memory by handle, and writes into it.
+fn private_memory_by_handle(
+    scratch: &Scratch<'_>,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    let space = made(
+        nr::SPACE_CREATE,
+        &[],
+        "space self-check failed: space_create failed",
+    )?;
+    let allocate = |handle: Handle, at: u64, protection: u32| {
+        call(
+            nr::SPACE_ALLOCATE,
+            &[reg(handle), at, 2 * PAGE_SIZE, u64::from(protection)],
+        )
+    };
+    let no_execute = duplicate(space, Rights(Rights::SPACE.0 & !Rights::EXECUTE.0))?;
+    refused(
+        allocate(no_execute, AT_PRIVATE, MAP_READ | MAP_EXECUTE),
+        status::ACCESS_DENIED,
+        "space self-check failed: space_allocate made executable memory without EXECUTE",
+        report,
+    )?;
+    refused(
+        allocate(space, AT_PRIVATE, MAP_READ | MAP_WRITE | MAP_EXECUTE),
+        status::INVALID_ARGS,
+        "space self-check failed: space_allocate took a writable and executable protection",
+        report,
+    )?;
+    if allocate(space, AT_PRIVATE, MAP_READ | MAP_WRITE) != Ok(AT_PRIVATE as usize) {
+        return Err("space self-check failed: space_allocate did not allocate where asked");
+    }
+    report.changes += 1;
+    refused(
+        allocate(space, AT_PRIVATE, MAP_READ),
+        status::INVALID_ARGS,
+        "space self-check failed: space_allocate allocated over a mapping",
+        report,
+    )?;
+    if byte_at(scratch, space, AT_PRIVATE + 5)? != 0 {
+        return Err("space self-check failed: memory space_allocate made did not read zero");
+    }
+    let no_write = duplicate(space, Rights(Rights::SPACE.0 & !Rights::WRITE.0))?;
+    scratch.put(BUFFER, SECRET)?;
+    refused(
+        write(no_write, AT_PRIVATE, BUFFER, 8),
+        status::ACCESS_DENIED,
+        "space self-check failed: space_write wrote without WRITE",
+        report,
+    )?;
+    put_byte(scratch, space, AT_PRIVATE, b'w')?;
+    if byte_at(scratch, space, AT_PRIVATE)? != b'w' {
+        return Err("space self-check failed: a byte written by handle did not read back");
+    }
+    // A region made read-only takes no write by handle, and keeps its byte.
+    let second = AT_PRIVATE + PAGE_SIZE;
+    put_byte(scratch, space, second, b'r')?;
+    let _ = call(
+        nr::SPACE_PROTECT,
+        &[reg(space), second, PAGE_SIZE, u64::from(MAP_READ)],
+    )
+    .map_err(|_| "space self-check failed: allocated memory could not be made read-only")?;
+    scratch.put(BUFFER + PAGE_SIZE, b"x")?;
+    refused(
+        write(space, second, BUFFER + PAGE_SIZE, 1),
+        status::FAULT,
+        "space self-check failed: space_write wrote into a read-only region",
+        report,
+    )?;
+    if byte_at(scratch, space, second)? != b'r' {
+        return Err("space self-check failed: a refused write by handle changed the page");
+    }
+    for closing in [no_execute, no_write, space] {
+        let _ = call(nr::HANDLE_CLOSE, &[reg(closing)]);
+    }
+    Ok(())
+}
+
+/// Case 10: a clone's rights are its source handle's, and a clone needs
+/// `READ`.
+fn clone_rights(report: &mut Report) -> Result<(), &'static str> {
+    let space = made(
+        nr::SPACE_CREATE,
+        &[],
+        "space self-check failed: space_create failed",
+    )?;
+    let narrow = duplicate(space, Rights::READ | Rights::MAP)?;
+    let clone = made(
+        nr::SPACE_CLONE,
+        &[reg(narrow)],
+        "space self-check failed: space_clone failed",
+    )?;
+    if rights_of(clone)? != (Rights::READ | Rights::MAP) {
+        return Err("space self-check failed: a clone carried other rights than its source handle");
+    }
+    let blind = duplicate(space, Rights(Rights::SPACE.0 & !Rights::READ.0))?;
+    refused(
+        call(nr::SPACE_CLONE, &[reg(blind)]),
+        status::ACCESS_DENIED,
+        "space self-check failed: space_clone cloned without READ",
+        report,
+    )?;
+    for closing in [narrow, clone, blind, space] {
+        let _ = call(nr::HANDLE_CLOSE, &[reg(closing)]);
+    }
+    Ok(())
+}
+
+/// Case 11: the copy-on-write clone, and the F-41 lesson.
+fn copy_on_write_by_handle(scratch: &Scratch<'_>, report: &mut Report) -> Result<(), &'static str> {
+    let source = made(
+        nr::SPACE_CREATE,
+        &[],
+        "space self-check failed: space_create failed",
+    )?;
+    let held = space_of(source)?;
+    if call(
+        nr::SPACE_ALLOCATE,
+        &[
+            reg(source),
+            AT_PRIVATE,
+            3 * PAGE_SIZE,
+            u64::from(MAP_READ | MAP_WRITE),
+        ],
+    ) != Ok(AT_PRIVATE as usize)
+    {
+        return Err("space self-check failed: no private memory for the clone");
+    }
+    let vmo = made(
+        nr::VMO_CREATE,
+        &[PAGE_SIZE],
+        "space self-check failed: vmo_create failed",
+    )?;
+    scratch.put(OFFSET, &0_u64.to_ne_bytes())?;
+    if map(source, vmo, AT_SHARED, MAP_READ | MAP_WRITE) != Ok(AT_SHARED as usize) {
+        return Err("space self-check failed: a shared VMO was not mapped for the clone");
+    }
+    let (first, second, third) = (
+        AT_PRIVATE,
+        AT_PRIVATE + PAGE_SIZE,
+        AT_PRIVATE + 2 * PAGE_SIZE,
+    );
+    put_byte(scratch, source, first, b'A')?;
+    put_byte(scratch, source, third, b'Z')?;
+    // Page two is written, then made read-only before the clone: F-41's page.
+    put_byte(scratch, source, second, b'E')?;
+    protect_page(source, second, MAP_READ)?;
+    if !writable(&held, first) {
+        return Err("space self-check failed: a page written by handle had no writable leaf");
+    }
+    let begun = held.shootdowns_begun();
+
+    let clone = made(
+        nr::SPACE_CLONE,
+        &[reg(source)],
+        "space self-check failed: space_clone failed",
+    )?;
+    // Cases 1 and 2: the source's writable translation is out of its tables,
+    // and a shootdown for it begun, before the call answered.
+    if writable(&held, first) {
+        return Err(
+            "space self-check failed: a clone left the source's writable translation \
+                    of a private page in place",
+        );
+    }
+    if held.shootdowns_begun() <= begun {
+        return Err(
+            "space self-check failed: a clone took the source's translations down with \
+                    no shootdown",
+        );
+    }
+    report.clone_cases += 1;
+    // The source writes after the clone, by a kernel copy: the clone keeps
+    // what it had.
+    put_byte(scratch, source, first, b'B')?;
+    if byte_at(scratch, source, first)? != b'B' || byte_at(scratch, clone, first)? != b'A' {
+        return Err(
+            "space self-check failed: a clone saw a write its source made after the \
+                    clone",
+        );
+    }
+    report.clone_cases += 1;
+    // The clone writes: the source never sees it.
+    put_byte(scratch, clone, first + 8, b'D')?;
+    if byte_at(scratch, source, first + 8)? != 0 {
+        return Err("space self-check failed: a source saw a write its clone made");
+    }
+    report.clone_cases += 1;
+    f41_by_handle(scratch, source, clone, second)?;
+    report.clone_cases += 1;
+    // Shared stays shared.
+    put_byte(scratch, source, AT_SHARED, b'H')?;
+    if byte_at(scratch, clone, AT_SHARED)? != b'H' {
+        return Err("space self-check failed: a shared mapping was not shared by its clone");
+    }
+    report.clone_cases += 1;
+    the_clone_gives_back(scratch, clone, third)?;
+    report.clone_cases += 1;
+    drop(held);
+    for closing in [vmo, source] {
+        let _ = call(nr::HANDLE_CLOSE, &[reg(closing)]);
+    }
+    Ok(())
+}
+
+/// `space_protect` of one page, which must succeed.
+fn protect_page(space: Handle, at: u64, protection: u32) -> Result<(), &'static str> {
+    call(
+        nr::SPACE_PROTECT,
+        &[reg(space), at, PAGE_SIZE, u64::from(protection)],
+    )
+    .map(|_| ())
+    .map_err(|_| "space self-check failed: a protection by handle was refused")
+}
+
+/// Whether `space`'s tables hold a writable leaf for `at`.
+fn writable(space: &AddressSpace, at: u64) -> bool {
+    crate::mm::flags_in(space.root_table(), at).is_some_and(|flags| flags.write)
+}
+
+/// Case 11, F-41's page: read-only at the clone, made writable after it,
+/// on either side; neither sees the other's write.
+fn f41_by_handle(
+    scratch: &Scratch<'_>,
+    source: Handle,
+    clone: Handle,
+    second: u64,
+) -> Result<(), &'static str> {
+    // F-41's own case: read-only at the clone, writable after it, on either
+    // side.
+    protect_page(source, second, MAP_READ | MAP_WRITE)?;
+    put_byte(scratch, source, second, b'F')?;
+    if byte_at(scratch, clone, second)? != b'E' {
+        return Err(
+            "space self-check failed: a write to a page made writable after the clone \
+                    reached the clone (F-41)",
+        );
+    }
+    protect_page(clone, second, MAP_READ | MAP_WRITE)?;
+    put_byte(scratch, clone, second, b'G')?;
+    if byte_at(scratch, source, second)? != b'F' {
+        return Err(
+            "space self-check failed: a write to a page made writable after the clone \
+                    reached the source (F-41)",
+        );
+    }
+    Ok(())
+}
+
+/// Case 11's last: a page a source and its clone both still hold is given
+/// back to one holder as the clone goes.
+fn the_clone_gives_back(
+    scratch: &Scratch<'_>,
+    clone: Handle,
+    third: u64,
+) -> Result<(), &'static str> {
+    // A page both still hold is given back to one holder as the clone goes.
+    let cloned = space_of(clone)?;
+    if byte_at(scratch, clone, third)? != b'Z' {
+        return Err(
+            "space self-check failed: a clone did not read a page its source wrote \
+                    before the clone",
+        );
+    }
+    let frame = crate::mm::translate_in(cloned.root_table(), third)
+        .map(|physical| physical / PAGE_SIZE)
+        .ok_or("space self-check failed: a page the clone read has no translation")?;
+    drop(cloned);
+    if crate::mm::frame_references(frame) != 2 {
+        return Err(
+            "space self-check failed: a page a source and its clone both hold is not \
+                    shared by the two",
+        );
+    }
+    let _ = call(nr::HANDLE_CLOSE, &[reg(clone)]);
+    if crate::mm::frame_references(frame) != 1 {
+        return Err("space self-check failed: a page a closed clone held was not given back");
     }
     Ok(())
 }
@@ -842,7 +1397,7 @@ fn owner_pays(
 ) -> Result<(), &'static str> {
     let vmo = made(
         nr::VMO_CREATE,
-        &[2 * PAGE_SIZE],
+        &[4 * PAGE_SIZE],
         "space self-check failed: vmo_create failed",
     )?;
     scratch.put(OFFSET, &0_u64.to_ne_bytes())?;
@@ -852,7 +1407,7 @@ fn owner_pays(
             reg(space),
             reg(vmo),
             AT_OWNED,
-            2 * PAGE_SIZE,
+            4 * PAGE_SIZE,
             u64::from(MAP_READ | MAP_WRITE),
             OFFSET,
         ],
@@ -891,6 +1446,34 @@ fn owner_pays(
     if super::oom::kills() != kills || memory(&setup.caller)? != caller_before {
         return Err(
             "space self-check failed: a by-handle read at the owner's limit killed or \
+                    charged the caller",
+        );
+    }
+    // A write commits the same way: the owner pays, the caller does not, and
+    // at the owner's limit it is refused.
+    scratch.put(BUFFER, SECRET)?;
+    let (owner_before, caller_before) = (memory(&setup.owner)?, memory(&setup.caller)?);
+    if write(space, AT_OWNED + 2 * PAGE_SIZE, BUFFER, 8) != Ok(8) {
+        return Err("space self-check failed: a by-handle write of an untouched page failed");
+    }
+    let (owner_after, caller_after) = (memory(&setup.owner)?, memory(&setup.caller)?);
+    if owner_after < owner_before + PAGE_SIZE || caller_after != caller_before {
+        return Err(
+            "space self-check failed: a page a by-handle write committed was not charged \
+                    to the space's owner alone",
+        );
+    }
+    let _ = setup.owner.set_limit(Resource::Memory, owner_after);
+    refused(
+        write(space, AT_OWNED + 3 * PAGE_SIZE, BUFFER, 8),
+        status::NO_MEMORY,
+        "space self-check failed: a by-handle write past the owner's limit was not NO_MEMORY",
+        report,
+    )?;
+    let _ = setup.owner.set_limit(Resource::Memory, u64::MAX);
+    if super::oom::kills() != kills || memory(&setup.caller)? != caller_before {
+        return Err(
+            "space self-check failed: a by-handle write at the owner's limit killed or \
                     charged the caller",
         );
     }

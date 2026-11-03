@@ -365,8 +365,8 @@
       "recursive": false
     },
     "syscall/native.rs::answer": {
-      "complexity": 40,
-      "lines": 98,
+      "complexity": 41,
+      "lines": 108,
       "recursive": false
     },
     "syscall/native.rs::channel_read": {
@@ -407,6 +407,11 @@
     "user/space.rs::fault_private_file": {
       "complexity": 15,
       "lines": 53,
+      "recursive": false
+    },
+    "user/space.rs::fork": {
+      "complexity": 15,
+      "lines": 60,
       "recursive": false
     },
     "user/space.rs::protect": {

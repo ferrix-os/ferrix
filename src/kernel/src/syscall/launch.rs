@@ -146,6 +146,9 @@ pub(crate) fn load_native(
         // And the time namespace its creator's children are born in, as a
         // fork's child has (`docs/NAMESPACES.md` §12.1): a vDSO that reads the
         // first namespace's clocks would be a way out of the namespace.
+        if creator.space().raises_refused() {
+            child.space().refuse_raises();
+        }
         child.inherit_time(creator);
         if super::vdso::is_shifted(&child.time_namespace())
             && super::vdso::retarget(child.space(), true).is_err()
