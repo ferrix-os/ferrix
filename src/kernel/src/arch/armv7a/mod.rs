@@ -13,6 +13,7 @@ pub mod console;
 pub mod cpu;
 pub(crate) mod rehome_check;
 pub use cpu::dma_barrier;
+pub mod exception_check;
 pub(crate) mod mmio;
 mod signal;
 mod smp;
@@ -53,7 +54,9 @@ pub(crate) use smp::{CpuStarter, describe_cpus, hardware_id};
 pub use trap::UserRegs;
 pub use trap::breakpoint;
 pub use trap::{TrapFrame, enter_user, resume_user};
-pub(crate) use trap::{advance_past_breakpoint, classify, fault_signal, report_trap, system_call};
+pub(crate) use trap::{
+    advance_past_breakpoint, classify, exception_code, fault_signal, report_trap, system_call,
+};
 
 /// Point this CPU's per-CPU register at `address`.
 ///

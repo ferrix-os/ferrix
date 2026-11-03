@@ -37,6 +37,8 @@
     "vmap"
   ],
   "check_code_in_product": {
+    "object::exception::force_poison": "Arms the seam case p of the exception check uses, built only with the self-checks.",
+    "object::exception::take_poison": "The seam case p of the exception check takes a machine check's two rules through, built only with the self-checks.",
     "mm::reserve::take_from_reserve": "Takes one object out of this processor's reserve so the next section must fill it again: for the heap caches' reserve check (mm/check.rs, reserve_refusals_drain_every_cache, L.mm.95). It reaches the reserve's slot, private to mm::reserve, so it lives beside it; nothing in product code calls it.",
     "mm::reserve::full_here": "Whether this processor's reserve is full and holds no large block outside a section: for the same check (mm/check.rs, reserve_refusals_drain_every_cache, L.mm.95), reading the private slot; nothing in product code calls it.",
     "mm::initrd_span": "The kept initramfs's physical base and length, for the release's boot check (fs/release_check.rs, L.mm.99-100) to count the whole pages given back against. It reads INITRD, private to mm.rs, so it lives beside it; nothing in product code calls it.",
