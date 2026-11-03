@@ -793,12 +793,13 @@ jobs:
       # behaviour). A part of its own, with a budget of 15 minutes of real
       # time for this job, read off the run. Every other figure here and in
       # the tests' ignore labels is libtest's "finished in", which under
-      # Miri's isolation is Miri's virtual clock and not time: at 7c5eda2d5,
-      # 503.51 s by libtest took 411 s here. By that clock a test over 25 s
+      # Miri's isolation is Miri's virtual clock and not time: at c158bd2f4,
+      # 883.83 s by libtest took 837 s here, and the job 15 min 37 s, over
+      # budget, so the set was cut. By that clock a test over 25 s
       # is ignored here (measured 2026-11-03; the slowest did not finish in
       # half an hour) unless it reaches what nothing cheaper does. Four such
-      # are kept, of 32 to 237 s: docs/RELIABILITY.md, Miri, names them. The
-      # set takes 891 s by libtest. docs/certification/TODO.md, section 4,
+      # are kept, of 32 to 78 s: docs/RELIABILITY.md, Miri, names them. The
+      # set takes 732 s by libtest. docs/certification/TODO.md, section 4,
       # item 7, says what it does not reach. Plain cargo test runs them all.
       - name: Miri (btrfs reader)
         if: matrix.part == 4
