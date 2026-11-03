@@ -1,6 +1,6 @@
 {
   "//": [
-    "Kernel requirements verified only from load-ring checks, which tools/common/check/check-evidence-homes.py allows for now (docs/MICROKERNEL.md section 6.2, B5; docs/microkernel/B5.md). A list that only shrinks: an id leaves when a check in a core or item file verifies it, its negative control FIRED. M3's gate is an empty list.",
+    "Kernel requirements verified only from load-ring checks, which tools/common/check/check-evidence-homes.py allows for now (docs/MICROKERNEL.md section 6.2, B5; docs/microkernel/B5.md). A list that only shrinks: an id leaves when a check in a core or item file verifies it, its negative control FIRED. M3's gate is an empty list, or class C's marked entries until personality=user builds (B5.md section 2).",
     "raised_only: a ratchet on the ids resting only on check files the load's crate or the composition root builds (raised_checks): those do not link in a kernel without the load. M5's gate (ledger 5782 (3)). A new id fails until listed by a reviewed edit; give it a home instead where it can have one."
   ],
   "ids": [

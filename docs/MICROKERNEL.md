@@ -482,10 +482,10 @@ when this was written) are verified *only* by checks in load-ring files
 (`tools/common/gen/microkernel-surface.py orphans --list`):
 H.DEV.2/4, H.MEM.8/16, H.QUOTA.6/7/10-12, H.SCHED.9, H.TRAP.9/11/12/16, and
 L.aarch64, L.armv7a, L.device, L.object, L.quiesce, L.sched, L.syscall,
-L.trap, L.user and L.x86_64 ids. The most are in `syscall/check.rs` (31,
-which also holds ASR-7's 427 refusal assertions), `fs/mmap_check.rs` (9),
-`syscall/seccomp_check.rs` (7), `interfaces/block_ring/check.rs` (6) and
-the cgroupfs checks (22 together). In M2 and M3, before M5, each is
+L.trap, L.user and L.x86_64 ids. The most, on 2026-11-03, are in `syscall/check.rs` (38, which also holds
+ASR-7's refusal assertions), the cgroupfs checks (33 together), `fs/mmap_check.rs`
+(9), `syscall/seccomp_check.rs` (8), `interfaces/block_ring/check.rs` (6) and
+`syscall/vdso_check.rs` (6); `docs/microkernel/B5.md` lists each. In M2 and M3, before M5, each is
 re-homed to a check in a core or item file with its negative control fired
 again (`gate.sh control --expect`, FIRED). A new `xtask check` step fails when
 a core or item id is verified only from a load-ring or user-space check.
