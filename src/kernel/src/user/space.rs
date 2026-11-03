@@ -242,7 +242,7 @@ struct Inner {
 
 /// The most a region a handle or the kernel mapped may be protected to.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Ceiling {
+pub enum Ceiling {
     /// The kernel's own pages, mapped into every process (the vDSO, the
     /// ARMv7-A signal page): no call may change their protection.
     Kernel,
@@ -296,7 +296,7 @@ fn within_ceilings(inner: &Inner, range: PageRange, flags: VmaFlags) -> Result<(
 
 /// Why [`AddressSpace::protect_by_handle`] refused.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum ProtectRefused {
+pub enum ProtectRefused {
     /// As the space refuses any change: a malformed range, or one not wholly
     /// mapped.
     Space(SpaceError),
@@ -357,6 +357,11 @@ pub struct AddressSpace {
     /// [`UNCLAIMED`] before a process has claimed it: see
     /// [`AddressSpace::claim_domain`] and `docs/OPAQUE-KERNEL.md` §9.2.
     domain: AtomicU64,
+    /// Space handles naming this space: while any lives, whoever holds one
+    /// may write into what runs here, so no file gives it ids
+    /// ([`AddressSpace::raises_refused`], `L.object.309`). `process_space` is
+    /// refused after the start, so for a started process this only falls.
+    handles: AtomicU64,
 }
 
 impl AddressSpace {
@@ -576,6 +581,7 @@ impl AddressSpace {
             cpus: CpuMask::new(),
             flushes: Flushes::new(),
             layout: SleepLock::new((), &crate::sync::SchedParker),
+            handles: AtomicU64::new(0),
             inner: SpinLock::new(inner),
             domain: AtomicU64::new(UNCLAIMED),
         }
@@ -605,6 +611,24 @@ const UNCLAIMED: u64 = u64::MAX;
 /// domains claimed it, or its process left its domain. Zero, by contrast, is
 /// a space claimed by a process in no domain, which a birth may still place.
 const OUT: u64 = u64::MAX - 1;
+
+impl AddressSpace {
+    /// A space handle to this space was made.
+    pub(crate) fn handle_made(&self) {
+        let _ = self.handles.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// A space handle to this space is gone.
+    pub(crate) fn handle_gone(&self) {
+        let _ = self.handles.fetch_sub(1, Ordering::SeqCst);
+    }
+
+    /// Whether a program here may be given ids by a file: not while a handle
+    /// names this space (`L.object.309`, ledger 5727 (1), 6256).
+    pub fn raises_refused(&self) -> bool {
+        self.handles.load(Ordering::SeqCst) != 0
+    }
+}
 
 impl AddressSpace {
     /// The speculation domain the switch barrier decision reads: zero for
@@ -2051,7 +2075,7 @@ impl AddressSpace {
     }
 
     /// How many shootdowns of this space have begun: see the field.
-    pub(crate) fn shootdowns_begun(&self) -> u64 {
+    pub fn shootdowns_begun(&self) -> u64 {
         self.flushes.begun.load(Ordering::SeqCst)
     }
 
@@ -3149,7 +3173,7 @@ impl AddressSpace {
     /// pages, a range past the object's end, or one that overlaps a mapping;
     /// [`SpaceError::NotUserRange`] outside the user half; and
     /// [`SpaceError::OutOfMemory`] if no free range is long enough.
-    pub(crate) fn map_by_handle(
+    pub fn map_by_handle(
         &self,
         at: Option<u64>,
         len: u64,
@@ -3581,6 +3605,74 @@ impl AddressSpace {
         Ok(())
     }
 
+    /// Map `len` bytes of fresh private anonymous memory, zero until written,
+    /// at `at` or wherever there is room: what `space_allocate` does
+    /// (`docs/microkernel/K2.md` §2.3). The memory is nobody else's, so its
+    /// ceiling is read, write and execute, one at a time with the third
+    /// (ASR-2, refused here under no lock yet whatever the caller decoded);
+    /// a clone copies it on write, and the Linux calls that reshape a region
+    /// refuse it, as they refuse every region a handle made.
+    ///
+    /// # Errors
+    ///
+    /// [`SpaceError::Refused`] for writable and executable together;
+    /// [`SpaceError::BadRange`] for a length that is not whole pages or a
+    /// range over a mapping; [`SpaceError::NotUserRange`] outside the user
+    /// half; [`SpaceError::OutOfMemory`] for no room or no memory.
+    pub fn allocate_by_handle(
+        &self,
+        at: Option<u64>,
+        len: u64,
+        flags: VmaFlags,
+    ) -> Result<u64, SpaceError> {
+        let flags = VmaFlags {
+            shared: false,
+            grows_down: false,
+            ..flags
+        };
+        let ceiling = Ceiling::Handle {
+            write: true,
+            execute: true,
+        };
+        if !ceiling.admits(flags) {
+            return Err(SpaceError::Refused(at.unwrap_or(0)));
+        }
+        if len == 0 || !len.is_multiple_of(PAGE_SIZE) {
+            return Err(SpaceError::BadRange);
+        }
+        let mut inner = self.inner.lock();
+        let at = match at {
+            Some(at) => at,
+            None => inner
+                .map
+                .find_free(len, PAGE_SIZE, None)
+                .ok_or(SpaceError::OutOfMemory)?,
+        };
+        if !is_user_address(at) || at.checked_add(len).is_none_or(|end| end > USER_VIRT_END) {
+            return Err(SpaceError::NotUserRange(at));
+        }
+        let range = PageRange::from_len(at, len).map_err(|_| SpaceError::BadRange)?;
+        let id = inner.next_id;
+        inner.next_id = inner.next_id.saturating_add(1);
+        let vmo = Vmo::new_anonymous(len / PAGE_SIZE).map_err(|_| SpaceError::OutOfMemory)?;
+        self.add_region(
+            &mut inner,
+            NewRegion {
+                id,
+                range,
+                flags,
+                backing: Backing::Anonymous { id, offset: 0 },
+                sharing: Sharing::Private,
+            },
+            vmo,
+        )?;
+        if fallible::insert(&mut inner.native, id, ceiling).is_err() {
+            self.abandon_region(&mut inner, id, range);
+            return Err(SpaceError::OutOfMemory);
+        }
+        Ok(at)
+    }
+
     /// Change the protection of `len` bytes at `at`, every page of which a
     /// handle mapped, to `flags`' read, write and execute: what `space_protect`
     /// does (`docs/microkernel/K2.md` §2.3).
@@ -3599,7 +3691,7 @@ impl AddressSpace {
     /// mapped; [`ProtectRefused::NotByHandle`] for one that reaches a region no
     /// handle mapped; [`ProtectRefused::Beyond`] for a protection past a
     /// region's ceiling.
-    pub(crate) fn protect_by_handle(
+    pub fn protect_by_handle(
         &self,
         at: u64,
         len: u64,
