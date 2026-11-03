@@ -12,10 +12,9 @@ use ferrix_native_abi::exception::X86_64Registers as Registers;
 /// `int3`, then `exit_group(97)`, which only a program resumed past it
 /// reaches.
 ///
-/// Every vector's gate but the legacy system call's has DPL 0 here
-/// (`trap.rs`, the IDT), so a program's `int3` is a general protection fault
-/// at the `int3` itself, not a breakpoint: reported as [`BREAKPOINT_KIND`],
-/// vector 13, its pc at the instruction, which is one byte.
+/// A program's `int3` is a breakpoint here (vector 3's gate is DPL 3 since
+/// `SIGTRAP` came to programs): reported as [`BREAKPOINT_KIND`], its pc past
+/// the one-byte instruction, as the processor leaves it.
 ///
 /// ```text
 ///   int3
@@ -28,20 +27,19 @@ pub const BREAKPOINT_PROGRAM: &[u8] = &[
     0x0f, 0x05, // syscall
 ];
 
-/// How a program's breakpoint instruction is reported here: as the general
-/// protection fault the DPL 0 gate makes it.
-pub const BREAKPOINT_KIND: u32 = ferrix_native_abi::exception::KIND_OTHER;
+/// How a program's breakpoint instruction is reported here.
+pub const BREAKPOINT_KIND: u32 = ferrix_native_abi::exception::KIND_BREAKPOINT;
 
-/// The architecture's code a breakpoint's report carries: vector 13 over
-/// the error code naming IDT vector 3 (`3 << 3 | 2`).
-pub const BREAKPOINT_CODE: Option<u64> = Some(13 << 32 | 0x1a);
+/// The architecture's code a breakpoint's report carries: vector 3 over no
+/// error code.
+pub const BREAKPOINT_CODE: Option<u64> = Some(3 << 32);
 
-/// How far past a breakpoint's own address a supervisor resumes: the
-/// `int3`'s one byte.
-pub const BREAKPOINT_SKIP: u64 = 1;
+/// How far past the reported pc a supervisor resumes: none, the processor
+/// has already stepped over the `int3`.
+pub const BREAKPOINT_SKIP: u64 = 0;
 
 /// Whether a breakpoint's report says its pc is the trapping instruction's.
-pub const BREAKPOINT_PC_AT_TRAP: bool = true;
+pub const BREAKPOINT_PC_AT_TRAP: bool = false;
 
 /// In `USER_FAULT_PROGRAM`: the faulting store's offset, and its `syscall`'s.
 pub const FAULT_AT: u64 = 2;

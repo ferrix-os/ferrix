@@ -877,10 +877,10 @@ fn closed_undecided(
     Ok(())
 }
 
-/// Case i: a breakpoint instruction, reported as the architecture takes it
-/// (a breakpoint on the Arm pair; on x86-64 the general protection fault
-/// its DPL 0 gate makes of a program's `int3`), its pc at the instruction;
-/// moved past and resumed, the program exits 97.
+/// Case i: a breakpoint instruction, reported as one, its pc where the
+/// architecture leaves it (past a program's `int3` on x86-64, at the `brk` or
+/// `bkpt` on the Arm pair); moved past as that says and resumed, the program
+/// exits 97.
 fn breakpoint_case(
     side: &Side,
     root: Handle,
