@@ -66,6 +66,7 @@ use ferrix_cgroupfs::write::Limit;
 use ferrix_native_abi::signals::Signals;
 use ferrix_sync::Once;
 
+use super::exception::Supervisor;
 use super::port::{Observer, Observers, PortError, deliver, register, trigger};
 use super::process::{self, Process};
 use super::quota::{self, Charge, Counter, Mark, Quota, Resource, Usage};
@@ -208,6 +209,10 @@ pub struct Job {
     domain: u64,
     /// Sealed as it was made, as is every job made inside it (`H.OBJ.22`).
     sealed: bool,
+    /// Its supervisor slot (`docs/microkernel/K4.md` §2.2): the exception
+    /// channel attached to it, if any, which hears the faults of every
+    /// process in it and in the jobs inside it.
+    supervisor: Supervisor,
 }
 
 /// Whose audit budget a new job's refusals are charged to: decided by
@@ -441,6 +446,7 @@ impl Job {
             audit_budget,
             domain: 0,
             sealed: false,
+            supervisor: Supervisor::new(),
         })
     }
 
@@ -761,6 +767,11 @@ impl Job {
     /// Its number.
     pub fn id(&self) -> u64 {
         self.id
+    }
+
+    /// Its supervisor slot (`docs/microkernel/K4.md`).
+    pub(crate) fn supervisor(&self) -> &Supervisor {
+        &self.supervisor
     }
 
     /// Whether it is a root: the tree's, or one a boot check made alone.

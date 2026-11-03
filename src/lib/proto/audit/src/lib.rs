@@ -118,6 +118,13 @@ pub const READER_GIVEN: Event = Event::new(Class::Granted, 6);
 /// and the domain's number's low word.
 pub const DOMAIN: Event = Event::new(Class::Granted, 7);
 
+/// An exception channel attached to a process or a job
+/// (`docs/microkernel/K4.md` §2.2): a supervisor, which from then on may
+/// control how the faults beneath it end. The subject is the caller, the
+/// target the process or job, the detail the attached timeout in
+/// milliseconds.
+pub const EXCEPTION_ATTACHED: Event = Event::new(Class::Granted, 8);
+
 /// A job ended by `job_kill`: the target is the job.
 pub const JOB_KILLED: Event = Event::new(Class::Ended, 1);
 
@@ -252,6 +259,7 @@ pub const NAMED: [(Event, &str); 27] = [
     (STARTER_GIVEN, "STARTER_GIVEN"),
     (READER_GIVEN, "READER_GIVEN"),
     (DOMAIN, "DOMAIN"),
+    (EXCEPTION_ATTACHED, "EXCEPTION_ATTACHED"),
     (JOB_KILLED, "JOB_KILLED"),
     (CGROUP_KILLED, "CGROUP_KILLED"),
     (OOM_KILLED, "OOM_KILLED"),
