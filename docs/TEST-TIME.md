@@ -1516,6 +1516,93 @@ Two checks fail only here, both real and neither papered over:
    read back. The virtio specification makes the field driver-writable;
    crosvm does not keep it.
 
+## Can a GPU speed this up? Measured, 2026-11-04 (mk-gpu)
+
+The customer asked whether nazuna's GPUs can speed up CI. **No step gains from
+one.** Nothing was moved to a GPU, because nothing measured came near a minute
+a row. GitHub's CI runs on `ubuntu-latest`, which has no GPU, so only the local
+gates could use one at all.
+
+Everything GPU ran on the RTX 3090 through OpenCL against the driver as bound
+(3060 hidden by UUID, no install), at `nice 19`, with utilisation and memory
+read before and during; digests were asserted equal to the CPU's. Scripts,
+outputs and logs: `~/.local/share/ferrix/mk-gpu-bench/` (`run2.txt`, `tp/`,
+`ab-*.txt`, `*sample*.txt`).
+
+**Where the time goes.** Pool rows since 2026-10-20, 622,572 row-seconds:
+`check` 23.3%, `test-boot` 21.5%, `test-compositor` 15.6%, `build` 4.3%, then
+nothing over 3%. By process, an hour of `/proc` samples at load 20-80 (a window
+with several cold builds, 30,186 CPU-s): rustc 63.6%, python3 11.1%,
+clippy-driver 9.2%, QEMU 4.1%, xtask 0.4%, no zstd or other compressor. A KVM
+guest averaged 0.5 of a core over 24 boots and TCG about 0.8: boots mostly wait.
+In the 30 minutes after that, at load 59, the CPU was **37% idle and 14% in
+iowait**, with the root NVMe 78% busy at 95 MB/s and 110 ms a write, on a
+filesystem 92-96% full. Past a point the pool waits on its disk, not its cores.
+
+| Step | Measured or reason | Verdict |
+|---|---|---|
+| rustc, clippy (73% of the CPU) | No GPU backend. See *Compiling* below | No |
+| QEMU guests | TCG and KVM run on the processor; guests mostly wait | No |
+| SHA-256, one stream | One chain, so one work item, which cannot be split. CPU with SHA-NI: 2.75 GB/s. The next row shows what one long file does to a GPU batch | No |
+| SHA-256, every tracked file (4,137, 132 MB, largest 32.7 MB) | GPU 5.96 s, one CPU thread 0.05 s. Files under 1 MiB only: GPU 0.19 s, CPU 0.03 s | No: 6-120x slower |
+| SHA-256, 1 GiB in 4 KiB or 64 KiB leaves | GPU 11 GB/s (PCIe caps it at 13), 12 CPU processes 5.3-5.6, 1 thread 2.3-2.7. GPU wins 2x, on digests nothing here uses | No: changes the evidence, and there is nothing to hash |
+| Hashing in a row | `test-boot`: no call of xtask's SHA-256. `build`: one, 50 MB, 0.18 s of 16.6 s. `check` runs with the step cache off | Nothing to save |
+| Screenshot compare | 1024x768: `memcmp` 0.05 ms, GPU with upload 0.97 ms. 4K: 0.8 ms, 7 ms | No: GPU 7-20x slower |
+| zstd, compression | No gate path uses it (no samples, no call in xtask) | Nothing to save |
+| Host tests that render (`tole_examples`) | Already on a real GPU where there is one. Medians from `check` logs, load under 15: 3090 13.6 s (122 runs), 3060 18.2 s (8). Lavapipe here at load 12: 9.9 s, twice. A GPU is no faster | No |
+| Lavapipe in guests | 2 of `test-compositor`'s 73 boots, and what they check is lavapipe (`the_scene_on_lavapipe_is_the_software_picture`). `test-dxvk`: 2 rows in 15 days. A real GPU there checks something else, and a host without one could not pass. Not benched | No |
+| Fuzzing | CI only, no GPU there, a fixed 30 s a target, and it runs Rust parsers in process | No |
+| Coverage post-processing | No `coverage` row in the pool in 15 days; CI's time is TCG | No |
+| Logs, traces | xtask's whole CPU is 0.4% | No |
+| Formal tools | xtask runs no solver (no Kani, CBMC, Z3); Miri and loom run on the CPU | No |
+
+Dispatch itself is cheap (13 us for one item and its read-back, polling); what
+costs is PCIe at 13 GB/s against a host that hashes and compares in place, and
+a GPU work item being slow. The first program build took 0.8 s, 5 ms once cached.
+
+### Compiling
+
+Asked to look properly, not to assume. `-Z time-passes` on all 129 workspace
+crates of a cold `xtask build --arch x86_64`, 195.9 crate-seconds in all (passes
+nest and LLVM's overlap, so the shares do not add up): LLVM passes 22%, type
+check 18%, IR generation 14.5%, serialising queries and dep graph 14%, borrow
+check 12%, link 9%, metadata 9%, monomorphization 8%, coherence 6.5%, **parsing
+3.5%, macro expansion 2.1%**.
+
+The research that exists is Pareas (Voetter, Huijben, Rietveld, *Compilation on
+the GPU?*, CF 2022; [Voetter's thesis](https://theses.liacs.nl/pdf/2020-2021-VoetterRobin.pdf)):
+a whole compiler on a GPU, for a small language designed for it, with no macros
+or trait solving. The thesis finds linear scaling only "for relatively large
+input", up to 20 times the input's size allocated in the lexer, and overhead
+from compiling kernels at run time. Our sources are small files, and rustc
+expands macros as it parses, so the parse cannot be lifted out whole.
+
+So the ceiling is lexing and parsing at **infinite speed: at most 11
+crate-seconds of a cold build**, about 3 s of wall at four rustcs at once, and
+next to nothing warm (`ferrix_kernel_load`: parse 3 ms and expansion 0.33 s of
+14.9 s). Type checking, borrow checking and LLVM's passes are pointer-chasing
+over irregular graphs with no GPU implementation. Query hashing decides what
+runs next, one tiny value at a time, so it cannot be batched without rewriting
+rustc's query engine. It cannot pay off, so no prototype was built.
+
+### The plain alternatives
+
+| Alternative | Measured | Verdict |
+|---|---|---|
+| Name table in `sysml` | `sysml/tests.py` 25.8 to 2.9 s, `gen-arch-doc --check` 3.3 to 0.8 s, answers identical. The step's slowest member, so about 14 s of a `check`'s wall until the item boundary (20 s) sets it | **Done**, this landing |
+| `-Zthreads=8`, cold `build` | Alternating, 5 rounds each, load 18-38: 88.7 s mean to 52.6 s (83.7, 69.0, 123.1, 92.4, 75.4 against 36.9, 75.9, 44.2, 43.6, 62.5), user CPU +4%, kernel byte-identical | **Open**, the best lead here. Unstable (needs `RUSTC_BOOTSTRAP=1`), so the consultant first. The A/B on `check` was stopped by the queue after its seed; not measured |
+| tmpfs target, cold `build` | Quiet host, load 7: disk 48.2, 45.9 s; tmpfs 48.3, 53.6 s. No gain when the disk is idle; not measured under load. Five slots' targets, 16-18 GB each even trimmed, do not fit 59 GB of RAM | Not worth it quiet |
+| A faster or emptier root disk | From the iowait above: the only thing here that lifts the pool at saturation. Not an experiment this host allows | Customer's to weigh |
+| `check-item-boundary.py` | 20 s, a Python Rust lexer (`rustlex.py`, `mask` 10,571 calls), now the slowest of the at-once step. A certified checker, so left alone | To mk-ci, with its consultant |
+| sccache, a shared target | Not measured. A warm slot already does what they do; cold slots are mk-ci's | Not pursued |
+
+One thing to decide, separate from time: `tole`'s device ranking picks the first
+discrete GPU, and the compositor's tests start `virgl_test_server` on NVIDIA's
+EGL, so a `check` on nazuna draws on the 3090 or the 3060 (`nvidia-smi` showed both
+kinds of process on the 3060 at 23:28). The 3060 fell off the bus before.
+Forcing lavapipe would be no slower, but it stops testing a real GPU, so that is
+the consultant's and the product owner's call. Left as it is.
+
 ## Next
 
 Phase 2 in the order the numbers give: (3) stop rather than wait for a
