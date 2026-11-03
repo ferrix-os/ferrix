@@ -10,6 +10,8 @@
     "is used by a higher crate's product code now (a change to the interface), is used by",
     "for what no CHECKS-ONLY marker stands on, says `born` (its mechanism) and `ledger` (ledger 6137).",
     "for what no CHECKS-ONLY marker stands on, says `born` (its mechanism) and `ledger` (ledger 6137).",
+    "for what no CHECKS-ONLY marker stands on, says `born` (its mechanism) and `ledger` (ledger 6137).",
+    "for what no CHECKS-ONLY marker stands on, says `born` (its mechanism) and `ledger` (ledger 6137).",
     "The 545 entries the split generated may shrink and never grow. An entry born after it,",
     "for what no CHECKS-ONLY marker stands on, says `born` (its mechanism) and `ledger` (ledger 6137)."
   ],
@@ -543,6 +545,11 @@
       "before": "pub(crate)"
     },
     {
+      "item": "arch/mod.rs: exception_check (re-export)",
+      "born": "K4",
+      "ledger": 6131
+    },
+    {
       "item": "arch/mod.rs: forget_root (re-export)",
       "before": "pub(crate)"
     },
@@ -1001,6 +1008,16 @@
     {
       "item": "audit.rs: DEVICE_LIMIT_SET (re-export)",
       "before": "pub(crate)"
+    },
+    {
+      "item": "audit.rs: EXCEPTION_CONTEXT (re-export)",
+      "born": "K4",
+      "ledger": 6131
+    },
+    {
+      "item": "audit.rs: EXCEPTION_KILLED (re-export)",
+      "born": "K4",
+      "ledger": 6131
     },
     {
       "item": "audit.rs: Event (re-export)",
@@ -2149,6 +2166,11 @@
     {
       "item": "trap.rs: MAX_ERRNO (const)",
       "before": "pub(crate)"
+    },
+    {
+      "item": "trap.rs: Poison (enum)",
+      "born": "K4",
+      "ledger": 6131
     },
     {
       "item": "trap.rs: SyscallFilter (type)",

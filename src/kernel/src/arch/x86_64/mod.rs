@@ -5,6 +5,7 @@ pub mod clock;
 pub mod console;
 pub(crate) mod copy_mc;
 pub mod cpu;
+pub mod exception_check;
 pub(crate) use cpu::clean_for_walker;
 /// The region the kernel log is kept in across a reset, written back before
 /// a reset may discard the caches (see [`crate::arch::write_back_for_reset`]):
@@ -169,7 +170,9 @@ pub(crate) fn cpu_local_register() -> u64 {
 }
 pub use trap::TrapFrame;
 pub use trap::breakpoint;
-pub(crate) use trap::{advance_past_breakpoint, classify, fault_signal, report_trap};
+pub(crate) use trap::{
+    advance_past_breakpoint, classify, exception_code, fault_signal, report_trap,
+};
 
 /// What this architecture decides on its own from what the machine hands
 /// it, checked right after the timer's rate and before anything is built on

@@ -81,6 +81,16 @@ pub enum StatLayout {
     Stat64,
 }
 
+// K4's boot check's architecture half, per architecture (`docs/microkernel/K4.md` §5).
+#[cfg(target_arch = "aarch64")]
+#[doc(hidden)]
+pub use aarch64::exception_check;
+#[cfg(target_arch = "arm")]
+#[doc(hidden)]
+pub use armv7a::exception_check;
+#[cfg(target_arch = "x86_64")]
+#[doc(hidden)]
+pub use x86_64::exception_check;
 // Drivers for the Arm peripherals both Arm architectures can have: the GICv2,
 // the PL011, and the STM32MP1's USART, which is ARMv7-A's.
 #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
@@ -486,23 +496,21 @@ pub use x86_64::{USER_INTO_CGROUP_PROGRAM, USER_OOM_PROGRAM};
 // Signal delivery: the register context the way back to user mode loads, the
 // architecture's signal frame, and the signal a user-mode fault becomes.
 #[cfg(target_arch = "aarch64")]
-pub(crate) use aarch64::fault_signal;
-#[cfg(target_arch = "aarch64")]
 pub use aarch64::{
     SIGNAL_RED_ZONE, USER_DETHREAD_PROGRAM, USER_EXITS_PROGRAM, USER_HANDOFF_PROGRAM,
     USER_SIGNAL_PROGRAM, USER_STOPPED_PROGRAM, USER_SYSLOG_PROGRAM, USER_THREAD_PROGRAM,
     USER_XSTATE_PROGRAM, UserContext, restore_signal_frame, setup_signal_frame,
 };
-#[cfg(target_arch = "arm")]
-pub(crate) use armv7a::fault_signal;
+#[cfg(target_arch = "aarch64")]
+pub(crate) use aarch64::{exception_code, fault_signal};
 #[cfg(target_arch = "arm")]
 pub use armv7a::{
     SIGNAL_RED_ZONE, USER_DETHREAD_PROGRAM, USER_EXITS_PROGRAM, USER_HANDOFF_PROGRAM,
     USER_SIGNAL_PROGRAM, USER_STOPPED_PROGRAM, USER_SYSLOG_PROGRAM, USER_THREAD_PROGRAM,
     USER_XSTATE_PROGRAM, UserContext, restore_signal_frame, setup_signal_frame,
 };
-#[cfg(target_arch = "x86_64")]
-pub(crate) use x86_64::fault_signal;
+#[cfg(target_arch = "arm")]
+pub(crate) use armv7a::{exception_code, fault_signal};
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
     ARCH, COMPAT_USER_END, EPOLL_EVENT_BYTES, Irq, NAME, OPEN_FLAGS, STAT_LAYOUT, TrapFrame,
@@ -542,6 +550,8 @@ pub use x86_64::{
     drop_identity_map, halt, identity_map_live, init_console, init_interrupts, init_traps,
     kernel_write_protected, wait_for_interrupt, wait_for_work,
 };
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::{exception_code, fault_signal};
 // The scoped TLB shootdown: one page invalidated, one processor interrupted,
 // and the program that checks it from user mode.
 #[cfg(target_arch = "aarch64")]

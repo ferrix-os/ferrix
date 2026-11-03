@@ -4,6 +4,7 @@ mod check;
 pub mod console;
 mod cpu;
 pub use cpu::dma_barrier;
+pub mod exception_check;
 mod gic;
 pub(crate) mod mmio;
 pub(crate) mod scrub;
@@ -120,7 +121,9 @@ pub(crate) fn cpu_local_register() -> u64 {
 pub use trap::UserRegs;
 pub use trap::breakpoint;
 pub use trap::{TrapFrame, enter_user, resume_user};
-pub(crate) use trap::{advance_past_breakpoint, classify, fault_signal, report_trap, system_call};
+pub(crate) use trap::{
+    advance_past_breakpoint, classify, exception_code, fault_signal, report_trap, system_call,
+};
 
 /// Install the exception vector table.
 ///

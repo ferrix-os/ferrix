@@ -2941,8 +2941,9 @@ package FerrixX8664Requirements {
                 si_code BUS_MCEERR_AR, si_addr the lowest address in the
                 program's half that maps the frame (0 past 2^18 leaves) and
                 si_addr_lsb 12, ending the program without its handler where RIPV
-                is clear -- but for a clean cached page dropped as L.x86_64.247
-                says, which raises nothing.";
+                is clear and asking its supervisors first where it is not -- but
+                for a clean cached page dropped as L.x86_64.247 says, which raises
+                nothing.";
             attribute :>> criterion = "test-mce-srar under KVM and TCG: the victim's
                 handler prints code=4, its own page's address, lsb=12 and err=0
                 (no physical address in its context), the frame is listed in
@@ -4008,6 +4009,28 @@ package FerrixX8664Requirements {
             attribute :>> parent = "H.DMA.9";
             attribute :>> unit = ("iommu::remapping::remap_message",
                 "iommu::remapping::prepare_console");
+        }
+    }
+
+    package ExceptionContexts {
+        doc /* A supervisor's registers checked as sigreturn's are
+             * (docs/microkernel/K4.md section 3.2; docs/I386.md I2a, I2b). */
+
+        requirement <'L.x86_64.186'> aSupervisorsRegistersAreAProgramsOnly : ItemLowLevel {
+            attribute :>> statement = "UserContext::from_supervisor shall refuse,
+                changing nothing, registers whose cs is not 64-bit or 32-bit user code
+                exactly, whose rip or rsp is outside the user half or, for 32-bit
+                code, whose rip is at or above 4 GiB, whose ss is not user data,
+                whose rflags lacks the always-set bits or holds one outside
+                FLAGS_RESTORABLE, or whose reserved words are not zero; the read it
+                pairs with shall show rflags only within FLAGS_RESTORABLE.";
+            attribute :>> criterion = "Case b: a kernel and a data cs, 32-bit cs with
+                rip 4 GiB, a kernel ss, IOPL, VM, TF, NT, RF, interrupts off, every
+                flag outside FLAGS_RESTORABLE, a kernel rip, a non-canonical rsp and a
+                reserved word are refused; AC and a general register are taken.";
+            attribute :>> parent = ("H.TRAP.20", "H.TRAP.9");
+            attribute :>> unit = ("arch::x86_64::signal::UserContext::from_supervisor",
+                "arch::x86_64::signal::UserContext::supervised");
         }
     }
 }
