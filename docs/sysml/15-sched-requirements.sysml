@@ -1388,7 +1388,8 @@ package FerrixSchedRequirements {
 
     package Realtime {
         doc /* The realtime tier in the core (docs/SCHED-CLASSES.md section 9e,
-             * step 4b; the consultant's OK IF R1-R15, ledger line 29): the task's
+             * step 4b; the consultant's OK IF R1-R15, container review 29 (not on record;
+             * ledger 5684)): the task's
              * upper cell, the move between tiers, wakes, inheritance, the Linux
              * calls, and the modes. */
 
@@ -1399,7 +1400,8 @@ package FerrixSchedRequirements {
                 upper cell while no queue holds the task, taken and put only under
                 the lock of its home queue or before any queue has seen it; and kept
                 when the task returns to fair. A node given back while its cell
-                holds one stops the machine.";
+                holds one stops the machine, and so does a task queued with a
+                real-time policy and an empty cell.";
             attribute :>> criterion = "The stage-5 move check: a fair task made
                 SCHED_FIFO owns its node and policy, and given back to fair still
                 owns its node; L.sched.134's and H.SCHED.21's checks, which queue

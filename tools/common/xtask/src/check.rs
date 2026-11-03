@@ -318,6 +318,12 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
         &[
             &["tools/common/check/check-build-flags.py"],
             &["tools/common/check/check-boot-line.py", "--self-test"],
+            // The removable crates' and the class crates' judge, which only
+            // test-removable runs whole, its refusals shown here.
+            &[
+                "tools/common/check/check-removable-symbols.py",
+                "--self-test",
+            ],
         ],
     ),
     // The load ratchet (docs/roadmap/microkernel-m0.md, D): how much this
@@ -1296,8 +1302,9 @@ fn arches_for(args: &Args) -> Result<Vec<Arch>> {
 /// The buildable profiles test-removable's class-crate half links.
 const CLASS_PROFILES: [&str; 2] = ["present", "desktop"];
 
-/// test-removable's class-crate half (`docs/SCHED-CLASSES.md` §9b; ledger
-/// line 22, G3, G8): for each architecture and buildable profile, the
+/// test-removable's class-crate half (`docs/SCHED-CLASSES.md` §9b; container
+/// review 22 (not on record; ledger 5684), G3, G8): for each architecture and
+/// buildable profile, the
 /// release kernel, then the same kernel with LTO alone turned off and the
 /// linker's map of it, both kept in `kept`, judged by
 /// `check-removable-symbols.py --class` against `class_crates`: each class
@@ -1312,7 +1319,7 @@ fn class_crates(xtask: &std::path::Path, arches: &[Arch], kept: &std::path::Path
             let stem = format!("{}-class-{profile}", arch.name());
             let map = kept.join(format!("{stem}.map"));
             // A link cargo found fresh and skipped writes no map, and an older
-            // run's would be judged in its place (ledger line 23 (1)).
+            // run's would be judged in its place (container review 23 (1)).
             if map.exists() {
                 std::fs::remove_file(&map)
                     .map_err(|error| Error::new(format!("{}: {error}", map.display())))?;

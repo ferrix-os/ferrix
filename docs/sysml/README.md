@@ -23,7 +23,7 @@ tooling that can check a model for consistency where it cannot check prose.
 | `04-memory.sysml` | `FerrixMemory` | Frames, heap, paging, the vmap arena, the VMA map, VMOs, process address spaces, demand paging, copy-on-write and file mappings (today); reclaim (ahead). |
 | `05-scheduling.sysml` | `FerrixScheduling` | Locks, interrupts, time, SMP, tasks, the fair class, placement and balancing, one Throughput scheduling domain, and futex (today); the real-time classes and the mode-switch state machine (ahead). |
 | `06-objects.sysml` | `FerrixObjects` | The nine kernel objects, clone's sharing set, the Linux ABI layer and the native ABI. |
-| `07-isolation.sysml` | `FerrixIsolation` | Credentials (today); cgroups v2 and the namespaces' mount groundwork (in progress); the namespaces themselves and seccomp (ahead). |
+| `07-isolation.sysml` | `FerrixIsolation` | Credentials, cgroups v2, the namespaces and seccomp (all today, since stage 13). |
 | `08-drivers.sysml` | `FerrixDrivers` | Table access and MMIO, device nodes, IOMMU domains, `devmgr`, the driver processes, the shared rings and the bootstrap sequence. |
 | `09-storage.sysml` | `FerrixStorage` | Block core, VFS, page cache, the small filesystems, btrfs in three stages (the third, subvolumes, ahead), and the net core. |
 | `10-roadmap.sysml` | `FerrixRoadmap` | Stages 0–25, the ARMv7-A port, networking and dynamic linking as requirements with status and exit criteria, their ordering, what satisfies each, and the boot tests that verify the done ones. |

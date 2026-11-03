@@ -1,7 +1,7 @@
 # init
 
 `/sbin/init`, `/sbin/getty`, the getty generator and `/bin/svc`: the service
-manager `docs/INIT.md` designs, landings L1 to L12 (§16 records each).
+manager `docs/INIT.md` designs, landings L1 to L13 (§16 records each).
 Every image that boots `/sbin/init` runs it, the desktop's included, where
 the compositor is `hyprix.service`.
 
@@ -36,8 +36,14 @@ everything around it that makes system calls:
   links to it, each the verb of its name (§8.2).
 * `dirclient/` -- a Linux program using init's directory, as `test-init`
   runs it.
-* `units/` -- the targets, `getty@.service`, `rescue.service` and
-  `devmgr.service`, installed in `/lib/ferrix/units`.
+* `drvupdate/` -- `/bin/drvupdate DRIVER IMAGE [LOCATION]`, which sends a
+  new driver image to `drvupdated` and prints `devmgr`'s answer
+  (`docs/DEVMGR.md` §4.1).
+* `units/` -- the targets, `getty@.service`, `rescue.service`,
+  `devmgr.service`, and the services of `lode` (`lode.service`,
+  `lode-crashd.service`, `lode-pstore.service`, `lode-upload.service`) and
+  of the RAM scrubber (`memscrub.service`), installed in
+  `/lib/ferrix/units`.
 
 It is a workspace of its own, as zinc and the compositor are, because these
 are Linux programs built with std, and the Ferrix workspace's dependency

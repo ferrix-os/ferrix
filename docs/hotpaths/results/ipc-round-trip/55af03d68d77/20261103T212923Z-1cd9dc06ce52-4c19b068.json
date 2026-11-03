@@ -1,0 +1,644 @@
+{
+  "configuration": {
+    "accel": "kvm",
+    "against_sel4": false,
+    "alternate": "3afb272b5",
+    "command": "bench-ipc",
+    "init": "busybox.static",
+    "kernel_options": [
+      "ferrix.fastpath=on"
+    ],
+    "memory_mib": 512,
+    "mitigations": "on",
+    "pin": "11",
+    "release": true,
+    "rounds": 5,
+    "smp": 1
+  },
+  "configuration_hash": "4c19b0686d99738122da3b8820d612b41680254c9c68b5dcd088504c3be8fd55",
+  "cpu_hash": "2291b09857f1b58dde3edb099203527542da83284d33e3809c718f6c8c2f493c",
+  "ferrix": {
+    "commit": "1cd9dc06ce52e403c982aff47436f7421cb71584",
+    "dirty": false
+  },
+  "figure": {
+    "line": "domain-call",
+    "statistic": "p50",
+    "unit": "ns"
+  },
+  "hardware": {
+    "host": {
+      "arch": "x86_64",
+      "caches": [
+        {
+          "level": 1,
+          "line": 64,
+          "sets": 64,
+          "shared_by": 2,
+          "size_kib": 32,
+          "type": "Instruction",
+          "ways": 8
+        },
+        {
+          "level": 1,
+          "line": 64,
+          "sets": 64,
+          "shared_by": 2,
+          "size_kib": 48,
+          "type": "Data",
+          "ways": 12
+        },
+        {
+          "level": 2,
+          "line": 64,
+          "sets": 1024,
+          "shared_by": 2,
+          "size_kib": 1024,
+          "type": "Unified",
+          "ways": 16
+        },
+        {
+          "level": 3,
+          "line": 64,
+          "sets": 32768,
+          "shared_by": 12,
+          "size_kib": 32768,
+          "type": "Unified",
+          "ways": 16
+        }
+      ],
+      "cpu": {
+        "brand": "AMD Ryzen 9 9900X 12-Core Processor",
+        "family": 26,
+        "microcode": "0xb404035",
+        "model": 68,
+        "stepping": 0,
+        "vendor": "AuthenticAMD"
+      },
+      "features": {
+        "arch_capabilities": false,
+        "auto_ibrs": true,
+        "avx": true,
+        "avx2": true,
+        "avx512f": true,
+        "constant_tsc": true,
+        "eraps": true,
+        "fred": false,
+        "fsgsbase": true,
+        "hypervisor": false,
+        "ibpb": true,
+        "ibrs": true,
+        "intel_stibp": false,
+        "invlpgb": false,
+        "invpcid": true,
+        "la57": false,
+        "lfence_serializing": true,
+        "md_clear": false,
+        "null_sel_clr_base": true,
+        "pcid": false,
+        "pdpe1gb": true,
+        "pku": true,
+        "rdpid": true,
+        "rdtscp": true,
+        "smap": true,
+        "smep": true,
+        "spec_ctrl": false,
+        "spec_ctrl_ssbd": false,
+        "ssbd": true,
+        "stibp": true,
+        "tce": true,
+        "umip": true,
+        "virt_ssbd": false,
+        "x2apic": false,
+        "xgetbv1": true,
+        "xsave": true,
+        "xsavec": true,
+        "xsaveopt": true,
+        "xsaves": true
+      },
+      "hypervisor": null,
+      "kernel": "7.0.0-29-generic",
+      "tlb": {
+        "l1_2m": {
+          "code_entries": 64,
+          "code_ways": 255,
+          "data_entries": 96,
+          "data_ways": 255
+        },
+        "l1_4k": {
+          "code_entries": 64,
+          "code_ways": 255,
+          "data_entries": 96,
+          "data_ways": 255
+        },
+        "l2_2m": {
+          "code_entries": 64,
+          "code_ways_code": 2,
+          "data_entries": 128,
+          "data_ways_code": 4
+        },
+        "l2_4k": {
+          "code_entries": 64,
+          "code_ways_code": 4,
+          "data_entries": 128,
+          "data_ways_code": 6
+        }
+      },
+      "topology": {
+        "cores": 12,
+        "logical": 24,
+        "packages": 1,
+        "threads_per_core": 2
+      },
+      "vulnerabilities": {
+        "gather_data_sampling": "Not affected",
+        "ghostwrite": "Not affected",
+        "indirect_target_selection": "Not affected",
+        "itlb_multihit": "Not affected",
+        "l1tf": "Not affected",
+        "mds": "Not affected",
+        "meltdown": "Not affected",
+        "mmio_stale_data": "Not affected",
+        "old_microcode": "Not affected",
+        "reg_file_data_sampling": "Not affected",
+        "retbleed": "Not affected",
+        "spec_rstack_overflow": "Mitigation: IBPB on VMEXIT only",
+        "spec_store_bypass": "Mitigation: Speculative Store Bypass disabled via prctl",
+        "spectre_v1": "Mitigation: usercopy/swapgs barriers and __user pointer sanitization",
+        "spectre_v2": "Mitigation: Enhanced / Automatic IBRS; IBPB: conditional; STIBP: always-on; PBRSB-eIBRS: Not affected; BHI: Not affected",
+        "srbds": "Not affected",
+        "tsa": "Not affected",
+        "tsx_async_abort": "Not affected",
+        "vmscape": "Mitigation: IBPB on VMEXIT"
+      }
+    },
+    "schema": "ferrix-hw-fingerprint/1",
+    "vm": {
+      "accel": "kvm",
+      "arch": "x86_64",
+      "cpu": {
+        "brand": "QEMU Virtual CPU version 2.5+",
+        "family": 15,
+        "features": {
+          "arch_capabilities": true,
+          "auto_ibrs": true,
+          "avx": true,
+          "avx2": true,
+          "avx512f": false,
+          "constant_tsc": true,
+          "eraps": true,
+          "fred": false,
+          "fsgsbase": false,
+          "hypervisor": true,
+          "ibpb": false,
+          "ibrs": false,
+          "intel_stibp": true,
+          "invpcid": false,
+          "la57": false,
+          "lfence_serializing": false,
+          "md_clear": false,
+          "null_sel_clr_base": false,
+          "pcid": false,
+          "pdpe1gb": true,
+          "pku": false,
+          "rdctl_no": false,
+          "rdpid": true,
+          "rdtscp": true,
+          "smap": true,
+          "smep": true,
+          "spec_ctrl": true,
+          "spec_ctrl_ssbd": true,
+          "ssbd": false,
+          "stibp": false,
+          "tce": false,
+          "umip": true,
+          "virt_ssbd": false,
+          "x2apic": true,
+          "xgetbv1": true,
+          "xsave": true,
+          "xsavec": false,
+          "xsaveopt": true,
+          "xsaves": false
+        },
+        "model": 107,
+        "stepping": 1,
+        "vendor": "AuthenticAMD"
+      },
+      "cpu_model": "qemu64,+pdpe1gb,+smep,+smap,+umip,+rdrand,+rdseed,+ssse3,+sse4.1,+sse4.2,+popcnt,+cx16,+movbe,+xsave,+xsaveopt,+avx,+avx2,+f16c,+fma,+bmi1,+bmi2,+abm,+pclmulqdq,+aes,+x2apic,+rdtscp,+rdpid,+spec-ctrl,+stibp,+ssbd,+arch-capabilities,+auto-ibrs,+invtsc,+eraps,+xgetbv1",
+      "probe": "qom-get",
+      "qemu": "10.2.1",
+      "qemu_package": "ferrix-cfi"
+    }
+  },
+  "host_hash": "8f71a3ca9c7fe85216ffdbd1e2de79d39fabaaf984f67528c2cde7b26896264b",
+  "hw_hash": "55af03d68d77544432af9d17a3241a684b97322e05bd647d91eac236b84fd36f",
+  "kernel_view": [
+    "cpu x87 errors as #MF: CR0.NE set, as firmware had left it",
+    "cpu machine check: CR4.MCE set, as firmware had left it",
+    "cpu ring 0 kept out of user pages: SMEP on, SMAP on",
+    "cpu descriptor table addresses kept from ring 3: UMIP on",
+    "cpu page attribute table: entry 1 write-combining",
+    "cpu program register state: x87, SSE and AVX, saved with XSAVE; vector registers: Zenbleed and GDS do not apply",
+    "cpu performance: no HWP, P-states left as firmware set them",
+    "cpu checked MSR read: #GP at 0x3fffffff resumed at its fixup",
+    "cpu checked MSR write: #GP at 0x3fffffff resumed at its fixup",
+    "cpu pcid: off, CPUID.1:ECX[17] clear on the boot processor; no INVPCID",
+    "cpu speculation defences: clamped indices, SWAPGS fence, entry registers cleared, AutoIBRS, STIBP, SSBD, predictor barrier on switch, RSB fill on switch, ERAPS empties the RSB on switch",
+    "cpu speculation exposure: Spectre v2 into ring 0 covered; between programs covered; store bypass covered; Meltdown not affected (AMD); MDS not affected (AMD); RFDS not affected (AMD); BHI not affected (AMD)",
+    "cpu speculation exposure: ITS not affected (off Linux's list, or ITS_NO); MMIO stale data not affected (off Linux's list, or its three _NO bits); SRBDS not affected (off Linux's list, or no RDRAND); TAA not affected (no TSX, or TAA_NO); Retbleed not affected (off Linux's list, or BTC_NO); SRSO not affected (off Linux's list, or SRSO_NO); TSA not affected (off Linux's list, or TSA_SQ_NO and TSA_L1_NO); VMSCAPE not affected (no hypervisor in the item)",
+    "cpu tsc_aux: 1 of 1 processors name their own number through RDTSCP"
+  ],
+  "log": "~/.local/share/ferrix/logs/pr38fix/bench-hotpath-fp.log",
+  "path": "ipc-round-trip",
+  "reference": {
+    "commit": "3afb272b55e746af381738702cc4e7f476b279fa",
+    "kind": "ferrix tree",
+    "ref": "3afb272b5",
+    "runs": [
+      {
+        "host": "host load 0.51 before, 0.86 after, SMT sibling cpu23 0% busy",
+        "stats": {
+          "call": {
+            "mean": 3478,
+            "min": 3335,
+            "n": 20000,
+            "p50": 3375,
+            "p90": 3395,
+            "p99": 5513
+          },
+          "domain-call": {
+            "mean": 940,
+            "min": 888,
+            "n": 20000,
+            "p50": 908,
+            "p90": 918,
+            "p99": 968
+          },
+          "floor": {
+            "mean": 363,
+            "min": 349,
+            "n": 20000,
+            "p50": 349,
+            "p90": 359,
+            "p99": 359
+          },
+          "trip": {
+            "mean": 14991,
+            "min": 13244,
+            "n": 20000,
+            "p50": 14562,
+            "p90": 14982,
+            "p99": 24660
+          }
+        }
+      },
+      {
+        "host": "host load 0.65 before, 0.74 after, SMT sibling cpu23 0% busy",
+        "stats": {
+          "call": {
+            "mean": 2795,
+            "min": 2706,
+            "n": 20000,
+            "p50": 2736,
+            "p90": 2746,
+            "p99": 2886
+          },
+          "domain-call": {
+            "mean": 755,
+            "min": 719,
+            "n": 20000,
+            "p50": 729,
+            "p90": 739,
+            "p99": 749
+          },
+          "floor": {
+            "mean": 289,
+            "min": 279,
+            "n": 20000,
+            "p50": 289,
+            "p90": 289,
+            "p99": 289
+          },
+          "trip": {
+            "mean": 12132,
+            "min": 10797,
+            "n": 20000,
+            "p50": 11845,
+            "p90": 12165,
+            "p99": 19856
+          }
+        }
+      },
+      {
+        "host": "host load 0.49 before, 0.42 after, SMT sibling cpu23 0% busy",
+        "stats": {
+          "call": {
+            "mean": 3474,
+            "min": 3345,
+            "n": 20000,
+            "p50": 3385,
+            "p90": 3395,
+            "p99": 4025
+          },
+          "domain-call": {
+            "mean": 939,
+            "min": 878,
+            "n": 20000,
+            "p50": 908,
+            "p90": 908,
+            "p99": 938
+          },
+          "floor": {
+            "mean": 363,
+            "min": 349,
+            "n": 20000,
+            "p50": 349,
+            "p90": 359,
+            "p99": 359
+          },
+          "trip": {
+            "mean": 15199,
+            "min": 13493,
+            "n": 20000,
+            "p50": 14802,
+            "p90": 15191,
+            "p99": 24890
+          }
+        }
+      },
+      {
+        "host": "host load 0.41 before, 0.66 after, SMT sibling cpu23 0% busy",
+        "stats": {
+          "call": {
+            "mean": 3463,
+            "min": 3335,
+            "n": 20000,
+            "p50": 3375,
+            "p90": 3395,
+            "p99": 3995
+          },
+          "domain-call": {
+            "mean": 939,
+            "min": 888,
+            "n": 20000,
+            "p50": 908,
+            "p90": 918,
+            "p99": 928
+          },
+          "floor": {
+            "mean": 362,
+            "min": 349,
+            "n": 20000,
+            "p50": 349,
+            "p90": 359,
+            "p99": 359
+          },
+          "trip": {
+            "mean": 14967,
+            "min": 13254,
+            "n": 20000,
+            "p50": 14572,
+            "p90": 14952,
+            "p99": 24630
+          }
+        }
+      },
+      {
+        "host": "host load 0.49 before, 0.63 after, SMT sibling cpu23 0% busy",
+        "stats": {
+          "call": {
+            "mean": 3471,
+            "min": 3335,
+            "n": 20000,
+            "p50": 3385,
+            "p90": 3395,
+            "p99": 4025
+          },
+          "domain-call": {
+            "mean": 932,
+            "min": 868,
+            "n": 20000,
+            "p50": 898,
+            "p90": 908,
+            "p99": 928
+          },
+          "floor": {
+            "mean": 365,
+            "min": 349,
+            "n": 20000,
+            "p50": 349,
+            "p90": 359,
+            "p99": 359
+          },
+          "trip": {
+            "mean": 15152,
+            "min": 13373,
+            "n": 20000,
+            "p50": 14742,
+            "p90": 15141,
+            "p99": 24770
+          }
+        }
+      }
+    ]
+  },
+  "runs": [
+    {
+      "host": "host load 0.31 before, 0.47 after, SMT sibling cpu23 0% busy",
+      "stats": {
+        "call": {
+          "mean": 3535,
+          "min": 3405,
+          "n": 20000,
+          "p50": 3445,
+          "p90": 3455,
+          "p99": 4055
+        },
+        "domain-call": {
+          "mean": 957,
+          "min": 898,
+          "n": 20000,
+          "p50": 928,
+          "p90": 938,
+          "p99": 948
+        },
+        "floor": {
+          "mean": 362,
+          "min": 349,
+          "n": 20000,
+          "p50": 359,
+          "p90": 359,
+          "p99": 359
+        },
+        "trip": {
+          "mean": 15076,
+          "min": 13423,
+          "n": 20000,
+          "p50": 14702,
+          "p90": 15041,
+          "p99": 24870
+        }
+      }
+    },
+    {
+      "host": "host load 0.86 before, 0.62 after, SMT sibling cpu23 0% busy",
+      "stats": {
+        "call": {
+          "mean": 3525,
+          "min": 3395,
+          "n": 20000,
+          "p50": 3435,
+          "p90": 3455,
+          "p99": 4055
+        },
+        "domain-call": {
+          "mean": 954,
+          "min": 908,
+          "n": 20000,
+          "p50": 928,
+          "p90": 938,
+          "p99": 958
+        },
+        "floor": {
+          "mean": 362,
+          "min": 349,
+          "n": 20000,
+          "p50": 349,
+          "p90": 359,
+          "p99": 359
+        },
+        "trip": {
+          "mean": 15107,
+          "min": 13274,
+          "n": 20000,
+          "p50": 14682,
+          "p90": 15041,
+          "p99": 24930
+        }
+      }
+    },
+    {
+      "host": "host load 0.74 before, 0.49 after, SMT sibling cpu23 0% busy",
+      "stats": {
+        "call": {
+          "mean": 3525,
+          "min": 3395,
+          "n": 20000,
+          "p50": 3435,
+          "p90": 3455,
+          "p99": 4035
+        },
+        "domain-call": {
+          "mean": 951,
+          "min": 878,
+          "n": 20000,
+          "p50": 918,
+          "p90": 928,
+          "p99": 958
+        },
+        "floor": {
+          "mean": 365,
+          "min": 349,
+          "n": 20000,
+          "p50": 359,
+          "p90": 359,
+          "p99": 359
+        },
+        "trip": {
+          "mean": 15143,
+          "min": 13373,
+          "n": 20000,
+          "p50": 14752,
+          "p90": 15091,
+          "p99": 24840
+        }
+      }
+    },
+    {
+      "host": "host load 0.42 before, 0.41 after, SMT sibling cpu23 0% busy",
+      "stats": {
+        "call": {
+          "mean": 3531,
+          "min": 3395,
+          "n": 20000,
+          "p50": 3435,
+          "p90": 3445,
+          "p99": 7780
+        },
+        "domain-call": {
+          "mean": 956,
+          "min": 898,
+          "n": 20000,
+          "p50": 918,
+          "p90": 928,
+          "p99": 958
+        },
+        "floor": {
+          "mean": 364,
+          "min": 349,
+          "n": 20000,
+          "p50": 359,
+          "p90": 359,
+          "p99": 359
+        },
+        "trip": {
+          "mean": 15063,
+          "min": 13304,
+          "n": 20000,
+          "p50": 14692,
+          "p90": 15031,
+          "p99": 24730
+        }
+      }
+    },
+    {
+      "host": "host load 0.66 before, 0.49 after, SMT sibling cpu23 0% busy",
+      "stats": {
+        "call": {
+          "mean": 3535,
+          "min": 3395,
+          "n": 20000,
+          "p50": 3435,
+          "p90": 3455,
+          "p99": 7740
+        },
+        "domain-call": {
+          "mean": 957,
+          "min": 898,
+          "n": 20000,
+          "p50": 918,
+          "p90": 928,
+          "p99": 948
+        },
+        "floor": {
+          "mean": 361,
+          "min": 349,
+          "n": 20000,
+          "p50": 349,
+          "p90": 359,
+          "p99": 359
+        },
+        "trip": {
+          "mean": 15046,
+          "min": 13214,
+          "n": 20000,
+          "p50": 14662,
+          "p90": 15001,
+          "p99": 24740
+        }
+      }
+    }
+  ],
+  "schema": "ferrix-hotpath-result/1",
+  "summary": {
+    "p50_ns_median": 918,
+    "ratio_milli": {
+      "least": 1011,
+      "median": 1022,
+      "most": 1273
+    },
+    "reference_p50_ns_median": 908,
+    "rounds": 5
+  },
+  "taken": "2026-11-03T21:29:23Z"
+}

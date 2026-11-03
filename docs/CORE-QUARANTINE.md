@@ -8,6 +8,8 @@ items on the list then start with 1, 6, 7"). It builds on the machine-check
 log (`docs/MACHINE-CHECK.md`, landed d787815b1), whose poll counts each
 processor's corrected errors in `/proc/ferrix-mce`.
 
+**Landed:** on `develop` as 805b289b1 (2026-10-30); the branch `feature/core-quarantine` is gone. Reconciled 2026-11-02.
+
 ## 1. Why
 
 An overclock that is too far usually fails on one core first: that core's

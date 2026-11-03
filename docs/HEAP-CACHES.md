@@ -3,6 +3,8 @@
 Status: design, OK IF 1-10 (the certification consultant, ledger line 4914,
 2026-10-30); revised for conditions 1-4 below.
 
+**Landed:** on `develop` as e4d44f24a (2026-10-30), with the cache checks' retries a89cf40f6 and 16d8d2526. Reconciled 2026-11-02.
+
 ## 1. Why
 
 Every kernel allocation and free takes one lock, `mm::HEAP`, an `IrqSpinLock`

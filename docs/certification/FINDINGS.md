@@ -3449,8 +3449,8 @@ allocators and the fair scheduler's logic among them. `ferrix-heap` holds the
 per-processor heap cache too since 2026-10-30 (`CpuCache`,
 docs/HEAP-CACHES.md), safe Rust and run under Miri; which ring it belongs
 in is the customer's decision. **Restated
-2026-10-26** (the consultant's code review of the scheduler split, ledger
-line 12 of the container's ledger, to be copied to the gate host's):
+2026-10-26** (the consultant's code review of the scheduler split, container
+review 12 (not on record; ledger 5684)):
 `ferrix-sched` is now two crates, `ferrix-sched-class` (the
 scheduling-class interface, domains and balancing) and `ferrix-sched-fair`
 (EEVDF), `docs/SCHED-CLASSES.md` §11; so 26 in all, the core's files naming

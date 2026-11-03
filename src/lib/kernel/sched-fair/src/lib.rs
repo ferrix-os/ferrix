@@ -1514,8 +1514,9 @@ const _: () = assert!(
 );
 
 /// The fair tier of a class stack: the innermost one, wherever fair is in
-/// the stack (docs/SCHED-CLASSES.md §9d; the consultant's ledger lines 26
-/// and 27, F1 and F7). The fair-only calls the kernel makes -- weights, the
+/// the stack (docs/SCHED-CLASSES.md §9d; container reviews 26 and 27 (not on
+/// record; ledger 5684), F1 and F7). The fair-only calls the kernel makes --
+/// weights, the
 /// picture the checks and `/proc` read, the slice, the levelling, the steal
 /// choice -- reach it through here, read-only but for the four named
 /// changes; every change of membership or of the running entity goes
@@ -1621,7 +1622,7 @@ pub trait StackTiers<T>: FairTier<T> {
     fn stack_config(fair: Config) -> Self::Config;
     /// [`ferrix_sched_class::SchedClass::remove`] from the tier the caller says the entity is
     /// in: the one above fair with `upper`, fair's otherwise; no other
-    /// tier's queue is walked (line 30, B3).
+    /// tier's queue is walked (container review 30, B3).
     fn remove_in(queue: &mut Self::Queue, id: u64, upper: bool) -> Option<(T, Self::Entity)>;
     /// The stack's entity for a fair task.
     fn fair_entity(entity: FairEntity<T>) -> Self::Entity;

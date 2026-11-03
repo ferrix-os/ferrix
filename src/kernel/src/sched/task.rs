@@ -225,7 +225,7 @@ pub struct Task {
     /// from, which the switch hands over). A task moved between queues
     /// carries it false: a move of one with it set, or a pick of one another
     /// processor runs, stops the machine (FX-0537, docs/SCHED-CLASSES.md
-    /// §9e, line 30 B1).
+    /// §9e, container review 30 (not on record; ledger 5684) B1).
     on_cpu: AtomicBool,
     /// Whether it is inside a system call, as the processor running it last
     /// had it (`crate::sched::IN_CALL`): kept here while it does not run.
@@ -915,18 +915,24 @@ impl Task {
     /// Under the lock of the queue it goes on, the only taker of its node.
     pub(crate) fn entity_with(&self, slot: TaskSlot) -> super::stack::StackEntity {
         let word = self.rt_word();
-        if let Some(params) = word.params()
-            && let Some(node) = self.upper.take()
-        {
+        if let Some(params) = word.params() {
+            // The node is put in its cell before the policy is stored
+            // (`sched::set_policy`, `sched::prepare_user`), and only a queue
+            // holding the task takes it, so a real-time policy with no node
+            // is that rule broken. Queued fair it would run where nothing
+            // expects it: `is_fair` says no, and it would never count as
+            // current.
+            let Some(node) = self.upper.take() else {
+                crate::panic::fatal!(
+                    crate::panic::catalog::REALTIME_NODE_MISSING,
+                    "a task with a real-time policy has no node to be queued with"
+                );
+            };
             self.parked.put(slot);
             self.entity_rt.store(word.tier_bits(), Ordering::Relaxed);
             return super::stack::Stack::upper_entity(params, node);
         }
         self.entity_rt.store(0, Ordering::Relaxed);
-        // A real-time policy with no node cannot be: the node is put in its
-        // cell before the policy is stored (`sched::set_policy`,
-        // `sched::prepare_user`), and only a queue holding the task takes
-        // it. Queued fair otherwise, which is what it was before.
         super::stack::Stack::fair_entity((self.entity_state(), slot))
     }
 
@@ -997,7 +1003,7 @@ impl Task {
     }
 
     /// Whether the entity its queue holds is the tier above fair's: what a
-    /// removal is routed by (`CpuQueue::release`, line 30, B3). Read under
+    /// removal is routed by (`CpuQueue::release`, container review 30, B3). Read under
     /// that queue's lock, which `entity_with` writes it under.
     pub(crate) fn queued_upper(&self) -> bool {
         self.entity_rt.load(Ordering::Relaxed) != 0

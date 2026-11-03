@@ -69,6 +69,7 @@ Causes are listed most likely first.
 | [FX-0536](#fx-0536) | the view of a blocked task read it wrongly |
 | [FX-0537](#fx-0537) | a task a processor runs was found waiting in a run queue |
 | [FX-0538](#fx-0538) | a task was about to run outside its scheduling domain |
+| [FX-0539](#fx-0539) | a task with a real-time policy had no node to be queued with |
 | [FX-0601](#fx-0601) | the memory a process is built from failed its self-check |
 | [FX-0602](#fx-0602) | a page taken from a mapped object stayed reachable, or was not taken as it should be |
 | [FX-0701](#fx-0701) | the system call dispatch path failed its self-check |
@@ -1319,7 +1320,7 @@ as a waiting one, at every moment outside a decision; so a steal, a placement or
 a pick that finds a waiting task with the mark set has found one context about
 to run on two processors, or on one before it was saved, and the machine is
 stopped before it does (docs/SCHED-CLASSES.md §9e, the certification
-consultant's ledger line 30, B1).
+consultant's container review 30 (not on record; ledger 5684), B1).
 
 1. A path enqueued a running task as a waiting one outside a decision: a change
    of policy that moved the running task at once, rather than at its processor's
@@ -1355,6 +1356,23 @@ runs where its domain's guarantee does not hold (V2).
 See: src/kernel/src/sched/domains.rs; src/kernel/src/sched/mod.rs move_onto,
 depart and require_admitted; src/kernel/src/sched/direct.rs;
 docs/SCHED-CLASSES.md §9f.
+
+<a id="fx-0539"></a>
+
+## FX-0539 — a task with a real-time policy had no node to be queued with
+
+A task that asks for `SCHED_FIFO` or `SCHED_RR` is given its node of the tier
+above fair before the policy is stored, and only the queue holding the task
+takes the node from its cell. A task being queued with a real-time policy and an
+empty cell has broken that rule. Queued as fair, it would run at the wrong tier
+while every test of its policy says it is real-time, so the machine is stopped
+(L.sched.129, ledger 5684's C3).
+
+1. A path stored a real-time policy before it put the node in the cell
+   (`sched::set_policy`, `sched::prepare_user`).
+2. A task was queued while a queue still held it, so that queue holds the node.
+
+See: src/kernel/src/sched/task.rs Task::entity_with; docs/SCHED-CLASSES.md §9e.
 
 <a id="fx-0601"></a>
 

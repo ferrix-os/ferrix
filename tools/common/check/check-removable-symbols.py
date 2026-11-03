@@ -17,7 +17,8 @@ build left, release, on each architecture (`cargo xtask test-removable`).
     check-removable-symbols.py --self-test
 
 **The class crates** (`--class`; docs/SCHED-CLASSES.md §9b, the consultant's
-design review of step 3b, ledger line 22, G3, G8): each crate of
+design review of step 3b, container review 22 (not on record; ledger 5684),
+G3, G8): each crate of
 `class_crates` is judged against the profile the kernel was built from. A
 crate its flags do not select, and the fixture, leave no symbol in the
 release ELF, and neither a member of their rlib nor a symbol of theirs in
@@ -61,16 +62,31 @@ def judge(names: list[str], entry: dict, value: str) -> list[str]:
     return problems
 
 
-def seam_problems(elf: Path, names: list[str], entry: dict, value: str) -> list[str]:
+def is_x86_64(elf: Path) -> bool:
+    """Whether `elf` is an x86-64 program, by its header's e_machine; true for
+    a file that cannot be read, so that a missing kernel asks for every symbol."""
+    try:
+        return elf.read_bytes()[18:20] == b"\x3e\x00"
+    except OSError:
+        return True
+
+
+def seam_problems(elf: Path, names: list[str], entry: dict, value: str, x86_64: bool | None = None) -> list[str]:
     """The seam's symbols in a kernel built with `value` (ledger 3934 (4)):
     each `__ferrix_*` symbol the record lists defined exactly once, and in a
     build with the present value each one's code calling into the crate (its
     implementation's methods are out of line for this); in another build the
-    load's `Absent`, inlined or not, and nothing of the crate (`judge`)."""
+    load's `Absent`, inlined or not, and nothing of the crate (`judge`). A
+    symbol `seam_symbols_x86_64_only` lists has no caller elsewhere, since the
+    call behind it folds away where interrupts cannot move
+    (`arch::CAN_MOVE_INTERRUPTS`), and is held to at most once there."""
     problems = []
     crate = entry.get("symbol", "")
     for symbol in entry.get("seam_symbols", []):
         count = sum(1 for name in names if name == symbol)
+        if count == 0 and symbol in entry.get("seam_symbols_x86_64_only", []) \
+                and not (is_x86_64(elf) if x86_64 is None else x86_64):
+            continue
         if count != 1:
             problems.append(f"{symbol} is defined {count} time(s), not once")
             continue
@@ -121,7 +137,7 @@ def class_judge(names: list[str], map_text: str, record: dict, flags: dict[str, 
     `map_text`, against the class crates' `record`."""
     # The absent side reads an absence in the map, so a map that could hold
     # nothing it looks for -- empty, truncated, or with its names mangled --
-    # is refused before it is read (ledger line 23 (1)).
+    # is refused before it is read (container review 23 (1)).
     if "ferrix_kernel_core::" not in map_text:
         return ["the non-LTO map names no demangled path of the kernel's core (ferrix_kernel_core::): "
                 "it is empty, truncated or mangled, and cannot show an absence"]
@@ -175,6 +191,13 @@ def self_test() -> list[str]:
         failures.append("a seam symbol defined twice passed")
     if not seam_problems(Path("/nonexistent"), [], seam, "fixed"):
         failures.append("a seam symbol not defined passed")
+    only_x86 = dict(seam, seam_symbols_x86_64_only=["__ferrix_setters_sethostname"])
+    if seam_problems(Path("/nonexistent"), [], only_x86, "fixed", x86_64=False):
+        failures.append("an x86-only seam symbol was asked of another architecture")
+    if not seam_problems(Path("/nonexistent"), [], only_x86, "fixed", x86_64=True):
+        failures.append("an x86-only seam symbol not defined on x86-64 passed")
+    if not seam_problems(Path("/nonexistent"), fixed + ["__ferrix_setters_sethostname"], only_x86, "fixed", x86_64=False):
+        failures.append("an x86-only seam symbol defined twice elsewhere passed")
     record = {
         "ferrix-sched-fair": {"rust_name": "ferrix_sched_fair", "flag": "sched_fair", "present_when": "eevdf",
                               "marker": "<ferrix_sched_fair::Eevdf as ferrix_sched_class::SchedClass<"},

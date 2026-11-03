@@ -1,6 +1,6 @@
 # The native channel round trip
 
-*reviewed 2026-10-21, to `main` 2ba25d12a; the latest figure here is of 2026-10-10.* The customer's target for the
+*reviewed 2026-11-02, to `main` e51fc67fd; the latest figure here is of 2026-10-10. Since then step 3's PCIDs landed (2026-10-29, 94d0c9df0, `docs/PCID.md`): off on nazuna, which has none, and 0.737 of `develop`'s round trip on the N150 (PCID.md §6); no `domain-call` figure for `main` has been taken since F-69.* The customer's target for the
 round trip is seL4's matched figure, 440 ns, and since 2026-10-06 under 400.
 This page is where its progress is kept: what is measured, the points so far,
 and what is in flight. The design, step by step, is
@@ -111,6 +111,12 @@ run's own architecture and processor count (`3f7b09345`, 2026-10-21).
 ## In flight
 
 Not on `main`; none is written up above as landed.
+
+**PR #38, scheduler classes, on `present` (2026-11-03, `feature/ferrix-roadmap-completion-hkxlpp`; not landed).**
+Against its merge base 3afb272b5, x86_64 under kvm, 5 rounds, load under 1: fast
+path off 1747 to 1757 ns, 1.000 (1.000 to 1.006); fast path on 918 to 928 ns against
+898 to 908, 1.022 (1.011 to 1.273), a cost waiting on a decision
+(`docs/SCHED-CLASSES.md`, the 2026-11-03 entry).
 
 - The scheduler's K and the slots are branches (`open-branches.md`).
 

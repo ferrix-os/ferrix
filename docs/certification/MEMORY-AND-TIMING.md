@@ -379,18 +379,22 @@ path, which the scope does not excuse and the claim of "every site a program can
 reach" did not allow for. Found on 2026-09-26: `Signals::default` built the
 signal tables with `vec!`, under every process and thread. It is now fallible,
 checked at stage 7 with a negative control, and the gate reads `signal.rs`,
-`thread.rs` and `process.rs`. What those two calls still reach that cannot
-report failure:
+`thread.rs` and `process.rs`. Since 2026-11-02 it also reads `process_create`'s
+load, `launch.rs`, `exec.rs` and `load.rs` (consultant ledger 5546, answer A),
+whose 30 unmarked sites are recorded in its baseline as debt that may only
+fall. Each file's count is that file's debt, not the count of the item's
+path through it. What those two calls still reach that cannot report failure:
 
 | Where | What |
 |---|---|
-| `syscall/process.rs` | the program name and arguments recorded (`record_exec`), the thread and task lists a start pushes onto -- among the 13 the gate records |
+| `syscall/process.rs` | the program name and arguments recorded (`record_exec`), the thread and task lists a start pushes onto -- among the 11 the gate records |
 | `syscall/registry.rs` | the `Arc` the new process is registered in |
 | `syscall/fd.rs` | `standard_streams`: the console's open description, whose `Arc` `OpenFile::new` makes. The table grows fallibly (F-37) and a refusal is `NO_MEMORY`, not a stop (2026-09-26; stage 7 checks it with every allocation failing); only a console that cannot be opened at all, a kernel bug, still stops it (`CONSOLE_DESCRIPTORS`) |
-| `syscall/load.rs`, `syscall/exec.rs` | the ELF loader's lists |
+| `syscall/load.rs`, `syscall/exec.rs`, `syscall/launch.rs` | the ELF loader's lists, which `load_native_in` reaches through `load_into`: the segments' file runs, their order and the mapping plan (`file_runs`, `place`, `apply_permissions`, `outside`, `without`) and `entry_point` -- 13 of the 16 the gate records in `load.rs`. The other 3 (`interpreter_of`, reached through `linker_for`), the 13 it records in `exec.rs` and the 1 in `launch.rs` are on `execve`'s and the init's paths in the same files (a linker's or a `#!` line's path, `execveat`'s `/dev/fd` name, argument strings copied in, the init's failure text), counted because the gate holds a file whole |
+| `syscall/vdso.rs` | `build`'s image buffer (`vdso.rs`:102, a `vec!` of `IMAGE_BYTES`), made the first time either variant is mapped: every load reaches it, `process_create`'s included, through `load_native_in`, `populate` and `map_into` (`exec.rs`:454), and `load_native`'s `retarget` for the shifted variant only. `image()` (`vdso.rs`:239) is the checks' copy. Not gated: its own landing makes `build` fallible first and then adds the file to `REACHED` at 0 |
 
 Each of these is the load's and covered by AoU-5, as it was before; the
-difference is that the list is now written down and the three files the item
+difference is that the list is now written down and the six files the item
 leans on most are gated. Converting the rest is the load-side work §1.5's
 third item declines, done one path at a time as the item comes to depend on
 it.
@@ -1121,7 +1125,8 @@ queue is a balanced tree: `pick`, an enqueue and the removal of the running
 entity are O(log n) or better in the processor's real-time tasks; `remove`
 of a waiting entity by identifier walks the tree, O(n), under the queue's
 spin lock. Every removal is routed by the task's tier
-(`StackTiers::remove_in`, the review's line 30, B3), so the removal of a
+(`StackTiers::remove_in`, container review 30 (not on record; ledger 5684),
+B3), so the removal of a
 fair task, a steal's among them, never walks this tree, and the walk serves
 one caller alone: a change of policy on a queued real-time task that does
 not run (L.sched.134), at the call or at its processor's next decision. A

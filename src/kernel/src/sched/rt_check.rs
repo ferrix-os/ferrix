@@ -28,7 +28,8 @@
 //! * **The floor** (H.SCHED.22): a fair task beside a spinning `SCHED_FIFO`
 //!   task is given between [`FLOOR_LEAST_NANOS`] and [`FLOOR_MOST_NANOS`] of
 //!   [`FLOOR_WINDOW_NANOS`], and the `SCHED_FIFO` task the rest, unthrottled
-//!   at each period's end.
+//!   at each period's end. Its clock is real time: a budget spent before
+//!   the processor went idle is whole again after a period of that idling.
 //! * **The move** (L.sched.134, L.sched.129, L.sched.130): a fair task made
 //!   `SCHED_FIFO` while it runs beside another fair task takes the processor
 //!   from it, and given back to fair shares it again; it keeps its node
@@ -37,7 +38,8 @@
 //! * **Flips**: an unpinned running task flipped between `SCHED_FIFO` and
 //!   fair 200 times beside a waiting one, with processors idle to steal:
 //!   the running task is moved only at its processor's next decision
-//!   (line 30, B1; its control is the move made at the call, FX-0537).
+//!   (container review 30 (not on record; ledger 5684), B1; its control is the move
+//!   made at the call, FX-0537).
 //! * **The modes** (L.sched.137, L.sched.138): a `SoftRt` domain is made
 //!   where the tier is built (run at run time by `domains_check`),
 //!   `ModeUnavailable` where it is not, and a real-time policy refused there
@@ -74,16 +76,18 @@ const RR_LEAST_NANOS: u64 = 100_000_000;
 /// The most the second `SCHED_FIFO` task of the control may have run.
 const FIFO_CONTROL_MOST_NANOS: u64 = 5_000_000;
 
-/// The floor's window: two periods and a little.
-const FLOOR_WINDOW_NANOS: u64 = 2_100_000_000;
+/// The floor's window: three periods and a little. The periods are fixed, so
+/// the tier may spend a whole budget only in a whole period: a window that
+/// starts just past 50 ms into one has no throttle until nearly two have gone,
+/// and holds two throttles only in this length.
+const FLOOR_WINDOW_NANOS: u64 = 3_100_000_000;
 
 /// The least a fair task must be given of it: 50 ms a period over two
-/// periods, less a margin for where the window falls.
+/// periods, less a margin.
 const FLOOR_LEAST_NANOS: u64 = 60_000_000;
 
-/// The most: well short of the half a fair share would give. An emulated
-/// processor's timer comes late enough to give it several times the floor
-/// (ARMv7-A under `tcg`: 334 ms, 2026-10-27).
+/// The most: well short of the half a fair share would give, for an emulated
+/// processor's late timer.
 const FLOOR_MOST_NANOS: u64 = 700_000_000;
 
 /// The least the spinning `SCHED_FIFO` task must be given of it: more than
@@ -175,7 +179,8 @@ pub(super) fn run() -> Result<&'static str, &'static str> {
     match VERDICT.load(Ordering::Acquire) {
         1 => Ok(
             "priority order, preemption on a remote and a local wake, FIFO's place, \
-                 RR's quantum (and FIFO's control), a yield, the 50 ms floor, flips of a \
+                 RR's quantum (and FIFO's control), a yield, the 50 ms floor and its clock \
+                 over an idle processor, flips of a \
                  running task, the move between tiers",
         ),
         _ => Err(WHY.get()),
@@ -218,6 +223,7 @@ fn drive(c: usize) {
         .and_then(|()| fifo_keeps_its_place(c))
         .and_then(|()| round_robin(c))
         .and_then(|()| floor(c))
+        .and_then(|()| floor_clock(c))
         .and_then(|()| flips(c))
         .and_then(|()| the_move(c));
     STOP.store(true, Ordering::Release);
@@ -683,6 +689,58 @@ fn floor(c: usize) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// The floor's clock runs while its processor idles (ledger 5684's C1): a
+/// `SCHED_FIFO` task spends the period's budget, shown by the fair task beside
+/// it moving at last; both leave, and the processor idles past the period's
+/// end; a new `SCHED_FIFO` task then has a whole budget. Read straight from
+/// the queue, since a clock that stopped refills within the 50 ms left of its
+/// period once the new task runs.
+///
+/// Verifies: H.SCHED.22
+fn floor_clock(c: usize) -> Result<(), &'static str> {
+    reset();
+    let _fair = super::spawn_on("rt-clock-fair", spinner, 1, NICE_0_WEIGHT, c, CpuSet::of(c))?;
+    started(1)?;
+    let _fifo = super::spawn_rt_on(
+        "rt-clock",
+        spinner,
+        0,
+        c,
+        CpuSet::of(c),
+        params(RtPolicy::Fifo, 10),
+    )?;
+    started(2)?;
+    super::sleep_for(10_000_000);
+    let held = RAN[1].load(Ordering::Acquire);
+    wait_until(
+        || RAN[1].load(Ordering::Acquire) > held,
+        "the fair task never ran beside a spinning SCHED_FIFO task",
+    )?;
+    stop();
+    super::sleep_for(1_100_000_000);
+    reset();
+    let _next = super::spawn_rt_on(
+        "rt-clock",
+        spinner,
+        0,
+        c,
+        CpuSet::of(c),
+        params(RtPolicy::Fifo, 10),
+    )?;
+    started(1)?;
+    let left = super::queue_of(c)
+        .and_then(|lock| lock.lock().remaining_for_check())
+        .unwrap_or(0);
+    stop();
+    if left < 500_000_000 {
+        crate::console::println!(
+            "  sched    floor's clock: {left} ns of budget after an idle period"
+        );
+        return Err("the floor's clock stopped while its processor idled");
+    }
+    Ok(())
+}
+
 /// The move between tiers, the node kept, and a weight kept.
 ///
 /// Verifies: L.sched.129, L.sched.130, L.sched.134
@@ -699,7 +757,7 @@ fn the_move(c: usize) -> Result<(), &'static str> {
 }
 
 /// The running task's move between tiers is made at its processor's next
-/// decision, never while it runs (line 30, B1): an unpinned task spinning
+/// decision, never while it runs (container review 30, B1): an unpinned task spinning
 /// on `c` beside a pinned one, so that `c` has a task waiting for an idle
 /// processor to steal, is flipped between `SCHED_FIFO` and fair 200 times,
 /// 10 ms after each flip to fair,

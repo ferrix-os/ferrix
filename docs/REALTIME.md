@@ -300,13 +300,15 @@ ARCHITECTURE.md already says:
   maximum controlled priority is the native form: a handle's rights bound
   the priority it can confer.
 
-**As built (step 4b, `desktop`, 2026-10-27; SCHED-CLASSES.md §9e, ledger
-line 29).** `ferrix-sched-fifo` is the tier: a balanced tree of the tasks'
+**As built (step 4b, `desktop`, 2026-10-27; SCHED-CLASSES.md §9e, container
+review 29 (not on record; ledger 5684)).** `ferrix-sched-fifo` is the tier: a
+balanced tree of the tasks'
 own nodes keyed by priority and arrival rather than a bitmap of lists (the
 review accepted the class's own tree). Its constants are fixed in the crate,
 never run-time settings (R13): the round-robin quantum is **100 ms**
-(Linux's default `sched_rr_timeslice_ms`), restarted after a yield and after
-a preemption, and the floor is **950 ms of every 1 s period** per processor
+(Linux's default `sched_rr_timeslice_ms`), the task's own and restarted only
+when spent, so that a preempted or yielding task completes what is left as
+sched(7) says and `task_tick_rt` does, and the floor is **950 ms of every 1 s period** per processor
 (Linux's default `sched_rt_runtime_us`): while fair tasks are runnable
 there, real-time tasks run at most that, so fair tasks keep at least 50 ms;
 with none runnable the throttle does not bind. The floor is the throttle

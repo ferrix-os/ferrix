@@ -2973,7 +2973,7 @@ pub(crate) static RUNNING_TASK_QUEUED: Explanation = Explanation {
               steal, a placement or a pick that finds a waiting task with the mark set has \
               found one context about to run on two processors, or on one before it was \
               saved, and the machine is stopped before it does (docs/SCHED-CLASSES.md §9e, \
-              the certification consultant's ledger line 30, B1).",
+              the certification consultant's container review 30 (not on record; ledger 5684), B1).",
     causes: &[
         "A path enqueued a running task as a waiting one outside a decision: a change of \
          policy that moved the running task at once, rather than at its processor's next \
@@ -3013,6 +3013,25 @@ pub(crate) static TASK_OUTSIDE_DOMAIN: Explanation = Explanation {
     see: "src/kernel/src/sched/domains.rs; src/kernel/src/sched/mod.rs move_onto, \
           depart and require_admitted; src/kernel/src/sched/direct.rs; \
           docs/SCHED-CLASSES.md §9f",
+};
+
+/// For `Task::entity_with`, when a task with a real-time policy has no node
+/// of the tier above fair to be queued with.
+pub(crate) static REALTIME_NODE_MISSING: Explanation = Explanation {
+    code: "FX-0539",
+    title: "a task with a real-time policy had no node to be queued with",
+    meaning: "A task that asks for `SCHED_FIFO` or `SCHED_RR` is given its node of the \
+              tier above fair before the policy is stored, and only the queue holding the \
+              task takes the node from its cell. A task being queued with a real-time \
+              policy and an empty cell has broken that rule. Queued as fair, it would run \
+              at the wrong tier while every test of its policy says it is real-time, so \
+              the machine is stopped (L.sched.129, ledger 5684's C3).",
+    causes: &[
+        "A path stored a real-time policy before it put the node in the cell \
+         (`sched::set_policy`, `sched::prepare_user`).",
+        "A task was queued while a queue still held it, so that queue holds the node.",
+    ],
+    see: "src/kernel/src/sched/task.rs Task::entity_with; docs/SCHED-CLASSES.md §9e",
 };
 
 /// For `check_proc_access` in `stages_check.rs`, when
@@ -3664,6 +3683,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &STAGE5_TASK_VIEW,
     &RUNNING_TASK_QUEUED,
     &TASK_OUTSIDE_DOMAIN,
+    &REALTIME_NODE_MISSING,
     &STAGE6_USER_MEMORY,
     &STAGE6_REVERSE_MAP,
     &STAGE7_SYSCALLS,

@@ -13,8 +13,9 @@ unschedulable set instead of missing deadlines.
 Linux, seL4 MCS, QNX, Zircon and the ARINC 653 systems do, what Ferrix has
 today, and proposes the stage's design and an order of landings.
 
-**Built so far (2026-10-27, on `claude/ferrix-roadmap-completion-hkxlpp`,
-landing owed):** the groundwork every real-time class sits on,
+**Built so far (2026-10-27, on `feature/ferrix-roadmap-completion-hkxlpp`,
+PR #38, landing owed; rows, controls and figures of 2026-11-03 in
+[docs/SCHED-CLASSES.md](../SCHED-CLASSES.md)'s "Where it stands"):** the groundwork every real-time class sits on,
 [docs/SCHED-CLASSES.md](../SCHED-CLASSES.md), each step reviewed by the
 certification consultant:
 

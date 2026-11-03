@@ -1,4 +1,4 @@
-//! The class's rules, on the host (the consultant's ledger line 29, R2).
+//! The class's rules, on the host (container review 29 (not on record; ledger 5684), R2).
 
 extern crate std;
 
@@ -122,6 +122,139 @@ fn rr_rotates_at_its_quantum_and_fifo_does_not() {
     let _ = FifoRr::pick(&mut f);
     assert!(!FifoRr::charge(&mut f, 3 * RR_QUANTUM_NS));
     assert_eq!(FifoRr::pick(&mut f), Some(&1));
+}
+
+/// Ledger 5684's B1: a decision before the quantum's end restarts nothing.
+/// Two `SCHED_RR` tasks of one priority, 60 ms then a decision, twelve times:
+/// with a quantum restarted at each pick, the peer never ran in 720 ms of a
+/// 100 ms quantum.
+#[test]
+fn an_early_decision_does_not_restart_the_quantum() {
+    const STEP_NS: u64 = 60_000_000;
+    let mut q = queue();
+    FifoRr::enqueue(&mut q, 1, 1, rr(30)).unwrap();
+    FifoRr::enqueue(&mut q, 2, 2, rr(30)).unwrap();
+    let mut ran = Vec::new();
+    ran.push(*FifoRr::pick(&mut q).unwrap());
+    for _ in 0..12 {
+        let _ = FifoRr::charge(&mut q, STEP_NS);
+        ran.push(*FifoRr::pick(&mut q).unwrap());
+    }
+    // Two steps of 60 ms each spend a quantum, then the other's turn.
+    assert_eq!(ran, [1, 1, 2, 2, 1, 1, 2, 2, 1, 1, 2, 2, 1]);
+    assert!(FifoRr::check(&q).is_ok());
+}
+
+/// sched(7): a preempted thread "will complete the unexpired portion", and
+/// the head of its priority is still its own.
+#[test]
+fn a_preempted_rr_entity_completes_its_quantum() {
+    let mut q = queue();
+    FifoRr::enqueue(&mut q, 1, 1, rr(30)).unwrap();
+    FifoRr::enqueue(&mut q, 2, 2, rr(30)).unwrap();
+    assert_eq!(FifoRr::pick(&mut q), Some(&1));
+    assert!(!FifoRr::charge(&mut q, 60_000_000));
+    FifoRr::enqueue(&mut q, 3, 3, rr(50)).unwrap();
+    assert!(FifoRr::should_preempt(&q));
+    assert_eq!(FifoRr::pick(&mut q), Some(&3));
+    let _ = FifoRr::remove_current(&mut q);
+    assert_eq!(FifoRr::pick(&mut q), Some(&1));
+    assert_eq!(FifoRr::remaining_ns(&q), Some(40_000_000));
+    assert!(FifoRr::charge(&mut q, 40_000_000));
+    assert_eq!(FifoRr::pick(&mut q), Some(&2));
+    // Put back by a tier above, the same.
+    let mut b = queue();
+    FifoRr::enqueue(&mut b, 1, 1, rr(30)).unwrap();
+    let _ = FifoRr::pick(&mut b);
+    let _ = FifoRr::charge(&mut b, 60_000_000);
+    FifoRr::put_back(&mut b);
+    let _ = FifoRr::pick(&mut b);
+    assert_eq!(FifoRr::remaining_ns(&b), Some(40_000_000));
+}
+
+/// `yield_task_rt` requeues and leaves `time_slice` alone; so does a block,
+/// and the node carries it.
+#[test]
+fn a_yield_and_a_block_keep_what_is_left_of_the_quantum() {
+    let mut q = queue();
+    FifoRr::enqueue(&mut q, 1, 1, rr(30)).unwrap();
+    FifoRr::enqueue(&mut q, 2, 2, rr(30)).unwrap();
+    let _ = FifoRr::pick(&mut q);
+    let _ = FifoRr::charge(&mut q, 60_000_000);
+    FifoRr::yield_current(&mut q);
+    assert_eq!(FifoRr::current(&q), Some(&2));
+    assert_eq!(FifoRr::remaining_ns(&q), Some(RR_QUANTUM_NS));
+    assert!(FifoRr::charge(&mut q, RR_QUANTUM_NS));
+    assert_eq!(FifoRr::pick(&mut q), Some(&1));
+    assert_eq!(FifoRr::remaining_ns(&q), Some(40_000_000));
+    let (id, payload, entity) = FifoRr::remove_current(&mut q).unwrap();
+    FifoRr::enqueue(&mut q, id, payload, entity).unwrap();
+    // 2 has the tail's turn first, then 1 with its 40 ms.
+    assert_eq!(FifoRr::pick(&mut q), Some(&2));
+    let _ = FifoRr::remove_current(&mut q);
+    assert_eq!(FifoRr::pick(&mut q), Some(&1));
+    assert_eq!(FifoRr::remaining_ns(&q), Some(40_000_000));
+}
+
+/// `task_tick_rt` refills at the quantum's end alone or not, so a peer
+/// arriving after that waits out what is left of the new quantum.
+#[test]
+fn a_quantum_spent_alone_is_refilled() {
+    let mut q = queue();
+    FifoRr::enqueue(&mut q, 1, 1, rr(30)).unwrap();
+    let _ = FifoRr::pick(&mut q);
+    assert!(!FifoRr::charge(&mut q, RR_QUANTUM_NS));
+    assert_eq!(FifoRr::remaining_ns(&q), Some(RR_QUANTUM_NS));
+    FifoRr::enqueue(&mut q, 2, 2, rr(30)).unwrap();
+    assert!(!FifoRr::should_preempt(&q));
+    assert!(!FifoRr::charge(&mut q, 60_000_000));
+    assert!(FifoRr::charge(&mut q, 40_000_000));
+    assert_eq!(FifoRr::pick(&mut q), Some(&2));
+}
+
+/// The floor's clock is real time: a budget spent is refilled by the time
+/// passing while nothing ran (`CpuQueue::account_with`'s `elapse`), not left
+/// to wait for the class's next charges (ledger 5684's C1).
+#[test]
+fn time_passing_with_nothing_running_refills_the_budget() {
+    let mut q = queue();
+    FifoRr::enqueue(&mut q, 1, 1, fifo(30)).unwrap();
+    let _ = FifoRr::pick(&mut q);
+    assert!(FifoRr::charge(&mut q, RUNTIME_NS));
+    let (id, payload, entity) = FifoRr::remove_current(&mut q).unwrap();
+    FifoRr::elapse(&mut q, PERIOD_NS);
+    FifoRr::enqueue(&mut q, id, payload, entity).unwrap();
+    assert!(FifoRr::ready(&q, true));
+    let _ = FifoRr::pick(&mut q);
+    assert_eq!(FifoRr::remaining_ns(&q), Some(RUNTIME_NS));
+}
+
+/// A charge that crosses a period's end counts in the new period only for
+/// the part inside it. Charged whole to the new period, a task that ran 950 ms
+/// from 500 ms into a period read as throttled 450 ms into the next, and the
+/// tier below kept the processor for the 550 ms left of it, not 50.
+#[test]
+fn a_charge_across_a_period_end_counts_only_its_part_in_the_new_period() {
+    let mut q = queue();
+    FifoRr::enqueue(&mut q, 1, 1, fifo(30)).unwrap();
+    let _ = FifoRr::pick(&mut q);
+    FifoRr::elapse(&mut q, PERIOD_NS / 2);
+    assert!(!FifoRr::charge(&mut q, RUNTIME_NS));
+    assert!(FifoRr::ready(&q, true));
+    assert_eq!(
+        FifoRr::remaining_ns(&q),
+        Some(RUNTIME_NS - (RUNTIME_NS - PERIOD_NS / 2))
+    );
+    // Run to the budget's end: throttled with the period's last 50 ms left.
+    assert!(FifoRr::charge(&mut q, PERIOD_NS / 2));
+    assert!(!FifoRr::ready(&q, true));
+    assert_eq!(FifoRr::decision_in_ns(&q), Some(PERIOD_NS - RUNTIME_NS));
+    // Whole periods inside one charge: the same, the part after the last end.
+    let mut long = queue();
+    FifoRr::enqueue(&mut long, 1, 1, fifo(30)).unwrap();
+    let _ = FifoRr::pick(&mut long);
+    assert!(!FifoRr::charge(&mut long, 3 * PERIOD_NS + 1));
+    assert_eq!(FifoRr::remaining_ns(&long), Some(RUNTIME_NS - 1));
 }
 
 #[test]

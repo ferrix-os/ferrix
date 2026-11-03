@@ -1,14 +1,19 @@
 //! `SCHED_FIFO` and `SCHED_RR`: fixed priorities above the fair class
-//! (docs/SCHED-CLASSES.md §9e; the consultant's design review, ledger line
-//! 29, R1-R15).
+//! (docs/SCHED-CLASSES.md §9e; the design review, container review 29 (not on
+//! record; ledger 5684), R1-R15).
 //!
 //! **Priorities 1 to 99**, higher first, as Linux numbers them; within a
 //! priority, arrival order. A `SCHED_FIFO` entity runs until it blocks,
 //! yields or is preempted by a higher priority, and a preempted one keeps
 //! the head of its priority. A `SCHED_RR` entity also has a quantum,
 //! [`RR_QUANTUM_NS`], at whose end it goes to the tail of its priority if
-//! another waits there; its quantum restarts after a yield and after it was
-//! preempted, as Linux's does. A yield goes to the tail.
+//! another waits there. The quantum is the entity's own and restarts only
+//! when it is spent, whether or not a peer waits, as Linux's `time_slice`
+//! does (`kernel/sched/rt.c`'s `task_tick_rt`, the one place that refills it
+//! after the fork; sched(7): a preempted thread "will complete the unexpired
+//! portion"): a decision before its end restarts nothing, and an entity
+//! preempted, yielding or blocking keeps what is left. A yield goes to the
+//! tail.
 //!
 //! **The floor.** As Linux's `sched_rt_runtime_us` does by default, the
 //! class spends at most [`RUNTIME_NS`] of every [`PERIOD_NS`] of real time
@@ -18,8 +23,9 @@
 //! [`SchedClass::ready`], so a stack picks below it, preempts nothing and
 //! arms the period's end, not a timer at once (R3, R4). With nothing below
 //! waiting the floor does not bind. The period's clock is the class's own,
-//! advanced by every charge on the processor, the lower tier's through
-//! [`SchedClass::elapse`]. A `SCHED_FIFO` entity at priority 99 starves the
+//! advanced by every charge on the processor and, through
+//! [`SchedClass::elapse`], by the lower tier's and by the time nothing ran,
+//! so it is real time and a budget spent is refilled over a sleep. A `SCHED_FIFO` entity at priority 99 starves the
 //! kernel's fair worker tasks (the reaper, the network's) for up to 950 ms
 //! of every second (C2).
 //!
@@ -82,6 +88,9 @@ pub struct Node<T> {
     id: u64,
     params: Params,
     key: Key,
+    /// Its use of its `SCHED_RR` quantum: its own, as Linux's `time_slice`
+    /// is, so it survives a preemption, a yield, a block and a move.
+    quantum_used: u64,
     payload: Option<T>,
     left: Link<T>,
     right: Link<T>,
@@ -106,6 +115,7 @@ impl<T> FifoSlot<T> {
                 priority: MIN_PRIORITY,
             },
             key: Key { rank: 0, seq: 0 },
+            quantum_used: 0,
             payload: None,
             left: None,
             right: None,
@@ -131,8 +141,6 @@ pub struct FifoQueue<T> {
     running: Option<Box<Node<T>>>,
     /// The next arrival sequence.
     seq: u64,
-    /// The running `SCHED_RR` entity's use of its quantum.
-    quantum_used: u64,
     /// Real time into the current period.
     period_at: u64,
     /// The class's running time in the current period.
@@ -152,14 +160,18 @@ impl<T> FifoQueue<T> {
     }
 
     /// Advance the period clock by `ns`, starting a new period, with its
-    /// budget refilled, at each period's end.
-    fn advance(&mut self, ns: u64) {
+    /// budget refilled, at each period's end. Answers how much of `ns` falls
+    /// in the period the clock is in now: a charge is whole however long the
+    /// entity ran alone, tickless, so it can end a period and start another.
+    fn advance(&mut self, ns: u64) -> u64 {
         let at = self.period_at.saturating_add(ns);
         if at >= PERIOD_NS {
             self.period_at = at % PERIOD_NS;
             self.spent = 0;
+            self.period_at
         } else {
             self.period_at = at;
+            ns
         }
     }
 
@@ -389,7 +401,6 @@ impl<T> SchedClass<T> for FifoRr {
             len_waiting: 0,
             running: None,
             seq: 0,
-            quantum_used: 0,
             period_at: 0,
             spent: 0,
         })
@@ -433,7 +444,7 @@ impl<T> SchedClass<T> for FifoRr {
     /// one caller in the kernel is a change of policy on a queued real-time
     /// task that does not run (`CpuQueue::set_policy` and, at a decision,
     /// `requeue_if_moved`), routed to this tier alone (`StackTiers::remove_in`,
-    /// the review's line 30, B3), never a switch, a wake or the tick.
+    /// container review 30, B3), never a switch, a wake or the tick.
     fn remove(queue: &mut FifoQueue<T>, id: u64) -> Option<(T, FifoEntity<T>)> {
         if queue
             .running
@@ -450,30 +461,26 @@ impl<T> SchedClass<T> for FifoRr {
 
     fn remove_current(queue: &mut FifoQueue<T>) -> Option<Left<T, FifoEntity<T>>> {
         let mut node = queue.running.take()?;
-        queue.quantum_used = 0;
         let payload = node.payload.take()?;
         Some((node.id, payload, (node.params, FifoSlot(node))))
     }
 
     fn pick(queue: &mut FifoQueue<T>) -> Option<&T> {
-        if let Some(running) = queue.running.take() {
-            let rotate = running.params.policy == Policy::Rr && queue.quantum_used >= RR_QUANTUM_NS;
+        if let Some(mut running) = queue.running.take() {
+            let rotate =
+                running.params.policy == Policy::Rr && running.quantum_used >= RR_QUANTUM_NS;
             // A preempted entity keeps the head of its priority (its key);
-            // an RR entity whose quantum is spent goes to the tail.
+            // an RR entity whose quantum is spent goes to the tail, with a
+            // new one. Nothing else restarts a quantum.
             let seq = if rotate {
+                running.quantum_used = 0;
                 queue.next_seq()
             } else {
                 running.key.seq
             };
-            if rotate {
-                queue.quantum_used = 0;
-            }
             queue.insert(running, seq);
         }
         let next = queue.take_first()?;
-        if queue.running.is_none() {
-            queue.quantum_used = 0;
-        }
         queue.running = Some(next);
         queue
             .running
@@ -483,9 +490,9 @@ impl<T> SchedClass<T> for FifoRr {
 
     fn put_back(queue: &mut FifoQueue<T>) {
         if let Some(running) = queue.running.take() {
-            // Preempted: the head of its priority, its quantum restarting.
+            // Preempted: the head of its priority, and what is left of its
+            // quantum still its own.
             let seq = running.key.seq;
-            queue.quantum_used = 0;
             queue.insert(running, seq);
         }
     }
@@ -511,18 +518,29 @@ impl<T> SchedClass<T> for FifoRr {
     }
 
     fn charge(queue: &mut FifoQueue<T>, ran_ns: u64) -> bool {
-        queue.advance(ran_ns);
+        let in_this_period = queue.advance(ran_ns);
         if queue.running.is_none() {
             return false;
         }
-        queue.spent = queue.spent.saturating_add(ran_ns);
-        queue.quantum_used = queue.quantum_used.saturating_add(ran_ns);
-        let rr_due = queue
-            .running
-            .as_ref()
-            .is_some_and(|node| node.params.policy == Policy::Rr)
-            && queue.quantum_used >= RR_QUANTUM_NS
-            && queue.same_priority_waits();
+        queue.spent = queue.spent.saturating_add(in_this_period);
+        let peer = queue.same_priority_waits();
+        let rr_due = queue.running.as_mut().is_some_and(|node| {
+            if node.params.policy != Policy::Rr {
+                return false;
+            }
+            node.quantum_used = node.quantum_used.saturating_add(ran_ns);
+            if node.quantum_used < RR_QUANTUM_NS {
+                return false;
+            }
+            if !peer {
+                // Alone at its priority: a new quantum, so that a peer
+                // arriving later waits out what is left of this one, as
+                // `task_tick_rt`'s refill has it. With a peer, the pick
+                // that sends it to the tail refills it.
+                node.quantum_used = 0;
+            }
+            peer
+        });
         // A spent budget is a decision too: the stack picks below if
         // anything waits there (`ready`).
         rr_due || queue.higher_waits() || queue.throttled()
@@ -532,19 +550,16 @@ impl<T> SchedClass<T> for FifoRr {
         let running = queue.running.as_ref()?;
         let budget = RUNTIME_NS.saturating_sub(queue.spent);
         Some(match running.params.policy {
-            Policy::Rr => budget.min(RR_QUANTUM_NS.saturating_sub(queue.quantum_used)),
+            Policy::Rr => budget.min(RR_QUANTUM_NS.saturating_sub(running.quantum_used)),
             Policy::Fifo => budget,
         })
     }
 
     fn should_preempt(queue: &FifoQueue<T>) -> bool {
         queue.higher_waits()
-            || (queue
-                .running
-                .as_ref()
-                .is_some_and(|node| node.params.policy == Policy::Rr)
-                && queue.quantum_used >= RR_QUANTUM_NS
-                && queue.same_priority_waits())
+            || (queue.running.as_ref().is_some_and(|node| {
+                node.params.policy == Policy::Rr && node.quantum_used >= RR_QUANTUM_NS
+            }) && queue.same_priority_waits())
     }
 
     fn decision_in_ns(queue: &FifoQueue<T>) -> Option<u64> {
@@ -568,8 +583,9 @@ impl<T> SchedClass<T> for FifoRr {
 
     fn yield_current(queue: &mut FifoQueue<T>) {
         if let Some(running) = queue.running.take() {
+            // The tail, with what is left of its quantum: `yield_task_rt`
+            // requeues and leaves `time_slice` alone.
             let seq = queue.next_seq();
-            queue.quantum_used = 0;
             queue.insert(running, seq);
             if let Some(next) = queue.take_first() {
                 queue.running = Some(next);
@@ -582,7 +598,7 @@ impl<T> SchedClass<T> for FifoRr {
     }
 
     fn elapse(queue: &mut FifoQueue<T>, ns: u64) {
-        queue.advance(ns);
+        let _ = queue.advance(ns);
     }
 
     fn steals_work(_: &FifoQueue<T>) -> bool {
