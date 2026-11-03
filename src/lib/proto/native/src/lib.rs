@@ -50,6 +50,7 @@ pub mod job;
 pub mod pending;
 pub mod pin;
 pub mod port;
+pub mod space;
 pub mod vmo;
 
 #[cfg(test)]

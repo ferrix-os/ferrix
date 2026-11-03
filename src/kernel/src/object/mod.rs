@@ -30,6 +30,7 @@ pub mod pin;
 pub mod port;
 pub mod process;
 pub mod quota;
+pub mod space;
 pub mod timer;
 
 use alloc::sync::Arc;
@@ -76,6 +77,8 @@ pub enum Object {
     Port(Arc<port::Port>),
     /// A deadline, signalled when it passes (`docs/microkernel/K10.md`).
     Timer(Arc<timer::Timer>),
+    /// An address space (`docs/microkernel/K2.md`).
+    Space(Arc<space::SpaceRef>),
     /// The capability to ask the kernel to start `devmgr`
     /// (`docs/INIT.md` §7.3, L12): a token with nothing in it. What it
     /// permits is decided where `devmgr_start` is answered -- the kernel
@@ -124,7 +127,8 @@ impl Object {
             Object::Port(port) if !port.is_empty() => Signals::READABLE,
             Object::Process(process) if process.exit().is_closed() => Signals::TERMINATED,
             Object::Timer(timer) => timer.core().signals(),
-            Object::Device(_)
+            Object::Space(_)
+            | Object::Device(_)
             | Object::Interrupt(_)
             | Object::IoMapping(_)
             | Object::Pin(_)
@@ -153,6 +157,7 @@ impl Object {
             Object::Interrupt(interrupt) => interrupt.waiters(),
             Object::Timer(timer) => timer.core().waiters(),
             Object::Vmo(_)
+            | Object::Space(_)
             | Object::Device(_)
             | Object::IoMapping(_)
             | Object::Pin(_)
@@ -335,7 +340,9 @@ impl Object {
             | Object::CpuService
             | Object::MemoryScrub
             | Object::Exception(_) => true,
-            Object::Channel(_) | Object::Job(_) | Object::Process(_) => false,
+            // A space's last reference tears down its tables and every
+            // object it maps, as a process's end does.
+            Object::Channel(_) | Object::Job(_) | Object::Process(_) | Object::Space(_) => false,
         }
     }
 }
