@@ -13,7 +13,21 @@ the crate's. The symbols are read with `nm --demangle` from the ELF the
 build left, release, on each architecture (`cargo xtask test-removable`).
 
     check-removable-symbols.py --elf KERNEL --crate ferrix-kernel-settings --value fixed
+    check-removable-symbols.py --class --elf KERNEL --map MAP --profile present
     check-removable-symbols.py --self-test
+
+**The class crates** (`--class`; docs/SCHED-CLASSES.md §9b, the consultant's
+design review of step 3b, container review 22 (not on record; ledger 5684),
+G3, G8): each crate of
+`class_crates` is judged against the profile the kernel was built from. A
+crate its flags do not select, and the fixture, leave no symbol in the
+release ELF, and neither a member of their rlib nor a symbol of theirs in
+the map of a link of the same architecture, profile and flags with LTO
+alone turned off; a selected one leaves its marker (its check, kept out of
+line) in the ELF and its code in that map: a member of its rlib, or, for a
+crate of generics alone such as ferrix-sched-fair, its functions
+monomorphised into the crates that use it, which the map names. LTO only removes and merges code, so what the non-LTO
+link leaves out the LTO image cannot hold.
 """
 
 from __future__ import annotations
@@ -48,16 +62,31 @@ def judge(names: list[str], entry: dict, value: str) -> list[str]:
     return problems
 
 
-def seam_problems(elf: Path, names: list[str], entry: dict, value: str) -> list[str]:
+def is_x86_64(elf: Path) -> bool:
+    """Whether `elf` is an x86-64 program, by its header's e_machine; true for
+    a file that cannot be read, so that a missing kernel asks for every symbol."""
+    try:
+        return elf.read_bytes()[18:20] == b"\x3e\x00"
+    except OSError:
+        return True
+
+
+def seam_problems(elf: Path, names: list[str], entry: dict, value: str, x86_64: bool | None = None) -> list[str]:
     """The seam's symbols in a kernel built with `value` (ledger 3934 (4)):
     each `__ferrix_*` symbol the record lists defined exactly once, and in a
     build with the present value each one's code calling into the crate (its
     implementation's methods are out of line for this); in another build the
-    load's `Absent`, inlined or not, and nothing of the crate (`judge`)."""
+    load's `Absent`, inlined or not, and nothing of the crate (`judge`). A
+    symbol `seam_symbols_x86_64_only` lists has no caller elsewhere, since the
+    call behind it folds away where interrupts cannot move
+    (`arch::CAN_MOVE_INTERRUPTS`), and is held to at most once there."""
     problems = []
     crate = entry.get("symbol", "")
     for symbol in entry.get("seam_symbols", []):
         count = sum(1 for name in names if name == symbol)
+        if count == 0 and symbol in entry.get("seam_symbols_x86_64_only", []) \
+                and not (is_x86_64(elf) if x86_64 is None else x86_64):
+            continue
         if count != 1:
             problems.append(f"{symbol} is defined {count} time(s), not once")
             continue
@@ -102,6 +131,43 @@ def symbols(elf: Path) -> list[str]:
     return names
 
 
+def class_judge(names: list[str], map_text: str, record: dict, flags: dict[str, str]) -> list[str]:
+    """What is wrong with a kernel built with the profile `flags`, whose
+    release ELF holds the demangled `names` and whose non-LTO link's map is
+    `map_text`, against the class crates' `record`."""
+    # The absent side reads an absence in the map, so a map that could hold
+    # nothing it looks for -- empty, truncated, or with its names mangled --
+    # is refused before it is read (container review 23 (1)).
+    if "ferrix_kernel_core::" not in map_text:
+        return ["the non-LTO map names no demangled path of the kernel's core (ferrix_kernel_core::): "
+                "it is empty, truncated or mangled, and cannot show an absence"]
+    problems = []
+    for package, entry in sorted(record.items()):
+        if package.startswith("//") or package == "named_outside":
+            continue
+        name = entry.get("rust_name", package.replace("-", "_"))
+        member = f"lib{name}-"
+        mine = [symbol for symbol in names if f"{name}::" in symbol]
+        selected = not entry.get("fixture") and flags.get(entry.get("flag", "")) == entry.get("present_when")
+        what = "the fixture" if entry.get("fixture") else f"{entry.get('flag')}={flags.get(entry.get('flag', ''))}"
+        if selected:
+            if not any(symbol.startswith(entry.get("marker", "\0")) for symbol in names):
+                problems.append(f"{package} is selected ({what}) and its marker {entry.get('marker')}.. is not "
+                                "in the ELF")
+            if member not in map_text and f"{name}::" not in map_text:
+                problems.append(f"{package} is selected ({what}) and the non-LTO map holds none of its code, "
+                                "neither a member of its rlib nor a symbol of it monomorphised into another")
+        else:
+            if mine:
+                problems.append(f"{package} is not selected ({what}) and the ELF holds {len(mine)} symbol(s) of it, "
+                                f"the first {mine[0]}")
+            if member in map_text:
+                problems.append(f"{package} is not selected ({what}) and the non-LTO map pulls in a member of its rlib")
+            if f"{name}::" in map_text:
+                problems.append(f"{package} is not selected ({what}) and the non-LTO map holds a symbol of it")
+    return problems
+
+
 def self_test() -> list[str]:
     entry = {"flag": "runtime_settings", "present_when": "live", "symbol": "ferrix_kernel_settings",
              "absent_symbols": ["<ferrix_kernel_load::syscall::system::UtsNamespace>::set_hostname"]}
@@ -125,7 +191,62 @@ def self_test() -> list[str]:
         failures.append("a seam symbol defined twice passed")
     if not seam_problems(Path("/nonexistent"), [], seam, "fixed"):
         failures.append("a seam symbol not defined passed")
+    only_x86 = dict(seam, seam_symbols_x86_64_only=["__ferrix_setters_sethostname"])
+    if seam_problems(Path("/nonexistent"), [], only_x86, "fixed", x86_64=False):
+        failures.append("an x86-only seam symbol was asked of another architecture")
+    if not seam_problems(Path("/nonexistent"), [], only_x86, "fixed", x86_64=True):
+        failures.append("an x86-only seam symbol not defined on x86-64 passed")
+    if not seam_problems(Path("/nonexistent"), fixed + ["__ferrix_setters_sethostname"], only_x86, "fixed", x86_64=False):
+        failures.append("an x86-only seam symbol defined twice elsewhere passed")
+    record = {
+        "ferrix-sched-fair": {"rust_name": "ferrix_sched_fair", "flag": "sched_fair", "present_when": "eevdf",
+                              "marker": "<ferrix_sched_fair::Eevdf as ferrix_sched_class::SchedClass<"},
+        "ferrix-sched-fixture": {"rust_name": "ferrix_sched_fixture", "fixture": True},
+        "named_outside": {},
+    }
+    present = ["<ferrix_sched_fair::Eevdf as ferrix_sched_class::SchedClass<T>>::check",
+               "ferrix_sched_fair::RunQueue<T>::insert"]
+    good_map = ("/t/libferrix_kernel_core-0c.rlib(core.o):(.text.x)\n    ferrix_kernel_core::sched::init\n"
+                "    ferrix_sched_fair::tree::check_node::<T>\n")
+    flags = {"sched_fair": "eevdf"}
+    if class_judge(present, good_map, record, flags):
+        failures.append(f"a kernel with fair and without the fixture was refused: {class_judge(present, good_map, record, flags)}")
+    for what, names, text, expect in [
+        ("the fixture in the ELF", present + ["ferrix_sched_fixture::Queue<T>::holds"], good_map, "the ELF holds"),
+        ("the fixture's rlib in the map", present, good_map + "/t/libferrix_sched_fixture-1b.rlib(x.o)\n", "pulls in a member"),
+        ("fair's marker inlined away", present[1:], good_map, "marker"),
+        ("fair's code missing from the map", present,
+         "/t/libferrix_kernel_core-0c.rlib(core.o)\n    ferrix_kernel_core::sched::init\n", "none of its code"),
+        ("the fixture's code monomorphised into another", present,
+         good_map + "    ferrix_sched_fixture::Queue<T>::holds\n", "holds a symbol of it"),
+    ]:
+        if not any(expect in p for p in class_judge(names, text, record, flags)):
+            failures.append(f"the class-crate judge passed {what}")
+    if not any("cannot show an absence" in p for p in class_judge(present, "", record, flags)) or \
+            not any("cannot show an absence" in p for p in class_judge(present, "_ZN17ferrix_sched_fair4tree\n", record, flags)):
+        failures.append("an empty or mangled map was read as showing an absence")
+    if not class_judge(present, good_map, record, {"sched_fair": "absent"}):
+        failures.append("fair in a kernel whose flags leave it out passed")
     return failures
+
+
+def class_main(elf: Path, map_path: Path, profile: str) -> int:
+    """`--class`: the class crates in one kernel."""
+    import tomllib
+    with MANIFEST.open(encoding="utf-8") as handle:
+        record = json.load(handle).get("class_crates", {})
+    with (ROOT / "tools" / "common" / "data" / "profiles" / f"{profile}.toml").open("rb") as handle:
+        flags = tomllib.load(handle).get("flags", {})
+    names = symbols(elf)
+    problems = class_judge(names, map_path.read_text(encoding="utf-8", errors="replace"), record, flags)
+    if problems:
+        for problem in problems:
+            print(f"removable-symbols: {elf}: {problem}", file=sys.stderr)
+        return 1
+    entries = [p for p in record if not p.startswith("//") and p != "named_outside"]
+    print(f"removable-symbols: {elf}: profile {profile}: {len(entries)} class crate(s) as its flags select, "
+          f"in the release ELF and the non-LTO map {map_path}")
+    return 0
 
 
 def main() -> int:
@@ -134,6 +255,9 @@ def main() -> int:
     parser.add_argument("--elf", type=Path)
     parser.add_argument("--crate")
     parser.add_argument("--value")
+    parser.add_argument("--class", dest="class_crates", action="store_true")
+    parser.add_argument("--map", type=Path)
+    parser.add_argument("--profile")
     args = parser.parse_args()
     failures = self_test()
     if failures:
@@ -143,6 +267,10 @@ def main() -> int:
     if args.self_test:
         print("removable-symbols: self-tests pass")
         return 0
+    if args.class_crates:
+        if not (args.elf and args.map and args.profile):
+            parser.error("--class needs --elf, --map and --profile")
+        return class_main(args.elf, args.map, args.profile)
     if not (args.elf and args.crate and args.value):
         parser.error("--elf, --crate and --value are needed")
     with MANIFEST.open(encoding="utf-8") as handle:

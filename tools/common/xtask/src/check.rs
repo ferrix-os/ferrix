@@ -318,6 +318,12 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
         &[
             &["tools/common/check/check-build-flags.py"],
             &["tools/common/check/check-boot-line.py", "--self-test"],
+            // The removable crates' and the class crates' judge, which only
+            // test-removable runs whole, its refusals shown here.
+            &[
+                "tools/common/check/check-removable-symbols.py",
+                "--self-test",
+            ],
         ],
     ),
     // The load ratchet (docs/roadmap/microkernel-m0.md, D): how much this
@@ -1279,8 +1285,95 @@ fn test_removable(args: &Args) -> Result<()> {
             }
         }
     }
+    checked += class_crates(&xtask, &arches_for(args)?, &kept)?;
     println!("test-removable: run: PASSED ({checked} kernels linked and checked)");
     Ok(())
+}
+
+/// The architectures test-removable runs on.
+fn arches_for(args: &Args) -> Result<Vec<Arch>> {
+    if args.arch.is_none() {
+        Ok(Arch::ALL.to_vec())
+    } else {
+        args.arches()
+    }
+}
+
+/// The buildable profiles test-removable's class-crate half links.
+const CLASS_PROFILES: [&str; 2] = ["present", "desktop"];
+
+/// test-removable's class-crate half (`docs/SCHED-CLASSES.md` §9b; container
+/// review 22 (not on record; ledger 5684), G3, G8): for each architecture and
+/// buildable profile, the
+/// release kernel, then the same kernel with LTO alone turned off and the
+/// linker's map of it, both kept in `kept`, judged by
+/// `check-removable-symbols.py --class` against `class_crates`: each class
+/// crate the profile's flags select leaves its marker in the ELF and its
+/// code in the map, and every other, the fixture among them, leaves nothing.
+///
+/// Verifies: H.SCHED.20
+fn class_crates(xtask: &std::path::Path, arches: &[Arch], kept: &std::path::Path) -> Result<usize> {
+    let mut checked = 0;
+    for &arch in arches {
+        for profile in CLASS_PROFILES {
+            let stem = format!("{}-class-{profile}", arch.name());
+            let map = kept.join(format!("{stem}.map"));
+            // A link cargo found fresh and skipped writes no map, and an older
+            // run's would be judged in its place (container review 23 (1)).
+            if map.exists() {
+                std::fs::remove_file(&map)
+                    .map_err(|error| Error::new(format!("{}: {error}", map.display())))?;
+            }
+            for with_map in [false, true] {
+                let mut build = Command::new(xtask);
+                let _ = build.current_dir(paths::workspace_root()).args([
+                    "build",
+                    "--release",
+                    "--arch",
+                    arch.name(),
+                    "--kernel-profile",
+                    profile,
+                ]);
+                if with_map {
+                    let _ = build.env(cargo::LINK_MAP, &map);
+                }
+                println!(
+                    "test-removable: {arch}: the class crates in profile {profile}{}",
+                    if with_map { ", linked without LTO" } else { "" }
+                );
+                let status = build
+                    .status()
+                    .map_err(|error| Error::new(format!("test-removable: {error}")))?;
+                if !status.success() {
+                    return Err(Error::new(format!(
+                        "test-removable: {arch}: the build of profile {profile} failed"
+                    )));
+                }
+                if !with_map {
+                    let elf = cargo::kernel_elf(arch, true);
+                    let copy = kept.join(format!("{stem}.elf"));
+                    let _ = std::fs::copy(&elf, &copy)
+                        .map_err(|error| Error::new(format!("{}: {error}", elf.display())))?;
+                }
+            }
+            let elf = kept.join(format!("{stem}.elf")).display().to_string();
+            let map = map.display().to_string();
+            python_with(
+                "tools/common/check/check-removable-symbols.py",
+                &[
+                    "--class",
+                    "--elf",
+                    &elf,
+                    "--map",
+                    &map,
+                    "--profile",
+                    profile,
+                ],
+            )?;
+            checked += 1;
+        }
+    }
+    Ok(checked)
 }
 
 /// The item crates that must make every allocation fallibly, by package.

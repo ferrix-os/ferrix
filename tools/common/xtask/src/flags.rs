@@ -264,9 +264,16 @@ pub(crate) struct Profile {
     pub(crate) values: Vec<(String, String)>,
     /// The `flag=value`s it uses below its level by a dated exception.
     pub(crate) exceptions: Vec<(String, String)>,
+    /// The `flag=value`s that do not allow its level yet, each waiting on
+    /// its own evidence (`pending`, docs/SCHED-CLASSES.md §9c, E3): while
+    /// any is listed the profile is validated statically and not built.
+    pub(crate) pending: Vec<(String, String)>,
     /// Its image keys (`image = { .. }`), in the file's order: what the
     /// image carries beside the kernel (docs/BUILD-FLAGS.md §3, "Not flags").
     pub(crate) image: Vec<(String, String)>,
+    /// The board families its loader accepts a signed slot for
+    /// (`slot_families`, docs/SIGNING.md §1.4).
+    pub(crate) slot_families: Vec<String>,
 }
 
 impl Profile {
@@ -297,16 +304,8 @@ impl Profile {
                 .ok_or_else(|| what(&format!("flag {flag} is not a string")))?;
             values.push((flag.clone(), value.to_owned()));
         }
-        let mut exceptions = Vec::new();
-        if let Some(Value::Array(items)) = root.get("exceptions") {
-            for item in items {
-                let field = |key: &str| item.get(key).and_then(Value::as_str).map(str::to_owned);
-                match (field("flag"), field("value")) {
-                    (Some(flag), Some(value)) => exceptions.push((flag, value)),
-                    _ => return Err(what("an exception names no flag or value")),
-                }
-            }
-        }
+        let exceptions = flag_values(&root, "exceptions").map_err(|why| what(&why))?;
+        let pending = flag_values(&root, "pending").map_err(|why| what(&why))?;
         let mut image = Vec::new();
         for (key, value) in root.get("image").map(Value::entries).unwrap_or_default() {
             let value = value
@@ -314,14 +313,36 @@ impl Profile {
                 .ok_or_else(|| what(&format!("image key {key} is not a string")))?;
             image.push((key.clone(), value.to_owned()));
         }
+        let slot_families = root
+            .get("slot_families")
+            .and_then(Value::strings)
+            .unwrap_or_default();
         Ok(Profile {
             name: name.to_owned(),
             level,
             values,
             exceptions,
+            pending,
             image,
+            slot_families,
         })
     }
+}
+
+/// A profile's list of `{ flag, value, .. }` tables under `key`.
+fn flag_values(root: &Value, key: &str) -> std::result::Result<Vec<(String, String)>, String> {
+    let Some(Value::Array(items)) = root.get(key) else {
+        return Ok(Vec::new());
+    };
+    items
+        .iter()
+        .map(|item| {
+            let field = |name: &str| item.get(name).and_then(Value::as_str).map(str::to_owned);
+            field("flag")
+                .zip(field("value"))
+                .ok_or_else(|| format!("an entry of `{key}` names no flag or value"))
+        })
+        .collect()
 }
 
 /// A build's flags, resolved.
@@ -406,7 +427,55 @@ impl Resolved {
 pub(crate) fn resolve(profile: Option<&str>, sets: &[(String, String)]) -> Result<Resolved> {
     let resolved = resolve_unbuilt(profile, sets)?;
     buildable(&resolved)?;
+    let families = read_toml(&paths::workspace_root().join(FAMILY_FILE))?;
+    let recorded = |name: &str| {
+        families
+            .get("family")
+            .and_then(|table| table.get(name))
+            .and_then(|family| family.get("recorded"))
+            .is_none_or(|value| matches!(value, Value::Bool(true)))
+    };
+    let profile = Profile::load(&resolved.base)?;
+    if let Some(why) = unnamed_boards(&profile, recorded) {
+        return Err(Error::new(why));
+    }
+    if resolved.profile != "none" && !profile.pending.is_empty() {
+        let waiting: Vec<String> = profile
+            .pending
+            .iter()
+            .map(|(flag, value)| format!("{flag}={value}"))
+            .collect();
+        return Err(Error::new(format!(
+            "profile {} is not yet buildable: {} not claimable at {} yet (pending)",
+            profile.name,
+            waiting.join(", "),
+            profile.level
+        )));
+    }
     Ok(resolved)
+}
+
+/// The hardware-family registry (`docs/SIGNING.md` §1.4).
+const FAMILY_FILE: &str = "tools/common/data/hardware-families.toml";
+
+/// Why a profile that boots only signed slots, and names no board family
+/// its loader can recognise (`recorded`), is not buildable: such an image
+/// boots nothing (docs/SCHED-CLASSES.md §9c; container reviews 25 (not on record;
+/// ledger 5684) (2) and 26).
+fn unnamed_boards(profile: &Profile, recorded: impl Fn(&str) -> bool) -> Option<String> {
+    let required = profile
+        .image
+        .iter()
+        .any(|(key, value)| key == "slot_signing" && value == "required");
+    let known = profile.slot_families.iter().any(|family| recorded(family));
+    (required && !known).then(|| {
+        format!(
+            "profile {} is not yet buildable: it boots only signed slots and names no board \
+             family in slot_families whose recognition rule is recorded, so its image would \
+             boot nothing",
+            profile.name
+        )
+    })
 }
 
 /// [`resolve`] without the last check: whether the result builds today.
@@ -533,6 +602,7 @@ fn consistent(file: &FlagFile, profile: &Profile, resolved: &Resolved) -> Result
             && profile
                 .exceptions
                 .iter()
+                .chain(&profile.pending)
                 .any(|(name, excepted)| name == flag && excepted == value);
         if !declared.allows.contains(&resolved.level) && !excepted {
             return Err(Error::new(format!(
@@ -747,6 +817,41 @@ mod tests {
             .iter()
             .map(|(flag, value)| ((*flag).to_owned(), (*value).to_owned()))
             .collect()
+    }
+
+    #[test]
+    fn signed_slots_with_no_board_family_are_refused() {
+        let mut profile = super::Profile::load("max_plus").unwrap();
+        assert!(super::unnamed_boards(&profile, |_| true).is_none());
+        assert!(
+            super::unnamed_boards(&profile, |_| false).is_some_and(|why| why.contains("recorded"))
+        );
+        profile.slot_families.clear();
+        assert!(
+            super::unnamed_boards(&profile, |_| true)
+                .is_some_and(|why| why.contains("names no board"))
+        );
+        assert!(
+            super::unnamed_boards(&super::Profile::load("present").unwrap(), |_| false).is_none()
+        );
+    }
+
+    #[test]
+    fn pending_values_are_validated_statically_and_never_built() {
+        let resolved = resolve_unbuilt(Some("max_plus"), &[]).unwrap();
+        assert_eq!(resolved.level, "sc4_plus");
+        assert!(resolve(Some("max_plus"), &[]).is_err());
+        let mut profile = super::Profile::load("max_plus").unwrap();
+        assert!(
+            profile
+                .pending
+                .contains(&("personality".to_owned(), "none".to_owned()))
+        );
+        profile.pending.clear();
+        let why = super::consistent(&FlagFile::load().unwrap(), &profile, &resolved)
+            .unwrap_err()
+            .to_string();
+        assert!(why.contains("rule 3"), "{why}");
     }
 
     #[test]

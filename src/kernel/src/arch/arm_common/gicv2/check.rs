@@ -21,7 +21,8 @@
 
 use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
-use ferrix_sched::{CpuSet, NICE_0_WEIGHT};
+use ferrix_sched_class::CpuSet;
+use ferrix_sched_fair::NICE_0_WEIGHT;
 
 use super::{
     DEFAULT_PRIORITY, DISTRIBUTOR, FIRST_SPECIAL_ID, GICD_ICENABLER, GICD_ICFGR, GICD_IPRIORITYR,

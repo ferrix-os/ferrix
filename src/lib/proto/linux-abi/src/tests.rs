@@ -2100,6 +2100,8 @@ const ARM_NUMBERS: &[(usize, Syscall)] = &[
     (374, Syscall::Sendmmsg),                 // sendmmsg
     (375, Syscall::Setns),                    // setns
     (379, Syscall::FinitModule),              // finit_module
+    (380, Syscall::SchedSetattr),             // sched_setattr
+    (381, Syscall::SchedGetattr),             // sched_getattr
     (382, Syscall::Renameat2),                // renameat2
     (384, Syscall::Getrandom),                // getrandom
     (385, Syscall::MemfdCreate),              // memfd_create
@@ -3603,8 +3605,6 @@ const I386_NUMBERS: [(usize, usize, usize); 250] = [
     (i386::SYSLOG, 103, arm::SYSLOG),
     (i386::SCHED_SETAFFINITY, 241, arm::SCHED_SETAFFINITY),
     (i386::SCHED_GETAFFINITY, 242, arm::SCHED_GETAFFINITY),
-    (i386::SCHED_SETATTR, 351, arm::SCHED_SETATTR),
-    (i386::SCHED_GETATTR, 352, arm::SCHED_GETATTR),
     (i386::PSELECT6_TIME64, 413, arm::PSELECT6_TIME64),
     (i386::TIMES, 43, arm::TIMES),
     (i386::GETRUSAGE, 77, arm::GETRUSAGE),
@@ -3653,6 +3653,8 @@ const I386_NUMBERS: [(usize, usize, usize); 250] = [
     (i386::FSTATAT64, 300, arm::FSTATAT64),
     (i386::RSEQ, 386, arm::RSEQ),
     (i386::WAITID, 284, arm::WAITID),
+    (i386::SCHED_SETATTR, 351, arm::SCHED_SETATTR),
+    (i386::SCHED_GETATTR, 352, arm::SCHED_GETATTR),
 ];
 
 /// Every i386 number [`from_i386`] translates, as `asm/unistd_32.h` numbers

@@ -127,7 +127,7 @@ pub(crate) fn claim() -> Result<Arc<Endpoint>, CreateError> {
         return Err(CreateError::InUse);
     }
     *STARTING.lock() = Some(kernel_end);
-    if sched::spawn("logctl", run, 0, ferrix_sched::NICE_0_WEIGHT).is_err() {
+    if sched::spawn("logctl", run, 0, ferrix_sched_fair::NICE_0_WEIGHT).is_err() {
         let _ = STARTING.lock().take();
         CLAIMED.store(false, Ordering::Release);
         return Err(CreateError::NoMemory);

@@ -21,7 +21,7 @@
 use core::arch::x86_64::{__cpuid, __cpuid_count};
 use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
-use ferrix_sched::MAX_CPUS;
+use ferrix_sched_class::MAX_CPUS;
 
 pub(crate) mod check;
 

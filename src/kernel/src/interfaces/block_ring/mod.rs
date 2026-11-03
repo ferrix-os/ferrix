@@ -363,7 +363,7 @@ pub(crate) fn create(node: &Arc<DeviceNode>) -> Result<Arc<Endpoint>, CreateErro
         control: kernel_end,
         location,
     });
-    match sched::spawn("block ring", run, id, ferrix_sched::NICE_0_WEIGHT) {
+    match sched::spawn("block ring", run, id, ferrix_sched_fair::NICE_0_WEIGHT) {
         Ok(task) => {
             let mut tasks = TASKS.lock();
             tasks.retain(|task| !task.is_dead());

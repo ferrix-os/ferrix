@@ -99,7 +99,14 @@ pub(crate) fn start() {
     {
         return;
     }
-    if sched::spawn("watchdog", feed_forever, 0, ferrix_sched::NICE_0_WEIGHT).is_err() {
+    if sched::spawn(
+        "watchdog",
+        feed_forever,
+        0,
+        ferrix_sched_fair::NICE_0_WEIGHT,
+    )
+    .is_err()
+    {
         println!("  watchdog no task to feed them: the phone will reset within seconds");
     }
 }

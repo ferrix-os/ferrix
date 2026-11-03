@@ -57,7 +57,7 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use crate::sync::SpinLock;
 
@@ -208,6 +208,12 @@ pub struct Job {
     domain: u64,
     /// Sealed as it was made, as is every job made inside it (`H.OBJ.22`).
     sealed: bool,
+    /// The scheduling domain it was admitted to (`sched::domains`,
+    /// docs/SCHED-CLASSES.md §9f, V10), as that domain's word: zero for
+    /// none, when it is in its parent's, and so in the boot domain at the
+    /// root. A word naming a domain since dissolved reads as the boot
+    /// domain's.
+    sched_domain: AtomicU32,
 }
 
 /// Whose audit budget a new job's refusals are charged to: decided by
@@ -441,6 +447,7 @@ impl Job {
             audit_budget,
             domain: 0,
             sealed: false,
+            sched_domain: AtomicU32::new(0),
         })
     }
 
@@ -1031,6 +1038,27 @@ impl Job {
             job.memory_events.wake_all();
             at = job.parent.as_deref();
         }
+    }
+
+    /// The slot of the scheduling domain its processes run in: the one it
+    /// or the nearest job above it was admitted to, while that domain lives,
+    /// and otherwise the boot domain's (`sched::domains`, V10).
+    pub(crate) fn sched_slot(&self) -> u8 {
+        let mut at = Some(self);
+        while let Some(job) = at {
+            let word = job.sched_domain.load(Ordering::Acquire);
+            if word != 0 {
+                return crate::sched::domain_slot_of_word(word);
+            }
+            at = job.parent.as_deref();
+        }
+        crate::sched::domain_slot_of_word(0)
+    }
+
+    /// Admit it, and every job beneath it, to the domain whose word is
+    /// `word` (`sched::domains::admit`).
+    pub(crate) fn set_sched_domain(&self, word: u32) {
+        self.sched_domain.store(word, Ordering::Release);
     }
 
     /// Whether `job` is this job or beneath it.

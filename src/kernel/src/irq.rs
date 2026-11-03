@@ -207,8 +207,8 @@ pub const COUNTED: usize = 128;
 /// Interrupts delivered, per processor and number: `/proc/interrupts`, which
 /// shows where a device's interrupts land (`docs/CORE-QUARANTINE.md` §7,
 /// that none lands on a processor out of service).
-static HERE: [AtomicU32; COUNTED * ferrix_sched::MAX_CPUS] =
-    [const { AtomicU32::new(0) }; COUNTED * ferrix_sched::MAX_CPUS];
+static HERE: [AtomicU32; COUNTED * ferrix_sched_class::MAX_CPUS] =
+    [const { AtomicU32::new(0) }; COUNTED * ferrix_sched_class::MAX_CPUS];
 
 /// Count `irq` delivered on this processor.
 fn count_here(irq: u32) {

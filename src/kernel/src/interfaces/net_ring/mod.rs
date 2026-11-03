@@ -247,7 +247,7 @@ pub(crate) fn create(node: &Arc<DeviceNode>) -> Result<(usize, Arc<Endpoint>), C
         device: Arc::clone(node),
         location: crate::interfaces::block_ring::location_of(node),
     });
-    match sched::spawn("net ring", run, id, ferrix_sched::NICE_0_WEIGHT) {
+    match sched::spawn("net ring", run, id, ferrix_sched_fair::NICE_0_WEIGHT) {
         Ok(task) => {
             let mut tasks = TASKS.lock();
             tasks.retain(|(_, task)| !task.is_dead());

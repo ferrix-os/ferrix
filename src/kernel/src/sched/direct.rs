@@ -33,7 +33,7 @@
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use ferrix_sched::JobPlan;
+use ferrix_sched_fair::JobPlan;
 use ferrix_sync::{IrqControl, SpinLock};
 
 use super::queue::CpuQueue;
@@ -75,8 +75,9 @@ pub enum Count {
     T10,
     /// This processor's run queue lock held.
     Queue,
-    /// T11: the parked task's home is another processor, or it does not
-    /// hold both its slots (asleep elsewhere's state 3).
+    /// T11: the parked task's home is another processor, it does not hold
+    /// both its slots (asleep elsewhere's state 3), or it may not run here
+    /// for its domain (docs/SCHED-CLASSES.md §9f, V3).
     T11,
     /// T12: something waits in the fair class, or a sleeper is due.
     T12,
@@ -183,7 +184,9 @@ pub(crate) fn begin(caller: &Task, peer: &Task) -> Result<Direct, Count> {
     // elsewhere (state 3 of `wake_with`), which only that set gives back.
     // Its run slot is held exactly while no queue holds it, which A1 asserts
     // (`is_queued`, set and cleared with the slot under the queue's lock).
-    if peer.cpu() != cpu || !peer.holds_sleep_slot() {
+    // And it may run here for its domain: a peer in another falls back to
+    // the ordinary wake, which places it in its own (V3).
+    if peer.cpu() != cpu || !peer.holds_sleep_slot() || !super::domains::admits(peer, cpu) {
         return Err(Count::T11);
     }
     // T12: nothing waits in the fair class, and no sleeper is due, so that
@@ -232,6 +235,7 @@ impl Direct {
         block_caller: impl FnOnce(Arc<Task>),
     ) {
         let now = self.now;
+        let cpu = self.cpu;
         let queue = self.queue();
         let idle = queue.idle.as_ref().is_some_and(|idle| {
             core::ptr::eq(Arc::as_ptr(idle), caller) || Arc::ptr_eq(idle, &peer)
@@ -246,6 +250,15 @@ impl Direct {
             .current
             .as_ref()
             .is_some_and(|current| Arc::ptr_eq(current, &peer));
+        // Its domain was tested under this lock hold too (T11), and is
+        // changed only under it (D-1, V2).
+        if !super::domains::admits(&peer, cpu) {
+            crate::panic::fatal!(
+                crate::panic::catalog::TASK_OUTSIDE_DOMAIN,
+                "the direct switch was asked to run a task outside its domain: task {}",
+                peer.id
+            );
+        }
         // Its slots were tested under this lock hold (T11, `begin`), and
         // only a holder of a queue's lock moves them.
         if running || peer.is_queued() || peer.state() != BLOCKED {
@@ -269,7 +282,15 @@ impl Direct {
         // `set_state_from` adds it.
         peer.store_state(RUNNABLE);
         let joined = peer.join_word();
-        let plan = ferrix_sched::plan_job_fold(joined, caller.group_word(), quota::NONE);
+        // A fold only between two fair tasks (docs/SCHED-CLASSES.md §9e, R6,
+        // F10): the fused step is the fair class's, and a real-time task on
+        // either side takes the stack's general sequence, under which the
+        // caller's leave and the peer's join are made apart.
+        let plan = if caller.is_fair() && peer.is_fair() {
+            ferrix_sched_fair::plan_job_fold(joined, caller.group_word(), quota::NONE)
+        } else {
+            JobPlan::Separate
+        };
         match (plan, joined) {
             (JobPlan::Separate, Some((job, weight))) => {
                 quota::adjust(job, i64::from(weight));
