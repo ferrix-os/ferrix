@@ -338,8 +338,10 @@ const BUCKET_BITS: u32 = 8;
 /// Buckets in [`TABLE`].
 pub(crate) const BUCKETS: usize = 1 << BUCKET_BITS;
 
+// CHECKS-ONLY: user/address_wait_check.rs
 /// The least room a bucket keeps once it has had any: [`shrink`] goes no
 /// lower.
+#[doc(hidden)]
 pub const MIN_ROOM: usize = 4;
 
 /// The most entries a wake takes off a bucket under one hold of its lock.
@@ -967,9 +969,11 @@ pub fn bucket_of(key: &Key) -> usize {
     key.bucket()
 }
 
+// CHECKS-ONLY: user/address_wait_check.rs
 /// The entries and room of bucket `index`: for the self-check of the bound on
 /// a bucket's uncharged room, which only a kernel with its checks runs.
 #[cfg(ferrix_checks = "on")]
+#[doc(hidden)]
 pub fn bucket_room(index: usize) -> (usize, usize) {
     let table = bucket_lock(index).lock();
     (table.len(), table.capacity())

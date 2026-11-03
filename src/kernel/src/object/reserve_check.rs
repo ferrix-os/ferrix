@@ -35,6 +35,7 @@ pub struct Report {
     pub heap_pages: u64,
 }
 
+// CHECKS-ONLY: stages_check.rs
 /// Run every check.
 ///
 /// # Errors
@@ -47,6 +48,7 @@ pub struct Report {
 /// Verifies: L.object.225
 /// Verifies: L.user.145
 /// Verifies: L.mm.81
+#[doc(hidden)]
 pub fn run() -> Result<Report, &'static str> {
     let slots = quota::live_slots();
     let promise = mm::outstanding_promise();

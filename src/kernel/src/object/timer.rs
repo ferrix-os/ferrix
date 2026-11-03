@@ -554,8 +554,10 @@ impl Drop for TimerCore {
 pub mod sabotage {
     use super::{Armed, Ordering, SleepSlot, TimerCore, sched};
 
+    // CHECKS-ONLY: object/timer_check.rs
     /// Take `timer`'s arm off its sleeper set as a pass would, without its
     /// lock, leaving the slot out: an arm in flight.
+    #[doc(hidden)]
     pub fn take_arm(timer: &TimerCore) -> Option<(Armed, SleepSlot)> {
         sched::unfile_timer(timer.filed_cpu.load(Ordering::Relaxed), timer)
     }

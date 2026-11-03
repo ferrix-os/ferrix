@@ -46,9 +46,11 @@ pub enum Due {
     Fire(Armed),
 }
 
+// CHECKS-ONLY: object/timer_check.rs
 /// The most timer arms one processor holds between being taken off its
 /// sleeper set and being fired by its timer interrupt, and the most a pass
 /// re-files when that is full (`L.object.218`).
+#[doc(hidden)]
 pub const FIRE_BATCH: usize = 16;
 
 /// The most a task under a `cpu.max` runs before the quota is looked at
@@ -76,11 +78,11 @@ pub(crate) const TARGET_LATENCY_NS: u64 = 3_000_000;
 /// the same number `sched_min_granularity`, and the ratio between it and the
 /// target latency is what decides how many runnable tasks it takes before
 /// latency has to give: eight, here.
-pub const MIN_SLICE_NS: u64 = TARGET_LATENCY_NS / 8;
+pub(crate) const MIN_SLICE_NS: u64 = TARGET_LATENCY_NS / 8;
 
 /// The largest slice, which is what one runnable task gets and what the
 /// fairness bound is stated in.
-pub const SLICE_NS: u64 = TARGET_LATENCY_NS;
+pub(crate) const SLICE_NS: u64 = TARGET_LATENCY_NS;
 
 /// The shortest interval worth arming the timer for: below this the interrupt
 /// costs more than the time it measures.
@@ -155,10 +157,12 @@ pub(crate) struct Pick {
     pub(crate) count: usize,
 }
 
+// CHECKS-ONLY: object/timer_check.rs
 /// Timer arms a pass took off a sleeper set and the timer interrupt has not
 /// fired yet: at most [`FIRE_BATCH`], in a fixed array, so that a pass
 /// allocates nothing.
 #[derive(Debug)]
+#[doc(hidden)]
 pub struct Fired {
     /// The arms and their slots; the first `len` are full.
     pub slots: [Option<(Armed, SleepSlot)>; FIRE_BATCH],
@@ -182,6 +186,7 @@ impl Fired {
     }
 }
 
+// CHECKS-ONLY: object/timer_check.rs
 /// One pass's next step over `sleepers` at `now`: entries leave in key
 /// order while the first is due. A timer's arm goes into `fired`, which only
 /// the timer interrupt empties: a decision holds the run queue's lock across
@@ -201,6 +206,7 @@ impl Fired {
 /// out not. `None` when nothing more is due. A free function over the set
 /// and the buffer so that stage 9's coalescing case runs this same code over
 /// a set it built (`object::timer_check`).
+#[doc(hidden)]
 pub fn take_next(
     sleepers: &mut Timeline<Due>,
     fired: &mut Fired,

@@ -262,8 +262,10 @@ impl Pager {
     }
 }
 
+// CHECKS-ONLY: object/pager_check.rs
 /// A pager's bound, clamped to `[PAGER_WAIT_MIN_NS, PAGER_WAIT_MAX_NS]`, 0
 /// asking for the maximum.
+#[doc(hidden)]
 pub const fn clamp_wait(wait_ns: u64) -> u64 {
     if wait_ns == 0 || wait_ns > PAGER_WAIT_MAX_NS {
         PAGER_WAIT_MAX_NS

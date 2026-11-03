@@ -1288,11 +1288,13 @@ impl Drop for Endpoint {
     }
 }
 
+// CHECKS-ONLY: object/ticket_check.rs
 /// What one channel takes from the kernel heap: its two sides and its two
 /// ends. Not charged as heap to anyone, as no native object's own record is:
 /// it is one of the two objects its maker's job is counted for (F-35). Read
 /// by the ticket check, for K7's stated bound (`docs/microkernel/K7.md`
 /// §2.3).
+#[doc(hidden)]
 pub fn heap_footprint() -> usize {
     ferrix_kmem::arc_footprint::<Channel>()
         .saturating_add(2 * ferrix_kmem::arc_footprint::<Endpoint>())

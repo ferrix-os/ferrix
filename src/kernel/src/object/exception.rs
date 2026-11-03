@@ -203,6 +203,7 @@ impl Supervisor {
     }
 
     /// Whether a channel whose read end is open is attached.
+    #[doc(hidden)]
     pub fn is_live(&self) -> bool {
         match &*self.slot.lock() {
             Slot::Open(Some(attached)) => !attached.end.peer_closed(),
@@ -414,12 +415,16 @@ static REPORTED: AtomicU64 = AtomicU64::new(0);
 /// Levels skipped since boot because a report could not be made or queued.
 static SKIPPED: AtomicU64 = AtomicU64::new(0);
 
+// CHECKS-ONLY: object/exception_check.rs
 /// Reports written since boot, for the checks.
+#[doc(hidden)]
 pub fn reported() -> u64 {
     REPORTED.load(Ordering::Relaxed)
 }
 
+// CHECKS-ONLY: object/exception_check.rs
 /// Levels skipped since boot, for the checks.
+#[doc(hidden)]
 pub fn skipped() -> u64 {
     SKIPPED.load(Ordering::Relaxed)
 }

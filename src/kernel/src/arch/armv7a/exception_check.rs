@@ -10,6 +10,7 @@ use alloc::vec::Vec;
 
 use ferrix_native_abi::exception::Armv7aRegisters as Registers;
 
+// CHECKS-ONLY: object/exception_check.rs
 /// `bkpt #0`, then `exit_group(97)`, which only a program resumed past its
 /// breakpoint reaches. ARM state.
 ///
@@ -17,6 +18,7 @@ use ferrix_native_abi::exception::Armv7aRegisters as Registers;
 ///   bkpt #0
 ///   mov r7, #248 ; mov r0, #97 ; svc #0
 /// ```
+#[doc(hidden)]
 pub const BREAKPOINT_PROGRAM: &[u8] = &[
     0x70, 0x00, 0x20, 0xe1, // bkpt #0
     0xf8, 0x70, 0xa0, 0xe3, // mov  r7, #248
@@ -24,26 +26,40 @@ pub const BREAKPOINT_PROGRAM: &[u8] = &[
     0x00, 0x00, 0x00, 0xef, // svc  #0
 ];
 
+// CHECKS-ONLY: object/exception_check.rs
 /// How a program's breakpoint instruction is reported.
+#[doc(hidden)]
 pub const BREAKPOINT_KIND: u32 = ferrix_native_abi::exception::KIND_BREAKPOINT;
 
+// CHECKS-ONLY: object/exception_check.rs
 /// The architecture's code a breakpoint's report carries: not compared,
 /// the `IFSR` a `bkpt` leaves being the debug event's encoding of the core.
+#[doc(hidden)]
 pub const BREAKPOINT_CODE: Option<u64> = None;
 
+// CHECKS-ONLY: object/exception_check.rs
 /// How far past a breakpoint's own address a supervisor resumes: `bkpt`
 /// leaves the pc at itself.
+#[doc(hidden)]
 pub const BREAKPOINT_SKIP: u64 = 4;
 
+// CHECKS-ONLY: object/exception_check.rs
 /// Whether a breakpoint's report says its pc is the trapping instruction's.
+#[doc(hidden)]
 pub const BREAKPOINT_PC_AT_TRAP: bool = true;
 
+// CHECKS-ONLY: object/exception_check.rs
 /// In `USER_FAULT_PROGRAM`: the faulting store's offset, and its `svc`'s.
+#[doc(hidden)]
 pub const FAULT_AT: u64 = 4;
+// CHECKS-ONLY: object/exception_check.rs
 /// See [`FAULT_AT`].
+#[doc(hidden)]
 pub const FAULT_EXIT_AT: u64 = 16;
 
+// CHECKS-ONLY: object/exception_check.rs
 /// Point `registers` at an `exit_group(status)` instruction at `pc`.
+#[doc(hidden)]
 pub fn exit_with(registers: &mut Registers, pc: u64, status: u64) {
     registers.r[15] = pc as u32;
     registers.r[7] = 248;
@@ -55,14 +71,18 @@ pub fn pc(registers: &Registers) -> u64 {
     u64::from(registers.r[15])
 }
 
+// CHECKS-ONLY: object/exception_check.rs
 /// Set the program counter.
+#[doc(hidden)]
 pub fn set_pc(registers: &mut Registers, pc: u64) {
     registers.r[15] = pc as u32;
 }
 
+// CHECKS-ONLY: object/exception_check.rs
 /// Register sets a supervisor's write must be refused, each named, made
 /// from the thread's own `base` (L.armv7a.28; the consultant's condition 5,
 /// ledger 2871).
+#[doc(hidden)]
 pub fn forgeries(base: &Registers) -> Vec<(Registers, &'static str)> {
     let mut forged = Vec::new();
     let with = |change: &dyn Fn(&mut Registers)| {

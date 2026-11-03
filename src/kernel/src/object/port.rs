@@ -429,7 +429,7 @@ impl Observer {
     /// [`Observer::fire`], handing back the port it queued on instead of
     /// letting go of it: for a caller in an interrupt handler, which must
     /// not be the one to drop a port's last reference (`object::timer`).
-    pub fn fire_keeping(self, asserted: Signals) -> Option<Arc<Port>> {
+    pub(crate) fn fire_keeping(self, asserted: Signals) -> Option<Arc<Port>> {
         let Observer {
             mut promise,
             key,

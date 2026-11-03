@@ -540,6 +540,10 @@
       "before": "pub(crate)"
     },
     {
+      "item": "arch/mod.rs: exception_check (re-export)",
+      "before": "pub(crate)"
+    },
+    {
       "item": "arch/mod.rs: forget_root (re-export)",
       "before": "pub(crate)"
     },
@@ -1000,11 +1004,23 @@
       "before": "pub(crate)"
     },
     {
+      "item": "audit.rs: EXCEPTION_CONTEXT (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "audit.rs: EXCEPTION_KILLED (re-export)",
+      "before": "pub(crate)"
+    },
+    {
       "item": "audit.rs: Event (re-export)",
       "before": "pub(crate)"
     },
     {
       "item": "audit.rs: NO_UID (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "audit.rs: PAGER (re-export)",
       "before": "pub(crate)"
     },
     {
@@ -1412,6 +1428,10 @@
       "before": "pub(crate)"
     },
     {
+      "item": "mm/check.rs: WxReport::leaves (field)",
+      "before": "pub(crate)"
+    },
+    {
       "item": "mm/check.rs: hole_in_ram (fn)",
       "before": "pub(crate)"
     },
@@ -1421,6 +1441,10 @@
     },
     {
       "item": "mm/check.rs: past_ram (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "mm/check.rs: sweep_user_root (fn)",
       "before": "pub(crate)"
     },
     {
@@ -1508,15 +1532,19 @@
       "before": "pub(crate)"
     },
     {
-      "item": "object/oom.rs: is_charge_refusal (fn)",
-      "before": "pub(crate)"
-    },
-    {
       "item": "object/oom.rs: kills (fn)",
       "before": "pub(crate)"
     },
     {
       "item": "object/oom.rs: out_of_memory (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/oom.rs: user_fault (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/pager.rs: PagerCore (struct)",
       "before": "pub(crate)"
     },
     {
@@ -1557,6 +1585,10 @@
     },
     {
       "item": "object/process.rs: Exit::for_check (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/process.rs: Process::job_id (method)",
       "before": "pub(crate)"
     },
     {
@@ -1605,6 +1637,54 @@
     },
     {
       "item": "object/quota.rs: uncharge (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/reserve_check.rs: Report::promise (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/ticket.rs: Ticket (struct)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/timer.rs: Armed (struct)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/timer.rs: Report::fired_at (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/timer.rs: Report::fired_in (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/timer.rs: Report::fires (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/timer.rs: Report::home (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/timer.rs: TimerCore (struct)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/timer.rs: TimerCore::timeline_id (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/timer.rs: fire (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/timer.rs: heap_bytes (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/timer.rs: take_arm (fn)",
       "before": "pub(crate)"
     },
     {
@@ -1828,6 +1908,18 @@
       "before": "pub(crate)"
     },
     {
+      "item": "sched/mod.rs: Due (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/mod.rs: FIRE_BATCH (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/mod.rs: Fired (re-export)",
+      "before": "pub(crate)"
+    },
+    {
       "item": "sched/mod.rs: REAPER_PATIENCE_NANOS (const)",
       "before": "pub(crate)"
     },
@@ -1896,6 +1988,10 @@
       "before": "pub(crate)"
     },
     {
+      "item": "sched/mod.rs: take_next (re-export)",
+      "before": "pub(crate)"
+    },
+    {
       "item": "sched/mod.rs: wait_until_reaper_quiet (fn)",
       "before": "pub(crate)"
     },
@@ -1908,6 +2004,14 @@
       "before": "pub(crate)"
     },
     {
+      "item": "sched/queue.rs: Due (enum)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/task.rs: Task::address_space (method)",
+      "before": "pub(crate)"
+    },
+    {
       "item": "sched/task.rs: Task::base_weight (method)",
       "before": "pub(crate)"
     },
@@ -1917,6 +2021,10 @@
     },
     {
       "item": "sched/task.rs: Task::entity_state (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/task.rs: Task::filed_at (method)",
       "before": "pub(crate)"
     },
     {
@@ -2136,6 +2244,10 @@
       "before": "pub(crate)"
     },
     {
+      "item": "user/space.rs: AddressSpace::resident_pages (method)",
+      "before": "pub(crate)"
+    },
+    {
       "item": "user/space.rs: AddressSpace::uninstall (method)",
       "before": "pub(crate)"
     },
@@ -2157,6 +2269,10 @@
     },
     {
       "item": "user/vmo.rs: Vmo::mapper_count (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "user/vmo.rs: Vmo::page_state (method)",
       "before": "pub(crate)"
     },
     {

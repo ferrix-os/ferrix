@@ -9,6 +9,7 @@ use alloc::vec::Vec;
 
 use ferrix_native_abi::exception::X86_64Registers as Registers;
 
+// CHECKS-ONLY: object/exception_check.rs
 /// `int3`, then `exit_group(97)`, which only a program resumed past it
 /// reaches.
 ///
@@ -20,6 +21,7 @@ use ferrix_native_abi::exception::X86_64Registers as Registers;
 ///   int3
 ///   movl $231, %eax ; movl $97, %edi ; syscall
 /// ```
+#[doc(hidden)]
 pub const BREAKPOINT_PROGRAM: &[u8] = &[
     0xcc, // int3
     0xb8, 0xe7, 0x00, 0x00, 0x00, // movl $231, %eax
@@ -27,26 +29,40 @@ pub const BREAKPOINT_PROGRAM: &[u8] = &[
     0x0f, 0x05, // syscall
 ];
 
+// CHECKS-ONLY: object/exception_check.rs
 /// How a program's breakpoint instruction is reported here.
+#[doc(hidden)]
 pub const BREAKPOINT_KIND: u32 = ferrix_native_abi::exception::KIND_BREAKPOINT;
 
+// CHECKS-ONLY: object/exception_check.rs
 /// The architecture's code a breakpoint's report carries: vector 3 over no
 /// error code.
+#[doc(hidden)]
 pub const BREAKPOINT_CODE: Option<u64> = Some(3 << 32);
 
+// CHECKS-ONLY: object/exception_check.rs
 /// How far past the reported pc a supervisor resumes: none, the processor
 /// has already stepped over the `int3`.
+#[doc(hidden)]
 pub const BREAKPOINT_SKIP: u64 = 0;
 
+// CHECKS-ONLY: object/exception_check.rs
 /// Whether a breakpoint's report says its pc is the trapping instruction's.
+#[doc(hidden)]
 pub const BREAKPOINT_PC_AT_TRAP: bool = false;
 
+// CHECKS-ONLY: object/exception_check.rs
 /// In `USER_FAULT_PROGRAM`: the faulting store's offset, and its `syscall`'s.
+#[doc(hidden)]
 pub const FAULT_AT: u64 = 2;
+// CHECKS-ONLY: object/exception_check.rs
 /// See [`FAULT_AT`].
+#[doc(hidden)]
 pub const FAULT_EXIT_AT: u64 = 15;
 
+// CHECKS-ONLY: object/exception_check.rs
 /// Point `registers` at an `exit_group(status)` instruction at `pc`.
+#[doc(hidden)]
 pub fn exit_with(registers: &mut Registers, pc: u64, status: u64) {
     registers.rip = pc;
     registers.general[0] = 231;
@@ -58,7 +74,9 @@ pub fn pc(registers: &Registers) -> u64 {
     registers.rip
 }
 
+// CHECKS-ONLY: object/exception_check.rs
 /// Set the program counter.
+#[doc(hidden)]
 pub fn set_pc(registers: &mut Registers, pc: u64) {
     registers.rip = pc;
 }
@@ -76,9 +94,11 @@ const ALLOWED_FLAGS: u64 = (1 << 0)
     | (1 << 18)
     | 0x202;
 
+// CHECKS-ONLY: object/exception_check.rs
 /// Register sets a supervisor's write must be refused, each named, made
 /// from the thread's own `base` (L.x86_64.186; the consultant's condition 5,
 /// ledger 2871).
+#[doc(hidden)]
 pub fn forgeries(base: &Registers) -> Vec<(Registers, &'static str)> {
     let mut forged = Vec::new();
     let with = |change: &dyn Fn(&mut Registers)| {

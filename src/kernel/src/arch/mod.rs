@@ -82,11 +82,17 @@ pub enum StatLayout {
 }
 
 // K4's boot check's architecture half, per architecture (`docs/microkernel/K4.md` §5).
+// CHECKS-ONLY: object/exception_check.rs
 #[cfg(target_arch = "aarch64")]
+#[doc(hidden)]
 pub use aarch64::exception_check;
+// CHECKS-ONLY: object/exception_check.rs
 #[cfg(target_arch = "arm")]
+#[doc(hidden)]
 pub use armv7a::exception_check;
+// CHECKS-ONLY: object/exception_check.rs
 #[cfg(target_arch = "x86_64")]
+#[doc(hidden)]
 pub use x86_64::exception_check;
 // Drivers for the Arm peripherals both Arm architectures can have: the GICv2,
 // the PL011, and the STM32MP1's USART, which is ARMv7-A's.

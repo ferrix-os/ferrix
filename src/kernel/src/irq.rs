@@ -137,7 +137,7 @@ static UNMARKED: AtomicU64 = AtomicU64::new(0);
 
 /// How many interrupts ran their handler unmarked as interrupt context:
 /// none, if every entry marks its service loop.
-pub fn unmarked() -> u64 {
+pub(crate) fn unmarked() -> u64 {
     UNMARKED.load(Ordering::Relaxed)
 }
 

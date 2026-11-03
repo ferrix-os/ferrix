@@ -886,7 +886,7 @@ impl AddressSpace {
     /// covers, a private region -- whose pages are this space's alone, even
     /// while a `fork` shares them copy-on-write -- and a device region, which
     /// has no object.
-    pub fn shared_object_at(&self, address: u64) -> Option<(Arc<Vmo>, u64)> {
+    pub(crate) fn shared_object_at(&self, address: u64) -> Option<(Arc<Vmo>, u64)> {
         let inner = self.inner.lock();
         let region = inner.map.find(address)?;
         if !region.flags.shared {
@@ -2163,6 +2163,7 @@ impl AddressSpace {
     }
 
     /// How many shootdowns of this space have begun: see the field.
+    #[doc(hidden)]
     pub fn shootdowns_begun(&self) -> u64 {
         self.flushes.begun.load(Ordering::SeqCst)
     }

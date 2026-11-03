@@ -88,8 +88,11 @@ pub use preempt::{preempt_disable, preempt_enable};
 /// The slice a task alone on its queue is given: what `sched_getattr`
 /// answers for a thread that asked for none of its own.
 pub const BASE_SLICE_NS: u64 = SLICE_NS;
-pub use queue::{Due, MIN_SLICE_NS, SLICE_NS};
+pub use queue::Due;
+pub(crate) use queue::{MIN_SLICE_NS, SLICE_NS};
+// CHECKS-ONLY: object/timer_check.rs
 #[cfg(ferrix_checks = "on")]
+#[doc(hidden)]
 pub use queue::{FIRE_BATCH, Fired, take_next};
 pub(crate) use task::SleepSlot;
 pub use task::Task;
@@ -3058,8 +3061,10 @@ pub(crate) fn unfile_timer(
     queue.unfile_timer(key, timer.timeline_id())
 }
 
+// CHECKS-ONLY: object/timer_check.rs
 /// How many entries, tasks and timer arms, this processor's sleeper set
 /// holds, and how many arms wait in its fired buffer: for the checks.
+#[doc(hidden)]
 pub fn sleepers_here() -> (usize, usize) {
     let saved = <arch::Irq as IrqControl>::disable();
     let counts = this_cpu().and_then(queue_of).map_or((0, 0), |lock| {

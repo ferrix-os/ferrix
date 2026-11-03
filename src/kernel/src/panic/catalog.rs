@@ -355,8 +355,10 @@ pub static STAGE9_QUOTAS: Explanation = Explanation {
           docs/certification/IMPLEMENTATION.md",
 };
 
+// CHECKS-ONLY: stages_check.rs
 /// For `check_pager` in `stages_check.rs`, when `object::pager_check::run`
 /// fails.
+#[doc(hidden)]
 pub static STAGE9_PAGER: Explanation = Explanation {
     code: "FX-0915",
     title: "a pager-backed VMO's fault, wait or dirty tracking was not as K3 states",
@@ -387,7 +389,9 @@ pub static STAGE9_PAGER: Explanation = Explanation {
           src/kernel/src/user/vmo.rs; src/kernel/src/user/space.rs; docs/microkernel/K3.md",
 };
 
+// CHECKS-ONLY: stages_check.rs
 /// For `check_reservations` in `stages_check.rs`.
+#[doc(hidden)]
 pub static STAGE9_RESERVE: Explanation = Explanation {
     code: "FX-0914",
     title: "a job's memory reservation did not hold what it promises",
@@ -415,7 +419,9 @@ pub static STAGE9_RESERVE: Explanation = Explanation {
           src/kernel/src/object/reserve_check.rs; docs/microkernel/K12.md",
 };
 
+// CHECKS-ONLY: stages_check.rs
 /// For `check_tickets` in `stages_check.rs`, when `object::ticket_check::run` fails.
+#[doc(hidden)]
 pub static STAGE9_TICKETS: Explanation = Explanation {
     code: "FX-0912",
     title: "a server's charges did not follow the client's ticket",
@@ -1776,8 +1782,10 @@ pub static STAGE13_USER_DISPATCH: Explanation = Explanation {
           src/kernel/src/syscall/seccomp.rs check; docs/SECCOMP.md §13",
 };
 
+// CHECKS-ONLY: stages_check.rs
 /// For `check_address_waits` in `stages_check.rs`, when
 /// `user::address_wait_check::run` fails.
+#[doc(hidden)]
 pub static STAGE9_ADDRESS_WAIT: Explanation = Explanation {
     code: "FX-0911",
     title: "the waits on a user address failed their self-check",
@@ -1825,8 +1833,10 @@ pub static SMBIOS: Explanation = Explanation {
          src/lib/platform/smbios; docs/DMI.md",
 };
 
+// CHECKS-ONLY: stages_check.rs
 /// For `check_exceptions` in `stages_check.rs`, when `object::exception_check::run`
 /// fails (`docs/microkernel/K4.md` §5).
+#[doc(hidden)]
 pub static STAGE9_EXCEPTIONS: Explanation = Explanation {
     code: "FX-0917",
     title: "an exception channel was attached where it must be refused, or refused where it \
@@ -2559,8 +2569,10 @@ pub static STAGE8_PATH_CALLS: Explanation = Explanation {
           src/kernel/src/syscall/stat.rs; src/lib/fs/common/vfs; docs/ROADMAP.md stage 8",
 };
 
+// CHECKS-ONLY: stages_check.rs
 /// For `check_spaces` in `stages_check.rs`, when `object::space_check::run`
 /// fails.
+#[doc(hidden)]
 pub static STAGE9_SPACES: Explanation = Explanation {
     code: "FX-0916",
     title: "an address space reached by handle was not held to the handle's rights",
@@ -2646,8 +2658,10 @@ pub static STAGE9_OBJECTS: Explanation = Explanation {
           src/kernel/src/object/channel.rs; docs/ROADMAP.md stage 9",
 };
 
+// CHECKS-ONLY: stages_check.rs
 /// For `check_timers` in `stages_check.rs`, when `object::timer_check::run`
 /// fails.
+#[doc(hidden)]
 pub static STAGE9_TIMERS: Explanation = Explanation {
     code: "FX-0913",
     title: "the timer objects failed their self-check",

@@ -78,8 +78,10 @@ pub const NO_RESERVATION: Reservation = reservation::NONE;
 /// (`vmo_pin`'s `PIN_BLOCKS`).
 pub const MAX_ORDER: u8 = ferrix_frame::MAX_ORDER;
 
+// CHECKS-ONLY: syscall/native_check.rs
 /// The kernel heap's size classes: for the check that a reserved heap keeps at
 /// most a page a class of what its job freed.
+#[doc(hidden)]
 pub const HEAP_CLASSES: usize = ferrix_heap::CLASSES;
 pub use reserve::fill_reserve;
 pub(crate) use reserve::{Reserved, reserve};
@@ -536,7 +538,7 @@ pub(crate) fn reservation_unbind(entry: Reservation) {
 }
 
 /// The outstanding promise: free frames that belong to a reservation.
-pub fn outstanding_promise() -> u64 {
+pub(crate) fn outstanding_promise() -> u64 {
     reservation::outstanding()
 }
 
