@@ -26,6 +26,10 @@
 //! Built with `present`, for the build without the tier: every real-time
 //! policy is `EINVAL`, by each call that could set one (L.sched.138).
 //!
+//! On both, **neighbour**: the calls take a thread id, so another process's
+//! thread that is not its leader is found, as Linux's `find_process_by_pid`
+//! finds it, and a number no thread has is not.
+//!
 //! Built with `negative-control`, the inherit step expects a reset-on-fork
 //! child to keep its parent's policy, and the program must fail on that
 //! step.
@@ -451,6 +455,73 @@ fn inherit() -> Step {
     Ok(())
 }
 
+/// Another process's second thread, named by its thread id.
+fn neighbour() -> Step {
+    let (mut tids, mut hold) = ([0; 2], [0; 2]);
+    // SAFETY: each array is alive and has room for the two descriptors.
+    if unsafe { libc::pipe(tids.as_mut_ptr()) != 0 || libc::pipe(hold.as_mut_ptr()) != 0 } {
+        return Err(format!("pipe failed, errno {}", errno()));
+    }
+    // SAFETY: init is single-threaded here; the child starts its own thread
+    // and exits.
+    let pid = unsafe { libc::fork() };
+    if pid < 0 {
+        return Err(format!("fork failed, errno {}", errno()));
+    }
+    if pid == 0 {
+        let thread = std::thread::spawn(move || {
+            // SAFETY: gettid takes nothing.
+            let tid = unsafe { libc::syscall(libc::SYS_gettid) } as c_int;
+            let bytes = tid.to_ne_bytes();
+            let mut byte = 0_u8;
+            // SAFETY: the buffers are alive for the calls; the read ends when
+            // the parent closes the pipe's other end.
+            unsafe {
+                let _ = libc::write(tids[1], bytes.as_ptr().cast(), bytes.len());
+                let _ = libc::close(hold[1]);
+                let _ = libc::read(hold[0], (&raw mut byte).cast(), 1);
+            }
+        });
+        let status = c_int::from(thread.join().is_err());
+        // SAFETY: the child ends here.
+        unsafe { libc::_exit(status) };
+    }
+    let mut bytes = [0_u8; 4];
+    // SAFETY: the buffer is alive for the call; the child writes all four
+    // bytes at once.
+    let got = unsafe {
+        let _ = libc::close(tids[1]);
+        let _ = libc::close(hold[0]);
+        libc::read(tids[0], bytes.as_mut_ptr().cast(), bytes.len())
+    };
+    let tid = c_int::from_ne_bytes(bytes);
+    let answer = (|| {
+        expect("the child's thread id", got, 4)?;
+        if tid == pid {
+            return Err("the child's second thread has its process's number".to_owned());
+        }
+        expect("getscheduler of a neighbour's thread", getscheduler(tid), Ok(0))?;
+        expect("getparam of a neighbour's thread", getparam(tid), Ok(0))?;
+        expect(
+            "setscheduler of a neighbour's thread",
+            setscheduler(tid, SCHED_OTHER, 0),
+            Ok(0),
+        )
+    })();
+    let mut status = 0;
+    // SAFETY: closing this end lets the child's thread go; then the wait for
+    // the child just made.
+    let _ = unsafe {
+        let _ = libc::close(hold[1]);
+        libc::waitpid(pid, &mut status, 0)
+    };
+    answer?;
+    if !libc::WIFEXITED(status) || libc::WEXITSTATUS(status) != 0 {
+        return Err("the neighbour did not end cleanly".to_owned());
+    }
+    Ok(())
+}
+
 /// The build without the tier: every real-time policy is `EINVAL`.
 fn absent() -> Step {
     let einval = Err(libc::EINVAL);
@@ -468,10 +539,15 @@ fn absent() -> Step {
 
 fn main() {
     let steps: &[Named] = if cfg!(feature = "present") {
-        &[("encoding", encoding), ("absent", absent)]
+        &[
+            ("encoding", encoding),
+            ("neighbour", neighbour),
+            ("absent", absent),
+        ]
     } else {
         &[
             ("encoding", encoding),
+            ("neighbour", neighbour),
             ("chrt", chrt),
             ("errors", errors),
             ("permission", permission),

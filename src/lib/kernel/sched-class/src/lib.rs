@@ -219,8 +219,8 @@ pub trait SchedClass<T> {
     /// class's length, so a throttled tier neither preempts nor arms a timer.
     fn ready(queue: &Self::Queue, below_waiting: bool) -> bool;
 
-    /// `ns` of real time passed on the CPU while another tier ran: what a
-    /// class whose budget is measured per period of real time counts its
+    /// `ns` of real time passed on the CPU while another tier ran, or nothing
+    /// did: what a class whose budget is measured per period of real time counts its
     /// period by (R4). Nothing for a class without one.
     fn elapse(queue: &mut Self::Queue, ns: u64);
 

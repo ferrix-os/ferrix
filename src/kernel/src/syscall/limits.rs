@@ -439,9 +439,10 @@ const SCHED_RESET_ON_FORK: i32 = 0x4000_0000;
 const RLIMIT_RTPRIO: u32 = 14;
 
 /// The thread a `sched_*` call names: the caller for 0, else the thread
-/// numbered `pid` (a thread id, as Linux's calls take), after the checks
-/// every one makes first: a negative pid is `EINVAL`, and so is a null
-/// structure where `at` is one.
+/// numbered `pid`, any thread of any process the caller can see, as Linux's
+/// `find_process_by_pid` has it (`kernel/sched/syscalls.c`, `find_task_by_vpid`;
+/// `test-rtsched`'s neighbour step), after the checks every one makes first: a
+/// negative pid is `EINVAL`, and so is a null structure where `at` is one.
 fn sched_subject(
     process: &Process,
     pid: i32,

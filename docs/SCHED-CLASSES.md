@@ -1245,8 +1245,11 @@ guarantee stated narrowly; the checks split below):
   on `present` for the `EINVAL`.
 * **R13, constants**: the floor (950 of every 1000 ms) and the RR quantum
   (100 ms) are constants of the crate, named in REALTIME.md, never a
-  run-time setting. An RR task's quantum restarts after a yield and after
-  it was preempted, as Linux's does (C1).
+  run-time setting. As built an RR task's quantum is its own and restarts
+  only when spent, as Linux's `time_slice` does (read in
+  `kernel/sched/rt.c`, 6.18.54, and sched(7): the text this line first had,
+  that it restarts after a yield and a preemption "as Linux's does", was
+  wrong; ledger 5684, C2).
 * **R14**: `/proc`'s documentation says its load figures count real-time
   tasks.
 * **R15**: where it stands names container review 29, and so does the landing.

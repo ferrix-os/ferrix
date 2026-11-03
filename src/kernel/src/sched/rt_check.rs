@@ -28,7 +28,8 @@
 //! * **The floor** (H.SCHED.22): a fair task beside a spinning `SCHED_FIFO`
 //!   task is given between [`FLOOR_LEAST_NANOS`] and [`FLOOR_MOST_NANOS`] of
 //!   [`FLOOR_WINDOW_NANOS`], and the `SCHED_FIFO` task the rest, unthrottled
-//!   at each period's end.
+//!   at each period's end. Its clock is real time: a budget spent before
+//!   the processor went idle is whole again after a period of that idling.
 //! * **The move** (L.sched.134, L.sched.129, L.sched.130): a fair task made
 //!   `SCHED_FIFO` while it runs beside another fair task takes the processor
 //!   from it, and given back to fair shares it again; it keeps its node
@@ -175,7 +176,8 @@ pub(super) fn run() -> Result<&'static str, &'static str> {
     match VERDICT.load(Ordering::Acquire) {
         1 => Ok(
             "priority order, preemption on a remote and a local wake, FIFO's place, \
-                 RR's quantum (and FIFO's control), a yield, the 50 ms floor, flips of a \
+                 RR's quantum (and FIFO's control), a yield, the 50 ms floor and its clock \
+                 over an idle processor, flips of a \
                  running task, the move between tiers",
         ),
         _ => Err(WHY.get()),
@@ -218,6 +220,7 @@ fn drive(c: usize) {
         .and_then(|()| fifo_keeps_its_place(c))
         .and_then(|()| round_robin(c))
         .and_then(|()| floor(c))
+        .and_then(|()| floor_clock(c))
         .and_then(|()| flips(c))
         .and_then(|()| the_move(c));
     STOP.store(true, Ordering::Release);
@@ -679,6 +682,58 @@ fn floor(c: usize) -> Result<(), &'static str> {
     }
     if fifo < FLOOR_FIFO_LEAST_NANOS {
         return Err("a throttled SCHED_FIFO task did not run again at its period's end");
+    }
+    Ok(())
+}
+
+/// The floor's clock runs while its processor idles (ledger 5684's C1): a
+/// `SCHED_FIFO` task spends the period's budget, shown by the fair task beside
+/// it moving at last; both leave, and the processor idles past the period's
+/// end; a new `SCHED_FIFO` task then has a whole budget. Read straight from
+/// the queue, since a clock that stopped refills within the 50 ms left of its
+/// period once the new task runs.
+///
+/// Verifies: H.SCHED.22
+fn floor_clock(c: usize) -> Result<(), &'static str> {
+    reset();
+    let _fair = super::spawn_on("rt-clock-fair", spinner, 1, NICE_0_WEIGHT, c, CpuSet::of(c))?;
+    started(1)?;
+    let _fifo = super::spawn_rt_on(
+        "rt-clock",
+        spinner,
+        0,
+        c,
+        CpuSet::of(c),
+        params(RtPolicy::Fifo, 10),
+    )?;
+    started(2)?;
+    super::sleep_for(10_000_000);
+    let held = RAN[1].load(Ordering::Acquire);
+    wait_until(
+        || RAN[1].load(Ordering::Acquire) > held,
+        "the fair task never ran beside a spinning SCHED_FIFO task",
+    )?;
+    stop();
+    super::sleep_for(1_100_000_000);
+    reset();
+    let _next = super::spawn_rt_on(
+        "rt-clock",
+        spinner,
+        0,
+        c,
+        CpuSet::of(c),
+        params(RtPolicy::Fifo, 10),
+    )?;
+    started(1)?;
+    let left = super::queue_of(c)
+        .and_then(|lock| lock.lock().remaining_for_check())
+        .unwrap_or(0);
+    stop();
+    if left < 500_000_000 {
+        crate::console::println!(
+            "  sched    floor's clock: {left} ns of budget after an idle period"
+        );
+        return Err("the floor's clock stopped while its processor idled");
     }
     Ok(())
 }

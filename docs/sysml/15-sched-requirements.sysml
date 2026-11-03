@@ -1399,7 +1399,8 @@ package FerrixSchedRequirements {
                 upper cell while no queue holds the task, taken and put only under
                 the lock of its home queue or before any queue has seen it; and kept
                 when the task returns to fair. A node given back while its cell
-                holds one stops the machine.";
+                holds one stops the machine, and so does a task queued with a
+                real-time policy and an empty cell.";
             attribute :>> criterion = "The stage-5 move check: a fair task made
                 SCHED_FIFO owns its node and policy, and given back to fair still
                 owns its node; L.sched.134's and H.SCHED.21's checks, which queue

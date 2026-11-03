@@ -2984,6 +2984,25 @@ pub(crate) static RUNNING_TASK_QUEUED: Explanation = Explanation {
           src/kernel/src/sched/mod.rs move_onto; docs/SCHED-CLASSES.md §9e",
 };
 
+/// For `Task::entity_with`, when a task with a real-time policy has no node
+/// of the tier above fair to be queued with.
+pub(crate) static REALTIME_NODE_MISSING: Explanation = Explanation {
+    code: "FX-0539",
+    title: "a task with a real-time policy had no node to be queued with",
+    meaning: "A task that asks for `SCHED_FIFO` or `SCHED_RR` is given its node of the \
+              tier above fair before the policy is stored, and only the queue holding the \
+              task takes the node from its cell. A task being queued with a real-time \
+              policy and an empty cell has broken that rule. Queued as fair, it would run \
+              at the wrong tier while every test of its policy says it is real-time, so \
+              the machine is stopped (L.sched.129, ledger 5684's C3).",
+    causes: &[
+        "A path stored a real-time policy before it put the node in the cell \
+         (`sched::set_policy`, `sched::prepare_user`).",
+        "A task was queued while a queue still held it, so that queue holds the node.",
+    ],
+    see: "src/kernel/src/sched/task.rs Task::entity_with; docs/SCHED-CLASSES.md §9e",
+};
+
 /// For `check_proc_access` in `stages_check.rs`, when
 /// `fs::procaccess_check::run` fails.
 pub static STAGE13_PROC_ACCESS: Explanation = Explanation {
@@ -3632,6 +3651,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &ENDPOINT_CLOSED_MASKED,
     &STAGE5_TASK_VIEW,
     &RUNNING_TASK_QUEUED,
+    &REALTIME_NODE_MISSING,
     &STAGE6_USER_MEMORY,
     &STAGE6_REVERSE_MAP,
     &STAGE7_SYSCALLS,
