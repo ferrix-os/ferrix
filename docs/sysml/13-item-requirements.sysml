@@ -235,8 +235,10 @@ package FerrixItemRequirements {
         }
         requirement <'H.MEM.18'> userMappingsKeepTheirPermissions : ItemHighLevel {
             attribute :>> statement = "The kernel shall refuse to map a device
-                window or a native VMO executable into a user address space, and
-                shall map the vDSO's data page read-only.";
+                window executable into a user address space, and a native VMO
+                executable except through space_map with EXECUTE on both the space
+                handle and the VMO handle (H.MEM.24), and shall map the vDSO's data
+                page read-only.";
             attribute :>> criterion = "An executable device window and an executable
                 vmo_map are each refused, 0 mapped; the vDSO's data page reads back
                 not writable, and a write to it faults.";
@@ -253,6 +255,25 @@ package FerrixItemRequirements {
                 replaced one, 100 times over, leaves 0 reads of a poisoned object
                 among more than 0 reads (the `grace` line).";
             attribute :>> parent = ("O.ISOLATE", "ASR-1");
+        }
+        // K2 of docs/MICROKERNEL.md section 3 (docs/microkernel/K2.md; the
+        // consultant's OK IF, ledger 2845 and 2857).
+        requirement <'H.MEM.24'> aSpaceByHandleIsHeldToItsRights : ItemHighLevel {
+            attribute :>> statement = "An address space reached by handle shall be
+                mapped, unmapped, protected and read only as that handle's rights
+                allow; no mapping made by handle shall be both writable and
+                executable; an executable mapping by handle shall need EXECUTE on
+                the space handle and on the VMO handle; and a process's space shall
+                be given by handle only to its creator, before it starts.";
+            attribute :>> criterion = "Stage 9's `space` line: every by-handle call
+                refused without its right, an executable mapping refused without
+                EXECUTE on either handle and made with both, a writable and
+                executable protection refused by the decoder and by the space
+                itself, process_space refused without MANAGE, for a process its
+                handle cannot reach and after the start, and the sweep of every
+                user root the check reached finding 0 leaves writable and
+                executable and more than 0 executable.";
+            attribute :>> parent = ("O.ISOLATE", "O.WXN", "O.CAPABILITY", "ASR-2", "ASR-3");
         }
     }
 
