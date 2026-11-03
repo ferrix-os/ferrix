@@ -1042,18 +1042,24 @@ impl Task {
     /// Under the lock of the queue it goes on, the only taker of its node.
     pub(crate) fn entity_with(&self, slot: TaskSlot) -> super::stack::StackEntity {
         let word = self.rt_word();
-        if let Some(params) = word.params()
-            && let Some(node) = self.upper.take()
-        {
+        if let Some(params) = word.params() {
+            // The node is put in its cell before the policy is stored
+            // (`sched::set_policy`, `sched::prepare_user`), and only a queue
+            // holding the task takes it, so a real-time policy with no node
+            // is that rule broken. Queued fair it would run where nothing
+            // expects it: `is_fair` says no, and it would never count as
+            // current.
+            let Some(node) = self.upper.take() else {
+                crate::panic::fatal!(
+                    crate::panic::catalog::REALTIME_NODE_MISSING,
+                    "a task with a real-time policy has no node to be queued with"
+                );
+            };
             self.parked.put(slot);
             self.entity_rt.store(word.tier_bits(), Ordering::Relaxed);
             return super::stack::Stack::upper_entity(params, node);
         }
         self.entity_rt.store(0, Ordering::Relaxed);
-        // A real-time policy with no node cannot be: the node is put in its
-        // cell before the policy is stored (`sched::set_policy`,
-        // `sched::prepare_user`), and only a queue holding the task takes
-        // it. Queued fair otherwise, which is what it was before.
         super::stack::Stack::fair_entity((self.entity_state(), slot))
     }
 

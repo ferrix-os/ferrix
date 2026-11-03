@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "0392e773059389a7411e8c23ad6efafa9e685bf8acbf0fcdde27ab45035a82ed",
+  "digest": "76d67780c0673206aed957f3411bef42f549e7c3ef78158b7161cb63415688f0",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -51481,7 +51481,7 @@
               "name": "Realtime",
               "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime",
               "kind": "package",
-              "doc": "The realtime tier in the core (docs/SCHED-CLASSES.md section 9e, step 4b; the consultant's OK IF R1-R15, ledger line 29): the task's upper cell, the move between tiers, wakes, inheritance, the Linux calls, and the modes.",
+              "doc": "The realtime tier in the core (docs/SCHED-CLASSES.md section 9e, step 4b; the consultant's OK IF R1-R15, container review 29 (not on record; ledger 5684)): the task's upper cell, the move between tiers, wakes, inheritance, the Linux calls, and the modes.",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
                 "line": 1388
@@ -51495,7 +51495,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1394
+                    "line": 1395
                   },
                   "children": [
                     {
@@ -51503,10 +51503,10 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::theUpperCellIsTheQueueHolders",
                       "kind": "attribute",
                       "redefines": "statement",
-                      "value": "\"A task's node of the tier above fair shall be allocated once, when it first asks for a real-time policy or is made by a real-time parent, outside every scheduler path; kept in its upper cell while no queue holds the task, taken and put only under the lock of its home queue or before any queue has seen it; and kept when the task returns to fair. A node given back while its cell holds one stops the machine.\"",
+                      "value": "\"A task's node of the tier above fair shall be allocated once, when it first asks for a real-time policy or is made by a real-time parent, outside every scheduler path; kept in its upper cell while no queue holds the task, taken and put only under the lock of its home queue or before any queue has seen it; and kept when the task returns to fair. A node given back while its cell holds one stops the machine, and so does a task queued with a real-time policy and an empty cell.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1401
+                        "line": 1403
                       }
                     },
                     {
@@ -51517,7 +51517,7 @@
                       "value": "\"The stage-5 move check: a fair task made SCHED_FIFO owns its node and policy, and given back to fair still owns its node; L.sched.134's and H.SCHED.21's checks, which queue every real-time task through its cell; and review of every take and put (Task::entity_with, keep_entity, keep_refused, give_upper_node).\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1406
+                        "line": 1408
                       }
                     },
                     {
@@ -51528,7 +51528,7 @@
                       "value": "\"H.SCHED.21\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1407
+                        "line": 1409
                       }
                     },
                     {
@@ -51539,7 +51539,7 @@
                       "value": "(\"sched::task::Task::entity_with\", \"sched::task::Task::keep_entity\", \"sched::task::Task::keep_refused\", \"sched::task::Task::give_upper_node\", \"sched::set_policy\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1410
+                        "line": 1412
                       }
                     }
                   ]
@@ -51552,7 +51552,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1412
+                    "line": 1414
                   },
                   "children": [
                     {
@@ -51563,7 +51563,7 @@
                       "value": "\"A weight set on a task while a tier above fair holds it shall be its fair record's, and the weight it is queued with when it returns to fair.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1415
+                        "line": 1417
                       }
                     },
                     {
@@ -51574,7 +51574,7 @@
                       "value": "\"The stage-5 move check: a weight set on a SCHED_FIFO task is its base weight after its return to fair, and its record's weight the one that base gives.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1418
+                        "line": 1420
                       }
                     },
                     {
@@ -51585,7 +51585,7 @@
                       "value": "\"H.SCHED.2\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1419
+                        "line": 1421
                       }
                     },
                     {
@@ -51596,7 +51596,7 @@
                       "value": "(\"sched::queue::CpuQueue::set_weight\", \"sched::task::Task::entity_with\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1421
+                        "line": 1423
                       }
                     }
                   ]
@@ -51609,7 +51609,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1423
+                    "line": 1425
                   },
                   "children": [
                     {
@@ -51620,7 +51620,7 @@
                       "value": "\"A wake, local or remote, shall ask the class stack whether the woken task should preempt the running one (Stack::should_preempt), and a yes shall have the processor decide at once: at its timer armed MIN_ARM_NS away, or on the way out of a system call.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1428
+                        "line": 1430
                       }
                     },
                     {
@@ -51631,7 +51631,7 @@
                       "value": "\"The stage-5 order check on desktop: a SCHED_FIFO task woken from another processor, and by a fair task on its own, runs within 100 ms while a fair task spins there tickless. The bound is an emulated processor's, and shows only that the preemption happens: without it the wait has no end, the fair task running tickless. It is not a latency claim; that is F-95's and the gate host's.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1435
+                        "line": 1437
                       }
                     },
                     {
@@ -51642,7 +51642,7 @@
                       "value": "\"H.SCHED.21\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1436
+                        "line": 1438
                       }
                     },
                     {
@@ -51653,7 +51653,7 @@
                       "value": "(\"sched::wake_at_home\", \"sched::kick_after_wake\", \"sched::queue::CpuQueue::should_preempt\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1438
+                        "line": 1440
                       }
                     }
                   ]
@@ -51666,7 +51666,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1440
+                    "line": 1442
                   },
                   "children": [
                     {
@@ -51677,7 +51677,7 @@
                       "value": "\"A real-time task shall be woken on the processor it last ran on: never pulled onto its waker's, placed on an idle one, or stolen; so a higher priority waits for its own processor even while another is idle.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1444
+                        "line": 1446
                       }
                     },
                     {
@@ -51688,7 +51688,7 @@
                       "value": "\"The stage-5 placement check on desktop, with three processors or more: a SCHED_FIFO task of any affinity woken from another processor while its own runs a fair task and a third is idle runs on its own; a fair task, the control, runs elsewhere.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1448
+                        "line": 1450
                       }
                     },
                     {
@@ -51699,7 +51699,7 @@
                       "value": "\"H.SCHED.21\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1449
+                        "line": 1451
                       }
                     },
                     {
@@ -51710,7 +51710,7 @@
                       "value": "(\"sched::place_on_idle\", \"sched::wake_onto\", \"sched::queue::CpuQueue::steal_candidate\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1451
+                        "line": 1453
                       }
                     }
                   ]
@@ -51723,7 +51723,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1453
+                    "line": 1455
                   },
                   "children": [
                     {
@@ -51734,7 +51734,7 @@
                       "value": "\"A change of a task's policy or real-time priority shall store the new policy at once and, under its home queue's lock, take a task that queue holds and does not run off its tier and enqueue it at the tail of its new place; the running task shall be moved so at its processor's next decision, before the pick, and that decision asked for at once; an unchanged policy moves nothing. Between the call and that decision the task's policy reads as the new one (sched_getscheduler) while it still runs in its old tier. A task a processor runs, until the switch away from it has saved its context, shall never be moved to another processor or picked by one other than its own: move_onto and pick_next stop the machine on one (FX-0537).\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1465
+                        "line": 1467
                       }
                     },
                     {
@@ -51745,7 +51745,7 @@
                       "value": "\"The stage-5 move check on desktop: a fair task made SCHED_FIFO while it spins beside another fair task takes the processor from it, and given back to fair shares it again; the flips check: an unpinned running task flipped between SCHED_FIFO and fair 200 times beside a waiting one, with processors idle to steal, ends fair with no stop; its control, the running task moved at the call with no decision asked for, stops the machine with FX-0537 (three boots of three); test-rtsched's chrt step reads each change back.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1474
+                        "line": 1476
                       }
                     },
                     {
@@ -51756,7 +51756,7 @@
                       "value": "\"H.SCHED.21\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1475
+                        "line": 1477
                       }
                     },
                     {
@@ -51767,7 +51767,7 @@
                       "value": "(\"sched::set_policy\", \"sched::queue::CpuQueue::set_policy\", \"sched::queue::CpuQueue::requeue_if_moved\", \"sched::queue::CpuQueue::release\", \"sched::queue::CpuQueue::pick_next\", \"sched::move_onto\", \"sched::task::Task::set_on_cpu\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1480
+                        "line": 1482
                       }
                     }
                   ]
@@ -51780,7 +51780,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1482
+                    "line": 1484
                   },
                   "children": [
                     {
@@ -51791,7 +51791,7 @@
                       "value": "\"prepare_user, the scheduler's one maker of user tasks, shall give each new task its maker's real-time policy and priority with a node of its own, unless the maker has reset-on-fork set, when it starts SCHED_OTHER; the new task's reset-on-fork flag starts clear.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1487
+                        "line": 1489
                       }
                     },
                     {
@@ -51802,7 +51802,7 @@
                       "value": "\"test-rtsched on desktop: a forked child and a thread of a SCHED_FIFO 10 parent read SCHED_FIFO 10, and with reset-on-fork a forked child reads SCHED_OTHER; its negative control, expecting the reset child to keep SCHED_FIFO, fails on that step. Review: prepare_user is the one maker of user tasks (syscall::process's prepare_thread and start_thread, which launch::load_native reaches through StartClaim::prepare).\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1494
+                        "line": 1496
                       }
                     },
                     {
@@ -51813,7 +51813,7 @@
                       "value": "\"H.SCHED.21\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1495
+                        "line": 1497
                       }
                     },
                     {
@@ -51824,7 +51824,7 @@
                       "value": "(\"sched::prepare_user\", \"sched::inherit_policy\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1496
+                        "line": 1498
                       }
                     }
                   ]
@@ -51837,7 +51837,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1498
+                    "line": 1500
                   },
                   "children": [
                     {
@@ -51848,7 +51848,7 @@
                       "value": "\"A task's run time shall be charged to its job's cpu.max whatever its tier, and a real-time task held by it as a fair one is.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1501
+                        "line": 1503
                       }
                     },
                     {
@@ -51859,7 +51859,7 @@
                       "value": "\"The stage-13 cpu checks on desktop: a program of two spinning threads made SCHED_FIFO in a cgroup with cpu.max 20000 100000 is held between a twelfth and two thirds of a processor.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1505
+                        "line": 1507
                       }
                     },
                     {
@@ -51870,7 +51870,7 @@
                       "value": "(\"H.SCHED.22\", \"H.QUOTA.4\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1506
+                        "line": 1508
                       }
                     },
                     {
@@ -51881,7 +51881,7 @@
                       "value": "(\"sched::queue::CpuQueue::account_with\", \"sched::queue::CpuQueue::arm_timer\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1508
+                        "line": 1510
                       }
                     }
                   ]
@@ -51894,7 +51894,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1510
+                    "line": 1512
                   },
                   "children": [
                     {
@@ -51905,7 +51905,7 @@
                       "value": "\"A scheduling domain shall be made only through make_domain, which refuses a mode whose tiers are not compiled in as ModeUnavailable, and SoftRt where they are as NotCreatable, until its own processors, a fully preemptible kernel and threaded interrupts land.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1515
+                        "line": 1517
                       }
                     },
                     {
@@ -51916,7 +51916,7 @@
                       "value": "\"The stage-5 modes check: on desktop a SoftRt domain is refused NotCreatable, and on present ModeUnavailable.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1517
+                        "line": 1519
                       }
                     },
                     {
@@ -51927,7 +51927,7 @@
                       "value": "\"H.SCHED.20\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1518
+                        "line": 1520
                       }
                     },
                     {
@@ -51938,7 +51938,7 @@
                       "value": "(\"sched::make_domain\", \"sched::init\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1519
+                        "line": 1521
                       }
                     }
                   ]
@@ -51951,7 +51951,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1521
+                    "line": 1523
                   },
                   "children": [
                     {
@@ -51962,7 +51962,7 @@
                       "value": "\"In a build without the realtime tier, set_policy shall refuse every real-time policy as NoTier, before any allocation and changing nothing, and realtime_built shall answer false.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1525
+                        "line": 1527
                       }
                     },
                     {
@@ -51973,7 +51973,7 @@
                       "value": "\"test-rtsched on present, on every architecture: SCHED_FIFO and SCHED_RR are EINVAL by sched_setscheduler and sched_setattr, and the thread still reads SCHED_OTHER (the Linux layer's EINVAL, which reads realtime_built); the stage-5 modes check: set_policy answers NoTier and leaves the task fair.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1531
+                        "line": 1533
                       }
                     },
                     {
@@ -51984,7 +51984,7 @@
                       "value": "\"H.SCHED.20\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1532
+                        "line": 1534
                       }
                     },
                     {
@@ -51995,7 +51995,7 @@
                       "value": "(\"sched::set_policy\", \"sched::realtime_built\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1533
+                        "line": 1535
                       }
                     }
                   ]
