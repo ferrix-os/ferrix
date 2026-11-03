@@ -1093,6 +1093,12 @@ impl Control {
         self.process.upgrade()
     }
 
+    /// Whether no start has let go of the reference that kept it: true from
+    /// `process_create` until `process_start` hands it to the task.
+    pub(crate) fn is_unstarted(&self) -> bool {
+        self.unstarted.lock().is_some()
+    }
+
     /// Let go of the reference that kept it before it started, now that its
     /// task holds it.
     pub fn started(&self) {

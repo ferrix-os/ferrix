@@ -95,7 +95,7 @@
 //! lock is ever held while a space's lock is taken, no two spaces' locks are
 //! ever held together, and no shootdown waits under any of them.
 
-use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::collections::BTreeMap;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::any::Any;
@@ -232,10 +232,80 @@ struct Inner {
     /// The next object id to hand out. Never zero, which `Backing` reserves
     /// for private memory with no named object.
     next_id: u64,
-    /// The objects `vmo_map` put here, which the Linux calls that reshape a
-    /// region -- `mremap`, `mprotect` -- may not touch: a native VMO's size
-    /// and the rights its protection stands for belong to its handle.
-    native: BTreeSet<u64>,
+    /// The objects `vmo_map`, `space_map` and the kernel's own code pages put
+    /// here, each with the most its regions may be protected to, which the
+    /// Linux calls that reshape a region -- `mremap`, `mprotect` -- may not
+    /// touch: a native VMO's size and the rights its protection stands for
+    /// belong to its handle (`docs/microkernel/K2.md` §2.3).
+    native: BTreeMap<u64, Ceiling>,
+}
+
+/// The most a region a handle or the kernel mapped may be protected to.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Ceiling {
+    /// The kernel's own pages, mapped into every process (the vDSO, the
+    /// ARMv7-A signal page): no call may change their protection.
+    Kernel,
+    /// Mapped through a VMO handle: writable only if the handle carried
+    /// `WRITE`, executable only if it carried `EXECUTE`. Readable always.
+    Handle {
+        /// The handle carried `WRITE`.
+        write: bool,
+        /// The handle carried `EXECUTE`.
+        execute: bool,
+    },
+}
+
+impl Ceiling {
+    /// Whether `flags` are within this ceiling, and never both writable and
+    /// executable (ASR-2).
+    pub(crate) fn admits(self, flags: VmaFlags) -> bool {
+        match self {
+            Ceiling::Kernel => false,
+            Ceiling::Handle { write, execute } => {
+                !(flags.write && flags.execute)
+                    && (!flags.write || write)
+                    && (!flags.execute || execute)
+            }
+        }
+    }
+}
+
+/// Whether every region `range` reaches was mapped by handle and admits
+/// `flags`: [`AddressSpace::protect_by_handle`]'s test, made before anything
+/// changes. A region no handle mapped is refused before one past its ceiling.
+fn within_ceilings(inner: &Inner, range: PageRange, flags: VmaFlags) -> Result<(), ProtectRefused> {
+    let mut verdict = Ok(());
+    let reached = inner
+        .map
+        .iter()
+        .filter(|region| region.range.start() < range.end() && range.start() < region.range.end());
+    for region in reached {
+        let ceiling = match region.backing {
+            Backing::Anonymous { id, .. } => inner.native.get(&id).copied(),
+            _ => None,
+        };
+        match ceiling {
+            None | Some(Ceiling::Kernel) => return Err(ProtectRefused::NotByHandle),
+            Some(ceiling) if !ceiling.admits(flags) => verdict = Err(ProtectRefused::Beyond),
+            Some(_) => {}
+        }
+    }
+    verdict
+}
+
+/// Why [`AddressSpace::protect_by_handle`] refused.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum ProtectRefused {
+    /// As the space refuses any change: a malformed range, or one not wholly
+    /// mapped.
+    Space(SpaceError),
+    /// The range reaches a region no handle mapped: the program's own, or
+    /// the kernel's.
+    NotByHandle,
+    /// The protection is past what a region's handle allowed, or is writable
+    /// and executable.
+    Beyond,
 }
 
 impl Inner {
@@ -243,7 +313,9 @@ impl Inner {
     /// reshape a region may: anonymous memory that `vmo_map` did not put here.
     fn reshapeable(&self, backing: Backing) -> Option<(u64, u64)> {
         match backing {
-            Backing::Anonymous { id, offset } if !self.native.contains(&id) => Some((id, offset)),
+            Backing::Anonymous { id, offset } if !self.native.contains_key(&id) => {
+                Some((id, offset))
+            }
             _ => None,
         }
     }
@@ -319,7 +391,7 @@ impl AddressSpace {
                     files: BTreeMap::new(),
                     shadows: BTreeMap::new(),
                     next_id: 1,
-                    native: BTreeSet::new(),
+                    native: BTreeMap::new(),
                 },
             )
         })
@@ -395,6 +467,15 @@ impl AddressSpace {
     /// The physical address of the root table, for whoever installs it.
     pub fn root_table(&self) -> u64 {
         self.root * PAGE_SIZE
+    }
+
+    /// Run `walk` on the root table's physical address with this space's
+    /// lock held, so that no fault, unmap or protect changes the tables
+    /// while it reads them: for the W^X sweep of a user root
+    /// (`mm::check::sweep_user_root`). `walk` takes no other space's lock.
+    pub(crate) fn with_root_held<R>(&self, walk: impl FnOnce(u64) -> R) -> R {
+        let _inner = self.inner.lock();
+        walk(self.root * PAGE_SIZE)
     }
 
     /// Install this address space on the processor that is running, in place
@@ -711,12 +792,14 @@ fn file_placement(
 
 /// Copies of the native-object set and the file table a forked child
 /// inherits, made fallibly (finding F-23).
-fn inherited(
-    inner: &Inner,
-) -> Result<(BTreeSet<u64>, BTreeMap<u64, FileMapping>), fallible::AllocError> {
-    let mut native = BTreeSet::new();
-    for &id in &inner.native {
-        let _ = fallible::insert_into_set(&mut native, id)?;
+/// What [`inherited`] copies: the ceilings of the native objects and the
+/// file table.
+type Inherited = (BTreeMap<u64, Ceiling>, BTreeMap<u64, FileMapping>);
+
+fn inherited(inner: &Inner) -> Result<Inherited, fallible::AllocError> {
+    let mut native = BTreeMap::new();
+    for (&id, &ceiling) in &inner.native {
+        let _ = fallible::insert(&mut native, id, ceiling)?;
     }
     let mut files = BTreeMap::new();
     for (&id, mapping) in &inner.files {
@@ -2103,7 +2186,7 @@ fn drop_objects(
     me: *const AddressSpace,
     objects: &mut BTreeMap<u64, Arc<Vmo>>,
     shadows: &mut BTreeMap<u64, Arc<Vmo>>,
-    native: &mut BTreeSet<u64>,
+    native: &mut BTreeMap<u64, Ceiling>,
     kept: impl Fn(u64) -> bool,
 ) {
     objects.retain(|&id, vmo| {
@@ -2113,7 +2196,7 @@ fn drop_objects(
         }
         named
     });
-    native.retain(|id| objects.contains_key(id));
+    native.retain(|id, _| objects.contains_key(id));
     shadows.retain(|&id, shadow| {
         let named = kept(id);
         if !named {
@@ -3016,8 +3099,31 @@ impl AddressSpace {
         Ok(at)
     }
 
+    /// [`AddressSpace::map_by_handle`] with the ceiling `flags` themselves
+    /// set and never executable: what `vmo_map`'s callers inside the kernel
+    /// map with, a chardev driver's shared VMO among them.
+    ///
+    /// # Errors
+    ///
+    /// As [`AddressSpace::map_by_handle`]: an executable mapping is refused.
+    pub fn map_object(
+        &self,
+        at: Option<u64>,
+        len: u64,
+        vmo: Arc<Vmo>,
+        offset: u64,
+        flags: VmaFlags,
+    ) -> Result<u64, SpaceError> {
+        let ceiling = Ceiling::Handle {
+            write: flags.write,
+            execute: false,
+        };
+        self.map_by_handle(at, len, vmo, offset, flags, ceiling)
+    }
+
     /// Map `len` bytes of `vmo`, from byte `offset`, at `at` or wherever there
-    /// is room: what `vmo_map` does.
+    /// is room: what `vmo_map` and `space_map` do. `ceiling` is what the VMO's
+    /// handle allowed (`docs/microkernel/K2.md` §2.3).
     ///
     /// Shared, always. The region names the object itself, not a copy of it,
     /// so a write through it is a write every handle and every other mapping
@@ -3036,20 +3142,29 @@ impl AddressSpace {
     ///
     /// # Errors
     ///
-    /// [`SpaceError::Refused`] for an executable mapping;
+    /// [`SpaceError::Refused`] for flags past `ceiling`, and always for a
+    /// mapping both writable and executable (ASR-2: refused here, under no
+    /// lock yet, whatever the caller decoded);
     /// [`SpaceError::BadRange`] for a length or offset that is not whole
     /// pages, a range past the object's end, or one that overlaps a mapping;
     /// [`SpaceError::NotUserRange`] outside the user half; and
     /// [`SpaceError::OutOfMemory`] if no free range is long enough.
-    pub fn map_object(
+    pub(crate) fn map_by_handle(
         &self,
         at: Option<u64>,
         len: u64,
         vmo: Arc<Vmo>,
         offset: u64,
         flags: VmaFlags,
+        ceiling: Ceiling,
     ) -> Result<u64, SpaceError> {
-        if flags.execute {
+        let flags = VmaFlags {
+            read: true,
+            shared: true,
+            grows_down: false,
+            ..flags
+        };
+        if !ceiling.admits(flags) {
             return Err(SpaceError::Refused(at.unwrap_or(0)));
         }
         if len == 0
@@ -3073,12 +3188,6 @@ impl AddressSpace {
             return Err(SpaceError::NotUserRange(at));
         }
         let range = PageRange::from_len(at, len).map_err(|_| SpaceError::BadRange)?;
-        let flags = VmaFlags {
-            execute: false,
-            shared: true,
-            grows_down: false,
-            ..flags
-        };
         let id = inner.next_id;
         inner.next_id = inner.next_id.saturating_add(1);
         self.add_region(
@@ -3092,7 +3201,7 @@ impl AddressSpace {
             },
             vmo,
         )?;
-        if fallible::insert_into_set(&mut inner.native, id).is_err() {
+        if fallible::insert(&mut inner.native, id, ceiling).is_err() {
             self.abandon_region(&mut inner, id, range);
             return Err(SpaceError::OutOfMemory);
         }
@@ -3148,7 +3257,7 @@ impl AddressSpace {
             },
             vmo,
         )?;
-        if fallible::insert_into_set(&mut inner.native, id).is_err() {
+        if fallible::insert(&mut inner.native, id, Ceiling::Kernel).is_err() {
             self.abandon_region(&mut inner, id, range);
             return Err(SpaceError::OutOfMemory);
         }
@@ -3246,7 +3355,7 @@ impl AddressSpace {
                 offset: PAGE_SIZE,
             },
         );
-        if inserted.is_err() || fallible::insert_into_set(&mut inner.native, id).is_err() {
+        if inserted.is_err() || fallible::insert(&mut inner.native, id, Ceiling::Kernel).is_err() {
             if inserted.is_ok() {
                 let _ = inner.map.remove_quietly(code);
             }
@@ -3437,7 +3546,7 @@ impl AddressSpace {
             let reaches_native = map.iter().any(|region| {
                 region.range.start() < range.end()
                     && range.start() < region.range.end()
-                    && matches!(region.backing, Backing::Anonymous { id, .. } if native.contains(&id))
+                    && matches!(region.backing, Backing::Anonymous { id, .. } if native.contains_key(&id))
             });
             // A shared file mapping that may not write its file -- of a file
             // not open for writing, or made after a seal refused writes -- may
@@ -3468,6 +3577,54 @@ impl AddressSpace {
         // meanwhile finds no translation to forget: the pending count this
         // shootdown holds is what makes it flush the set anyway, rather than
         // release a frame the old entry still reaches.
+        self.shoot(&cpus, &mut pages);
+        Ok(())
+    }
+
+    /// Change the protection of `len` bytes at `at`, every page of which a
+    /// handle mapped, to `flags`' read, write and execute: what `space_protect`
+    /// does (`docs/microkernel/K2.md` §2.3).
+    ///
+    /// Each region in the range is held to its [`Ceiling`]: never writable
+    /// and executable at once (ASR-2, refused here under the lock whatever
+    /// the caller decoded), writable only if its handle carried `WRITE`,
+    /// executable only if it carried `EXECUTE`. All or nothing: every region
+    /// is checked before the map changes. The translations come down and are
+    /// shot down as [`AddressSpace::protect`]'s do, and a private region made
+    /// writable is marked copy-on-write by the map (finding F-41).
+    ///
+    /// # Errors
+    ///
+    /// [`ProtectRefused::Space`] for a malformed range or one not wholly
+    /// mapped; [`ProtectRefused::NotByHandle`] for one that reaches a region no
+    /// handle mapped; [`ProtectRefused::Beyond`] for a protection past a
+    /// region's ceiling.
+    pub(crate) fn protect_by_handle(
+        &self,
+        at: u64,
+        len: u64,
+        flags: VmaFlags,
+    ) -> Result<(), ProtectRefused> {
+        if !is_user_address(at) || at.checked_add(len).is_none_or(|end| end > USER_VIRT_END) {
+            return Err(ProtectRefused::Space(SpaceError::NotUserRange(at)));
+        }
+        let range = PageRange::from_len(at, len)
+            .map_err(|_| ProtectRefused::Space(SpaceError::BadRange))?;
+        let flags = VmaFlags {
+            read: true,
+            ..flags
+        };
+        let mut pages = TlbPages::new();
+        let cpus = {
+            let mut inner = self.inner.lock();
+            within_ceilings(&inner, range, flags)?;
+            inner
+                .map
+                .protect(range, flags)
+                .map_err(|why| ProtectRefused::Space(map_error(why)))?;
+            self.unmap_range(range, &mut pages);
+            self.begin_shootdown(&inner)
+        };
         self.shoot(&cpus, &mut pages);
         Ok(())
     }
@@ -3749,7 +3906,7 @@ impl AddressSpace {
         };
         let first = offset.saturating_add(start - region.range.start()) / PAGE_SIZE;
         let count = (stop - start) / PAGE_SIZE;
-        let native = inner.native.contains(&id);
+        let native = inner.native.contains_key(&id);
         // A private region of an object some region of this space shares is
         // the shared object's, as `fault` treats it.
         let shared = region.flags.shared || native || (!file && shared_object(&inner.map, id));

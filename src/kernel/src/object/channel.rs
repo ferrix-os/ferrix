@@ -1192,6 +1192,8 @@ fn queued_endpoints(endpoint: &Arc<Endpoint>) -> Option<Vec<Arc<Endpoint>>> {
             | Object::Pin(_)
             // A process handle holds how the process ended, not its table.
             | Object::Process(_)
+            // A space holds the VMOs it maps, and no handle.
+            | Object::Space(_)
             | Object::Port(_)
             // A timer holds ports it delivered to, and a port holds packets,
             // never an object.

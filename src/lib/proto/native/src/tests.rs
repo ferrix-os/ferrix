@@ -38,6 +38,7 @@ use crate::job::{self, Job};
 use crate::pending::{self, Process, Protection};
 use crate::pin::{Addresses, Pin, PinAccess, device_address};
 use crate::port::{self, Port};
+use crate::space::{self, Access, Space};
 use crate::vmo::{self, Vmo};
 
 /// What the recorder does when a call arrives.
@@ -1196,6 +1197,14 @@ fn every_call_in_the_native_table_has_a_wrapper() {
     let _ = address::wake(&sys, word, 1, address::MATCH_ANY);
     let _ = address::requeue(&sys, (0x1000, 0x1004), (0, 1), false, None);
     let _ = address::wait_any(&sys, &[types::AddressWord::default()], Deadline::Never);
+    let made_space = Space::from_owned(handle());
+    let _ = space::create(&sys);
+    let _ = made_space.map(&vmo, None, 1, Access::Read, 0);
+    let _ = made_space.unmap(0, 1);
+    let _ = made_space.protect(0, 1, Access::Read);
+    let _ = made_space.read(0, &mut []);
+    let _ = Process::from_owned(handle()).space(Requested::Same);
+    let _ = Vmo::from_owned(handle()).executable();
 
     let wrapped: BTreeSet<usize> = sys.numbers().into_iter().collect();
     let table: BTreeSet<usize> = nr::ALL.iter().map(|&call| nr::number(call)).collect();
@@ -1285,4 +1294,90 @@ fn the_address_waits_lay_out_their_registers() {
     );
     assert_eq!(calls[3].number, nr::ADDRESS_WAIT_ANY);
     assert_eq!(calls[3].args[1..3], [1, 0]);
+}
+// ---------------------------------------------------------------------------
+// Address spaces by handle (K2)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_space_maps_protects_unmaps_and_reads_by_handle() {
+    let sys = Recorder::default();
+    sys.returns(0xA1);
+    let made_space = space::create(&sys).unwrap();
+    let vmo = Vmo::from_owned(owned(&sys, 0xA2));
+    sys.answer(|raw| {
+        let [space, vmo, at, length, protection, offset] = raw.args();
+        assert_eq!((space, vmo, at, length), (0xA1, 0xA2, 0x5000_0000, 0x1000));
+        assert_eq!(protection, (types::MAP_READ | types::MAP_EXECUTE) as usize);
+        assert_eq!(read_u64(raw, offset), 0x2000);
+        0x5000_0000
+    });
+    assert_eq!(
+        made_space.map(&vmo, Some(0x5000_0000), 0x1000, Access::ReadExecute, 0x2000),
+        Ok(0x5000_0000)
+    );
+    sys.returns(0);
+    made_space
+        .protect(0x5000_0000, 0x1000, Access::Read)
+        .unwrap();
+    sys.returns(0);
+    made_space.unmap(0x5000_0000, 0x1000).unwrap();
+    sys.answer(|raw| {
+        let [space, at, buffer, count, _, _] = raw.args();
+        assert_eq!((space, at, count), (0xA1, 0x6000, 4));
+        write(raw, buffer, b"read");
+        4
+    });
+    let mut out = [0_u8; 4];
+    assert_eq!(made_space.read(0x6000, &mut out), Ok(4));
+    assert_eq!(&out, b"read");
+    sys.fails(status::BAD_STATE);
+    assert_eq!(
+        made_space.protect(0x7000, 0x1000, Access::ReadWrite),
+        Err(Error::BadState)
+    );
+    let calls = sys.take();
+    assert_eq!(
+        calls.iter().map(|made| made.number).collect::<Vec<_>>(),
+        [
+            nr::SPACE_CREATE,
+            nr::SPACE_MAP,
+            nr::SPACE_PROTECT,
+            nr::SPACE_UNMAP,
+            nr::SPACE_READ,
+            nr::SPACE_PROTECT,
+        ]
+    );
+    assert_eq!(calls[2].args[3], types::MAP_READ as usize);
+    assert_eq!(
+        calls[5].args[3],
+        (types::MAP_READ | types::MAP_WRITE) as usize
+    );
+    drop((made_space, vmo));
+}
+
+#[test]
+fn a_process_space_and_an_executable_vmo() {
+    let sys = Recorder::default();
+    let process = Process::from_owned(owned(&sys, 0xB1));
+    sys.returns(0xB2);
+    let taken: Space<&Recorder> = process.space(Requested::Exactly(Rights::READ)).unwrap();
+    let vmo = Vmo::from_owned(owned(&sys, 0xB3));
+    sys.returns(0xB4);
+    let runnable = vmo.executable().unwrap();
+    assert_eq!(runnable.as_owned().handle(), Handle(0xB4));
+    let other = Vmo::from_owned(owned(&sys, 0xB5));
+    sys.fails(status::ACCESS_DENIED);
+    let (error, back) = other.executable().unwrap_err();
+    assert_eq!(error, Error::AccessDenied);
+    assert_eq!(back.as_owned().handle(), Handle(0xB5));
+    let calls = sys.take();
+    assert_eq!(
+        calls[0],
+        made(nr::PROCESS_SPACE, &[0xB1, Rights::READ.0 as usize])
+    );
+    assert_eq!(calls[1], made(nr::VMO_EXECUTABLE, &[0xB3, 0]));
+    assert_eq!(calls[2], made(nr::VMO_EXECUTABLE, &[0xB5, 0]));
+    assert_eq!(calls.len(), 3, "the replaced handle is not closed again");
+    drop((taken, runnable, back, process));
 }
