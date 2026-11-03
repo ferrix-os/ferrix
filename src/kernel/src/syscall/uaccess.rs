@@ -256,7 +256,7 @@ pub fn copy_from_user(space: &AddressSpace, from: u64, out: &mut [u8]) -> Result
 ///
 /// [`UserError`], for a range that is not the program's or a page it may not
 /// read.
-pub fn copy_from_user_present(
+pub(crate) fn copy_from_user_present(
     space: &AddressSpace,
     from: u64,
     out: &mut [u8],

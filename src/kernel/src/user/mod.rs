@@ -5,6 +5,7 @@
 //! builds address spaces it does not itself run in, and hands a processor to
 //! code it does not trust.
 
+pub mod address_wait;
 pub mod cache;
 pub mod check;
 pub(crate) mod edge_check;

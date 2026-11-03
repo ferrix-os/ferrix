@@ -71,6 +71,12 @@ pub(super) fn check_programs() {
     // build that got it wrong would answer a program's `write` with `unlink`.
     // Finding that under the first user process, in the same commit as the
     // ring-3 transition, is a debugging session nobody wants.
+    // Stage 9's waits on a user address (K5, docs/microkernel/K5.md §6):
+    // the core's table, first, because stage 7's futex checks ride on the
+    // same table, and a table broken under them is named here by the core's
+    // own check rather than by the Linux personality's.
+    check_address_waits();
+
     check_syscalls();
     check_thread_times();
 
@@ -1309,6 +1315,25 @@ pub(super) fn check_exceptions() {
             "stage 9 exception channel check failed: {problem}"
         ),
     }
+}
+
+/// Stage 9: the waits on a user address (K5), driven through the native
+/// calls between processes the check builds.
+///
+/// Halts rather than returning, as every other stage's check does.
+pub(super) fn check_address_waits() {
+    let report = match user::address_wait_check::run() {
+        Ok(report) => report,
+        Err(problem) => fatal!(
+            catalog::STAGE9_ADDRESS_WAIT,
+            "address-wait self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  addrwait {} waits woken across {} processes, by mapping and by handle, \
+         {} refusals as specified, a wake's walk {} ns per entry",
+        report.woken, report.processes, report.refusals, report.walk_ns,
+    );
 }
 
 /// Stage 9: the vector registers of a task resumed from a blocking native

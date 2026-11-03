@@ -407,7 +407,7 @@ impl Process {
     }
 
     /// Its job's quota slot, read without a lock.
-    pub(crate) fn quota_slot(&self) -> u32 {
+    pub fn quota_slot(&self) -> u32 {
         self.slot.load(Ordering::Acquire)
     }
 
