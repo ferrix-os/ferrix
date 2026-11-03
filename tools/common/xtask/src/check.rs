@@ -327,6 +327,14 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
         "load ring size",
         &[&["tools/common/check/check-load-ring.py"]],
     ),
+    // The orphan step (docs/MICROKERNEL.md section 6.2, B5): no requirement of
+    // the kernel verified only from checks that leave with the load, but the
+    // ids on a list that only shrinks. Its scope is kernel source's `Verifies:`
+    // tags; an id whose only check is a host test or an xtask row is outside.
+    (
+        "evidence homes",
+        &[&["tools/common/check/check-evidence-homes.py"]],
+    ),
     // A coding standard with metrics, which EN 50716 requires and the
     // other gates did not supply: how complicated one function in the
     // certified item may be, how long, and whether it calls itself. A

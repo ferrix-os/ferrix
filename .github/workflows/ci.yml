@@ -145,6 +145,9 @@ jobs:
       - name: Device registers are touched only where the architecture allows
         run: python3 tools/common/check/check-device-access.py
 
+      - name: No kernel requirement rests only on checks that leave with the load
+        run: python3 tools/common/check/check-evidence-homes.py
+
       - name: Every unsafe construct is justified at the site
         run: python3 tools/common/check/check-unsafe-audit.py
 
