@@ -167,12 +167,12 @@ the card's monitor and the kernel half of N3b's dmabufs.
 
 ## Forecast
 
-- About **518 sized points** were left on 2026-10-08, the last count, at
-  the forecast rate of 20 a day: they end on 2026-11-03 (2026-10-18 at 56 a
-  day). The scope was 442 on 2026-09-26 and grew as rows were sized; the
-  recount and what moved it are in [Status](status.md).
-- Unsized work (self-hosting, bare metal, most of Steam) is not in any date,
-  and neither are stage 23's and stage 24's first guesses.
+- About **3,072 points** were left on 2026-11-03, the last count, at the
+  forecast rate of 20 a day: they end on 2027-04-06 (2026-12-31 at 53 a day,
+  what landed from 10-06 to 10-31). The scope was 442 on 2026-09-26 and 518 on
+  2026-10-08; on 2026-11-03 every row outside it was estimated and added, 2,554
+  points, many of them guesses. The recount and each row's basis are in
+  [Status](status.md).
 
 ## Details
 

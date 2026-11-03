@@ -1,317 +1,167 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="880" height="640" viewBox="0 0 880 640" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#1f2328">
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="800" viewBox="0 0 1040 800" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#1f2328">
 <title>Ferrix burndown</title>
-<rect width="880" height="640" fill="#ffffff"/>
-<text x="70.0" y="28.0" text-anchor="start" font-size="16" fill="#1f2328" font-weight="bold">Sized points remaining at the end of each day, from 10-31</text>
-<text x="70.0" y="46.0" text-anchor="start" font-size="12" fill="#656d76" font-weight="normal">518 points in the status table's sized, unfinished rows, 330 of them added since 09-26; unsized work is outside it, and scope added later moves the date</text>
-<line x1="70.0" y1="290.0" x2="810.0" y2="290.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="62.0" y="294.0" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">0</text>
-<line x1="70.0" y1="251.7" x2="810.0" y2="251.7" stroke="#d8dee4" stroke-width="1"/>
-<text x="62.0" y="255.7" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">100</text>
-<line x1="70.0" y1="213.3" x2="810.0" y2="213.3" stroke="#d8dee4" stroke-width="1"/>
-<text x="62.0" y="217.3" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">200</text>
-<line x1="70.0" y1="175.0" x2="810.0" y2="175.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="62.0" y="179.0" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">300</text>
-<line x1="70.0" y1="136.7" x2="810.0" y2="136.7" stroke="#d8dee4" stroke-width="1"/>
-<text x="62.0" y="140.7" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">400</text>
-<line x1="70.0" y1="98.3" x2="810.0" y2="98.3" stroke="#d8dee4" stroke-width="1"/>
-<text x="62.0" y="102.3" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">500</text>
-<line x1="70.0" y1="60.0" x2="810.0" y2="60.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="62.0" y="64.0" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">600</text>
-<text x="70.0" y="308.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">10-31</text>
-<text x="124.8" y="308.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">11-02</text>
-<text x="179.6" y="308.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">11-04</text>
-<text x="234.4" y="308.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">11-06</text>
-<text x="289.3" y="308.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">11-08</text>
-<text x="344.1" y="308.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">11-10</text>
-<text x="398.9" y="308.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">11-12</text>
-<text x="453.7" y="308.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">11-14</text>
-<text x="508.5" y="308.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">11-16</text>
-<text x="563.3" y="308.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">11-18</text>
-<text x="618.1" y="308.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">11-20</text>
-<text x="673.0" y="308.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">11-22</text>
-<text x="727.8" y="308.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">11-24</text>
-<text x="782.6" y="308.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">11-26</text>
-<text x="18.0" y="175.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">points</text>
-<polyline points="70.0,91.4 97.4,99.1 124.8,106.8 152.2,114.4 179.6,122.1 207.0,129.8 234.4,137.4 261.9,145.1 289.3,152.8 316.7,160.4 344.1,168.1 371.5,175.8 398.9,183.4 426.3,191.1 453.7,198.8 481.1,206.4 508.5,214.1 535.9,221.8 563.3,229.4 590.7,237.1 618.1,244.8 645.6,252.4 673.0,260.1 700.4,267.8 727.8,275.4 755.2,283.1 779.9,290.0" fill="none" stroke="#0969da" stroke-width="2.5" stroke-linejoin="round"/>
-<circle cx="70.0" cy="91.4" r="3" fill="#0969da"/>
-<circle cx="97.4" cy="99.1" r="3" fill="#0969da"/>
-<circle cx="124.8" cy="106.8" r="3" fill="#0969da"/>
-<circle cx="152.2" cy="114.4" r="3" fill="#0969da"/>
-<circle cx="179.6" cy="122.1" r="3" fill="#0969da"/>
-<circle cx="207.0" cy="129.8" r="3" fill="#0969da"/>
-<circle cx="234.4" cy="137.4" r="3" fill="#0969da"/>
-<circle cx="261.9" cy="145.1" r="3" fill="#0969da"/>
-<circle cx="289.3" cy="152.8" r="3" fill="#0969da"/>
-<circle cx="316.7" cy="160.4" r="3" fill="#0969da"/>
-<circle cx="344.1" cy="168.1" r="3" fill="#0969da"/>
-<circle cx="371.5" cy="175.8" r="3" fill="#0969da"/>
-<circle cx="398.9" cy="183.4" r="3" fill="#0969da"/>
-<circle cx="426.3" cy="191.1" r="3" fill="#0969da"/>
-<circle cx="453.7" cy="198.8" r="3" fill="#0969da"/>
-<circle cx="481.1" cy="206.4" r="3" fill="#0969da"/>
-<circle cx="508.5" cy="214.1" r="3" fill="#0969da"/>
-<circle cx="535.9" cy="221.8" r="3" fill="#0969da"/>
-<circle cx="563.3" cy="229.4" r="3" fill="#0969da"/>
-<circle cx="590.7" cy="237.1" r="3" fill="#0969da"/>
-<circle cx="618.1" cy="244.8" r="3" fill="#0969da"/>
-<circle cx="645.6" cy="252.4" r="3" fill="#0969da"/>
-<circle cx="673.0" cy="260.1" r="3" fill="#0969da"/>
-<circle cx="700.4" cy="267.8" r="3" fill="#0969da"/>
-<circle cx="727.8" cy="275.4" r="3" fill="#0969da"/>
-<circle cx="755.2" cy="283.1" r="3" fill="#0969da"/>
-<circle cx="779.9" cy="290.0" r="3" fill="#0969da"/>
-<line x1="390.0" y1="68.0" x2="414.0" y2="68.0" stroke="#0969da" stroke-width="2.5"/>
-<text x="422.0" y="72.0" text-anchor="start" font-size="12" fill="#1f2328" font-weight="normal">20 a day, what came off the 09-26 scope, 09-27 to 10-04: done 11-26</text>
-<polyline points="70.0,91.4 97.4,112.9 124.8,134.4 152.2,155.8 179.6,177.3 207.0,198.8 234.4,220.2 261.9,241.7 289.3,263.2 316.7,284.6 323.5,290.0" fill="none" stroke="#bf3989" stroke-width="2.5" stroke-linejoin="round"/>
-<circle cx="70.0" cy="91.4" r="3" fill="#bf3989"/>
-<circle cx="97.4" cy="112.9" r="3" fill="#bf3989"/>
-<circle cx="124.8" cy="134.4" r="3" fill="#bf3989"/>
-<circle cx="152.2" cy="155.8" r="3" fill="#bf3989"/>
-<circle cx="179.6" cy="177.3" r="3" fill="#bf3989"/>
-<circle cx="207.0" cy="198.8" r="3" fill="#bf3989"/>
-<circle cx="234.4" cy="220.2" r="3" fill="#bf3989"/>
-<circle cx="261.9" cy="241.7" r="3" fill="#bf3989"/>
-<circle cx="289.3" cy="263.2" r="3" fill="#bf3989"/>
-<circle cx="316.7" cy="284.6" r="3" fill="#bf3989"/>
-<circle cx="323.5" cy="290.0" r="3" fill="#bf3989"/>
-<line x1="390.0" y1="86.0" x2="414.0" y2="86.0" stroke="#bf3989" stroke-width="2.5"/>
-<text x="422.0" y="90.0" text-anchor="start" font-size="12" fill="#1f2328" font-weight="normal">56 a day, if every estimated point came off it: done 11-10</text>
-<text x="70.0" y="350.0" text-anchor="start" font-size="16" fill="#1f2328" font-weight="bold">Points landed per day, and the running total</text>
-<text x="70.0" y="368.0" text-anchor="start" font-size="12" fill="#656d76" font-weight="normal">hatched: sized afterwards from git log, not estimated before the work started</text>
+<rect width="1040" height="800" fill="#ffffff"/>
+<text x="56.0" y="28.0" text-anchor="start" font-size="16" fill="#1f2328" font-weight="bold">Sized points remaining at the end of each day, from 11-03</text>
+<text x="56.0" y="46.0" text-anchor="start" font-size="12" fill="#656d76" font-weight="normal">3,072 points in the status table's unfinished rows, 2,554 of them estimated on 11-03, many as guesses; scope added later moves the date</text>
+<line x1="56.0" y1="270.0" x2="1016.0" y2="270.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="48.0" y="274.0" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">0</text>
+<line x1="56.0" y1="240.0" x2="1016.0" y2="240.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="48.0" y="244.0" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">500</text>
+<line x1="56.0" y1="210.0" x2="1016.0" y2="210.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="48.0" y="214.0" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">1,000</text>
+<line x1="56.0" y1="180.0" x2="1016.0" y2="180.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="48.0" y="184.0" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">1,500</text>
+<line x1="56.0" y1="150.0" x2="1016.0" y2="150.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="48.0" y="154.0" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">2,000</text>
+<line x1="56.0" y1="120.0" x2="1016.0" y2="120.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="48.0" y="124.0" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">2,500</text>
+<line x1="56.0" y1="90.0" x2="1016.0" y2="90.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="48.0" y="94.0" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">3,000</text>
+<line x1="56.0" y1="60.0" x2="1016.0" y2="60.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="48.0" y="64.0" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">3,500</text>
+<text x="56.0" y="288.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">11-03</text>
+<text x="142.7" y="288.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">11-17</text>
+<text x="229.4" y="288.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">12-01</text>
+<text x="316.1" y="288.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">12-15</text>
+<text x="402.8" y="288.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">12-29</text>
+<text x="489.5" y="288.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">01-12</text>
+<text x="576.3" y="288.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">01-26</text>
+<text x="663.0" y="288.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">02-09</text>
+<text x="749.7" y="288.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">02-23</text>
+<text x="836.4" y="288.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">03-09</text>
+<text x="923.1" y="288.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">03-23</text>
+<text x="1009.8" y="288.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">04-06</text>
+<polyline points="56.0,85.7 62.2,86.9 68.4,88.1 74.6,89.3 80.8,90.5 87.0,91.7 93.2,92.9 99.4,94.1 105.5,95.3 111.7,96.5 117.9,97.7 124.1,98.9 130.3,100.1 136.5,101.3 142.7,102.5 148.9,103.7 155.1,104.9 161.3,106.1 167.5,107.3 173.7,108.5 179.9,109.7 186.1,110.9 192.3,112.1 198.5,113.3 204.6,114.5 210.8,115.7 217.0,116.9 223.2,118.1 229.4,119.3 235.6,120.5 241.8,121.7 248.0,122.9 254.2,124.1 260.4,125.3 266.6,126.5 272.8,127.7 279.0,128.9 285.2,130.1 291.4,131.3 297.5,132.5 303.7,133.7 309.9,134.9 316.1,136.1 322.3,137.3 328.5,138.5 334.7,139.7 340.9,140.9 347.1,142.1 353.3,143.3 359.5,144.5 365.7,145.7 371.9,146.9 378.1,148.1 384.3,149.3 390.5,150.5 396.6,151.7 402.8,152.9 409.0,154.1 415.2,155.3 421.4,156.5 427.6,157.7 433.8,158.9 440.0,160.1 446.2,161.3 452.4,162.5 458.6,163.7 464.8,164.9 471.0,166.1 477.2,167.3 483.4,168.5 489.5,169.7 495.7,170.9 501.9,172.1 508.1,173.3 514.3,174.5 520.5,175.7 526.7,176.9 532.9,178.1 539.1,179.3 545.3,180.5 551.5,181.7 557.7,182.9 563.9,184.1 570.1,185.3 576.3,186.5 582.5,187.7 588.6,188.9 594.8,190.1 601.0,191.3 607.2,192.5 613.4,193.7 619.6,194.9 625.8,196.1 632.0,197.3 638.2,198.5 644.4,199.7 650.6,200.9 656.8,202.1 663.0,203.3 669.2,204.5 675.4,205.7 681.5,206.9 687.7,208.1 693.9,209.3 700.1,210.5 706.3,211.7 712.5,212.9 718.7,214.1 724.9,215.3 731.1,216.5 737.3,217.7 743.5,218.9 749.7,220.1 755.9,221.3 762.1,222.5 768.3,223.7 774.5,224.9 780.6,226.1 786.8,227.3 793.0,228.5 799.2,229.7 805.4,230.9 811.6,232.1 817.8,233.3 824.0,234.5 830.2,235.7 836.4,236.9 842.6,238.1 848.8,239.3 855.0,240.5 861.2,241.7 867.4,242.9 873.5,244.1 879.7,245.3 885.9,246.5 892.1,247.7 898.3,248.9 904.5,250.1 910.7,251.3 916.9,252.5 923.1,253.7 929.3,254.9 935.5,256.1 941.7,257.3 947.9,258.5 954.1,259.7 960.3,260.9 966.5,262.1 972.6,263.3 978.8,264.5 985.0,265.7 991.2,266.9 997.4,268.1 1003.6,269.3 1007.3,270.0" fill="none" stroke="#0969da" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="1007.3" cy="270.0" r="4" fill="#0969da"/>
+<line x1="596.0" y1="68.0" x2="620.0" y2="68.0" stroke="#0969da" stroke-width="2"/>
+<text x="628.0" y="72.0" text-anchor="start" font-size="12" fill="#1f2328" font-weight="normal">20 a day, what came off the 09-26 scope, 09-27 to 10-04: done 04-06</text>
+<polyline points="56.0,85.7 62.2,88.9 68.4,92.0 74.6,95.2 80.8,98.4 87.0,101.6 93.2,104.8 99.4,107.9 105.5,111.1 111.7,114.3 117.9,117.5 124.1,120.7 130.3,123.8 136.5,127.0 142.7,130.2 148.9,133.4 155.1,136.6 161.3,139.7 167.5,142.9 173.7,146.1 179.9,149.3 186.1,152.5 192.3,155.6 198.5,158.8 204.6,162.0 210.8,165.2 217.0,168.4 223.2,171.5 229.4,174.7 235.6,177.9 241.8,181.1 248.0,184.3 254.2,187.4 260.4,190.6 266.6,193.8 272.8,197.0 279.0,200.2 285.2,203.3 291.4,206.5 297.5,209.7 303.7,212.9 309.9,216.1 316.1,219.2 322.3,222.4 328.5,225.6 334.7,228.8 340.9,232.0 347.1,235.1 353.3,238.3 359.5,241.5 365.7,244.7 371.9,247.9 378.1,251.0 384.3,254.2 390.5,257.4 396.6,260.6 402.8,263.8 409.0,266.9 415.0,270.0" fill="none" stroke="#bf3989" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="415.0" cy="270.0" r="4" fill="#bf3989"/>
+<line x1="596.0" y1="86.0" x2="620.0" y2="86.0" stroke="#bf3989" stroke-width="2"/>
+<text x="628.0" y="90.0" text-anchor="start" font-size="12" fill="#1f2328" font-weight="normal">53 a day, everything that landed 10-06 to 10-31: done 12-31</text>
+<circle cx="56.0" cy="85.7" r="4" fill="#1f2328"/>
+<text x="56.0" y="324.0" text-anchor="start" font-size="16" fill="#1f2328" font-weight="bold">Points landed per day</text>
+<rect x="56.0" y="337.0" width="12.0" height="12.0" rx="2" fill="#0969da"/>
+<text x="73.0" y="347.0" text-anchor="start" font-size="12" fill="#656d76" font-weight="normal">estimated before the work started</text>
 <defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#54aeff"/><line x1="0" y1="0" x2="0" y2="6" stroke="#ffffff" stroke-width="2"/></pattern></defs>
-<line x1="70.0" y1="590.0" x2="810.0" y2="590.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="62.0" y="594.0" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">0</text>
-<line x1="70.0" y1="556.7" x2="810.0" y2="556.7" stroke="#d8dee4" stroke-width="1"/>
-<text x="62.0" y="560.7" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">50</text>
-<line x1="70.0" y1="523.3" x2="810.0" y2="523.3" stroke="#d8dee4" stroke-width="1"/>
-<text x="62.0" y="527.3" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">100</text>
-<line x1="70.0" y1="490.0" x2="810.0" y2="490.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="62.0" y="494.0" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">150</text>
-<line x1="70.0" y1="456.7" x2="810.0" y2="456.7" stroke="#d8dee4" stroke-width="1"/>
-<text x="62.0" y="460.7" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">200</text>
-<line x1="70.0" y1="423.3" x2="810.0" y2="423.3" stroke="#d8dee4" stroke-width="1"/>
-<text x="62.0" y="427.3" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">250</text>
-<line x1="70.0" y1="390.0" x2="810.0" y2="390.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="62.0" y="394.0" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">300</text>
-<text x="818.0" y="594.0" text-anchor="start" font-size="12" fill="#bf3989" font-weight="normal">0</text>
-<text x="818.0" y="560.7" text-anchor="start" font-size="12" fill="#bf3989" font-weight="normal">400</text>
-<text x="818.0" y="527.3" text-anchor="start" font-size="12" fill="#bf3989" font-weight="normal">800</text>
-<text x="818.0" y="494.0" text-anchor="start" font-size="12" fill="#bf3989" font-weight="normal">1200</text>
-<text x="818.0" y="460.7" text-anchor="start" font-size="12" fill="#bf3989" font-weight="normal">1600</text>
-<text x="818.0" y="427.3" text-anchor="start" font-size="12" fill="#bf3989" font-weight="normal">2000</text>
-<text x="818.0" y="394.0" text-anchor="start" font-size="12" fill="#bf3989" font-weight="normal">2400</text>
-<text x="18.0" y="490.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">a day</text>
-<text x="862.0" y="490.0" text-anchor="middle" font-size="12" fill="#bf3989" font-weight="normal">total</text>
-<rect x="72.8" y="502.7" width="9.9" height="87.3" rx="2" fill="#0969da"/>
-<text x="77.7" y="497.7" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">131</text>
-<text x="77.7" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">09-14</text>
-<rect x="88.2" y="567.3" width="9.9" height="22.7" rx="2" fill="#0969da"/>
-<text x="93.1" y="562.3" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">34</text>
-<text x="93.1" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">09-15</text>
-<rect x="103.6" y="546.0" width="9.9" height="44.0" rx="2" fill="#0969da"/>
-<text x="108.5" y="541.0" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">66</text>
-<text x="108.5" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">09-16</text>
-<rect x="119.0" y="447.3" width="9.9" height="142.7" rx="2" fill="#0969da"/>
-<text x="124.0" y="442.3" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">214</text>
-<text x="124.0" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">09-17</text>
-<rect x="134.4" y="556.7" width="9.9" height="33.3" rx="2" fill="url(#hatch)"/>
-<text x="139.4" y="551.7" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">50</text>
-<text x="139.4" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">09-18</text>
-<rect x="149.9" y="556.7" width="9.9" height="33.3" rx="2" fill="url(#hatch)"/>
-<text x="154.8" y="551.7" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">50</text>
-<text x="154.8" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">09-19</text>
-<rect x="165.3" y="553.3" width="9.9" height="36.7" rx="2" fill="url(#hatch)"/>
-<text x="170.2" y="548.3" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">55</text>
-<text x="170.2" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">09-20</text>
-<rect x="180.7" y="526.0" width="9.9" height="64.0" rx="2" fill="url(#hatch)"/>
-<text x="185.6" y="521.0" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">96</text>
-<text x="185.6" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">09-21</text>
-<rect x="196.1" y="576.7" width="9.9" height="13.3" rx="2" fill="url(#hatch)"/>
-<text x="201.0" y="571.7" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">20</text>
-<text x="201.0" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">09-22</text>
-<rect x="211.5" y="554.7" width="9.9" height="35.3" rx="2" fill="url(#hatch)"/>
-<text x="216.5" y="549.7" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">53</text>
-<text x="216.5" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">09-23</text>
-<rect x="226.9" y="524.0" width="9.9" height="66.0" rx="2" fill="#0969da"/>
-<rect x="226.9" y="506.0" width="9.9" height="18.0" rx="2" fill="url(#hatch)"/>
-<text x="231.9" y="501.0" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">126</text>
-<text x="231.9" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">09-24</text>
-<rect x="242.4" y="572.7" width="9.9" height="17.3" rx="2" fill="url(#hatch)"/>
-<text x="247.3" y="567.7" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">26</text>
-<text x="247.3" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">09-25</text>
-<rect x="257.8" y="521.3" width="9.9" height="68.7" rx="2" fill="#0969da"/>
-<rect x="257.8" y="404.7" width="9.9" height="116.7" rx="2" fill="url(#hatch)"/>
-<text x="262.7" y="399.7" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">278</text>
-<text x="262.7" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">09-26</text>
-<rect x="273.2" y="530.0" width="9.9" height="60.0" rx="2" fill="#0969da"/>
-<rect x="273.2" y="430.0" width="9.9" height="100.0" rx="2" fill="url(#hatch)"/>
-<text x="278.1" y="425.0" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">240</text>
-<text x="278.1" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">09-27</text>
-<rect x="288.6" y="560.7" width="9.9" height="29.3" rx="2" fill="url(#hatch)"/>
-<text x="293.5" y="555.7" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">44</text>
-<text x="293.5" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">09-28</text>
-<rect x="304.0" y="566.0" width="9.9" height="24.0" rx="2" fill="#0969da"/>
-<rect x="304.0" y="548.7" width="9.9" height="17.3" rx="2" fill="url(#hatch)"/>
-<text x="309.0" y="543.7" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">62</text>
-<text x="309.0" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">09-29</text>
-<rect x="319.4" y="577.3" width="9.9" height="12.7" rx="2" fill="#0969da"/>
-<rect x="319.4" y="522.0" width="9.9" height="55.3" rx="2" fill="url(#hatch)"/>
-<text x="324.4" y="517.0" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">102</text>
-<text x="324.4" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">09-30</text>
-<rect x="334.9" y="527.3" width="9.9" height="62.7" rx="2" fill="url(#hatch)"/>
-<text x="339.8" y="522.3" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">94</text>
-<text x="339.8" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-01</text>
-<rect x="350.3" y="575.3" width="9.9" height="14.7" rx="2" fill="#0969da"/>
-<rect x="350.3" y="490.0" width="9.9" height="85.3" rx="2" fill="url(#hatch)"/>
-<text x="355.2" y="485.0" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">150</text>
-<text x="355.2" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-02</text>
-<rect x="365.7" y="564.7" width="9.9" height="25.3" rx="2" fill="#0969da"/>
-<rect x="365.7" y="488.0" width="9.9" height="76.7" rx="2" fill="url(#hatch)"/>
-<text x="370.6" y="483.0" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">153</text>
-<text x="370.6" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-03</text>
-<rect x="381.1" y="553.3" width="9.9" height="36.7" rx="2" fill="url(#hatch)"/>
-<text x="386.0" y="548.3" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">55</text>
-<text x="386.0" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-04</text>
-<rect x="396.5" y="532.7" width="9.9" height="57.3" rx="2" fill="#0969da"/>
-<rect x="396.5" y="513.3" width="9.9" height="19.3" rx="2" fill="url(#hatch)"/>
-<text x="401.5" y="508.3" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">115</text>
-<text x="401.5" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-05</text>
-<rect x="411.9" y="550.7" width="9.9" height="39.3" rx="2" fill="#0969da"/>
-<rect x="411.9" y="548.0" width="9.9" height="2.7" rx="2" fill="url(#hatch)"/>
-<text x="416.9" y="543.0" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">63</text>
-<text x="416.9" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-06</text>
-<rect x="427.4" y="561.3" width="9.9" height="28.7" rx="2" fill="#0969da"/>
-<rect x="427.4" y="552.0" width="9.9" height="9.3" rx="2" fill="url(#hatch)"/>
-<text x="432.3" y="547.0" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">57</text>
-<text x="432.3" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-07</text>
-<rect x="442.8" y="572.0" width="9.9" height="18.0" rx="2" fill="#0969da"/>
-<rect x="442.8" y="565.3" width="9.9" height="6.7" rx="2" fill="url(#hatch)"/>
-<text x="447.7" y="560.3" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">37</text>
-<text x="447.7" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-08</text>
-<rect x="458.2" y="589.3" width="9.9" height="0.7" rx="2" fill="url(#hatch)"/>
-<text x="463.1" y="584.3" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">1</text>
-<text x="463.1" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-09</text>
-<rect x="473.6" y="582.7" width="9.9" height="7.3" rx="2" fill="url(#hatch)"/>
-<text x="478.5" y="577.7" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">11</text>
-<text x="478.5" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-10</text>
-<rect x="489.0" y="586.7" width="9.9" height="3.3" rx="2" fill="#0969da"/>
-<rect x="489.0" y="537.3" width="9.9" height="49.3" rx="2" fill="url(#hatch)"/>
-<text x="494.0" y="532.3" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">79</text>
-<text x="494.0" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-11</text>
-<rect x="504.4" y="574.7" width="9.9" height="15.3" rx="2" fill="url(#hatch)"/>
-<text x="509.4" y="569.7" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">23</text>
-<text x="509.4" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-12</text>
-<rect x="519.9" y="570.7" width="9.9" height="19.3" rx="2" fill="url(#hatch)"/>
-<text x="524.8" y="565.7" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">29</text>
-<text x="524.8" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-13</text>
-<rect x="535.3" y="581.3" width="9.9" height="8.7" rx="2" fill="#0969da"/>
-<rect x="535.3" y="569.3" width="9.9" height="12.0" rx="2" fill="url(#hatch)"/>
-<text x="540.2" y="564.3" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">31</text>
-<text x="540.2" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-14</text>
-<rect x="550.7" y="586.7" width="9.9" height="3.3" rx="2" fill="#0969da"/>
-<rect x="550.7" y="540.0" width="9.9" height="46.7" rx="2" fill="url(#hatch)"/>
-<text x="555.6" y="535.0" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">75</text>
-<text x="555.6" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-15</text>
-<rect x="566.1" y="582.0" width="9.9" height="8.0" rx="2" fill="#0969da"/>
-<rect x="566.1" y="522.0" width="9.9" height="60.0" rx="2" fill="url(#hatch)"/>
-<text x="571.0" y="517.0" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">102</text>
-<text x="571.0" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-16</text>
-<rect x="581.5" y="561.3" width="9.9" height="28.7" rx="2" fill="url(#hatch)"/>
-<text x="586.5" y="556.3" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">43</text>
-<text x="586.5" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-17</text>
-<rect x="596.9" y="548.7" width="9.9" height="41.3" rx="2" fill="url(#hatch)"/>
-<text x="601.9" y="543.7" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">62</text>
-<text x="601.9" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-18</text>
-<rect x="612.4" y="581.3" width="9.9" height="8.7" rx="2" fill="url(#hatch)"/>
-<text x="617.3" y="576.3" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">13</text>
-<text x="617.3" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-19</text>
-<rect x="627.8" y="574.0" width="9.9" height="16.0" rx="2" fill="url(#hatch)"/>
-<text x="632.7" y="569.0" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">24</text>
-<text x="632.7" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-20</text>
-<rect x="643.2" y="567.3" width="9.9" height="22.7" rx="2" fill="url(#hatch)"/>
-<text x="648.1" y="562.3" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">34</text>
-<text x="648.1" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-21</text>
-<rect x="658.6" y="554.0" width="9.9" height="36.0" rx="2" fill="url(#hatch)"/>
-<text x="663.5" y="549.0" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">54</text>
-<text x="663.5" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-22</text>
-<rect x="674.0" y="470.7" width="9.9" height="119.3" rx="2" fill="#0969da"/>
-<rect x="674.0" y="445.3" width="9.9" height="25.3" rx="2" fill="url(#hatch)"/>
-<text x="679.0" y="440.3" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">217</text>
-<text x="679.0" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-23</text>
-<rect x="689.4" y="568.0" width="9.9" height="22.0" rx="2" fill="#0969da"/>
-<rect x="689.4" y="544.0" width="9.9" height="24.0" rx="2" fill="url(#hatch)"/>
-<text x="694.4" y="539.0" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">69</text>
-<text x="694.4" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-24</text>
-<rect x="704.9" y="575.3" width="9.9" height="14.7" rx="2" fill="#0969da"/>
-<rect x="704.9" y="518.7" width="9.9" height="56.7" rx="2" fill="url(#hatch)"/>
-<text x="709.8" y="513.7" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">107</text>
-<text x="709.8" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-25</text>
-<rect x="720.3" y="556.7" width="9.9" height="33.3" rx="2" fill="url(#hatch)"/>
-<text x="725.2" y="551.7" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">50</text>
-<text x="725.2" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-26</text>
-<rect x="735.7" y="588.0" width="9.9" height="2.0" rx="2" fill="url(#hatch)"/>
-<text x="740.6" y="583.0" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">3</text>
-<text x="740.6" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-27</text>
-<rect x="751.1" y="568.7" width="9.9" height="21.3" rx="2" fill="url(#hatch)"/>
-<text x="756.0" y="563.7" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">32</text>
-<text x="756.0" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-28</text>
-<rect x="766.5" y="580.0" width="9.9" height="10.0" rx="2" fill="url(#hatch)"/>
-<text x="771.5" y="575.0" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">15</text>
-<text x="771.5" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-29</text>
-<rect x="781.9" y="536.7" width="9.9" height="53.3" rx="2" fill="url(#hatch)"/>
-<text x="786.9" y="531.7" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">80</text>
-<text x="786.9" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-30</text>
-<rect x="797.4" y="550.7" width="9.9" height="39.3" rx="2" fill="url(#hatch)"/>
-<text x="802.3" y="545.7" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">59</text>
-<text x="802.3" y="608.0" text-anchor="middle" font-size="9" fill="#656d76" font-weight="normal">10-31</text>
-<polyline points="77.7,579.1 93.1,576.2 108.5,570.8 124.0,552.9 139.4,548.8 154.8,544.6 170.2,540.0 185.6,532.0 201.0,530.3 216.5,525.9 231.9,515.4 247.3,513.2 262.7,490.1 278.1,470.1 293.5,466.4 309.0,461.2 324.4,452.8 339.8,444.9 355.2,432.4 370.6,419.7 386.0,415.1 401.5,405.5 416.9,400.2 432.3,395.5 447.7,392.4 463.1,392.3 478.5,391.4 494.0,384.8 509.4,382.9 524.8,380.5 540.2,377.9 555.6,371.7 571.0,363.2 586.5,359.6 601.9,354.4 617.3,353.3 632.7,351.3 648.1,348.5 663.5,344.0 679.0,325.9 694.4,320.2 709.8,311.2 725.2,307.1 740.6,306.8 756.0,304.2 771.5,302.9 786.9,296.2 802.3,291.3" fill="none" stroke="#bf3989" stroke-width="2.5" stroke-linejoin="round"/>
-<circle cx="77.7" cy="579.1" r="3" fill="#bf3989"/>
-<circle cx="93.1" cy="576.2" r="3" fill="#bf3989"/>
-<circle cx="108.5" cy="570.8" r="3" fill="#bf3989"/>
-<circle cx="124.0" cy="552.9" r="3" fill="#bf3989"/>
-<circle cx="139.4" cy="548.8" r="3" fill="#bf3989"/>
-<circle cx="154.8" cy="544.6" r="3" fill="#bf3989"/>
-<circle cx="170.2" cy="540.0" r="3" fill="#bf3989"/>
-<circle cx="185.6" cy="532.0" r="3" fill="#bf3989"/>
-<circle cx="201.0" cy="530.3" r="3" fill="#bf3989"/>
-<circle cx="216.5" cy="525.9" r="3" fill="#bf3989"/>
-<circle cx="231.9" cy="515.4" r="3" fill="#bf3989"/>
-<circle cx="247.3" cy="513.2" r="3" fill="#bf3989"/>
-<circle cx="262.7" cy="490.1" r="3" fill="#bf3989"/>
-<circle cx="278.1" cy="470.1" r="3" fill="#bf3989"/>
-<circle cx="293.5" cy="466.4" r="3" fill="#bf3989"/>
-<circle cx="309.0" cy="461.2" r="3" fill="#bf3989"/>
-<circle cx="324.4" cy="452.8" r="3" fill="#bf3989"/>
-<circle cx="339.8" cy="444.9" r="3" fill="#bf3989"/>
-<circle cx="355.2" cy="432.4" r="3" fill="#bf3989"/>
-<circle cx="370.6" cy="419.7" r="3" fill="#bf3989"/>
-<circle cx="386.0" cy="415.1" r="3" fill="#bf3989"/>
-<circle cx="401.5" cy="405.5" r="3" fill="#bf3989"/>
-<circle cx="416.9" cy="400.2" r="3" fill="#bf3989"/>
-<circle cx="432.3" cy="395.5" r="3" fill="#bf3989"/>
-<circle cx="447.7" cy="392.4" r="3" fill="#bf3989"/>
-<circle cx="463.1" cy="392.3" r="3" fill="#bf3989"/>
-<circle cx="478.5" cy="391.4" r="3" fill="#bf3989"/>
-<circle cx="494.0" cy="384.8" r="3" fill="#bf3989"/>
-<circle cx="509.4" cy="382.9" r="3" fill="#bf3989"/>
-<circle cx="524.8" cy="380.5" r="3" fill="#bf3989"/>
-<circle cx="540.2" cy="377.9" r="3" fill="#bf3989"/>
-<circle cx="555.6" cy="371.7" r="3" fill="#bf3989"/>
-<circle cx="571.0" cy="363.2" r="3" fill="#bf3989"/>
-<circle cx="586.5" cy="359.6" r="3" fill="#bf3989"/>
-<circle cx="601.9" cy="354.4" r="3" fill="#bf3989"/>
-<circle cx="617.3" cy="353.3" r="3" fill="#bf3989"/>
-<circle cx="632.7" cy="351.3" r="3" fill="#bf3989"/>
-<circle cx="648.1" cy="348.5" r="3" fill="#bf3989"/>
-<circle cx="663.5" cy="344.0" r="3" fill="#bf3989"/>
-<circle cx="679.0" cy="325.9" r="3" fill="#bf3989"/>
-<circle cx="694.4" cy="320.2" r="3" fill="#bf3989"/>
-<circle cx="709.8" cy="311.2" r="3" fill="#bf3989"/>
-<circle cx="725.2" cy="307.1" r="3" fill="#bf3989"/>
-<circle cx="740.6" cy="306.8" r="3" fill="#bf3989"/>
-<circle cx="756.0" cy="304.2" r="3" fill="#bf3989"/>
-<circle cx="771.5" cy="302.9" r="3" fill="#bf3989"/>
-<circle cx="786.9" cy="296.2" r="3" fill="#bf3989"/>
-<circle cx="802.3" cy="291.3" r="3" fill="#bf3989"/>
-<text x="794.3" y="283.3" text-anchor="end" font-size="12" fill="#bf3989" font-weight="bold">≈ 3584</text>
+<rect x="278.0" y="337.0" width="12.0" height="12.0" rx="2" fill="url(#hatch)"/>
+<text x="295.0" y="347.0" text-anchor="start" font-size="12" fill="#656d76" font-weight="normal">sized afterwards from git log; a number on days of 100 or more</text>
+<line x1="56.0" y1="546.0" x2="1016.0" y2="546.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="48.0" y="550.0" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">0</text>
+<line x1="56.0" y1="486.0" x2="1016.0" y2="486.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="48.0" y="490.0" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">100</text>
+<line x1="56.0" y1="426.0" x2="1016.0" y2="426.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="48.0" y="430.0" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">200</text>
+<line x1="56.0" y1="366.0" x2="1016.0" y2="366.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="48.0" y="370.0" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">300</text>
+<rect x="59.4" y="467.4" width="12.0" height="78.6" rx="2" fill="#0969da"/>
+<rect x="78.2" y="525.6" width="12.0" height="20.4" rx="2" fill="#0969da"/>
+<rect x="97.0" y="506.4" width="12.0" height="39.6" rx="2" fill="#0969da"/>
+<rect x="115.9" y="417.6" width="12.0" height="128.4" rx="2" fill="#0969da"/>
+<rect x="134.7" y="516.0" width="12.0" height="30.0" rx="2" fill="url(#hatch)"/>
+<rect x="153.5" y="516.0" width="12.0" height="30.0" rx="2" fill="url(#hatch)"/>
+<rect x="172.3" y="513.0" width="12.0" height="33.0" rx="2" fill="url(#hatch)"/>
+<rect x="191.2" y="488.4" width="12.0" height="57.6" rx="2" fill="url(#hatch)"/>
+<rect x="210.0" y="534.0" width="12.0" height="12.0" rx="2" fill="url(#hatch)"/>
+<rect x="228.8" y="514.2" width="12.0" height="31.8" rx="2" fill="url(#hatch)"/>
+<rect x="247.6" y="486.6" width="12.0" height="59.4" rx="2" fill="#0969da"/>
+<rect x="247.6" y="470.4" width="12.0" height="16.2" rx="2" fill="url(#hatch)"/>
+<rect x="266.4" y="530.4" width="12.0" height="15.6" rx="2" fill="url(#hatch)"/>
+<rect x="285.3" y="484.2" width="12.0" height="61.8" rx="2" fill="#0969da"/>
+<rect x="285.3" y="379.2" width="12.0" height="105.0" rx="2" fill="url(#hatch)"/>
+<rect x="304.1" y="492.0" width="12.0" height="54.0" rx="2" fill="#0969da"/>
+<rect x="304.1" y="402.0" width="12.0" height="90.0" rx="2" fill="url(#hatch)"/>
+<rect x="322.9" y="519.6" width="12.0" height="26.4" rx="2" fill="url(#hatch)"/>
+<rect x="341.7" y="524.4" width="12.0" height="21.6" rx="2" fill="#0969da"/>
+<rect x="341.7" y="508.8" width="12.0" height="15.6" rx="2" fill="url(#hatch)"/>
+<rect x="360.6" y="534.6" width="12.0" height="11.4" rx="2" fill="#0969da"/>
+<rect x="360.6" y="484.8" width="12.0" height="49.8" rx="2" fill="url(#hatch)"/>
+<rect x="379.4" y="489.6" width="12.0" height="56.4" rx="2" fill="url(#hatch)"/>
+<rect x="398.2" y="532.8" width="12.0" height="13.2" rx="2" fill="#0969da"/>
+<rect x="398.2" y="456.0" width="12.0" height="76.8" rx="2" fill="url(#hatch)"/>
+<rect x="417.0" y="523.2" width="12.0" height="22.8" rx="2" fill="#0969da"/>
+<rect x="417.0" y="454.2" width="12.0" height="69.0" rx="2" fill="url(#hatch)"/>
+<rect x="435.9" y="513.0" width="12.0" height="33.0" rx="2" fill="url(#hatch)"/>
+<rect x="454.7" y="494.4" width="12.0" height="51.6" rx="2" fill="#0969da"/>
+<rect x="454.7" y="477.0" width="12.0" height="17.4" rx="2" fill="url(#hatch)"/>
+<rect x="473.5" y="510.6" width="12.0" height="35.4" rx="2" fill="#0969da"/>
+<rect x="473.5" y="508.2" width="12.0" height="2.4" rx="2" fill="url(#hatch)"/>
+<rect x="492.3" y="520.2" width="12.0" height="25.8" rx="2" fill="#0969da"/>
+<rect x="492.3" y="511.8" width="12.0" height="8.4" rx="2" fill="url(#hatch)"/>
+<rect x="511.2" y="529.8" width="12.0" height="16.2" rx="2" fill="#0969da"/>
+<rect x="511.2" y="523.8" width="12.0" height="6.0" rx="2" fill="url(#hatch)"/>
+<rect x="530.0" y="545.4" width="12.0" height="0.6" rx="2" fill="url(#hatch)"/>
+<rect x="548.8" y="539.4" width="12.0" height="6.6" rx="2" fill="url(#hatch)"/>
+<rect x="567.6" y="543.0" width="12.0" height="3.0" rx="2" fill="#0969da"/>
+<rect x="567.6" y="498.6" width="12.0" height="44.4" rx="2" fill="url(#hatch)"/>
+<rect x="586.4" y="532.2" width="12.0" height="13.8" rx="2" fill="url(#hatch)"/>
+<rect x="605.3" y="528.6" width="12.0" height="17.4" rx="2" fill="url(#hatch)"/>
+<rect x="624.1" y="538.2" width="12.0" height="7.8" rx="2" fill="#0969da"/>
+<rect x="624.1" y="527.4" width="12.0" height="10.8" rx="2" fill="url(#hatch)"/>
+<rect x="642.9" y="543.0" width="12.0" height="3.0" rx="2" fill="#0969da"/>
+<rect x="642.9" y="501.0" width="12.0" height="42.0" rx="2" fill="url(#hatch)"/>
+<rect x="661.7" y="538.8" width="12.0" height="7.2" rx="2" fill="#0969da"/>
+<rect x="661.7" y="484.8" width="12.0" height="54.0" rx="2" fill="url(#hatch)"/>
+<rect x="680.6" y="520.2" width="12.0" height="25.8" rx="2" fill="url(#hatch)"/>
+<rect x="699.4" y="508.8" width="12.0" height="37.2" rx="2" fill="url(#hatch)"/>
+<rect x="718.2" y="538.2" width="12.0" height="7.8" rx="2" fill="url(#hatch)"/>
+<rect x="737.0" y="531.6" width="12.0" height="14.4" rx="2" fill="url(#hatch)"/>
+<rect x="755.9" y="525.6" width="12.0" height="20.4" rx="2" fill="url(#hatch)"/>
+<rect x="774.7" y="513.6" width="12.0" height="32.4" rx="2" fill="url(#hatch)"/>
+<rect x="793.5" y="438.6" width="12.0" height="107.4" rx="2" fill="#0969da"/>
+<rect x="793.5" y="415.8" width="12.0" height="22.8" rx="2" fill="url(#hatch)"/>
+<rect x="812.3" y="526.2" width="12.0" height="19.8" rx="2" fill="#0969da"/>
+<rect x="812.3" y="504.6" width="12.0" height="21.6" rx="2" fill="url(#hatch)"/>
+<rect x="831.2" y="532.8" width="12.0" height="13.2" rx="2" fill="#0969da"/>
+<rect x="831.2" y="481.8" width="12.0" height="51.0" rx="2" fill="url(#hatch)"/>
+<rect x="850.0" y="516.0" width="12.0" height="30.0" rx="2" fill="url(#hatch)"/>
+<rect x="868.8" y="544.2" width="12.0" height="1.8" rx="2" fill="url(#hatch)"/>
+<rect x="887.6" y="526.8" width="12.0" height="19.2" rx="2" fill="url(#hatch)"/>
+<rect x="906.4" y="537.0" width="12.0" height="9.0" rx="2" fill="url(#hatch)"/>
+<rect x="925.3" y="498.0" width="12.0" height="48.0" rx="2" fill="url(#hatch)"/>
+<rect x="944.1" y="510.6" width="12.0" height="35.4" rx="2" fill="url(#hatch)"/>
+<rect x="981.7" y="545.4" width="12.0" height="0.6" rx="2" fill="url(#hatch)"/>
+<rect x="1000.6" y="545.4" width="12.0" height="0.6" rx="2" fill="url(#hatch)"/>
+<text x="291.3" y="374.2" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">278</text>
+<text x="310.1" y="397.0" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">240</text>
+<text x="799.5" y="410.8" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">217</text>
+<text x="121.9" y="412.6" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">214</text>
+<text x="423.1" y="449.2" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">153</text>
+<text x="404.2" y="451.0" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">150</text>
+<text x="65.4" y="462.4" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">131</text>
+<text x="253.6" y="465.4" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">126</text>
+<text x="460.7" y="472.0" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">115</text>
+<text x="837.2" y="476.8" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">107</text>
+<text x="366.6" y="479.8" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">102</text>
+<text x="667.8" y="479.8" text-anchor="middle" font-size="10" fill="#1f2328" font-weight="normal">102</text>
+<text x="65.4" y="564.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">09-14</text>
+<text x="197.2" y="564.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">09-21</text>
+<text x="328.9" y="564.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">09-28</text>
+<text x="460.7" y="564.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">10-05</text>
+<text x="592.5" y="564.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">10-12</text>
+<text x="724.2" y="564.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">10-19</text>
+<text x="856.0" y="564.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">10-26</text>
+<text x="987.8" y="564.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">11-02</text>
+<text x="56.0" y="604.0" text-anchor="start" font-size="16" fill="#1f2328" font-weight="bold">Running total of points landed</text>
+<line x1="56.0" y1="762.0" x2="1016.0" y2="762.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="48.0" y="766.0" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">0</text>
+<line x1="56.0" y1="729.0" x2="1016.0" y2="729.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="48.0" y="733.0" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">1,000</text>
+<line x1="56.0" y1="696.0" x2="1016.0" y2="696.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="48.0" y="700.0" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">2,000</text>
+<line x1="56.0" y1="663.0" x2="1016.0" y2="663.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="48.0" y="667.0" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">3,000</text>
+<line x1="56.0" y1="630.0" x2="1016.0" y2="630.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="48.0" y="634.0" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">4,000</text>
+<polyline points="65.4,757.7 84.2,756.6 103.1,754.4 121.9,747.3 140.7,745.7 159.5,744.0 178.4,742.2 197.2,739.0 216.0,738.4 234.8,736.6 253.6,732.5 272.5,731.6 291.3,722.4 310.1,714.5 328.9,713.1 347.8,711.0 366.6,707.6 385.4,704.5 404.2,699.6 423.1,694.5 441.9,692.7 460.7,688.9 479.5,686.9 498.4,685.0 517.2,683.8 536.0,683.7 554.8,683.4 573.6,680.8 592.5,680.0 611.3,679.0 630.1,678.0 648.9,675.5 667.8,672.2 686.6,670.8 705.4,668.7 724.2,668.3 743.1,667.5 761.9,666.4 780.7,664.6 799.5,657.4 818.4,655.1 837.2,651.6 856.0,650.0 874.8,649.9 893.6,648.8 912.5,648.3 931.3,645.7 950.1,643.7 968.9,643.7 987.8,643.7 1006.6,643.7" fill="none" stroke="#bf3989" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="1006.6" cy="643.7" r="4" fill="#bf3989"/>
+<text x="998.6" y="635.7" text-anchor="end" font-size="12" fill="#1f2328" font-weight="bold">≈ 3,586</text>
+<text x="65.4" y="780.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">09-14</text>
+<text x="197.2" y="780.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">09-21</text>
+<text x="328.9" y="780.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">09-28</text>
+<text x="460.7" y="780.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">10-05</text>
+<text x="592.5" y="780.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">10-12</text>
+<text x="724.2" y="780.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">10-19</text>
+<text x="856.0" y="780.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">10-26</text>
+<text x="987.8" y="780.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">11-02</text>
 </svg>
