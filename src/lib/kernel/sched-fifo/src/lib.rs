@@ -160,14 +160,18 @@ impl<T> FifoQueue<T> {
     }
 
     /// Advance the period clock by `ns`, starting a new period, with its
-    /// budget refilled, at each period's end.
-    fn advance(&mut self, ns: u64) {
+    /// budget refilled, at each period's end. Answers how much of `ns` falls
+    /// in the period the clock is in now: a charge is whole however long the
+    /// entity ran alone, tickless, so it can end a period and start another.
+    fn advance(&mut self, ns: u64) -> u64 {
         let at = self.period_at.saturating_add(ns);
         if at >= PERIOD_NS {
             self.period_at = at % PERIOD_NS;
             self.spent = 0;
+            self.period_at
         } else {
             self.period_at = at;
+            ns
         }
     }
 
@@ -514,11 +518,11 @@ impl<T> SchedClass<T> for FifoRr {
     }
 
     fn charge(queue: &mut FifoQueue<T>, ran_ns: u64) -> bool {
-        queue.advance(ran_ns);
+        let in_this_period = queue.advance(ran_ns);
         if queue.running.is_none() {
             return false;
         }
-        queue.spent = queue.spent.saturating_add(ran_ns);
+        queue.spent = queue.spent.saturating_add(in_this_period);
         let peer = queue.same_priority_waits();
         let rr_due = queue.running.as_mut().is_some_and(|node| {
             if node.params.policy != Policy::Rr {
@@ -594,7 +598,7 @@ impl<T> SchedClass<T> for FifoRr {
     }
 
     fn elapse(queue: &mut FifoQueue<T>, ns: u64) {
-        queue.advance(ns);
+        let _ = queue.advance(ns);
     }
 
     fn steals_work(_: &FifoQueue<T>) -> bool {
