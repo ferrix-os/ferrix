@@ -300,8 +300,9 @@ ARCHITECTURE.md already says:
   maximum controlled priority is the native form: a handle's rights bound
   the priority it can confer.
 
-**As built (step 4b, `desktop`, 2026-10-27; SCHED-CLASSES.md §9e, ledger
-line 29).** `ferrix-sched-fifo` is the tier: a balanced tree of the tasks'
+**As built (step 4b, `desktop`, 2026-10-27; SCHED-CLASSES.md §9e, container
+review 29 (not on record; ledger 5684)).** `ferrix-sched-fifo` is the tier: a
+balanced tree of the tasks'
 own nodes keyed by priority and arrival rather than a bitmap of lists (the
 review accepted the class's own tree). Its constants are fixed in the crate,
 never run-time settings (R13): the round-robin quantum is **100 ms**

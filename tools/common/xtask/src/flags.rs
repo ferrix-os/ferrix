@@ -489,7 +489,8 @@ const FAMILY_FILE: &str = "tools/common/data/hardware-families.toml";
 
 /// Why a profile that boots only signed slots, and names no board family
 /// its loader can recognise (`recorded`), is not buildable: such an image
-/// boots nothing (docs/SCHED-CLASSES.md §9c; ledger lines 25 (2) and 26).
+/// boots nothing (docs/SCHED-CLASSES.md §9c; container reviews 25 (not on record;
+/// ledger 5684) (2) and 26).
 fn unnamed_boards(profile: &Profile, recorded: impl Fn(&str) -> bool) -> Option<String> {
     let required = profile
         .image

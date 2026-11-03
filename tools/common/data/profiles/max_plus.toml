@@ -1,7 +1,7 @@
 # `max_plus` ("Max+"): the barest microkernel Ferrix can build (the
 # customer, 2026-10-27: "max+ shall be the most bare microkernel possible"),
 # docs/SCHED-CLASSES.md section 9c, the consultant's design review OK IF
-# E1-E13 (ledger line 24 of the sched-classes container ledger). Every flag
+# E1-E13 (container review 24 (not on record; ledger 5684)). Every flag
 # and image key takes its `barest` value from build-flags.toml, held by
 # check-build-flags (E13); the countermeasures and their checks stay (E11).
 #
@@ -39,13 +39,14 @@ image = { driver_updates = "absent", settings_writer = "absent", slot_signing = 
 slot_families = ["aarch64-kv260"]
 exceptions = []
 # The barest values that do not allow sc4_plus yet, each with what it waits
-# on and the ledger line that admitted it (E3; ledger line 25 (1)): the
+# on and the ledger entry that holds it (E3; container review 25 (1), not on
+# record; ledger 5684): the
 # profile is reported not claimable while any is listed. The list may shrink
 # freely and grows only with a ledger line.
 pending = [
-    { flag = "personality", value = "none", until = "LINUX-ABI-SEPARATION.md section 11.11's later steps; ledger 3257 (1), 3208 (6)(g)", ledger = "sched-classes line 24" },
-    { flag = "fs", value = "none", until = "LINUX-ABI-SEPARATION.md section 11.11's later steps", ledger = "sched-classes line 24" },
-    { flag = "linux_abi", value = "off", until = "the checks that run a Linux program re-homed (LINUX-ABI-SEPARATION.md section 11.11)", ledger = "sched-classes line 24" },
+    { flag = "personality", value = "none", until = "LINUX-ABI-SEPARATION.md section 11.11's later steps; ledger 3257 (1), 3208 (6)(g)", ledger = "5684, the container review 24 that admitted it being not on record" },
+    { flag = "fs", value = "none", until = "LINUX-ABI-SEPARATION.md section 11.11's later steps", ledger = "5684, the container review 24 that admitted it being not on record" },
+    { flag = "linux_abi", value = "off", until = "the checks that run a Linux program re-homed (LINUX-ABI-SEPARATION.md section 11.11)", ledger = "5684, the container review 24 that admitted it being not on record" },
 ]
 
 [flags]

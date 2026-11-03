@@ -17,7 +17,8 @@ build left, release, on each architecture (`cargo xtask test-removable`).
     check-removable-symbols.py --self-test
 
 **The class crates** (`--class`; docs/SCHED-CLASSES.md §9b, the consultant's
-design review of step 3b, ledger line 22, G3, G8): each crate of
+design review of step 3b, container review 22 (not on record; ledger 5684),
+G3, G8): each crate of
 `class_crates` is judged against the profile the kernel was built from. A
 crate its flags do not select, and the fixture, leave no symbol in the
 release ELF, and neither a member of their rlib nor a symbol of theirs in
@@ -121,7 +122,7 @@ def class_judge(names: list[str], map_text: str, record: dict, flags: dict[str, 
     `map_text`, against the class crates' `record`."""
     # The absent side reads an absence in the map, so a map that could hold
     # nothing it looks for -- empty, truncated, or with its names mangled --
-    # is refused before it is read (ledger line 23 (1)).
+    # is refused before it is read (container review 23 (1)).
     if "ferrix_kernel_core::" not in map_text:
         return ["the non-LTO map names no demangled path of the kernel's core (ferrix_kernel_core::): "
                 "it is empty, truncated or mangled, and cannot show an absence"]

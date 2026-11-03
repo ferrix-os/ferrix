@@ -1,6 +1,6 @@
 //! `SCHED_FIFO` and `SCHED_RR`: fixed priorities above the fair class
-//! (docs/SCHED-CLASSES.md §9e; the consultant's design review, ledger line
-//! 29, R1-R15).
+//! (docs/SCHED-CLASSES.md §9e; the design review, container review 29 (not on
+//! record; ledger 5684), R1-R15).
 //!
 //! **Priorities 1 to 99**, higher first, as Linux numbers them; within a
 //! priority, arrival order. A `SCHED_FIFO` entity runs until it blocks,
@@ -433,7 +433,7 @@ impl<T> SchedClass<T> for FifoRr {
     /// one caller in the kernel is a change of policy on a queued real-time
     /// task that does not run (`CpuQueue::set_policy` and, at a decision,
     /// `requeue_if_moved`), routed to this tier alone (`StackTiers::remove_in`,
-    /// the review's line 30, B3), never a switch, a wake or the tick.
+    /// container review 30, B3), never a switch, a wake or the tick.
     fn remove(queue: &mut FifoQueue<T>, id: u64) -> Option<(T, FifoEntity<T>)> {
         if queue
             .running

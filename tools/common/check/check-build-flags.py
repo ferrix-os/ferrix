@@ -42,7 +42,8 @@ are read, which boot options are, and the kernel's own table of flags.
 
 4. **The scheduler's flags are read in the arms file alone**
    (docs/SCHED-CLASSES.md §9a; the consultant's design review of step 3,
-   ledger line 20, D6, D7, D9, D10): no `ferrix_sched_*` cfg anywhere in the
+   container review 20 (not on record; ledger 5684), D6, D7, D9, D10): no
+   `ferrix_sched_*` cfg anywhere in the
    kernel but src/kernel/src/sched_select.rs; there, each declared value of
    each `sched_*` flag has exactly one arm, a `Value` const naming it with
    its place in the flag file's list (or the identity tier alias of an
@@ -390,7 +391,7 @@ def flag_word_problems(source: str, flag_file: dict, profiles: list[str]) -> lis
 
 
 
-# The scheduler's flags (docs/SCHED-CLASSES.md §9a; ledger line 20, D6, D7):
+# The scheduler's flags (docs/SCHED-CLASSES.md §9a; container review 20, D6, D7):
 # the arms file is the only file reading a `sched_*` cfg, with one arm a
 # declared value. `SCHED_CONSTS` is the const each flag's arm defines.
 ARMS = KERNEL_WORD
@@ -410,7 +411,7 @@ ARM = re.compile(r'#\[cfg\(\s*ferrix_(sched_[a-z0-9_]+)\s*=\s*"([a-z0-9_]+)"\s*\
 
 # Stack's nesting in the arms file, outermost first, as its tier aliases name
 # it; the flag file declares the tier flags in the same order, which
-# check-boot-line.py composes the classes line by (ledger line 23 (3)).
+# check-boot-line.py composes the classes line by (container review 23 (3)).
 TIER_ALIASES = {"Windows": "sched_windows", "Deadline": "sched_deadline", "Realtime": "sched_realtime",
                 "Fair": "sched_fair"}
 STACK = re.compile(r"pub\s+type\s+Stack\s*=\s*([^;]+);")
@@ -491,7 +492,7 @@ def arms_problems(source: str, flag_file: dict) -> list[str]:
 
 # The modes and their tiers (D9) are read from the kernel's own map,
 # `mode_available`'s match in the arms file, so the profile rule and the
-# kernel's refusal cannot drift apart (ledger line 21 (2)). An arm is
+# kernel's refusal cannot drift apart (container review 21 (2)). An arm is
 # `SchedMode::<Mode> => <expression>`, the expression of `<TIER>.present`
 # joined by `&&` and `||`.
 MODE_ARM = re.compile(r"SchedMode::([A-Za-z]+)\s*=>\s*([^,]+),")
@@ -520,7 +521,7 @@ def mode_map(source: str) -> dict[str, tuple[str, set[str]]]:
 def mode_problems(profiles: dict[str, dict], modes: dict[str, tuple[str, set[str]]]) -> list[str]:
     """Each profile's `modes` is the set of modes whose tiers it has present,
     both ways, never empty, and every tier it has present is one an allowed
-    mode uses (D9, S12, ledger line 21 (1)); a profile with a claim is
+    mode uses (D9, S12, container review 21 (1)); a profile with a claim is
     `sched_dispatch = "fixed"` (D10)."""
     problems = []
     if not modes:
@@ -551,7 +552,7 @@ def mode_problems(profiles: dict[str, dict], modes: dict[str, tuple[str, set[str
 
 
 # max+'s rule (docs/SCHED-CLASSES.md section 9c; the consultant's design
-# review, ledger line 24, E1, E2, E13): every flag and image key names its
+# review, container review 24, E1, E2, E13): every flag and image key names its
 # `barest` value, the one that links the least code and leaves the least to
 # decide at run time among the values that allow sc4 (the countermeasure
 # floor, E11); only that value may allow sc4_plus, which is sc4's targets
@@ -560,7 +561,7 @@ def mode_problems(profiles: dict[str, dict], modes: dict[str, tuple[str, set[str
 # option it permits, and claims a target.
 TOP = "sc4_plus"
 # The flags and keys whose barest value E11 keeps as a countermeasure or its
-# check: never pending, so never waived (ledger line 25 (1)).
+# check: never pending, so never waived (container review 25 (1)).
 COUNTERMEASURES = {"mitigations", "checks", "ssbd", "program_barrier", "smt", "slot_signing"}
 
 
@@ -614,7 +615,7 @@ def barest_problems(flag_file: dict, profiles: dict[str, dict]) -> list[str]:
     return problems
 
 
-# The audit record's fields (D8; ledger line 21 (4)): two bits a flag in the
+# The audit record's fields (D8; container review 21 (4)): two bits a flag in the
 # first word, the scheduler's flags left out; in the second the profile and
 # the level four bits each, `sched_dispatch` two, each tier three. A value
 # past its field would alias another in the record, so the flag file may not

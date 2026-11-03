@@ -885,7 +885,8 @@ impl CpuQueue {
     pub(crate) fn pick_next(&mut self) -> Option<Arc<Task>> {
         if let Some(task) = Stack::pick(&mut self.stack) {
             // Only this processor's own running task may be picked while a
-            // processor runs it (line 30, B1): any other would be run twice.
+            // processor runs it (container review 30 (not on record; ledger 5684), B1): any
+            // other would be run twice.
             let here = self
                 .current
                 .as_ref()
@@ -1044,7 +1045,7 @@ impl CpuQueue {
 
     /// Take a queued task off this queue, for another one to run: from the
     /// tier above fair with `upper`, from fair's otherwise, walking no other
-    /// tier's queue (line 30, B3).
+    /// tier's queue (container review 30, B3).
     pub(crate) fn release(&mut self, id: TaskId, upper: bool) -> Option<Arc<Task>> {
         // Charged first for the reason `insert` is: the lag the leaving task
         // takes with it is measured against a virtual time that must include

@@ -140,8 +140,8 @@ barest = "retyped"  # max_plus's (SCHED-CLASSES.md section 9c, E13): no shared k
 values.retyped = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "M6", built = "no" }
 values.heap = { allows = ["present", "sc2", "none"], lands = "today", built = "yes" }
 
-# The scheduler (docs/SCHED-CLASSES.md §6, §9a; ledger line 20 of the
-# container's consultant ledger, D1): how the stack is dispatched, then one
+# The scheduler (docs/SCHED-CLASSES.md §6, §9a; container review 20 (not on
+# record; ledger 5684), D1): how the stack is dispatched, then one
 # flag a tier, outermost first, each value naming the crate that fills it.
 # The selection crate's arms file (src/kernel/src/sched_select.rs) is the
 # only code that reads them (D6). A value that succeeds one of `schedule`'s
@@ -171,7 +171,7 @@ values.absent = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands 
 [flags.sched_realtime]
 why = "stage 14's SoftRt tier, fixed priorities FIFO and round-robin (ferrix-sched-fifo), or none"
 barest = "absent"  # max_plus's (SCHED-CLASSES.md section 9c, E13): no tier
-values.fifo_rr = { allows = ["none"], lands = "stage 14, step 4b (ledger line 29, R11)", built = "yes" }
+values.fifo_rr = { allows = ["none"], lands = "stage 14, step 4b (container review 29, R11)", built = "yes" }
 values.absent = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
 
 # eevdf's `present` stands under F-76 until S7 classifies ferrix-sched-fair.
