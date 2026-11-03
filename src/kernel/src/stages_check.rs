@@ -115,6 +115,10 @@ pub(super) fn check_programs() {
     // driver.
     check_native_objects();
 
+    // K10's timer objects, on the native calls just proved and the
+    // scheduler's sleeper sets (docs/microkernel/K10.md §5).
+    check_timers();
+
     // What the switch gives a program back after a blocking native call,
     // and the FS base kept in the task: programs on the native calls just
     // proved (x86-64; docs/OPAQUE-KERNEL.md §9.8, 3a and 3b).
@@ -1211,6 +1215,31 @@ pub(super) fn check_reverse_map() {
         report.global,
         report.leaked,
     );
+}
+
+/// K10's timer objects: `object::timer_check` (`docs/microkernel/K10.md` §5).
+///
+/// Halts rather than returning, as every other stage's check does.
+pub(super) fn check_timers() {
+    let report = match object::timer_check::run() {
+        Ok(report) => report,
+        Err(problem) => fatal!(
+            catalog::STAGE9_TIMERS,
+            "stage 9 timer self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  timers   {} fired, none early, none superseded, none after a close; \
+         a batch over {} passes; {} refusals as specified; an early wake took out its own entry",
+        report.fired, report.passes, report.refusals,
+    );
+    if report.moved != 0 {
+        println!(
+            "  timers   {} arms moved off a processor leaving service, each as set; \
+             the longest move's hold {} ns",
+            report.moved, report.move_hold_ns,
+        );
+    }
 }
 
 /// Stage 9: the native ABI's objects, driven through their handlers by two

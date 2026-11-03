@@ -113,7 +113,9 @@ channel, futex or port is on no list; this is what finds it when it wakes.
    never steals and never sets `IDLE` while parked.
 5. **Evacuate** the run queue and **every sleeper-timeline entry** -- tasks,
    K10 timer objects and K5 timeouts -- onto in-service processors, under
-   the two queues' locks (`move_onto`).
+   the two queues' locks (`move_onto`). Since K10 landed the arms are moved
+   too (`take_timer_arm`), after the tasks; arms already in the fired buffer
+   are fired first; only tasks count as drained.
 6. **The handshake**: one per-processor atomic, `Active -> Parking ->
    Parked`; at the deadline the waiter compare-exchanges `Parking ->
    Cancelled`, so exactly one of park or undo wins. A processor that finds
