@@ -88,9 +88,9 @@ pub use preempt::{preempt_disable, preempt_enable};
 /// The slice a task alone on its queue is given: what `sched_getattr`
 /// answers for a thread that asked for none of its own.
 pub const BASE_SLICE_NS: u64 = SLICE_NS;
+pub use queue::{Due, MIN_SLICE_NS, SLICE_NS};
 #[cfg(ferrix_checks = "on")]
 pub use queue::{FIRE_BATCH, Fired, take_next};
-pub use queue::{Due, MIN_SLICE_NS, SLICE_NS};
 pub(crate) use task::SleepSlot;
 pub use task::Task;
 pub use task::{TaskId, UserThread};

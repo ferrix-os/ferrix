@@ -280,11 +280,7 @@ impl PagerCore {
     /// # Errors
     ///
     /// [`AllocError`] with no memory.
-    pub fn link(
-        self: &Arc<Self>,
-        key: u64,
-        options: u64,
-    ) -> Result<Arc<PagerLink>, AllocError> {
+    pub fn link(self: &Arc<Self>, key: u64, options: u64) -> Result<Arc<PagerLink>, AllocError> {
         fallible::try_arc(PagerLink {
             core: Arc::clone(self),
             id: NEXT_LINK.fetch_add(1, Ordering::Relaxed),

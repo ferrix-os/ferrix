@@ -158,11 +158,7 @@ pub fn is_charge_refusal(error: &SpaceError) -> bool {
 ///
 /// As [`AddressSpace::fault`], and the refusal itself when nothing could be
 /// killed.
-pub fn user_fault(
-    space: &AddressSpace,
-    address: u64,
-    access: Access,
-) -> Result<(), SpaceError> {
+pub fn user_fault(space: &AddressSpace, address: u64, access: Access) -> Result<(), SpaceError> {
     // The faulting task's own memory, adopted ticket or not
     // (`docs/microkernel/K7.md` §2.3).
     quota::charging_own(|| user_fault_own(space, address, access))

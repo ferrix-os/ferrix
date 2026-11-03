@@ -55,8 +55,8 @@ pub mod dmar;
 pub mod hpet;
 pub mod iort;
 pub mod ivrs;
-pub mod sleep;
 pub mod pptt;
+pub mod sleep;
 
 use core::fmt;
 
