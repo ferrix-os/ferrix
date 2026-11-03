@@ -1,7 +1,7 @@
 # btrfs under memory pressure (`test-btrfs-pressure`)
 
-**Where it stands (2026-10-18).** Branch `pagecache-evict` (not landed):
-the page cache dropped whole under a burst of new files, the dentry cache's
+**Where it stands (2026-10-18).** Branch `pagecache-evict`, on `main` since 2026-10-18
+(edf7a8722, 0bb74a0c3): the page cache dropped whole under a burst of new files, the dentry cache's
 doing (F-90), and the gate's `evict` boot that shows it ("The page cache
 dropped whole"); the certification consultant's review: OK IF (1)-(9),
 ledger line 2336. The box run and a reclaim-driven release of kept dentries

@@ -8,7 +8,7 @@ stage has its own page, and the details are linked at the end.
 
 The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
 
-## Where it stands (2026-10-21)
+## Where it stands (2026-11-02)
 
 **Done**
 
@@ -27,8 +27,8 @@ The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
   passes on all three architectures (2026-10-14). What the stage was first
   written to hold beyond that (time namespaces, unprivileged mounting,
   reclaim of the dentry and inode caches and the rest) is the
-  [follow-ons](follow-ons.md), all built on 2026-10-26 on the branch
-  `claude/ferrix-roadmap-completion-hkxlpp`, each landing owing the gate host's runs.
+  [follow-ons](follow-ons.md), all built and on `main` since 2026-10-26 (the
+  gate host's runs each commit named as owed are not recorded in the tree).
 
 **In progress**
 
@@ -75,14 +75,19 @@ The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
   VFIO and installed Ferrix onto it); a netboot stick boots a bare-metal PC
   (2026-10-15). The first release, v0.1.0, was tagged on 2026-10-20 and built
   none of its assets; v0.1.1 (2026-10-21) carries the x86-64 desktop as a zip
-  that plain QEMU boots (`docs/RELEASES.md`). `test-install` fails on
-  `main` in the live medium's boot (a BACKLOG row).
+  that plain QEMU boots (`docs/RELEASES.md`). v0.2.0 (2026-10-29) is the
+  first live ISO: Yoru from memory and the graphical installer, checked on
+  QEMU machines and not yet booted on a real PC. `test-install` failed in the
+  live medium's boot; its stated cause is fixed (0d9f41949) and no passing run
+  is recorded (a BACKLOG row).
 - **The customer's N150 box (stage 21):** Ferrix booted on it on 2026-10-15
   to a desktop on the firmware framebuffer, `/` on its SATA drive and the
   network up, on a branch; its drivers (AHCI, the YT6801's network, the
   framebuffer, VT-d, SMBIOS, an event log for panics) and an Intel GPU render
   driver, whose first GPU commands ran on the box on 2026-10-20, are on
-  `main`. The kernel bring-up is evidenced on QEMU only so far.
+  `main`, and since then its large GPU pages, 2 MiB VT-d entries, a second
+  HDMI port's modeset and a ring-3 power driver. The kernel bring-up is
+  evidenced on QEMU only so far, and several box runs are BACKLOG rows.
 - **The switch to a microkernel (M0, `docs/MICROKERNEL.md`):** ordered by the
   customer on 2026-10-13. The build-flag system with its four kernel
   profiles, the load ratchet and a Ferrocene-version type-check are on
@@ -107,11 +112,14 @@ The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
   and Endfield's launcher draws its install dialog in Debian's Wine and in
   GE-Proton11-7's (2026-10-14); the game's download stopped on ENOSPC from
   Ferrix's btrfs, whose cause (a writable mount's page cache was never
-  reclaimed) is fixed on `main` since 2026-10-15 and not yet run again.
+  reclaimed) is fixed on `main` since 2026-10-15.
   Syscall User Dispatch and seccomp's `TRAP`, which Proton's Wine and the
-  anti-cheat's direct calls need, landed on 2026-10-18. The GPU steps stand
-  on stage 21's unlanded branches and on the N150 box's Intel GPU driver
-  ([its page](stage-23-arknights-endfield.md)).
+  anti-cheat's direct calls need, landed on 2026-10-18. Since 2026-10-23
+  Endfield, started from Steam, has run on the N150 box on its Intel GPU's
+  driver and reaches its world on about half its starts (5 of 11 on
+  2026-10-24), at about 25 frames a second at 720p, limited by the GPU
+  (`docs/GAME-MODE.md`); the page's steps 4 to 6 are not yet brought up to
+  the box's runs ([its page](stage-23-arknights-endfield.md)).
 - **Stage 24 (the game path):** where a fullscreen game can be faster on
   Ferrix than on a stock Linux desktop: input to scan-out, and even frames
   under a background load. A design (`docs/GAME-PATH.md`) the customer made a
@@ -124,10 +132,24 @@ The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
 - **Stage 25 (Yoru, the main UI):** the customer's design "Yoru WM" as the
   desktop's look and shell on hyprix (`docs/DESKTOP.md` §6, 2026-10-24).
   Built: the tokens, the dock and its stash, the launcher's look, the
-  sidebars, the wallpaper picker, Nocturne for GTK and `portald`, and
-  Chrome's GTK volumes; to do: the palette, snapping, the helpers, the
-  lock, notifications and switcher in the tokens, and a Files app
+  sidebars with the weather and the quick settings, the wallpaper picker and
+  the theme engine, Files (`shelf`), Nocturne for GTK and `portald`, and
+  Chrome's GTK volumes; to do: the palette, snapping beyond halves, the
+  helpers, and the lock, notifications and switcher in the tokens
   ([its page](stage-25-yoru.md)).
+- **Since 2026-10-21, besides the stages (details in [Where it stands](where-it-stands.md)):**
+  the repository flow (landings on `develop`, `main` moved by a fast-forward
+  promotion); `lode`, a log manager, and tole, a UI framework in a repository
+  of its own, with Settings and the log viewer drawn by it and a settings
+  writer behind a trusted prompt; the GNOME-like desktop on hyprix (floating
+  windows, hot-plugged screens, notifications) and a Vulkan helper process
+  that draws its frames; the machine check and memory failures handled at
+  eight points (the log, AMD, CMCI, a system call's copy, a clean cached
+  page, a ring-3 driver, a quarantined core, a RAM scrubber) with the bad
+  frames kept out of the next boot; per-processor heap caches, the
+  initramfs's memory given back and PCIDs; suspending one program; and the
+  first four slices of product signing (the loader verifies a slot's signed
+  manifest; `present` keeps it off until a release key exists).
 
 **Next:** cutting test and gate run time, the customer's priority one
 (`docs/TEST-TIME.md`), then Steam's workarounds and the namespaces under
@@ -196,7 +218,7 @@ single file across.
 |  | [Chrome — a browser on Ferrix](chrome.md) | ◐ in progress | headless and in a window, 2026-09-24; the DK1 ≈ 45–55 points |
 |  | [Claude Code — Anthropic's coding agent on Ferrix](claude-code.md) | ◐ in progress | the command line, 2026-09-30; the desktop app assessed, 2026-10-14 |
 | 13 | [Namespaces, cgroups v2, seccomp](stage-13-namespaces-cgroups-v2-seccomp.md) | ✓ done | month |
-|  | [Namespace and cgroup follow-ons](follow-ons.md) | ◐ in progress | unsized; built 2026-10-26, landing owed |
+|  | [Namespace and cgroup follow-ons](follow-ons.md) | ✓ done | unsized; built and landed 2026-10-26 |
 | 14 | [Real-time domains](stage-14-real-time-domains.md) | ○ not started | month |
 | 15 | [A real userland](stage-15-real-userland.md) | ◐ in progress | week |
 | 16 | [`rustc`](stage-16-rustc.md) | ✓ done | the goal; ≈ 40 guessed, 8 spent |

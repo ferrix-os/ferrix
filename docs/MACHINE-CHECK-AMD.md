@@ -8,6 +8,8 @@ classifies every record by Intel's rules. Version 1 (19b56cf8c) had the
 consultant's design review OK IF A1-A13 (ledger 4820, §7); this version
 carries A2-A5 and A8 (A1); "Changes from version 1" says what changed.
 
+**Landed:** on `develop` as 55b750b00 (2026-10-30) and the review's B1-B4 as 6deacfc3d; the consultant's final check is OK. The run on the Ryzen 9 9900X is a BACKLOG row. Reconciled 2026-11-02.
+
 ## 1. Why
 
 The customer's machine is an AMD Ryzen 9 9900X (Zen 5, SMCA). AMD reports

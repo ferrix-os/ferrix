@@ -9,6 +9,8 @@ set), `docs/POSTMORTEM.md` (PM3's pstore region, PM4's event log, S1's stop
 word) and `ferrix.panic=reset` (`panic/reset.rs`, BACKLOG's panic-reboot
 row).
 
+**Landed:** slice 8a as 368e7f5e9 (pstore header version 3, the kernel's records) and 8b as fa6e08d0d (the loader's bad-frame set, across a power cycle), both on `develop` on 2026-10-31; e51fc67fd makes the mechanism `off`, `reset` or `persist` (§10). Reconciled 2026-11-02.
+
 **This is slice 8a, the warm reset.** 8b, bad frames across a power cycle
 in the event log, is a design of its own (B1: one record per frame in the
 event log's ring would push every panic record out; the set must live

@@ -193,4 +193,69 @@ before. 2026-10-05 is a full day, and 64 of its 86 estimated points are one
 landing that was built on the two days before. The roadmap's charts are redrawn
 from it, and the forecast's scope, 647 points, is in `docs/roadmap/status.md`.
 
+### Update, 2026-11-02
+
+Counted from `main`'s cf30aa08f (the 2026-10-05 count) to `develop`'s
+e51fc67fd (2026-10-31), 26 calendar days, by the same rule: a landing counts at
+the estimate written before its work started, and what had none is sized
+afterwards from `git log`, in clusters. **This is the roughest count of the
+series**, made in one pass by the docs steward, not by the sessions that did the
+work, and it should be read that way.
+
+**Method.** A day is the date a commit has on `develop` (a rebase moves it, so
+a day's figure can carry a neighbour's work). Documentation, reservations,
+pins, coverage, regenerated files and BACKLOG commits are not counted. For
+09-24 to 10-05 the series ran at about 1.2 points for each such commit (1,445
+points over 1,182 commits, by the same filter); this count uses 1.1, the lower
+figure, since the older days carried big estimated lumps. A day with no
+estimate is 1.1 times its commits. A day with estimates is the larger of that and the estimates plus a
+third of its commits (work that no document sized). On 10-26 and 10-29 to -31
+the landings were large and few, and are sized by cluster (the table lists
+them). The estimates are the design documents' own points, written before the
+work: `docs/LOGGING.md` §17 (79 for its plan), `docs/UI-FRAMEWORK.md` §8 (U1 to
+U9, 61), `docs/DESKTOP.md` (parts 1, 2 and 4 at 18, 13 and 18, 3h at 21),
+`docs/roadmap/stage-25-yoru.md` (30 built), `docs/NVIDIA.md` (N3c, 8), stage 24's
+R1 to R3 and I1, the Claude desktop app's C1 to C4, and the round trip's 59.
+
+| day | estimated before | sized afterwards | what |
+|---|---|---|---|
+| 2026-10-06 | 59 | 4 | est: the channel round trip's 2f, step 3 and step 4's fast path 59; after: the cuts' groundwork |
+| 2026-10-07 | 43 | 14 | est: stage 13's controllers 30, C1 5, stage 19's second pass and `xray` 8; after: the DS and ES skip, object cuts 1 and 2, link-time hooks, a task's slots |
+| 2026-10-08 | 27 | 10 | est: L13c 3, `zwp_linux_dmabuf_v1` 8, Chrome's armhf volume 3, the SD card's driver 13; after: live driver updates, ARMv7-A user state (lazy VFP, `TPIDRURW`), F-65, F-69, cut 3, Q4, Q8, Windows on four processors |
+| 2026-10-09 | 0 | 1 | one commit |
+| 2026-10-10 | 0 | 11 | after: Wine's notepad (E1), `arch_prctl` GS base, nvrm's interrupt, F-69 made cheaper |
+| 2026-10-11 | 5 | 74 | est: D0 5; after: A/B slots, an NVMe driver, a PC's xHCI, N3b's kernel half, Steam's direct start, the pipe waits, Settings, `test-devloop`, QEMU on Ferrix |
+| 2026-10-12 | 0 | 23 | after: 32-bit Windows programs in Wine, DXVK on lavapipe, `hyprctl clients`, `memfd_create`'s exec seal, xtask build and check |
+| 2026-10-13 | 0 | 29 | after: the microkernel's build flags and plan (mostly documents, which are not counted) |
+| 2026-10-14 | 13 | 18 | est: stage 24's R1 to R3 13; after: `test-container`, the Endfield launcher in Wine and Proton |
+| 2026-10-15 | 5 | 70 | est: stage 24's I1 5; after: the YT6801, H6, the step cache for `check`, netboot, the page cache's reclaim, fsync (`futex_waitv`), the kernel split S2 and S3a |
+| 2026-10-16 | 12 | 90 | est: the Claude desktop app's C1 to C4 12 (at the low end of 12-18); after: the N150 bring-up (boot, PCI, the clock, APIC, fbcon, DMI, AHCI, USB) |
+| 2026-10-17 | 0 | 43 | after: M0's build flags and ratchet, the event log, btrfs under pressure, the YT6801 |
+| 2026-10-18 | 0 | 62 | after: the Intel GPU driver (`intel-xelp`, M1 and M2), seccomp S4 to S6 and Syscall User Dispatch |
+| 2026-10-19 | 0 | 13 | after: M1's designs, `smt=off`'s plan, a thread's kernel time, K5 to K12 ids |
+| 2026-10-20 | 0 | 24 | after: VT-d's RMRR domain (K2), the Intel driver, v0.1.0, the install guide |
+| 2026-10-21 | 0 | 34 | after: i915's frequency policy, hyprix's fullscreen paths, pstore, `bench-rows`, F-64 and F-73, v0.1.1 |
+| 2026-10-22 | 0 | 54 | after: GNOME's gaps 1 and 2 and G1, the render core, the Intel driver's restart, the power core and `msrlog`, wake-affine |
+| 2026-10-23 | 179 | 38 | est: lode's plan steps 1 to 5, 8, 2a and 2b 61, tole's U1 to U7 48, the GNOME-like desktop's parts 1, 2, 4 and 3h 70; after: lode's rest, hyprix's multi-monitor, `linux_abi`, the kernel split S3, the kernel log as Linux's records, `dmesg`, `ETXTBSY`, power |
+| 2026-10-24 | 33 | 36 | est: lode's step 9 4, tole's U8 and U9 13, Yoru's Y1 to Y3 16; after: tombstones 1 to 3, `settingsd` and the trusted prompt, the product signing S1 to S3, the repository flow's workflows, the GPU renderer |
+| 2026-10-25 | 22 | 85 | est: Yoru's Y4 and Y7 14, N3c 8; after: the live ISO, product signing S4, USB serial (FTDI, USB-Blaster), pty fixes, portald, GTK and Chrome volumes, the quick settings, `nvrm`'s hot-plug and quiesce |
+| 2026-10-26 | 0 | 50 | cluster: time namespaces 8, N5 and `test-bwrap` 8, the caches' reclaim 5, the `seccomp_bpf` selftest 5, `memory.reclaim` 5, `cpu.max.burst` 3, `cpu.idle` 3, `io.weight` and `io.latency` 8, `memory.stat` 3, L.object.187 2; power's `auto` plan |
+| 2026-10-27 | 0 | 3 | cluster: `/proc/<pid>/maps` in blocks (F-97) |
+| 2026-10-28 | 0 | 32 | after: `hyprix-gpu` and its protocol, the render backend, hyprix's window rules, v0.2.0's checks, yserver pin |
+| 2026-10-29 | 0 | 15 | cluster: PCIDs 8, ACPI S5 and the seat's power rights 4, the live ISO's PC display 3 |
+| 2026-10-30 | 0 | 80 | cluster: the machine-check log 13, AMD 13, copy 8, core quarantine 8, RAM scrubber 8, RAM release R1 8, heap caches 5, F-99 5, `sched_setaffinity` 3 and slice requests 3, suspend 5, large GPU pages 5 |
+| 2026-10-31 | 0 | 59 | cluster: page-cache poison 5, driver poison 5, CMCI 5, restart 8a 8 and 8b 8, the bad-frame switch 3, the OOM kill 8, 2 MiB VT-d 5, the heap-refusal fix 2, hyprix and Intel 10 |
+
+So **≈ 1,370 points over 26 days, ≈ 53 a day**, 398 of them estimated before the
+work started. The running total is **≈ 3,584 points in 48 calendar days, ≈ 75 a
+day** (2,214 to 10-05 and 1,370), or ≈ 1,662 (≈ 35 a day) counting only what had
+an estimate (1,264 and 398). Nothing sized in the status table's scope came off
+it in these weeks (the burndown's ≈ 518 stands), so the rate the forecast uses
+is still the 20 a day of 09-27 to 10-04, and most of what landed was work
+outside the table. The code base was not counted again.
+
+Work built and not on `develop` is not counted: stage 14's scheduler classes
+(pull requests #38 and #40), the microkernel's M1 branches, `hyprix:gpu`. Each
+is counted on the day it lands.
+
 ---
