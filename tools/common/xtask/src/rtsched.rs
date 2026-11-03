@@ -32,6 +32,7 @@ pub(crate) const TASKS: &[Task] = &[Task {
 /// The lines a working run prints on a profile with the tier, in order.
 const STEPS: &[&str] = &[
     "rtsched: encoding ok",
+    "rtsched: neighbour ok",
     "rtsched: chrt ok",
     "rtsched: errors ok",
     "rtsched: permission ok",
@@ -42,6 +43,7 @@ const STEPS: &[&str] = &[
 /// The lines a working run prints on a profile without it.
 const ABSENT_STEPS: &[&str] = &[
     "rtsched: encoding ok",
+    "rtsched: neighbour ok",
     "rtsched: absent ok",
     "rtsched: all ok",
 ];
