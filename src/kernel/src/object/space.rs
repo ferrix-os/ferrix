@@ -24,7 +24,7 @@ use crate::user::space::AddressSpace;
 
 /// What a space handle names.
 #[derive(Debug)]
-pub(crate) struct SpaceRef {
+pub struct SpaceRef {
     /// The space.
     space: Arc<AddressSpace>,
     /// The job that pays for what by-handle calls commit there, held for as
@@ -39,6 +39,12 @@ pub(crate) struct SpaceRef {
     charge: Charge,
 }
 
+impl Drop for SpaceRef {
+    fn drop(&mut self) {
+        self.space.handle_gone();
+    }
+}
+
 impl SpaceRef {
     /// A new, empty space, charged as one object to the running task's job,
     /// which owns it.
@@ -46,10 +52,11 @@ impl SpaceRef {
     /// # Errors
     ///
     /// [`AllocError`] for no memory, no root, or a job at its object limit.
-    pub(crate) fn create() -> Result<Arc<SpaceRef>, AllocError> {
+    pub fn create() -> Result<Arc<SpaceRef>, AllocError> {
         let charge = Charge::running(Resource::Objects, 1).map_err(|_| AllocError)?;
         let owner = crate::sched::running_group();
         let space = AddressSpace::new().map_err(|_| AllocError)?;
+        space.handle_made();
         fallible::try_arc(SpaceRef {
             space,
             owner,
@@ -63,9 +70,28 @@ impl SpaceRef {
     /// # Errors
     ///
     /// [`AllocError`].
-    pub(crate) fn of(space: Arc<AddressSpace>, owner: u32) -> Result<Arc<SpaceRef>, AllocError> {
+    pub fn of(space: Arc<AddressSpace>, owner: u32) -> Result<Arc<SpaceRef>, AllocError> {
         // Nothing charged, and the owner's slot held all the same.
         let charge = Charge::to(owner, Resource::Objects, 0).map_err(|_| AllocError)?;
+        space.handle_made();
+        fallible::try_arc(SpaceRef {
+            space,
+            owner,
+            charge,
+        })
+    }
+
+    /// A copy-on-write clone of this space (`AddressSpace::fork`), charged as
+    /// one object to the running task's job, which owns it.
+    ///
+    /// # Errors
+    ///
+    /// [`AllocError`] for no memory, or a job at its object limit.
+    pub fn clone_space(&self) -> Result<Arc<SpaceRef>, AllocError> {
+        let charge = Charge::running(Resource::Objects, 1).map_err(|_| AllocError)?;
+        let owner = crate::sched::running_group();
+        let space = self.space.fork().map_err(|_| AllocError)?;
+        space.handle_made();
         fallible::try_arc(SpaceRef {
             space,
             owner,
@@ -74,14 +100,14 @@ impl SpaceRef {
     }
 
     /// The space.
-    pub(crate) fn space(&self) -> &Arc<AddressSpace> {
+    pub fn space(&self) -> &Arc<AddressSpace> {
         &self.space
     }
 
     /// Run `work`, the target-side half of a by-handle call, with every frame
     /// and table it commits charged to the space's owner rather than to the
     /// caller.
-    pub(crate) fn charging_owner<R>(&self, work: impl FnOnce() -> R) -> R {
+    pub fn charging_owner<R>(&self, work: impl FnOnce() -> R) -> R {
         quota::charging_to(self.owner, work)
     }
 }

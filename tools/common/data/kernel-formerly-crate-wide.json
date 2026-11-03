@@ -1428,6 +1428,11 @@
       "before": "pub(crate)"
     },
     {
+      "item": "mm/check.rs: WxReport::leaves (field)",
+      "born": "K2",
+      "ledger": 6131
+    },
+    {
       "item": "mm/check.rs: hole_in_ram (fn)",
       "before": "pub(crate)"
     },
@@ -1438,6 +1443,11 @@
     {
       "item": "mm/check.rs: past_ram (fn)",
       "before": "pub(crate)"
+    },
+    {
+      "item": "mm/check.rs: sweep_user_root (fn)",
+      "born": "K2",
+      "ledger": 6131
     },
     {
       "item": "mm/reserve.rs: bypass_heap_in_sections (fn)",
@@ -1526,10 +1536,6 @@
     },
     {
       "item": "object/oom.rs: fault (fn)",
-      "before": "pub(crate)"
-    },
-    {
-      "item": "object/oom.rs: is_charge_refusal (fn)",
       "before": "pub(crate)"
     },
     {
@@ -2224,6 +2230,11 @@
     {
       "item": "user/space.rs: AddressSpace::resident_pages (method)",
       "born": "F-91",
+      "ledger": 6131
+    },
+    {
+      "item": "user/space.rs: AddressSpace::shootdowns_begun (method)",
+      "born": "K2",
       "ledger": 6131
     },
     {

@@ -92,9 +92,7 @@ pub fn sweep_w_xor_x(view: &BootView<'_>) -> Result<(), &'static str> {
 /// # Errors
 ///
 /// The first user leaf both writable and executable.
-pub(crate) fn sweep_user_root(
-    space: &crate::user::space::AddressSpace,
-) -> Result<WxReport, WriteExecute> {
+pub fn sweep_user_root(space: &crate::user::space::AddressSpace) -> Result<WxReport, WriteExecute> {
     let mut report = WxReport {
         leaves: 0,
         executable: 0,
@@ -138,9 +136,9 @@ pub struct WriteExecute {
 #[derive(Clone, Copy, Debug)]
 pub struct WxReport {
     /// Mappings the hardware can see.
-    pub(crate) leaves: u64,
+    pub leaves: u64,
     /// Of those, how many are executable at all.
-    pub(crate) executable: u64,
+    pub executable: u64,
 }
 
 /// Walk the live page tables and require that nothing is writable *and*

@@ -176,10 +176,12 @@ fn width(abi: Abi) -> Width {
 /// (`docs/microkernel/K4.md` §11 (1), the consultant's condition 1): one that
 /// may rewrite this process's registers at its next fault must not thereby
 /// control a program running with ids a file gave it, as Linux refuses the
-/// raise under `ptrace` (`LSM_UNSAFE_PTRACE`).
+/// raise under `ptrace` (`LSM_UNSAFE_PTRACE`). So must a space handle's holder,
+/// who may write into it (`L.object.309`).
 pub(crate) fn ids_it_may_raise(process: &Process, set_ids: SetIds) -> SetIds {
     if crate::syscall::attributes::get(process).no_new_privs
         || object::exception::supervised(process)
+        || process.space().raises_refused()
     {
         SetIds::NONE
     } else {
