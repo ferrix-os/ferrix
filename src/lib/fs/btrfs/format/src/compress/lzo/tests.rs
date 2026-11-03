@@ -107,7 +107,7 @@ fn an_inline_extent_from_mkfs_decodes() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "238 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "248 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn a_regular_extent_from_mkfs_decodes() {
     assert_eq!(segments(TEXT, 4096).len(), 27, "one segment per sector");
@@ -117,7 +117,7 @@ fn a_regular_extent_from_mkfs_decodes() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "35 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "35 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn a_many_sector_extent_from_mkfs_decodes() {
     let found = segments(MIXED, 4096);
@@ -134,7 +134,7 @@ fn a_many_sector_extent_from_mkfs_decodes() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "238 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "248 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn padding_after_the_total_length_is_ignored() {
     // The rest of the last sector is not part of the extent, so whatever it
@@ -201,10 +201,6 @@ fn stream_of_length(len: usize, fill: u8) -> Vec<u8> {
 }
 
 #[test]
-#[cfg_attr(
-    miri,
-    ignore = "23 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
-)]
 fn a_header_that_would_straddle_a_sector_starts_on_the_boundary() {
     // With 512-byte sectors the first segment's data starts at 8. A stream of
     // 500 bytes leaves exactly four before the boundary, so the next header
@@ -278,7 +274,7 @@ fn a_segment_expands_to_at_most_one_sector() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "238 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "249 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn the_output_bounds_the_decode() {
     let plain = text_plain();
@@ -529,7 +525,7 @@ const MAX_LEN: usize = if cfg!(miri) { 4096 } else { 128 * 1024 };
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "45 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "64 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn raw_streams_round_trip_through_the_test_encoder() {
     let mut rng = Rng(0x5EED_0000_0000_0001);
@@ -572,7 +568,7 @@ fn raw_streams_round_trip_through_the_test_encoder() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "71 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "119 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn extents_round_trip_through_the_test_encoder() {
     let mut rng = Rng(0x5EED_0000_0000_0002);
@@ -628,7 +624,7 @@ const VECTORS: [(&[u8], usize); 3] = [(INLINE, 1800), (TEXT, 106_784), (MIXED, M
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "145 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "145 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn every_truncation_answers() {
     for (extent, len) in VECTORS {
@@ -655,7 +651,7 @@ fn every_truncation_answers() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "318 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "319 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn single_bit_flips_answer() {
     for (extent, len) in VECTORS {

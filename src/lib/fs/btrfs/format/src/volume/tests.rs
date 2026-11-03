@@ -165,10 +165,6 @@ fn manifest_entries() -> usize {
 }
 
 #[test]
-#[cfg_attr(
-    miri,
-    ignore = "walks all four real images key by key; plain cargo test covers it"
-)]
 fn every_image_mounts_and_finds_its_fs_tree() {
     for (name, packed) in IMAGES {
         with_volume(packed, |_, volume, _| {
@@ -200,7 +196,7 @@ fn every_image_mounts_and_finds_its_fs_tree() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "walks all four real images key by key; plain cargo test covers it"
+    ignore = "276 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn a_walk_visits_every_key_once_in_order() {
     for (name, packed) in IMAGES {
@@ -227,10 +223,6 @@ fn a_walk_visits_every_key_once_in_order() {
 
 /// Verifies: L.btrfs.66
 #[test]
-#[cfg_attr(
-    miri,
-    ignore = "21 s (wall time) under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
-)]
 fn a_walk_stops_when_the_visitor_breaks() {
     with_volume(IMAGES[0].1, |device, volume, node| {
         let mut seen = 0;
@@ -253,7 +245,7 @@ fn a_walk_stops_when_the_visitor_breaks() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "walks all four real images key by key; plain cargo test covers it"
+    ignore = "did not finish in 1,800 s of real time under Miri on 2026-11-03, so libtest gave no figure, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn the_last_key_at_or_before_is_found_across_leaf_boundaries() {
     for (name, packed) in IMAGES {
@@ -375,10 +367,6 @@ fn a_pointer_to_the_wrong_generation_is_refused() {
 
 /// Verifies: L.btrfs.10
 #[test]
-#[cfg_attr(
-    miri,
-    ignore = "44 s (wall time) under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
-)]
 fn a_dup_node_whose_first_copy_fails_is_read_from_the_second() {
     let mut device = PackedDevice::new(DUP);
     let mut chunks = [ChunkMapEntry::EMPTY; 16];
@@ -416,10 +404,6 @@ fn a_dup_node_whose_first_copy_fails_is_read_from_the_second() {
 
 /// Verifies: L.btrfs.10
 #[test]
-#[cfg_attr(
-    miri,
-    ignore = "38 s (wall time) under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
-)]
 fn a_volume_whose_root_tree_has_one_bad_copy_still_opens() {
     let mut device = PackedDevice::new(DUP);
     let mut chunks = [ChunkMapEntry::EMPTY; 16];
@@ -551,10 +535,6 @@ fn a_volume_made_without_a_default_mounts_the_top_level_tree() {
 }
 
 #[test]
-#[cfg_attr(
-    miri,
-    ignore = "23 s (wall time) under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
-)]
 fn the_subvolume_the_root_tree_names_is_the_one_mounted() {
     with_volume(DEFAULT_SUBVOL, |device, volume, node| {
         assert_eq!(
@@ -578,10 +558,6 @@ fn the_subvolume_the_root_tree_names_is_the_one_mounted() {
 }
 
 #[test]
-#[cfg_attr(
-    miri,
-    ignore = "23 s (wall time) under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
-)]
 fn without_a_default_entry_the_top_level_tree_is_mounted() {
     let mut device = PackedDevice::new(DEFAULT_SUBVOL);
     // Point the superblock at a root tree directory that does not exist, so
@@ -608,7 +584,7 @@ fn without_a_default_entry_the_top_level_tree_is_mounted() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "116 s (wall time) under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "59 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn a_default_entry_that_names_no_subvolume_is_refused() {
     assert_eq!(

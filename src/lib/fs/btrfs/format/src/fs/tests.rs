@@ -196,11 +196,11 @@ fn check_image(name: &str) {
 }
 
 /// What [`check_image`] reads back under Miri, where the whole zlib image took
-/// 396 s even without `big.txt` and `sparse.bin`: the top level's files and
-/// link up to [`MIRI_LARGEST`] (an empty file, a link, a 13-byte name that is
-/// not UTF-8) and [`MIRI_INLINE`], an inline extent the image compresses, 60 s
-/// in all on 2026-11-02. The root's listing is still checked whole. Plain
-/// `cargo test` reads every entry.
+/// 396 s by libtest even without `big.txt` and `sparse.bin`: the top level's
+/// files and link up to [`MIRI_LARGEST`] (an empty file, a link, a 13-byte name
+/// that is not UTF-8) and [`MIRI_INLINE`], an inline extent the image
+/// compresses, 61 s by libtest in all on 2026-11-03. The root's listing is
+/// still checked whole. Plain `cargo test` reads every entry.
 fn miri_reads(path: &[u8], expected: &Expected) -> bool {
     let small_top_level_file =
         !path.contains(&b'/') && expected.kind != "dir" && expected.size <= MIRI_LARGEST;
@@ -246,7 +246,7 @@ fn check_listing(
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "reads every file of a real image; plain cargo test covers it, and under Miri the zlib image's test reads the part miri_reads keeps"
+    ignore = "60 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn the_uncompressed_image_reads_back_exactly() {
     check_image("none");
@@ -262,7 +262,7 @@ fn the_zlib_image_reads_back_exactly() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "reads every file of a real image; plain cargo test covers it, and under Miri the zlib image's test reads the part miri_reads keeps"
+    ignore = "61 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn the_lzo_image_reads_back_exactly() {
     check_image("lzo");
@@ -272,7 +272,7 @@ fn the_lzo_image_reads_back_exactly() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "reads every file of a real image; plain cargo test covers it, and under Miri the zlib image's test reads the part miri_reads keeps"
+    ignore = "62 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn the_zstd_image_reads_back_exactly() {
     check_image("zstd");
@@ -347,7 +347,7 @@ fn a_read_past_the_end_returns_nothing_and_a_listing_can_resume() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "229 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "230 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn a_hole_reads_as_zeroes() {
     let f = &mut Fixture::new(IMAGES[0].1);
@@ -548,7 +548,7 @@ fn a_lookup_refuses_a_name_that_no_longer_matches_its_hash() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "603 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "603 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn a_read_refuses_an_extent_that_starts_inside_the_one_before() {
     // `sparse.bin` is 8 KiB written at 0, then 4 KiB at 1 MiB. Refile the
@@ -708,7 +708,7 @@ fn a_data_sector_that_fails_its_checksum_is_an_error_not_bytes() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "71 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "71 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn a_dup_data_sector_that_fails_its_checksum_is_read_from_the_other_copy() {
     let f = &mut Fixture::new(DUP);
@@ -790,6 +790,40 @@ fn damage_in_a_compressed_extent_fails_its_checksum_before_it_is_expanded() {
     assert!(
         matches!(error, BtrfsError::DataChecksum { logical, .. } if logical == file.disk_bytenr),
         "the compressed bytes are checked before the decoder sees them: {error:?}"
+    );
+}
+
+/// The damage test without the damage: the one kept under Miri that goes on
+/// through `expand_extent`'s decode, so Miri sees a compressed regular extent
+/// come out as bytes. The test above stops at the checksum. `big.txt` is one
+/// line repeated, and a line written here owes nothing to the decoder; the
+/// image tests hold the whole file to the manifest's CRC.
+#[test]
+fn a_compressed_extent_reads_back_as_its_bytes() {
+    let (name, packed) = IMAGES[1];
+    assert_eq!(name, "zlib");
+    let f = &mut Fixture::new(packed);
+    let volume = Volume::open(&mut f.device, &mut f.chunks, &mut f.node).unwrap();
+    let sub = volume.default_subvolume();
+    let (ino, _, compression) = first_extent(&volume, &sub, &mut f.device, b"big.txt", &mut f.node);
+    assert_ne!(compression, 0, "big.txt compresses");
+
+    let mut buffers = ReadBuffers::new((
+        &mut f.compressed[..],
+        &mut f.plain[..],
+        &mut f.zstd[..],
+        &mut f.csum_node[..],
+    ))
+    .unwrap();
+    let mut piece = vec![0u8; 1000];
+    let read = sub
+        .read(&mut f.device, ino, 0, &mut piece, &mut f.node, &mut buffers)
+        .unwrap();
+    assert_eq!(read, piece.len());
+    let lines = b"compressible line of text\n".repeat(39);
+    assert!(
+        piece == lines[..piece.len()],
+        "the extent's first 1,000 bytes are the file's"
     );
 }
 
@@ -910,7 +944,10 @@ fn open_and_read(packed: &[u8], name: &[u8], fail_at: u64) -> (Result<Vec<u8>, B
 
 /// Verifies: L.btrfs.110
 #[test]
-#[cfg_attr(miri, ignore = "reopens real images once per read they make")]
+#[cfg_attr(
+    miri,
+    ignore = "did not finish in 1,800 s of real time under Miri on 2026-11-03, so libtest gave no figure, over the 25 s a test may take there; plain cargo test runs it"
+)]
 fn a_device_out_of_memory_is_answered_as_such_at_every_read() {
     // Plain and compressed extents, and DUP, whose damaged first copies are
     // read from the second: running out of memory is not damage, and is

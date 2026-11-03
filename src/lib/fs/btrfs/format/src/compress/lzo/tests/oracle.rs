@@ -108,7 +108,7 @@ fn sample(rng: &mut Rng, len: usize) -> Vec<u8> {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "lzokay-native, the oracle, is undefined behaviour under Miri: Dict::init copies 0x200 bytes through a one-byte borrow"
+    ignore = "113 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn a_real_extent_decodes_the_same_through_lzokay() {
     let mut ours = vec![0u8; MIXED_LEN];

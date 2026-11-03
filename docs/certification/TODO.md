@@ -525,23 +525,55 @@ is left, each with how to know it is done:
 6. **The two refusals no test opens** (`L.btrfs.9`, `L.btrfs.12`, in the
    baseline): images with each feature the reader or the writer refuses,
    opened, and the refusal named.
-7. **Miri over `src/lib/fs/btrfs/format`** in CI. Done 2026-11-02: part 4
-   of CI's Miri job runs `ferrix-btrfs`. The crate forbids `unsafe` and has
-   no runtime dependencies, so an out-of-bounds index panics under plain
-   `cargo test` too; what Miri adds is a check of the `unsafe` in `core` and
-   `alloc` under the crate's calls, and of the test-only oracle crates. Most
-   tests that took over 20 s under Miri are ignored there, each saying its
-   measured time; the two `lzokay-native` oracle tests are ignored for that
-   crate's own undefined behaviour (`Dict::init`). The file-data path stays
-   under Miri: four tests of 20 to 38 s and a part of the zlib image
-   (`miri_reads` in `fs/tests.rs`) reach `expand_inline`, `expand_extent`,
-   `read_verified`, `copy_extent`, `read_checked`, `verify_sectors`,
-   `copy_from`, `expanded_len`, `read_logical`, `last_at_or_before`,
-   `CsumItem::get`, `checksum_for` and the zstd Huffman literals
-   (`huffman::decode`, `direct_weights`). Host line coverage of the Miri set
-   reaches 454 of the 502 functions the full suite reaches; none of the
-   named functions is left out. Plain `cargo test` runs all 171 tests. No
-   undefined behaviour showed in the reader's own code.
+7. **Miri over `src/lib/fs/btrfs/format`** in CI. Done 2026-11-02, its set
+   and this text corrected 2026-11-03: part 4 of CI's Miri job runs
+   `ferrix-btrfs`, against a budget of 15 minutes of real time. The crate
+   forbids `unsafe` and has no runtime dependencies, so an out-of-bounds
+   index panics under plain `cargo test` too; what Miri adds is a check of
+   the `unsafe` in `core` and `alloc` under the crate's calls, and of the
+   test-only oracle crates. Plain `cargo test` runs all 172 tests.
+
+   *The set.* The figures are libtest's, Miri's virtual clock and not time
+   ([RELIABILITY.md](../RELIABILITY.md), Miri, has the rule). 137 tests run
+   under Miri, 891 s in all: those of at most 25 s, and four kept above
+   that for what they reach, of 32, 40, 61 and 237 s. 35 are ignored: 34 over
+   25 s, each label giving its figure or saying the run did not finish, and
+   `whatever_lzokay_compresses_decodes_to_its_input` for the undefined
+   behaviour of `lzokay-native`'s compressor (`Dict::init`,
+   [p2.md](../backlog/p2.md)'s row; SOUP.md has no column for an anomaly, so
+   the evaluation IEC 62304 7.1.2 asks for has to read it there).
+
+   *Reached.* `read_verified`, `read_checked`, `verify_sectors`, `copy_from`,
+   `expand_inline`, and `expand_extent` as far as a compressed regular extent
+   coming out as its bytes (`a_compressed_extent_reads_back_as_its_bytes`,
+   zlib): a panic after the read in `expand_extent` fails that test under
+   Miri. `parsing_never_panics_on_corrupt_input` runs on 28 of each buffer's
+   1,024 indices. Host line coverage of the kept tests, built natively with
+   `--cfg miri` and so an upper bound on Miri's reach, is 3,124 of 3,426
+   product lines, 91.2%, against 92.2% for all 172.
+
+   *Not reached under Miri*, on the same measure, the lines all 172 tests
+   reach and the kept ones do not: an LZO extent through
+   `compress::decompress`, so no LZO extent is read through `fs.rs`;
+   `expand_extent`'s cached hit, a second read of the same extent; a read
+   refusing an extent that starts inside the one before; a walk moving on to
+   the next leaf, or back to the previous one; a node copy's out-of-memory
+   answer and a default entry naming no subvolume; `read_checked`'s stop on
+   a damaged checksum tree; the superblock's other checksum types, which the
+   stride steps over; and in the decoders a few lines: zlib's repeat code and
+   Huffman walk, zstd's longer dictionary-id and size fields and three-byte
+   sequence count. Nor does Miri read a whole image in any compression.
+
+   *What showed.* No undefined behaviour in the reader's own calls in the
+   runs that finished: the 137 kept tests together, and 30 of the 34
+   ignored for time, each run alone with `-- --ignored` on 2026-11-03 (nightly
+   miri 84b36a78a). Four were stopped unfinished after 1,800 s of real time:
+   `bit_flips_in_a_full_extent_are_total`,
+   `ruzstd_frames_of_random_shape_and_length_round_trip`,
+   `a_device_out_of_memory_is_answered_as_such_at_every_read` and
+   `the_last_key_at_or_before_is_found_across_leaf_boundaries`. Nothing is
+   claimed for them under Miri.
+
 8. **Arithmetic that cannot overflow** (`L.btrfs.23`, the certification
    consultant's advice). The release kernel builds without overflow checks,
    so an unchecked sum of two values read from a volume wraps silently, and
