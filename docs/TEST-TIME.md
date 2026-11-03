@@ -1547,7 +1547,7 @@ filesystem 92-96% full. Past a point the pool waits on its disk, not its cores.
 | SHA-256, every tracked file (4,137, 132 MB, largest 32.7 MB) | GPU 5.96 s, one CPU thread 0.05 s. Files under 1 MiB only: GPU 0.19 s, CPU 0.03 s | No: 6-120x slower |
 | SHA-256, 1 GiB in 4 KiB or 64 KiB leaves | GPU 11 GB/s (PCIe caps it at 13), 12 CPU processes 5.3-5.6, 1 thread 2.3-2.7. GPU wins 2x, on digests nothing here uses | No: changes the evidence, and there is nothing to hash |
 | Hashing in a row | `test-boot`: no call of xtask's SHA-256. `build`: one, 50 MB, 0.18 s of 16.6 s. `check` runs with the step cache off | Nothing to save |
-| Screenshot compare | 1024x768: `memcmp` 0.05 ms, GPU with upload 0.97 ms. 4K: 0.8 ms, 7 ms | No: GPU 7-20x slower |
+| Screenshot compare | 1024x768: `memcmp` 0.05 ms, GPU with upload 0.97 ms. 4K: 0.8 ms, 7 ms | No: GPU 9-20x slower |
 | zstd, compression | No gate path uses it (no samples, no call in xtask) | Nothing to save |
 | Host tests that render (`tole_examples`) | Already on a real GPU where there is one. Medians from `check` logs, load under 15: 3090 13.6 s (122 runs), 3060 18.2 s (8). Lavapipe here at load 12: 9.9 s, twice. A GPU is no faster | No |
 | Lavapipe in guests | 2 of `test-compositor`'s 73 boots, and what they check is lavapipe (`the_scene_on_lavapipe_is_the_software_picture`). `test-dxvk`: 2 rows in 15 days. A real GPU there checks something else, and a host without one could not pass. Not benched | No |
@@ -1596,12 +1596,21 @@ rustc's query engine. It cannot pay off, so no prototype was built.
 | `check-item-boundary.py` | 20 s, a Python Rust lexer (`rustlex.py`, `mask` 10,571 calls), now the slowest of the at-once step. A certified checker, so left alone | To mk-ci, with its consultant |
 | sccache, a shared target | Not measured. A warm slot already does what they do; cold slots are mk-ci's | Not pursued |
 
-One thing to decide, separate from time: `tole`'s device ranking picks the first
-discrete GPU, and the compositor's tests start `virgl_test_server` on NVIDIA's
-EGL, so a `check` on nazuna draws on the 3090 or the 3060 (`nvidia-smi` showed both
-kinds of process on the 3060 at 23:28). The 3060 fell off the bus before.
-Forcing lavapipe would be no slower, but it stops testing a real GPU, so that is
-the consultant's and the product owner's call. Left as it is.
+One thing to decide, separate from time: `tole`'s device ranking takes the first
+discrete GPU in the driver's order when none is named, and the compositor's tests
+start `virgl_test_server --use-egl-surfaceless`, which by glvnd's order means
+NVIDIA's EGL (read, not run). So a `check` on nazuna draws on the 3090 or the 3060:
+the logs above name both for `tole_examples`, and one look at `nvidia-smi` by hand
+at 23:28, not logged, showed both programs on the 3060. The 3060 went off the bus
+on 2026-10-10 while bound to vfio-pci during card-VM boots, cause unknown and no
+host test in the record; only a reboot or a suspend brings it back.
+`docs/backlog/DECISIONS.md` (2026-10-02) says "the 3090 is never touched". It was
+written for the NVIDIA port, and whether it reaches host tests, or this section's
+benches on the 3090, is the customer's to say; hardware use is the product owner's.
+`tole_examples` on lavapipe is no slower; the virgl tests on Mesa's EGL were
+neither timed nor run. The consultant has no certification objection either way
+(ledger 5999): neither crate is in the item and CI has no GPU. Left as it is, with
+the question in `docs/BACKLOG.md`.
 
 ## Next
 
