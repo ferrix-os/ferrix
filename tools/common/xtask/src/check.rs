@@ -320,7 +320,10 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
             &["tools/common/check/check-boot-line.py", "--self-test"],
             // The removable crates' and the class crates' judge, which only
             // test-removable runs whole, its refusals shown here.
-            &["tools/common/check/check-removable-symbols.py", "--self-test"],
+            &[
+                "tools/common/check/check-removable-symbols.py",
+                "--self-test",
+            ],
         ],
     ),
     // The load ratchet (docs/roadmap/microkernel-m0.md, D): how much this
