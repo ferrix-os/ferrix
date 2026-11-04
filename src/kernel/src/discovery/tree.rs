@@ -148,7 +148,13 @@ static SEALED: AtomicBool = AtomicBool::new(false);
 /// # Errors
 ///
 /// [`ClaimRefused::Sealed`] once sealed; [`ClaimRefused::NoMemory`].
-#[cfg_attr(not(ferrix_personality = "user"), allow(dead_code))]
+#[cfg_attr(
+    not(ferrix_personality = "user"),
+    allow(
+        dead_code,
+        reason = "publication is personality=user's; a hybrid's check alone reaches this"
+    )
+)]
 pub(crate) fn claim_kernel_use(what: KernelUse) -> Result<(), ClaimRefused> {
     claim_in(&mut CLAIMS.lock(), SEALED.load(Ordering::Acquire), what)
 }
@@ -181,7 +187,13 @@ fn covered_by(claims: &[KernelUse], start: u64, end: u64) -> bool {
 }
 
 /// Whether a claim made before the seal covers physical `start..end`.
-#[cfg_attr(not(ferrix_personality = "user"), allow(dead_code))]
+#[cfg_attr(
+    not(ferrix_personality = "user"),
+    allow(
+        dead_code,
+        reason = "publication is personality=user's; a hybrid's check alone reaches this"
+    )
+)]
 pub(crate) fn covered(start: u64, end: u64) -> bool {
     covered_by(&CLAIMS.lock(), start, end)
 }
@@ -238,14 +250,26 @@ pub(crate) fn claim_early_windows() -> Result<(), ClaimRefused> {
 
 /// Seal the kernel-owned set: from now on every [`claim_kernel_use`] is
 /// refused. Idempotent.
-#[cfg_attr(not(ferrix_personality = "user"), allow(dead_code))]
+#[cfg_attr(
+    not(ferrix_personality = "user"),
+    allow(
+        dead_code,
+        reason = "publication is personality=user's; a hybrid's check alone reaches this"
+    )
+)]
 pub(crate) fn seal() {
     let _claims = CLAIMS.lock();
     SEALED.store(true, Ordering::Release);
 }
 
 /// Whether the kernel-owned set is sealed.
-#[cfg_attr(not(ferrix_personality = "user"), allow(dead_code))]
+#[cfg_attr(
+    not(ferrix_personality = "user"),
+    allow(
+        dead_code,
+        reason = "publication is personality=user's; a hybrid's check alone reaches this"
+    )
+)]
 pub(crate) fn sealed() -> bool {
     SEALED.load(Ordering::Acquire)
 }
@@ -255,7 +279,13 @@ pub(crate) fn sealed() -> bool {
 /// # Errors
 ///
 /// [`AllocError`].
-#[cfg_attr(not(ferrix_personality = "user"), allow(dead_code))]
+#[cfg_attr(
+    not(ferrix_personality = "user"),
+    allow(
+        dead_code,
+        reason = "publication is personality=user's; a hybrid's check alone reaches this"
+    )
+)]
 pub(crate) fn claims() -> Result<Vec<KernelUse>, AllocError> {
     fallible::try_to_vec(&CLAIMS.lock())
 }
@@ -274,7 +304,13 @@ pub(crate) fn claims() -> Result<Vec<KernelUse>, AllocError> {
 /// # Errors
 ///
 /// [`ClaimRefused`], from the first claim that was refused.
-#[cfg_attr(not(ferrix_personality = "user"), allow(dead_code))]
+#[cfg_attr(
+    not(ferrix_personality = "user"),
+    allow(
+        dead_code,
+        reason = "publication is personality=user's; a hybrid's check alone reaches this"
+    )
+)]
 pub(crate) fn claim_tree_uses(tree: &Fdt<'_>, reserved: &Reserved) -> Result<(), ClaimRefused> {
     claim_accessor_nodes(tree)?;
     claim_described_nodes(tree)?;
@@ -288,14 +324,26 @@ pub(crate) fn claim_tree_uses(tree: &Fdt<'_>, reserved: &Reserved) -> Result<(),
 }
 
 /// Claim a node.
-#[cfg_attr(not(ferrix_personality = "user"), allow(dead_code))]
+#[cfg_attr(
+    not(ferrix_personality = "user"),
+    allow(
+        dead_code,
+        reason = "publication is personality=user's; a hybrid's check alone reaches this"
+    )
+)]
 fn claim_node(node: Node<'_>) -> Result<(), ClaimRefused> {
     claim_kernel_use(KernelUse::Node(node.id()))
 }
 
 /// The nodes the kernel's accessors find: the console, the interrupt
 /// controller, the architected timer, PSCI and the `SMMUv3`s.
-#[cfg_attr(not(ferrix_personality = "user"), allow(dead_code))]
+#[cfg_attr(
+    not(ferrix_personality = "user"),
+    allow(
+        dead_code,
+        reason = "publication is personality=user's; a hybrid's check alone reaches this"
+    )
+)]
 fn claim_accessor_nodes(tree: &Fdt<'_>) -> Result<(), ClaimRefused> {
     let found = [
         tree.console(),
@@ -319,7 +367,13 @@ fn claim_accessor_nodes(tree: &Fdt<'_>) -> Result<(), ClaimRefused> {
 /// `/cpus`, `/memory` (and every `device_type = "memory"`),
 /// `/reserved-memory` and `/chosen`, and each processor's spin-table
 /// release address.
-#[cfg_attr(not(ferrix_personality = "user"), allow(dead_code))]
+#[cfg_attr(
+    not(ferrix_personality = "user"),
+    allow(
+        dead_code,
+        reason = "publication is personality=user's; a hybrid's check alone reaches this"
+    )
+)]
 fn claim_described_nodes(tree: &Fdt<'_>) -> Result<(), ClaimRefused> {
     for found in tree.nodes() {
         let top = found.depth == 1
@@ -483,7 +537,13 @@ impl Ownership {
     }
 
     /// How many nodes are kernel-owned.
-    #[cfg_attr(not(ferrix_personality = "user"), allow(dead_code))]
+    #[cfg_attr(
+        not(ferrix_personality = "user"),
+        allow(
+            dead_code,
+            reason = "publication is personality=user's; a hybrid's check alone reaches this"
+        )
+    )]
     pub(crate) fn owned(&self) -> usize {
         self.owned.len()
     }

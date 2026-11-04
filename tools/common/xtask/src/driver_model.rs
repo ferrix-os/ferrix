@@ -44,7 +44,7 @@ use crate::{Error, Result, cargo, fat, initramfs, native, qemu, sha256};
 /// This module's `cargo xtask` commands (`crate::task`).
 pub(crate) const TASKS: &[Task] = &[Task {
     name: "test-driver-model",
-    help_at: 207,
+    help_at: 1221,
     help: &[
         "test-driver-model  Serve a device the kernel never named on an unchanged kernel",
         "              (docs/DRIVER-MODEL.md section 8): QEMU virt's PL031 under a made-up",

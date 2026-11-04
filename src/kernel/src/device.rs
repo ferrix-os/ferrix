@@ -492,7 +492,13 @@ impl Reserved {
     /// IOMMUs, the ECAM windows, the console and the boot framebuffer. A
     /// device-tree node overlapping one of them is kernel-owned
     /// (`docs/DRIVER-MODEL.md` §3, D3).
-    #[cfg_attr(not(ferrix_personality = "user"), allow(dead_code))]
+    #[cfg_attr(
+        not(ferrix_personality = "user"),
+        allow(
+            dead_code,
+            reason = "publication is personality=user's; a hybrid's check alone reaches this"
+        )
+    )]
     pub(crate) fn kernel_ranges(&self) -> impl Iterator<Item = (u64, u64)> + '_ {
         let (first, last) = self.map;
         self.ranges
