@@ -1,6 +1,6 @@
 # Drivers without kernel changes
 
-**Status: design, 2026-10-25. Not built.** The customer's rule
+**Status: design, 2026-10-25; step 1 built 2026-10-26 (§12).** The customer's rule
 (2026-10-25): *writing a driver must never need a change to the kernel;
 otherwise it is not a microkernel.* This document says what that takes,
 where Ferrix breaks the rule today, and the interface that closes each gap.
@@ -438,3 +438,92 @@ provider's otherwise.
   architectures?
 * **B3:** does acpid become a certified user-space component, or does
   ring-3 ACPI stay outside the claim?
+
+## 12. Where it stands
+
+**Step 1 and step 7's first rows built (2026-10-26, branch
+`driver-model-step1`), for the consultant's review; not landed.**
+
+* **Generic nodes** (§3, H.DEV.7): the board finder publishes, after the
+  `TREE_*` bindings, every enabled node with a `compatible` on
+  memory-mapped buses that is not kernel-owned and whose registers no
+  earlier node holds (D10, L.device.65). The kernel copies its identity into
+  a record (`ferrix_fdt::identity`): compatible list, path, references as
+  (provider node, target node, phandle, uninterpreted cells), its own
+  `*-names`, its subtree, and flags (L.discovery.9). `device_info` names it
+  `DEVICE_TREE_GENERIC`, with the record's flags and length; because
+  `DEVICE_INFO_BYTES` is fixed for good, the record itself is read through
+  `device_config_read`, as a PCI function's identity is read from its
+  configuration space, read-only (L.device.64). No new call number and no
+  change to `syscall/native.rs` was needed.
+* **Kernel-owned by use** (D3, H.DEV.8): one registration,
+  `discovery::tree::claim_kernel_use`, sealed once every finder has run
+  (L.discovery.8). Today's uses are registered at the seal from the
+  accessors the kernel's subsystems read the tree with, the reserved ranges
+  that are not the memory map's and the device windows mapped then
+  (L.discovery.10); board support's temporary register windows register as
+  they are mapped. A subsystem that comes to use a node registers it before
+  the seal.
+* **KERNEL_DEPENDS** (D4, L.discovery.11) is closed transitively; devmgr
+  refuses a driver for a flagged node inside the claim and admits it on
+  ARMv7-A or under `ferrix.unisolated`.
+* **DMA fails closed** (D5, L.device.63); **whole pages** (D7, L.device.60
+  and .61); **SPIs only** through `claim_line` (D8, L.device.62); **bounds**
+  (D9, L.discovery.12) host-tested in `ferrix-fdt` and fuzzed by
+  `fdt_generic`. The walks hold no lock; the registration's lock is held
+  only to push or copy a claim. D6 is not built: it is the customer's
+  question.
+* **devmgr** matches generic nodes by `compatible` from its image-time
+  table and checks the driver's requirement table
+  (`ferrix_devmgr_proto::requirements`, section `.ferrix.requirements` of
+  the image) before starting it, naming the reference a node lacks (D13).
+* **`cargo xtask test-driver-model`** (§8, D1, D20): QEMU `virt`'s PL031
+  under `ferrix,test-seconds`, on one kernel ELF hashed before the test
+  exists, admitted by the unclaimed word; `testseconds` reads its
+  identification, counter and match interrupt; with its clock's provider
+  gone devmgr refuses it and names `apb_pclk`.
+* **`ferrix-driver`'s driver model** (the approved design page): `Driver`,
+  `BindContext`, `#[derive(Resources)]` with its embedded requirement
+  table, `#[derive(PinStates)]`, `register_map!`/`bitfields!` with
+  `ReadWrite`/`ReadOnly`/`WriteOnly` and `OffsetByOne`, and `run::<D>()`,
+  with `testseconds` ported onto it and the page's SPI and LM75 examples
+  kept compiling (`ferrix-driver-model-examples`). The register types are
+  the crate's own, not `tock-registers`: the page's names and encodings are
+  its own. The old `ferrix_driver::Driver` trait of the virtio, NVMe, AHCI
+  and SDMMC drivers is now `Probe`. Stubs, each answering `ENOSYS`: the
+  clock, reset and regulator clients (`ferrix-platform`, step 2), pin states
+  (step 2), child devices and `I2cDevice` (step 4), and the character-device
+  class (devmgr gives a generic node's driver no grant yet). A fixed
+  configuration is built in a `const` item, where a field value out of range
+  (`.frame_size(40)`) fails the build, shown by a `compile_fail` doctest in
+  `ferrix-registers`; a value known only at run time goes through the
+  generated fallible setter (`try_frame_size`), which answers `OutOfRange`.
+* **The consultant's verdict on d68c9017d** (ledger 4541): OK IF (1)-(12).
+  Met on this branch: the console claimed as every window early boot
+  mapped, on every architecture (1); board windows through
+  `discovery::tree::use_window`, claimed before the seal and refused after
+  it outside a claim, the TAMP's boot-context page claimed at bring-up (2);
+  every page of every kernel-owned node kept from publication (3);
+  KERNEL_DEPENDS failing closed -- a kernel-owned or depended-on node whose
+  references cannot all be read stops publication of the tree, with a line
+  naming it (4); a node with no record withheld (6); MEMORY-AND-TIMING §2.2u
+  (7). (5) is recorded, not checked: **devmgr's refusal of a KERNEL_DEPENDS
+  node inside the claim has no check**; no boot inside the claim publishes
+  a flagged node devmgr has a driver for, and its check and control are a
+  prerequisite of D6 or of platform stream-id binding (`docs/BACKLOG.md`,
+  P3). The Pixel 7's gs201 DWC3 row is owed (BACKLOG); the DK1 rows run on
+  the final hash.
+* **Not yet:** providers (step 2), nexus routes (step 3), child devices
+  (step 4), B1-B3, D6, the driver store (step 6), and the board rows on the
+  DK1 and the Pixel 7 (the product owner's).
+
+**Ledger 5896, C.1-C.5 (2026-11-04), under the customer's rule of 2026-11-03
+(flags only, from one source):** generic publication is compiled only into
+`personality=user` kernels. `present` and `desktop` publish no generic node on any
+board; their `platform/**` and `early.rs` are as they were. So **the rule "writing a
+driver never needs a change to the kernel" is shown by no booting profile yet**:
+`test-driver-model` refuses with a named line until a `personality=user` kernel starts
+devmgr, and that landing owes it on aarch64 (D1, D20, D23, dm2-c9 and c10 FIRED, the
+real tree's L.device.62). Its statements H.DEV.7-8, L.discovery.8-12, L.device.60-65,
+V-19 and CLAIM's ARMv7-A sentence hold where publication is on; the made-up-tree
+checks and their one `generic` line run in every profile.

@@ -1,0 +1,16 @@
+[package]
+name = "ferrix-registers"
+description = "Typed device registers without a kernel: ReadWrite, ReadOnly, WriteOnly, register values and encodings such as OffsetByOne, which ferrix-driver re-exports and ferrix-driver-derive's register_map! and bitfields! generate code against"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+ferrix-driver-derive.workspace = true
+
+[lints]
+workspace = true

@@ -26,7 +26,7 @@ use ferrix_rt::native::port::{self, Port};
 use ferrix_rt::{Bootstrap, Kernel};
 
 use crate::start::{self, Bind, Started};
-use crate::{Driver, Step, Stopped, Stuck};
+use crate::{Probe, Step, Stopped, Stuck};
 
 /// Port keys.
 const KEY_INTERRUPT: u64 = 1;
@@ -53,7 +53,7 @@ pub enum Answer {
 pub struct Fault;
 
 /// An input device, as the input core needs it.
-pub trait Device: Driver {
+pub trait Device: Probe {
     /// HELLO for this device at START's `location`.
     fn hello(&mut self, location: u32) -> Hello;
 

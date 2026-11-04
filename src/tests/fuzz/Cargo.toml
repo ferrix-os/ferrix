@@ -147,6 +147,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "fdt_generic"
+path = "fuzz_targets/fdt_generic.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "acpi_tables"
 path = "fuzz_targets/acpi_tables.rs"
 test = false

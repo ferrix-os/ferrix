@@ -46,7 +46,7 @@ use ferrix_virtio_blk::{Completion, DeviceError, Status};
 
 use crate::dma::PAGE;
 use crate::start::{self, Bind, Started};
-use crate::{Driver, Step, Stopped, Stuck};
+use crate::{Probe, Step, Stopped, Stuck};
 
 /// Ring entries: 64 in a 4 KiB ring.
 const ENTRIES: u32 = 64;
@@ -66,7 +66,7 @@ const KEY_CONTROL: u64 = 4;
 
 /// A disk, as the block ring needs it: the requests it serves are
 /// `ferrix-blkserve`'s [`Disk`].
-pub trait Device: Driver + Disk {
+pub trait Device: Probe + Disk {
     /// Its geometry, as the ring announces it.
     fn geometry(&self) -> Geometry;
 

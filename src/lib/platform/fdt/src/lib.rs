@@ -41,6 +41,10 @@
 
 use core::fmt;
 
+pub mod generic;
+pub mod identity;
+pub mod write;
+
 // ---------------------------------------------------------------------------
 // Format constants
 // ---------------------------------------------------------------------------
@@ -1575,6 +1579,8 @@ impl Iterator for MemoryRegions<'_> {
 mod cpu_map;
 pub use cpu_map::{CpuMap, CpuMapError};
 
+#[cfg(test)]
+mod generic_tests;
 #[cfg(test)]
 mod tests;
 

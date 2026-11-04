@@ -1229,4 +1229,221 @@ package FerrixDeviceRequirements {
             attribute :>> unit = "device::Reserved::covers";
         }
     }
+
+    package GenericNodes {
+        doc /* Generic device-tree nodes (docs/DRIVER-MODEL.md section 3, step 1;
+             * the consultant's D3-D10 and D21, ledger 4475): the kernel-owned
+             * set, sealed; the identity record; the minting rules a generic
+             * node is held to. */
+
+        requirement <'L.discovery.8'> kernelOwnedSetSealed : ItemLowLevel {
+            attribute :>> statement = "claim_kernel_use and use_window shall be the
+                one way into the kernel-owned set, and every claim shall be refused
+                once stage 10 has sealed the set, which it does when every finder
+                has run and before anything is published; after the seal,
+                use_window -- the one way board support maps a register window --
+                shall allow only a window wholly inside a range claimed before the
+                seal.
+                Under personality=user only: a hybrid registers no claim and seals nothing.";
+            attribute :>> criterion = "Stage 10's check: a claim after the seal
+                is refused Sealed, a window outside every claim NotClaimed; with
+                either refusal removed the boot panics naming a kernel claim after
+                the seal, or a window outside every claim mapped after it.";
+            attribute :>> parent = "H.DEV.8";
+            attribute :>> unit = ("discovery::tree::claim_kernel_use",
+                "discovery::tree::seal", "discovery::tree::sealed",
+                "discovery::tree::claims", "discovery::tree::use_window",
+                "discovery::tree::covered", "discovery::tree::covered_by");
+        }
+        requirement <'L.discovery.9'> referencesCopiedUninterpreted : ItemLowLevel {
+            attribute :>> statement = "A generic node's identity record shall
+                carry each clocks, resets, power-domains, pinctrl-N, *-supply,
+                interconnects, interrupts-extended, gpios, dmas, mboxes and iommus
+                reference as the provider node, the node the phandle names, the
+                phandle and the specifier cells the provider's #cells says, copied
+                and not interpreted; a phandle that names no node, or a disabled
+                one, shall be a reference marked missing or disabled, and the
+                record its compatible list, path, *-names and subtree.
+                Only personality=user publishes real nodes: present and desktop
+                publish none, and every profile's check holds this on made-up trees.";
+            attribute :>> criterion = "ferrix-fdt's host tests: references of
+                every kind, a missing and a disabled provider, a pin
+                configuration's controller, the record read back; test-driver-model
+                reads the PL031's path and its apb_pclk reference out of the
+                record devmgr is given.";
+            attribute :>> parent = "H.DEV.7";
+            attribute :>> unit = "discovery::tree::Walk::node";
+        }
+        requirement <'L.discovery.10'> kernelOwnedDerivedByUse : ItemLowLevel {
+            attribute :>> statement = "Every device window early boot mapped --
+                the console the kernel brought up, whichever the command line or
+                the tree named -- shall be claimed before the seal on every
+                machine; claim_tree_uses shall register as used the nodes the
+                kernel's own accessors find (the console stdout-path names, the
+                primary interrupt controller, the architected timer, PSCI, the
+                SMMUv3s, /cpus, /memory, /reserved-memory, /chosen), each
+                spin-table release address, every reserved range not the memory
+                map's and every device window mapped; Ownership::derive shall make
+                kernel-owned every used node, every node under one, and every node
+                whose page-rounded registers overlap a used range or a used node's
+                registers; and no node sharing a page with any kernel-owned node's
+                registers, however that node came to be kernel-owned, shall be
+                published.
+                Under personality=user only: a hybrid registers no claim and seals nothing.";
+            attribute :>> criterion = "Stage 10's check: on a made-up tree the
+                console is not published, a node in its page is kernel-owned and a
+                node in that node's other page is not published; every early
+                window is claimed and no published generic node holds one of its
+                pages. With a used node's registers left out, with only used
+                nodes' pages tested, or with the early windows unclaimed, the boot
+                panics naming the rule.";
+            attribute :>> parent = "H.DEV.8";
+            attribute :>> unit = ("discovery::tree::claim_tree_uses",
+                "discovery::tree::claim_accessor_nodes",
+                "discovery::tree::claim_described_nodes",
+                "discovery::tree::claim_node", "discovery::tree::Ownership::derive",
+                "discovery::tree::split", "discovery::tree::pages_of",
+                "discovery::tree::Ownership::owns", "discovery::tree::Ownership::owned",
+                "discovery::tree::Ownership::owns_pages", "discovery::tree::claim_early_windows",
+                "discovery::tree::Walk::publishes", "discovery::tree::say_stopped",
+                "discovery::tree::PathOf::fmt", "early::device_windows", "early::record_window",
+                "device::begin",
+                "device::Reserved::kernel_ranges");
+        }
+        requirement <'L.discovery.11'> kernelDependsClosed : ItemLowLevel {
+            attribute :>> statement = "Every node a kernel-owned node references
+                as a clock, reset, power domain, pin configuration (and its
+                controller), supply or interconnect, directly or through nodes so
+                referenced, shall be published with FLAG_KERNEL_DEPENDS in its
+                record and in device_info's device_id; and when a kernel-owned or
+                depended-on node's references cannot all be read -- past the
+                record's bound, a provider that does not say how wide its
+                specifiers are, or a phandle that names no node with words after
+                it -- nothing of the tree shall be published, with a line naming
+                the node.
+                Only personality=user publishes real nodes: present and desktop
+                publish none, and every profile's check holds this on made-up trees.";
+            attribute :>> criterion = "Stage 10's check: a made-up console's clock
+                and that clock's clock are flagged, a node it does not reference
+                is not, and a made-up console whose clock's provider has no
+                #clock-cells, or whose clocks name no node before a provider,
+                stops publication; with the walk stopped after one
+                reference, or the stop removed, the boot panics naming the rule.
+                devmgr's refusal of a flagged node inside the claim is ring 3,
+                outside this requirement, and unchecked (DRIVER-MODEL.md §12,
+                BACKLOG).";
+            attribute :>> parent = "H.DEV.8";
+            attribute :>> unit = ("discovery::tree::Ownership::close",
+                "discovery::tree::Ownership::depend",
+                "discovery::tree::Ownership::depends_on",
+                "discovery::tree::Ownership::incomplete");
+        }
+        requirement <'L.discovery.12'> genericParsingBounded : ItemLowLevel {
+            attribute :>> statement = "Generic publication's parsing shall be
+                bounded: no node deeper than 16 levels visited, at most 64
+                references a node read and at most 8 cells each, at most 512
+                bytes of compatible and 256 of path copied, a record of at most
+                4096 bytes with what does not fit cut and flagged, a ranges
+                translation of at most 16 hops over addresses of at most two
+                cells, and at most 256 generic nodes a tree; the walk holds no
+                lock.
+                Only personality=user publishes real nodes: present and desktop
+                publish none, and every profile's check holds this on made-up trees.";
+            attribute :>> criterion = "ferrix-fdt's host tests of each bound, and
+                the fdt_generic fuzz target: every node visited once with its
+                depth of ancestors, references within their bound, every record
+                read back within its buffer.";
+            attribute :>> parent = "H.DEV.7";
+            attribute :>> unit = ("discovery::tree::find_generic",
+                "discovery::tree::stop_on", "discovery::tree::primary_controller");
+        }
+        requirement <'L.device.60'> genericAperturesByWholePages : ItemLowLevel {
+            attribute :>> statement = "A generic node's register range shall be
+                minted as an aperture of the whole pages it lies in, and withheld
+                whole when those pages overlap reserved memory or the range is
+                empty, starts in the page at physical address 0, runs off the
+                address space or does not translate.
+                Only personality=user publishes real nodes: present and desktop
+                publish none, and every profile's check holds this on made-up trees.";
+            attribute :>> criterion = "Stage 10's check: a made-up range in a page
+                the kernel reserves another part of is withheld, a whole page minted; with
+                the overlap tested on the exact range the boot panics naming a
+                range sharing a page with reserved memory.";
+            attribute :>> parent = "H.DEV.7";
+            attribute :>> unit = ("device::DeviceNode::mint_generic",
+                "device::page_span", "device::DeviceNode::generic");
+        }
+        requirement <'L.device.61'> sharedPageMintedToNeither : ItemLowLevel {
+            attribute :>> statement = "A page an aperture of a generic node shares
+                with an aperture of any other node shall be minted to neither,
+                and the generic node's record flagged REGISTERS_WITHHELD.
+                Only personality=user publishes real nodes: present and desktop
+                publish none, and every profile's check holds this on made-up trees.";
+            attribute :>> criterion = "Stage 10's check: two made-up nodes in one
+                page keep no aperture, and no published generic node shares a
+                page; with the rule off the boot panics naming a page two
+                published nodes share.";
+            attribute :>> parent = "H.DEV.7";
+            attribute :>> unit = ("device::withhold_shared_pages",
+                "device::DeviceNode::flag_identity");
+        }
+        requirement <'L.device.62'> genericVectorsSharedLinesOnly : ItemLowLevel {
+            attribute :>> statement = "A generic node shall be given its interrupts
+                only on the primary interrupt controller, in order, each only if
+                it is a shared peripheral interrupt no kernel handler and no other
+                node holds, the first refused ending the list.
+                Only personality=user publishes real nodes: present and desktop
+                publish none, and every profile's check holds this on made-up trees.";
+            attribute :>> criterion = "Stage 10's check: a made-up private line is
+                refused and a shared one minted; with claim_line taking private
+                lines the boot panics naming a private interrupt minted to a
+                generic node.";
+            attribute :>> parent = "H.DEV.7";
+            attribute :>> unit = "discovery::tree::Walk::node";
+        }
+        requirement <'L.device.63'> treeNodeNeverNoDma : ItemLowLevel {
+            attribute :>> statement = "Every generic node shall be described as
+                reaching memory, whatever its tree says: NO_DMA comes only from
+                nodes the kernel describes itself.
+                Only personality=user publishes real nodes: present and desktop
+                publish none, and every profile's check holds this on made-up trees.";
+            attribute :>> criterion = "Stage 10's check: every made-up and every
+                published generic node reaches memory; with generic nodes
+                described as reaching none the boot panics naming a generic node
+                described as reaching no memory.";
+            attribute :>> parent = ("H.DEV.7", "H.DMA.9");
+            attribute :>> unit = ("device::DeviceNode::reaches_memory",
+                "device::DeviceNode::is_generic");
+        }
+        requirement <'L.device.64'> genericIdentityThroughItsConfiguration : ItemLowLevel {
+            attribute :>> statement = "device_info shall describe a generic node
+                with virtio DEVICE_TREE_GENERIC, its record's flags in device_id
+                and the record's length in class; and device_config_read shall
+                read the record, read-only, zero past its end, where
+                device_config_write is refused.
+                Only personality=user publishes real nodes: present and desktop
+                publish none, and every profile's check holds this on made-up trees.";
+            attribute :>> criterion = "Stage 10's check: every published generic
+                node's device_info and its record's first word read back; devmgr
+                matches the PL031 of test-driver-model through them.";
+            attribute :>> parent = "H.DEV.7";
+            attribute :>> unit = ("device::DeviceNode::describe",
+                "device::DeviceNode::config_read", "device::DeviceNode::set_identity",
+                "device::DeviceNode::identity", "device::DeviceNode::identity_flags");
+        }
+        requirement <'L.device.65'> noNodePublishedTwice : ItemLowLevel {
+            attribute :>> statement = "Generic publication shall leave alone every
+                node whose registers an earlier finder's node holds -- a binding
+                the kernel knows, or a virtio-mmio transport -- and every
+                virtio,mmio node, so that no tree node is published twice.
+                Only personality=user publishes real nodes: present and desktop
+                publish none, and every profile's check holds this on made-up trees.";
+            attribute :>> criterion = "Stage 10's check: a made-up node a binding
+                holds is not published again, and no tree node's record is
+                published twice; with the hold not tested the boot panics naming
+                a node a binding holds published again.";
+            attribute :>> parent = "H.DEV.7";
+            attribute :>> unit = "discovery::board::Boards::find";
+        }
+    }
 }

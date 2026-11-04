@@ -319,6 +319,48 @@ fn refuse_armed(binary: &str, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// `testseconds`, `test-driver-model`'s driver of a node the kernel has
+/// never named (`docs/DRIVER-MODEL.md` §8). Not in [`PROGRAMS`]: only that
+/// test's images carry it, beside a `devmgr` built with its table row
+/// ([`TEST_DEVMGR`]), which [`refuse_test_driver`] holds.
+pub(crate) const TEST_DRIVER: Program = Program {
+    package: "ferrix-test-seconds-driver",
+    binary: "testseconds",
+    directory: DRIVERS,
+};
+
+/// The variable that compiles `test-driver-model`'s row into `devmgr`'s
+/// table of generic nodes' drivers, and its value.
+pub(crate) const TEST_DEVMGR: (&str, &str) = ("FERRIX_DEVMGR_TEST_DRIVER", "on");
+
+/// Set by `test-driver-model` alone: the one run whose images may carry
+/// [`TEST_DRIVER`].
+static TEST_DRIVER_ASKED: AtomicBool = AtomicBool::new(false);
+
+/// Let this run's images carry [`TEST_DRIVER`]: `test-driver-model` only.
+pub(crate) fn allow_test_driver() {
+    TEST_DRIVER_ASKED.store(true, Ordering::Relaxed);
+}
+
+/// Refuse a set of native programs that carries [`TEST_DRIVER`], unless
+/// `test-driver-model` is building it.
+///
+/// # Errors
+///
+/// When `natives` carries it in any other run.
+pub(crate) fn refuse_test_driver(natives: &[Built]) -> Result<()> {
+    if TEST_DRIVER_ASKED.load(Ordering::Relaxed) {
+        return Ok(());
+    }
+    if natives.iter().any(|built| built.name == TEST_DRIVER.binary) {
+        return Err(Error::new(
+            "this image carries testseconds, which only test-driver-model's images may carry \
+             (docs/DRIVER-MODEL.md section 8)",
+        ));
+    }
+    Ok(())
+}
+
 /// Set by `test-restart --update` alone: the one run whose images may
 /// carry [`UPDATER`].
 static UPDATES_ASKED: AtomicBool = AtomicBool::new(false);
@@ -330,12 +372,14 @@ pub(crate) fn allow_updater() {
 
 /// Refuse a set of native programs that carries [`UPDATER`], unless
 /// `test-restart --update` is building it (the certification consultant's
-/// C1, 2026-10-07).
+/// C1, 2026-10-07); and one that carries [`TEST_DRIVER`], unless
+/// `test-driver-model` is ([`refuse_test_driver`]).
 ///
 /// # Errors
 ///
 /// When `natives` carries the helper in any other run.
 pub(crate) fn refuse_updater(natives: &[Built]) -> Result<()> {
+    refuse_test_driver(natives)?;
     if UPDATES_ASKED.load(Ordering::Relaxed) {
         return Ok(());
     }

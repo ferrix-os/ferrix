@@ -123,6 +123,7 @@ mod display;
 mod dma_faults;
 mod dmesg;
 mod dotfiles;
+mod driver_model;
 mod dxvk;
 mod edid;
 mod everything;
@@ -606,6 +607,7 @@ const TASKS: &[&[Task]] = &[
     powerctl::TASKS,
     quarantine::TASKS,
     scrub::TASKS,
+    driver_model::TASKS,
     n150::TASKS,
     netboot::TASKS,
     nvidia::TASKS,

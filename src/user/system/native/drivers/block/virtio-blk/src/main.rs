@@ -19,7 +19,7 @@ use ferrix_blkring::control::VMO_RIGHTS;
 use ferrix_blkring::geometry::{Device as Geometry, DeviceFlags};
 use ferrix_blkserve::Disk;
 use ferrix_driver::dma::{Dma, PAGE};
-use ferrix_driver::{Driver, Step, Stopped, Stuck, block, virtio};
+use ferrix_driver::{Probe, Step, Stopped, Stuck, block, virtio};
 use ferrix_rt::native::handle::OwnedHandle;
 use ferrix_rt::{Bootstrap, Kernel};
 use ferrix_virtio_blk::{
@@ -73,7 +73,7 @@ fn max_sectors(max_segments: u32, block_size: u32) -> u32 {
     (bytes / block_size.max(1)).clamp(1, MAX_SECTORS_CAP)
 }
 
-impl Driver for VirtioBlk {
+impl Probe for VirtioBlk {
     type Device = Device;
 
     fn probe(device: Device) -> Result<Self, Step> {

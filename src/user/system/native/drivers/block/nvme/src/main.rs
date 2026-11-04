@@ -38,7 +38,7 @@ use ferrix_blkring::geometry::{Device as Geometry, DeviceFlags};
 use ferrix_blkserve::Disk;
 use ferrix_driver::dma::{Dma, MAX_RUN_PAGES, PAGE, Run};
 use ferrix_driver::pci::{self, Function};
-use ferrix_driver::{Driver, Step, Stopped, Stuck, block, mmio};
+use ferrix_driver::{Probe, Step, Stopped, Stuck, block, mmio};
 use ferrix_native_abi::types::DeviceInfo;
 use ferrix_nvme::driver::{Cause, Released, list_pages_needed, queue_pages_needed};
 use ferrix_nvme::hmb::{Chunk, Wish};
@@ -188,7 +188,7 @@ impl fmt::Debug for Nvme {
     }
 }
 
-impl Driver for Nvme {
+impl Probe for Nvme {
     type Device = Device;
 
     fn probe(device: Device) -> Result<Self, Step> {

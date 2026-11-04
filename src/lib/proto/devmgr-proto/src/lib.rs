@@ -51,6 +51,7 @@ pub mod budget;
 pub mod choice;
 pub mod gpu;
 pub mod isolation;
+pub mod requirements;
 
 /// DEVICES' message type.
 pub const DEVICES: u32 = 1;
@@ -507,3 +508,6 @@ mod gpu_tests;
 
 #[cfg(test)]
 mod choice_tests;
+
+#[cfg(test)]
+mod requirements_tests;

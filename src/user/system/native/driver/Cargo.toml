@@ -17,7 +17,12 @@ block = ["dep:ferrix-blkserve", "dep:ferrix-virtio-blk"]
 
 [dependencies]
 ferrix-blkring.workspace = true
+ferrix-devmgr-proto.workspace = true
+ferrix-driver-derive.workspace = true
+ferrix-fdt.workspace = true
+ferrix-linux-abi.workspace = true
 ferrix-native-abi.workspace = true
+ferrix-registers.workspace = true
 ferrix-rt.workspace = true
 ferrix-virtio.workspace = true
 ferrix-blkserve = { workspace = true, optional = true }

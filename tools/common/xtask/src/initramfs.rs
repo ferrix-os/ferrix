@@ -890,7 +890,8 @@ fn build_with_shell(
 ) -> Result<Vec<u8>> {
     // A sabotaged authd goes into test-auth's control images and no other.
     crate::auth::refuse_sabotaged(ports)?;
-    // drvupdated goes into test-restart --update's images and no other.
+    // drvupdated goes into test-restart --update's images and no other, and
+    // testseconds into test-driver-model's.
     native::refuse_updater(natives)?;
     refuse_too_many_drivers(natives)?;
     let mut archive = Newc::new();

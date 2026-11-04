@@ -8,7 +8,7 @@
 //!
 //! The layers, as Linux names them:
 //!
-//! * the driver core -- [`Bind`], [`Driver`], [`Step`];
+//! * the driver core -- [`Bind`], [`Probe`], [`Step`];
 //! * resources -- [`mmio::Block`], [`dma::Dma`];
 //! * buses -- [`virtio`], whose [`virtio::Device`] is the transport every
 //!   virtio device logic crate drives, [`pci`], a PCI function that is not
@@ -34,12 +34,46 @@
 
 #![no_std]
 
+pub mod bus;
+pub mod class;
 pub mod dma;
 pub mod mmio;
+pub mod model;
 pub mod pci;
+pub mod registers;
 pub mod start;
 pub mod tree;
 pub mod virtio;
+
+// The driver model (`docs/DRIVER-MODEL.md`; [`model`]): what a driver of a
+// generic device-tree node is written against.
+pub use ferrix_devmgr_proto::requirements;
+pub use ferrix_driver_derive::{PinStates, Resources, bitfields, register_map};
+pub use model::{
+    BindContext, DeviceHandle, DeviceInfo, Driver, Errno, Event, Flow, FromNode, Interrupt,
+    InterruptOccurrence, Node, PinControl, PinStateName, PinStates, ProviderLost, Reference,
+    Requirement, Resources, Result, What, run,
+};
+pub use registers::{
+    Access, OffsetByOne, OutOfRange, ReadOnly, ReadWrite, RegisterMap, Registers, Value, WriteOnly,
+};
+
+/// The process entry of a driver written against [`model`]: keeps the
+/// bootstrap channel for [`run`], then calls the crate's `fn main()`, which
+/// is `run::<TheDriver>()`.
+#[macro_export]
+macro_rules! entry {
+    () => {
+        ::ferrix_rt::entry!(__ferrix_driver_start);
+
+        /// Keep the bootstrap channel, then run the driver.
+        fn __ferrix_driver_start(bootstrap: ::ferrix_rt::Bootstrap) -> i32 {
+            $crate::model::keep_bootstrap(bootstrap);
+            main();
+            0
+        }
+    };
+}
 
 #[cfg(feature = "block")]
 pub mod block;
@@ -49,7 +83,7 @@ pub mod input;
 pub use start::{Bind, Started};
 
 /// A driver: which device it binds to, and how it comes up on one.
-pub trait Driver: Sized {
+pub trait Probe: Sized {
     /// The device it is started on; its type decides the match.
     type Device: Bind;
 
@@ -58,7 +92,7 @@ pub trait Driver: Sized {
     /// # Errors
     ///
     /// The [`Step`] that failed, which becomes the exit status.
-    fn probe(device: Self::Device) -> Result<Self, Step>;
+    fn probe(device: Self::Device) -> core::result::Result<Self, Step>;
 }
 
 /// Proof that the device was reset and can no longer touch its memory.

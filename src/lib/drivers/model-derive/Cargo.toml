@@ -1,0 +1,19 @@
+[package]
+name = "ferrix-driver-derive"
+description = "ferrix-driver's derives and register macros: #[derive(Resources)] with its embedded requirement table, #[derive(PinStates)], register_map! and bitfields! (docs/DRIVER-MODEL.md)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1.0.107"
+quote = "1.0.47"
+syn = { version = "2.0.119", features = ["full"] }
+
+[lints]
+workspace = true

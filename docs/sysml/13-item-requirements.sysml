@@ -1086,6 +1086,44 @@ package FerrixItemRequirements {
                 boot; L.device.70, 73.";
             attribute :>> parent = ("O.CAPABILITY", "ASR-3");
         }
+        requirement <'H.DEV.7'> genericTreeNodesPublished : ItemHighLevel {
+            attribute :>> statement = "On a machine described by its device tree,
+                the kernel shall publish every enabled node that has a compatible,
+                sits on memory-mapped buses and is not kernel-owned, and that no
+                binding the kernel knows and no virtio-mmio transport already
+                holds, as a generic node whose identity -- compatible list, path,
+                references and subtree -- is data the kernel does not interpret;
+                so that a driver for it needs no change to the kernel.
+                Only personality=user publishes real nodes: present and desktop
+                publish none, and every profile's check holds this on made-up trees.";
+            attribute :>> criterion = "cargo xtask test-driver-model: on one
+                kernel ELF whose sha256 is recorded before the test exists, QEMU
+                virt's PL031 under a made-up compatible is published, devmgr
+                matches it by that compatible from its image-time table and
+                checks its driver's requirement table, and the driver reads the
+                device's identification, its counter and its match interrupt
+                through its own aperture and vector; with the clock's provider
+                gone it is not started and devmgr names the reference (D13).
+                Stage 10's check holds a made-up tree to the publication rules on
+                every boot.";
+            attribute :>> parent = ("O.CAPABILITY", "ASR-3");
+        }
+        requirement <'H.DEV.8'> kernelOwnedNodesExcludedAndSealed : ItemHighLevel {
+            attribute :>> statement = "A device-tree node the kernel uses, a node
+                under one, or a node whose registers share a page with what the
+                kernel uses, shall never be published; the set shall be fixed by
+                one registration that is sealed before anything is published; and
+                a node a kernel-owned node depends on through clocks, resets,
+                power domains, pin control, supplies or interconnects, directly
+                or transitively, shall be published flagged KERNEL_DEPENDS.
+                Only personality=user publishes real nodes: present and desktop
+                publish none, and every profile's check holds this on made-up trees.";
+            attribute :>> criterion = "Stage 10's check: on a made-up tree the
+                console and a node overlapping its page are kernel-owned, its
+                clock and that clock's clock are flagged, and a claim after the
+                seal is refused; each with a gate.sh control that fires.";
+            attribute :>> parent = ("O.CAPABILITY", "ASR-3");
+        }
     }
 
     package Traps {

@@ -11,6 +11,8 @@
 //! which is all early boot needs.
 
 use core::cell::UnsafeCell;
+#[cfg(ferrix_personality = "user")]
+use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use ferrix_bootinfo::{BootView, PAGE_SIZE};
 use ferrix_paging::{MapFlags, Mapper, PhysAddr, PhysMem, VirtAddr};
@@ -42,6 +44,46 @@ static POOL: TablePool = TablePool(UnsafeCell::new(
     // have: copying one silently duplicates a mapping.
     [const { Table([0; 512]) }; EARLY_TABLES],
 ));
+
+/// The most early device windows recorded: two or three are made.
+#[cfg(ferrix_personality = "user")]
+const EARLY_WINDOWS: usize = 8;
+
+/// Every device window [`EarlyMemory::map_device`] made, as physical
+/// `start..end`, whole pages: the console the command line or the tree
+/// named, on every architecture. What generic device-tree publication
+/// claims as the kernel's own use at its seal (`docs/DRIVER-MODEL.md` §3,
+/// D3; `L.discovery.10`), since these windows are not `vmap`'s.
+#[cfg(ferrix_personality = "user")]
+static WINDOWS: [(AtomicU64, AtomicU64); EARLY_WINDOWS] =
+    [const { (AtomicU64::new(0), AtomicU64::new(0)) }; EARLY_WINDOWS];
+
+/// How many of [`WINDOWS`] are filled.
+#[cfg(ferrix_personality = "user")]
+static WINDOWS_MADE: AtomicUsize = AtomicUsize::new(0);
+
+/// Record a device window; one past [`EARLY_WINDOWS`] is reported as a map
+/// failure by its caller, so no window the kernel uses goes unrecorded.
+#[cfg(ferrix_personality = "user")]
+fn record_window(start: u64, end: u64) -> bool {
+    let index = WINDOWS_MADE.load(Ordering::Acquire);
+    let Some((first, last)) = WINDOWS.get(index) else {
+        return false;
+    };
+    first.store(start, Ordering::Relaxed);
+    last.store(end, Ordering::Relaxed);
+    WINDOWS_MADE.store(index + 1, Ordering::Release);
+    true
+}
+
+/// Every device window early boot mapped, as physical `start..end`.
+#[cfg(ferrix_personality = "user")]
+pub(crate) fn device_windows() -> impl Iterator<Item = (u64, u64)> {
+    WINDOWS
+        .iter()
+        .take(WINDOWS_MADE.load(Ordering::Acquire))
+        .map(|(start, end)| (start.load(Ordering::Relaxed), end.load(Ordering::Relaxed)))
+}
 
 /// Why an early mapping could not be made.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -143,7 +185,21 @@ impl EarlyMemory {
     /// image, which no device window may map ([`crate::mm::overlaps_image`]);
     /// [`EarlyError::MapFailed`] for what the mapper refuses.
     pub fn map_device(&mut self, virt: u64, phys: u64, len: u64) -> Result<(), EarlyError> {
-        self.map_window(virt, phys, len, MapFlags::KERNEL_DEVICE)
+        self.map_window(virt, phys, len, MapFlags::KERNEL_DEVICE)?;
+        // Only a kernel that publishes generic nodes needs the record, and no
+        // other may gain a failure a board could meet (ledger 5896, C.1).
+        #[cfg(ferrix_personality = "user")]
+        {
+            let start = phys - phys % PAGE_SIZE;
+            let end = phys
+                .saturating_add(len)
+                .checked_next_multiple_of(PAGE_SIZE)
+                .unwrap_or(u64::MAX);
+            if !record_window(start, end) {
+                return Err(EarlyError::MapFailed(ferrix_paging::MapError::OutOfMemory));
+            }
+        }
+        Ok(())
     }
 
     /// Map `len` bytes of a framebuffer at `virt`, with the attributes

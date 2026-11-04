@@ -16,7 +16,7 @@
 use ferrix_driver::dma::{Dma, PAGE};
 use ferrix_driver::input::{self, Answer, Fault};
 use ferrix_driver::virtio;
-use ferrix_driver::{Driver, Step, Stopped, Stuck};
+use ferrix_driver::{Probe, Step, Stopped, Stuck};
 use ferrix_inputctl::message::{Events, Hello, Message};
 use ferrix_rt::Bootstrap;
 use ferrix_virtio_input::{AREA_BYTES, Control, Options, Parts, Rings, Teardown};
@@ -39,7 +39,7 @@ type Device = virtio::Device<virtio::Input>;
 /// The device logic, on the virtio transport and pinned memory.
 struct VirtioInput(ferrix_virtio_input::Driver<Device, Dma, Dma>);
 
-impl Driver for VirtioInput {
+impl Probe for VirtioInput {
     type Device = Device;
 
     fn probe(device: Device) -> Result<Self, Step> {
