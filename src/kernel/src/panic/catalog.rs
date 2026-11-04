@@ -387,6 +387,32 @@ pub static STAGE9_PAGER: Explanation = Explanation {
     ],
     see: "src/kernel/src/object/pager.rs; src/kernel/src/object/pager_check.rs; \
           src/kernel/src/user/vmo.rs; src/kernel/src/user/space.rs; docs/microkernel/K3.md",
+/// For `check_reservations` in `stages_check.rs`.
+pub(crate) static STAGE9_RESERVE: Explanation = Explanation {
+    code: "FX-0914",
+    title: "a job's memory reservation did not hold what it promises",
+    meaning: "`object::reserve_check::run` reserves memory for a job in a tree of its own \
+              beside a QM sibling (`docs/microkernel/K12.md`). Its rules must refuse a \
+              reservation above the job's own limit, under a limit or `memory.high` above \
+              it, beneath another reservation and on a job that is not empty, and must \
+              refuse a limit or mark above a reserved job and a limit below its reservation. \
+              The job's frames must be drawn from its reservation and tagged with it up to \
+              its size and not past it, a frame taken while an interrupt is serviced must \
+              never be drawn, a reclaim for anyone else must spare a drawn frame, and once \
+              the tree is gone its reservation must promise nothing and every quota slot be \
+              given back. A kernel failing this lets a QM partition take the memory a \
+              certified one was promised.",
+    causes: &[
+        "A rule of the reservation stopped being tested, or tested under the wrong lock \
+         (`quota::Quota::set_reservation`, `quota::limit_allowed`).",
+        "A frame route stopped asking `mm::reservation::take` with the job's reservation, \
+         or asked it in interrupt context (`mm::reservation_for`).",
+        "A free path stopped calling `mm::reservation::freed`, so the drawn count or the \
+         promise did not come back.",
+        "A slot was freed without unbinding its reservation, or a sub-job did not copy it.",
+    ],
+    see: "src/kernel/src/mm/reservation.rs; src/kernel/src/object/quota.rs; \
+          src/kernel/src/object/reserve_check.rs; docs/microkernel/K12.md",
 };
 
 /// For `check_kernel_memory` in `stages_check.rs`, when `fs::kmem_check::run` fails.
@@ -3815,6 +3841,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &STAGE13_TIME_NAMESPACES,
     &STAGE9_ADDRESS_WAIT,
     &STAGE9_TIMERS,
+    &STAGE9_RESERVE,
     &STAGE9_PAGER,
     &STAGE9_SPACES,
     &STAGE9_EXCEPTIONS,
