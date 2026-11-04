@@ -15,10 +15,11 @@ use ferrix_vma::VmaFlags;
 
 use crate::object::bare::Bare;
 use crate::object::job::Job;
-use crate::object::quota::Resource;
+use crate::object::quota::{Counter, Mark, Resource};
 use crate::sched::Task;
 use crate::syscall::uaccess;
 use crate::user::space::AddressSpace;
+use crate::user::vmo::{Filler, Vmo};
 
 /// Where the program is.
 const TEXT: u64 = 0x40_0000;
@@ -533,6 +534,76 @@ fn a_program_has_its_argument_and_its_calls_theirs() -> Result<(), &'static str>
     Ok(())
 }
 
+/// A file's source whose every page can be read again, as a read-only mount's.
+#[derive(Debug)]
+struct ReadAgain;
+
+impl Filler for ReadAgain {
+    fn fill(&self, _: &Vmo, _: u64) -> Result<(), ferrix_vfs::Errno> {
+        Ok(())
+    }
+
+    fn fill_one(&self, _: &Vmo, _: u64) -> Result<(), ferrix_vfs::Errno> {
+        Ok(())
+    }
+
+    fn reclaimable(&self) -> bool {
+        true
+    }
+}
+
+/// L.object.108: a task of a job over its `memory.high`, having just taken a page,
+/// gives back that job's clean cache down to the mark, counted in the job and above,
+/// and a sibling's cache stays. The pages are taken as a fault takes them, charged to
+/// the job, and `throttle` is what the trap's way out calls after one.
+///
+/// Verifies: L.object.108
+fn over_its_mark_a_job_gives_back() -> Result<(), &'static str> {
+    const PAGES: u64 = 64;
+    const SIBLING_PAGES: u64 = 8;
+    const MARK: u64 = 16 * PAGE_SIZE;
+    let tree = Job::new_root().map_err(|_| "bare: no job")?;
+    let job = tree.new_child().map_err(|_| "bare: no job")?;
+    let sibling = tree.new_child().map_err(|_| "bare: no job")?;
+    if !job.set_mark(Mark::High, MARK) {
+        return Err("bare: a job's memory.high could not be set");
+    }
+    let source: Arc<dyn Filler> =
+        crate::fallible::try_arc(ReadAgain).map_err(|_| "bare: no memory")?;
+    let file = Vmo::new_filled(PAGES, Some(Arc::clone(&source))).map_err(|_| "bare: no file")?;
+    let beside = Vmo::new_filled(SIBLING_PAGES, Some(source)).map_err(|_| "bare: no file")?;
+    let own = crate::sched::running_group();
+    crate::sched::set_current_group(sibling.quota_index());
+    let filled = (0..SIBLING_PAGES).try_for_each(|index| beside.commit_and_write(index, 0, &[1]));
+    crate::sched::set_current_group(job.quota_index());
+    let taken = filled.and_then(|()| {
+        (0..PAGES).try_for_each(|index| {
+            file.commit_and_write(index, 0, &[1])?;
+            crate::object::oom::throttle();
+            Ok(())
+        })
+    });
+    crate::sched::set_current_group(own);
+    taken.map_err(|_| "bare: a file's page would not commit")?;
+    let used = job
+        .usage(Resource::Memory)
+        .map_or(u64::MAX, |usage| usage.used);
+    // The last page's own throttle ran after the page: the job is at its mark.
+    if used > MARK {
+        return Err("bare: a job over its memory.high was not brought back to it");
+    }
+    if file.committed() as u64 * PAGE_SIZE > MARK {
+        return Err("bare: a file's pages stayed resident over its job's memory.high");
+    }
+    if job.counted(Counter::High) == 0 || tree.counted(Counter::High) == 0 {
+        return Err("bare: a crossing of memory.high was not counted in its job and above");
+    }
+    if beside.committed() as u64 != SIBLING_PAGES || sibling.counted(Counter::High) != 0 {
+        return Err("bare: a job over its memory.high took a sibling's cache");
+    }
+    Ok(())
+}
+
 /// The word at [`PAGES_AT`] of `space`.
 fn word_at(space: &AddressSpace) -> Result<u8, &'static str> {
     let mut one = [0_u8; 1];
@@ -575,6 +646,62 @@ fn a_store_copies_for_the_side_that_writes() -> Result<(), &'static str> {
     Ok(())
 }
 
+/// L.user.62, H.MEM.16: a clone's store to a shared anonymous page reaches the holder
+/// it was cloned from, a page the clone faults in first included, and its store to a
+/// private page does not. `AddressSpace::fork`, the function a Linux fork and K2's
+/// clone both are; the store is the program's own.
+///
+/// Verifies: L.user.62, H.MEM.16
+fn a_shared_store_reaches_the_other_side() -> Result<(), &'static str> {
+    const OLD: u8 = 0x55;
+    let source = AddressSpace::new().map_err(|_| "bare: no space")?;
+    put_program(
+        &source,
+        Work {
+            pages: 3,
+            status: STATUS,
+            ..Work::default()
+        },
+    )?;
+    let shared = VmaFlags {
+        shared: true,
+        ..VmaFlags::READ_WRITE
+    };
+    let _ = source
+        .unmap(PAGES_AT, 2 * PAGE_SIZE)
+        .map_err(|_| "bare: a program's pages would not unmap")?;
+    let _ = source
+        .map_anonymous(PAGES_AT, 2 * PAGE_SIZE, shared)
+        .map_err(|_| "bare: a shared mapping would not map")?;
+    let private = PAGES_AT + 2 * PAGE_SIZE;
+    uaccess::copy_to_user(&source, PAGES_AT, &[OLD]).map_err(|_| "bare: no copy")?;
+    uaccess::copy_to_user(&source, private, &[OLD]).map_err(|_| "bare: no copy")?;
+    let clone = source.fork().map_err(|_| "bare: no memory for a fork")?;
+    let job = Job::new_root().map_err(|_| "bare: no job")?;
+    let host = Bare::new(clone, job, None).map_err(|_| "bare: no process")?;
+    let side = BareSide { host };
+    let _task = side.start(None)?;
+    if side.ended()? != STATUS as i32 {
+        return Err("bare: a clone's stores did not go through");
+    }
+    let read = |at| {
+        let mut one = [0_u8; 1];
+        uaccess::copy_from_user(&source, at, &mut one)
+            .map(|()| one[0])
+            .map_err(|_| "bare: no read")
+    };
+    if read(PAGES_AT)? == OLD {
+        return Err("bare: a clone's store to a shared page did not reach its source");
+    }
+    if read(PAGES_AT + PAGE_SIZE)? == 0 {
+        return Err("bare: a shared page a clone faulted in first was not the source's");
+    }
+    if read(private)? != OLD {
+        return Err("bare: a clone's store to a private page reached its source");
+    }
+    Ok(())
+}
+
 // CHECKS-ONLY: stages_check.rs
 /// Every case: how many ran, none where the kernel does not count kernel time.
 ///
@@ -582,12 +709,14 @@ fn a_store_copies_for_the_side_that_writes() -> Result<(), &'static str> {
 ///
 /// The first that did not hold.
 pub fn run() -> Result<u32, &'static str> {
+    over_its_mark_a_job_gives_back()?;
     // ARMv7-A has no K11: its native programs' end is the Linux one, until M5.
     if !crate::arch::HAS_RESTRICTED {
-        return Ok(0);
+        return Ok(1);
     }
     a_fault_is_resolved()?;
     a_store_copies_for_the_side_that_writes()?;
+    a_shared_store_reaches_the_other_side()?;
     let here = crate::smp::this_cpu().ok_or("bare: no processor")?.logical;
     let count = crate::smp::count();
     let cpu = if count > 1 { (here + 1) % count } else { here };
@@ -599,9 +728,9 @@ pub fn run() -> Result<u32, &'static str> {
     #[cfg(target_arch = "x86_64")]
     a_program_has_its_argument_and_its_calls_theirs()?;
     if !crate::sched::vtime::counting() {
-        return Ok(8);
+        return Ok(10);
     }
     user_time_is_not_kernel_time(cpu)?;
     calls_and_faults_are_kernel_time(cpu)?;
-    Ok(10)
+    Ok(12)
 }
