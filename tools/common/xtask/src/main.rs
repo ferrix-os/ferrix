@@ -602,6 +602,7 @@ const TASKS: &[&[Task]] = &[
     lode_pstore::TASKS,
     lode_remote::TASKS,
     first_processes::TASKS,
+    kernel_shape::TASKS,
     kernel_shape::FIRST_TASKS,
     machine_check::TASKS,
     mce_cmci::TASKS,

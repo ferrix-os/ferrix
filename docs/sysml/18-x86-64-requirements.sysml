@@ -992,6 +992,7 @@ package FerrixX8664Requirements {
             attribute :>> unit = ("arch::x86_64::powerctl::logic::row",
                 "arch::x86_64::powerctl::logic::packages",
                 "arch::x86_64::powerctl::logic::refusal");
+            attribute :>> scope = "personality=kernel";
         }
         requirement <'L.x86_64.195'> powerSetWithinTheRow : ItemLowLevel {
             attribute :>> statement = "power_set shall refuse with INVALID_ARGS and write nothing an
@@ -1021,6 +1022,7 @@ package FerrixX8664Requirements {
             attribute :>> unit = ("arch::x86_64::powerctl::logic::compose",
                 "arch::x86_64::powerctl::write",
                 "arch::x86_64::powerctl::Msr::write");
+            attribute :>> scope = "personality=kernel";
         }
         requirement <'L.x86_64.197'> powerReadIsReadOnlyAndMarksAbsence : ItemLowLevel {
             attribute :>> statement = "power_read shall write POWER_READ_WORDS words: firmware's 0x601,
@@ -1068,6 +1070,7 @@ package FerrixX8664Requirements {
                 "arch::x86_64::powerctl::State::release",
                 "arch::x86_64::powerctl::State::gone",
                 "arch::x86_64::powerctl::unserved");
+            attribute :>> scope = "personality=kernel";
         }
         requirement <'L.x86_64.199'> powerLeaseLapses : ItemLowLevel {
             attribute :>> statement = "The power core shall end a claim and restore firmware's 0x601 when
@@ -1079,6 +1082,7 @@ package FerrixX8664Requirements {
                 restored on Lease after the driver stops renewing.";
             attribute :>> parent = "H.DEV.6";
             attribute :>> unit = "arch::x86_64::powerctl::logic::lapsed";
+            attribute :>> scope = "personality=kernel";
         }
         requirement <'L.x86_64.200'> powerBackstopRestoresAtNinety : ItemLowLevel {
             attribute :>> statement = "While a raise is in force the watch task shall read 0x1a2, 0x19c
@@ -1095,6 +1099,7 @@ package FerrixX8664Requirements {
             attribute :>> parent = "H.DEV.6";
             attribute :>> unit = ("arch::x86_64::powerctl::logic::verdict",
                 "arch::x86_64::powerctl::State::backstop");
+            attribute :>> scope = "personality=kernel";
         }
         requirement <'L.x86_64.201'> powerLatchesOffUntilReboot : ItemLowLevel {
             attribute :>> statement = "A backstop trip, a write that faults, reads back otherwise or
@@ -1108,6 +1113,7 @@ package FerrixX8664Requirements {
             attribute :>> parent = "H.DEV.6";
             attribute :>> unit = ("arch::x86_64::powerctl::State::end",
                 "arch::x86_64::powerctl::Cause::latches");
+            attribute :>> scope = "personality=kernel";
         }
         requirement <'L.x86_64.202'> powerFirmwareChangeIsLeftAlone : ItemLowLevel {
             attribute :>> statement = "Firmware's 0x601 shall be read once, at the probe. A claim, a
@@ -1123,6 +1129,7 @@ package FerrixX8664Requirements {
             attribute :>> parent = "H.DEV.6";
             attribute :>> unit = ("arch::x86_64::powerctl::write",
                 "arch::x86_64::powerctl::State::claim");
+            attribute :>> scope = "personality=kernel";
         }
         requirement <'L.x86_64.203'> powerRaiseFloor : ItemLowLevel {
             attribute :>> statement = "power_set shall refuse with SHOULD_WAIT a raise less than a second
@@ -1134,6 +1141,7 @@ package FerrixX8664Requirements {
                 and the floor reset per claim, each panic stage 3.";
             attribute :>> parent = "H.DEV.5";
             attribute :>> unit = "arch::x86_64::powerctl::logic::raise_due";
+            attribute :>> scope = "personality=kernel";
         }
         requirement <'L.x86_64.204'> powerWriteAndRestoreInterleave : ItemLowLevel {
             attribute :>> statement = "A power write shall run with interrupts masked on its processor,
@@ -1148,6 +1156,7 @@ package FerrixX8664Requirements {
                 panics stage 3.";
             attribute :>> parent = "H.DEV.6";
             attribute :>> unit = "arch::x86_64::powerctl::Msr::masked";
+            attribute :>> scope = "personality=kernel";
         }
         requirement <'L.x86_64.205'> powerWriteIsReadBack : ItemLowLevel {
             attribute :>> statement = "A power write shall read 0x601 back; a back whose bits 12:0 are
@@ -1160,6 +1169,7 @@ package FerrixX8664Requirements {
                 the read-back value not taken as the last written panics stage 3.";
             attribute :>> parent = "H.DEV.6";
             attribute :>> unit = "arch::x86_64::powerctl::State::set";
+            attribute :>> scope = "personality=kernel";
         }
         requirement <'L.x86_64.206'> powerExitRestore : ItemLowLevel {
             attribute :>> statement = "restore shall, on an orderly power-off, a reset and both ends of a
@@ -1190,6 +1200,7 @@ package FerrixX8664Requirements {
                 restore unmasked panics stage 3.";
             attribute :>> parent = "H.DEV.6";
             attribute :>> unit = "arch::x86_64::powerctl::State::restore_once";
+            attribute :>> scope = "personality=kernel";
         }
         requirement <'L.x86_64.207'> powerFakeIsTestOnly : ItemLowLevel {
             attribute :>> statement = "Under ferrix.powerctl.fake alone the power node shall stand on
@@ -1202,6 +1213,7 @@ package FerrixX8664Requirements {
                 with a planted one as its control.";
             attribute :>> parent = "H.DEV.5";
             attribute :>> unit = "arch::x86_64::powerctl::say";
+            attribute :>> scope = "personality=kernel";
         }
         requirement <'L.x86_64.32'> speculationPlanFollowsCpuid : ItemLowLevel {
             attribute :>> statement = "Plan::for_processor shall choose enhanced
@@ -1614,6 +1626,7 @@ package FerrixX8664Requirements {
                 program exits 1 and the check fails by name.";
             attribute :>> parent = "H.TRAP.9";
             attribute :>> unit = "arch::x86_64::signal::put_cause";
+            attribute :>> scope = "personality=kernel";
         }
         requirement <'L.x86_64.175'> machineCheckTakenOnEveryProcessor : ItemLowLevel {
             doc /* F-73. With CR4.MCE clear a processor does not take the

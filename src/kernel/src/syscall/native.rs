@@ -146,9 +146,11 @@ fn decode(number: usize) -> Option<NativeCall> {
 /// it, so that a handler which needs more -- `job_for_cgroup` reads the
 /// caller's descriptors and credentials -- can have its own type back
 /// ([`object::process::downcast`]).
+#[cfg(not(ferrix_shape = "micro"))]
 pub(crate) type Handler = fn(&dyn Host, &[u64; 6]) -> Result<usize, Errno>;
 
 /// One call the item leaves to the load ring, and what answers it.
+#[cfg(not(ferrix_shape = "micro"))]
 struct Served {
     /// The call.
     call: NativeCall,
@@ -156,6 +158,7 @@ struct Served {
     handler: Once<Handler>,
 }
 
+#[cfg(not(ferrix_shape = "micro"))]
 impl Served {
     /// `call`, answered by nothing yet.
     const fn new(call: NativeCall) -> Served {
@@ -174,6 +177,7 @@ impl Served {
 /// of these calls makes a channel for a driver, not the path a driver's work
 /// takes. A `Once` per call, as [`crate::hooks`] keeps them: written at
 /// bring-up, read without a lock.
+#[cfg(not(ferrix_shape = "micro"))]
 static SERVED: [Served; 21] = [
     Served::new(NativeCall::BlockRingCreate),
     Served::new(NativeCall::NetRingCreate),
@@ -206,6 +210,7 @@ static SERVED: [Served; 21] = [
 /// [`Full`] when `call` is not one this table leaves to the load ring, or
 /// already has a handler: either way the load registers more than the item
 /// expects, and the boot says so.
+#[cfg(not(ferrix_shape = "micro"))]
 pub fn serve(call: NativeCall, handler: Handler) -> Result<(), Full> {
     let served = SERVED
         .iter()
@@ -222,6 +227,7 @@ pub fn serve(call: NativeCall, handler: Handler) -> Result<(), Full> {
 /// The first call left to the load ring that nothing answers: what the boot
 /// checks is `None` before it goes on, so that a call the `match` in
 /// [`dispatch`] no longer answers itself cannot go unanswered unseen.
+#[cfg(not(ferrix_shape = "micro"))]
 pub fn unserved() -> Option<NativeCall> {
     SERVED
         .iter()
@@ -230,6 +236,7 @@ pub fn unserved() -> Option<NativeCall> {
 }
 
 /// How many calls the load ring answers, for the boot's report.
+#[cfg(not(ferrix_shape = "micro"))]
 pub fn served_count() -> usize {
     SERVED
         .iter()
@@ -238,6 +245,7 @@ pub fn served_count() -> usize {
 }
 
 /// Answer `call` through the table.
+#[cfg(not(ferrix_shape = "micro"))]
 fn served(call: NativeCall, caller: &dyn Host, a: &[u64; 6]) -> Result<usize, Errno> {
     let handler = SERVED
         .iter()
@@ -535,6 +543,9 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         NativeCall::InterruptCreate | NativeCall::InterruptAck | NativeCall::InterruptBind => {
             interrupt_call(call, process, &a)
         }
+        // Retired under this shape: each answers ENOSYS by the last arm, and devmgr
+        // asks a core in user space for what these gave (MICROKERNEL.md §3).
+        #[cfg(not(ferrix_shape = "micro"))]
         NativeCall::BlockRingCreate
         | NativeCall::NetRingCreate
         | NativeCall::DisplayControlCreate
@@ -642,6 +653,8 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         | NativeCall::RestrictedEnter
         | NativeCall::RestrictedResume
         | NativeCall::RestrictedContinue => region::answer(call, process, &a),
+        #[cfg(ferrix_shape = "micro")]
+        _ => Err(Errno::ENOSYS),
     }
 }
 
@@ -2972,6 +2985,7 @@ fn copy_records(
 /// mebibytes, copied into the kernel's own memory before it is loaded.
 const MAX_IMAGE_BYTES: u64 = 16 << 20;
 
+#[cfg(not(ferrix_shape = "micro"))]
 /// `process_create`.
 ///
 /// The image is read out of the VMO into kernel memory and loaded from there,
@@ -3146,6 +3160,7 @@ pub fn image_bytes(vmo: &Vmo) -> Result<crate::vmap::Buffer, Errno> {
     Ok(bytes)
 }
 
+#[cfg(not(ferrix_shape = "micro"))]
 /// `process_start`.
 ///
 /// In the order that makes a race harmless and a failure clean:

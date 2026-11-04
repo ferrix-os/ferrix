@@ -2386,6 +2386,7 @@ package FerrixMemoryRequirements {
                 "object::pin::fold", "syscall::native::vmo_copy",
                 "arch::x86_64::framebuffer::flush_cache_lines",
                 "arch::x86_64::framebuffer::flush_lines");
+            attribute :>> scope = "personality=kernel";
         }
         requirement <'L.user.107'> aCopyThroughADevicePageIsRefused : ItemLowLevel {
             attribute :>> statement = "with_page and with_present_page shall refuse

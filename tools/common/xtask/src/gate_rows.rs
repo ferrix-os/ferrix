@@ -509,7 +509,10 @@ fn rows_for(path: &str, image_crates: &BTreeSet<String>, rows: &mut Rows) {
         || under("src/user/system/native/partmgr/")
         || under("src/lib/proto/partition-desc/")
     {
-        rows.add(&["test-first-processes --personality user"]);
+        rows.add(&[
+            "test-first-processes --personality user",
+            "test-kernel-shape --personality user",
+        ]);
         reason(rows, "the first processes' row");
     }
     if under("src/user/system/native/netd/") || under("src/lib/proto/netswitch/") {

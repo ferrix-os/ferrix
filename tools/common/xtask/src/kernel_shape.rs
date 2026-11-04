@@ -1,11 +1,111 @@
-//! `btrfsd`'s rows and what an image under `fs=server` carries; `test-kernel-shape`
-//! joins them with M6 (`docs/microkernel/M6.md` §3).
+//! `cargo xtask test-kernel-shape --personality user`: what ring 0 holds in the
+//! microkernel's shape (`docs/microkernel/M6.md` §3): rustc's own list of what it
+//! read for the kernel's crates, and the kernel's symbols, against M6's list.
 
 use crate::args::Args;
 use crate::check::python_with;
 use crate::paths;
 use crate::task::Task;
 use crate::{Error, Result, cargo, fat, initramfs, native, qemu};
+
+/// The task.
+pub(crate) const TASKS: &[Task] = &[
+    Task {
+        name: "test-kernel-shape",
+        help_at: 965,
+        help: &[
+            "test-kernel-shape  Build --personality user and hold ring 0 to M6's list: no load file, none of what left, by rustc's dep-info and nm",
+        ],
+        run: |_, args| test_kernel_shape(args),
+    },
+    Task {
+        name: "test-kernel-symbols",
+        help_at: 966,
+        help: &[
+            "test-kernel-symbols  With FERRIX_SYMBOLS_BASE=<rev>: this kernel's symbols and sizes against that commit's, for what is said to leave a build unchanged (M.8)",
+        ],
+        run: |_, args| test_kernel_symbols(args),
+    },
+];
+
+/// M.8: this tree's kernel, by this run's flags, against the commit `FERRIX_SYMBOLS_BASE`
+/// names, built from a worktree of its own with the same flags.
+fn test_kernel_symbols(args: &Args) -> Result<()> {
+    let base = std::env::var("FERRIX_SYMBOLS_BASE")
+        .map_err(|_| Error::new("test-kernel-symbols needs FERRIX_SYMBOLS_BASE=<rev>"))?;
+    let target = paths::target_dir();
+    let tree = target.join("symbols-base");
+    let _ = std::fs::remove_dir_all(&tree);
+    let added = std::process::Command::new("git")
+        .args(["worktree", "add", "--detach", "--force"])
+        .arg(&tree)
+        .arg(&base)
+        .status()
+        .map_err(|error| Error::new(error.to_string()))?;
+    if !added.success() {
+        return Err(Error::new(format!("no worktree of {base}")));
+    }
+    for arch in args.arches()? {
+        let kernel = cargo::build_kernel(arch, args.release)?;
+        let tail = kernel
+            .elf
+            .strip_prefix(&target)
+            .map_err(|error| Error::new(error.to_string()))?;
+        let base_target = tree.join("target-symbols");
+        let built = std::process::Command::new("cargo")
+            .args(["xtask", "build", "--arch", arch.name()])
+            .args(
+                args.sets
+                    .iter()
+                    .flat_map(|(flag, value)| ["--set".to_owned(), format!("{flag}={value}")]),
+            )
+            .current_dir(&tree)
+            .env("CARGO_TARGET_DIR", &base_target)
+            .status()
+            .map_err(|error| Error::new(error.to_string()))?;
+        if !built.success() {
+            return Err(Error::new(format!("{base} did not build for {arch}")));
+        }
+        let (head, then) = (
+            kernel.elf.display().to_string(),
+            base_target.join(tail).display().to_string(),
+        );
+        python_with(
+            "tools/common/check/compare-kernel-symbols.py",
+            &[then.as_str(), head.as_str()],
+        )?;
+        println!("  {arch}: the kernel's symbols and sizes are {base}'s");
+    }
+    let _ = std::process::Command::new("git")
+        .args(["worktree", "remove", "--force"])
+        .arg(&tree)
+        .status();
+    Ok(())
+}
+
+fn test_kernel_shape(args: &Args) -> Result<()> {
+    if crate::flags::this_run()?.value("personality") != Some("user") {
+        return Err(Error::new("test-kernel-shape is for --personality user"));
+    }
+    for arch in args.arches()? {
+        let kernel = cargo::build_kernel(arch, args.release)?;
+        let directory = kernel
+            .elf
+            .parent()
+            .ok_or_else(|| Error::new("the kernel has no directory"))?
+            .display()
+            .to_string();
+        python_with(
+            "tools/common/check/check-kernel-shape.py",
+            &[directory.as_str(), "--report"],
+        )?;
+        python_with(
+            "tools/common/check/check-kernel-alloc-audit.py",
+            &["--built", directory.as_str()],
+        )?;
+    }
+    Ok(())
+}
 
 /// `test-first-processes`: the manager, its partition, devmgr and `linuxd`
 /// (`docs/microkernel/BOOT-AUTHORITY.md` §6). Test images ship in no product.

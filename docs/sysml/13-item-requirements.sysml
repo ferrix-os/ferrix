@@ -30,6 +30,11 @@ package FerrixItemRequirements {
             doc /* The pass/fail condition a check tests, counted where there
                  * is something to count. */
         }
+        attribute scope : String[0..1] {
+            doc /* The flags this holds under, BUILD-FLAGS rule 7: `personality=kernel` for
+                 * what a `personality=user` kernel does not build (M6.md, M.4). None: every
+                 * configuration. Scoped is not withdrawn: withdrawn is for what is deleted. */
+        }
         attribute parent : String[1..*] {
             doc /* The ids of the level above: for a high-level requirement a
                  * Security Target objective (O.*), an assumed safety
@@ -1160,6 +1165,7 @@ package FerrixItemRequirements {
                 is restored after the driver stops renewing and after it exits;
                 stage 3 drives every other cause on the fake.";
             attribute :>> parent = ("O.FAILSAFE", "ASR-6");
+            attribute :>> scope = "personality=kernel";
         }
         requirement <'H.DEV.9'> bindRightOnKeptHandleOnly : ItemHighLevel {
             attribute :>> statement = "The kernel shall mint the right to attach a

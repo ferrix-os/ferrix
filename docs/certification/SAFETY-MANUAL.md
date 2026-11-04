@@ -770,6 +770,13 @@ which it keeps open as asked.
 `netd` is QM and in no claim's item (`docs/microkernel/M8.md` §2, N.6). A safety partition uses devices only through native drivers devmgr assigns to it, never `netd` or a Linux partition's device cores. The integrator keeps it so.
 
 
+### AoU-47 — with no serial, a panic says only what pstore keeps
+
+A `personality=user` kernel has no screen and draws no panic there (`docs/microkernel/M6.md`, M.9). On a
+machine with no serial line a panic's report reaches nobody until the next boot reads pstore. The integrator
+provides the line, or relies on pstore and says so.
+
+
 ### AoU-41 — a safety partition maps no pager-backed VMO it did not choose
 A pager-backed VMO (`docs/microkernel/K3.md`) has absent pages its pager
 supplies: a fault on one waits for that pager, up to the pager's bound of at

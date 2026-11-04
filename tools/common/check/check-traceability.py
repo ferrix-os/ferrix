@@ -182,6 +182,10 @@ boundary = complexity.load_gate()
 # --- requirements ------------------------------------------------------------
 
 
+# What a requirement may be scoped to (BUILD-FLAGS rule 7, docs/microkernel/M6.md M.4).
+SCOPES = ("personality=kernel", "kernel_memory=retyped")
+
+
 @dataclasses.dataclass
 class Requirement:
     id: str
@@ -194,6 +198,7 @@ class Requirement:
     source: str
     line: int
     area: str = ""
+    scope: str = ""
 
 
 def _string(value: str) -> str:
@@ -261,6 +266,7 @@ def requirements_of(elements) -> tuple[list[Requirement], set[str], list[str]]:
             units=_strings(element.attribute_value("unit")),
             source=element.source,
             line=element.line,
+            scope=_string(element.attribute_value("scope") or ""),
         )
         node = element.parent
         while node is not None and node.kind != "package":
@@ -299,6 +305,8 @@ def check_requirements(requirements: list[Requirement], parents_allowed: set[str
         elif not ID_FORM[r.level].match(r.id):
             form = "H.<AREA>.<n>" if r.level == "high" else "L.<module>.<n>"
             problems.append(f"{where}: a {r.level}-level id is written {form}")
+        if r.scope and r.scope not in SCOPES:
+            problems.append(f"{r.id}: scope {r.scope!r} is not one of {SCOPES}")
         if not r.statement:
             problems.append(f"{where}: no statement")
         elif not SHALL.search(r.statement):
@@ -1201,7 +1209,8 @@ def render(
             named = ", ".join(f"`{v.file}::{v.function}`" for v in checks) or (
                 "*baselined*" if r.id in baseline else "—"
             )
-            row = [f"`{r.id}`", _cell(r.statement), _cell(r.criterion), ", ".join(r.parents)]
+            statement = f"*Under `{r.scope}`:* {r.statement}" if r.scope else r.statement
+            row = [f"`{r.id}`", _cell(statement), _cell(r.criterion), ", ".join(r.parents)]
             if with_unit:
                 row.append(", ".join(f"`{u}`" for u in r.units))
             row.append(named)
