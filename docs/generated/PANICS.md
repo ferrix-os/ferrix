@@ -110,6 +110,7 @@ Causes are listed most likely first.
 | [FX-0910](#fx-0910) | A time namespace failed its self-check |
 | [FX-0911](#fx-0911) | the waits on a user address failed their self-check |
 | [FX-0913](#fx-0913) | the timer objects failed their self-check |
+| [FX-0915](#fx-0915) | a pager-backed VMO's fault, wait or dirty tracking was not as K3 states |
 | [FX-0916](#fx-0916) | an address space reached by handle was not held to the handle's rights |
 | [FX-0917](#fx-0917) | an exception channel was attached where it must be refused, or refused where it must be attached |
 | [FX-1001](#fx-1001) | PCI enumeration failed its self-check |
@@ -2715,6 +2716,38 @@ late, twice or after they were cancelled.
 
 See: src/kernel/src/object/timer_check.rs run; src/kernel/src/object/timer.rs;
 src/kernel/src/sched/queue.rs; docs/microkernel/K10.md.
+
+<a id="fx-0915"></a>
+
+## FX-0915 — a pager-backed VMO's fault, wait or dirty tracking was not as K3 states
+
+`object::pager_check::run` (docs/microkernel/K3.md section 6) serves pagers from
+a check process and faults their VMOs from threads of client processes in two
+jobs: a fault on an absent page must send one page request, shared by threads of
+one job and not across jobs, and be resumed by a supply with the bytes supplied;
+a failed, timed-out, closed or killed wait must end without its page and never
+before the pager's bound, the first three audited; a kernel copy must wait, or
+fail at once for a NO_COPY_WAIT VMO; a Clean page must never be mapped writable,
+a write-back must take the write right away before it returns, and only Clean
+pages may be cleaned or decommitted; and the calls must refuse as specified. A
+kernel failing this lets a pager stall a process for ever, hand it zeros for a
+file's page, or lose a write from the dirty set (H.MEM.22, H.MEM.23).
+
+1. An absent page of a pager-backed VMO was committed as zeros: `Vmo::sourced`
+   or `commit_page` no longer treats it as the pager's.
+2. A request's wait ignores its deadline, the pager's close, or the process's
+   end (`object::pager`'s `PagerLink::wait`, `PagerCore::close`).
+3. Requests are coalesced across jobs, or `PAGER_OP_FAIL` fails requests it was
+   not named for.
+4. A Clean page is installed writable, or `writeback_begin` leaves a translation
+   writable, so a write marks nothing (`user/space.rs`'s `resolve`,
+   `Vmo::writeback_begin`).
+5. A supply moved a page it must refuse (held, shared, uncommitted) or took one
+   from a VMO that is not anonymous.
+
+See: src/kernel/src/object/pager.rs; src/kernel/src/object/pager_check.rs;
+src/kernel/src/user/vmo.rs; src/kernel/src/user/space.rs;
+docs/microkernel/K3.md.
 
 <a id="fx-0916"></a>
 

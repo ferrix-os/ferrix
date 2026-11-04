@@ -15,7 +15,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`sched`](#sched) | 156 | 2 | 2 | 11 |
 | [`syscall`](#syscall) | 117 | 10 | 10 | 3 |
 | [`iommu`](#iommu) | 99 | - | 1 | 2 |
-| [`user`](#user) | 73 | - | 1 | 3 |
+| [`user`](#user) | 72 | - | 1 | 3 |
 | [`main`](#main) | 65 | 6 | 4 | 1 |
 | [`object`](#object) | 51 | 13 | 34 | 8 |
 | [`console`](#console) | 40 | 6 | 7 | 6 |
@@ -36,7 +36,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`audit`](#audit) | 1 | - | - | 1 |
 | [`signal_frame`](#signal_frame) | - | - | 1 | 1 |
 | [`timer`](#timer) | - | - | 1 | 1 |
-| **Total** | **1261** | **164** | **218** | 77 |
+| **Total** | **1260** | **164** | **218** | 77 |
 
 ---
 
@@ -165,7 +165,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | `sched/vtime.rs` | `core` | 11 | - | - | 11 | 125, 137, 141, 215, 269-270, 274, 279, 281, 285, 289 |
 | `sched/task.rs` | `core` | 10 | 0 | 1 | 0 | - |
 | `sched/borrow.rs` | `core` | 5 | - | - | 5 | 143, 218, 225-226, 233 |
-| `sched/work.rs` | `core` | 4 | - | - | 4 | 155, 339, 377, 380 |
+| `sched/work.rs` | `core` | 4 | - | - | 4 | 155, 347, 385, 388 |
 | `sched/trip.rs` | `core` | 1 | - | - | 1 | 365 |
 
 ---
@@ -174,7 +174,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `syscall/native.rs` | `item` | 110 | 6 | 8 | 2 | 2347, 2929 |
+| `syscall/native.rs` | `item` | 110 | 6 | 8 | 2 | 2713, 3295 |
 | `syscall/program.rs` | `item` | 6 | 4 | 2 | 2 | 89, 133 |
 | `syscall/mod.rs` | `item` | 1 | 0 | 0 | 0 | - |
 
@@ -193,7 +193,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `user/vmo.rs` | `core` | 49 | 0 | 1 | 0 | - |
+| `user/vmo.rs` | `core` | 48 | 0 | 1 | 0 | - |
 | `user/space.rs` | `core` | 23 | 0 | 0 | 0 | - |
 | `user/cache.rs` | `core` | 1 | - | - | 1 | 123 |
 

@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2691 declarations in the core's files, 179 in the item's; 176 checks-only.
+2731 declarations in the core's files, 179 in the item's; 178 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1231,6 +1231,7 @@ checks above is `pub` for raised checks (F3).
 | `LIMIT_SET` | re-export | item |  |
 | `NO_UID` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Outcome` | re-export | item, bin |  |
+| `PAGER` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `PROCESS_MADE` | re-export | item |  |
 | `QUIESCED` | re-export | item |  |
 | `READER_GIVEN` | re-export | item |  |
@@ -2004,7 +2005,7 @@ checks above is `pub` for raised checks (F3).
 | `Batch::sweeps` | field | item |  |
 | `Batch::tested` | field | item, load |  |
 | `Standing::reason` | method | item, load, bin |  |
-| `Standing::runs` | method | load, bin |  |
+| `Standing::runs` | method | item, load, bin |  |
 
 ### `mmio`
 
@@ -2036,6 +2037,7 @@ checks above is `pub` for raised checks (F3).
 | `io_mapping` | mod | item, load |  |
 | `job` | mod | item, load |  |
 | `oom` | mod | item, load |  |
+| `pager` | mod | item, load |  |
 | `pin` | mod | item, load |  |
 | `port` | mod | item, load |  |
 | `process` | mod | item, load |  |
@@ -2239,6 +2241,33 @@ checks above is `pub` for raised checks (F3).
 | `out_of_memory_at` | fn | load (checks) | checks-only |
 | `reclaim_for` | fn | item |  |
 | `throttle` | fn | load |  |
+| `user_fault` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+
+### `object::pager`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `Command` | enum | item |  |
+| `FaultMode` | enum | item |  |
+| `Refusal` | enum | item |  |
+| `clamp_wait` | fn | load (checks) | checks-only |
+| `Pager` | struct | item |  |
+| `PagerCore` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `PagerLink` | struct | item |  |
+| `Pager::core` | method | item, load, bin |  |
+| `Pager::new` | method | item, load, bin |  |
+| `PagerCore::link` | method | item, load, bin |  |
+| `PagerCore::outstanding` | method | load |  |
+| `PagerCore::serves` | method | item |  |
+| `PagerCore::wait_ns` | method | item, load |  |
+| `PagerCore::waiting` | method | load |  |
+| `PagerLink::detach` | method | item, load |  |
+| `PagerLink::dirtied` | method | item |  |
+| `PagerLink::fail` | method | item |  |
+| `PagerLink::is_gone` | method | item, load |  |
+| `PagerLink::request` | method | item, load |  |
+| `PagerLink::supplied` | method | item, load, bin |  |
+| `PagerLink::traps_dirty` | method | item |  |
 
 ### `object::pin`
 
@@ -2567,6 +2596,7 @@ checks above is `pub` for raised checks (F3).
 | `STAGE9_EXCEPTIONS` | static | bin (checks) | checks-only |
 | `STAGE9_KMEM` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE9_OBJECTS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE9_PAGER` | static | bin (checks) | checks-only |
 | `STAGE9_QUOTAS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE9_REFUSALS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE9_SPACES` | static | bin (checks) | checks-only |
@@ -2796,6 +2826,7 @@ checks above is `pub` for raised checks (F3).
 | `UserThread` | trait | load |  |
 | `TaskId` | type | load |  |
 | `Task::id` | field | item, load, bin |  |
+| `Task::address_space` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Task::affinity` | method | load |  |
 | `Task::base_weight` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Task::core_process` | method | item, load |  |
@@ -2899,7 +2930,7 @@ checks above is `pub` for raised checks (F3).
 | `has_end` | fn | load |  |
 | `hook_armed_by` | fn | bin |  |
 | `notify` | fn | load |  |
-| `own_end` | fn | item |  |
+| `own_end` | fn | item, load |  |
 | `place_before_entry` | fn | load |  |
 | `post` | fn | load |  |
 | `post_own` | fn | load |  |
@@ -3282,7 +3313,10 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `PageState` | enum | item, load |  |
+| `PagedWrite` | enum | item |  |
 | `RunError` | enum | item |  |
+| `SupplyError` | enum | item |  |
 | `VmoError` | enum | item, load |  |
 | `arm_block_hook` | fn | load (checks) | checks-only |
 | `arm_reclaim_hook` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -3309,16 +3343,20 @@ checks above is `pub` for raised checks (F3).
 | `Vmo::commit_run` | method | item |  |
 | `Vmo::committed` | method | load, bin |  |
 | `Vmo::cut_mappings` | method | load |  |
+| `Vmo::decommit_clean` | method | item |  |
 | `Vmo::decommit_from` | method | load |  |
 | `Vmo::decommit_range` | method | load |  |
+| `Vmo::dirty_range` | method | item |  |
+| `Vmo::dirty_runs` | method | item |  |
 | `Vmo::fork` | method | load |  |
 | `Vmo::give_back_run` | method | item |  |
 | `Vmo::hold` | method | item, load |  |
 | `Vmo::holds_any` | method | load |  |
 | `Vmo::insert_absent` | method | load |  |
-| `Vmo::is_anonymous` | method | load |  |
+| `Vmo::is_anonymous` | method | item, load |  |
 | `Vmo::is_coherent` | method | item |  |
 | `Vmo::is_combining` | method | item, load |  |
+| `Vmo::is_pager_backed` | method | item |  |
 | `Vmo::len_bytes` | method | item, load |  |
 | `Vmo::len_pages` | method | item, load |  |
 | `Vmo::make_coherent` | method | item, load |  |
@@ -3326,17 +3364,24 @@ checks above is `pub` for raised checks (F3).
 | `Vmo::mapper_count` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Vmo::new_anonymous` | method | item, load |  |
 | `Vmo::new_filled` | method | load |  |
+| `Vmo::new_paged` | method | item |  |
 | `Vmo::page` | method | item, load |  |
+| `Vmo::page_state` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Vmo::pager` | method | item, load |  |
 | `Vmo::past_file_end` | method | load |  |
 | `Vmo::read_page` | method | item, load |  |
-| `Vmo::read_present` | method | load |  |
+| `Vmo::read_present` | method | item, load |  |
 | `Vmo::replace` | method | item, load |  |
 | `Vmo::set_file_len` | method | load |  |
 | `Vmo::sourced` | method | load |  |
+| `Vmo::supply_from` | method | item |  |
 | `Vmo::take_kernel_view` | method | load |  |
 | `Vmo::take_mapped_writes` | method | load |  |
 | `Vmo::writably_mapped` | method | load |  |
 | `Vmo::write_page` | method | item, load |  |
+| `Vmo::write_paged` | method | item |  |
+| `Vmo::writeback_begin` | method | item |  |
+| `Vmo::writeback_end` | method | item |  |
 | `Vmo::zero_from` | method | load |  |
 
 ### `vmap`
