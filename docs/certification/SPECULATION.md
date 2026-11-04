@@ -242,6 +242,23 @@ which is not built.
 
 ---
 
+### Restricted mode (`docs/microkernel/K1.md` §6)
+
+A thread of a shared process runs a Linux program in restricted mode and
+`linuxd` in normal mode, in one kernel thread. Under
+`partition_speculation=exit`, and in every build where the flag is not
+applicable, **one predictor barrier is issued on every exit from restricted
+mode and none on entry**, before any instruction of normal mode runs, and at a
+switch that brings a normal-mode thread in where restricted code ran last on
+the processor (`speculation::restricted_left`, `L.x86_64.271`, `L.x86_64.276`),
+since `entered_space` sees two roots of one process as one key. Why the entry
+adds nothing to FDP_IFC between Linux processes: `linuxd` already holds the
+whole partition's data, and any other program's training is flushed at its own
+exit and again at the switch between programs. **The residual, an assumption of
+use:** no barrier closes Spectre v1 gadgets in `linuxd`, which is outside the
+TSF; clamps there are defence in depth, not claimed. The exit barrier's skip on
+a processor that reports SRSO_NO and the rest (`MICROKERNEL.md` §7) is not built.
+
 ## 4. AArch64
 
 Decided by **each core for itself**, as it starts, from its own `MIDR_EL1`

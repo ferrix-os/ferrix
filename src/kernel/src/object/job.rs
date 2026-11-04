@@ -82,6 +82,9 @@ pub const KILLED_STATUS: i32 = 137;
 /// Why a job refused something.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JobError {
+    /// A move between jobs of different criticality levels: a change of level by
+    /// another name (`docs/microkernel/K17.md`).
+    OtherLevel,
     /// The job has been killed, and takes no new processes or children.
     Killed,
     /// A child of that name already exists.
@@ -213,6 +216,12 @@ pub struct Job {
     /// (`docs/microkernel/K14.md` §3). Set once, never cleared; inherited by
     /// every job made inside it.
     measured: AtomicBool,
+    /// Its criticality level, fixed as it is made and at most its parent's
+    /// (`docs/microkernel/K17.md`).
+    level: u8,
+    /// Whether it or a job above it asked for a level: what K14's rules read,
+    /// since a job that never asked is at the top by inheritance alone.
+    declared: bool,
     /// Its supervisor slot (`docs/microkernel/K4.md` §2.2): the exception
     /// channel attached to it, if any, which hears the faults of every
     /// process in it and in the jobs inside it.
@@ -451,6 +460,8 @@ impl Job {
             domain: 0,
             sealed: false,
             measured: AtomicBool::new(false),
+            level: ferrix_native_abi::types::JOB_LEVEL_TOP,
+            declared: false,
             supervisor: Supervisor::new(),
         })
     }
@@ -471,6 +482,8 @@ impl Job {
         child.domain = domain;
         child.sealed = sealed || self.sealed;
         child.measured = AtomicBool::new(self.measured());
+        child.level = self.level;
+        child.declared = self.declared;
         fallible::try_arc(child)
     }
 
@@ -553,9 +566,49 @@ impl Job {
         self.domain
     }
 
+    /// Its criticality level.
+    pub fn level(&self) -> u8 {
+        self.level
+    }
+
+    /// [`Job::new_child_as`] at `level`, which the caller has held to at most this
+    /// job's: declared, it and everything inside it, for good.
+    ///
+    /// # Errors
+    ///
+    /// As [`Job::new_child`].
+    pub fn new_child_at(
+        self: &Arc<Job>,
+        domain: bool,
+        sealed: bool,
+        level: u8,
+    ) -> Result<Arc<Job>, JobError> {
+        let domain = if domain {
+            NEXT_DOMAIN.fetch_add(1, Ordering::Relaxed)
+        } else {
+            0
+        };
+        self.new_child_leveled(domain, sealed, Some(level))
+    }
+
     /// [`Job::new_child`] as speculation domain `domain`, zero for none.
     fn new_child_in(self: &Arc<Job>, domain: u64, sealed: bool) -> Result<Arc<Job>, JobError> {
-        let child = self.bare_child(None, Budget::Parents, domain, sealed)?;
+        self.new_child_leveled(domain, sealed, None)
+    }
+
+    /// [`Job::new_child_in`], at `level` if one is asked for.
+    fn new_child_leveled(
+        self: &Arc<Job>,
+        domain: u64,
+        sealed: bool,
+        level: Option<u8>,
+    ) -> Result<Arc<Job>, JobError> {
+        let mut child = self.bare_child(None, Budget::Parents, domain, sealed)?;
+        // Before anything else can hold it, so never changed once seen.
+        if let (Some(level), Some(made)) = (level, Arc::get_mut(&mut child)) {
+            made.level = level;
+            made.declared = true;
+        }
         let mut members = self.state.lock();
         if members.killed {
             return Err(JobError::Killed);
@@ -1369,4 +1422,12 @@ impl Drop for Job {
             };
         }
     }
+}
+
+// CHECKS-ONLY: object/level_check.rs
+/// Whether `job` or a job above it asked for its level. K14's rules are to read
+/// it too (`docs/microkernel/K17.md` §6).
+#[doc(hidden)]
+pub fn level_declared(job: &Job) -> bool {
+    job.declared
 }

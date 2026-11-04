@@ -72,6 +72,9 @@ impl Rights {
     /// what `devmgr_start`, `job_for_cgroup` and the root job's handles carry,
     /// never hold it. Bits 8 to 10 are other rows' (K12, K3, K2).
     pub const SUPERVISE: Rights = Rights(1 << 11);
+    /// A thread may be kicked out of restricted mode
+    /// (`docs/microkernel/K1.md` §2.4).
+    pub const SIGNAL: Rights = Rights(1 << 12);
 
     /// A device's function may be attached to the IOMMU domain the kernel
     /// makes for it (`device_bind_domain`, `docs/microkernel/K8.md`). The
@@ -82,7 +85,11 @@ impl Rights {
 
     /// Every defined right.
     pub const ALL: Rights = Rights(
-        0xFF | Rights::PAGER.0 | Rights::EXECUTE.0 | Rights::SUPERVISE.0 | Rights::BIND_DOMAIN.0,
+        0xFF | Rights::PAGER.0
+            | Rights::EXECUTE.0
+            | Rights::SUPERVISE.0
+            | Rights::SIGNAL.0
+            | Rights::BIND_DOMAIN.0,
     );
 
     /// What a new channel endpoint carries.
@@ -157,6 +164,16 @@ impl Rights {
     /// What a pager's keeper carries (K13): it takes the pager up, and moves. No
     /// `DUPLICATE`: there is one keeper, and its close is what it is.
     pub const KEEPER: Rights = Rights(Rights::TRANSFER.0 | Rights::MANAGE.0);
+    /// What a handle to a thread carries (`docs/microkernel/K11.md` §2.2).
+    pub const THREAD: Rights = Rights(
+        Rights::SIGNAL.0
+            | Rights::WAIT.0
+            | Rights::READ.0
+            | Rights::DUPLICATE.0
+            | Rights::TRANSFER.0,
+    );
+    /// What a handle to a region carries (`docs/microkernel/K11.md` §2.2).
+    pub const REGION: Rights = Rights(Rights::MANAGE.0 | Rights::DUPLICATE.0 | Rights::TRANSFER.0);
     /// What a handle to a process carries.
     ///
     /// [`Rights::WAIT`] to hear that it has ended, directly or through a port,

@@ -2443,6 +2443,14 @@ pub(crate) fn of_host(host: &dyn Host) -> Option<&Process> {
     any.downcast_ref()
 }
 
+impl Process {
+    /// What it can see. This personality's processes hold no region, so they
+    /// have one space (`docs/microkernel/K11.md` §4).
+    pub fn space(&self) -> &Arc<AddressSpace> {
+        self.core.own_space()
+    }
+}
+
 /// The process the running task belongs to.
 ///
 /// `None` for a kernel thread.

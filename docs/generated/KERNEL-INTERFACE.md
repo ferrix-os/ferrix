@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2814 declarations in the core's files, 193 in the item's; 207 checks-only.
+2901 declarations in the core's files, 194 in the item's; 216 checks-only.
 
 ## ferrix-kernel-core
 
@@ -62,6 +62,7 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `CAN_MOVE_INTERRUPTS` | const | load |  |
+| `HAS_RESTRICTED` | const | item, load, bin |  |
 | `StatLayout` | enum | load |  |
 | `check_boot_options` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `check_distributor` | fn | bin |  |
@@ -356,6 +357,15 @@ checks above is `pub` for raised checks (F3).
 | `restore_signal_frame` | re-export | load |  |
 | `restore_signal_frame` | re-export | load |  |
 | `restore_signal_frame` | re-export | load |  |
+| `restricted_context_bytes` | re-export | item |  |
+| `restricted_context_bytes` | re-export | item |  |
+| `restricted_context_bytes` | re-export | item |  |
+| `restricted_set_vector_bytes` | re-export | item |  |
+| `restricted_set_vector_bytes` | re-export | item |  |
+| `restricted_set_vector_bytes` | re-export | item |  |
+| `restricted_vector_bytes` | re-export | item |  |
+| `restricted_vector_bytes` | re-export | item |  |
+| `restricted_vector_bytes` | re-export | item |  |
 | `resume_user` | re-export | load |  |
 | `resume_user` | re-export | load |  |
 | `resume_user` | re-export | load |  |
@@ -566,6 +576,14 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `USER_STACK_PROGRAM` | const | load (checks) | checks-only |
+
+### `arch::aarch64::restricted`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `context_bytes` | fn | item |  |
+| `set_vector_bytes` | fn | item |  |
+| `vector_bytes` | fn | item |  |
 
 ### `arch::aarch64::signal`
 
@@ -834,6 +852,14 @@ checks above is `pub` for raised checks (F3).
 | `UserRegs::for_child` | method | load |  |
 | `UserRegs::set_stack` | method | load |  |
 | `UserRegs::stack_pointer` | method | load |  |
+
+### `arch::no_restricted`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `restricted_context_bytes` | fn | item |  |
+| `restricted_set_vector_bytes` | fn | item |  |
+| `restricted_vector_bytes` | fn | item |  |
 
 ### `arch::percpu`
 
@@ -1124,6 +1150,14 @@ checks above is `pub` for raised checks (F3).
 |---|---|---|---|
 | `USER_STACK_PROGRAM` | const | load (checks) | checks-only |
 
+### `arch::x86_64::restricted`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `context_bytes` | fn | item |  |
+| `set_vector_bytes` | fn | item |  |
+| `vector_bytes` | fn | item |  |
+
 ### `arch::x86_64::signal`
 
 | Item | Kind | Named by | Note |
@@ -1238,6 +1272,7 @@ checks above is `pub` for raised checks (F3).
 | `start` | fn | bin |  |
 | `check` | mod | bin |  |
 | `BOOTED` | re-export | bin |  |
+| `BUFFER_DECLARED` | re-export | item |  |
 | `CGROUP_KILLED` | re-export | load |  |
 | `CGROUP_LIMIT` | re-export | load |  |
 | `CONTROL` | re-export | item |  |
@@ -1252,6 +1287,7 @@ checks above is `pub` for raised checks (F3).
 | `EXCEPTION_KILLED` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Event` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `JOB_KILLED` | re-export | item |  |
+| `LEVEL` | re-export | item, load |  |
 | `LIMIT_SET` | re-export | item |  |
 | `NO_UID` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Outcome` | re-export | item, bin |  |
@@ -1415,7 +1451,7 @@ checks above is `pub` for raised checks (F3).
 | `Report::processors` | field | item, load, bin |  |
 | `Report::raced` | field | load, bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Report::read_racing` | field | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
-| `Report::whole` | field | load, bin |  |
+| `Report::whole` | field | item, load, bin |  |
 | `Report::whole_processors` | field | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `console::output`
@@ -2011,6 +2047,7 @@ checks above is `pub` for raised checks (F3).
 | `hole_in_ram` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `memory_check` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `past_ram` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `sweep_restricted` | fn | load (checks) | checks-only |
 | `sweep_user_root` | fn | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `sweep_w_xor_x` | fn | bin |  |
 | `WriteExecute` | struct | item, load |  |
@@ -2045,7 +2082,7 @@ checks above is `pub` for raised checks (F3).
 | `Batch::retired` | field | item, load |  |
 | `Batch::stopped` | field | item, load |  |
 | `Batch::suspects` | field | item, load |  |
-| `Batch::sweeps` | field | item |  |
+| `Batch::sweeps` | field | item, load, bin |  |
 | `Batch::tested` | field | item, load |  |
 | `Standing::reason` | method | item, load, bin |  |
 | `Standing::runs` | method | item, load, bin |  |
@@ -2074,17 +2111,20 @@ checks above is `pub` for raised checks (F3).
 | `abandoned` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `as_if_draining_elsewhere` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `dispose` | fn | item, load |  |
+| `bare` | mod | item, load |  |
 | `channel` | mod | item, load |  |
 | `exception` | mod | item, load |  |
 | `interrupt` | mod | item, load, bin |  |
 | `io_mapping` | mod | item, load |  |
 | `job` | mod | item, load |  |
+| `level` | mod | item |  |
 | `oom` | mod | item, load |  |
 | `pager` | mod | item, load |  |
 | `pin` | mod | item, load |  |
 | `port` | mod | item, load |  |
 | `process` | mod | item, load |  |
 | `quota` | mod | item, load |  |
+| `region` | mod | item |  |
 | `rehome_check` | mod | item (checks) | pub for raised checks |
 | `space` | mod | item, load |  |
 | `ticket` | mod | item, load |  |
@@ -2094,6 +2134,29 @@ checks above is `pub` for raised checks (F3).
 | `Transfer` | type | item, load |  |
 | `Object::signals` | method | item, load, bin |  |
 | `Object::waiters` | method | item, load |  |
+
+### `object::bare`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `current_thread` | fn | item |  |
+| `leave_current` | fn | item |  |
+| `thread_object_at` | fn | load (checks) | checks-only |
+| `Bare` | struct | item |  |
+| `BareThread` | struct | - |  |
+| `ThreadRef` | struct | - |  |
+| `Bare::end` | method | item, load, bin |  |
+| `Bare::new` | method | item, load, bin |  |
+| `Bare::spawn` | method | item, load |  |
+| `Bare::spawn_with` | method | item |  |
+| `Bare::start` | method | item, load, bin |  |
+| `BareThread::object` | method | item, load, bin |  |
+| `BareThread::process_of` | method | item, load |  |
+| `ThreadRef::has_ended` | method | item |  |
+| `ThreadRef::in_region` | method | item |  |
+| `ThreadRef::level` | method | item, load |  |
+| `ThreadRef::task` | method | item, load |  |
+| `ThreadRef::waiters` | method | item, load |  |
 
 ### `object::channel`
 
@@ -2156,11 +2219,12 @@ checks above is `pub` for raised checks (F3).
 | `supervised` | fn | load |  |
 | `Exception` | struct | item |  |
 | `Supervisor` | struct | item |  |
+| `Exception::level` | method | item, load |  |
 | `Exception::registers` | method | item, load |  |
 | `Exception::resolve` | method | item, load |  |
 | `Exception::set_registers` | method | item |  |
 | `Supervisor::attach` | method | item, load, bin |  |
-| `Supervisor::close` | method | load |  |
+| `Supervisor::close` | method | item, load |  |
 | `Supervisor::is_live` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Supervisor::is_refused` | method | item, load |  |
 | `Supervisor::let_go_if_dead` | method | item |  |
@@ -2203,6 +2267,7 @@ checks above is `pub` for raised checks (F3).
 | `KILLED_STATUS` | const | item, load |  |
 | `Budget` | enum | item, load |  |
 | `JobError` | enum | item, load |  |
+| `level_declared` | fn | load (checks) | checks-only |
 | `root` | fn | item, load |  |
 | `Job` | struct | item, load |  |
 | `NodeAttributes` | struct | load |  |
@@ -2232,10 +2297,11 @@ checks above is `pub` for raised checks (F3).
 | `Job::is_root` | method | load |  |
 | `Job::kill` | method | item, load |  |
 | `Job::kill_members` | method | load |  |
+| `Job::level` | method | item, load |  |
 | `Job::limits` | method | load |  |
 | `Job::live` | method | item, load |  |
 | `Job::make_measured` | method | item |  |
-| `Job::mark` | method | load |  |
+| `Job::mark` | method | item, load |  |
 | `Job::may_start_in` | method | item, load |  |
 | `Job::measure_refuses` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Job::measured` | method | item, load, bin |  |
@@ -2243,6 +2309,7 @@ checks above is `pub` for raised checks (F3).
 | `Job::name` | method | item, load, bin |  |
 | `Job::new_child` | method | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Job::new_child_as` | method | item |  |
+| `Job::new_child_at` | method | item |  |
 | `Job::new_child_domain` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Job::new_named_child` | method | load |  |
 | `Job::new_named_child_as` | method | item |  |
@@ -2275,6 +2342,16 @@ checks above is `pub` for raised checks (F3).
 | `NodeAttributes::gid` | field | load |  |
 | `NodeAttributes::permissions` | field | item, load |  |
 | `NodeAttributes::uid` | field | load |  |
+
+### `object::level`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `level_of` | fn | item |  |
+| `may_hold` | fn | item |  |
+| `Refused` | struct | item, load |  |
+| `Refused::holder` | field | item, load |  |
+| `Refused::object` | field | item, load, bin |  |
 
 ### `object::oom`
 
@@ -2310,9 +2387,11 @@ checks above is `pub` for raised checks (F3).
 | `PagerCore` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `PagerLink` | struct | item |  |
 | `Keeper::is_parked` | method | load |  |
+| `Keeper::level` | method | item, load |  |
 | `Keeper::take_up` | method | item, load |  |
 | `Pager::core` | method | item, load, bin |  |
 | `Pager::keep` | method | item, load |  |
+| `Pager::level` | method | item, load |  |
 | `Pager::new` | method | item, load, bin |  |
 | `PagerCore::adoptable_ticket` | method | item |  |
 | `PagerCore::link` | method | item, load, bin |  |
@@ -2423,15 +2502,17 @@ checks above is `pub` for raised checks (F3).
 | `Control::is_unstarted` | method | item |  |
 | `Control::process` | method | item, load |  |
 | `Control::started` | method | item, load, bin |  |
-| `Exit::close` | method | load |  |
+| `Exit::close` | method | item, load |  |
 | `Exit::for_check` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Exit::id` | method | item, load, bin |  |
 | `Exit::is_closed` | method | item |  |
 | `Exit::is_terminated` | method | item, load |  |
+| `Exit::level` | method | item, load |  |
 | `Exit::observe` | method | item, load |  |
 | `Exit::signal` | method | item, load |  |
 | `Exit::status` | method | item, load, bin |  |
-| `Process::charge_thread` | method | load |  |
+| `Process::caller_space` | method | item |  |
+| `Process::charge_thread` | method | item, load |  |
 | `Process::close_bootstrap` | method | load |  |
 | `Process::end_record` | method | load |  |
 | `Process::exit` | method | item, load |  |
@@ -2452,20 +2533,22 @@ checks above is `pub` for raised checks (F3).
 | `Process::move_to` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Process::new` | method | item, load, bin |  |
 | `Process::over_quota` | method | load |  |
+| `Process::own_space` | method | item, load |  |
 | `Process::pid` | method | item, load |  |
 | `Process::post_to_tasks` | method | load |  |
 | `Process::quota_slot` | method | item, load |  |
+| `Process::region` | method | item, load, bin |  |
 | `Process::seal_bootstrap` | method | load |  |
-| `Process::space` | method | item, load |  |
 | `Process::speculation_domain` | method | load |  |
 | `Process::started` | method | item, load, bin |  |
 | `Process::supervisor` | method | item, load |  |
 | `Process::sync_freeze` | method | load |  |
 | `Process::try_with_handles_masked` | method | item |  |
 | `Process::uncharge_tasks` | method | load |  |
-| `Process::uncharge_thread` | method | load |  |
+| `Process::uncharge_thread` | method | item, load |  |
 | `Process::with_bootstrap` | method | item, load |  |
 | `Process::with_handles` | method | item, load |  |
+| `Process::with_private_handles` | method | item |  |
 | `Process::with_tasks` | method | item, load |  |
 | `ProcessRef::control` | method | item, load |  |
 | `ProcessRef::created` | method | item, load |  |
@@ -2515,6 +2598,20 @@ checks above is `pub` for raised checks (F3).
 | `Usage::refused` | field | item, load, bin |  |
 | `Usage::used` | field | item, load |  |
 
+### `object::region`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `Ended` | struct | load |  |
+| `Region` | struct | item |  |
+| `Region::enter` | method | item |  |
+| `Region::job` | method | item, load |  |
+| `Region::leave` | method | item, load |  |
+| `Region::new` | method | item, load, bin |  |
+| `Region::set_window` | method | item |  |
+| `Region::space` | method | item, load |  |
+| `Region::with_handles` | method | item, load |  |
+
 ### `object::rehome_check`
 
 | Item | Kind | Named by | Note |
@@ -2529,6 +2626,7 @@ checks above is `pub` for raised checks (F3).
 | `SpaceRef::charging_owner` | method | item |  |
 | `SpaceRef::clone_space` | method | item |  |
 | `SpaceRef::create` | method | item, load |  |
+| `SpaceRef::level` | method | item, load |  |
 | `SpaceRef::of` | method | item, load, bin |  |
 | `SpaceRef::space` | method | item, load |  |
 
@@ -2678,11 +2776,13 @@ checks above is `pub` for raised checks (F3).
 | `STAGE9_BUILD` | static | bin (checks) | checks-only |
 | `STAGE9_EXCEPTIONS` | static | bin (checks) | checks-only |
 | `STAGE9_KMEM` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE9_LEVELS` | static | bin (checks) | checks-only |
 | `STAGE9_OBJECTS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE9_PAGER` | static | bin (checks) | checks-only |
 | `STAGE9_QUOTAS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE9_REBIND` | static | bin (checks) | checks-only |
 | `STAGE9_REFUSALS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE9_REGIONS` | static | bin (checks) | checks-only |
 | `STAGE9_SEALING` | static | bin (checks) | checks-only |
 | `STAGE9_SPACES` | static | bin (checks) | checks-only |
 | `STAGE9_TICKETS` | static | bin (checks) | checks-only |
@@ -2753,7 +2853,9 @@ checks above is `pub` for raised checks (F3).
 | `refusal_while_pinned` | fn | load (checks) | checks-only |
 | `regroup_current` | fn | item |  |
 | `rehomed` | fn | load |  |
+| `running_bare` | fn | item |  |
 | `running_group` | fn | item, load |  |
+| `running_restricted` | fn | item |  |
 | `set_current_group` | fn | item, load |  |
 | `set_in_call_masked` | fn | item |  |
 | `set_request` | fn | load |  |
@@ -3016,18 +3118,21 @@ checks above is `pub` for raised checks (F3).
 |---|---|---|---|
 | `END` | const | load |  |
 | `HOOK_LAST_LOOK` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `KICK` | const | item |  |
 | `SIGNAL` | const | load |  |
 | `STOP` | const | load |  |
 | `arm` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `disarm` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `has_end` | fn | load |  |
 | `hook_armed_by` | fn | bin |  |
-| `notify` | fn | load |  |
+| `notify` | fn | item, load |  |
 | `own_end` | fn | item, load |  |
+| `own_end_or_restricted_kick` | fn | item |  |
 | `place_before_entry` | fn | load |  |
 | `post` | fn | load |  |
 | `post_own` | fn | load |  |
 | `posting` | fn | load |  |
+| `restricted_kick_due` | fn | item |  |
 | `set_auditing` | fn | item (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `check` | mod | load (checks) | pub for raised checks |
 | `Posting` | struct | - |  |
@@ -3189,12 +3294,14 @@ checks above is `pub` for raised checks (F3).
 | `ask` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `attention_due` | fn | load |  |
 | `breakpoint_count` | fn | bin |  |
+| `exit_barrier_offered` | fn | load (checks) | checks-only |
 | `fast_write_read` | fn | item, load |  |
 | `filter_quiet` | fn | item |  |
 | `filter_system_call` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `handled_fault_count` | fn | load, bin |  |
 | `must_attend` | fn | item |  |
 | `register` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `restricted_barriers` | fn | load (checks) | checks-only |
 | `set_fast_write_read` | fn | item |  |
 | `set_quiet_syscall_filter` | fn | bin |  |
 | `set_return_path` | fn | load |  |
@@ -3371,7 +3478,9 @@ checks above is `pub` for raised checks (F3).
 | `Access::write` | field | item, load |  |
 | `AddressSpace::advise` | method | load |  |
 | `AddressSpace::allocate_by_handle` | method | item |  |
+| `AddressSpace::bind_region` | method | item |  |
 | `AddressSpace::ceiling` | method | item, load |  |
+| `AddressSpace::check_normal_slots` | method | load (checks) | checks-only |
 | `AddressSpace::domain` | method | item, load |  |
 | `AddressSpace::fault` | method | item, load |  |
 | `AddressSpace::fill_file_page_alone` | method | load |  |
@@ -3380,6 +3489,7 @@ checks above is `pub` for raised checks (F3).
 | `AddressSpace::images_into` | method | item, load |  |
 | `AddressSpace::install` | method | load, bin |  |
 | `AddressSpace::is_measured` | method | item, load |  |
+| `AddressSpace::is_region` | method | item |  |
 | `AddressSpace::layout` | method | item, load |  |
 | `AddressSpace::map_anonymous` | method | item, load |  |
 | `AddressSpace::map_anywhere` | method | load |  |
@@ -3405,6 +3515,8 @@ checks above is `pub` for raised checks (F3).
 | `AddressSpace::resident_pages` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `AddressSpace::resident_split` | method | load |  |
 | `AddressSpace::root_table` | method | item, load |  |
+| `AddressSpace::route` | method | load |  |
+| `AddressSpace::routed` | method | item |  |
 | `AddressSpace::set_ceiling` | method | load |  |
 | `AddressSpace::shared_code_at` | method | load |  |
 | `AddressSpace::shootdowns_begun` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -3424,7 +3536,7 @@ checks above is `pub` for raised checks (F3).
 | `Resident::shmem` | field | load |  |
 | `Resident::total` | method | load, bin |  |
 | `WindowPages::physical` | field | load, bin |  |
-| `WindowPages::whole` | field | load, bin |  |
+| `WindowPages::whole` | field | item, load, bin |  |
 | `WindowPages::whole_len` | field | load |  |
 | `WindowPages::all` | method | item, load, bin |  |
 
@@ -3464,6 +3576,7 @@ checks above is `pub` for raised checks (F3).
 | `Vmo::commit_run` | method | item |  |
 | `Vmo::committed` | method | load, bin |  |
 | `Vmo::cut_mappings` | method | load |  |
+| `Vmo::declare_for` | method | item |  |
 | `Vmo::decommit_clean` | method | item |  |
 | `Vmo::decommit_from` | method | load |  |
 | `Vmo::decommit_range` | method | load |  |
@@ -3474,6 +3587,7 @@ checks above is `pub` for raised checks (F3).
 | `Vmo::freeze_for_check` | method | load (checks) | checks-only |
 | `Vmo::give_back_run` | method | item |  |
 | `Vmo::grow_to` | method | load |  |
+| `Vmo::highest_mapper` | method | item |  |
 | `Vmo::hold` | method | item, load |  |
 | `Vmo::hold_read` | method | item, load |  |
 | `Vmo::holds_any` | method | load |  |
@@ -3488,6 +3602,7 @@ checks above is `pub` for raised checks (F3).
 | `Vmo::make_coherent` | method | item, load |  |
 | `Vmo::make_combining` | method | item, load |  |
 | `Vmo::mapper_count` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Vmo::may_map_at` | method | item |  |
 | `Vmo::new_anonymous` | method | item, load |  |
 | `Vmo::new_filled` | method | load |  |
 | `Vmo::new_paged` | method | item |  |
@@ -3500,7 +3615,9 @@ checks above is `pub` for raised checks (F3).
 | `Vmo::read_present` | method | item, load |  |
 | `Vmo::replace` | method | item, load |  |
 | `Vmo::seal` | method | item, load |  |
+| `Vmo::set_creator_level` | method | item |  |
 | `Vmo::set_file_len` | method | load |  |
+| `Vmo::set_pager_level` | method | item |  |
 | `Vmo::sourced` | method | load |  |
 | `Vmo::supply_from` | method | item |  |
 | `Vmo::take_kernel_view` | method | item, load |  |
@@ -3627,6 +3744,7 @@ checks above is `pub` for raised checks (F3).
 | `location_of` | fn | load |  |
 | `make_drivers_job` | fn | bin |  |
 | `published` | fn | load |  |
+| `read_file` | fn | load (checks) | checks-only |
 | `read_option` | fn | bin |  |
 | `register_reader` | fn | load |  |
 | `request` | fn | load |  |

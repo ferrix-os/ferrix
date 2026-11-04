@@ -1602,6 +1602,76 @@ pub(crate) fn share_kernel_slots(root: u64, slots: core::ops::Range<usize>) {
     });
 }
 
+/// Make the table under `root` that `virt` falls in, if there is none: a
+/// region's top tables, which every normal root then shares
+/// (`docs/microkernel/K11.md` §3), charged to the running task's job.
+///
+/// # Errors
+///
+/// [`ferrix_paging::MapError::OutOfMemory`].
+pub(crate) fn ensure_top_in(root: u64, virt: u64) -> Result<(), ferrix_paging::MapError> {
+    let mapper: Mapper<crate::arch::PageEncoding> = Mapper::new(PhysAddr(root));
+    let flags = MapFlags {
+        read: true,
+        write: true,
+        execute: true,
+        user: true,
+        global: false,
+        device: false,
+        uncached: false,
+        write_combining: false,
+    };
+    mapper.ensure_top(
+        &mut ChargedTables {
+            owner: crate::sched::running_group(),
+            program: true,
+        },
+        VirtAddr(virt),
+        flags,
+    )
+}
+
+/// A root table for a shared process's normal root, zeroed, charged as a table to
+/// the job whose slot is `owner` (`docs/microkernel/K11.md` §3).
+pub(crate) fn allocate_root_for(owner: u32) -> Option<Frame> {
+    let mut tables = ChargedTables {
+        owner,
+        program: true,
+    };
+    tables.allocate_table().map(|table| table.0 / PAGE_SIZE)
+}
+
+/// Give back what [`allocate_root_for`] took: its free takes the charge back.
+pub(crate) fn free_root(frame: Frame) {
+    count(Route::UserTables, 1);
+    deallocate_frames(frame, 0);
+}
+
+/// Copy root slot `slot` of the tree at `from` to the tree at `to`: a normal
+/// root taking a restricted slot or a region's (`docs/microkernel/K11.md`
+/// §3). Answers whether the source had anything there.
+pub(crate) fn copy_root_slot(from: u64, to: u64, slot: usize) -> bool {
+    let offset = (slot as u64) * 8;
+    let entry = KernelPhysMem.read(PhysAddr(from + offset));
+    if entry != 0 {
+        KernelPhysMem.write(PhysAddr(to + offset), entry);
+    }
+    entry != 0
+}
+
+/// The table root slot `slot` of the tree at `root` names, as an address: zero
+/// for absent. The address alone, since a walker sets its accessed bit in
+/// whichever root it walked.
+pub(crate) fn root_slot_entry(root: u64, slot: usize) -> u64 {
+    use ferrix_paging::Encoding as _;
+    let entry = KernelPhysMem.read(PhysAddr(root + (slot as u64) * 8));
+    if crate::arch::PageEncoding::is_present(entry) {
+        crate::arch::PageEncoding::address(entry).0
+    } else {
+        0
+    }
+}
+
 /// Take down what [`map_in`] built at `virt` in a live tree, and add to
 /// `flush` both the addresses to shoot down and every table under `root` the
 /// removal leaves empty.
@@ -1622,8 +1692,23 @@ pub(crate) fn unmap_in(
     len: u64,
     flush: &mut crate::smp::TlbPages,
 ) -> Result<(), ferrix_paging::MapError> {
+    unmap_in_keeping(root, virt, len, flush, false)
+}
+
+/// [`unmap_in`], leaving the tables directly under the root when `keep_top`:
+/// a tree a second root copies root entries of (`docs/microkernel/K11.md` §3).
+pub(crate) fn unmap_in_keeping(
+    root: u64,
+    virt: u64,
+    len: u64,
+    flush: &mut crate::smp::TlbPages,
+    keep_top: bool,
+) -> Result<(), ferrix_paging::MapError> {
     let len = len.next_multiple_of(PAGE_SIZE);
-    let mapper: Mapper<crate::arch::PageEncoding> = Mapper::new(PhysAddr(root));
+    let mut mapper: Mapper<crate::arch::PageEncoding> = Mapper::new(PhysAddr(root));
+    if keep_top {
+        mapper.keep_top();
+    }
     let tables = flush.tables();
     let unmapped = mapper.unmap_range(&mut KernelPhysMem, VirtAddr(virt), len, |freed| {
         if let Released::Table { phys } = freed {

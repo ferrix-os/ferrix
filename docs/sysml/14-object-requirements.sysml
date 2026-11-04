@@ -2886,6 +2886,175 @@ package FerrixObjectRequirements {
             attribute :>> unit = ("syscall::native::process_create",
                 "syscall::native::job_create");
         }
+        requirement <'L.object.270'> regionCreateNeedsManage : ItemLowLevel {
+            attribute :>> statement = "REGION_CREATE shall need MANAGE on a job, charge one object, and
+                answer a region handle and its space handle.";
+            attribute :>> criterion = "The check: without MANAGE, refused.";
+            attribute :>> parent = "H.OBJ.26";
+            attribute :>> unit = ("object::region::Region::new",
+                "object::region::Region::enter");
+        }
+        requirement <'L.object.271'> aSharedProcessIsInTheRegionsJob : ItemLowLevel {
+            attribute :>> statement = "PROCESS_CREATE_SHARED shall need MANAGE on the region and on the
+                job, the job the region's or beneath it, and bind a fresh or a
+                given space.";
+            attribute :>> criterion = "Case 89 and the check.";
+            attribute :>> parent = "H.OBJ.25";
+            attribute :>> unit = ("object::bare::Bare::new",
+                "object::bare::Bare::start",
+                "object::bare::run_thread",
+                "object::process::Process::in_region");
+        }
+        requirement <'L.object.272'> threadCreateIsTheCallersOwn : ItemLowLevel {
+            attribute :>> statement = "THREAD_CREATE shall make a thread of the caller's own process
+                alone, charged to its job, and be refused from restricted mode.";
+            attribute :>> criterion = "Cases 84, 124, 127.";
+            attribute :>> parent = "H.OBJ.25";
+            attribute :>> unit = ("object::bare::Bare::spawn",
+                "object::bare::Bare::spawn_with",
+                "object::bare::current_thread");
+        }
+        requirement <'L.object.273'> threadExitEndsAThreadOrAProcess : ItemLowLevel {
+            attribute :>> statement = "THREAD_EXIT shall end the calling thread, or its process with the
+                status, in normal mode, and be refused from restricted mode; a
+                thread's handle shall see TERMINATED.";
+            attribute :>> criterion = "Cases 88, 89.";
+            attribute :>> parent = "H.OBJ.25";
+            attribute :>> unit = ("object::bare::leave_current",
+                "object::bare::Bare::thread_gone");
+        }
+        requirement <'L.object.274'> restrictedModeReachesThePrivateTable : ItemLowLevel {
+            attribute :>> statement = "From restricted mode a handle number shall name the private table.";
+            attribute :>> criterion = "Case 61.";
+            attribute :>> parent = "H.OBJ.23";
+            attribute :>> unit = "object::process::Process::table_of_mode";
+        }
+        requirement <'L.object.275'> normalModeReachesTheSharedTable : ItemLowLevel {
+            attribute :>> statement = "From normal mode of a shared process a handle number shall name
+                the shared table.";
+            attribute :>> criterion = "Case 60 onward.";
+            attribute :>> parent = "H.OBJ.23";
+            attribute :>> unit = "object::process::Process::table_of_mode";
+        }
+        requirement <'L.object.276'> aPlainProcessHasOneTable : ItemLowLevel {
+            attribute :>> statement = "A process of no region shall have one table, whatever the mode
+                byte, which is never up for it.";
+            attribute :>> criterion = "Every other program of the boot.";
+            attribute :>> parent = "H.OBJ.23";
+            attribute :>> unit = "object::process::Process::with_private_handles";
+        }
+        requirement <'L.object.277'> theTablesNumbersAreApart : ItemLowLevel {
+            attribute :>> statement = "Neither table's numbers shall name the other's objects.";
+            attribute :>> criterion = "Cases 61, 62, 64.";
+            attribute :>> parent = "H.OBJ.23";
+            attribute :>> unit = "object::process::Process::table_of_mode";
+        }
+        requirement <'L.object.278'> aMoveNeedsTransfer : ItemLowLevel {
+            attribute :>> statement = "Each move shall need TRANSFER, and HANDLE_KEEP DUPLICATE as well.";
+            attribute :>> criterion = "Case 68.";
+            attribute :>> parent = "H.OBJ.24";
+            attribute :>> unit = ("syscall::native::region::handle_to_shared",
+                "syscall::native::region::handle_to_private");
+        }
+        requirement <'L.object.279'> aMoveCannotWiden : ItemLowLevel {
+            attribute :>> statement = "A move shall give a subset of the rights held, or be refused
+                INVALID_ARGS.";
+            attribute :>> criterion = "Case 63.";
+            attribute :>> parent = "H.OBJ.24";
+            attribute :>> unit = "syscall::native::region::handle_to_shared";
+        }
+        requirement <'L.object.280'> aMoveTakesItFromWhereItWas : ItemLowLevel {
+            attribute :>> statement = "A move shall take the handle from its table, and name only this
+                process's private one.";
+            attribute :>> criterion = "Cases 64, 66, 67.";
+            attribute :>> parent = "H.OBJ.24";
+            attribute :>> unit = "syscall::native::region::handle_to_private";
+        }
+        requirement <'L.object.281'> bootstrapAndGiveTables : ItemLowLevel {
+            attribute :>> statement = "PROCESS_START_SHARED shall move a bootstrap handle to the shared
+                table, or pass its value when it is there already.";
+            attribute :>> criterion = "The check starts the program so.";
+            attribute :>> parent = "H.OBJ.24";
+            attribute :>> unit = "syscall::native::region::process_start_shared";
+        }
+        requirement <'L.object.282'> aRegionsLastProcessEmptiesItsTable : ItemLowLevel {
+            attribute :>> statement = "A region's last process leaving shall empty its shared table,
+                whatever is in it, and refuse any more.";
+            attribute :>> criterion = "The boot goes on past the check with its frames back;
+                object::region.";
+            attribute :>> parent = "H.OBJ.26";
+            attribute :>> unit = ("object::region::Region::leave",
+                "object::bare::Bare::drop");
+        }
+        requirement <'L.object.283'> aHigherObjectsHandleDoesNotLand : ItemLowLevel {
+            attribute :>> statement = "A handle to a process, thread, job, space, region or exception
+                whose job's level is above the holder's shall not land in the
+                holder's table: by a channel read, a move, a bootstrap or a
+                cgroup's job.";
+            attribute :>> criterion = "The `levels` line on every boot: three handles offered from level
+                2 to level 0, each INVALID.";
+            attribute :>> parent = "H.OBJ.34";
+            attribute :>> unit = ("object::level::may_hold",
+                "object::level::level_of",
+                "object::exception::Exception::level",
+                "object::process::Exit::level",
+                "object::bare::ThreadRef::level",
+                "object::space::SpaceRef::level",
+                "syscall::native::transfers_refused");
+        }
+        requirement <'L.object.284'> aChildIsAtMostItsParent : ItemLowLevel {
+            attribute :>> statement = "JOB_CREATE shall refuse a level above the parent's (ACCESS_DENIED)
+                or past the top (INVALID_ARGS), and without the option the child
+                takes the parent's level.";
+            attribute :>> criterion = "The `levels` line on every boot.";
+            attribute :>> parent = "H.OBJ.34";
+            attribute :>> unit = ("object::job::Job::new_child_at",
+                "object::job::Job::level",
+                "syscall::native::job_level_asked");
+        }
+        requirement <'L.object.285'> aDomainIsOneLevel : ItemLowLevel {
+            attribute :>> statement = "A speculation domain shall be one job, and so one level, and no
+                process shall move into it from another.";
+            attribute :>> criterion = "By the move refusal, L.object.288, under every
+                partition_speculation value.";
+            attribute :>> parent = "H.OBJ.34";
+            attribute :>> unit = "object::job::Job::domain";
+        }
+        requirement <'L.object.286'> aRefusalIsAudited : ItemLowLevel {
+            attribute :>> statement = "Every refusal between levels shall be recorded as LEVEL, outside
+                every lock.";
+            attribute :>> criterion = "The `levels` line on every boot: the record moves at each.";
+            attribute :>> parent = "H.OBJ.34";
+            attribute :>> unit = ("syscall::native::record_level",
+                "syscall::native::may_map_at");
+        }
+        requirement <'L.object.287'> aLevelIsFixed : ItemLowLevel {
+            attribute :>> statement = "No call shall change a job's level after it is made; a job that
+                asked, and every job inside it, is declared for good.";
+            attribute :>> criterion = "The `levels` line on every boot: the level and the declared mark
+                read back.";
+            attribute :>> parent = "H.OBJ.34";
+            attribute :>> unit = ("object::job::level_declared",
+                "object::job::Job::new_child_leveled");
+        }
+        requirement <'L.object.288'> aMoveKeepsItsLevel : ItemLowLevel {
+            attribute :>> statement = "A process shall not move between jobs of different levels; one
+                placed as it is made takes the level of its job; and a region shall
+                take no process of another level than its job's.";
+            attribute :>> criterion = "The `levels` line on every boot.";
+            attribute :>> parent = "H.OBJ.34";
+            attribute :>> unit = ("object::process::Process::move_charged",
+                "object::process::Process::take_level_of",
+                "syscall::native::region::process_create_shared");
+        }
+        requirement <'L.object.289'> aRefusedHandleIsDeliveredInvalid : ItemLowLevel {
+            attribute :>> statement = "A channel read of a message holding a handle its reader may not
+                hold shall deliver the bytes with that slot Handle::INVALID, the
+                object disposed outside the lock, at final delivery alone.";
+            attribute :>> criterion = "The `levels` line on every boot.";
+            attribute :>> parent = "H.OBJ.34";
+            attribute :>> unit = "syscall::native::deliver_some";
+        }
         requirement <'L.trap.9'> theChainIsNearestFirst : ItemLowLevel {
             attribute :>> statement = "Save a machine check that cannot be restarted, which no supervisor hears, a user-mode fault its address space does not
                 resolve shall be offered, before the personality's fault_signal, to
@@ -2978,6 +3147,156 @@ package FerrixObjectRequirements {
                 "object::exception::note_resumed",
                 "object::exception::Supervisor::refuse",
                 "object::exception::Supervisor::is_refused");
+        }
+        requirement <'L.trap.14'> aLinuxNumberExitsWithItsWords : ItemLowLevel {
+            attribute :>> statement = "A Linux number from restricted mode shall exit with the number and
+                six arguments in the registers K1 §2.2 names, the reason in the
+                reason register.";
+            attribute :>> criterion = "Case 20, 21.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = ("arch::x86_64::restricted::from_restricted",
+                "arch::x86_64::speculation::exit_barrier",
+                "arch::x86_64::restricted::leave_restricted",
+                "arch::x86_64::restricted::flip",
+                "arch::x86_64::restricted::swap_user_state",
+                "arch::x86_64::syscall::look_on_the_way_out",
+                "arch::x86_64::restricted::own_state");
+        }
+        requirement <'L.trap.15'> aNativeNumberIsAnsweredOrExits : ItemLowLevel {
+            attribute :>> statement = "A native number from restricted mode shall be answered by the row
+                of nr::from_restricted: against the private table in place, by an
+                exit (PORT_FD), or refused BAD_STATE with the thread staying; a
+                value with high bits set is a Linux number.";
+            attribute :>> criterion = "Cases 52 to 55.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = "arch::x86_64::restricted::store_syscall";
+        }
+        requirement <'L.trap.16'> anUnresolvedFaultExits : ItemLowLevel {
+            attribute :>> statement = "An unresolved fault from restricted mode shall exit FAULT with its
+                vector, code, address and kind, ahead of any supervisor, and a
+                resolvable one shall not exit.";
+            attribute :>> criterion = "Cases 30 to 37.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = ("arch::x86_64::restricted::fault_exit",
+                "arch::x86_64::restricted::exit_from_trap",
+                "trap::restricted_fault_kind", "trap::exit_on_fault");
+        }
+        requirement <'L.trap.17'> aKickExitsARunningThread : ItemLowLevel {
+            attribute :>> statement = "A kick shall exit a thread running in restricted mode. Needs
+                SIGNAL.";
+            attribute :>> criterion = "Cases 84, 85.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = ("arch::x86_64::restricted::kick_on_trap_frame",
+                "arch::x86_64::restricted::kick_on_syscall_frame");
+        }
+        requirement <'L.trap.18'> aKickInNormalModeWaits : ItemLowLevel {
+            attribute :>> statement = "A kick to a thread in normal mode shall exit its next entry, which
+                runs no instruction of the program.";
+            attribute :>> criterion = "Case 86.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = ("arch::x86_64::restricted::answer_going_in",
+                "arch::x86_64::restricted::write_exit");
+        }
+        requirement <'L.trap.19'> normalModeIsAsItWas : ItemLowLevel {
+            attribute :>> statement = "Normal mode's stack pointer, callee-saved registers and FS and GS
+                at the return shall be those of the call, but for the reason
+                register.";
+            attribute :>> criterion = "Every case runs Rust across each exit.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = "arch::x86_64::restricted::answer_going_in";
+        }
+        requirement <'L.trap.20'> resumeOnlyAfterASystemCall : ItemLowLevel {
+            attribute :>> statement = "RESTRICTED_RESUME shall be refused BAD_STATE with no context held,
+                or unless the last exit was a system call exit, with the reason
+                register left zero.";
+            attribute :>> criterion = "Cases 26, 27.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = "arch::x86_64::restricted::prepare";
+        }
+        requirement <'L.trap.21'> normalCallsAreRefusedFromRestrictedMode : ItemLowLevel {
+            attribute :>> statement = "A call nr::from_restricted marks normal-only, made from restricted
+                mode, shall be refused BAD_STATE, and the thread shall stay in
+                restricted mode.";
+            attribute :>> criterion = "Case 53.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = "arch::x86_64::restricted::from_restricted";
+        }
+        requirement <'L.trap.22'> aPreemptedProgramComesBack : ItemLowLevel {
+            attribute :>> statement = "The kernel's preemption of a thread in restricted mode shall
+                resume it on the restricted root with its registers.";
+            attribute :>> criterion = "Cases 124 to 126: a spinner preempted many times exits only by its
+                kick.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = ("user::space::AddressSpace::install_as",
+                "smp::PerCpu::set_task_kind");
+        }
+        requirement <'L.trap.23'> vectorsAreTheProgramsOwn : ItemLowLevel {
+            attribute :>> statement = "A program's vector registers shall be the same after an exit and
+                an entry whatever normal mode did to its own.";
+            attribute :>> criterion = "Cases 74 to 76.";
+            attribute :>> parent = "H.TRAP.24";
+            attribute :>> unit = ("arch::x86_64::restricted::vector_bytes",
+                "arch::x86_64::restricted::set_vector_bytes",
+                "arch::x86_64::switch::UserState::vector_image",
+                "arch::x86_64::switch::UserState::set_vector_image");
+        }
+        requirement <'L.trap.24'> aCopyFaultLandsAndNoOtherDoes : ItemLowLevel {
+            attribute :>> statement = "A page fault in normal mode, on the restricted half, unresolved,
+                with the instruction pointer in the region's copy window, shall
+                resume at the window's landing with only the fault's kind written;
+                any other normal-mode fault goes to K4's chain and past it ends
+                the region's job.";
+            attribute :>> criterion = "Cases 70 to 72; the fault of the second process in case 89.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = ("arch::x86_64::restricted::land_copy",
+                "trap::copy_landing",
+                "trap::restricted_fault",
+                "object::region::Region::set_window",
+                "object::region::Region::landing_for",
+                "object::bare::fault_signal");
+        }
+        requirement <'L.trap.25'> aKillEndsAThreadInEitherMode : ItemLowLevel {
+            attribute :>> statement = "A job kill shall end a thread of a process of a region in either
+                mode.";
+            attribute :>> criterion = "Cases 133, 134. That an end posted as a thread goes in is taken before
+                the flip, with interrupts masked, is by review of answer_going_in's
+                must_leave look (ledger 6282 R6, B7), which no case can time.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = ("object::bare::Bare::end",
+                "object::bare::Bare::release",
+                "object::bare::return_to_user",
+                "object::bare::leave_current",
+                "object::bare::ThreadRef::mark_ended");
+        }
+        requirement <'L.trap.26'> aKickEndsARestrictedWait : ItemLowLevel {
+            attribute :>> statement = "A kick shall end a blocking native call from restricted mode with
+                INTERRUPTED in the result register, then an exit.";
+            attribute :>> criterion = "Case 127.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = "sched::work::take_kick";
+        }
+        requirement <'L.trap.27'> manyKicksAreOneExit : ItemLowLevel {
+            attribute :>> statement = "Any number of kicks before an exit shall be one exit, and the exit
+                shall lower the mark.";
+            attribute :>> criterion = "Case 87.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = "sched::work::take_kick";
+        }
+        requirement <'L.trap.28'> continueReentersUnchanged : ItemLowLevel {
+            attribute :>> statement = "RESTRICTED_CONTINUE shall re-enter the held context as it stands,
+                and a RESTRICTED_CONTEXT_READ of a context whose flags a program
+                set shall be accepted by RESTRICTED_ENTER, normalised.";
+            attribute :>> criterion = "Cases 58, 59.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = ("arch::x86_64::restricted::read_context",
+                "arch::x86_64::restricted::context_bytes");
+        }
+        requirement <'L.trap.29'> everyNativeNumberHasARow : ItemLowLevel {
+            attribute :>> statement = "Every native call shall have a row in nr::from_restricted, an
+                exhaustive match.";
+            attribute :>> criterion = "The build: a call with no row does not compile.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = "arch::x86_64::restricted::from_restricted";
         }
         requirement <'L.object.243'> aReportIsTheKernels : ItemLowLevel {
             attribute :>> statement = "A report shall be 64 bytes the kernel writes,

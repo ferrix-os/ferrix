@@ -901,11 +901,21 @@ name = "ferrix-restart"
 version = "0.1.0"
 
 [[package]]
+name = "ferrix-restricted-check"
+version = "0.1.0"
+dependencies = [
+ "ferrix-linux-abi",
+ "ferrix-native-abi",
+ "ferrix-rt",
+]
+
+[[package]]
 name = "ferrix-rt"
 version = "0.1.0"
 dependencies = [
  "ferrix-linux-abi",
  "ferrix-native",
+ "ferrix-native-abi",
 ]
 
 [[package]]

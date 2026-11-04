@@ -206,6 +206,8 @@ fi
 # they are properties both of our targets share, and asserting one is fine
 # anywhere. `target_os` likewise: xtask is a host program.
 #
+# The native ABI's per-architecture types are selected in its own `src/arch/`.
+#
 # A native program under `src/user/system/native/` follows the same rule: its crate's
 # `src/arch/` is the facade, as `src/kernel/src/arch/` is the kernel's.
 # ---------------------------------------------------------------------------

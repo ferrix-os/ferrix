@@ -1907,6 +1907,47 @@ pub static STAGE9_EXCEPTIONS: Explanation = Explanation {
           docs/microkernel/K4.md",
 };
 
+// CHECKS-ONLY: stages_check.rs
+/// For `check_levels` in `stages_check.rs`, when `object::level_check::run` fails.
+#[doc(hidden)]
+pub static STAGE9_LEVELS: Explanation = Explanation {
+    code: "FX-0926",
+    title: "a criticality level did not keep a lower job from a higher one",
+    meaning: "`object::level_check::run` makes jobs at levels 2 and 0 and passes handles and \
+              VMOs between them through the native calls. A lower level was given a handle to \
+              a higher job's objects, a write right to a VMO a higher level maps, or a move \
+              or child above it, or a refusal went unaudited, or jammed a channel.",
+    causes: &[
+        "`object::level::may_hold` or one of the doors in src/kernel/src/syscall/native.rs \
+         was changed.",
+    ],
+    see: "src/kernel/src/object/level.rs; src/kernel/src/object/level_check.rs; \
+          docs/microkernel/K17.md",
+};
+
+// CHECKS-ONLY: stages_check.rs
+/// For `check_regions` in `stages_check.rs`, when `object::region_check::run`
+/// fails.
+#[doc(hidden)]
+pub static STAGE9_REGIONS: Explanation = Explanation {
+    code: "FX-0925",
+    title: "a shared process or restricted mode did not do what K1 and K11 say",
+    meaning: "`object::region_check::run` makes a region and a process of it and runs \
+              `restricted-check` in its normal mode: a program in restricted mode comes back on \
+              a system call, an unresolved fault and a kick with the registers K1 §2.2 says; a \
+              forged context is refused and changes nothing; nothing of the region is reachable \
+              from restricted mode; each mode names its own handle table; and one barrier is \
+              issued per exit. A failure means one of those isolation rules does not hold.",
+    causes: &[
+        "A context check, the table the mode picks, or the root the mode installs was changed; \
+         the line above the panic names the program's failing case.",
+        "`/sbin/restricted-check` is missing from the initramfs, or its layout has moved.",
+    ],
+    see: "src/kernel/src/object/region_check.rs; src/kernel/src/arch/x86_64/restricted.rs; \
+          src/user/system/native/restricted-check; docs/microkernel/K1.md; \
+          docs/microkernel/K11.md",
+};
+
 /// For `check_sysfs` in `stages_check.rs`, when `fs::sysfs::check::run` fails.
 pub static SYSFS: Explanation = Explanation {
     code: "FX-0890",
@@ -4015,6 +4056,8 @@ pub(crate) static ALL: &[&Explanation] = &[
     &STAGE9_PAGER,
     &STAGE9_SPACES,
     &STAGE9_EXCEPTIONS,
+    &STAGE9_REGIONS,
+    &STAGE9_LEVELS,
     &STAGE9_BUILD,
     &STAGE6_REHOMED_MEMORY,
     &STAGE6_REHOMED_OBJECTS,

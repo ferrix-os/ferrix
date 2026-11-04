@@ -136,6 +136,10 @@ pub struct Process {
     /// Its supervisor slot (`docs/microkernel/K4.md` §2.2): the exception
     /// channel attached to it, if any. Emptied as it ends.
     supervisor: Supervisor,
+    /// The region it is a process of, if any (`docs/microkernel/K11.md`):
+    /// then `handles` is its private table, and normal mode's calls reach
+    /// the region's. Set as it is made, and never changed.
+    region: Option<Arc<crate::object::region::Region>>,
 }
 
 /// Take the live tasks of `tasks` from `next` into the empty `batch`, calling
@@ -278,6 +282,7 @@ impl Process {
     /// [`AllocError`], before it is counted anywhere.
     pub fn new(space: Arc<AddressSpace>, pid: u32, job: Arc<Job>) -> Result<Process, AllocError> {
         let exit = fallible::try_arc(Exit::new())?;
+        exit.level.store(job.level(), Ordering::Relaxed);
         let id = exit.id;
         let job_id = job.id();
         let slot = job.quota_index();
@@ -313,7 +318,20 @@ impl Process {
                 version: 0,
             }),
             supervisor: Supervisor::new(),
+            region: None,
         })
+    }
+
+    /// The same process, as one of `region`'s, before it is shared.
+    #[must_use]
+    pub(crate) fn in_region(mut self, region: Arc<crate::object::region::Region>) -> Process {
+        self.region = Some(region);
+        self
+    }
+
+    /// The region it is a process of, if any.
+    pub fn region(&self) -> Option<&Arc<crate::object::region::Region>> {
+        self.region.as_ref()
     }
 
     /// The speculation domain it is in: zero for none, which a process that
@@ -460,9 +478,22 @@ impl Process {
         }
     }
 
-    /// What it can see.
-    pub fn space(&self) -> &Arc<AddressSpace> {
+    /// What it can see: the restricted space, for a process of a region.
+    /// Addresses at or above `SHARED_BASE` from normal mode reach the region
+    /// through [`AddressSpace::route`], and "the caller's own space" of a call
+    /// that maps is [`Process::caller_space`] (`docs/microkernel/K11.md` §4).
+    pub fn own_space(&self) -> &Arc<AddressSpace> {
         &self.space
+    }
+
+    /// The space the running task's call means by "the caller's own": the
+    /// region's in normal mode of a shared process, and otherwise its space
+    /// (`docs/microkernel/K11.md` §2.3).
+    pub fn caller_space(&self) -> &Arc<AddressSpace> {
+        match &self.region {
+            Some(region) if !crate::sched::running_restricted() => region.space(),
+            _ => &self.space,
+        }
     }
 
     /// Its process id; zero if it was made with every pid in use.
@@ -495,8 +526,27 @@ impl Process {
     /// than drop, so that the object dies after the lock is released: an
     /// object's drop can free memory and drain other objects, and
     /// `crate::object::dispose` is where that belongs.
+    ///
+    /// For a process of a region, the table the running task's mode names: the
+    /// region's in normal mode and its own private one in restricted mode,
+    /// from the mode alone and never from an argument
+    /// (`docs/microkernel/K11.md` §2.3).
     pub fn with_handles<R>(&self, change: impl FnOnce(&mut HandleTable) -> R) -> R {
+        change(&mut self.table_of_mode().lock())
+    }
+
+    /// Its own table: the private one, whatever the running task's mode.
+    /// For a move to or from it, for `PROCESS_GIVE`'s target and for its end.
+    pub fn with_private_handles<R>(&self, change: impl FnOnce(&mut HandleTable) -> R) -> R {
         change(&mut self.handles.lock())
+    }
+
+    /// The table a call by the running task names.
+    fn table_of_mode(&self) -> &SpinLock<HandleTable> {
+        match &self.region {
+            Some(region) if !crate::sched::running_restricted() => region.table(),
+            _ => &self.handles,
+        }
     }
 
     /// [`Process::with_handles`] for a look that may not wait: `look` runs
@@ -516,7 +566,7 @@ impl Process {
         // SAFETY: (CONTEXT) the caller's contract is the lock's: masked for
         // the whole hold, which ends before this returns, and `look` blocks
         // on nothing.
-        unsafe { crate::sync::try_lock_masked(&self.handles) }.map(|table| look(&table))
+        unsafe { crate::sync::try_lock_masked(self.table_of_mode()) }.map(|table| look(&table))
     }
 
     /// The job it is in: its cgroup.
@@ -549,6 +599,16 @@ impl Process {
         self.move_charged(to, true)
     }
 
+    /// Take `to`'s level. A move is no way to change level; a process placed as it
+    /// is made (`checked`) takes the level of the job it is made for.
+    fn take_level_of(&self, from: &Job, to: &Job, checked: bool) -> Result<(), JobError> {
+        if !checked && from.level() != to.level() {
+            return Err(JobError::OtherLevel);
+        }
+        self.exit.level.store(to.level(), Ordering::Relaxed);
+        Ok(())
+    }
+
     /// Move it, and the tasks it charged, into `to`; with `checked`, only if
     /// `to`'s task limits allow them.
     fn move_charged(&self, to: &Arc<Job>, checked: bool) -> Result<(), JobError> {
@@ -558,6 +618,7 @@ impl Process {
             if to.refuses() {
                 return Err(JobError::Killed);
             }
+            self.take_level_of(&membership, to, checked)?;
             if Arc::ptr_eq(&membership, to) {
                 return Ok(());
             }
@@ -869,6 +930,9 @@ pub struct Exit {
     /// The process's id ([`next_id`]), which outlives the process here, so a
     /// handle to an ended process still names it.
     id: u64,
+    /// Its job's criticality level, which a move never changes
+    /// (`docs/microkernel/K17.md`).
+    level: core::sync::atomic::AtomicU8,
     /// Its exit status, valid once `terminated` is.
     status: AtomicI32,
     /// The signal that ended it, or zero.
@@ -901,10 +965,16 @@ fn next_id() -> u64 {
 }
 
 impl Exit {
+    /// Its job's criticality level.
+    pub fn level(&self) -> u8 {
+        self.level.load(Ordering::Relaxed)
+    }
+
     /// Not ended, and watched by nobody.
     fn new() -> Exit {
         Exit {
             id: next_id(),
+            level: core::sync::atomic::AtomicU8::new(ferrix_native_abi::types::JOB_LEVEL_TOP),
             status: AtomicI32::new(0),
             ended_by: AtomicU32::new(0),
             terminated: AtomicBool::new(false),

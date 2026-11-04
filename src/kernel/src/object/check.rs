@@ -1319,6 +1319,15 @@ impl Side {
         }
     }
 
+    /// A fresh process, as [`Side::new`], placed in `job` as a new one is.
+    pub(crate) fn new_in(job: &Arc<Job>) -> Result<Side, &'static str> {
+        let side = Side::new()?;
+        side.process
+            .move_new_to(job)
+            .map_err(|_| "could not place a process in its job")?;
+        Ok(side)
+    }
+
     /// Make a native call with these registers.
     pub(crate) fn call(&self, number: usize, args: &[u64]) -> Result<usize, Errno> {
         let mut registers = [0_u64; 6];
@@ -1363,8 +1372,9 @@ impl Side {
             })
             .ok_or(what)?;
         let bytes = native::image_bytes(&vmo).map_err(|_| what)?;
-        let at = crate::discovery::first_image_check::load_for_check(host.core().space(), &bytes)
-            .map_err(|_| what)?;
+        let at =
+            crate::discovery::first_image_check::load_for_check(host.core().own_space(), &bytes)
+                .map_err(|_| what)?;
         *self.last_built.lock() = Some(at);
         Ok(child)
     }

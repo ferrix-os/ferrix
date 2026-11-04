@@ -224,6 +224,15 @@ pub const TICKET: Event = Event::new(Class::Refused, 6);
 /// [`Class::Refused`]; K7 holds 6.
 pub const PAGER: Event = Event::new(Class::Refused, 7);
 
+/// A buffer declared between criticality levels (`docs/microkernel/K17.md`): the
+/// subject the caller, the target the job, the detail the job's level.
+pub const BUFFER_DECLARED: Event = Event::new(Class::Granted, 9);
+
+/// A handle, a mapping or a child job refused between criticality levels
+/// (`docs/microkernel/K17.md` rule g): the subject the caller; the target the
+/// object or job; the detail the holder's level, the object's and which rule.
+pub const LEVEL: Event = Event::new(Class::Refused, 9);
+
 /// The resources a [`LIMIT`] or [`LIMIT_SET`] record names, by number.
 pub mod resource {
     /// Memory, in bytes.
@@ -274,7 +283,9 @@ pub mod power {
 }
 
 /// Every event this crate names, with its name.
-pub const NAMED: [(Event, &str); 33] = [
+pub const NAMED: [(Event, &str); 35] = [
+    (LEVEL, "LEVEL"),
+    (BUFFER_DECLARED, "BUFFER_DECLARED"),
     (START, "START"),
     (CONFIG, "CONFIG"),
     (BOOTED, "BOOTED"),

@@ -54,6 +54,8 @@ pub use arch::ELF_MACHINE;
 pub mod linux;
 pub mod log;
 
+#[allow(unused_imports, unreachable_pub, reason = "ARMv7-A has none of these")]
+pub use arch::modes::*;
 pub use ferrix_native as native;
 use ferrix_native::channel::Channel;
 use ferrix_native::{Handle, OwnedHandle, Raw, Syscall};
@@ -84,10 +86,12 @@ impl Syscall for Kernel {
 
 /// End the process with `status`.
 ///
-/// Linux's `exit_group`, because the native ABI has no exit of its own: a
-/// native program is a process like any other, and the kernel's dispatcher
-/// ends one the same way whichever ABI it speaks.
+/// The native ABI's own exit, where the process is one no personality holds
+/// (`docs/microkernel/K11.md` §2.2), and otherwise, refused that, Linux's
+/// `exit_group`: a native program started by the Linux personality is a
+/// process like any other, and is ended the same way whichever ABI it speaks.
 pub fn exit(status: i32) -> ! {
+    let _ = native::region::thread_exit(Kernel, status, true);
     arch::exit(status)
 }
 

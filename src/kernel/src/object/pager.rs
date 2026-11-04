@@ -221,6 +221,9 @@ pub struct Pager {
     _charge: Charge,
     /// Its heap, charged likewise (F-37).
     _heap: ferrix_kmem::Charge,
+    /// The criticality level of the job that made it: who holds this handle fills
+    /// what its VMOs read (`docs/microkernel/K17.md`).
+    level: u8,
 }
 
 impl Drop for Pager {
@@ -274,6 +277,8 @@ struct Registry {
 /// (ledger 5968 (2)(b)).
 #[derive(Debug)]
 pub struct Keeper {
+    /// The pager's criticality level, which the handle it takes up has.
+    level: u8,
     /// The pager's state.
     core: Arc<PagerCore>,
     /// The kernel object it is.
@@ -320,7 +325,7 @@ impl Pager {
     /// # Errors
     ///
     /// [`AllocError`] at the job's limits or with no memory.
-    pub fn new(port: Arc<Port>, wait_ns: u64) -> Result<Pager, AllocError> {
+    pub fn new(port: Arc<Port>, wait_ns: u64, level: u8) -> Result<Pager, AllocError> {
         let charge = Charge::running(Resource::Objects, 1).map_err(|_| AllocError)?;
         let heap = ferrix_kmem::Charge::bytes(
             ferrix_kmem::arc_footprint::<PagerCore>().saturating_add(4 * size_of::<Arc<Request>>()),
@@ -342,12 +347,18 @@ impl Pager {
             core,
             _charge: charge,
             _heap: heap,
+            level,
         })
     }
 
     /// What its VMOs share.
     pub fn core(&self) -> &Arc<PagerCore> {
         &self.core
+    }
+
+    /// The criticality level of the job that made it.
+    pub const fn level(&self) -> u8 {
+        self.level
     }
 
     /// `pager_keep`: its one keeper, charged to the running task's job.
@@ -368,6 +379,7 @@ impl Pager {
         registry.kept = true;
         drop(registry);
         Ok(Some(Keeper {
+            level: self.level,
             core: Arc::clone(&self.core),
             _charge: charge,
             _heap: heap,
@@ -376,6 +388,11 @@ impl Pager {
 }
 
 impl Keeper {
+    /// The pager's criticality level: the door reads it (ledger 6575 D1).
+    pub const fn level(&self) -> u8 {
+        self.level
+    }
+
     /// `pager_take_up`: the pager's handle again, its requests sent to `port`.
     ///
     /// Everything fallible comes first, with the lock let go: the new handle's
@@ -430,6 +447,7 @@ impl Keeper {
             }
         }
         Ok(Pager {
+            level: self.level,
             core: Arc::clone(&self.core),
             _charge: charge,
             _heap: heap,

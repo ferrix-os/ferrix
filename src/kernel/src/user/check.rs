@@ -959,10 +959,12 @@ enum RootWrite {
     /// Anything else: a tag on another root, a tag out of range, a keep
     /// bit with no tag.
     Malformed,
+    /// A user address translated with no user root in force.
+    Stray,
 }
 
 /// The largest tag a user space may carry (`docs/PCID.md` §2).
-const LARGEST_TAG: u64 = 6;
+const LARGEST_TAG: u64 = arch::ROOT_TAG_SLOTS as u64;
 
 /// Install `space` on this processor, read the word at user address `at`
 /// through it, uninstall it, and say what the read saw and how the install
@@ -986,6 +988,10 @@ fn read_installed(space: &AddressSpace, at: u64) -> (u64, RootWrite) {
     // SAFETY: (TRANSLATE) nothing after this wants a user address.
     unsafe { space.uninstall() };
     let root = space.root_table();
+    // A stray read now finds nothing: no regime, and no tag of a space's in force.
+    if arch::user_address_translates(at) {
+        return (seen, RootWrite::Stray);
+    }
     // Uninstalled, the kernel's root is loaded with PCID 0, the kernel's own.
     if arch::root_tag_now() != 0 {
         return (seen, RootWrite::Malformed);
@@ -1035,6 +1041,9 @@ fn expect_write(
     what: &'static str,
 ) -> Result<(), &'static str> {
     let wanted = if tagged { write } else { RootWrite::Untagged };
+    if how == RootWrite::Stray {
+        return Err("a user address translated with no user root");
+    }
     if seen != value || how != wanted {
         return Err(what);
     }
@@ -1114,7 +1123,11 @@ fn switch_back(
         tagged,
         read_installed(space, SWITCH_AT),
         SWITCH_SECOND,
-        RootWrite::Flushed,
+        if arch::SHOOTDOWN_REACHES_EVERY_TAG {
+            RootWrite::Kept
+        } else {
+            RootWrite::Flushed
+        },
         "a space switched back to after a shootdown of it kept its stale translations",
     )?;
     expect_write(
@@ -1163,13 +1176,17 @@ fn switch_back(
 /// the check fails at the switch after the move.
 ///
 /// Verifies: `L.x86_64.216`, `L.x86_64.217`, `L.x86_64.218`, `L.x86_64.219`
-/// Verifies: L.user.169, L.user.170
+/// Verifies: L.user.169, L.user.170, L.aarch64.78
 fn check_a_space_switched_back_to_sees_its_shootdowns() -> Result<(), &'static str> {
     const AT: u64 = SWITCH_AT;
     const FIRST: u64 = SWITCH_FIRST;
     const OTHER: u64 = SWITCH_OTHER;
     /// More spaces than a processor has slots.
-    const CROWD: u64 = 7;
+    const CROWD: u64 = if arch::ROOT_TAG_SLOTS == 0 {
+        7
+    } else {
+        arch::ROOT_TAG_SLOTS as u64 + 1
+    };
 
     let before = quiet_frames()?;
     let space = space_with_marker(AT, FIRST)?;

@@ -1083,6 +1083,16 @@ device that does not exist: the element-level analysis is §5, the element-level
 safety argument is §2 to §4, and what remains is the integrator's half, which
 is exported rather than missing.
 
+### AoU-44 — a partition's programs share its `linuxd`, and what it can be made to leak
+
+A region's `linuxd` (`docs/microkernel/K11.md`) holds every process of the region's memory and
+credentials in one shared region, and is not part of the certified item. The kernel keeps
+each program's memory apart from the others' and from every other region's, and issues a predictor
+barrier at each exit from restricted mode (`docs/microkernel/K1.md` §6), but no barrier closes a
+Spectre v1 gadget in `linuxd`'s own code. An integrator who needs programs kept apart from one
+another against that puts them in separate regions, once M8 allows more than one, or in native
+partitions. Clamps in `linuxd` are defence in depth and are not claimed.
+
 ### AoU-35 — a driver that hands out its `IoMapping` keeps the receiver inside its job
 A driver's `IoMapping` is never revoked by the kernel; the reach it gives
 ends when devmgr's kill of the driver's job has ended every process that

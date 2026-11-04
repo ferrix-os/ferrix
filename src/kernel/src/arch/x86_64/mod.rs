@@ -24,6 +24,7 @@ mod msrlog;
 pub mod paranoid;
 mod pcid;
 mod powerctl;
+pub(crate) mod restricted;
 pub(crate) mod scrub;
 mod signal;
 mod smp;
@@ -1675,6 +1676,12 @@ pub(crate) fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
     if !frame.came_from_user() {
         return Err("a system call through the trap vector from ring 0");
     }
+    // `int $0x80` from restricted mode always exits (`docs/microkernel/K1.md`
+    // §2.2), ahead of the Linux compat decode.
+    if crate::sched::running_restricted() {
+        restricted::compat_exit(frame);
+        return Ok(());
+    }
     let word = |register: u64| register & 0xFFFF_FFFF;
     let args = SyscallArgs {
         abi: Abi::Compat,
@@ -1785,14 +1792,28 @@ pub(crate) fn prepare_user_root(root: u64) {
 /// kernel instruction, and the trap taken if it did not translate would be a
 /// triple fault. The tables it roots must also stay alive until another root
 /// replaces this one on this processor.
-pub(crate) unsafe fn install_user_root(root: u64, space: u64, begun: u64, cpu: usize) {
+pub(crate) unsafe fn install_user_root(root: u64, space: u64, begun: u64, cpu: usize, key: u64) {
     // SAFETY: (TRANSLATE) the caller guarantees the root carries the kernel's half, which
     // is what maps the code and stack this returns onto, and masks interrupts
     // on `cpu`, the processor running this.
     let _ = unsafe { pcid::install(root, space, begun, cpu) };
     // `IBPB` and a return stack refill, if this is another program's space
-    // than the one this processor last ran. See `speculation`.
-    crate::arch::speculation::entered_space(root);
+    // than the one this processor last ran, by `key`, the root that names the
+    // program: two roots of one shared process are one key
+    // (`docs/microkernel/K1.md` §6). See `speculation`.
+    crate::arch::speculation::entered_space(key);
+}
+
+/// [`install_user_root`] without the speculation decision: a shared process's
+/// flip between its two roots, whose barrier is `speculation::restricted_left`'s
+/// (`docs/microkernel/K1.md` §6).
+///
+/// # Safety
+///
+/// (TRANSLATE) As [`install_user_root`].
+pub(crate) unsafe fn flip_user_root(root: u64, space: u64, begun: u64, cpu: usize) {
+    // SAFETY: (TRANSLATE) the caller's guarantee.
+    let _ = unsafe { pcid::install(root, space, begun, cpu) };
 }
 
 /// The value the last [`install_user_root`] on processor `logical` wrote to
@@ -1806,6 +1827,19 @@ pub(crate) fn last_root_write(logical: usize) -> Option<(u64, u64, bool)> {
 /// The tag the running processor's root register holds now: its PCID.
 pub(crate) fn root_tag_now() -> u64 {
     pcid::tag_now()
+}
+
+/// How many tags a processor has.
+pub(crate) const ROOT_TAG_SLOTS: usize = pcid::SLOTS;
+
+/// Whether a shootdown reaches a space's translations under its tag while it is on
+/// no processor: no, it goes to the space's set, so a tag held elsewhere flushes on its way back.
+pub(crate) const SHOOTDOWN_REACHES_EVERY_TAG: bool = false;
+
+/// Whether user address `at` translates here now, on the architecture that can ask
+/// without taking a fault: not asked here.
+pub(crate) const fn user_address_translates(_at: u64) -> bool {
+    false
 }
 
 /// The PCID slot rule, on spaces described rather than installed: see

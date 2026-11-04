@@ -293,6 +293,22 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
         "assembly allow-list",
         &[&["tools/common/check/check-asm-budget.py"]],
     ),
+    // K1's ASIDs: a hit is safe only while every shootdown reaches every tag.
+    (
+        "AArch64 TLB invalidations",
+        &[
+            &["tools/common/check/check-asid-tlbi.py"],
+            &["tools/common/check/check-asid-tlbi.py", "--self-test"],
+        ],
+    ),
+    // K17's door: every landing of a handle in another job's table asks it.
+    (
+        "criticality level doors",
+        &[
+            &["tools/common/check/check-level-doors.py"],
+            &["tools/common/check/check-level-doors.py", "--self-test"],
+        ],
+    ),
     // The seam §7 is built on: the kernel enumerates devices and drives
     // none. A convenient register access in the wrong file is how that
     // claim decays, and it decays silently, so it is asserted here rather

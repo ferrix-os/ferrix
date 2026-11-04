@@ -592,35 +592,76 @@ pub(crate) unsafe fn disable_ttbr0() {
     }
 }
 
-/// Translate the lower half through the tables at `root`, with `ASID` zero.
+/// Translate the lower half through `value`, a root and its ASID in one write
+/// (`asid::tagged_root`), keeping whatever that ASID has cached.
 ///
 /// The inverse of [`disable_ttbr0`], and the two writes are in the order that
 /// order matters in: the root first and `EPD0` second. Between them the
 /// processor is walking the new tables through a regime that is still
 /// disabled, which faults; the other order leaves a window in which the regime
-/// is live and the register still holds whatever was there before — which for
+/// is live and the register still holds whatever was there before -- which for
 /// the first user process is the zero [`disable_ttbr0`] wrote, and for every
-/// switch after it is *another process's tables*.
-///
-/// The `ASID` field of `TTBR0_EL1` is left zero, because stage 6 does not
-/// allocate address space identifiers: every address space is `ASID` zero and
-/// the switch invalidates all of them. See [`flush_user_tlb`].
+/// switch after it is *another process's tables*. Where `EPD0` is already clear,
+/// as on every flip, `TCR_EL1` is not written.
 ///
 /// # Safety
 ///
-/// (TRANSLATE) `root` must be the physical address of a live translation table for the
-/// lower half, and it must stay live until another root replaces it here.
-pub(crate) unsafe fn write_ttbr0(root: u64) {
+/// (TRANSLATE) `value`'s root must be the physical address of a live translation
+/// table for the lower half, and it must stay live until another root replaces it
+/// here; and its ASID must be the one `asid` gave this root, or an invalidated one.
+pub(crate) unsafe fn write_ttbr0(value: u64) {
     // SAFETY: (TRANSLATE) the caller guarantees the tables. The `isb` makes both writes
     // take effect before the next instruction is fetched.
     unsafe {
         asm!(
-            "msr ttbr0_el1, {root}",
+            "msr ttbr0_el1, {value}",
             "mrs {scratch}, tcr_el1",
+            "tst {scratch}, {epd0}",
+            "b.eq 2f",
+            "bic {scratch}, {scratch}, {epd0}",
+            "msr tcr_el1, {scratch}",
+            "2:",
+            "isb",
+            value = in(reg) value,
+            scratch = out(reg) _,
+            epd0 = in(reg) TCR_EPD0,
+            options(nostack),
+        );
+    }
+}
+
+/// [`write_ttbr0`] for an ASID another root held: the regime is switched off, the
+/// ASID's entries invalidated on this processor, and only then the new root written
+/// and the regime switched on, so that no walk under the ASID can use the evicted
+/// owner's entries or tables, including ones freed since, whose frames are reused.
+///
+/// `TLBI ASIDE1` takes non-global entries of that ASID, so the kernel's, global, stay;
+/// `nsh` because the slot is this processor's. Its operand holds the ASID in bits
+/// 63:48, as `TTBR0_EL1` does.
+///
+/// # Safety
+///
+/// (TRANSLATE) As [`write_ttbr0`], and nothing may be using the lower half: this runs
+/// in the kernel, in `TTBR1_EL1`.
+pub(crate) unsafe fn write_ttbr0_invalidating(value: u64, asid: u64) {
+    // SAFETY: (TRANSLATE) the caller guarantees the tables. The first `isb` has the
+    // regime off before the invalidation, the `dsb` has the invalidation done before
+    // the root is written, and the last `isb` makes both writes take effect before
+    // the next instruction is fetched.
+    unsafe {
+        asm!(
+            "mrs {scratch}, tcr_el1",
+            "orr {scratch}, {scratch}, {epd0}",
+            "msr tcr_el1, {scratch}",
+            "isb",
+            "tlbi aside1, {operand}",
+            "dsb nsh",
+            "msr ttbr0_el1, {value}",
             "bic {scratch}, {scratch}, {epd0}",
             "msr tcr_el1, {scratch}",
             "isb",
-            root = in(reg) root,
+            value = in(reg) value,
+            operand = in(reg) asid << 48,
             scratch = out(reg) _,
             epd0 = in(reg) TCR_EPD0,
             options(nostack, preserves_flags),
@@ -628,32 +669,24 @@ pub(crate) unsafe fn write_ttbr0(root: u64) {
     }
 }
 
-/// Drop this processor's cached user translations, and keep the kernel's.
-///
-/// `TLBI ASIDE1` invalidates the entries matching an `ASID` and by definition
-/// not the global ones, so the kernel's — its text, the direct map, the device
-/// windows, all mapped global — survive. That is the whole reason this is not
-/// [`flush_tlb`]: that one is `vmalle1is`, which throws away the global
-/// entries too *and* broadcasts, and an address space switch neither needs nor
-/// can afford either.
-///
-/// `nsh` rather than `ish` on the barrier: the invalidation is this
-/// processor's business. Another processor running another thread of the same
-/// process must keep its translations, and one that is about to run this
-/// address space will invalidate as it installs the root.
-pub(crate) fn flush_user_tlb() {
-    // SAFETY: (TRANSLATE) invalidating translations can only cost a re-walk. The `dsb`
-    // waits for the invalidation and the `isb` keeps the next instruction from
-    // being fetched through an entry it removed.
+/// Whether the processor would translate user address `at` as things stand: `AT S1E1R`,
+/// which faults nothing and reports in `PAR_EL1`.
+pub(crate) fn translates(at: u64) -> bool {
+    let par: u64;
+    // SAFETY: (SYSREG) `AT` reads no memory but the tables and changes only `PAR_EL1`,
+    // which nothing else here reads and which is read back at once with interrupts
+    // masked by the caller.
     unsafe {
         asm!(
-            "tlbi aside1, {asid}",
-            "dsb nsh",
+            "at s1e1r, {at}",
             "isb",
-            asid = in(reg) 0_u64,
+            "mrs {par}, par_el1",
+            at = in(reg) at,
+            par = out(reg) par,
             options(nostack, preserves_flags),
         );
     }
+    par & 1 == 0
 }
 
 /// This processor's multiprocessor affinity register.
@@ -736,6 +769,17 @@ pub(crate) fn enable_user_fpu() {
 ///
 /// A scratch register with no architectural meaning, which is the point: the
 /// hardware never reads it, and EL0 cannot see it.
+pub(crate) fn zero_tpidrro() {
+    // SAFETY: (SYSREG) a register only EL0 reads and nothing in the kernel uses.
+    unsafe {
+        asm!(
+            "msr tpidrro_el0, xzr",
+            options(nomem, nostack, preserves_flags)
+        );
+    };
+}
+
+/// Set this core's `TPIDR_EL1`, the kernel's per-processor pointer.
 pub(crate) fn write_tpidr_el1(value: u64) {
     // SAFETY: (SYSREG) writing a scratch register has no effect beyond the register.
     unsafe {

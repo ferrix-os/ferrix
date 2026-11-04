@@ -201,6 +201,16 @@ pub struct UserState {
     fpu: FpuArea,
 }
 
+/// A vector image the processor would refuse.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct BadImage;
+
+/// Where `MXCSR_MASK` is in the legacy area.
+const MXCSR_MASK_AT: usize = 28;
+/// The mask to assume when a processor reports none: Intel's documented
+/// default, every bit but `DAZ`.
+const DEFAULT_MXCSR_MASK: u32 = 0xFFBF;
+
 // CHECKS-ONLY: arch/x86_64/switch/check.rs
 /// An `XSAVE` area in the standard form, for the components
 /// `cpu::enable_extended_state` enables: the 512-byte legacy area `FXSAVE`
@@ -325,6 +335,105 @@ impl UserState {
             legacy[MXCSR_AT + 3],
         ]);
         alloc::borrow::Cow::Owned(FpuArea::initial(mxcsr, control))
+    }
+
+    /// `DS`, `ES`, `FS` and `GS` as last saved.
+    pub(super) const fn selectors(&self) -> [u16; 4] {
+        self.selectors
+    }
+
+    /// Set what the next load of the selectors loads: a context a check has
+    /// let through (`docs/microkernel/K1.md` §4).
+    pub(super) const fn set_selectors(&mut self, selectors: [u16; 4]) {
+        self.selectors = selectors;
+    }
+
+    /// The thread pointer on record.
+    pub(super) const fn thread_pointer(&self) -> u64 {
+        self.thread_pointer
+    }
+
+    /// The `GS` base on record.
+    pub(super) const fn gs_base(&self) -> u64 {
+        self.gs_base
+    }
+
+    /// Set the `GS` base on record, not the processor's.
+    pub(super) const fn set_gs_base_record(&mut self, base: u64) {
+        self.gs_base = base;
+    }
+
+    /// The three thread-local descriptors as last saved.
+    pub(super) const fn tls(&self) -> [u64; gdt::TLS_SLOTS] {
+        self.tls
+    }
+
+    /// Set the three thread-local descriptors: ones a check has let through.
+    pub(super) const fn set_tls(&mut self, tls: [u64; gdt::TLS_SLOTS]) {
+        self.tls = tls;
+    }
+
+    /// The vector state as its image: the standard form, whatever is in the
+    /// registers (`docs/microkernel/K1.md` §5.2).
+    pub(super) fn vector_image(&self) -> [u8; cpu::XSAVE_AREA_BYTES as usize] {
+        let area = self.vectors();
+        let mut image = [0; cpu::XSAVE_AREA_BYTES as usize];
+        image[..512].copy_from_slice(&area.legacy);
+        image[512..576].copy_from_slice(&area.header);
+        image[576..].copy_from_slice(&area.avx);
+        image
+    }
+
+    /// Replace the vector state with `image`, if the processor would take it:
+    /// `MXCSR` within the bits it has, `XSTATE_BV` within what is enabled, the
+    /// rest of the header zero.
+    ///
+    /// # Errors
+    ///
+    /// [`BadImage`], with nothing changed.
+    pub(super) fn set_vector_image(
+        &mut self,
+        image: &[u8; cpu::XSAVE_AREA_BYTES as usize],
+    ) -> Result<(), BadImage> {
+        let word = |at: usize| {
+            image
+                .get(at..at + 4)
+                .and_then(|bytes| <[u8; 4]>::try_from(bytes).ok())
+                .map_or(0, u32::from_le_bytes)
+        };
+        let mask = match word(MXCSR_MASK_AT) {
+            0 => DEFAULT_MXCSR_MASK,
+            mask => mask,
+        };
+        let live_mask = match u32::from_le_bytes(
+            self.fpu.legacy[MXCSR_MASK_AT..MXCSR_MASK_AT + 4]
+                .try_into()
+                .map_err(|_| BadImage)?,
+        ) {
+            0 => DEFAULT_MXCSR_MASK,
+            live => live,
+        };
+        if word(MXCSR_AT) & !(mask & live_mask) != 0 {
+            return Err(BadImage);
+        }
+        let header = image.get(512..576).ok_or(BadImage)?;
+        let (bv, rest) = header.split_first_chunk::<8>().ok_or(BadImage)?;
+        let bv = u64::from_le_bytes(*bv);
+        let enabled = cpu::extended_state_components();
+        if bv & !enabled.max(cpu::XSTATE_X87_SSE) != 0 {
+            return Err(BadImage);
+        }
+        if rest.iter().any(|&byte| byte != 0) {
+            return Err(BadImage);
+        }
+        let (legacy, tail) = image.split_at_checked(512).ok_or(BadImage)?;
+        self.fpu.legacy.copy_from_slice(legacy);
+        self.fpu.header.copy_from_slice(header);
+        self.fpu
+            .avx
+            .copy_from_slice(tail.get(64..).ok_or(BadImage)?);
+        self.unsaved = false;
+        Ok(())
     }
 
     /// Give the program `pointer` as its thread pointer, as `CLONE_SETTLS`

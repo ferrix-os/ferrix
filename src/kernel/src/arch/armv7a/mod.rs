@@ -1179,13 +1179,13 @@ pub(crate) fn prepare_user_root(root: u64) {
 ///
 /// (TRANSLATE) `root` must root a live set of tables for the lower half, and they must
 /// stay live until another root replaces them on this processor.
-pub(crate) unsafe fn install_user_root(root: u64, _space: u64, _begun: u64, _cpu: usize) {
+pub(crate) unsafe fn install_user_root(root: u64, _space: u64, _begun: u64, _cpu: usize, key: u64) {
     // SAFETY: (TRANSLATE) the caller guarantees the tables are live.
     unsafe { cpu::write_ttbr0(root) };
     cpu::flush_user_tlb();
     // The branch predictor invalidated, if this is another program's space
     // than the one this core last ran and the core is one that needs it.
-    crate::arch::speculation::entered_space(root);
+    crate::arch::speculation::entered_space(key);
 }
 
 /// The last root write and its keep bit: `None`, since every user
@@ -1202,6 +1202,19 @@ pub(crate) const fn root_tag_now() -> u64 {
 /// The x86-64 PCID slot rule's check: nothing to check, no tags here.
 pub(crate) const fn check_root_tags() -> Result<(), &'static str> {
     Ok(())
+}
+
+/// How many tags a processor has: none.
+pub(crate) const ROOT_TAG_SLOTS: usize = 0;
+
+/// Whether a shootdown reaches a space's translations under its tag while it is on
+/// no processor: nothing is kept here to reach.
+pub(crate) const SHOOTDOWN_REACHES_EVERY_TAG: bool = true;
+
+/// Whether user address `at` translates here now, on the architecture that can ask
+/// without taking a fault: not asked here.
+pub(crate) const fn user_address_translates(_at: u64) -> bool {
+    false
 }
 
 /// Stop translating the lower half at all.
@@ -1724,4 +1737,16 @@ pub(crate) fn mpidr() -> u64 {
 /// table where `MPIDR.MT` is set.
 pub(crate) fn check_smt() -> Result<(), &'static str> {
     super::arm_common::smt::check::check_arm_smt()
+}
+
+/// [`install_user_root`] without the speculation decision: a shared process's
+/// flip between its two roots (`docs/microkernel/K1.md` §6).
+///
+/// # Safety
+///
+/// (TRANSLATE) As [`install_user_root`].
+pub(crate) unsafe fn flip_user_root(root: u64, _space: u64, _begun: u64, _cpu: usize) {
+    // SAFETY: (TRANSLATE) the caller's guarantee.
+    unsafe { cpu::write_ttbr0(root) };
+    cpu::flush_user_tlb();
 }

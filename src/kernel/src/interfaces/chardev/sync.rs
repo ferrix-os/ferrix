@@ -520,7 +520,7 @@ pub(crate) fn resolve(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, 
     } else {
         return Err(status::BAD_HANDLE);
     };
-    uaccess::copy_to_user(caller.core().space(), out, &cookie.to_ne_bytes())
+    uaccess::copy_to_user(caller.core().own_space(), out, &cookie.to_ne_bytes())
         .map_err(|_| status::FAULT)?;
     Ok(usize::from(signalled))
 }

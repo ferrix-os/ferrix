@@ -140,6 +140,10 @@ pub struct UserState {
     vectors: [u8; 512],
 }
 
+/// A vector image with reserved bits set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct BadImage;
+
 const _: () = assert!(
     core::mem::offset_of!(UserState, vectors) == 32,
     "the save sequence stores q0 at offset 32"
@@ -163,6 +167,49 @@ impl UserState {
     /// asks.
     pub const fn set_thread_pointer(&mut self, pointer: u64) {
         self.thread_pointer = pointer;
+    }
+
+    /// The thread pointer on record.
+    pub(super) const fn thread_pointer(&self) -> u64 {
+        self.thread_pointer
+    }
+
+    /// The vector state as its image: `V0` to `V31`, then `FPCR` and `FPSR`
+    /// (`docs/microkernel/K1.md` §5.2).
+    pub(super) fn vector_image(&self) -> [u8; 528] {
+        let mut image = [0; 528];
+        image[..512].copy_from_slice(&self.vectors);
+        image[512..520].copy_from_slice(&self.fpcr.to_le_bytes());
+        image[520..].copy_from_slice(&self.fpsr.to_le_bytes());
+        image
+    }
+
+    /// Replace the vector state with `image`, whose `FPCR` and `FPSR` hold only
+    /// defined bits.
+    ///
+    /// # Errors
+    ///
+    /// [`BadImage`], with nothing changed.
+    pub(super) fn set_vector_image(&mut self, image: &[u8; 528]) -> Result<(), BadImage> {
+        /// `FPCR`'s defined bits: `AHP`, `DN`, `FZ`, `RMode`, the trap enables, `FIZ`, `AH`, `NEP`.
+        const FPCR_DEFINED: u64 = 0x07C0_9F07;
+        /// `FPSR`'s defined bits: `NZCV`, `QC` and the cumulative flags.
+        const FPSR_DEFINED: u64 = 0xF800_009F;
+        let word = |at: usize| {
+            image
+                .get(at..at + 8)
+                .and_then(|bytes| <[u8; 8]>::try_from(bytes).ok())
+                .map(u64::from_le_bytes)
+                .ok_or(BadImage)
+        };
+        let (fpcr, fpsr) = (word(512)?, word(520)?);
+        if fpcr & !FPCR_DEFINED != 0 || fpsr & !FPSR_DEFINED != 0 {
+            return Err(BadImage);
+        }
+        self.vectors.copy_from_slice(&image[..512]);
+        self.fpcr = fpcr;
+        self.fpsr = fpsr;
+        Ok(())
     }
 
     /// A 32-bit x86 program's thread-local segment: there are none on this

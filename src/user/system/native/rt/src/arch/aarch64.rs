@@ -199,3 +199,64 @@ pub(crate) fn exit(status: i32) -> ! {
 
 /// The ELF machine of a native program here (`ferrix-process-builder`).
 pub const ELF_MACHINE: u16 = 183;
+/// Make `RESTRICTED_ENTER`, `RESTRICTED_RESUME` or `RESTRICTED_CONTINUE`, with
+/// one argument, and answer what an exit leaves (`docs/microkernel/K1.md`
+/// §2.2): the reason in X9, zeroed first because a refusal leaves it alone,
+/// the number in X8, the words in X0 to X5. Everything the AAPCS lets a
+/// function change goes with them.
+///
+/// # Safety
+///
+/// As [`linux`], for `argument`: an entry's context pointer, which the kernel
+/// only reads.
+pub(crate) unsafe fn restricted(number: usize, argument: u64) -> crate::restricted::Exit {
+    let (mut reason, mut x8): (u64, u64) = (0, number as u64);
+    let mut words = [argument, 0, 0, 0, 0, 0];
+    let [w0, w1, w2, w3, w4, w5] = &mut words;
+    // SAFETY: the caller's promise about the argument; the kernel restores
+    // SP and every register K1 §2.2 does not name.
+    unsafe {
+        asm!(
+            "svc #0",
+            inlateout("x8") x8,
+            inlateout("x9") reason,
+            inlateout("x0") *w0,
+            lateout("x1") *w1,
+            lateout("x2") *w2,
+            lateout("x3") *w3,
+            lateout("x4") *w4,
+            lateout("x5") *w5,
+            clobber_abi("C"),
+        );
+    }
+    // A refused call answers in X0, as any call; `Exit` says so in one place.
+    let number = if reason == 0 { words[0] } else { x8 };
+    crate::restricted::Exit {
+        reason,
+        number,
+        words,
+    }
+}
+
+// `linuxd`'s copies of a program's memory, in the copy window
+// (`docs/microkernel/K1.md` §2.5): zero, or what the kernel landed with.
+core::arch::global_asm!(
+    ".section .text.ferrix_program_copy, \"ax\"",
+    ".globl ferrix_program_copy",
+    "ferrix_program_copy:",
+    "cbz x2, 2f",
+    "1:",
+    "ldrb w3, [x1], #1",
+    "strb w3, [x0], #1",
+    "subs x2, x2, #1",
+    "b.ne 1b",
+    "2:",
+    "mov x0, #0",
+    ".globl ferrix_program_copy_end",
+    "ferrix_program_copy_end:",
+    "nop",
+    ".globl ferrix_program_copy_landing",
+    "ferrix_program_copy_landing:",
+    "ret",
+    ".text",
+);

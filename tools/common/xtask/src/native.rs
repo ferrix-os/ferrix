@@ -44,6 +44,11 @@ pub(crate) struct Program {
 /// Every native program the initramfs carries.
 pub(crate) const PROGRAMS: &[Program] = &[
     Program {
+        package: "ferrix-restricted-check",
+        binary: "restricted-check",
+        directory: DIRECTORY,
+    },
+    Program {
         package: "ferrix-channel-echo",
         binary: "channel-echo",
         directory: DIRECTORY,

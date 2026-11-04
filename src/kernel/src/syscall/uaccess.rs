@@ -141,7 +141,9 @@ fn resolve<R>(
     access: Access,
     touch: impl FnOnce(u64) -> R,
 ) -> Result<R, UserError> {
-    Ok(space.with_page(user_address(at)?, access, touch)?)
+    Ok(space
+        .route(at)
+        .with_page(user_address(at)?, access, touch)?)
 }
 
 /// `at`, if it is a user address, clamped so that a mispredicted check cannot
@@ -296,7 +298,10 @@ fn copy_from_user_through(
         match through {
             Through::Faulting => resolve(space, at, Access::READ, read)??,
             Through::Present => {
-                match space.with_present_page(user_address(at)?, Access::READ, read)? {
+                match space
+                    .route(at)
+                    .with_present_page(user_address(at)?, Access::READ, read)?
+                {
                     None => return Ok(false),
                     Some(read) => read?,
                 }
@@ -412,7 +417,7 @@ pub fn fault_in_for_write(space: &AddressSpace, at: u64, len: usize) -> Result<(
     let end = at.checked_add(len).ok_or(UserError::Overflow)?;
     let mut page = at;
     while page < end {
-        crate::object::oom::fault(space, user_address(page)?, Access::WRITE)?;
+        crate::object::oom::fault(space.route(page), user_address(page)?, Access::WRITE)?;
         page = (page - page % PAGE_SIZE).saturating_add(PAGE_SIZE);
     }
     Ok(())

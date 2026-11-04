@@ -1476,6 +1476,8 @@ The list below is the plan's review history. B5's orphan step is on `develop`
   **OK IF** HR1 to HR7, `hardened` refused (SRSO user to user on Zen 5).
   Revision 15 (this text) takes the rule the consultant accepted: an IBPB
   on every restricted exit, none on entry, about 630 to 640 ns on nazuna.
+* K1 and K11's design review: **OK IF** I1 to I9, N1 to N15, ledger 5806
+  (`docs/microkernel/K1.md`, `docs/microkernel/K11.md`, on `feature/mk-restricted`).
 * Each K-row still needs its own design review before code. This plan
   approves no code. The reviews are internal, not independent verification
   (F-27).

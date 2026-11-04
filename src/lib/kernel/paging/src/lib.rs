@@ -564,6 +564,9 @@ impl fmt::Display for MapError {
 pub struct Mapper<E: Encoding> {
     root: PhysAddr,
     largest_block: Level,
+    /// Whether [`Mapper::prune`] leaves the tables directly under the root in
+    /// place: [`Mapper::keep_top`].
+    keep_top: bool,
     encoding: PhantomData<E>,
 }
 
@@ -579,6 +582,7 @@ impl<E: Encoding> Mapper<E> {
         Mapper {
             root,
             largest_block: Level::MEGABYTE,
+            keep_top: false,
             encoding: PhantomData,
         }
     }
@@ -587,6 +591,35 @@ impl<E: Encoding> Mapper<E> {
     #[must_use]
     pub const fn root(&self) -> PhysAddr {
         self.root
+    }
+
+    /// Never free a table directly under the root, even an empty one: so a
+    /// root entry goes from absent to one table once, and never back, and a
+    /// second root that copied the entry can never name a freed table. A
+    /// restricted space's tree (`docs/microkernel/K11.md` §3).
+    pub const fn keep_top(&mut self) {
+        self.keep_top = true;
+    }
+
+    /// Make the table under the root that `virt` falls in, if there is none,
+    /// with `flags`: what a region's top tables are (K11 §3).
+    ///
+    /// # Errors
+    ///
+    /// [`MapError::OutOfMemory`].
+    pub fn ensure_top(
+        &self,
+        memory: &mut impl PhysMem,
+        virt: VirtAddr,
+        flags: MapFlags,
+    ) -> Result<(), MapError> {
+        let level = E::ROOT_LEVEL;
+        let slot = descriptor_address(self.root, level.index(virt));
+        if !E::is_present(memory.read(slot)) {
+            let fresh = memory.allocate_table().ok_or(MapError::OutOfMemory)?;
+            memory.write(slot, E::table_descriptor_at(fresh, level, flags));
+        }
+        Ok(())
     }
 
     /// Permit 1 GiB block mappings, which makes the direct map of physical
@@ -881,7 +914,7 @@ impl<E: Encoding> Mapper<E> {
     /// `CR3` or `TTBR1`.
     fn prune(&self, memory: &mut impl PhysMem, path: &Path, released: &mut impl FnMut(Released)) {
         for step in path.steps().rev() {
-            if !is_empty::<E>(memory, step.table) {
+            if !is_empty::<E>(memory, step.table) || (self.keep_top && step.parent == self.root) {
                 return;
             }
             memory.write(descriptor_address(step.parent, step.slot), E::ABSENT);

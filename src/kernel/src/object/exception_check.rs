@@ -23,7 +23,7 @@ use ferrix_native_abi::nr;
 use ferrix_native_abi::rights::{Rights, SAME_RIGHTS};
 use ferrix_native_abi::signals::Signals;
 use ferrix_native_abi::status;
-use ferrix_native_abi::types::EXCEPTION_TIMEOUT_MAX_MS;
+use ferrix_native_abi::types::{EXCEPTION_TIMEOUT_MAX_MS, JOB_LEVEL_SET, JOB_LEVEL_SHIFT};
 use ferrix_vma::VmaFlags;
 
 use crate::arch;
@@ -456,8 +456,42 @@ fn faults(side: &Side, root: Handle, report: &mut Report) -> Result<(), &'static
     poison_and_its_supervisors(side, root, fault, report)?;
     no_raise_under_a_supervisor(side, root, fault)?;
     raised_is_never_offered(side)?;
+    stays_in_its_level(side, root, fault)?;
     close(side, fault)?;
     close(side, breakpoint)?;
+    Ok(())
+}
+
+/// K17: an exception's handle writes a thread's registers, so it does not land in
+/// a job of a lower level than the fault's (`L.object.283`).
+fn stays_in_its_level(side: &Side, root: Handle, image: Handle) -> Result<(), &'static str> {
+    let leveled = |level: u64| {
+        side.handle(
+            nr::JOB_CREATE,
+            &[reg(root), JOB_LEVEL_SET | (level << JOB_LEVEL_SHIFT)],
+            "job_create at a level failed",
+        )
+    };
+    let two = leveled(2)?;
+    let zero = Side::new_in(&job_of(side, leveled(0)?)?)?;
+    side.put(NAME_AT, NAME)?;
+    let process = side.handle(
+        nr::PROCESS_CREATE,
+        &[reg(two), reg(image), NAME_AT, NAME.len() as u64],
+        "process_create failed",
+    )?;
+    let channel = attach(side, process, LONG_MS).map_err(|_| "K17: attach failed")?;
+    start(side, process, None)?;
+    let (_, exception) = next_report(side, channel)?;
+    if super::level_check::sent_to_zero(side, &zero, exception)? != Handle::INVALID.0 {
+        return Err("an exception's handle reached a lower level's table");
+    }
+    if ended(side, process)?.0 != KILLED {
+        return Err("K17: a refused exception did not hand its fault on to the end");
+    }
+    for handle in [channel, process, two] {
+        close(side, handle)?;
+    }
     Ok(())
 }
 

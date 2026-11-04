@@ -1197,6 +1197,20 @@ pub(crate) fn switch_barrier(_cpu: usize) -> bool {
     HARDENED
 }
 
+/// [`switch_barrier`] for a restricted exit, answering whether an `IBPB` was
+/// written: a machine with none decides and issues nothing
+/// (`docs/microkernel/K1.md` §6, the consultant's N11).
+pub(crate) fn exit_barrier(cpu: usize) -> bool {
+    let _ = switch_barrier(cpu);
+    HARDENED && SWITCH_IBPB.load(Ordering::Relaxed)
+}
+
+/// Whether `CPUID` said `IA32_PRED_CMD` takes `IBPB`, which is what sets
+/// [`SWITCH_IBPB`], read here again for the check of what [`exit_barrier`] answers.
+pub(crate) fn exit_barrier_offered(_cpu: usize) -> bool {
+    SWITCH_IBPB.load(Ordering::Relaxed)
+}
+
 /// The switch barrier between two programs of one speculation domain: the
 /// return stack refill alone, without `IBPB` (`docs/OPAQUE-KERNEL.md`
 /// §9.3a, A2). The refill stays because it costs a few hundred cycles and

@@ -341,6 +341,9 @@ pub struct Vmo {
     /// it by. Taken after a space's lock and before `pages`, never around
     /// either.
     mappers: SpinLock<Vec<Mapper>>,
+    /// What rule (b) and (d) of `docs/microkernel/K17.md` remember: a leaf lock,
+    /// taken with nothing else needed and nothing taken under it.
+    levels: SpinLock<Levels>,
     /// How many shared mappings may write the file this object holds: made
     /// from a file open for writing, and not after a seal refused writes.
     /// What a write seal is refused for, as Linux's `i_mmap_writable`. Raised
@@ -637,7 +640,85 @@ pub(crate) struct Own<'a> {
     pub(crate) shootdown: Option<(CpuSet, TlbPages)>,
 }
 
+/// Which levels have written and mapped a VMO, kept for its life: fail-closed, so a
+/// handle closed lifts nothing (`docs/microkernel/K17.md`).
+#[derive(Debug)]
+struct Levels {
+    /// The lowest level that has held a write right, its creator's at first; the
+    /// top for an object nothing wrote through a handle.
+    lowest_writer: u8,
+    /// The highest level that has mapped it.
+    highest_mapper: u8,
+    /// The level of the job that serves it as its pager, if any.
+    pager: Option<u8>,
+    /// The one level allowed to map it above a lower writer.
+    declared: Option<u8>,
+}
+
+impl Levels {
+    /// Nothing yet.
+    const fn new() -> Levels {
+        Levels {
+            lowest_writer: ferrix_native_abi::types::JOB_LEVEL_TOP,
+            highest_mapper: 0,
+            pager: None,
+            declared: None,
+        }
+    }
+}
+
 impl Vmo {
+    /// Made by a job at `level`, which holds a write right to it from now on.
+    pub fn set_creator_level(&self, level: u8) {
+        self.levels.lock().lowest_writer = level;
+    }
+
+    /// Served by a pager in a job at `level`.
+    pub fn set_pager_level(&self, level: u8) {
+        self.levels.lock().pager = Some(level);
+    }
+
+    /// May a write right land at `level`? Lowers the mark if so (rule b). O(1).
+    pub(crate) fn may_write_from(&self, level: u8) -> bool {
+        let mut levels = self.levels.lock();
+        let above = levels.highest_mapper > level && levels.declared != Some(levels.highest_mapper);
+        if above {
+            return false;
+        }
+        levels.lowest_writer = levels.lowest_writer.min(level);
+        true
+    }
+
+    /// May it be mapped at `level`? Raises the mark if so (rules b and d): never
+    /// over a lower pager, whatever is declared, and over a lower writer only for
+    /// the level declared.
+    pub fn may_map_at(&self, level: u8) -> bool {
+        let mut levels = self.levels.lock();
+        if levels.pager.is_some_and(|pager| pager < level)
+            || (levels.lowest_writer < level && levels.declared != Some(level))
+        {
+            return false;
+        }
+        levels.highest_mapper = levels.highest_mapper.max(level);
+        true
+    }
+
+    /// The highest level that has mapped it.
+    pub fn highest_mapper(&self) -> u8 {
+        self.levels.lock().highest_mapper
+    }
+
+    /// Declare it for `level`: once, with no pager (`job_declare_buffer`). Whether it
+    /// was: not one declared before, served by a pager, or already mapped above `level`.
+    pub fn declare_for(&self, level: u8) -> bool {
+        let mut levels = self.levels.lock();
+        if levels.declared.is_some() || levels.pager.is_some() || levels.highest_mapper > level {
+            return false;
+        }
+        levels.declared = Some(level);
+        true
+    }
+
     /// An anonymous object of `pages` pages, with nothing committed.
     ///
     /// # Errors
@@ -821,6 +902,7 @@ impl Vmo {
             len: AtomicU64::new(pages),
             bound: AtomicU64::new(u64::MAX),
             mappers: SpinLock::new(Vec::new()),
+            levels: SpinLock::new(Levels::new()),
             shared_may_write: AtomicU64::new(0),
             mapped_written: AtomicBool::new(false),
             source,
@@ -1201,6 +1283,7 @@ impl Vmo {
             digest: SpinLock::new(None),
             len: AtomicU64::new(self.len_pages()),
             bound: AtomicU64::new(self.bound.load(Ordering::SeqCst)),
+            levels: SpinLock::new(Levels::new()),
             mappers: SpinLock::new(Vec::new()),
             shared_may_write: AtomicU64::new(0),
             mapped_written: AtomicBool::new(false),

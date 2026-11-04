@@ -114,6 +114,8 @@ Causes are listed most likely first.
 | [FX-0915](#fx-0915) | a pager-backed VMO's fault, wait or dirty tracking was not as K3 states |
 | [FX-0916](#fx-0916) | an address space reached by handle was not held to the handle's rights |
 | [FX-0917](#fx-0917) | an exception channel was attached where it must be refused, or refused where it must be attached |
+| [FX-0925](#fx-0925) | a shared process or restricted mode did not do what K1 and K11 say |
+| [FX-0926](#fx-0926) | a criticality level did not keep a lower job from a higher one |
 | [FX-0930](#fx-0930) | a process built by its creator was not held to the rules of its making |
 | [FX-0931](#fx-0931) | spaces and objects failed the check made of kernel objects alone |
 | [FX-0932](#fx-0932) | jobs, quotas, switch counts or the filter failed the check of kernel objects alone |
@@ -2846,6 +2848,43 @@ without the right, twice, or past a limit.
 
 See: src/kernel/src/object/exception.rs;
 src/kernel/src/object/exception_check.rs; docs/microkernel/K4.md.
+
+<a id="fx-0925"></a>
+
+## FX-0925 — a shared process or restricted mode did not do what K1 and K11 say
+
+`object::region_check::run` makes a region and a process of it and runs
+`restricted-check` in its normal mode: a program in restricted mode comes back
+on a system call, an unresolved fault and a kick with the registers K1 §2.2
+says; a forged context is refused and changes nothing; nothing of the region is
+reachable from restricted mode; each mode names its own handle table; and one
+barrier is issued per exit. A failure means one of those isolation rules does
+not hold.
+
+1. A context check, the table the mode picks, or the root the mode installs was
+   changed; the line above the panic names the program's failing case.
+2. `/sbin/restricted-check` is missing from the initramfs, or its layout has
+   moved.
+
+See: src/kernel/src/object/region_check.rs;
+src/kernel/src/arch/x86_64/restricted.rs;
+src/user/system/native/restricted-check; docs/microkernel/K1.md;
+docs/microkernel/K11.md.
+
+<a id="fx-0926"></a>
+
+## FX-0926 — a criticality level did not keep a lower job from a higher one
+
+`object::level_check::run` makes jobs at levels 2 and 0 and passes handles and
+VMOs between them through the native calls. A lower level was given a handle to
+a higher job's objects, a write right to a VMO a higher level maps, or a move or
+child above it, or a refusal went unaudited, or jammed a channel.
+
+1. `object::level::may_hold` or one of the doors in
+   src/kernel/src/syscall/native.rs was changed.
+
+See: src/kernel/src/object/level.rs; src/kernel/src/object/level_check.rs;
+docs/microkernel/K17.md.
 
 <a id="fx-0930"></a>
 

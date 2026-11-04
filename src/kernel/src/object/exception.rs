@@ -306,6 +306,9 @@ pub(crate) struct ExceptionCore {
     /// The kernel heap it and its report take, charged to the faulting
     /// process's job.
     _charge: ferrix_kmem::Charge,
+    /// The faulting process's job's criticality level: this handle writes a
+    /// thread's registers (`docs/microkernel/K17.md`).
+    level: u8,
 }
 
 impl ExceptionCore {
@@ -335,6 +338,11 @@ pub enum Refused {
 }
 
 impl Exception {
+    /// The faulting process's job's criticality level.
+    pub fn level(&self) -> u8 {
+        self.core.level
+    }
+
     /// The registers it holds, as a supervisor reads them.
     ///
     /// # Errors
@@ -664,6 +672,11 @@ fn make(report: &Report, context: arch::UserContext) -> Result<Made, AllocError>
         }),
         waiters: WaitQueue::new(),
         _charge: charge,
+        level: sched::with_current(|task| {
+            task.core_process().map(|process| process.exit().level())
+        })
+        .flatten()
+        .unwrap_or(ferrix_native_abi::types::JOB_LEVEL_TOP),
     })?;
     let exception = fallible::try_arc(Exception {
         core: Arc::clone(&core),

@@ -170,7 +170,12 @@ fn making(side: &Side, root: Handle, report: &mut Report) -> Result<Handle, &'st
             _ => None,
         })
         .ok_or("build self-check failed: process_make did not answer PROCESS_CREATED")?;
-    if host.core().space().with_regions(|regions| regions.count()) != 0 {
+    if host
+        .core()
+        .own_space()
+        .with_regions(|regions| regions.count())
+        != 0
+    {
         return Err("build self-check failed: a made process's space is not empty");
     }
     let plain = side.handle(

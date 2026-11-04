@@ -220,6 +220,12 @@ well. A process's own space is reached by handle only by its creator, only
 through a handle taken with `process_space` before the process started, and
 no wider than that handle's rights (`docs/microkernel/K2.md` §2.2).
 
+*Application note (K1, K11; `docs/microkernel/K1.md` §6).* Between Linux processes of one
+region, the flow enforced is between restricted address spaces and through the kernel's
+barrier at each exit from restricted mode and each switch between programs; a
+region's `linuxd` holds every process of that region's data by design and is outside the
+TSF, and a Spectre v1 gadget in it is the assumption of use AoU-44 states, not claimed.
+
 **FDP_IFC.1 / FDP_IFF.1** Subset information flow control. The TSF shall
 enforce the **Address Space Separation SFP**: information flows between two
 processes only through an object both hold a handle to. No implicit flow

@@ -574,6 +574,19 @@ pub unsafe fn resume_user(regs: &UserRegs) -> ! {
 /// it just built on this processor's kernel stack.
 #[unsafe(no_mangle)]
 extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
+    // Restricted mode first, before the fast path and the filter: a restricted
+    // thread's call reaches neither (`docs/microkernel/K1.md` §3). One byte of
+    // the processor's record, and a branch not taken.
+    if crate::sched::running_restricted() {
+        crate::sched::vtime::entered();
+        if let Some(outcome) = super::restricted::from_restricted(frame) {
+            write_outcome(frame, outcome);
+        }
+        super::restricted::kick_on_syscall_frame(frame);
+        look_on_the_way_out(frame);
+        crate::sched::vtime::leaving();
+        return;
+    }
     // Step 4's fast path for `channel_write_read`, on a boot that registered
     // one (`ferrix.fastpath=on`, T1): first, before the filter, which its own
     // T2 stands in for, and with interrupts still masked. Every entry measure
@@ -623,6 +636,13 @@ extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
 /// return here end the stint themselves.
 #[inline(always)]
 fn general_entry(frame: &mut SyscallFrame) {
+    // The three calls that go into restricted mode own the frame, as
+    // `rt_sigreturn` does; a native number's cost alone.
+    if super::restricted::goes_in(frame.rax as usize) {
+        let number = frame.rax as usize;
+        super::restricted::answer_going_in(frame, number);
+        return;
+    }
     let args = crate::trap::SyscallArgs {
         abi: Abi::Native,
         number: frame.rax as usize,
@@ -646,6 +666,7 @@ fn general_entry(frame: &mut SyscallFrame) {
             // number is decoded here, once, for the two calls this entry
             // answers itself.
             if let Early::Linux(Some(call)) = early(args.number)
+                && !crate::sched::running_bare()
                 && answer_here(frame, &args, call)
             {
                 return;
@@ -713,7 +734,11 @@ fn frame_tail(frame: &mut SyscallFrame, outcome: Outcome) {
 /// how every `SYSCALL` leaves the kernel but the frame tail's quiet one.
 fn leave(frame: &mut SyscallFrame, outcome: Outcome) {
     write_outcome(frame, outcome);
+    look_on_the_way_out(frame);
+}
 
+/// The way back to user mode's look, on a `SYSCALL` frame.
+pub(super) fn look_on_the_way_out(frame: &mut SyscallFrame) {
     // On the way back: a process ended from outside ends here, a stopped one
     // waits, and a signal with a handler is delivered by pointing the frame at
     // it. See `crate::syscall::deliver`.

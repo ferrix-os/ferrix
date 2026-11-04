@@ -234,7 +234,7 @@ pub(crate) fn sys_futex_waitv(
     let mut vector =
         fallible::try_with_capacity::<u8>(count * FUTEX_WAITV_SIZE).map_err(|_| Errno::ENOMEM)?;
     vector.resize(count * FUTEX_WAITV_SIZE, 0);
-    uaccess::copy_from_user(process.core().space(), waiters, &mut vector)
+    uaccess::copy_from_user(process.core().own_space(), waiters, &mut vector)
         .map_err(|_| Errno::EFAULT)?;
     let mut words: Vec<Word> = fallible::try_with_capacity(count).map_err(|_| Errno::ENOMEM)?;
     for element in vector.chunks_exact(FUTEX_WAITV_SIZE) {
@@ -278,7 +278,7 @@ fn key(process: &Process, address: u64, shared: bool) -> Result<Key, Errno> {
     if !address.is_multiple_of(4) {
         return Err(Errno::EINVAL);
     }
-    Ok(Key::new(process.space(), address, shared))
+    Ok(Key::new(process.own_space(), address, shared))
 }
 
 /// The core's wait on `words` for a Linux caller: interrupted when it has a
@@ -286,7 +286,7 @@ fn key(process: &Process, address: u64, shared: bool) -> Result<Key, Errno> {
 fn wait_on(process: &dyn Host, words: &[Word], deadline: Option<u64>) -> Result<usize, Errno> {
     let core = process.core();
     address_wait::wait_on(
-        core.space(),
+        core.own_space(),
         words,
         deadline,
         &|| process.wait_interrupted(),
@@ -388,7 +388,7 @@ fn requeue(
         bitset: MATCH_ANY,
     });
     address_wait::requeue(
-        core.space(),
+        core.own_space(),
         &source,
         &target,
         (wake_count, move_count),
@@ -426,13 +426,13 @@ fn either_key(space: &Arc<AddressSpace>, address: u64) -> [Key; 2] {
 /// For the self-check, which has to know its waiter is asleep before it can
 /// tell a wake that works from one that arrived first.
 pub(crate) fn waiters_on(process: &Process, address: u64) -> usize {
-    address_wait::waiters_on(&either_key(process.space(), address))
+    address_wait::waiters_on(&either_key(process.own_space(), address))
 }
 
 /// The bucket a private wait on `address` in `process`'s space is listed in:
 /// for the self-check, which needs two words in different buckets.
 pub(crate) fn bucket_of(process: &Process, address: u64) -> usize {
-    address_wait::bucket_of(&Key::new(process.space(), address, false))
+    address_wait::bucket_of(&Key::new(process.own_space(), address, false))
 }
 
 /// The negative controls' and the stale-entry check's hooks, over the core's
@@ -448,7 +448,7 @@ pub(crate) mod sabotage {
     /// cannot see.
     pub(crate) fn forget_waiters(process: &Process, address: u64, count: i32) -> usize {
         address_wait::sabotage::forget_waiters(
-            &either_key(process.space(), address),
+            &either_key(process.own_space(), address),
             super::wake_limit(count),
         )
     }
@@ -468,8 +468,8 @@ pub(crate) mod sabotage {
     /// entry's key where it lies and leaves it in `from`'s bucket.
     pub(crate) fn requeue_without_moving(process: &Process, from: u64, to: u64) -> usize {
         address_wait::sabotage::requeue_without_moving(
-            &Key::new(process.space(), from, false),
-            &Key::new(process.space(), to, false),
+            &Key::new(process.own_space(), from, false),
+            &Key::new(process.own_space(), to, false),
         )
     }
 }

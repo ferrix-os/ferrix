@@ -313,6 +313,7 @@
         "stages_check.rs",
         "syscall/mod.rs",
         "syscall/native.rs",
+        "syscall/native/region.rs",
         "syscall/native_check.rs",
         "syscall/build_check.rs",
         "syscall/program.rs",
@@ -928,6 +929,16 @@
       },
       {
         "file": "object/edge_check.rs",
+        "file_ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "object/level_check.rs",
+        "file_ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "object/region_check.rs",
         "file_ring": "core",
         "crate": "ferrix-kernel-load"
       },

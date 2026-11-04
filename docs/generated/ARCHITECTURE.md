@@ -123,7 +123,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 | `FerrixSigningRequirements` | `26-signing-requirements.sysml` | docs/SIGNING.md is the design (the certification consultant's OK IF at ledger lines 3667 and 3738; the customer's decisions at 3731). Slice S1 builds the verify-only crate `ferrix-sigverify` (src/lib/crypto/sigverify) and the hash it rests on, `ferrix-sha256` (src/lib/crypto/sha256), both in the item ring (certification-item.json's crates). What the UEFI loader, init's configuration verifier and devmgr do with the verifier's answer is theirs, and gets ids in their own slices (S4, S8, S9). |
 
-27 files, 165 packages, 9386 elements, 220 relations. Model digest `4c4c2160ab6dfab9`.
+27 files, 165 packages, 9782 elements, 220 relations. Model digest `e39ae25c822c53d1`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -293,8 +293,13 @@ Handles, rights and the objects they name: O.CAPABILITY and ASR-3 (FDP_ACC.1, FD
 | `H.OBJ.19` | Every channel message shall carry the identity of the process that wrote it and of the job that process was in at the write, written by the kernel at the write and never taken from the message or the writer's arguments, and readable by its reader with the message; a process's identity shall never be given to another process while the kernel runs. A message the kernel writes shall carry zero and zero, which attest that the kernel wrote it, not that its content is the kernel's own. The identity is the writer's, not its credentials (docs/microkernel/K6.md, MICROKERNEL.md §3 K6). | Stage 9's `sender` line: messages read with channel_read_attested carry their writer's process and job ids, which object_id confirms, whatever the body says, through the slot, either end's transfer, the writer's end and a move between jobs; the kernel's read as zero and zero; every process made has an id above every earlier one; channel_write_read answers none. Stage 8's exec check: a process's id survives its execve. Each with its negative control (K6.md §7). | `G.7, O.CAPABILITY` |
 | `H.OBJ.21` | A timer object shall signal its waiters and the ports registered on it no earlier than its deadline and within its slack plus the lateness MEMORY-AND-TIMING.md §2.2ab states, at most once a set; never for an arm a later set or cancel superseded, nor after its last handle closed; and shall be charged to the job that made it, one object and its heap as kernel memory. | Stage 9's `timers` line on every boot: a timer is heard no earlier than its deadline, a cancelled or superseded arm and a closed timer are never heard, and a timer is charged to its job and refused past its object limit (object::timer_check). | `G.7, O.CAPABILITY, O.QUOTA` |
 | `H.OBJ.20` | A wait on a word of user memory shall sleep only while the word holds the value its caller gave, shall end when a wake of its word takes it, when its deadline passes or when its caller must leave, and shall be charged to its caller's job; a wake shall end at most the number of waits it names. A woken wait may find its word unchanged. | Stage 9's address-wait check: waits by mapping and by handle woken across processes, changed words refused, counts, bitsets, a requeue, a wait on many words, a deadline, an ended process and a job's limit (the `addrwait` line). | `G.7, O.QUOTA` |
+| `H.OBJ.23` | A shared process's calls shall reach its private handle table from restricted mode and its region's shared table from normal mode, by the mode alone and never by an argument. | The `regions` line on every boot of x86-64: restricted-check holds every case; a number in one table means nothing in the other. | `O.CAPABILITY` |
+| `H.OBJ.24` | A handle shall cross between the shared and private tables only through HANDLE_TO_SHARED and HANDLE_TO_PRIVATE, its rights checked. | The `regions` line on every boot of x86-64: restricted-check holds every case; the moves refused without TRANSFER, with wider rights, or naming nothing. | `O.CAPABILITY` |
+| `H.OBJ.25` | PROCESS_CREATE_SHARED shall make a process with a restricted space of its own, and no reach into another's. | The `regions` line on every boot of x86-64: restricted-check holds every case; a second process's copy of the first's restricted memory faults. | `O.ISOLATE` |
+| `H.OBJ.26` | A region's mappings shall reach every process of its partition in normal mode and none in restricted mode. | The `regions` line on every boot of x86-64: restricted-check holds every case; a word and a page of the region are seen by two processes, and a change reaches a thread on another processor. | `O.ISOLATE` |
+| `H.OBJ.34` | A job shall have a criticality level fixed as it is made, at most its parent's, and the kernel shall refuse, and audit, what would let a lower level hold a handle to a higher job's processes, threads, jobs, spaces, region or exceptions, write a VMO a higher level maps other than a declared buffer, or serve as its pager. | The `levels` line on every boot. | `O.ISOLATE` |
 
-22 requirements.
+27 requirements.
 
 ### Scheduling
 
@@ -4150,11 +4155,47 @@ flowchart LR
 | `L.object.241` | `anExceptionChannelIsAttachedOnlyBySupervise` | — | — | — |
 | `L.object.242` | `closingTheReadEndDetaches` | — | — | — |
 | `L.object.246` | `superviseIsOnlyACreators` | — | — | — |
+| `L.object.270` | `regionCreateNeedsManage` | — | — | — |
+| `L.object.271` | `aSharedProcessIsInTheRegionsJob` | — | — | — |
+| `L.object.272` | `threadCreateIsTheCallersOwn` | — | — | — |
+| `L.object.273` | `threadExitEndsAThreadOrAProcess` | — | — | — |
+| `L.object.274` | `restrictedModeReachesThePrivateTable` | — | — | — |
+| `L.object.275` | `normalModeReachesTheSharedTable` | — | — | — |
+| `L.object.276` | `aPlainProcessHasOneTable` | — | — | — |
+| `L.object.277` | `theTablesNumbersAreApart` | — | — | — |
+| `L.object.278` | `aMoveNeedsTransfer` | — | — | — |
+| `L.object.279` | `aMoveCannotWiden` | — | — | — |
+| `L.object.280` | `aMoveTakesItFromWhereItWas` | — | — | — |
+| `L.object.281` | `bootstrapAndGiveTables` | — | — | — |
+| `L.object.282` | `aRegionsLastProcessEmptiesItsTable` | — | — | — |
+| `L.object.283` | `aHigherObjectsHandleDoesNotLand` | — | — | — |
+| `L.object.284` | `aChildIsAtMostItsParent` | — | — | — |
+| `L.object.285` | `aDomainIsOneLevel` | — | — | — |
+| `L.object.286` | `aRefusalIsAudited` | — | — | — |
+| `L.object.287` | `aLevelIsFixed` | — | — | — |
+| `L.object.288` | `aMoveKeepsItsLevel` | — | — | — |
+| `L.object.289` | `aRefusedHandleIsDeliveredInvalid` | — | — | — |
 | `L.trap.9` | `theChainIsNearestFirst` | — | — | — |
 | `L.trap.10` | `theWaitIsBounded` | — | — | — |
 | `L.trap.11` | `anExpiryIsTheDefault` | — | — | — |
 | `L.trap.12` | `theVerdictsAreKept` | — | — | — |
 | `L.trap.13` | `nestingRaisesNothing` | — | — | — |
+| `L.trap.14` | `aLinuxNumberExitsWithItsWords` | — | — | — |
+| `L.trap.15` | `aNativeNumberIsAnsweredOrExits` | — | — | — |
+| `L.trap.16` | `anUnresolvedFaultExits` | — | — | — |
+| `L.trap.17` | `aKickExitsARunningThread` | — | — | — |
+| `L.trap.18` | `aKickInNormalModeWaits` | — | — | — |
+| `L.trap.19` | `normalModeIsAsItWas` | — | — | — |
+| `L.trap.20` | `resumeOnlyAfterASystemCall` | — | — | — |
+| `L.trap.21` | `normalCallsAreRefusedFromRestrictedMode` | — | — | — |
+| `L.trap.22` | `aPreemptedProgramComesBack` | — | — | — |
+| `L.trap.23` | `vectorsAreTheProgramsOwn` | — | — | — |
+| `L.trap.24` | `aCopyFaultLandsAndNoOtherDoes` | — | — | — |
+| `L.trap.25` | `aKillEndsAThreadInEitherMode` | — | — | — |
+| `L.trap.26` | `aKickEndsARestrictedWait` | — | — | — |
+| `L.trap.27` | `manyKicksAreOneExit` | — | — | — |
+| `L.trap.28` | `continueReentersUnchanged` | — | — | — |
+| `L.trap.29` | `everyNativeNumberHasARow` | — | — | — |
 | `L.object.243` | `aReportIsTheKernels` | — | — | — |
 | `L.object.244` | `registersAreCheckedBeforeStored` | — | — | — |
 | `L.object.245` | `aVerdictIsGivenOnce` | — | — | — |
@@ -4606,6 +4647,17 @@ flowchart LR
 | `L.user.160` | `aCloneByHandleCopiesOnWrite` | — | — | — |
 | `L.user.161` | `aCopyBetweenSpacesHonoursTheRegion` | — | — | — |
 | `L.user.162` | `anUnmapByHandleReachesARunningSpace` | — | — | — |
+| `L.user.180` | `aNormalRootsSlotsAreTheRestrictedRoots` | — | — | — |
+| `L.user.181` | `aRestrictedSpaceEndsAtTheRegion` | — | — | — |
+| `L.user.182` | `aPointerIsRoutedByTheMode` | — | — | — |
+| `L.user.183` | `aRegionShootdownReachesItsProcessors` | — | — | — |
+| `L.user.193` | `aRegionsProcessStartsOnlyShared` | — | — | — |
+| `L.user.189` | `aMeasuredJobsRegionIsMeasured` | — | — | — |
+| `L.user.184` | `aRegionIsForkedByNothing` | — | — | — |
+| `L.user.185` | `noWriteRightUnderAHigherMapper` | — | — | — |
+| `L.user.186` | `noHigherMapOverALowerWriter` | — | — | — |
+| `L.user.187` | `aLowerLevelIsNeverAPager` | — | — | — |
+| `L.user.188` | `aDeclarationIsOneLevelOnce` | — | — | — |
 | `L.user.146` | `anAbsentPagerPageIsAsked` | — | — | — |
 | `L.user.147` | `aRequestIsListedWithoutAllocating` | — | — | — |
 | `L.user.148` | `aSuppliedFaultIsRetried` | — | — | — |
@@ -4881,6 +4933,19 @@ flowchart LR
 | `L.x86_64.131` | `x2apicIsLeftOnEveryProcessor` | — | — | — |
 | `L.x86_64.132` | `oneDestinationEncoder` | — | — | — |
 | `L.x86_64.186` | `aSupervisorsRegistersAreAProgramsOnly` | — | — | — |
+| `L.x86_64.260` | `aContextsAddressesAreInTheWindow` | — | — | — |
+| `L.x86_64.261` | `aContextsSelectorsArePinned` | — | — | — |
+| `L.x86_64.262` | `aContextsFlagsAreAProgramsOwn` | — | — | — |
+| `L.x86_64.263` | `aContextsDescriptorsAreRing3` | — | — | — |
+| `L.x86_64.264` | `aContextsDataSelectorsAreLoadable` | — | — | — |
+| `L.x86_64.265` | `aContextsBasesAreInTheWindow` | — | — | — |
+| `L.x86_64.266` | `thirtyTwoBitCodeIsUnderFourGiB` | — | — | — |
+| `L.x86_64.267` | `aContextsFieldsAreNotTruncated` | — | — | — |
+| `L.x86_64.268` | `aContextIsCopiedOnce` | — | — | — |
+| `L.x86_64.269` | `sysretOnlyWhereItFits` | — | — | — |
+| `L.x86_64.270` | `int80ExitsCompat` | — | — | — |
+| `L.x86_64.271` | `oneBarrierPerExit` | — | — | — |
+| `L.x86_64.276` | `aSwitchFromRestrictedIsAnExit` | — | — | — |
 | `L.aarch64.1` | `syndromesAreDecoded` | — | — | — |
 | `L.aarch64.2` | `faultsGetLinuxsSignal` | — | — | — |
 | `L.aarch64.3` | `programsFaultToTheirSignal` | — | — | — |
@@ -4937,6 +5002,18 @@ flowchart LR
 | `L.aarch64.51` | `theFilterIsAskedFirstAtTheSvc` | — | — | — |
 | `L.aarch64.65` | `noTwoThreadsOfACoreFromThePptt` | — | — | — |
 | `L.aarch64.66` | `aSupervisorsRegistersAreAProgramsOnly` | — | — | — |
+| `L.aarch64.70` | `aContextsAddressesAreInTheWindow` | — | — | — |
+| `L.aarch64.71` | `aContextsPstateIsFlagsOnly` | — | — | — |
+| `L.aarch64.72` | `tpidrroIsNeverHandedIn` | — | — | — |
+| `L.aarch64.73` | `anExitRewritesTheFrame` | — | — | — |
+| `L.aarch64.74` | `vectorImageHoldsDefinedBits` | — | — | — |
+| `L.aarch64.75` | `everyRootHasATagOfItsOwn` | — | — | — |
+| `L.aarch64.76` | `aHitInvalidatesNothing` | — | — | — |
+| `L.aarch64.77` | `aMissInvalidatesBeforeTheWalk` | — | — | — |
+| `L.aarch64.78` | `uninstallLeavesTheRegimeOff` | — | — | — |
+| `L.aarch64.79` | `aDeadIdsSlotGoesAtItsEviction` | — | — | — |
+| `L.aarch64.80` | `aShootdownReachesEveryTag` | — | — | — |
+| `L.aarch64.81` | `theSlotRuleIsCheckedOnEveryBoot` | — | — | — |
 | `L.claim.1` | `aNodeIsClaimedOnce` | — | — | — |
 | `L.claim.2` | `aSharedNodeUpToItsLimit` | — | — | — |
 | `L.claim.3` | `refusedUnderAnyLiveDriver` | — | — | — |

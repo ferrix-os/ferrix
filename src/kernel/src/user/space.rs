@@ -107,9 +107,10 @@ use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use crate::sync::SpinLock;
 use ferrix_bootinfo::{PAGE_SIZE, USER_VIRT_END, is_user_address};
 use ferrix_frame::Frame;
+use ferrix_native_abi::restricted::SHARED_BASE;
 use ferrix_paging::MapFlags;
 use ferrix_sched::CpuSet;
-use ferrix_sync::{SleepLock, SleepLockGuard};
+use ferrix_sync::{Once, SleepLock, SleepLockGuard};
 use ferrix_vma::{Backing, PageRange, Unmapping, Vma, VmaFlags};
 
 use crate::arch;
@@ -434,12 +435,52 @@ pub struct AddressSpace {
     /// [`UNCLAIMED`] before a process has claimed it: see
     /// [`AddressSpace::claim_domain`] and `docs/OPAQUE-KERNEL.md` §9.2.
     domain: AtomicU64,
+    /// Once it is a process's restricted space: its second root, which adds
+    /// the region to it (`docs/microkernel/K11.md` §3).
+    normal: Once<NormalRoot>,
+    /// Whether its top tables stay as they emptied, so that [`NormalRoot`]'s
+    /// copies of its root entries can never name a freed table: set before
+    /// the normal root is made.
+    keep_top: AtomicBool,
+    /// Whether this is a region's space: refused [`AddressSpace::fork`] and
+    /// any process of its own.
+    region: AtomicBool,
     /// Space handles naming this space: while any lives, whoever holds one
     /// may write into what runs here, so no file gives it ids
     /// ([`AddressSpace::raises_refused`], `L.object.309`). `process_space` is
     /// refused after the start, so for a started process this only falls.
     handles: AtomicU64,
 }
+
+/// A restricted space's normal root: the kernel's half, the same restricted
+/// slots, and the region's (`docs/microkernel/K11.md` §3).
+#[derive(Debug)]
+struct NormalRoot {
+    /// Its frame, given back as the space goes.
+    root: Frame,
+    /// Its own id, for a PCID slot of its own.
+    id: u64,
+    /// The region's space, whose top tables it names.
+    region: Arc<AddressSpace>,
+}
+
+/// The first root slot of a region: [`SHARED_BASE`]'s.
+const FIRST_SHARED_SLOT: usize = (SHARED_BASE >> ROOT_SLOT_SHIFT) as usize;
+/// One past a region's last root slot: [`USER_VIRT_END`]'s.
+const END_SHARED_SLOT: usize = (USER_VIRT_END >> ROOT_SLOT_SHIFT) as usize;
+/// The root slots of a region. Empty on ARMv7-A, which has none, whose user half ends
+/// below [`SHARED_BASE`].
+#[allow(
+    clippy::reversed_empty_ranges,
+    reason = "ARMv7-A's user half ends below the base; no region is ever made there"
+)]
+const fn shared_root_slots() -> core::ops::Range<usize> {
+    FIRST_SHARED_SLOT..END_SHARED_SLOT
+}
+
+/// The low bit of a root slot in an address, on both architectures that have
+/// restricted mode: four levels of nine bits over a 4 KiB page.
+const ROOT_SLOT_SHIFT: u32 = 39;
 
 impl AddressSpace {
     /// An empty address space, with the kernel reachable from it.
@@ -495,7 +536,9 @@ impl AddressSpace {
     /// [`SpaceError::BadRange`] for an `end` that is not a page boundary
     /// inside the user half, or below a region still mapped; nothing changes.
     pub fn set_ceiling(&self, end: u64) -> Result<(), SpaceError> {
-        if end > USER_VIRT_END {
+        // A restricted space's ceiling never rises past the region's floor
+        // (`docs/microkernel/K11.md` §2.1, `L.user.181`).
+        if end > USER_VIRT_END || (self.is_bound() && end > SHARED_BASE) {
             return Err(SpaceError::BadRange);
         }
         self.inner
@@ -593,6 +636,19 @@ impl AddressSpace {
     /// joins is the one whose root is loaded, and the caller must not be
     /// preempted into a context expecting a different address space.
     pub unsafe fn install(&self, replacing: Option<&AddressSpace>) {
+        // SAFETY: (TRANSLATE) the caller's guarantee, for the mode the running
+        // task's next instruction in ring 3 runs in; a space with no region
+        // has one root, whichever.
+        unsafe { self.install_as(replacing, false) }
+    }
+
+    /// [`AddressSpace::install`], with the root a task in `restricted` mode
+    /// runs on (`docs/microkernel/K11.md` §3).
+    ///
+    /// # Safety
+    ///
+    /// (TRANSLATE) As [`AddressSpace::install`].
+    pub(crate) unsafe fn install_as(&self, replacing: Option<&AddressSpace>, restricted: bool) {
         // The speculation domains the barrier decision compares: the
         // outgoing space's read as it leaves, so that a program that left
         // its domain while it ran is out of it now (`docs/OPAQUE-KERNEL.md`
@@ -607,17 +663,41 @@ impl AddressSpace {
         // After the join, for the order the module gives: a shootdown whose
         // set read missed the join is one whose count this read sees.
         let begun = self.flushes.begun.load(Ordering::SeqCst);
-        // SAFETY: (TRANSLATE) the root was made by `new`, so `prepare_user_root` has run
-        // on it and the kernel is reachable through it on the architecture
-        // that needs that; the caller guarantees it outlives the installation,
-        // and masks interrupts on `cpu`, the processor running this.
-        unsafe { arch::install_user_root(self.root * PAGE_SIZE, self.id, begun, cpu) };
+        let normal = self.normal.get();
+        if let Some(normal) = normal {
+            // NOALLOC: as above.
+            normal.region.cpus.join(cpu);
+        }
+        let (root, id, begun) = match normal {
+            Some(normal) => self.root_for(normal, restricted),
+            None => (self.root * PAGE_SIZE, self.id, begun),
+        };
+        // SAFETY: (TRANSLATE) the root was made by `new` or `bind_region`, so
+        // `prepare_user_root` has run on it and the kernel is reachable through
+        // it on the architecture that needs that; the caller guarantees it
+        // outlives the installation, and masks interrupts on `cpu`, the
+        // processor running this. The speculation decision is keyed on the
+        // restricted root, whichever root is written: two roots of one process
+        // are one key (K1 §6).
+        unsafe { arch::install_user_root(root, id, begun, cpu, self.root * PAGE_SIZE) };
         crate::sched::trip::count(crate::sched::trip::Count::RootInstall);
         if let Some(previous) = replacing
             && !core::ptr::eq(previous, self)
         {
             previous.cpus.leave(cpu);
+            if let Some(normal) = previous.normal.get()
+                && !normal
+                    .region
+                    .is_same_region(self.normal.get().map(|next| &next.region))
+            {
+                normal.region.cpus.leave(cpu);
+            }
         }
+    }
+
+    /// Whether `other` is this same space.
+    fn is_same_region(&self, other: Option<&Arc<AddressSpace>>) -> bool {
+        other.is_some_and(|other| core::ptr::eq(&raw const **other, self))
     }
 
     /// Leave this address space on the processor that is running.
@@ -644,6 +724,9 @@ impl AddressSpace {
         unsafe { arch::uninstall_user_root() };
         crate::sched::trip::count(crate::sched::trip::Count::RootUninstall);
         self.cpus.leave(cpu);
+        if let Some(normal) = self.normal.get() {
+            normal.region.cpus.leave(cpu);
+        }
     }
 }
 
@@ -663,7 +746,218 @@ impl AddressSpace {
             inner: SpinLock::new(inner),
             measured: AtomicBool::new(false),
             domain: AtomicU64::new(UNCLAIMED),
+            normal: Once::new(),
+            keep_top: AtomicBool::new(false),
+            region: AtomicBool::new(false),
         }
+    }
+
+    /// A new region's space: empty, its window `[SHARED_BASE, USER_VIRT_END)`,
+    /// and with the tables under every root slot of that window made now, so
+    /// that a normal root copies its entries once and never again
+    /// (`docs/microkernel/K11.md` §3).
+    ///
+    /// # Errors
+    ///
+    /// [`SpaceError::OutOfMemory`].
+    pub(crate) fn new_region() -> Result<Arc<AddressSpace>, SpaceError> {
+        let space = AddressSpace::new()?;
+        space.region.store(true, Ordering::Release);
+        space.keep_top.store(true, Ordering::Release);
+        {
+            let mut inner = space.inner.lock();
+            inner.map = ferrix_vma::AddressSpace::new(SHARED_BASE, USER_VIRT_END)
+                .map_err(|_| SpaceError::BadRange)?;
+        }
+        for slot in shared_root_slots() {
+            mm::ensure_top_in(space.root_table(), (slot as u64) << ROOT_SLOT_SHIFT)
+                .map_err(|_| SpaceError::OutOfMemory)?;
+        }
+        Ok(space)
+    }
+
+    /// Whether this is a region's space.
+    pub fn is_region(&self) -> bool {
+        self.region.load(Ordering::Acquire)
+    }
+
+    /// Whether this is bound to a region as a process's restricted space.
+    pub(crate) fn is_bound(&self) -> bool {
+        self.normal.get().is_some()
+    }
+
+    /// Bind this space to `region` as a process's restricted space: its
+    /// ceiling comes down to [`SHARED_BASE`], its top tables stop being freed,
+    /// and its normal root is made. Once.
+    ///
+    /// # Errors
+    ///
+    /// [`SpaceError::BadRange`] for a space with a mapping at or above
+    /// [`SHARED_BASE`], and one already bound, or a region's;
+    /// [`SpaceError::OutOfMemory`]. A refusal leaves it as it was.
+    pub fn bind_region(&self, region: &Arc<AddressSpace>, owner: u32) -> Result<(), SpaceError> {
+        if !region.is_region() {
+            return Err(SpaceError::BadRange);
+        }
+        let frame = mm::allocate_root_for(owner).ok_or(SpaceError::OutOfMemory)?;
+        arch::prepare_user_root(frame * PAGE_SIZE);
+        for slot in shared_root_slots() {
+            let _ = mm::copy_root_slot(region.root_table(), frame * PAGE_SIZE, slot);
+        }
+        // One decision, under this space's lock: of two binds of one space by
+        // duplicate handles one wins and the other is refused; and a space a
+        // process already runs on, or a region's, is never bound.
+        let refused = {
+            let mut inner = self.inner.lock();
+            if self.is_bound()
+                || self.is_region()
+                || self.domain.load(Ordering::Acquire) != UNCLAIMED
+                || inner.map.set_high(SHARED_BASE).is_err()
+            {
+                true
+            } else {
+                self.keep_top.store(true, Ordering::Release);
+                for slot in 0..FIRST_SHARED_SLOT {
+                    let _ = mm::copy_root_slot(self.root_table(), frame * PAGE_SIZE, slot);
+                }
+                let _ = self.normal.call_once(|| NormalRoot {
+                    root: frame,
+                    id: next_id(),
+                    region: Arc::clone(region),
+                });
+                false
+            }
+        };
+        if refused {
+            mm::free_root(frame);
+            return Err(SpaceError::BadRange);
+        }
+        Ok(())
+    }
+
+    /// Copy the root entry `address` falls in from the restricted root to the
+    /// normal one, if the first has one and the second does not: what a fault
+    /// from normal mode does first, so that a slot's cost is one fault per
+    /// process and the restricted root's path is untouched
+    /// (`docs/microkernel/K11.md` §3). `true` if it copied one, when the
+    /// faulting access may well be right now.
+    pub(crate) fn sync_top(&self, address: u64) -> bool {
+        let Some(normal) = self.normal.get() else {
+            return false;
+        };
+        let slot = (address >> ROOT_SLOT_SHIFT) as usize;
+        if slot >= FIRST_SHARED_SLOT {
+            return false;
+        }
+        let _inner = self.inner.lock();
+        let at = normal.root * PAGE_SIZE;
+        if mm::root_slot_entry(at, slot) != 0 {
+            return false;
+        }
+        mm::copy_root_slot(self.root_table(), at, slot)
+    }
+
+    /// The space a program pointer or a fault at `address` means, for the
+    /// running task, whose own space this may be: below [`SHARED_BASE`] this,
+    /// and at or above it the region's, only in normal mode and only for the
+    /// running task's own space (`docs/microkernel/K11.md` §2.3, `L.user.182`).
+    /// A by-handle call names its own space and goes straight there.
+    pub fn route(&self, address: u64) -> &AddressSpace {
+        let Some(normal) = self.normal.get() else {
+            return self;
+        };
+        if address < SHARED_BASE || crate::sched::running_restricted() {
+            return self;
+        }
+        let own = crate::sched::with_current(|task| {
+            task.address_space()
+                .is_some_and(|mine| core::ptr::eq(&raw const **mine, self))
+        })
+        .unwrap_or(false);
+        if own { &normal.region } else { self }
+    }
+
+    /// [`AddressSpace::route`], as the reference a caller that keeps one needs.
+    pub fn routed(this: &Arc<AddressSpace>, address: u64) -> &Arc<AddressSpace> {
+        match this.normal.get() {
+            Some(normal) if !core::ptr::eq(this.route(address), &raw const **this) => {
+                &normal.region
+            }
+            _ => this,
+        }
+    }
+
+    /// Put this space's root for `restricted` on the running processor: a
+    /// flip, or a switch between two of its threads in different modes. The
+    /// processor is in its sets already (`docs/microkernel/K11.md` §3), so
+    /// this is a root write and nothing else; the speculation decision is
+    /// the caller's, and the flip does not call `entered_space`.
+    ///
+    /// # Safety
+    ///
+    /// (TRANSLATE) As [`AddressSpace::install`]: this space is the one the
+    /// running processor has joined, and interrupts are masked.
+    pub(crate) unsafe fn flip_root(&self, restricted: bool) {
+        let Some(normal) = self.normal.get() else {
+            return;
+        };
+        let cpu = this_logical_cpu();
+        let (root, id, begun) = self.root_for(normal, restricted);
+        // SAFETY: (TRANSLATE) the caller's guarantee; both roots carry the
+        // kernel's half, and live as long as this space.
+        unsafe { arch::flip_user_root(root, id, begun, cpu) };
+    }
+
+    /// What a root write for `restricted` names: its table, its PCID key and
+    /// the shootdown count it answers to, both spaces' for the normal root.
+    fn root_for(&self, normal: &NormalRoot, restricted: bool) -> (u64, u64, u64) {
+        let own = self.flushes.begun.load(Ordering::SeqCst);
+        if restricted {
+            (self.root * PAGE_SIZE, self.id, own)
+        } else {
+            (
+                normal.root * PAGE_SIZE,
+                normal.id,
+                own.wrapping_add(normal.region.flushes.begun.load(Ordering::SeqCst)),
+            )
+        }
+    }
+
+    /// The root slots a region has.
+    pub(crate) const fn shared_slots(&self) -> core::ops::Range<usize> {
+        shared_root_slots()
+    }
+
+    /// Hold the normal root to its rule (`L.user.180`): each restricted slot
+    /// the restricted root's entry or absent, each shared slot the region's.
+    ///
+    /// # Errors
+    ///
+    /// What it found.
+    #[doc(hidden)]
+    pub fn check_normal_slots(&self) -> Result<(), &'static str> {
+        let normal = self.normal.get().ok_or("a space with no normal root")?;
+        let _inner = self.inner.lock();
+        let at = normal.root * PAGE_SIZE;
+        for slot in 0..FIRST_SHARED_SLOT {
+            let entry = mm::root_slot_entry(at, slot);
+            if entry != 0 && entry != mm::root_slot_entry(self.root_table(), slot) {
+                return Err("a normal root's restricted slot is not the restricted root's");
+            }
+        }
+        for slot in shared_root_slots() {
+            if mm::root_slot_entry(at, slot)
+                != mm::root_slot_entry(normal.region.root_table(), slot)
+            {
+                return Err("a normal root's shared slot is not the region's");
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether its tables keep their top level: see the field.
+    fn keeps_top(&self) -> bool {
+        self.keep_top.load(Ordering::Relaxed)
     }
 }
 
@@ -2258,7 +2552,13 @@ impl AddressSpace {
                 }
                 let address = region.range.start() + (start - region_first) * PAGE_SIZE;
                 let len = (end - start) * PAGE_SIZE;
-                let _ = mm::unmap_in(self.root * PAGE_SIZE, address, len, flush);
+                let _ = mm::unmap_in_keeping(
+                    self.root * PAGE_SIZE,
+                    address,
+                    len,
+                    flush,
+                    self.keeps_top(),
+                );
                 found = true;
             }
         }
@@ -2268,7 +2568,13 @@ impl AddressSpace {
     /// Take `range`'s translations out of the tables, adding the addresses
     /// and every table the removal empties to `pages`, for its shootdown.
     fn unmap_range(&self, range: PageRange, pages: &mut TlbPages) {
-        let _ = mm::unmap_in(self.root * PAGE_SIZE, range.start(), range.bytes(), pages);
+        let _ = mm::unmap_in_keeping(
+            self.root * PAGE_SIZE,
+            range.start(),
+            range.bytes(),
+            pages,
+            self.keeps_top(),
+        );
     }
 
     /// Count a shootdown of this space pending, and read the processors it
@@ -4401,11 +4707,12 @@ impl AddressSpace {
             Some(object) => advised.take(object, first, count)?,
             None => None,
         };
-        let _ = mm::unmap_in(
+        let _ = mm::unmap_in_keeping(
             self.root * PAGE_SIZE,
             start,
             stop - start,
             &mut advised.pages,
+            self.keeps_top(),
         );
         if let Some(taken) = taken {
             // NOALLOC: `make_room` made room for it above.
@@ -4583,6 +4890,11 @@ impl Drop for AddressSpace {
         // `unmap_unwalked` only ever walked the ranges above, all of which are in
         // the user half, so nothing of the kernel's was ever reached.
         mm::deallocate_frames(self.root, 0);
+        // And the normal root: its slots name this tree's tables, which have
+        // just gone, and the region's, which are the region's.
+        if let Some(normal) = self.normal.get() {
+            mm::free_root(normal.root);
+        }
     }
 }
 

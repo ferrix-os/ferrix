@@ -20,17 +20,20 @@
 //! to [`dispose`], which drops them one level at a time in a loop. However
 //! deep the chain, the stack holds one drop at a time.
 
+pub mod bare;
 pub mod channel;
 pub mod exception;
 pub mod interrupt;
 pub mod io_mapping;
 pub mod job;
+pub mod level;
 pub mod oom;
 pub mod pager;
 pub mod pin;
 pub mod port;
 pub mod process;
 pub mod quota;
+pub mod region;
 pub mod rehome_check;
 pub mod space;
 pub mod ticket;
@@ -117,6 +120,12 @@ pub enum Object {
     /// (`docs/microkernel/K4.md` §2.1). Its last handle closed undecided
     /// hands the fault on.
     Exception(Arc<exception::Exception>),
+    /// A partition's shared half and shared handle table
+    /// (`docs/microkernel/K11.md`).
+    Region(Arc<region::Region>),
+    /// A thread of a process no personality holds
+    /// (`docs/microkernel/K11.md`).
+    Thread(Arc<bare::ThreadRef>),
 }
 
 /// A queue nothing is woken on, for objects whose signals never change.
@@ -136,7 +145,10 @@ impl Object {
             Object::Port(port) if !port.is_empty() => Signals::READABLE,
             Object::Process(process) if process.exit().is_closed() => Signals::TERMINATED,
             Object::Timer(timer) => timer.core().signals(),
-            Object::Space(_)
+            Object::Thread(thread) if thread.has_ended() => Signals::TERMINATED,
+            Object::Region(_)
+            | Object::Thread(_)
+            | Object::Space(_)
             | Object::Device(_)
             | Object::Interrupt(_)
             | Object::IoMapping(_)
@@ -167,7 +179,9 @@ impl Object {
             // Woken from the interrupt handler itself; see `interrupt`.
             Object::Interrupt(interrupt) => interrupt.waiters(),
             Object::Timer(timer) => timer.core().waiters(),
-            Object::Vmo(_)
+            Object::Thread(thread) => thread.waiters(),
+            Object::Region(_)
+            | Object::Vmo(_)
             | Object::Space(_)
             | Object::Device(_)
             | Object::IoMapping(_)
@@ -354,10 +368,15 @@ impl Object {
             | Object::Audit
             | Object::CpuService
             | Object::MemoryScrub
+            | Object::Thread(_)
             | Object::Exception(_) => true,
             // A space's last reference tears down its tables and every
             // object it maps, as a process's end does.
-            Object::Channel(_) | Object::Job(_) | Object::Process(_) | Object::Space(_) => false,
+            Object::Channel(_)
+            | Object::Job(_)
+            | Object::Process(_)
+            | Object::Space(_)
+            | Object::Region(_) => false,
         }
     }
 }

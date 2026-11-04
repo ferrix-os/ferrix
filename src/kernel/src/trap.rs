@@ -164,6 +164,9 @@ pub(crate) fn dispatch(frame: &mut arch::TrapFrame) {
     // unless there is a kill or a signal to deal with first.
     crate::sched::throttle_current(must_attend);
 
+    // A kick out of restricted mode, ahead of the personality's look
+    // (`docs/microkernel/K1.md` §3). One byte of the processor's record.
+    arch::restricted_kick_on_trap(frame);
     // On the way back to a program, which is where a program killed from
     // outside finds out and a signal is delivered: a task spinning in user
     // mode reaches here on its next tick, and one that was preempted reaches
@@ -648,6 +651,11 @@ pub fn must_attend() -> bool {
 
 /// The registered return path, if there is one.
 pub(crate) fn return_path() -> Option<&'static ReturnPath> {
+    // A thread of a process no personality holds has a way back of its own
+    // (`object::bare`), in every build.
+    if crate::sched::running_bare() {
+        return Some(&crate::object::bare::RETURN_PATH);
+    }
     let path = RETURN_PATH.load(Ordering::Acquire);
     // SAFETY: (SHARED) only `set_return_path` stores here, and only the address of a
     // `'static` that is never written through.
@@ -707,6 +715,51 @@ fn user_fault_as(frame: &mut arch::TrapFrame, trap: &Trap, raised: (u32, i32, u6
     user_fault_ending(frame, trap, raised, Poison::None);
 }
 
+// CHECKS-ONLY: object/region_check.rs
+/// Whether this processor offers the exit's barrier (`docs/microkernel/K1.md` §6).
+#[doc(hidden)]
+pub fn exit_barrier_offered() -> bool {
+    arch::exit_barrier_offered()
+}
+
+// CHECKS-ONLY: object/region_check.rs
+/// Barriers decided and issued at restricted exits, on every processor
+/// (`docs/microkernel/K1.md` §6, §10).
+#[doc(hidden)]
+pub fn restricted_barriers() -> (u64, u64) {
+    arch::restricted_barriers()
+}
+
+/// What kind of fault an exit says it was (`docs/microkernel/K1.md` §2.2).
+fn restricted_fault_kind(
+    trap: &Trap,
+    signal: u32,
+    code: i32,
+) -> ferrix_native_abi::restricted::FaultKind {
+    use ferrix_native_abi::restricted::FaultKind;
+    /// `BUS_MCEERR_AR`.
+    const BUS_MCEERR_AR: i32 = 4;
+    match trap {
+        _ if signal == ferrix_linux_abi::types::SIGBUS && code == BUS_MCEERR_AR => {
+            FaultKind::Poison
+        }
+        _ if signal == ferrix_linux_abi::types::SIGBUS => FaultKind::PastEnd,
+        Trap::PageFault(fault) if fault.present => FaultKind::Protection,
+        Trap::PageFault(_) => FaultKind::NoMapping,
+        _ => FaultKind::NotMemory,
+    }
+}
+
+/// A fault from restricted mode, as the exit that says so.
+fn exit_on_fault(frame: &mut arch::TrapFrame, trap: &Trap, signal: u32, code: i32, address: u64) {
+    let kind = restricted_fault_kind(trap, signal, code);
+    let address = match kind {
+        ferrix_native_abi::restricted::FaultKind::NotMemory => 0,
+        _ => address,
+    };
+    arch::restricted_fault_exit(frame, kind, address);
+}
+
 /// What a fault consumed, as far as its supervisors are concerned.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Poison {
@@ -730,6 +783,13 @@ fn user_fault_ending(
     (signal, code, address): (u32, i32, u64),
     poison: Poison,
 ) {
+    // A fault from restricted mode goes to `linuxd`, as an exit: no signal, and
+    // ahead of K4's supervisors (`docs/microkernel/K1.md` §3, the consultant's
+    // N6).
+    if crate::sched::running_restricted() {
+        exit_on_fault(frame, trap, signal, code, address);
+        return;
+    }
     let Some(path) = return_path() else {
         // No personality registered, so nothing can turn a fault into a
         // signal. A kernel built that way has no user programs to fault.
@@ -832,7 +892,58 @@ fn resolve_user_fault(fault: &PageFault) -> Result<(), Option<crate::user::space
         write: fault.write,
         execute: fault.execute,
     };
-    crate::object::oom::user_fault(&space, fault.address, access).map_err(Some)
+    // The space the address means, in the running task's mode, and a root slot
+    // its normal root has yet to copy (`docs/microkernel/K11.md` §3).
+    if !crate::sched::running_restricted() {
+        let _ = space.sync_top(fault.address);
+    }
+    crate::object::oom::user_fault(space.route(fault.address), fault.address, access).map_err(Some)
+}
+
+/// Where a fault in normal mode, on the restricted half and in the region's
+/// copy window, lands.
+fn copy_landing(frame: &arch::TrapFrame, fault: &PageFault) -> Option<u64> {
+    if fault.address >= ferrix_native_abi::restricted::SHARED_BASE {
+        return None;
+    }
+    crate::sched::with_current(|task| {
+        task.core_process()?
+            .region()?
+            .landing_for(frame.instruction_pointer())
+    })
+    .flatten()
+}
+
+/// A fault in ring 3 the kernel did not resolve, if K1 has a say: from restricted
+/// mode an exit, whose kind the space's answer says (`docs/microkernel/K1.md`
+/// §2.2); from normal mode, `linuxd`'s own copy of a program's memory faulting
+/// on a hole, which lands where it said (§2.5), ahead of K4.
+fn restricted_fault(
+    frame: &mut arch::TrapFrame,
+    fault: &PageFault,
+    resolved: Result<(), Option<crate::user::space::SpaceError>>,
+) -> bool {
+    use crate::user::space::SpaceError;
+    use ferrix_native_abi::restricted::FaultKind;
+    if !fault.user || !frame.came_from_user() {
+        return false;
+    }
+    let kind = match resolved {
+        Err(Some(SpaceError::PastEnd(_) | SpaceError::Unreadable(_))) => FaultKind::PastEnd,
+        Err(Some(SpaceError::NotMapped(_))) => FaultKind::NoMapping,
+        Err(Some(SpaceError::Refused(_))) => FaultKind::Protection,
+        _ if fault.present => FaultKind::Protection,
+        _ => FaultKind::NoMapping,
+    };
+    if crate::sched::running_restricted() {
+        arch::restricted_fault_exit(frame, kind, fault.address);
+        return true;
+    }
+    let Some(landing) = copy_landing(frame, fault) else {
+        return false;
+    };
+    arch::restricted_land_copy(frame, landing, kind);
+    true
 }
 
 fn handle_page_fault(frame: &mut arch::TrapFrame, fault: PageFault) {
@@ -883,6 +994,9 @@ fn handle_page_fault(frame: &mut arch::TrapFrame, fault: PageFault) {
     };
     if resolved.is_ok() {
         let _ = FAULTS_HANDLED.fetch_add(1, Ordering::Relaxed);
+        return;
+    }
+    if restricted_fault(frame, &fault, resolved) {
         return;
     }
     if fault.user && frame.came_from_user() {

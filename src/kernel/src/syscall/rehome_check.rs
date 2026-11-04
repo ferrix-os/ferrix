@@ -408,7 +408,7 @@ fn check_a_combining_object() -> Result<bool, &'static str> {
         return Ok(false);
     }
     let caller = Caller::new()?;
-    let space = caller.core.space();
+    let space = caller.core.own_space();
     let at = space
         .map_object(
             None,

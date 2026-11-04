@@ -257,6 +257,40 @@ pub const SPACE_COPY_MAX: usize = 64 * 1024;
 pub const PAGER_KEEP: usize = 0x10A2;
 /// [`NativeCall::PagerTakeUp`].
 pub const PAGER_TAKE_UP: usize = 0x10A3;
+/// [`NativeCall::RestrictedEnter`].
+pub const RESTRICTED_ENTER: usize = 0x1090;
+/// [`NativeCall::RestrictedResume`].
+pub const RESTRICTED_RESUME: usize = 0x1091;
+/// [`NativeCall::RestrictedKick`].
+pub const RESTRICTED_KICK: usize = 0x1092;
+/// [`NativeCall::RestrictedContextRead`].
+pub const RESTRICTED_CONTEXT_READ: usize = 0x1093;
+/// [`NativeCall::RestrictedVectorsRead`].
+pub const RESTRICTED_VECTORS_READ: usize = 0x1094;
+/// [`NativeCall::RestrictedVectorsWrite`].
+pub const RESTRICTED_VECTORS_WRITE: usize = 0x1095;
+/// [`NativeCall::RestrictedCopyWindow`].
+pub const RESTRICTED_COPY_WINDOW: usize = 0x1096;
+/// [`NativeCall::RegionCreate`].
+pub const REGION_CREATE: usize = 0x1097;
+/// [`NativeCall::ProcessCreateShared`].
+pub const PROCESS_CREATE_SHARED: usize = 0x1098;
+/// [`NativeCall::ThreadCreate`].
+pub const THREAD_CREATE: usize = 0x1099;
+/// [`NativeCall::ThreadExit`].
+pub const THREAD_EXIT: usize = 0x109A;
+/// [`NativeCall::HandleToShared`].
+pub const HANDLE_TO_SHARED: usize = 0x109B;
+/// [`NativeCall::HandleToPrivate`].
+pub const HANDLE_TO_PRIVATE: usize = 0x109C;
+/// [`NativeCall::RestrictedContinue`].
+pub const RESTRICTED_CONTINUE: usize = 0x109D;
+/// [`NativeCall::ProcessStartShared`].
+pub const PROCESS_START_SHARED: usize = 0x109E;
+/// [`NativeCall::ThreadSelf`].
+pub const THREAD_SELF: usize = 0x109F;
+/// [`NativeCall::JobDeclareBuffer`].
+pub const JOB_DECLARE_BUFFER: usize = 0x10E0;
 /// [`NativeCall::PagerCreate`].
 pub const PAGER_CREATE: usize = 0x1074;
 /// [`NativeCall::PagerCreateVmo`].
@@ -939,6 +973,42 @@ pub enum NativeCall {
     /// shared mappings shared. The new handle carries the given one's rights,
     /// never more; the clone is owned by the caller's job. Needs `READ`.
     SpaceClone,
+    /// `(context: *Context)` → the exit. Enter restricted mode with `context`, which is copied once and checked (`docs/microkernel/K1.md` §4). Normal mode of a shared process only.
+    RestrictedEnter,
+    /// `(value)` → the exit. Put `value` in the program's result register and re-enter the held context: legal after a system call exit alone.
+    RestrictedResume,
+    /// `(thread)` → 0. Exit that thread from restricted mode, now or at its next entry. Needs `SIGNAL`.
+    RestrictedKick,
+    /// `(out: *mut Context)` → 0. The held context, its flags normalised so that an entry accepts them.
+    RestrictedContextRead,
+    /// `(out, length)` → bytes. The program's vector state, as the standard image.
+    RestrictedVectorsRead,
+    /// `(in, length)` → 0. Replace the program's vector state with an image the kernel checks.
+    RestrictedVectorsWrite,
+    /// `(start, end, landing)` → 0. The code in the region that may fault on the restricted half, and where it lands.
+    RestrictedCopyWindow,
+    /// `(job, space: *u64)` → region. A partition's shared half and shared handle table; its space's handle at `space`. Needs `MANAGE` on the job.
+    RegionCreate,
+    /// `(region, job, space, name, name_length, out_space: *u64)` → process. A process of the region, over `space` or a fresh space whose handle goes to `out_space`. Needs `MANAGE` on the region and the job.
+    ProcessCreateShared,
+    /// `(entry, stack, argument)` → thread. A thread of the caller's own process, in normal mode.
+    ThreadCreate,
+    /// `(status, whole_process). Ends the calling thread, or its process. Never returns.`
+    ThreadExit,
+    /// `(private, rights, options)` → handle. Move a handle of this process's private table to the shared one. Needs `TRANSFER`, and `DUPLICATE` with `HANDLE_KEEP`.
+    HandleToShared,
+    /// `(shared, rights)` → handle. Move a handle of the shared table to this process's private one. Needs `TRANSFER`.
+    HandleToPrivate,
+    /// `()` → the exit. Re-enter the held context exactly as it stands.
+    RestrictedContinue,
+    /// `()` → thread. A handle to the calling thread, in normal mode.
+    ThreadSelf,
+    /// `(process, entry, stack, bootstrap)` → 0. Start a process of a region at `entry` on `stack`, in normal mode, with `bootstrap` moved to the shared table and its value in the first argument register. Needs `MANAGE`.
+    ProcessStartShared,
+    /// `(job, vmo)` → 0. Declare the VMO a buffer lower levels may write and the
+    /// job's level may map. Needs `SET_LIMIT` on the job and `MAP` on the VMO, which
+    /// has no pager. Once (`docs/microkernel/K17.md`).
+    JobDeclareBuffer,
     /// `(port, wait_ns: *u64, options)` → pager. A pager whose page requests
     /// go to `port` (WRITE), and whose faults wait at most the `u64` at
     /// `wait_ns`, clamped to [`crate::types::PAGER_WAIT_MIN_NS`] and
@@ -992,7 +1062,7 @@ pub enum NativeCall {
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 105] = [
+pub const ALL: [NativeCall; 122] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,
@@ -1091,6 +1161,22 @@ pub const ALL: [NativeCall; 105] = [
     NativeCall::ExceptionChannelCreate,
     NativeCall::ExceptionState,
     NativeCall::ExceptionResolve,
+    NativeCall::RestrictedEnter,
+    NativeCall::RestrictedResume,
+    NativeCall::RestrictedKick,
+    NativeCall::RestrictedContextRead,
+    NativeCall::RestrictedVectorsRead,
+    NativeCall::RestrictedVectorsWrite,
+    NativeCall::RestrictedCopyWindow,
+    NativeCall::RegionCreate,
+    NativeCall::ProcessCreateShared,
+    NativeCall::ThreadCreate,
+    NativeCall::ThreadExit,
+    NativeCall::HandleToShared,
+    NativeCall::HandleToPrivate,
+    NativeCall::RestrictedContinue,
+    NativeCall::ProcessStartShared,
+    NativeCall::ThreadSelf,
     NativeCall::ProcessMake,
     NativeCall::ProcessRun,
     NativeCall::PagerKeep,
@@ -1098,6 +1184,7 @@ pub const ALL: [NativeCall; 105] = [
     NativeCall::DeviceBindDomain,
     NativeCall::VmoDigest,
     NativeCall::ProcessImages,
+    NativeCall::JobDeclareBuffer,
 ];
 
 /// Whether `number` is in the native range at all.
@@ -1214,6 +1301,23 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         SPACE_READ => NativeCall::SpaceRead,
         SPACE_WRITE => NativeCall::SpaceWrite,
         SPACE_CLONE => NativeCall::SpaceClone,
+        RESTRICTED_ENTER => NativeCall::RestrictedEnter,
+        RESTRICTED_RESUME => NativeCall::RestrictedResume,
+        RESTRICTED_KICK => NativeCall::RestrictedKick,
+        RESTRICTED_CONTEXT_READ => NativeCall::RestrictedContextRead,
+        RESTRICTED_VECTORS_READ => NativeCall::RestrictedVectorsRead,
+        RESTRICTED_VECTORS_WRITE => NativeCall::RestrictedVectorsWrite,
+        RESTRICTED_COPY_WINDOW => NativeCall::RestrictedCopyWindow,
+        REGION_CREATE => NativeCall::RegionCreate,
+        PROCESS_CREATE_SHARED => NativeCall::ProcessCreateShared,
+        THREAD_CREATE => NativeCall::ThreadCreate,
+        THREAD_EXIT => NativeCall::ThreadExit,
+        HANDLE_TO_SHARED => NativeCall::HandleToShared,
+        HANDLE_TO_PRIVATE => NativeCall::HandleToPrivate,
+        RESTRICTED_CONTINUE => NativeCall::RestrictedContinue,
+        THREAD_SELF => NativeCall::ThreadSelf,
+        PROCESS_START_SHARED => NativeCall::ProcessStartShared,
+        JOB_DECLARE_BUFFER => NativeCall::JobDeclareBuffer,
         PAGER_CREATE => NativeCall::PagerCreate,
         PAGER_KEEP => NativeCall::PagerKeep,
         PAGER_TAKE_UP => NativeCall::PagerTakeUp,
@@ -1229,7 +1333,7 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
 
 /// The number a call is made with.
 #[must_use]
-#[expect(clippy::too_many_lines, reason = "one arm per call, the table of them")]
+#[expect(clippy::too_many_lines, reason = "one arm a call, and nothing else")]
 pub const fn number(call: NativeCall) -> usize {
     match call {
         NativeCall::HandleClose => HANDLE_CLOSE,
@@ -1329,6 +1433,23 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::SpaceRead => SPACE_READ,
         NativeCall::SpaceWrite => SPACE_WRITE,
         NativeCall::SpaceClone => SPACE_CLONE,
+        NativeCall::RestrictedEnter => RESTRICTED_ENTER,
+        NativeCall::RestrictedResume => RESTRICTED_RESUME,
+        NativeCall::RestrictedKick => RESTRICTED_KICK,
+        NativeCall::RestrictedContextRead => RESTRICTED_CONTEXT_READ,
+        NativeCall::RestrictedVectorsRead => RESTRICTED_VECTORS_READ,
+        NativeCall::RestrictedVectorsWrite => RESTRICTED_VECTORS_WRITE,
+        NativeCall::RestrictedCopyWindow => RESTRICTED_COPY_WINDOW,
+        NativeCall::RegionCreate => REGION_CREATE,
+        NativeCall::ProcessCreateShared => PROCESS_CREATE_SHARED,
+        NativeCall::ThreadCreate => THREAD_CREATE,
+        NativeCall::ThreadExit => THREAD_EXIT,
+        NativeCall::HandleToShared => HANDLE_TO_SHARED,
+        NativeCall::HandleToPrivate => HANDLE_TO_PRIVATE,
+        NativeCall::RestrictedContinue => RESTRICTED_CONTINUE,
+        NativeCall::ThreadSelf => THREAD_SELF,
+        NativeCall::ProcessStartShared => PROCESS_START_SHARED,
+        NativeCall::JobDeclareBuffer => JOB_DECLARE_BUFFER,
         NativeCall::PagerCreate => PAGER_CREATE,
         NativeCall::PagerKeep => PAGER_KEEP,
         NativeCall::PagerTakeUp => PAGER_TAKE_UP,
@@ -1337,5 +1458,149 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::PagerOp => PAGER_OP,
         NativeCall::PagerQueryDirty => PAGER_QUERY_DIRTY,
         NativeCall::ChargeTicket => CHARGE_TICKET,
+    }
+}
+
+/// What a native number does when it comes from restricted mode
+/// (`docs/microkernel/K1.md` §2.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FromRestricted {
+    /// The kernel answers it against the private table, and the thread stays.
+    Answered,
+    /// It exits, as a Linux number does: `linuxd` answers it.
+    Exits,
+    /// It is normal mode's: refused `BAD_STATE`, and the thread stays.
+    NormalOnly,
+}
+
+/// Every native call's row. An exhaustive match, so a call added without one
+/// does not build: what K1 §2.2 asks of a table, and what a K-row's rule about
+/// restricted code cites.
+#[must_use]
+#[expect(clippy::too_many_lines, reason = "one arm a call, and nothing else")]
+pub const fn from_restricted(call: NativeCall) -> FromRestricted {
+    match call {
+        NativeCall::DeviceBindDomain | NativeCall::VmoDigest | NativeCall::ProcessImages => {
+            FromRestricted::Answered
+        }
+        NativeCall::HandleClose => FromRestricted::Answered,
+        NativeCall::HandleDuplicate => FromRestricted::Answered,
+        NativeCall::HandleReplace => FromRestricted::Answered,
+        NativeCall::ObjectWaitOne => FromRestricted::Answered,
+        NativeCall::ObjectWaitAsync => FromRestricted::Answered,
+        NativeCall::ObjectId => FromRestricted::Answered,
+        NativeCall::ChannelCreate => FromRestricted::Answered,
+        NativeCall::ChannelWrite => FromRestricted::Answered,
+        NativeCall::ChannelRead => FromRestricted::Answered,
+        NativeCall::ChannelWriteRead => FromRestricted::Answered,
+        NativeCall::ChannelReadAttested => FromRestricted::Answered,
+        NativeCall::PortCreate => FromRestricted::Answered,
+        NativeCall::PortQueue => FromRestricted::Answered,
+        NativeCall::PortWait => FromRestricted::Answered,
+        NativeCall::PortFd => FromRestricted::Exits,
+        NativeCall::VmoCreate => FromRestricted::Answered,
+        NativeCall::VmoRead => FromRestricted::Answered,
+        NativeCall::VmoWrite => FromRestricted::Answered,
+        NativeCall::VmoGetSize => FromRestricted::Answered,
+        NativeCall::VmoMap => FromRestricted::Answered,
+        NativeCall::VmoPin => FromRestricted::Answered,
+        NativeCall::VmoPinAddresses => FromRestricted::Answered,
+        NativeCall::VmoExecutable => FromRestricted::Answered,
+        NativeCall::JobCreate => FromRestricted::Answered,
+        NativeCall::JobKill => FromRestricted::Answered,
+        NativeCall::JobForCgroup => FromRestricted::Answered,
+        NativeCall::JobSetLimit => FromRestricted::Answered,
+        NativeCall::JobGetQuota => FromRestricted::Answered,
+        NativeCall::ProcessCreate => FromRestricted::Answered,
+        NativeCall::ProcessStart => FromRestricted::Answered,
+        NativeCall::ProcessGive => FromRestricted::Answered,
+        NativeCall::ProcessBootstrap => FromRestricted::NormalOnly,
+        NativeCall::ProcessStatus => FromRestricted::Answered,
+        NativeCall::ProcessSpace => FromRestricted::Answered,
+        NativeCall::InterruptCreate => FromRestricted::Answered,
+        NativeCall::InterruptBind => FromRestricted::Answered,
+        NativeCall::InterruptAck => FromRestricted::Answered,
+        NativeCall::IoMappingCreate => FromRestricted::Answered,
+        NativeCall::IoMappingMap => FromRestricted::Answered,
+        NativeCall::IoMappingMapCombining => FromRestricted::Answered,
+        NativeCall::BlockRingCreate => FromRestricted::Answered,
+        NativeCall::DeviceInfo => FromRestricted::Answered,
+        NativeCall::DeviceQuiesce => FromRestricted::Answered,
+        NativeCall::NetRingCreate => FromRestricted::Answered,
+        NativeCall::DisplayControlCreate => FromRestricted::Answered,
+        NativeCall::InputControlCreate => FromRestricted::Answered,
+        NativeCall::RenderControlCreate => FromRestricted::Answered,
+        NativeCall::DeviceClock => FromRestricted::Answered,
+        NativeCall::SoundControlCreate => FromRestricted::Answered,
+        NativeCall::LogControlCreate => FromRestricted::Answered,
+        NativeCall::DevmgrStart => FromRestricted::NormalOnly,
+        NativeCall::AuditRead => FromRestricted::Answered,
+        NativeCall::DeviceAperture => FromRestricted::Answered,
+        NativeCall::DeviceConfigRead => FromRestricted::Answered,
+        NativeCall::DeviceConfigWrite => FromRestricted::Answered,
+        NativeCall::DeviceSetLimit => FromRestricted::Answered,
+        NativeCall::DeviceGetLimit => FromRestricted::Answered,
+        NativeCall::DeviceIsolation => FromRestricted::Answered,
+        NativeCall::ChardevControlCreate => FromRestricted::Answered,
+        NativeCall::ChardevReply => FromRestricted::Answered,
+        NativeCall::ChardevCopyIn => FromRestricted::Answered,
+        NativeCall::ChardevCopyOut => FromRestricted::Answered,
+        NativeCall::ChardevFile => FromRestricted::Answered,
+        NativeCall::ChardevDmabufInstall => FromRestricted::Answered,
+        NativeCall::ChardevDmabufResolve => FromRestricted::Answered,
+        NativeCall::ChardevSyncInstall => FromRestricted::Answered,
+        NativeCall::ChardevSyncSignal => FromRestricted::Answered,
+        NativeCall::ChardevSyncResolve => FromRestricted::Answered,
+        NativeCall::ChardevDmabufFence => FromRestricted::Answered,
+        NativeCall::PowerControlCreate => FromRestricted::Answered,
+        NativeCall::PowerSet => FromRestricted::Answered,
+        NativeCall::PowerRead => FromRestricted::Answered,
+        NativeCall::CpuService => FromRestricted::Answered,
+        NativeCall::MemoryScrub => FromRestricted::Answered,
+        NativeCall::AddressWait => FromRestricted::Answered,
+        NativeCall::AddressWake => FromRestricted::Answered,
+        NativeCall::AddressRequeue => FromRestricted::Answered,
+        NativeCall::AddressWaitAny => FromRestricted::Answered,
+        NativeCall::TimerCreate => FromRestricted::Answered,
+        NativeCall::TimerSet => FromRestricted::Answered,
+        NativeCall::TimerCancel => FromRestricted::Answered,
+        NativeCall::PagerCreate => FromRestricted::Answered,
+        NativeCall::ChargeTicket => FromRestricted::Answered,
+        NativeCall::PagerKeep => FromRestricted::Answered,
+        NativeCall::PagerTakeUp => FromRestricted::Answered,
+        NativeCall::ProcessMake => FromRestricted::Answered,
+        NativeCall::ProcessRun => FromRestricted::Answered,
+        NativeCall::PagerCreateVmo => FromRestricted::Answered,
+        NativeCall::PagerSupply => FromRestricted::Answered,
+        NativeCall::PagerOp => FromRestricted::Answered,
+        NativeCall::PagerQueryDirty => FromRestricted::Answered,
+        NativeCall::SpaceCreate => FromRestricted::Answered,
+        NativeCall::SpaceMap => FromRestricted::Answered,
+        NativeCall::SpaceUnmap => FromRestricted::Answered,
+        NativeCall::SpaceProtect => FromRestricted::Answered,
+        NativeCall::SpaceAllocate => FromRestricted::Answered,
+        NativeCall::SpaceRead => FromRestricted::Answered,
+        NativeCall::SpaceWrite => FromRestricted::Answered,
+        NativeCall::SpaceClone => FromRestricted::Answered,
+        NativeCall::RestrictedEnter => FromRestricted::NormalOnly,
+        NativeCall::RestrictedResume => FromRestricted::NormalOnly,
+        NativeCall::RestrictedKick => FromRestricted::Answered,
+        NativeCall::RestrictedContextRead => FromRestricted::NormalOnly,
+        NativeCall::RestrictedVectorsRead => FromRestricted::NormalOnly,
+        NativeCall::RestrictedVectorsWrite => FromRestricted::NormalOnly,
+        NativeCall::RestrictedCopyWindow => FromRestricted::NormalOnly,
+        NativeCall::RegionCreate => FromRestricted::NormalOnly,
+        NativeCall::ProcessCreateShared => FromRestricted::NormalOnly,
+        NativeCall::ThreadCreate => FromRestricted::NormalOnly,
+        NativeCall::ThreadExit => FromRestricted::NormalOnly,
+        NativeCall::HandleToShared => FromRestricted::NormalOnly,
+        NativeCall::HandleToPrivate => FromRestricted::NormalOnly,
+        NativeCall::RestrictedContinue => FromRestricted::NormalOnly,
+        NativeCall::ThreadSelf => FromRestricted::NormalOnly,
+        NativeCall::ProcessStartShared => FromRestricted::NormalOnly,
+        NativeCall::JobDeclareBuffer => FromRestricted::NormalOnly,
+        NativeCall::ExceptionChannelCreate => FromRestricted::Answered,
+        NativeCall::ExceptionState => FromRestricted::Answered,
+        NativeCall::ExceptionResolve => FromRestricted::Answered,
     }
 }

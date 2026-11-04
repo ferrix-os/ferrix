@@ -648,6 +648,18 @@ pub(crate) fn switch_barrier(cpu: usize) -> bool {
     true
 }
 
+/// Whether this core's plan has firmware's barrier: what [`exit_barrier`] must answer.
+pub(crate) fn exit_barrier_offered(cpu: usize) -> bool {
+    SWITCH_WORKAROUND
+        .get(cpu)
+        .is_some_and(|wanted| wanted.load(Ordering::Relaxed))
+}
+
+/// [`switch_barrier`] for a restricted exit: whether firmware's was called.
+pub(crate) fn exit_barrier(cpu: usize) -> bool {
+    switch_barrier(cpu)
+}
+
 /// `index` if `index < len`, else zero: `csel` on the flags `cmp` set, and
 /// `csdb` so that no later instruction may use a *predicted* result of the
 /// select.

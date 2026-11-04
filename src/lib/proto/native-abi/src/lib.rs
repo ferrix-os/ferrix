@@ -50,6 +50,7 @@ pub mod directory;
 pub mod exception;
 pub mod handle;
 pub mod nr;
+pub mod restricted;
 pub mod rights;
 pub mod signals;
 pub mod status;

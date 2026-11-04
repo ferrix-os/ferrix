@@ -194,9 +194,9 @@ fn a_rights_request_with_an_unknown_bit_is_refused() {
         "bit 8 is not a right"
     );
     assert_eq!(
-        Requested::from_register(1 << 12),
+        Requested::from_register(1 << 14),
         None,
-        "bit 12 is not a right"
+        "bit 14 is not a right"
     );
     assert_eq!(
         Requested::from_register(u64::from(Rights::SUPERVISE.0)),
@@ -573,4 +573,54 @@ fn page_requests_and_pager_specs_have_one_layout() {
     assert_eq!(size_of::<PagerRange>(), 16);
     assert_eq!(size_of::<DirtyRange>(), 24);
     assert_eq!(offset_of!(DirtyRange, state), 16);
+}
+
+#[test]
+fn restricted_mode_and_shared_processes_have_their_block() {
+    assert_eq!(nr::decode(0x1090), Some(NativeCall::RestrictedEnter));
+    assert_eq!(nr::decode(0x1091), Some(NativeCall::RestrictedResume));
+    assert_eq!(nr::decode(0x1092), Some(NativeCall::RestrictedKick));
+    assert_eq!(nr::decode(0x1097), Some(NativeCall::RegionCreate));
+    assert_eq!(nr::decode(0x1098), Some(NativeCall::ProcessCreateShared));
+    assert_eq!(nr::decode(0x109D), Some(NativeCall::RestrictedContinue));
+    assert_eq!(nr::decode(0x109E), Some(NativeCall::ProcessStartShared));
+    assert_eq!(nr::decode(0x109F), Some(NativeCall::ThreadSelf));
+}
+
+/// Verifies: L.trap.29
+#[test]
+fn every_native_call_has_a_row_from_restricted_mode() {
+    use nr::FromRestricted;
+    for call in ALL {
+        let _ = nr::from_restricted(call);
+    }
+    assert_eq!(
+        nr::from_restricted(NativeCall::PortFd),
+        FromRestricted::Exits
+    );
+    assert_eq!(
+        nr::from_restricted(NativeCall::RestrictedEnter),
+        FromRestricted::NormalOnly
+    );
+    assert_eq!(
+        nr::from_restricted(NativeCall::HandleClose),
+        FromRestricted::Answered
+    );
+}
+
+#[test]
+fn continue_goes_back_in_after_a_kick_or_a_fault_at_a_user_address() {
+    use crate::restricted::{Reason, may_continue};
+    const END: u64 = 0x8000_0000_0000;
+    let (kick, fault, call) = (
+        Reason::Kick as u64,
+        Reason::Fault as u64,
+        Reason::Syscall as u64,
+    );
+    assert!(may_continue(true, kick, 0x1000, END));
+    assert!(may_continue(true, fault, END - 1, END));
+    assert!(!may_continue(false, fault, 0x1000, END));
+    assert!(!may_continue(true, call, 0x1000, END));
+    assert!(!may_continue(true, fault, END, END));
+    assert!(!may_continue(true, fault, 0xFFFF_8000_0000_0000, END));
 }

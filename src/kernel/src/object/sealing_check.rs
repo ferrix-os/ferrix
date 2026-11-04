@@ -12,7 +12,7 @@ use ferrix_native_abi::handle::Handle;
 use ferrix_native_abi::nr;
 use ferrix_native_abi::rights::{Rights, SAME_RIGHTS};
 use ferrix_native_abi::status;
-use ferrix_native_abi::types::{self, MAP_EXECUTE, MAP_READ, MAP_WRITE};
+use ferrix_native_abi::types::{self, JOB_LEVEL_TOP, MAP_EXECUTE, MAP_READ, MAP_WRITE};
 
 use crate::object::Object;
 use crate::object::check::{SCRATCH, Side, Spawner, reg};
@@ -87,7 +87,7 @@ fn seal(side: &Side, vmo: Handle, report: &mut Report) -> Result<Handle, &'stati
 
 /// A measured space in the check's table, as a handle with every right.
 fn measured_space(side: &Side) -> Result<(Arc<SpaceRef>, Handle), &'static str> {
-    let space = SpaceRef::create().map_err(|_| "no memory for a space")?;
+    let space = SpaceRef::create(JOB_LEVEL_TOP).map_err(|_| "no memory for a space")?;
     space.space().measure();
     let handle = side
         .process
@@ -134,6 +134,109 @@ fn run_on(side: &Side, report: &mut Report) -> Result<(), &'static str> {
     measured_rules(side, report)?;
     timed(side, report)?;
     jobs(side, report)
+}
+
+/// A shared process of a measured job (ledger 6499 X1, X2): the region is measured, so
+/// an unsealed executable map into it is refused; plain `VMO_EXECUTABLE` from normal mode
+/// is refused, whatever its restricted space is; and that space stays unmeasured, as it
+/// runs other people's code by design (`docs/microkernel/K14.md`).
+///
+/// Verifies: L.user.189
+fn region_of_a_measured_job(
+    side: &Side,
+    spawner: &Spawner,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    if !crate::arch::HAS_RESTRICTED {
+        return Ok(());
+    }
+    let job = side.handle(
+        nr::JOB_CREATE,
+        &[reg(spawner.root), types::JOB_MEASURED],
+        "job_create measured failed",
+    )?;
+    let region = side.handle(
+        nr::REGION_CREATE,
+        &[reg(job), DIGEST_AT],
+        "region_create in a measured job failed",
+    )?;
+    let region_space = Handle(side.get_u32(DIGEST_AT)?);
+    let plain = one_page(side)?;
+    let runnable = side.handle(
+        nr::VMO_EXECUTABLE,
+        &[reg(plain), 0],
+        "vmo_executable failed",
+    )?;
+    refused(
+        map(side, region_space, runnable, MAP_READ | MAP_EXECUTE),
+        status::BAD_STATE,
+        "an unsealed VMO was mapped executable in a measured job's region",
+        report,
+    )?;
+    side.put(BYTES_AT, b"m")?;
+    let shared = side.handle(
+        nr::PROCESS_CREATE_SHARED,
+        &[reg(region), reg(job), 0, BYTES_AT, 1, DIGEST_AT],
+        "process_create_shared in a measured job failed",
+    )?;
+    let host = side.process.with_handles(|table| match table.get(shared) {
+        Ok((Object::Process(process), _)) => process.control().and_then(|control| control.host()),
+        _ => None,
+    });
+    let host = host.ok_or("a shared process's handle named no process")?;
+    if host.core().own_space().is_measured() {
+        return Err("a measured job's restricted space was measured");
+    }
+    let args = crate::trap::SyscallArgs {
+        abi: crate::trap::Abi::Native,
+        number: nr::VMO_EXECUTABLE,
+        args: [0, 0, 0, 0, 0, 0],
+        ip: 0,
+    };
+    refused(
+        crate::syscall::native::dispatch(&args, Some(&*host)),
+        status::BAD_STATE,
+        "plain vmo_executable was answered in normal mode of a measured job's process",
+        report,
+    )?;
+    // A new space in normal mode is measured, and an unmeasured one is not cloned
+    // (`L.mm.116`'s rule, by the space the call means).
+    let args = crate::trap::SyscallArgs {
+        abi: crate::trap::Abi::Native,
+        number: nr::SPACE_CREATE,
+        args: [0, 0, 0, 0, 0, 0],
+        ip: 0,
+    };
+    let made = crate::syscall::native::dispatch(&args, Some(&*host))
+        .map_err(|_| "space_create in normal mode of a measured job's process failed")?;
+    let made = u32::try_from(made)
+        .map(Handle)
+        .map_err(|_| "a space's handle was not one")?;
+    let measured = host.core().with_handles(|table| match table.get(made) {
+        Ok((Object::Space(space), _)) => space.space().is_measured(),
+        _ => false,
+    });
+    if !measured {
+        return Err("a new space in normal mode of a measured job's process was unmeasured");
+    }
+    let plain = SpaceRef::create(JOB_LEVEL_TOP).map_err(|_| "no memory for a space")?;
+    let plain = host
+        .core()
+        .with_handles(|table| table.insert(Object::Space(plain), Rights::SPACE))
+        .map_err(|_| "no room for a space's handle")?;
+    let args = crate::trap::SyscallArgs {
+        abi: crate::trap::Abi::Native,
+        number: nr::SPACE_CLONE,
+        args: [reg(plain), 0, 0, 0, 0, 0],
+        ip: 0,
+    };
+    refused(
+        crate::syscall::native::dispatch(&args, Some(&*host)),
+        status::BAD_STATE,
+        "an unmeasured space was cloned in normal mode of a measured job's process",
+        report,
+    )?;
+    Ok(())
 }
 
 /// The time a seal takes, for MEMORY-AND-TIMING 2.2ah (K14.10); and that a sealed
@@ -490,6 +593,7 @@ fn measured_rules(side: &Side, report: &mut Report) -> Result<(), &'static str> 
 /// `L.mm.116`, `L.mm.120`, `L.mm.121`, `L.mm.125`, `L.mm.126`.
 fn jobs(side: &Side, report: &mut Report) -> Result<(), &'static str> {
     let spawner = Spawner::new(side)?;
+    region_of_a_measured_job(side, &spawner, report)?;
     let job = side.handle(
         nr::JOB_CREATE,
         &[reg(spawner.root), types::JOB_MEASURED],
@@ -542,7 +646,7 @@ fn jobs(side: &Side, report: &mut Report) -> Result<(), &'static str> {
         "plain vmo_executable passed in a measured job",
         report,
     )?;
-    let unmeasured = SpaceRef::create().map_err(|_| "no memory for a space")?;
+    let unmeasured = SpaceRef::create(JOB_LEVEL_TOP).map_err(|_| "no memory for a space")?;
     let handle = other
         .process
         .with_handles(|table| table.insert(Object::Space(unmeasured), Rights::SPACE))

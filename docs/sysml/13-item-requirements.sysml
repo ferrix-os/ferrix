@@ -647,6 +647,48 @@ package FerrixItemRequirements {
                 line).";
             attribute :>> parent = ("G.7", "O.QUOTA");
         }
+        requirement <'H.OBJ.23'> theModeNamesTheTable : ItemHighLevel {
+            attribute :>> statement = "A shared process's calls shall reach its private handle table from
+                restricted mode and its region's shared table from normal mode, by
+                the mode alone and never by an argument.";
+            attribute :>> criterion = "The `regions` line on every boot of x86-64: restricted-check holds
+                every case; a number in one table means nothing in the other.";
+            attribute :>> parent = ("O.CAPABILITY");
+        }
+        requirement <'H.OBJ.24'> aHandleCrossesOnlyByTheTwoMoves : ItemHighLevel {
+            attribute :>> statement = "A handle shall cross between the shared and private tables only
+                through HANDLE_TO_SHARED and HANDLE_TO_PRIVATE, its rights
+                checked.";
+            attribute :>> criterion = "The `regions` line on every boot of x86-64: restricted-check holds
+                every case; the moves refused without TRANSFER, with wider rights,
+                or naming nothing.";
+            attribute :>> parent = ("O.CAPABILITY");
+        }
+        requirement <'H.OBJ.25'> aSharedProcessHasItsOwnRestrictedSpace : ItemHighLevel {
+            attribute :>> statement = "PROCESS_CREATE_SHARED shall make a process with a restricted space
+                of its own, and no reach into another's.";
+            attribute :>> criterion = "The `regions` line on every boot of x86-64: restricted-check holds
+                every case; a second process's copy of the first's restricted
+                memory faults.";
+            attribute :>> parent = ("O.ISOLATE");
+        }
+        requirement <'H.OBJ.26'> theRegionIsSeenInNormalModeOnly : ItemHighLevel {
+            attribute :>> statement = "A region's mappings shall reach every process of its partition in
+                normal mode and none in restricted mode.";
+            attribute :>> criterion = "The `regions` line on every boot of x86-64: restricted-check holds
+                every case; a word and a page of the region are seen by two
+                processes, and a change reaches a thread on another processor.";
+            attribute :>> parent = ("O.ISOLATE");
+        }
+        requirement <'H.OBJ.34'> aLowerLevelReachesNothingOfAHigher : ItemHighLevel {
+            attribute :>> statement = "A job shall have a criticality level fixed as it is made, at most
+                its parent's, and the kernel shall refuse, and audit, what would
+                let a lower level hold a handle to a higher job's processes,
+                threads, jobs, spaces, region or exceptions, write a VMO a higher
+                level maps other than a declared buffer, or serve as its pager.";
+            attribute :>> criterion = "The `levels` line on every boot.";
+            attribute :>> parent = ("O.ISOLATE");
+        }
     }
 
     package Scheduling {
@@ -1408,6 +1450,42 @@ package FerrixItemRequirements {
                 once; a cgroup move into a supervised job is EBUSY (the `cgroups`
                 line).";
             attribute :>> parent = ("O.CAPABILITY", "O.ISOLATE");
+        }
+        requirement <'H.TRAP.21'> restrictedModeRunsAProgramAndComesBack : ItemHighLevel {
+            attribute :>> statement = "The kernel shall provide a restricted mode: a thread of a shared
+                process shall run a program context and come back, the same thread
+                with no scheduler decision and no message, on a system call, an
+                unresolved fault or a kick, with the context held by the kernel.";
+            attribute :>> criterion = "The `regions` line on every boot of x86-64: restricted-check holds
+                every case of K1 §10.";
+            attribute :>> parent = ("O.ISOLATE");
+        }
+        requirement <'H.TRAP.22'> aContextIsCheckedAsSigreturnIs : ItemHighLevel {
+            attribute :>> statement = "Every context handed to the kernel for restricted mode shall be
+                checked by the rules a signal frame is, refused rather than
+                masked, and a refusal shall change nothing.";
+            attribute :>> criterion = "The `regions` line on every boot of x86-64: restricted-check holds
+                every case, its forged contexts each refused INVALID_ARGS, then a
+                good one running.";
+            attribute :>> parent = ("O.ISOLATE");
+        }
+        requirement <'H.TRAP.23'> nothingOfTheRegionFromRestrictedMode : ItemHighLevel {
+            attribute :>> statement = "Nothing of a partition's shared region shall be reachable from
+                restricted mode: not readable, writable or executable.";
+            attribute :>> criterion = "The `regions` line on every boot of x86-64: restricted-check holds
+                every case; load, store and fetch at the region exit FAULT, and
+                the sweep of the restricted root finds none of the region's
+                entries or frames.";
+            attribute :>> parent = ("O.ISOLATE");
+        }
+        requirement <'H.TRAP.24'> restrictedExitKeepsVectorsAndTheBarrier : ItemHighLevel {
+            attribute :>> statement = "A program's whole vector state shall survive every exit from
+                restricted mode, and each exit shall keep the speculation rule the
+                build selects, with the barrier counted.";
+            attribute :>> criterion = "The `regions` line on every boot of x86-64: restricted-check holds
+                every case; the vector case, and one barrier decided per exit,
+                none per entry, under `exit`.";
+            attribute :>> parent = ("O.ISOLATE");
         }
     }
 

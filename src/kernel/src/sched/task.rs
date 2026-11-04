@@ -59,6 +59,12 @@ pub trait UserThread: Any + Send + Sync + fmt::Debug {
     fn start_affinity(&self) -> Option<CpuSet> {
         None
     }
+
+    /// Whether it is a thread of a process no personality holds
+    /// (`object::bare`): what its way out is told apart by.
+    fn is_bare(&self) -> bool {
+        false
+    }
 }
 
 /// A task's name, unique for the life of the machine.
@@ -264,6 +270,17 @@ pub struct Task {
     /// death. Never changed: a mask a user sets is never a veto on a park
     /// (L.sched.123; ledger 5156 (A3)).
     spawn_pin: Option<usize>,
+    /// Whether it is in restricted mode (`docs/microkernel/K1.md`): written by
+    /// itself with interrupts masked, read by a switch of its processor.
+    restricted_mode: AtomicBool,
+    /// What it holds once it has entered restricted mode; only it reaches it.
+    #[cfg_attr(
+        target_arch = "arm",
+        expect(dead_code, reason = "ARMv7-A has no restricted mode")
+    )]
+    restricted_state: UnsafeCell<Option<Box<arch::RestrictedState>>>,
+    /// Whether it is a thread of a process no personality holds.
+    bare_thread: bool,
     /// Its share of a CPU, as the run queue has it: [`Task::base_weight`]
     /// scaled by its job's processor weight (`object::quota::effective`).
     weight: AtomicU32,
@@ -675,6 +692,39 @@ impl Task {
         }
     }
 
+    /// Whether it is in restricted mode.
+    pub(crate) fn is_restricted(&self) -> bool {
+        self.restricted_mode.load(Ordering::Relaxed)
+    }
+
+    /// Whether it is a thread of a process no personality holds.
+    pub(crate) const fn is_bare(&self) -> bool {
+        self.bare_thread
+    }
+
+    /// Its mode is now `restricted`. By itself, with interrupts masked.
+    #[cfg_attr(
+        target_arch = "arm",
+        expect(dead_code, reason = "ARMv7-A has no restricted mode")
+    )]
+    pub(super) fn set_restricted(&self, restricted: bool) {
+        self.restricted_mode.store(restricted, Ordering::Relaxed);
+    }
+
+    #[cfg_attr(
+        target_arch = "arm",
+        expect(dead_code, reason = "ARMv7-A has no restricted mode")
+    )]
+    /// Its restricted-mode record.
+    ///
+    /// # Safety
+    ///
+    /// (CONTEXT) By the running task itself, which is the only one that
+    /// reaches it, and for no longer than its own call.
+    pub(super) const unsafe fn restricted_slot(&self) -> *mut Option<Box<arch::RestrictedState>> {
+        self.restricted_state.get()
+    }
+
     /// Its pending-work word, for `sched::work` alone, which owns every
     /// read and write of it.
     pub(super) const fn work(&self) -> &AtomicU32 {
@@ -705,6 +755,7 @@ impl Task {
         let (user, core) = user_parts(thread.as_ref(), user_state)?;
         let (run_slot, sleep_slot) = slots()?;
         let spawn_pin = pinned_program_cpu(&affinity, thread.is_some());
+        let bare_thread = thread.as_ref().is_some_and(|thread| thread.is_bare());
         if let Some(count) = spawn_pin.and_then(|cpu| PINNED_PROGRAMS.get(cpu)) {
             let _ = count.fetch_add(1, Ordering::AcqRel);
         }
@@ -722,6 +773,9 @@ impl Task {
             wakees: Wakees::new(crate::timer::now_nanos()),
             affinity: Affinity::new(affinity),
             spawn_pin,
+            restricted_mode: AtomicBool::new(false),
+            restricted_state: UnsafeCell::new(None),
+            bare_thread,
             address_space,
             thread,
             core,
@@ -783,6 +837,9 @@ impl Task {
             // says so in the same terms as everything else.
             affinity: Affinity::new(CpuSet::of(cpu)),
             spawn_pin: None,
+            restricted_mode: AtomicBool::new(false),
+            restricted_state: UnsafeCell::new(None),
+            bare_thread: false,
             // The boot task and the idle tasks are the kernel's own and have
             // no user half to translate.
             address_space: None,

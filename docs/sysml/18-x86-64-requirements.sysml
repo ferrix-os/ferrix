@@ -4032,5 +4032,97 @@ package FerrixX8664Requirements {
             attribute :>> unit = ("arch::x86_64::signal::UserContext::with_supervisors",
                 "arch::x86_64::signal::UserContext::supervised");
         }
+        requirement <'L.x86_64.260'> aContextsAddressesAreInTheWindow : ItemLowLevel {
+            attribute :>> statement = "rip and rsp in a context handed in shall be in the restricted
+                window.";
+            attribute :>> criterion = "Forged cases 4, 5, 6.";
+            attribute :>> parent = "H.TRAP.22";
+            attribute :>> unit = ("arch::x86_64::restricted::check_context",
+                "arch::x86_64::restricted::in_window");
+        }
+        requirement <'L.x86_64.261'> aContextsSelectorsArePinned : ItemLowLevel {
+            attribute :>> statement = "cs shall be exactly 64-bit or 32-bit user code and ss exactly user
+                data.";
+            attribute :>> criterion = "Forged cases 0 to 3.";
+            attribute :>> parent = "H.TRAP.22";
+            attribute :>> unit = "arch::x86_64::restricted::check_context";
+        }
+        requirement <'L.x86_64.262'> aContextsFlagsAreAProgramsOwn : ItemLowLevel {
+            attribute :>> statement = "rflags shall hold bit 1 and IF, and none of IOPL, VM, VIF, VIP,
+                NT, RF, TF, ID.";
+            attribute :>> criterion = "Forged cases 7 to 14.";
+            attribute :>> parent = "H.TRAP.22";
+            attribute :>> unit = "arch::x86_64::restricted::check_context";
+        }
+        requirement <'L.x86_64.263'> aContextsDescriptorsAreRing3 : ItemLowLevel {
+            attribute :>> statement = "Each thread-local descriptor shall be zero or present, S=1, DPL 3,
+                L=0.";
+            attribute :>> criterion = "Forged cases 21 to 23; case 79 reads through a good one.";
+            attribute :>> parent = "H.TRAP.22";
+            attribute :>> unit = "arch::x86_64::restricted::check_context";
+        }
+        requirement <'L.x86_64.264'> aContextsDataSelectorsAreLoadable : ItemLowLevel {
+            attribute :>> statement = "ds, es, fs and gs shall be null or loadable with RPL 3 under the
+                context's own descriptors, never the LDT, refused and not nulled.";
+            attribute :>> criterion = "Forged cases 15, 16, 18.";
+            attribute :>> parent = "H.TRAP.22";
+            attribute :>> unit = "arch::x86_64::restricted::check_context";
+        }
+        requirement <'L.x86_64.265'> aContextsBasesAreInTheWindow : ItemLowLevel {
+            attribute :>> statement = "fs_base and gs_base shall be zero or in the restricted window.";
+            attribute :>> criterion = "Forged cases 19, 20.";
+            attribute :>> parent = "H.TRAP.22";
+            attribute :>> unit = "arch::x86_64::restricted::check_context";
+        }
+        requirement <'L.x86_64.266'> thirtyTwoBitCodeIsUnderFourGiB : ItemLowLevel {
+            attribute :>> statement = "In 32-bit code rip shall be under 4 GiB.";
+            attribute :>> criterion = "Forged case 24.";
+            attribute :>> parent = "H.TRAP.22";
+            attribute :>> unit = "arch::x86_64::restricted::check_context";
+        }
+        requirement <'L.x86_64.267'> aContextsFieldsAreNotTruncated : ItemLowLevel {
+            attribute :>> statement = "A selector field with bits above its width shall be refused.";
+            attribute :>> criterion = "Forged case 17.";
+            attribute :>> parent = "H.TRAP.22";
+            attribute :>> unit = "arch::x86_64::restricted::check_context";
+        }
+        requirement <'L.x86_64.268'> aContextIsCopiedOnce : ItemLowLevel {
+            attribute :>> statement = "A context shall be copied once into kernel memory and the copy
+                checked, with no second fetch.";
+            attribute :>> criterion = "By review, no check can see a second fetch: take_context copies once into a local and decodes after; ledger 6064 (9) read it.";
+            attribute :>> parent = "H.TRAP.22";
+            attribute :>> unit = ("arch::x86_64::restricted::enter_prepared",
+                "arch::x86_64::restricted::take_context");
+        }
+        requirement <'L.x86_64.269'> sysretOnlyWhereItFits : ItemLowLevel {
+            attribute :>> statement = "An entry shall leave by SYSRET only for 64-bit cs with rcx equal
+                to rip and r11 equal to rflags, and by IRETQ otherwise.";
+            attribute :>> criterion = "Case 79 and every case with marked registers.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = "arch::x86_64::restricted::answer_going_in";
+        }
+        requirement <'L.x86_64.270'> int80ExitsCompat : ItemLowLevel {
+            attribute :>> statement = "int $0x80 from restricted mode shall exit SYSCALL_COMPAT with its
+                words zero-extended.";
+            attribute :>> criterion = "Case 79.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = "arch::x86_64::restricted::compat_exit";
+        }
+        requirement <'L.x86_64.271'> oneBarrierPerExit : ItemLowLevel {
+            attribute :>> statement = "Under the exit rule one predictor barrier shall be decided per
+                exit and none per entry.";
+            attribute :>> criterion = "Case 80: 200 on 200 exits; a control removes it.";
+            attribute :>> parent = "H.TRAP.24";
+            attribute :>> unit = "arch::speculation::restricted_left";
+        }
+        requirement <'L.x86_64.276'> aSwitchFromRestrictedIsAnExit : ItemLowLevel {
+            attribute :>> statement = "A switch that brings a normal-mode thread in, where restricted
+                code ran last on the processor, shall issue the barrier under the
+                exit rule, a kernel thread between them changing nothing.";
+            attribute :>> criterion = "Cases 124, 125.";
+            attribute :>> parent = "H.TRAP.24";
+            attribute :>> unit = ("arch::speculation::restricted_left",
+                "arch::speculation::restricted_ran");
+        }
     }
 }

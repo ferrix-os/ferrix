@@ -27,7 +27,7 @@ pub mod service;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::hint::spin_loop;
-use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 
 use ferrix_bootinfo::{BootView, PAGE_SIZE};
 use ferrix_sched::{CpuSet, MAX_CPUS};
@@ -139,6 +139,35 @@ pub struct PerCpu {
     /// so that the count every call makes is no locked add on a line every
     /// processor writes.
     pub syscalls: OwnCount,
+    /// What the running task is, for its entries to read in one load:
+    /// [`KIND_RESTRICTED`], [`KIND_BARE`]. Written by this processor alone, at
+    /// every switch and flip.
+    task_kind: AtomicU8,
+}
+
+/// In [`PerCpu::task_kind`]: the running task is in restricted mode.
+const KIND_RESTRICTED: u8 = 1 << 0;
+/// In [`PerCpu::task_kind`]: the running task's process has no personality.
+const KIND_BARE: u8 = 1 << 1;
+
+impl PerCpu {
+    /// Say what the running task is.
+    pub(crate) fn set_task_kind(&self, restricted: bool, bare: bool) {
+        let kind = if restricted { KIND_RESTRICTED } else { 0 } | if bare { KIND_BARE } else { 0 };
+        self.task_kind.store(kind, Ordering::Relaxed);
+    }
+
+    /// Whether the running task is in restricted mode.
+    #[inline]
+    pub(crate) fn runs_restricted(&self) -> bool {
+        self.task_kind.load(Ordering::Relaxed) & KIND_RESTRICTED != 0
+    }
+
+    /// Whether the running task's process has no personality.
+    #[inline]
+    pub(crate) fn runs_bare(&self) -> bool {
+        self.task_kind.load(Ordering::Relaxed) & KIND_BARE != 0
+    }
 }
 
 /// A count in a [`PerCpu`] record: added to by its own processor alone,
@@ -361,6 +390,7 @@ fn leak_records(numbered: impl Iterator<Item = (usize, u64)>) -> &'static [PerCp
             gdt: AtomicU64::new(0),
             privilege_stack: AtomicU64::new(0),
             parked: AtomicU64::new(0),
+            task_kind: AtomicU8::new(0),
             syscalls: OwnCount::new(),
         })
         // FATAL-ALLOC: boot only: stage 4 builds the processor table once, before the secondaries start.

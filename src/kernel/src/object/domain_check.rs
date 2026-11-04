@@ -220,7 +220,7 @@ fn check_leavers(
     // 6. A space shared with a process of another domain is in neither.
     let sharer = born_in(marked)?;
     made.push(Arc::clone(&sharer));
-    let guest = Process::new(Arc::clone(sharer.core().space()))
+    let guest = Process::new(Arc::clone(sharer.core().own_space()))
         .map_err(|_| "no memory for a process sharing a space")?;
     let guest = crate::syscall::registry::register(guest);
     made.push(Arc::clone(&guest));
@@ -273,12 +273,12 @@ fn expect(
     why: &'static str,
     report: &mut Report,
 ) -> Result<(), &'static str> {
-    let decided = switch_and_back(from.core().space(), to.core().space()).decided;
+    let decided = switch_and_back(from.core().own_space(), to.core().own_space()).decided;
     if decided != wanted {
         crate::console::println!(
             "  domain   {why}: {decided} of 2 switches needed the barrier, {wanted} wanted (domains {} and {})",
-            from.core().space().domain(),
-            to.core().space().domain(),
+            from.core().own_space().domain(),
+            to.core().own_space().domain(),
         );
         return Err(why);
     }
@@ -447,7 +447,7 @@ fn domain_records() -> u64 {
 /// no invalidation, and on an architecture whose barrier has more to it --
 /// x86-64's return-stack refill -- still does the rest.
 fn check_in_domain_path(first: &Process, second: &Process) -> Result<(), &'static str> {
-    let done = switch_and_back(first.core().space(), second.core().space());
+    let done = switch_and_back(first.core().own_space(), second.core().own_space());
     if done.issued != 0 {
         return Err("case 1: a switch inside one domain issued the predictor invalidation");
     }
@@ -574,16 +574,16 @@ fn after_a_forgotten_root(forgotten: &Process, next: &Process) -> u64 {
     let cpu = crate::smp::this_cpu().map_or(0, |cpu| cpu.logical);
     // SAFETY: (TRANSLATE) as in `switch_and_back`: both held throughout,
     // interrupts masked, no user address touched, and back to no user space.
-    unsafe { forgotten.core().space().install(None) };
+    unsafe { forgotten.core().own_space().install(None) };
     // SAFETY: (TRANSLATE) as above.
-    unsafe { forgotten.core().space().uninstall() };
-    arch::forget_root(forgotten.core().space().root_table());
+    unsafe { forgotten.core().own_space().uninstall() };
+    arch::forget_root(forgotten.core().own_space().root_table());
     let before = arch::barrier_decisions_on(cpu);
     // SAFETY: (TRANSLATE) as above.
-    unsafe { next.core().space().install(None) };
+    unsafe { next.core().own_space().install(None) };
     let decided = arch::barrier_decisions_on(cpu).saturating_sub(before);
     // SAFETY: (TRANSLATE) as above.
-    unsafe { next.core().space().uninstall() };
+    unsafe { next.core().own_space().uninstall() };
     <arch::Irq as IrqControl>::restore(saved);
     decided
 }
@@ -625,11 +625,16 @@ fn check_leaving_at_once(
     // This processor's last space a member's, the leaver's.
     let saved = <arch::Irq as IrqControl>::disable();
     // SAFETY: (TRANSLATE) as in `switch_and_back`.
-    unsafe { first.core().space().install(None) };
+    unsafe { first.core().own_space().install(None) };
     // SAFETY: (TRANSLATE) as above.
-    unsafe { leaver.core().space().install(Some(first.core().space())) };
+    unsafe {
+        leaver
+            .core()
+            .own_space()
+            .install(Some(first.core().own_space()));
+    };
     // SAFETY: (TRANSLATE) as above.
-    unsafe { leaver.core().space().uninstall() };
+    unsafe { leaver.core().own_space().uninstall() };
     <arch::Irq as IrqControl>::restore(saved);
     let decided = |cpu: Option<usize>| cpu.map_or(0, arch::barrier_decisions_on);
     let other = parked.as_ref().map(|&(_, other)| other);
@@ -683,7 +688,7 @@ fn park_elsewhere(
         NICE_0_WEIGHT,
         other,
         only,
-        Some(Arc::clone(leaver.core().space())),
+        Some(Arc::clone(leaver.core().own_space())),
     )?;
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
     while !PARKED.load(Ordering::Acquire) {
@@ -821,7 +826,7 @@ fn check_recorded_after_the_scan(
     made.push(Arc::clone(&leaver));
     let none = AddressSpace::new().map_err(|_| "no address space for case 11")?;
     *LATE_NONE.lock() = Some(none);
-    *LATE_MEMBER.lock() = Some(Arc::clone(first.core().space()));
+    *LATE_MEMBER.lock() = Some(Arc::clone(first.core().own_space()));
     for flag in [
         &LATE_READY,
         &LATE_GO,
@@ -1019,8 +1024,8 @@ fn check_forget_racing_an_install(
     made.push(Arc::clone(&forgotten));
     let leaver = born_in(marked)?;
     made.push(Arc::clone(&leaver));
-    *RACED_FORGOTTEN.lock() = Some(Arc::clone(forgotten.core().space()));
-    *RACED_MEMBER.lock() = Some(Arc::clone(leaver.core().space()));
+    *RACED_FORGOTTEN.lock() = Some(Arc::clone(forgotten.core().own_space()));
+    *RACED_MEMBER.lock() = Some(Arc::clone(leaver.core().own_space()));
     for flag in [
         &RACED_READY,
         &RACED_ARMED,
@@ -1059,7 +1064,7 @@ fn check_forget_racing_an_install(
 
     RACED_ARMED.store(true, Ordering::SeqCst);
     arch::arm_forget_hook(&RACED_HOOK);
-    arch::forget_root(forgotten.core().space().root_table());
+    arch::forget_root(forgotten.core().own_space().root_table());
     arch::disarm_forget_hook();
     let acted = !RACED_ARMED.swap(false, Ordering::SeqCst);
 

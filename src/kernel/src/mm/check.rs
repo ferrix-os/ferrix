@@ -123,6 +123,63 @@ pub fn sweep_user_root(space: &crate::user::space::AddressSpace) -> Result<WxRep
     }
 }
 
+// CHECKS-ONLY: object/region_check.rs
+/// Sweep a restricted root (`docs/microkernel/K1.md` §10): no entry at or above
+/// `SHARED_BASE`, and no leaf below it on a frame the region's own tables map.
+/// Answers the leaves walked. Neither the check's program nor any restricted
+/// space it makes maps a VMO of the region's, so no frame is excused.
+///
+/// # Errors
+///
+/// What it found.
+#[doc(hidden)]
+pub fn sweep_restricted(
+    restricted: &crate::user::space::AddressSpace,
+    region: &crate::user::space::AddressSpace,
+) -> Result<u64, &'static str> {
+    use alloc::vec::Vec;
+    let mut frames: Vec<u64> = Vec::new();
+    let mut short = false;
+    region.with_root_held(|root| {
+        let _ = sweep(root, |leaf| {
+            if leaf.flags.user {
+                if frames.try_reserve(1).is_err() {
+                    short = true;
+                    return false;
+                }
+                frames.push(leaf.phys.0);
+            }
+            true
+        });
+    });
+    if short {
+        return Err("no memory to list the region's frames");
+    }
+    frames.sort_unstable();
+    let mut leaves = 0;
+    let mut found = None;
+    restricted.with_root_held(|root| {
+        for slot in restricted.shared_slots() {
+            if super::root_slot_entry(root, slot) != 0 {
+                found = Some("a root entry of the region's in a restricted root");
+                return;
+            }
+        }
+        let _ = sweep(root, |leaf| {
+            if !leaf.flags.user {
+                return true;
+            }
+            leaves += 1;
+            if frames.binary_search(&leaf.phys.0).is_ok() {
+                found = Some("a frame of the region's in a restricted root");
+                return false;
+            }
+            true
+        });
+    });
+    found.map_or(Ok(leaves), Err)
+}
+
 /// A mapping that is both writable and executable.
 #[derive(Clone, Copy, Debug)]
 pub struct WriteExecute {

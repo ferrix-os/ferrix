@@ -63,17 +63,19 @@ use ferrix_native_abi::status;
 use ferrix_native_abi::types::{
     self, ADDRESS_BY_VMO, ADDRESS_COMPARE, ADDRESS_SHARED, ADDRESS_WAIT_ANY_MAX,
     APERTURE_INFO_BYTES, AddressWord, ApertureInfo, CHANNEL_MAX_BYTES, CHANNEL_MAX_HANDLES,
-    DEVICE_INFO_BYTES, DIRTY_STATE_AWAITING_CLEAN, DIRTY_STATE_DIRTY, DeviceInfo, JOB_SEALED,
-    JOB_SPECULATION_DOMAIN, MAP_EXECUTE, MAP_NO_PAGER, MAP_READ, MAP_WRITE, PAGER_OP_DECOMMIT,
-    PAGER_OP_DETACH, PAGER_OP_DIRTY, PAGER_OP_FAIL, PAGER_OP_WRITEBACK_BEGIN,
-    PAGER_OP_WRITEBACK_END, PAGER_VMO_NO_COPY_WAIT, PAGER_VMO_TRAP_DIRTY, POWER_READ_WORDS,
-    PortPacket, ProcessStatus, ReadActual, ReadAttested, TREE_X86_POWER,
+    DEVICE_INFO_BYTES, DIRTY_STATE_AWAITING_CLEAN, DIRTY_STATE_DIRTY, DeviceInfo, JOB_LEVEL_SET,
+    JOB_LEVEL_SHIFT, JOB_LEVEL_TOP, JOB_SEALED, JOB_SPECULATION_DOMAIN, MAP_EXECUTE, MAP_NO_PAGER,
+    MAP_READ, MAP_WRITE, PAGER_OP_DECOMMIT, PAGER_OP_DETACH, PAGER_OP_DIRTY, PAGER_OP_FAIL,
+    PAGER_OP_WRITEBACK_BEGIN, PAGER_OP_WRITEBACK_END, PAGER_VMO_NO_COPY_WAIT, PAGER_VMO_TRAP_DIRTY,
+    POWER_READ_WORDS, PortPacket, ProcessStatus, ReadActual, ReadAttested, TREE_X86_POWER,
 };
 use ferrix_objects::message::Message;
 use ferrix_objects::reach::Reach;
 use ferrix_objects::table::TableError;
 use ferrix_sync::Once;
 use ferrix_vma::VmaFlags;
+
+mod region;
 
 use crate::arch;
 use crate::audit;
@@ -333,6 +335,12 @@ pub fn processes() -> Option<&'static Processes> {
 /// Whether the calling thread of `caller` is to leave its wait: as the
 /// personality says, or, with none registered, once its process has ended.
 fn must_leave(caller: &dyn Host) -> bool {
+    // A thread of a process no personality holds has no personality to ask:
+    // its process's end, and a kick of a wait it made from restricted mode
+    // (`docs/microkernel/K1.md` §2.4).
+    if crate::sched::running_bare() {
+        return caller.core().is_terminated() || crate::sched::work::restricted_kick_due();
+    }
     match processes() {
         Some(processes) => (processes.must_leave)(caller),
         None => caller.core().is_terminated(),
@@ -604,6 +612,23 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         | NativeCall::SpaceAllocate
         | NativeCall::SpaceWrite
         | NativeCall::SpaceClone => space_call(call, process, &a),
+        NativeCall::JobDeclareBuffer => job_declare_buffer(process, handle(a[0]), handle(a[1])),
+        NativeCall::RegionCreate
+        | NativeCall::ProcessCreateShared
+        | NativeCall::ProcessStartShared
+        | NativeCall::ThreadCreate
+        | NativeCall::ThreadSelf
+        | NativeCall::ThreadExit
+        | NativeCall::RestrictedKick
+        | NativeCall::HandleToShared
+        | NativeCall::HandleToPrivate
+        | NativeCall::RestrictedContextRead
+        | NativeCall::RestrictedVectorsRead
+        | NativeCall::RestrictedVectorsWrite
+        | NativeCall::RestrictedCopyWindow
+        | NativeCall::RestrictedEnter
+        | NativeCall::RestrictedResume
+        | NativeCall::RestrictedContinue => region::answer(call, process, &a),
     }
 }
 
@@ -699,7 +724,7 @@ fn channel_create(process: &Process, out: u64) -> Result<usize, Errno> {
     }
     let handles = insert_all(process, ends)?;
     let written = handle_bytes(&handles)
-        .and_then(|bytes| uaccess::copy_to_user(process.space(), out, &bytes).map_err(fault));
+        .and_then(|bytes| uaccess::copy_to_user(process.own_space(), out, &bytes).map_err(fault));
     if let Err(problem) = written {
         // The program never learned the numbers, so nothing can close them
         // but this. Another thread may already have guessed one and closed
@@ -728,6 +753,202 @@ fn insert_all(process: &Process, objects: Vec<(Object, Rights)>) -> Result<Vec<H
         object::dispose(objects.into_iter().map(|(object, _)| object));
         status
     })
+}
+
+/// Whether any of `transfers` may not land in `process`'s table: the door's first
+/// look, so a read with nothing refused goes on as ever.
+fn transfers_refused(process: &Process, transfers: &[object::Transfer]) -> bool {
+    let holder = process.exit().level();
+    transfers
+        .iter()
+        .any(|(object, rights)| object::level::may_hold(holder, object, *rights).is_err())
+}
+
+/// [`deliver`] of a message with a handle its reader may not hold: the bytes
+/// delivered, that handle's slot `Handle::INVALID` and the object disposed, each
+/// refusal audited (`docs/microkernel/K17.md` §3). A read that cannot finish puts
+/// the whole message back, the refused handles in it: the refusal counts at final
+/// delivery alone.
+fn deliver_some(
+    process: &Process,
+    endpoint: &Endpoint,
+    message: ChannelMessage,
+    at: Destination,
+    through: UserCopy,
+) -> Result<Vec<object::Transfer>, Undelivered> {
+    let holder = process.exit().level();
+    let Message {
+        bytes: data,
+        handles: mut transfers,
+        sender,
+    } = message;
+    let count = transfers.len();
+    let Ok(mut refused) = fallible::try_with_capacity(count) else {
+        unread(
+            endpoint,
+            Message {
+                bytes: data,
+                handles: transfers,
+                sender,
+            },
+        );
+        return Err(Undelivered::Refused(status::NO_MEMORY));
+    };
+    let mut was_refused = [false; CHANNEL_MAX_HANDLES];
+    // From the end, so that a removal leaves the earlier indices alone.
+    for index in (0..count).rev() {
+        let landing = transfers.get(index).is_some_and(|(object, rights)| {
+            object::level::may_hold(holder, object, *rights).is_ok()
+        });
+        if !landing {
+            // NOALLOC: room for every handle was had above.
+            refused.push(transfers.remove(index));
+            if let Some(mark) = was_refused.get_mut(index) {
+                *mark = true;
+            }
+        }
+    }
+    // The whole message again: `refused` holds the highest index first.
+    let restore = |mut kept: Vec<object::Transfer>, mut refused: Vec<object::Transfer>| {
+        for (index, _) in was_refused.iter().enumerate().filter(|(_, mark)| **mark) {
+            if let Some(transfer) = refused.pop() {
+                // NOALLOC: the capacity the message came with.
+                kept.insert(index, transfer);
+            }
+        }
+        kept
+    };
+    // FALLIBLE: the handle table's reserve refuses with `TableError::NoMemory`.
+    let placed = process.with_handles(|table| match table.reserve(transfers.len()) {
+        Ok(()) => table
+            .insert_many(transfers)
+            .map_err(|(why, transfers)| (table_error(why), transfers)),
+        Err(error) => Err((table_error(error), transfers)),
+    });
+    let values = match placed {
+        Ok(values) => values,
+        Err((why, kept)) => {
+            unread(
+                endpoint,
+                Message {
+                    bytes: data,
+                    handles: restore(kept, refused),
+                    sender,
+                },
+            );
+            return Err(Undelivered::Refused(why));
+        }
+    };
+    let mut slots = [Handle::INVALID; CHANNEL_MAX_HANDLES];
+    let mut landed = values.iter();
+    for (slot, mark) in slots.iter_mut().zip(&was_refused).take(count) {
+        if !*mark {
+            *slot = landed.next().copied().unwrap_or(Handle::INVALID);
+        }
+    }
+    let slots = slots.get(..count).unwrap_or(&[]);
+    if let Err(problem) = put_message(process, at, &data, slots, sender, through) {
+        if let Ok(kept) = process.with_handles(|table| table.take_many(&values, Rights::NONE)) {
+            unread(
+                endpoint,
+                Message {
+                    bytes: data,
+                    handles: restore(kept, refused),
+                    sender,
+                },
+            );
+        }
+        return Err(problem);
+    }
+    Ok(refused)
+}
+
+/// A message's three parts to the reader: its bytes, its handle slots, its record.
+fn put_message(
+    process: &Process,
+    at: Destination,
+    data: &[u8],
+    slots: &[Handle],
+    sender: Sender,
+    through: UserCopy,
+) -> Result<(), Undelivered> {
+    put_user(process, at.bytes, data, through)?;
+    let bytes = handle_bytes(slots).map_err(Undelivered::Refused)?;
+    put_user(process, at.handles, &bytes, through)?;
+    let record = record_bytes(at.actual, data.len(), slots.len(), sender);
+    put_user(
+        process,
+        at.actual.at,
+        record.get(..at.actual.size()).unwrap_or_default(),
+        through,
+    )
+}
+
+/// Whether a job at `level` may map `vmo`: rules (b) and (d), audited.
+fn may_map_at(process: &Process, vmo: &Vmo, level: u8) -> Result<(), Errno> {
+    if vmo.may_map_at(level) {
+        return Ok(());
+    }
+    record_level(
+        process,
+        audit::target::RESOURCE,
+        0,
+        level,
+        vmo.highest_mapper(),
+    );
+    Err(status::ACCESS_DENIED)
+}
+
+/// `job_create`'s options bits that ask for a level.
+const JOB_LEVEL_BITS: u64 = JOB_LEVEL_SET | (0b111 << JOB_LEVEL_SHIFT);
+
+/// The level `job_create`'s options ask for, if they do.
+fn job_level_asked(options: u64) -> Result<Option<u8>, Errno> {
+    if options & JOB_LEVEL_SET == 0 {
+        return if options & JOB_LEVEL_BITS == 0 {
+            Ok(None)
+        } else {
+            Err(status::INVALID_ARGS)
+        };
+    }
+    let level = ((options >> JOB_LEVEL_SHIFT) & 0b111) as u8;
+    if level > JOB_LEVEL_TOP {
+        return Err(status::INVALID_ARGS);
+    }
+    Ok(Some(level))
+}
+
+/// Audit a refusal between levels (`docs/microkernel/K17.md` rule g).
+fn record_level(process: &Process, kind: u32, id: u64, holder: u8, object: u8) {
+    audit::record(
+        audit::LEVEL,
+        audit::Outcome::Refused,
+        0,
+        audit::Subject::of(process),
+        audit::Target { kind, id },
+        [u32::from(holder), u32::from(object), 0],
+    );
+}
+
+/// `job_declare_buffer`: `(job, vmo)`.
+fn job_declare_buffer(process: &Process, job: Handle, vmo: Handle) -> Result<usize, Errno> {
+    let job = job_in(process, job, Rights::SET_LIMIT)?;
+    let vmo = process.with_handles(|table| vmo_in(table, vmo, Rights::MAP))?;
+    if !vmo.declare_for(job.level()) {
+        return Err(status::BAD_STATE);
+    }
+    audit::record(
+        audit::BUFFER_DECLARED,
+        audit::Outcome::Done,
+        0,
+        audit::Subject::of(process),
+        audit::Target {
+            kind: audit::target::JOB,
+            id: job.id(),
+        },
+        [u32::from(job.level()), 0, 0],
+    );
+    Ok(0)
 }
 
 /// `channel_write`.
@@ -909,7 +1130,7 @@ fn channel_read(
                 // larger than the message and faulting it all in would commit
                 // memory nothing asked for. Best effort: a buffer this cannot
                 // fault in is answered for when the message is delivered.
-                let space = process.space();
+                let space = process.own_space();
                 let first_page = usize::try_from(PAGE_SIZE - bytes.at % PAGE_SIZE).unwrap_or(0);
                 let _ = uaccess::fault_in_for_write(space, bytes.at, byte_capacity.min(first_page));
                 let _ = uaccess::fault_in_for_write(
@@ -944,12 +1165,27 @@ fn channel_read(
             actual,
         };
         match deliver(process, &endpoint, message, at, through) {
-            Ok(()) => return Ok(0),
+            Ok(refused) => {
+                // Outside the lock: the record, and what the refused handles
+                // held (`docs/microkernel/K17.md`).
+                drop(topology);
+                for (object, _) in refused {
+                    record_level(
+                        process,
+                        audit::target::HANDLE,
+                        0,
+                        process.exit().level(),
+                        object::level::level_of(&object),
+                    );
+                    object::dispose([object]);
+                }
+                return Ok(0);
+            }
             Err(Undelivered::Refused(why)) => return Err(why),
             Err(Undelivered::WouldFault) => {
                 let _ = FAULTED_ROUNDS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                 drop(topology.take());
-                let space = process.space();
+                let space = process.own_space();
                 uaccess::fault_in_for_write(space, bytes.at, byte_count).map_err(fault)?;
                 uaccess::fault_in_for_write(
                     space,
@@ -1101,6 +1337,12 @@ fn send_words(
         })
 }
 
+/// Whether a receive may park for a fast writer: on a boot that has the fast
+/// path, and not from restricted mode, whose wait a kick must end.
+fn may_park() -> bool {
+    crate::trap::fast_write_read().is_some() && !crate::sched::running_restricted()
+}
+
 /// `channel_write_read`'s read: wait for the next message on `endpoint` and
 /// answer its size and its words, the bytes after it zero.
 fn receive_words(endpoint: &Endpoint) -> Result<(usize, [u64; 3]), Errno> {
@@ -1114,7 +1356,8 @@ fn receive_words(endpoint: &Endpoint) -> Result<(usize, [u64; 3]), Errno> {
         // 2), on a boot that has the fast path: park, so that a fast writer
         // can hand the next message over directly. Declined, it waits below
         // as before; woken without a reply, it carries on as after that wait.
-        if crate::trap::fast_write_read().is_some() {
+        // From restricted mode, the general wait alone, which a kick ends.
+        if may_park() {
             match park_for_reply(endpoint) {
                 Parked::Replied(answer) => return Ok(answer),
                 Parked::Woken => {
@@ -1130,9 +1373,12 @@ fn receive_words(endpoint: &Endpoint) -> Result<(usize, [u64; 3]), Errno> {
         // and its process's end wakes the task. Two loads (2e): the end's
         // word, and the caller's `END` (`sched::work`), which the core posts
         // for every case the personality's `must_leave` answers true.
-        let _ = endpoint
-            .waiters()
-            .wait_trusting(|| endpoint.readable_or_closed() || crate::sched::work::own_end());
+        let _ = endpoint.waiters().wait_trusting(|| {
+            endpoint.readable_or_closed() || crate::sched::work::own_end_or_restricted_kick()
+        });
+        if crate::sched::work::restricted_kick_due() {
+            return Err(status::INTERRUPTED);
+        }
         if crate::sched::work::own_end() {
             return Err(Errno::EINTR);
         }
@@ -1406,12 +1652,25 @@ fn deliver(
     message: ChannelMessage,
     at: Destination,
     through: UserCopy,
-) -> Result<(), Undelivered> {
+) -> Result<Vec<object::Transfer>, Undelivered> {
     let Message {
         bytes: data,
         handles: transfers,
         sender,
     } = message;
+    if !transfers.is_empty() && transfers_refused(process, &transfers) {
+        return deliver_some(
+            process,
+            endpoint,
+            Message {
+                bytes: data,
+                handles: transfers,
+                sender,
+            },
+            at,
+            through,
+        );
+    }
     // FALLIBLE: the handle table's reserve refuses with `TableError::NoMemory`.
     let placed = process.with_handles(|table| match table.reserve(transfers.len()) {
         Ok(()) => table
@@ -1434,20 +1693,7 @@ fn deliver(
         }
     };
 
-    let copied = put_user(process, at.bytes, &data, through)
-        .and_then(|()| {
-            let bytes = handle_bytes(&values).map_err(Undelivered::Refused)?;
-            put_user(process, at.handles, &bytes, through)
-        })
-        .and_then(|()| {
-            let record = record_bytes(at.actual, data.len(), values.len(), sender);
-            put_user(
-                process,
-                at.actual.at,
-                record.get(..at.actual.size()).unwrap_or_default(),
-                through,
-            )
-        });
+    let copied = put_message(process, at, &data, &values, sender, through);
     if let Err(problem) = copied {
         // Taken back and requeued, so a bad buffer loses nothing. If another
         // thread of this process has already closed one of the new handles,
@@ -1467,7 +1713,7 @@ fn deliver(
         }
         return Err(problem);
     }
-    Ok(())
+    Ok(Vec::new())
 }
 
 /// Put `message` back at the head of `endpoint`'s queue, or free what it
@@ -1482,9 +1728,9 @@ fn unread(endpoint: &Endpoint, message: ChannelMessage) {
 /// Copy `data` to `at` in the reader's memory, as `through` allows.
 fn put_user(process: &Process, at: u64, data: &[u8], through: UserCopy) -> Result<(), Undelivered> {
     match through {
-        UserCopy::Faulting => uaccess::copy_to_user(process.space(), at, data)
+        UserCopy::Faulting => uaccess::copy_to_user(process.own_space(), at, data)
             .map_err(|why| Undelivered::Refused(fault(why))),
-        UserCopy::Present => match uaccess::copy_to_user_present(process.space(), at, data) {
+        UserCopy::Present => match uaccess::copy_to_user_present(process.own_space(), at, data) {
             Ok(true) => Ok(()),
             Ok(false) => Err(Undelivered::WouldFault),
             Err(why) => Err(Undelivered::Refused(fault(why))),
@@ -1526,7 +1772,7 @@ fn record_bytes(
 
 /// Write a [`ReadActual`] to `at`.
 fn report_actual(process: &Process, at: u64, bytes: usize, handles: usize) -> Result<(), Errno> {
-    uaccess::copy_to_user(process.space(), at, &actual_bytes(bytes, handles)).map_err(fault)
+    uaccess::copy_to_user(process.own_space(), at, &actual_bytes(bytes, handles)).map_err(fault)
 }
 
 /// The channel endpoint a handle names, if it carries `needed`.
@@ -1592,7 +1838,7 @@ fn capacity(count: u64, max: usize) -> usize {
 fn copy_in(process: &Process, at: u64, count: usize) -> Result<Vec<u8>, Errno> {
     let mut data = fallible::try_filled(0_u8, count).map_err(|_| status::NO_MEMORY)?;
     if count > 0 {
-        uaccess::copy_from_user(process.space(), at, &mut data).map_err(fault)?;
+        uaccess::copy_from_user(process.own_space(), at, &mut data).map_err(fault)?;
     }
     Ok(data)
 }
@@ -1618,7 +1864,7 @@ fn handle_bytes(handles: &[Handle]) -> Result<Vec<u8>, Errno> {
 /// A 64-bit value read through a pointer argument.
 fn read_u64(process: &Process, at: u64) -> Result<u64, Errno> {
     let mut word = [0_u8; 8];
-    uaccess::copy_from_user(process.space(), at, &mut word).map_err(fault)?;
+    uaccess::copy_from_user(process.own_space(), at, &mut word).map_err(fault)?;
     Ok(u64::from_ne_bytes(word))
 }
 
@@ -1629,6 +1875,7 @@ fn vmo_create(process: &Process, bytes: u64) -> Result<usize, Errno> {
         return Err(status::NO_MEMORY);
     }
     let vmo = Vmo::new_anonymous(pages).map_err(|_| status::NO_MEMORY)?;
+    vmo.set_creator_level(process.exit().level());
     insert_new(process, Object::Vmo(vmo), Rights::VMO)
 }
 
@@ -1713,10 +1960,10 @@ fn copy_page(
         Direction::Read => {
             vmo.read_page(at / PAGE_SIZE, within, slot)
                 .map_err(vmo_error)?;
-            uaccess::copy_to_user(process.space(), user, slot).map_err(fault)
+            uaccess::copy_to_user(process.own_space(), user, slot).map_err(fault)
         }
         Direction::Write => {
-            uaccess::copy_from_user(process.space(), user, slot).map_err(fault)?;
+            uaccess::copy_from_user(process.own_space(), user, slot).map_err(fault)?;
             vmo.write_page(at / PAGE_SIZE, within, slot)
                 .map_err(vmo_error)
         }
@@ -1745,7 +1992,7 @@ fn copy_paged(
         Err(_) => Err(status::FAULT),
     };
     if direction == Direction::Write {
-        uaccess::copy_from_user(process.space(), user, slot).map_err(fault)?;
+        uaccess::copy_from_user(process.own_space(), user, slot).map_err(fault)?;
     }
     for _ in 0..PAGED_TRIES {
         let wanted = match direction {
@@ -1755,7 +2002,7 @@ fn copy_paged(
         let Some(command) = wanted else {
             return match direction {
                 Direction::Read => {
-                    uaccess::copy_to_user(process.space(), user, slot).map_err(fault)
+                    uaccess::copy_to_user(process.own_space(), user, slot).map_err(fault)
                 }
                 Direction::Write => Ok(()),
             };
@@ -1865,7 +2112,7 @@ fn pager_create(
     }
     let port = port_in(process, port, Rights::WRITE)?;
     let wait_ns = read_u64(process, wait_at)?;
-    let pager = Pager::new(port, wait_ns).map_err(|_| status::NO_MEMORY)?;
+    let pager = Pager::new(port, wait_ns, process.exit().level()).map_err(|_| status::NO_MEMORY)?;
     let pager = fallible::try_arc(pager).map_err(|_| status::NO_MEMORY)?;
     insert_new(process, Object::Pager(pager), Rights::PAGER_OBJECT)
 }
@@ -1922,8 +2169,13 @@ fn pager_create_vmo(process: &Process, pager: Handle, spec_at: u64) -> Result<us
         .core()
         .link(key, options)
         .map_err(|_| status::NO_MEMORY)?;
+    // Served at the pager's level, whoever makes the VMO: a job above may hold a
+    // lower job's pager, and what it maps is that lower job's to fill.
+    let serving = pager.level();
     drop(pager);
     let vmo = Vmo::new_paged(pages, link).map_err(|_| status::NO_MEMORY)?;
+    vmo.set_creator_level(process.exit().level());
+    vmo.set_pager_level(serving);
     insert_new(process, Object::Vmo(vmo), Rights::VMO)
 }
 
@@ -2099,7 +2351,7 @@ fn pager_query_dirty(
             bytes.copy_from_slice(&word.to_ne_bytes());
         }
         let to = out.at.saturating_add(24 * at as u64);
-        uaccess::copy_to_user(process.space(), to, &record).map_err(fault)?;
+        uaccess::copy_to_user(process.own_space(), to, &record).map_err(fault)?;
     }
     if more {
         return Err(status::BUFFER_TOO_SMALL);
@@ -2121,7 +2373,8 @@ fn vmo_error(error: VmoError) -> Errno {
 /// `vmo_get_size`.
 fn vmo_get_size(process: &Process, vmo: Handle, out: u64) -> Result<usize, Errno> {
     let vmo = process.with_handles(|table| vmo_in(table, vmo, Rights::NONE))?;
-    uaccess::copy_to_user(process.space(), out, &vmo.len_bytes().to_ne_bytes()).map_err(fault)?;
+    uaccess::copy_to_user(process.own_space(), out, &vmo.len_bytes().to_ne_bytes())
+        .map_err(fault)?;
     Ok(0)
 }
 
@@ -2185,7 +2438,7 @@ fn object_wait_one(
     object::dispose([object]);
 
     if observed_at != 0 {
-        uaccess::copy_to_user(process.space(), observed_at, &observed.0.to_ne_bytes())
+        uaccess::copy_to_user(process.own_space(), observed_at, &observed.0.to_ne_bytes())
             .map_err(fault)?;
     }
     if must_leave(caller) {
@@ -2287,7 +2540,9 @@ fn device_call(call: NativeCall, process: &Process, a: &[u64; 6]) -> Result<usiz
 
 /// `job_create`.
 fn job_create(process: &Process, parent: Handle, options: u64) -> Result<usize, Errno> {
-    if options & !(JOB_SPECULATION_DOMAIN | JOB_SEALED | types::JOB_MEASURED) != 0 {
+    let level_asked = job_level_asked(options)?;
+    if options & !(JOB_SPECULATION_DOMAIN | JOB_SEALED | types::JOB_MEASURED | JOB_LEVEL_BITS) != 0
+    {
         return Err(status::INVALID_ARGS);
     }
     // MANAGE on the parent is the authority both to make a job and to make
@@ -2295,7 +2550,21 @@ fn job_create(process: &Process, parent: Handle, options: u64) -> Result<usize, 
     // before anything is made, so a refusal marks nothing.
     let parent = job_in(process, parent, Rights::MANAGE)?;
     let domain = options & JOB_SPECULATION_DOMAIN != 0;
-    let made = parent.new_child_as(domain, options & JOB_SEALED != 0);
+    let sealed = options & JOB_SEALED != 0;
+    let made = match level_asked {
+        Some(level) if level > parent.level() => {
+            record_level(
+                process,
+                audit::target::JOB,
+                parent.id(),
+                level,
+                parent.level(),
+            );
+            return Err(status::ACCESS_DENIED);
+        }
+        Some(level) => parent.new_child_at(domain, sealed, level),
+        None => parent.new_child_as(domain, sealed),
+    };
     let child = made.map_err(|why| match why {
         job::JobError::NoMemory => status::NO_MEMORY,
         _ => status::BAD_STATE,
@@ -2430,7 +2699,7 @@ fn job_get_quota(process: &Process, job: Handle, resource: u64, out: u64) -> Res
     for (chunk, value) in bytes.chunks_exact_mut(8).zip([used, limit, refused]) {
         chunk.copy_from_slice(&value.to_ne_bytes());
     }
-    uaccess::copy_to_user(process.space(), out, &bytes).map_err(fault)?;
+    uaccess::copy_to_user(process.own_space(), out, &bytes).map_err(fault)?;
     Ok(0)
 }
 
@@ -2450,7 +2719,7 @@ fn audit_read(
 ) -> Result<usize, Errno> {
     let which = audit_ring(process, handle, which)?;
     let mut words = [0_u8; types::AUDIT_ANSWER_WORDS * 8];
-    uaccess::copy_from_user(process.space(), answer, &mut words).map_err(fault)?;
+    uaccess::copy_from_user(process.own_space(), answer, &mut words).map_err(fault)?;
     let from = words
         .get(8..16)
         .and_then(|bytes| <[u8; 8]>::try_from(bytes).ok())
@@ -2476,7 +2745,7 @@ fn audit_read(
     for (chunk, value) in words.chunks_exact_mut(8).zip(told) {
         chunk.copy_from_slice(&value.to_ne_bytes());
     }
-    uaccess::copy_to_user(process.space(), answer, &words).map_err(fault)?;
+    uaccess::copy_to_user(process.own_space(), answer, &words).map_err(fault)?;
     Ok(0)
 }
 
@@ -2541,7 +2810,7 @@ fn memory_scrub(
     for (chunk, value) in words.chunks_exact_mut(8).zip(told) {
         chunk.copy_from_slice(&value.to_ne_bytes());
     }
-    uaccess::copy_to_user(process.space(), answer, &words).map_err(fault)?;
+    uaccess::copy_to_user(process.own_space(), answer, &words).map_err(fault)?;
     Ok(0)
 }
 
@@ -2586,7 +2855,7 @@ fn copy_records(
     let read = audit::read(which, from, &mut records);
     let mut at = buffer;
     for record in records.iter().take(read.copied) {
-        uaccess::copy_to_user(process.space(), at, &record.to_bytes()).map_err(fault)?;
+        uaccess::copy_to_user(process.own_space(), at, &record.to_bytes()).map_err(fault)?;
         at = at.wrapping_add(ferrix_audit::RECORD_BYTES as u64);
     }
     // Only once every record is out: a copy that faulted gave the reader
@@ -2669,7 +2938,7 @@ fn new_process_handle(
         });
     }
     if job.measured() {
-        let space = child.core().space();
+        let space = child.core().own_space();
         space.measure();
         if let Some(digest) = digest
             && space.note_image(digest).is_err()
@@ -2810,6 +3079,12 @@ fn start_with(
         child.control().map(Arc::clone).ok_or(status::BAD_STATE)
     })?;
     let child = control.host().ok_or(status::BAD_STATE)?;
+    // `PROCESS_START_SHARED` starts a process of a region, and only that: `PROCESS_RUN` is
+    // answered from restricted mode, where this would be a normal-mode thread at an entry
+    // the program chose (ledger 6575 D3).
+    if child.core().region().is_some() {
+        return Err(status::BAD_STATE);
+    }
     let processes = processes().ok_or(status::BAD_STATE)?;
     let mut place = || {
         if bootstrap == Handle::default() {
@@ -2837,12 +3112,14 @@ fn start_with(
 /// whose task has not run, cannot meet the same two locks taken the other way
 /// round. Needs `TRANSFER`.
 fn move_handle(from: &Process, to: &Process, handle: Handle) -> Result<Handle, Errno> {
+    let level = to.exit().level();
     let outcome = from.with_handles(|source| {
-        let (_, rights) = source.get(handle).map_err(table_error)?;
+        let (object, rights) = source.get(handle).map_err(table_error)?;
         if !rights.contains(Rights::TRANSFER) {
             return Err(status::ACCESS_DENIED);
         }
-        to.with_handles(|target| {
+        object::level::may_hold(level, object, rights).map_err(|_| status::ACCESS_DENIED)?;
+        to.with_private_handles(|target| {
             if target.is_closed() {
                 return Err(status::BAD_STATE);
             }
@@ -2885,11 +3162,13 @@ fn move_handle(from: &Process, to: &Process, handle: Handle) -> Result<Handle, E
 /// `BAD_HANDLE`, `ACCESS_DENIED` without `TRANSFER`, `ALREADY_BOUND` for a
 /// slot given before, `BAD_STATE` for a sealed one.
 pub fn give_bootstrap(from: &Process, to: &Process, handle: Handle) -> Result<usize, Errno> {
+    let level = to.exit().level();
     from.with_handles(|source| {
-        let (_, rights) = source.get(handle).map_err(table_error)?;
+        let (object, rights) = source.get(handle).map_err(table_error)?;
         if !rights.contains(Rights::TRANSFER) {
             return Err(status::ACCESS_DENIED);
         }
+        object::level::may_hold(level, object, rights).map_err(|_| status::ACCESS_DENIED)?;
         to.with_bootstrap(|slot| {
             match slot.refusal() {
                 Some(GiveRefused::Given) => return Err(status::ALREADY_BOUND),
@@ -2992,7 +3271,7 @@ fn issue_ticket(process: &Process, channel: Handle, out: u64) -> Result<usize, E
             IssueError::PeerClosed => status::PEER_CLOSED,
             IssueError::NoMemory => status::NO_MEMORY,
         })?;
-    if let Err(error) = uaccess::copy_to_user(process.space(), out, &id.to_ne_bytes()) {
+    if let Err(error) = uaccess::copy_to_user(process.own_space(), out, &id.to_ne_bytes()) {
         // An id nobody can name is a ticket nobody can end: end it.
         let _ = endpoint.end_ticket(id);
         return Err(fault(error));
@@ -3038,7 +3317,7 @@ fn adopt_ticket(process: &Process, end: Handle, id: u64, out: u64) -> Result<usi
     {
         to.copy_from_slice(&word.to_ne_bytes());
     }
-    uaccess::copy_to_user(process.space(), out, &bytes).map_err(fault)?;
+    uaccess::copy_to_user(process.own_space(), out, &bytes).map_err(fault)?;
     object::ticket::adopt(adopted);
     Ok(0)
 }
@@ -3052,7 +3331,7 @@ fn object_id(process: &Process, target: Handle, out: u64) -> Result<usize, Errno
             _ => Err(status::WRONG_TYPE),
         }
     })?;
-    uaccess::copy_to_user(process.space(), out, &id.to_ne_bytes()).map_err(fault)?;
+    uaccess::copy_to_user(process.own_space(), out, &id.to_ne_bytes()).map_err(fault)?;
     Ok(0)
 }
 
@@ -3096,7 +3375,7 @@ fn process_status(process: &Process, target: Handle, out: u64) -> Result<usize, 
     object::dispose([Object::Process(ended)]);
     let [s0, s1, s2, s3] = answer.state.to_ne_bytes();
     let [v0, v1, v2, v3] = answer.value.to_ne_bytes();
-    uaccess::copy_to_user(process.space(), out, &[s0, s1, s2, s3, v0, v1, v2, v3])
+    uaccess::copy_to_user(process.own_space(), out, &[s0, s1, s2, s3, v0, v1, v2, v3])
         .map_err(fault)?;
     Ok(0)
 }
@@ -3290,11 +3569,11 @@ fn exception_state(
             .and_then(|registers| {
                 let mut bytes = [0_u8; <exception_abi::Registers as Words>::BYTES];
                 registers.write(&mut bytes);
-                uaccess::copy_to_user(process.space(), at, &bytes).map_err(fault)
+                uaccess::copy_to_user(process.own_space(), at, &bytes).map_err(fault)
             })
     } else {
         let mut bytes = [0_u8; <exception_abi::Registers as Words>::BYTES];
-        uaccess::copy_from_user(process.space(), at, &mut bytes)
+        uaccess::copy_from_user(process.own_space(), at, &mut bytes)
             .map_err(fault)
             .and_then(|()| {
                 <exception_abi::Registers as Words>::read(&bytes).ok_or(status::INVALID_ARGS)
@@ -3475,7 +3754,7 @@ fn power_call(call: NativeCall, process: &Process, a: &[u64; 6]) -> Result<usize
             for (chunk, word) in bytes.chunks_exact_mut(8).zip(words) {
                 chunk.copy_from_slice(&word.to_ne_bytes());
             }
-            uaccess::copy_to_user(process.space(), a[1], &bytes).map_err(fault)?;
+            uaccess::copy_to_user(process.own_space(), a[1], &bytes).map_err(fault)?;
             Ok(0)
         }
         _ => Err(Errno::ENOSYS),
@@ -3489,7 +3768,7 @@ fn power_call(call: NativeCall, process: &Process, a: &[u64; 6]) -> Result<usize
 fn device_info(process: &Process, device: Handle, at: u64) -> Result<usize, Errno> {
     let node = device_in(process, device, Rights::NONE)?;
     let info = node.describe();
-    uaccess::copy_to_user(process.space(), at, &info_bytes(&info)).map_err(fault)?;
+    uaccess::copy_to_user(process.own_space(), at, &info_bytes(&info)).map_err(fault)?;
     Ok(0)
 }
 
@@ -3503,7 +3782,7 @@ fn device_aperture(process: &Process, device: Handle, index: u64, at: u64) -> Re
         .ok()
         .and_then(|index| node.aperture_info(index))
         .ok_or(status::INVALID_ARGS)?;
-    uaccess::copy_to_user(process.space(), at, &aperture_bytes(&info)).map_err(fault)?;
+    uaccess::copy_to_user(process.own_space(), at, &aperture_bytes(&info)).map_err(fault)?;
     Ok(0)
 }
 
@@ -3548,7 +3827,7 @@ fn device_config_read(
 ) -> Result<usize, Errno> {
     let node = device_in(process, device, Rights::MANAGE)?;
     let value = node.config_read(offset, width).map_err(config_status)?;
-    uaccess::copy_to_user(process.space(), out, &value.to_ne_bytes()).map_err(fault)?;
+    uaccess::copy_to_user(process.own_space(), out, &value.to_ne_bytes()).map_err(fault)?;
     Ok(0)
 }
 
@@ -4180,7 +4459,7 @@ fn vmo_pin_addresses(
     let written = match &bytes {
         Err(_) => Err(status::NO_MEMORY),
         Ok(bytes) if bytes.is_empty() => Ok(()),
-        Ok(bytes) => uaccess::copy_to_user(process.space(), at, bytes).map_err(fault),
+        Ok(bytes) => uaccess::copy_to_user(process.own_space(), at, bytes).map_err(fault),
     };
     drop(bytes);
     let pages = addresses.len();
@@ -4216,7 +4495,7 @@ fn io_mapping_map(
     }
     let at = (address != 0).then_some(address);
     let mapped = mapping
-        .map_into(process.space(), at, combining)
+        .map_into(process.caller_space(), at, combining)
         .map_err(space_status)?;
     usize::try_from(mapped).map_err(|_| status::INVALID_ARGS)
 }
@@ -4265,8 +4544,9 @@ fn vmo_map(
         execute: false,
     };
     let at = (address != 0).then_some(address);
+    may_map_at(process, &vmo, process.exit().level())?;
     let mapped = process
-        .space()
+        .caller_space()
         .map_by_handle(at, length, vmo, offset, flags, ceiling)
         .map_err(space_status)?;
     usize::try_from(mapped).map_err(|_| status::INVALID_ARGS)
@@ -4331,7 +4611,7 @@ fn vmo_executable(process: &Process, vmo: Handle, options: u64) -> Result<usize,
     match options {
         0 => {
             // In a measured job only a sealed image is ever run (K14 §3).
-            if process.space().is_measured() {
+            if process.caller_space().is_measured() {
                 return Err(unmeasured(process, NativeCall::VmoExecutable));
             }
         }
@@ -4402,7 +4682,7 @@ fn vmo_digest(process: &Process, vmo: Handle, out: u64) -> Result<usize, Errno> 
         return Err(status::BAD_STATE);
     }
     let digest = vmo.digest().ok_or(status::SHOULD_WAIT)?;
-    uaccess::copy_to_user(process.space(), out, &digest).map_err(|_| status::FAULT)?;
+    uaccess::copy_to_user(process.own_space(), out, &digest).map_err(|_| status::FAULT)?;
     Ok(0)
 }
 
@@ -4427,13 +4707,13 @@ fn process_images(
         child.control().map(Arc::clone).ok_or(status::ACCESS_DENIED)
     })?;
     let host = child.host().ok_or(status::BAD_STATE)?;
-    let space = host.core().space();
+    let space = host.core().own_space();
     let mut digests = [[0_u8; 32]; crate::user::space::MAX_IMAGES];
     let count = space.images_into(&mut digests);
     let wanted = usize::try_from(capacity).unwrap_or(usize::MAX).min(count);
     for (index, digest) in digests.iter().take(wanted).enumerate() {
         let at = out.checked_add(index as u64 * 32).ok_or(status::FAULT)?;
-        uaccess::copy_to_user(process.space(), at, digest).map_err(|_| status::FAULT)?;
+        uaccess::copy_to_user(process.own_space(), at, digest).map_err(|_| status::FAULT)?;
     }
     Ok(if space.is_measured() {
         count
@@ -4473,8 +4753,12 @@ fn process_space(process: &Process, target: Handle, rights: u64) -> Result<usize
     // and execs a set-id file between the two either sees this handle and raises
     // nothing, or has started by the test below, and the handle goes unanswered
     // (ledger 6162 N1, L.object.309).
-    let space =
-        SpaceRef::of(Arc::clone(core.space()), core.quota_slot()).map_err(|_| status::NO_MEMORY)?;
+    let space = SpaceRef::of(
+        Arc::clone(core.own_space()),
+        core.quota_slot(),
+        core.exit().level(),
+    )
+    .map_err(|_| status::NO_MEMORY)?;
     if !control.is_unstarted() || core.is_terminated() || core.with_tasks(|tasks| !tasks.is_empty())
     {
         return Err(status::BAD_STATE);
@@ -4484,9 +4768,9 @@ fn process_space(process: &Process, target: Handle, rights: u64) -> Result<usize
 
 /// `space_create`.
 fn space_create(process: &Process) -> Result<usize, Errno> {
-    let space = SpaceRef::create().map_err(|_| status::NO_MEMORY)?;
+    let space = SpaceRef::create(process.exit().level()).map_err(|_| status::NO_MEMORY)?;
     // A measured caller's new space is measured, sticky from here (K14.7).
-    if process.space().is_measured() {
+    if process.caller_space().is_measured() {
         space.space().measure();
     }
     insert_new(process, Object::Space(space), Rights::SPACE)
@@ -4535,6 +4819,8 @@ fn space_map(
         execute: held.contains(Rights::EXECUTE),
     };
     let at = (address != 0).then_some(address);
+    // At the level of the space it lands in, not the caller's.
+    may_map_at(process, &vmo, target.level())?;
     let _layout = target.space().layout();
     let mapped = target
         .charging_owner(|| {
@@ -4651,8 +4937,24 @@ fn space_clone(process: &Process, space: Handle) -> Result<usize, Errno> {
     // Clone launders nothing: a measured caller takes no copy of a space that
     // may hold unsealed executable regions (K14.6). The clone keeps the
     // source's state, either way, in `AddressSpace::fork`.
-    if process.space().is_measured() && !source.space().is_measured() {
+    if process.caller_space().is_measured() && !source.space().is_measured() {
         return Err(unmeasured(process, NativeCall::SpaceClone));
+    }
+    // Nothing forks a region (`docs/microkernel/K11.md` §2.2).
+    if source.space().is_region() {
+        return Err(status::NOT_SUPPORTED);
+    }
+    // A clone keeps every mapping's VMO at the source's level: a space of another
+    // level is not cloned (`docs/microkernel/K17.md` §3).
+    if source.level() != process.exit().level() {
+        record_level(
+            process,
+            audit::target::HANDLE,
+            0,
+            process.exit().level(),
+            source.level(),
+        );
+        return Err(status::ACCESS_DENIED);
     }
     let clone = source.clone_space().map_err(|_| status::NO_MEMORY)?;
     insert_new(process, Object::Space(clone), rights)
@@ -4682,7 +4984,7 @@ fn space_write(
     space_steps(address, length, |done, to, step| {
         let from = buffer.checked_add(done as u64).ok_or(status::FAULT)?;
         let chunk = bounce.get_mut(..step).ok_or(status::FAULT)?;
-        uaccess::copy_from_user(process.space(), from, chunk).map_err(fault)?;
+        uaccess::copy_from_user(process.own_space(), from, chunk).map_err(fault)?;
         let chunk = bounce.get(..step).ok_or(status::FAULT)?;
         target.charging_owner(|| write_target(target.space(), to, chunk))
     })
@@ -4692,6 +4994,10 @@ fn space_write(
 /// for a write -- which copies a copy-on-write page -- with the space's own
 /// fault, never `oom::fault`, if it is not there to be written yet.
 fn write_target(space: &AddressSpace, to: u64, data: &[u8]) -> Result<(), Errno> {
+    // As `read_target`.
+    if to.saturating_add(data.len() as u64) > space.ceiling() {
+        return Err(status::FAULT);
+    }
     for _ in 0..SPACE_COPY_TRIES {
         match uaccess::copy_to_user_present(space, to, data) {
             Ok(true) => return Ok(()),
@@ -4743,7 +5049,7 @@ fn space_read(
         target.charging_owner(|| read_target(target.space(), from, chunk))?;
         let to = buffer.checked_add(done as u64).ok_or(status::FAULT)?;
         let chunk = bounce.get(..step).ok_or(status::FAULT)?;
-        uaccess::copy_to_user(process.space(), to, chunk).map_err(fault)
+        uaccess::copy_to_user(process.own_space(), to, chunk).map_err(fault)
     })
 }
 
@@ -4782,6 +5088,11 @@ fn space_step(address: u64, done: usize, length: usize) -> Result<(u64, usize), 
 /// the page in with the space's own fault (never `oom::fault`) if it is not
 /// there yet.
 fn read_target(space: &AddressSpace, from: u64, out: &mut [u8]) -> Result<(), Errno> {
+    // By the handle's space alone: never routed to a region, even for the
+    // caller's own (`docs/microkernel/K11.md` §4).
+    if from.saturating_add(out.len() as u64) > space.ceiling() {
+        return Err(status::FAULT);
+    }
     for _ in 0..SPACE_COPY_TRIES {
         match uaccess::copy_from_user_present(space, from, out) {
             Ok(true) => return Ok(()),
@@ -4901,7 +5212,8 @@ fn port_wait(
             return Err(status::TIMED_OUT);
         }
     };
-    if let Err(problem) = uaccess::copy_to_user(process.space(), packet_at, &packet_bytes(&packet))
+    if let Err(problem) =
+        uaccess::copy_to_user(process.own_space(), packet_at, &packet_bytes(&packet))
     {
         port.put_back(packet);
         return Err(fault(problem));
@@ -5005,7 +5317,7 @@ fn timer_set(process: &Process, timer: Handle, spec_at: u64, options: u64) -> Re
     }
     let timer = timer_in(process, timer, Rights::WRITE)?;
     let mut bytes = [0_u8; types::TIMER_SPEC_BYTES];
-    let read = uaccess::copy_from_user(process.space(), spec_at, &mut bytes).map_err(fault);
+    let read = uaccess::copy_from_user(process.own_space(), spec_at, &mut bytes).map_err(fault);
     let set = read.and_then(|()| {
         let spec = types::TimerSpec::from_bytes(&bytes).ok_or(status::INVALID_ARGS)?;
         timer.core().set(
@@ -5048,6 +5360,8 @@ fn observe(target: &Object, observer: Observer) -> Option<Result<(), PortError>>
         | Object::Audit
         | Object::CpuService
         | Object::MemoryScrub
+        | Object::Region(_)
+        | Object::Thread(_)
         | Object::Exception(_) => None,
     }
 }
@@ -5139,7 +5453,11 @@ fn address_word(
     Ok(Word {
         place: Place::User(address),
         expected,
-        key: Key::new(process.space(), address, flags & ADDRESS_SHARED != 0),
+        key: Key::new(
+            AddressSpace::routed(process.own_space(), address),
+            address,
+            flags & ADDRESS_SHARED != 0,
+        ),
         bitset,
     })
 }
@@ -5164,7 +5482,7 @@ fn address_wait(caller: &dyn Host, a: &[u64; 6]) -> Result<usize, Errno> {
     )?;
     let deadline = address_deadline(process, deadline_at)?;
     waits::wait_on(
-        process.space(),
+        process.own_space(),
         core::slice::from_ref(&word),
         deadline,
         &|| must_leave(caller),
@@ -5210,8 +5528,14 @@ fn address_requeue(process: &Process, a: &[u64; 6]) -> Result<usize, Errno> {
         usize::try_from(moved).unwrap_or(usize::MAX),
     );
     let compare = (flags & ADDRESS_COMPARE != 0).then_some(&source);
-    waits::requeue(process.space(), &source.key, &target.key, counts, compare)
-        .map_err(address_status)
+    waits::requeue(
+        process.own_space(),
+        &source.key,
+        &target.key,
+        counts,
+        compare,
+    )
+    .map_err(address_status)
 }
 
 /// `address_wait_any`: sleep on up to `ADDRESS_WAIT_ANY_MAX` words until a
@@ -5226,7 +5550,7 @@ fn address_wait_any(caller: &dyn Host, a: &[u64; 6]) -> Result<usize, Errno> {
     let size = size_of::<AddressWord>();
     let mut vector: Vec<u8> =
         fallible::try_filled(0, count * size).map_err(|_| status::NO_MEMORY)?;
-    uaccess::copy_from_user(process.space(), words_at, &mut vector).map_err(fault)?;
+    uaccess::copy_from_user(process.own_space(), words_at, &mut vector).map_err(fault)?;
     let mut words: Vec<Word> = fallible::try_with_capacity(count).map_err(|_| status::NO_MEMORY)?;
     for element in vector.chunks_exact(size) {
         let field = |at: usize, bytes: &mut [u8]| {
@@ -5254,7 +5578,7 @@ fn address_wait_any(caller: &dyn Host, a: &[u64; 6]) -> Result<usize, Errno> {
     drop(vector);
     let deadline = address_deadline(process, deadline_at)?;
     waits::wait_on(
-        process.space(),
+        process.own_space(),
         &words,
         deadline,
         &|| must_leave(caller),

@@ -27,6 +27,8 @@ use crate::user::space::AddressSpace;
 pub struct SpaceRef {
     /// The space.
     space: Arc<AddressSpace>,
+    /// The criticality level of the job it belongs to (`docs/microkernel/K17.md`).
+    level: u8,
     /// The job that pays for what by-handle calls commit there, held for as
     /// long as this lives: see the module.
     owner: u32,
@@ -52,13 +54,14 @@ impl SpaceRef {
     /// # Errors
     ///
     /// [`AllocError`] for no memory, no root, or a job at its object limit.
-    pub fn create() -> Result<Arc<SpaceRef>, AllocError> {
+    pub fn create(level: u8) -> Result<Arc<SpaceRef>, AllocError> {
         let charge = Charge::running(Resource::Objects, 1).map_err(|_| AllocError)?;
         let owner = crate::sched::running_group();
         let space = AddressSpace::new().map_err(|_| AllocError)?;
         space.handle_made();
         fallible::try_arc(SpaceRef {
             space,
+            level,
             owner,
             charge,
         })
@@ -70,12 +73,17 @@ impl SpaceRef {
     /// # Errors
     ///
     /// [`AllocError`].
-    pub fn of(space: Arc<AddressSpace>, owner: u32) -> Result<Arc<SpaceRef>, AllocError> {
+    pub fn of(
+        space: Arc<AddressSpace>,
+        owner: u32,
+        level: u8,
+    ) -> Result<Arc<SpaceRef>, AllocError> {
         // Nothing charged, and the owner's slot held all the same.
         let charge = Charge::to(owner, Resource::Objects, 0).map_err(|_| AllocError)?;
         space.handle_made();
         fallible::try_arc(SpaceRef {
             space,
+            level,
             owner,
             charge,
         })
@@ -94,9 +102,15 @@ impl SpaceRef {
         space.handle_made();
         fallible::try_arc(SpaceRef {
             space,
+            level: self.level,
             owner,
             charge,
         })
+    }
+
+    /// Its job's criticality level.
+    pub const fn level(&self) -> u8 {
+        self.level
     }
 
     /// The space.

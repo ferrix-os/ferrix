@@ -1469,7 +1469,7 @@ pub fn prepare_user(
     };
     // Resolved here, so that launching has nothing left to refuse.
     let queue = queue_of(cpu).ok_or("no such processor")?;
-    let space = Arc::clone(thread.process().core().space());
+    let space = Arc::clone(thread.process().core().own_space());
     // Counted before the task exists: on another processor it can reach its
     // thread's exit as soon as it is launched. A task that could not be made
     // gives the count back here, and one never launched when it is dropped.
@@ -1806,6 +1806,7 @@ pub fn current() -> Option<Arc<Task>> {
 fn set_current(queue: &mut CpuQueue, cpu: usize, task: Arc<Task>) {
     if let Some(record) = crate::smp::record(cpu) {
         record.running.set(&task);
+        record.set_task_kind(task.is_restricted(), task.is_bare());
     }
     queue.current = Some(task);
 }
@@ -3560,7 +3561,7 @@ fn switch_chosen(
     // two stack pointers and whose whole job is register operations -- and not
     // after the switch either, because the incoming context resumes on its own
     // stack and would have to be told to do this before touching anything.
-    swap_address_space(previous.address_space(), next.address_space());
+    swap_address_space(previous, next);
     switch_user_state(previous, next);
 
     // SAFETY: (SHARED) both tasks belong to this queue and this processor holds its
@@ -3603,24 +3604,106 @@ fn switch_chosen(
 /// moves queued tasks from a third processor -- but a blocked task is not
 /// anybody's `current`, so it cannot be the `previous` of a switch it is not
 /// part of.
-fn swap_address_space(
-    previous: Option<&Arc<crate::user::space::AddressSpace>>,
-    next: Option<&Arc<crate::user::space::AddressSpace>>,
-) {
+fn swap_address_space(previous_task: &Task, next_task: &Task) {
+    let previous = previous_task.address_space();
+    let next = next_task.address_space();
+    let restricted = next_task.is_restricted();
     match (previous, next) {
         // Two threads of one process, or two kernel threads: nothing to do,
-        // and doing it anyway would throw away every user translation.
-        (Some(before), Some(after)) if Arc::ptr_eq(before, after) => {}
+        // and doing it anyway would throw away every user translation. But
+        // for two threads of a shared process in different modes, which run
+        // on its two roots (`docs/microkernel/K11.md` §3).
+        (Some(before), Some(after)) if Arc::ptr_eq(before, after) => {
+            if previous_task.is_restricted() != restricted {
+                // SAFETY: (TRANSLATE) as the install below; this processor
+                // is in the space's sets, since a task of it ran here.
+                unsafe { after.flip_root(restricted) };
+            }
+        }
         (None, None) => {}
         // SAFETY: (TRANSLATE) `next` is the task this processor is about to run, and the
         // queue holds an `Arc` to it for as long as it is `current`, so the
         // tables outlive the installation. Interrupts are off and the run
         // queue lock is held, so nothing else can install a root here first.
-        (before, Some(after)) => unsafe { after.install(before.map(|space| &**space)) },
+        (before, Some(after)) => unsafe {
+            after.install_as(before.map(|space| &**space), restricted);
+        },
         // SAFETY: (TRANSLATE) the incoming task is a kernel thread and wants no user
         // address; the kernel is reachable without one on every architecture.
         (Some(before), None) => unsafe { before.uninstall() },
     }
+    // A switch is an exit by another name when restricted code ran here last
+    // and a normal-mode thread comes next, whose key `entered_space` may find
+    // unchanged: the consultant's N1 (K1 §6, `L.x86_64.276`). A kernel thread
+    // between them leaves the mark as it is.
+    if next.is_some() {
+        if restricted {
+            arch::restricted_ran();
+        } else {
+            arch::restricted_left();
+        }
+    }
+}
+
+/// Whether the running task is in restricted mode: one byte of the processor's
+/// record, which every switch and flip writes, so right after any migration.
+#[inline]
+pub fn running_restricted() -> bool {
+    crate::smp::this_cpu().is_some_and(crate::smp::PerCpu::runs_restricted)
+}
+
+/// Whether the running task is a thread of a process no personality holds.
+#[inline]
+pub fn running_bare() -> bool {
+    crate::smp::this_cpu().is_some_and(crate::smp::PerCpu::runs_bare)
+}
+
+/// Whether the running task is a thread of a shared process.
+#[cfg_attr(
+    target_arch = "arm",
+    expect(dead_code, reason = "ARMv7-A has no restricted mode")
+)]
+pub(crate) fn running_in_region() -> bool {
+    with_current(|task| {
+        task.core_process()
+            .is_some_and(|core| core.region().is_some())
+    })
+    .unwrap_or(false)
+}
+
+/// The running task's mode is now `restricted`. With interrupts masked.
+#[cfg_attr(
+    target_arch = "arm",
+    expect(dead_code, reason = "ARMv7-A has no restricted mode")
+)]
+pub(crate) fn set_running_restricted(restricted: bool) {
+    let _ = with_current(|task| {
+        task.set_restricted(restricted);
+        if let Some(record) = crate::smp::this_cpu() {
+            record.set_task_kind(restricted, task.is_bare());
+        }
+    });
+}
+
+#[cfg_attr(
+    target_arch = "arm",
+    expect(dead_code, reason = "ARMv7-A has no restricted mode")
+)]
+/// The running task's restricted-mode record, as a slot to fill.
+///
+/// # Safety
+///
+/// (CONTEXT) The running task's own, and only it reaches it; the reference is
+/// not kept past its own call.
+pub(crate) unsafe fn own_restricted_slot()
+-> Option<&'static mut Option<alloc::boxed::Box<arch::RestrictedState>>> {
+    with_current(|task| {
+        // SAFETY: (CONTEXT) the caller's guarantee.
+        let slot = unsafe { task.restricted_slot() };
+        // SAFETY: (CONTEXT) the caller's guarantee; the task is not freed while
+        // its own code runs.
+        unsafe { &mut *slot }
+    })
 }
 
 /// Move the user registers no trap saves from the outgoing task to the
@@ -3668,13 +3751,6 @@ fn switch_user_state(previous: &Arc<Task>, next: &Arc<Task>) {
     }
 }
 
-#[cfg_attr(
-    target_arch = "aarch64",
-    expect(
-        dead_code,
-        reason = "x86-64's and ARMv7-A's entries keep a record this way; AArch64's not yet"
-    )
-)]
 /// Run `change` on the running task's own saved user state, the record the
 /// switch loads it from: the vector-state contract's mark the `SYSCALL`
 /// entry raises and lowers, and the `FS` and `GS` bases `arch_prctl` and

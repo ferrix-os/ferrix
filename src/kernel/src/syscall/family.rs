@@ -733,6 +733,9 @@ fn fork_into(
 /// `ENOSYS` for a thread with a descriptor table or directories of its own, or
 /// with `CLONE_VFORK` or `CLONE_PIDFD`; `EAGAIN` with every id in use or the
 /// process already ending; `ESRCH` from a caller that is not a thread of it.
+// Kept out of `sys_clone`'s frame: a fork reaches `Process::new` below that frame, on a
+// four-page stack with an interrupt's frames still to fit, and needs nothing of this.
+#[inline(never)]
 fn clone_thread(
     parent: &Arc<Process>,
     request: &CloneRequest,

@@ -1,0 +1,22 @@
+[package]
+name = "ferrix-restricted-check"
+description = "Runs in a shared process's normal mode and drives a program in restricted mode, for the boot's K1 and K11 checks"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "restricted-check"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+ferrix-linux-abi.workspace = true
+ferrix-rt.workspace = true
+ferrix-native-abi.workspace = true
+
+[lints]
+workspace = true

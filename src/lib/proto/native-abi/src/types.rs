@@ -428,6 +428,13 @@ pub const JOB_SPECULATION_DOMAIN: u64 = 1;
 /// `MANAGE`, as for any child; nothing unseals one. devmgr seals each
 /// driver's job, so the driver cannot leave the job whose kill ends it.
 pub const JOB_SEALED: u64 = 2;
+/// `job_create`'s option: the job's criticality level is in [`JOB_LEVEL_SHIFT`]'s
+/// bits, at most its parent's (`docs/microkernel/K17.md`). Without it, its parent's.
+pub const JOB_LEVEL_SET: u64 = 1 << 9;
+/// Where the level is in `job_create`'s options: three bits.
+pub const JOB_LEVEL_SHIFT: u32 = 10;
+/// The highest level: the root job's, and every job's that never asked.
+pub const JOB_LEVEL_TOP: u8 = 4;
 
 /// `job_create`'s option: a **measured** job (`docs/microkernel/K14.md` §3).
 /// Its processes' executable memory comes only from sealed, measured VMOs.

@@ -403,7 +403,7 @@ fn at_or_above(job: Arc<Job>, full: u32) -> Option<Arc<Job>> {
 /// Whether a process not yet ended runs in `space`.
 fn shared_with_the_living(space: &Arc<AddressSpace>, live: &[Arc<dyn Host>]) -> bool {
     live.iter()
-        .any(|host| !host.core().is_terminated() && Arc::ptr_eq(host.core().space(), space))
+        .any(|host| !host.core().is_terminated() && Arc::ptr_eq(host.core().own_space(), space))
 }
 
 /// Choose and kill in the job whose memory quota slot is `full`, for a
@@ -448,7 +448,7 @@ fn kill_in(space: &AddressSpace, scope_of: Scope, live: &[Arc<dyn Host>]) -> (An
         return (Answer::Refused, false);
     };
     kill_victim(scope_of, &scope, victim, resident);
-    if core::ptr::eq(Arc::as_ptr(victim.core().space()), space) {
+    if core::ptr::eq(Arc::as_ptr(victim.core().own_space()), space) {
         (Answer::Victim, false)
     } else {
         (Answer::Retry, false)
@@ -476,7 +476,7 @@ fn survey<'a>(
     scope_of: Scope,
     live: &'a [Arc<dyn Host>],
 ) -> Result<Survey<'a>, (Answer, bool)> {
-    let ours = |host: &Arc<dyn Host>| core::ptr::eq(Arc::as_ptr(host.core().space()), space);
+    let ours = |host: &Arc<dyn Host>| core::ptr::eq(Arc::as_ptr(host.core().own_space()), space);
     // Whether a process not yet ended faults here: one that shares the
     // space with an ended one (`vfork`) is not that one.
     let living = live
@@ -497,7 +497,7 @@ fn survey<'a>(
             continue;
         };
         let _ = looked.scope.get_or_insert(within);
-        let resident = core.space().resident_pages().unwrap_or(0);
+        let resident = core.own_space().resident_pages().unwrap_or(0);
         if !core.is_terminated() {
             if core.pid() > 1 && looked.victim.is_none_or(|(most, _)| resident > most) {
                 looked.victim = Some((resident, host));
@@ -533,12 +533,12 @@ enum Ended {
 /// OOM reaper does, rather than at its parent's `wait4`.
 fn ended(host: &Arc<dyn Host>, resident: u64, live: &[Arc<dyn Host>]) -> Ended {
     let core = host.core();
-    if resident == 0 || shared_with_the_living(core.space(), live) {
+    if resident == 0 || shared_with_the_living(core.own_space(), live) {
         return Ended::Gone;
     }
     if core.exit().is_closed() {
         let _ = core
-            .space()
+            .own_space()
             .unmap(MMAP_MIN_ADDR, USER_VIRT_END - MMAP_MIN_ADDR);
         return Ended::Emptied;
     }

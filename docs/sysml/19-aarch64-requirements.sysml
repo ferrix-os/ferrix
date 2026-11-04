@@ -546,8 +546,8 @@ package FerrixAarch64Requirements {
 
         requirement <'L.aarch64.31'> userRootsAreInstalled : ItemLowLevel {
             attribute :>> statement = "install_user_root shall translate the lower
-                half through a program's root in TTBR0_EL1 and drop this
-                processor's cached user translations, and uninstall_user_root
+                half through a program's root in TTBR0_EL1, under an ASID whose
+                entries are that root's alone, and uninstall_user_root
                 shall stop translating the lower half, so that a kernel thread
                 reaches no program's memory.";
             attribute :>> criterion = "Two programs mapping one address reach
@@ -557,7 +557,7 @@ package FerrixAarch64Requirements {
             attribute :>> unit = ("arch::aarch64::install_user_root",
                 "arch::aarch64::uninstall_user_root", "arch::aarch64::prepare_user_root",
                 "arch::aarch64::cpu::write_ttbr0", "arch::aarch64::cpu::disable_ttbr0",
-                "arch::aarch64::cpu::flush_user_tlb");
+                "arch::aarch64::cpu::write_ttbr0_invalidating");
         }
         requirement <'L.aarch64.32'> theIdentityMapGoes : ItemLowLevel {
             attribute :>> statement = "drop_identity_map shall stop the lower
@@ -963,6 +963,120 @@ package FerrixAarch64Requirements {
             attribute :>> parent = ("H.TRAP.20", "H.TRAP.9");
             attribute :>> unit = ("arch::aarch64::signal::UserContext::with_supervisors",
                 "arch::aarch64::signal::UserContext::supervised");
+        }
+        requirement <'L.aarch64.70'> aContextsAddressesAreInTheWindow : ItemLowLevel {
+            attribute :>> statement = "pc and sp in a context handed in shall be in the restricted
+                window.";
+            attribute :>> criterion = "Forged cases 0 to 2.";
+            attribute :>> parent = "H.TRAP.22";
+            attribute :>> unit = "arch::aarch64::restricted::check_context";
+        }
+        requirement <'L.aarch64.71'> aContextsPstateIsFlagsOnly : ItemLowLevel {
+            attribute :>> statement = "pstate in a context handed in shall be the condition flags alone:
+                no EL, mask, single-step, illegal-state, DIT, PAN, SSBS or branch-
+                type bit.";
+            attribute :>> criterion = "Forged cases 3 to 12.";
+            attribute :>> parent = "H.TRAP.22";
+            attribute :>> unit = "arch::aarch64::restricted::check_context";
+        }
+        requirement <'L.aarch64.72'> tpidrroIsNeverHandedIn : ItemLowLevel {
+            attribute :>> statement = "TPIDRRO_EL0 in a context shall be zero: no A32 code runs here, and
+                nothing writes the register, so that no value crosses a switch.";
+            attribute :>> criterion = "Forged case 13.";
+            attribute :>> parent = "H.TRAP.22";
+            attribute :>> unit = ("arch::aarch64::restricted::check_context",
+                "arch::aarch64::cpu::zero_tpidrro");
+        }
+        requirement <'L.aarch64.73'> anExitRewritesTheFrame : ItemLowLevel {
+            attribute :>> statement = "Every exit shall save the program registers in the held context
+                and replace the frame with the normal mode, the reason in x9, the
+                number in x8, the words in x0 to x5; a refused call shall leave x9
+                as it was and the status in x0.";
+            attribute :>> criterion = "Cases 20 to 27 under TCG.";
+            attribute :>> parent = "H.TRAP.22";
+            attribute :>> unit = ("arch::aarch64::restricted::exit",
+                "arch::aarch64::restricted::write_exit",
+                "arch::aarch64::restricted::from_restricted",
+                "arch::aarch64::restricted::on_system_call",
+                "arch::aarch64::restricted::decoded_unless_bare",
+                "arch::aarch64::restricted::take_context",
+                "arch::aarch64::restricted::fault_exit",
+                "arch::aarch64::restricted::kick_on_trap_frame",
+                "arch::aarch64::restricted::answer_going_in",
+                "arch::aarch64::restricted::prepare",
+                "arch::aarch64::restricted::flip",
+                "arch::aarch64::restricted::swap_user_state",
+                "arch::aarch64::restricted::own_state",
+                "arch::aarch64::restricted::refuse",
+                "arch::aarch64::restricted::land_copy",
+                "arch::aarch64::restricted::context_bytes",
+                "arch::aarch64::restricted::read_context",
+                "arch::aarch64::restricted::frame_of");
+        }
+        requirement <'L.aarch64.74'> vectorImageHoldsDefinedBits : ItemLowLevel {
+            attribute :>> statement = "RESTRICTED_VECTORS_WRITE shall refuse an image with reserved bits
+                in FPCR or FPSR.";
+            attribute :>> criterion = "Cases 77, 78.";
+            attribute :>> parent = "H.TRAP.22";
+            attribute :>> unit = ("arch::aarch64::restricted::vector_bytes",
+                "arch::aarch64::restricted::set_vector_bytes",
+                "arch::aarch64::switch::UserState::vector_image",
+                "arch::aarch64::switch::UserState::set_vector_image");
+        }
+        requirement <'L.aarch64.75'> everyRootHasATagOfItsOwn : ItemLowLevel {
+            attribute :>> statement = "Each root written to TTBR0_EL1 shall carry an ASID of 1 to 16 in
+                bits 63:48, one slot of the processor's table per root id, so a
+                shared process's two roots have two ASIDs.";
+            attribute :>> criterion = "check_root_tags on every boot; user::check's tag cases on the
+                register.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = ("arch::aarch64::asid::install", "arch::aarch64::asid::tagged_root",
+                "arch::aarch64::asid::asid_of", "arch::aarch64::asid::tag_now",
+                "arch::aarch64::root_tag_now", "arch::aarch64::flip_user_root");
+        }
+        requirement <'L.aarch64.76'> aHitInvalidatesNothing : ItemLowLevel {
+            attribute :>> statement = "A root found in a slot shall keep that ASID's translations.";
+            attribute :>> criterion = "check_root_tags; the tag case after a second install.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = ("arch::aarch64::asid::Slots::choose", "arch::aarch64::cpu::write_ttbr0",
+                "arch::aarch64::asid::last_write", "arch::aarch64::last_root_write",
+                "arch::aarch64::asid::record");
+        }
+        requirement <'L.aarch64.77'> aMissInvalidatesBeforeTheWalk : ItemLowLevel {
+            attribute :>> statement = "A root not in a slot shall take one, the regime off and the ASID
+                invalidated on this processor before the root is written.";
+            attribute :>> criterion = "check_root_tags decides the path; the sequence is by review, as TCG
+                cannot show a stale entry, and the board row's.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = "arch::aarch64::cpu::write_ttbr0_invalidating";
+        }
+        requirement <'L.aarch64.78'> uninstallLeavesTheRegimeOff : ItemLowLevel {
+            attribute :>> statement = "Uninstalling shall set EPD0 and write TTBR0_EL1 zero, so ASID 0 is in
+                force, and no user translation shall be tagged 0.";
+            attribute :>> criterion = "user::check asks AT S1E1R after each uninstall.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = ("arch::aarch64::uninstall_user_root", "arch::aarch64::cpu::disable_ttbr0",
+                "arch::aarch64::cpu::translates", "arch::aarch64::user_address_translates");
+        }
+        requirement <'L.aarch64.79'> aDeadIdsSlotGoesAtItsEviction : ItemLowLevel {
+            attribute :>> statement = "A root's id shall never be reused, so a space gone is never hit, and
+                its entries go with the miss that takes its slot.";
+            attribute :>> criterion = "check_root_tags; user::check's space made after one dropped.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = "arch::aarch64::asid::install";
+        }
+        requirement <'L.aarch64.80'> aShootdownReachesEveryTag : ItemLowLevel {
+            attribute :>> statement = "Every TLB shootdown on AArch64 shall be broadcast and name no ASID.";
+            attribute :>> criterion = "check-asid-tlbi.py, since QEMU invalidates under every ASID whichever
+                it is told; restricted-check cases 89, 138 with --smp 2.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = ("arch::aarch64::cpu::flush_tlb", "arch::aarch64::cpu::flush_tlb_page");
+        }
+        requirement <'L.aarch64.81'> theSlotRuleIsCheckedOnEveryBoot : ItemLowLevel {
+            attribute :>> statement = "The slot rule shall be held on every boot, on a table of its own.";
+            attribute :>> criterion = "check_root_tags, which fails with the hit or the miss's path changed.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = "arch::aarch64::check_root_tags";
         }
     }
 }

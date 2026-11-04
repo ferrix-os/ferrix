@@ -28,14 +28,17 @@ mod speculation_check;
 use aarch64::speculation as machine_speculation;
 #[cfg(target_arch = "arm")]
 use armv7a::speculation as machine_speculation;
+pub(crate) use speculation::exit_barrier_offered;
 pub use speculation::nospec_index;
+pub(crate) use speculation::restricted_barriers;
 pub use speculation::{
     CheckHook, HARDENED, arm_forget_hook, arm_leave_hook, barrier_decisions_on, disarm_forget_hook,
     disarm_leave_hook, forget_root, last_domain_on, refill_wanted_in_domain, refills_in_domain_on,
     switch_barriers, switch_barriers_on,
 };
 pub(crate) use speculation::{
-    answer_leaving, entering_space, leaving_domain, left_space, nospec_below, serve_wanted_barrier,
+    answer_leaving, entering_space, leaving_domain, left_space, nospec_below, restricted_left,
+    restricted_ran, serve_wanted_barrier,
 };
 pub use speculation::{
     forget_hook_armed_by, leave_hook_armed_by, report_exposure as report_speculation,
@@ -127,14 +130,15 @@ pub use aarch64::{
 };
 #[cfg(target_arch = "aarch64")]
 pub(crate) use aarch64::{
-    CpuStarter, PageEncoding, advance_past_breakpoint, check_root_tags, classify,
-    console_receive_irq, cpu_local, cpu_local_register, describe_cpus, drain_console,
-    enable_console_receive, flush_tlb, forbid_user_access, frame_pointer, hardware_id,
-    identity_root, install_user_root, ipi_irq, last_root_write, mask_interrupt, msi_doorbell,
-    permit_user_access, prepare_stack, prepare_user_root, report_trap, restore_user_state,
-    returned_to_service, root_tag_now, save_user_state, send_ipi_to_others, service_interrupts,
-    set_cpu_local, switch_to, system_call, timer_arm, timer_disarm, timer_disarm_fired, timer_irq,
-    uninstall_user_root, unmask_interrupt,
+    CpuStarter, PageEncoding, ROOT_TAG_SLOTS, SHOOTDOWN_REACHES_EVERY_TAG, advance_past_breakpoint,
+    check_root_tags, classify, console_receive_irq, cpu_local, cpu_local_register, describe_cpus,
+    drain_console, enable_console_receive, flip_user_root, flush_tlb, forbid_user_access,
+    frame_pointer, hardware_id, identity_root, install_user_root, ipi_irq, last_root_write,
+    mask_interrupt, msi_doorbell, permit_user_access, prepare_stack, prepare_user_root,
+    report_trap, restore_user_state, returned_to_service, root_tag_now, save_user_state,
+    send_ipi_to_others, service_interrupts, set_cpu_local, switch_to, system_call, timer_arm,
+    timer_disarm, timer_disarm_fired, timer_irq, uninstall_user_root, unmask_interrupt,
+    user_address_translates,
 };
 #[cfg(target_arch = "aarch64")]
 pub use aarch64::{
@@ -162,14 +166,15 @@ pub use armv7a::{
 };
 #[cfg(target_arch = "arm")]
 pub(crate) use armv7a::{
-    CpuStarter, PageEncoding, advance_past_breakpoint, check_root_tags, classify,
-    console_receive_irq, cpu_local, cpu_local_register, describe_cpus, drain_console,
-    enable_console_receive, flush_tlb, forbid_user_access, frame_pointer, hardware_id,
-    identity_root, install_user_root, ipi_irq, last_root_write, mask_interrupt, msi_doorbell,
-    permit_user_access, prepare_stack, prepare_user_root, report_trap, restore_user_state,
-    returned_to_service, root_tag_now, save_user_state, send_ipi_to_others, service_interrupts,
-    set_cpu_local, switch_to, system_call, timer_arm, timer_disarm, timer_disarm_fired, timer_irq,
-    uninstall_user_root, unmask_interrupt,
+    CpuStarter, PageEncoding, ROOT_TAG_SLOTS, SHOOTDOWN_REACHES_EVERY_TAG, advance_past_breakpoint,
+    check_root_tags, classify, console_receive_irq, cpu_local, cpu_local_register, describe_cpus,
+    drain_console, enable_console_receive, flip_user_root, flush_tlb, forbid_user_access,
+    frame_pointer, hardware_id, identity_root, install_user_root, ipi_irq, last_root_write,
+    mask_interrupt, msi_doorbell, permit_user_access, prepare_stack, prepare_user_root,
+    report_trap, restore_user_state, returned_to_service, root_tag_now, save_user_state,
+    send_ipi_to_others, service_interrupts, set_cpu_local, switch_to, system_call, timer_arm,
+    timer_disarm, timer_disarm_fired, timer_irq, uninstall_user_root, unmask_interrupt,
+    user_address_translates,
 };
 #[cfg(target_arch = "arm")]
 pub use armv7a::{
@@ -538,14 +543,15 @@ pub use x86_64::{
 };
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::{
-    CpuStarter, PageEncoding, advance_past_breakpoint, check_root_tags, classify,
-    console_receive_irq, cpu_local, cpu_local_register, describe_cpus, drain_console,
-    enable_console_receive, flush_tlb, forbid_user_access, frame_pointer, hardware_id,
-    identity_root, install_user_root, ipi_irq, last_root_write, mask_interrupt, msi_doorbell,
-    permit_user_access, prepare_stack, prepare_user_root, report_trap, restore_user_state,
-    returned_to_service, root_tag_now, save_user_state, send_ipi_to_others, service_interrupts,
-    set_cpu_local, switch_to, system_call, timer_arm, timer_disarm, timer_disarm_fired, timer_irq,
-    uninstall_user_root, unmask_interrupt,
+    CpuStarter, PageEncoding, ROOT_TAG_SLOTS, SHOOTDOWN_REACHES_EVERY_TAG, advance_past_breakpoint,
+    check_root_tags, classify, console_receive_irq, cpu_local, cpu_local_register, describe_cpus,
+    drain_console, enable_console_receive, flip_user_root, flush_tlb, forbid_user_access,
+    frame_pointer, hardware_id, identity_root, install_user_root, ipi_irq, last_root_write,
+    mask_interrupt, msi_doorbell, permit_user_access, prepare_stack, prepare_user_root,
+    report_trap, restore_user_state, returned_to_service, root_tag_now, save_user_state,
+    send_ipi_to_others, service_interrupts, set_cpu_local, switch_to, system_call, timer_arm,
+    timer_disarm, timer_disarm_fired, timer_irq, uninstall_user_root, unmask_interrupt,
+    user_address_translates,
 };
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
@@ -919,3 +925,78 @@ pub(crate) use aarch64::inspect::{SWITCH_FRAME, entry_frame};
 pub(crate) use armv7a::inspect::{SWITCH_FRAME, entry_frame};
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::inspect::{SWITCH_FRAME, entry_frame};
+
+// Restricted mode (`docs/microkernel/K1.md`): x86-64's and AArch64's; ARMv7-A
+// has none (§8).
+#[cfg(target_arch = "aarch64")]
+pub(crate) use aarch64::restricted::{
+    RestrictedState, fault_exit as restricted_fault_exit,
+    kick_on_trap_frame as restricted_kick_on_trap, land_copy as restricted_land_copy,
+};
+#[cfg(target_arch = "aarch64")]
+pub use aarch64::restricted::{
+    context_bytes as restricted_context_bytes, set_vector_bytes as restricted_set_vector_bytes,
+    vector_bytes as restricted_vector_bytes,
+};
+#[cfg(target_arch = "arm")]
+pub(crate) use no_restricted::{
+    RestrictedState, restricted_fault_exit, restricted_kick_on_trap, restricted_land_copy,
+};
+#[cfg(target_arch = "arm")]
+pub use no_restricted::{
+    restricted_context_bytes, restricted_set_vector_bytes, restricted_vector_bytes,
+};
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::restricted::{
+    RestrictedState, fault_exit as restricted_fault_exit,
+    kick_on_trap_frame as restricted_kick_on_trap, land_copy as restricted_land_copy,
+};
+#[cfg(target_arch = "x86_64")]
+pub use x86_64::restricted::{
+    context_bytes as restricted_context_bytes, set_vector_bytes as restricted_set_vector_bytes,
+    vector_bytes as restricted_vector_bytes,
+};
+/// Whether this architecture has restricted mode and shared processes.
+pub const HAS_RESTRICTED: bool = !cfg!(target_arch = "arm");
+
+/// What an architecture without restricted mode answers: nothing can enter it,
+/// so its way out is never reached.
+#[cfg(target_arch = "arm")]
+mod no_restricted {
+    #![allow(clippy::unnecessary_wraps, reason = "the same signatures as x86-64's")]
+    use ferrix_linux_abi::errno::Errno;
+    use ferrix_native_abi::restricted::{CONTEXT_BYTES, FaultKind, VECTORS_BYTES};
+    use ferrix_native_abi::status;
+
+    /// Nothing is ever held.
+    #[derive(Debug)]
+    pub(crate) struct RestrictedState;
+
+    pub(crate) fn restricted_fault_exit(_: &mut super::TrapFrame, _: FaultKind, _: u64) {}
+    pub(crate) fn restricted_kick_on_trap(_: &mut super::TrapFrame) {}
+    pub(crate) fn restricted_land_copy(_: &mut super::TrapFrame, _: u64, _: FaultKind) {}
+    /// Refused: see the module.
+    ///
+    /// # Errors
+    ///
+    /// Always.
+    pub fn restricted_context_bytes() -> Result<[u8; CONTEXT_BYTES], Errno> {
+        Err(status::NOT_SUPPORTED)
+    }
+    /// Refused: see the module.
+    ///
+    /// # Errors
+    ///
+    /// Always.
+    pub fn restricted_vector_bytes() -> Result<[u8; VECTORS_BYTES], Errno> {
+        Err(status::NOT_SUPPORTED)
+    }
+    /// Refused: see the module.
+    ///
+    /// # Errors
+    ///
+    /// Always.
+    pub fn restricted_set_vector_bytes(_: &[u8; VECTORS_BYTES]) -> Result<(), Errno> {
+        Err(status::NOT_SUPPORTED)
+    }
+}

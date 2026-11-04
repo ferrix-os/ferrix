@@ -89,6 +89,12 @@ pub fn dispatch_with<P: Personality>(args: &SyscallArgs, regs: Option<&arch::Use
     if args.abi == Abi::Native && ferrix_native_abi::nr::is_native(args.number) {
         return native_call(args);
     }
+    // A thread of a process no personality holds makes no Linux call: in normal
+    // mode the number answers `ENOSYS`, in every build, and from restricted
+    // mode it never arrives here (`docs/microkernel/K11.md` §4).
+    if sched::running_bare() {
+        return Outcome::Return(Errno::ENOSYS.as_return_value());
+    }
     // The table is the entry's (`crate::trap::Abi`), each behind its own
     // clamp in the facade.
     let decoded = match args.abi {

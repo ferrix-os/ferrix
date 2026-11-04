@@ -1206,8 +1206,14 @@ fn queued_endpoints(endpoint: &Arc<Endpoint>) -> Option<Vec<Arc<Endpoint>>> {
             | Object::Pin(_)
             // A process handle holds how the process ended, not its table.
             | Object::Process(_)
-            // A space holds the VMOs it maps, and no handle.
+            // A space holds the VMOs it maps, and no handle. A thread holds
+            // its task weakly.
             | Object::Space(_)
+            | Object::Thread(_)
+            // A region's shared table holds handles, emptied as its last
+            // process leaves (`object::region`): it is no queue of a channel
+            // that keeps a cycle up past that.
+            | Object::Region(_)
             | Object::Port(_)
             // A timer holds ports it delivered to, and a port holds packets,
             // never an object.

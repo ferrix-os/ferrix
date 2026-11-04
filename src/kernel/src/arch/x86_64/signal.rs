@@ -152,6 +152,11 @@ impl UserContext {
         UserContext(*frame)
     }
 
+    /// The registers as a frame.
+    pub(super) const fn into_frame(self) -> TrapFrame {
+        self.0
+    }
+
     /// Put them back where the trap stub restores them from.
     pub(crate) const fn store_trap(&self, frame: &mut TrapFrame) {
         *frame = self.0;

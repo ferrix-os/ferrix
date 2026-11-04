@@ -1,5 +1,6 @@
 //! The `AArch64` end of the kernel.
 
+pub(crate) mod asid;
 mod check;
 pub mod console;
 mod cpu;
@@ -10,6 +11,7 @@ mod gic;
 pub(crate) mod mmio;
 // CHECKS-ONLY: syscall/build_check.rs
 pub mod programs_check;
+pub(crate) mod restricted;
 pub(crate) mod scrub;
 mod signal;
 mod smp;
@@ -101,6 +103,9 @@ pub(crate) use smp::{CpuStarter, describe_cpus, hardware_id};
 /// the rest of the system's life: `cpu_local` hands it back as a reference.
 pub(crate) unsafe fn set_cpu_local(address: u64) {
     cpu::write_tpidr_el1(address);
+    // Nothing writes it after this, so that no value crosses a switch and no
+    // firmware's reaches a program (`docs/microkernel/K1.md` §8).
+    cpu::zero_tpidrro();
 }
 
 /// The address [`set_cpu_local`] installed on this CPU.
@@ -1146,48 +1151,60 @@ pub(crate) fn prepare_user_root(root: u64) {
 /// in question: the register being written is not the one the code doing the
 /// writing is translated through.
 ///
-/// What Arm does not do for free is the invalidation. A write to `CR3` drops
-/// the non-global entries as a side effect; a write to `TTBR0_EL1` drops
-/// nothing at all, and without [`cpu::flush_user_tlb`] the next user access
-/// would be answered out of the *previous* address space's entries. That is
-/// the bug this pairing exists to make impossible.
+/// A write to `TTBR0_EL1` drops nothing, so the next user access would be
+/// answered from whatever its ASID holds: [`asid::install`] gives each root a tag
+/// of its own, and invalidates a tag that changes hands.
 ///
 /// # Safety
 ///
 /// (TRANSLATE) `root` must root a live set of tables for the lower half, and they must
-/// stay live until another root replaces them on this processor.
-pub(crate) unsafe fn install_user_root(root: u64, _space: u64, _begun: u64, _cpu: usize) {
+/// stay live until another root replaces them on this processor. Interrupts masked.
+pub(crate) unsafe fn install_user_root(root: u64, space: u64, _begun: u64, cpu: usize, key: u64) {
     // SAFETY: (TRANSLATE) the caller guarantees the tables are live.
-    unsafe { cpu::write_ttbr0(root) };
-    cpu::flush_user_tlb();
+    unsafe { asid::install(root, space, cpu) };
     // Firmware's branch predictor invalidation, if this is another program's
     // space than the one this core last ran and the plan has it.
-    crate::arch::speculation::entered_space(root);
+    crate::arch::speculation::entered_space(key);
 }
 
-/// The last root write and its keep bit: `None`, since every user
-/// translation here carries `ASID` zero and every install invalidates it.
-pub(crate) const fn last_root_write(_logical: usize) -> Option<(u64, u64, bool)> {
-    None
+/// How many tags a processor has.
+pub(crate) const ROOT_TAG_SLOTS: usize = asid::SLOTS;
+
+/// Whether a shootdown reaches a space's translations under its tag while it is on
+/// no processor: yes, since all are broadcast and name no ASID, so a hit after one
+/// keeps what is left.
+pub(crate) const SHOOTDOWN_REACHES_EVERY_TAG: bool = true;
+
+/// The record of the last root write, with the bit that says it kept and that the
+/// machine tags: `TTBR0_EL1` has no keep bit, so this is what [`asid`] noted.
+pub(crate) fn last_root_write(logical: usize) -> Option<(u64, u64, bool)> {
+    asid::last_write(logical)
 }
 
-/// The tag the running processor's root register holds: none here.
-pub(crate) const fn root_tag_now() -> u64 {
-    0
+/// The tag the running processor's root register holds.
+pub(crate) fn root_tag_now() -> u64 {
+    asid::tag_now()
 }
 
-/// The x86-64 PCID slot rule's check: nothing to check, no tags here.
-pub(crate) const fn check_root_tags() -> Result<(), &'static str> {
-    Ok(())
+/// The ASID slot rule's check, on a table of its own.
+pub(crate) fn check_root_tags() -> Result<(), &'static str> {
+    asid::check::check_slot_rule()
+}
+
+/// Whether user address `at` translates on this processor now: `false` for one no
+/// root in force maps, and for any with no user root.
+pub(crate) fn user_address_translates(at: u64) -> bool {
+    cpu::translates(at)
 }
 
 /// Stop translating the lower half at all.
 ///
 /// What a processor picking up a kernel thread does. `EPD0` makes a walk
 /// through `TTBR0_EL1` fault rather than merely find nothing, so a stray user
-/// address in the kernel is a fault at the instruction that made it — but
-/// `EPD0` governs walks and not the `TLB`, so the cached entries have to go as
-/// well, which is the second call.
+/// address in the kernel is a fault at the instruction that made it. `EPD0`
+/// governs walks and not the `TLB`, and nothing is invalidated: `disable_ttbr0`
+/// writes `TTBR0_EL1` zero, so ASID 0 is in force, and no user translation is
+/// ever tagged 0 (`L.aarch64.78`).
 ///
 /// # Safety
 ///
@@ -1196,7 +1213,6 @@ pub(crate) unsafe fn uninstall_user_root() {
     // SAFETY: (TRANSLATE) the caller guarantees no user address is wanted; the kernel is
     // reached entirely through `TTBR1_EL1`.
     unsafe { cpu::disable_ttbr0() };
-    cpu::flush_user_tlb();
 }
 
 /// Root of the loader's identity map, while it still exists.
@@ -1246,6 +1262,10 @@ pub unsafe fn drop_identity_map(_view: &BootView<'_>) {
     // SAFETY: (TRANSLATE) the caller guarantees the lower half is unused, and the kernel
     // has been running entirely in the upper half since its first instruction.
     unsafe { cpu::disable_ttbr0() };
+    // What the walk cached, as a secondary core drops it: under ASID 0 the map's own
+    // entries are what `L.aarch64.78` says that tag holds none of, and no uninstall
+    // invalidates any more.
+    cpu::flush_tlb();
     IDENTITY_DROPPED.store(true, Ordering::Relaxed);
 }
 
@@ -1705,4 +1725,15 @@ pub(crate) fn mpidr() -> u64 {
 /// table where `MPIDR.MT` is set.
 pub(crate) fn check_smt() -> Result<(), &'static str> {
     super::arm_common::smt::check::check_arm_smt()
+}
+
+/// [`install_user_root`] without the speculation decision: a shared process's
+/// flip between its two roots (`docs/microkernel/K1.md` §6).
+///
+/// # Safety
+///
+/// (TRANSLATE) As [`install_user_root`].
+pub(crate) unsafe fn flip_user_root(root: u64, space: u64, _begun: u64, cpu: usize) {
+    // SAFETY: (TRANSLATE) the caller's guarantee.
+    unsafe { asid::install(root, space, cpu) };
 }

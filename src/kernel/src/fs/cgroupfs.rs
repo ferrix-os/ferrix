@@ -183,6 +183,8 @@ fn move_errno(refused: JobError) -> Errno {
         JobError::Removed => Errno::ENODEV,
         // `cgroup_migrate_vet_dst`.
         JobError::Internal => Errno::EBUSY,
+        // A move is no way to change a criticality level (`docs/microkernel/K17.md`).
+        JobError::OtherLevel => Errno::EPERM,
         JobError::NoMemory => Errno::ENOMEM,
         // A sealed job (`L.object.248`), which Linux has no counterpart of.
         JobError::Sealed => Errno::EPERM,
@@ -438,6 +440,11 @@ pub(crate) fn job_for_cgroup(caller: &dyn Host, registers: &[u64; 6]) -> Result<
         return Err(status::ACCESS_DENIED);
     };
     let granted = requested.resolve(allowed).ok_or(status::ACCESS_DENIED)?;
+    // A cgroup above the caller's level is no way to a handle to it
+    // (`docs/microkernel/K17.md` rule a).
+    if job.level() > caller.core().exit().level() {
+        return Err(status::ACCESS_DENIED);
+    }
     native::insert_new(caller.core(), Object::Job(job), granted)
 }
 
@@ -542,6 +549,7 @@ impl Inode for Directory {
                 | JobError::Missing
                 | JobError::Busy
                 | JobError::Internal
+                | JobError::OtherLevel
                 | JobError::Sealed => Errno::ENOENT,
             })?;
         own_new(&child, permissions)?;

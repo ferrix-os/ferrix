@@ -55,7 +55,13 @@ const ROWS: &[&str] = &[
     // the depth-1 p50 of the seam's 4 KiB reads through the block ring and
     // the ring-3 driver (`block_ring::hop_check`).
     BLOCK_ROW,
+    // Another of its own, from the `regions` line: a Linux number's round trip
+    // through restricted mode (`docs/MICROKERNEL.md` §7, `docs/microkernel/K1.md`).
+    RESTRICTED_ROW,
 ];
+
+/// The row read from the kernel's `regions` boot line.
+const RESTRICTED_ROW: &str = "restricted-getppid";
 
 /// The row read from the kernel's `seam` boot line.
 const BLOCK_ROW: &str = "block-read-4K";
@@ -132,6 +138,8 @@ pub(crate) fn bench_rows(args: &Args) -> Result<()> {
             for (row, list) in ROWS.iter().zip(figures.iter_mut()) {
                 let p50 = if *row == BLOCK_ROW {
                     seam_p50(&lines)
+                } else if *row == RESTRICTED_ROW {
+                    restricted_p50(&lines)
                 } else {
                     crate::pipe_bench::summary(&lines, row)
                 };
@@ -139,6 +147,7 @@ pub(crate) fn bench_rows(args: &Args) -> Result<()> {
                     "  {arch}: boot {boot}: row {row} p50 {} ns",
                     p50.map_or_else(|| "?".to_owned(), |ns| ns.to_string())
                 );
+                refuse_zero(&arch.to_string(), row, p50)?;
                 list.extend(p50);
             }
         }
@@ -170,6 +179,27 @@ pub(crate) fn bench_rows(args: &Args) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Nothing round-trips in no time: a row that reads 0 is broken, and a run that
+/// passed with it would have measured nothing (K1, ledger 6282 R4).
+fn refuse_zero(arch: &str, row: &str, p50: Option<u64>) -> Result<()> {
+    if p50 == Some(0) {
+        return Err(Error::new(format!(
+            "{arch}: row {row} read 0 ns: a broken row, no figure"
+        )));
+    }
+    Ok(())
+}
+
+/// The restricted row off the kernel's `regions` boot line, in ns:
+/// "regions  ... restricted-getppid 3500 ns".
+fn restricted_p50(lines: &[String]) -> Option<u64> {
+    lines.iter().find_map(|line| {
+        let at = line.find("restricted-getppid ")?;
+        let rest = line.get(at + "restricted-getppid ".len()..)?;
+        rest.split_whitespace().next()?.parse().ok()
+    })
 }
 
 /// The depth-1 p50 of the kernel's `seam` boot line, in ns: "seam  a 4 KiB
@@ -334,6 +364,22 @@ fn boot_once(arch: Arch, program: &Path, args: &Args) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::limits;
+
+    #[test]
+    fn a_row_of_nothing_is_refused() {
+        assert!(super::refuse_zero("x86_64", "restricted-getppid", Some(0)).is_err());
+        assert!(super::refuse_zero("x86_64", "restricted-getppid", Some(1)).is_ok());
+        assert!(super::refuse_zero("x86_64", "restricted-getppid", None).is_ok());
+    }
+
+    #[test]
+    fn the_regions_line_gives_the_restricted_row() {
+        let line = "   23.39 |   regions  restricted-check held every case; \
+                    restricted-getppid 4410 ns"
+            .to_owned();
+        assert_eq!(super::restricted_p50(&[line]), Some(4410));
+        assert_eq!(super::restricted_p50(&["regions".to_owned()]), None);
+    }
 
     #[test]
     fn the_seam_line_gives_its_depth_one_p50() {

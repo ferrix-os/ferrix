@@ -39,6 +39,11 @@
       "lines": 15,
       "recursive": false
     },
+    "arch/x86_64/restricted.rs::check_context": {
+      "complexity": 24,
+      "lines": 32,
+      "recursive": false
+    },
     "arch/x86_64/signal.rs::setup_signal_frame": {
       "complexity": 19,
       "lines": 30,
@@ -125,13 +130,13 @@
       "recursive": false
     },
     "object/process.rs::move_charged": {
-      "complexity": 15,
-      "lines": 45,
+      "complexity": 16,
+      "lines": 46,
       "recursive": false
     },
     "sched/task.rs::new": {
       "complexity": 4,
-      "lines": 60,
+      "lines": 64,
       "recursive": false
     },
     "smp.rs::invalidate_pages": {
@@ -410,18 +415,23 @@
       "recursive": false
     },
     "syscall/native.rs::answer": {
-      "complexity": 40,
-      "lines": 120,
+      "complexity": 42,
+      "lines": 137,
       "recursive": false
     },
     "syscall/native.rs::channel_read": {
-      "complexity": 15,
-      "lines": 52,
+      "complexity": 16,
+      "lines": 63,
       "recursive": false
     },
     "syscall/native.rs::channel_write": {
       "complexity": 19,
       "lines": 36,
+      "recursive": false
+    },
+    "syscall/native.rs::deliver_some": {
+      "complexity": 14,
+      "lines": 70,
       "recursive": false
     },
     "syscall/native.rs::device_call": {
@@ -439,14 +449,24 @@
       "lines": 28,
       "recursive": false
     },
+    "syscall/native/region.rs::answer": {
+      "complexity": 16,
+      "lines": 20,
+      "recursive": false
+    },
+    "syscall/native/region.rs::process_create_shared": {
+      "complexity": 21,
+      "lines": 51,
+      "recursive": false
+    },
     "syscall/uaccess.rs::copy_from_user_through": {
       "complexity": 16,
-      "lines": 21,
+      "lines": 23,
       "recursive": false
     },
     "trap.rs::handle_page_fault": {
-      "complexity": 17,
-      "lines": 50,
+      "complexity": 18,
+      "lines": 52,
       "recursive": false
     },
     "user/space.rs::advise": {
@@ -456,7 +476,7 @@
     },
     "user/space.rs::advise_region": {
       "complexity": 29,
-      "lines": 50,
+      "lines": 51,
       "recursive": false
     },
     "user/space.rs::allocate_by_handle": {

@@ -206,3 +206,62 @@ pub(crate) fn exit(status: i32) -> ! {
 
 /// The ELF machine of a native program here (`ferrix-process-builder`).
 pub const ELF_MACHINE: u16 = 62;
+/// Make `RESTRICTED_ENTER`, `RESTRICTED_RESUME` or `RESTRICTED_CONTINUE`, with
+/// one argument, and answer what an exit leaves (`docs/microkernel/K1.md`
+/// §2.2): the reason in R12, zeroed first because a refusal leaves it alone,
+/// the number in RAX, the words in the argument registers. The vector
+/// registers go as across a function call.
+///
+/// # Safety
+///
+/// As [`linux`], for `argument`: an entry's context pointer, which the kernel
+/// only reads.
+pub(crate) unsafe fn restricted(number: usize, argument: u64) -> crate::restricted::Exit {
+    let (mut reason, mut rax): (u64, u64) = (0, number as u64);
+    let mut words = [argument, 0, 0, 0, 0, 0];
+    let [w0, w1, w2, w3, w4, w5] = &mut words;
+    // SAFETY: the caller's promise about the argument; the kernel restores
+    // RSP and every register not named here, as K1 §2.2 says.
+    unsafe {
+        asm!(
+            "syscall",
+            inlateout("rax") rax,
+            inlateout("r12") reason,
+            inlateout("rdi") *w0,
+            lateout("rsi") *w1,
+            lateout("rdx") *w2,
+            lateout("r10") *w3,
+            lateout("r8") *w4,
+            lateout("r9") *w5,
+            lateout("rcx") _,
+            lateout("r11") _,
+            lateout("xmm0") _, lateout("xmm1") _, lateout("xmm2") _, lateout("xmm3") _,
+            lateout("xmm4") _, lateout("xmm5") _, lateout("xmm6") _, lateout("xmm7") _,
+            lateout("xmm8") _, lateout("xmm9") _, lateout("xmm10") _, lateout("xmm11") _,
+            lateout("xmm12") _, lateout("xmm13") _, lateout("xmm14") _, lateout("xmm15") _,
+        );
+    }
+    crate::restricted::Exit {
+        reason,
+        number: rax,
+        words,
+    }
+}
+
+// `linuxd`'s copies of a program's memory, in the copy window
+// (`docs/microkernel/K1.md` §2.5): zero, or what the kernel landed with.
+core::arch::global_asm!(
+    ".section .text.ferrix_program_copy, \"ax\"",
+    ".globl ferrix_program_copy",
+    "ferrix_program_copy:",
+    "mov rcx, rdx",
+    "rep movsb",
+    "xor eax, eax",
+    ".globl ferrix_program_copy_end",
+    "ferrix_program_copy_end:",
+    "nop",
+    ".globl ferrix_program_copy_landing",
+    "ferrix_program_copy_landing:",
+    "ret",
+    ".text",
+);

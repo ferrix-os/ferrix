@@ -3233,6 +3233,106 @@ package FerrixMemoryRequirements {
             attribute :>> unit = ("syscall::native::space_unmap",
                 "user::space::AddressSpace::unmap");
         }
+        requirement <'L.user.180'> aNormalRootsSlotsAreTheRestrictedRoots : ItemLowLevel {
+            attribute :>> statement = "A normal root's restricted slots shall be the restricted root's or
+                absent, and its region slots the region's, a restricted space's
+                top tables never freed before it goes.";
+            attribute :>> criterion = "check_normal_slots at the sweep; a control lets a top table free.";
+            attribute :>> parent = "H.OBJ.26";
+            attribute :>> unit = ("user::space::AddressSpace::sync_top",
+                "user::space::AddressSpace::bind_region",
+                "user::space::AddressSpace::check_normal_slots",
+                "mm::copy_root_slot",
+                "mm::allocate_root_for",
+                "mm::free_root",
+                "mm::root_slot_entry",
+                "mm::unmap_in_keeping",
+                "mm::ensure_top_in",
+                "user::space::AddressSpace::new_region");
+        }
+        requirement <'L.user.181'> aRestrictedSpaceEndsAtTheRegion : ItemLowLevel {
+            attribute :>> statement = "A restricted root shall hold no entry at or above SHARED_BASE, and
+                a restricted space's ceiling shall be SHARED_BASE and shall not
+                rise.";
+            attribute :>> criterion = "The sweep; the check reads the ceiling; a control plants one.";
+            attribute :>> parent = "H.TRAP.23";
+            attribute :>> unit = ("user::space::AddressSpace::bind_region",
+                "user::space::AddressSpace::flip_root",
+                "user::space::AddressSpace::root_for",
+                "arch::x86_64::flip_user_root",
+                "arch::aarch64::flip_user_root");
+        }
+        requirement <'L.user.182'> aPointerIsRoutedByTheMode : ItemLowLevel {
+            attribute :>> statement = "A pointer at or above SHARED_BASE shall mean the region only from
+                normal mode and only for the running task's own space.";
+            attribute :>> criterion = "Cases 120 to 122.";
+            attribute :>> parent = "H.OBJ.26";
+            attribute :>> unit = ("user::space::AddressSpace::route",
+                "user::space::AddressSpace::routed",
+                "object::process::Process::caller_space");
+        }
+        requirement <'L.user.183'> aRegionShootdownReachesItsProcessors : ItemLowLevel {
+            attribute :>> statement = "A change of a region's mappings shall reach every processor
+                running a process of its partition in either mode.";
+            attribute :>> criterion = "Case 89 with --smp 2 and up: the second process sees the new page.";
+            attribute :>> parent = "H.OBJ.26";
+            attribute :>> unit = "user::space::AddressSpace::install_as";
+        }
+        requirement <'L.user.193'> aRegionsProcessStartsOnlyShared : ItemLowLevel {
+            attribute :>> statement = "PROCESS_START and PROCESS_RUN shall refuse a process of a
+                region, BAD_STATE, from either mode: PROCESS_START_SHARED starts those.";
+            attribute :>> criterion = "Case 153.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = "syscall::native::start_with";
+        }
+        requirement <'L.user.189'> aMeasuredJobsRegionIsMeasured : ItemLowLevel {
+            attribute :>> statement = "A region made for a measured job shall be measured, and K14's tests of a
+                caller shall read the space its call means, the region's in normal mode, with
+                the process's restricted space unmeasured by design.";
+            attribute :>> criterion = "The sealing check's region_of_a_measured_job.";
+            attribute :>> parent = "H.OBJ.26";
+            attribute :>> unit = "syscall::native::region::region_create";
+        }
+        requirement <'L.user.184'> aRegionIsForkedByNothing : ItemLowLevel {
+            attribute :>> statement = "SPACE_CLONE of a region's space shall be refused.";
+            attribute :>> criterion = "The check.";
+            attribute :>> parent = "H.OBJ.26";
+            attribute :>> unit = "user::space::AddressSpace::fork";
+        }
+        requirement <'L.user.185'> noWriteRightUnderAHigherMapper : ItemLowLevel {
+            attribute :>> statement = "A write right to a VMO a higher level maps shall not land at a
+                lower level, but for the level declared.";
+            attribute :>> criterion = "The `levels` line on every boot: the row's negative control.";
+            attribute :>> parent = "H.OBJ.34";
+            attribute :>> unit = ("user::vmo::Vmo::may_write_from",
+                "user::vmo::Vmo::highest_mapper",
+                "user::vmo::Vmo::set_creator_level");
+        }
+        requirement <'L.user.186'> noHigherMapOverALowerWriter : ItemLowLevel {
+            attribute :>> statement = "A VMO a lower level has held a write right to shall not be mapped
+                at a higher level, the target space's level, but for the level
+                declared; a clone or a bind across levels is refused.";
+            attribute :>> criterion = "The `levels` line on every boot.";
+            attribute :>> parent = "H.OBJ.34";
+            attribute :>> unit = "user::vmo::Vmo::may_map_at";
+        }
+        requirement <'L.user.187'> aLowerLevelIsNeverAPager : ItemLowLevel {
+            attribute :>> statement = "A pager-backed VMO shall not be mapped above its pager's level,
+                whatever is declared.";
+            attribute :>> criterion = "By the same test as L.user.186; the pager is its creator, so its
+                creator-level writer refuses first.";
+            attribute :>> parent = "H.OBJ.34";
+            attribute :>> unit = "user::vmo::Vmo::set_pager_level";
+        }
+        requirement <'L.user.188'> aDeclarationIsOneLevelOnce : ItemLowLevel {
+            attribute :>> statement = "JOB_DECLARE_BUFFER shall need SET_LIMIT on the job and MAP on the
+                VMO, be refused for a VMO declared, with a pager or mapped above,
+                and lift the rule for its one level, audited.";
+            attribute :>> criterion = "The `levels` line on every boot.";
+            attribute :>> parent = "H.OBJ.34";
+            attribute :>> unit = ("user::vmo::Vmo::declare_for",
+                "syscall::native::job_declare_buffer");
+        }
     }
 
     package PagerBackedObjects {

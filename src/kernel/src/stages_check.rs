@@ -129,6 +129,13 @@ pub(super) fn check_programs() {
     // supervisor to a process or a job, once each, and what it costs.
     check_exceptions();
 
+    // K17: criticality levels between jobs (docs/microkernel/K17.md).
+    check_levels();
+
+    // K1 and K11: a program in restricted mode under a shared process, where
+    // the architecture has them (docs/microkernel/K1.md §10).
+    check_regions();
+
     // K2: an address space mapped, protected, unmapped and read by handle,
     // W^X on every space so mapped, and who pays (docs/microkernel/K2.md).
     check_spaces();
@@ -1331,6 +1338,59 @@ pub(super) fn check_exceptions() {
         Err(problem) => fatal!(
             catalog::STAGE9_EXCEPTIONS,
             "stage 9 exception channel check failed: {problem}"
+        ),
+    }
+}
+
+/// Stage 9: criticality levels (K17), through the native calls.
+///
+/// Halts rather than returning, as every other stage's check does.
+pub(super) fn check_levels() {
+    match object::level_check::run() {
+        Ok(report) => println!(
+            "  levels   {} refusals between levels as specified and audited, {} handles \
+             delivered invalid with their bytes",
+            report.refusals, report.dropped
+        ),
+        Err(problem) => fatal!(
+            catalog::STAGE9_LEVELS,
+            "stage 9 criticality level check failed: {problem}"
+        ),
+    }
+}
+
+/// Stage 9: regions and restricted mode (K1, K11), through a native program.
+///
+/// Halts rather than returning, as every other stage's check does.
+pub(super) fn check_regions() {
+    if !arch::HAS_RESTRICTED {
+        println!("  regions  none on this architecture: K1's and K11's calls answer ENOSYS");
+        return;
+    }
+    match object::region_check::run() {
+        Ok(report) => println!(
+            "  regions  restricted-check held every case: {} sweep of a restricted root over \
+             {} leaves found nothing of the region; {} barriers on {} exits under `{}`{}; \
+             restricted-getppid {} ns",
+            report.sweeps,
+            report.leaves,
+            report.barriers,
+            report.barriers,
+            if cfg!(ferrix_partition_speculation = "partition") {
+                "partition"
+            } else {
+                "exit"
+            },
+            if report.issued {
+                ""
+            } else {
+                " (decided: this processor model has no barrier to issue)"
+            },
+            report.row_ns,
+        ),
+        Err(problem) => fatal!(
+            catalog::STAGE9_REGIONS,
+            "stage 9 region and restricted-mode check failed: {problem}"
         ),
     }
 }

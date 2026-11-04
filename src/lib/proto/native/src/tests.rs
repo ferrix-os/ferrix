@@ -1191,6 +1191,22 @@ fn every_call_in_the_native_table_has_a_wrapper() {
     let _ = device.pin(&vmo, 0, 1, PinAccess::ReadOnly);
     let _ = Pin::from_owned(handle()).addresses(&mut []);
     let _ = crate::exception::attach(&job, 1000);
+    let thread = crate::region::Thread::from_owned(handle());
+    let _ = thread.kick();
+    let _ = crate::region::thread_create(&sys, 0, 0, 0);
+    let _ = crate::region::thread_self(&sys);
+    let _ = crate::region::thread_exit(&sys, 0, false);
+    let _ = crate::region::handle_to_shared(&sys, Handle(1), Requested::Same, 0);
+    let _ = crate::region::handle_to_private(&sys, Handle(1), Requested::Same);
+    let _ = crate::region::context_read(&sys);
+    let _ = crate::region::vectors_read(&sys, &mut [0; 8]);
+    let _ = crate::region::vectors_write(&sys, &[0; 8]);
+    let _ = crate::region::copy_window(&sys, 0, 0, 0);
+    let _ = crate::region::region_create(&job);
+    let region = crate::region::Region::from_owned(handle());
+    let _ = region.process_create(&job, b"");
+    let _ = crate::region::job_declare_buffer(&job, &vmo);
+    let _ = crate::region::process_start_shared(&Process::from_owned(handle()), 0, 0, None);
     let exception = crate::exception::Exception::from_owned(handle());
     let _ = exception.read_state(&mut [0; 8]);
     let _ = exception.write_state(&[0; 8]);
@@ -1224,7 +1240,17 @@ fn every_call_in_the_native_table_has_a_wrapper() {
 
     let wrapped: BTreeSet<usize> = sys.numbers().into_iter().collect();
     let table: BTreeSet<usize> = nr::ALL.iter().map(|&call| nr::number(call)).collect();
-    let missing: Vec<_> = table.difference(&wrapped).collect();
+    // These three answer in more registers than a `Syscall` sees, so they are
+    // `ferrix_rt::restricted`'s, on the architecture's trap.
+    let elsewhere = [
+        nr::RESTRICTED_ENTER,
+        nr::RESTRICTED_RESUME,
+        nr::RESTRICTED_CONTINUE,
+    ];
+    let missing: Vec<_> = table
+        .difference(&wrapped)
+        .filter(|number| !elsewhere.contains(number))
+        .collect();
     assert!(missing.is_empty(), "no wrapper makes {missing:#x?}");
 }
 

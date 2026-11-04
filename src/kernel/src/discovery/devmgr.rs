@@ -133,6 +133,17 @@ pub fn register_reader(read: ReadFile) {
     let _ = READ_FILE.call_once(|| read);
 }
 
+// CHECKS-ONLY: object/region_check.rs
+/// Read a whole file as `devmgr`'s files are read: for a boot check's program.
+///
+/// # Errors
+///
+/// As the registered reader's.
+#[doc(hidden)]
+pub fn read_file(path: &[u8]) -> Result<vmap::Buffer, Errno> {
+    READ_FILE.get().copied().unwrap_or(no_files)(path)
+}
+
 /// The [`ReadFile`] of a kernel whose filesystem registered none, which has
 /// no `/sbin/devmgr` to start. `main.rs` checks that a boot of this kernel is
 /// not one.
@@ -710,7 +721,7 @@ pub(crate) const fn image_rights() -> Rights {
 fn load(image: &[u8]) -> Result<(Arc<dyn Host>, EntryPoint), &'static str> {
     let processes = native::processes().ok_or("nothing is registered to start devmgr with")?;
     let process = (processes.make)(None, NAME).map_err(|_| "no memory for devmgr's process")?;
-    match first_image::load(process.core().space(), image) {
+    match first_image::load(process.core().own_space(), image) {
         Ok(at) => Ok((process, at)),
         Err(_) => {
             process.kill(job::KILLED_STATUS);

@@ -409,7 +409,7 @@ pub fn read_pair(
 ) -> Result<(i64, i64), Errno> {
     if width.field_bytes() == 8 {
         let mut bytes = [0_u8; 16];
-        uaccess::copy_from_user(process.space(), at, &mut bytes).map_err(|_| Errno::EFAULT)?;
+        uaccess::copy_from_user(process.own_space(), at, &mut bytes).map_err(|_| Errno::EFAULT)?;
         let (first, second) = bytes.split_at(8);
         let first = i64::from_le_bytes(first.try_into().map_err(|_| Errno::EFAULT)?);
         let second = i64::from_le_bytes(second.try_into().map_err(|_| Errno::EFAULT)?);
@@ -421,7 +421,7 @@ pub fn read_pair(
         return Ok((first, second));
     }
     let mut bytes = [0_u8; 8];
-    uaccess::copy_from_user(process.space(), at, &mut bytes).map_err(|_| Errno::EFAULT)?;
+    uaccess::copy_from_user(process.own_space(), at, &mut bytes).map_err(|_| Errno::EFAULT)?;
     let (first, second) = bytes.split_at(4);
     let first = i32::from_le_bytes(first.try_into().map_err(|_| Errno::EFAULT)?);
     let second = i32::from_le_bytes(second.try_into().map_err(|_| Errno::EFAULT)?);

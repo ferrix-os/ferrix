@@ -243,6 +243,17 @@ fn read_midr() -> u32 {
     value
 }
 
+/// No restricted exit here, so nothing to offer for one.
+pub(crate) const fn exit_barrier_offered(_cpu: usize) -> bool {
+    false
+}
+
+/// [`switch_barrier`] for a restricted exit, which this architecture never makes
+/// (`docs/MICROKERNEL.md` §11 Q7).
+pub(crate) fn exit_barrier(cpu: usize) -> bool {
+    switch_barrier(cpu)
+}
+
 /// The switch barrier between two programs of one speculation domain:
 /// nothing. This architecture's barrier is the predictor invalidation alone,
 /// which a domain leaves out (`docs/OPAQUE-KERNEL.md` §9.3a, A2).

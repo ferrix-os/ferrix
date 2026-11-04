@@ -1275,7 +1275,7 @@ fn copy_chunks(
         .try_reserve_exact(CHUNK.min(length))
         .map_err(|_| status::NO_MEMORY)?;
     bounce.resize(CHUNK.min(length), 0);
-    let driver = caller.core().space();
+    let driver = caller.core().own_space();
     let client = request.client.space();
     let mut done = 0;
     while done < length {

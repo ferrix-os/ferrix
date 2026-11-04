@@ -2363,6 +2363,40 @@ compare each. Nothing is freed under it: an ended ticket is handed out and
 dropped after the lock goes. Lock order: a process's membership lock
 (released) before it; a task's adoption lock is never taken under it.
 
+### 2.2ah A VMO's level marks (`Vmo::levels`, K17)
+
+A spin lock of its own per VMO, and a leaf: nothing is taken under it and it
+is in no other lock's order, so a handle's landing and a mapping can each hold
+whatever they already hold when they take it. It is held for a compare and at
+most one store of two small integers: `Vmo::may_write_from`, `may_map_at`,
+`declare_for` and the two setters. No walk, no allocation. `level::may_hold` is
+O(1) per handle, so a message's delivery spends at most `CHANNEL_MAX_HANDLES`
+of these. An object refused at delivery is dropped after the inbox lock goes
+(`deliver_some`), so what its drop costs is the reader's, outside the lock.
+Between jobs of one level nothing is refused and the marks never move past
+the first value, and a kernel whose jobs asked for no level pays the lock alone.
+
+### 2.2ai A root's ASID (`arch::aarch64::asid`, K1)
+
+`asid::install` runs with interrupts masked at every root write and takes no lock: each
+processor owns its table. A write scans at most sixteen slots (16 relaxed loads). A hit is one
+`msr ttbr0_el1`, a load and test of `TCR_EL1`, and an `isb`. A miss adds two writes of
+`TCR_EL1`, two `isb`s, one `tlbi aside1` and one `dsb nsh`, local to the processor, and the walks
+its evicted owner has to make again when it comes back: at most one miss in every sixteen new
+roots evicts any one root, round robin. No allocation. Nothing here is measured: TCG has no
+timing, so the figure is the board row's.
+
+### 2.2ak `clone`'s stack on AArch64 (K1, ledger 6282 R2)
+
+A gate at `--smp 2` overflowed the four-page stack on this branch: `sys_clone` had grown to
+4,016 bytes with `clone_thread` inlined in it. With `clone_thread` out of line the deepest path to
+`Process::new` is at or under base's by frame sizes, from each build's `sub sp` and pre-indexed
+`stp`, this path with a nested timer interrupt in `fire_timers`: 13,120 bytes against 14,112, of
+the 16,384, plus two trap frames of about 300 bytes each and `fire_timers`' callees, which are not
+counted. So the margin is about 2.6 KiB less whatever those callees take; the block ring's task, whose path to an allocation with a tick in it reached 15,280 bytes on base as well, is now 2,512 of frames before the same allocation (`RingDisk::done` on the heap); and the moves of a by-value
+`Process` (4,000 and 2,528 bytes) are what to shrink first (`docs/BACKLOG.md`). Debug build; a release
+build's frames differ.
+
 ### 2.3 What is missing, per standard
 
 * **DO-178C DAL C** does not require WCET as such, but does require that

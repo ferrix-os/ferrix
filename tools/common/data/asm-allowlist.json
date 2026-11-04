@@ -14,8 +14,9 @@
     "'Convenient in assembly' is not a reason. 'Faster in assembly' is not a",
     "reason either -- measure it, then argue it in the entry."
   ],
-  "max_total_lines": 1753,
+  "max_total_lines": 1985,
   "//max_total_lines": [
+    "1985 since 2026-11-04 (K1, K11, docs/microkernel/K1.md section 10; +14 for AArch64 ASIDs (section 8.1); +70 for AArch64's images, +40 for the row's image and rt's copy of a program's memory, whose every load and store may fault and land, K1 section 2.5): rt's trap for the three calls that go into restricted mode, whose exit answers in more registers than a call (+24), and restricted-check's images, the instructions a program in restricted mode runs so that a boot check can see each way out: a fault, a system call, int $0x80 from 32-bit code, no Rust spelling (+84).",
     "The cap that actually binds. Assembly is a fixed cost here: the list below",
     "is meant to be finished once every architecture boots, and a scheduler, a",
     "filesystem or a driver must add nothing to it. 1600 is the full intended",
@@ -118,7 +119,7 @@
     },
     {
       "file": "src/kernel/src/arch/aarch64/cpu.rs",
-      "max_lines": 100,
+      "max_lines": 113,
       "reason": "CPU primitives, one instruction each: `dsb`/`isb` are barriers, `tlbi` is TLB maintenance, `wfi` and `msr daifset` are CPU state, and `hvc` is the PSCI call that powers the machine off. Grows with stage 3 (VBAR_EL1, GIC, the generic timer) and must not grow with anything else."
     },
     {
@@ -213,7 +214,7 @@
     },
     {
       "file": "src/user/system/native/rt/src/arch/aarch64.rs",
-      "max_lines": 21,
+      "max_lines": 49,
       "reason": "A native program's side of the kernel's entry, and its first instructions. `_start`: the kernel enters a process with `eret`, not a call, so the frame pointer and link register hold no caller's frame and nothing promises the stack's alignment; they are zeroed and the stack aligned before the first Rust function is called, with the bootstrap handle left in X0. The trap: `svc #0` with the number in X8 and arguments in X0-X5 is `system_call`'s contract in src/kernel/src/arch/aarch64/trap.rs, and an instruction plus a register assignment is what `asm!` is -- the instruction and a line per register operand, for a call and for `exit_group`, because the register assignment is the contract. Nothing a runtime adds later (threads, TLS, allocation) belongs here. 21 for the counter's `isb` before `mrs cntvct_el0` (2026-10-07): a barrier and a system register, neither with a Rust spelling, so that a stamp around a system call is not taken before the call's instructions retire."
     },
     {
@@ -222,8 +223,18 @@
       "reason": "AArch64's argument in ARM state. `_start`: the kernel enters a process with `rfeia`, so R11 and LR hold no caller's frame and the stack may not be the multiple of 8 the AAPCS requires at a call; they are zeroed and the stack aligned before `ferrix_rt_start`, with the bootstrap handle left in R0. The trap: `svc #0` with the number in R7 and arguments in R0-R5, the EABI contract `system_call` in src/kernel/src/arch/armv7a/trap.rs reads -- the instruction and a line per register operand, for a call and for `exit_group`, because the register assignment is the contract. And the counter, `isb` and `mrrc p15, 1, ..., c14` (CNTVCT, which the kernel lets PL0 read since 2026-10-07): a coprocessor read has no Rust spelling."
     },
     {
+      "file": "src/user/system/native/restricted-check/src/arch/aarch64.rs",
+      "max_lines": 71,
+      "reason": "K1's boot check on AArch64: the same images as x86-64's in A64, each a way out the kernel must handle, and a copy in the copy window. An instruction that faults on purpose has no Rust spelling."
+    },
+    {
+      "file": "src/user/system/native/restricted-check/src/arch/x86_64.rs",
+      "max_lines": 91,
+      "reason": "K1's boot check: position-independent images a thread runs in restricted mode, each a way out the kernel must handle (`syscall`, `int3`, `ud2`, a divide by zero, a load, store and fetch through a register, `popf` with the trap flag, 32-bit code's `int $0x80`), and a copy in the copy window, whose landing is an address. An instruction that faults on purpose has no Rust spelling."
+    },
+    {
       "file": "src/user/system/native/rt/src/arch/x86_64.rs",
-      "max_lines": 20,
+      "max_lines": 47,
       "reason": "`_start`: `ferrix_enter_user` enters a process with `SYSRET` and the stack a multiple of 16 with no return address, where a function expects to be entered by a `call` eight bytes below that; the stack is aligned, RBP zeroed, and `ferrix_rt_start` called with the bootstrap handle still in RDI. The trap: `SYSCALL` with the number in RAX, arguments in RDI, RSI, RDX, R10, R8, R9 and RCX and R11 destroyed, as `ferrix_syscall_stub` in src/kernel/src/arch/x86_64/syscall.rs defines -- the instruction and a line per register operand, for a call and for `exit_group`, because the register assignment is the contract."
     }
   ]

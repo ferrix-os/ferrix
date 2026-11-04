@@ -129,6 +129,7 @@ members = [
     "src/user/system/native/rt",
     "src/user/system/native/driver",
     "src/user/system/native/channel-echo",
+    "src/user/system/native/restricted-check",
     "src/user/system/native/pong",
     "src/user/system/native/crash-at-start",
     "src/user/system/native/mce-victim",

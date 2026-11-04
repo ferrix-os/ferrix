@@ -312,6 +312,72 @@ fn issue_barrier(cpu: usize) {
     }
 }
 
+/// Whether the rule at a flip is `partition_speculation=exit`'s: an `IBPB` on
+/// every restricted exit. Every build but one made with `partition`
+/// (`docs/microkernel/K1.md` §6), so `present` and `desktop` boot the check
+/// under the strong rule.
+const EXIT_BARRIER: bool = !cfg!(ferrix_partition_speculation = "partition");
+
+/// Whether each processor last ran restricted code in ring 3, and has had no
+/// barrier since: what a switch from a restricted thread to a normal-mode
+/// thread of the same process, which `entered_space` sees as one key, finds.
+static RESTRICTED_RAN: [AtomicBool; MAX_CPUS] = [const { AtomicBool::new(false) }; MAX_CPUS];
+/// Barriers each processor has decided at a restricted exit.
+static RESTRICTED_DECIDED: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS];
+/// Barriers each processor has issued at a restricted exit: `machine` says it
+/// did, which a model with no `IBPB` does not.
+static RESTRICTED_ISSUED: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS];
+
+/// This processor is about to run restricted code. With interrupts masked.
+pub(crate) fn restricted_ran() {
+    if let Some(ran) = RESTRICTED_RAN.get(this_cpu()) {
+        ran.store(true, Ordering::Relaxed);
+    }
+}
+
+/// This processor is about to run `linuxd`'s code, or a normal-mode thread: if
+/// restricted code ran here last, the barrier the build's rule asks (K1 §6).
+/// None on entry. With interrupts masked.
+pub(crate) fn restricted_left() {
+    let cpu = this_cpu();
+    let Some(ran) = RESTRICTED_RAN.get(cpu) else {
+        return;
+    };
+    if !ran.load(Ordering::Relaxed) {
+        return;
+    }
+    ran.store(false, Ordering::Relaxed);
+    if !HARDENED || !EXIT_BARRIER {
+        return;
+    }
+    if let Some(decided) = RESTRICTED_DECIDED.get(cpu) {
+        count_here(decided);
+    }
+    if machine::exit_barrier(cpu)
+        && let Some(issued) = RESTRICTED_ISSUED.get(cpu)
+    {
+        count_here(issued);
+    }
+}
+
+/// Whether this processor offers the barrier a restricted exit issues, as read from
+/// the processor itself and not from what the exit answered (ledger 6282 R6, B5).
+pub(crate) fn exit_barrier_offered() -> bool {
+    HARDENED && EXIT_BARRIER && machine::exit_barrier_offered(this_cpu())
+}
+
+/// Barriers decided and issued at restricted exits, on every processor: for
+/// the check's count (K1 §6, §10).
+pub(crate) fn restricted_barriers() -> (u64, u64) {
+    let sum = |counters: &[AtomicU64; MAX_CPUS]| {
+        counters
+            .iter()
+            .map(|counted| counted.load(Ordering::Relaxed))
+            .sum()
+    };
+    (sum(&RESTRICTED_DECIDED), sum(&RESTRICTED_ISSUED))
+}
+
 /// Add one to `counter`, a word of this processor's that only it writes,
 /// with interrupts masked (every caller: the switch, the grace period's
 /// answer, the barrier interrupt): a load and a store, not a locked add

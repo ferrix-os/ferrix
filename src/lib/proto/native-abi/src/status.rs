@@ -95,3 +95,11 @@ pub const ALL: [Errno; 19] = [
     LIMIT_REACHED,
     UNTRANSLATED,
 ];
+
+/// The call has no meaning on this architecture: restricted mode's and shared
+/// processes' calls on ARMv7-A (`docs/microkernel/K1.md` §8).
+pub const NOT_SUPPORTED: Errno = Errno::ENOSYS;
+
+/// A kick ended the wait of a native call made from restricted mode
+/// (`docs/microkernel/K1.md` §2.4).
+pub const INTERRUPTED: Errno = Errno::EINTR;

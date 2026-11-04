@@ -143,9 +143,13 @@ pub mod object {
     #[cfg(ferrix_linux_abi = "on")]
     pub mod format_check;
     #[cfg(ferrix_linux_abi = "on")]
+    pub mod level_check;
+    #[cfg(ferrix_linux_abi = "on")]
     pub mod pager_check;
     #[cfg(ferrix_linux_abi = "on")]
     pub mod quota_check;
+    #[cfg(ferrix_linux_abi = "on")]
+    pub mod region_check;
     #[cfg(ferrix_linux_abi = "on")]
     pub mod sealing_check;
     #[cfg(ferrix_linux_abi = "on")]

@@ -111,6 +111,10 @@ pub(crate) const FILTERED: u32 = 1 << 4;
 /// first (L.sched.99).
 pub(crate) const PLACE: u32 = 1 << 5;
 
+/// A kick: the task is to leave restricted mode at its next way out, or at
+/// its next entry (`docs/microkernel/K1.md` §2.4). Lowered as it is taken.
+pub const KICK: u32 = 1 << 6;
+
 /// The bits the way out acts on through the personality.
 const ATTENTION: u32 = END | STOP | SIGNAL | TRACE;
 /// The bits the task clears as it finds them. [`END`] is never cleared.
@@ -159,6 +163,33 @@ pub fn post_own(bits: u32) {
 /// personality post it for. False where nothing runs.
 pub fn own_end() -> bool {
     with_running(has_end).unwrap_or(false)
+}
+
+/// Take a kick posted to the running task, if there is one: one load when
+/// there is none.
+#[cfg_attr(
+    target_arch = "arm",
+    expect(dead_code, reason = "ARMv7-A has no restricted mode")
+)]
+pub(crate) fn take_kick() -> bool {
+    with_running(|task| {
+        task.work().load(Ordering::Acquire) & KICK != 0
+            && task.work().fetch_and(!KICK, Ordering::Acquire) & KICK != 0
+    })
+    .unwrap_or(false)
+}
+
+/// Whether a kick is posted to the running task, and it is in restricted mode:
+/// what a blocking native call from there ends for (`docs/microkernel/K1.md`
+/// §2.4). A normal-mode wait is not interrupted.
+pub fn restricted_kick_due() -> bool {
+    super::running_restricted() && own_word() & KICK != 0
+}
+
+/// Whether a wait of the running task's has either reason to end that is not
+/// its own condition.
+pub fn own_end_or_restricted_kick() -> bool {
+    own_end() || restricted_kick_due()
 }
 
 /// The running task's word as it stands, clearing nothing: what a pager's

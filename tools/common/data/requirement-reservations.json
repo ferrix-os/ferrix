@@ -22,7 +22,6 @@
     },
     {
       "ids": [
-        "H.OBJ.34",
         "H.SCHED.26-27",
         "L.sched.153-170"
       ],
@@ -45,13 +44,12 @@
     },
     {
       "ids": [
-        "H.TRAP.21-24",
-        "H.OBJ.23-26",
-        "L.trap.14-30",
-        "L.object.270-289",
-        "L.user.180-199",
-        "L.x86_64.260-285",
-        "L.aarch64.70-90"
+        "L.trap.30",
+        "L.user.190-192",
+        "L.user.194-199",
+        "L.x86_64.272-275",
+        "L.x86_64.277-285",
+        "L.aarch64.82-90"
       ],
       "owner": "mk-restricted",
       "branch": "feature/mk-restricted",
