@@ -554,7 +554,9 @@ impl Process {
             }
             // A started process leaves or enters a sealed job by no move
             // (`L.object.248`); `process_create` places one not yet started.
-            if Job::seal_refuses(&membership, to, checked) {
+            if Job::seal_refuses(&membership, to, checked)
+                || Job::measure_refuses(&membership, to, checked)
+            {
                 return Err(JobError::Sealed);
             }
             let tasks = self.tasks.load(Ordering::Acquire);

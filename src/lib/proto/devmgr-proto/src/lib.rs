@@ -119,7 +119,10 @@ pub const FLAG_FIRST: u32 = 1;
 /// other bit unknown to this crate gives no opt-out (ledger 3906 (2)).
 pub const FLAG_UNISOLATED_ALLOWED: u32 = 1 << 1;
 /// Every `flags` bit this crate defines.
-const FLAGS_KNOWN: u32 = FLAG_FIRST | FLAG_UNISOLATED_ALLOWED;
+/// DEVICES flags, bit 2: devmgr binds each function it admits before its
+/// driver can reach it (`device_bind_domain`, `docs/microkernel/K8.md` §2).
+pub const FLAG_EXPLICIT_BIND: u32 = 1 << 2;
+const FLAGS_KNOWN: u32 = FLAG_FIRST | FLAG_UNISOLATED_ALLOWED | FLAG_EXPLICIT_BIND;
 
 /// Why bytes on the channel are not a message.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -146,6 +149,8 @@ pub struct Devices<'a> {
     pub names: &'a [[u8; NAME_BYTES]],
     /// Whether the boot carries `ferrix.unisolated` ([`FLAG_UNISOLATED_ALLOWED`]).
     pub unisolated_allowed: bool,
+    /// Whether devmgr must bind what it admits ([`FLAG_EXPLICIT_BIND`]).
+    pub explicit_bind: bool,
 }
 
 impl Devices<'_> {
@@ -188,6 +193,11 @@ impl Devices<'_> {
                 FLAG_UNISOLATED_ALLOWED
             } else {
                 0
+            }
+            | if self.explicit_bind {
+                FLAG_EXPLICIT_BIND
+            } else {
+                0
             };
         put(out, 20, &flags.to_le_bytes());
         for (i, name) in self.names.iter().enumerate() {
@@ -211,6 +221,8 @@ pub struct DevicesView<'a> {
     /// Whether the boot carries `ferrix.unisolated`: only with that bit set
     /// and no bit this crate does not define.
     pub unisolated_allowed: bool,
+    /// Whether devmgr binds what it admits, under the same rule.
+    pub explicit_bind: bool,
     names: &'a [u8],
 }
 
@@ -270,6 +282,7 @@ impl DevicesView<'_> {
             more,
             first: flags & FLAG_FIRST != 0,
             unisolated_allowed: flags & FLAG_UNISOLATED_ALLOWED != 0 && flags & !FLAGS_KNOWN == 0,
+            explicit_bind: flags & FLAG_EXPLICIT_BIND != 0 && flags & !FLAGS_KNOWN == 0,
             names: bytes.get(DEVICES_HEADER_BYTES..).unwrap_or(&[]),
         })
     }

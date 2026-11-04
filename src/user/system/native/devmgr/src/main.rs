@@ -20,6 +20,7 @@
 mod arch;
 
 use core::fmt;
+use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
 use ferrix_rt::log::Level;
 
@@ -1180,6 +1181,7 @@ fn receive(channel: &Channel<Kernel>) -> Result<Given, Step> {
         let base = usize::from(view.first);
         if view.first {
             given.unisolated_allowed = view.unisolated_allowed;
+            EXPLICIT_BIND.store(view.explicit_bind, Ordering::Relaxed);
             given.job = Some(Job::from_owned(owned(0)));
             given.drivers = drivers;
             for j in 0..drivers {
@@ -2285,6 +2287,35 @@ fn start(
     }
 }
 
+/// Whether DEVICES said this kernel's nodes need a bind
+/// (`docs/microkernel/K8.md` §2): false on a hybrid kernel, where nothing here
+/// runs.
+static EXPLICIT_BIND: AtomicBool = AtomicBool::new(false);
+
+/// Attach `keep`'s function to its domain, under a kernel that asks for it,
+/// before anything asks how the device is isolated. Bound already is what a
+/// restart meets, a node with no DMA has nothing to bind, and a domain that
+/// would not translate is left for the admission to refuse on its line. Any
+/// other refusal is a driver not started.
+fn bind_first(keep: &Device<Kernel>, info: &DeviceInfo, what: &str) -> bool {
+    if !EXPLICIT_BIND.load(Ordering::Relaxed) {
+        return true;
+    }
+    match keep.bind_domain() {
+        Ok(()) | Err(Error::AlreadyBound | Error::WrongType | Error::Untranslated) => true,
+        Err(_) => {
+            say(
+                Level::Warning,
+                format_args!(
+                    "devmgr   {what} {:#010x}: its domain could not be bound; not started",
+                    info.location
+                ),
+            );
+            false
+        }
+    }
+}
+
 /// Whether `keep`'s device may be handed to its driver: the admission
 /// rule on what `device_isolation` answers (`ferrix_devmgr_proto::
 /// admission`), translation alone on AArch64 (the customer's G4), the
@@ -2296,6 +2327,9 @@ fn admit(
     what: &str,
     unisolated_allowed: bool,
 ) -> Option<Admitted> {
+    if !bind_first(keep, info, what) {
+        return None;
+    }
     let bits = keep.isolation().ok();
     let decided = admission::admit(bits, arch::AARCH64, unisolated_allowed, info.location);
     if let Some(line) = decided.line(what, info.location) {
@@ -2321,6 +2355,9 @@ fn admit_first(
     plan: Plan,
     drivers: &Drivers<'_>,
 ) -> Option<Admitted> {
+    if !bind_first(keep, info, plan_name(plan)) {
+        return None;
+    }
     if matches!(plan, Plan::Gpu(_)) && !hand_over_gpu(keep, info) {
         return None;
     }

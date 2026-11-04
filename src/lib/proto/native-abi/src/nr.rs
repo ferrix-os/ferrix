@@ -168,6 +168,12 @@ pub const DEVICE_SET_LIMIT: usize = 0x1057;
 pub const DEVICE_GET_LIMIT: usize = 0x1058;
 /// [`NativeCall::DeviceIsolation`].
 pub const DEVICE_ISOLATION: usize = 0x1059;
+/// [`NativeCall::DeviceBindDomain`].
+pub const DEVICE_BIND_DOMAIN: usize = 0x10C0;
+/// [`NativeCall::VmoDigest`].
+pub const VMO_DIGEST: usize = 0x10C1;
+/// [`NativeCall::ProcessImages`].
+pub const PROCESS_IMAGES: usize = 0x10C2;
 /// [`NativeCall::ChardevControlCreate`].
 pub const CHARDEV_CONTROL_CREATE: usize = 0x105A;
 /// [`NativeCall::ChardevReply`].
@@ -650,6 +656,24 @@ pub enum NativeCall {
     /// only the vectors minted for it (`H.DMA.9`). Any device handle will
     /// do.
     DeviceIsolation,
+    /// `(device)`. Attach the device's function to the IOMMU domain the
+    /// kernel makes and keeps for it (`docs/microkernel/K8.md`). Needs
+    /// `MANAGE` and `BIND_DOMAIN` on the handle. Takes and answers no domain,
+    /// unit or table. `ALREADY_BOUND` when it is bound, `WRONG_TYPE` for a
+    /// node that reaches no memory or a function that is never a bus master,
+    /// `ACCESS_DENIED` for a domain that would not translate unless the boot
+    /// carries `ferrix.unisolated`, `LIMIT_REACHED` when the function's only
+    /// possible domain is held already.
+    DeviceBindDomain,
+    /// `(vmo, *out)`. The 32 bytes of a sealed VMO's digest
+    /// (`docs/microkernel/K14.md` §4). Needs `READ`. `BAD_STATE` when it is
+    /// not sealed, `SHOULD_WAIT` while its hash runs.
+    VmoDigest,
+    /// `(process, *out, capacity)` → count. The digests of what the process's
+    /// space was given to run, up to `capacity`; the count is all of them,
+    /// with [`crate::types::IMAGES_UNMEASURED`] set when its space is not
+    /// measured. Needs `MANAGE`.
+    ProcessImages,
     /// `(device)` → channel. The device's chardev control channel, one per
     /// device, for a driver whose device files the kernel forwards
     /// undecoded (`docs/NVIDIA.md` §4.4): HELLO on it lists the minors of
@@ -916,7 +940,7 @@ pub enum NativeCall {
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 97] = [
+pub const ALL: [NativeCall; 100] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,
@@ -1014,6 +1038,9 @@ pub const ALL: [NativeCall; 97] = [
     NativeCall::ExceptionChannelCreate,
     NativeCall::ExceptionState,
     NativeCall::ExceptionResolve,
+    NativeCall::DeviceBindDomain,
+    NativeCall::VmoDigest,
+    NativeCall::ProcessImages,
 ];
 
 /// Whether `number` is in the native range at all.
@@ -1091,6 +1118,9 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         DEVICE_SET_LIMIT => NativeCall::DeviceSetLimit,
         DEVICE_GET_LIMIT => NativeCall::DeviceGetLimit,
         DEVICE_ISOLATION => NativeCall::DeviceIsolation,
+        DEVICE_BIND_DOMAIN => NativeCall::DeviceBindDomain,
+        VMO_DIGEST => NativeCall::VmoDigest,
+        PROCESS_IMAGES => NativeCall::ProcessImages,
         CHARDEV_CONTROL_CREATE => NativeCall::ChardevControlCreate,
         CHARDEV_REPLY => NativeCall::ChardevReply,
         CHARDEV_COPY_IN => NativeCall::ChardevCopyIn,
@@ -1137,6 +1167,7 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
 
 /// The number a call is made with.
 #[must_use]
+#[expect(clippy::too_many_lines, reason = "one arm per call, the table of them")]
 pub const fn number(call: NativeCall) -> usize {
     match call {
         NativeCall::HandleClose => HANDLE_CLOSE,
@@ -1197,6 +1228,9 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::DeviceSetLimit => DEVICE_SET_LIMIT,
         NativeCall::DeviceGetLimit => DEVICE_GET_LIMIT,
         NativeCall::DeviceIsolation => DEVICE_ISOLATION,
+        NativeCall::DeviceBindDomain => DEVICE_BIND_DOMAIN,
+        NativeCall::VmoDigest => VMO_DIGEST,
+        NativeCall::ProcessImages => PROCESS_IMAGES,
         NativeCall::ChardevControlCreate => CHARDEV_CONTROL_CREATE,
         NativeCall::ChardevReply => CHARDEV_REPLY,
         NativeCall::ChardevCopyIn => CHARDEV_COPY_IN,

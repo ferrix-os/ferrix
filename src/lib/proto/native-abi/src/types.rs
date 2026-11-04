@@ -391,6 +391,19 @@ pub const JOB_SPECULATION_DOMAIN: u64 = 1;
 /// driver's job, so the driver cannot leave the job whose kill ends it.
 pub const JOB_SEALED: u64 = 2;
 
+/// `job_create`'s option: a **measured** job (`docs/microkernel/K14.md` §3).
+/// Its processes' executable memory comes only from sealed, measured VMOs.
+/// Nothing unmeasures one, and every job made inside it is measured too.
+pub const JOB_MEASURED: u64 = 1 << 8;
+
+/// `vmo_executable`'s option: seal the VMO (`docs/microkernel/K14.md` §2).
+pub const VMO_SEAL: u64 = 1;
+
+/// `process_images`' answer carries this bit when the space is not measured,
+/// so that its digests are not the whole of what it can run: a reader never
+/// takes a partial list for a whole one.
+pub const IMAGES_UNMEASURED: usize = 1 << (usize::BITS - 2);
+
 /// The longest `exception_channel_create`'s `timeout_ms` may be, and the
 /// longest one fault waits for its supervisors in all
 /// (`docs/microkernel/K4.md` §2.4): ten seconds.

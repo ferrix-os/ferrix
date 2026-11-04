@@ -95,13 +95,14 @@
 //! lock is ever held while a space's lock is taken, no two spaces' locks are
 //! ever held together, and no shootdown waits under any of them.
 
+use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::any::Any;
 use core::fmt;
 use core::ops::Deref;
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::sync::SpinLock;
 use ferrix_bootinfo::{PAGE_SIZE, USER_VIRT_END, is_user_address};
@@ -158,6 +159,11 @@ pub enum SpaceError {
     /// A page of the device memory asked for is mapped, by this or another
     /// address space, with another memory type (`user::memory_type`).
     OtherMemoryType,
+    /// An executable mapping of something with no measurement in a measured
+    /// space (`docs/microkernel/K14.md` §3).
+    Unmeasured,
+    /// The space's record of images is full ([`MAX_IMAGES`]).
+    ImagesFull,
     /// The page of a file on a disk that a fault was filling was reclaimed
     /// before the fault could use it (`user::cache`): fill it again. Only
     /// [`AddressSpace::fault`] sees this, and it never gives it to a caller.
@@ -181,6 +187,10 @@ impl fmt::Display for SpaceError {
                 f.write_str("the device memory is mapped with another memory type")
             }
             SpaceError::Evicted => f.write_str("a page was reclaimed as it was filled"),
+            SpaceError::Unmeasured => {
+                f.write_str("the executable mapping has no measurement in a measured space")
+            }
+            SpaceError::ImagesFull => f.write_str("the space's record of images is full"),
         }
     }
 }
@@ -241,6 +251,53 @@ struct Inner {
     /// touch: a native VMO's size and the rights its protection stands for
     /// belong to its handle (`docs/microkernel/K2.md` §2.3).
     native: BTreeMap<u64, Ceiling>,
+    /// The digests of the images mapped executable here, room had before this
+    /// lock (`docs/microkernel/K14.md` §4). What ran stays recorded: an unmap
+    /// leaves it, a clone copies it.
+    images: Option<Box<Images>>,
+}
+
+/// The most image digests a space records (K14.11: a fixed block, not grown
+/// under the lock).
+pub const MAX_IMAGES: usize = 32;
+
+/// A space's record of what it was given to run.
+#[derive(Debug, Clone)]
+pub(crate) struct Images {
+    digests: [[u8; 32]; MAX_IMAGES],
+    count: usize,
+}
+
+impl Images {
+    /// An empty record, boxed; `None` for want of memory.
+    fn boxed() -> Option<Box<Images>> {
+        fallible::try_box(Images {
+            digests: [[0; 32]; MAX_IMAGES],
+            count: 0,
+        })
+        .ok()
+    }
+
+    /// Note `digest`, once. `false` when the record is full of others.
+    fn note(&mut self, digest: [u8; 32]) -> bool {
+        let Some(known) = self.digests.get(..self.count) else {
+            return false;
+        };
+        if known.contains(&digest) {
+            return true;
+        }
+        let Some(slot) = self.digests.get_mut(self.count) else {
+            return false;
+        };
+        *slot = digest;
+        self.count += 1;
+        true
+    }
+
+    /// The digests recorded.
+    pub(crate) fn digests(&self) -> &[[u8; 32]] {
+        self.digests.get(..self.count).unwrap_or(&[])
+    }
 }
 
 /// The most a region a handle or the kernel mapped may be protected to.
@@ -312,6 +369,19 @@ pub enum ProtectRefused {
 }
 
 impl Inner {
+    /// Note `digest` on the record, whose first room was had before this lock.
+    fn note_image(&mut self, digest: [u8; 32], room: Option<Box<Images>>) -> bool {
+        match (&mut self.images, room) {
+            (Some(images), _) => images.note(digest),
+            (empty, Some(mut room)) => {
+                let noted = room.note(digest);
+                *empty = Some(room);
+                noted
+            }
+            (None, None) => false,
+        }
+    }
+
     /// The object a region names and its offset, if the Linux calls that
     /// reshape a region may: anonymous memory that `vmo_map` did not put here.
     fn reshapeable(&self, backing: Backing) -> Option<(u64, u64)> {
@@ -356,6 +426,10 @@ pub struct AddressSpace {
     /// [`AddressSpace::layout`].
     layout: SleepLock<()>,
     inner: SpinLock<Inner>,
+    /// Whether its executable memory comes only from sealed, measured VMOs
+    /// (`docs/microkernel/K14.md` §3). Set once, never cleared; read by the
+    /// map calls with no job's lock taken (K14.7), and copied by a clone.
+    measured: AtomicBool,
     /// The speculation domain its programs are in, zero for none, or
     /// [`UNCLAIMED`] before a process has claimed it: see
     /// [`AddressSpace::claim_domain`] and `docs/OPAQUE-KERNEL.md` §9.2.
@@ -400,6 +474,7 @@ impl AddressSpace {
                     shadows: BTreeMap::new(),
                     next_id: 1,
                     native: BTreeMap::new(),
+                    images: None,
                 },
             )
         })
@@ -586,6 +661,7 @@ impl AddressSpace {
             layout: SleepLock::new((), &crate::sync::SchedParker),
             handles: AtomicU64::new(0),
             inner: SpinLock::new(inner),
+            measured: AtomicBool::new(false),
             domain: AtomicU64::new(UNCLAIMED),
         }
     }
@@ -852,6 +928,13 @@ fn unrooted(root: Frame) -> SpaceError {
 /// out of memory and the child is let go.
 fn attach_child(child: &Arc<AddressSpace>) -> Result<(), SpaceError> {
     let inner = child.inner.lock();
+    // A clone's copy of a region by handle counts as the original's does.
+    // Never refused: an object with a writable region is one no seal took.
+    for (&id, vmo) in &inner.objects {
+        if writable_ceiling(&inner.native, id) {
+            let _ = vmo.raise_writable_region();
+        }
+    }
     for (&id, mapping) in &inner.files {
         if mapping.may_write
             && let Some(vmo) = inner.objects.get(&id)
@@ -1117,6 +1200,18 @@ impl AddressSpace {
             return Err(SpaceError::OutOfMemory);
         };
 
+        // The record of what ran, as the source has it (K14.6, K14.7).
+        let images = match inner.images.as_deref() {
+            Some(images) => match fallible::try_box(images.clone()) {
+                Ok(copy) => Some(copy),
+                Err(_) => {
+                    mm::deallocate_frames(root, 0);
+                    return Err(SpaceError::OutOfMemory);
+                }
+            },
+            None => None,
+        };
+
         // Only now the parent's map is marked and copied, and its writable
         // translations to the shared pages taken down.
         let Ok(map) = inner.map.clone_for_fork() else {
@@ -1154,6 +1249,7 @@ impl AddressSpace {
                     // space's table.
                     next_id,
                     native,
+                    images,
                 },
             )
         })
@@ -1163,6 +1259,9 @@ impl AddressSpace {
         // have written, which is harmless.
         .map_err(|_| unrooted(root))?;
         attach_child(&child)?;
+        if self.is_measured() {
+            child.measure();
+        }
         Ok(child)
     }
 
@@ -2386,6 +2485,12 @@ struct Freeing {
 /// Take every object and shadow that `kept` does not keep out of the tables,
 /// detached from the space at `me`, and drop them, which releases every page
 /// they committed.
+/// Whether `id` is a region by handle whose ceiling holds `WRITE`: what
+/// [`Vmo::seal`] refuses, by count.
+fn writable_ceiling(native: &BTreeMap<u64, Ceiling>, id: u64) -> bool {
+    matches!(native.get(&id), Some(Ceiling::Handle { write: true, .. }))
+}
+
 fn drop_objects(
     me: *const AddressSpace,
     objects: &mut BTreeMap<u64, Arc<Vmo>>,
@@ -2396,6 +2501,11 @@ fn drop_objects(
     objects.retain(|&id, vmo| {
         let named = kept(id);
         if !named {
+            // Phase three of an unmap: this region's translations are gone
+            // on every processor by now (K14.2).
+            if writable_ceiling(native, id) {
+                vmo.lower_writable_region();
+            }
             vmo.detach(me, id);
         }
         named
@@ -3325,6 +3435,46 @@ impl AddressSpace {
         self.map_by_handle(at, len, vmo, offset, flags, ceiling)
     }
 
+    /// Whether its executable memory comes only from sealed VMOs.
+    pub fn is_measured(&self) -> bool {
+        self.measured.load(Ordering::Acquire)
+    }
+
+    /// Hold it to that from now on. Before anything is mapped in it through
+    /// a handle, by whoever makes it; there is no way back.
+    pub fn measure(&self) {
+        self.measured.store(true, Ordering::Release);
+    }
+
+    /// Record `digest` as something this space was given to run, by the path
+    /// that loads an image into it without a map by handle (`process_create`
+    /// until K15).
+    ///
+    /// # Errors
+    ///
+    /// [`SpaceError::OutOfMemory`] or [`SpaceError::ImagesFull`].
+    pub fn note_image(&self, digest: [u8; 32]) -> Result<(), SpaceError> {
+        let room = Images::boxed().ok_or(SpaceError::OutOfMemory)?;
+        if self.inner.lock().note_image(digest, Some(room)) {
+            Ok(())
+        } else {
+            Err(SpaceError::ImagesFull)
+        }
+    }
+
+    /// Copy its record of images out, for `process_images`: as many as `out`
+    /// holds. Answers how many there are.
+    pub fn images_into(&self, out: &mut [[u8; 32]]) -> usize {
+        let inner = self.inner.lock();
+        let Some(images) = inner.images.as_ref() else {
+            return 0;
+        };
+        for (slot, digest) in out.iter_mut().zip(images.digests()) {
+            *slot = *digest;
+        }
+        images.digests().len()
+    }
+
     /// Map `len` bytes of `vmo`, from byte `offset`, at `at` or wherever there
     /// is room: what `vmo_map` and `space_map` do. `ceiling` is what the VMO's
     /// handle allowed (`docs/microkernel/K2.md` §2.3).
@@ -3371,6 +3521,18 @@ impl AddressSpace {
         if !ceiling.admits(flags) {
             return Err(SpaceError::Refused(at.unwrap_or(0)));
         }
+        // `may_execute` (`docs/microkernel/K14.md` §3): by the ceiling, not
+        // only the flags, so no later protect finds an unmeasured region it
+        // may raise. The room for the record is had before the lock.
+        let runs = flags.execute || matches!(ceiling, Ceiling::Handle { execute: true, .. });
+        let digest = if runs { vmo.digest() } else { None };
+        if runs && digest.is_none() && self.is_measured() {
+            return Err(SpaceError::Unmeasured);
+        }
+        let room = digest
+            .is_some()
+            .then(|| Images::boxed().ok_or(SpaceError::OutOfMemory))
+            .transpose()?;
         if len == 0
             || !len.is_multiple_of(PAGE_SIZE)
             || !offset.is_multiple_of(PAGE_SIZE)
@@ -3394,7 +3556,19 @@ impl AddressSpace {
         let range = PageRange::from_len(at, len).map_err(|_| SpaceError::BadRange)?;
         let id = inner.next_id;
         inner.next_id = inner.next_id.saturating_add(1);
-        self.add_region(
+        // A second handle's map racing a seal: one of them is refused here,
+        // under the object's lock.
+        let writable = matches!(ceiling, Ceiling::Handle { write: true, .. });
+        if writable {
+            vmo.raise_writable_region().map_err(SpaceError::Backing)?;
+        }
+        let counted = Arc::clone(&vmo);
+        let uncount = |counted: &Vmo| {
+            if writable {
+                counted.lower_writable_region();
+            }
+        };
+        if let Err(why) = self.add_region(
             &mut inner,
             NewRegion {
                 id,
@@ -3404,10 +3578,24 @@ impl AddressSpace {
                 sharing: Sharing::Shared,
             },
             vmo,
-        )?;
+        ) {
+            uncount(&counted);
+            return Err(why);
+        }
         if fallible::insert(&mut inner.native, id, ceiling).is_err() {
+            uncount(&counted);
             self.abandon_region(&mut inner, id, range);
             return Err(SpaceError::OutOfMemory);
+        }
+        // What ran stays recorded; noted last, so a map refused above left
+        // no digest of something that never ran.
+        if let Some(digest) = digest
+            && !inner.note_image(digest, room)
+        {
+            uncount(&counted);
+            let _ = inner.native.remove(&id);
+            self.abandon_region(&mut inner, id, range);
+            return Err(SpaceError::ImagesFull);
         }
         Ok(at)
     }
@@ -3810,9 +3998,14 @@ impl AddressSpace {
             grows_down: false,
             ..flags
         };
+        // Anonymous memory has no measurement, so a measured space's has no
+        // executable ceiling either (`docs/microkernel/K14.md` §3).
+        if flags.execute && self.is_measured() {
+            return Err(SpaceError::Unmeasured);
+        }
         let ceiling = Ceiling::Handle {
             write: true,
-            execute: true,
+            execute: !self.is_measured(),
         };
         if !ceiling.admits(flags) {
             return Err(SpaceError::Refused(at.unwrap_or(0)));
@@ -3835,6 +4028,9 @@ impl AddressSpace {
         let id = inner.next_id;
         inner.next_id = inner.next_id.saturating_add(1);
         let vmo = Vmo::new_anonymous(len / PAGE_SIZE).map_err(|_| SpaceError::OutOfMemory)?;
+        // Its ceiling holds `WRITE`, and its going lowers the count as any
+        // such region's. A fresh object: nothing has sealed it.
+        vmo.raise_writable_region().map_err(SpaceError::Backing)?;
         self.add_region(
             &mut inner,
             NewRegion {
@@ -4357,6 +4553,9 @@ impl Drop for AddressSpace {
             );
         }
         for (&id, vmo) in &inner.objects {
+            if writable_ceiling(&inner.native, id) {
+                vmo.lower_writable_region();
+            }
             vmo.detach(me, id);
         }
         for (&id, shadow) in &inner.shadows {

@@ -73,9 +73,17 @@ impl Rights {
     /// never hold it. Bits 8 to 10 are other rows' (K12, K3, K2).
     pub const SUPERVISE: Rights = Rights(1 << 11);
 
+    /// A device's function may be attached to the IOMMU domain the kernel
+    /// makes for it (`device_bind_domain`, `docs/microkernel/K8.md`). The
+    /// kernel mints it only on the handle `devmgr` keeps of each pair, and
+    /// only in a kernel whose nodes need an explicit bind. No call names a
+    /// domain, a unit or a table: this right moves none of them.
+    pub const BIND_DOMAIN: Rights = Rights(1 << 13);
+
     /// Every defined right.
-    pub const ALL: Rights =
-        Rights(0xFF | Rights::PAGER.0 | Rights::EXECUTE.0 | Rights::SUPERVISE.0);
+    pub const ALL: Rights = Rights(
+        0xFF | Rights::PAGER.0 | Rights::EXECUTE.0 | Rights::SUPERVISE.0 | Rights::BIND_DOMAIN.0,
+    );
 
     /// What a new channel endpoint carries.
     pub const CHANNEL: Rights = Rights(

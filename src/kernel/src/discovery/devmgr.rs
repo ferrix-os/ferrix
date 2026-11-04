@@ -87,7 +87,28 @@ const GIVEN_DEVICE_RIGHTS: Rights = Rights(DEVICE_RIGHTS.0 | Rights::SET_LIMIT.0
 /// the first's, and `DUPLICATE`, so a driver that died can be started again
 /// with a handle of its own while `devmgr` keeps this one for the next
 /// quiesce (`docs/DEVMGR.md` §4).
-const KEPT_DEVICE_RIGHTS: Rights = Rights(GIVEN_DEVICE_RIGHTS.0 | Rights::DUPLICATE.0);
+///
+/// In a kernel whose nodes need an explicit bind it also has `BIND_DOMAIN`
+/// (`docs/microkernel/K8.md` §2, `L.device.67`, `L.device.71`), the one
+/// handle of the pair that ever does.
+const KEPT_DEVICE_RIGHTS: Rights = Rights(
+    GIVEN_DEVICE_RIGHTS.0
+        | Rights::DUPLICATE.0
+        | if device::EXPLICIT_BIND {
+            Rights::BIND_DOMAIN.0
+        } else {
+            0
+        },
+);
+
+// The kernel mints the right on the kept handle alone, and only where a node
+// needs it (`L.device.67`, `L.device.71`).
+const _: () = assert!(
+    !GIVEN_DEVICE_RIGHTS.contains(Rights::BIND_DOMAIN)
+        && !DEVICE_RIGHTS.contains(Rights::BIND_DOMAIN)
+        && KEPT_DEVICE_RIGHTS.contains(Rights::BIND_DOMAIN) == device::EXPLICIT_BIND,
+    "BIND_DOMAIN is on the kept handle of an explicit kernel, and nowhere else"
+);
 
 /// Read a whole file from the root the initramfs was unpacked into: how
 /// `devmgr`'s program, its drivers and their manifest are read.
@@ -635,6 +656,7 @@ fn write_devices(
             first,
             names: if first { &names } else { &[] },
             unisolated_allowed: unisolated_allowed(),
+            explicit_bind: device::EXPLICIT_BIND,
         };
         let mut bytes = [0_u8; DEVICES_MAX_BYTES];
         let len = message

@@ -293,6 +293,22 @@ package FerrixItemRequirements {
         }
         // K3, pager-backed VMOs (docs/microkernel/K3.md; the consultant's OK
         // IF, ledger 2858).
+        requirement <'H.MEM.29'> aSealedImageNeverChanges : ItemHighLevel {
+            attribute :>> statement = "A sealed VMO's contents and length shall never
+                change after its seal, and its digest shall be the kernel's, computed
+                from its frames after the freeze.";
+            attribute :>> criterion = "object::sealing_check on every boot, and
+                check-vmo-seal-tags.py in xtask check; L.mm.111-114.";
+            attribute :>> parent = ("O.CAPABILITY", "ASR-3");
+        }
+        requirement <'H.MEM.30'> aMeasuredSpaceRunsOnlyWhatIsMeasured : ItemHighLevel {
+            attribute :>> statement = "A measured space's executable memory shall come
+                only from sealed, measured VMOs and the kernel's own code pages, and
+                its digests shall be recorded and never removed.";
+            attribute :>> criterion = "object::sealing_check on every boot;
+                L.mm.115-122, 124-126.";
+            attribute :>> parent = ("O.CAPABILITY", "ASR-2");
+        }
         requirement <'H.MEM.22'> aPagerAnswersWithinItsBound : ItemHighLevel {
             attribute :>> statement = "An absent page of a pager-backed VMO shall
                 become present only by its pager's supply. A thread shall wait on a
@@ -1042,6 +1058,33 @@ package FerrixItemRequirements {
                 is restored after the driver stops renewing and after it exits;
                 stage 3 drives every other cause on the fake.";
             attribute :>> parent = ("O.FAILSAFE", "ASR-6");
+        }
+        requirement <'H.DEV.9'> bindRightOnKeptHandleOnly : ItemHighLevel {
+            attribute :>> statement = "The kernel shall mint the right to attach a
+                function to an IOMMU domain only on the handle devmgr keeps of a
+                device's pair, in a kernel whose nodes need it, and no call shall
+                name, pass or map an IOMMU domain, unit or table.";
+            attribute :>> criterion = "The rights' compile-time assertion; the
+                stage 10 authority check; L.device.66, 67, 71.";
+            attribute :>> parent = ("O.CAPABILITY", "ASR-3");
+        }
+        requirement <'H.DEV.10'> nothingGivenBeforeTheBind : ItemHighLevel {
+            attribute :>> statement = "Under explicit binding an aperture, a
+                vector or a pin shall be given only after the node was bound by
+                the holder of the right, and a PCI function shall become a bus
+                master only after that bind; a device tree or virtio-mmio node
+                has no master enable, and its limit is the refusal of those
+                three.";
+            attribute :>> criterion = "The stage 10 authority check on made-up
+                nodes and on an idle real PCI function; L.device.68, 69, 72.";
+            attribute :>> parent = ("O.CAPABILITY", "ASR-3");
+        }
+        requirement <'H.DEV.11'> iommuInNoAperture : ItemHighLevel {
+            attribute :>> statement = "IOMMU registers and tables shall be in no
+                aperture a device node gives.";
+            attribute :>> criterion = "device::check::check_iommu_held on every
+                boot; L.device.70, 73.";
+            attribute :>> parent = ("O.CAPABILITY", "ASR-3");
         }
     }
 

@@ -466,7 +466,7 @@
         "above": "`WriteVolume` and its transaction, inode and extent operations, called by ferrix-btrfs-vfs and src/kernel/src/fs/btrfs*.rs"
       },
     "ferrix-sha256": {
-        "ring": "item",
+        "ring": "core",
         "path": "src/lib/crypto/sha256",
         "below": "byte slices its caller lends; no trait, no allocation, no dependency",
         "above": "Sha256 (new, update, finish), digest, finish_192 and digest_192: SHA-256 (FIPS 180-4) and SHA-256/192 (RFC 9858), called by ferrix-sigverify and ferrix-slots (docs/SIGNING.md section 5.1)"
@@ -961,6 +961,16 @@
       },
       {
         "file": "object/space_check.rs",
+        "file_ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "object/authority_check.rs",
+        "file_ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "object/sealing_check.rs",
         "file_ring": "core",
         "crate": "ferrix-kernel-load"
       },

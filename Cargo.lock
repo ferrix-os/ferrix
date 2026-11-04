@@ -520,6 +520,7 @@ dependencies = [
  "ferrix-pci",
  "ferrix-qr",
  "ferrix-sched",
+ "ferrix-sha256",
  "ferrix-sync",
  "ferrix-vdso",
  "ferrix-vfs",

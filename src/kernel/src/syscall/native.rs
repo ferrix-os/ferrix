@@ -97,7 +97,7 @@ use crate::syscall::uaccess::{self, UserError};
 use crate::trap::SyscallArgs;
 use crate::user::address_wait::{self as waits, Key, Place, WaitError, Word};
 use crate::user::space::{Access, AddressSpace, Ceiling, ProtectRefused, SpaceError};
-use crate::user::vmo::{PageState, PagedWrite, SupplyError, Vmo, VmoError};
+use crate::user::vmo::{PageState, PagedWrite, SealRefusal, SupplyError, Vmo, VmoError};
 
 /// The largest VMO a program may create, in pages: four gibibytes.
 ///
@@ -522,6 +522,7 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         | NativeCall::DeviceSetLimit
         | NativeCall::DeviceGetLimit
         | NativeCall::DeviceIsolation
+        | NativeCall::DeviceBindDomain
         | NativeCall::PowerControlCreate
         | NativeCall::PowerSet
         | NativeCall::PowerRead => device_call(call, process, &a),
@@ -542,6 +543,8 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         NativeCall::AddressRequeue => address_requeue(process, &a),
         NativeCall::AddressWaitAny => address_wait_any(caller, &a),
         NativeCall::VmoExecutable
+        | NativeCall::VmoDigest
+        | NativeCall::ProcessImages
         | NativeCall::ProcessSpace
         | NativeCall::SpaceCreate
         | NativeCall::SpaceMap
@@ -558,6 +561,8 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
 fn space_call(call: NativeCall, process: &Process, a: &[u64; 6]) -> Result<usize, Errno> {
     match call {
         NativeCall::VmoExecutable => vmo_executable(process, handle(a[0]), a[1]),
+        NativeCall::VmoDigest => vmo_digest(process, handle(a[0]), a[1]),
+        NativeCall::ProcessImages => process_images(process, handle(a[0]), a[1], a[2]),
         NativeCall::ProcessSpace => process_space(process, handle(a[0]), a[1]),
         NativeCall::SpaceCreate => space_create(process),
         NativeCall::SpaceMap => {
@@ -2019,6 +2024,7 @@ fn vmo_error(error: VmoError) -> Errno {
         VmoError::OutOfMemory => status::NO_MEMORY,
         // Only `Vmo::read_present` answers it, which no native call reaches.
         VmoError::Poisoned(_) => status::FAULT,
+        VmoError::Sealed => status::BAD_STATE,
     }
 }
 
@@ -2170,13 +2176,14 @@ fn device_call(call: NativeCall, process: &Process, a: &[u64; 6]) -> Result<usiz
         NativeCall::DeviceSetLimit => device_set_limit(process, device, second, third),
         NativeCall::DeviceGetLimit => device_get_limit(process, device, second),
         NativeCall::DeviceIsolation => device_isolation(process, device),
+        NativeCall::DeviceBindDomain => device_bind_domain(process, device),
         _ => power_call(call, process, a),
     }
 }
 
 /// `job_create`.
 fn job_create(process: &Process, parent: Handle, options: u64) -> Result<usize, Errno> {
-    if options & !(JOB_SPECULATION_DOMAIN | JOB_SEALED) != 0 {
+    if options & !(JOB_SPECULATION_DOMAIN | JOB_SEALED | types::JOB_MEASURED) != 0 {
         return Err(status::INVALID_ARGS);
     }
     // MANAGE on the parent is the authority both to make a job and to make
@@ -2189,6 +2196,9 @@ fn job_create(process: &Process, parent: Handle, options: u64) -> Result<usize, 
         job::JobError::NoMemory => status::NO_MEMORY,
         _ => status::BAD_STATE,
     })?;
+    if options & types::JOB_MEASURED != 0 {
+        child.make_measured();
+    }
     if domain {
         let (parent_id, domain) = (parent.id(), child.domain());
         audit::record(
@@ -2506,6 +2516,13 @@ fn process_create(
         return Err(status::ACCESS_DENIED);
     }
     let vmo = process.with_handles(|table| vmo_in(table, image, Rights::READ))?;
+    // A measured job runs only a sealed image, and its digest is what the new
+    // process carries (`docs/microkernel/K14.md` §3).
+    let measured = job.measured();
+    let digest = vmo.digest();
+    if measured && digest.is_none() {
+        return Err(unmeasured(process, NativeCall::ProcessCreate));
+    }
     let name_len = usize::try_from(name.count)
         .ok()
         .filter(|&count| count <= nr::PROCESS_NAME_MAX)
@@ -2530,6 +2547,16 @@ fn process_create(
             job::JobError::Limited => status::SHOULD_WAIT,
             _ => status::BAD_STATE,
         });
+    }
+    if measured {
+        let space = child.core().space();
+        space.measure();
+        if let Some(digest) = digest
+            && space.note_image(digest).is_err()
+        {
+            child.kill(job::KILLED_STATUS);
+            return Err(status::NO_MEMORY);
+        }
     }
     let pid = child.core().pid();
     let created = ProcessRef::created(child).map_err(|_| status::NO_MEMORY)?;
@@ -3046,6 +3073,9 @@ fn device_isolated_in(process: &Process, device: Handle) -> Result<Arc<DeviceNod
 
 fn interrupt_create(process: &Process, device: Handle, index: u64) -> Result<usize, Errno> {
     let node = device_isolated_in(process, device)?;
+    if !node.may_drive() {
+        return Err(status::BAD_STATE);
+    }
     // Taking a device's interrupt is what its driver does, and devmgr and a
     // quiesce never do: noted, so that a check waiting for the driver's work
     // can say how the driver ended.
@@ -3086,6 +3116,9 @@ fn interrupt_ack(process: &Process, interrupt: Handle) -> Result<usize, Errno> {
 /// whole purpose of the call.
 fn io_mapping_create(process: &Process, device: Handle, spec: u64) -> Result<usize, Errno> {
     let node = device_in(process, device, Rights::MANAGE)?;
+    if !node.may_drive() {
+        return Err(status::BAD_STATE);
+    }
     // Mapping a device's registers, likewise (see `interrupt_create`).
     crate::discovery::devmgr::note_driver(&node, process);
     let phys = read_u64(process, spec)?;
@@ -3417,7 +3450,11 @@ fn vmo_pin(
     if options & PIN_CONTIGUOUS != 0 {
         return contiguous_pin(process, &node, &vmo, (first, pages), read_only, past_caches);
     }
-    let held = hold_reclaiming(&node, &vmo, (first, pages), order)?;
+    let held = if read_only && vmo.is_sealed() {
+        vmo.hold_read(first, pages).map_err(vmo_error)?
+    } else {
+        hold_reclaiming(&node, &vmo, (first, pages), order)?
+    };
     if past_caches {
         coherent_for_device(&vmo, &held)?;
     }
@@ -3611,7 +3648,7 @@ fn pin_through(
     flags: ferrix_paging::MapFlags,
     owner: Arc<object::process::Exit>,
 ) -> Result<Arc<object::pin::Pin>, Errno> {
-    let domain = node.domain().map_err(|_| status::NO_MEMORY)?;
+    let domain = domain_of_call(node)?;
     let pin = object::pin::Pin::new(node, &domain, held, flags, owner).map_err(pin_status)?;
     fallible::try_arc(pin).map_err(|_| status::NO_MEMORY)
 }
@@ -3685,7 +3722,7 @@ fn set_limit_on(node: &DeviceNode, rights: Rights, which: u64, value: u64) -> Re
     }
     // A budget no `usize` holds is past any ceiling.
     let pages = usize::try_from(value).map_err(|_| status::NO_MEMORY)?;
-    let domain = node.domain().map_err(|_| status::NO_MEMORY)?;
+    let domain = domain_of_call(node)?;
     object::pin::set_budget(&domain, pages).map_err(|why| match why {
         object::pin::BudgetError::LivePins => status::BAD_STATE,
         object::pin::BudgetError::PastCeiling => status::NO_MEMORY,
@@ -3728,8 +3765,39 @@ fn set_isolated_mark(node: &DeviceNode, value: u64) -> Result<usize, Errno> {
 /// refused for leaves bus mastering off (ledger 4108 (1)), and a device
 /// whose switch cannot be reached gets no pin.
 fn domain_then_dma(node: &DeviceNode) -> Result<(), Errno> {
-    let _ = node.domain().map_err(|_| status::NO_MEMORY)?;
+    let _ = domain_of_call(node)?;
     node.enable_dma().map_err(|_| status::BAD_STATE)
+}
+
+/// The domain a native call reaches: `BAD_STATE` on an explicit node nobody
+/// bound, none made on the way (`L.device.68`).
+fn domain_of_call(node: &DeviceNode) -> Result<Arc<crate::iommu::Domain>, Errno> {
+    node.domain_for_call().map_err(|why| match why {
+        crate::device::DomainAnswer::Unbound => status::BAD_STATE,
+        crate::device::DomainAnswer::NoMemory => status::NO_MEMORY,
+    })
+}
+
+/// `device_bind_domain` (`docs/microkernel/K8.md` §2).
+///
+/// `BIND_DOMAIN` is on the handle `devmgr` keeps. A successful bind writes no
+/// audit record: it grants nothing until a driver pins (K8.7). A refusal on
+/// the rights, or on an untranslated domain, is `ACCESS_DENIED` and so the
+/// funnel's RIGHTS record; the other refusals write none.
+///
+/// Verifies through `object::authority_check`: L.device.66, L.device.69.
+fn device_bind_domain(process: &Process, device: Handle) -> Result<usize, Errno> {
+    use crate::device::BindRefusal;
+    let node = device_in(process, device, Rights::MANAGE | Rights::BIND_DOMAIN)?;
+    node.bind_domain(crate::discovery::devmgr::unisolated_allowed())
+        .map(|()| 0)
+        .map_err(|why| match why {
+            BindRefusal::NoDma => status::WRONG_TYPE,
+            BindRefusal::Already => status::ALREADY_BOUND,
+            BindRefusal::Untranslated => status::UNTRANSLATED,
+            BindRefusal::Held => status::LIMIT_REACHED,
+            BindRefusal::NoMemory => status::NO_MEMORY,
+        })
 }
 
 /// `device_isolation`: how the device is isolated, as
@@ -3738,14 +3806,18 @@ fn domain_then_dma(node: &DeviceNode) -> Result<(), Errno> {
 /// Bit 0 answers for the domain the device has, made here if no pin has
 /// made it yet: devmgr asks before it starts the driver, while nothing is
 /// pinned, and the domain is the node's for life, so the answer is the one
-/// the driver's pins will get (`L.device.55`). A node that can be given no
+/// the driver's pins will get (`L.device.55`). On an explicit node none is
+/// made here: an unbound one answers untranslated, and devmgr binds first
+/// (`L.device.68`). A node that can be given no
 /// domain -- one reaching no memory, a function whose identity domain is
 /// held -- answers 0. A refused or yielded node's domain may be made too,
 /// which widens nothing: a domain maps only what is pinned into it, and
 /// such a node is given no pins.
 fn device_isolation(process: &Process, device: Handle) -> Result<usize, Errno> {
     let node = device_in(process, device, Rights::NONE)?;
-    let translated = node.domain().is_ok_and(|domain| domain.translated());
+    let translated = node
+        .domain_for_call()
+        .is_ok_and(|domain| domain.translated());
     let mut bits = 0;
     if translated {
         bits |= types::DEVICE_ISOLATION_DMA_TRANSLATED;
@@ -3905,7 +3977,10 @@ fn vmo_map(
     let mapped = process
         .space()
         .map_by_handle(at, length, vmo, offset, flags, ceiling)
-        .map_err(space_status)?;
+        .map_err(|why| match why {
+            SpaceError::Unmeasured => unmeasured(process, NativeCall::SpaceMap),
+            why => space_status(why),
+        })?;
     usize::try_from(mapped).map_err(|_| status::INVALID_ARGS)
 }
 
@@ -3965,8 +4040,30 @@ fn space_held(
 /// with room for it had first, so the VMO is under exactly one of the two
 /// handles throughout and a refusal changes nothing.
 fn vmo_executable(process: &Process, vmo: Handle, options: u64) -> Result<usize, Errno> {
-    if options != 0 {
-        return Err(status::INVALID_ARGS);
+    match options {
+        0 => {
+            // In a measured job only a sealed image is ever run (K14 §3).
+            if process.space().is_measured() {
+                return Err(unmeasured(process, NativeCall::VmoExecutable));
+            }
+        }
+        types::VMO_SEAL => {
+            // Freeze and hash outside the table's lock: the hash runs long.
+            // WRITE is the authority to freeze the object for every other
+            // holder of it too, which K14.9 accepts.
+            let held = process.with_handles(|table| {
+                vmo_in(table, vmo, Rights::READ | Rights::MAP | Rights::WRITE)
+            })?;
+            let _ = held.seal().map_err(|why| match why {
+                SealRefusal::Kind
+                | SealRefusal::Busy
+                | SealRefusal::Shared
+                | SealRefusal::Already => status::BAD_STATE,
+                SealRefusal::TooLong => status::INVALID_ARGS,
+                SealRefusal::NoMemory => status::NO_MEMORY,
+            })?;
+        }
+        _ => return Err(status::INVALID_ARGS),
     }
     let placed = process.with_handles(|table| {
         let _ = vmo_held(table, vmo, Rights::MAP | Rights::READ).map_err(|why| (why, None))?;
@@ -3989,6 +4086,72 @@ fn vmo_executable(process: &Process, vmo: Handle, options: u64) -> Result<usize,
             Err(why)
         }
     }
+}
+
+/// An executable mapping refused for want of a measurement: its own audit
+/// event, and `BAD_STATE`, so the funnel writes no RIGHTS record for it
+/// (`docs/microkernel/K14.md`, K14 Q2).
+fn unmeasured(process: &Process, call: NativeCall) -> Errno {
+    let refused = status::BAD_STATE;
+    audit::record(
+        audit::UNMEASURED,
+        audit::Outcome::Refused,
+        i16::try_from(refused.0).unwrap_or(i16::MAX),
+        audit::Subject::of(process),
+        audit::Target {
+            kind: audit::target::NONE,
+            id: 0,
+        },
+        [u32::try_from(nr::number(call)).unwrap_or(u32::MAX), 0, 0],
+    );
+    refused
+}
+
+/// `vmo_digest`.
+fn vmo_digest(process: &Process, vmo: Handle, out: u64) -> Result<usize, Errno> {
+    let vmo = process.with_handles(|table| vmo_in(table, vmo, Rights::READ))?;
+    if !vmo.is_sealed() {
+        return Err(status::BAD_STATE);
+    }
+    let digest = vmo.digest().ok_or(status::SHOULD_WAIT)?;
+    uaccess::copy_to_user(process.space(), out, &digest).map_err(|_| status::FAULT)?;
+    Ok(0)
+}
+
+/// `process_images`: the kernel's record of what a process was given to run.
+/// No call reaches inside the process through this: it is the kernel's list,
+/// not the process's memory (`Rights::PROCESS`).
+fn process_images(
+    process: &Process,
+    target: Handle,
+    out: u64,
+    capacity: u64,
+) -> Result<usize, Errno> {
+    let child = process.with_handles(|table| {
+        let (object, held) = table.get(target).map_err(table_error)?;
+        let Object::Process(child) = object else {
+            return Err(status::WRONG_TYPE);
+        };
+        if !held.contains(Rights::MANAGE) {
+            return Err(status::ACCESS_DENIED);
+        }
+        // Only a process made through the native ABI has a way back to it.
+        child.control().map(Arc::clone).ok_or(status::ACCESS_DENIED)
+    })?;
+    let host = child.host().ok_or(status::BAD_STATE)?;
+    let space = host.core().space();
+    let mut digests = [[0_u8; 32]; crate::user::space::MAX_IMAGES];
+    let count = space.images_into(&mut digests);
+    let wanted = usize::try_from(capacity).unwrap_or(usize::MAX).min(count);
+    for (index, digest) in digests.iter().take(wanted).enumerate() {
+        let at = out.checked_add(index as u64 * 32).ok_or(status::FAULT)?;
+        uaccess::copy_to_user(process.space(), at, digest).map_err(|_| status::FAULT)?;
+    }
+    Ok(if space.is_measured() {
+        count
+    } else {
+        count | types::IMAGES_UNMEASURED
+    })
 }
 
 /// `process_space`.
@@ -4030,6 +4193,10 @@ fn process_space(process: &Process, target: Handle, rights: u64) -> Result<usize
 /// `space_create`.
 fn space_create(process: &Process) -> Result<usize, Errno> {
     let space = SpaceRef::create().map_err(|_| status::NO_MEMORY)?;
+    // A measured caller's new space is measured, sticky from here (K14.7).
+    if process.space().is_measured() {
+        space.space().measure();
+    }
     insert_new(process, Object::Space(space), Rights::SPACE)
 }
 
@@ -4129,6 +4296,9 @@ fn space_protect(
         .protect_by_handle(address, length, flags)
         .map_err(|why| match why {
             ProtectRefused::NotByHandle => status::BAD_STATE,
+            ProtectRefused::Beyond if execute && target.space().is_measured() => {
+                unmeasured(process, NativeCall::SpaceProtect)
+            }
             ProtectRefused::Beyond => status::ACCESS_DENIED,
             ProtectRefused::Space(why) => space_status(why),
         })?;
@@ -4170,7 +4340,10 @@ fn space_allocate(
     let mapped = target
         .space()
         .allocate_by_handle(at, length, flags)
-        .map_err(space_status)?;
+        .map_err(|why| match why {
+            SpaceError::Unmeasured => unmeasured(process, NativeCall::SpaceAllocate),
+            why => space_status(why),
+        })?;
     usize::try_from(mapped).map_err(|_| status::INVALID_ARGS)
 }
 
@@ -4178,6 +4351,12 @@ fn space_allocate(
 /// `fork` clones one, answered with the handle's own rights and never more.
 fn space_clone(process: &Process, space: Handle) -> Result<usize, Errno> {
     let (source, rights) = space_held(process, space, Rights::READ)?;
+    // Clone launders nothing: a measured caller takes no copy of a space that
+    // may hold unsealed executable regions (K14.6). The clone keeps the
+    // source's state, either way, in `AddressSpace::fork`.
+    if process.space().is_measured() && !source.space().is_measured() {
+        return Err(unmeasured(process, NativeCall::SpaceClone));
+    }
     let clone = source.clone_space().map_err(|_| status::NO_MEMORY)?;
     insert_new(process, Object::Space(clone), rights)
 }
@@ -4329,6 +4508,10 @@ fn space_status(why: SpaceError) -> Errno {
         SpaceError::Refused(_) => status::ACCESS_DENIED,
         // Another mapping holds the pages with another memory type.
         SpaceError::OtherMemoryType => status::ALREADY_BOUND,
+        // Not a right the caller lacks: the object has no measurement. Its own
+        // event says so (`audit::UNMEASURED`), and the funnel writes no RIGHTS.
+        SpaceError::Unmeasured | SpaceError::Backing(VmoError::Sealed) => status::BAD_STATE,
+        SpaceError::ImagesFull => status::LIMIT_REACHED,
         SpaceError::NotUserRange(_)
         | SpaceError::BadRange
         | SpaceError::NotMapped(_)

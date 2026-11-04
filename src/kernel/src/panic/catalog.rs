@@ -2672,6 +2672,47 @@ pub static STAGE9_OBJECTS: Explanation = Explanation {
 };
 
 // CHECKS-ONLY: stages_check.rs
+/// K14: sealing, measured spaces and the digest record.
+#[doc(hidden)]
+pub static STAGE9_SEALING: Explanation = Explanation {
+    code: "FX-0951",
+    title: "the sealing self-check failed",
+    meaning: "`object::sealing_check::run` holds K14's rules (`docs/microkernel/K14.md`): a \
+              sealed VMO's bytes and length never change, its digest is the kernel's over \
+              its length and frames, a measured space runs only sealed images, and what it \
+              was given to run stays on its record. A kernel failing one could run code its \
+              digests do not name.",
+    causes: &[
+        "A path in `user/vmo.rs` that changes a page stopped testing `Pages::sealed`.",
+        "`AddressSpace::map_by_handle` lost its test of the digest, or a clone its state.",
+        "`Vmo::seal` hashed something other than the frames in page order.",
+    ],
+    see: "src/kernel/src/object/sealing_check.rs run; src/kernel/src/user/vmo.rs seal; \
+          docs/microkernel/K14.md",
+};
+
+/// K8: the device authority self-check.
+pub static STAGE10_AUTHORITY: Explanation = Explanation {
+    code: "FX-0950",
+    title: "the device authority self-check failed",
+    meaning: "`object::authority_check::run` and `device::check::check_iommu_held` hold \
+              K8's rules (`docs/microkernel/K8.md`): the right to attach a function to its \
+              IOMMU domain sits on one handle, an explicit node gives a driver no aperture, \
+              vector or pin before its bind and makes no domain on the way, an untranslated \
+              function is not bound without the boot's opt-out, and the IOMMU's registers and \
+              tables are in no aperture. A kernel failing one could hand a device memory, or \
+              its IOMMU, to whoever holds the handle.",
+    causes: &[
+        "`DeviceNode::domain_for_call` makes a domain, or a native path calls \
+         `DeviceNode::domain` directly.",
+        "`DeviceNode::bind_domain` lost a refusal, or `device_bind_domain` its right.",
+        "`Reserved::of` stopped adding `iommu::units`.",
+    ],
+    see: "src/kernel/src/object/authority_check.rs run; src/kernel/src/device.rs bind_domain; \
+          docs/microkernel/K8.md",
+};
+
+// CHECKS-ONLY: stages_check.rs
 /// For `check_timers` in `stages_check.rs`, when `object::timer_check::run`
 /// fails.
 #[doc(hidden)]
@@ -3897,6 +3938,8 @@ pub(crate) static ALL: &[&Explanation] = &[
     &STAGE6_REHOMED_OBJECTS,
     &STAGE6_REHOMED_CACHE,
     &ITEM_REHOMED_CALLS,
+    &STAGE10_AUTHORITY,
+    &STAGE9_SEALING,
     &STAGE10_PCI,
     &STAGE10_DEVICES,
     &STAGE10_IOMMU,

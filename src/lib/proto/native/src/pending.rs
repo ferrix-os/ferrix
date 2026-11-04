@@ -70,7 +70,37 @@ pub fn create_process<S: Syscall>(
     )))
 }
 
+/// What [`Process::images`] answered.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Images {
+    /// How many digests the record holds, whatever fitted the buffer.
+    pub count: usize,
+    /// Whether the space is unmeasured, so that the list is not the whole of
+    /// what it can run.
+    pub unmeasured: bool,
+}
+
 impl<S: Syscall> Process<S> {
+    /// `process_images`: the kernel's record of what it was given to run
+    /// (`docs/microkernel/K14.md` §4).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::AccessDenied`] without `MANAGE`; [`Error::WrongType`].
+    pub fn images(&self, out: &mut [[u8; 32]]) -> Result<Images, Error> {
+        let capacity = out.len();
+        let value = Call::new(nr::PROCESS_IMAGES)
+            .value(register(self.handle()))
+            .output(out.as_flattened_mut())
+            .value(capacity)
+            .make(self.syscall());
+        let answer: usize = decode(value)?;
+        Ok(Images {
+            count: answer & !types::IMAGES_UNMEASURED,
+            unmeasured: answer & types::IMAGES_UNMEASURED != 0,
+        })
+    }
+
     /// `process_start`: run the process, giving it `bootstrap`.
     ///
     /// The handle leaves this process only if the call succeeds, so a failure

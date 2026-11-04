@@ -180,6 +180,8 @@ fn refused(error: VmoError) -> Errno {
         VmoError::OutOfMemory => Errno::ENOSPC,
         // Only a read answers it, and `read_piece` acts on it there.
         VmoError::Poisoned(_) => Errno::EIO,
+        // A file's object is never sealed.
+        VmoError::Sealed => Errno::EIO,
     }
 }
 

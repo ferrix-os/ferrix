@@ -223,6 +223,19 @@ pub(crate) fn judge(
         ))
     };
     boot_line(arch, log, kernel, args)?;
+    // K8.6: `edu` is an idle PCI function on this machine, so the bind's check has
+    // a real bus master to show. Finding none would pass it silently.
+    if arch == Arch::X86_64
+        && machine == Machine::QemuVirt
+        && lines.iter().any(|line| line.contains("  bind     "))
+        && !lines
+            .iter()
+            .any(|line| line.contains("became a bus master only after its bind"))
+    {
+        return Err(failed(
+            "the bind check found no function to show the bus master's half on".to_owned(),
+        ));
+    }
     let off = crate::cargo::mitigations_off();
     let declined = crate::kaslr::declined(args);
     if machine == Machine::Crosvm && !off && !declined {
