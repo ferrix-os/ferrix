@@ -1375,6 +1375,81 @@ pub static STAGE5_SCHEDULER: Explanation = Explanation {
     see: "src/kernel/src/sched/check.rs run; src/kernel/src/sched/mod.rs; docs/ROADMAP.md stage 5",
 };
 
+/// For `syscall::rehome_check::stage_core_objects`.
+// CHECKS-ONLY: syscall/rehome_check.rs
+pub static STAGE6_REHOMED_MEMORY: Explanation = Explanation {
+    code: "FX-0931",
+    title: "spaces and objects failed the check made of kernel objects alone",
+    meaning: "`user::rehome_check::run` drives `AddressSpace` and `Vmo`, with a page source of \
+              its own and no process or file system: the floor of a space's map, an `mremap`'s \
+              move and its pages, a fault filling from a source, the resident counts of a disk \
+              file, a file's cut reaching its mappings, the may-write count, a page shared \
+              across a fork, `protect`, and shared and private file mappings. The sentence names \
+              the case that was not true.",
+    causes: &[
+        "`user/space.rs` or `user/vmo.rs` changed what a mapping shows or refuses: the sentence \
+         names which, and the requirement it verifies is in the check's `Verifies:` tag.",
+        "A frame an object or a space was given did not come back (the frame count's sentence).",
+    ],
+    see: "src/kernel/src/user/rehome_check.rs; docs/microkernel/B5.md",
+};
+
+/// For `syscall::rehome_check::stage_core_objects`.
+// CHECKS-ONLY: syscall/rehome_check.rs
+pub static STAGE6_REHOMED_OBJECTS: Explanation = Explanation {
+    code: "FX-0932",
+    title: "jobs, quotas, switch counts or the filter failed the check of kernel objects alone",
+    meaning: "`object::rehome_check::run` drives `Job`, `Quota`, a bootstrap slot, an end record \
+              and a core `Process` with no personality: limits and usage, the kernel-heap charge, \
+              removal of a job, `EMPTY`, the OOM counts, the charge of processor time and \
+              `cpu.max`, the seal, and the process table's lookup. `sched::rehome_check::run` \
+              counts the switches of kernel tasks, and `trap::rehome_check::run` asks the filter \
+              slots of its own and the architectures' values. The sentence names the case that \
+              was not true.",
+    causes: &[
+        "`object/job.rs`, `object/quota.rs`, `object/process.rs`, `sched/` or `trap.rs` changed \
+         what it answers: the sentence names which, and the requirement it verifies is in the \
+         check's `Verifies:` tag.",
+    ],
+    see: "src/kernel/src/object/rehome_check.rs; docs/microkernel/B5.md",
+};
+
+/// For `syscall::rehome_check::stage_core_objects` and `stage_shrinker`.
+// CHECKS-ONLY: syscall/rehome_check.rs
+pub static STAGE6_REHOMED_CACHE: Explanation = Explanation {
+    code: "FX-0933",
+    title: "the page cache failed the check made of kernel objects alone",
+    meaning: "`user::rehome_cache_check::run` drives `user::cache` over objects with a source of \
+              its own, in jobs made for it, with no file system or process: reclaim's scope and \
+              its hand, `reclaim_asked`, the shrinker's slot, a written page kept, a mapping made \
+              at the take, `totals`, `resident`, and poison in a cached page. The sentence names \
+              the case that was not true.",
+    causes: &[
+        "`user/cache.rs`, `user/vmo.rs` or `object/quota.rs` changed what reclaim takes or what \
+         the cache counts: the sentence names which, and the requirement it verifies is in the \
+         check's `Verifies:` tag.",
+    ],
+    see: "src/kernel/src/user/rehome_cache_check.rs; docs/microkernel/B5.md",
+};
+
+/// For `syscall::rehome_check::stage_core_objects` and `stage_on_devices`.
+// CHECKS-ONLY: syscall/rehome_check.rs
+pub static ITEM_REHOMED_CALLS: Explanation = Explanation {
+    code: "FX-0934",
+    title: "the native calls failed the check made of kernel objects alone",
+    meaning: "`syscall::rehome_check` makes native calls for a core `Process` with no \
+              personality: an unknown number's `ENOSYS`, `job_create`'s options and the seal, a \
+              node's description, a quiesce against a server of the check's own, and a \
+              write-combining object's mappings, copies and refusals; `check_drivers_sealed` \
+              walks `drivers.slice`. The sentence names the case that was not true.",
+    causes: &[
+        "`syscall/native.rs`, `device.rs`, `user/vmo.rs` or `user/space.rs` changed what a call \
+         answers: the sentence names which, and the requirement it verifies is in the check's \
+         `Verifies:` tag.",
+    ],
+    see: "src/kernel/src/syscall/rehome_check.rs; docs/microkernel/B5.md",
+};
+
 /// For `check_user_memory` in `stages_check.rs`, when `user::check::run` fails.
 pub static STAGE6_USER_MEMORY: Explanation = Explanation {
     code: "FX-0601",
@@ -3649,6 +3724,10 @@ pub(crate) static ALL: &[&Explanation] = &[
     &CHECK_HOOK_LEFT_ARMED,
     &SMBIOS,
     &STAGE13_TIME_NAMESPACES,
+    &STAGE6_REHOMED_MEMORY,
+    &STAGE6_REHOMED_OBJECTS,
+    &STAGE6_REHOMED_CACHE,
+    &ITEM_REHOMED_CALLS,
     &STAGE10_PCI,
     &STAGE10_DEVICES,
     &STAGE10_IOMMU,

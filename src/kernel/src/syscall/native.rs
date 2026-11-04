@@ -325,15 +325,16 @@ pub(crate) type WaitUnserved =
     fn(node: &Arc<DeviceNode>, cancelled: &dyn Fn() -> bool) -> Result<(), StillServed>;
 
 /// What a quiesce waits out, in the order it was registered: the block and
-/// net rings, the display, the renderer, input and audio, with room for two
+/// net rings, the display, the renderer, input, audio and the chardev core;
+/// on a boot whose checks run, `syscall::rehome_check`'s; and room for four
 /// more.
-static SERVERS: Hooks<Server, 8> = Hooks::new();
+static SERVERS: Hooks<Server, 12> = Hooks::new();
 
 /// Have a quiesce wait out `server`.
 ///
 /// # Errors
 ///
-/// [`Full`] past eight, which is more subsystems serving devices than the
+/// [`Full`] past twelve, which is more subsystems serving devices than the
 /// item expects.
 pub fn register_server(server: &'static Server) -> Result<(), Full> {
     SERVERS.register(server)

@@ -50,6 +50,7 @@ mod mark_check;
 mod preempt;
 mod preempt_check;
 mod queue;
+pub mod rehome_check;
 mod slice_check;
 mod task;
 pub mod trip;

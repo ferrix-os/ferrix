@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2535 declarations in the core's files, 179 in the item's; 123 checks-only.
+2550 declarations in the core's files, 183 in the item's; 133 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1264,7 +1264,7 @@ checks above is `pub` for raised checks (F3).
 |---|---|---|---|
 | `mark_ready` | fn | bin |  |
 | `recent` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
-| `write` | fn | load |  |
+| `write` | fn | item, load |  |
 | `write_bytes` | fn | load |  |
 | `write_raw` | fn | load |  |
 | `write_record` | fn | load |  |
@@ -1437,7 +1437,7 @@ checks above is `pub` for raised checks (F3).
 | `DeviceNode::empty` | method | load |  |
 | `DeviceNode::enable_dma` | method | item, load |  |
 | `DeviceNode::firmware_framebuffer` | method | item |  |
-| `DeviceNode::framebuffer_mode` | method | load |  |
+| `DeviceNode::framebuffer_mode` | method | item, load |  |
 | `DeviceNode::hello_accepted` | method | load |  |
 | `DeviceNode::host_visible` | method | item, load |  |
 | `DeviceNode::index` | method | item, load, bin |  |
@@ -1453,13 +1453,13 @@ checks above is `pub` for raised checks (F3).
 | `DeviceNode::may_have_client_nodes` | method | load |  |
 | `DeviceNode::may_take_vectors_and_pins` | method | item, load |  |
 | `DeviceNode::pci` | method | item, load, bin |  |
-| `DeviceNode::pci_function` | method | load |  |
+| `DeviceNode::pci_function` | method | item, load |  |
 | `DeviceNode::power` | method | item, load, bin |  |
 | `DeviceNode::reaches_memory` | method | item, load |  |
 | `DeviceNode::reads_log` | method | load |  |
 | `DeviceNode::tree_binding` | method | item |  |
 | `DeviceNode::vector` | method | item, load |  |
-| `DeviceNode::vector_count` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `DeviceNode::vector_count` | method | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `DeviceNode::verify_config` | method | item, load |  |
 | `DeviceNode::yielded` | method | item, load, bin |  |
 | `DmaShape::coherent` | field | item, load |  |
@@ -1976,6 +1976,7 @@ checks above is `pub` for raised checks (F3).
 | `port` | mod | item, load |  |
 | `process` | mod | item, load |  |
 | `quota` | mod | item, load |  |
+| `rehome_check` | mod | item (checks) | pub for raised checks |
 | `TOPOLOGY` | static | item |  |
 | `HandleTable` | type | item, load |  |
 | `Transfer` | type | item, load |  |
@@ -2069,7 +2070,7 @@ checks above is `pub` for raised checks (F3).
 | `Job::bandwidth` | method | load |  |
 | `Job::burst` | method | load |  |
 | `Job::change_subtree_control` | method | load |  |
-| `Job::children` | method | load |  |
+| `Job::children` | method | item, load |  |
 | `Job::contains` | method | item, load |  |
 | `Job::counted` | method | load, bin |  |
 | `Job::cpu_idle` | method | item, load |  |
@@ -2101,7 +2102,7 @@ checks above is `pub` for raised checks (F3).
 | `Job::new_child_domain` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Job::new_named_child` | method | load |  |
 | `Job::new_named_child_as` | method | item |  |
-| `Job::new_root` | method | load |  |
+| `Job::new_root` | method | item, load |  |
 | `Job::new_root_as` | method | item |  |
 | `Job::node` | method | item, load |  |
 | `Job::note_frozen` | method | load |  |
@@ -2111,7 +2112,7 @@ checks above is `pub` for raised checks (F3).
 | `Job::path_names` | method | load |  |
 | `Job::quota_index` | method | item, load |  |
 | `Job::remove_named_child` | method | load |  |
-| `Job::sealed` | method | load, bin |  |
+| `Job::sealed` | method | item, load, bin |  |
 | `Job::set_bandwidth` | method | load |  |
 | `Job::set_burst` | method | load |  |
 | `Job::set_cpu_idle` | method | load |  |
@@ -2331,6 +2332,12 @@ checks above is `pub` for raised checks (F3).
 | `Usage::refused` | field | item, load, bin |  |
 | `Usage::used` | field | item, load |  |
 
+### `object::rehome_check`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `run` | fn | item (checks) | checks-only |
+
 ### `panic`
 
 | Item | Kind | Named by | Note |
@@ -2359,6 +2366,7 @@ checks above is `pub` for raised checks (F3).
 | `INIT_EXITED` | static | item |  |
 | `INIT_INPUTS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `INTERRUPT_BRING_UP` | static | bin |  |
+| `ITEM_REHOMED_CALLS` | static | item (checks) | checks-only |
 | `LOAD_REGISTRATION` | static | bin |  |
 | `LOG_CONTROL` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `MEMORY_BRING_UP` | static | bin |  |
@@ -2409,6 +2417,9 @@ checks above is `pub` for raised checks (F3).
 | `STAGE4_SMP` | static | bin |  |
 | `STAGE5_SCHEDULER` | static | bin |  |
 | `STAGE5_TASK_VIEW` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE6_REHOMED_CACHE` | static | item (checks) | checks-only |
+| `STAGE6_REHOMED_MEMORY` | static | item (checks) | checks-only |
+| `STAGE6_REHOMED_OBJECTS` | static | item (checks) | checks-only |
 | `STAGE6_REVERSE_MAP` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE6_USER_MEMORY` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE7_SEMAPHORES` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -2522,6 +2533,7 @@ checks above is `pub` for raised checks (F3).
 | `direct` | mod | item, load |  |
 | `inspect` | mod | load |  |
 | `inspect_check` | mod | bin (checks) | pub for raised checks |
+| `rehome_check` | mod | item (checks) | pub for raised checks |
 | `trip` | mod | item, load |  |
 | `vtime` | mod | load |  |
 | `work` | mod | item, load, bin |  |
@@ -2631,6 +2643,12 @@ checks above is `pub` for raised checks (F3).
 | `preempt_disable` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `preempt_enable` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Preempt` | struct | - |  |
+
+### `sched::rehome_check`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `run` | fn | item (checks) | checks-only |
 
 ### `sched::task`
 
@@ -2920,6 +2938,7 @@ checks above is `pub` for raised checks (F3).
 | `system_call` | fn | item, load |  |
 | `user_interrupt_count` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `check` | mod | load (checks) | pub for raised checks |
+| `rehome_check` | mod | item (checks) | pub for raised checks |
 | `ReturnPath` | struct | load |  |
 | `SyscallArgs` | struct | item, load, bin |  |
 | `FastWriteRead` | type | bin |  |
@@ -2941,6 +2960,12 @@ checks above is `pub` for raised checks (F3).
 |---|---|---|---|
 | `outcomes` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
+### `trap::rehome_check`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `run` | fn | item (checks) | checks-only |
+
 ### `user`
 
 | Item | Kind | Named by | Note |
@@ -2948,6 +2973,8 @@ checks above is `pub` for raised checks (F3).
 | `cache` | mod | load |  |
 | `check` | mod | bin (checks) | pub for raised checks |
 | `memory_type` | mod | item, load, bin |  |
+| `rehome_cache_check` | mod | item (checks) | pub for raised checks |
+| `rehome_check` | mod | item (checks) | pub for raised checks |
 | `space` | mod | item, load |  |
 | `vmo` | mod | item, load, bin |  |
 
@@ -3005,6 +3032,19 @@ checks above is `pub` for raised checks (F3).
 | `Hold` | struct | item |  |
 | `MemoryType::of` | method | item, load, bin |  |
 
+### `user::rehome_cache_check`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `check_the_shrinker` | fn | item (checks) | checks-only |
+| `run` | fn | item (checks) | checks-only |
+
+### `user::rehome_check`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `run` | fn | item (checks) | checks-only |
+
 ### `user::space`
 
 | Item | Kind | Named by | Note |
@@ -3015,9 +3055,9 @@ checks above is `pub` for raised checks (F3).
 | `Destination` | enum | load |  |
 | `FilePlace` | enum | load |  |
 | `SpaceError` | enum | item, load |  |
-| `coherent_touches` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
-| `Access` | struct | load |  |
-| `AddressSpace` | struct | load |  |
+| `coherent_touches` | fn | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Access` | struct | item, load |  |
+| `AddressSpace` | struct | item, load |  |
 | `FileMapping` | struct | load |  |
 | `Region` | struct | load |  |
 | `Resident` | struct | - |  |
@@ -3059,7 +3099,7 @@ checks above is `pub` for raised checks (F3).
 | `AddressSpace::shared_object_at` | method | load |  |
 | `AddressSpace::uninstall` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `AddressSpace::unmap` | method | load |  |
-| `AddressSpace::with_page` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `AddressSpace::with_page` | method | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `AddressSpace::with_present_page` | method | load |  |
 | `AddressSpace::with_regions` | method | load |  |
 | `FileMapping::file` | field | item, load, bin |  |
@@ -3121,7 +3161,7 @@ checks above is `pub` for raised checks (F3).
 | `Vmo::len_bytes` | method | item, load |  |
 | `Vmo::len_pages` | method | item, load |  |
 | `Vmo::make_coherent` | method | item, load |  |
-| `Vmo::make_combining` | method | load |  |
+| `Vmo::make_combining` | method | item, load |  |
 | `Vmo::mapper_count` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Vmo::new_anonymous` | method | item, load |  |
 | `Vmo::new_filled` | method | load |  |
@@ -3132,7 +3172,7 @@ checks above is `pub` for raised checks (F3).
 | `Vmo::replace` | method | item, load |  |
 | `Vmo::set_file_len` | method | load |  |
 | `Vmo::sourced` | method | load |  |
-| `Vmo::take_kernel_view` | method | load |  |
+| `Vmo::take_kernel_view` | method | item, load |  |
 | `Vmo::take_mapped_writes` | method | load |  |
 | `Vmo::writably_mapped` | method | load |  |
 | `Vmo::write_page` | method | item, load |  |
@@ -3403,6 +3443,7 @@ checks above is `pub` for raised checks (F3).
 | `unanswered` | fn | load |  |
 | `native` | mod | load, bin |  |
 | `program` | mod | load |  |
+| `rehome_check` | mod | bin |  |
 | `Outcome` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `SyscallArgs` | re-export | load |  |
 | `uaccess` | re-export | load |  |
@@ -3454,3 +3495,11 @@ checks above is `pub` for raised checks (F3).
 | `ProgramFile::object` | method | load, bin |  |
 | `ProgramFile::open` | method | load, bin |  |
 | `ProgramFile::read_exact_at` | method | load |  |
+
+### `syscall::rehome_check`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `stage_core_objects` | fn | bin |  |
+| `stage_on_devices` | fn | bin |  |
+| `stage_shrinker` | fn | bin |  |
