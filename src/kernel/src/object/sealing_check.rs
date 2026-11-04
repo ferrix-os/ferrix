@@ -407,6 +407,9 @@ fn measured_rules(side: &Side, report: &mut Report) -> Result<(), &'static str> 
         "an unsealed VMO was mapped executable in a measured job",
         report,
     )?;
+    if !refusal_recorded(nr::SPACE_MAP) {
+        return Err("a SPACE_MAP refused for want of a measurement left no audit record");
+    }
     // Nor readable, for a later protect to raise: its ceiling holds EXECUTE.
     refused(
         map(side, space, runnable, MAP_READ),
@@ -552,4 +555,22 @@ fn jobs(side: &Side, report: &mut Report) -> Result<(), &'static str> {
         "a measured caller cloned an unmeasured space",
         report,
     )
+}
+
+/// Whether the refusals' ring holds K14's event with `call`'s number.
+fn refusal_recorded(call: usize) -> bool {
+    let mut records = [crate::audit::Record::EMPTY; 16];
+    let mut from = 0;
+    let mut found = false;
+    loop {
+        let read = crate::audit::read(crate::audit::Which::Refusals, from, &mut records);
+        if read.copied == 0 {
+            return found;
+        }
+        found |= records
+            .iter()
+            .take(read.copied)
+            .any(|record| record.is(crate::audit::UNMEASURED) && record.detail[0] as usize == call);
+        from = read.next;
+    }
 }

@@ -3977,10 +3977,7 @@ fn vmo_map(
     let mapped = process
         .space()
         .map_by_handle(at, length, vmo, offset, flags, ceiling)
-        .map_err(|why| match why {
-            SpaceError::Unmeasured => unmeasured(process, NativeCall::SpaceMap),
-            why => space_status(why),
-        })?;
+        .map_err(space_status)?;
     usize::try_from(mapped).map_err(|_| status::INVALID_ARGS)
 }
 
@@ -4247,7 +4244,10 @@ fn space_map(
     let mapped = target
         .space()
         .map_by_handle(at, length, vmo, offset, flags, ceiling)
-        .map_err(space_status)?;
+        .map_err(|why| match why {
+            SpaceError::Unmeasured => unmeasured(process, NativeCall::SpaceMap),
+            why => space_status(why),
+        })?;
     usize::try_from(mapped).map_err(|_| status::INVALID_ARGS)
 }
 
