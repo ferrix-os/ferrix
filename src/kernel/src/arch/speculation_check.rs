@@ -83,7 +83,9 @@ pub fn check() -> Result<Report, &'static str> {
 
 /// What processor `logical` recorded, held to the rules every processor
 /// keeps: it recorded, everything it wrote read back, it applied the clamp in
-/// a hardened build and nothing in an unhardened one, and it issued no switch
+/// a hardened build and nothing in an unhardened one (the vector covers are
+/// decided apart from [`Defences`], and a cover's failure is its read-back), and
+/// it issued no switch
 /// barrier its plan does not have.
 fn check_processor(logical: usize) -> Result<Defences, &'static str> {
     let applied = applied_by(logical)

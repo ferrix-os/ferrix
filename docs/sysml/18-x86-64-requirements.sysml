@@ -3677,7 +3677,7 @@ package FerrixX8664Requirements {
                 "arch::x86_64::switch::UserState::set_xstate_bv");
         }
         requirement <'L.x86_64.123'> avxWithheldWhereVectorRegistersLeak : ItemLowLevel {
-            attribute :>> statement = "With the speculation switch on, vector_leak
+            attribute :>> statement = "In every build, vector_leak
                 shall, on a Zen 2 processor (family 0x17, Linux's amd_zenbleed
                 models), set DE_CFG[9] on every processor unless the microcode is
                 at the fixed revision, and withhold AVX from XCR0 in a guest; and
@@ -3691,7 +3691,8 @@ package FerrixX8664Requirements {
                 without and with GDS_NO, with GDS_CTRL on, off and unlocked, off and
                 locked, an Alder Lake -- its verdict, and family_and_model reads a
                 Matisse and a Kaby Lake right; with the guest rule taken out, the
-                check fails. The writes, DE_CFG[9] and clearing GDS_MITG_DIS, are
+                check fails; and the same verdicts in a kernel built with
+                mitigations=off, whose boot names one. The writes, DE_CFG[9] and clearing GDS_MITG_DIS, are
                 not exercised on the gate's machines, which are not affected parts;
                 in a guest the verdict rests on the model the hypervisor presents
                 (SPECULATION.md section 9, AoU-11).";

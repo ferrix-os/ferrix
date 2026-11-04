@@ -1,8 +1,8 @@
 # Side-channel defences
 
 The argument for F-31: which speculative-execution defences the item carries,
-per architecture, why that set and not another, how one build switch takes all
-of them out, and what they cost; and the layout randomisation (KASLR) that the
+per architecture, why that set and not another, how one build switch takes every
+speed-trade defence out, and what they cost; and the layout randomisation (KASLR) that the
 same switch turns on, in §6.
 
 The item's claim is isolation between mutually distrusting processes
@@ -55,10 +55,14 @@ which only KASLR needs. **What it keeps:** SMEP, SMAP and
 PAN, which are memory protection rather than side-channel defences (F-32), and
 every architectural bounds check. The boot log says which build it is:
 
+`off` keeps Zenbleed's and GDS's covers (§3): they cost nothing measurable, so they are
+no speed trade, and an `off` build on an uncovered part withholds AVX, failing closed, as
+an `on` build does (DF6, ledger 1012).
+
 ```
   kaslr    NOT randomised: the kernel is a fixed-address image (--mitigations off); kernel at its link address 0xffffffff80000000
   cpu      descriptor table addresses kept from ring 3: UMIP off, as built
-  cpu      speculation defences off: built with --mitigations off
+  cpu      speculation defences off: built with --mitigations off; Zenbleed's and GDS's covers stay
   cpu      speculation defences off on 4 processors, as built
 ```
 
@@ -876,11 +880,8 @@ instructions per clamp.
 * **KPTI** (§6.2), and so **KASLR against a local timing attacker**, the
   **fixed physical placement** of the image and the writable alias of its text
   in the direct map, and ARMv7-A's few bits (§6.1).
-* **Zenbleed and Gather Data Sampling in a `--mitigations off` build**
-  (§3). The strict form of each, AVX withheld where nothing covers the leak,
-  is `on`'s; `off` decides nothing and programs keep AVX. And the model
-  lists are Linux's of 2026 (the 6.1.157 tree's `amd_zenbleed` and
-  `cpu_vuln_blacklist`), so a part added to them later is not known here.
+* **Zenbleed and Gather Data Sampling in a `--mitigations off` build** are decided and
+  covered as in any other since DF6 (§1), not a residual.
 * **Zenbleed and GDS in a guest.** The verdict there is only as good as the
   CPU model and `IA32_ARCH_CAPABILITIES` the hypervisor presents. A
   synthetic model -- xtask's own x86-64-v3 among them -- names neither the
