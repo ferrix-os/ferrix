@@ -56,7 +56,7 @@
     },
     "discovery/devmgr.rs::write_devices": {
       "complexity": 17,
-      "lines": 57,
+      "lines": 58,
       "recursive": false
     },
     "discovery/pci.rs::check_function": {
@@ -117,6 +117,11 @@
     "main.rs::start_scheduler": {
       "complexity": 5,
       "lines": 71,
+      "recursive": false
+    },
+    "object/process.rs::move_charged": {
+      "complexity": 15,
+      "lines": 45,
       "recursive": false
     },
     "smp.rs::invalidate_pages": {
@@ -366,7 +371,7 @@
     },
     "syscall/native.rs::answer": {
       "complexity": 40,
-      "lines": 112,
+      "lines": 115,
       "recursive": false
     },
     "syscall/native.rs::channel_read": {
@@ -379,9 +384,24 @@
       "lines": 36,
       "recursive": false
     },
+    "syscall/native.rs::device_call": {
+      "complexity": 15,
+      "lines": 18,
+      "recursive": false
+    },
+    "syscall/native.rs::process_create": {
+      "complexity": 19,
+      "lines": 51,
+      "recursive": false
+    },
+    "syscall/native.rs::vmo_executable": {
+      "complexity": 15,
+      "lines": 33,
+      "recursive": false
+    },
     "syscall/native.rs::vmo_pin": {
-      "complexity": 17,
-      "lines": 24,
+      "complexity": 20,
+      "lines": 28,
       "recursive": false
     },
     "syscall/uaccess.rs::copy_from_user_through": {
@@ -404,9 +424,24 @@
       "lines": 50,
       "recursive": false
     },
+    "user/space.rs::allocate_by_handle": {
+      "complexity": 16,
+      "lines": 45,
+      "recursive": false
+    },
     "user/space.rs::fault_private_file": {
       "complexity": 15,
       "lines": 53,
+      "recursive": false
+    },
+    "user/space.rs::fork": {
+      "complexity": 19,
+      "lines": 70,
+      "recursive": false
+    },
+    "user/space.rs::map_by_handle": {
+      "complexity": 26,
+      "lines": 68,
       "recursive": false
     },
     "user/space.rs::protect": {
@@ -422,6 +457,16 @@
     "user/space.rs::resolve": {
       "complexity": 20,
       "lines": 80,
+      "recursive": false
+    },
+    "user/vmo.rs::commit_run": {
+      "complexity": 15,
+      "lines": 31,
+      "recursive": false
+    },
+    "user/vmo.rs::seal": {
+      "complexity": 24,
+      "lines": 56,
       "recursive": false
     }
   }

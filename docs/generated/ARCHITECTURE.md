@@ -123,7 +123,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 | `FerrixSigningRequirements` | `26-signing-requirements.sysml` | docs/SIGNING.md is the design (the certification consultant's OK IF at ledger lines 3667 and 3738; the customer's decisions at 3731). Slice S1 builds the verify-only crate `ferrix-sigverify` (src/lib/crypto/sigverify) and the hash it rests on, `ferrix-sha256` (src/lib/crypto/sha256), both in the item ring (certification-item.json's crates). What the UEFI loader, init's configuration verifier and devmgr do with the verifier's answer is theirs, and gets ids in their own slices (S4, S8, S9). |
 
-27 files, 163 packages, 9021 elements, 220 relations. Model digest `f7101960ab85391e`.
+27 files, 163 packages, 9156 elements, 220 relations. Model digest `cf5db81721786af5`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -254,10 +254,12 @@ Address spaces, the frames under them and the mappings that reach them: O.ISOLAT
 | `H.MEM.19` | Once a grace period the kernel waits for has ended, no read-side section that was running on any processor when the wait began shall still be running. | A writer that replaces an object every other online processor is reading, waits a grace period and poisons the replaced one, 100 times over, leaves 0 reads of a poisoned object among more than 0 reads (the `grace` line). | `O.ISOLATE, ASR-1` |
 | `H.MEM.24` | An address space reached by handle shall be mapped, unmapped, protected and read only as that handle's rights allow; no mapping made by handle shall be both writable and executable; an executable mapping by handle shall need EXECUTE on the space handle and on the VMO handle; and a process's space shall be given by handle only to its creator, before it starts. | Stage 9's `space` line: every by-handle call refused without its right, an executable mapping refused without EXECUTE on either handle and made with both, a writable and executable protection refused by the decoder and by the space itself, process_space refused without MANAGE, for a process its handle cannot reach and after the start, and the sweep of every user root the check reached finding 0 leaves writable and executable and more than 0 executable. | `O.ISOLATE, O.WXN, O.CAPABILITY, ASR-2, ASR-3` |
 | `H.MEM.25` | A copy-on-write clone of an address space made by handle shall never see a write its source makes after the clone, by any path, nor the source one the clone makes; memory both map shared shall stay shared. | Stage 9's `space` line, clone: the source's writable translation of a private page gone and a shootdown begun before space_clone answers; a write after the clone by either side, by a kernel copy and to a page made read-only before the clone and writable after it (F-41), unseen by the other; a shared mapping's write seen by both; a page both hold given back to one as the clone goes. A program's own store through a stale translation after a fork is stage 6's USER_COW_PROGRAM check (H.MEM.8, L.user.61; F-41 itself is L.user.60), through the same AddressSpace::fork. | `O.ISOLATE, ASR-1` |
+| `H.MEM.29` | A sealed VMO's contents and length shall never change after its seal, and its digest shall be the kernel's, computed from its frames after the freeze. | object::sealing_check on every boot, and check-vmo-seal-tags.py in xtask check; L.mm.111-114. | `O.CAPABILITY, ASR-3` |
+| `H.MEM.30` | A measured space's executable memory shall come only from sealed, measured VMOs and the kernel's own code pages, and its digests shall be recorded and never removed. | object::sealing_check on every boot; L.mm.115-122, 124-126. | `O.CAPABILITY, ASR-2` |
 | `H.MEM.22` | An absent page of a pager-backed VMO shall become present only by its pager's supply. A thread shall wait on a pager only for a fault on, or a kernel copy into, a pager-backed VMO its own process maps or names, and the wait shall end on the supply, the pager's failure, the process's end, the pager's close, or the pager's bound of at most 30 s; every ending but the supply shall give the faulting process SIGBUS or its call an error, and none shall stop the kernel. | Stage 9's pager check (the `pager` line): faults forwarded and supplied, shared within a job and apart across jobs; failed, timed-out, closed and killed waits ended without their page, the bound held from below, the failures audited; copies waiting or refused; each with its negative control (K3.md section 6). | `O.FAILSAFE, O.ISOLATE` |
 | `H.MEM.23` | A write to a page of a pager-backed VMO shall keep the page in the dirty set until a write-back that began after the write ends; a page in the dirty set shall never be decommitted or reclaimed. | Stage 9's pager check (the `pager` line): a Clean page is never mapped writable, a write-back takes the write right away before it returns, a write after it is Dirty after its end, and a decommit takes Clean pages only; each with its negative control (K3.md section 6). | `O.ISOLATE, ASR-1` |
 
-23 requirements.
+25 requirements.
 
 ### Objects
 
@@ -4583,6 +4585,21 @@ flowchart LR
 | `L.user.154` | `aCleanPageIsNeverWritable` | — | — | — |
 | `L.user.155` | `aWriteBackKeepsLaterWrites` | — | — | — |
 | `L.user.156` | `aPagersCloseEndsItsFaults` | — | — | — |
+| `L.mm.111` | `sealOnlyPlain` | — | — | — |
+| `L.mm.112` | `sealRefusedWhileWritable` | — | — | — |
+| `L.mm.113` | `sealedNeverChanges` | — | — | — |
+| `L.mm.114` | `digestOfLengthAndFrames` | — | — | — |
+| `L.mm.115` | `nothingRunsBeforeItsDigest` | — | — | — |
+| `L.mm.116` | `measuredIsStickyAndInherited` | — | — | — |
+| `L.mm.117` | `measuredMapOnlySealed` | — | — | — |
+| `L.mm.118` | `measuredNoExecutableAnonymous` | — | — | — |
+| `L.mm.119` | `measuredProtectWithinSealed` | — | — | — |
+| `L.mm.120` | `measuredNoPlainExecutable` | — | — | — |
+| `L.mm.121` | `measuredCreateOnlySealed` | — | — | — |
+| `L.mm.122` | `cloneDoesNotLaunder` | — | — | — |
+| `L.mm.124` | `digestsKept` | — | — | — |
+| `L.mm.125` | `partialListSaysSo` | — | — | — |
+| `L.mm.126` | `noMoveAcrossTheLine` | — | — | — |
 | `L.x86_64.1` | `selectorsRing3MayHoldAreLoadable` | — | — | — |
 | `L.x86_64.2` | `compatUserSegmentsInGdt` | — | — | — |
 | `L.x86_64.3` | `istStacksPerProcessor` | — | — | — |
@@ -4959,6 +4976,14 @@ flowchart LR
 | `L.device.52` | `powerClaimOneHolderNoCopy` | — | — | — |
 | `L.device.53` | `powerNodeHasNothingElse` | — | — | — |
 | `L.device.54` | `driversSliceIsSealed` | — | — | — |
+| `L.device.66` | `bindNeedsItsRight` | — | — | — |
+| `L.device.67` | `bindRightMintedOnKeptOnly` | — | — | — |
+| `L.device.68` | `unboundGivesNothing` | — | — | — |
+| `L.device.69` | `bindRefusalsChangeNothing` | — | — | — |
+| `L.device.70` | `iommuRegistersInNoAperture` | — | — | — |
+| `L.device.71` | `bindingFollowsProfile` | — | — | — |
+| `L.device.72` | `untranslatedNotBound` | — | — | — |
+| `L.device.73` | `tablesInNoAperture` | — | — | — |
 | `L.armv7a.1` | `theFilterIsAskedFirstAtTheSvc` | — | — | — |
 | `L.armv7a.2` | `aRolledBackFrameReadsAsAtTheCall` | — | — | — |
 | `L.armv7a.3` | `nothingInsideADomain` | — | — | — |

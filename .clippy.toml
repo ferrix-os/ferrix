@@ -68,7 +68,10 @@ disallowed-methods = [
     { path = "ferrix_kernel_core::arch::x86_64::switch::UserState::set_xstate_bv", reason = "checks-only, defined in arch/x86_64/switch.rs", allow-invalid = true },
     { path = "ferrix_kernel_core::arch::x86_64::switch::UserState::xstate_bv", reason = "checks-only, defined in arch/x86_64/switch.rs", allow-invalid = true },
     { path = "ferrix_kernel_core::device::DeviceNode::config_writes", reason = "checks-only, defined in device.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::device::DeviceNode::explicit_for_check", reason = "checks-only, defined in device.rs", allow-invalid = true },
     { path = "ferrix_kernel_core::device::DeviceNode::mapped_config", reason = "checks-only, defined in device.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::device::DeviceNode::refuse_for_check", reason = "checks-only, defined in device.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::device::DeviceNode::take_domain_for_check", reason = "checks-only, defined in device.rs", allow-invalid = true },
     { path = "ferrix_kernel_core::iommu::Domain::blocks_wiring", reason = "checks-only, defined in iommu.rs", allow-invalid = true },
     { path = "ferrix_kernel_core::iommu::Domain::detach_translation", reason = "checks-only, defined in iommu.rs", allow-invalid = true },
     { path = "ferrix_kernel_core::iommu::Domain::entry_span", reason = "checks-only, defined in iommu.rs", allow-invalid = true },
@@ -77,5 +80,7 @@ disallowed-methods = [
     { path = "ferrix_kernel_core::iommu::Domain::pin_runs", reason = "checks-only, defined in iommu.rs", allow-invalid = true },
     { path = "ferrix_kernel_core::object::pin::Pin::with_budget", reason = "checks-only, defined in object/pin.rs", allow-invalid = true },
     { path = "ferrix_kernel_core::user::cache::Reclaimed::stolen", reason = "checks-only, defined in user/cache.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::user::vmo::Vmo::freeze_for_check", reason = "checks-only, defined in user/vmo.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::user::vmo::Vmo::raise_writable_for_check", reason = "checks-only, defined in user/vmo.rs", allow-invalid = true },
 ]
 # END kernel-interface.py
