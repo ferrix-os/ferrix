@@ -2654,11 +2654,7 @@ fn kernel_clippy_every_build() -> Result<()> {
             .zip(&lint_dirs)
             .map(|((_, resolved), lint_dir)| {
                 let every_arch = &every_arch;
-                scope.spawn(move || {
-                    let mut arguments = every_arch.clone();
-                    arguments.extend(["--target-dir", lint_dir.as_str()]);
-                    clippy_captured(&arguments, &cargo::flag_environment(resolved))
-                })
+                scope.spawn(move || lint_one_setting(every_arch, lint_dir, resolved))
             })
             .collect();
         let off_running = scope.spawn(|| clippy_captured(&without, &cargo::flag_environment(&off)));
@@ -2691,6 +2687,23 @@ fn kernel_clippy_every_build() -> Result<()> {
         let _ = first_failure.get_or_insert(error);
     }
     first_failure.map_or(Ok(()), Err)
+}
+
+/// `clippy_captured` over the kernel for one flag setting, in its directory.
+///
+/// These directories are only ever linted in, and the gate pool trims them after
+/// each run, so rustc's incremental state, 0.5 GB an architecture and setting, was
+/// written to be deleted (`docs/TEST-TIME.md`, *Cut M3*).
+fn lint_one_setting(
+    every_arch: &[&str],
+    lint_dir: &str,
+    resolved: &crate::flags::Resolved,
+) -> (String, Result<()>) {
+    let mut arguments = every_arch.to_vec();
+    arguments.extend(["--target-dir", lint_dir]);
+    let mut environment = cargo::flag_environment(resolved).to_vec();
+    environment.push(("CARGO_INCREMENTAL", "0".to_owned()));
+    clippy_captured(&arguments, &environment)
 }
 
 /// Where one of the kernel's flag settings is linted: a directory of its own
