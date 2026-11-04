@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "657971a69e2b87b58ddfb349afbcba2582549da30f588184a9d25ecf822d6812",
+  "digest": "eeac7c7c40a2aed401691f90de7604f412ae3a6f1c005142d32fe3ab4bcd8e90",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -23661,7 +23661,7 @@
                       "qualifiedName": "FerrixItemRequirements::Scheduling::Devices::refusedUnderALiveDriver",
                       "kind": "attribute",
                       "redefines": "criterion",
-                      "value": "\"A quiesce of the device a running block driver serves answers BAD_STATE (the `blk-ring` line).\"",
+                      "value": "\"A quiesce of the device a running block driver serves answers BAD_STATE (the `blk-ring` line). And with kernel objects alone, on every profile, the `item dev` line (syscall/rehome_check.rs::check_quiesce), against a server of the check's own: a real ring's answer stays the `blk-ring` line.\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
                         "line": 900
@@ -23707,7 +23707,7 @@
                       "qualifiedName": "FerrixItemRequirements::Scheduling::Devices::stoppedBeforeItAnswers",
                       "kind": "attribute",
                       "redefines": "criterion",
-                      "value": "\"A quiesce the instant a block driver dies answers success, and the function's command register, whose bus mastering was turned on while the driver served it as its first pin turns it, reads it off (the `blk-ring` line).\"",
+                      "value": "\"A quiesce the instant a block driver dies answers success, and the function's command register, whose bus mastering was turned on while the driver served it as its first pin turns it, reads it off (the `blk-ring` line). And with kernel objects alone, on every profile, the `item dev` line (syscall/rehome_check.rs::check_quiesce), against a server of the check's own: a real ring's answer stays the `blk-ring` line.\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
                         "line": 910
@@ -24363,7 +24363,7 @@
                       "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::unknownCallsAreEnosys",
                       "kind": "attribute",
                       "redefines": "criterion",
-                      "value": "\"0xDEAD, usize::MAX and usize::MAX - 1, each dispatched as a native call through the registered entry, are answered -38, 3 of 3.\"",
+                      "value": "\"0xDEAD, usize::MAX and usize::MAX - 1, each dispatched as a native call through the registered entry, are answered -38, 3 of 3. And with kernel objects alone, on every profile, the `item` line (syscall/rehome_check.rs::check_an_unknown_number_is_enosys).\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
                         "line": 1062
@@ -35983,7 +35983,7 @@
                   "qualifiedName": "FerrixObjectRequirements::ChannelWriteRead::sealedAsMade",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Stage 13's cgroupfs check: a job made with JOB_SEALED, one made inside it by job_create without the bit and one made inside it by mkdir read as sealed, the cgroup they were made in does not, and an unknown option bit is INVALID_ARGS.\"",
+                  "value": "\"Stage 13's cgroupfs check: a job made with JOB_SEALED, one made inside it by job_create without the bit and one made inside it by mkdir read as sealed, the cgroup they were made in does not, and an unknown option bit is INVALID_ARGS. And with kernel objects alone, on every profile, the `item` line (syscall/rehome_check.rs::check_job_create).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 2131
@@ -40423,7 +40423,7 @@
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::switchesAreCountedByWhy",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Stage 7's switch case: two kernel tasks on one processor yielding to each other 20 times each, never blocking, count one voluntary switch, at their end, and every other switch away from them as involuntary, at least one, the two adding to how often each was switched to; a task that sleeps 10 times counts at least 10 voluntary and fewer than 10 involuntary; with the classification inverted, the case fails with its sentence.\"",
+                  "value": "\"Stage 7's switch case: two kernel tasks on one processor yielding to each other 20 times each, never blocking, count one voluntary switch, at their end, and every other switch away from them as involuntary, at least one, the two adding to how often each was switched to; a task that sleeps 10 times counts at least 10 voluntary and fewer than 10 involuntary; with the classification inverted, the case fails with its sentence. And with kernel objects alone, on every profile, the `core sch` line (sched/rehome_check.rs::check_switches_are_counted).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
                     "line": 846
@@ -57412,7 +57412,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::aCombiningVmoIsOneTypeToPrograms",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Stage 10's chardev check on x86-64: a program's mapping of the VMO, faulted in by a write, reads back write-combining and not device; a write(2) from it and a read(2) into it through a memfd round-trip its bytes and count four coherent touches; vmo_read of the VMO is BAD_STATE. With resolve's write-combining choice, the coherent touch or vmo_copy's refusal dropped, the boot panics. The flush's effect is argued, since QEMU models no cache.\"",
+                  "value": "\"Stage 10's chardev check on x86-64: a program's mapping of the VMO, faulted in by a write, reads back write-combining and not device; a write(2) from it and a read(2) into it through a memfd round-trip its bytes and count four coherent touches; vmo_read of the VMO is BAD_STATE. With resolve's write-combining choice, the coherent touch or vmo_copy's refusal dropped, the boot panics. The flush's effect is argued, since QEMU models no cache. And with kernel objects alone, on every profile, the `item` line (syscall/rehome_check.rs::check_a_combining_object).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 2246
@@ -67286,7 +67286,7 @@
                   "qualifiedName": "FerrixX8664Requirements::SystemCallEntry::aRolledBackFrameReadsAsAtTheCall",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"The value for number 0x2222 is 0x2222 (the `seccomp` line's rollback check); the handler of a trapped call reads it from a real frame in a later landing.\"",
+                  "value": "\"The value for number 0x2222 is 0x2222 (the `seccomp` line's rollback check); the handler of a trapped call reads it from a real frame in a later landing. And with kernel objects alone, on every profile, the `core trp` line (arch/x86_64/rehome_check.rs::check_the_rollback).\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
                     "line": 2142
@@ -67583,7 +67583,7 @@
                   "qualifiedName": "FerrixX8664Requirements::CompatEntry::aForeignImageIsRefused",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"An ELF64 image built for another machine is refused by the loader.\"",
+                  "value": "\"An ELF64 image built for another machine is refused by the loader. And with kernel objects alone, on every profile, the `core trp` line (arch/x86_64/rehome_check.rs::check_an_image_of_another_machine).\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
                     "line": 2223
@@ -73095,7 +73095,7 @@
                   "qualifiedName": "FerrixX8664Requirements::Dispatch::anUnknownNumberIsEnosys",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"0xDEAD, usize::MAX and usize::MAX - 1, each dispatched as a native call through the registered entry, are answered -38, 3 of 3.\"",
+                  "value": "\"0xDEAD, usize::MAX and usize::MAX - 1, each dispatched as a native call through the registered entry, are answered -38, 3 of 3. And with kernel objects alone, on every profile, the `item` line (syscall/rehome_check.rs::check_an_unknown_number_is_enosys).\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
                     "line": 3611
@@ -74121,7 +74121,7 @@
                   "qualifiedName": "FerrixX8664Requirements::Dispatch::aTrapAnswersOnlyTheCallsOwnRegister",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A slot with a filter that answers Trap is asked about a call with its first argument 0x1111, -512, -516 and -1; each answer is the architecture's rollback value of that call, the number on x86-64 and the first argument on the Arm pair (the `seccomp` line).\"",
+                  "value": "\"A slot with a filter that answers Trap is asked about a call with its first argument 0x1111, -512, -516 and -1; each answer is the architecture's rollback value of that call, the number on x86-64 and the first argument on the Arm pair (the `seccomp` line). And with kernel objects alone, on every profile, the `core trp` line (trap/rehome_check.rs::check_a_trap_verdict).\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
                     "line": 3879
@@ -74178,7 +74178,7 @@
                   "qualifiedName": "FerrixX8664Requirements::Dispatch::theRegisteredFilterIsAskedFirst",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Every entry of the running architecture, driven with frames of the check's own, asks the registered filter exactly once per call, and the errnos 0, 13, 512, 4095, 4096, 5000 and 4294967295 come back as 0, -13, -512, -4095, -4095, -4095 and -4095; a slot with nothing registered answers nothing, and one registered twice asks the first (the `seccomp` line).\"",
+                  "value": "\"Every entry of the running architecture, driven with frames of the check's own, asks the registered filter exactly once per call, and the errnos 0, 13, 512, 4095, 4096, 5000 and 4294967295 come back as 0, -13, -512, -4095, -4095, -4095 and -4095; a slot with nothing registered answers nothing, and one registered twice asks the first (the `seccomp` line). And with kernel objects alone, on every profile, the `core trp` line (trap/rehome_check.rs::check_the_filter_slot), on a slot of the check's own: `filter_system_call` is `ask` on the real slot, which main.rs fills first.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
                     "line": 3893
@@ -78802,7 +78802,7 @@
                   "qualifiedName": "FerrixDeviceRequirements::Nodes::aPciNodeDescribedAsItIs",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"For the first published PCI function, device_info's location, vendor and device, counts and virtio blocks agree with the node and with enumeration.\"",
+                  "value": "\"For the first published PCI function, device_info's location, vendor and device, counts and virtio blocks agree with the node and with enumeration. And with kernel objects alone, on every profile, the `item dev` line (syscall/rehome_check.rs::check_described).\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
                     "line": 259
@@ -80068,7 +80068,7 @@
                   "qualifiedName": "FerrixDeviceRequirements::Quiesce::onlyItsManagerQuiesces",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A quiesce through a handle to the device without MANAGE answers ACCESS_DENIED.\"",
+                  "value": "\"A quiesce through a handle to the device without MANAGE answers ACCESS_DENIED. And with kernel objects alone, on every profile, the `item dev` line (syscall/rehome_check.rs::check_quiesce).\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
                     "line": 576
@@ -80125,7 +80125,7 @@
                   "qualifiedName": "FerrixDeviceRequirements::Quiesce::refusedUnderItsDriver",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A quiesce of the device a running driver serves answers BAD_STATE, and the driver goes on serving it.\"",
+                  "value": "\"A quiesce of the device a running driver serves answers BAD_STATE, and the driver goes on serving it. And with kernel objects alone, on every profile, the `item dev` line (syscall/rehome_check.rs::check_quiesce), against a server of the check's own.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
                     "line": 584
@@ -80182,7 +80182,7 @@
                   "qualifiedName": "FerrixDeviceRequirements::Quiesce::itWaitsOutADeadDriver",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A quiesce the instant a block driver's handles close answers success, and the next driver is given a ring on the device.\"",
+                  "value": "\"A quiesce the instant a block driver's handles close answers success, and the next driver is given a ring on the device. And with kernel objects alone, on every profile, the `item dev` line (syscall/rehome_check.rs::check_quiesce), against a server of the check's own that first answers still waiting.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
                     "line": 595
@@ -82010,7 +82010,7 @@
                   "qualifiedName": "FerrixArmv7aRequirements::Traps::aRolledBackFrameReadsAsAtTheCall",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"The value for first argument 0x1111 is 0x1111 and the token read back from a driven svc is ARMv7-A's, 0x40000028 (the `seccomp` line).\"",
+                  "value": "\"The value for first argument 0x1111 is 0x1111 and the token read back from a driven svc is ARMv7-A's, 0x40000028 (the `seccomp` line). And with kernel objects alone, on every profile, the `core trp` line (arch/armv7a/rehome_check.rs::check_the_token_and_the_rollback).\"",
                   "source": {
                     "file": "docs/sysml/21-armv7a-requirements.sysml",
                     "line": 44

@@ -897,7 +897,7 @@ package FerrixItemRequirements {
             attribute :>> statement = "A quiesce shall be refused while a live
                 driver serves the device.";
             attribute :>> criterion = "A quiesce of the device a running block
-                driver serves answers BAD_STATE (the `blk-ring` line).";
+                driver serves answers BAD_STATE (the `blk-ring` line). And with kernel objects alone, on every profile, the `item dev` line (syscall/rehome_check.rs::check_quiesce), against a server of the check's own: a real ring's answer stays the `blk-ring` line.";
             attribute :>> parent = ("O.DMA", "ASR-4");
         }
         requirement <'H.DEV.4'> stoppedBeforeItAnswers : ItemHighLevel {
@@ -907,7 +907,7 @@ package FerrixItemRequirements {
             attribute :>> criterion = "A quiesce the instant a block driver dies
                 answers success, and the function's command register, whose
                 bus mastering was turned on while the driver served it as its
-                first pin turns it, reads it off (the `blk-ring` line).";
+                first pin turns it, reads it off (the `blk-ring` line). And with kernel objects alone, on every profile, the `item dev` line (syscall/rehome_check.rs::check_quiesce), against a server of the check's own: a real ring's answer stays the `blk-ring` line.";
             attribute :>> parent = ("O.DMA", "ASR-4");
         }
         requirement <'H.DEV.3'> aRestartedDriverKeepsItsName : ItemHighLevel {
@@ -1059,7 +1059,7 @@ package FerrixItemRequirements {
                 be refused with ENOSYS, never answered by a handler or a fault.";
             attribute :>> criterion = "0xDEAD, usize::MAX and usize::MAX - 1, each
                 dispatched as a native call through the registered entry, are
-                answered -38, 3 of 3.";
+                answered -38, 3 of 3. And with kernel objects alone, on every profile, the `item` line (syscall/rehome_check.rs::check_an_unknown_number_is_enosys).";
             attribute :>> parent = "O.VALIDATE";
         }
         requirement <'H.TRAP.12'> decodedByTheEntrysTable : ItemHighLevel {

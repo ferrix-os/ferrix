@@ -2139,7 +2139,7 @@ package FerrixX8664Requirements {
                 at the call: the number.";
             attribute :>> criterion = "The value for number 0x2222 is 0x2222 (the
                 `seccomp` line's rollback check); the handler of a trapped call reads
-                it from a real frame in a later landing.";
+                it from a real frame in a later landing. And with kernel objects alone, on every profile, the `core trp` line (arch/x86_64/rehome_check.rs::check_the_rollback).";
             attribute :>> parent = "H.TRAP.16";
             attribute :>> unit = "arch::x86_64::syscall_rollback_value";
         }
@@ -2220,7 +2220,7 @@ package FerrixX8664Requirements {
             attribute :>> statement = "image_abi shall answer no ABI for an image of
                 another machine, so that the loader refuses it.";
             attribute :>> criterion = "An ELF64 image built for another machine is
-                refused by the loader.";
+                refused by the loader. And with kernel objects alone, on every profile, the `core trp` line (arch/x86_64/rehome_check.rs::check_an_image_of_another_machine).";
             attribute :>> parent = "H.TRAP.10";
             attribute :>> unit = "arch::x86_64::image_abi";
         }
@@ -3608,7 +3608,7 @@ package FerrixX8664Requirements {
                 handler or a fault.";
             attribute :>> criterion = "0xDEAD, usize::MAX and usize::MAX - 1, each
                 dispatched as a native call through the registered entry, are
-                answered -38, 3 of 3.";
+                answered -38, 3 of 3. And with kernel objects alone, on every profile, the `item` line (syscall/rehome_check.rs::check_an_unknown_number_is_enosys).";
             attribute :>> parent = "H.TRAP.11";
             attribute :>> unit = ("syscall::dispatch_with",
                 "trap::system_call",
@@ -3876,7 +3876,7 @@ package FerrixX8664Requirements {
                 asked about a call with its first argument 0x1111, -512, -516 and
                 -1; each answer is the architecture's rollback value of that call,
                 the number on x86-64 and the first argument on the Arm pair (the
-                `seccomp` line).";
+                `seccomp` line). And with kernel objects alone, on every profile, the `core trp` line (trap/rehome_check.rs::check_a_trap_verdict).";
             attribute :>> parent = "H.TRAP.16";
             attribute :>> unit = "trap::ask";
         }
@@ -3890,7 +3890,7 @@ package FerrixX8664Requirements {
                 once per call, and the errnos 0, 13, 512, 4095, 4096, 5000 and
                 4294967295 come back as 0, -13, -512, -4095, -4095, -4095 and -4095;
                 a slot with nothing registered answers nothing, and one registered
-                twice asks the first (the `seccomp` line).";
+                twice asks the first (the `seccomp` line). And with kernel objects alone, on every profile, the `core trp` line (trap/rehome_check.rs::check_the_filter_slot), on a slot of the check's own: `filter_system_call` is `ask` on the real slot, which main.rs fills first.";
             attribute :>> parent = "H.TRAP.16";
             attribute :>> unit = ("trap::filter_system_call", "trap::set_quiet_syscall_filter",
                 "trap::register", "trap::ask");

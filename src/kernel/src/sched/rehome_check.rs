@@ -45,6 +45,8 @@ fn pinned(name: &'static str, entry: fn(usize), cpu: usize) -> Result<Arc<Task>,
 
 /// Two tasks yielding to each other count every switch away as involuntary but
 /// the one at their end; a task that sleeps counts each sleep as voluntary.
+///
+/// Verifies: L.sched.83
 fn check_switches_are_counted(cpu: usize) -> Result<(), &'static str> {
     ARRIVED.store(0, Ordering::Release);
     let pair = [

@@ -41,7 +41,7 @@ package FerrixArmv7aRequirements {
                 the number.";
             attribute :>> criterion = "The value for first argument 0x1111 is 0x1111
                 and the token read back from a driven svc is ARMv7-A's, 0x40000028
-                (the `seccomp` line).";
+                (the `seccomp` line). And with kernel objects alone, on every profile, the `core trp` line (arch/armv7a/rehome_check.rs::check_the_token_and_the_rollback).";
             attribute :>> parent = "H.TRAP.16";
             attribute :>> unit = ("arch::armv7a::audit_arch",
                 "arch::armv7a::syscall_rollback_value");

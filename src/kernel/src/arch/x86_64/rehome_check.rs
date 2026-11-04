@@ -6,6 +6,8 @@ use crate::arch;
 use crate::trap::Abi;
 
 /// x86-64's rollback value is the number, for both of its entries.
+///
+/// Verifies: `L.x86_64.125`
 fn check_the_rollback() -> Result<(), &'static str> {
     let args = [0x1111, 2, 3, 4, 5, 6];
     for abi in [Abi::Native, Abi::Compat] {
@@ -17,6 +19,8 @@ fn check_the_rollback() -> Result<(), &'static str> {
 }
 
 /// An image of another machine has no ABI, and the loader refuses it for that.
+///
+/// Verifies: `L.x86_64.74`
 fn check_an_image_of_another_machine() -> Result<(), &'static str> {
     /// `EM_AARCH64`.
     const EM_AARCH64: u16 = 183;

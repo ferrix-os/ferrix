@@ -2243,7 +2243,7 @@ package FerrixMemoryRequirements {
                 four coherent touches; vmo_read of the VMO is BAD_STATE. With
                 resolve's write-combining choice, the coherent touch or
                 vmo_copy's refusal dropped, the boot panics. The flush's effect
-                is argued, since QEMU models no cache.";
+                is argued, since QEMU models no cache. And with kernel objects alone, on every profile, the `item` line (syscall/rehome_check.rs::check_a_combining_object).";
             attribute :>> parent = ("H.MEM.1", "H.MEM.15");
             attribute :>> unit = ("user::vmo::Vmo::commit", "user::vmo::Vmo::commit_run",
                 "user::vmo::flush_frame", "user::vmo::Vmo::flush_if_combining",
