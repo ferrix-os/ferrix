@@ -1114,11 +1114,6 @@ fn fault_problem(arch: Arch, lines: &[String]) -> Option<String> {
     }
 }
 
-/// Boot an image with a program and a script built in, and require the
-/// script's output, in order, and its exit status.
-///
-/// The lines are looked for *after* the boot marker, so a kernel that happened
-/// to print one of them during its self-checks cannot satisfy the test.
 /// The lift's milestone 2 (`docs/microkernel/M5-LIFT.md` §7): the kernel's marker names
 /// `personality=user`, and after it the built-in program's line and its exit.
 pub(crate) fn test_linuxd(arch: Arch, image: &Path, kernel: &Path, args: &Args) -> Result<()> {
@@ -1154,6 +1149,211 @@ pub(crate) fn test_linuxd(arch: Arch, image: &Path, kernel: &Path, args: &Args) 
         )));
     }
     println!("  {arch}: linuxd served a static program's write and exit");
+    Ok(())
+}
+
+/// `btrfsd`'s first tranche, by [`crate::shell::BTRFSD_SCRIPT`].
+pub(crate) fn test_btrfsd(arch: Arch, image: &Path, kernel: &Path, args: &Args) -> Result<()> {
+    let watched = watch(arch, image, kernel, args, crate::shell::EXITED)?;
+    let log = watched.log.display();
+    match watched.verdict {
+        Verdict::Reached => {}
+        Verdict::Panicked => return Err(panicked(arch, &watched.log)),
+        Verdict::Silent => {
+            return Err(Error::new(format!(
+                "{arch}: the script never ended within {}s.\n  Serial output is in {log}",
+                args.timeout
+            )));
+        }
+    }
+    let saw = |text: &str| watched.lines.iter().any(|line| line.contains(text));
+    for want in [
+        "btrfsd   up",
+        "btrfsd started, its image's digest checked",
+        "btrfsd-row: mount status 0",
+        "btrfsd-row: writable mount status 0",
+        "btrfsd-row: wrote through-the-server",
+        "btrfsd-row: survives its first name through-the-server",
+        "btrfsd-row: appended 24",
+        // The fixture's own bytes, `gen-btrfs-fixtures.py`'s big.txt, through two
+        // compressed extents and one uncompressed.
+        "d17580e20349ef31c084eef73acdd0ea1f3c0a664e704b1729c9081bd13c65d0  /mnt/big.txt",
+    ] {
+        if !saw(want) {
+            return Err(Error::new(format!(
+                "{arch}: `{want}` is missing.\n  Serial output is in {log}"
+            )));
+        }
+    }
+    if saw("btrfsd-row: could not read") || !saw("btrfsd-row: read ") {
+        return Err(Error::new(format!(
+            "{arch}: the files did not read.\n  Serial output is in {log}"
+        )));
+    }
+    crate::btrfs_check::Checker::required()?.run(&btrfs_disk::blank_path(arch), arch)?;
+    println!(
+        "  {arch}: a volume served by btrfsd, read and written by a program, and btrfs check passes"
+    );
+    Ok(())
+}
+
+/// `btrfsd` under `blk-victim`, by [`crate::shell::BTRFSD_RESTART_SCRIPT`].
+/// Verifies: `L.device.81`, `L.device.82`, `L.device.83`
+#[expect(
+    clippy::too_many_lines,
+    reason = "one row, each of its judgements in the order the serial line gives them"
+)]
+pub(crate) fn test_btrfsd_restart(
+    arch: Arch,
+    image: &Path,
+    kernel: &Path,
+    args: &Args,
+) -> Result<()> {
+    let watched = watch(arch, image, kernel, args, crate::shell::EXITED)?;
+    let log = watched.log.display();
+    match watched.verdict {
+        Verdict::Reached => {}
+        Verdict::Panicked => return Err(panicked(arch, &watched.log)),
+        Verdict::Silent => {
+            return Err(Error::new(format!(
+                "{arch}: a request hung: the script never ended within {}s.\n  Serial output is in {log}",
+                args.timeout
+            )));
+        }
+    }
+    let saw = |text: &str| watched.lines.iter().any(|line| line.contains(text));
+    // The victim driver's refusals, each its own exit status (L.device.82, BA.4).
+    for (status, rule) in [
+        (70, "vmo_hold took a handle without its rights"),
+        (71, "vmo_hold took a VMO past its bound"),
+        (72, "vmo_hold took a sealed VMO"),
+        (
+            73,
+            "a driver's job is not measured: a plain VMO became an image",
+        ),
+    ] {
+        if saw(&format!(": exit status {status}")) {
+            return Err(Error::new(format!(
+                "{arch}: {rule}.\n  Serial output is in {log}"
+            )));
+        }
+    }
+    // What every sector reads as, over 32 MiB: its number, in 512 bytes.
+    let mut sectors = Vec::with_capacity(32 * 1024 * 1024);
+    for sector in 0_u64..65_536 {
+        for _ in 0..64 {
+            sectors.extend_from_slice(&sector.to_le_bytes());
+        }
+    }
+    let want = crate::sha256::hex(&sectors);
+    let prefix = crate::sha256::hex(sectors.get(..900 * 4096).unwrap_or(&sectors));
+    for wanted in [
+        format!("{prefix}  -"),
+        format!("{want}  /dev/vdc"),
+        "btrfsd-row: vdc read status 0".to_owned(),
+        "vda is back".to_owned(),
+    ] {
+        if !saw(&wanted) {
+            return Err(Error::new(format!(
+                "{arch}: `{wanted}` is missing.\n  Serial output is in {log}"
+            )));
+        }
+    }
+    // Who paid for a driver's sparse VMOs (H.1): vdb's and vdc's megabytes commit
+    // when this server holds them, on their job and not on this server's.
+    let holds = |disk: &str| -> Option<u64> {
+        let wanted = format!("btrfsd   {disk} is up; this server holds ");
+        watched.lines.iter().find_map(|line| {
+            let (_, tail) = line.split_once(wanted.as_str())?;
+            tail.split(' ').next()?.parse().ok()
+        })
+    };
+    match (holds("vda"), holds("vdc")) {
+        (Some(first), Some(last)) if last < first + 1024 => {}
+        (first, last) => {
+            return Err(Error::new(format!(
+                "{arch}: a driver's VMOs were charged to the server: it held {first:?} KiB after vda and {last:?} KiB after vdc.\n  Serial output is in {log}"
+            )));
+        }
+    }
+    if saw("btrfsd-row: vdb read status 0") || !saw("btrfsd-row: vdb read status") {
+        return Err(Error::new(format!(
+            "{arch}: a hung driver's disk did not answer an error.\n  Serial output is in {log}"
+        )));
+    }
+    // A dead driver's pins stay until its device's next driver has been accepted
+    // (BD.1): not at its death or quiesce, not at the next driver's pin.
+    let line_of = |text: &str| watched.lines.iter().position(|line| line.contains(text));
+    let back = line_of("vda is back");
+    let released = line_of("pages a dead driver's device could still write went back");
+    match (back, released) {
+        (Some(back), Some(released)) if released > back => {}
+        _ => {
+            return Err(Error::new(format!(
+                "{arch}: a dead driver's pins went back before its next driver was accepted, or never.\n  Serial output is in {log}"
+            )));
+        }
+    }
+    // A dead driver's memory goes with it (H.4): what the drivers' job holds after
+    // its last restart is what it held after its first.
+    let held: Vec<u64> = watched
+        .lines
+        .iter()
+        .filter_map(|line| {
+            let (_, tail) = line.split_once("the drivers hold ")?;
+            tail.split(' ').next()?.parse().ok()
+        })
+        .collect();
+    let (Some(first), Some(last)) = (held.first(), held.last()) else {
+        return Err(Error::new(format!(
+            "{arch}: no restart said what the drivers hold.\n  Serial output is in {log}"
+        )));
+    };
+    if held.len() < 2 || *last > first.saturating_add(512) {
+        return Err(Error::new(format!(
+            "{arch}: a dead driver's memory stayed: the drivers hold {held:?} KiB after each restart.\n  Serial output is in {log}"
+        )));
+    }
+    // A dead job's charge ends with it, so no job's figure shows a hold left behind: the
+    // kernel's own count of what servers hold (H.4, ledger 6803 hb7's successor).
+    let pages: Vec<u64> = watched
+        .lines
+        .iter()
+        .filter_map(|line| {
+            let (_, tail) = line.split_once("a next driver accepted; ")?;
+            tail.split(' ').next()?.parse().ok()
+        })
+        .collect();
+    // Each restart replaces a ring of the same size, and the line is said only when the figure
+    // moves: what was said before the first restart is what stands after the last.
+    let first_restart = watched
+        .lines
+        .iter()
+        .position(|line| line.contains("the drivers hold "))
+        .unwrap_or(watched.lines.len());
+    let before: Vec<u64> = watched
+        .lines
+        .iter()
+        .take(first_restart)
+        .filter_map(|line| {
+            let (_, tail) = line.split_once("a next driver accepted; ")?;
+            tail.split(' ').next()?.parse().ok()
+        })
+        .collect();
+    let (Some(baseline), Some(last)) = (before.last(), pages.last()) else {
+        return Err(Error::new(format!(
+            "{arch}: no driver's acceptance said what servers hold.\n  Serial output is in {log}"
+        )));
+    };
+    if last > baseline {
+        return Err(Error::new(format!(
+            "{arch}: a dead driver's holds stayed: servers hold {pages:?} pages at each acceptance.\n  Serial output is in {log}"
+        )));
+    }
+    println!(
+        "  {arch}: requests went over {} restarts, a hang answered an error, and the drivers hold {held:?} KiB",
+        held.len()
+    );
     Ok(())
 }
 

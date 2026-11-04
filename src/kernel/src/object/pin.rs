@@ -878,7 +878,7 @@ pub struct Released {
 /// driver's HELLO for `node`, which that driver sent only after resetting the
 /// device. Nothing when `node` has no domain, or none of its pins was
 /// quarantined.
-pub fn quarantine_release(node: &DeviceNode) {
+pub(crate) fn quarantine_release(node: &DeviceNode) {
     let Some(domain) = node.domain_made() else {
         return;
     };

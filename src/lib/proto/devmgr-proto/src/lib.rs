@@ -103,6 +103,12 @@ pub const ANSWER_FAILED: u32 = 3;
 /// kernel (`docs/MICROKERNEL.md` §3, *Retired calls*).
 pub const FLAG_CORES: u32 = 1 << 4;
 
+/// DEVICES flags, bit 5: after the cores' channel, a channel to the block cores,
+/// which `btrfsd` serves under `fs=server` (`docs/microkernel/BTRFSD.md` §2, CO.4):
+/// `devmgr` asks it for `BLOCK_RING_CREATE`'s control channel, and `linuxd` for the
+/// others.
+pub const FLAG_BLOCK_CORES: u32 = 1 << 5;
+
 /// The device cores' protocol: one request and one answer, in turn, on the
 /// channel [`FLAG_CORES`] gives. `devmgr` to `linuxd`: [`CoreOpen`], with one
 /// handle, the device with `TRANSFER` alone, which says what it is
@@ -241,8 +247,12 @@ pub const FLAG_EXPLICIT_BIND: u32 = 1 << 2;
 /// DEVICES flags, bit 3: the first message's last handle is the debug log's
 /// write handle (`docs/microkernel/BOOT-AUTHORITY.md` §3).
 pub const FLAG_DEBUG_LOG: u32 = 1 << 3;
-const FLAGS_KNOWN: u32 =
-    FLAG_FIRST | FLAG_UNISOLATED_ALLOWED | FLAG_EXPLICIT_BIND | FLAG_DEBUG_LOG | FLAG_CORES;
+const FLAGS_KNOWN: u32 = FLAG_FIRST
+    | FLAG_UNISOLATED_ALLOWED
+    | FLAG_EXPLICIT_BIND
+    | FLAG_DEBUG_LOG
+    | FLAG_CORES
+    | FLAG_BLOCK_CORES;
 
 /// Why bytes on the channel are not a message.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -275,6 +285,8 @@ pub struct Devices<'a> {
     pub debug_log: bool,
     /// Whether the first message's handles end with the cores' channel.
     pub cores: bool,
+    /// Whether the block cores' channel comes after that.
+    pub block_cores: bool,
 }
 
 impl Devices<'_> {
@@ -299,6 +311,7 @@ impl Devices<'_> {
             + self.names.len()
             + (self.first && self.debug_log) as usize
             + (self.first && self.cores) as usize
+            + (self.first && self.block_cores) as usize
     }
 
     /// Encode into `out`, answering the bytes written, or `None` if `out` is
@@ -328,7 +341,12 @@ impl Devices<'_> {
                 0
             }
             | if self.debug_log { FLAG_DEBUG_LOG } else { 0 }
-            | if self.cores { FLAG_CORES } else { 0 };
+            | if self.cores { FLAG_CORES } else { 0 }
+            | if self.block_cores {
+                FLAG_BLOCK_CORES
+            } else {
+                0
+            };
         put(out, 20, &flags.to_le_bytes());
         for (i, name) in self.names.iter().enumerate() {
             put(out, DEVICES_HEADER_BYTES + i * NAME_BYTES, name);
@@ -357,6 +375,8 @@ pub struct DevicesView<'a> {
     pub debug_log: bool,
     /// Whether the first message's handles end with the cores' channel.
     pub cores: bool,
+    /// Whether the block cores' channel comes after that.
+    pub block_cores: bool,
     names: &'a [u8],
 }
 
@@ -391,6 +411,7 @@ impl DevicesView<'_> {
             + self.drivers as usize
             + (self.first && self.debug_log) as usize
             + (self.first && self.cores) as usize
+            + (self.first && self.block_cores) as usize
     }
 
     /// Decode a DEVICES message.
@@ -423,6 +444,7 @@ impl DevicesView<'_> {
             explicit_bind: flags & FLAG_EXPLICIT_BIND != 0 && flags & !FLAGS_KNOWN == 0,
             debug_log: flags & FLAG_DEBUG_LOG != 0 && flags & !FLAGS_KNOWN == 0,
             cores: flags & FLAG_CORES != 0 && flags & !FLAGS_KNOWN == 0,
+            block_cores: flags & FLAG_BLOCK_CORES != 0 && flags & !FLAGS_KNOWN == 0,
             names: bytes.get(DEVICES_HEADER_BYTES..).unwrap_or(&[]),
         })
     }

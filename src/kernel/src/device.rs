@@ -2501,6 +2501,14 @@ impl DeviceNode {
     /// its firmware rewrote it, and then the frames a dead driver's pins kept
     /// go back (`object::pin::quarantine_release`), whose device can no
     /// longer reach them either way.
+    #[cfg(ferrix_personality = "user")]
+    pub fn served(&self) -> Result<(), Breach> {
+        self.verify_config()?;
+        crate::object::pin::quarantine_release(self);
+        Ok(())
+    }
+
+    /// See [`DeviceNode::served`], for the kernel's own core.
     pub fn hello_accepted(&self) {
         let _ = self.verify_config();
         crate::object::pin::quarantine_release(self);

@@ -29,12 +29,44 @@ pub(crate) mod anon;
 pub mod bind_check;
 pub(crate) mod blkio;
 pub(crate) mod block;
+#[cfg(not(ferrix_fs = "server"))]
 pub(crate) mod btrfs;
+#[cfg(ferrix_fs = "server")]
+pub(crate) mod served;
+#[cfg(ferrix_fs = "server")]
+pub(crate) use served as btrfs;
 #[cfg(not(ferrix_load_built = "lift"))]
 pub mod btrfs_check;
 pub mod btrfs_powerfail;
 pub mod btrfs_write_check;
 pub mod cgroupfs;
+
+/// Under `--personality user`, the other side of the block ring: the core, or under
+/// `fs=server` `btrfsd`, whose channel is `files` (`docs/microkernel/BTRFSD.md` §2).
+///
+/// # Errors
+///
+/// As the core's registration.
+#[cfg(ferrix_load_built = "lift")]
+pub fn start_block_side(files: u32) -> Result<(), Full> {
+    #[cfg(ferrix_fs = "server")]
+    {
+        btrfs::start(files);
+        Ok(())
+    }
+    #[cfg(not(ferrix_fs = "server"))]
+    {
+        let _ = files;
+        crate::interfaces::block_ring::install()
+    }
+}
+
+/// Every disk the block side has said is up by now is known here.
+#[cfg(ferrix_load_built = "lift")]
+pub fn settle_block_side() {
+    #[cfg(ferrix_fs = "server")]
+    btrfs::settle();
+}
 #[cfg(not(ferrix_load_built = "lift"))]
 pub mod check;
 pub(crate) mod console;

@@ -1176,6 +1176,12 @@ pub(crate) struct Charge {
 }
 
 impl Charge {
+    /// The slot charged.
+    #[cfg(ferrix_personality = "user")]
+    pub(crate) const fn owner(&self) -> u32 {
+        self.index
+    }
+
     /// Charge `amount` of `resource` to the job the running task is in.
     ///
     /// # Errors

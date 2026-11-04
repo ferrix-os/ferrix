@@ -402,6 +402,7 @@ fn check_quiesce() -> Result<bool, &'static str> {
 /// no core's view and write-combining ever meet.
 ///
 /// Verifies: L.user.133
+#[cfg(not(all(ferrix_personality = "user", ferrix_load_built = "none")))]
 fn check_a_combining_object() -> Result<bool, &'static str> {
     let object = Vmo::new_anonymous(1).map_err(|_| "no object to make write-combining")?;
     if !object.make_combining() {
@@ -532,6 +533,10 @@ fn check_drivers_sealed() -> Result<u64, &'static str> {
 fn run_early() -> Result<u64, &'static str> {
     check_an_unknown_number_is_enosys()?;
     check_job_create()?;
+    // Nothing under `personality=user` makes an object write-combining (M.4).
+    #[cfg(all(ferrix_personality = "user", ferrix_load_built = "none"))]
+    let combined = false;
+    #[cfg(not(all(ferrix_personality = "user", ferrix_load_built = "none")))]
     let combined = check_a_combining_object()?;
     Ok(2 + u64::from(combined))
 }

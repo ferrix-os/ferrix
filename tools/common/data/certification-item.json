@@ -521,6 +521,24 @@
         "below": "byte slices its caller lends; no trait, no allocation, no dependency",
         "above": "the entry point parse, the table walk and the identity decode, called by src/boot/common/uefi and src/kernel/src/discovery/smbios.rs"
       },
+      "ferrix-fsproto": {
+        "ring": "load",
+        "path": "src/lib/fs/fsproto",
+        "in_ring0_when": [
+          "fs=server"
+        ],
+        "below": "ferrix-vfs's `Inode`, which it serves on channel messages, and every length checked in `wire`",
+        "above": "`linuxd`'s fs/served.rs and `btrfsd`. No kernel links it. `in_ring0_when` makes component_problems refuse a profile that chooses fs=server above level none, the fail-closed wanted until `btrfsd`'s item at M7 (BD.7)"
+      },
+      "ferrix-blkclient": {
+        "ring": "load",
+        "path": "src/lib/fs/blkclient",
+        "in_ring0_when": [
+          "fs=server"
+        ],
+        "below": "the block ring's protocol and VMO_HOLD, DEVICE_SERVED by devmgr",
+        "above": "`btrfsd`: the other side of a block driver in user space. No kernel links it. `in_ring0_when` makes component_problems refuse a profile that chooses fs=server above level none, the fail-closed wanted until `btrfsd`'s item at M7 (BD.7)"
+      },
       "ferrix-btrfs-vfs": {
         "ring": "load",
         "path": "src/lib/fs/btrfs/vfs",
@@ -1146,7 +1164,9 @@
     "fs/btrfs_write_check.rs": 7,
     "fs/cgroupfs.rs": 13,
     "fs/devfs.rs": 1,
-    "fs/mod.rs": 23,
+    "fs/mod.rs": 25,
+    "syscall/rehome_check.rs": 3,
+    "user/rehome_check.rs": 2,
     "fs/procfs.rs": 1,
     "fs/sysfs.rs": 1,
     "interfaces/block_ring/mod.rs": 8,
@@ -1163,7 +1183,7 @@
     "syscall/seccomp.rs": 1,
     "user/mod.rs": 5,
     "user/space.rs": 6,
-    "user/vmo.rs": 2,
+    "user/vmo.rs": 3,
     "object/mod.rs": 2,
     "syscall/uaccess.rs": 1,
     "object/job.rs": 3,

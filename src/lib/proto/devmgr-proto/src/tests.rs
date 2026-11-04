@@ -25,6 +25,7 @@ fn devices_round_trips_and_counts_its_handles() {
         explicit_bind: false,
         debug_log: false,
         cores: false,
+        block_cores: false,
     };
     let mut bytes = [0_u8; DEVICES_MAX_BYTES];
     let len = message.encode(&mut bytes).expect("fits");
@@ -64,6 +65,7 @@ fn a_continuation_carries_devices_only() {
         explicit_bind: false,
         debug_log: false,
         cores: false,
+        block_cores: false,
     };
     let mut bytes = [0_u8; DEVICES_MAX_BYTES];
     let len = message.encode(&mut bytes).expect("fits");
@@ -83,6 +85,7 @@ fn a_continuation_carries_devices_only() {
             explicit_bind: false,
             debug_log: false,
             cores: false,
+            block_cores: false,
         }
         .encode(&mut bytes),
         None,
@@ -106,6 +109,7 @@ fn devices_carries_max_drivers_with_room_for_a_device() {
         explicit_bind: false,
         debug_log: false,
         cores: false,
+        block_cores: false,
     };
     let mut bytes = [0_u8; DEVICES_MAX_BYTES];
     let len = message.encode(&mut bytes).expect("MAX_DRIVERS names fit");
@@ -131,6 +135,7 @@ fn devices_refuses_too_many_drivers_and_a_small_buffer() {
             explicit_bind: false,
             debug_log: false,
             cores: false,
+            block_cores: false,
         }
         .encode(&mut bytes),
         None,
@@ -148,6 +153,7 @@ fn devices_refuses_too_many_drivers_and_a_small_buffer() {
             explicit_bind: false,
             debug_log: false,
             cores: false,
+            block_cores: false,
         }
         .encode(&mut small),
         None,
@@ -231,6 +237,7 @@ fn bytes_that_are_not_a_message_are_malformed() {
         explicit_bind: false,
         debug_log: false,
         cores: false,
+        block_cores: false,
     };
     let mut bytes = [0_u8; DEVICES_MAX_BYTES];
     let len = devices.encode(&mut bytes).expect("fits");
@@ -355,6 +362,7 @@ fn the_unisolated_flag_round_trips_and_an_unknown_bit_gives_no_opt_out() {
         explicit_bind: false,
         debug_log: false,
         cores: false,
+        block_cores: false,
     };
     let mut bytes = [0_u8; DEVICES_MAX_BYTES];
     let len = message.encode(&mut bytes).expect("fits");
@@ -369,6 +377,7 @@ fn the_unisolated_flag_round_trips_and_an_unknown_bit_gives_no_opt_out() {
         explicit_bind: false,
         debug_log: false,
         cores: false,
+        block_cores: false,
         ..message
     };
     let len = off.encode(&mut bytes).expect("fits");
@@ -401,6 +410,7 @@ fn explicit_bind_travels_by_its_bit() {
         explicit_bind: true,
         debug_log: false,
         cores: false,
+        block_cores: false,
     };
     let len = message.encode(&mut out).expect("encodes");
     assert_eq!(out[20..24], (FLAG_FIRST | FLAG_EXPLICIT_BIND).to_le_bytes());

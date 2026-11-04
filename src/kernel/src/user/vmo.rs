@@ -388,9 +388,12 @@ pub struct Vmo {
     /// The kernel object it is, charged to the job that made it for as long
     /// as it exists (`object::quota`). Nothing for a file's page cache, which
     /// is the file's; its pages are charged as memory all the same.
-    #[expect(
-        dead_code,
-        reason = "AUDIT: held for its drop, which uncharges the job"
+    #[cfg_attr(
+        not(ferrix_personality = "user"),
+        expect(
+            dead_code,
+            reason = "AUDIT: held for its drop, which uncharges the job"
+        )
     )]
     charge: Charge,
 }
@@ -1004,6 +1007,7 @@ impl Vmo {
     /// wrote is left to be evicted over what a write-combining store put in
     /// memory, and nothing reads the object through the direct map again
     /// (`vmo_read` and `vmo_write` refuse it, as a coherent one).
+    #[cfg(not(all(ferrix_personality = "user", ferrix_load_built = "none")))]
     pub fn make_combining(&self) -> bool {
         if !crate::arch::user_combining()
             || !crate::object::io_mapping::combining_ready()
@@ -2870,6 +2874,8 @@ impl Vmo {
             vmo: Arc::clone(self),
             first,
             frames,
+            #[cfg(ferrix_personality = "user")]
+            counted: AtomicBool::new(false),
         })
     }
 
@@ -2900,6 +2906,29 @@ impl Vmo {
     /// [`VmoError::OutOfMemory`] when a frame cannot be had. Pages committed
     /// before a failure stay committed, as [`Vmo::commit`] would leave them,
     /// and none is held.
+    #[cfg(ferrix_personality = "user")]
+    pub fn hold_whole_on_payer(self: &Arc<Self>) -> Result<Held, VmoError> {
+        let pages = self.len_pages();
+        let payer = self.charge.owner();
+        crate::object::quota::charging_own(|| {
+            crate::object::quota::charging_to(payer, || {
+                for index in 0..pages {
+                    let _ = self.commit(index)?;
+                }
+                self.hold(0, pages)
+            })
+        })
+        .inspect(|held| {
+            let _ = SERVER_HELD_PAGES.fetch_add(held.frames.len() as u64, Ordering::Relaxed);
+            held.counted.store(true, Ordering::Relaxed);
+        })
+    }
+
+    /// Every page in `first..first + pages` held: the frame of each, exclusive.
+    ///
+    /// # Errors
+    ///
+    /// As it says: a range past the object, a sealed one, or no memory.
     pub fn hold(self: &Arc<Self>, first: u64, pages: u64) -> Result<Held, VmoError> {
         let len = self.len_pages();
         let end = first
@@ -2944,6 +2973,8 @@ impl Vmo {
             vmo: Arc::clone(self),
             first,
             frames,
+            #[cfg(ferrix_personality = "user")]
+            counted: AtomicBool::new(false),
         })
     }
 }
@@ -3143,6 +3174,18 @@ impl Pages {
     }
 }
 
+/// How many pages [`Vmo::hold_whole_on_payer`] holds now, for the row that holds a dead
+/// driver's to going back (BTRFSD H.4): a dead job's charge ends with it, so no job's figure
+/// shows a hold left behind.
+#[cfg(ferrix_personality = "user")]
+static SERVER_HELD_PAGES: AtomicU64 = AtomicU64::new(0);
+
+/// See [`SERVER_HELD_PAGES`].
+#[cfg(ferrix_personality = "user")]
+pub fn server_held_pages() -> u64 {
+    SERVER_HELD_PAGES.load(Ordering::Relaxed)
+}
+
 /// Pages of a VMO held in place, from [`Vmo::hold`]. Dropping it lets them go.
 #[derive(Debug)]
 pub struct Held {
@@ -3152,6 +3195,9 @@ pub struct Held {
     first: u64,
     /// The frame holding each page, in page order.
     frames: Vec<Frame>,
+    /// Counted in [`SERVER_HELD_PAGES`].
+    #[cfg(ferrix_personality = "user")]
+    counted: AtomicBool,
 }
 
 impl Held {
@@ -3166,6 +3212,10 @@ impl Drop for Held {
         let end = self.first.saturating_add(self.frames.len() as u64);
         // SEAL: read
         self.vmo.pages.lock().uncount_held(self.first, end);
+        #[cfg(ferrix_personality = "user")]
+        if self.counted.load(Ordering::Relaxed) {
+            let _ = SERVER_HELD_PAGES.fetch_sub(self.frames.len() as u64, Ordering::Relaxed);
+        }
     }
 }
 

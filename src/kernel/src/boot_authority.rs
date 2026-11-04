@@ -15,7 +15,7 @@ use ferrix_native_abi::first::{self, READY_MAGIC};
 use ferrix_native_abi::rights::Rights;
 use ferrix_native_abi::status;
 use ferrix_native_abi::types::{CHANNEL_MAX_BYTES, CHANNEL_MAX_HANDLES};
-use ferrix_partition_desc::{Description, Device as Described, KIND_PCI};
+use ferrix_partition_desc::{Description, Device as Described, KIND_PCI, ROLE_FILES};
 
 use crate::console::println;
 use crate::device::{self, DeviceNode, Location};
@@ -44,8 +44,12 @@ pub fn run(view: &ferrix_bootinfo::BootView<'_>) {
     devmgr::register_reader(read_file);
     read_certified_list();
     flag_nodes();
-    start_manager();
-    let detached = match devmgr::start_detached() {
+    let served = start_manager();
+    let (block_cores, files) = match served {
+        Some(ends) => (ends.block_cores, ends.files),
+        None => (None, None),
+    };
+    let detached = match devmgr::start_detached(block_cores) {
         Ok(Some(detached)) => {
             println!("  devmgr   started: its channels go to linuxd");
             Some(detached)
@@ -59,7 +63,7 @@ pub fn run(view: &ferrix_bootinfo::BootView<'_>) {
             None
         }
     };
-    crate::linuxd_start::run_with(view, detached);
+    crate::linuxd_start::run_with(view, detached, files);
 }
 
 /// Held at each start site rather than taken on trust (ledger 6564 Y.3): what the kernel
@@ -224,10 +228,17 @@ fn node_of(described: &Described<'_>) -> Result<Arc<DeviceNode>, &'static str> {
 /// Start the partition manager, if the image describes partitions, and wait for
 /// READY. With no description it is a machine with no safety partition: said in
 /// a line. A malformed one stops the boot (BA.2).
-fn start_manager() {
-    if let Err(why) = try_start_manager() {
-        fatal!(catalog::PARTITION_DESCRIPTION, "first processes: {why}");
+fn start_manager() -> Option<Served> {
+    match try_start_manager() {
+        Ok(served) => served,
+        Err(why) => fatal!(catalog::PARTITION_DESCRIPTION, "first processes: {why}"),
     }
+}
+
+/// The other ends of a file server's channels, for `devmgr` and `linuxd`.
+struct Served {
+    block_cores: Option<Arc<Endpoint>>,
+    files: Option<Arc<Endpoint>>,
 }
 
 #[cfg_attr(
@@ -237,10 +248,10 @@ fn start_manager() {
         reason = "the manager's start is one order of steps, BOOT-AUTHORITY.md BA.2 to BA.6"
     )
 )]
-fn try_start_manager() -> Result<(), &'static str> {
+fn try_start_manager() -> Result<Option<Served>, &'static str> {
     let Some((description, _)) = sealed_file(DESCRIPTION)? else {
         println!("  partmgr  no description in the image: no safety partition, no manager");
-        return Ok(());
+        return Ok(None);
     };
     // Read back whole from the archive, and parsed by the one parser.
     let bytes = crate::mm::with_initrd(|archive| {
@@ -307,6 +318,32 @@ fn try_start_manager() -> Result<(), &'static str> {
             devices += 1;
         }
     }
+    // A file server's channels: one end is for it, through the manager.
+    let mut served = Served {
+        block_cores: None,
+        files: None,
+    };
+    if parsed
+        .partitions()
+        .any(|partition| partition.role() == ROLE_FILES)
+    {
+        if !cfg!(ferrix_fs = "server") {
+            return Err("a file server in a description of a kernel that has its own");
+        }
+        let (block_cores, server_cores) =
+            Endpoint::pair().map_err(|_| "no memory for the block cores' channel")?;
+        let (files, server_files) =
+            Endpoint::pair().map_err(|_| "no memory for the files' channel")?;
+        for end in [server_cores, server_files] {
+            fallible::push_within(
+                &mut transfers,
+                (Object::Channel(end), const { MANAGER.of(Held::Channel) }),
+            )
+            .map_err(|_| TOO_MANY)?;
+        }
+        served.block_cores = Some(block_cores);
+        served.files = Some(files);
+    }
     MANAGER.judge(transfers.iter().map(|(object, rights)| (object, *rights)))?;
     let (kernel_end, manager_end) = Endpoint::pair().map_err(|_| "no memory for its channel")?;
     let body = fallible::try_to_vec(&first::encode(images, devices)).map_err(|_| "no memory")?;
@@ -340,7 +377,7 @@ fn try_start_manager() -> Result<(), &'static str> {
                     // manager lives as long as the machine, and dropping this end would
                     // close its channel: its peer closing is not its end, the watch is.
                     let _kept_for_good = Arc::into_raw(kernel_end);
-                    return Ok(());
+                    return Ok(Some(served));
                 }
             }
             Err(ReadError::Empty) => {

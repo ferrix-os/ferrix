@@ -316,15 +316,37 @@ impl Hello {
     ///
     /// The [`Refusal`] to send.
     pub fn validate(&self, handle_rights: &[Rights]) -> Result<Accepted, Refusal> {
+        self.version_and_queues()?;
+        if handle_rights != HELLO_RIGHTS {
+            return Err(Refusal::Rights);
+        }
+        self.described()
+    }
+
+    /// [`Hello::validate`]'s checks of the message itself, for a core in user
+    /// space (`docs/microkernel/BTRFSD.md` §2), which cannot read a handle's
+    /// rights: its rule is `handle_replace` with exactly [`HELLO_RIGHTS`]'s, on
+    /// each handle, which refuses fewer and leaves no more.
+    ///
+    /// # Errors
+    ///
+    /// The [`Refusal`] to send.
+    pub fn validate_message(&self) -> Result<Accepted, Refusal> {
+        self.version_and_queues()?;
+        self.described()
+    }
+
+    const fn version_and_queues(&self) -> Result<(), Refusal> {
         if self.version != VERSION {
             return Err(Refusal::Version);
         }
         if self.queues != QUEUES {
             return Err(Refusal::Queues);
         }
-        if handle_rights != HELLO_RIGHTS {
-            return Err(Refusal::Rights);
-        }
+        Ok(())
+    }
+
+    fn described(&self) -> Result<Accepted, Refusal> {
         let device = Device::new(
             self.block_size,
             self.capacity,

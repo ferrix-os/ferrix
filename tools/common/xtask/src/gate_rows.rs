@@ -501,8 +501,8 @@ fn rows_for(path: &str, image_crates: &BTreeSet<String>, rows: &mut Rows) {
         .iter()
         .any(|dir| path.starts_with(&format!("{dir}/")));
     let reason = |rows: &mut Rows, why: &str| rows.reasons.push(format!("{path}: {why}"));
-    // Judged by its own lines, since a `personality=user` kernel prints FERRIX-BOOT-UNCHECKED
-    // (BOOT-AUTHORITY.md BA.13), on top of the kernel's rows.
+    // Each judged by its own lines, since a `personality=user` kernel prints
+    // FERRIX-BOOT-UNCHECKED (BOOT-AUTHORITY.md BA.13, M6.md §3), on top of the kernel's rows.
     if path.ends_with("src/kernel/src/boot_authority.rs")
         || path.ends_with("src/kernel/src/first_rows.rs")
         || path.ends_with("src/kernel/src/linuxd_start.rs")
@@ -511,6 +511,20 @@ fn rows_for(path: &str, image_crates: &BTreeSet<String>, rows: &mut Rows) {
     {
         rows.add(&["test-first-processes --personality user"]);
         reason(rows, "the first processes' row");
+    }
+    if under("src/user/system/native/btrfsd/")
+        || under("src/lib/fs/fsproto/")
+        || under("src/lib/fs/blkclient/")
+        || path.ends_with("src/kernel/src/fs/served.rs")
+    {
+        rows.add(&[
+            "test-btrfsd --personality user --set fs=server",
+            "test-btrfsd-restart --personality user --set fs=server",
+            "test-btrfs --personality user --set fs=server",
+            "test-powerfail --personality user --set fs=server",
+            "test-rustc --personality user --set fs=server",
+        ]);
+        reason(rows, "btrfsd's row");
     }
     if under("src/user/system/linux/ferrousli/") {
         rows.add(&[
@@ -1092,6 +1106,22 @@ mod tests {
                 .commands
                 .iter()
                 .any(|c| c == "build --arch all --release")
+        );
+    }
+
+    #[test]
+    fn the_first_processes_and_the_servers_have_their_rows() {
+        let rows = rows_of(&["src/kernel/src/boot_authority.rs"]);
+        assert!(
+            rows.commands
+                .iter()
+                .any(|c| c == "test-first-processes --personality user")
+        );
+        let rows = rows_of(&["src/lib/fs/fsproto/src/wire.rs"]);
+        assert!(
+            rows.commands
+                .iter()
+                .any(|c| c == "test-btrfsd --personality user --set fs=server")
         );
     }
 

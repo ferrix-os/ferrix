@@ -45,9 +45,8 @@ pub struct BootPage {
     /// The device cores' channel, `devmgr`'s requests for a driver's control
     /// channel; 0 with no `devmgr`.
     pub cores: u32,
-    /// Zero.
-    /// How many [`DeviceFact`]s are at [`DEVICES_AT`] in the page.
-    pub devices: u32,
+    /// `btrfsd`'s channel under `fs=server`; 0 in any other build.
+    pub files: u32,
     /// The initramfs's length in bytes.
     pub initramfs_bytes: u64,
     /// The kernel command line's length: its bytes start at [`COMMAND_LINE_AT`].
@@ -58,6 +57,8 @@ pub struct BootPage {
     /// could give it at its start, so a program's memory runs out here, where the
     /// load's reclaim and OOM answer, before the kernel's does.
     pub memory_frames: u64,
+    /// How many [`DeviceFact`]s are at [`DEVICES_AT`] in the page.
+    pub devices: u64,
     /// The time of day firmware gave at boot, in nanoseconds since the epoch; 0 for none.
     pub wall_clock: u64,
 }
@@ -160,6 +161,7 @@ impl BootPage {
         console: 0,
         devmgr: 0,
         cores: 0,
+        files: 0,
         devices: 0,
         initramfs_bytes: 0,
         command_line_bytes: 0,
@@ -170,17 +172,18 @@ impl BootPage {
 
     /// As the kernel writes it.
     #[must_use]
-    pub fn to_bytes(&self) -> [u8; 72] {
-        let mut out = [0_u8; 72];
+    pub fn to_bytes(&self) -> [u8; 80] {
+        let mut out = [0_u8; 80];
         let words = [
             self.magic,
             u64::from(self.region) | u64::from(self.job) << 32,
             u64::from(self.initramfs) | u64::from(self.debug_log) << 32,
             u64::from(self.console) | u64::from(self.devmgr) << 32,
-            u64::from(self.cores) | u64::from(self.devices) << 32,
+            u64::from(self.cores) | u64::from(self.files) << 32,
             self.initramfs_bytes,
             u64::from(self.command_line_bytes) | u64::from(self.processors) << 32,
             self.memory_frames,
+            self.devices,
             self.wall_clock,
         ];
         for (slot, word) in out.chunks_exact_mut(8).zip(words) {

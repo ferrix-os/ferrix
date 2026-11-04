@@ -69,7 +69,7 @@
     "boot_authority.rs": {
       "bucket": "boot",
       "what": "the first processes' descriptions, lists and images",
-      "sites": 16
+      "sites": 17
     },
     "claim.rs": {
       "bucket": "boot",
@@ -104,7 +104,7 @@
     "discovery/devmgr.rs": {
       "bucket": "boot",
       "what": "devmgr's image VMOs and DEVICES; request, record, note_driver and published are the hybrid's, cut under M6",
-      "sites": 32
+      "sites": 33
     },
     "discovery/first_image.rs": {
       "bucket": "boot",
@@ -304,7 +304,7 @@
     "syscall/native.rs": {
       "bucket": "job",
       "what": "each call's scratch and new objects: the caller's, or the ticket's through charge_target",
-      "sites": 36
+      "sites": 37
     },
     "syscall/native/region.rs": {
       "bucket": "job",

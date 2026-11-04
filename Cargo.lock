@@ -119,6 +119,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrix-blk-victim"
+version = "0.1.0"
+dependencies = [
+ "ferrix-blkclient",
+ "ferrix-blkring",
+ "ferrix-native-abi",
+ "ferrix-rt",
+]
+
+[[package]]
+name = "ferrix-blkclient"
+version = "0.1.0"
+dependencies = [
+ "ferrix-blkring",
+ "ferrix-native",
+ "ferrix-native-abi",
+]
+
+[[package]]
 name = "ferrix-blkring"
 version = "0.1.0"
 dependencies = [
@@ -209,6 +228,24 @@ dependencies = [
  "ferrix-btrfs",
  "ferrix-fallible",
  "ferrix-heap",
+]
+
+[[package]]
+name = "ferrix-btrfsd"
+version = "0.1.0"
+dependencies = [
+ "ferrix-blkclient",
+ "ferrix-blkring",
+ "ferrix-btrfs",
+ "ferrix-btrfs-vfs",
+ "ferrix-btrfs-write",
+ "ferrix-devmgr-proto",
+ "ferrix-fsproto",
+ "ferrix-linux-abi",
+ "ferrix-native-abi",
+ "ferrix-rt",
+ "ferrix-sync",
+ "ferrix-vfs",
 ]
 
 [[package]]
@@ -406,6 +443,14 @@ version = "0.1.0"
 [[package]]
 name = "ferrix-frame"
 version = "0.1.0"
+
+[[package]]
+name = "ferrix-fsproto"
+version = "0.1.0"
+dependencies = [
+ "ferrix-linux-abi",
+ "ferrix-vfs",
+]
 
 [[package]]
 name = "ferrix-gc400"
@@ -729,12 +774,14 @@ dependencies = [
  "ferrix-fallible",
  "ferrix-fdt",
  "ferrix-frame",
+ "ferrix-fsproto",
  "ferrix-inputctl",
  "ferrix-kmem",
  "ferrix-lift-core",
  "ferrix-lift-item",
  "ferrix-linux-abi",
  "ferrix-logctl",
+ "ferrix-native",
  "ferrix-native-abi",
  "ferrix-net",
  "ferrix-netlink",
@@ -746,6 +793,7 @@ dependencies = [
  "ferrix-pci",
  "ferrix-procfs",
  "ferrix-renderctl",
+ "ferrix-rt",
  "ferrix-sched",
  "ferrix-seccomp",
  "ferrix-smbios",

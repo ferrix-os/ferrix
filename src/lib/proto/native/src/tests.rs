@@ -1105,6 +1105,7 @@ fn every_call_in_the_native_table_has_a_wrapper() {
     let _ = channel.duplicate(Requested::Same);
     let _ = handle().replace(Requested::Same);
     let _ = channel.wait_one(Signals::READABLE, Deadline::Never);
+    let _ = vmo.hold_whole();
     let _ = channel.wait_async(&port, Signals::READABLE, 0);
     let _ = channel::create(&sys);
     let _ = channel.write(b"");

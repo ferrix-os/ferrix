@@ -116,6 +116,14 @@ name = "ferrix-frame"
 version = "0.1.0"
 
 [[package]]
+name = "ferrix-fsproto"
+version = "0.1.0"
+dependencies = [
+ "ferrix-linux-abi",
+ "ferrix-vfs",
+]
+
+[[package]]
 name = "ferrix-fuzz"
 version = "0.0.0"
 dependencies = [
@@ -135,6 +143,7 @@ dependencies = [
  "ferrix-fat",
  "ferrix-fdt",
  "ferrix-frame",
+ "ferrix-fsproto",
  "ferrix-inputctl",
  "ferrix-linux-abi",
  "ferrix-native-abi",

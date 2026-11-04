@@ -73,6 +73,19 @@ impl<S: Syscall> Vmo<S> {
         decode_unit(value)
     }
 
+    /// `vmo_hold`: every page of this VMO committed and held in place for as long
+    /// as the handle answered lives (`docs/microkernel/BTRFSD.md`, BD.2).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::BadState`] for a kind that cannot be held; the status otherwise.
+    pub fn hold_whole(&self) -> Result<OwnedHandle<S>, Error> {
+        let value = Call::new(nr::VMO_HOLD)
+            .value(register(self.handle()))
+            .make(self.syscall());
+        Ok(OwnedHandle::from_raw(self.syscall(), decode_handle(value)?))
+    }
+
     /// `vmo_get_size`: the VMO's size in bytes.
     ///
     /// # Errors

@@ -21,6 +21,7 @@ ferrix-fat = { path = "../../lib/fs/common/fat" }
 ferrix-argon2 = { path = "../../lib/crypto/argon2" }
 ferrix-auth-proto = { path = "../../lib/proto/auth-proto" }
 ferrix-elf = { path = "../../lib/platform/elf" }
+ferrix-fsproto = { path = "../../lib/fs/fsproto" }
 ferrix-netswitch = { path = "../../lib/proto/netswitch" }
 ferrix-fdt = { path = "../../lib/platform/fdt" }
 ferrix-frame = { path = "../../lib/kernel/frame" }
@@ -358,6 +359,20 @@ bench = false
 [[bin]]
 name = "partition_desc"
 path = "fuzz_targets/partition_desc.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fsproto_wire"
+path = "fuzz_targets/fsproto_wire.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fsproto_serve"
+path = "fuzz_targets/fsproto_serve.rs"
 test = false
 doc = false
 bench = false

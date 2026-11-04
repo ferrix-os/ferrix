@@ -31,7 +31,8 @@ use ferrix_devmgr_proto::choice::{self, Chooser, Wanted};
 use ferrix_devmgr_proto::gpu::{self, HandOver, SetRefused, Unanswered};
 use ferrix_devmgr_proto::{
     ANSWER_BUSY, ANSWER_DONE, ANSWER_FAILED, ANSWER_NO_DEVICE, BUS_PCI, BUS_PLATFORM, CORE_BYTES,
-    CoreOpen, CoreOpened, DEVICES_MAX_BYTES, DevicesView, Message, NAME_BYTES, SHORT_BYTES,
+    CoreOpen, CoreOpened, CorePublished, DEVICES_MAX_BYTES, DevicesView, Message, NAME_BYTES,
+    SHORT_BYTES,
 };
 use ferrix_drvupdate_proto::{self as update, Answer, Fingerprint, Outcome, REQUEST_BYTES};
 use ferrix_native_abi::handle::Handle;
@@ -1249,6 +1250,11 @@ fn receive(channel: &Channel<Kernel>) -> Result<Given, Step> {
                 let core = handles.get(at).copied().unwrap_or(Handle::INVALID);
                 CORES.store(core.0, Ordering::Relaxed);
             }
+            if view.block_cores {
+                let at = base + 2 * devices + drivers + usize::from(view.debug_log) + 1;
+                let core = handles.get(at).copied().unwrap_or(Handle::INVALID);
+                BLOCK_CORES.store(core.0, Ordering::Relaxed);
+            }
             given.job = Some(Job::from_owned(owned(0)));
             given.drivers = drivers;
             for j in 0..drivers {
@@ -1305,6 +1311,10 @@ fn await_published(
     let mut held = 0_usize;
     let mut exited = false;
     let published = loop {
+        if block_core_published(location) {
+            tell_served(location);
+            break true;
+        }
         let mut short = [0_u8; SHORT_BYTES];
         match channel.read(&mut short, &mut []) {
             Ok(got) => match Message::decode(short.get(..got.bytes).unwrap_or(&[])) {
@@ -1331,6 +1341,7 @@ fn await_published(
         {
             break false;
         }
+        arm_block_core(port);
         let Ok(packet) = port.wait(deadline) else {
             // The deadline passed, or the port failed: not published.
             break false;
@@ -1623,6 +1634,16 @@ fn launch_due(
         }
         let generation = entry.generation;
         if launch_again(channel, port, slot, entry, drivers, inbox, Deadline::Never) {
+            // What a file server's ring holds of a dead driver goes with it: said
+            // for the row that holds it to that (BTRFSD, H.4).
+            if BLOCK_CORES.load(Ordering::Relaxed) != 0
+                && let Ok(quota) = drivers.job.quota(ferrix_rt::native::job::Resource::Memory)
+            {
+                say(
+                    Level::Info,
+                    format_args!("devmgr   the drivers hold {} KiB", quota.used / 1024),
+                );
+            }
             let _ = channel.write(
                 &Message::Restarted {
                     location: entry.location,
@@ -2448,6 +2469,53 @@ fn tell_served(location: u32) {
 
 /// The cores' channel when this kernel has no device core in it, else 0.
 static CORES: AtomicU32 = AtomicU32::new(0);
+/// The block cores' channel under `fs=server`, else 0.
+static BLOCK_CORES: AtomicU32 = AtomicU32::new(0);
+/// The channel to the server of `call`.
+fn core_of(call: usize) -> u32 {
+    let block = BLOCK_CORES.load(Ordering::Relaxed);
+    if block != 0 && call == nr::BLOCK_RING_CREATE {
+        block
+    } else {
+        CORES.load(Ordering::Relaxed)
+    }
+}
+
+/// Wake `port` when `btrfsd` says something.
+fn arm_block_core(port: &Port<Kernel>) {
+    for server in [&BLOCK_CORES] {
+        let core = server.load(Ordering::Relaxed);
+        if core == 0 {
+            continue;
+        }
+        let channel = core::mem::ManuallyDrop::new(Channel::<Kernel>::from_owned(
+            OwnedHandle::from_raw(Kernel, Handle(core)),
+        ));
+        let _ = channel.wait_async(port, Signals::READABLE | Signals::PEER_CLOSED, KEY_KERNEL);
+    }
+}
+
+/// A server's word that the driver at `location` was accepted, if it has said so: a
+/// server's word, on which `device_served` is called and nothing else (CO.5).
+fn block_core_published(location: u32) -> bool {
+    for server in [&BLOCK_CORES] {
+        let core = server.load(Ordering::Relaxed);
+        if core == 0 {
+            continue;
+        }
+        let channel = core::mem::ManuallyDrop::new(Channel::<Kernel>::from_owned(
+            OwnedHandle::from_raw(Kernel, Handle(core)),
+        ));
+        let mut bytes = [0_u8; CORE_BYTES];
+        while let Ok(got) = channel.read(&mut bytes, &mut []) {
+            let word = CorePublished::decode(bytes.get(..got.bytes).unwrap_or(&[]));
+            if word.is_some_and(|published| published.location == location) {
+                return true;
+            }
+        }
+    }
+    false
+}
 
 /// A driver's control channel for `device`: from the kernel, or, in a kernel
 /// that has retired `call`, from the core that serves it in `linuxd`
@@ -2459,7 +2527,7 @@ fn core_control(
     location: u32,
     kernel: impl FnOnce(&Device<Kernel>) -> Result<Channel<Kernel>, Error>,
 ) -> Result<Channel<Kernel>, ()> {
-    let core = CORES.load(Ordering::Relaxed);
+    let core = core_of(call);
     if core == 0 {
         return kernel(device).map_err(|_| ());
     }
@@ -2483,7 +2551,16 @@ fn core_control(
         .map_err(|_| ())?;
     let mut bytes = [0_u8; CORE_BYTES];
     let mut handles = [Handle::INVALID; 1];
-    let got = channel.read(&mut bytes, &mut handles).map_err(|_| ())?;
+    let got = loop {
+        let got = channel.read(&mut bytes, &mut handles).map_err(|_| ())?;
+        // A word from before this open: an earlier driver's, already judged.
+        if CorePublished::decode(bytes.get(..got.bytes).unwrap_or(&[])).is_none() {
+            break got;
+        }
+        let _ = channel
+            .wait_one(Signals::READABLE | Signals::PEER_CLOSED, deadline)
+            .map_err(|_| ())?;
+    };
     let opened = CoreOpened::decode(bytes.get(..got.bytes).unwrap_or(&[])).ok_or(())?;
     if opened.status != 0 {
         return Err(());

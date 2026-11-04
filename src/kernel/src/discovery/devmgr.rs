@@ -460,7 +460,7 @@ pub fn start() -> Result<Option<Report>, &'static str> {
     let drivers = files.set.names.len();
     let (kernel_end, devmgr_end) =
         Endpoint::pair().map_err(|_| "no memory for devmgr's channel")?;
-    let devices = write_devices(&kernel_end, files.images()?, drivers_job()?, None)?;
+    let devices = write_devices(&kernel_end, files.images()?, drivers_job()?, None, None)?;
     let (process, at) = load(&files.set.image)?;
     start_program(&process, at, devmgr_end, &kernel_end)?;
 
@@ -496,7 +496,9 @@ pub(crate) struct Detached {
 ///
 /// What did not happen, as a sentence.
 #[cfg(ferrix_personality = "user")]
-pub(crate) fn start_detached() -> Result<Option<Detached>, &'static str> {
+pub(crate) fn start_detached(
+    block_cores: Option<Arc<Endpoint>>,
+) -> Result<Option<Detached>, &'static str> {
     let Some(files) = read_files()? else {
         return Ok(None);
     };
@@ -508,6 +510,7 @@ pub(crate) fn start_detached() -> Result<Option<Detached>, &'static str> {
         files.images()?,
         Arc::clone(&job),
         Some(devmgr_cores),
+        block_cores,
     )?;
     let (process, at) = load(&files.set.image)?;
     // Not a start refused but the boot's stop: the row says so (ledger 6564 Y.3).
@@ -739,6 +742,7 @@ fn write_devices(
     images: Vec<Arc<Vmo>>,
     job: Arc<Job>,
     mut cores: Option<Arc<Endpoint>>,
+    mut block_cores: Option<Arc<Endpoint>>,
 ) -> Result<usize, &'static str> {
     let names = {
         let bindings = BINDINGS.lock();
@@ -793,6 +797,7 @@ fn write_devices(
             explicit_bind: device::EXPLICIT_BIND,
             debug_log: cfg!(ferrix_personality = "user"),
             cores: cores.is_some() && first,
+            block_cores: block_cores.is_some() && first,
         };
         let mut bytes = [0_u8; DEVICES_MAX_BYTES];
         let len = message
@@ -841,6 +846,12 @@ fn write_devices(
             let _ = fallible::push_within(
                 &mut transfers,
                 (Object::Channel(cores), const { DEVMGR.of(Held::Channel) }),
+            );
+        }
+        if let Some(block) = block_cores.take() {
+            let _ = fallible::push_within(
+                &mut transfers,
+                (Object::Channel(block), const { DEVMGR.of(Held::Channel) }),
             );
         }
         #[cfg(ferrix_personality = "user")]
@@ -1134,7 +1145,7 @@ fn start_in(job: Arc<Job>) -> Result<Started, Errno> {
     let drivers = files.set.names.len();
     let (kernel_end, devmgr_end) = Endpoint::pair().map_err(|_| status::NO_MEMORY)?;
     let images = files.images().map_err(|_| status::NO_MEMORY)?;
-    let devices = write_devices(&kernel_end, images, Arc::clone(&job), None)
+    let devices = write_devices(&kernel_end, images, Arc::clone(&job), None, None)
         .map_err(|_| status::NO_MEMORY)?;
     let (process, at) = load(&files.set.image).map_err(|_| status::BAD_STATE)?;
     let kill = |process: &Arc<dyn Host>| process.kill(job::KILLED_STATUS);

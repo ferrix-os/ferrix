@@ -1,0 +1,16 @@
+[package]
+name = "ferrix-blkclient"
+description = "The block ring's other side in user space: HELLO, READY and the ring, for a filesystem server (docs/microkernel/BTRFSD.md §2)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+ferrix-blkring.workspace = true
+ferrix-native.workspace = true
+ferrix-native-abi.workspace = true
+
+[lints]
+workspace = true

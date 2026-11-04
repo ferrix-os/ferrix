@@ -1,0 +1,23 @@
+[package]
+name = "ferrix-blk-victim"
+description = "A test block driver over memory that dies or hangs on purpose: test-btrfsd-restart's. It never ships in a product image."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "blk-victim"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+ferrix-blkclient.workspace = true
+ferrix-blkring.workspace = true
+ferrix-native-abi.workspace = true
+ferrix-rt.workspace = true
+
+[lints]
+workspace = true

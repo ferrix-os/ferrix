@@ -152,6 +152,7 @@ mod ipc;
 mod iso;
 mod jobs;
 mod kaslr;
+mod kernel_shape;
 mod keyboard;
 mod lode;
 mod lode_budget;
@@ -601,6 +602,7 @@ const TASKS: &[&[Task]] = &[
     lode_pstore::TASKS,
     lode_remote::TASKS,
     first_processes::TASKS,
+    kernel_shape::FIRST_TASKS,
     machine_check::TASKS,
     mce_cmci::TASKS,
     mce_copy::TASKS,

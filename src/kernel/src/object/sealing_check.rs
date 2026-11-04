@@ -17,7 +17,7 @@ use ferrix_native_abi::types::{self, JOB_LEVEL_TOP, MAP_EXECUTE, MAP_READ, MAP_W
 use crate::object::Object;
 use crate::object::check::{SCRATCH, Side, Spawner, reg};
 use crate::object::space::SpaceRef;
-use crate::user::vmo::{SealRefusal, VmoError};
+use crate::user::vmo::{SealRefusal, Vmo, VmoError};
 
 /// Where a check's small inputs and outputs go in the scratch region.
 const OFFSET_AT: u64 = SCRATCH + PAGE_SIZE + 0x80;
@@ -64,7 +64,7 @@ fn one_page(side: &Side) -> Result<Handle, &'static str> {
 }
 
 /// The object a handle names.
-fn object(side: &Side, vmo: Handle) -> Result<Arc<crate::user::vmo::Vmo>, &'static str> {
+fn object(side: &Side, vmo: Handle) -> Result<Arc<Vmo>, &'static str> {
     side.process.with_handles(|table| {
         let (object, _) = table.get(vmo).map_err(|_| "a VMO handle was gone")?;
         let Object::Vmo(vmo) = object else {
@@ -373,6 +373,21 @@ fn every_write_path(side: &Side, report: &mut Report) -> Result<(), &'static str
             "a sealed VMO was mapped writable",
             report,
         )?;
+    }
+    // A write-combining VMO never gives a kernel view, nor the other way round, which is
+    // vmo_hold's refusal of the kinds a kernel cannot hold (BTRFSD.md, H.2).
+    if crate::arch::user_combining() && crate::object::io_mapping::combining_ready() {
+        let combining = Vmo::new_anonymous(1).map_err(|_| "no memory for a VMO")?;
+        if !combining.make_combining() {
+            return Err("an empty anonymous VMO was not made combining");
+        }
+        if combining.take_kernel_view() {
+            return Err("a write-combining VMO gave a kernel view");
+        }
+        let viewed = Vmo::new_anonymous(1).map_err(|_| "no memory for a VMO")?;
+        if !viewed.take_kernel_view() || viewed.make_combining() {
+            return Err("a VMO with a kernel view was made combining");
+        }
     }
     let mut paths: u32 = 0;
     let mut refuse = |ok: bool, what: &'static str| -> Result<(), &'static str> {

@@ -37,6 +37,10 @@ members = [
     "src/lib/proto/bootinfo",
     "src/lib/proto/boot-policy",
     "src/lib/proto/netswitch",
+    "src/lib/fs/blkclient",
+    "src/lib/fs/fsproto",
+    "src/user/system/native/btrfsd",
+    "src/user/system/native/blk-victim",
     "src/lib/proto/slots",
     "src/lib/proto/eventlog",
     "src/lib/platform/description",
@@ -191,6 +195,9 @@ license = "MIT"
 publish = false
 
 [workspace.dependencies]
+ferrix-blkclient = { path = "src/lib/fs/blkclient" }
+ferrix-fsproto = { path = "src/lib/fs/fsproto" }
+ferrix-blk-victim = { path = "src/user/system/native/blk-victim" }
 ferrix-partition-desc = { path = "src/lib/proto/partition-desc" }
 ferrix-acpi = { path = "src/lib/platform/acpi" }
 ferrix-block = { path = "src/lib/fs/common/block" }

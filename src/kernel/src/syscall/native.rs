@@ -583,6 +583,7 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         | NativeCall::DeviceIsolation
         | NativeCall::DeviceBindDomain
         | NativeCall::DeviceServed
+        | NativeCall::VmoHold
         | NativeCall::PowerControlCreate
         | NativeCall::PowerSet
         | NativeCall::PowerRead => device_call(call, process, &a),
@@ -2581,6 +2582,8 @@ fn device_call(call: NativeCall, process: &Process, a: &[u64; 6]) -> Result<usiz
         NativeCall::DeviceBindDomain => device_bind_domain(process, device),
         #[cfg(ferrix_personality = "user")]
         NativeCall::DeviceServed => device_served(process, device),
+        #[cfg(ferrix_personality = "user")]
+        NativeCall::VmoHold => vmo_hold(process, device),
         _ => power_call(call, process, a),
     }
 }
@@ -4619,6 +4622,60 @@ fn device_bind_domain(process: &Process, device: Handle) -> Result<usize, Errno>
         })
 }
 
+/// `device_served` (`docs/microkernel/M5-LIFT.md` §11, `docs/microkernel/BTRFSD.md`, BD.1): what a core in the
+/// kernel does at an accepted HELLO, for a core that is not in the kernel. devmgr
+/// calls it on a server's word, and calling it early widens nothing the driver it
+/// holds the handle of could not already reach: V-20.
+#[cfg(ferrix_personality = "user")]
+fn device_served(process: &Process, device: Handle) -> Result<usize, Errno> {
+    let node = device_in(process, device, Rights::MANAGE)?;
+    // The two kernel steps a HELLO to the in-kernel core makes. A live driver
+    // holds MANAGE as well and could call this too: today's HELLO is the same
+    // trust. Releasing the quarantine early widens nothing translated, where
+    // an unmapped page faults, and untranslated only an unisolated or K14
+    // node is admitted (K8.3).
+    node.served().map_err(|_| status::BAD_STATE)?;
+    // Any live driver holding MANAGE can call this, so the line is said only when the
+    // figure moves (ledger 6933 BF.4, BA.6).
+    static LAST_SAID: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(u64::MAX);
+    let held = crate::user::vmo::server_held_pages();
+    if LAST_SAID.swap(held, core::sync::atomic::Ordering::Relaxed) != held {
+        crate::console::println!(
+            "  served   a next driver accepted; {held} pages held for servers"
+        );
+    }
+    Ok(0)
+}
+
+/// The most bytes [`vmo_hold`] holds: a ring and a driver's data region, which
+/// a kernel core held with no more than these, never a disk's worth.
+#[cfg(ferrix_personality = "user")]
+const HOLD_MOST_PAGES: u64 = (64 * 1024 * 1024) / 4096;
+
+/// `vmo_hold` (BD.2, H.1, H.2): a server's hold of a VMO a driver made, which
+/// its decommit or its job's limit can then not fault.
+///
+/// The bound comes first, and every page is committed on the charge of the job
+/// that pays for the object: the driver's, so a sparse VMO costs the server
+/// nothing but the list of frames, bounded by [`HOLD_MOST_PAGES`], and at its
+/// limit the driver is the one refused. A user kernel's ring 0 makes nothing
+/// write-combining (ledger 6426), so no view is taken here.
+#[cfg(ferrix_personality = "user")]
+fn vmo_hold(process: &Process, vmo: Handle) -> Result<usize, Errno> {
+    let vmo =
+        process.with_handles(|table| unpaged_vmo_in(table, vmo, Rights::READ | Rights::MAP))?;
+    if !vmo.is_anonymous() {
+        return Err(status::BAD_STATE);
+    }
+    let pages = vmo.len_pages();
+    if pages > HOLD_MOST_PAGES {
+        return Err(status::INVALID_ARGS);
+    }
+    let held = vmo.hold_whole_on_payer().map_err(vmo_error)?;
+    let object = Object::Held(fallible::try_arc(held).map_err(|_| status::NO_MEMORY)?);
+    insert_new(process, object, Rights(Rights::TRANSFER.0))
+}
+
 /// `device_isolation`: how the device is isolated, as
 /// `DEVICE_ISOLATION_*` bits (`L.device.27`).
 ///
@@ -5649,25 +5706,6 @@ fn timer_cancel(process: &Process, timer: Handle) -> Result<usize, Errno> {
     Ok(0)
 }
 
-/// `device_served` (`docs/microkernel/M5-LIFT.md` §11): what a core in the
-/// kernel does at an accepted HELLO, for a core that is not in the kernel. devmgr
-/// calls it on a server's word, and calling it early widens nothing the driver it
-/// holds the handle of could not already reach: V-20.
-#[cfg(ferrix_personality = "user")]
-fn device_served(process: &Process, device: Handle) -> Result<usize, Errno> {
-    let node = device_in(process, device, Rights::MANAGE)?;
-    // The two kernel steps a HELLO to the in-kernel core makes. A live driver
-    // holds MANAGE as well and could call this too: today's HELLO is the same
-    // trust. Releasing the quarantine early widens nothing translated, where
-    // an unmapped page faults, and untranslated only an unisolated or K14
-    // node is admitted (K8.3).
-    if node.verify_config().is_err() {
-        return Err(status::BAD_STATE);
-    }
-    object::pin::quarantine_release(&node);
-    Ok(0)
-}
-
 /// Register `observer` on `target`, or `None` for an object with no signal
 /// that changes.
 fn observe(target: &Object, observer: Observer) -> Option<Result<(), PortError>> {
@@ -5694,6 +5732,8 @@ fn observe(target: &Object, observer: Observer) -> Option<Result<(), PortError>>
         | Object::Region(_)
         | Object::Thread(_)
         | Object::Exception(_) => None,
+        #[cfg(ferrix_personality = "user")]
+        Object::Held(_) => None,
     }
 }
 

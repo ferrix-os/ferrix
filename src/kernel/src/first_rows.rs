@@ -181,6 +181,11 @@ pub(crate) const MANAGER: Rows = Rows(&[
         rights: KEPT_DEVICE_RIGHTS,
         most: MANY,
     },
+    Row {
+        held: Held::Channel,
+        rights: Rights::CHANNEL,
+        most: 2,
+    },
 ]);
 
 /// `devmgr`'s.

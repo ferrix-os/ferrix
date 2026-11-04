@@ -1445,6 +1445,33 @@ package FerrixDeviceRequirements {
             attribute :>> parent = "H.DEV.7";
             attribute :>> unit = "discovery::board::Boards::find";
         }
+        requirement <'L.device.81'> servedIsCalledOnAServersWord : ItemLowLevel {
+            attribute :>> statement = "device_served, under personality=user alone and needing MANAGE, shall
+                read the device's configuration back and release a dead driver's pins
+                from quarantine, refusing BAD_STATE when the read-back refuses.";
+            attribute :>> criterion = "test-btrfsd-restart: the release comes after the next driver's
+                acceptance, and not at its death.";
+            attribute :>> parent = "H.DEV.11";
+            attribute :>> unit = ("syscall::native::device_served", "device::DeviceNode::served");
+        }
+        requirement <'L.device.82'> aHoldHasKindsABoundAndAPayer : ItemLowLevel {
+            attribute :>> statement = "vmo_hold, under personality=user alone, shall refuse a handle without
+                READ and MAP, a VMO past its bound, a pager's, a sealed or a write-
+                combining one, and commit on the charge of the job the VMO is charged
+                to.";
+            attribute :>> criterion = "test-btrfsd-restart: the driver's probes by the real call, and the
+                server's own figure not growing with a driver's sparse megabytes.";
+            attribute :>> parent = "H.DEV.11";
+            attribute :>> unit = ("syscall::native::vmo_hold", "user::vmo::Vmo::hold_whole_on_payer");
+        }
+        requirement <'L.device.83'> aHoldSurvivesItsDriver : ItemLowLevel {
+            attribute :>> statement = "Pages held shall stay backed across the death of the driver that made
+                them, until the hold is closed.";
+            attribute :>> criterion = "test-btrfsd-restart: requests over three restarts read the right
+                bytes, and what the drivers' job holds does not grow.";
+            attribute :>> parent = "H.DEV.11";
+            attribute :>> unit = "user::vmo::Vmo::hold_whole_on_payer";
+        }
         requirement <'L.device.84'> theDebugLogTakesAHandle : ItemLowLevel {
             attribute :>> statement = "DEBUG_WRITE shall need a handle of the debug log with WRITE, shall take at
                 most one line's bound a call, and a measured process's line shall carry a prefix from the

@@ -32,7 +32,7 @@ const PATH: &[u8] = b"sbin/linuxd";
 
 /// Start linuxd, or say why not. Its end is the kernel's end: `power::finish`.
 pub(crate) fn run(view: &ferrix_bootinfo::BootView<'_>) {
-    run_with(view, None);
+    run_with(view, None, None);
 }
 
 /// [`run`], with `devmgr` when something started it first: what the boot
@@ -40,12 +40,13 @@ pub(crate) fn run(view: &ferrix_bootinfo::BootView<'_>) {
 pub(crate) fn run_with(
     view: &ferrix_bootinfo::BootView<'_>,
     devmgr: Option<crate::discovery::devmgr::Detached>,
+    files: Option<Arc<crate::object::channel::Endpoint>>,
 ) {
     if !matches!(crate::mm::keep_initrd(view), Ok(Some(_))) {
         println!("  linuxd   did not start: no initramfs");
         return;
     }
-    if let Err(why) = start(view.wall_clock(), view.cmdline(), devmgr) {
+    if let Err(why) = start(view.wall_clock(), view.cmdline(), devmgr, files) {
         println!("  linuxd   did not start: {why}");
     }
 }
@@ -101,6 +102,7 @@ fn start(
     wall_clock: u64,
     cmdline: &str,
     devmgr: Option<crate::discovery::devmgr::Detached>,
+    files: Option<Arc<crate::object::channel::Endpoint>>,
 ) -> Result<(), &'static str> {
     // An option past the room would just not apply, silently: not started, said why.
     if cmdline.len() > COMMAND_LINE_MOST {
@@ -110,8 +112,8 @@ fn start(
         .new_child()
         .map_err(|_| "no job for the partition")?;
     let region = Region::new(Arc::clone(&partition)).map_err(|_| "no memory for a region")?;
-    let entry =
-        crate::mm::with_initrd(|archive| load(region.space(), archive)).ok_or("no initramfs")??;
+    let entry = crate::mm::with_initrd(|archive| load(region.space(), archive, PATH))
+        .ok_or("no initramfs")??;
     let (archive, archive_len) = archive_vmo()?;
     let _ = crate::mm::give_back_initrd();
     let page = Vmo::new_anonymous(1).map_err(|_| "no memory for the boot page")?;
@@ -130,9 +132,18 @@ fn start(
         ),
         None => (0, 0),
     };
+    let files = match files {
+        Some(end) => give(
+            &region,
+            Object::Channel(end),
+            const { LINUXD.of(Held::Channel) },
+        )?,
+        None => 0,
+    };
     let boot = BootPage {
         devmgr: devmgr_messages,
         cores,
+        files,
         magic: BOOT_MAGIC,
         region: give(
             &region,
@@ -152,7 +163,7 @@ fn start(
         initramfs_bytes: archive_len,
         command_line_bytes: cmdline.len() as u32,
         processors: crate::smp::count() as u32,
-        devices: write_devices(&page)?,
+        devices: u64::from(write_devices(&page)?),
         debug_log: give(
             &region,
             Object::DebugLog,
@@ -263,8 +274,9 @@ fn archive_vmo() -> Result<(Arc<Vmo>, u64), &'static str> {
 fn load(
     space: &Arc<AddressSpace>,
     archive: &[u8],
+    path: &[u8],
 ) -> Result<crate::syscall::native::EntryPoint, &'static str> {
-    let image = ferrix_cpio::file_named(archive, PATH).ok_or("no sbin/linuxd")?;
+    let image = ferrix_cpio::file_named(archive, path).ok_or("no such image")?;
     crate::discovery::first_image::load_at(space, image, IMAGE_BASE).map_err(|why| {
         println!("  linuxd   image refused: {why:?}");
         "linuxd's image was refused"

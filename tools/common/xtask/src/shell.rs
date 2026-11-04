@@ -75,6 +75,68 @@ cat /proc/self/maps > /tmp/maps; echo "lift: maps read"
 exit 9
 "#;
 
+/// `cargo xtask test-btrfsd`'s script: a volume mounted and read through `btrfsd`.
+pub(crate) const BTRFSD_SCRIPT: &str = r#"echo "btrfsd-row: started"
+mkdir -p /mnt
+mount -t btrfs -o ro /dev/vdb /mnt; echo "btrfsd-row: mount status $?"
+ls /mnt > /tmp/listed; echo "btrfsd-row: listed $(wc -l < /tmp/listed) names"
+find /mnt -type f | head -n 200 > /tmp/files
+while read file; do cat "$file" | wc -c >/dev/null || echo "btrfsd-row: could not read $file"; done < /tmp/files
+echo "btrfsd-row: read $(wc -l < /tmp/files) files"
+sha256sum /mnt/big.txt
+mkdir -p /rw
+mount -t btrfs /dev/vdc /rw; echo "btrfsd-row: writable mount status $?"
+mkdir -p /rw/row/here && echo through-the-server > /rw/row/here/note
+ln -s here/note /rw/row/link; ln /rw/row/here/note /rw/row/hard
+sync; echo "btrfsd-row: wrote $(cat /rw/row/link)"
+mv /rw/row/hard /rw/row/moved; rm /rw/row/here/note; echo "btrfsd-row: survives its first name $(cat /rw/row/moved)"
+echo more >> /rw/row/moved; echo "btrfsd-row: appended $(wc -c < /rw/row/moved)"
+sync; umount /rw; echo "btrfsd-row: unmount status $?"
+exit 9
+"#;
+
+/// `cargo xtask test-btrfsd-restart`'s script. The dying disk's read goes on over
+/// each next driver, the hanging disk's fails within its bound, and one that does
+/// neither reads as it did, beside them.
+pub(crate) const BTRFSD_RESTART_SCRIPT: &str = r#"echo "btrfsd-row: started"
+dd if=/dev/vda bs=4096 count=900 2>/dev/null | sha256sum
+sha256sum /dev/vdc
+echo "btrfsd-row: vdc read status $?"
+sha256sum /dev/vdb
+echo "btrfsd-row: vdb read status $?"
+exit 9
+"#;
+
+/// What [`BTRFSD_SCRIPT`] runs.
+pub(crate) fn btrfsd_carried(busybox: &Path) -> Result<Vec<ports::File>> {
+    let bytes = std::fs::read(busybox)
+        .map_err(|error| Error::new(format!("reading {}: {error}", busybox.display())))?;
+    Ok([
+        "bin/sh",
+        "bin/cat",
+        "bin/mount",
+        "bin/mkdir",
+        "bin/ls",
+        "bin/wc",
+        "bin/find",
+        "bin/head",
+        "bin/sha256sum",
+        "bin/dd",
+        "bin/ln",
+        "bin/sync",
+        "bin/mv",
+        "bin/rm",
+        "bin/umount",
+    ]
+    .into_iter()
+    .map(|path| ports::File {
+        path: path.to_owned(),
+        mode: 0o755,
+        content: ports::Content::Bytes(bytes.clone()),
+    })
+    .collect())
+}
+
 /// What [`LIFT_SCRIPT`] runs: busybox under each applet's name.
 pub(crate) fn lift_carried(busybox: &Path) -> Result<Vec<ports::File>> {
     let bytes = std::fs::read(busybox)

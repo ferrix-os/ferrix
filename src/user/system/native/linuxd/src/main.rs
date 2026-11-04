@@ -212,18 +212,21 @@ fn served(_argument: usize) {
         syscall::time::set_realtime(page.wall_clock);
     }
     init::read_option(&view);
+    fs::btrfs_powerfail::init(&view);
     fs::root_disk::init(&view);
     fs::procfs::remember_command_line(command_line);
     match fs::init(&view) {
         Ok(_) => console::write_bytes(b"  linuxd   root built\n"),
-        Err(_) => {
-            console::write_bytes(b"  linuxd   the root could not be built\n");
+        Err(why) => {
+            console::write(format_args!(
+                "  linuxd   the root could not be built: {why:?}\n"
+            ));
             return;
         }
     }
     // The disks, once devmgr's drivers have come up. The cores are its by the
     // channel the kernel gave both (M5-LIFT.md §11).
-    let cored = interfaces::block_ring::install()
+    let cored = fs::start_block_side(page.files)
         .and_then(|()| interfaces::net_ring::install())
         .and_then(|()| interfaces::display::install())
         .and_then(|()| interfaces::render::install())
@@ -244,6 +247,41 @@ fn served(_argument: usize) {
         let patience = ferrix_kernel_core::timer::now_nanos().saturating_add(20_000_000_000);
         if !ferrix_kernel_item::discovery::devmgr::wait_reported(patience) {
             console::write_bytes(b"  linuxd   devmgr did not report\n");
+        }
+        fs::settle_block_side();
+        // test-powerfail's two boots: what `check_btrfs_write` does in a hybrid.
+        {
+            use fs::btrfs_powerfail::{self as powerfail, Mode};
+            let (result, verb) = match powerfail::mode() {
+                Mode::Check => (None, ""),
+                Mode::Churn => (Some(powerfail::churn(powerfail::seed())), "churned"),
+                Mode::Replay => (Some(powerfail::replay()), "replayed"),
+            };
+            match result {
+                Some(Ok(report)) if report.skipped.is_some() => {
+                    console::write(format_args!(
+                        "  btrfs-pf not run: {}\n",
+                        report.skipped.unwrap_or_default()
+                    ));
+                }
+                Some(Ok(report)) => console::write(format_args!(
+                    "  btrfs-pf vdc {verb}: {} files, {} with a trailer whose promise held; {}\n",
+                    report.files,
+                    report.checked,
+                    if report.logged {
+                        "the crash left a log, and the mount replayed it"
+                    } else {
+                        "the crash left no log"
+                    },
+                )),
+                Some(Err(problem)) => {
+                    console::write(format_args!(
+                        "  btrfs-pf power-fail check failed: {problem}\n"
+                    ));
+                    ferrix_rt::exit(1);
+                }
+                None => {}
+            }
         }
         match fs::btrfs_write_check::mount_fixture() {
             Ok(true) => console::write_bytes(b"  btrfs    the fixture is mounted at /mnt\n"),

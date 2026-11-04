@@ -176,6 +176,8 @@ pub const DEVICE_ISOLATION: usize = 0x1059;
 pub const DEVICE_BIND_DOMAIN: usize = 0x10C0;
 /// [`NativeCall::DeviceServed`].
 pub const DEVICE_SERVED: usize = 0x10C3;
+/// [`NativeCall::VmoHold`].
+pub const VMO_HOLD: usize = 0x10C4;
 /// [`NativeCall::VmoDigest`].
 pub const VMO_DIGEST: usize = 0x10C1;
 /// [`NativeCall::ProcessImages`].
@@ -752,6 +754,11 @@ pub enum NativeCall {
     /// what the kernel's cores do at HELLO (`docs/microkernel/M5-LIFT.md` §11).
     /// Needs `MANAGE`. `personality=user` only; `ENOSYS` otherwise.
     DeviceServed,
+    /// `(vmo)`. A handle holding every page of it in place for as long as the handle lives,
+    /// committed on the charge of the job it is charged to (`docs/microkernel/BTRFSD.md`,
+    /// BD.2). Refuses pager-backed, file and physical VMOs. Needs `READ`
+    /// and `MAP`. `personality=user` only.
+    VmoHold,
     /// `(vmo, *out)`. The 32 bytes of a sealed VMO's digest
     /// (`docs/microkernel/K14.md` §4). Needs `READ`. `BAD_STATE` when it is
     /// not sealed, `SHOULD_WAIT` while its hash runs.
@@ -1111,7 +1118,7 @@ pub enum NativeCall {
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 133] = [
+pub const ALL: [NativeCall; 134] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,
@@ -1244,6 +1251,7 @@ pub const ALL: [NativeCall; 133] = [
     NativeCall::VmoDigest,
     NativeCall::ProcessImages,
     NativeCall::DeviceServed,
+    NativeCall::VmoHold,
     NativeCall::JobDeclareBuffer,
 ];
 
@@ -1326,6 +1334,7 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         DEVICE_ISOLATION => NativeCall::DeviceIsolation,
         DEVICE_BIND_DOMAIN => NativeCall::DeviceBindDomain,
         DEVICE_SERVED => NativeCall::DeviceServed,
+        VMO_HOLD => NativeCall::VmoHold,
         VMO_DIGEST => NativeCall::VmoDigest,
         PROCESS_IMAGES => NativeCall::ProcessImages,
         CHARDEV_CONTROL_CREATE => NativeCall::ChardevControlCreate,
@@ -1469,6 +1478,7 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::DeviceIsolation => DEVICE_ISOLATION,
         NativeCall::DeviceBindDomain => DEVICE_BIND_DOMAIN,
         NativeCall::DeviceServed => DEVICE_SERVED,
+        NativeCall::VmoHold => VMO_HOLD,
         NativeCall::VmoDigest => VMO_DIGEST,
         NativeCall::ProcessImages => PROCESS_IMAGES,
         NativeCall::ChardevControlCreate => CHARDEV_CONTROL_CREATE,
@@ -1563,6 +1573,7 @@ pub enum FromRestricted {
 pub const fn from_restricted(call: NativeCall) -> FromRestricted {
     match call {
         NativeCall::DeviceServed => FromRestricted::Answered,
+        NativeCall::VmoHold => FromRestricted::Answered,
         NativeCall::DeviceBindDomain | NativeCall::VmoDigest | NativeCall::ProcessImages => {
             FromRestricted::Answered
         }
@@ -1797,6 +1808,7 @@ pub const fn copy_miss(call: NativeCall) -> CopyMiss {
         | NativeCall::DeviceIsolation
         | NativeCall::DeviceBindDomain
         | NativeCall::DeviceServed
+        | NativeCall::VmoHold
         | NativeCall::ProcessImages
         | NativeCall::ChardevControlCreate
         | NativeCall::ChardevReply

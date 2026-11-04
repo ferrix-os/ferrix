@@ -82,6 +82,10 @@ pub enum Object {
     Pin(Arc<pin::Pin>),
     /// A process: how it ended, and not the process itself.
     Process(process::ProcessRef),
+    /// A VMO's pages held in place for a server (`vmo_hold`,
+    /// `docs/microkernel/BTRFSD.md`, BD.2).
+    #[cfg(ferrix_personality = "user")]
+    Held(Arc<crate::user::vmo::Held>),
     /// An event queue.
     Port(Arc<port::Port>),
     /// A deadline, signalled when it passes (`docs/microkernel/K10.md`).
@@ -172,6 +176,8 @@ impl Object {
             | Object::CpuService
             | Object::MemoryScrub
             | Object::Exception(_) => Signals::NONE,
+            #[cfg(ferrix_personality = "user")]
+            Object::Held(_) => Signals::NONE,
         }
     }
 
@@ -205,6 +211,8 @@ impl Object {
             | Object::CpuService
             | Object::MemoryScrub
             | Object::Exception(_) => &QUIET,
+            #[cfg(ferrix_personality = "user")]
+            Object::Held(_) => &QUIET,
         }
     }
 }
@@ -391,6 +399,8 @@ impl Object {
             | Object::Process(_)
             | Object::Space(_)
             | Object::Region(_) => false,
+            #[cfg(ferrix_personality = "user")]
+            Object::Held(_) => false,
         }
     }
 }

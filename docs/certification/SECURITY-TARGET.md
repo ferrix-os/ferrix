@@ -131,6 +131,7 @@ driver answering the TOE's reads with bytes of its choosing.
 | T.EXHAUST | A process consumes memory, CPU or object-table capacity so as to deny service to others. |
 | T.CONFUSE | A process induces the TOE to act on a user-supplied pointer or length without validation. |
 | T.MEDIA | A volume crafted or damaged by whoever wrote the medium, or bytes a ring-3 block driver returns, induce the TOE's btrfs code to read or write outside its buffers, panic, loop without bound, or return damaged data as valid. |
+| T.CLIENT | Under `fs=server`, a Linux partition's `linuxd` sends `btrfsd` requests crafted to read or write outside the volume its channel names, or another partition's. Mapped when `fs=server` enters a claim (M7): bounded and hostile-read by `ferrix-fsproto`, one volume per channel. |
 
 ### 3.3 Assumptions
 

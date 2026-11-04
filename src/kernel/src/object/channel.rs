@@ -1232,6 +1232,8 @@ fn queued_endpoints(endpoint: &Arc<Endpoint>) -> Option<Vec<Arc<Endpoint>>> {
             | Object::CpuService
             | Object::MemoryScrub
             | Object::Exception(_) => None,
+            #[cfg(ferrix_personality = "user")]
+            Object::Held(_) => None,
         });
     for queued in carried {
         // Once each, and no more than the walk could use: an inbox can hold

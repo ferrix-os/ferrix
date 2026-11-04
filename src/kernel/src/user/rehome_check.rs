@@ -83,6 +83,7 @@ fn once() -> Result<(), &'static str> {
     check_a_private_mapping_keeps_its_copies()?;
     check_a_fork_keeps_private_copies_apart()?;
     check_the_loader_pattern()?;
+    #[cfg(not(all(ferrix_personality = "user", ferrix_load_built = "none")))]
     check_make_combining()?;
     check_is_anonymous()
 }
@@ -1236,6 +1237,7 @@ fn check_commit_and_write() -> Result<(), &'static str> {
 /// leaving the object as it was.
 ///
 /// Verifies: L.user.132
+#[cfg(not(all(ferrix_personality = "user", ferrix_load_built = "none")))]
 fn check_make_combining() -> Result<(), &'static str> {
     let memory = memory_file(PAGE_SIZE)?;
     if memory.make_combining() || memory.is_combining() {

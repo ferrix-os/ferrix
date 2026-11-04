@@ -97,6 +97,7 @@ comes from M8 (N.9). What a role is given today (the prose table above says what
 | `MANAGER` | `Description` | `Rights(Rights::READ.0 | Rights::MAP.0 | Rights::TRANSFER.0)` |
 | `MANAGER` | `Image` | `IMAGE_RIGHTS` |
 | `MANAGER` | `DeviceKept` | `KEPT_DEVICE_RIGHTS` |
+| `MANAGER` | `Channel` | `Rights::CHANNEL` |
 | `DEVMGR` | `Job` | `Rights::JOB` |
 | `DEVMGR` | `DebugLog` | `LOG_TO_PASS_ON` |
 | `DEVMGR` | `Image` | `IMAGE_RIGHTS` |

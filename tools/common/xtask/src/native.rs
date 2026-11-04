@@ -223,12 +223,14 @@ pub(crate) fn build(arch: Arch, release: bool) -> Result<Vec<Built>> {
 
 /// [`build`], into `target_dir`.
 pub(crate) fn build_in(arch: Arch, release: bool, target_dir: &Path) -> Result<Vec<Built>> {
+    let served = crate::flags::this_run().is_ok_and(|flags| flags.value("fs") == Some("server"));
     let lifted =
         crate::flags::this_run().is_ok_and(|flags| flags.value("personality") == Some("user"));
     PROGRAMS
         .iter()
         .chain(lifted.then_some(&LINUXD))
         .chain(lifted.then_some(&PARTMGR))
+        .chain(served.then_some(&BTRFSD))
         .map(|program| build_one(arch, release, target_dir, program))
         .collect()
 }
@@ -256,6 +258,21 @@ pub(crate) const PARTMGR: Program = Program {
 pub(crate) const CRASH_AT_START: Program = Program {
     package: "ferrix-crash-at-start",
     binary: "crash-at-start",
+    directory: DRIVERS,
+};
+
+/// The filesystem server (`docs/microkernel/BTRFSD.md`), in an `fs=server` image alone.
+pub(crate) const BTRFSD: Program = Program {
+    package: "ferrix-btrfsd",
+    binary: "btrfsd",
+    directory: DIRECTORY,
+};
+
+/// A block driver over memory that misbehaves on purpose: only
+/// `test-btrfsd-restart`'s archive, under the name `blk`.
+pub(crate) const BLK_VICTIM: Program = Program {
+    package: "ferrix-blk-victim",
+    binary: "blk-victim",
     directory: DRIVERS,
 };
 

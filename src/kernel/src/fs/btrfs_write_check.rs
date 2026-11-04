@@ -33,14 +33,19 @@ use crate::fs;
 use crate::interfaces::block_ring::VIRTIO_BLK_MAJOR;
 
 #[cfg(not(ferrix_load_built = "lift"))]
+#[cfg(not(ferrix_fs = "server"))]
 mod clean_check;
 #[cfg(not(ferrix_load_built = "lift"))]
+#[cfg(not(ferrix_fs = "server"))]
 mod mapped_check;
 #[cfg(not(ferrix_load_built = "lift"))]
+#[cfg(not(ferrix_fs = "server"))]
 mod poison_check;
 #[cfg(not(ferrix_load_built = "lift"))]
+#[cfg(not(ferrix_fs = "server"))]
 mod reclaim_check;
 #[cfg(not(ferrix_load_built = "lift"))]
+#[cfg(not(ferrix_fs = "server"))]
 mod stuck_check;
 
 /// Where the writable disk is mounted.

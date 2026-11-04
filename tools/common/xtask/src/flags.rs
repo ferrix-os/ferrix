@@ -806,7 +806,7 @@ mod tests {
         let why = resolve(None, &set(&[("fs", "server")]))
             .unwrap_err()
             .to_string();
-        assert!(why.contains("not yet buildable"), "{why}");
+        assert!(why.contains("requires personality=user"), "{why}");
         let why = resolve(None, &set(&[("personality", "user")]))
             .unwrap_err()
             .to_string();

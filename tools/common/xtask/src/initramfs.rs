@@ -881,6 +881,10 @@ fn build_with(program: Option<&[u8]>, natives: &[native::Built]) -> Result<Vec<u
 }
 
 /// [`build`], with the program's bytes rather than its path.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one archive, each kind of content in its place in the order the kernel reads them"
+)]
 fn build_with_shell(
     program: Option<&[u8]>,
     natives: &[native::Built],
@@ -888,6 +892,20 @@ fn build_with_shell(
     uutils: &[(&str, Vec<u8>)],
     ports: &[ports::File],
 ) -> Result<Vec<u8>> {
+    crate::kernel_shape::refuse_executable_copies(natives)?;
+    let served = crate::kernel_shape::server_description(natives)?.filter(|_| {
+        !ports
+            .iter()
+            .any(|file| file.path == "etc/ferrix/partitions")
+    });
+    let with_server: Vec<ports::File>;
+    let ports = match served {
+        Some(description) => {
+            with_server = ports.iter().cloned().chain([description]).collect();
+            with_server.as_slice()
+        }
+        None => ports,
+    };
     // A sabotaged authd goes into test-auth's control images and no other.
     crate::auth::refuse_sabotaged(ports)?;
     // drvupdated goes into test-restart --update's images and no other, and
