@@ -1595,6 +1595,9 @@ extern "C" fn unmapper(_argument: usize) -> ! {
     let space = SHOOTDOWN_SPACE.load(Acquire);
     let done = sys(nr::SPACE_UNMAP, [space, SHOOTDOWN_AT, 0x1000, 0, 0, 0]);
     SHOOTDOWN_STEP.store(if done.is_ok() { 2 } else { 100 }, Release);
+    // This thread alone. `ferrix_rt::exit` ends the process, with status 0, under
+    // the read this case is for.
+    let _ = sys(nr::THREAD_EXIT, [0, 0, 0, 0, 0, 0]);
     ferrix_rt::exit(0)
 }
 
@@ -1645,9 +1648,7 @@ fn restricted_shootdown(given: &Given) -> Result<(), i32> {
     hold(
         after.reason == Reason::Fault as u64 && after.number != arch::VECTOR_BREAKPOINT,
         138,
-    )?;
-    sys(nr::HANDLE_CLOSE, [thread, 0, 0, 0, 0, 0]).map_err(|_| 138)?;
-    Ok(())
+    )
 }
 
 /// Set by a thread case 141 must not have started.
