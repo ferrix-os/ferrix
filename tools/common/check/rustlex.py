@@ -37,6 +37,7 @@ and `cr`.
 
 from __future__ import annotations
 
+import functools
 import re
 import sys
 
@@ -132,8 +133,13 @@ def spans(source: str):
         pos = end
 
 
+@functools.lru_cache(maxsize=None)
 def mask(source: str) -> str:
-    """The source with comments and literal contents blanked, length kept."""
+    """The source with comments and literal contents blanked, length kept.
+
+    Remembered by the source's text: a pure function, and `check-item-boundary.py`
+    asks it 11,555 times for 1,062 different sources.
+    """
     out: list[str] = []
     pos = 0
     for kind, start, end in spans(source):
@@ -150,13 +156,19 @@ def mask(source: str) -> str:
     return "".join(out)
 
 
+@functools.lru_cache(maxsize=None)
+def _tokens(masked: str) -> tuple[tuple[str, int], ...]:
+    return tuple((m.group(), m.start()) for m in _TOKEN.finditer(masked))
+
+
 def tokens(masked: str) -> list[tuple[str, int]]:
     """Identifiers, numbers, `::` and single punctuation, with offsets.
 
     Takes a *masked* source: run `mask` first, or a comment full of paths
-    becomes a dependency. A literal comes out as its two delimiters.
+    becomes a dependency. A literal comes out as its two delimiters. A fresh list
+    each call, from a remembered result: callers may keep or change theirs.
     """
-    return [(m.group(), m.start()) for m in _TOKEN.finditer(masked)]
+    return list(_tokens(masked))
 
 
 # --- self-test ---------------------------------------------------------------
@@ -273,6 +285,14 @@ def self_test() -> list[str]:
     tokens_seen = [t for t, _ in tokens(mask("use crate::a::{b, c}; // crate::d"))]
     if tokens_seen != ["use", "crate", "::", "a", "::", "{", "b", ",", "c", "}", ";"]:
         failures.append(f"tokens: {tokens_seen}")
+    # What is remembered is not handed out: a caller's list is its own to change.
+    first = tokens("fn a")
+    second = tokens("fn a")
+    if first is second:
+        failures.append("tokens: two calls on one text gave the same list")
+    first.append(("changed", 0))
+    if tokens("fn a") != [("fn", 0), ("a", 3)]:
+        failures.append(f"tokens: a caller's change reached the next answer: {tokens('fn a')}")
     return failures
 
 
