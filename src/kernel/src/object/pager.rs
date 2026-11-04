@@ -18,6 +18,15 @@
 //!
 //! None of them stops the kernel.
 //!
+//! # A keeper, and a pager parked (K13)
+//!
+//! A pager with a [`Keeper`] does not die when its handle closes: it is
+//! **parked**. Its requests stay open and their waiters stay bounded by the
+//! pager's bound; a fault meanwhile is listed and sends nothing. `Keeper::take_up`
+//! sends every open request to a new port under its own id. Live, parked and dead
+//! are one state, decided under the registry's lock by the pager's close, the
+//! keeper's close and the take-up alike (ledger 5968 (1)).
+//!
 //! # Who shares a request
 //!
 //! Threads **of one job** that fault the same run share its request; a fault
@@ -166,6 +175,25 @@ struct Request {
 }
 
 impl Request {
+    /// Queue its packet, on the port `promise` promised room on. A packet sent to
+    /// a port its pager has since left is lost with that port, and take-up sends
+    /// it again; handed the same port back, a second packet is possible and
+    /// harmless, since a supply skips what is present, `PAGER_OP_DIRTY` is
+    /// idempotent, and an answer to an ended request finds nothing (ledger 5968 (4)).
+    fn send(&self, promise: Promise) {
+        let signals = page_request(
+            self.command.number(),
+            u32::try_from(self.count).unwrap_or(u32::MAX),
+        );
+        Port::queue_promised(
+            promise,
+            PACKET_PAGE_REQUEST,
+            self.key,
+            signals,
+            [self.first.saturating_mul(PAGE_SIZE), self.id],
+        );
+    }
+
     /// Its state.
     fn state(&self) -> u8 {
         self.state.load(Ordering::Acquire)
@@ -203,14 +231,69 @@ impl Drop for Pager {
 /// A pager's state, shared by its handle and every VMO made over it.
 #[derive(Debug)]
 pub struct PagerCore {
-    /// Where its requests go.
-    port: Arc<Port>,
     /// How long a fault waits for it, in nanoseconds.
     wait_ns: u64,
-    /// Set once, at its close: no request opens after.
+    /// Set once, at its death: no request opens after. Read without the lock
+    /// on the way in; [`Registry::state`] decides it.
     closed: AtomicBool,
+    /// Its outstanding requests and its state.
+    requests: SpinLock<Registry>,
+}
+
+/// Whether a pager is served, waiting for its next server, or gone.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Served {
+    /// Its handle is open.
+    Live,
+    /// Its handle closed with a keeper holding it (K13).
+    Parked,
+    /// Gone for good.
+    Dead,
+}
+
+/// A pager's state, under one lock.
+#[derive(Debug)]
+struct Registry {
     /// Its outstanding requests, with room for one more kept.
-    requests: SpinLock<Vec<Arc<Request>>>,
+    list: Vec<Arc<Request>>,
+    /// See [`Served`].
+    state: Served,
+    /// Whether a keeper holds it.
+    kept: bool,
+    /// Where its requests go.
+    port: Arc<Port>,
+    /// Moved at each park and take-up: a fault that read the port before one
+    /// goes round again, so nothing is listed against a port it has no room on.
+    generation: u64,
+}
+
+/// The capability to take a pager up after its handle closes, as its one keeper
+/// holds it. Charged to the job that asked: one object, and the heap of the
+/// registry it keeps alive, so a parked pager is never an uncharged pool
+/// (ledger 5968 (2)(b)).
+#[derive(Debug)]
+pub struct Keeper {
+    /// The pager's state.
+    core: Arc<PagerCore>,
+    /// The kernel object it is.
+    _charge: Charge,
+    /// The registry's heap.
+    _heap: ferrix_kmem::Charge,
+}
+
+impl Drop for Keeper {
+    fn drop(&mut self) {
+        self.core.keeper_closed();
+    }
+}
+
+/// Why a take-up was refused.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TakeUpRefused {
+    /// The pager is not parked.
+    NotParked,
+    /// No memory, or the job's limit: it stays parked and a retry may work.
+    NoMemory,
 }
 
 /// A pager-backed VMO's tie to its pager.
@@ -242,12 +325,17 @@ impl Pager {
             ferrix_kmem::arc_footprint::<PagerCore>().saturating_add(4 * size_of::<Arc<Request>>()),
         )
         .map_err(|_| AllocError)?;
-        let requests = fallible::try_with_capacity(4)?;
+        let list = fallible::try_with_capacity(4)?;
         let core = fallible::try_arc(PagerCore {
-            port,
             wait_ns: clamp_wait(wait_ns),
             closed: AtomicBool::new(false),
-            requests: SpinLock::new(requests),
+            requests: SpinLock::new(Registry {
+                list,
+                state: Served::Live,
+                kept: false,
+                port,
+                generation: 0,
+            }),
         })?;
         Ok(Pager {
             core,
@@ -259,6 +347,97 @@ impl Pager {
     /// What its VMOs share.
     pub fn core(&self) -> &Arc<PagerCore> {
         &self.core
+    }
+
+    /// `pager_keep`: its one keeper, charged to the running task's job.
+    ///
+    /// # Errors
+    ///
+    /// `Ok(None)` when it has one; [`AllocError`] at the job's limits.
+    pub fn keep(&self) -> Result<Option<Keeper>, AllocError> {
+        let charge = Charge::running(Resource::Objects, 1).map_err(|_| AllocError)?;
+        let heap = ferrix_kmem::Charge::bytes(
+            ferrix_kmem::arc_footprint::<PagerCore>().saturating_add(4 * size_of::<Arc<Request>>()),
+        )
+        .map_err(|_| AllocError)?;
+        let mut registry = self.core.requests.lock();
+        if registry.kept {
+            return Ok(None);
+        }
+        registry.kept = true;
+        drop(registry);
+        Ok(Some(Keeper {
+            core: Arc::clone(&self.core),
+            _charge: charge,
+            _heap: heap,
+        }))
+    }
+}
+
+impl Keeper {
+    /// `pager_take_up`: the pager's handle again, its requests sent to `port`.
+    ///
+    /// Everything fallible comes first, with the lock let go: the new handle's
+    /// charges, a promise and a place on the list per open request. If more
+    /// opened meanwhile it grows and goes round. A request's own bound does not
+    /// restart: each waiter's deadline was set when it began to wait.
+    ///
+    /// The room a promise reserves is capacity in the port's queue, as K3's every
+    /// promise is: charged to nobody, and bounded by the open requests, each of
+    /// which holds a record charged to its own job (ledger 5968 (2)(a)).
+    ///
+    /// # Errors
+    ///
+    /// [`TakeUpRefused`]; the pager stays as it was.
+    pub fn take_up(&self, port: &Arc<Port>) -> Result<Pager, TakeUpRefused> {
+        let charge = Charge::running(Resource::Objects, 1).map_err(|_| TakeUpRefused::NoMemory)?;
+        let heap = ferrix_kmem::Charge::bytes(
+            ferrix_kmem::arc_footprint::<PagerCore>().saturating_add(4 * size_of::<Arc<Request>>()),
+        )
+        .map_err(|_| TakeUpRefused::NoMemory)?;
+        let mut promises: Vec<Promise>;
+        let mut sends: Vec<Arc<Request>>;
+        let old = loop {
+            let wanted = self.core.outstanding();
+            promises = fallible::try_with_capacity(wanted).map_err(|_| TakeUpRefused::NoMemory)?;
+            sends = fallible::try_with_capacity(wanted).map_err(|_| TakeUpRefused::NoMemory)?;
+            for _ in 0..wanted {
+                let promise = Promise::new(port).map_err(|_| TakeUpRefused::NoMemory)?;
+                // NOALLOC: room for `wanted`.
+                promises.push(promise);
+            }
+            let mut registry = self.core.requests.lock();
+            if registry.state != Served::Parked {
+                return Err(TakeUpRefused::NotParked);
+            }
+            if registry.list.len() > wanted {
+                continue;
+            }
+            for open in registry.list.iter().filter(|open| open.state() == OPEN) {
+                // NOALLOC: room for `wanted`, at least the listed ones.
+                sends.push(Arc::clone(open));
+            }
+            registry.state = Served::Live;
+            registry.generation = registry.generation.wrapping_add(1);
+            break core::mem::replace(&mut registry.port, Arc::clone(port));
+        };
+        // The old port's reference goes with the lock let go (5968 (3)).
+        drop(old);
+        for request in &sends {
+            if let Some(promise) = promises.pop() {
+                request.send(promise);
+            }
+        }
+        Ok(Pager {
+            core: Arc::clone(&self.core),
+            _charge: charge,
+            _heap: heap,
+        })
+    }
+
+    /// Whether it is parked: for the boot check.
+    pub fn is_parked(&self) -> bool {
+        self.core.requests.lock().state == Served::Parked
     }
 }
 
@@ -304,28 +483,66 @@ impl PagerCore {
 
     /// Requests outstanding.
     pub fn outstanding(&self) -> usize {
-        self.requests.lock().len()
+        self.requests.lock().list.len()
     }
 
     /// Threads waiting on its requests: for the boot check.
     pub fn waiting(&self) -> usize {
         self.requests
             .lock()
+            .list
             .iter()
             .map(|request| request.waiters.load(Ordering::Relaxed))
             .sum()
     }
 
-    /// The pager's death: no request opens from here on, and every
-    /// outstanding one ends at once. Run where the close runs, with no spin
-    /// lock held (2858 (4)); takes only the registry's lock and wait queues'.
+    /// The pager's handle closed: its death, or with a keeper its parking, when
+    /// no request ends. Run where the close runs, with no spin lock held
+    /// (2858 (4)); takes only the registry's lock and wait queues'.
     fn close(&self) {
         debug_assert!(
             !sched::started() || sched::may_block(),
             "a pager was closed where nothing may block"
         );
+        let mut registry = self.requests.lock();
+        if registry.kept {
+            registry.state = Served::Parked;
+            registry.generation = registry.generation.wrapping_add(1);
+            drop(registry);
+            record_rebind(audit::Subject::KERNEL, 0);
+            return;
+        }
+        registry.state = Served::Dead;
         self.closed.store(true, Ordering::Release);
+        drop(registry);
         let _ = self.end_where(&|_| true, GONE, Errno(0));
+    }
+
+    /// The keeper closed: if the pager is parked, its death, as the pager's own
+    /// close; if live, it simply has no keeper again. Under the one lock with
+    /// [`PagerCore::close`], so neither order leaves a pager parked for good.
+    fn keeper_closed(&self) {
+        debug_assert!(
+            !sched::started() || sched::may_block(),
+            "a keeper was closed where nothing may block"
+        );
+        let mut registry = self.requests.lock();
+        registry.kept = false;
+        if registry.state != Served::Parked {
+            return;
+        }
+        registry.state = Served::Dead;
+        self.closed.store(true, Ordering::Release);
+        drop(registry);
+        let _ = self.end_where(&|_| true, GONE, Errno(0));
+    }
+
+    /// The port to promise on for a fault, and the generation that answer holds
+    /// for: no port while parked, when a request is listed and sends nothing.
+    fn current(&self) -> (Option<Arc<Port>>, u64) {
+        let registry = self.requests.lock();
+        let port = (registry.state == Served::Live).then(|| Arc::clone(&registry.port));
+        (port, registry.generation)
     }
 
     /// End every outstanding request `pick` accepts with `state`, waking its
@@ -335,7 +552,7 @@ impl PagerCore {
         let mut ended = 0;
         loop {
             let mut batch: [Option<Arc<Request>>; END_BATCH] = [const { None }; END_BATCH];
-            let taken = take_ended(&mut self.requests.lock(), pick, &mut batch);
+            let taken = take_ended(&mut self.requests.lock().list, pick, &mut batch);
             for request in batch.iter().flatten() {
                 request.errno.store(u32::from(errno.0), Ordering::Relaxed);
                 request.state.store(state, Ordering::Release);
@@ -365,14 +582,18 @@ impl PagerCore {
         link: &PagerLink,
         fresh: &Arc<Request>,
         index: u64,
-    ) -> Result<(Arc<Request>, bool), Refusal> {
+        generation: u64,
+    ) -> Result<Listed, Refusal> {
         loop {
             let wanted = {
-                let mut requests = self.requests.lock();
+                let mut registry = self.requests.lock();
                 if self.closed.load(Ordering::Acquire) || link.detached.load(Ordering::Acquire) {
                     return Err(Refusal::Gone);
                 }
-                if let Some(open) = requests.iter().find(|open| {
+                if registry.generation != generation {
+                    return Ok(Listed::Stale);
+                }
+                if let Some(open) = registry.list.iter().find(|open| {
                     open.link == fresh.link
                         && open.job == fresh.job
                         && open.command == fresh.command
@@ -380,24 +601,24 @@ impl PagerCore {
                         && open.state() == OPEN
                 }) {
                     let _ = open.waiters.fetch_add(1, Ordering::Relaxed);
-                    return Ok((Arc::clone(open), false));
+                    return Ok(Listed::Joined(Arc::clone(open)));
                 }
-                if fallible::push_within(&mut requests, Arc::clone(fresh)).is_ok() {
-                    return Ok((Arc::clone(fresh), true));
+                if fallible::push_within(&mut registry.list, Arc::clone(fresh)).is_ok() {
+                    return Ok(Listed::Opened);
                 }
-                requests.capacity().saturating_mul(2).max(4)
+                registry.list.capacity().saturating_mul(2).max(4)
             };
             // Grown with the lock let go: the room for the next one is had
             // here, never under it (2858 (2)).
             let mut bigger: Vec<Arc<Request>> =
                 fallible::try_with_capacity(wanted).map_err(|_| Refusal::NoMemory)?;
-            let mut requests = self.requests.lock();
-            if requests.capacity() < wanted && requests.len() <= wanted {
+            let mut registry = self.requests.lock();
+            if registry.list.capacity() < wanted && registry.list.len() <= wanted {
                 // NOALLOC: `bigger` holds `wanted`, at least the listed ones.
-                bigger.append(&mut requests);
-                core::mem::swap(&mut *requests, &mut bigger);
+                bigger.append(&mut registry.list);
+                core::mem::swap(&mut registry.list, &mut bigger);
             }
-            drop(requests);
+            drop(registry);
             drop(bigger);
         }
     }
@@ -405,7 +626,7 @@ impl PagerCore {
     /// A waiter leaves `request`: the state it found, read under the lock.
     /// The last waiter to leave an open request abandons it, and says so.
     fn leave(&self, request: &Arc<Request>) -> (u8, bool) {
-        let mut requests = self.requests.lock();
+        let mut registry = self.requests.lock();
         let state = request.state();
         let left = request
             .waiters
@@ -414,8 +635,12 @@ impl PagerCore {
         if state != OPEN || left > 0 {
             return (state, false);
         }
-        if let Some(at) = requests.iter().position(|open| Arc::ptr_eq(open, request)) {
-            let _ = requests.swap_remove(at);
+        if let Some(at) = registry
+            .list
+            .iter()
+            .position(|open| Arc::ptr_eq(open, request))
+        {
+            let _ = registry.list.swap_remove(at);
         }
         request.state.store(ABANDONED, Ordering::Release);
         (OPEN, true)
@@ -490,22 +715,33 @@ impl PagerLink {
             _heap: heap,
         })
         .map_err(|_| Refusal::NoMemory)?;
-        let promise = Promise::new(&self.core.port).map_err(|_| Refusal::NoMemory)?;
-        let (request, opened) = self.core.list_or_join(self, &fresh, index)?;
+        let request = self.open_or_join(&fresh, index)?;
         drop(fresh);
-        if opened {
-            let signals = page_request(command.number(), u32::try_from(count).unwrap_or(u32::MAX));
-            Port::queue_promised(
-                promise,
-                PACKET_PAGE_REQUEST,
-                self.key,
-                signals,
-                [index.saturating_mul(PAGE_SIZE), request.id],
-            );
-        } else {
-            drop(promise);
-        }
         self.wait(&request)
+    }
+
+    /// List `fresh` for `index`, sending its packet unless parked, or join the
+    /// open request that covers it: the request to wait on.
+    fn open_or_join(&self, fresh: &Arc<Request>, index: u64) -> Result<Arc<Request>, Refusal> {
+        loop {
+            let (port, generation) = self.core.current();
+            let promise = port
+                .as_ref()
+                .map(Promise::new)
+                .transpose()
+                .map_err(|_| Refusal::NoMemory)?;
+            drop(port);
+            match self.core.list_or_join(self, fresh, index, generation)? {
+                Listed::Stale => {}
+                Listed::Joined(open) => return Ok(open),
+                Listed::Opened => {
+                    if let Some(promise) = promise {
+                        fresh.send(promise);
+                    }
+                    return Ok(Arc::clone(fresh));
+                }
+            }
+        }
     }
 
     /// Wait on `request`, bounded by the pager's `wait_ns`, and leave it.
@@ -620,6 +856,32 @@ fn take_ended(
         taken += 1;
     }
     taken
+}
+
+/// What [`PagerCore::list_or_join`] did.
+enum Listed {
+    /// The fresh request is listed.
+    Opened,
+    /// It joined this one.
+    Joined(Arc<Request>),
+    /// The pager parked or was taken up since the caller read its port.
+    Stale,
+}
+
+/// The `PAGER` audit record of a park (the kernel's own, as a dying table's) or a
+/// take-up, which is a grant of authority over the pager's clients (ledger 5968 (6)).
+pub fn record_rebind(subject: audit::Subject, outstanding: u32) {
+    audit::record(
+        audit::PAGER,
+        audit::Outcome::Done,
+        0,
+        subject,
+        audit::Target {
+            kind: audit::target::JOB,
+            id: subject.job,
+        },
+        [outstanding, 0, 0],
+    );
 }
 
 /// The `PAGER` audit record of `request`, ended without its page.

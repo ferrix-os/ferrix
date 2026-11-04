@@ -47,13 +47,14 @@ use ferrix_netring::control::{
     CONTROL_RIGHTS as NET_CONTROL_RIGHTS, DEVICE_RIGHTS as NET_DEVICE_RIGHTS, MAX_MESSAGE,
     Message as NetRing, Start as NetStart,
 };
+use ferrix_process_builder::build;
 use ferrix_restart::{Ended, Escalation, Exit, Instant, Next, Policy, Restart, Signal};
 use ferrix_rt::native::channel::{self, Channel, ReadError};
 use ferrix_rt::native::device::{Device, Limit};
 use ferrix_rt::native::error::Error;
 use ferrix_rt::native::handle::{Deadline, Object, OwnedHandle};
 use ferrix_rt::native::job::Job;
-use ferrix_rt::native::pending::{self, Process};
+use ferrix_rt::native::pending::Process;
 use ferrix_rt::native::port::{self, Port};
 use ferrix_rt::native::vmo::{self, Vmo};
 use ferrix_rt::{Bootstrap, Kernel};
@@ -902,9 +903,9 @@ fn spawn_updater(drivers: &Drivers<'_>, port: &Port<Kernel>) -> Option<Updater> 
         .and_then(Option::as_ref)?;
     let started = (|| {
         let job = drivers.job.create_sealed_child().ok()?;
-        let process = pending::create_process(&job, image, "drvupdated").ok()?;
+        let built = build(&job, image, "drvupdated", ferrix_rt::ELF_MACHINE).ok()?;
         let (near, far) = channel::create(Kernel).ok()?;
-        process.start(far.into_owned()).ok()?;
+        let process = built.run(far.into_owned()).ok()?;
         near.wait_async(port, Signals::READABLE | Signals::PEER_CLOSED, KEY_UPDATE)
             .ok()?;
         Some(Updater {
@@ -974,9 +975,9 @@ fn spawn_events(drivers: &Drivers<'_>) -> Option<Events> {
         .and_then(Option::as_ref)?;
     let started = (|| {
         let job = drivers.job.create_child().ok()?;
-        let process = pending::create_process(&job, image, "devmgr-events").ok()?;
+        let built = build(&job, image, "devmgr-events", ferrix_rt::ELF_MACHINE).ok()?;
         let (near, far) = channel::create(Kernel).ok()?;
-        process.start(far.into_owned()).ok()?;
+        let process = built.run(far.into_owned()).ok()?;
         Some(Events {
             channel: near,
             _job: job,
@@ -2006,6 +2007,9 @@ fn copy_image(given: &Vmo<Kernel>, length: u64) -> Option<Image> {
         fingerprint.update(bytes);
         offset += take as u64;
     }
+    // Executable, not writable: what a process is built from (K15). It keeps
+    // `DUPLICATE`, since a keeper is given a narrowed duplicate of a worker's.
+    let vmo = vmo.executable().ok()?;
     Some(Image {
         vmo,
         length,
@@ -2021,15 +2025,18 @@ fn loads(job: &Job<Kernel>, image: &Vmo<Kernel>, program: &str) -> bool {
     let Ok(scratch) = job.create_sealed_child() else {
         return false;
     };
-    let loaded = match pending::create_process(&scratch, image, program) {
-        Ok(process) => {
+    let loaded = match build(&scratch, image, program, ferrix_rt::ELF_MACHINE) {
+        Ok(built) => {
             let _ = scratch.kill();
             let deadline = ferrix_rt::linux::monotonic_nanos().map_or(Deadline::Never, |now| {
                 Deadline::At(now.saturating_add(TRIAL_PATIENCE_NANOS))
             });
             // A trial that is not gone in time refuses the update with
             // nothing stopped (the certification consultant's K2).
-            process.wait_one(Signals::TERMINATED, deadline).is_ok()
+            built
+                .process()
+                .wait_one(Signals::TERMINATED, deadline)
+                .is_ok()
         }
         Err(_) => false,
     };
@@ -2528,7 +2535,7 @@ fn end_job_tree(job: &Job<Kernel>, location: u32) -> bool {
 const KEEPER_JOB_RIGHTS: Rights = Rights(Rights::TRANSFER.0 | Rights::WAIT.0 | Rights::MANAGE.0);
 
 /// The rights a keeper holds on its worker's image: enough to start it.
-const WORKER_IMAGE_RIGHTS: Rights = Rights(Rights::READ.0 | Rights::TRANSFER.0);
+const WORKER_IMAGE_RIGHTS: Rights = ferrix_native_abi::rights::IMAGE_RIGHTS;
 
 /// Start the Intel GPU's keeper: START as an engine's, with two more
 /// handles after the device, its own job and the worker's image
@@ -3091,11 +3098,11 @@ fn launch_in<const N: usize>(
     start: &[u8],
     handles: [OwnedHandle<Kernel>; N],
 ) -> Result<Launched, ()> {
-    let process = pending::create_process(&child_job, image, program).map_err(|_| ())?;
+    let built = build(&child_job, image, program, ferrix_rt::ELF_MACHINE).map_err(|_| ())?;
     let (near, far) = channel::create(Kernel).map_err(|_| ())?;
     near.write_with(start, handles).map_err(|_| ())?;
-    process.notify_on_exit(port, key).map_err(|_| ())?;
-    process.start(far.into_owned()).map_err(|_| ())?;
+    built.process().notify_on_exit(port, key).map_err(|_| ())?;
+    let process = built.run(far.into_owned()).map_err(|_| ())?;
     Ok((child_job, process, near))
 }
 

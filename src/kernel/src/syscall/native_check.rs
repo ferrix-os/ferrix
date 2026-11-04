@@ -170,8 +170,8 @@ fn the_wrong_kind_of_handle_is_refused(
             "a VMO was written as a channel",
         ),
         (
-            nr::PROCESS_START,
-            [wrong, 0, 0, 0, 0],
+            nr::PROCESS_RUN,
+            [wrong, 0x1000, 0x1000, 0, 0],
             "a VMO was started as a process",
         ),
         (
@@ -615,10 +615,12 @@ fn a_bootstrap_without_transfer_is_refused(
         .call(nr::VMO_WRITE, &[reg(image), IMAGE_AT, len, OFFSET])
         .map_err(|_| "a child's image could not be written")?;
     side.put(NAME_AT, CHILD_NAME)?;
-    let child = side.handle(
-        nr::PROCESS_CREATE,
-        &[reg(root), reg(image), NAME_AT, CHILD_NAME.len() as u64],
-        "process_create failed",
+    let child = side.built(
+        root,
+        image,
+        NAME_AT,
+        CHILD_NAME.len() as u64,
+        "process_make failed",
     )?;
     let (bootstrap, _other) = channel(side)?;
     let kept = side.handle(
@@ -627,7 +629,7 @@ fn a_bootstrap_without_transfer_is_refused(
         "handle_duplicate without TRANSFER failed",
     )?;
     refused(
-        side.call(nr::PROCESS_START, &[reg(child), reg(kept)]),
+        side.run(child, reg(kept)),
         status::ACCESS_DENIED,
         "a child was started with a bootstrap handle that may not be transferred",
         report,

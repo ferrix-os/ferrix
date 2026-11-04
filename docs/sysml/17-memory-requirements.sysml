@@ -3115,6 +3115,48 @@ package FerrixMemoryRequirements {
              * address space keeps of a mapping made by handle. Stage 9's `space`
              * line verifies each. */
 
+        requirement <'L.user.200'> theFirstImageIsLoadedAsItAsks : ItemLowLevel {
+            attribute :>> statement = "first_image::load shall map every PT_LOAD of an image into an empty space as anonymous memory, the file bytes copied, .bss zero, permissions by page.";
+            attribute :>> criterion = "A two-segment image's bytes read back; an executable leaf and no W+X leaf in the sweep (the `build` line).";
+            attribute :>> parent = "H.MEM.27";
+            attribute :>> unit = ("discovery::first_image::load");
+        }
+
+        requirement <'L.user.201'> theFirstImageHasNoWXPage : ItemLowLevel {
+            attribute :>> statement = "first_image::load shall refuse an image with a page that would be writable and executable, with nothing mapped.";
+            attribute :>> criterion = "An RWX segment and two segments sharing a page: WriteExecute, no region left (the `build` line).";
+            attribute :>> parent = "H.MEM.27";
+            attribute :>> unit = ("discovery::first_image::load", "discovery::first_image::flags_of");
+        }
+
+        requirement <'L.user.202'> theFirstImageRefusesWhatCannotRun : ItemLowLevel {
+            attribute :>> statement = "first_image::load shall refuse another machine or class, a PT_INTERP, an entry or a segment outside user space, a truncated header and no loadable segment, without a stop.";
+            attribute :>> criterion = "Seven malformed images, each refused (the `build` line).";
+            attribute :>> parent = "H.MEM.27";
+            attribute :>> unit = ("discovery::first_image::load", "discovery::first_image::moved");
+        }
+
+        requirement <'L.user.203'> theFirstStackIsPlaced : ItemLowLevel {
+            attribute :>> statement = "first_image::load shall place the stack and its guards where ferrix-native-abi's constants say, as the loader library does.";
+            attribute :>> criterion = "The three regions read back at their addresses and permissions (the `build` line); a compile-time assertion against exec.rs's constants.";
+            attribute :>> parent = "H.MEM.27";
+            attribute :>> unit = ("discovery::first_image::place_stack");
+        }
+
+        requirement <'L.user.204'> theElfParserValidates : ItemLowLevel {
+            attribute :>> statement = "ferrix-elf's parse, validate_segments_within and load_span shall refuse a header or segment outside the image.";
+            attribute :>> criterion = "ferrix-elf's host tests and the elf_parse fuzz target, gate-level rows.";
+            attribute :>> parent = "H.MEM.27";
+            attribute :>> unit = ("discovery::first_image::elf_bytes");
+        }
+
+        requirement <'L.user.205'> firstImageHasOneCaller : ItemLowLevel {
+            attribute :>> statement = "first_image::load shall be called only from discovery/devmgr.rs and check files, and no other product file but the Linux loader's shall parse an ELF.";
+            attribute :>> criterion = "check-item-boundary.py's loader rule, with a planted caller failing it.";
+            attribute :>> parent = "H.MEM.26";
+            attribute :>> unit = ("discovery::first_image::load");
+        }
+
         requirement <'L.user.158'> aRegionByHandleKeepsItsCeiling : ItemLowLevel {
             attribute :>> statement = "A region vmo_map or space_map made shall record
                 the most its handle allowed, readable always, writable only with

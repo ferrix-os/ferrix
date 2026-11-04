@@ -123,7 +123,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 | `FerrixSigningRequirements` | `26-signing-requirements.sysml` | docs/SIGNING.md is the design (the certification consultant's OK IF at ledger lines 3667 and 3738; the customer's decisions at 3731). Slice S1 builds the verify-only crate `ferrix-sigverify` (src/lib/crypto/sigverify) and the hash it rests on, `ferrix-sha256` (src/lib/crypto/sha256), both in the item ring (certification-item.json's crates). What the UEFI loader, init's configuration verifier and devmgr do with the verifier's answer is theirs, and gets ids in their own slices (S4, S8, S9). |
 
-27 files, 164 packages, 9220 elements, 220 relations. Model digest `b2387a1be043ddc1`.
+27 files, 164 packages, 9346 elements, 220 relations. Model digest `1cec2c85db6cb595`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -252,6 +252,10 @@ Address spaces, the frames under them and the mappings that reach them: O.ISOLAT
 | `H.MEM.17` | A frame taken out of a translation, of a user address space or of the kernel's, shall not return to the frame allocator until the TLB invalidation that covers it has been made on every processor that may still use the translation. | A frame an unmap, a decommit or a replace takes out of a translation that another processor has cached is still allocated until that processor's shootdown returns: 0 frames freed before it, on every architecture. | `O.ISOLATE, ASR-1` |
 | `H.MEM.18` | The kernel shall refuse to map a device window executable into a user address space, and a native VMO executable except through space_map with EXECUTE on both the space handle and the VMO handle (H.MEM.24), and shall map the vDSO's data page read-only. | An executable device window and an executable vmo_map are each refused, 0 mapped; the vDSO's data page reads back not writable, and a write to it faults. | `O.WXN, O.ISOLATE` |
 | `H.MEM.19` | Once a grace period the kernel waits for has ended, no read-side section that was running on any processor when the wait began shall still be running. | A writer that replaces an object every other online processor is reading, waits a grace period and poisons the replaced one, 100 times over, leaves 0 reads of a poisoned object among more than 0 reads (the `grace` line). | `O.ISOLATE, ASR-1` |
+| `H.OBJ.28` | A pager with a keeper whose handle closes shall hold its outstanding requests until pager_take_up, which shall send each again to the new port under its own id, or the keeper's close, or each waiter's bound, whichever comes first; present pages and their Dirty state shall stay; and everything held meanwhile shall stay charged to the job that was charged for it. | Stage 9's `rebind` line: read, dirty and copy waits across a close answered by the next instance, two cycles, each waiter's bound and the keeper's close ending parked waits. | `O.ISOLATE` |
+| `H.OBJ.27` | A native process made by process_make shall begin with an empty address space, and shall run only what its creator mapped, entered at an entry point and on a stack the kernel has checked lie in user space. In a kernel built with personality=user the kernel shall parse no image on any call a program can make. | Stage 9's `build` line; in a personality=user build, the numbers of process_create and process_start answer ENOSYS. | `O.VALIDATE, O.ISOLATE` |
+| `H.MEM.26` | In a kernel built with personality=user, the kernel's one loader shall load only images read from the initramfs, for the processes the kernel itself starts, and constants of the in-kernel checks. | check-item-boundary.py's loader rule: first_image::load is called only from discovery/devmgr.rs and check files, with a planted caller failing it. In present and desktop ferrix.devmgr=init still parses what pid 1 left at /sbin/devmgr, as ITEM.md section 5 and VULNERABILITY-ANALYSIS.md say. | `O.VALIDATE` |
+| `H.MEM.27` | On every profile, the kernel's one loader shall leave no page both writable and executable, and shall refuse a malformed image and never panic; what a refused devmgr then does is stage 10's stated fatal. | Stage 9's `build` line: 0 leaves writable and executable, 7 malformed images refused. | `O.WXN, ASR-2` |
 | `H.MEM.24` | An address space reached by handle shall be mapped, unmapped, protected and read only as that handle's rights allow; no mapping made by handle shall be both writable and executable; an executable mapping by handle shall need EXECUTE on the space handle and on the VMO handle; and a process's space shall be given by handle only to its creator, before it starts. | Stage 9's `space` line: every by-handle call refused without its right, an executable mapping refused without EXECUTE on either handle and made with both, a writable and executable protection refused by the decoder and by the space itself, process_space refused without MANAGE, for a process its handle cannot reach and after the start, and the sweep of every user root the check reached finding 0 leaves writable and executable and more than 0 executable. | `O.ISOLATE, O.WXN, O.CAPABILITY, ASR-2, ASR-3` |
 | `H.MEM.25` | A copy-on-write clone of an address space made by handle shall never see a write its source makes after the clone, by any path, nor the source one the clone makes; memory both map shared shall stay shared. | Stage 9's `space` line, clone: the source's writable translation of a private page gone and a shootdown begun before space_clone answers; a write after the clone by either side, by a kernel copy and to a page made read-only before the clone and writable after it (F-41), unseen by the other; a shared mapping's write seen by both; a page both hold given back to one as the clone goes. A program's own store through a stale translation after a fork is stage 6's USER_COW_PROGRAM check (H.MEM.8, L.user.61; F-41 itself is L.user.60), through the same AddressSpace::fork. | `O.ISOLATE, ASR-1` |
 | `H.MEM.29` | A sealed VMO's contents and length shall never change after its seal, and its digest shall be the kernel's, computed from its frames after the freeze. | object::sealing_check on every boot, and check-vmo-seal-tags.py in xtask check; L.mm.111-114. | `O.CAPABILITY, ASR-3` |
@@ -259,7 +263,7 @@ Address spaces, the frames under them and the mappings that reach them: O.ISOLAT
 | `H.MEM.22` | An absent page of a pager-backed VMO shall become present only by its pager's supply. A thread shall wait on a pager only for a fault on, or a kernel copy into, a pager-backed VMO its own process maps or names, and the wait shall end on the supply, the pager's failure, the process's end, the pager's close, or the pager's bound of at most 30 s; every ending but the supply shall give the faulting process SIGBUS or its call an error, and none shall stop the kernel. | Stage 9's pager check (the `pager` line): faults forwarded and supplied, shared within a job and apart across jobs; failed, timed-out, closed and killed waits ended without their page, the bound held from below, the failures audited; copies waiting or refused; each with its negative control (K3.md section 6). | `O.FAILSAFE, O.ISOLATE` |
 | `H.MEM.23` | A write to a page of a pager-backed VMO shall keep the page in the dirty set until a write-back that began after the write ends; a page in the dirty set shall never be decommitted or reclaimed. | Stage 9's pager check (the `pager` line): a Clean page is never mapped writable, a write-back takes the write right away before it returns, a write after it is Dirty after its end, and a decommit takes Clean pages only; each with its negative control (K3.md section 6). | `O.ISOLATE, ASR-1` |
 
-25 requirements.
+29 requirements.
 
 ### Objects
 
@@ -4153,6 +4157,22 @@ flowchart LR
 | `L.object.205` | `addressRequeueDecodes` | — | — | — |
 | `L.object.206` | `addressWaitAnyDecodes` | — | — | — |
 | `L.object.232` | `aMadeSpaceIsEmptyAndItsMakers` | — | — | — |
+| `L.object.290` | `processMakeMakesAnEmptyProcess` | — | — | — |
+| `L.object.291` | `processRunIsJudgedLikeAStart` | — | — | — |
+| `L.object.292` | `processRunChecksEntryAndStack` | — | — | — |
+| `L.object.293` | `aProcessEntersWhereItIsTold` | — | — | — |
+| `L.object.294` | `anEmptySpaceOnlyEndsTheChild` | — | — | — |
+| `L.object.295` | `theOldCallsAreCompiledOut` | — | — | — |
+| `L.object.296` | `nothingOfASpaceThroughAStartedHandle` | — | — | — |
+| `L.object.299` | `noPagerRefusesAPagerVmo` | — | — | — |
+| `L.object.306` | `theImageRights` | — | — | — |
+| `L.object.300` | `aPagerHasOneKeeper` | — | — | — |
+| `L.object.301` | `aParkedPagerEndsNothing` | — | — | — |
+| `L.object.302` | `aTakeUpSendsEachAgain` | — | — | — |
+| `L.object.303` | `aParkedWaitIsBounded` | — | — | — |
+| `L.object.304` | `aKeepersCloseEndsAParkedPager` | — | — | — |
+| `L.object.305` | `parkedStateStaysCharged` | — | — | — |
+| `L.object.307` | `dirtyStaysAcrossARestart` | — | — | — |
 | `L.object.233` | `onlyTheCreatorBeforeTheStart` | — | — | — |
 | `L.object.234` | `anExecutableMappingNeedsBothHandles` | — | — | — |
 | `L.object.235` | `anUnmapByHandleNeedsMap` | — | — | — |
@@ -4569,6 +4589,12 @@ flowchart LR
 | `L.user.142` | `anEndingCallerLeaves` | — | — | — |
 | `L.user.143` | `aWaitOutlivesItsMapping` | — | — | — |
 | `L.user.144` | `aWaiterIsChargedAndBucketsShrink` | — | — | — |
+| `L.user.200` | `theFirstImageIsLoadedAsItAsks` | — | — | — |
+| `L.user.201` | `theFirstImageHasNoWXPage` | — | — | — |
+| `L.user.202` | `theFirstImageRefusesWhatCannotRun` | — | — | — |
+| `L.user.203` | `theFirstStackIsPlaced` | — | — | — |
+| `L.user.204` | `theElfParserValidates` | — | — | — |
+| `L.user.205` | `firstImageHasOneCaller` | — | — | — |
 | `L.user.158` | `aRegionByHandleKeepsItsCeiling` | — | — | — |
 | `L.user.159` | `noRegionByHandleIsWritableAndExecutable` | — | — | — |
 | `L.user.160` | `aCloneByHandleCopiesOnWrite` | — | — | — |

@@ -54,7 +54,7 @@
     },
     {
       "file": "arch/x86_64/mod.rs",
-      "lines": "2023, 2025",
+      "lines": "2025, 2027",
       "category": "defensive",
       "match": "for _ in 0..1000 {",
       "why": "The keyboard controller's reset pulse, tried only when the FADT's reset register did not reset the machine. q35's register resets it at once (`boot-reset`), so the wait for the 8042's input buffer never starts. What it defends against is firmware that names a reset register that does nothing, which Linux's reboot order also allows for."
@@ -250,56 +250,56 @@
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "139-140",
+      "lines": "140-141",
       "category": "defensive",
       "match": "Err(Errno::ENOENT)",
       "why": "The reader of a kernel whose filesystem registered none. Every build registers one before devmgr starts, and register_load refuses to boot without it (LOAD_REGISTRATION), so it is never the one called."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "414-416",
+      "lines": "415-417",
       "category": "defensive",
       "match": "for (_, answer) in PENDING.lock().iter_mut() {",
       "why": "devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "419",
+      "lines": "420",
       "category": "defensive",
       "match": "ANSWERED.wake_all();",
       "why": "devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "548",
+      "lines": "549",
       "category": "absent-hardware",
       "match": "return Ok(None);",
       "why": "An image with no /sbin/devmgr: every image xtask builds carries it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "1238",
+      "lines": "1248",
       "category": "failure-path",
       "match": "_ => return Err(\"devmgr said something other than REPORT fir",
       "why": "A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "1242",
+      "lines": "1252",
       "category": "failure-path",
       "match": "Err(_) => return Err(\"devmgr closed its channel before repor",
       "why": "A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "1253",
+      "lines": "1263",
       "category": "failure-path",
       "match": "return Err(\"devmgr reported nothing within the patience\");",
       "why": "A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "1309",
+      "lines": "1319",
       "category": "defensive",
       "match": "}",
       "why": "The listener's end when devmgr's channel closes: devmgr does not exit in a running system, so the loop never meets a closed channel."
@@ -1090,56 +1090,56 @@
     },
     {
       "file": "syscall/native.rs",
-      "lines": "224",
+      "lines": "226",
       "category": "defensive",
       "match": ".map(|served| served.call)",
       "why": "The call a boot finds the load ring left unanswered: register_load requires unserved() to be None before the boot goes on (LOAD_REGISTRATION), so the closure naming the call runs only on a kernel whose load forgot a handler."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "316",
+      "lines": "338",
       "category": "defensive",
       "match": "None => caller.core().is_terminated(),",
       "why": "The wait's exit test on a kernel with no personality registered: every build registers one before the first program runs (register_load, checked at boot), so a native wait always asks the personality."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "599-600",
+      "lines": "625-626",
       "category": "credited-elsewhere",
       "match": "TableError::Full => status::NO_HANDLES,",
       "why": "Run by the native refusal check: a duplicate into a full table answers NO_HANDLES and a message naming one handle twice answers INVALID_ARGS, both required. Those callers inline table_error; the arms' rows are only in its out-of-line copy, whose callers never meet these two errors."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "1428-1429",
+      "lines": "1454-1455",
       "category": "defensive",
       "match": "object::dispose(message.handles.into_iter().map(|(object, _)",
       "why": "The queue refusing to take back at its head a message it gave up a moment earlier: its capacity still holds the slot, so putting it back needs no memory."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2663",
+      "lines": "2820",
       "category": "defensive",
       "match": "return Err(status::BAD_STATE);",
       "why": "A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2666",
+      "lines": "2823",
       "category": "defensive",
       "match": "return Err(status::NO_HANDLES);",
       "why": "A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2682-2683",
+      "lines": "2839-2840",
       "category": "defensive",
       "match": "Err(Err(object)) => {",
       "why": "An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "3447",
+      "lines": "3604",
       "category": "absent-hardware",
       "match": "return Err(status::INVALID_ARGS);",
       "why": "A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine."

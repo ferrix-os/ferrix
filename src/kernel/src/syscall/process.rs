@@ -2509,6 +2509,16 @@ pub(crate) fn claim_start(process: &Arc<Process>) -> Result<StartClaim, &'static
     Ok(claim)
 }
 
+/// Take the claim on a process made with nothing loaded, whose entry its creator
+/// names under the claim (`docs/microkernel/K15.md` §2.1).
+pub(crate) fn claim_empty_start(process: &Arc<Process>) -> Result<StartClaim, &'static str> {
+    let claim = take_claim(process)?;
+    if process.is_terminated() {
+        return Err("the process has already ended");
+    }
+    Ok(claim)
+}
+
 /// Take the claim whether or not a program is loaded: a fork child resumes from
 /// its parent's registers instead.
 fn take_claim(process: &Arc<Process>) -> Result<StartClaim, &'static str> {

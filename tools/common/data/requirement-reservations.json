@@ -33,11 +33,10 @@
     },
     {
       "ids": [
-        "H.MEM.26-28",
-        "H.OBJ.27-29",
-        "L.object.290-296",
-        "L.object.298-308",
-        "L.user.200-219"
+        "H.MEM.28",
+        "H.OBJ.29",
+        "L.object.308",
+        "L.user.206-219"
       ],
       "owner": "mk-m2",
       "branch": "feature/mk-m2",

@@ -136,7 +136,7 @@ fn made_as_its_creator(harness: &Harness, side: &Side) -> Checked<u32> {
     drop(made);
 
     let _ = side
-        .call(nr::PROCESS_START, &[reg(child), 0])
+        .run(child, 0)
         .map_err(|_| "the creator check's child would not start")?;
     wait(
         side,
@@ -188,10 +188,12 @@ fn create(side: &Side, job: Handle, file: &[u8]) -> Checked<Handle> {
         .call(nr::VMO_WRITE, &[reg(vmo), IMAGE_AT, len, OFFSET])
         .map_err(|_| "the creator check's image could not be written")?;
     side.put(NAME_AT, CHILD_NAME)?;
-    side.handle(
-        nr::PROCESS_CREATE,
-        &[reg(job), reg(vmo), NAME_AT, CHILD_NAME.len() as u64],
-        "process_create by uid 1000 in its delegated cgroup was refused",
+    side.built(
+        job,
+        vmo,
+        NAME_AT,
+        CHILD_NAME.len() as u64,
+        "process_make by uid 1000 in its delegated cgroup was refused",
     )
 }
 

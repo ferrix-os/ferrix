@@ -1212,6 +1212,10 @@ fn every_call_in_the_native_table_has_a_wrapper() {
     let _ = made_space.write(0, &[]);
     let _ = made_space.clone_space();
     let _ = Process::from_owned(handle()).space(Requested::Same);
+    let _ = pending::make_process(&Job::from_owned(handle()), "");
+    let _ = Process::from_owned(handle()).run(0, 0, handle());
+    let _ = pending::pager_keep(&sys, Handle(1));
+    let _ = pending::pager_take_up(&handle(), &Port::from_owned(handle()));
     let _ = Vmo::from_owned(handle()).executable();
     let _ = Vmo::from_owned(handle()).digest(&mut [0; 32]);
     let _ = Process::from_owned(handle()).images(&mut []);

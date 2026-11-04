@@ -1890,6 +1890,39 @@ def _build_packages(**changes) -> dict[str, tuple[str, dict]]:
     return packages
 
 
+def loader_problems(manifest: dict, sources: dict[str, str]) -> list[str]:
+    """K15: who in the kernel may parse an ELF, and who may call the one loader.
+
+    `docs/microkernel/K15.md` section 5. A program's image is parsed in the
+    program; a new caller here is a parser back in ring 0, which the review of
+    that caller decides. Check files are outside it.
+    """
+    allowed = manifest.get("loader_callers", {})
+    rules = (
+        ("elf_parse", re.compile(r"\bElf::parse\b|\bferrix_elf::Elf\b"), "parses an ELF"),
+        ("first_image_load", re.compile(r"\bfirst_image::load\b"), "calls the kernel's one loader"),
+    )
+    problems = []
+    for key, pattern, what in rules:
+        for rel, text in sorted(sources.items()):
+            if rel not in allowed.get(key, []) and pattern.search(text):
+                problems.append(f"{rel} {what}, and loader_callers does not name it (K15)")
+    return problems
+
+
+def _loader_self_test() -> list[str]:
+    manifest = {"loader_callers": {"elf_parse": ["a.rs"], "first_image_load": ["a.rs"]}}
+    good = {"a.rs": "Elf::parse(x); first_image::load(s, x);", "b.rs": "// nothing"}
+    failures = []
+    if loader_problems(manifest, good):
+        failures.append("loader rule: a named caller was refused")
+    if len(loader_problems(manifest, {"b.rs": "ferrix_elf::Elf::parse(x);"})) != 1:
+        failures.append("loader rule: a planted parser passed")
+    if len(loader_problems(manifest, {"b.rs": "first_image::load(s, x);"})) != 1:
+        failures.append("loader rule: a planted loader call passed")
+    return failures
+
+
 def _build_script_self_test() -> list[str]:
     """(K1)'s cases: the four as built pass; a library without the build line,
     one naming another script, the load among them, and an outside package
@@ -2027,6 +2060,7 @@ _EXPECT = {
 
 def self_test() -> list[str]:
     failures = [f"lexer: {f}" for f in rustlex.self_test()]
+    failures += _loader_self_test()
     files = sorted(_CRATE)
     modules, refs, problems = build(files, lambda rel: _CRATE[rel])
     failures += [f"build: {p}" for p in problems]
@@ -3042,6 +3076,9 @@ def main() -> int:
         with (ROOT / path / "Cargo.toml").open("rb") as handle:
             return tomllib.load(handle)
 
+    kernel_problems += loader_problems(
+        manifest, {rel: (KERNEL_SRC / rel).read_text() for rel in files if not is_test_file(rel, manifest)}
+    )
     kernel_problems += build_script_problems(
         {package: entry.get("path", "") for package, entry in kernel_entries.items()},
         workspace_packages(), lambda path: (ROOT / path).is_file(),

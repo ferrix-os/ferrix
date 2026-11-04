@@ -27,6 +27,7 @@ ferrix-displayctl.workspace = true
 ferrix-intel-xelp.workspace = true
 ferrix-linux-abi.workspace = true
 ferrix-native-abi.workspace = true
+ferrix-process-builder.workspace = true
 ferrix-rt.workspace = true
 
 [lints]

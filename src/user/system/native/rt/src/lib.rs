@@ -50,6 +50,7 @@
 #![no_std]
 
 mod arch;
+pub use arch::ELF_MACHINE;
 pub mod linux;
 pub mod log;
 

@@ -33,7 +33,7 @@ use crate::object::process::{self as core_process, Host};
 use crate::syscall::credentials::Credentials;
 use crate::syscall::exec::{self, ExecError};
 use crate::syscall::load::{LoadError, Source};
-use crate::syscall::native::{self, Argument, Processes, StartRefused};
+use crate::syscall::native::{self, Argument, EntryPoint, Processes, StartRefused};
 use crate::syscall::process::{self, Process};
 use crate::syscall::{attributes, registry};
 use crate::user::space::SpaceError;
@@ -48,6 +48,7 @@ static LAUNCHER: Launcher = Launcher {
 /// What the native ABI and `devmgr` are lent.
 static PROCESSES: Processes = Processes {
     load: load_native,
+    make: make_native,
     start: start_native,
     must_leave,
 };
@@ -118,6 +119,33 @@ pub(crate) fn load_native(
     image: &[u8],
     name: &[u8],
 ) -> Result<Arc<dyn Host>, Errno> {
+    let (creator, credentials, context, pids) = as_its_creator(creator)?;
+    let child = exec::load_native_in(image, name, credentials, context, pids.as_ref())
+        .map_err(load_status)?;
+    from_its_creator(creator, child)
+}
+
+/// [`load_native`] without the loader: a process with an empty address space
+/// and everything else of a native child's (`docs/microkernel/K15.md` §2.1). The
+/// item's `process_make`, and the kernel's start of `devmgr`, which then loads it
+/// with `discovery::first_image`.
+pub(crate) fn make_native(creator: Option<&dyn Host>, name: &[u8]) -> Result<Arc<dyn Host>, Errno> {
+    let (creator, credentials, context, pids) = as_its_creator(creator)?;
+    let child =
+        exec::make_native_in(name, credentials, context, pids.as_ref()).map_err(load_status)?;
+    from_its_creator(creator, child)
+}
+
+/// What a native child takes from `creator` before it exists.
+type FromCreator<'a> = (
+    Option<&'a Process>,
+    Credentials,
+    Option<ferrix_vfs::Context>,
+    Option<Arc<crate::syscall::pidns::PidNamespace>>,
+);
+
+/// Its ids, its fs context and the pid namespace its children are born in.
+fn as_its_creator(creator: Option<&dyn Host>) -> Result<FromCreator<'_>, Errno> {
     let creator = creator
         .map(|creator| process::of_host(creator).ok_or(status::BAD_STATE))
         .transpose()?;
@@ -129,8 +157,14 @@ pub(crate) fn load_native(
         None => (Credentials::root(), None),
     };
     let pids = creator.and_then(Process::children_namespace);
-    let child = exec::load_native_in(image, name, credentials, context, pids.as_ref())
-        .map_err(load_status)?;
+    Ok((creator, credentials, context, pids))
+}
+
+/// What a native child takes from `creator` once it is registered.
+fn from_its_creator(
+    creator: Option<&Process>,
+    child: Arc<Process>,
+) -> Result<Arc<dyn Host>, Errno> {
     // After `exec::load_native` registered it, so that the entry is not
     // pruned as a pid nothing finds, and before anything can start it.
     if let Some(creator) = creator {
@@ -188,10 +222,23 @@ fn load_status(error: ExecError) -> Errno {
 /// anything moved, and everything that can fail about the task has failed
 /// before `argument` moves a handle into the process. A refused argument
 /// drops the prepared start, which frees the task and gives the start back.
-fn start_native(host: &Arc<dyn Host>, argument: Argument<'_>) -> Result<(), StartRefused> {
+fn start_native(
+    host: &Arc<dyn Host>,
+    at: Option<EntryPoint>,
+    argument: Argument<'_>,
+) -> Result<(), StartRefused> {
     let process =
         core_process::downcast::<Process>(Arc::clone(host)).ok_or(StartRefused::Claimed)?;
-    let claim = process::claim_start(&process).map_err(|_| StartRefused::Claimed)?;
+    let claim = match at {
+        // Set under the claim, so a second start cannot change what the first
+        // enters, and a refused start leaves nothing the next one depends on.
+        Some(at) => {
+            let claim = process::claim_empty_start(&process).map_err(|_| StartRefused::Claimed)?;
+            process.set_startup(exec::native_startup(at.entry, at.stack));
+            claim
+        }
+        None => process::claim_start(&process).map_err(|_| StartRefused::Claimed)?,
+    };
     let prepared = claim.prepare(None).map_err(|_| StartRefused::NoTask)?;
     let argument = argument().map_err(StartRefused::Argument)?;
     let _task = prepared.start(argument);

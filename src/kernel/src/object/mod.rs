@@ -84,6 +84,9 @@ pub enum Object {
     /// A pager: the one handle that serves its VMOs' faults
     /// (`docs/microkernel/K3.md`). Its close is the pager's death.
     Pager(Arc<pager::Pager>),
+    /// A pager's keeper: with it the pager's close parks it, and the next
+    /// instance of its server takes it up (`docs/microkernel/K13.md`).
+    PagerKeeper(Arc<pager::Keeper>),
     /// The capability to ask the kernel to start `devmgr`
     /// (`docs/INIT.md` §7.3, L12): a token with nothing in it. What it
     /// permits is decided where `devmgr_start` is answered -- the kernel
@@ -140,6 +143,7 @@ impl Object {
             | Object::Process(_)
             | Object::Port(_)
             | Object::Pager(_)
+            | Object::PagerKeeper(_)
             | Object::Starter
             | Object::Audit
             | Object::CpuService
@@ -168,6 +172,7 @@ impl Object {
             | Object::IoMapping(_)
             | Object::Pin(_)
             | Object::Pager(_)
+            | Object::PagerKeeper(_)
             | Object::Starter
             | Object::Audit
             | Object::CpuService
@@ -343,6 +348,7 @@ impl Object {
             | Object::Port(_)
             | Object::Timer(_)
             | Object::Pager(_)
+            | Object::PagerKeeper(_)
             | Object::Starter
             | Object::Audit
             | Object::CpuService

@@ -7,6 +7,8 @@ pub(crate) mod copy_mc;
 pub mod cpu;
 pub mod exception_check;
 pub(crate) mod rehome_check;
+// CHECKS-ONLY: syscall/build_check.rs
+pub mod programs_check;
 pub(crate) use cpu::clean_for_walker;
 /// The region the kernel log is kept in across a reset, written back before
 /// a reset may discard the caches (see [`crate::arch::write_back_for_reset`]):

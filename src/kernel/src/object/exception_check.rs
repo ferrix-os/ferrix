@@ -106,13 +106,9 @@ pub fn run() -> Result<Report, &'static str> {
 
     attach_and_detach_a_job(&side, job, &job_object, &mut report)?;
     let vmo = image_vmo(&side, arch::USER_ARGUMENT_PROGRAM, IMAGE_AT)?;
-    let process = side.handle(
-        nr::PROCESS_CREATE,
-        &[reg(job), reg(vmo), NAME_AT, NAME.len() as u64],
-        "process_create failed",
-    )?;
+    let process = side.built(job, vmo, NAME_AT, NAME.len() as u64, "process_make failed")?;
     if rights_of(&side, process)? != Rights::PROCESS_CREATED {
-        return Err("process_create did not answer PROCESS_CREATED");
+        return Err("process_make did not answer PROCESS_CREATED");
     }
     refusals(&side, root_handle, process, vmo, &mut report)?;
     a_process_attached_hears_its_end(&side, job, process, &mut report)?;
@@ -470,19 +466,21 @@ fn faults(side: &Side, root: Handle, report: &mut Report) -> Result<(), &'static
 fn made(side: &Side, root: Handle, image: Handle) -> Result<(Handle, Handle), &'static str> {
     let job = side.handle(nr::JOB_CREATE, &[reg(root), 0], "job_create failed")?;
     side.put(NAME_AT, NAME)?;
-    let process = side.handle(
-        nr::PROCESS_CREATE,
-        &[reg(job), reg(image), NAME_AT, NAME.len() as u64],
-        "process_create failed",
+    let process = side.built(
+        job,
+        image,
+        NAME_AT,
+        NAME.len() as u64,
+        "process_make failed",
     )?;
     Ok((job, process))
 }
 
-/// `process_start`, with `bootstrap` or none.
+/// `process_run`, with `bootstrap` or none.
 fn start(side: &Side, process: Handle, bootstrap: Option<Handle>) -> Result<(), &'static str> {
-    side.call(nr::PROCESS_START, &[reg(process), bootstrap.map_or(0, reg)])
+    side.run(process, bootstrap.map_or(0, reg))
         .map(|_| ())
-        .map_err(|_| "process_start failed")
+        .map_err(|_| "process_run failed")
 }
 
 /// Wait for any of `signals` on `handle`, for at most `patience` nanoseconds.

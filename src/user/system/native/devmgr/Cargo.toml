@@ -20,6 +20,7 @@ ferrix-devmgr-events-proto.workspace = true
 ferrix-drvupdate-proto.workspace = true
 ferrix-fdt.workspace = true
 ferrix-native-abi.workspace = true
+ferrix-process-builder.workspace = true
 ferrix-netring.workspace = true
 ferrix-restart.workspace = true
 ferrix-rt.workspace = true

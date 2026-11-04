@@ -215,6 +215,17 @@ fn terminal_font() -> Result<()> {
     python_with(&script.to_string_lossy(), &["--check"])
 }
 
+/// K15's rule, its planted callers: who in the kernel may parse an ELF and call
+/// the one loader. The item boundary's run reads the tree with it.
+///
+/// Verifies: L.user.205, H.MEM.26
+fn loader_rule() -> Result<()> {
+    python_with(
+        "tools/common/check/check-item-boundary.py",
+        &["--self-test"],
+    )
+}
+
 /// The first step of every check: whether the commit hooks are armed.
 fn commit_hooks() -> Result<()> {
     python_with("tools/common/check/check-commit-authors.py", &["--hooks"])
@@ -527,6 +538,7 @@ fn run(args: &Args) -> Result<()> {
 /// clippies unless `--fast`; whether `--fast` skipped them.
 fn main_workspace(root: &std::path::Path, args: &Args) -> Result<bool> {
     step("terminal font", terminal_font)?;
+    step("the loader rule", loader_rule)?;
     step("btrfs allocates fallibly", item_crates_allocate_fallibly)?;
     step(
         "the item with Ferrocene's Rust (1.95.0, upstream)",

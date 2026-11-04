@@ -81,6 +81,7 @@ output is used to *satisfy* an objective rather than to find defects.
 |---|---|---|
 | `xtask` | build driver and boot-test harness; 242 own tests | T2 |
 | `check-item-boundary.py` | the item boundary — this scheme's own scope | T2 |
+| `check-item-boundary.py`'s loader rule | K15: `Elf::parse` and `ferrix_elf::Elf` in kernel product files only where `loader_callers.elf_parse` names, `first_image::load` only where `first_image_load` does; `--self-test` plants one of each | T2 |
 | `check-complexity.py` | complexity, length and recursion in the item | T2 |
 | `kernel-interface.py` | the kernel crates' interface: every `pub` of a core or item file listed in `docs/generated/KERNEL-INTERFACE.md`, a `pub` no crate above names and a checks-only type reachable from product API refused, and the checks-only methods written into `.clippy.toml`'s `disallowed-methods` (ledger lines 1531 D5, D6, 1630 F2.2); self-tested on every run | T2 |
 | `check-traceability.py` | the item's requirements against their parents, units and checks; writes TRACEABILITY.md; self-tested on every run | **T2, and load-bearing** |

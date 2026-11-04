@@ -1,0 +1,7 @@
+//! The little program K15's check runs (`syscall/build_check.rs`).
+
+// CHECKS-ONLY: syscall/build_check.rs
+/// The same: `mov x0, sp; lsr x0, x0, #12; mov x8, #94; svc #0`.
+pub const USER_STACK_PROGRAM: &[u8] = &[
+    0xe0, 0x03, 0x00, 0x91, 0x00, 0xfc, 0x4c, 0xd3, 0xc8, 0x0b, 0x80, 0xd2, 0x01, 0x00, 0x00, 0xd4,
+];

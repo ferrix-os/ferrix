@@ -16,6 +16,7 @@ bench = false
 [dependencies]
 ferrix-rt.workspace = true
 ferrix-native-abi.workspace = true
+ferrix-process-builder.workspace = true
 
 [lints]
 workspace = true

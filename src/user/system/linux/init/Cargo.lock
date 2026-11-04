@@ -28,7 +28,15 @@ name = "ferrix-auth-proto"
 version = "0.1.0"
 
 [[package]]
+name = "ferrix-bootinfo"
+version = "0.1.0"
+
+[[package]]
 name = "ferrix-drvupdate-proto"
+version = "0.1.0"
+
+[[package]]
+name = "ferrix-elf"
 version = "0.1.0"
 
 [[package]]
@@ -52,6 +60,16 @@ name = "ferrix-native-abi"
 version = "0.1.0"
 dependencies = [
  "ferrix-linux-abi",
+]
+
+[[package]]
+name = "ferrix-process-builder"
+version = "0.1.0"
+dependencies = [
+ "ferrix-bootinfo",
+ "ferrix-elf",
+ "ferrix-native",
+ "ferrix-native-abi",
 ]
 
 [[package]]
@@ -91,6 +109,7 @@ dependencies = [
  "ferrix-log-shed",
  "ferrix-native",
  "ferrix-native-abi",
+ "ferrix-process-builder",
  "ferrix-settings-proto",
  "ferrix-svc",
  "ferrix-svc-proto",

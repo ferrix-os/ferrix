@@ -43,21 +43,21 @@
     },
     {
       "file": "arch/armv7a/mod.rs",
-      "lines": "176",
+      "lines": "178",
       "category": "defensive",
       "match": "Err(_) => cpu::flush_tlb(),",
       "why": "A page address past 4 GiB asked to be invalidated, which on this architecture cannot be a translation; everything is flushed rather than a truncated page. Every caller passes a virtual address, all of which are below 4 GiB here."
     },
     {
       "file": "arch/armv7a/mod.rs",
-      "lines": "1333",
+      "lines": "1335",
       "category": "defensive",
       "match": "shutdown()",
       "why": "Firmware whose PSCI `SYSTEM_RESET` returned instead of resetting: the machine is powered off rather than carrying on as though it had reset. The suite's `boot-reset` gate takes the reset, and QEMU and the DK1 both reset."
     },
     {
       "file": "arch/armv7a/mod.rs",
-      "lines": "1363",
+      "lines": "1365",
       "category": "defensive",
       "match": "return Err(\"this GIC is not a GICv2, and GICv3 support is not written yet\");",
       "why": "A device tree describing a GICv3 on ARMv7-A, which this kernel has no driver for here: interrupt bring-up is refused by name and the kernel stops (FX-0303). The machines it runs on -- QEMU's `virt` as the suite boots it, the STM32MP157 -- have a GICv2; a `virt` given a GICv3 would be a boot that stops, which is not coverage evidence."
@@ -505,35 +505,35 @@
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "139-140",
+      "lines": "140-141",
       "category": "defensive",
       "match": "Err(Errno::ENOENT)",
       "why": "The reader of a kernel whose filesystem registered none. Every build registers one before devmgr starts, and register_load refuses to boot without it (LOAD_REGISTRATION), so it is never the one called."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "414-416",
+      "lines": "415-417",
       "category": "defensive",
       "match": "for (_, answer) in PENDING.lock().iter_mut() {",
       "why": "devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "419",
+      "lines": "420",
       "category": "defensive",
       "match": "ANSWERED.wake_all();",
       "why": "devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "548",
+      "lines": "549",
       "category": "absent-hardware",
       "match": "return Ok(None);",
       "why": "An image with no /sbin/devmgr: every image xtask builds carries it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "1309",
+      "lines": "1319",
       "category": "defensive",
       "match": "}",
       "why": "The listener's end when devmgr's channel closes: devmgr does not exit in a running system, so the loop never meets a closed channel."
@@ -1583,70 +1583,70 @@
     },
     {
       "file": "syscall/native.rs",
-      "lines": "316",
+      "lines": "338",
       "category": "defensive",
       "match": "None => caller.core().is_terminated(),",
       "why": "The wait's exit test on a kernel with no personality registered: every build registers one before the first program runs (register_load, checked at boot), so a native wait always asks the personality."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "598",
+      "lines": "624",
       "category": "credited-elsewhere",
       "match": "TableError::AccessDenied => status::ACCESS_DENIED,",
       "why": "Run by stage 9's object check, which duplicates a handle asking for rights it does not hold and requires ACCESS_DENIED. On AArch64 every caller that meets AccessDenied inlines table_error; the arm's row is only in the out-of-line copy."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "599",
+      "lines": "625",
       "category": "credited-elsewhere",
       "match": "TableError::Full => status::NO_HANDLES,",
       "why": "Run by the native refusal check: a duplicate into a full table answers NO_HANDLES and a message naming one handle twice answers INVALID_ARGS, both required. Those callers inline table_error; the arms' rows are only in its out-of-line copy, whose callers never meet these two errors."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "1428-1429",
+      "lines": "1454-1455",
       "category": "defensive",
       "match": "object::dispose(message.handles.into_iter().map(|(object, _)",
       "why": "The queue refusing to take back at its head a message it gave up a moment earlier: its capacity still holds the slot, so putting it back needs no memory."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2597",
+      "lines": "2743",
       "category": "defensive",
       "match": "}",
       "why": "The closing row of image_bytes is the drop of its buffer when a page of the image's VMO cannot be read: a VMO's pages up to its length always read, a decommitted one as zeros."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2663",
+      "lines": "2820",
       "category": "defensive",
       "match": "return Err(status::BAD_STATE);",
       "why": "A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2666",
+      "lines": "2823",
       "category": "defensive",
       "match": "return Err(status::NO_HANDLES);",
       "why": "A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2676",
+      "lines": "2833",
       "category": "defensive",
       "match": ".map_err(|object| source.insert(object, rights))) // FALLIBL",
       "why": "An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2683",
+      "lines": "2840",
       "category": "defensive",
       "match": "object::dispose([object]);",
       "why": "An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "3447",
+      "lines": "3604",
       "category": "absent-hardware",
       "match": "return Err(status::INVALID_ARGS);",
       "why": "A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine."

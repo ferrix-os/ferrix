@@ -133,6 +133,10 @@ pub(super) fn check_programs() {
     // W^X on every space so mapped, and who pays (docs/microkernel/K2.md).
     check_spaces();
 
+    // K15: a process made empty and run where its creator says, and the one
+    // loader the kernel keeps (docs/microkernel/K15.md §6).
+    check_build();
+
     // What the switch gives a program back after a blocking native call,
     // and the FS base kept in the task: programs on the native calls just
     // proved (x86-64; docs/OPAQUE-KERNEL.md §9.8, 3a and 3b).
@@ -149,6 +153,9 @@ pub(super) fn check_programs() {
     // K3: pager-backed VMOs, their faults forwarded to a pager over a port
     // and waited for, bounded (docs/microkernel/K3.md §6).
     check_pager();
+
+    // K13: a pager's restart without its clients' loss.
+    check_rebind();
     check_kernel_memory();
 }
 
@@ -1347,6 +1354,22 @@ pub(super) fn check_address_waits() {
 /// Stage 9: an address space reached by handle (`docs/microkernel/K2.md`).
 ///
 /// Halts rather than returning, as every other stage's check does.
+pub(super) fn check_build() {
+    let first: [u64; 3] = match discovery::first_image_check::run() {
+        Ok(report) => report,
+        Err(problem) => fatal!(catalog::STAGE9_BUILD, "{problem}"),
+    };
+    let built = match syscall::build_check::run() {
+        Ok(report) => report,
+        Err(problem) => fatal!(catalog::STAGE9_BUILD, "{problem}"),
+    };
+    println!(
+        "  build    {} processes made empty and run at a checked entry and stack, {} refusals; \
+         first image: {} malformed refused, 0 of {} leaves writable and executable ({} executable)",
+        built.run, built.refusals, first[0], first[1], first[2],
+    );
+}
+
 pub(super) fn check_spaces() {
     let report = match object::space_check::run() {
         Ok(report) => report,
@@ -1466,6 +1489,21 @@ pub(super) fn check_quotas() {
 /// write-back; supplies, maps and decoding refused as specified.
 ///
 /// Halts rather than returning, as every other stage's check does.
+pub(super) fn check_rebind() {
+    let report = match object::pager_check::run_rebind() {
+        Ok(report) => report,
+        Err(problem) => fatal!(
+            catalog::STAGE9_REBIND,
+            "rebind self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  rebind   {} faults outlived their pager and were answered by its next instance, {} \
+         ended at their bound or with their keeper; {} audited; two cycles, READ and DIRTY",
+        report.supplied, report.ended, report.audited,
+    );
+}
+
 pub(super) fn check_pager() {
     let report = match object::pager_check::run() {
         Ok(report) => report,

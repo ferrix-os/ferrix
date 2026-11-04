@@ -28,10 +28,11 @@
 use core::fmt::Write as _;
 
 use ferrix_native_abi::rights::{Requested, Rights};
+use ferrix_process_builder::build;
 use ferrix_rt::linux::{self, numbers};
 use ferrix_rt::native::channel::{self, Channel, ReadError};
 use ferrix_rt::native::job::{Job, for_cgroup};
-use ferrix_rt::native::pending::{Protection, create_process};
+use ferrix_rt::native::pending::Protection;
 use ferrix_rt::native::vmo::{self, Vmo};
 use ferrix_rt::native::{Deadline, Error, Handle, Object, OwnedHandle, Signals};
 use ferrix_rt::{Bootstrap, Kernel};
@@ -306,8 +307,8 @@ fn round_trip(
 /// new channel as its bootstrap, and keep the other.
 fn spawn(job: &Job<Kernel>, image: &Vmo<Kernel>, name: &str) -> Result<Channel<Kernel>, i32> {
     let (mine, theirs) = channel::create(Kernel).map_err(|_| 8)?;
-    let process = create_process(job, image, name).map_err(|_| 9)?;
-    process.start(theirs.into_owned()).map_err(|_| 9)?;
+    let built = build(job, image, name, ferrix_rt::ELF_MACHINE).map_err(|_| 9)?;
+    let process = built.run(theirs.into_owned()).map_err(|_| 9)?;
     // The process handle goes; the process lives until its channel does.
     drop(process);
     Ok(mine)
@@ -342,6 +343,7 @@ fn prepare() -> Result<(Vmo<Kernel>, Job<Kernel>), i32> {
         at = at.saturating_add(got);
     }
     let _ = linux::close(fd);
+    let image = ferrix_process_builder::image(image).map_err(|_| 5)?;
 
     // Mounted and made here, what is there already being as good: the shell
     // running this may have no `mount` or `mkdir`.

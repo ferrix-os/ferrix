@@ -979,14 +979,9 @@ fn a_created_process(
     .map_err(|_| "space self-check failed: the child's image could not be written")?;
     scratch.put(NAME, CHILD_NAME)?;
     let child = made(
-        nr::PROCESS_CREATE,
-        &[
-            reg(setup.owner_handle),
-            reg(vmo),
-            NAME,
-            CHILD_NAME.len() as u64,
-        ],
-        "space self-check failed: process_create failed",
+        nr::PROCESS_MAKE,
+        &[reg(setup.owner_handle), NAME, CHILD_NAME.len() as u64],
+        "space self-check failed: process_make failed",
     )?;
     let _ = call(nr::HANDLE_CLOSE, &[reg(vmo)]);
 
@@ -1031,9 +1026,12 @@ fn a_created_process(
         })
         .ok_or("space self-check failed: process_space did not answer a space")?;
 
+    let at = crate::discovery::first_image_check::load_for_check(&child_space, &image)
+        .map_err(|_| "space self-check failed: the child's image would not load")?;
+
     // Who pays: a page the by-handle read faults in is the owner's.
     owner_pays(setup, scratch, full, report)?;
-    after_the_start(scratch, child, reader, report)?;
+    after_the_start(scratch, child, at, reader, report)?;
     let _ = call(nr::HANDLE_CLOSE, &[reg(watcher)]);
     *CHILD.lock() = Some((child, full));
     Ok(child_space)
@@ -1044,11 +1042,12 @@ fn a_created_process(
 fn after_the_start(
     scratch: &Scratch<'_>,
     child: Handle,
+    at: crate::syscall::native::EntryPoint,
     reader: Handle,
     report: &mut Report,
 ) -> Result<(), &'static str> {
     let same = u64::from(SAME_RIGHTS);
-    let _ = call(nr::PROCESS_START, &[reg(child), 0])
+    let _ = call(nr::PROCESS_RUN, &[reg(child), at.entry, at.stack, 0])
         .map_err(|_| "space self-check failed: the child could not be started")?;
     refused(
         call(nr::PROCESS_SPACE, &[reg(child), same]),

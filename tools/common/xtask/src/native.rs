@@ -463,6 +463,7 @@ pub(crate) fn verify(arch: Arch, image: &[u8]) -> std::result::Result<(), String
         ));
     }
     no_page_is_writable_and_executable(&elf)?;
+    executable_pages_can_be_mapped(&elf)?;
     entry_is_the_runtimes(&elf, expected)?;
     let traps = elf
         .loadable()
@@ -474,6 +475,47 @@ pub(crate) fn verify(arch: Arch, image: &[u8]) -> std::result::Result<(), String
         });
     if !traps {
         return Err("its text holds no trap instruction, so it makes no call".to_owned());
+    }
+    Ok(())
+}
+
+/// `ferrix-process-builder` maps an executable page and never copies it
+/// (`docs/microkernel/K15.md`, ledger 5726 (2)), so every executable page must
+/// be one mapping can show: the segment's offset and address agree within a page,
+/// its memory ends with its file contents, and no other segment shares its pages.
+fn executable_pages_can_be_mapped(elf: &Elf<'_>) -> std::result::Result<(), String> {
+    const PAGE: u64 = 4096;
+    let pages = |segment: &Segment| {
+        let first = segment.vaddr & !(PAGE - 1);
+        let last = (segment.vaddr + segment.memsz + PAGE - 1) & !(PAGE - 1);
+        (first, last)
+    };
+    for text in elf.loadable().filter(Segment::is_executable) {
+        if (text.vaddr ^ text.offset) & (PAGE - 1) != 0 {
+            return Err(format!(
+                "its executable segment at {:#x} has an offset that disagrees within a page: \
+                 it cannot be mapped",
+                text.vaddr
+            ));
+        }
+        if text.memsz > text.filesz {
+            return Err(format!(
+                "its executable segment at {:#x} has memory past its file contents: \
+                 it cannot be mapped",
+                text.vaddr
+            ));
+        }
+        let (first, last) = pages(&text);
+        let shared = elf.loadable().any(|other| {
+            let (start, end) = pages(&other);
+            other.vaddr != text.vaddr && start < last && first < end
+        });
+        if shared {
+            return Err(format!(
+                "its executable segment at {:#x} shares a page with another: it cannot be mapped",
+                text.vaddr
+            ));
+        }
     }
     Ok(())
 }
@@ -615,6 +657,61 @@ mod tests {
         );
 
         assert!(verify(Arch::X86_64, b"\x7fELF").is_err());
+    }
+
+    /// A little ELF64 of these segments: flags, file offset, address, file size,
+    /// memory size.
+    fn little_elf(segments: &[(u32, u64, u64, u64, u64)]) -> Vec<u8> {
+        let (head, phent) = (64, 56);
+        let mut file = vec![0_u8; 0x4000];
+        file[..7].copy_from_slice(&[0x7F, b'E', b'L', b'F', 2, 1, 1]);
+        file[16..18].copy_from_slice(&ET_EXEC.to_le_bytes());
+        file[18..20].copy_from_slice(&EM_X86_64.to_le_bytes());
+        file[20..24].copy_from_slice(&1_u32.to_le_bytes());
+        file[32..40].copy_from_slice(&(head as u64).to_le_bytes());
+        file[52..54].copy_from_slice(&(head as u16).to_le_bytes());
+        file[54..56].copy_from_slice(&(phent as u16).to_le_bytes());
+        file[56..58].copy_from_slice(&(segments.len() as u16).to_le_bytes());
+        for (index, &(flags, offset, at, filesz, memsz)) in segments.iter().enumerate() {
+            let to = head + phent * index;
+            file[to..to + 4].copy_from_slice(&1_u32.to_le_bytes());
+            file[to + 4..to + 8].copy_from_slice(&flags.to_le_bytes());
+            file[to + 8..to + 16].copy_from_slice(&offset.to_le_bytes());
+            file[to + 16..to + 24].copy_from_slice(&at.to_le_bytes());
+            file[to + 32..to + 40].copy_from_slice(&filesz.to_le_bytes());
+            file[to + 40..to + 48].copy_from_slice(&memsz.to_le_bytes());
+            file[to + 48..to + 56].copy_from_slice(&4096_u64.to_le_bytes());
+        }
+        file
+    }
+
+    /// K15: what the loader library maps, it must be able to map (ledger 5726 (2)).
+    #[test]
+    fn an_executable_page_that_cannot_be_mapped_is_refused() {
+        const RX: u32 = 5;
+        const RW: u32 = 6;
+        let good = little_elf(&[
+            (RX, 0x1000, 0x40_1000, 0x800, 0x800),
+            (RW, 0x2000, 0x40_2000, 0x10, 0x10),
+        ]);
+        let mappable = |file: &[u8]| executable_pages_can_be_mapped(&Elf::parse(file).unwrap());
+        assert_eq!(mappable(&good), Ok(()));
+        let offset = little_elf(&[(RX, 0x1100, 0x40_1000, 0x800, 0x800)]);
+        assert!(mappable(&offset).is_err());
+        let bss = little_elf(&[(RX, 0x1000, 0x40_1000, 0x800, 0x2000)]);
+        assert!(mappable(&bss).is_err());
+        let shared = little_elf(&[
+            (RX, 0x1000, 0x40_1000, 0x800, 0x800),
+            (RW, 0x1800, 0x40_1800, 0x10, 0x10),
+        ]);
+        assert!(mappable(&shared).is_err());
+    }
+
+    /// The other two of the image check's refusals a planted image shows.
+    #[test]
+    fn a_writable_executable_page_is_refused() {
+        let wx = little_elf(&[(7, 0x1000, 0x40_1000, 0x800, 0x800)]);
+        assert!(no_page_is_writable_and_executable(&Elf::parse(&wx).unwrap()).is_err());
     }
 
     #[test]

@@ -1199,6 +1199,7 @@ fn queued_endpoints(endpoint: &Arc<Endpoint>) -> Option<Vec<Arc<Endpoint>>> {
             // never an object.
             | Object::Timer(_)
             | Object::Pager(_)
+            | Object::PagerKeeper(_)
             | Object::Starter
             | Object::Audit
             | Object::CpuService

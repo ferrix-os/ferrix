@@ -68,6 +68,7 @@ members = [
     "src/lib/network/netlink",
     "src/lib/proto/native-abi",
     "src/lib/proto/native",
+    "src/lib/proto/process-builder",
     "src/lib/kernel/objects",
     "src/lib/drivers/display/modes",
     "src/lib/drivers/display/stm32-display",
@@ -230,6 +231,7 @@ ferrix-sigverify = { path = "src/lib/crypto/sigverify" }
 ferrix-linux-abi = { path = "src/lib/proto/linux-abi" }
 ferrix-native-abi = { path = "src/lib/proto/native-abi" }
 ferrix-native = { path = "src/lib/proto/native" }
+ferrix-process-builder = { path = "src/lib/proto/process-builder" }
 ferrix-stm32-display = { path = "src/lib/drivers/display/stm32-display" }
 ferrix-stm32-sdmmc = { path = "src/lib/drivers/block/stm32-sdmmc" }
 ferrix-nvme = { path = "src/lib/drivers/block/nvme" }

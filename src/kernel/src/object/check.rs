@@ -401,18 +401,22 @@ impl<'a> Spawner<'a> {
     }
 
     /// `process_create` in `job` from `vmo`, with the staged name cut to
-    /// `name_len`.
+    /// `name_len`: its own cases, for the shapes that keep the call
+    /// (`docs/microkernel/K15.md` §2.2); every other child here is `built`.
     fn create(&self, job: Handle, vmo: Handle, name_len: u64) -> Result<usize, Errno> {
         self.side
             .call(nr::PROCESS_CREATE, &[reg(job), reg(vmo), INBOX, name_len])
     }
 
+    /// `process_create` in `job` from the real image: K14's refusal of it.
+    pub(crate) fn created(&self, job: Handle) -> Result<usize, Errno> {
+        self.create(job, self.image, len(SPAWN_NAME))
+    }
+
     /// A child made in `job` from the real image.
     pub(crate) fn made(&self, job: Handle, what: &'static str) -> Result<Handle, &'static str> {
-        let value = self
-            .create(job, self.image, len(SPAWN_NAME))
-            .map_err(|_| what)?;
-        u32::try_from(value).map(Handle).map_err(|_| what)
+        self.side
+            .built(job, self.image, INBOX, len(SPAWN_NAME), what)
     }
 
     /// Watch `target` for `TERMINATED` on the port, with `key`.
@@ -588,7 +592,7 @@ fn check_a_childs_end_leaves_nothing_charged(
     spawner.watch(child, 73, "watching a process in a job of its own failed")?;
     let (near, far) = side.channel()?;
     let _ = side
-        .call(nr::PROCESS_START, &[reg(child), reg(far)])
+        .run(child, reg(far))
         .map_err(|_| "process_start in a job of its own failed")?;
     spawner.heard(
         73,
@@ -631,7 +635,7 @@ fn check_a_child_finds_its_bootstrap(
         "duplicating a process handle without MANAGE failed",
     )?;
     refused(
-        side.call(nr::PROCESS_START, &[reg(manage_less), reg(far)]),
+        side.run(manage_less, reg(far)),
         status::ACCESS_DENIED,
         "process_start without MANAGE was not refused",
         counter,
@@ -643,13 +647,13 @@ fn check_a_child_finds_its_bootstrap(
         .call(nr::HANDLE_CLOSE, &[reg(manage_less)])
         .map_err(|_| "closing a narrowed process handle failed")?;
     refused(
-        side.call(nr::PROCESS_START, &[reg(child), reg(manage_less)]),
+        side.run(child, reg(manage_less)),
         status::BAD_HANDLE,
         "process_start with a closed bootstrap handle was not refused",
         counter,
     )?;
     let _ = side
-        .call(nr::PROCESS_START, &[reg(child), reg(far)])
+        .run(child, reg(far))
         .map_err(|_| "process_start after a refused bootstrap move failed")?;
     refused(
         side.call(nr::HANDLE_CLOSE, &[reg(far)]),
@@ -658,7 +662,7 @@ fn check_a_child_finds_its_bootstrap(
         counter,
     )?;
     refused(
-        side.call(nr::PROCESS_START, &[reg(child), 0]),
+        side.run(child, 0),
         status::BAD_STATE,
         "a process was started twice",
         counter,
@@ -694,7 +698,7 @@ fn check_a_child_finds_its_bootstrap(
     let bare = spawner.made(spawner.root, "process_create of a second child failed")?;
     spawner.watch(bare, 72, "watching a second made process failed")?;
     let _ = side
-        .call(nr::PROCESS_START, &[reg(bare), 0])
+        .run(bare, 0)
         .map_err(|_| "process_start with no bootstrap failed")?;
     spawner.heard(
         72,
@@ -723,7 +727,7 @@ fn check_a_killed_child_is_not_started(
         .call(nr::JOB_KILL, &[reg(doomed_job)])
         .map_err(|_| "killing a job with an unstarted process in it failed")?;
     refused(
-        side.call(nr::PROCESS_START, &[reg(doomed), reg(kept_far)]),
+        side.run(doomed, reg(kept_far)),
         status::BAD_STATE,
         "a process killed before its start was started",
         counter,
@@ -1289,6 +1293,8 @@ fn check_what_vmo_map_refuses(
 pub(crate) struct Side {
     /// The process, over its own address space.
     pub(crate) process: Arc<Process>,
+    /// Where the last child [`Side::built`] made enters.
+    last_built: SpinLock<Option<native::EntryPoint>>,
 }
 
 impl Side {
@@ -1299,7 +1305,18 @@ impl Side {
             .space()
             .map_anonymous(SCRATCH, SCRATCH_LEN, VmaFlags::READ_WRITE)
             .map_err(|_| "could not map a scratch region")?;
-        Ok(Side { process })
+        Ok(Side {
+            process,
+            last_built: SpinLock::new(None),
+        })
+    }
+
+    /// A side over a process that already exists.
+    pub(crate) fn of(process: Arc<Process>) -> Side {
+        Side {
+            process,
+            last_built: SpinLock::new(None),
+        }
     }
 
     /// Make a native call with these registers.
@@ -1315,6 +1332,50 @@ impl Side {
             ip: 0,
         };
         native::dispatch(&args, Some(&*self.process))
+    }
+
+    /// A child made in `job` by `process_make`, with the name staged at `name_at`
+    /// and the image in VMO `image` loaded, not started: what a starter does with
+    /// the library, here by the kernel's own loader, since these checks are about
+    /// what the child does and not how its pages got there
+    /// (`docs/microkernel/K15.md`).
+    pub(crate) fn built(
+        &self,
+        job: Handle,
+        image: Handle,
+        name_at: u64,
+        name_len: u64,
+        what: &'static str,
+    ) -> Result<Handle, &'static str> {
+        let child = self.handle(nr::PROCESS_MAKE, &[reg(job), name_at, name_len], what)?;
+        let (vmo, host) = self
+            .process
+            .with_handles(|table| {
+                let vmo = match table.get(image) {
+                    Ok((Object::Vmo(vmo), _)) => Some(Arc::clone(vmo)),
+                    _ => None,
+                };
+                let host = match table.get(child) {
+                    Ok((Object::Process(made), _)) => made.control().and_then(|held| held.host()),
+                    _ => None,
+                };
+                vmo.zip(host)
+            })
+            .ok_or(what)?;
+        let bytes = native::image_bytes(&vmo).map_err(|_| what)?;
+        let at = crate::discovery::first_image_check::load_for_check(host.core().space(), &bytes)
+            .map_err(|_| what)?;
+        *self.last_built.lock() = Some(at);
+        Ok(child)
+    }
+
+    /// `process_run` on `child`, at the entry the last [`Side::built`] loaded.
+    pub(crate) fn run(&self, child: Handle, bootstrap: u64) -> Result<usize, Errno> {
+        let at = (*self.last_built.lock()).ok_or(status::BAD_STATE)?;
+        self.call(
+            nr::PROCESS_RUN,
+            &[reg(child), at.entry, at.stack, bootstrap],
+        )
     }
 
     /// Make a call that returns a handle.

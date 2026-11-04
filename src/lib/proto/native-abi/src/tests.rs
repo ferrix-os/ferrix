@@ -87,6 +87,8 @@ fn process_creation_opens_its_block() {
     assert_eq!(nr::decode(0x1033), Some(NativeCall::ProcessBootstrap));
     assert_eq!(nr::decode(0x1034), Some(NativeCall::ProcessStatus));
     assert_eq!(nr::decode(0x1035), Some(NativeCall::ProcessSpace));
+    assert_eq!(nr::decode(0x10A0), Some(NativeCall::ProcessMake));
+    assert_eq!(nr::decode(0x10A1), Some(NativeCall::ProcessRun));
     for number in 0x1036..=0x1037 {
         assert_eq!(nr::decode(number), None, "{number:#x} was assigned");
     }

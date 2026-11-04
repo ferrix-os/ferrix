@@ -1,0 +1,17 @@
+[package]
+name = "ferrix-process-builder"
+description = "The native ELF loader in user space: maps an image into a new process through K2's calls"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+ferrix-bootinfo.workspace = true
+ferrix-elf.workspace = true
+ferrix-native.workspace = true
+ferrix-native-abi.workspace = true
+
+[lints]
+workspace = true

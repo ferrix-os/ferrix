@@ -96,6 +96,12 @@ pub enum ExecError {
     Linker(Errno),
 }
 
+const _: () = assert!(
+    STACK_SIZE == ferrix_native_abi::types::NATIVE_STACK_SIZE
+        && STACK_GUARD == ferrix_native_abi::types::NATIVE_STACK_GUARD,
+    "the loader library places a native process's stack by these constants"
+);
+
 /// Where the stack goes: as high in the program's space as a page allows --
 /// the user half, or below 4 GiB for a 32-bit program on a 64-bit kernel.
 ///
@@ -282,6 +288,59 @@ pub(crate) fn load_native_in(
     let space = AddressSpace::new().map_err(ExecError::Space)?;
     let mut process =
         Process::new(Arc::clone(&space)).map_err(|_| ExecError::Space(SpaceError::OutOfMemory))?;
+    set_up_native(&mut process, credentials, context, pids)?;
+    let loaded = load_into(&space, Source::Bytes(image), None)?;
+    // A native process's start argument is a 64-bit handle, and it speaks
+    // the native ABI through `SYSCALL`: a 32-bit image cannot be one.
+    if loaded.loaded.abi != Abi::Native {
+        return Err(ExecError::Load(LoadError::WrongMachine(3)));
+    }
+    process.record_exec(name, None, &[name]);
+    process.set_startup(native_startup(loaded.loaded.start, loaded.stack_top));
+    Ok(registry::register(process))
+}
+
+/// [`load_native_in`] without the loader: a process with an empty space, findable
+/// and not startable until its creator says where it enters
+/// (`docs/microkernel/K15.md` §2.1).
+///
+/// # Errors
+///
+/// [`ExecError`]; a namespace that is ending is out of memory.
+pub(crate) fn make_native_in(
+    name: &[u8],
+    credentials: Credentials,
+    context: Option<Context>,
+    pids: Option<&Arc<crate::syscall::pidns::PidNamespace>>,
+) -> Result<Arc<Process>, ExecError> {
+    let space = AddressSpace::new().map_err(ExecError::Space)?;
+    let mut process = Process::new(space).map_err(|_| ExecError::Space(SpaceError::OutOfMemory))?;
+    set_up_native(&mut process, credentials, context, pids)?;
+    process.record_exec(name, None, &[name]);
+    Ok(registry::register(process))
+}
+
+/// A native process's start, which nothing but its entry and stack tell apart.
+pub(crate) const fn native_startup(entry: u64, stack: u64) -> Startup {
+    Startup {
+        entry,
+        stack,
+        argument: 0,
+        vdso: 0,
+        abi: Abi::Native,
+    }
+}
+
+/// Give `process`, just made, `credentials`, `context` and `pids`: everything a
+/// native child has that does not depend on an image. By reference: a `Process`
+/// is large, and passed by value through one more frame it overflows the stack
+/// of the checks that make a child.
+fn set_up_native(
+    process: &mut Process,
+    credentials: Credentials,
+    context: Option<Context>,
+    pids: Option<&Arc<crate::syscall::pidns::PidNamespace>>,
+) -> Result<(), ExecError> {
     if let Some(namespace) = pids {
         process
             .enter_pid_namespace(namespace)
@@ -296,21 +355,7 @@ pub(crate) fn load_native_in(
         let started_in = core::mem::replace(&mut *process.fs_context().lock(), context);
         drop(started_in);
     }
-    let loaded = load_into(&space, Source::Bytes(image), None)?;
-    // A native process's start argument is a 64-bit handle, and it speaks
-    // the native ABI through `SYSCALL`: a 32-bit image cannot be one.
-    if loaded.loaded.abi != Abi::Native {
-        return Err(ExecError::Load(LoadError::WrongMachine(3)));
-    }
-    process.record_exec(name, None, &[name]);
-    process.set_startup(Startup {
-        entry: loaded.loaded.start,
-        stack: loaded.stack_top,
-        argument: 0,
-        vdso: 0,
-        abi: Abi::Native,
-    });
-    Ok(registry::register(process))
+    Ok(())
 }
 
 /// Load `program` into a new process, ready to run and not yet running.

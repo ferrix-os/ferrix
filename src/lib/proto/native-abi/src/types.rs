@@ -261,6 +261,19 @@ pub struct AddressWord {
 /// assumption of use (`docs/microkernel/K3.md` §5). Bit 2 is K2's `MAP_EXECUTE`.
 pub const MAP_NO_PAGER: u32 = 1 << 3;
 
+/// `space_allocate`'s protection for a region with no access at all: a guard
+/// (K15). Not a bit: it is the absence of `MAP_READ`, taken by `space_allocate`
+/// alone, and refused by every other mapping call.
+pub const MAP_NONE: u32 = 0;
+
+/// The stack a native process starts on, by the loader library's layout, in
+/// bytes: reserved whole, paid for a page at a time. The Linux loader's
+/// `STACK_SIZE` is the same, and the kernel asserts so.
+pub const NATIVE_STACK_SIZE: u64 = 8 * 1024 * 1024;
+
+/// The guard below that stack, in bytes.
+pub const NATIVE_STACK_GUARD: u64 = 1024 * 1024;
+
 /// What a `channel_read` found.
 ///
 /// Written on success, and on `BUFFER_TOO_SMALL` too, when it is how the

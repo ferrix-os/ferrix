@@ -15,6 +15,8 @@ pub(crate) mod rehome_check;
 pub use cpu::dma_barrier;
 pub mod exception_check;
 pub(crate) mod mmio;
+// CHECKS-ONLY: syscall/build_check.rs
+pub mod programs_check;
 mod signal;
 mod smp;
 pub(super) mod speculation;

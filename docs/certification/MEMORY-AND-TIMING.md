@@ -764,6 +764,17 @@ reader has the bytes when a frame goes.
   images for the boot (`L.user.174`): 398 pages on the box's image, 378 of
   them the driver images a running devmgr holds anyway.
 
+### K15: who pays for a process's image
+
+`ferrix-process-builder` maps text and read-only data from the image's VMO. Those frames
+stay charged to whoever filled the VMO (devmgr's job, or the kernel for an image it made)
+**outside the child's limit**, while any child maps them, and they are bounded by the
+image's size, not by anything the child does. Everything else a build commits is the
+child's job's by K2's owner slot, as before. Page tables and text faults come at run time,
+so a job at its limit may build a process and then lose it at its first fault
+(L.object.294). The kernel's `first_image` copies, into anonymous memory charged to the
+running task: the kernel, for what it starts itself.
+
 ## 2. Worst-case execution time — F-24
 
 ### 2.1 What is claimed

@@ -420,6 +420,7 @@ fn rejects_an_undersized_program_header_entry() {
     assert_eq!(Elf::parse(&image).unwrap_err(), ElfError::HeaderOutOfBounds);
 }
 
+/// Verifies: L.user.204
 #[test]
 fn rejects_segment_contents_past_the_end_of_the_image() {
     let mut image = kernel_image();

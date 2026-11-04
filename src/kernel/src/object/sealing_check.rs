@@ -506,7 +506,7 @@ fn jobs(side: &Side, report: &mut Report) -> Result<(), &'static str> {
         return Err("a measured job made an unmeasured child");
     }
     // An unsealed image in a measured job, by process_create.
-    if spawner.made(job, "refused as it should be").is_ok() {
+    if spawner.created(job).is_ok() {
         return Err("an unsealed image was started in a measured job");
     }
     report.refusals += 1;

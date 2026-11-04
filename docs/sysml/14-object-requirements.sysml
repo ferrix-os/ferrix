@@ -2995,6 +2995,118 @@ package FerrixObjectRequirements {
             attribute :>> unit = ("syscall::native::space_create",
                 "object::space::SpaceRef::create");
         }
+        requirement <'L.object.290'> processMakeMakesAnEmptyProcess : ItemLowLevel {
+            attribute :>> statement = "process_make shall need MANAGE on the job, keep a sealed creator inside its tree, refuse a name past PROCESS_NAME_MAX, and answer a handle with Rights::PROCESS_CREATED to an unstarted process in the job, its space empty, audited PROCESS_MADE, and in a measured job shall measure the space before the caller hears of it.";
+            attribute :>> criterion = "The process's space has no region and the handle reads PROCESS_CREATED; without MANAGE ACCESS_DENIED, a long name INVALID_ARGS, a sealed member outside its tree ACCESS_DENIED (the `build` line).";
+            attribute :>> parent = "H.OBJ.27";
+            attribute :>> unit = ("syscall::native::process_make", "syscall::native::new_process_handle");
+        }
+
+        requirement <'L.object.291'> processRunIsJudgedLikeAStart : ItemLowLevel {
+            attribute :>> statement = "process_run shall need MANAGE, answer BAD_STATE once started, and a refused bootstrap shall move nothing and give the start back.";
+            attribute :>> criterion = "A WAIT-only handle ACCESS_DENIED; a bootstrap that is no handle BAD_HANDLE and a later run succeeds; a second run BAD_STATE (the `build` line).";
+            attribute :>> parent = "H.OBJ.27";
+            attribute :>> unit = ("syscall::native::process_run", "syscall::native::start_with");
+        }
+
+        requirement <'L.object.292'> processRunChecksEntryAndStack : ItemLowLevel {
+            attribute :>> statement = "process_run shall refuse an entry at or past the end of user space, or a stack past it, with INVALID_ARGS before anything is claimed.";
+            attribute :>> criterion = "Four entries and two stacks outside user space, each INVALID_ARGS, on every architecture, and the machine runs on (the `build` line).";
+            attribute :>> parent = "H.OBJ.27";
+            attribute :>> unit = ("syscall::native::process_run", "syscall::native::in_user_space");
+        }
+
+        requirement <'L.object.293'> aProcessEntersWhereItIsTold : ItemLowLevel {
+            attribute :>> statement = "A process process_run started shall enter at the entry, on the stack, with the bootstrap's value in its first argument register.";
+            attribute :>> criterion = "A program that exits with its stack pointer's page number exits with the stack's; one that exits with its argument exits with the bootstrap's value (the `build` line).";
+            attribute :>> parent = "H.OBJ.27";
+            attribute :>> unit = ("syscall::native::process_run", "syscall::native::start_with");
+        }
+
+        requirement <'L.object.294'> anEmptySpaceOnlyEndsTheChild : ItemLowLevel {
+            attribute :>> statement = "A process run with nothing mapped at its entry shall end by its own fault, and nothing else shall stop; a job at its memory limit may build a process that then ends at a text fault.";
+            attribute :>> criterion = "An empty process run ends with a non-zero status and the check goes on; a child whose job's limit was lowered after its build ends at its first fault (the `build` line).";
+            attribute :>> parent = "H.OBJ.27";
+            attribute :>> unit = ("syscall::native::process_run", "syscall::native::process_make");
+        }
+
+        requirement <'L.object.295'> theOldCallsAreCompiledOut : ItemLowLevel {
+            attribute :>> statement = "In a kernel built with personality=user, process_create and process_start shall answer ENOSYS.";
+            attribute :>> criterion = "The case in syscall/build_check.rs under that flag; until that build boots, BACKLOG's row.";
+            attribute :>> parent = "H.OBJ.27";
+            attribute :>> unit = ("syscall::native::job_call");
+        }
+
+        requirement <'L.object.296'> nothingOfASpaceThroughAStartedHandle : ItemLowLevel {
+            attribute :>> statement = "After process_run, process_space on the process shall answer BAD_STATE, so a creator holds its space only by a handle it took before the start.";
+            attribute :>> criterion = "process_space after a run BAD_STATE (the `build` line).";
+            attribute :>> parent = "H.OBJ.27";
+            attribute :>> unit = ("syscall::native::process_space");
+        }
+
+        requirement <'L.object.299'> noPagerRefusesAPagerVmo : ItemLowLevel {
+            attribute :>> statement = "space_map with MAP_NO_PAGER shall refuse a pager-backed VMO with WRONG_TYPE and map any other.";
+            attribute :>> criterion = "The refusal and the map (the `build` line).";
+            attribute :>> parent = "H.OBJ.27";
+            attribute :>> unit = ("syscall::native::space_map");
+        }
+
+        requirement <'L.object.306'> theImageRights : ItemLowLevel {
+            attribute :>> statement = "The kernel shall hand devmgr each image with READ, MAP, EXECUTE and TRANSFER, neither WRITE nor DUPLICATE.";
+            attribute :>> criterion = "image_rights() is IMAGE_RIGHTS, which holds no WRITE or DUPLICATE (the `build` line).";
+            attribute :>> parent = "H.OBJ.27";
+            attribute :>> unit = ("discovery::devmgr::image_rights");
+        }
+
+        requirement <'L.object.300'> aPagerHasOneKeeper : ItemLowLevel {
+            attribute :>> statement = "pager_keep shall need PAGER on the pager and answer at most one keeper for it, with exactly Rights::KEEPER, charged to the caller's job as one object and the registry's heap; a keeper's close on a live pager shall change nothing else.";
+            attribute :>> criterion = "A second keep ALREADY_BOUND; the rights read exactly; a keeper closed on a live pager and the pager still serves (the `rebind` line).";
+            attribute :>> parent = "H.OBJ.28";
+            attribute :>> unit = ("object::pager::Pager::keep", "syscall::native::pager_keep");
+        }
+
+        requirement <'L.object.301'> aParkedPagerEndsNothing : ItemLowLevel {
+            attribute :>> statement = "With a keeper the pager's close shall end no request, and a request opened while parked shall be listed and send no packet; live, parked and dead shall be decided under the registry's lock.";
+            attribute :>> criterion = "Read and dirty waits across a close stay waiting; a copy's fault while parked is listed with no packet (the `rebind` line).";
+            attribute :>> parent = "H.OBJ.28";
+            attribute :>> unit = ("object::pager::PagerCore::close", "object::pager::PagerCore::current", "object::pager::PagerCore::list_or_join", "object::pager::PagerLink::open_or_join");
+        }
+
+        requirement <'L.object.302'> aTakeUpSendsEachAgain : ItemLowLevel {
+            attribute :>> statement = "pager_take_up shall need MANAGE on the keeper and WRITE on the port, refuse a pager not parked with BAD_STATE, leave it parked on NO_MEMORY, send each open request to the new port under its own id, and audit the take-up.";
+            attribute :>> criterion = "The packets on the new port carry the old ids; a supply by the new handle answers the clients; a second take-up BAD_STATE; the same port handed back in a second cycle (the `rebind` line).";
+            attribute :>> parent = "H.OBJ.28";
+            attribute :>> unit = ("object::pager::Keeper::take_up", "object::pager::Request::send", "object::pager::record_rebind", "syscall::native::pager_take_up");
+        }
+
+        requirement <'L.object.303'> aParkedWaitIsBounded : ItemLowLevel {
+            attribute :>> statement = "A wait on a parked pager shall stay bounded by each waiter's own bound from when it began to wait, and shall end at its process's end.";
+            attribute :>> criterion = "At a 5 ms bound with no take-up the wait ends SIGBUS never before the bound; a waiter killed while parked leaves (the `rebind` line).";
+            attribute :>> parent = "H.OBJ.28";
+            attribute :>> unit = ("object::pager::PagerLink::request", "object::pager::PagerLink::wait");
+        }
+
+        requirement <'L.object.304'> aKeepersCloseEndsAParkedPager : ItemLowLevel {
+            attribute :>> statement = "A keeper's close while the pager is parked shall be the pager's death: every request ends at once and no request opens after.";
+            attribute :>> criterion = "A parked waiter ends SIGBUS within 5 s of the keeper's close, far below its bound (the `rebind` line).";
+            attribute :>> parent = "H.OBJ.28";
+            attribute :>> unit = ("object::pager::PagerCore::keeper_closed", "object::pager::Keeper::drop");
+        }
+
+        requirement <'L.object.305'> parkedStateStaysCharged : ItemLowLevel {
+            attribute :>> statement = "A request's record shall stay charged to the job whose fault opened it across a park and a take-up.";
+            attribute :>> criterion = "The faulting job's memory holds the record while parked and after the take-up (the `rebind` line).";
+            attribute :>> parent = "H.OBJ.28";
+            attribute :>> unit = ("object::pager::PagerLink::request", "object::pager::Keeper::take_up");
+        }
+
+        requirement <'L.object.307'> dirtyStaysAcrossARestart : ItemLowLevel {
+            attribute :>> statement = "A page Dirty before a restart shall stay reported to the next instance.";
+            attribute :>> criterion = "pager_query_dirty by the new handle reports the page (the `rebind` line).";
+            attribute :>> parent = "H.OBJ.28";
+            attribute :>> unit = ("object::pager::Keeper::take_up");
+        }
+
         requirement <'L.object.233'> onlyTheCreatorBeforeTheStart : ItemLowLevel {
             attribute :>> statement = "process_space shall answer a handle to the
                 address space of a process process_create made, through a handle

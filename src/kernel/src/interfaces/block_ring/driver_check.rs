@@ -246,10 +246,12 @@ fn start_driver(
         &[reg(device)],
         "block_ring_create for a driver failed",
     )?;
-    let child = side.handle(
-        nr::PROCESS_CREATE,
-        &[reg(job), reg(image), NAME_AT, NAME.len() as u64],
-        "process_create for a driver failed",
+    let child = side.built(
+        job,
+        image,
+        NAME_AT,
+        NAME.len() as u64,
+        "process_make for a driver failed",
     )?;
 
     // START over the bootstrap channel: the device, and the control channel.
@@ -289,8 +291,8 @@ fn start_driver(
         )
         .map_err(|_| "watching a driver failed")?;
     let _ = side
-        .call(nr::PROCESS_START, &[reg(child), reg(far)])
-        .map_err(|_| "process_start for a driver failed")?;
+        .run(child, reg(far))
+        .map_err(|_| "process_run for a driver failed")?;
     Ok(child)
 }
 

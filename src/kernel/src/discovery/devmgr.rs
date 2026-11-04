@@ -44,6 +44,7 @@ use ferrix_native_abi::status;
 use ferrix_native_abi::types::{CHANNEL_MAX_BYTES, CHANNEL_MAX_HANDLES};
 use ferrix_sync::Once;
 
+use super::first_image;
 use crate::fallible::{self, AllocError};
 use crate::object::channel::{Endpoint, ReadError, Sender};
 use crate::object::job::{self, Job};
@@ -51,7 +52,7 @@ use crate::object::process::{Exit, Host, Process, ProcessRef};
 use crate::object::{Object, Transfer};
 use crate::sched::WaitQueue;
 use crate::sync::SpinLock;
-use crate::syscall::native::{self, StartRefused};
+use crate::syscall::native::{self, EntryPoint, StartRefused};
 use crate::user::vmo::Vmo;
 use crate::{device, sched, timer, vmap};
 
@@ -447,8 +448,8 @@ pub fn start() -> Result<Option<Report>, &'static str> {
     let (kernel_end, devmgr_end) =
         Endpoint::pair().map_err(|_| "no memory for devmgr's channel")?;
     let devices = write_devices(&kernel_end, files.images()?, drivers_job()?)?;
-    let process = load(&files.set.image)?;
-    start_program(&process, devmgr_end, &kernel_end)?;
+    let (process, at) = load(&files.set.image)?;
+    start_program(&process, at, devmgr_end, &kernel_end)?;
 
     let (started, failed) = report(&kernel_end)?;
     if sched::spawn("devmgr listener", listen, 0, ferrix_sched::NICE_0_WEIGHT).is_err() {
@@ -679,13 +680,7 @@ fn write_devices(
         }
         if let Some(images) = images.take() {
             for vmo in images {
-                let _ = fallible::push_within(
-                    &mut transfers,
-                    (
-                        Object::Vmo(vmo),
-                        Rights(Rights::READ.0 | Rights::TRANSFER.0),
-                    ),
-                );
+                let _ = fallible::push_within(&mut transfers, (Object::Vmo(vmo), image_rights()));
             }
         }
         let handles = transfers.len();
@@ -702,12 +697,26 @@ fn write_devices(
     Ok(nodes.len())
 }
 
-/// Load `devmgr`'s `image` into a process of its own, not started. It runs
-/// as root whoever asked (`native::LoadNative` with no creator): it is the
-/// kernel's, however it was asked for.
-fn load(image: &[u8]) -> Result<Arc<dyn Host>, &'static str> {
+/// What the kernel hands `devmgr` a driver's image with: read, map executable,
+/// move; no write, no duplicate (`docs/microkernel/K15.md` §2.5, L.object.299).
+pub(crate) const fn image_rights() -> Rights {
+    ferrix_native_abi::rights::IMAGE_RIGHTS
+}
+
+/// Load `devmgr`'s `image` into a process of its own, not started, by the one
+/// loader the kernel keeps. It runs as root whoever asked (`native::MakeNative`
+/// with no creator): it is the kernel's, however it was asked for. A process
+/// whose image is refused is ended here, never run.
+fn load(image: &[u8]) -> Result<(Arc<dyn Host>, EntryPoint), &'static str> {
     let processes = native::processes().ok_or("nothing is registered to start devmgr with")?;
-    (processes.load)(None, image, NAME).map_err(|_| "/sbin/devmgr does not load")
+    let process = (processes.make)(None, NAME).map_err(|_| "no memory for devmgr's process")?;
+    match first_image::load(process.core().space(), image) {
+        Ok(at) => Ok((process, at)),
+        Err(_) => {
+            process.kill(job::KILLED_STATUS);
+            Err("/sbin/devmgr does not load")
+        }
+    }
 }
 
 /// Put `devmgr_end` in `process`'s table as its bootstrap handle, and start
@@ -720,6 +729,7 @@ fn load(image: &[u8]) -> Result<Arc<dyn Host>, &'static str> {
 /// nothing here joins it.
 fn start_program(
     process: &Arc<dyn Host>,
+    at: EntryPoint,
     devmgr_end: Arc<Endpoint>,
     kernel_end: &Arc<Endpoint>,
 ) -> Result<(), &'static str> {
@@ -733,7 +743,7 @@ fn start_program(
         *CHANNEL.lock() = Some(Arc::clone(kernel_end));
         Ok(u64::from(bootstrap.0))
     };
-    (processes.start)(process, &mut publish).map_err(|why| match why {
+    (processes.start)(process, Some(at), &mut publish).map_err(|why| match why {
         StartRefused::Claimed => "devmgr could not be claimed to start",
         StartRefused::NoTask | StartRefused::Argument(_) => "devmgr could not be started",
     })
@@ -957,7 +967,7 @@ fn start_in(job: Arc<Job>) -> Result<Started, Errno> {
     let images = files.images().map_err(|_| status::NO_MEMORY)?;
     let devices =
         write_devices(&kernel_end, images, Arc::clone(&job)).map_err(|_| status::NO_MEMORY)?;
-    let process = load(&files.set.image).map_err(|_| status::BAD_STATE)?;
+    let (process, at) = load(&files.set.image).map_err(|_| status::BAD_STATE)?;
     let kill = |process: &Arc<dyn Host>| process.kill(job::KILLED_STATUS);
     if process.core().move_new_to(&job).is_err() {
         kill(&process);
@@ -969,7 +979,7 @@ fn start_in(job: Arc<Job>) -> Result<Started, Errno> {
         return Err(status::NO_MEMORY);
     };
     let end = Arc::clone(&devmgr_end);
-    start_program(&process, devmgr_end, &kernel_end).map_err(|_| status::BAD_STATE)?;
+    start_program(&process, at, devmgr_end, &kernel_end).map_err(|_| status::BAD_STATE)?;
     *HANDED.lock() = (devices, drivers, files.kept);
     REPORTED.store(false, Ordering::Release);
     let replaced = RUNNING.lock().replace(Running { exit, job });

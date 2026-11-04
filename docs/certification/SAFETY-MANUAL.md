@@ -740,6 +740,14 @@ the core's task; an unorderly reset (a watchdog, a triple fault, the reset
 button) writes nothing back (VULNERABILITY-ANALYSIS V-16). The integrator
 shall not set `ferrix.powerctl` on a system of which a claim is made.
 
+### AoU-43 — a supervisor that keeps a server's channel end tells its clients what the server lost
+
+K13 (`docs/microkernel/K13.md`): a supervisor that holds a duplicate of a server's channel end keeps
+the peer from closing when the server dies, so a message the dead server had already read is gone and
+its client hears nothing. The integrator's supervisor tells such a client after a restart, or the
+protocol carries a deadline. A client with neither waits on. The kernel's part stops at the channel,
+which it keeps open as asked.
+
 ### AoU-41 — a safety partition maps no pager-backed VMO it did not choose
 A pager-backed VMO (`docs/microkernel/K3.md`) has absent pages its pager
 supplies: a fault on one waits for that pager, up to the pager's bound of at
