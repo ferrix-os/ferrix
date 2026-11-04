@@ -1685,7 +1685,7 @@ first pass, none the second, 0.3 to 1.2 s a step; the directory 1.6 GB, where it
 | Rule | Why | Measured |
 |---|---|---|
 | A slot with no target dir waits up to 180 s for a warm one | three rows of one commit filled two cold slots | 894 and 931 s cold against about 200 s warm (`mk-m2-b5-*`) |
-| Under 150 GB free, a slot taken loses rustc's caches but the three kernels' | they were 23-27 GB of a slot's 34-37 GB | slots 37 to 16, 43 to 18, 34 to 17 GB; free 44 to 94 GB in 3 min, still warm |
+| Under 150 GB free, a slot taken, and one whose run ends, loses rustc's caches but the three kernels' and xtask's (0.5 GB against 25 s rebuilding it from nothing, 2-10 s with it) | they were 23-27 GB of a slot's 34-37 GB | slots 37 to 16, 43 to 18, 34 to 17 GB; free 44 to 94 GB in 3 min, still warm |
 | The load ceiling holds only at 3 busy slots or more | all five slots stood free with 51 runs queued, at load 44-60 from local builds | not yet measured: runs already queued keep the old script |
 
 Looked at and not taken, by what is on the critical path: `-Zthreads=8` (mk-ci: mk-gpu
