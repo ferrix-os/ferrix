@@ -697,6 +697,46 @@ fn a_shared_store_reaches_the_other_side() -> Result<(), &'static str> {
     Ok(())
 }
 
+/// L.object.107's core half: a process is frozen when its job or one above asks,
+/// whether that came before it was made, before it moved in or after, and stops being
+/// so when thawed or moved out. The parking is `needs_attention`'s, the personality's.
+///
+/// Verifies: L.object.107
+fn a_job_says_who_is_frozen() -> Result<(), &'static str> {
+    let tree = Job::new_root().map_err(|_| "bare: no job")?;
+    let frozen = tree.new_child().map_err(|_| "bare: no job")?;
+    let beneath = frozen.new_child().map_err(|_| "bare: no job")?;
+    let outside = tree.new_child().map_err(|_| "bare: no job")?;
+    frozen.set_freeze(true);
+    let born = BareSide::in_job(Work::default(), beneath)?;
+    let born = crate::object::process::Host::core(&*born.host);
+    if !born.sync_freeze().0 || !born.is_frozen() {
+        return Err("bare: a process made beneath a frozen job was not frozen");
+    }
+    let moved = BareSide::in_job(Work::default(), Arc::clone(&outside))?;
+    let moved = crate::object::process::Host::core(&*moved.host);
+    if moved.sync_freeze().0 || moved.is_frozen() {
+        return Err("bare: a process outside a frozen job was frozen");
+    }
+    moved
+        .move_to(&frozen)
+        .map_err(|_| "bare: a process would not move into a frozen job")?;
+    if !moved.sync_freeze().0 || !moved.is_frozen() {
+        return Err("bare: a process moved into a frozen job was not frozen");
+    }
+    moved
+        .move_to(&outside)
+        .map_err(|_| "bare: a process would not move out of a frozen job")?;
+    if moved.sync_freeze().0 || moved.is_frozen() {
+        return Err("bare: a process moved out of a frozen job stayed frozen");
+    }
+    frozen.set_freeze(false);
+    if born.sync_freeze().0 || born.is_frozen() {
+        return Err("bare: a process stayed frozen after its job was thawed");
+    }
+    Ok(())
+}
+
 // CHECKS-ONLY: stages_check.rs
 /// Every case: how many ran, none where the kernel does not count kernel time.
 ///
@@ -705,9 +745,10 @@ fn a_shared_store_reaches_the_other_side() -> Result<(), &'static str> {
 /// The first that did not hold.
 pub fn run() -> Result<u32, &'static str> {
     over_its_mark_a_job_gives_back()?;
+    a_job_says_who_is_frozen()?;
     // ARMv7-A has no K11: its native programs' end is the Linux one, until M5.
     if !crate::arch::HAS_RESTRICTED {
-        return Ok(1);
+        return Ok(2);
     }
     a_fault_is_resolved()?;
     a_store_copies_for_the_side_that_writes()?;
@@ -723,9 +764,9 @@ pub fn run() -> Result<u32, &'static str> {
     #[cfg(target_arch = "x86_64")]
     a_program_has_its_argument_and_its_calls_theirs()?;
     if !crate::sched::vtime::counting() {
-        return Ok(10);
+        return Ok(11);
     }
     user_time_is_not_kernel_time(cpu)?;
     calls_and_faults_are_kernel_time(cpu)?;
-    Ok(12)
+    Ok(13)
 }
