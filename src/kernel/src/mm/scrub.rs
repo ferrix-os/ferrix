@@ -304,23 +304,28 @@ fn share_used() -> bool {
 }
 
 /// What [`claim`] did.
-enum Claim {
+pub(super) enum Claim {
     /// The frame is the scrubber's.
     Taken,
     /// Not free, retired, or the only free block of its order or larger.
     Skipped,
-    /// Free memory is below twice the watermark: the batch stops.
+    /// Free memory is below twice the watermark beyond the promise: the batch
+    /// stops.
     Low,
 }
 
 /// Claim `frame`, in one hold of `FRAMES` (`L.mm.101`): only if it is free,
-/// not retired, free memory is at least twice the watermark, and another
+/// not retired, free memory is at least twice the watermark and the promise,
+/// and another
 /// free block of its block's order or larger exists. Counts nothing: the
 /// release is uncounted too (C4).
-fn claim(frame: Frame) -> Claim {
-    let watermark = super::watermark();
+pub(super) fn claim(frame: Frame) -> Claim {
+    // The watermark beyond the promise, and the watermark again: a frame the
+    // scrubber holds is not free, and a reservation's holder must not be
+    // refused for it (`L.mm.80`, ledger 5841 R3).
+    let floor = super::program_floor().saturating_add(super::watermark());
     with_frames(|frames| {
-        if frames.free_frames() < watermark.saturating_mul(2) {
+        if frames.free_frames() < floor {
             return Claim::Low;
         }
         let Some((head, order)) = frames.free_block_of(frame) else {

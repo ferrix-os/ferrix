@@ -77,6 +77,7 @@ pub const NO_RESERVATION: Reservation = reservation::NONE;
 /// The largest buddy block's order, for the calls that name one
 /// (`vmo_pin`'s `PIN_BLOCKS`).
 pub const MAX_ORDER: u8 = ferrix_frame::MAX_ORDER;
+
 pub use reserve::fill_reserve;
 pub(crate) use reserve::{Reserved, reserve};
 pub use reserve::{bypass_heap_in_sections, refuse_reserve_fills, reserve_counts};

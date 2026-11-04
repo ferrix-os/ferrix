@@ -44,6 +44,7 @@ pub struct Report {
 /// Verifies: L.object.223
 /// Verifies: L.object.225
 /// Verifies: L.user.145
+#[doc(hidden)]
 pub fn run() -> Result<Report, &'static str> {
     let slots = quota::live_slots();
     let promise = mm::outstanding_promise();

@@ -355,7 +355,9 @@ pub static STAGE9_QUOTAS: Explanation = Explanation {
           docs/certification/IMPLEMENTATION.md",
 };
 
+// CHECKS-ONLY: stages_check.rs
 /// For `check_reservations` in `stages_check.rs`.
+#[doc(hidden)]
 pub static STAGE9_RESERVE: Explanation = Explanation {
     code: "FX-0914",
     title: "a job's memory reservation did not hold what it promises",
