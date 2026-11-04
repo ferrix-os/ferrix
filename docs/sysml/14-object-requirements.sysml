@@ -2128,7 +2128,7 @@ package FerrixObjectRequirements {
             attribute :>> criterion = "Stage 13's cgroupfs check: a job made with
                 JOB_SEALED, one made inside it by job_create without the bit and
                 one made inside it by mkdir read as sealed, the cgroup they were
-                made in does not, and an unknown option bit is INVALID_ARGS.";
+                made in does not, and an unknown option bit is INVALID_ARGS. And with kernel objects alone, on every profile, the `item` line (syscall/rehome_check.rs::check_job_create).";
             attribute :>> parent = "H.OBJ.22";
             attribute :>> unit = ("object::job::Job::bare_child",
                 "object::job::Job::new_child_as", "object::job::Job::new_named_child_as",

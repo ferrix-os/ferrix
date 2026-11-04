@@ -105,6 +105,8 @@ impl Caller {
 
 /// A number no table carries is refused with `ENOSYS`, through the registered
 /// entry, and never answered by a handler or a fault.
+///
+/// Verifies: H.TRAP.11, L.trap.4
 fn check_an_unknown_number_is_enosys() -> Result<(), &'static str> {
     let enosys = Outcome::Return(Errno::ENOSYS.as_return_value());
     for number in [0xDEAD, usize::MAX, usize::MAX - 1] {
@@ -135,6 +137,8 @@ fn check_an_unknown_number_is_enosys() -> Result<(), &'static str> {
 
 /// A job is sealed exactly when made with `JOB_SEALED` or inside a sealed job;
 /// `job_create` refuses any other option bit before anything is made.
+///
+/// Verifies: L.object.250
 fn check_job_create() -> Result<(), &'static str> {
     let caller = Caller::new()?;
     let parent = Job::new_root().map_err(|_| "no parent job")?;
@@ -176,6 +180,8 @@ fn check_job_create() -> Result<(), &'static str> {
 }
 
 /// The node's description is what the node holds, and what enumeration read.
+///
+/// Verifies: L.device.10
 fn check_described() -> Result<(), &'static str> {
     for node in device::devices() {
         let Some(function) = node.pci_function() else {
@@ -323,6 +329,8 @@ fn quiesce(caller: &Caller, handle: u64) -> Result<usize, Errno> {
 /// A quiesce through a handle without `MANAGE` is refused; one under a driver is
 /// `BAD_STATE`, changing nothing; and one as the driver dies waits for the core,
 /// turns the device's DMA off, lets go the core's claim and answers success.
+///
+/// Verifies: L.quiesce.1, L.quiesce.2, L.quiesce.3, H.DEV.2, H.DEV.4
 fn check_quiesce() -> Result<bool, &'static str> {
     {
         let mut registered = REGISTERED.lock();
@@ -391,6 +399,8 @@ fn check_quiesce() -> Result<bool, &'static str> {
 /// A write-combining object's mappings are write-combining, every copy through
 /// the direct map is made coherent, `vmo_read` and `vmo_write` are refused, and
 /// no core's view and write-combining ever meet.
+///
+/// Verifies: L.user.133
 fn check_a_combining_object() -> Result<bool, &'static str> {
     let object = Vmo::new_anonymous(1).map_err(|_| "no object to make write-combining")?;
     if !object.make_combining() {

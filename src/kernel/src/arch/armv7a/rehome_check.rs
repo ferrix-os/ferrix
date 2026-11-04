@@ -7,6 +7,8 @@ use crate::trap::Abi;
 
 /// ARMv7-A's token is `AUDIT_ARCH_ARM` for the svc, and its rollback value the
 /// first argument.
+///
+/// Verifies: L.armv7a.2
 fn check_the_token_and_the_rollback() -> Result<(), &'static str> {
     let args = [0x1111, 2, 3, 4, 5, 6];
     if arch::syscall_rollback_value(Abi::Native, 0x2222, &args) != 0x1111 {

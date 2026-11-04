@@ -45,6 +45,8 @@ fn asked(slot: &Once<SyscallFilter>, args: &SyscallArgs) -> Option<isize> {
 
 /// No filter, nothing answered; the first registration stands; and an errno is
 /// cut to 4095 before it is the call's result.
+///
+/// Verifies: L.trap.7
 fn check_the_filter_slot() -> Result<(), &'static str> {
     let args = call(UNKNOWN, 0);
     let slot: Once<SyscallFilter> = Once::new();
@@ -76,6 +78,8 @@ fn check_the_filter_slot() -> Result<(), &'static str> {
 
 /// A Trap verdict is answered with the architecture's rollback value of the
 /// call as the entry read it and no other.
+///
+/// Verifies: L.trap.8
 fn check_a_trap_verdict() -> Result<(), &'static str> {
     fn trapping(_: &SyscallArgs) -> Verdict {
         Verdict::Trap
