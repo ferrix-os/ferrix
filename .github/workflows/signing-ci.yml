@@ -20,12 +20,13 @@
 # * the key is a step-level environment variable of the one step that
 #   signs, masked by GitHub in the form it is passed, never echoed and
 #   never written to disk;
-# * before signing, every earlier run's signature log is fetched, and a
-#   leaf any of them used is refused; after, every log is audited for an
-#   (I, q) twice. The logs are kept 90 days, and the key expires 85 days
-#   after it was made (the anchors file's `expires`, which the signer
-#   refuses on and after), so the audit always covers every log since the
-#   key was made.
+# * before signing, every earlier run's signature log is listed and fetched,
+#   and a leaf any of them used is refused; after, every log is audited for
+#   an (I, q) twice. A failed fetch ends the run; a listing can miss a log for
+#   one run, the next one lists them all again (docs/SIGNING.md §6.5). The
+#   logs are kept 90 days, and the key expires 85 days after it was made (the
+#   anchors file's `expires`, which the signer refuses on and after), so the
+#   audit covers every log since the key was made.
 # * every action is pinned to a commit.
 # * no other workflow names the key or the environment.
 
@@ -71,16 +72,37 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/logs"
           : > "$RUNNER_TEMP/prior.log"
+          # One log per earlier run, one request each: at this many requests
+          # GitHub answers some with a 5xx (one ended 4 of the last 60 runs,
+          # 2026-11-04). Only those are asked again, and the output is
+          # kept only from an answer that succeeded. Anything else, or a 5xx
+          # that lasts, still ends the run: a failed fetch is never passed over.
+          fetch() { # fetch OUT ARGS...: gh api ARGS > OUT
+            out=$1; shift
+            for wait in 15 30 60 120 0; do
+              if gh api "$@" > "$out" 2> "$RUNNER_TEMP/gh.err"; then return 0; fi
+              cat "$RUNNER_TEMP/gh.err" >&2
+              grep -q 'HTTP 5[0-9][0-9]' "$RUNNER_TEMP/gh.err" || return 1
+              [ "$wait" = 0 ] || sleep "$wait"
+            done
+            return 1
+          }
           # This repository's runs on develop and main only (ledger 4188 (6)).
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
+          fetch "$RUNNER_TEMP/artifacts.txt" --paginate "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
             --jq '.artifacts[]
               | select(.expired == false and (.name | startswith("signing-ci-log-")))
               | select(.workflow_run.head_branch == "develop" or .workflow_run.head_branch == "main")
               | select(.workflow_run.head_repository_id == .workflow_run.repository_id)
-              | "\(.id) \(.archive_download_url)"' > "$RUNNER_TEMP/artifacts.txt"
+              | "\(.id) \(.archive_download_url)"'
+          # The listing is about 50 pages, newest first, read over minutes while
+          # other runs upload: an artifact pushed across a page's edge is listed
+          # twice, and its log appended twice read as "(I, q) is logged twice:
+          # rotate the key" (run 41903726637, artifact 13025335414). One artifact
+          # counts once. Two artifacts holding one leaf still fail the audit.
+          sort -u -o "$RUNNER_TEMP/artifacts.txt" "$RUNNER_TEMP/artifacts.txt"
           fetched=0
           while read -r id url; do
-            gh api "$url" > "$RUNNER_TEMP/logs/$id.zip"
+            fetch "$RUNNER_TEMP/logs/$id.zip" "$url"
             unzip -p "$RUNNER_TEMP/logs/$id.zip" >> "$RUNNER_TEMP/prior.log"
             fetched=$((fetched + 1))
           done < "$RUNNER_TEMP/artifacts.txt"

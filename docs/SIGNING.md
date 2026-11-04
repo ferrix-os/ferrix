@@ -940,6 +940,16 @@ customer's own OK is needed as well, and nothing is created before both):
   plant a `PATH` or `LD_PRELOAD` entry the `Sign` step inherits. It is in
   the same trust as a push to `develop`, and exposes development images
   only.
+  **Two more, of the listing (ledger 6829).** The fetch reads the artifact
+  listing, about 50 pages newest first, over minutes while other runs upload.
+  A log pushed across a page's edge is listed twice: run 41903726637
+  (2026-11-04) stopped on "(I, q 7488) is logged twice" for that reason, before
+  `Sign`, so no leaf went. All 161 logs held no (I, q) twice, so it was no hit
+  under this section and no rotation followed; one artifact now counts once,
+  and two holding one leaf still fail. The other way, an artifact expiring
+  mid-listing can shift a log past an edge unread, for that run. No leaf can be
+  reused by it, since q is a function of the run and attempt alone, and the next
+  run lists everything again, so a repeat is found one run late.
 
 **The key's creation (4005 (8); 4188 (10)).** On 2026-10-25, after the
 consultant's OK IF (1)-(10) at ledger 4188 and the customer's OK of the
