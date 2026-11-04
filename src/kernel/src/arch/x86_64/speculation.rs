@@ -745,8 +745,6 @@ struct VectorFacts {
 /// it (`docs/certification/SPECULATION.md` §3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum VectorLeak {
-    /// Built `--mitigations off`: nothing is decided.
-    SwitchOff,
     /// Neither Zenbleed nor Gather Data Sampling applies.
     NotAffected,
     /// Zenbleed, closed by microcode at or past the fixed revision.
@@ -771,7 +769,6 @@ impl VectorLeak {
     /// For the boot log.
     pub(crate) const fn describe(self) -> &'static str {
         match self {
-            VectorLeak::SwitchOff => "not decided: built with --mitigations off",
             VectorLeak::NotAffected => "Zenbleed and GDS do not apply",
             VectorLeak::ZenbleedMicrocode => "Zenbleed closed by microcode",
             VectorLeak::ZenbleedChickenBit => "Zenbleed closed by DE_CFG[9]",
@@ -914,9 +911,6 @@ fn vector_facts(offered: &Offered) -> VectorFacts {
 /// one. Before `init`, since `XCR0` is written in `init_traps`; `apply` does
 /// the same covering on every processor after.
 pub(crate) fn vector_leak() -> VectorLeak {
-    if !HARDENED {
-        return VectorLeak::SwitchOff;
-    }
     let verdict = decide_vector_leak(&vector_facts(&offered()));
     match verdict {
         VectorLeak::ZenbleedChickenBit => {
@@ -1027,7 +1021,10 @@ static SWITCH_IBPB: AtomicBool = AtomicBool::new(false);
 /// first program.
 pub(crate) fn init() {
     if !HARDENED {
-        println!("  cpu      speculation defences off: built with --mitigations off");
+        println!(
+            "  cpu      speculation defences off: built with --mitigations off; \
+             Zenbleed's and GDS's covers stay"
+        );
         record_this_cpu(Defences::NONE);
         return;
     }
@@ -1168,7 +1165,13 @@ fn apply_vector_cover() -> bool {
 /// Apply the boot processor's plan on a secondary, as it starts.
 pub(crate) fn apply_this_cpu() {
     if !HARDENED {
-        record_this_cpu(Defences::NONE);
+        // The vector covers are no speed trade and stay in every build
+        // (`L.x86_64.123`): one that does not hold stops the boot here too.
+        record_this_cpu(if apply_vector_cover() {
+            Defences::NONE
+        } else {
+            Defences::NONE.with(Defences::READ_BACK_FAILED)
+        });
         return;
     }
     let defences = Defences::from_bits(PLAN_DEFENCES.load(Ordering::Acquire));

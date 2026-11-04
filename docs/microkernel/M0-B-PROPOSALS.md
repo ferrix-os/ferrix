@@ -441,6 +441,10 @@ No FINDINGS id. Internal review, not independent verification (F-27).
 
 ## 2. Zenbleed's and GDS's fixes leave `mitigations` (DF6)
 
+**Built 2026-11-04.** The code as §2.2 says, on `feature/mk-land`; the check in
+`test-flags`, `vector_verdict_named`. `VectorLeak::SwitchOff` is gone, so D1 now plants a
+verdict that says "not decided".
+
 ### 2.1 What there is today
 
 `src/kernel/src/arch/x86_64/speculation.rs`:
