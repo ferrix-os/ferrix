@@ -590,3 +590,15 @@ Done 2026-10-24 (kernel-flakes).
 | Item | Owner | Stage |
 |---|---|---|
 | **Open (2026-11-04, mk-merge).** `test-init --arch aarch64 --smp 2` on ae0bf31a1 stopped in stage 9's timer check (K10, `object/timer_check.rs`) with "an early wake took out more or less than its own entry", `logs/queue/mkm-s2-inita2c.log`; the same row passed on 9e44200e6, which differs by `fire_timers`' cut, `logs/queue/mkm-s3-inita2c.log`. The only firing in the gate logs but its own control's. Not traced. The check reads `sleepers_here` twice around a wake, on two processors at this row, so another entry filed or fired between the reads is a reading; not shown. | open |
+
+### fl-091
+
+| Item | Owner | Stage |
+|---|---|---|
+| **Open (2026-11-04, mk-merge).** Stage 7's kernel time check: "a program spinning in user mode was charged its user time as kernel time (the return to user mode left its stint open)", AArch64 TCG, load 19, `logs/queue/mkm-cm7-plant-a.log`, on a scratch tree of copy-miss with a plant in `read_target`; the same tree passed on rerun, `mkm-cm7-plant-a2.log`. The only firing in the gate logs but that check's own controls. Not traced. | open |
+
+### fl-092
+
+| Item | Owner | Stage |
+|---|---|---|
+| **Open (2026-11-04, mk-merge, ledger 6766).** `test-mce-restart-off --arch x86_64 --accel tcg --kernel-profile desktop`, two different failures on K12's tree 2c7af8895. (a) The row's own collision: `logs/queue/mkm-k12r-19.log`, "boot 2's loader did not keep the banks' page out first"; the banks' page is a program's frame from boot 1, boot 2's loader may already hold it, and says "could not be kept out (left): it is in use". The row now accepts that line and judges the rest; `m8b-d10` logged it on an old tree. (b) `mkm-k12r-19b.log`: "the machine did not reset after the stop", the panic printed "reset in 10 s" and then nothing for about 390 s, the first unforced sighting. See the row's next dated line for what the QMP-dump runs found. | open |

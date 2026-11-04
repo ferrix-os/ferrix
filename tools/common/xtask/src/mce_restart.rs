@@ -1014,12 +1014,18 @@ fn judge_off(boot_2: &[String], page: u64) -> std::result::Result<(), String> {
     if !has(boot_2, mode) {
         return Err(format!("boot 2's loader did not say `{mode}`"));
     }
-    if !has(boot_2, &left) {
+    // The page is a program's frame from boot 1 and varies: boot 2's loader may already
+    // hold it, says so and goes on, and then has nothing to release (fl-092).
+    let collided = has(
+        boot_2,
+        &format!("badframe {page:#x} could not be kept out (left): it is in use"),
+    );
+    if !collided && !has(boot_2, &left) {
         return Err(format!(
             "boot 2's loader did not keep the banks' page out first: no `{left}`"
         ));
     }
-    if !has(boot_2, &released) {
+    if !collided && !has(boot_2, &released) {
         return Err(format!(
             "boot 2's loader did not release the page: no `{released}`"
         ));
