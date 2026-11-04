@@ -3,12 +3,15 @@
 
 use ferrix_linux_abi::errno::Errno;
 use ferrix_native_abi::nr;
-use ferrix_native_abi::restricted::{Context, FaultKind, HANDLE_KEEP, Reason, SHARED_BASE};
+use ferrix_native_abi::restricted::{
+    Context, ENTER_COPY_MISS_EXITS, EXIT_PC, FAULT_KIND, FaultKind, HANDLE_KEEP, Reason,
+    SHARED_BASE,
+};
 use ferrix_native_abi::rights::{Rights, SAME_RIGHTS};
 use ferrix_native_abi::status;
 use ferrix_rt::linux;
 use ferrix_rt::restricted::{
-    Exit, continue_, copy_from_program, declare_copy_window, enter, resume,
+    Exit, continue_, copy_from_program, declare_copy_window, enter, enter_with, resume,
 };
 
 use crate::arch;
@@ -293,6 +296,7 @@ fn cases(bootstrap: ferrix_rt::Bootstrap) -> Result<(), i32> {
     continue_after_fault()?;
     tables(&given)?;
     moves()?;
+    copy_miss(&given)?;
     copy_window()?;
     vectors()?;
     if arch::HAS_COMPAT {
@@ -635,6 +639,173 @@ fn refused_in_restricted(number: usize, args: [u64; 6]) -> Result<(), i32> {
         arch::result_of(&read()?) as i64 == status::BAD_STATE.as_return_value() as i64,
         153,
     )
+}
+
+/// Where the copy-miss cases' calls point: pages no other case maps.
+const MISS_AT: u64 = 0x2100_0000;
+/// A word of the zero page: an offset, and a deadline already past.
+const ZERO_WORD: u64 = ZERO_AT + 0x100;
+/// Scratch in the zero page's mapping, which a program may write.
+const SCRATCH: u64 = ZERO_AT + 0x200;
+
+/// `number` run in restricted mode with no option: its answer.
+fn answered(number: usize, words: [u64; 6], case: i32) -> Result<u64, i32> {
+    let mut context = at(arch::sys());
+    arch::set_call(&mut context, number as u64, words);
+    fault_exit(&enter(&context), arch::VECTOR_BREAKPOINT, case)?;
+    Ok(arch::result_of(&read()?))
+}
+
+/// Require the exit of a call whose copy missed at `address`: the kernel's kind, and the
+/// program back at the call with its number, its registers as the call left them.
+fn missed(exit: &Exit, address: u64, number: usize, case: i32) -> Result<(), i32> {
+    let call = IMAGE_AT + arch::sys();
+    fault_exit(exit, arch::VECTOR_PAGE, case)?;
+    hold(
+        exit.words[FAULT_KIND] == FaultKind::CallCopy as u64
+            && exit.words[1] == address
+            && exit.words[EXIT_PC] == call,
+        case,
+    )?;
+    let context = read()?;
+    hold(
+        arch::pc_of(&context) == call
+            && arch::call_number_of(&context) == number as u64
+            && arch::as_a_call_left(&context, call),
+        case,
+    )
+}
+
+/// Map a page of `byte`s at `address` in the restricted space: the shadow filling the cache.
+fn fill(space: u64, address: u64, byte: u8, case: i32) -> Result<(), i32> {
+    let page = [byte; 0x1000];
+    let offset = 0_u64;
+    let vmo = sys(nr::VMO_CREATE, [0x1000, 0, 0, 0, 0, 0]).map_err(|_| case)?;
+    sys(
+        nr::VMO_WRITE,
+        [
+            vmo,
+            page.as_ptr().addr() as u64,
+            0x1000,
+            (&raw const offset).addr() as u64,
+            0,
+            0,
+        ],
+    )
+    .map_err(|_| case)?;
+    let write = u64::from(ferrix_native_abi::types::MAP_READ | ferrix_native_abi::types::MAP_WRITE);
+    sys(
+        nr::SPACE_MAP,
+        [
+            space,
+            vmo,
+            address,
+            0x1000,
+            write,
+            (&raw const offset).addr() as u64,
+        ],
+    )
+    .map_err(|_| case)?;
+    Ok(())
+}
+
+/// Cases 146 to 152: `ENTER_COPY_MISS_EXITS` (K1 §2.2, ledger 6326, 6529), with this normal
+/// mode standing in for `linuxd`.
+fn copy_miss(given: &Given) -> Result<(), i32> {
+    let option = ENTER_COPY_MISS_EXITS;
+    let fault = status::FAULT.as_return_value() as i64;
+    // Case 146, a row that runs again: back at the call, as often as it is continued while
+    // the page is not there, the option holding; then it runs, and its bytes are there.
+    let vmo = answered(nr::VMO_CREATE, [0x1000, 0, 0, 0, 0, 0], 146)?;
+    let write = [vmo, MISS_AT, 8, ZERO_WORD, 0, 0];
+    let mut context = at(arch::sys());
+    arch::set_call(&mut context, nr::VMO_WRITE as u64, write);
+    missed(&enter_with(&context, option), MISS_AT, nr::VMO_WRITE, 146)?;
+    missed(&continue_(), MISS_AT, nr::VMO_WRITE, 146)?;
+    fill(given.space, MISS_AT, 0x5A, 146)?;
+    fault_exit(&continue_(), arch::VECTOR_BREAKPOINT, 146)?;
+    hold(arch::result_of(&read()?) == 0, 146)?;
+    answered(nr::VMO_READ, [vmo, SCRATCH, 8, ZERO_WORD, 0, 0], 146)?;
+    hold(copy_word(SCRATCH) == Ok(0x5A5A_5A5A_5A5A_5A5A), 146)?;
+    // Case 147, the option down: the same miss answers `FAULT`, no exit.
+    let hole = MISS_AT + 0x1000;
+    let mut context = at(arch::sys());
+    arch::set_call(
+        &mut context,
+        nr::VMO_WRITE as u64,
+        [vmo, hole, 8, ZERO_WORD, 0, 0],
+    );
+    fault_exit(&enter(&context), arch::VECTOR_BREAKPOINT, 147)?;
+    hold(arch::result_of(&read()?) as i64 == fault, 147)?;
+    // Case 148, a pointer the shadow refuses: `FAULT`, past the instruction, the program
+    // still running, never a signal (P4).
+    let mut context = at(arch::sys());
+    arch::set_call(
+        &mut context,
+        nr::VMO_WRITE as u64,
+        [vmo, hole, 8, ZERO_WORD, 0, 0],
+    );
+    missed(&enter_with(&context, option), hole, nr::VMO_WRITE, 148)?;
+    let mut told = read()?;
+    arch::answer_past_call(&mut told, fault as u64);
+    fault_exit(&enter_with(&told, option), arch::VECTOR_BREAKPOINT, 148)?;
+    hold(arch::result_of(&read()?) as i64 == fault, 148)?;
+    // Case 149, a row that restores: the message taken goes back, and is there for the
+    // next run; lost, this read would answer that nothing is waiting (P3).
+    answered(nr::CHANNEL_CREATE, [SCRATCH, 0, 0, 0, 0, 0], 149)?;
+    let ends = copy_word(SCRATCH).map_err(|_| 149)?;
+    let (near, far) = (ends & 0xFFFF_FFFF, ends >> 32);
+    answered(nr::CHANNEL_WRITE, [near, IMAGE_AT, 8, 0, 0, 0], 149)?;
+    let into = MISS_AT + 0x2000;
+    let read_it = [far, into, 8, 0, 0, SCRATCH];
+    let mut context = at(arch::sys());
+    arch::set_call(&mut context, nr::CHANNEL_READ as u64, read_it);
+    missed(&enter_with(&context, option), into, nr::CHANNEL_READ, 149)?;
+    fill(given.space, into, 0, 149)?;
+    fault_exit(&continue_(), arch::VECTOR_BREAKPOINT, 149)?;
+    hold(arch::result_of(&read()?) == 0, 149)?;
+    let mut first = [0_u8; 8];
+    first.copy_from_slice(arch::image().get(..8).ok_or(149)?);
+    hold(copy_word(into) == Ok(u64::from_ne_bytes(first)), 149)?;
+    // Case 150, the port's: the packet goes back. The deadline is past, so lost, it would
+    // answer `TIMED_OUT` rather than wait.
+    let port = answered(nr::PORT_CREATE, [0; 6], 150)?;
+    answered(nr::PORT_QUEUE, [port, ZERO_WORD, 0, 0, 0, 0], 150)?;
+    let into = MISS_AT + 0x3000;
+    let mut context = at(arch::sys());
+    arch::set_call(
+        &mut context,
+        nr::PORT_WAIT as u64,
+        [port, ZERO_WORD, into, 0, 0, 0],
+    );
+    missed(&enter_with(&context, option), into, nr::PORT_WAIT, 150)?;
+    fill(given.space, into, 0, 150)?;
+    fault_exit(&continue_(), arch::VECTOR_BREAKPOINT, 150)?;
+    hold(arch::result_of(&read()?) == 0, 150)?;
+    // Case 151, a hole in another space, by handle: its `FAULT` is that space's, and no
+    // exit (6529 Q1).
+    let other = sys(nr::SPACE_CREATE, [0; 6]).map_err(|_| 151)?;
+    let other = sys(
+        nr::HANDLE_TO_PRIVATE,
+        [other, u64::from(SAME_RIGHTS), 0, 0, 0, 0],
+    )
+    .map_err(|_| 151)?;
+    let mut context = at(arch::sys());
+    arch::set_call(
+        &mut context,
+        nr::SPACE_READ as u64,
+        [other, MISS_AT, SCRATCH, 8, 0, 0],
+    );
+    fault_exit(&enter_with(&context, option), arch::VECTOR_BREAKPOINT, 151)?;
+    hold(arch::result_of(&read()?) as i64 == fault, 151)?;
+    // Case 152, an option not known: refused before anything is taken.
+    let refused_it = enter_with(&at(arch::sys()), 4);
+    hold(
+        refused_it.reason == 0
+            && refused_it.number as i64 == status::INVALID_ARGS.as_return_value() as i64,
+        152,
+    )?;
+    Ok(())
 }
 
 /// Cases 58, 59: `RESTRICTED_CONTINUE` retries a fault as it stands, and what a
@@ -1563,7 +1734,7 @@ fn all_calls_exit() -> Result<(), i32> {
     // Refused, it takes nothing: the context held is still this one, its flag up.
     let mut other = at(arch::sys());
     arch::set_call(&mut other, nr::THREAD_SELF as u64, [0; 6]);
-    let refused_entry = ferrix_rt::restricted::enter_with(&other, 1 << 63);
+    let refused_entry = enter_with(&other, 1 << 63);
     hold(
         refused_entry.reason == 0
             && refused_entry.number as i64 == status::INVALID_ARGS.as_return_value() as i64,

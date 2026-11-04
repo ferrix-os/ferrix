@@ -9,7 +9,7 @@ use ferrix_bootinfo::is_user_address;
 use ferrix_linux_abi::errno::Errno;
 use ferrix_native_abi::nr;
 use ferrix_native_abi::restricted::{CONTEXT_BYTES, Context, FaultKind, Reason, SHARED_BASE};
-use ferrix_native_abi::restricted::{ENTER_ALL_CALLS_EXIT, may_continue};
+use ferrix_native_abi::restricted::{ENTER_ALL_CALLS_EXIT, ENTER_COPY_MISS_EXITS, may_continue};
 use ferrix_native_abi::status;
 
 use super::switch::UserState;
@@ -18,6 +18,7 @@ use crate::arch::speculation;
 use crate::fallible;
 use crate::sched;
 use crate::syscall::uaccess;
+use crate::user::space::AddressSpace;
 
 /// The condition flags: all of `pstate` a context may hold.
 const PSTATE_NZCV: u64 = 0xF000_0000;
@@ -40,6 +41,10 @@ pub(crate) struct RestrictedState {
     /// Whether a native number exits too, as `RESTRICTED_ENTER` asked: tested only for
     /// a native number, so a Linux number's path does not read it.
     all_calls_exit: bool,
+    /// `ENTER_COPY_MISS_EXITS`, until the next entry.
+    copy_miss_exits: bool,
+    /// Where an answered call's copy last missed, and whether it wrote.
+    copy_miss: Option<(u64, bool)>,
     /// Whether a context is held: from the first entry on.
     held: bool,
     /// The last exit's reason, zero before the first.
@@ -54,6 +59,8 @@ impl RestrictedState {
             normal: TrapFrame::default(),
             other: UserState::new(),
             all_calls_exit: false,
+            copy_miss_exits: false,
+            copy_miss: None,
             held: false,
             last: 0,
         }
@@ -224,11 +231,12 @@ fn prepare(number: usize, argument: u64, options: u64) -> Result<(), Errno> {
     let state = own_state()?;
     match number {
         nr::RESTRICTED_ENTER => {
-            if options & !ENTER_ALL_CALLS_EXIT != 0 {
+            if options & !(ENTER_ALL_CALLS_EXIT | ENTER_COPY_MISS_EXITS) != 0 {
                 return Err(status::INVALID_ARGS);
             }
             take_context(state, argument)?;
             state.all_calls_exit = options & ENTER_ALL_CALLS_EXIT != 0;
+            state.copy_miss_exits = options & ENTER_COPY_MISS_EXITS != 0;
         }
         nr::RESTRICTED_RESUME => {
             if !state.held
@@ -298,10 +306,87 @@ pub(super) fn from_restricted(frame: &mut TrapFrame) -> bool {
                 refuse(frame, status::BAD_STATE);
                 return true;
             }
-            Some(nr::FromRestricted::Answered) | None => return false,
+            Some(nr::FromRestricted::Answered) | None => {
+                forget_copy_miss();
+                return false;
+            }
         }
     }
     exit(frame, Reason::Syscall as u64, x8, [x0, x1, x2, x3, x4, x5]);
+    true
+}
+
+/// A copy of an answered call that missed, in `space`: kept only with the option up, for
+/// this thread's own restricted space (ledger 6529 Q1). The one byte first: nothing else is
+/// read on `present`'s error path.
+pub(crate) fn note_copy_miss(space: &AddressSpace, at: u64, write: bool) {
+    if !sched::running_restricted() {
+        return;
+    }
+    let own = sched::with_current(|task| {
+        task.address_space()
+            .is_some_and(|mine| core::ptr::eq(core::ptr::from_ref(&**mine), space))
+    });
+    // SAFETY: (CONTEXT) only the running task reaches its own record, for this call.
+    let slot = unsafe { sched::own_restricted_slot() };
+    if own == Some(true)
+        && let Some(state) = slot.and_then(|slot| slot.as_deref_mut())
+        && state.copy_miss_exits
+    {
+        state.copy_miss = Some((at, write));
+    }
+}
+
+/// A failure the call goes on past is not the miss of a `FAULT` it answers.
+pub(crate) fn forget_copy_miss() {
+    if !sched::running_restricted() {
+        return;
+    }
+    // SAFETY: (CONTEXT) only the running task reaches its own record, for this call.
+    let slot = unsafe { sched::own_restricted_slot() };
+    if let Some(state) = slot.and_then(|slot| slot.as_deref_mut()) {
+        state.copy_miss = None;
+    }
+}
+
+/// The call answered `FAULT` because its copy missed (`docs/microkernel/K1.md` §2.2, ledger
+/// 6529 Q4): a call that may run again exits instead, decided before `x0` is written, with
+/// the registers as at the call, `x8` the number, and the pc back at its `SVC`. The context
+/// is held and goes back by `CONTINUE`, under `may_continue`. `true` when it did. With
+/// interrupts masked.
+pub(super) fn call_copy_exit(
+    frame: &mut TrapFrame,
+    number: usize,
+    outcome: &crate::trap::Outcome,
+) -> bool {
+    /// `SVC`'s length.
+    const SVC_BYTES: u64 = 4;
+    /// A data abort from EL0, and its syndrome's write bit.
+    const DATA_ABORT: u64 = 0x24;
+    const WNR: u64 = 1 << 6;
+    let Ok(state) = own_state() else {
+        return false;
+    };
+    let Some((address, write)) = state.copy_miss.take() else {
+        return false;
+    };
+    if !matches!(outcome, crate::trap::Outcome::Return(value) if *value == status::FAULT.as_return_value())
+        || !nr::decode(number)
+            .is_some_and(|call| !matches!(nr::copy_miss(call), nr::CopyMiss::AnswersFault))
+    {
+        return false;
+    }
+    frame.elr = frame.elr.wrapping_sub(SVC_BYTES);
+    let syndrome = (DATA_ABORT << 26) | if write { WNR } else { 0 };
+    let words = [
+        syndrome,
+        address,
+        FaultKind::CallCopy as u64,
+        frame.elr,
+        frame.sp,
+        0,
+    ];
+    exit(frame, Reason::Fault as u64, DATA_ABORT, words);
     true
 }
 

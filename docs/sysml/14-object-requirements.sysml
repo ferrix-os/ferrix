@@ -3263,6 +3263,37 @@ package FerrixObjectRequirements {
             attribute :>> unit = ("arch::x86_64::restricted::all_calls_exit",
                 "arch::aarch64::restricted::all_calls_exit");
         }
+        requirement <'L.user.190'> aCallsCopyMissMayExit : ItemLowLevel {
+            attribute :>> statement = "A context entered with ENTER_COPY_MISS_EXITS, whose answered
+                call answers FAULT because its copy missed the thread's own restricted space and
+                whose row in copy_miss may run again, shall exit with the kernel's kind CallCopy,
+                the registers as at the call and the pc back at it, before anything of the answer
+                is written, and CONTINUE shall run it again; with the option down the call shall
+                answer FAULT, and an unknown option shall be refused before anything is taken.";
+            attribute :>> criterion = "Cases 146, 147, 148, 152.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = ("arch::x86_64::restricted::call_copy_exit",
+                "arch::aarch64::restricted::call_copy_exit");
+        }
+        requirement <'L.user.191'> aMissIsTheThreadsOwnSpaces : ItemLowLevel {
+            attribute :>> statement = "A failed copy shall be noted as a miss only with the option
+                up and only in the running thread's own restricted space, and a failure the call
+                goes on past shall not stay noted, so that a FAULT from another cause exits never.";
+            attribute :>> criterion = "Case 151, and no path reaches the guard today, so it is shown with a plant: read_target, in restricted mode, through a faulting copy of the target's space, mkm-cm7-plant-x and -a holding the case, and with the guard taken away mkm-cm7-own-x and -a failing it (ledger 6677).";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = ("arch::x86_64::restricted::note_copy_miss",
+                "arch::aarch64::restricted::note_copy_miss",
+                "arch::x86_64::restricted::forget_copy_miss",
+                "arch::aarch64::restricted::forget_copy_miss",
+                "syscall::uaccess::forget_copy_miss");
+        }
+        requirement <'L.user.192'> aCallThatTookSomethingRestoresIt : ItemLowLevel {
+            attribute :>> statement = "A call whose row in copy_miss is Restores shall give back what
+                it took when its copy fails, so that the run again finds it.";
+            attribute :>> criterion = "Cases 149, 150.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = ("syscall::native::port_wait",);
+        }
         requirement <'L.trap.25'> aKillEndsAThreadInEitherMode : ItemLowLevel {
             attribute :>> statement = "A job kill shall end a thread of a process of a region in either
                 mode.";

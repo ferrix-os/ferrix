@@ -475,6 +475,9 @@ pub fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
         }
     };
 
+    if restricted && super::restricted::call_copy_exit(frame, args.number, &outcome) {
+        return Ok(());
+    }
     match outcome {
         Outcome::Return(value) => {
             if let Some(result) = frame.x.first_mut() {

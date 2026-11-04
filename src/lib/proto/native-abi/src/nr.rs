@@ -1604,3 +1604,150 @@ pub const fn from_restricted(call: NativeCall) -> FromRestricted {
         NativeCall::ExceptionResolve => FromRestricted::Answered,
     }
 }
+
+/// What an answered call does when its copy misses a restricted space that is a
+/// cache of `linuxd`'s (M5-LIFT §10, ledger 6326 (P2)).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CopyMiss {
+    /// No effect is taken before its copies: it may run again.
+    Rerun,
+    /// It takes something first and gives it back when the copy fails
+    /// (`Endpoint::unread`, `Port::put_back`): it may run again.
+    Restores,
+    /// It answers `FAULT`: anything not shown to be one of the other two.
+    AnswersFault,
+}
+
+/// Every native call's row: an exhaustive match, so a new number with no row does
+/// not build (N9).
+#[must_use]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one row a native call, with no default"
+)]
+pub const fn copy_miss(call: NativeCall) -> CopyMiss {
+    match call {
+        NativeCall::VmoRead
+        | NativeCall::VmoWrite
+        | NativeCall::VmoGetSize
+        | NativeCall::VmoDigest
+        | NativeCall::ChannelCreate
+        | NativeCall::ChannelWrite
+        | NativeCall::ObjectWaitOne
+        | NativeCall::ObjectWaitAsync
+        | NativeCall::ObjectId
+        | NativeCall::HandleDuplicate
+        | NativeCall::HandleReplace
+        | NativeCall::HandleClose
+        | NativeCall::PortCreate
+        | NativeCall::PortQueue
+        | NativeCall::VmoCreate
+        | NativeCall::ProcessCreate
+        | NativeCall::ProcessStart
+        | NativeCall::ProcessStatus
+        | NativeCall::JobGetQuota
+        | NativeCall::SpaceRead => CopyMiss::Rerun,
+        NativeCall::ChannelRead | NativeCall::ChannelReadAttested | NativeCall::PortWait => {
+            CopyMiss::Restores
+        }
+        NativeCall::ChannelWriteRead
+        | NativeCall::ProcessMake
+        | NativeCall::ProcessRun
+        | NativeCall::PagerKeep
+        | NativeCall::PagerTakeUp
+        | NativeCall::ChargeTicket
+        | NativeCall::PortFd
+        | NativeCall::VmoMap
+        | NativeCall::VmoPin
+        | NativeCall::VmoPinAddresses
+        | NativeCall::VmoExecutable
+        | NativeCall::JobCreate
+        | NativeCall::JobKill
+        | NativeCall::JobForCgroup
+        | NativeCall::JobSetLimit
+        | NativeCall::ProcessGive
+        | NativeCall::ProcessBootstrap
+        | NativeCall::ProcessSpace
+        | NativeCall::InterruptCreate
+        | NativeCall::InterruptBind
+        | NativeCall::InterruptAck
+        | NativeCall::IoMappingCreate
+        | NativeCall::IoMappingMap
+        | NativeCall::IoMappingMapCombining
+        | NativeCall::BlockRingCreate
+        | NativeCall::NetRingCreate
+        | NativeCall::DisplayControlCreate
+        | NativeCall::InputControlCreate
+        | NativeCall::RenderControlCreate
+        | NativeCall::DeviceInfo
+        | NativeCall::DeviceQuiesce
+        | NativeCall::DeviceClock
+        | NativeCall::SoundControlCreate
+        | NativeCall::LogControlCreate
+        | NativeCall::DevmgrStart
+        | NativeCall::AuditRead
+        | NativeCall::DeviceAperture
+        | NativeCall::DeviceConfigRead
+        | NativeCall::DeviceConfigWrite
+        | NativeCall::DeviceSetLimit
+        | NativeCall::DeviceGetLimit
+        | NativeCall::DeviceIsolation
+        | NativeCall::DeviceBindDomain
+        | NativeCall::ProcessImages
+        | NativeCall::ChardevControlCreate
+        | NativeCall::ChardevReply
+        | NativeCall::ChardevCopyIn
+        | NativeCall::ChardevCopyOut
+        | NativeCall::ChardevFile
+        | NativeCall::ChardevDmabufInstall
+        | NativeCall::ChardevDmabufResolve
+        | NativeCall::ChardevSyncInstall
+        | NativeCall::ChardevSyncSignal
+        | NativeCall::ChardevSyncResolve
+        | NativeCall::ChardevDmabufFence
+        | NativeCall::PowerControlCreate
+        | NativeCall::PowerSet
+        | NativeCall::PowerRead
+        | NativeCall::CpuService
+        | NativeCall::MemoryScrub
+        | NativeCall::TimerCreate
+        | NativeCall::TimerSet
+        | NativeCall::TimerCancel
+        | NativeCall::ExceptionChannelCreate
+        | NativeCall::ExceptionState
+        | NativeCall::ExceptionResolve
+        | NativeCall::AddressWait
+        | NativeCall::AddressWake
+        | NativeCall::AddressRequeue
+        | NativeCall::AddressWaitAny
+        | NativeCall::SpaceCreate
+        | NativeCall::SpaceMap
+        | NativeCall::SpaceUnmap
+        | NativeCall::SpaceProtect
+        | NativeCall::SpaceAllocate
+        | NativeCall::SpaceWrite
+        | NativeCall::SpaceClone
+        | NativeCall::RestrictedEnter
+        | NativeCall::RestrictedResume
+        | NativeCall::RestrictedKick
+        | NativeCall::RestrictedContextRead
+        | NativeCall::RestrictedVectorsRead
+        | NativeCall::RestrictedVectorsWrite
+        | NativeCall::RestrictedCopyWindow
+        | NativeCall::RegionCreate
+        | NativeCall::ProcessCreateShared
+        | NativeCall::ThreadCreate
+        | NativeCall::ThreadExit
+        | NativeCall::HandleToShared
+        | NativeCall::HandleToPrivate
+        | NativeCall::RestrictedContinue
+        | NativeCall::ThreadSelf
+        | NativeCall::ProcessStartShared
+        | NativeCall::JobDeclareBuffer
+        | NativeCall::PagerCreate
+        | NativeCall::PagerCreateVmo
+        | NativeCall::PagerSupply
+        | NativeCall::PagerOp
+        | NativeCall::PagerQueryDirty => CopyMiss::AnswersFault,
+    }
+}

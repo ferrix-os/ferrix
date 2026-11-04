@@ -1139,6 +1139,8 @@ fn channel_read(
                     handle_capacity.saturating_mul(size_of::<u32>()),
                 );
                 let _ = uaccess::fault_in_for_write(space, actual.at, actual.size());
+                // Ignored, so not the miss of any `FAULT` this call answers (6529 Q1).
+                uaccess::forget_copy_miss();
                 topology = Some(object::TOPOLOGY.lock());
                 continue;
             }

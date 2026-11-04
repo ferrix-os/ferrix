@@ -81,6 +81,10 @@ pub enum FaultKind {
     PastEnd = 3,
     /// Memory poison: `SIGBUS`, `BUS_MCEERR_AR`.
     Poison = 4,
+    /// An answered call's copy missed the restricted space: the thread is back at
+    /// the call, to run it again once the page is there, or to be told `FAULT`
+    /// (`docs/microkernel/K1.md` §2.2, ledger 6326, 6529). Never a signal.
+    CallCopy = 5,
 }
 
 /// `HANDLE_TO_SHARED`'s option: leave the private handle where it is, which
@@ -91,6 +95,12 @@ pub const HANDLE_KEEP: usize = 1;
 /// too, until the next entry (`docs/microkernel/K1.md` §2.2). What `linuxd` asks for a thread
 /// under Syscall User Dispatch, whose program asked that the kernel take its calls away.
 pub const ENTER_ALL_CALLS_EXIT: u64 = 1;
+
+/// `RESTRICTED_ENTER`'s option: an answered call whose copy misses this context's own space
+/// exits instead of answering `FAULT`, where its row in `nr::copy_miss` says it may run again,
+/// until the next entry (`docs/microkernel/K1.md` §2.2). What `linuxd` asks for, whose
+/// restricted space is only a cache of its shadow.
+pub const ENTER_COPY_MISS_EXITS: u64 = 2;
 
 /// A program's registers on x86-64, as `RESTRICTED_ENTER` takes them and
 /// `RESTRICTED_CONTEXT_READ` gives them (K1 §2.3). Every field is a whole word,

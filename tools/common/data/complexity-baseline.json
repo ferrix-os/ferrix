@@ -29,6 +29,11 @@
       "lines": 15,
       "recursive": false
     },
+    "arch/aarch64/trap.rs::system_call": {
+      "complexity": 15,
+      "lines": 50,
+      "recursive": false
+    },
     "arch/armv7a/signal.rs::setup_signal_frame": {
       "complexity": 23,
       "lines": 34,
@@ -421,7 +426,7 @@
     },
     "syscall/native.rs::channel_read": {
       "complexity": 16,
-      "lines": 63,
+      "lines": 64,
       "recursive": false
     },
     "syscall/native.rs::channel_write": {

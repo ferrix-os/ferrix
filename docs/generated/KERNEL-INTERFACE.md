@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2910 declarations in the core's files, 194 in the item's; 221 checks-only.
+2911 declarations in the core's files, 194 in the item's; 221 checks-only.
 
 ## ferrix-kernel-core
 
@@ -3263,6 +3263,7 @@ checks above is `pub` for raised checks (F3).
 | `copy_to_user` | fn | item, load |  |
 | `copy_to_user_present` | fn | item |  |
 | `fault_in_for_write` | fn | item |  |
+| `forget_copy_miss` | fn | item |  |
 | `get_u32` | fn | load |  |
 | `get_word` | fn | load |  |
 | `is_user_range` | fn | load |  |

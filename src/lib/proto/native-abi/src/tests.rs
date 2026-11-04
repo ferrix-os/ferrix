@@ -587,6 +587,33 @@ fn restricted_mode_and_shared_processes_have_their_block() {
     assert_eq!(nr::decode(0x109F), Some(NativeCall::ThreadSelf));
 }
 
+/// Every native call has a row, by the match being exhaustive, and the rows that may run
+/// again are counted, so that a row moved out of `AnswersFault` is seen here (ledger 6326
+/// P2).
+#[test]
+fn copy_miss_rows_are_counted() {
+    use nr::CopyMiss;
+    let count = |row| {
+        ALL.iter()
+            .filter(|call| nr::copy_miss(**call) == row)
+            .count()
+    };
+    assert_eq!(count(CopyMiss::Rerun), 20);
+    assert_eq!(count(CopyMiss::Restores), 3);
+    // It sends first and does not unsend: a copy added to it must not re-send (6667).
+    assert_eq!(
+        nr::copy_miss(NativeCall::ChannelWriteRead),
+        CopyMiss::AnswersFault
+    );
+    assert_eq!(nr::copy_miss(NativeCall::ChannelRead), CopyMiss::Restores);
+    assert_eq!(nr::copy_miss(NativeCall::PortWait), CopyMiss::Restores);
+    assert_eq!(nr::copy_miss(NativeCall::VmoWrite), CopyMiss::Rerun);
+    assert_eq!(
+        nr::copy_miss(NativeCall::SpaceWrite),
+        CopyMiss::AnswersFault
+    );
+}
+
 /// Verifies: L.trap.29
 #[test]
 fn every_native_call_has_a_row_from_restricted_mode() {

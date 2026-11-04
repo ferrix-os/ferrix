@@ -24,7 +24,7 @@ use ferrix_bootinfo::is_user_address;
 use ferrix_linux_abi::errno::Errno;
 use ferrix_native_abi::nr;
 use ferrix_native_abi::restricted::{CONTEXT_BYTES, Context, FaultKind, Reason, SHARED_BASE};
-use ferrix_native_abi::restricted::{ENTER_ALL_CALLS_EXIT, may_continue};
+use ferrix_native_abi::restricted::{ENTER_ALL_CALLS_EXIT, ENTER_COPY_MISS_EXITS, may_continue};
 use ferrix_native_abi::status;
 
 use super::gdt;
@@ -35,6 +35,7 @@ use crate::arch::speculation;
 use crate::fallible;
 use crate::sched;
 use crate::syscall::uaccess;
+use crate::user::space::AddressSpace;
 
 /// `RFLAGS.IF`.
 const FLAGS_IF: u64 = 1 << 9;
@@ -70,6 +71,10 @@ pub(crate) struct RestrictedState {
     context: TrapFrame,
     /// The normal mode's frame, as its entry saved it.
     normal: SyscallFrame,
+    /// `ENTER_COPY_MISS_EXITS`, until the next entry.
+    copy_miss_exits: bool,
+    /// Where an answered call's copy last missed, and whether it wrote.
+    copy_miss: Option<(u64, bool)>,
     /// The user state of the mode that is not running: `linuxd`'s while the
     /// program runs, the program's while `linuxd` does.
     other: UserState,
@@ -88,6 +93,8 @@ impl RestrictedState {
     fn new() -> RestrictedState {
         RestrictedState {
             context: TrapFrame::default(),
+            copy_miss_exits: false,
+            copy_miss: None,
             normal: SyscallFrame {
                 r15: 0,
                 r14: 0,
@@ -377,11 +384,12 @@ fn prepare(number: usize, argument: u64, options: u64) -> Result<(), Errno> {
     let state = own_state()?;
     match number {
         nr::RESTRICTED_ENTER => {
-            if options & !ENTER_ALL_CALLS_EXIT != 0 {
+            if options & !(ENTER_ALL_CALLS_EXIT | ENTER_COPY_MISS_EXITS) != 0 {
                 return Err(status::INVALID_ARGS);
             }
             take_context(state, argument)?;
             state.all_calls_exit = options & ENTER_ALL_CALLS_EXIT != 0;
+            state.copy_miss_exits = options & ENTER_COPY_MISS_EXITS != 0;
         }
         nr::RESTRICTED_RESUME => {
             if !state.held
@@ -467,10 +475,14 @@ pub(super) fn from_restricted(frame: &mut SyscallFrame) -> Option<crate::trap::O
                     ],
                     ip: frame.rcx,
                 };
+                forget_copy_miss();
                 super::enable_interrupts();
                 let regs = super::syscall::UserRegs::Syscall(*frame);
                 let outcome = crate::trap::system_call(&args, Some(&regs));
                 super::disable_interrupts();
+                if call_copy_exit(frame, number, &outcome) {
+                    return None;
+                }
                 return Some(outcome);
             }
         }
@@ -494,6 +506,81 @@ pub(super) fn from_restricted(frame: &mut SyscallFrame) -> Option<crate::trap::O
     frame.r12 = Reason::Syscall as u64;
     state.last = Reason::Syscall as u64;
     None
+}
+
+/// A copy of an answered call that missed, in `space`: kept only with the option up, for
+/// this thread's own restricted space (ledger 6529 Q1). The one byte first: nothing else is
+/// read on `present`'s error path.
+pub(crate) fn note_copy_miss(space: &AddressSpace, at: u64, write: bool) {
+    if !sched::running_restricted() {
+        return;
+    }
+    let own = sched::with_current(|task| {
+        task.address_space()
+            .is_some_and(|mine| core::ptr::eq(core::ptr::from_ref(&**mine), space))
+    });
+    // SAFETY: (CONTEXT) only the running task reaches its own record, for this call.
+    let slot = unsafe { sched::own_restricted_slot() };
+    if own == Some(true)
+        && let Some(state) = slot.and_then(|slot| slot.as_deref_mut())
+        && state.copy_miss_exits
+    {
+        state.copy_miss = Some((at, write));
+    }
+}
+
+/// A failure the call goes on past is not the miss of a `FAULT` it answers.
+pub(crate) fn forget_copy_miss() {
+    if !sched::running_restricted() {
+        return;
+    }
+    // SAFETY: (CONTEXT) only the running task reaches its own record, for this call.
+    let slot = unsafe { sched::own_restricted_slot() };
+    if let Some(state) = slot.and_then(|slot| slot.as_deref_mut()) {
+        state.copy_miss = None;
+    }
+}
+
+/// The call answered `FAULT` because its copy missed (`docs/microkernel/K1.md` §2.2, ledger
+/// 6529 Q4): a call that may run again exits instead, decided before anything of the answer
+/// is written, with the registers as at the call and the pc back at its `SYSCALL`, `rcx` and
+/// `r11` as that left them. The context is held and goes back by `CONTINUE`, under
+/// `may_continue`. `true` when it did.
+fn call_copy_exit(frame: &mut SyscallFrame, number: usize, outcome: &crate::trap::Outcome) -> bool {
+    /// `SYSCALL`'s length.
+    const SYSCALL_BYTES: u64 = 2;
+    /// The page fault's vector, and its code's write bit.
+    const PAGE_FAULT: u64 = 14;
+    const PF_WRITE: u64 = 1 << 1;
+    let Ok(state) = own_state() else {
+        return false;
+    };
+    let Some((address, write)) = state.copy_miss.take() else {
+        return false;
+    };
+    if !matches!(outcome, crate::trap::Outcome::Return(value) if *value == status::FAULT.as_return_value())
+        || !nr::decode(number)
+            .is_some_and(|call| !matches!(nr::copy_miss(call), nr::CopyMiss::AnswersFault))
+    {
+        return false;
+    }
+    let mut context = super::signal::UserContext::from_syscall(frame).into_frame();
+    context.rip = frame.rcx.wrapping_sub(SYSCALL_BYTES);
+    state.context = context;
+    leave_restricted(state);
+    *frame = state.normal;
+    write_exit(
+        frame,
+        state,
+        Reason::Fault as u64,
+        PAGE_FAULT,
+        [
+            if write { PF_WRITE } else { 0 },
+            address,
+            FaultKind::CallCopy as u64,
+        ],
+    );
+    true
 }
 
 /// The way back to user mode's look, on the frame a native call from restricted

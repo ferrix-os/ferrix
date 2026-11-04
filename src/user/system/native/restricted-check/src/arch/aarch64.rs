@@ -201,6 +201,22 @@ pub(crate) const fn pc_of(context: &Context) -> u64 {
     context.pc
 }
 
+/// The number a context's call holds.
+pub(crate) const fn call_number_of(context: &Context) -> u64 {
+    context.x[8]
+}
+
+/// Nothing of a call's clobbers on AArch64: `SVC` leaves every register.
+pub(crate) const fn as_a_call_left(_: &Context, _: u64) -> bool {
+    true
+}
+
+/// Past the call at the context's pc, answering `value`.
+pub(crate) const fn answer_past_call(context: &mut Context, value: u64) {
+    context.pc += 4;
+    context.x[0] = value;
+}
+
 /// Set in a context every register a program can hold a marked value in.
 pub(crate) fn mark_every_register(context: &mut Context) {
     for (register, value) in context.x[19..=28].iter_mut().zip(0xB0_u64..) {

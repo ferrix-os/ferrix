@@ -55,6 +55,16 @@ pub fn enter(context: &Context) -> Exit {
     unsafe { arch::restricted(nr::RESTRICTED_ENTER, at, 0) }
 }
 
+/// [`enter`], an answered call's copy that misses exiting (`ENTER_COPY_MISS_EXITS`), and any
+/// other option asked.
+#[must_use]
+pub fn enter_with(context: &Context, options: u64) -> Exit {
+    let bytes = context.to_bytes();
+    let at = bytes.as_ptr().addr() as u64;
+    // SAFETY: as [`enter`].
+    unsafe { arch::restricted(nr::RESTRICTED_ENTER, at, options) }
+}
+
 /// [`enter`], every system call exiting, a native number too (`ENTER_ALL_CALLS_EXIT`).
 #[must_use]
 pub fn enter_all_calls_exit(context: &Context) -> Exit {
@@ -68,15 +78,6 @@ pub fn enter_all_calls_exit(context: &Context) -> Exit {
             ferrix_native::region::ENTER_ALL_CALLS_EXIT,
         )
     }
-}
-
-/// [`enter`] with `options` as given, a bit the kernel does not know included.
-#[must_use]
-pub fn enter_with(context: &Context, options: u64) -> Exit {
-    let bytes = context.to_bytes();
-    let at = bytes.as_ptr().addr() as u64;
-    // SAFETY: as [`enter`].
-    unsafe { arch::restricted(nr::RESTRICTED_ENTER, at, options) }
 }
 
 /// `restricted_resume`: put `value` in the program's result register and go

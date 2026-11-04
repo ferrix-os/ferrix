@@ -263,6 +263,22 @@ pub(crate) const fn result_of(context: &Context) -> u64 {
     context.rax
 }
 
+/// The number a context's call holds.
+pub(crate) const fn call_number_of(context: &Context) -> u64 {
+    context.rax
+}
+
+/// Whether `rcx` and `r11` are as a `SYSCALL` at `call` leaves them.
+pub(crate) const fn as_a_call_left(context: &Context, call: u64) -> bool {
+    context.rcx == call + 2 && context.r11 & 0x200 != 0
+}
+
+/// Past the call at the context's pc, answering `value`.
+pub(crate) const fn answer_past_call(context: &mut Context, value: u64) {
+    context.rip += 2;
+    context.rax = value;
+}
+
 /// The next register [`vectors`] reads back to.
 pub(crate) const fn second_result_of(context: &Context) -> u64 {
     context.rbx

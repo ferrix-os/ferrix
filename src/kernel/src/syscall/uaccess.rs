@@ -141,9 +141,13 @@ fn resolve<R>(
     access: Access,
     touch: impl FnOnce(u64) -> R,
 ) -> Result<R, UserError> {
-    Ok(space
-        .route(at)
-        .with_page(user_address(at)?, access, touch)?)
+    let answer = space.route(at).with_page(user_address(at)?, access, touch);
+    // A copy that missed: said, and the error goes up as ever. The dispatcher's end
+    // decides (`docs/microkernel/K1.md` §2.2, ledger 6529 Q1).
+    if answer.is_err() {
+        arch::note_copy_miss(space, at, access.write);
+    }
+    Ok(answer?)
 }
 
 /// `at`, if it is a user address, clamped so that a mispredicted check cannot
@@ -417,10 +421,20 @@ pub fn fault_in_for_write(space: &AddressSpace, at: u64, len: usize) -> Result<(
     let end = at.checked_add(len).ok_or(UserError::Overflow)?;
     let mut page = at;
     while page < end {
-        crate::object::oom::fault(space.route(page), user_address(page)?, Access::WRITE)?;
+        let faulted =
+            crate::object::oom::fault(space.route(page), user_address(page)?, Access::WRITE);
+        if faulted.is_err() {
+            arch::note_copy_miss(space, page, true);
+        }
+        faulted?;
         page = (page - page % PAGE_SIZE).saturating_add(PAGE_SIZE);
     }
     Ok(())
+}
+
+/// A failure the call goes on past: not the miss of any `FAULT` it answers (ledger 6529 Q1).
+pub fn forget_copy_miss() {
+    arch::forget_copy_miss();
 }
 
 /// How many bytes of `remaining` may be copied starting at `at` without
