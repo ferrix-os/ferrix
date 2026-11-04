@@ -209,6 +209,7 @@ pub(crate) fn covered(start: u64, end: u64) -> bool {
 ///
 /// [`ClaimRefused::NotClaimed`] after the seal for a window outside every
 /// claim; [`ClaimRefused::NoMemory`].
+#[allow(dead_code, reason = "a board's glue is its caller: B1-B3, not in this landing")]
 pub(crate) fn use_window(start: u64, end: u64) -> Result<(), ClaimRefused> {
     use_window_in(
         &mut CLAIMS.lock(),
