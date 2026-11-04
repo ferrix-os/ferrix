@@ -587,14 +587,13 @@ extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
         crate::sched::vtime::leaving();
         return;
     }
-    // Step 4's fast path for `channel_write_read`, on a boot that registered
-    // one (`ferrix.fastpath=on`, T1): first, before the filter, which its own
-    // T2 stands in for, and with interrupts still masked. Every entry measure
-    // has run in the stub by here (`docs/OPAQUE-KERNEL.md` §9.7, condition
-    // 2). A declined call goes on below as any other.
-    if frame.rax as usize == ferrix_native_abi::nr::CHANNEL_WRITE_READ
-        && crate::trap::fast_path_on()
-    {
+    // Step 4's fast path for `channel_write_read`, in a build with it
+    // (`ipc_fastpath=on`, T1): first, before the filter, which its own T2 stands
+    // in for, and with interrupts still masked. Every entry measure has run in
+    // the stub by here (`docs/OPAQUE-KERNEL.md` §9.7, condition 2). A declined
+    // call goes on below as any other.
+    #[cfg(ferrix_fast_ipc)]
+    if frame.rax as usize == ferrix_native_abi::nr::CHANNEL_WRITE_READ {
         // The call blocks, and lets the vector registers go across it (3a).
         mark_vectors_dead(true);
         let args = [
@@ -704,6 +703,7 @@ fn general_entry(frame: &mut SyscallFrame) {
 /// the stub's own exit runs. Otherwise the general branch: interrupts
 /// opened, the `may_block` check, the call's way back as `trap::system_call`
 /// makes it, and the entry's way out. With interrupts masked.
+#[cfg(ferrix_fast_ipc)]
 fn frame_tail(frame: &mut SyscallFrame, outcome: Outcome) {
     if crate::sched::nothing_due_here() && crate::trap::filter_quiet() {
         // No decision was asked of this processor (`nothing_due_here`), so
@@ -749,6 +749,67 @@ pub(super) fn look_on_the_way_out(frame: &mut SyscallFrame) {
         (path.return_to_user)(&mut context);
         context.store_syscall(frame);
     }
+}
+
+// CHECKS-ONLY: object/fast_path_check.rs
+/// Whether a reply of words writes `RAX`, `RSI`, `RDX` and `R10` of a frame and
+/// no other register (`L.x86_64.160`): the fast path's tail leaves the rest as the
+/// program left them, as the general path does, and a transcript would not say so.
+#[cfg(all(ferrix_fast_ipc, ferrix_checks = "on"))]
+#[doc(hidden)]
+pub fn reply_writes_four_registers() -> bool {
+    let before = SyscallFrame {
+        r15: 1,
+        r14: 2,
+        r13: 3,
+        r12: 4,
+        rbp: 5,
+        rbx: 6,
+        r9: 7,
+        r8: 8,
+        r10: 9,
+        rdx: 10,
+        rsi: 11,
+        rdi: 12,
+        rax: 13,
+        r11: 14,
+        rcx: 15,
+        user_rsp: 16,
+    };
+    let mut after = before;
+    write_outcome(
+        &mut after,
+        Outcome::ReturnWords {
+            value: 0x71,
+            words: [0x72, 0x73, 0x74],
+        },
+    );
+    let mut expected = before;
+    expected.rax = 0x71;
+    expected.rsi = 0x72;
+    expected.rdx = 0x73;
+    expected.r10 = 0x74;
+    let fields = |frame: &SyscallFrame| {
+        [
+            frame.r15,
+            frame.r14,
+            frame.r13,
+            frame.r12,
+            frame.rbp,
+            frame.rbx,
+            frame.r9,
+            frame.r8,
+            frame.r10,
+            frame.rdx,
+            frame.rsi,
+            frame.rdi,
+            frame.rax,
+            frame.r11,
+            frame.rcx,
+            frame.user_rsp,
+        ]
+    };
+    fields(&after) == fields(&expected)
 }
 
 /// Put a call's answer into its frame, where `SYSRET`'s way out restores

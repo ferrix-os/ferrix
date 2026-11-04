@@ -913,6 +913,7 @@ impl Task {
     /// already zero: the fast path's commit, under its home's run-queue lock
     /// while it is asleep there. The lock's hand-over at the switch to it is
     /// what orders these stores before its own reads.
+    #[cfg(ferrix_fast_ipc)]
     pub(crate) fn fill_reply(&self, len: usize, words: [u64; 3]) {
         for (cell, word) in self.reply.iter().skip(1).zip(words) {
             cell.store(word, Ordering::Relaxed);
@@ -1007,6 +1008,7 @@ impl Task {
     /// The direct switch's, under the run-queue lock every waker of either
     /// task takes, for the peer asleep (`BLOCKED`) and the caller running
     /// (`RUNNABLE`).
+    #[cfg(ferrix_fast_ipc)]
     pub(crate) fn set_state_from(&self, before: u8, state: u8) {
         self.store_state(state);
         if before != RUNNABLE && state == RUNNABLE {
@@ -1019,6 +1021,7 @@ impl Task {
     /// The state's store of [`Task::set_state_from`] alone, for the direct
     /// switch's fold, which makes the job's load itself
     /// (`docs/OPAQUE-KERNEL.md` §9.11, J1). The same conditions.
+    #[cfg(ferrix_fast_ipc)]
     pub(crate) fn store_state(&self, state: u8) {
         self.state.store(state, Ordering::Release);
     }
@@ -1264,6 +1267,7 @@ impl Task {
     /// Whether it holds its sleep slot: no sleeper set or reaper's list
     /// holds it. The direct switch's half of [`Task::holds_slots`]; its run
     /// slot is held exactly while it is not queued, which it asserts.
+    #[cfg(ferrix_fast_ipc)]
     pub(crate) fn holds_sleep_slot(&self) -> bool {
         self.sleep_slot.holds()
     }

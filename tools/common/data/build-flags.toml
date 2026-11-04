@@ -111,9 +111,9 @@ values.partition = { allows = ["sc2", "none"], lands = "M3", built = "no", requi
 values.not_applicable = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes", conflicts = ["personality=user"] }
 
 [flags.ipc_fastpath]
-why = "the fast path for channel_write_read (0x1013); `on` allows sc4 and present only once the 2026-10-02 rule is met, recorded as a dated change here"
+why = "the fast path for channel_write_read (0x1013); `on` selects code on x86-64 only, so an Arm image built `on` holds none of it (ledger 1001 (1)); `on` allows sc4 and present only once the 2026-10-02 rule is met, recorded as a dated change here"
 values.off = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
-values.on = { allows = ["sc2", "none"], lands = "M0", built = "stand-in", stands_in = "off" }
+values.on = { allows = ["sc2", "none"], lands = "M0", built = "yes" }
 
 [flags.restricted_fastpath]
 why = "K1's fast path for the restricted exit and re-entry; its levels are K1's review's to set, and until then `on` allows no certified level above sc2"
@@ -344,11 +344,6 @@ why = "ARMv7-A: do not read ACTLR (arch/armv7a/smp.rs), for a board whose firmwa
 values = ["kernel", "init"]
 until = "M5"
 why = "who starts devmgr (docs/INIT.md §7.3); retires with DEVMGR_START at M5"
-
-[boot_options."ferrix.fastpath"]
-values = ["on", "off"]
-until = "M0"
-why = "the channel_write_read fast path (L.x86_64.159), until the ipc_fastpath flag replaces it (BF6)"
 
 # A call that reads an option through a name the check cannot see as a
 # literal: the file, and the local function every read goes through there.

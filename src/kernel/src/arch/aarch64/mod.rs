@@ -62,11 +62,6 @@ pub const ARCH: Arch = Arch::AArch64;
 /// Which `struct stat` the stat calls fill in: the generic one, 128 bytes,
 /// from `include/uapi/asm-generic/stat.h`, as on every architecture added
 /// after 2011.
-/// Whether this architecture's `SYSCALL`-style entry takes step 4's fast
-/// path for `channel_write_read` when one is registered
-/// (`docs/OPAQUE-KERNEL.md` §9.7): x86-64's alone.
-pub const FAST_WRITE_READ: bool = false;
-
 /// The switches that left `DS` and `ES` unloaded (x86-64's `DS`/`ES` skip,
 /// `docs/OPAQUE-KERNEL.md` §9.8, 3b): none here, which has no segments.
 pub const fn selector_skips_total() -> Option<[u64; 3]> {
@@ -1737,3 +1732,7 @@ pub(crate) unsafe fn flip_user_root(root: u64, space: u64, _begun: u64, cpu: usi
     // SAFETY: (TRANSLATE) the caller's guarantee.
     unsafe { asid::install(root, space, cpu) };
 }
+
+/// Whether this architecture's system-call entry has the fast path for `channel_write_read` to take, so
+/// that its stage-9 cases, answered by the general path in an image built without it, run here.
+pub const FAST_WRITE_READ: bool = false;

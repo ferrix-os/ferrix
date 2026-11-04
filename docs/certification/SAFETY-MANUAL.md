@@ -782,7 +782,7 @@ accounting. No budget, quota or timing guarantee of the element rests on
 the split, and the integrator shall build none on it: `cpu.max` and the
 fair class charge the whole runtime. The split is counted only where the
 clock's counter is one register read (the invariant TSC, `CNTVCT`); with the
-HPET as the clock `stime` is 0. With `ferrix.fastpath=on`, outside the
+HPET as the clock `stime` is 0. In a build with `ipc_fastpath=on`, outside the
 reference configuration, a `channel_write_read` answered by the fast path
 counts its time in the kernel as user time, so `stime` under-counts; so do,
 in every configuration, the span from a call's or a trap's last scheduling

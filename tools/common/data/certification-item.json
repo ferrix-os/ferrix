@@ -724,9 +724,10 @@
     "hooks": [
       {
         "name": "ferrix_fast_write_read",
+        "cfg": "ferrix_fast_ipc",
         "declared_in": "trap.rs",
         "forwards_to": "syscall::native::fast_write_read",
-        "why": "the x86-64 entry's fast path for channel_write_read, called only while trap::fast_path_on (T1)"
+        "why": "the x86-64 entry's fast path for channel_write_read, in a kernel built with ipc_fastpath=on alone (T1)"
       },
       {
         "name": "ferrix_filter_quiet",

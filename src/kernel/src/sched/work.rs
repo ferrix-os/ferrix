@@ -228,10 +228,7 @@ pub(crate) fn look() -> u32 {
 /// look (`docs/OPAQUE-KERNEL.md` §9.7, part 2), which takes the general way
 /// out, where [`look`] clears and reads, whenever any bit is set. Zero where
 /// nothing runs. With interrupts masked.
-#[cfg_attr(
-    not(target_arch = "x86_64"),
-    expect(dead_code, reason = "only x86-64's SYSCALL entry takes the fast path")
-)]
+#[cfg(ferrix_fast_ipc)]
 pub(crate) fn peek() -> u32 {
     super::with_current(|task| task.work().load(Ordering::Acquire)).unwrap_or(0)
 }
@@ -255,10 +252,7 @@ pub(crate) const fn wants_attention(word: u32) -> bool {
 
 /// Whether a word asks anything of the way out: [`wants_attention`], or
 /// [`PLACE`]. What the frame tail's quiet exit must find clear.
-#[cfg_attr(
-    not(target_arch = "x86_64"),
-    expect(dead_code, reason = "only x86-64's SYSCALL entry takes the fast path")
-)]
+#[cfg(ferrix_fast_ipc)]
 pub(crate) const fn anything_due(word: u32) -> bool {
     word & (ATTENTION | PLACE) != 0
 }
@@ -412,6 +406,7 @@ pub const HOOK_LAST_LOOK: usize = 1;
 /// The fast path's hook, called just before T13's last look: with case 14's
 /// check armed and `caller` its target, post `END` to it, as a kill landing
 /// in that window would. Unarmed, one load.
+#[cfg(ferrix_fast_ipc)]
 pub(crate) fn fast_path_hook(caller: &Task) {
     if HOOK.load(Ordering::Acquire) != HOOK_LAST_LOOK + 1 {
         return;

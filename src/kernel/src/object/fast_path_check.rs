@@ -4,7 +4,7 @@
 //! (`arch::drive_native_words`), as `write_read_check` drives it.
 //!
 //! Every case states the result the general path gives, and holds both boots
-//! to it: with `ferrix.fastpath=off` every call takes the general path, and
+//! to it: built `ipc_fastpath=off` every call takes the general path, and
 //! with it on the case is built so that the fast path's test for it is
 //! reached, which the decline counters show. The gate boots x86-64 both ways,
 //! so a case that holds on both shows the two paths give the same result.
@@ -51,11 +51,46 @@ use super::job::KILLED_STATUS;
 use super::process::Host as _;
 use crate::arch;
 use crate::sched::Task;
+#[cfg(ferrix_fast_ipc)]
 use crate::sched::direct::{self, Count};
+
+/// What stands for `sched::direct`'s counts in an image without the fast path: no
+/// count moves, which is what the cases on `on` ask of it.
+#[cfg(not(ferrix_fast_ipc))]
+mod direct {
+    /// The counts the cases name.
+    #[derive(Clone, Copy)]
+    pub(super) enum Count {
+        /// A trip.
+        Trip,
+        /// A park.
+        Park,
+        /// T2.
+        T2,
+        /// T11.
+        T11,
+        /// T12.
+        T12,
+        /// T13.
+        T13,
+        /// A fold.
+        Fold,
+        /// Separate.
+        Separate,
+        /// Unplanned.
+        FoldUnplanned,
+    }
+    /// None moved.
+    pub(super) fn counts() -> [u64; 9] {
+        [0; 9]
+    }
+}
 use crate::sync::SpinLock;
 use crate::syscall::check::spawn_in;
 use crate::syscall::process::{self, Process};
 use crate::trap::Verdict;
+#[cfg(not(ferrix_fast_ipc))]
+use direct::Count;
 
 /// How long a wake may take: the bound a blocked caller is held to.
 const WOKEN_WITHIN_NANOS: u64 = 10_000_000_000;
@@ -168,7 +203,11 @@ fn check_the_task_names_its_core(task: &Task, process: &Process) -> Result<(), &
 ///
 /// Verifies: `H.SCHED.13`, `H.OBJ.18`, `L.sched.57`, `L.sched.58`
 pub(crate) fn run() -> Result<Report, &'static str> {
-    let on = crate::trap::fast_write_read().is_some();
+    #[cfg(ferrix_fast_ipc)]
+    if !arch::stage_check::reply_writes_four_registers() {
+        return Err("the fast path's reply wrote a register beside its four");
+    }
+    let on = crate::fastpath::BUILT;
     let before = direct::counts();
     let mut report = Report {
         on,
@@ -203,6 +242,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         return Err("a fast path counter moved on a boot without the fast path");
     }
     // After the counters are judged: its park counts one, on every boot.
+    #[cfg(ferrix_fast_ipc)]
     check_an_end_before_the_park()?;
     Ok(report)
 }
@@ -1312,21 +1352,25 @@ fn attempt_the_last_reference(how: LastDrop) -> Result<bool, &'static str> {
 /// Tries [`check_an_end_before_the_park`] makes. A try counts only when the
 /// decision it asked for was still pending just before the park, since an
 /// interrupt in between can make that decision first.
+#[cfg(ferrix_fast_ipc)]
 const PARK_TRIES: u64 = 8;
 
 /// How long the checker waits for a try's reader before calling it lost.
+#[cfg(ferrix_fast_ipc)]
 const PARK_PATIENCE_NANOS: u64 = 2_000_000_000;
-
 /// The end the try's reader parks on.
+#[cfg(ferrix_fast_ipc)]
 static PARK_END: SpinLock<Option<Arc<Endpoint>>> = SpinLock::new(None);
 
 /// Tries whose reader has finished.
+#[cfg(ferrix_fast_ipc)]
 static PARKS_DONE: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
-
 /// Tries whose decision was still pending just before the reader parked.
+#[cfg(ferrix_fast_ipc)]
 static PARKS_PENDING: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 
 /// Tries whose reader came back from its park any way but `Parked::Woken`.
+#[cfg(ferrix_fast_ipc)]
 static PARKS_ODD: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 
 /// The parked block's last look at `END` is never cut short by a switch
@@ -1348,6 +1392,7 @@ static PARKS_ODD: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64:
 /// checker then wakes it by hand and fails with this case's sentence.
 ///
 /// Verifies: L.sched.72
+#[cfg(ferrix_fast_ipc)]
 fn check_an_end_before_the_park() -> Result<(), &'static str> {
     let here = crate::smp::this_cpu().map_or(0, |cpu| cpu.logical);
     PARKS_DONE.store(0, core::sync::atomic::Ordering::Release);
@@ -1406,6 +1451,7 @@ fn check_an_end_before_the_park() -> Result<(), &'static str> {
 /// A try's reader: `END` posted to itself while running, a decision asked
 /// for, then the park on an empty end. `END` stays set, which is harmless:
 /// the reader is a kernel thread and exits next.
+#[cfg(ferrix_fast_ipc)]
 fn park_after_its_end(_argument: usize) {
     let end = PARK_END.lock().clone();
     if let (Some(me), Some(end)) = (crate::sched::current(), end) {

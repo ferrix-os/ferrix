@@ -164,6 +164,13 @@
       "purpose": "The kernel's lines start with their time as Linux's do, [    1.234567] , on the port, in dmesg and in the pstore copy (the customer's request of 2026-10-18, with the boot-time analysis)"
     },
     {
+      "ids": ["L.x86_64.150"],
+      "owner": "retired",
+      "branch": "feature/mk-land",
+      "date": "2026-11-04",
+      "purpose": "Retired, never to be reused: fastpath::init's read of the boot option ferrix.fastpath, gone with BF6 (ledger 1001, M0-B-PROPOSALS 1.3); the stage-9 line it named is informational, L.x86_64.159's criterion."
+    },
+    {
       "ids": ["L.x86_64.190-191", "L.x86_64.193"],
       "owner": "retired",
       "branch": "powerctl",

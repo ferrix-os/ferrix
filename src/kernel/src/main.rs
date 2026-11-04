@@ -217,11 +217,13 @@ const fn filter_quiet_of_personality() -> bool {
 
 // Each hook is the type `trap` declares it with: see the `const _`s there.
 const _: trap::FilterQuiet = ferrix_filter_quiet;
+#[cfg(ferrix_fast_ipc)]
 const _: trap::FastWriteRead = ferrix_fast_write_read;
 
 /// The core's fast-path hook, bound when the kernel is linked: the item's
-/// `channel_write_read` fast path, called directly from x86-64's entry once
-/// `trap::fast_path_on` says this boot takes it.
+/// `channel_write_read` fast path, called directly from x86-64's entry in a
+/// build with it (`ipc_fastpath=on`).
+#[cfg(ferrix_fast_ipc)]
 #[unsafe(no_mangle)]
 fn ferrix_fast_write_read(a: &[u64; 6]) -> trap::Fast {
     syscall::native::fast_write_read(a)

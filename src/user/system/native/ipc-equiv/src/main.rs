@@ -6,7 +6,7 @@
 //! one transcript line per case, `ipc-equiv case <n> <name>: <what came
 //! back>`, and last `ipc-equiv: exit <status>`. Started with a bootstrap
 //! channel it is a server, which answers each request by its first byte (see
-//! [`serve`]). `cargo xtask test-ipc-equiv` boots it with `ferrix.fastpath=off`
+//! [`serve`]). `cargo xtask test-ipc-equiv` boots it on an image built `ipc_fastpath=off`
 //! and, on x86-64, again with `on`, and requires the transcripts to match.
 //!
 //! No fast path exists yet, so both boots take the general path, and the

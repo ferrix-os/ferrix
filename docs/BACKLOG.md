@@ -491,6 +491,8 @@ log path and commit; a new sighting is added to its row the day it is seen.
 | ARMv7-A `test-boot`: "the kernel read no entropy by DMA", twice at load 34, passed on rerun (2026-11-04). [more](backlog/flakes.md#fl-088) | 9 |
 | AArch64 `test-boot` never printed `FERRIX-BOOT-OK` within 120 s at load 14, passed on rerun (2026-11-04). [more](backlog/flakes.md#fl-089) | 9 |
 | Stage 7's kernel time check, once on AArch64 TCG at load 19 (2026-11-04). [more](backlog/flakes.md#fl-091) | 7 |
+| Restricted-check's case 82 once under TCG on an on image, and K1's check owes both figures (2026-11-04, ledger 6869). [more](backlog/flakes.md#fl-093) | 9 |
+| test-ipc-equiv's on image panicked once, serial lost; `gate.sh` should keep a failed run's serial (2026-11-04, ledger 6869). [more](backlog/flakes.md#fl-094) | 9 |
 | `test-mce-restart-off`: the banks' page in the loader's hands (row fixed), and one machine that did not reset after its panic, not traced (2026-11-04, ledger 6766). [more](backlog/flakes.md#fl-092) | 8 |
 | Stage 9's timer check: "an early wake took out more or less than its own entry", once, `test-init --arch aarch64 --smp 2` (2026-11-04, K10's check, not traced). [more](backlog/flakes.md#fl-090) | 9 |
 
@@ -727,7 +729,7 @@ Spent about 33 points of about 70 estimated.
   stays the server's, bounded as K7.md 2.3 says; charge it to the ticket's job when
   K12b's reservation heap can (ledger 2925 (1)).
 - K10's fast path on a quiet host: `bench-ipc --release --accel kvm --smp 1 --arch x86_64
-  --alternate <before K10> --rounds 9 --kernel-option ferrix.fastpath=on` under
+  --alternate <before K10> --rounds 9 --set ipc_fastpath=on --no-claim` under
   `fleet/bench.lock` read 1.013 with A/A 1.000 (0.805 to 1.040), load about 35: not shown
   either way (ledger 5860 (ii)). Limit 1.01, fix or revert past it on a quiet host.
 - `mk/k12` (8af71f23d, WIP, never compiled, most of K12a): kernel-memory

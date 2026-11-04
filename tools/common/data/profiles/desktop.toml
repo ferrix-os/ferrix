@@ -56,7 +56,6 @@ nokaslr = true
 nosmp = true
 noactlr = true
 "ferrix.devmgr" = ["kernel", "init"]
-"ferrix.fastpath" = ["on", "off"]
 
 # The build settings that change code without a cfg (BF4), compared with the
 # tree by check-item-boundary.py: the toolchain with rust-toolchain.toml, the

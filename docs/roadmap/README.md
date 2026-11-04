@@ -54,7 +54,7 @@ The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
   (`docs/STEAM.md`).
 - **The channel round trip, toward seL4 (440 ns):** 2,556 ns at the
   2026-10-05 wind-down, from 37 us; step 1, step 2, step 3, step 4's fast path
-  (behind `ferrix.fastpath=on`, x86-64) and step 5's ERAPS and vector reset
+  (in a build with `ipc_fastpath=on`, x86-64) and step 5's ERAPS and vector reset
   are in, and so are the cuts of 2026-10-07 and 2026-10-08 (the FS and GS
   skip, user-side inlining, a live count of filtered threads): about 1,048 ns
   on 4066f41dd in the faster of a boot's two modes, 873 ns after the FS and GS

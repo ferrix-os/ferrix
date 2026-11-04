@@ -30,7 +30,7 @@ pub(crate) const TASKS: &[Task] = &[
         help_at: 440,
         help: &[
             "test-ipc-equiv",
-            "              Boot /sbin/ipc-equiv with ferrix.fastpath=off, and on x86-64 again with on, and",
+            "              Boot /sbin/ipc-equiv on a present image, and on x86-64 on one built ipc_fastpath=on, and",
             "              require channel_write_read's cases to answer the same (docs/OPAQUE-KERNEL.md §9.7)",
         ],
         run: |_, args| test_ipc_equiv(args),
@@ -223,7 +223,7 @@ fn run_once(args: &Args) -> Result<Boot> {
         let natives = native::build(arch, args.release)?;
         let carried = shell::carried_for(arch, &program, args)?;
         let initramfs = initramfs::build(None, &natives, None, &carried)?;
-        // `--kernel-option ferrix.fastpath=on` measures the fast path
+        // A build with `ipc_fastpath=on` measures the fast path
         // (`docs/OPAQUE-KERNEL.md` §9.7); the counts line says which path the
         // trips took.
         let cmdline = crate::image_cmdline(args);
@@ -358,8 +358,8 @@ fn other_tree(args: &Args, tree: &std::path::Path, reference: &str, pinned: bool
 }
 
 /// The other tree's `bench-ipc` arguments: this run's, so both sides boot the
-/// same configuration. The kernel options go too, or `ferrix.fastpath=on`
-/// would be measured against the general path.
+/// same configuration. The kernel options and the build flags go too, or an
+/// `ipc_fastpath=on` image would be measured against the general path.
 fn other_tree_args(args: &Args) -> Vec<String> {
     // The architecture and processor count this run boots, not x86-64 on
     // one: with those fixed, `--arch aarch64` and `--smp 4` were measured
@@ -388,6 +388,14 @@ fn other_tree_args(args: &Args) -> Vec<String> {
     }
     for option in &args.kernel_options {
         out.extend(["--kernel-option".to_owned(), option.clone()]);
+    }
+    let profile = crate::flags::asked_profile();
+    out.extend(["--kernel-profile".to_owned(), profile]);
+    for (flag, value) in crate::flags::asked_sets() {
+        out.extend(["--set".to_owned(), format!("{flag}={value}")]);
+    }
+    if args.no_claim {
+        out.push("--no-claim".to_owned());
     }
     out
 }
@@ -615,29 +623,52 @@ const EQUIV_SCRIPT: &str = r#"/sbin/ipc-equiv
 "#;
 
 /// The stage-9 line that says which path `channel_write_read` takes
-/// (`ferrix.fastpath`, `src/kernel/src/fastpath.rs`).
+/// (the build flag `ipc_fastpath`, `src/kernel/src/fastpath.rs`).
 const FASTPATH_LINE: &str = "ipc fast path for channel_write_read:";
 
-/// `test-ipc-equiv`: boot `/sbin/ipc-equiv` (`src/user/system/native/ipc-equiv`)
-/// with `ferrix.fastpath=off` on every architecture asked for, and on x86-64
-/// again with `ferrix.fastpath=on`, the one architecture the fast path is for
-/// (`docs/OPAQUE-KERNEL.md` §9.7, part 6). Each boot must print the stage-9
-/// line naming the path it was asked for and every case's line, end with
-/// `ipc-equiv: exit 0`, and the two x86-64 transcripts must be the same line
-/// for line.
-///
-/// The kernel's counts of the fast path, printed as the shell exits, must
-/// show trips taken on the boot with it on and nothing at all moved on a
-/// boot with it off: a comparison of two general paths would pass as well.
-///
-/// # Errors
-///
-/// No `--init`; a build or boot that fails; a boot whose stage-9 line names
-/// the wrong path; a transcript that did not finish; two that differ.
-/// Verifies: `L.x86_64.150`, `L.x86_64.159`, `L.x86_64.160`, `L.sched.59`
-/// Verifies: `L.sched.61`, `L.object.167`, `L.object.170`, `H.OBJ.18`
-/// Verifies: `L.x86_64.161`
-pub(crate) fn test_ipc_equiv(args: &Args) -> Result<()> {
+/// Set in the child that builds and boots one image of [`test_ipc_equiv`].
+const EQUIV_CHILD: &str = "FERRIX_IPC_EQUIV_CHILD";
+
+/// How a child marks the lines its parent reads.
+const EQUIV_MARK: &str = "equiv| ";
+
+/// The symbols an image built with the fast path holds and any other does not:
+/// the hook, whose `no_mangle` keeps it apart, and the `used` marker. Mangled
+/// names say nothing, as an inlined function leaves none (ledger 1001 (3)).
+const FAST_PATH_SYMBOLS: [&str; 2] = ["ferrix_fast_write_read", "FERRIX_FAST_IPC_BUILT"];
+
+/// Whether `elf` holds `name` anywhere, its symbol table included.
+fn holds_symbol(elf: &[u8], name: &str) -> bool {
+    elf.windows(name.len())
+        .any(|window| window == name.as_bytes())
+}
+
+/// What may differ between the `build` lines of the two images, and nothing else
+/// (ledger 1001 (5)): both are one commit, toolchain and profile file.
+fn build_lines_differ_only_by_the_flag(off: &str, on: &str) -> Result<()> {
+    let words = |line: &str| -> std::collections::BTreeSet<String> {
+        line.split_whitespace().map(str::to_owned).collect()
+    };
+    let (off_words, on_words) = (words(off), words(on));
+    for word in off_words.symmetric_difference(&on_words) {
+        let name = word.split('=').next().unwrap_or_default();
+        if word.contains('=') && !matches!(name, "ipc_fastpath" | "profile" | "level") {
+            return Err(Error::new(format!(
+                "the two images' build lines differ in {word}: off {off:?}, on {on:?}"
+            )));
+        }
+    }
+    if !on_words.contains("ipc_fastpath=on") || !off_words.contains("ipc_fastpath=off") {
+        return Err(Error::new(format!(
+            "the two images' build lines do not name the flag: off {off:?}, on {on:?}"
+        )));
+    }
+    Ok(())
+}
+
+/// One image's boot, in a child of [`test_ipc_equiv`]: `present`, with `ipc_fastpath`
+/// set as the parent asked by `--set`. Prints what the parent compares.
+fn equiv_child(args: &Args) -> Result<()> {
     let init = args.init.as_deref().ok_or_else(|| {
         Error::new("test-ipc-equiv needs --init, a static busybox for each architecture")
     })?;
@@ -645,89 +676,243 @@ pub(crate) fn test_ipc_equiv(args: &Args) -> Result<()> {
         let program = crate::program_for(init, arch)?;
         let loader = cargo::build_loader(arch, args.release)?;
         let kernel = cargo::build_kernel_with_init(arch, args.release, &program, EQUIV_SCRIPT)?;
+        let elf = std::fs::read(&kernel.elf)
+            .map_err(|error| Error::new(format!("reading {}: {error}", kernel.elf.display())))?;
+        let held: Vec<&str> = FAST_PATH_SYMBOLS
+            .into_iter()
+            .filter(|name| holds_symbol(&elf, name))
+            .collect();
+        println!("{EQUIV_MARK}sha256 {}", crate::sha256::hex(&elf));
+        println!("{EQUIV_MARK}symbols {}", held.join(" "));
         let natives = native::build(arch, args.release)?;
         let carried = shell::carried_for(arch, &program, args)?;
         let initramfs = initramfs::build(None, &natives, None, &carried)?;
+        let cmdline = crate::image_cmdline(args);
+        let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, cmdline.as_deref())?;
+        for line in qemu::watch_lines(arch, &image, &kernel, args, shell::EXITED)? {
+            println!("{EQUIV_MARK}{}", line.trim());
+        }
+    }
+    Ok(())
+}
+
+/// What one child's boot said.
+struct EquivBoot {
+    /// The kernel's sha256.
+    sha256: String,
+    /// The fast path's symbols the kernel holds.
+    symbols: String,
+    /// The `build` line.
+    build: String,
+    /// The transcript's lines, and the counts line.
+    transcript: Vec<String>,
+    /// The boot's `fastpath counts:` line.
+    counts: String,
+    /// The stage-9 line.
+    said: String,
+}
+
+/// Build and boot one image, in a child: this command's arguments for `arch`, with
+/// `--set ipc_fastpath=on --no-claim` on the `on` side.
+fn equiv_boot(arch: crate::paths::Arch, on: bool) -> Result<EquivBoot> {
+    let mut words = Vec::new();
+    let mut given = std::env::args().skip(1);
+    while let Some(word) = given.next() {
+        if word == "--arch" {
+            let _ = given.next();
+        } else {
+            words.push(word);
+        }
+    }
+    words.extend(["--arch".to_owned(), arch.to_string()]);
+    if on {
+        words.extend(["--set".to_owned(), "ipc_fastpath=on".to_owned()]);
+        words.push("--no-claim".to_owned());
+    }
+    let out = std::process::Command::new(std::env::current_exe()?)
+        .args(&words)
+        .env(EQUIV_CHILD, "1")
+        .output()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    if !out.status.success() {
+        return Err(Error::new(format!(
+            "{arch}: the {} image's boot failed: {}",
+            if on { "on" } else { "off" },
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    let lines: Vec<&str> = text
+        .lines()
+        .filter_map(|line| line.strip_prefix(EQUIV_MARK))
+        .collect();
+    let after = |what: &str| {
+        lines
+            .iter()
+            .find_map(|line| line.strip_prefix(what))
+            .map(str::to_owned)
+    };
+    let found = |what: &str, why: &str| {
+        lines
+            .iter()
+            .find_map(|line| line.get(line.find(what)?..))
+            .map(str::to_owned)
+            .ok_or_else(|| Error::new(format!("{arch}: no {why}")))
+    };
+    Ok(EquivBoot {
+        sha256: after("sha256 ").ok_or_else(|| Error::new(format!("{arch}: no sha256")))?,
+        symbols: after("symbols ").unwrap_or_default(),
+        build: found("build    ", "build line")?,
+        said: found(FASTPATH_LINE, "stage-9 line for the fast path")?,
+        counts: found(COUNTS_LINE, "fast path counts line")?,
+        transcript: lines
+            .iter()
+            .filter_map(|line| line.get(line.find("ipc-equiv")?..))
+            .map(|rest| rest.trim().to_owned())
+            .collect(),
+    })
+}
+
+/// `test-ipc-equiv`: two images from one commit, toolchain and profile file,
+/// `present` and on x86-64 `present --set ipc_fastpath=on --no-claim`, each booting
+/// `/sbin/ipc-equiv` (`src/user/system/native/ipc-equiv`; `docs/OPAQUE-KERNEL.md`
+/// §9.7, part 6; `docs/microkernel/M0-B-PROPOSALS.md` §1.5). Each image's stage-9
+/// line must name what it was built with, and its boot print every case's line and
+/// end with `ipc-equiv: exit 0`. The two transcripts must be the same line for line,
+/// the two kernels' sha256s must differ, and their `build` lines differ in
+/// `ipc_fastpath`, `profile` and `level` alone.
+///
+/// The kernel's counts of the fast path, printed as the shell exits, must show trips
+/// on the `on` image and nothing moved on the `off` one, and the `off` image holds
+/// neither the hook nor the marker: a comparison of two general paths would pass as
+/// well.
+///
+/// # Errors
+///
+/// No `--init`; a build or boot that fails; a boot whose stage-9 line names the wrong
+/// path; a transcript that did not finish; two that differ.
+/// Verifies: `L.x86_64.159`, `L.x86_64.160`, `L.sched.59`
+/// Verifies: `L.sched.61`, `L.object.167`, `L.object.170`, `H.OBJ.18`
+/// Verifies: `L.x86_64.161`
+pub(crate) fn test_ipc_equiv(args: &Args) -> Result<()> {
+    if std::env::var_os(EQUIV_CHILD).is_some() {
+        return equiv_child(args);
+    }
+    if args.init.is_none() {
+        return Err(Error::new(
+            "test-ipc-equiv needs --init, a static busybox for each architecture",
+        ));
+    }
+    for arch in args.arches()? {
         let settings: &[&str] = if arch == crate::paths::Arch::X86_64 {
             &["off", "on"]
         } else {
             &["off"]
         };
-        let mut transcripts = Vec::new();
+        let mut boots = Vec::new();
         for setting in settings {
-            let cmdline = format!("ferrix.fastpath={setting}\n");
-            let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, Some(&cmdline))?;
-            let lines = qemu::watch_lines(arch, &image, &kernel, args, shell::EXITED)?;
-            let said = lines
-                .iter()
-                .find(|line| line.contains(FASTPATH_LINE))
-                .ok_or_else(|| Error::new(format!("{arch}: no stage-9 line for the fast path")))?;
-            if !said.contains(&format!(
-                "{FASTPATH_LINE} {setting} (as ferrix.fastpath asked)"
+            let on = *setting == "on";
+            let boot = equiv_boot(arch, on)?;
+            println!("  {arch} {setting}: kernel sha256 {}", boot.sha256);
+            println!("  {arch} {setting}: {}", boot.build);
+            println!("  {arch} {setting}: {}", boot.said);
+            if !boot.said.contains(&format!(
+                "{FASTPATH_LINE} {setting} (built with ipc_fastpath={setting})"
             )) {
                 return Err(Error::new(format!(
-                    "{arch}: asked for ferrix.fastpath={setting}, the boot said: {}",
-                    said.trim()
+                    "{arch}: an image built ipc_fastpath={setting} said: {}",
+                    boot.said
                 )));
             }
-            let transcript: Vec<String> = lines
-                .iter()
-                .filter_map(|line| {
-                    line.get(line.find("ipc-equiv")?..)
-                        .map(|rest| rest.trim().to_owned())
-                })
-                .collect();
-            for line in &transcript {
-                println!("  {arch} fastpath={setting}: {line}");
+            let wanted = if on {
+                FAST_PATH_SYMBOLS.join(" ")
+            } else {
+                String::new()
+            };
+            if boot.symbols != wanted {
+                return Err(Error::new(format!(
+                    "{arch}: an image built ipc_fastpath={setting} holds [{}] of the fast path's \
+                     symbols, and should hold [{wanted}]",
+                    boot.symbols
+                )));
             }
-            let counts = lines
-                .iter()
-                .find_map(|line| line.get(line.find(COUNTS_LINE)?..))
-                .ok_or_else(|| Error::new(format!("{arch}: no fast path counts line")))?
-                .trim()
-                .to_owned();
-            println!("  {arch} fastpath={setting}: {counts}");
-            let numbers: Vec<u64> = counts
+            for line in &boot.transcript {
+                println!("  {arch} {setting}: {line}");
+            }
+            println!("  {arch} {setting}: {}", boot.counts);
+            let numbers: Vec<u64> = boot
+                .counts
                 .split_whitespace()
                 .filter_map(|word| word.split_once('=')?.1.parse().ok())
                 .collect();
             let trips = numbers.first().copied().unwrap_or(0);
-            if *setting == "on" && trips == 0 {
+            if on && trips == 0 {
                 return Err(Error::new(format!(
-                    "{arch}: ferrix.fastpath=on took no trip through the fast path"
+                    "{arch}: ipc_fastpath=on took no trip through the fast path"
                 )));
             }
-            if *setting == "off" && numbers.iter().any(|&count| count != 0) {
+            if !on && numbers.iter().any(|&count| count != 0) {
                 return Err(Error::new(format!(
-                    "{arch}: a fast path counter moved with ferrix.fastpath=off: {counts}"
+                    "{arch}: a fast path counter moved with ipc_fastpath=off: {}",
+                    boot.counts
                 )));
             }
-            if !transcript.iter().any(|line| line == "ipc-equiv: exit 0") {
-                return Err(Error::new(format!(
-                    "{arch}: ipc-equiv did not finish with ferrix.fastpath={setting}"
-                )));
-            }
-            transcripts.push(transcript);
-        }
-        if let [off, on] = transcripts.as_slice()
-            && off != on
-        {
-            let first = off
+            if !boot
+                .transcript
                 .iter()
-                .zip(on)
-                .find(|(off, on)| off != on)
-                .map_or_else(String::new, |(off, on)| {
-                    format!("off said {off:?}, on said {on:?}")
-                });
-            return Err(Error::new(format!(
-                "{arch}: the transcripts with the fast path off and on differ: {first}"
-            )));
+                .any(|line| line == "ipc-equiv: exit 0")
+            {
+                return Err(Error::new(format!(
+                    "{arch}: ipc-equiv did not finish with ipc_fastpath={setting}"
+                )));
+            }
+            boots.push(boot);
         }
-        if transcripts.len() == 2 {
+        if let [off, on] = boots.as_slice() {
+            build_lines_differ_only_by_the_flag(&off.build, &on.build)?;
+            if off.sha256 == on.sha256 {
+                return Err(Error::new(format!(
+                    "{arch}: the two images are the same kernel, {}",
+                    off.sha256
+                )));
+            }
+            if off.transcript != on.transcript {
+                let first = off
+                    .transcript
+                    .iter()
+                    .zip(&on.transcript)
+                    .find(|(off, on)| off != on)
+                    .map_or_else(String::new, |(off, on)| {
+                        format!("off said {off:?}, on said {on:?}")
+                    });
+                return Err(Error::new(format!(
+                    "{arch}: the transcripts with the fast path off and on differ: {first}"
+                )));
+            }
             println!("  {arch}: the transcripts with the fast path off and on are the same");
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod equiv_tests {
+    use super::{build_lines_differ_only_by_the_flag, holds_symbol};
+
+    #[test]
+    fn the_two_build_lines_may_differ_in_the_flag_alone() {
+        let off = "build    profile=present level=present ipc_fastpath=off checks=on";
+        let on = "build    profile=none level=none ipc_fastpath=on checks=on ; no claim";
+        assert!(build_lines_differ_only_by_the_flag(off, on).is_ok());
+        let other = "build    profile=none level=none ipc_fastpath=on checks=off ; no claim";
+        assert!(build_lines_differ_only_by_the_flag(off, other).is_err());
+        assert!(build_lines_differ_only_by_the_flag(off, off).is_err());
+    }
+
+    #[test]
+    fn a_symbol_is_found_anywhere_in_the_image() {
+        assert!(holds_symbol(b"\0a\0ferrix_x\0", "ferrix_x"));
+        assert!(!holds_symbol(b"\0a\0ferrix_\0", "ferrix_x"));
+    }
 }
 
 #[cfg(test)]
@@ -749,7 +934,7 @@ mod other_tree_tests {
             "--init",
             "/bb/{arch}/busybox",
             "--kernel-option",
-            "ferrix.fastpath=on",
+            "ferrix.devmgr=init",
             "--alternate",
             "main",
         ]);
@@ -758,7 +943,7 @@ mod other_tree_tests {
             .iter()
             .position(|word| word == "--kernel-option")
             .unwrap();
-        assert_eq!(out[at + 1], "ferrix.fastpath=on");
+        assert_eq!(out[at + 1], "ferrix.devmgr=init");
         assert!(out.contains(&"--release".to_owned()));
         assert!(!out.contains(&"--alternate".to_owned()));
     }

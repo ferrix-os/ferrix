@@ -401,9 +401,9 @@ pub fn ask(slot: &Once<SyscallFilter>, args: &SyscallArgs) -> Option<Outcome> {
 // symbols, and the composition root, `main.rs`, which names every ring
 // already, defines each as a forward to the function above it
 // (`crate::hooks`, *Link-time hooks*; check-item-boundary holds both ends).
-// Whether either is called is still decided at run time, at every call, by
-// the core's own flags, which keep the registrations' meaning:
-// [`FAST_PATH_ON`] for T1, and [`QUIET_REGISTERED`] for a filter registered
+// The fast path's is there only in a build with it (`ferrix_fast_ipc`, BF6), and
+// the entry calls it for every `channel_write_read`. Whether the filter's is
+// called is decided at run time by [`QUIET_REGISTERED`], for a filter registered
 // with its predicate.
 //
 // SAFETY: (LINK) each declaration's type is held to its definition's by
@@ -411,6 +411,7 @@ pub fn ask(slot: &Once<SyscallFilter>, args: &SyscallArgs) -> Option<Outcome> {
 // alias; Rust checks neither side against the other otherwise.
 unsafe extern "Rust" {
     /// `syscall::native::fast_write_read`, defined in `main.rs`.
+    #[cfg(ferrix_fast_ipc)]
     safe fn ferrix_fast_write_read(a: &[u64; 6]) -> Fast;
     /// `syscall::seccomp::quiet`, defined in `main.rs`.
     safe fn ferrix_filter_quiet() -> bool;
@@ -422,6 +423,7 @@ unsafe extern "Rust" {
 pub type FilterQuiet = fn() -> bool;
 
 // The declarations are the aliases' type, as `main.rs`'s definitions are.
+#[cfg(ferrix_fast_ipc)]
 const _: FastWriteRead = ferrix_fast_write_read;
 const _: FilterQuiet = ferrix_filter_quiet;
 
@@ -453,6 +455,7 @@ pub fn filter_quiet() -> bool {
 
 /// What step 4's fast path made of a `channel_write_read`
 /// (`docs/OPAQUE-KERNEL.md` §9.7, part 2).
+#[cfg(ferrix_fast_ipc)]
 #[derive(Clone, Copy, Debug)]
 pub enum Fast {
     /// A test failed, and nothing changed: the entry goes on as for any
@@ -471,34 +474,14 @@ pub enum Fast {
 /// The fast path, given the call's six argument registers. Entered from
 /// x86-64's `SYSCALL` entry alone, with interrupts masked, before the
 /// filter; returns with them masked.
+#[cfg(ferrix_fast_ipc)]
 pub type FastWriteRead = fn(&[u64; 6]) -> Fast;
 
-/// Whether this boot takes `channel_write_read` through the fast path: set
-/// at boot only when `ferrix.fastpath=on` (`fastpath.rs`), so that a clear
-/// flag is the switch off (T1). Read at every entry.
-static FAST_PATH_ON: AtomicBool = AtomicBool::new(false);
-
-/// Take `channel_write_read` through the fast path from now on. Set once,
-/// before the first program, and only on a boot that asks for it.
-pub fn set_fast_write_read() {
-    FAST_PATH_ON.store(true, Ordering::Release);
-}
-
-/// The fast path, if this boot takes it: `main.rs`'s
-/// `ferrix_fast_write_read`, called directly from the entry
-/// ([`fast_path_on`], [`fast_write_read_now`]) and named here for the
-/// checks that ask whether it is on.
-pub fn fast_write_read() -> Option<FastWriteRead> {
-    fast_path_on().then_some(fast_write_read_now as FastWriteRead)
-}
-
-/// Whether this boot takes the fast path (T1).
-pub(crate) fn fast_path_on() -> bool {
-    FAST_PATH_ON.load(Ordering::Acquire)
-}
-
-/// The fast path itself, by a direct call: only once [`fast_path_on`] has
-/// said yes.
+/// The fast path itself, by a direct call: `main.rs`'s `ferrix_fast_write_read`.
+/// Nothing the fast path reads is set up after the first ring-3 call, so nothing
+/// waits on a flag as `FAST_PATH_ON` once did: stage 3's first program already
+/// finds its channels, its tasks and the park record whole (ledger 1001 (2)).
+#[cfg(ferrix_fast_ipc)]
 pub(crate) fn fast_write_read_now(a: &[u64; 6]) -> Fast {
     ferrix_fast_write_read(a)
 }

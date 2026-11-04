@@ -27,9 +27,9 @@
 
 use alloc::sync::Arc;
 
-use ferrix_sched::{
-    Config, CpuLoad, EntityState, JobPlan, Load, RunQueue, Timeline, settle_job_fold, slice_for,
-};
+use ferrix_sched::{Config, CpuLoad, EntityState, Load, RunQueue, Timeline, slice_for};
+#[cfg(ferrix_fast_ipc)]
+use ferrix_sched::{JobPlan, settle_job_fold};
 
 use super::task::{BLOCKED, RUNNABLE, SleepSlot, Task, TaskId};
 use crate::object::timer::Armed;
@@ -1003,6 +1003,7 @@ impl CpuQueue {
     /// direct switch declines when one has, rather than wake it, so that a
     /// declined attempt leaves the queue as it found it (T12,
     /// `docs/OPAQUE-KERNEL.md` §9.7).
+    #[cfg(ferrix_fast_ipc)]
     pub(crate) fn sleeper_due(&self, now: u64) -> bool {
         let room = self.fired.len < FIRE_BATCH;
         self.sleepers.first().is_some_and(|(at, _, payload)| {
@@ -1037,6 +1038,7 @@ impl CpuQueue {
     /// equal), and once the caller's state is stored and its word left, the
     /// load changes once by the net. A way out that does not reach the
     /// caller's leave makes the peer's join alone ([`PendingJoin`]'s drop).
+    #[cfg(ferrix_fast_ipc)]
     pub(crate) fn hand_over(
         &mut self,
         peer: Arc<Task>,
@@ -1182,12 +1184,14 @@ impl CpuQueue {
 /// caller's leave -- it makes the peer's join alone, as the general path
 /// leaves things there: the peer joined, the caller not left. One place for
 /// every such way out (ledger line 461, J-C1).
+#[cfg(ferrix_fast_ipc)]
 struct PendingJoin {
     /// The job and the weight the peer's word was counted with, until
     /// settled.
     fold: Option<(u32, u32)>,
 }
 
+#[cfg(ferrix_fast_ipc)]
 impl PendingJoin {
     /// The pending join `plan` leaves, if it folds.
     const fn of(plan: JobPlan) -> PendingJoin {
@@ -1223,6 +1227,7 @@ impl PendingJoin {
     }
 }
 
+#[cfg(ferrix_fast_ipc)]
 impl Drop for PendingJoin {
     fn drop(&mut self) {
         if let Some((job, joined)) = self.fold.take() {

@@ -595,7 +595,7 @@ Done 2026-10-24 (kernel-flakes).
 
 | Item | Owner | Stage |
 |---|---|---|
-| **Open (2026-11-04, mk-merge).** Stage 7's kernel time check: "a program spinning in user mode was charged its user time as kernel time (the return to user mode left its stint open)", AArch64 TCG, load 19, `logs/queue/mkm-cm7-plant-a.log`, on a scratch tree of copy-miss with a plant in `read_target`; the same tree passed on rerun, `mkm-cm7-plant-a2.log`. The only firing in the gate logs but that check's own controls. Not traced. | open |
+| **Open (2026-11-04, mk-merge).** Stage 7's kernel time check: "a program spinning in user mode was charged its user time as kernel time (the return to user mode left its stint open)", AArch64 TCG, load 19, `logs/queue/mkm-cm7-plant-a.log`, on a scratch tree of copy-miss with a plant in `read_target`; the same tree passed on rerun, `mkm-cm7-plant-a2.log`. Second sighting: `test-boot --arch armv7a --smp 2` on BF6's ec8da68fa, `logs/queue/mkm-b6r-15.log`, where BF6 builds nothing; passed as `mkm-b7-a32s2`. Not traced. | open |
 
 ### fl-092
 
@@ -603,3 +603,15 @@ Done 2026-10-24 (kernel-flakes).
 |---|---|---|
 | **Open (2026-11-04, mk-merge, ledger 6766).** `test-mce-restart-off --arch x86_64 --accel tcg --kernel-profile desktop`, two different failures on K12's tree 2c7af8895. (a) The row's own collision: `logs/queue/mkm-k12r-19.log`, "boot 2's loader did not keep the banks' page out first"; the banks' page is a program's frame from boot 1, boot 2's loader may already hold it, and says "could not be kept out (left): it is in use". The row now accepts that line and judges the rest; `m8b-d10` logged it on an old tree. (b) `mkm-k12r-19b.log`: "the machine did not reset after the stop", the panic printed "reset in 10 s" and then nothing for about 390 s, the first unforced sighting. QMP-dump runs, ledger 6766: 8 on develop and 8 on K12 under the wrapper in `~/.local/share/ferrix/stack-walk/qmp/`, `mkm-mz-*`, plus 6 and 6 without it, `mkm-mx-*`, at load up to 30: no sighting, so no dump (mkm-mx-d4 stopped on fl-085, develop's). This half stays open; a next sighting gets a dump, and K12 is neither shown nor excluded. | open |
 | **Open (2026-11-04, mk-base, ledger 6404).** `test-boot --arch aarch64` on batch 20261104T053606Z's stack (75ba515da, K12a and K12b in it), log `batch-20261104T053606Z-5.log`: last lines stage 9's `copies` and `wake` at 35.38 s and `irq  1 edge-triggered MSI-X vector left unmasked by its deliveries`, then nothing to the 120 s limit, `the aarch64 kernel never printed FERRIX-BOOT-OK`; 85 s silent, retried green. Not plainly slowness and not explained. K12 is not excluded. A second sighting goes to the consultant. | mk-base | 9 |
+
+### fl-093
+
+| Item | Owner | Stage |
+|---|---|---|
+| **Open (2026-11-04, mk-merge, ledger 6869).** Restricted-check's case 82, the barrier count, stopped `test-boot --arch x86_64 --accel tcg --set ipc_fastpath=on` once, `logs/queue/mkm-b6r-4.log`; two passes after. A reading, not shown: `restricted_left` also runs at a switch, so a preempted trip adds a barrier and the check's `==` fails upward. The line prints neither figure. Owed, the PO's queue: K1's check prints both numbers. A next sighting with a shortfall is a missed barrier, a defect, for the consultant. | open |
+
+### fl-094
+
+| Item | Owner | Stage |
+|---|---|---|
+| **Open (2026-11-04, mk-merge, ledger 6869).** `test-ipc-equiv --arch x86_64 --accel tcg` on 42ea4a06c, BF6 before K12's stack fix and fire_timers' cut: the on image's boot panicked, `logs/queue/mkj-w5b.log`, its serial lost to the slot. Cause unknown; not seen on BF6's tree since. A next sighting goes to the consultant. Owed, the PO's queue: `gate.sh` keeps a FAILED run's serial. | open |

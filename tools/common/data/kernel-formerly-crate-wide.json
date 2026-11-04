@@ -17,6 +17,11 @@
       "before": "pub(crate)"
     },
     {
+      "item": "arch/aarch64/mod.rs: FAST_WRITE_READ (const)",
+      "born": "BF6",
+      "ledger": 6131
+    },
+    {
       "item": "arch/aarch64/mod.rs: TrapFrame (re-export)",
       "before": "pub(crate)"
     },
@@ -197,6 +202,11 @@
       "before": "pub(crate)"
     },
     {
+      "item": "arch/armv7a/mod.rs: FAST_WRITE_READ (const)",
+      "born": "BF6",
+      "ledger": 6131
+    },
+    {
       "item": "arch/armv7a/mod.rs: TrapFrame (re-export)",
       "before": "pub(crate)"
     },
@@ -371,6 +381,11 @@
     {
       "item": "arch/mod.rs: CheckHook (re-export)",
       "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: FAST_WRITE_READ (re-export)",
+      "born": "BF6",
+      "ledger": 6131
     },
     {
       "item": "arch/mod.rs: TrapFrame (re-export)",
@@ -795,6 +810,11 @@
       "before": "pub(crate)"
     },
     {
+      "item": "arch/x86_64/mod.rs: FAST_WRITE_READ (const)",
+      "born": "BF6",
+      "ledger": 6131
+    },
+    {
       "item": "arch/x86_64/mod.rs: TrapFrame (re-export)",
       "before": "pub(crate)"
     },
@@ -1212,6 +1232,11 @@
     {
       "item": "fallible.rs: stop_injecting (fn)",
       "before": "pub(crate)"
+    },
+    {
+      "item": "fastpath.rs: BUILT (const)",
+      "born": "BF6",
+      "ledger": 6131
     },
     {
       "item": "fastpath.rs: report (fn)",

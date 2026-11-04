@@ -289,7 +289,8 @@ Three slices, each reviewed before it lands:
    the audit id, which bring-up draws from the random generator and hands
    in, since the generator is the item's and the core may not name it --
    and bring-up's records: the start-up record and the boot's configuration
-   (`ferrix.checks`, `ferrix.devmgr`, the mitigations, KASLR, whether the
+   (`ferrix.checks`, `ferrix.devmgr`, the mitigations, `ipc_fastpath` from
+   `Config::Build`, KASLR, whether the
    log is kept across a reset, `ferrix.pstore`, `ferrix.efifb`, and the
    build flags, `Config::Build`) right after
    the generator's check, and one when the boot is brought up. Its boot

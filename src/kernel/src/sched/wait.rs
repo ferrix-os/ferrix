@@ -646,6 +646,7 @@ impl WaitQueue {
 
     /// How many marks are listed, read without a lock: what a debug build's
     /// assertion on the fast path reads (`object::channel::sendable`).
+    #[cfg(ferrix_fast_ipc)]
     pub(crate) fn hooked_now(&self) -> u32 {
         self.hooked.load(Ordering::Relaxed)
     }
