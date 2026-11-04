@@ -3022,7 +3022,7 @@ fn fire_timers(cpu: usize) {
     let Some(lock) = queue_of(cpu) else {
         return;
     };
-    let fired = {
+    let mut fired = {
         let mut queue = lock.lock();
         queue.take_due_timers(crate::timer::now_nanos());
         queue.take_fired()
@@ -3031,8 +3031,12 @@ fn fire_timers(cpu: usize) {
         return;
     }
     let pass = FIRE_PASSES.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
-    for (armed, slot) in fired.into_iter().flatten() {
-        crate::object::timer::fire(armed, slot, pass);
+    // In place: this runs in a timer's interrupt on whatever stack that came on,
+    // and an iterator over the array by value is a copy of it in this frame.
+    for entry in &mut fired {
+        if let Some((armed, slot)) = entry.take() {
+            crate::object::timer::fire(armed, slot, pass);
+        }
     }
 }
 
