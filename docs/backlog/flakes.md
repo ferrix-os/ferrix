@@ -589,7 +589,7 @@ Done 2026-10-24 (kernel-flakes).
 
 | Item | Owner | Stage |
 |---|---|---|
-| **Open (2026-11-04, mk-merge).** `test-init --arch aarch64 --smp 2` on ae0bf31a1 stopped in stage 9's timer check (K10, `object/timer_check.rs`) with "an early wake took out more or less than its own entry", `logs/queue/mkm-s2-inita2c.log`; the same row passed on 9e44200e6, which differs by `fire_timers`' cut, `logs/queue/mkm-s3-inita2c.log`. The only firing in the gate logs but its own control's. Not traced. The check reads `sleepers_here` twice around a wake, on two processors at this row, so another entry filed or fired between the reads is a reading; not shown. | open |
+| **Second sighting (2026-11-04, mk-gh-ci):** `test-boot --arch armv7a --smp 2`, `logs/queue/mkgh-a7s2.log`, the same panic at 41.09 s, on a tree whose diff doesn't reach armv7a's path. Still untraced; a third goes to the consultant with a trace (ledger 6829). **Open (2026-11-04, mk-merge).** `test-init --arch aarch64 --smp 2` on ae0bf31a1 stopped in stage 9's timer check (K10, `object/timer_check.rs`) with "an early wake took out more or less than its own entry", `logs/queue/mkm-s2-inita2c.log`; the same row passed on 9e44200e6, which differs by `fire_timers`' cut, `logs/queue/mkm-s3-inita2c.log`. The only firing in the gate logs but its own control's. Not traced. The check reads `sleepers_here` twice around a wake, on two processors at this row, so another entry filed or fired between the reads is a reading; not shown. | open |
 
 ### fl-091
 
