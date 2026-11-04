@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2775 declarations in the core's files, 184 in the item's; 189 checks-only.
+2777 declarations in the core's files, 184 in the item's; 191 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1889,6 +1889,7 @@ checks above is `pub` for raised checks (F3).
 |---|---|---|---|
 | `DEMAND_WINDOW` | const | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `GIVE_BACK_BATCH` | const | load (checks) | checks-only |
+| `HEAP_CLASSES` | const | load (checks) | checks-only |
 | `MAX_ORDER` | const | item |  |
 | `NO_RESERVATION` | const | load |  |
 | `RETIRED_CAPACITY` | const | load |  |
@@ -2482,8 +2483,9 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `run` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `run` | fn | bin (checks) | checks-only; formerly crate-wide, used above only by checks (1531 C1) |
 | `Report` | struct | item, load, bin |  |
+| `Report::heap_pages` | field | load, bin |  |
 | `Report::interrupts` | field | load, bin |  |
 | `Report::promise` | field | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Report::reserved` | field | item, load, bin |  |
