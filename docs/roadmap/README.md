@@ -94,7 +94,10 @@ The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
   `main`; so are the two fixes `smt=off` waited on (F-73, F-64) and the
   tooling for the performance baselines, which are not measured yet; M1's
   designs (K5, K6, K7, K10, K12) are reviewed, with their code on branches
-  ([its page](microkernel-m0.md)).
+  ([its page](microkernel-m0.md)); the overnight run of 2026-11-03 landed B5's
+  orphan step, and its other work (K2 to K4 and the rest of M1, K13, K15, K1,
+  K11, `linuxd` booting Linux programs, K8, K14, `btrfsd`) is on unlanded local
+  branches, not gated.
 - **Chrome** runs headless and in a window, on glibc and on ferrousli, Ferrix's
   own C library. On ARMv7-A, Debian's armhf Chromium runs headless in 512 MiB
   under QEMU, and the DK1's SD card has a driver; neither has run on the board.

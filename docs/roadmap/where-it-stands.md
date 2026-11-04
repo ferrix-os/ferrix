@@ -227,7 +227,7 @@ before 2026-10-24). What is still on a branch is at the end of this section.
   is the same line; `feature/hyprix-gpu-backend` (hyprix's `hyprix:gpu`
   option and the helper's environment lines), `land/hyprix-gpu-backend`
   (`test-compositor --boot helper-desktop`), `feature/csd-decorations`,
-  `feature/mk/*` (the microkernel's M1, unchanged since 2026-10-21),
+  `feature/mk/*` (the microkernel's M1, unchanged since 2026-10-21; its rebase and the rest of the 2026-11-03 run's work are on local `feature/mk-*` branches, unlanded),
   `park/f95-option-a` (F-95's landing 2 conditions), `wip/stability-try`
   (the nightly stability workflow) and `docs/intel-display` (a design paused
   by 3h). `docs/roadmap/open-branches.md` has the 2026-11-02 count.
@@ -251,7 +251,12 @@ before 2026-10-24). What is still on a branch is at the end of this section.
   designs K5, K6, K7, K10 and K12 are on `main` with the consultant's OK IF and
   their ids reserved (2026-10-19); the code is on `mk/*` branches, none
   gated, about 33 of about 70 points spent (`docs/BACKLOG.md`). The ids of M2's
-  K2, K3 and K4 are reserved (2026-10-21, 2426e7038).
+  K2, K3 and K4 are reserved (2026-10-21, 2426e7038). The overnight run of
+  2026-11-03 landed B5's orphan step (b4a6b3ff9, `docs/microkernel/B5.md`): a step
+  of `xtask check` fails when a kernel requirement is verified only by checks
+  that leave with the load; it lists 135 ids and holds 299 more on raised check
+  files by a ratchet. The id blocks of the run's agents are reserved
+  (bfc8a5f00, 709c13e91). Everything else of that run is on the local run branches, unlanded and ungated (the agents' notes of 2026-11-04 02:00, not `develop`): `feature/mk-base` (K2 to K7, K10, K12a/b, `smt=off` rebased on `develop`; a derived landing series `feature/mk-land` is being cut from it, its consultant's diff check of the first group at ledger 6131 to 6139), `feature/mk-m2` (K15, K13, K3b and B5's class C text), `feature/mk-m2-rehome` (B5's class A re-homing, 65 ids), `feature/mk-restricted` (K1 and K11 booting on x86-64 and AArch64, K17's and K9's designs; the diff check was NOT YET, ledger 6064), `feature/mk-lift` (`linuxd`: `test-shell` with busybox, and `test-btrfs` under `--personality user`, 2026-11-04) and `feature/mk-boot` (K8, K14, boot authority, the partition manager and `btrfsd`, whose `test-btrfsd` row reads a volume read-only on x86-64).
 * **Stage 13's exit is met** (`docs/CGROUPS.md` §15). `cargo xtask
   test-container` (f231cdf09, 2026-10-14) runs the criterion as one program,
   an unprivileged user namespace with a pid 1 under a memory limit with
