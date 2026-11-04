@@ -7,6 +7,14 @@ Moved out of [`docs/BACKLOG.md`](../BACKLOG.md) on 2026-10-16. A decision is rec
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-11-04 (customer, evening)** **Build a gate slot on the RTX 3090's
+  memory, as added capacity.** mk-gpu's measurement said the VRAM adds no slot
+  because it is no faster than the disk (`docs/TEST-TIME.md`). The customer:
+  "Its not about if it is slower by 10 or 20% its more about we can either run or
+  or we can't. And GPU gives us additional compute." So: slot 8, its hot target
+  data in the 3090's memory, 3090 only, a store fault an infrastructure failure
+  and never a row's result, a host without a GPU simply has no such slot; and if
+  the numbers say it is not worth keeping, the report says so.
 * **2026-11-04 (customer, evening)** **No commit by a tool**: "claude as the
   main author was able to commit something ... it is even worse than a co author.
   So block claude from commiting and fix the already commited comiits". The
