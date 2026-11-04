@@ -117,6 +117,7 @@ package FerrixIommuRequirements {
              * domain to it. */
 
         requirement <'L.iommu.7'> translationIsOn : ItemLowLevel {
+            attribute :>> scope = "personality=kernel";
             attribute :>> statement = "bring_up shall turn translation on for the
                 VT-d units a DMAR describes and the SMMUv3s an IORT describes that it
                 can drive.";
@@ -168,6 +169,7 @@ package FerrixIommuRequirements {
                 "iommu::smmuv3::write_entry");
         }
         requirement <'L.iommu.10'> aFunctionGetsADomainOnItsUnit : ItemLowLevel {
+            attribute :>> scope = "personality=kernel";
             attribute :>> statement = "domain_for shall give a function the DMAR puts
                 behind a translating VT-d unit a domain on that unit as its source
                 ID, and one an IORT root complex sends to a translating SMMUv3 a
@@ -461,6 +463,7 @@ package FerrixIommuRequirements {
             attribute :>> unit = ("iommu::Fault::fmt", "iommu::smmuv3::event_name");
         }
         requirement <'L.iommu.35'> aVtdFaultIsReadWhole : ItemLowLevel {
+            attribute :>> scope = "personality=kernel";
             attribute :>> statement = "A VT-d unit's take_fault shall answer the
                 refused access the first full record holds, reading from the one
                 FSTS.FRI names round every record CAP.NFR counts, as the source ID,
@@ -473,6 +476,7 @@ package FerrixIommuRequirements {
                 "iommu::Translation::take_fault", "iommu::Domain::take_fault");
         }
         requirement <'L.iommu.36'> anSmmuFaultIsRead : ItemLowLevel {
+            attribute :>> scope = "personality=kernel";
             attribute :>> statement = "An SMMUv3's take_fault shall answer a
                 translation, address size, access flag or permission event as a
                 refused access by its stream, page and direction.";

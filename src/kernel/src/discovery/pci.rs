@@ -68,6 +68,7 @@ use ferrix_pci::window;
 use ferrix_pci::{Address, ConfigSpace, PciError};
 
 mod held_off_check;
+#[cfg(not(ferrix_personality = "user"))]
 mod virtio;
 
 use crate::device::{self, ConfigFound, DeviceNode, Reserved, Seen};
@@ -396,6 +397,7 @@ pub(crate) struct Report {
     /// The completion the device reported for the last faulted write anyway,
     /// if it did: a fact about the device model, printed so a boot log shows
     /// it (`virtio::Faulted`).
+    #[cfg(not(ferrix_personality = "user"))]
     pub(crate) out_of_domain_completed: Option<virtio::Completed>,
     /// Why the last out-of-domain write was not shown to fault, if one was not.
     pub(crate) out_of_domain_skip: Option<&'static str>,
@@ -512,6 +514,7 @@ impl Enumeration {
             entropy_by_interrupt: 0,
             entropy_polled: None,
             out_of_domain_faulted: 0,
+            #[cfg(not(ferrix_personality = "user"))]
             out_of_domain_completed: None,
             out_of_domain_skip: None,
         };
@@ -602,6 +605,7 @@ impl Finder for Enumeration {
         if let Some(why) = &report.out_of_domain_skip {
             crate::println!("  pci      an out-of-domain write was not shown to fault: {why}");
         }
+        #[cfg(not(ferrix_personality = "user"))]
         if let Some(completed) = &report.out_of_domain_completed {
             crate::println!(
                 "  pci      the device completed the faulted write anyway: {} bytes that never \
@@ -985,6 +989,9 @@ fn check_function(
                 SharedMemory::find(&*space, address, ferrix_virtio::gpu::SHM_ID_HOST_VISIBLE)?
                     .filter(|window| regions.iter().any(|region| window.fits(region)));
         }
+        // A driver's work played once at stage 10, in a hybrid only: under this shape no
+        // kernel plays driver (`docs/microkernel/M6.md` §2).
+        #[cfg(not(ferrix_personality = "user"))]
         if kind == TYPE_ENTROPY {
             match virtio::entropy(
                 space,

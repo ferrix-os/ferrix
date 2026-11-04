@@ -90,6 +90,41 @@ def ring_of(manifest: dict, relative: str) -> str | None:
     return best
 
 
+# What this shape rules out, by the attribute's text: a report's figure, by a brace walk, and no
+# evidence; the shape is judged above, by rustc's list and the symbols.
+OUT_OF_THIS_SHAPE = (
+    '#[cfg(not(ferrix_personality = "user"))]',
+    '#[cfg(not(ferrix_shape = "micro"))]',
+    '#[cfg(ferrix_load_built = "ring0")]',
+    '#[cfg(ferrix_personality = "kernel")]',
+)
+
+
+def lines_cfgd_out(path: str) -> int:
+    """How many code lines of `path` an attribute of OUT_OF_THIS_SHAPE rules out."""
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        source = handle.read().split("\n")
+    out = 0
+    at = 0
+    while at < len(source):
+        if source[at].strip() not in OUT_OF_THIS_SHAPE:
+            at += 1
+            continue
+        depth = 0
+        opened = False
+        at += 1
+        while at < len(source):
+            text = source[at].split("//")[0]
+            if source[at].strip() and not source[at].lstrip().startswith("//"):
+                out += 1
+            depth += text.count("{") - text.count("}")
+            opened = opened or "{" in text
+            at += 1
+            if (opened and depth <= 0) or (not opened and text.rstrip().endswith((";", ","))):
+                break
+    return out
+
+
 def code_lines(path: str) -> int:
     count = 0
     with open(path, encoding="utf-8", errors="replace") as handle:
@@ -112,6 +147,7 @@ def main() -> int:
     files = read_files(args.directory, tree)
     breaches = []
     product = 0
+    built = 0
     checks = 0
     by_top: collections.Counter[str] = collections.Counter()
     for path in sorted(files):
@@ -128,6 +164,7 @@ def main() -> int:
             checks += lines
         else:
             product += lines
+            built += lines - lines_cfgd_out(path)
             by_top[relative.split("/")[0]] += lines
     kernel = os.path.join(args.directory, "ferrix-kernel")
     if os.path.exists(kernel):
@@ -145,7 +182,10 @@ def main() -> int:
     else:
         breaches.append(f"{kernel}: no kernel to read symbols from")
     if args.report:
-        print(f"check-kernel-shape: {product} lines of product code, {checks} of checks, no comments")
+        print(
+            f"check-kernel-shape: {product} lines of product code in the files rustc read, "
+            f"{built} of them not under a cfg this shape rules out, {checks} of checks, no comments"
+        )
         for top, lines in by_top.most_common():
             print(f"  {lines:7} {top}")
     for breach in breaches:

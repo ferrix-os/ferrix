@@ -3524,6 +3524,7 @@ package FerrixX8664Requirements {
         doc /* src/kernel/src/arch/x86_64/msi.rs: message-signalled interrupts. */
 
         requirement <'L.x86_64.113'> msiMessageRaisesItsVector : ItemLowLevel {
+            attribute :>> scope = "personality=kernel";
             attribute :>> statement = "msi_allocate shall answer a message address
                 and data that, written by a device, raise the vector it allocated on
                 the calling processor's local APIC and reach the handler registered
