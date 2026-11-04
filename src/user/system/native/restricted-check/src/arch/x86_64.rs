@@ -24,6 +24,8 @@ global_asm!(
 restricted_image:
 
 // A system call whose number and arguments the context chose, then a stop.
+// `sys_twice`: this one, then image_sys's, whose number is what this one's way back left in RAX.
+    syscall
 .globl image_sys
 image_sys:
     syscall
@@ -386,3 +388,8 @@ pub(crate) const VECTOR_BAD_AT: usize = 24;
 pub(crate) const GETPPID: u64 = 110;
 /// The value of `getpid` on the i386 table.
 pub(crate) const I386_GETPID: u64 = 20;
+
+/// A second system call just before [`sys`]'s: `syscall` is two bytes.
+pub(crate) fn sys_twice() -> u64 {
+    sys() - 2
+}

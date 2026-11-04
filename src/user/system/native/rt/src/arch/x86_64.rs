@@ -216,9 +216,13 @@ pub const ELF_MACHINE: u16 = 62;
 ///
 /// As [`linux`], for `argument`: an entry's context pointer, which the kernel
 /// only reads.
-pub(crate) unsafe fn restricted(number: usize, argument: u64) -> crate::restricted::Exit {
+pub(crate) unsafe fn restricted(
+    number: usize,
+    argument: u64,
+    second: u64,
+) -> crate::restricted::Exit {
     let (mut reason, mut rax): (u64, u64) = (0, number as u64);
-    let mut words = [argument, 0, 0, 0, 0, 0];
+    let mut words = [argument, second, 0, 0, 0, 0];
     let [w0, w1, w2, w3, w4, w5] = &mut words;
     // SAFETY: the caller's promise about the argument; the kernel restores
     // RSP and every register not named here, as K1 §2.2 says.
@@ -228,7 +232,7 @@ pub(crate) unsafe fn restricted(number: usize, argument: u64) -> crate::restrict
             inlateout("rax") rax,
             inlateout("r12") reason,
             inlateout("rdi") *w0,
-            lateout("rsi") *w1,
+            inlateout("rsi") *w1,
             lateout("rdx") *w2,
             lateout("r10") *w3,
             lateout("r8") *w4,

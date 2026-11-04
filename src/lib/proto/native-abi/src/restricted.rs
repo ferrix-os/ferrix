@@ -87,6 +87,11 @@ pub enum FaultKind {
 /// needs `DUPLICATE` beside `TRANSFER`.
 pub const HANDLE_KEEP: usize = 1;
 
+/// `RESTRICTED_ENTER`'s option: every system call of this context exits, a native number
+/// too, until the next entry (`docs/microkernel/K1.md` §2.2). What `linuxd` asks for a thread
+/// under Syscall User Dispatch, whose program asked that the kernel take its calls away.
+pub const ENTER_ALL_CALLS_EXIT: u64 = 1;
+
 /// A program's registers on x86-64, as `RESTRICTED_ENTER` takes them and
 /// `RESTRICTED_CONTEXT_READ` gives them (K1 §2.3). Every field is a whole word,
 /// so that nothing is truncated into validity: a bit above a selector's width

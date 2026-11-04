@@ -23,8 +23,8 @@
 use ferrix_bootinfo::is_user_address;
 use ferrix_linux_abi::errno::Errno;
 use ferrix_native_abi::nr;
-use ferrix_native_abi::restricted::may_continue;
 use ferrix_native_abi::restricted::{CONTEXT_BYTES, Context, FaultKind, Reason, SHARED_BASE};
+use ferrix_native_abi::restricted::{ENTER_ALL_CALLS_EXIT, may_continue};
 use ferrix_native_abi::status;
 
 use super::gdt;
@@ -73,6 +73,9 @@ pub(crate) struct RestrictedState {
     /// The user state of the mode that is not running: `linuxd`'s while the
     /// program runs, the program's while `linuxd` does.
     other: UserState,
+    /// Whether a native number exits too, as `RESTRICTED_ENTER` asked: tested only for
+    /// a native number, so a Linux number's path does not read it.
+    all_calls_exit: bool,
     /// Whether a context is held: from the first entry on.
     held: bool,
     /// The last exit's reason, zero before the first.
@@ -104,6 +107,7 @@ impl RestrictedState {
                 user_rsp: 0,
             },
             other: UserState::new(),
+            all_calls_exit: false,
             held: false,
             last: 0,
         }
@@ -304,7 +308,7 @@ pub(super) fn answer_going_in(frame: &mut SyscallFrame, number: usize) {
         return;
     }
     super::enable_interrupts();
-    let prepared = prepare(number, frame.rdi);
+    let prepared = prepare(number, frame.rdi, frame.rsi);
     super::disable_interrupts();
     if let Err(why) = prepared {
         frame.rax = why.as_return_value() as u64;
@@ -345,6 +349,15 @@ pub(super) fn answer_going_in(frame: &mut SyscallFrame, number: usize) {
     unsafe { super::signal::resume_context(&resume) }
 }
 
+/// Whether the running thread's context asked that a native number exit too. A read of
+/// its own record, with no allocation: it has entered, or it would not be here.
+fn all_calls_exit() -> bool {
+    // SAFETY: (CONTEXT) only the running task reaches its own record, for this call.
+    unsafe { sched::own_restricted_slot() }
+        .and_then(|slot| slot.as_deref())
+        .is_some_and(|state| state.all_calls_exit)
+}
+
 /// `RESTRICTED_ENTER`'s context: copied once and checked, and held.
 fn take_context(state: &mut RestrictedState, argument: u64) -> Result<(), Errno> {
     let mut bytes = [0_u8; CONTEXT_BYTES];
@@ -360,10 +373,16 @@ fn take_context(state: &mut RestrictedState, argument: u64) -> Result<(), Errno>
 
 /// What `number` changes in the held context, before the processor is told:
 /// with interrupts open, since a copy may fault and a first entry allocates.
-fn prepare(number: usize, argument: u64) -> Result<(), Errno> {
+fn prepare(number: usize, argument: u64, options: u64) -> Result<(), Errno> {
     let state = own_state()?;
     match number {
-        nr::RESTRICTED_ENTER => take_context(state, argument)?,
+        nr::RESTRICTED_ENTER => {
+            if options & !ENTER_ALL_CALLS_EXIT != 0 {
+                return Err(status::INVALID_ARGS);
+            }
+            take_context(state, argument)?;
+            state.all_calls_exit = options & ENTER_ALL_CALLS_EXIT != 0;
+        }
         nr::RESTRICTED_RESUME => {
             if !state.held
                 || (state.last != Reason::Syscall as u64
@@ -431,7 +450,7 @@ const fn store_syscall(frame: &mut SyscallFrame, context: &TrapFrame) {
 /// way out, and `true` when the call has been answered by exiting.
 pub(super) fn from_restricted(frame: &mut SyscallFrame) -> Option<crate::trap::Outcome> {
     let number = frame.rax as usize;
-    if nr::is_native(number) {
+    if nr::is_native(number) && !all_calls_exit() {
         match nr::decode(number).map(nr::from_restricted) {
             Some(nr::FromRestricted::Exits) => {}
             Some(nr::FromRestricted::NormalOnly) => {

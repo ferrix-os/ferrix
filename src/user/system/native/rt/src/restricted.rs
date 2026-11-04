@@ -52,7 +52,31 @@ pub fn enter(context: &Context) -> Exit {
     let at = bytes.as_ptr().addr() as u64;
     // SAFETY: `at` is this frame's own copy of the context, valid across the
     // call, which only reads it, and only before anything else happens.
-    unsafe { arch::restricted(nr::RESTRICTED_ENTER, at) }
+    unsafe { arch::restricted(nr::RESTRICTED_ENTER, at, 0) }
+}
+
+/// [`enter`], every system call exiting, a native number too (`ENTER_ALL_CALLS_EXIT`).
+#[must_use]
+pub fn enter_all_calls_exit(context: &Context) -> Exit {
+    let bytes = context.to_bytes();
+    let at = bytes.as_ptr().addr() as u64;
+    // SAFETY: as [`enter`].
+    unsafe {
+        arch::restricted(
+            nr::RESTRICTED_ENTER,
+            at,
+            ferrix_native::region::ENTER_ALL_CALLS_EXIT,
+        )
+    }
+}
+
+/// [`enter`] with `options` as given, a bit the kernel does not know included.
+#[must_use]
+pub fn enter_with(context: &Context, options: u64) -> Exit {
+    let bytes = context.to_bytes();
+    let at = bytes.as_ptr().addr() as u64;
+    // SAFETY: as [`enter`].
+    unsafe { arch::restricted(nr::RESTRICTED_ENTER, at, options) }
 }
 
 /// `restricted_resume`: put `value` in the program's result register and go
@@ -60,7 +84,7 @@ pub fn enter(context: &Context) -> Exit {
 #[must_use]
 pub fn resume(value: u64) -> Exit {
     // SAFETY: no pointer: `value` goes to the program's register.
-    unsafe { arch::restricted(nr::RESTRICTED_RESUME, value) }
+    unsafe { arch::restricted(nr::RESTRICTED_RESUME, value, 0) }
 }
 
 /// `restricted_continue`: go back in with nothing changed: the way back from a
@@ -68,7 +92,7 @@ pub fn resume(value: u64) -> Exit {
 #[must_use]
 pub fn continue_() -> Exit {
     // SAFETY: no pointer.
-    unsafe { arch::restricted(nr::RESTRICTED_CONTINUE, 0) }
+    unsafe { arch::restricted(nr::RESTRICTED_CONTINUE, 0, 0) }
 }
 
 unsafe extern "C" {

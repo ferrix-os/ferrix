@@ -3254,6 +3254,15 @@ package FerrixObjectRequirements {
                 "object::region::Region::landing_for",
                 "object::bare::fault_signal");
         }
+        requirement <'L.trap.30'> aContextMayAskEveryCallToExit : ItemLowLevel {
+            attribute :>> statement = "A context entered with ENTER_ALL_CALLS_EXIT shall exit on a native
+                number as on any other, answering nothing, until the next entry, and an
+                unknown option shall be refused.";
+            attribute :>> criterion = "Case 145.";
+            attribute :>> parent = "H.TRAP.21";
+            attribute :>> unit = ("arch::x86_64::restricted::all_calls_exit",
+                "arch::aarch64::restricted::all_calls_exit");
+        }
         requirement <'L.trap.25'> aKillEndsAThreadInEitherMode : ItemLowLevel {
             attribute :>> statement = "A job kill shall end a thread of a process of a region in either
                 mode.";

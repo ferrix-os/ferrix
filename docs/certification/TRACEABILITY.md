@@ -15,13 +15,13 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 186 | 133 | 53 |
-| Low (`L.*`) | 1439 | 1174 | 265 |
+| Low (`L.*`) | 1440 | 1175 | 265 |
 
-3238 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+3240 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 3244 |
+| Named by a low-level requirement | 3246 |
 | Accessors, covered by the requirement they serve | 1307 |
 | Check code in a product file | 124 |
 | Named by none | 1045 |
@@ -823,6 +823,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.trap.22` | The kernel's preemption of a thread in restricted mode shall resume it on the restricted root with its registers. | Cases 124 to 126: a spinner preempted many times exits only by its kick. | H.TRAP.21 | `user::space::AddressSpace::install_as`, `smp::PerCpu::set_task_kind` | `src/kernel/src/object/region_check.rs::run` | not built | not built | not built |
 | `L.trap.23` | A program's vector registers shall be the same after an exit and an entry whatever normal mode did to its own. | Cases 74 to 76. | H.TRAP.24 | `arch::x86_64::restricted::vector_bytes`, `arch::x86_64::restricted::set_vector_bytes`, `arch::x86_64::switch::UserState::vector_image`, `arch::x86_64::switch::UserState::set_vector_image` | `src/kernel/src/object/region_check.rs::run` | not built | not built | not built |
 | `L.trap.24` | A page fault in normal mode, on the restricted half, unresolved, with the instruction pointer in the region's copy window, shall resume at the window's landing with only the fault's kind written; any other normal-mode fault goes to K4's chain and past it ends the region's job. | Cases 70 to 72; the fault of the second process in case 89. | H.TRAP.21 | `arch::x86_64::restricted::land_copy`, `trap::copy_landing`, `trap::restricted_fault`, `object::region::Region::set_window`, `object::region::Region::landing_for`, `object::bare::fault_signal` | `src/kernel/src/object/region_check.rs::run`, `src/kernel/src/object/region_check.rs::fault_ends_the_region` | not built | not built | not built |
+| `L.trap.30` | A context entered with ENTER_ALL_CALLS_EXIT shall exit on a native number as on any other, answering nothing, until the next entry, and an unknown option shall be refused. | Case 145. | H.TRAP.21 | `arch::x86_64::restricted::all_calls_exit`, `arch::aarch64::restricted::all_calls_exit` | `src/kernel/src/object/region_check.rs::run` | not built | not built | not built |
 | `L.trap.25` | A job kill shall end a thread of a process of a region in either mode. | Cases 133, 134. That an end posted as a thread goes in is taken before the flip, with interrupts masked, is by review of answer_going_in's must_leave look (ledger 6282 R6, B7), which no case can time. | H.TRAP.21 | `object::bare::Bare::end`, `object::bare::Bare::release`, `object::bare::return_to_user`, `object::bare::leave_current`, `object::bare::ThreadRef::mark_ended` | `src/kernel/src/object/region_check.rs::run` | not built | not built | not built |
 | `L.trap.26` | A kick shall end a blocking native call from restricted mode with INTERRUPTED in the result register, then an exit. | Case 127. | H.TRAP.21 | `sched::work::take_kick` | `src/kernel/src/object/region_check.rs::run` | not built | not built | not built |
 | `L.trap.27` | Any number of kicks before an exit shall be one exit, and the exit shall lower the mark. | Case 87. | H.TRAP.21 | `sched::work::take_kick` | `src/kernel/src/object/region_check.rs::run` | not built | not built | not built |
@@ -2890,6 +2891,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/object/region_check.rs::run` | kernel | L.object.277, L.object.278, L.object.279, L.object.280, L.object.281, L.object.282 |
 | `src/kernel/src/object/region_check.rs::run` | kernel | L.trap.18, L.trap.19, L.trap.20, L.trap.21, L.trap.22, L.trap.23 |
 | `src/kernel/src/object/region_check.rs::run` | kernel | L.trap.24, L.trap.25, L.trap.26, L.trap.27, L.trap.28, L.x86_64.260 |
+| `src/kernel/src/object/region_check.rs::run` | kernel | L.trap.30 |
 | `src/kernel/src/object/region_check.rs::run` | kernel | L.user.180, L.user.181, L.user.182, L.user.183, L.user.184 |
 | `src/kernel/src/object/region_check.rs::run` | kernel | L.user.193 |
 | `src/kernel/src/object/region_check.rs::run` | kernel | L.x86_64.261, L.x86_64.262, L.x86_64.263, L.x86_64.264, L.x86_64.265, L.x86_64.266 |

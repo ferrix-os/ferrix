@@ -9,7 +9,8 @@ use ferrix_native_abi::nr;
 use ferrix_native_abi::rights::Requested;
 
 pub use ferrix_native_abi::restricted::{
-    CONTEXT_BYTES, Context, FaultKind, HANDLE_KEEP, Reason, SHARED_BASE, VECTORS_BYTES,
+    CONTEXT_BYTES, Context, ENTER_ALL_CALLS_EXIT, FaultKind, HANDLE_KEEP, Reason, SHARED_BASE,
+    VECTORS_BYTES,
 };
 
 use crate::Handle;

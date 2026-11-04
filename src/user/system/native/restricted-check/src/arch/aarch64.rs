@@ -29,6 +29,8 @@ global_asm!(
 .section .rodata.restricted_image, "a"
 .globl restricted_image
 restricted_image:
+// `sys_twice`: this one, then image_sys's, the same number in X8.
+    svc #0
 .globl image_sys
 image_sys:
     svc #0
@@ -285,3 +287,8 @@ pub(crate) const VECTOR_BAD_AT: usize = 512 + 1;
 pub(crate) const GETPPID: u64 = 173;
 /// No i386 table here.
 pub(crate) const I386_GETPID: u64 = 0;
+
+/// A second system call just before [`sys`]'s: `svc` is four bytes.
+pub(crate) fn sys_twice() -> u64 {
+    sys() - 4
+}

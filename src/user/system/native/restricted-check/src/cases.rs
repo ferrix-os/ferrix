@@ -289,6 +289,7 @@ fn cases(bootstrap: ferrix_rt::Bootstrap) -> Result<(), i32> {
     shared_region(&given)?;
     forged()?;
     native_from_restricted()?;
+    all_calls_exit()?;
     continue_after_fault()?;
     tables(&given)?;
     moves()?;
@@ -1547,6 +1548,37 @@ fn full_table_runs_no_thread() -> Result<(), i32> {
 const PAGE_STEP_FAILED: u64 = u64::MAX;
 /// Rounds of case 132's change of a page under another processor's reader.
 const SHOOTDOWN_ROUNDS: u64 = 64;
+
+/// Case 145: under `ENTER_ALL_CALLS_EXIT` a native number exits like any other and
+/// answers nothing, across a `RESUME`, until the next entry; an unknown option is
+/// refused with nothing taken (6268 Q2, ledger 6663).
+fn all_calls_exit() -> Result<(), i32> {
+    let mut context = at(arch::sys_twice());
+    arch::set_call(&mut context, nr::THREAD_SELF as u64, [0; 6]);
+    syscall_exit(
+        &ferrix_rt::restricted::enter_all_calls_exit(&context),
+        nr::THREAD_SELF as u64,
+        145,
+    )?;
+    // Refused, it takes nothing: the context held is still this one, its flag up.
+    let mut other = at(arch::sys());
+    arch::set_call(&mut other, nr::THREAD_SELF as u64, [0; 6]);
+    let refused_entry = ferrix_rt::restricted::enter_with(&other, 1 << 63);
+    hold(
+        refused_entry.reason == 0
+            && refused_entry.number as i64 == status::INVALID_ARGS.as_return_value() as i64,
+        145,
+    )?;
+    // The second call, a native number again, past the `RESUME`: on x86-64 the number is
+    // the value resumed, in RAX; on AArch64 X8 still holds the first's.
+    syscall_exit(&resume(nr::THREAD_SELF as u64), nr::THREAD_SELF as u64, 145)?;
+    fault_exit(&resume(0), arch::VECTOR_BREAKPOINT, 145)?;
+    let mut once = at(arch::sys());
+    arch::set_call(&mut once, nr::THREAD_SELF as u64, [0; 6]);
+    let plain = enter(&once);
+    hold(plain.reason != Reason::Syscall as u64, 145)?;
+    Ok(())
+}
 
 /// Case 89: a second process of the region: the same shared word, its own
 /// restricted space and table.
