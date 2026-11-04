@@ -199,7 +199,9 @@ def main() -> int:
         print(file=sys.stderr)
         print(
             "Ferrix commits name one author, never a tool. Rewrite them -- `git rebase -i`, or\n"
-            "`git commit --amend` for the tip -- and push again.",
+            "`git commit --amend --reset-author` for the tip (a plain amend keeps the author), "
+            "or for older commits\n"
+            "`git rebase --exec 'git commit --amend --no-edit --reset-author' BASE` -- and push again.",
             file=sys.stderr,
         )
         return 1

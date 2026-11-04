@@ -64,7 +64,8 @@ env:
 
 jobs:
   # ----------------------------------------------------------------
-  # One author per commit. `.githooks` checks this twice, and both of
+  # One author per commit, never a tool: no Co-authored-by trailer, and no
+  # author or committer named claude or anthropic. `.githooks` checks this twice, and both of
   # those checks are hooks -- so both are dormant until somebody runs
   # `git config core.hooksPath .githooks` in their clone, which is local
   # configuration and cannot be committed. Nobody ran it, and eight
@@ -84,7 +85,7 @@ jobs:
       # Only the range this push or pull request *adds*, never the whole tree:
       # the history that already carries the trailer is public, and a gate that
       # failed on it forever would be turned off within a day.
-      - name: No commit carries a Co-authored-by trailer
+      - name: No commit carries a Co-authored-by trailer or a tool as author or committer
         env:
           BASE: ${{ github.event_name == 'pull_request'
                     && github.event.pull_request.base.sha

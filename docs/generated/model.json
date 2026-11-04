@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "7506a65220bc702c5e46b31661fa2625f104a23e22fb8823e90bad5c91086fc6",
+  "digest": "781d54e144fe5df74ed4e4dfa3b2095d3286a446b1a4eb20ad4cd66f1216a330",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -635,7 +635,7 @@
               "kind": "requirement",
               "shortName": "P.16",
               "type": "DesignRule",
-              "doc": "docs/CONVENTIONS.md: a commit names one author. No Co-authored-by trailer, no Generated-with line, no tool signature, whoever or whatever made the change; a message is a subject, a blank line, and a body that argues the why. This overrides any agent's default attribution instruction.",
+              "doc": "docs/CONVENTIONS.md: a commit names one author. No Co-authored-by trailer, no Generated-with line, no tool signature, and no tool (a name or address matching claude or anthropic) as author or committer, whoever or whatever made the change; the author is the accountable owner, not a record of what made the change. A message is a subject, a blank line, and a body that argues the why. This overrides any agent's default attribution instruction.",
               "source": {
                 "file": "docs/sysml/01-requirements.sysml",
                 "line": 184
@@ -650,7 +650,7 @@
               "doc": "A control that only runs once a clone has been configured is not a control. Two hooks behind one un-committable core.hooksPath switch were one control with two names, and neither fired while eight trailer-carrying commits were written. Every rule has a check in CI that needs no local setup and cannot be skipped with --no-verify; hooks are the convenience, CI is the guarantee.",
               "source": {
                 "file": "docs/sysml/01-requirements.sysml",
-                "line": 191
+                "line": 194
               }
             }
           ]
@@ -661,7 +661,7 @@
           "kind": "package",
           "source": {
             "file": "docs/sysml/01-requirements.sysml",
-            "line": 206
+            "line": 209
           },
           "children": [
             {
@@ -673,7 +673,7 @@
               "doc": "HardRt promises EDF with admission control, bounded kernel critical sections on the RT path, preallocated pools there, and interrupts that cannot steal unaccounted time. It does not promise a certified worst-case execution time for the whole kernel; no OS that also hosts LLVM can.",
               "source": {
                 "file": "docs/sysml/01-requirements.sysml",
-                "line": 207
+                "line": 210
               }
             },
             {
@@ -685,7 +685,7 @@
               "doc": "btrfs is single-device to begin with and RAID 5/6 is out of scope; it is where btrfs itself is weakest.",
               "source": {
                 "file": "docs/sysml/01-requirements.sysml",
-                "line": 214
+                "line": 217
               }
             },
             {
@@ -697,7 +697,7 @@
               "doc": "src/lib/platform/acpi reads the fixed tables only. There is no AML interpreter and there will be none.",
               "source": {
                 "file": "docs/sysml/01-requirements.sysml",
-                "line": 218
+                "line": 221
               }
             }
           ]
@@ -18768,7 +18768,7 @@
           "kind": "verification",
           "type": "Gate",
           "maturity": "implemented",
-          "doc": "The One-author-per-commit CI job, over the range a push or pull request adds and never the whole tree, so public history that already carries a trailer cannot make the gate permanent red. Matches a trailer at the start of a line only, so prose about the rule passes. The commit-msg and pre-push hooks check the same thing a second earlier, where the fix is a message edit rather than a rebase; they are dormant until armed, and this job is the one that is not.",
+          "doc": "The One-author-per-commit CI job, over the range a push or pull request adds and never the whole tree, so public history that already carries a trailer cannot make the gate permanent red. Matches a trailer at the start of a line only, so prose about the rule passes; and refuses an author or committer whose name or address matches claude or anthropic. The commit-msg and pre-push hooks check the same thing a second earlier, where the fix is a message edit rather than a rebase; they are dormant until armed, and this job is the one that is not.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
             "line": 33
@@ -18791,7 +18791,7 @@
               "kind": "objective",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 43
+                "line": 44
               }
             }
           ]
@@ -18804,7 +18804,7 @@
           "maturity": "implemented",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 45
+            "line": 46
           },
           "children": [
             {
@@ -18815,7 +18815,7 @@
               "value": "\"cargo fmt --all -- --check\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 46
+                "line": 47
               }
             }
           ]
@@ -18829,7 +18829,7 @@
           "doc": "A CRLF in a shell script makes its shebang unparseable.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 48
+            "line": 49
           },
           "children": [
             {
@@ -18840,7 +18840,7 @@
               "value": "\"python3 tools/common/check/check-line-endings.py\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 49
+                "line": 50
               }
             }
           ]
@@ -18854,7 +18854,7 @@
           "doc": "Fails on an assembly site not in tools/common/data/asm-allowlist.json, on a file over its budget, and on a stale entry. Reports the Rust share on every run.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 52
+            "line": 53
           },
           "children": [
             {
@@ -18865,7 +18865,7 @@
               "value": "\"python3 tools/common/check/check-asm-budget.py\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 53
+                "line": 54
               }
             },
             {
@@ -18874,7 +18874,7 @@
               "kind": "objective",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 57
+                "line": 58
               }
             }
           ]
@@ -18888,7 +18888,7 @@
           "doc": "The seam docs/ARCHITECTURE.md §7 is built on: the kernel enumerates devices and drives none, so a register access in the wrong file fails the build rather than waiting for a review.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 59
+            "line": 60
           },
           "children": [
             {
@@ -18899,7 +18899,7 @@
               "value": "\"python3 tools/common/check/check-device-access.py\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 60
+                "line": 61
               }
             }
           ]
@@ -18913,7 +18913,7 @@
           "doc": "Every unsafe block has a SAFETY comment and one operation; every unsafe fn a Safety section. Prints the per-crate count so growth is noticed rather than happening.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 66
+            "line": 67
           },
           "children": [
             {
@@ -18924,7 +18924,7 @@
               "value": "\"python3 tools/common/check/check-unsafe-audit.py\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 67
+                "line": 68
               }
             },
             {
@@ -18933,7 +18933,7 @@
               "kind": "objective",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 71
+                "line": 72
               }
             }
           ]
@@ -18947,7 +18947,7 @@
           "doc": "Every panic-lint exemption is an #[expect] whose reason begins AUDIT:. expect fails once the lint stops firing, so a site refactored into safety loses its exemption.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 73
+            "line": 74
           },
           "children": [
             {
@@ -18958,7 +18958,7 @@
               "value": "\"python3 tools/common/check/check-panic-audit.py\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 74
+                "line": 75
               }
             },
             {
@@ -18967,7 +18967,7 @@
               "kind": "objective",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 78
+                "line": 79
               }
             }
           ]
@@ -18981,7 +18981,7 @@
           "doc": "The certified item's requirements (part 13) against their parents, their units and the checks that name them with `/// Verifies:`. Fails on an id no requirement defines, a requirement with no statement, criterion or parent, a unit that does not resolve, and a requirement no check names that is not in the baseline of the unverified, which may only shrink. Writes docs/certification/TRACEABILITY.md.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 80
+            "line": 81
           },
           "children": [
             {
@@ -18992,7 +18992,7 @@
               "value": "\"python3 tools/common/check/check-traceability.py --check\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 81
+                "line": 82
               }
             }
           ]
@@ -19006,7 +19006,7 @@
           "doc": "docs/generated is generated from this model and committed; a model edited without regenerating fails here.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 90
+            "line": 91
           },
           "children": [
             {
@@ -19017,7 +19017,7 @@
               "value": "\"python3 tools/common/gen/sysml/tests.py && python3 tools/common/gen/gen-arch-doc.py --check\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 91
+                "line": 92
               }
             }
           ]
@@ -19031,7 +19031,7 @@
           "doc": "The compositor's interface tables against the protocol XML vendored beside them.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 95
+            "line": 96
           },
           "children": [
             {
@@ -19042,7 +19042,7 @@
               "value": "\"python3 tools/common/gen/gen-wayland-protocol.py --check\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 96
+                "line": 97
               }
             }
           ]
@@ -19056,7 +19056,7 @@
           "doc": "The keymap every client is handed, and its modifier bits, against libxkbcommon's own output through a committed probe.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 100
+            "line": 101
           },
           "children": [
             {
@@ -19067,7 +19067,7 @@
               "value": "\"python3 tools/common/gen/gen-xkb-tables.py --check\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 101
+                "line": 102
               }
             }
           ]
@@ -19081,7 +19081,7 @@
           "doc": "The panic screen's font against the BDF committed beside it.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 105
+            "line": 106
           },
           "children": [
             {
@@ -19092,7 +19092,7 @@
               "value": "\"python3 tools/common/gen/gen-font.py --check\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 106
+                "line": 107
               }
             }
           ]
@@ -19106,7 +19106,7 @@
           "doc": "The terminal's font, rasterised from the TrueType faces committed beside it by a rasteriser in the repository, so the result is byte-identical on every checkout.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 109
+            "line": 110
           },
           "children": [
             {
@@ -19117,7 +19117,7 @@
               "value": "\"cargo xtask check (terminal font: the term app's tools/gen-font.py --check)\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 110
+                "line": 111
               }
             }
           ]
@@ -19131,7 +19131,7 @@
           "doc": "The explanations a panic prints, rendered into a document that goes stale the moment an entry changes without it.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 115
+            "line": 116
           },
           "children": [
             {
@@ -19142,7 +19142,7 @@
               "value": "\"python3 tools/common/gen/gen-panic-catalog.py --check\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 116
+                "line": 117
               }
             }
           ]
@@ -19156,7 +19156,7 @@
           "doc": "src/lib/ depend on nothing above them; generic kernel code names no architecture; cfg(target_arch) only under arch/.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 120
+            "line": 121
           },
           "children": [
             {
@@ -19167,7 +19167,7 @@
               "value": "\"tools/common/check/check-crate-layering.sh\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 121
+                "line": 122
               }
             },
             {
@@ -19176,7 +19176,7 @@
               "kind": "objective",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 124
+                "line": 125
               }
             }
           ]
@@ -19190,7 +19190,7 @@
           "doc": "Ten runs: the host (libraries and xtask), and the kernel, the loader, and the native runtime with its programs for each of the three targets, because cfg(target_arch) code is invisible to a lint pass for another machine. The lint table denies unwrap, expect, panic, unreachable, indexing and string slicing in production code.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 126
+            "line": 127
           },
           "children": [
             {
@@ -19201,7 +19201,7 @@
               "value": "\"cargo clippy -- -D warnings\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 127
+                "line": 128
               }
             },
             {
@@ -19212,7 +19212,7 @@
               "value": "10",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 134
+                "line": 135
               }
             }
           ]
@@ -19226,7 +19226,7 @@
           "doc": "1950 unit tests across src/lib/ on 2026-09-23 (about 520 when this gate was first written down), plus doc tests and xtask's 242.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 136
+            "line": 137
           },
           "children": [
             {
@@ -19237,7 +19237,7 @@
               "value": "\"cargo test --workspace --exclude ferrix-kernel --exclude ferrix-boot\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 137
+                "line": 138
               }
             }
           ]
@@ -19250,7 +19250,7 @@
           "maturity": "implemented",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 142
+            "line": 143
           },
           "children": [
             {
@@ -19261,7 +19261,7 @@
               "value": "\"cargo deny check\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 143
+                "line": 144
               }
             }
           ]
@@ -19275,7 +19275,7 @@
           "doc": "Broken intra-doc links are denied.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 145
+            "line": 146
           },
           "children": [
             {
@@ -19286,7 +19286,7 @@
               "value": "\"cargo doc\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 146
+                "line": 147
               }
             }
           ]
@@ -19300,7 +19300,7 @@
           "doc": "src/lib/platform/elf, bootinfo, ustack, objects, vfs, pci, block, blkring, native, virtio-blk, frame, heap and paging. cargo xtask check --miri runs the same list, and an xtask test holds it to the workflow. A test too slow to interpret runs shorter under cfg(miri) rather than being ignored.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 149
+            "line": 150
           },
           "children": [
             {
@@ -19311,7 +19311,7 @@
               "value": "\"cargo miri test\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 150
+                "line": 151
               }
             }
           ]
@@ -19325,7 +19325,7 @@
           "doc": "Replays the committed corpus first, searches second: an input that crashed once fails again in seconds. ustack_build asserts a round trip rather than the absence of a crash -- whatever the builder accepts, a walk that knows only the stack pointer must recover exactly what went in -- which is how it found that a string containing a NUL built an image that read back short.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 156
+            "line": 157
           },
           "children": [
             {
@@ -19336,7 +19336,7 @@
               "value": "\"cargo fuzz run <target>, for every target cargo fuzz list names\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 157
+                "line": 158
               }
             }
           ]
@@ -19350,7 +19350,7 @@
           "doc": "One bootable FAT32 image per architecture, byte-for-byte reproducible, uploaded as a CI artifact. xtask refuses to build a kernel with RUSTFLAGS set, because cargo lets that variable replace the per-target flags and silently drop the linker script.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 165
+            "line": 166
           },
           "children": [
             {
@@ -19361,7 +19361,7 @@
               "value": "\"cargo xtask build --arch all --release\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 166
+                "line": 167
               }
             }
           ]
@@ -19375,7 +19375,7 @@
           "doc": "The gate that answers the question the others cannot. An OS that compiles and does not boot is not a passing build.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 173
+            "line": 174
           },
           "children": [
             {
@@ -19386,7 +19386,7 @@
               "value": "\"cargo xtask test-boot --arch all\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 174
+                "line": 175
               }
             },
             {
@@ -19395,7 +19395,7 @@
               "kind": "objective",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 177
+                "line": 178
               }
             }
           ]
@@ -19407,7 +19407,7 @@
           "definition": true,
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 184
+            "line": 185
           },
           "children": [
             {
@@ -19417,7 +19417,7 @@
               "type": "String",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 185
+                "line": 186
               }
             },
             {
@@ -19427,7 +19427,7 @@
               "type": "Natural",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 186
+                "line": 187
               }
             }
           ]
@@ -19441,7 +19441,7 @@
           "doc": "An absolute cap, because assembly here is a fixed cost that a scheduler, a filesystem or a driver must add nothing to. The ratio is a backstop and the target is the direction of travel: reached by writing the operating system, not by shrinking the vector table. 303 lines and about 99.2% Rust when this was written, across fifteen sites; tools/common/data/asm-allowlist.json now names twenty-four: the x86-64 SYSCALL entry and the native runtime's three (docs/ASSEMBLY.md, A native program), the Pixel 7's loader entry, the x86-64 vDSO and the three side-channel sequences having joined them. The cap was 800 until 2026-09-27, when the count learned to read raw strings and found 1569 lines, not 733 (docs/ASSEMBLY.md, The budget).",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 189
+            "line": 190
           },
           "children": [
             {
@@ -19452,7 +19452,7 @@
               "value": "1600",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 202
+                "line": 203
               }
             },
             {
@@ -19463,7 +19463,7 @@
               "value": "0.06",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 203
+                "line": 204
               }
             },
             {
@@ -19474,7 +19474,7 @@
               "value": "0.001",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 204
+                "line": 205
               }
             },
             {
@@ -19486,7 +19486,7 @@
               "value": "( AssemblySite(file = \"src/boot/common/uefi/src/arch/x86_64.rs\", maxLines = 30), AssemblySite(file = \"src/boot/common/uefi/src/arch/aarch64.rs\", maxLines = 60), AssemblySite(file = \"src/boot/common/uefi/src/arch/armv7a.rs\", maxLines = 63), AssemblySite(file = \"src/kernel/src/arch/x86_64/cpu.rs\", maxLines = 100), AssemblySite(file = \"src/kernel/src/arch/aarch64/cpu.rs\", maxLines = 100), AssemblySite(file = \"src/kernel/src/arch/armv7a/cpu.rs\", maxLines = 102), AssemblySite(file = \"src/kernel/src/arch/x86_64/trap.rs\", maxLines = 181), AssemblySite(file = \"src/kernel/src/arch/aarch64/trap.rs\", maxLines = 145), AssemblySite(file = \"src/kernel/src/arch/armv7a/trap.rs\", maxLines = 130), AssemblySite(file = \"src/kernel/src/arch/x86_64/smp.rs\", maxLines = 41), AssemblySite(file = \"src/kernel/src/arch/aarch64/smp.rs\", maxLines = 58), AssemblySite(file = \"src/kernel/src/arch/armv7a/smp.rs\", maxLines = 40), AssemblySite(file = \"src/kernel/src/arch/x86_64/switch.rs\", maxLines = 32), AssemblySite(file = \"src/kernel/src/arch/aarch64/switch.rs\", maxLines = 75), AssemblySite(file = \"src/kernel/src/arch/armv7a/switch.rs\", maxLines = 67), AssemblySite(file = \"src/kernel/src/arch/x86_64/syscall.rs\", maxLines = 157), AssemblySite(file = \"src/user/system/native/rt/src/arch/x86_64.rs\", maxLines = 20), AssemblySite(file = \"src/user/system/native/rt/src/arch/aarch64.rs\", maxLines = 20), AssemblySite(file = \"src/user/system/native/rt/src/arch/armv7a.rs\", maxLines = 20), AssemblySite(file = \"src/boot/vendor/google/pixel7/src/entry.rs\", maxLines = 130), AssemblySite(file = \"src/kernel/src/arch/x86_64/vdso.rs\", maxLines = 120), AssemblySite(file = \"src/kernel/src/arch/x86_64/speculation.rs\", maxLines = 16), AssemblySite(file = \"src/kernel/src/arch/aarch64/speculation.rs\", maxLines = 16), AssemblySite(file = \"src/kernel/src/arch/armv7a/speculation.rs\", maxLines = 16) )",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 230
+                "line": 231
               }
             },
             {
@@ -19500,7 +19500,7 @@
               "doc": "The SYSCALL / SVC trampolines: the last entries the list was meant to gain. Only x86-64 needed one, src/kernel/src/arch/x86_64/syscall.rs, in the list above: on the Arm pair svc arrives through the vector table already there.",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 231
+                "line": 232
               }
             }
           ]
@@ -19512,7 +19512,7 @@
           "definition": true,
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 245
+            "line": 246
           },
           "children": [
             {
@@ -19521,7 +19521,7 @@
               "kind": "enum-literal",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 246
+                "line": 247
               }
             },
             {
@@ -19530,7 +19530,7 @@
               "kind": "enum-literal",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 247
+                "line": 248
               }
             },
             {
@@ -19539,7 +19539,7 @@
               "kind": "enum-literal",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 248
+                "line": 249
               }
             },
             {
@@ -19548,7 +19548,7 @@
               "kind": "enum-literal",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 249
+                "line": 250
               }
             }
           ]
@@ -19560,7 +19560,7 @@
           "definition": true,
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 252
+            "line": 253
           },
           "children": [
             {
@@ -19570,7 +19570,7 @@
               "type": "String",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 253
+                "line": 254
               }
             },
             {
@@ -19581,7 +19581,7 @@
               "multiplicity": "1..*",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 254
+                "line": 255
               }
             }
           ]
@@ -19593,7 +19593,7 @@
           "type": "LayerReach",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 257
+            "line": 258
           },
           "children": [
             {
@@ -19604,7 +19604,7 @@
               "value": "\"src/lib/\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 258
+                "line": 259
               }
             },
             {
@@ -19615,7 +19615,7 @@
               "value": "(TestReach::CargoTest, TestReach::Miri, TestReach::Fuzzer)",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 259
+                "line": 260
               }
             }
           ]
@@ -19627,7 +19627,7 @@
           "type": "LayerReach",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 261
+            "line": 262
           },
           "children": [
             {
@@ -19638,7 +19638,7 @@
               "value": "\"src/boot/common/uefi/\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 262
+                "line": 263
               }
             },
             {
@@ -19649,7 +19649,7 @@
               "value": "(TestReach::QemuBoot)",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 263
+                "line": 264
               }
             }
           ]
@@ -19662,7 +19662,7 @@
           "doc": "Miri cannot interpret a privileged instruction and a fuzzer cannot drive a page-fault handler, which is the whole argument for src/lib/.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 265
+            "line": 266
           },
           "children": [
             {
@@ -19673,7 +19673,7 @@
               "value": "\"src/kernel/\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 266
+                "line": 267
               }
             },
             {
@@ -19684,7 +19684,7 @@
               "value": "(TestReach::QemuBoot)",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 267
+                "line": 268
               }
             }
           ]
@@ -19696,7 +19696,7 @@
           "type": "LayerReach",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 272
+            "line": 273
           },
           "children": [
             {
@@ -19707,7 +19707,7 @@
               "value": "\"tools/common/xtask/\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 273
+                "line": 274
               }
             },
             {
@@ -19718,7 +19718,7 @@
               "value": "(TestReach::CargoTest)",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 274
+                "line": 275
               }
             }
           ]
@@ -19733,7 +19733,7 @@
           "doc": "Every boot writes a tree on a blank volume real mkfs.btrfs made, and cargo xtask test-btrfs hands the result to host btrfs check. A filesystem only our own reader can read is not a filesystem.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 281
+            "line": 282
           },
           "children": [
             {
@@ -19743,7 +19743,7 @@
               "type": "Ferrix",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 287
+                "line": 288
               }
             }
           ]
@@ -19758,7 +19758,7 @@
           "doc": "Kill QEMU at a random point inside a transaction, remount, replay, btrfs check again, over hundreds of seeds: cargo xtask test-powerfail. Its adversarial half, every unflushed write kept or dropped at random, is src/lib/fs/btrfs/write's powerfail tests. The test a CoW filesystem actually has to pass.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 289
+            "line": 290
           },
           "children": [
             {
@@ -19768,7 +19768,7 @@
               "type": "Ferrix",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 296
+                "line": 297
               }
             },
             {
@@ -19778,7 +19778,7 @@
               "type": "Natural",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 297
+                "line": 298
               }
             }
           ]
@@ -19793,7 +19793,7 @@
           "doc": "cargo xtask test-shell: a static busybox named with --init runs a builtins-only script given to sh -c, and its lines and its exit status of 7 are required after the boot marker; without --init it runs zinc. All three architectures.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 303
+            "line": 304
           },
           "children": [
             {
@@ -19803,7 +19803,7 @@
               "type": "Ferrix",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 309
+                "line": 310
               }
             }
           ]
@@ -19818,7 +19818,7 @@
           "doc": "cargo xtask test-threads: src/tests/threads/, a static musl Rust program of five threads using std::thread, Mutex and mpsc, booted as init on all three architectures, counting its threads through /proc/self; a build that expects one thread too many must fail on that count.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 311
+            "line": 312
           },
           "children": [
             {
@@ -19828,7 +19828,7 @@
               "type": "Ferrix",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 318
+                "line": 319
               }
             }
           ]
@@ -19843,7 +19843,7 @@
           "doc": "cargo xtask test-vfs: ls -R /proc, cat /proc/self/maps and a shell script whose applets are forked programs, on all three architectures; then su becomes the image's ferrix user, and every refusal the kernel owes a user who is not root is required of it.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 320
+            "line": 321
           },
           "children": [
             {
@@ -19853,7 +19853,7 @@
               "type": "Ferrix",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 327
+                "line": 328
               }
             }
           ]
@@ -19867,7 +19867,7 @@
           "doc": "cargo xtask test-net, Networking's exit, under xtask's own NAT gateway: eth0 configured with ip, route and netstat reporting through /proc/net, a name resolved, a file fetched byte for byte, and a stream over the loopback, on all three architectures.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 329
+            "line": 330
           },
           "children": [
             {
@@ -19877,7 +19877,7 @@
               "type": "Ferrix",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 335
+                "line": 336
               }
             }
           ]
@@ -19892,7 +19892,7 @@
           "doc": "cargo xtask test-restart, x86-64: a shell kills the gpu driver twice, and devmgr's DIED, the driver started again and card0 published again are required each time, with the shell still answering. test-compositor --boot restart does the same under the compositor.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 337
+            "line": 338
           },
           "children": [
             {
@@ -19902,7 +19902,7 @@
               "type": "Ferrix",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 344
+                "line": 345
               }
             }
           ]
@@ -19917,7 +19917,7 @@
           "doc": "cargo xtask test-display: a compositor's colour on card0, served by the ring-3 virtio-gpu driver, required pixel for pixel from QEMU's screendump, on x86-64 and AArch64; with --gl the render node as well.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 346
+            "line": 347
           },
           "children": [
             {
@@ -19927,7 +19927,7 @@
               "type": "Ferrix",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 352
+                "line": 353
               }
             }
           ]
@@ -19942,7 +19942,7 @@
           "doc": "cargo xtask test-input: a key and a touch sent in at QEMU's far end over QMP and required back out of /dev/input/eventN, on x86-64 and AArch64, with a negative control that must fail.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 354
+            "line": 355
           },
           "children": [
             {
@@ -19952,7 +19952,7 @@
               "type": "Ferrix",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 359
+                "line": 360
               }
             }
           ]
@@ -19967,7 +19967,7 @@
           "doc": "cargo xtask test-usb, x86-64: a qemu-xhci with a hub, a keyboard, a tablet, a mouse and a stick; keys and pointers required out of /dev/input/eventN (the tablet's as ABS_X and ABS_Y), a device unplugged and plugged in again over QMP, the stick read, the driver killed twice, and a negative control.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 361
+            "line": 362
           },
           "children": [
             {
@@ -19977,7 +19977,7 @@
               "type": "Ferrix",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 368
+                "line": 369
               }
             }
           ]
@@ -19991,7 +19991,7 @@
           "doc": "cargo xtask test-stall (finding F-95, docs/PREEMPTIBLE-WAITS.md): 10 ms sleepers, one pinned to each processor and one free, beside a ring-3 load that saturates every processor, phase by phase. A phase is asserted from the landing that brings it under its bound; until then the row reports and verifies nothing, and a run whose quiet phases break their bounds is void.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 370
+            "line": 371
           },
           "children": [
             {
@@ -20001,7 +20001,7 @@
               "type": "Ferrix",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 378
+                "line": 379
               }
             }
           ]
@@ -20016,7 +20016,7 @@
           "doc": "cargo xtask test-seat: keys typed at QEMU's far end reach a window on Ferrix and change the screen, and a keybind closes the window it is bound to close, on x86-64 and AArch64.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 380
+            "line": 381
           },
           "children": [
             {
@@ -20026,7 +20026,7 @@
               "type": "Ferrix",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 385
+                "line": 386
               }
             }
           ]
@@ -20041,7 +20041,7 @@
           "doc": "cargo xtask test-compositor: the compositor booted as init, and two Wayland clients tiled on the card, pixel for pixel as the renderer draws them, on x86-64 and AArch64; a later boot requires the picture the terminal makes.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 387
+            "line": 388
           },
           "children": [
             {
@@ -20051,7 +20051,7 @@
               "type": "Ferrix",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 393
+                "line": 394
               }
             }
           ]
@@ -20066,7 +20066,7 @@
           "doc": "cargo xtask test-pty: the term app's term --headless runs a program on a pseudoterminal pair, and what it wrote comes back through the master and the terminal's grid.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 395
+            "line": 396
           },
           "children": [
             {
@@ -20076,7 +20076,7 @@
               "type": "Ferrix",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 400
+                "line": 401
               }
             }
           ]
@@ -20091,7 +20091,7 @@
           "doc": "cargo xtask test-video: a four-frame AV1 test pattern checked into the repository plays as a wallpaper, and the screen must show its frames in turn, where QEMU's machine has a virtio-gpu.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 402
+            "line": 403
           },
           "children": [
             {
@@ -20101,7 +20101,7 @@
               "type": "Ferrix",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 408
+                "line": 409
               }
             }
           ]
@@ -20116,7 +20116,7 @@
           "doc": "Wake-up latency on a HardRt domain while a Throughput domain on other cores is saturated; the maximum must be inside the stated bound.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
-            "line": 410
+            "line": 411
           },
           "children": [
             {
@@ -20126,7 +20126,7 @@
               "type": "Ferrix",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 415
+                "line": 416
               }
             },
             {
@@ -20136,7 +20136,7 @@
               "type": "Natural",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
-                "line": 416
+                "line": 417
               }
             }
           ]
@@ -114750,7 +114750,7 @@
       ],
       "origin": "FerrixAssurance::commitAuthorship",
       "file": "docs/sysml/11-assurance.sysml",
-      "line": 43
+      "line": 44
     },
     {
       "kind": "verify",
@@ -114760,7 +114760,7 @@
       ],
       "origin": "FerrixAssurance::commitAuthorship",
       "file": "docs/sysml/11-assurance.sysml",
-      "line": 43
+      "line": 44
     },
     {
       "kind": "verify",
@@ -114770,7 +114770,7 @@
       ],
       "origin": "FerrixAssurance::assemblyAllowList",
       "file": "docs/sysml/11-assurance.sysml",
-      "line": 57
+      "line": 58
     },
     {
       "kind": "verify",
@@ -114780,7 +114780,7 @@
       ],
       "origin": "FerrixAssurance::unsafeAudit",
       "file": "docs/sysml/11-assurance.sysml",
-      "line": 71
+      "line": 72
     },
     {
       "kind": "verify",
@@ -114790,7 +114790,7 @@
       ],
       "origin": "FerrixAssurance::panicAudit",
       "file": "docs/sysml/11-assurance.sysml",
-      "line": 78
+      "line": 79
     },
     {
       "kind": "verify",
@@ -114800,7 +114800,7 @@
       ],
       "origin": "FerrixAssurance::crateLayering",
       "file": "docs/sysml/11-assurance.sysml",
-      "line": 124
+      "line": 125
     },
     {
       "kind": "verify",
@@ -114810,7 +114810,7 @@
       ],
       "origin": "FerrixAssurance::crateLayering",
       "file": "docs/sysml/11-assurance.sysml",
-      "line": 124
+      "line": 125
     },
     {
       "kind": "verify",
@@ -114820,7 +114820,7 @@
       ],
       "origin": "FerrixAssurance::bootTest",
       "file": "docs/sysml/11-assurance.sysml",
-      "line": 177
+      "line": 178
     },
     {
       "kind": "verify",
@@ -114830,7 +114830,7 @@
       ],
       "origin": "FerrixAssurance::bootTest",
       "file": "docs/sysml/11-assurance.sysml",
-      "line": 177
+      "line": 178
     },
     {
       "kind": "import",

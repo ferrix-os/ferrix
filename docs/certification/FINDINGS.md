@@ -3155,7 +3155,8 @@ about commit authorship and agent coordination.
 ### F-29 — development security is not demonstrable
 **Moderate** now; **Blocking** at EAL6+ (`ALC_DVS.2`). Development happens in
 ephemeral cloud containers with AI agents as authors. The one-author-per-commit
-gate is real provenance control and is not a controlled site with personnel
+gate (since ledger line 6775, no tool as author or committer) names the accountable
+owner, never who or what made the change, so it is no provenance of authorship; it is not a controlled site with personnel
 vetting and need-to-know.
 
 Also genuinely novel: no scheme has settled how to treat AI-authored code in a

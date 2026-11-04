@@ -22,7 +22,7 @@ before starting real work, so a later failure is attributable to your change.
 is the authority; the load-bearing ones:
 
 * One author per commit. **No `Co-authored-by:` trailer**, no tool signature,
-  no "Generated with" line. Enforced by a hook and a CI job.
+  no "Generated with" line, no tool as author or committer. Enforced by a hook and a CI job.
 * The lint table denies `unwrap`, `expect`, `panic`, `unreachable`, indexing
   and string slicing in production code. An exemption is an `#[expect]` whose
   reason begins `AUDIT:`, and it fails once the lint stops firing.

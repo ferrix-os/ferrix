@@ -7,6 +7,15 @@ Moved out of [`docs/BACKLOG.md`](../BACKLOG.md) on 2026-10-16. A decision is rec
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-11-04 (customer, evening)** **No commit by a tool**: "claude as the
+  main author was able to commit something ... it is even worse than a co author.
+  So block claude from commiting and fix the already commited comiits". The
+  reading taken (consultant, ledger 6775): no tool identity as author or
+  committer, which `commit-msg`, `pre-push` and CI's range check refuse; agents
+  go on committing, under the owner's identity. Thirteen commits already public
+  on `develop` and `main` stay: a rewrite is not asked for and the branch
+  rules refuse it; the check runs over the range a push adds. Git's author names
+  the accountable owner, not who or what made the change (F-29).
 * **2026-11-04 (customer, evening)** **The finished agents' build
   directories are deleted and the gate pool goes back to seven slots**, as the
   customer ordered it. The directories were `target-mk-*`, by exact name, only

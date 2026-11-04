@@ -1,6 +1,7 @@
 #!/bin/sh
 #
-# Reject any Co-authored-by trailer.
+# Reject any Co-authored-by trailer, and any author or committer that is a tool
+# (a name or address matching claude or anthropic).
 #
 # Ferrix records one author per commit. A trailer naming a second is either a
 # tool adding itself or a pairing convention this project does not use, and
@@ -19,7 +20,7 @@ for ident in "$(git var GIT_AUTHOR_IDENT)" "$(git var GIT_COMMITTER_IDENT)"; do
     who=${ident% * *}
     if printf '%s\n' "$who" | grep -qiE 'claude|anthropic'; then
         echo "commit-msg: refusing a commit by \"$who\": a tool is never the author." >&2
-        echo "Set user.name and user.email to the owner's, then commit again." >&2
+        echo "Set user.name and user.email to the owner's, then commit again; to repair the tip, git commit --amend --reset-author (a plain amend keeps the author)." >&2
         exit 1
     fi
 done

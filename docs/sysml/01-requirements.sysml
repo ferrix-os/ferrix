@@ -184,7 +184,10 @@ package FerrixRequirements {
         requirement <'P.16'> oneAuthorPerCommit : DesignRule {
             doc /* docs/CONVENTIONS.md: a commit names one author. No
                  * Co-authored-by trailer, no Generated-with line, no tool
-                 * signature, whoever or whatever made the change; a message is
+                 * signature, and no tool (a name or address matching claude
+                 * or anthropic) as author or committer, whoever or whatever
+                 * made the change; the author is the accountable owner, not a
+                 * record of what made the change. A message is
                  * a subject, a blank line, and a body that argues the why.
                  * This overrides any agent's default attribution instruction. */
         }

@@ -36,7 +36,8 @@ package FerrixAssurance {
              * request adds and never the whole tree, so public history that
              * already carries a trailer cannot make the gate permanent red.
              * Matches a trailer at the start of a line only, so prose about
-             * the rule passes. The commit-msg and pre-push hooks check the
+             * the rule passes; and refuses an author or committer whose name or
+             * address matches claude or anthropic. The commit-msg and pre-push hooks check the
              * same thing a second earlier, where the fix is a message edit
              * rather than a rebase; they are dormant until armed, and this
              * job is the one that is not. */
