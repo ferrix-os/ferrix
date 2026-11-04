@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2832 declarations in the core's files, 193 in the item's; 210 checks-only.
+2831 declarations in the core's files, 194 in the item's; 211 checks-only.
 
 ## ferrix-kernel-core
 
@@ -99,9 +99,9 @@ checks above is `pub` for raised checks (F3).
 | `EPOLL_EVENT_BYTES` | re-export | load |  |
 | `EPOLL_EVENT_BYTES` | re-export | load |  |
 | `EPOLL_EVENT_BYTES` | re-export | load |  |
-| `FAST_WRITE_READ` | re-export | item, load |  |
-| `FAST_WRITE_READ` | re-export | item, load |  |
-| `FAST_WRITE_READ` | re-export | item, load |  |
+| `FAST_WRITE_READ` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `FAST_WRITE_READ` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `FAST_WRITE_READ` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `HARDENED` | re-export | load, bin |  |
 | `Irq` | re-export | load, bin |  |
 | `Irq` | re-export | load, bin |  |
@@ -433,7 +433,7 @@ checks above is `pub` for raised checks (F3).
 | `ARCH` | const | item, load, bin |  |
 | `COMPAT_USER_END` | const | load |  |
 | `EPOLL_EVENT_BYTES` | const | load |  |
-| `FAST_WRITE_READ` | const | item, load |  |
+| `FAST_WRITE_READ` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `LENDS_FRAMEBUFFER` | const | item |  |
 | `NAME` | const | item, load, bin |  |
 | `OPEN_FLAGS` | const | load |  |
@@ -627,7 +627,7 @@ checks above is `pub` for raised checks (F3).
 | `ARCH` | const | item, load, bin |  |
 | `COMPAT_USER_END` | const | load |  |
 | `EPOLL_EVENT_BYTES` | const | load |  |
-| `FAST_WRITE_READ` | const | item, load |  |
+| `FAST_WRITE_READ` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `LENDS_FRAMEBUFFER` | const | item |  |
 | `NAME` | const | item, load, bin |  |
 | `OPEN_FLAGS` | const | load |  |
@@ -887,7 +887,7 @@ checks above is `pub` for raised checks (F3).
 | `ARCH` | const | item, load, bin |  |
 | `COMPAT_USER_END` | const | load |  |
 | `EPOLL_EVENT_BYTES` | const | load |  |
-| `FAST_WRITE_READ` | const | item, load |  |
+| `FAST_WRITE_READ` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `LENDS_FRAMEBUFFER` | const | item |  |
 | `NAME` | const | item, load, bin |  |
 | `OPEN_FLAGS` | const | load |  |
@@ -1174,6 +1174,7 @@ checks above is `pub` for raised checks (F3).
 |---|---|---|---|
 | `UserRegs` | enum | item, load, bin |  |
 | `program_gs_base` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `reply_writes_four_registers` | fn | load (checks) | checks-only |
 | `resume_user` | fn | load |  |
 | `stub_address` | fn | load (checks) | checks-only |
 | `user_base` | fn | load |  |
@@ -3212,13 +3213,11 @@ checks above is `pub` for raised checks (F3).
 | `ask` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `attention_due` | fn | load |  |
 | `breakpoint_count` | fn | bin |  |
-| `fast_write_read` | fn | item, load |  |
 | `filter_quiet` | fn | item |  |
 | `filter_system_call` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `handled_fault_count` | fn | load, bin |  |
 | `must_attend` | fn | item |  |
 | `register` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
-| `set_fast_write_read` | fn | item |  |
 | `set_quiet_syscall_filter` | fn | bin |  |
 | `set_return_path` | fn | load |  |
 | `set_syscall_entry` | fn | bin |  |
@@ -3572,7 +3571,7 @@ checks above is `pub` for raised checks (F3).
 | `build_flags` | mod | bin |  |
 | `checks` | mod | load, bin |  |
 | `discovery` | mod | load, bin |  |
-| `fastpath` | mod | bin (checks) | pub for raised checks |
+| `fastpath` | mod | load, bin (checks) | pub for raised checks |
 | `init` | mod | load, bin |  |
 | `init_check` | mod | bin (checks) | pub for raised checks |
 | `power` | mod | load, bin |  |
@@ -3725,6 +3724,7 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `BUILT` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `report` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `init`

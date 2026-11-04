@@ -10,24 +10,23 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 
 | Module | x86_64 | aarch64 | armv7a | Files |
 |---|---:|---:|---:|---:|
-| [`arch/x86_64`](#archx86_64) | 405 | - | - | 17 |
+| [`arch/x86_64`](#archx86_64) | 398 | - | - | 17 |
 | [`discovery`](#discovery) | 170 | 105 | 125 | 8 |
-| [`sched`](#sched) | 156 | 2 | 2 | 11 |
-| [`syscall`](#syscall) | 117 | 10 | 10 | 3 |
+| [`sched`](#sched) | 111 | 2 | 2 | 10 |
 | [`iommu`](#iommu) | 99 | - | 1 | 2 |
 | [`user`](#user) | 72 | - | 1 | 3 |
-| [`main`](#main) | 65 | 6 | 4 | 1 |
-| [`object`](#object) | 51 | 13 | 34 | 8 |
+| [`syscall`](#syscall) | 64 | 10 | 10 | 3 |
+| [`main`](#main) | 63 | 6 | 4 | 1 |
 | [`console`](#console) | 40 | 6 | 7 | 6 |
+| [`object`](#object) | 30 | 13 | 34 | 8 |
 | [`init`](#init) | 24 | 12 | 12 | 1 |
-| [`trap`](#trap) | 13 | - | - | 1 |
+| [`trap`](#trap) | 9 | - | - | 1 |
 | [`smp`](#smp) | 8 | 4 | 4 | 1 |
 | [`mm`](#mm) | 7 | 1 | 3 | 1 |
 | [`irq`](#irq) | 6 | - | 1 | 1 |
 | [`sync`](#sync) | 4 | - | - | 1 |
 | [`vmap`](#vmap) | 2 | 2 | 4 | 1 |
 | [`arch`](#arch) | 3 | - | - | 1 |
-| [`fastpath`](#fastpath) | 3 | - | - | 1 |
 | [`arch/armv7a`](#archarmv7a) | - | - | 2 | 2 |
 | [`boot_checks`](#boot_checks) | 2 | - | - | 1 |
 | [`early`](#early) | - | - | 2 | 1 |
@@ -36,7 +35,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`audit`](#audit) | 1 | - | - | 1 |
 | [`signal_frame`](#signal_frame) | - | - | 1 | 1 |
 | [`timer`](#timer) | - | - | 1 | 1 |
-| **Total** | **1252** | **163** | **216** | 77 |
+| **Total** | **1117** | **163** | **216** | 75 |
 
 ---
 
@@ -52,8 +51,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | os07-ustate, ARMv7-A user state: 3a's VFP reset ported, TPIDRURO kept in the task, TPIDRURW switched (docs/OPAQUE-KERNEL.md §9.14; branch os07/ustate; os07-ustate's consultant, design verdict 2026-10-08 ledger line 582, R1-R9) | armv7a | new code; no coverage run has measured it yet. | arch/armv7a/switch.rs save_user_state's partial save and restore_user_state's reset, trap.rs answer_set_tls, dispatch_marked and mark_vectors_dead, cpu.rs read_tpidrurw and write_tpidrurw: measure them on the ARMv7-A coverage run (stage 9's vectors and tls lines reach them). Argued, not measured: the D16 branch of the reset (vldmia of d16-d31 skipped) and every `doubles == 0` branch, unreachable in the reference configurations (QEMU's cortex-a7 and the DK1's Cortex-A7 are VFPv4-D32) -- other-configuration rows, no BACKLOG row (answer 4); FPEXC, written once at bring-up and by neither the save nor the reset, is argued, not checked (answer 2). |
 | po7-ipcM step 5, the vector reset by VZEROALL and the x87 by XINUSE (branch po7/step5-vec; po7-ipcM's consultant, design verdict of 2026-10-06, V6, and code verdict W1-W3) | x86_64 | carried from the evidence's own commits, no anchor dropped. | arch/x86_64/switch.rs reset_vectors's fast form and cpu.rs zero_vectors and x87_in_use: the x87-left branch (X87_LEFT) is reached only where XGETBV 1 is offered, the KVM boot (QEMU's TCG reports every component in use, and the gate's TCG model does not offer it), so measure it under KVM or argue it as absent hardware; reset_vectors's fallback XRSTOR of every component is unreachable in the reference configuration (XCR0 x87, SSE and AVX exactly) and gets an argued row, not a BACKLOG row. |
 | po7-ipcM step 5, ERAPS in place of the in-domain return-stack refill (branch po7/step5; the consultant's OK IF of 2026-10-06, po7-ipcM's consultant, condition C5) | x86_64 | carried from the evidence's own commits, no anchor dropped. | Absent hardware under the coverage run: x86_64 coverage is measured under TCG, which offers no ERAPS. arch/x86_64/speculation.rs switch_barrier_in_domain's `return false` and Plan::for_processor's and eraps_empties_on_switch's true outcome are reached on the reference host's KVM boot (test-boot --arch x86_64 --accel kvm, gate tag po7-ipcM-eraps3-kvm, whose defences line names ERAPS) and by control c2. Measure them under KVM or argue them as absent-hardware rows. |
-| OPAQUE-KERNEL.md §9.7 step 4, the direct switch and the fast path for channel_write_read (branch po7/step4) | x86_64, aarch64, armv7a | carried from the evidence's own commits, no anchor dropped. | Measure and test or argue the new and edited lines on every architecture: sched/direct.rs whole (begin, Direct::hand_over and switch, count, counts, block_parked, set_blocked, set_running_blocked), sched/mod.rs switch_chosen, require_preemption_on, nothing_due_here, set_in_call_masked; sched/queue.rs hand_over, insert_at, sleeper_due; sched/task.rs fill_reply, take_reply, set_state_from, holds_sleep_slot and the load-and-store statistics; sched/work.rs peek and fast_path_hook; sched/wait.rs's listed count; object/channel.rs the park record, take_parked and wake_parked in write, write_small, unread and the close, send_direct, sendable, park, unpark; syscall/native.rs fast_write_read, continue_general, park_for_reply, reply_words; arch/x86_64/syscall.rs frame_tail, leave, write_outcome; trap.rs filter_quiet, fast_write_read; timer.rs after_from, REQUESTED and stop; fastpath.rs's registration and report_counts. On AArch64 and ARMv7-A the record is never set and the fast path never registered (arch::FAST_WRITE_READ false): argued, not reached. The check code: object/fast_path_check.rs and the vector check's sending variant. |
-| OPAQUE-KERNEL.md §9.7, step 4's groundwork: ferrix.fastpath (branch step4-prep) | x86_64, aarch64, armv7a | carried from 527201573, no anchor dropped. | Measure and test or argue the new lines on every architecture: fastpath.rs whole (init and its four readings, on, report and its three wordings), checks::init's call of it and its report on a boot that skips the checks, and stages_check::check_native_objects' report. A boot with ferrix.fastpath=on and one with a value not understood reach the arms test-boot does not. |
+| OPAQUE-KERNEL.md §9.7 step 4, the direct switch and the fast path for channel_write_read (branch po7/step4) | x86_64, aarch64, armv7a | carried from the evidence's own commits, no anchor dropped. | Since BF6 (ledger 1001 (8), 6365) the fast path's own lines are not in present's image: cfg(ferrix_fast_ipc); removed, with the check that each lies inside such an item and is in no off image's line table: sched/direct.rs whole, the park and send_direct in object/channel.rs, syscall/native.rs fast_write_read, continue_general, park_for_reply, frame_tail in arch/x86_64/syscall.rs, trap.rs fast_write_read_now. Still owed where present's image holds them: sched/mod.rs switch_chosen, require_preemption_on; sched/queue.rs insert_at; sched/task.rs take_reply and the load-and-store statistics; sched/wait.rs's listed count; object/channel.rs the park record and take_parked in write, write_small, unread and the close; arch/x86_64/syscall.rs leave, write_outcome; trap.rs filter_quiet; timer.rs after_from, REQUESTED and stop; fastpath.rs's report_counts. |
 | OPAQUE-KERNEL.md §9.8 step 2f, no global or locked writes in the switch (branch step2f) | x86_64, aarch64, armv7a | carried from the evidence's own commits, no anchor dropped. | Measure and test or argue the new and edited lines on every architecture: sched/mod.rs's set_idle_at_switch (both outcomes: the bit already as wanted, and changed), take_resched's load before its swap (both outcomes), regroup_current's compare by two loads, its store and the fence when the counts differ, note_moved's SeqCst increment, and choose_next's moves into previous and current with the let-else that unlocks when either is absent (defensive: both were stored the line above); arch/speculation.rs's entered_space loads and stores and count_here; object/quota.rs's effective through ferrix_sched::carried_weight; and the check code, sched/check.rs's a_running_processor_is_not_idle_across_switches and switch_and_look, and object/quota_check.rs's check_the_weight bound. |
 | po5-red, an idle processor leaves another idle one its last waiting task (branch po5/red-main; the consultant's OK IF of 2026-10-05, ledger 366, condition S2) | x86_64, aarch64, armv7a | carried from the evidence's own commits, no anchor dropped. | Measure and test or argue the new lines on every architecture: sched/mod.rs steal_from's keeps_its_last, both outcomes -- a victim running its idle task with one waiting task kept, and one with two or more, or a busy victim, stolen from. |
 | NVIDIA.md N2-N6, Vulkan, NVKMS, the 3060's monitor and PIN_CONTIGUOUS (branch land-n6 from nvidia-n2; the consultant's land-ahead verdict, ledger 318, condition L3) | x86_64, aarch64, armv7a | carried from be2ec8395: 9 anchors dropped as unmeasured, syscall/native.rs 2283-2284 and 2286-2287 on x86_64, aarch64 and armv7a (vmo_pin's PIN_COHERENT flush, absent-hardware, now coherent_for_device), each with its argument. | Measure and test or argue the new lines on every architecture: syscall/native.rs contiguous_pin, coherent_for_device, dma_flags, run_status, budget_allows and is_one_run, and vmo_pin's PIN_CONTIGUOUS branch; mm.rs allocate_user_run; user/vmo.rs Vmo::commit_run, Vmo::give_back_run, Pages::insert_run and Pages::take_ours; user/space.rs map_window_typed's combining branch; interfaces/display/mod.rs accept's Refusal::Copies and the copying driver's rights; fs/devfs.rs announce; interfaces/chardev/mod.rs mmap forwarding (map_reply, Apertures, publishes_for); fs/procfs and fs/sysfs's nvidia files; syscall/load.rs's boundary pages and zero_tails, with the single-page fill it asks for first (user/space.rs fill_file_page_alone and fill_file_pages, user/vmo.rs Vmo::fill_one_page, fs/pages.rs Fill::fill_one). |
@@ -121,15 +119,15 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 |---|---|---:|---:|---:|---:|---|
 | `arch/x86_64/powerctl.rs` | `core` | 93 | - | - | 93 | 132-133, 149, 177, 180-182, 191, 229, 253, 262, 266, 418, 439, 466, 510, 556, 563, 609, 614-615, 622, 641, 644, 652, 656, 658, 670-671, 673, 678, 682-685, 688, 697, 705, 710, 719, 743-745, 747, 751-755, 758, 760, 762, 768, 772, 774-775, 779, 783, 787-788, 790, 795-797, 805-806, 808, 820-823, 855-856, 866, 868, 876-877, 881, 885, 887-888, 897, 900, 902-903, 909-914, 917, 920 |
 | `arch/x86_64/msrlog.rs` | `core` | 65 | - | - | 65 | 79, 81, 92-93, 96, 100, 105, 109, 111, 115-116, 118, 123, 125, 127, 130, 133, 138-139, 149, 152-154, 159-160, 163, 165, 169-171, 174-175, 178-179, 182-183, 186, 188, 191, 194-195, 199, 203-206, 209, 222, 225, 231-232, 240, 243, 245, 247-249, 252-253, 255-256, 259, 266-268 |
-| `arch/x86_64/mod.rs` | `core` | 38 | - | - | 38 | 206, 259, 272, 274, 279, 286, 290, 297, 301, 304-305, 359, 362, 451-452, 463, 468, 1435, 1437, 1509, 1511-1512, 1540-1541, 1742-1743, 1747, 1872, 2036, 2041, 2051, 2215, 2250, 2329, 2331, 2334, 2336, 2407 |
+| `arch/x86_64/mod.rs` | `core` | 38 | - | - | 38 | 201, 254, 267, 269, 274, 281, 285, 292, 296, 299-300, 354, 357, 446-447, 458, 463, 1430, 1432, 1504, 1506-1507, 1535-1536, 1737-1738, 1742, 1867, 2031, 2036, 2046, 2210, 2245, 2324, 2326, 2329, 2331, 2402 |
 | `arch/x86_64/speculation.rs` | `core` | 30 | - | - | 30 | 253, 275, 342, 527, 549-550, 561-563, 565, 582-584, 586, 774-777, 899, 903, 918, 926, 1119, 1121, 1126, 1134, 1142, 1157, 1160, 1197 |
 | `arch/x86_64/clock.rs` | `core` | 28 | - | - | 28 | 280, 306, 407, 410, 413, 416, 498, 500-502, 511, 524-526, 529, 536, 563, 697, 710, 730, 740, 744-745, 771-772, 774-775, 818 |
 | `arch/x86_64/trap.rs` | `core` | 28 | - | - | 28 | 61-74, 77, 79, 84-88, 564-565, 567, 571, 688, 704, 739 |
 | `arch/x86_64/cpu.rs` | `core` | 23 | - | - | 23 | 164, 432, 434-435, 755, 758, 796-797, 801-802, 870, 877, 879, 889, 891-892, 1000, 1081, 1086, 1199, 1215, 1384, 1720 |
-| `arch/x86_64/syscall.rs` | `core` | 22 | - | - | 22 | 458, 500, 584-585, 590, 592, 684, 693, 699, 703, 731-732, 738-739, 843, 876, 879-880, 882, 884, 890, 968 |
 | `arch/x86_64/msrlog/decode.rs` | `core` | 21 | - | - | 21 | 29-31, 37, 44-45, 67-69, 72, 91, 105-107, 122-123, 151-153, 180, 183 |
 | `arch/x86_64/apic.rs` | `core` | 17 | - | - | 17 | 206, 208, 212, 239, 242, 246, 251, 284, 312-313, 318, 358, 368, 547, 729-730, 733 |
 | `arch/x86_64/framebuffer.rs` | `core` | 15 | - | - | 15 | 104, 108, 173, 184, 186, 190, 192-193, 198-199, 201, 203-204, 206-207 |
+| `arch/x86_64/syscall.rs` | `core` | 15 | - | - | 15 | 458, 500, 683, 792-793, 799-800, 904, 937, 940-941, 943, 945, 951, 1029 |
 | `arch/x86_64/powerctl/logic.rs` | `core` | 11 | - | - | 11 | 56, 59, 67, 76, 82, 90, 92, 128, 131-133 |
 | `arch/x86_64/switch.rs` | `core` | 9 | - | - | 9 | 347, 350, 352, 767, 778, 936, 945, 947, 951 |
 | `arch/x86_64/smp.rs` | `core` | 2 | - | - | 2 | 486, 507 |
@@ -159,26 +157,15 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
 | `sched/direct.rs` | `core` | 39 | - | - | 39 | 109, 117, 132, 167-169, 173-174, 186, 194, 201, 204-206, 213, 228, 234, 237, 239, 251, 272-273, 281, 283, 294-295, 297-298, 303-305, 307, 309, 314, 317-318, 331-332, 340 |
-| `sched/queue.rs` | `core` | 26 | 0 | 0 | 0 | - |
-| `sched/mod.rs` | `core` | 20 | 2 | 1 | 1 | 1488 |
 | `sched/wait.rs` | `core` | 15 | 0 | 0 | 0 | - |
+| `sched/mod.rs` | `core` | 14 | 2 | 1 | 1 | 1487 |
 | `sched/inspect.rs` | `core` | 13 | - | - | 13 | 101, 161-163, 165-166, 168, 172, 178, 180, 183, 188, 191 |
 | `sched/preempt.rs` | `core` | 12 | - | - | 12 | 188, 355, 365-366, 370, 375-376, 378, 390, 414-415, 417 |
-| `sched/vtime.rs` | `core` | 11 | - | - | 11 | 125, 137, 141, 215, 269-270, 274, 279, 281, 285, 289 |
-| `sched/task.rs` | `core` | 10 | 0 | 1 | 0 | - |
+| `sched/task.rs` | `core` | 6 | 0 | 1 | 0 | - |
 | `sched/borrow.rs` | `core` | 5 | - | - | 5 | 143, 218, 225-226, 233 |
-| `sched/work.rs` | `core` | 4 | - | - | 4 | 155, 347, 385, 388 |
+| `sched/vtime.rs` | `core` | 4 | - | - | 4 | 125, 137, 141, 215 |
+| `sched/work.rs` | `core` | 2 | - | - | 2 | 155, 341 |
 | `sched/trip.rs` | `core` | 1 | - | - | 1 | 365 |
-
----
-
-## `syscall`
-
-| File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
-|---|---|---:|---:|---:|---:|---|
-| `syscall/native.rs` | `item` | 110 | 6 | 8 | 2 | 3005, 3700 |
-| `syscall/program.rs` | `item` | 6 | 4 | 2 | 2 | 89, 133 |
-| `syscall/mod.rs` | `item` | 1 | 0 | 0 | 0 | - |
 
 ---
 
@@ -201,26 +188,21 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 ---
 
+## `syscall`
+
+| File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
+|---|---|---:|---:|---:|---:|---|
+| `syscall/native.rs` | `item` | 57 | 6 | 8 | 2 | 3012, 3707 |
+| `syscall/program.rs` | `item` | 6 | 4 | 2 | 2 | 89, 133 |
+| `syscall/mod.rs` | `item` | 1 | 0 | 0 | 0 | - |
+
+---
+
 ## `main`
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `main.rs` | `item` | 65 | 6 | 4 | 3 | 421, 887, 1600 |
-
----
-
-## `object`
-
-| File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
-|---|---|---:|---:|---:|---:|---|
-| `object/channel.rs` | `core` | 32 | 4 | 4 | 4 | 690-692, 697 |
-| `object/pin.rs` | `core` | 3 | 1 | 21 | 0 | - |
-| `object/process.rs` | `core` | 8 | 3 | 3 | 2 | 199, 234 |
-| `object/quota.rs` | `core` | 4 | 0 | 0 | 0 | - |
-| `object/interrupt.rs` | `core` | 3 | 0 | 0 | 0 | - |
-| `object/oom.rs` | `core` | 1 | 3 | 2 | 0 | - |
-| `object/mod.rs` | `core` | 0 | 2 | 2 | 0 | - |
-| `object/port.rs` | `core` | 0 | 0 | 2 | 0 | - |
+| `main.rs` | `item` | 63 | 6 | 4 | 3 | 423, 889, 1602 |
 
 ---
 
@@ -237,6 +219,21 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 ---
 
+## `object`
+
+| File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
+|---|---|---:|---:|---:|---:|---|
+| `object/pin.rs` | `core` | 3 | 1 | 21 | 0 | - |
+| `object/channel.rs` | `core` | 11 | 4 | 4 | 4 | 690-692, 697 |
+| `object/process.rs` | `core` | 8 | 3 | 3 | 2 | 199, 234 |
+| `object/quota.rs` | `core` | 4 | 0 | 0 | 0 | - |
+| `object/interrupt.rs` | `core` | 3 | 0 | 0 | 0 | - |
+| `object/oom.rs` | `core` | 1 | 3 | 2 | 0 | - |
+| `object/mod.rs` | `core` | 0 | 2 | 2 | 0 | - |
+| `object/port.rs` | `core` | 0 | 0 | 2 | 0 | - |
+
+---
+
 ## `init`
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
@@ -249,7 +246,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `trap.rs` | `core` | 13 | 0 | 0 | 0 | - |
+| `trap.rs` | `core` | 9 | 0 | 0 | 0 | - |
 
 ---
 
@@ -301,19 +298,11 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 ---
 
-## `fastpath`
-
-| File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
-|---|---|---:|---:|---:|---:|---|
-| `fastpath.rs` | `item` | 3 | - | - | 3 | 49, 53, 60 |
-
----
-
 ## `arch/armv7a`
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `arch/armv7a/mod.rs` | `core` | - | - | 1 | 1 | 1347 |
+| `arch/armv7a/mod.rs` | `core` | - | - | 1 | 1 | 1342 |
 | `arch/armv7a/speculation.rs` | `core` | - | - | 1 | 1 | 99 |
 
 ---
