@@ -7,6 +7,14 @@ Moved out of [`docs/BACKLOG.md`](../BACKLOG.md) on 2026-10-16. A decision is rec
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-11-04 (customer, evening)** **The finished agents' build
+  directories are deleted and the gate pool goes back to seven slots**, as the
+  customer ordered it. The directories were `target-mk-*`, by exact name, only
+  the finished agents' (the review's condition; 133 GB were free after, 2.6 GB
+  left in them). `gate.sh`'s default is seven slots since 18:58 CET (sha256
+  `e182552f6f9decf318b60da5a14d274018ca61fe184b61f946f75ca2e363d4ed`; the certification consultant's ledger line 6694); the
+  shed and opening lines are unchanged. `docs/TEST-TIME.md` and
+  `docs/certification/TOOLS.md` carry the reversal and its residual.
 * **2026-11-04 (customer, answers of about 07:10 to the microkernel run's
   questions)**
   * **Tests use the RTX 3090 for GPU work, never the 3060**: "use the 3090".

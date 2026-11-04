@@ -1665,7 +1665,7 @@ a flipped bit would reach the build silently.
 
 | Way | Measured | Verdict |
 |---|---|---|
-| Free disk space, then `GATE_SLOTS=7` | 7 slots above. Finished agents' `target-mk-*` hold 74 GB; with 57 GB free and shedding at 40, that fits two slots. `GATE_OPEN_GB` already keeps a cold slot from opening without room | **Adds 2.** Owner's decision: the dirs are not this branch's to delete |
+| Free disk space, then `GATE_SLOTS=7` | 7 slots above. Finished agents' `target-mk-*` hold 74 GB; with 57 GB free and shedding at 40, that fits two slots. `GATE_OPEN_GB` already keeps a cold slot from opening without room | **Adds 2.** Owner's decision: the dirs are not this branch's to delete. *Reversed 2026-11-04:* the customer had them deleted and `gate.sh` runs seven slots by default again (ledger line 6694), measured line owed |
 | Kernel's incremental dir on tmpfs | Relink after a touch: 2.1-2.3 s; on disk 2.1-7.9 s, worst when the host is busy. A lost dir is only a rebuild | Saves seconds, adds no slot. Not done |
 | Whole target on tmpfs | Fastest, but 5 slots at 19-37 GB do not fit 59 GB of RAM | No |
 | A bigger or second disk | `/` is 98% full. `aosp17` holds 297 GB and `comfy` 189 GB, both the customer's. `nvme0` is BitLocker and `nvme1` has an NTFS partition and the swap | Customer's call; it would remove the limit |
@@ -1784,6 +1784,15 @@ Seven slots did not fit the disk: 25 to 31 GB each while running, on a budget of
 and the pool went back to five with the shed line at 40 GB, an idle slot giving way
 for any waiting run. Seven remains right for the processor, which sat 50 to 80% idle;
 it waits for a disk with room.
+
+**Reversed 2026-11-04, 18:58 CET:** the customer had the finished agents'
+`target-mk-*` deleted (74 GB, then 2.6 GB left) and the pool is back to seven slots,
+the default in `gate.sh` (sha256 `e182552f6f9decf318b60da5a14d274018ca61fe184b61f946f75ca2e363d4ed`, 133 GB free at install; consultant's
+ledger line 6694). The budget is 133 GB free plus 121 GB in targets against seven
+times 25 to 31 GB, so 37 to 79 GB stay free with all seven full. Two cold slots can
+still open together at 66 GB and reach refusal; a refusal is listed and requeue-able.
+The measured line (rows an hour, refusals, lowest free space) is owed after a loaded
+stretch.
 
 Local full `check`s were the largest cost: four running cold at once held load at
 70-100, and gates fell to about 3 per 10 minutes with 49 queued.
