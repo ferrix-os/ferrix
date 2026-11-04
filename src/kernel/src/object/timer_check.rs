@@ -20,14 +20,18 @@ use ferrix_native_abi::status;
 use ferrix_native_abi::types::{
     PACKET_SIGNAL, TIMER_CLOCK_BOOT, TIMER_CLOCK_MONOTONIC, TIMER_RELATIVE, TimerSpec,
 };
-use ferrix_sched::{CpuSet, NICE_0_WEIGHT, Timeline};
+#[cfg(ferrix_checks = "on")]
+use ferrix_sched::Timeline;
+use ferrix_sched::{CpuSet, NICE_0_WEIGHT};
 
 use crate::object::Object;
 use crate::object::check::{SCRATCH, Side, reg};
 use crate::object::job::Job;
 use crate::object::quota::Resource;
 use crate::object::timer::{self, Clock, Timer, TimerCore};
-use crate::sched::{self, Due, Fired, WaitQueue};
+use crate::sched::{self, WaitQueue};
+#[cfg(ferrix_checks = "on")]
+use crate::sched::{Due, Fired};
 use crate::sync::SpinLock;
 
 /// The hook that takes a timer's arm off its sleeper set, which exists only
@@ -36,11 +40,18 @@ use crate::sync::SpinLock;
 #[cfg(ferrix_checks = "on")]
 use crate::object::timer::take_arm;
 
+#[cfg(ferrix_checks = "on")]
+use crate::sched::{evacuate_with_fired_for_check, holds_arm_on};
+
 /// What stands for it in a kernel built `checks=off`, where no check runs:
 /// nothing here is ever called, and the product has no hook to call.
 #[cfg(not(ferrix_checks = "on"))]
-fn take_arm(_: &TimerCore) -> Option<(timer::Armed, sched::SleepSlot)> {
-    None
+fn evacuate_with_fired_for_check() {}
+
+/// As `evacuate_with_fired_for_check`, in a kernel built `checks=off`.
+#[cfg(not(ferrix_checks = "on"))]
+fn holds_arm_on(_: usize) -> bool {
+    false
 }
 
 /// A `TimerSpec`, in the check process's scratch region past what
@@ -176,7 +187,7 @@ fn set_on_the_processor_going_out(_argument: usize) {
         while crate::timer::now_nanos() < until {
             core::hint::spin_loop();
         }
-        sched::evacuate_with_fired_for_check();
+        evacuate_with_fired_for_check();
         let fired = core.report().fires;
         <crate::arch::Irq as ferrix_sync::IrqControl>::restore(saved);
         if fired != 1 {
@@ -191,7 +202,7 @@ fn set_on_the_processor_going_out(_argument: usize) {
                 .map_err(|_| "no memory for the idle arms' list")?;
         }
         busy.core().set(at(1500 * MS), 0, false);
-        cancelled.core().set(at(400 * MS), 0, false);
+        cancelled.core().set(at(120_000 * MS), 0, false);
         again.core().set(at(120_000 * MS), 0, false);
         for _ in 0..FAR_ARMS {
             let far = timer_here()?;
@@ -262,7 +273,7 @@ fn arms_leave_a_processor_going_out_of_service(report: &mut Report) -> Result<()
         Err(_) => return Err("arms: processor 1 did not leave service"),
     }
     let outcome = (|| {
-        if sched::holds_arm_on(OUT) {
+        if holds_arm_on(OUT) {
             return Err("arms case a: arms stayed on a processor out of service");
         }
         // (b): home at once, wherever it was filed; (c): from now, not its
@@ -335,7 +346,10 @@ fn run_here() -> Result<Report, &'static str> {
     check_a_timer_fires_at_its_deadline(&side, port, &mut report)?;
     check_a_deadline_past_four_seconds_arrives_whole(&side)?;
     check_a_cancelled_timer_stays_quiet(&side, port)?;
+    // Both drive the arms by a hook only a kernel with its self-checks holds.
+    #[cfg(ferrix_checks = "on")]
     check_a_superseded_arm_in_flight_signals_nothing(&side, port, &mut report)?;
+    #[cfg(ferrix_checks = "on")]
     check_timers_in_one_window_fire_together(&side, port, &mut report)?;
     check_a_past_deadline_fires_in_the_call(&side, &mut report)?;
     check_a_full_batch_loses_nothing(&side, port, &mut report)?;
@@ -526,6 +540,7 @@ fn check_a_cancelled_timer_stays_quiet(side: &Side, port: Handle) -> Result<(), 
 /// fire and fires once, at its own deadline.
 ///
 /// Verifies: L.object.219, L.object.218, H.OBJ.21
+#[cfg(ferrix_checks = "on")]
 fn check_a_superseded_arm_in_flight_signals_nothing(
     side: &Side,
     port: Handle,
@@ -574,6 +589,7 @@ fn check_a_superseded_arm_in_flight_signals_nothing(
 /// another task's entry between the two keys was enough.)
 ///
 /// Verifies: L.object.217
+#[cfg(ferrix_checks = "on")]
 fn check_timers_in_one_window_fire_together(
     side: &Side,
     port: Handle,

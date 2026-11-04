@@ -100,6 +100,9 @@ pub struct UserContext {
 }
 
 impl UserContext {
+    /// Whether a breakpoint leaves the pc after the instruction: `bkpt` leaves the pc at itself.
+    pub(crate) const BREAKPOINT_LEAVES_PC_AFTER: bool = false;
+
     /// The registers a trap from USR mode saved, with the banked two read from
     /// the processor.
     pub fn from_trap(frame: &TrapFrame) -> UserContext {
@@ -185,7 +188,7 @@ impl UserContext {
     /// never `J`, `E`, `I` or another mode. The pc's low bit is never an
     /// interworking switch: the state is `CPSR.T` alone, and a pc whose
     /// alignment does not fit it is refused. `pc` and `sp` are user addresses.
-    pub(crate) fn from_supervisor(
+    pub(crate) fn with_supervisors(
         &self,
         written: &ExceptionRegisters,
     ) -> Result<UserContext, BadFrame> {

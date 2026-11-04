@@ -202,11 +202,40 @@ class Model:
     digest: str = ""
     """SHA-256 over the inputs, so a document can name what produced it."""
 
+    _named: tuple[list[Element], list[tuple[Element, str]], dict[str, Element]] | None = (
+        dataclasses.field(default=None, repr=False, compare=False)
+    )
+    """The roots this was made from, every element with its qualified name in
+    source order, and the first element of each name. `resolve` runs some 8,000
+    times over 8,500 elements, and each pass used to rebuild every name from
+    its parents: 90% of `sysml/tests.py`'s 25 s (docs/TEST-TIME.md, mk-gpu)."""
+
     # -- traversal --------------------------------------------------------
 
     def walk(self) -> Iterator[Element]:
         for root in self.roots:
             yield from root.walk()
+
+    def _names(self) -> tuple[list[tuple[Element, str]], dict[str, Element]]:
+        """The names `find` and `resolve` search, in source order.
+
+        Made once for these roots: the parser finishes a tree before anything
+        looks a name up, and the one later change, a test's `model.roots = ...`
+        over a tree it just parsed, replaces the list and so makes them again.
+
+        Replacing the list is all this notices. After a lookup, `roots.extend`
+        leaves `find` saying None for what a walk finds, and `element.name = ...`
+        leaves it answering by the old name, while `by_short_name` and the last
+        pass of `resolve` still walk the live tree: mixed answers and no error.
+        No caller does either today; one that must, replaces `roots`.
+        """
+        if self._named is None or self._named[0] is not self.roots:
+            ordered = [(element, element.qualified_name) for element in self.walk()]
+            first: dict[str, Element] = {}
+            for element, name in ordered:
+                first.setdefault(name, element)
+            self._named = (self.roots, ordered, first)
+        return self._named[1], self._named[2]
 
     def packages(self) -> list[Element]:
         return [element for element in self.walk() if element.kind == "package"]
@@ -218,10 +247,7 @@ class Model:
         return None
 
     def find(self, qualified: str) -> Element | None:
-        for element in self.walk():
-            if element.qualified_name == qualified:
-                return element
-        return None
+        return self._names()[1].get(qualified)
 
     def by_short_name(self, short: str) -> Element | None:
         for element in self.walk():
@@ -275,19 +301,17 @@ class Model:
             local = self.find(f"{prefix}::{suffix}")
             if local is not None:
                 return local
-            for element in self.walk():
-                if element.qualified_name.startswith(
-                    prefix + "::"
-                ) and element.qualified_name.endswith("::" + suffix):
+            for element, name in self._names()[0]:
+                if name.startswith(prefix + "::") and name.endswith("::" + suffix):
                     return element
-            for element in self.walk():
-                if element.qualified_name.startswith(prefix + "::") and (
+            for element, name in self._names()[0]:
+                if name.startswith(prefix + "::") and (
                     element.name == tail or element.short_name == tail
                 ):
                     return element
 
-        for element in self.walk():
-            if element.qualified_name.endswith("::" + suffix):
+        for element, name in self._names()[0]:
+            if name.endswith("::" + suffix):
                 return element
         for element in self.walk():
             if element.name == tail or element.short_name == tail:

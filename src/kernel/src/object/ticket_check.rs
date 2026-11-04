@@ -276,7 +276,7 @@ fn check_a_reserved_client(world: &World) -> Result<(), &'static str> {
         .parent
         .new_child()
         .map_err(|_| "a job refused a child")?;
-    job.set_reservation(2 * PAGES * PAGE_SIZE)
+    job.set_reservation(64 * PAGE_SIZE)
         .map_err(|_| "a reservation for a ticket's client was refused")?;
     let client = Side::new()?;
     client

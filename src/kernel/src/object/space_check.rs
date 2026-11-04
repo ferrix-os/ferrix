@@ -757,6 +757,11 @@ fn each_call_needs_its_right(
 /// A created process, its handle, and its image's VMO closed: for the cases
 /// after [`a_created_process`].
 fn another_child(setup: &Setup, scratch: &Scratch<'_>) -> Result<Handle, &'static str> {
+    child_in(setup.owner_handle, scratch)
+}
+
+/// A process created, not started, in the job `job` names.
+fn child_in(job: Handle, scratch: &Scratch<'_>) -> Result<Handle, &'static str> {
     let image = child_image();
     scratch.put(IMAGE, &image)?;
     let vmo = made(
@@ -773,12 +778,7 @@ fn another_child(setup: &Setup, scratch: &Scratch<'_>) -> Result<Handle, &'stati
     scratch.put(NAME, CHILD_NAME)?;
     let child = made(
         nr::PROCESS_CREATE,
-        &[
-            reg(setup.owner_handle),
-            reg(vmo),
-            NAME,
-            CHILD_NAME.len() as u64,
-        ],
+        &[reg(job), reg(vmo), NAME, CHILD_NAME.len() as u64],
         "space self-check failed: process_create failed",
     )?;
     let _ = call(nr::HANDLE_CLOSE, &[reg(vmo)]);
@@ -798,8 +798,9 @@ fn process_of(setup: &Setup, handle: Handle) -> Result<Arc<Process>, &'static st
 
 /// While a space handle names a process's space, no file gives it ids, because
 /// the holder may write into what runs on them; it may again once the last is
-/// closed. A fork of such a space, and a native child of a process on one, stay
-/// refused (ledger 5727 (1)).
+/// closed. A fork made meanwhile has a space of its own, which no handle names,
+/// so it is raised. A native child with a handle taken before its start is not,
+/// until that handle closes (ledger 5727 (1), 6256 Z1).
 ///
 /// Verifies: L.object.309
 fn a_space_handle_stops_a_raise(setup: &Setup, scratch: &Scratch<'_>) -> Result<(), &'static str> {
@@ -821,42 +822,37 @@ fn a_space_handle_stops_a_raise(setup: &Setup, scratch: &Scratch<'_>) -> Result<
         .space()
         .fork()
         .map_err(|_| "space self-check failed: a fork failed")?;
-    if !forked.raises_refused() {
-        return Err("a fork of a space a handle names could be raised");
+    if forked.raises_refused() {
+        return Err("a fork of a space a handle names could not be raised");
     }
     let _ = call(nr::HANDLE_CLOSE, &[reg(held)]);
     if ids_it_may_raise(&process, RAISED) != RAISED {
         return Err("a process no space handle names was not raised by a set-id file");
     }
-    if !forked.raises_refused() {
-        return Err("a fork of a space a handle named stopped being refused");
-    }
     let _ = call(nr::HANDLE_CLOSE, &[reg(child)]);
-    // A native child of a process on such a space: this one, through a handle
-    // to its own space held for the call.
-    let own = setup.process.space();
-    let mine = super::space::SpaceRef::of(Arc::clone(own), setup.process.quota_slot())
-        .map_err(|_| "space self-check failed: no memory for a handle")?;
-    let refused_child = another_child(setup, scratch)?;
-    let inherited = process_of(setup, refused_child)?.space().raises_refused();
-    drop(mine);
-    let _ = call(nr::HANDLE_CLOSE, &[reg(refused_child)]);
-    if !inherited {
-        return Err("a native child of a process a handle names could be raised");
-    }
     Ok(())
 }
 
 /// A process that has ended leaves its space to the handles on it, and what
 /// they commit there is still its job's, not the caller's (ledger 2962 C1).
 ///
-/// Verifies: L.user.161
+/// Verifies: L.object.238
 fn an_ended_processs_space_charges_its_owner(
     setup: &Setup,
     scratch: &Scratch<'_>,
     report: &mut Report,
 ) -> Result<(), &'static str> {
-    let child = another_child(setup, scratch)?;
+    // A job of its own: nothing else any case does is charged to it, so its count
+    // moves only for this page (ledger 6305 Y1).
+    let alone = setup
+        .owner
+        .new_child()
+        .map_err(|_| "space self-check failed: the ended case's job was refused")?;
+    let alone_handle = setup
+        .process
+        .with_handles(|table| table.insert(Object::Job(Arc::clone(&alone)), Rights::JOB))
+        .map_err(|_| "space self-check failed: no room for the ended case's job")?;
+    let child = child_in(alone_handle, scratch)?;
     let space = made(
         nr::PROCESS_SPACE,
         &[reg(child), u64::from(SAME_RIGHTS)],
@@ -877,16 +873,17 @@ fn an_ended_processs_space_charges_its_owner(
     if mapped != Ok(AT_ENDED as usize) {
         return Err("space self-check failed: space_allocate in an ended process's space failed");
     }
-    let (owner_before, caller_before) = (memory(&setup.owner)?, memory(&setup.caller)?);
+    let (owner_before, caller_before) = (memory(&alone)?, memory(&setup.caller)?);
     if read(space, AT_ENDED, 8) != Ok(8) {
         return Err("space self-check failed: a read in an ended process's space failed");
     }
-    if memory(&setup.owner)? < owner_before + PAGE_SIZE || memory(&setup.caller)? != caller_before {
+    if memory(&alone)? < owner_before + PAGE_SIZE || memory(&setup.caller)? != caller_before {
         return Err("a page committed in an ended process's space was not charged to its job");
     }
     report.changes += 1;
     let _ = call(nr::HANDLE_CLOSE, &[reg(space)]);
     let _ = call(nr::HANDLE_CLOSE, &[reg(child)]);
+    let _ = call(nr::HANDLE_CLOSE, &[reg(alone_handle)]);
     Ok(())
 }
 

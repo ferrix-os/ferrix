@@ -1046,6 +1046,10 @@ pub const fn is_native(number: usize) -> bool {
 
 /// The call a number names, or `None` for a gap.
 #[must_use]
+#[expect(
+    clippy::too_many_lines,
+    reason = "a table of every native call, one line each: nothing to split"
+)]
 pub const fn decode(number: usize) -> Option<NativeCall> {
     let call = match number {
         HANDLE_CLOSE => NativeCall::HandleClose,

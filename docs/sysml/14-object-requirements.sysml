@@ -848,7 +848,7 @@ package FerrixObjectRequirements {
                 limit and the refusals.";
             attribute :>> criterion = "pids.max and memory.max written through
                 cgroupfs reach the job's quota and read back as written; an empty
-                job reads 0 used and 0 refused.";
+                job reads 0 used and 0 refused. And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_limits_and_usage).";
             attribute :>> parent = "H.QUOTA.5";
             attribute :>> unit = ("object::quota::Quota::set_limit",
                 "object::quota::Quota::usage", "object::job::Job::set_limit",
@@ -895,7 +895,7 @@ package FerrixObjectRequirements {
                 or neither, and uncharge_kernel shall give back both.";
             attribute :>> criterion = "At a 32 KiB limit each kind of personality
                 object is refused one past its count while a sibling makes one, and
-                every byte charged comes back when they go.";
+                every byte charged comes back when they go. And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_the_kernel_charge).";
             attribute :>> parent = "H.QUOTA.7";
             attribute :>> unit = ("object::quota::charge_kernel",
                 "object::quota::uncharge_kernel", "object::quota::KernelHeap::charge",
@@ -945,7 +945,7 @@ package FerrixObjectRequirements {
             attribute :>> statement = "Job::set_cpu_weight shall make the job's
                 weight the value written.";
             attribute :>> criterion = "cpu.weight written 300 through cgroupfs reads
-                back 300 from the job.";
+                back 300 from the job. And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_the_weight).";
             attribute :>> parent = "H.SCHED.3";
             attribute :>> unit = ("object::quota::Quota::set_weight",
                 "object::job::Job::set_cpu_weight", "object::job::Job::cpu_weight");
@@ -977,7 +977,7 @@ package FerrixObjectRequirements {
                 at once, the idle job's task runs at no more than 3 and its
                 sibling's at more than 1000; let off, the parent's load and
                 both tasks' weights are what they were at cpu.weight 10000
-                (the cpu line of stage 13, object::quota::check_idle_weight).";
+                (the cpu line of stage 13, object::quota::check_idle_weight). And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_an_idle_job_weighs_little).";
             attribute :>> parent = "H.SCHED.3";
             attribute :>> unit = ("object::quota::Slot::entity_weight",
                 "object::quota::Slot::reweigh", "object::quota::set_idle_at",
@@ -1263,7 +1263,7 @@ package FerrixObjectRequirements {
             attribute :>> statement = "Job::remove_named_child shall refuse to
                 remove a named child that holds a live anonymous job.";
             attribute :>> criterion = "rmdir of a cgroup holding a job native
-                job_create made is refused EBUSY.";
+                job_create made is refused EBUSY. And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_a_busy_child_stays).";
             attribute :>> parent = "H.OBJ.12";
             attribute :>> unit = "object::job::Job::remove_named_child";
         }
@@ -1272,7 +1272,7 @@ package FerrixObjectRequirements {
                 take no process and no child.";
             attribute :>> criterion = "Through a directory looked up before the
                 rmdir, a move into the removed cgroup and a mkdir in it are each
-                refused ENODEV, and the refused process stays where it was.";
+                refused ENODEV, and the refused process stays where it was. And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_a_removed_job_takes_nothing).";
             attribute :>> parent = "H.OBJ.12";
             attribute :>> unit = ("object::job::Job::remove_named_child",
                 "object::job::Job::new_named_child", "object::job::Members::admits");
@@ -1337,7 +1337,7 @@ package FerrixObjectRequirements {
             attribute :>> criterion = "EMPTY is asserted while the job is empty and
                 not while it has a member; a registration for EMPTY fires at the
                 last release and not the first, and one made while the job is empty
-                fires at once.";
+                fires at once. And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_empty).";
             attribute :>> parent = "H.OBJ.11";
             attribute :>> unit = ("object::job::Members::signals",
                 "object::job::Job::observe", "object::job::Job::signals",
@@ -1405,7 +1405,7 @@ package FerrixObjectRequirements {
                 their memory.events.";
             attribute :>> criterion = "After a scoped OOM kill, memory.events counts
                 one OOM kill in the job and in its parent and none in a sibling, and
-                an epoll on it is woken by the kill with EPOLLPRI.";
+                an epoll on it is woken by the kill with EPOLLPRI. And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_oom_counts).";
             attribute :>> parent = "H.QUOTA.6";
             attribute :>> unit = ("object::job::Job::count_oom",
                 "object::job::Job::oom_counts");
@@ -1502,7 +1502,7 @@ package FerrixObjectRequirements {
             attribute :>> criterion = "A second give to one child is refused
                 ALREADY_BOUND; the child's first process_bootstrap answers the end
                 given with its rights and its second answers zero; a give after the
-                take is refused ALREADY_BOUND.";
+                take is refused ALREADY_BOUND. And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_a_bootstrap_is_given_once).";
             attribute :>> parent = "H.OBJ.6";
             attribute :>> unit = ("object::process::Bootstrap::refusal",
                 "object::process::Bootstrap::give", "object::process::Bootstrap::take");
@@ -1560,7 +1560,7 @@ package FerrixObjectRequirements {
                 before.";
             attribute :>> criterion = "process_status says running before the end,
                 killed by SIGTERM for a process a signal ended, and exited with its
-                code for one that exited.";
+                code for one that exited. And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_exit_reports_once_ended).";
             attribute :>> parent = "H.OBJ.11";
             attribute :>> unit = ("object::process::Exit::record", "object::process::Exit::status",
                 "object::process::Exit::signal");
@@ -1628,7 +1628,7 @@ package FerrixObjectRequirements {
                 reap each found it; object::process::live still lists it; its pid
                 is not free until the process is dropped, and free after. A child
                 let go by a parent that ignores SIGCHLD is found by neither
-                kill(pid, 0) nor find, where before its end both found it.";
+                kill(pid, 0) nor find, where before its end both found it. And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_a_reaped_pid_finds_nothing).";
             attribute :>> parent = "H.OBJ.13";
             attribute :>> unit = ("object::process::unlist", "object::process::find",
                 "object::process::listed", "object::process::gather");
@@ -1756,7 +1756,7 @@ package FerrixObjectRequirements {
                 until that period's end; the period after has 20 ms, with one
                 burst of 15 ms counted, and 21 ms of use there counts no burst;
                 and with the burst at 0 a period that used 5 ms carries nothing
-                (the cpu line of stage 13, object::quota::check_burst_carry).";
+                (the cpu line of stage 13, object::quota::check_burst_carry). And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_a_burst_is_carried).";
             attribute :>> parent = "H.QUOTA.10";
             attribute :>> unit = ("object::quota::carry", "object::quota::carry_bound",
                 "object::quota::carry_cap", "object::quota::allowance",
@@ -1800,7 +1800,7 @@ package FerrixObjectRequirements {
                 has it.";
             attribute :>> criterion = "Reclaim at one cgroup leaves a sibling's
                 cached file untouched, spares a child using no more than its
-                memory.min, and what it took reads back as the source has it.";
+                memory.min, and what it took reads back as the source has it. And with kernel objects alone, on every profile, the `core pc` line (user/rehome_cache_check.rs::check_reclaim_is_scoped).";
             attribute :>> parent = "H.QUOTA.12";
             attribute :>> unit = ("user::cache::reclaim", "user::cache::reclaim_pages",
                 "user::cache::take_from",
@@ -1819,7 +1819,7 @@ package FerrixObjectRequirements {
                 slot is not started for a job that has gone.";
             attribute :>> criterion = "A task of a cgroup that was removed under it
                 reads the disk, and the quota slots in use are back to what they
-                were before the cgroup.";
+                were before the cgroup. And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_a_slot_says_its_job_went).";
             attribute :>> parent = "H.QUOTA.4";
             attribute :>> unit = ("object::quota::job_ended", "object::quota::on_job_release");
         }
@@ -1828,7 +1828,7 @@ package FerrixObjectRequirements {
                 files charged to a job and the jobs beneath it, apart from those
                 of memory filesystems, for memory.stat's file and shmem.";
             attribute :>> criterion = "memory.stat's file equals the cache that
-                memory.current holds, and its shmem the memory filesystem's.";
+                memory.current holds, and its shmem the memory filesystem's. And with kernel objects alone, on every profile, the `core pc` line (user/rehome_cache_check.rs::check_resident).";
             attribute :>> parent = "H.QUOTA.12";
             attribute :>> unit = "user::cache::resident";
         }
@@ -1840,7 +1840,7 @@ package FerrixObjectRequirements {
                 read_present shall answer that the page is absent.";
             attribute :>> criterion = "A page reclaim took reads back as the
                 source has it, never as zeros, through a read and through a
-                fault.";
+                fault. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_a_fill_reclaimed_is_filled_again).";
             attribute :>> parent = "H.QUOTA.12";
             attribute :>> unit = ("user::space::copy_or_zero", "user::vmo::Vmo::read_present");
         }
@@ -1858,7 +1858,7 @@ package FerrixObjectRequirements {
                 pages and pagetables at least one page, and anon, file, kernel,
                 pagetables and shmem add to memory.current; unmapping it gives
                 back exactly the 4 pages from anon and some of pagetables (the
-                reclaim line of stage 13 that names pgfault).";
+                reclaim line of stage 13 that names pgfault). And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_a_table_is_charged_as_a_table).";
             attribute :>> parent = ("H.QUOTA.2", "H.QUOTA.4");
             attribute :>> unit = ("object::quota::charge_table",
                 "object::quota::uncharge_table", "mm::uncharge_owner",
@@ -1886,7 +1886,7 @@ package FerrixObjectRequirements {
                 Given; and a cgroup with no cache, after 64 misses, gives back a
                 write of 8192 bytes from its cached dentries (the `reclaim`
                 line of stage 13 that names memory.reclaim and cached
-                dentries).";
+                dentries). And with kernel objects alone, on every profile, the `core pc` line (user/rehome_cache_check.rs::check_reclaim_asked) and the `core shr` line (user/rehome_cache_check.rs::check_the_shrinker).";
             attribute :>> parent = "H.QUOTA.12";
             attribute :>> unit = "user::cache::reclaim_asked";
         }
@@ -1904,7 +1904,7 @@ package FerrixObjectRequirements {
                 as it was last written, every page; a shared mapping that may
                 write, made and written between the source's answer and the
                 take, keeps the page it wrote, and the write reads back through the
-                file (the `reclaim` line of test-btrfs).";
+                file (the `reclaim` line of test-btrfs). And with kernel objects alone, on every profile, the `core pc` line (user/rehome_cache_check.rs::check_a_written_page_stays, user/rehome_cache_check.rs::check_a_mapping_made_at_the_take).";
             attribute :>> parent = "H.QUOTA.12";
             attribute :>> unit = ("user::cache::take_from", "user::vmo::Vmo::reclaim_clean",
                 "user::vmo::reclaim_clean", "user::vmo::Vmo::decommit_clean_range",
@@ -1928,7 +1928,7 @@ package FerrixObjectRequirements {
                 kernel is unchanged; a reclaim of one page at the cgroup after
                 64 more misses gives back no page and at least one dentry's
                 heap (the `reclaim` line of stage 13 that names cached
-                dentries).";
+                dentries). And with kernel objects alone, on every profile, the `core shr` line (user/rehome_cache_check.rs::check_the_shrinker).";
             attribute :>> parent = "H.QUOTA.12";
             attribute :>> unit = ("user::cache::reclaim", "user::cache::shrink",
                 "user::cache::install_shrinker", "user::cache::Reclaimed::gave",
@@ -1951,7 +1951,7 @@ package FerrixObjectRequirements {
                 synced is in Cached and in MemAvailable; a page of it written
                 again and not synced is in Dirty and not in MemAvailable; a
                 tmpfs file's pages are in Cached and Shmem (the `reclaim` line of
-                test-btrfs).";
+                test-btrfs). And with kernel objects alone, on every profile, the `core pc` line (user/rehome_cache_check.rs::check_totals).";
             attribute :>> parent = "H.QUOTA.12";
             attribute :>> unit = ("user::cache::totals", "user::vmo::Vmo::dirty_pages",
                 "user::vmo::Vmo::committed",
@@ -1985,7 +1985,7 @@ package FerrixObjectRequirements {
                 pages back, and both files read back as written (the `reclaim`
                 line of test-btrfs); a tmpfs file written across pages, cut into
                 its second page and grown again reads back its head and zeros
-                after the cut (stage 8's tmpfs check).";
+                after the cut (stage 8's tmpfs check). And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_commit_and_write).";
             attribute :>> parent = "H.QUOTA.12";
             attribute :>> unit = ("user::vmo::Vmo::commit_and_write", "user::vmo::Vmo::zero_from");
         }
@@ -2003,7 +2003,7 @@ package FerrixObjectRequirements {
                 reading a 128-page stream in 16 steps of 8 pages and an 8-page
                 file again after each, with a 128-page file beside it read once,
                 has the 8-page file taken back no more than 16 pages (the
-                `reclaim` line of stage 13 that names memory.max).";
+                `reclaim` line of stage 13 that names memory.max). And with kernel objects alone, on every profile, the `core pc` line (user/rehome_cache_check.rs::check_a_reclaim_goes_round).";
             attribute :>> parent = ("H.QUOTA.12", "H.QUOTA.13");
             attribute :>> unit = ("user::cache::reclaim", "user::cache::reclaim_pages",
                 "user::cache::take_from",
@@ -2285,7 +2285,7 @@ package FerrixObjectRequirements {
             attribute :>> criterion = "Stage 13's cgroupfs check: may_start_in
                 refuses a sealed member's start outside its tree and an outside
                 start into a sealed job, and allows a sealed member's start into
-                its own inner job.";
+                its own inner job. And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_may_start_in).";
             attribute :>> parent = "H.OBJ.22";
             attribute :>> unit = ("object::job::Job::may_start_in");
         }
@@ -2298,7 +2298,7 @@ package FerrixObjectRequirements {
             attribute :>> criterion = "Stage 13's cgroupfs check: a job made with
                 JOB_SEALED, one made inside it by job_create without the bit and
                 one made inside it by mkdir read as sealed, the cgroup they were
-                made in does not, and an unknown option bit is INVALID_ARGS.";
+                made in does not, and an unknown option bit is INVALID_ARGS. And with kernel objects alone, on every profile, the `item` line (syscall/rehome_check.rs::check_job_create).";
             attribute :>> parent = "H.OBJ.22";
             attribute :>> unit = ("object::job::Job::bare_child",
                 "object::job::Job::new_child_as", "object::job::Job::new_named_child_as",
@@ -2341,7 +2341,7 @@ package FerrixObjectRequirements {
                 with the disk's bytes; a dirty and a held page NotClean and kept;
                 an unheld frame NotCache; a frame not retirable NotRetired; a page
                 asked for with another frame NotCache and kept. Controls: the
-                clean test, the retirement's answer and the frame check removed.";
+                clean test, the retirement's answer and the frame check removed. And with kernel objects alone, on every profile, the `core pc` line (user/rehome_cache_check.rs::check_a_poisoned_page_is_dropped).";
             attribute :>> parent = "H.FAIL.11";
             attribute :>> unit = ("user::cache::drop_poisoned", "user::cache::drop_poisoned_at", "user::cache::retire", "user::cache::take", "user::cache::say", "user::vmo::Vmo::index_of", "user::vmo::Vmo::take_poisoned");
         }
@@ -2352,7 +2352,7 @@ package FerrixObjectRequirements {
                 on another), and write no task record.";
             attribute :>> criterion = "Stage 12's poison check: a read whose copy is answered as
                 poisoned retires and drops the page; test-mce-pagecache's read
-                mode. Control: Poisoned turned into EIO.";
+                mode. Control: Poisoned turned into EIO. And with kernel objects alone, on every profile, the `core pc` line (user/rehome_cache_check.rs::check_read_present_answers_poison).";
             attribute :>> parent = "H.FAIL.11";
             attribute :>> unit = ("user::vmo::Vmo::read_present");
         }
@@ -2365,7 +2365,7 @@ package FerrixObjectRequirements {
             attribute :>> criterion = "Stage 12's poison check: a clean page's poisoned read
                 refilled and answered with the disk's bytes; a dirty page's fails;
                 test-mce-pagecache's read and dirty modes. Control: the refill on
-                Clean removed.";
+                Clean removed. And with kernel objects alone, on every profile, the `core pc` line (user/rehome_cache_check.rs::check_a_poisoned_read).";
             attribute :>> parent = "H.FAIL.11";
             attribute :>> unit = ("user::cache::poisoned_read");
         }
@@ -3288,19 +3288,18 @@ package FerrixObjectRequirements {
         }
         requirement <'L.object.309'> aSpaceHandleStopsARaise : ItemLowLevel {
             attribute :>> statement = "While a space handle names a process's space,
-                ids_it_may_raise shall answer no ids for any set-id file, and so in a
-                fork of that space or a native child of that process; the count
-                shall fall as handles close, and nothing but a process not yet
-                started shall raise it.";
+                raises_refused shall say so, and execve shall give it no ids for any
+                set-id file; the count shall fall as handles close, and nothing but a
+                process not yet started shall raise it.";
             attribute :>> criterion = "Stage 9's space line: a process with a handle
                 kept is not raised and with it closed is; a fork made while one lived
-                and a native child of a process on one are not. Control: the test
+                is raised, its space its own; a native child with a handle taken
+                before its start is not, until the handle closes. Control: the test
                 removed from ids_it_may_raise.";
             attribute :>> parent = ("H.MEM.24", "H.MEM.25");
             attribute :>> unit = ("user::space::AddressSpace::raises_refused",
                 "user::space::AddressSpace::handle_made",
                 "user::space::AddressSpace::handle_gone",
-                "user::space::AddressSpace::refuse_raises",
                 "object::space::SpaceRef::of");
         }
         requirement <'L.object.240'> anExecutableVmoHandleCannotWrite : ItemLowLevel {

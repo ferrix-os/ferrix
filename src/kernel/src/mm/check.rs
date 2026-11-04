@@ -2173,8 +2173,13 @@ fn the_scrubber_leaves_a_promise_alone() -> Result<(), &'static str> {
     let free = mm::free_frames();
     let size = free.saturating_sub(mm::program_floor() + 64);
     let admitted = mm::reservation_resize(entry, size).is_ok();
-    let stopped = free < 2 * mm::watermark()
-        || matches!(super::scrub::claim(frame), super::scrub::Claim::Low);
+    let below = free < 2 * mm::watermark();
+    if below {
+        println!(
+            "  reserve  the scrubber's case skipped: free memory is under twice the watermark"
+        );
+    }
+    let stopped = below || matches!(super::scrub::claim(frame), super::scrub::Claim::Low);
     mm::reservation_unbind(entry);
     if !admitted {
         return Err("a reservation the free frames cover was refused");

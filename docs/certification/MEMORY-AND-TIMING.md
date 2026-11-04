@@ -429,8 +429,12 @@ beyond `O`.
   heap, under the kernel's floor `O`, where they can take `W` as any
   program's heap can. A free finds its heap by its page's tag, with no
   lock: the tag changes only while the heap takes or gives back the page.
-  Each reservation's heap keeps an empty page a size class, at most 9 pages,
-  which stay drawn and serve the next job the entry is bound for.
+  Each reservation's heap keeps an empty page a size class while its job
+  lives, at most 9 pages, inside its size; they go back to the free frames when
+  the entry is bound next, before the new job has anything drawn. Until that
+  bind a gone job's kept pages are neither free nor charged to anyone, at most
+  9 x 64 pages over the 64 entries; and a bind walks those 64 heaps, under each
+  heap's lock alone, a bounded cost of a job setting its reservation.
 * **Not guaranteed**: contiguity (the promise is a count, so a run, or a
   heap object larger than a class, can fail on a fragmented machine);
   kernel work for the job outside its own calls (kernel threads, interrupt

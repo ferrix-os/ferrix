@@ -1516,6 +1516,204 @@ Two checks fail only here, both real and neither papered over:
    read back. The virtio specification makes the field driver-writable;
    crosvm does not keep it.
 
+## Can a GPU speed this up? Measured, 2026-11-04 (mk-gpu)
+
+The customer asked whether nazuna's GPUs can speed up CI. **No step gains from
+one.** Nothing was moved to a GPU, because nothing measured came near a minute
+a row. GitHub's CI runs on `ubuntu-latest`, which has no GPU, so only the local
+gates could use one at all.
+
+Everything GPU ran on the RTX 3090 through OpenCL against the driver as bound
+(3060 hidden by UUID, no install), at `nice 19`, with utilisation and memory
+read before and during; digests were asserted equal to the CPU's. Scripts,
+outputs and logs: `~/.local/share/ferrix/mk-gpu-bench/` (`run2.txt`, `tp/`,
+`ab-*.txt`, `*sample*.txt`).
+
+**Where the time goes.** Pool rows since 2026-10-20, 622,572 row-seconds:
+`check` 23.3%, `test-boot` 21.5%, `test-compositor` 15.6%, `build` 4.3%, then
+nothing over 3%. By process, an hour of `/proc` samples at load 20-80 (a window
+with several cold builds, 30,186 CPU-s): rustc 63.6%, python3 11.1%,
+clippy-driver 9.2%, QEMU 4.1%, xtask 0.4%, no zstd or other compressor. A KVM
+guest averaged 0.5 of a core over 24 boots and TCG about 0.8: boots mostly wait.
+In the 30 minutes after that, at load 59, the CPU was **37% idle and 14% in
+iowait**, with the root NVMe 78% busy at 95 MB/s and 110 ms a write, on a
+filesystem 92-96% full. Past a point the pool waits on its disk, not its cores.
+
+| Step | Measured or reason | Verdict |
+|---|---|---|
+| rustc, clippy (73% of the CPU) | No GPU backend. See *Compiling* below | No |
+| QEMU guests | TCG and KVM run on the processor; guests mostly wait | No |
+| SHA-256, one stream | One chain, so one work item, which cannot be split. CPU with SHA-NI: 2.75 GB/s. The next row shows what one long file does to a GPU batch | No |
+| SHA-256, every tracked file (4,137, 132 MB, largest 32.7 MB) | GPU 5.96 s, one CPU thread 0.05 s. Files under 1 MiB only: GPU 0.19 s, CPU 0.03 s | No: 6-120x slower |
+| SHA-256, 1 GiB in 4 KiB or 64 KiB leaves | GPU 11 GB/s (PCIe caps it at 13), 12 CPU processes 5.3-5.6, 1 thread 2.3-2.7. GPU wins 2x, on digests nothing here uses | No: changes the evidence, and there is nothing to hash |
+| Hashing in a row | `test-boot`: no call of xtask's SHA-256. `build`: one, 50 MB, 0.18 s of 16.6 s. `check` runs with the step cache off | Nothing to save |
+| Screenshot compare | 1024x768: `memcmp` 0.05 ms, GPU with upload 0.97 ms. 4K: 0.8 ms, 7 ms | No: GPU 9-20x slower |
+| zstd, compression | No gate path uses it (no samples, no call in xtask) | Nothing to save |
+| Host tests that render (`tole_examples`) | Already on a real GPU where there is one. Medians from `check` logs, load under 15: 3090 13.6 s (122 runs), 3060 18.2 s (8). Lavapipe here at load 12: 9.9 s, twice. A GPU is no faster | No |
+| Lavapipe in guests | 2 of `test-compositor`'s 73 boots, and what they check is lavapipe (`the_scene_on_lavapipe_is_the_software_picture`). `test-dxvk`: 2 rows in 15 days. A real GPU there checks something else, and a host without one could not pass. Not benched | No |
+| Fuzzing | CI only, no GPU there, a fixed 30 s a target, and it runs Rust parsers in process | No |
+| Coverage post-processing | No `coverage` row in the pool in 15 days; CI's time is TCG | No |
+| Logs, traces | xtask's whole CPU is 0.4% | No |
+| Formal tools | xtask runs no solver (no Kani, CBMC, Z3); Miri and loom run on the CPU | No |
+
+Dispatch itself is cheap (13 us for one item and its read-back, polling); what
+costs is PCIe at 13 GB/s against a host that hashes and compares in place, and
+a GPU work item being slow. The first program build took 0.8 s, 5 ms once cached.
+
+### Compiling
+
+Asked to look properly, not to assume. `-Z time-passes` on all 129 workspace
+crates of a cold `xtask build --arch x86_64`, 195.9 crate-seconds in all (passes
+nest and LLVM's overlap, so the shares do not add up): LLVM passes 22%, type
+check 18%, IR generation 14.5%, serialising queries and dep graph 14%, borrow
+check 12%, link 9%, metadata 9%, monomorphization 8%, coherence 6.5%, **parsing
+3.5%, macro expansion 2.1%**.
+
+The research that exists is Pareas (Voetter, Huijben, Rietveld, *Compilation on
+the GPU?*, CF 2022; [Voetter's thesis](https://theses.liacs.nl/pdf/2020-2021-VoetterRobin.pdf)):
+a whole compiler on a GPU, for a small language designed for it, with no macros
+or trait solving. The thesis finds linear scaling only "for relatively large
+input", up to 20 times the input's size allocated in the lexer, and overhead
+from compiling kernels at run time. Our sources are small files, and rustc
+expands macros as it parses, so the parse cannot be lifted out whole.
+
+So the ceiling is lexing and parsing at **infinite speed: at most 11
+crate-seconds of a cold build**, about 3 s of wall at four rustcs at once, and
+next to nothing warm (`ferrix_kernel_load`: parse 3 ms and expansion 0.33 s of
+14.9 s). Type checking, borrow checking and LLVM's passes are pointer-chasing
+over irregular graphs with no GPU implementation. Query hashing decides what
+runs next, one tiny value at a time, so it cannot be batched without rewriting
+rustc's query engine. It cannot pay off, so no prototype was built.
+
+### The plain alternatives
+
+| Alternative | Measured | Verdict |
+|---|---|---|
+| Name table in `sysml` | `sysml/tests.py` 25.8 to 2.9 s, `gen-arch-doc --check` 3.3 to 0.8 s, answers identical. The step's slowest member, so about 14 s of a `check`'s wall until the item boundary (20 s) sets it | **Done**, this landing |
+| `-Zthreads=8`, cold `build` | Alternating, 5 rounds each, load 18-38: 88.7 s mean to 52.6 s (83.7, 69.0, 123.1, 92.4, 75.4 against 36.9, 75.9, 44.2, 43.6, 62.5), user CPU +4%, kernel byte-identical | **Open**, the best lead here. Unstable (needs `RUSTC_BOOTSTRAP=1`), so the consultant first. The A/B on `check` was stopped by the queue after its seed; not measured |
+| tmpfs target, cold `build` | Quiet host, load 7: disk 48.2, 45.9 s; tmpfs 48.3, 53.6 s. No gain when the disk is idle; not measured under load. Five slots' targets, 16-18 GB each even trimmed, do not fit 59 GB of RAM | Not worth it quiet |
+| A faster or emptier root disk | From the iowait above: the only thing here that lifts the pool at saturation. Not an experiment this host allows | Customer's to weigh |
+| `check-item-boundary.py` | 20 s, a Python Rust lexer (`rustlex.py`, `mask` 10,571 calls), now the slowest of the at-once step. A certified checker, so left alone | To mk-ci, with its consultant |
+| sccache, a shared target | Not measured. A warm slot already does what they do; cold slots are mk-ci's | Not pursued |
+
+One thing to decide, separate from time: `tole`'s device ranking takes the first
+discrete GPU in the driver's order when none is named, and the compositor's tests
+start `virgl_test_server --use-egl-surfaceless`, which by glvnd's order means
+NVIDIA's EGL (read, not run). So a `check` on nazuna draws on the 3090 or the 3060:
+the logs above name both for `tole_examples`, and one look at `nvidia-smi` by hand
+at 23:28, not logged, showed both programs on the 3060. The 3060 went off the bus
+on 2026-10-10 while bound to vfio-pci during card-VM boots, cause unknown and no
+host test in the record; only a reboot or a suspend brings it back.
+`docs/backlog/DECISIONS.md` (2026-10-02) says "the 3090 is never touched". It was
+written for the NVIDIA port, and whether it reaches host tests, or this section's
+benches on the 3090, is the customer's to say; hardware use is the product owner's.
+`tole_examples` on lavapipe is no slower; the virgl tests on Mesa's EGL were
+neither timed nor run. The consultant has no certification objection either way
+(ledger 5999): neither crate is in the item and CI has no GPU. Left as it is, with
+the question in `docs/BACKLOG.md`.
+## The microkernel run's night, 2026-11-03/04 (mk-ci)
+
+Five agents and their gates on nazuna, measured from `logs/queue/` and a 30 s
+sample of the host (`~/.local/share/ferrix/po-2026-11-03/mk-ci/sample.log`). No
+check, row, control or timeout changed. The host was never quiet, so each figure
+gives its load. Reviews: ledger lines 5878, 5937, 5939.
+
+**What limited the pool was the disk.** Load reached 100 at 60-80% iowait, on one
+NVMe at 100% utilisation writing 66-95 MB/s. Free space fell from 205 GB to 44 GB
+in an hour.
+
+### Cut M1: the kernel's clippy settings at once
+
+Each flag setting flips the kernel build script's env-dependent `cfg`s, so in one
+target directory every setting relinted the kernel crates on every run. Now each
+has a directory of its own, `<target>/kernel-lint-<name>`, and all run at once, as
+`mitigations=off` already did: same arguments but `--target-dir`, each to its end,
+output whole in the old order, first failure in that order the error.
+
+| `check` in a warm slot | Kernel clippy | Load |
+|---|---:|---:|
+| in turn (`mk-ci-ab-old-1`, `-old-2`, `-new-1`, `-new-2`) | 188.9, 85.4, 92.2, 629.2 s | 15.8, 23.1, 35.3, 19.7 |
+| at once, first run in new directories (`mk-ci-b-base`) | 117.5 s | 35.4 |
+| at once, after a control's edit (`mk-ci-b-again`) | 41.4 s | 23.4 |
+| at once, one hash again on one slot, nothing changed (`mk-ci-b3-2`) | **0.4 s**, no kernel crate relinted | 35.5 |
+
+The 629 s fell in the hour's worst IO. One sample at once is not a mean. With the
+caches trimmed a setting's directory is 80-108 MB. Controls: a lint inside
+`cfg(ferrix_linux_abi = "off")` and a `disallowed-types` entry in `.clippy.toml`
+with no source edit. Both FIRED, in slot 2 after `mk-ci-b-base` passed there: `mk-ci-b-c1b` with all five settings shown and only `linux_abi=off` failing, `mk-ci-b-c2` with every setting failing. Other runs used slot 2 between them, so its `kernel-lint-*` directories were warm from the base run but not untouched in between. `disallowed-methods` is one
+TOML key, in kernel-interface's checked block, so the entry outside it is that
+sibling key.
+
+`check` on one hash twice running on slot 2, `mk-ci-b3-1` then `mk-ci-b3-2`: 444 s,
+then **66 s** with one crate compiled, at load 35; the same run in turn took 146 to
+237 s. The units' test results are equal, 393 lines. The 66 s is the floor for a
+repeat of one tree, not for a new one.
+
+### Cut M2: side workspaces without incremental state
+
+`check` starts `check-side` with `CARGO_INCREMENTAL=0` unless the variable is set.
+bs-c's alternation above measured what it does: half the bytes and a third to a half
+of the directory, no wall time either way. The first run in each target directory
+rebuilds the side workspaces once, since the setting is in cargo's fingerprint.
+Until it lands everywhere, a slot alternating between trees with and without it also
+rebuilds them each way (`mk-ci-b3-1`'s 421 s of side workspaces). One hash, on one
+slot, `CARGO_INCREMENTAL=1` against the default (`mk-ci-m2-on`, `-off`): all 27 units'
+test results equal, loom's included. The figures for bytes are bs-c's; 26% more was on
+offer from `line-tables-only` on the side tests (tole 635 to 469 MB, no wall time), not
+taken.
+
+### Cut M3: the kernel's lint directories without incremental state
+
+Only lint runs use them and `gate.sh` trims their caches after each run, so the state was
+written to be deleted. On slot 2 with the trim off, the directories emptied first, on
+the commit before and on the commit itself (`mk-ci-m3-base`, `-new`): 6,885 MB, of it
+6,752 MB incremental state, against 511 MB, of it 1 MB. All 27 units' test results are
+equal, 393 lines. Kernel clippy took 72.0 and 31.2 s and the runs 278 and 129 s at
+loads 27.5 and 32.6, but the second run also had the slot warm from the first, so the
+wall times do not compare; the bytes do. `mk-ci-m3-ctl` FIRED with all six settings
+shown and only `linux_abi=off` failing. A local `check` loses incremental reuse in
+these lints.
+
+### Component checkouts kept
+
+`gate.sh` deleted every component before each run, and the clones' new mtimes
+rebuilt the apps and tole in every `check`. A checkout now stays when the commit does
+not track its path, its HEAD is the pin and its files equal the pin's tree through
+the mirror. Same tree, slot 1: 80 crates compiled before, 43 after; 237 and 146 s
+against 133 s at loads 15.8, 23.1 and 35.3; 393 test results each way. A control in a
+tracked app file FIRED and the run after it passed with 393. Four of the six mirrors
+(ferrousli, zinc, pixel7, the website) lack their pins, so those stay cloned each run.
+
+lode-viewer reaches this workspace's crates as well as tole's, so cargo found the
+root workspace first for tole-compiler and gave it its lints: 88 flags where the other
+apps give 32. In their shared directory it flipped, and rebuilt itself and the apps
+above it, on every `check`. `exclude` in the root `Cargo.toml` ends that. Four apps in
+one directory, `check-unit` twice, `CARGO_INCREMENTAL=0`: 73, 53, 13 and 6 crates the
+first pass, none the second, 0.3 to 1.2 s a step; the directory 1.6 GB, where it was
+4.0 GB with incremental state.
+
+### The pool's rules
+
+| Rule | Why | Measured |
+|---|---|---|
+| A slot with no target dir waits up to 180 s for a warm one | three rows of one commit filled two cold slots | 894 and 931 s cold against about 200 s warm (`mk-m2-b5-*`) |
+| Under 150 GB free, a slot taken, and one whose run ends, loses rustc's caches but the three kernels' and xtask's (0.5 GB against 25 s rebuilding it from nothing, 2-10 s with it) | they were 23-27 GB of a slot's 34-37 GB | slots 37 to 16, 43 to 18, 34 to 17 GB; free 44 to 94 GB in 3 min, still warm |
+| The load ceiling holds only at 3 busy slots or more | all five slots stood free with 51 runs queued, at load 44-60 from local builds | not yet measured: runs already queued keep the old script |
+
+Looked at and not taken, by what is on the critical path: `-Zthreads=8` (mk-ci: mk-gpu
+measured 89 to 53 s on a cold `build`, an unstable flag, no use on a saturated CPU,
+unmeasured on `check`); `check-item-boundary.py`'s 20 s, an audit beside a longer main
+workspace and the side lanes, so it shortens no `check`.
+
+Seven slots did not fit the disk: 25 to 31 GB each while running, on a budget of about
+205 GB with the agents' trees. At 04:42Z, 19 GB free, 86 runs in an hour were refused,
+and the pool went back to five with the shed line at 40 GB, an idle slot giving way
+for any waiting run. Seven remains right for the processor, which sat 50 to 80% idle;
+it waits for a disk with room.
+
+Local full `check`s were the largest cost: four running cold at once held load at
+70-100, and gates fell to about 3 per 10 minutes with 49 queued.
+
 ## Next
 
 Phase 2 in the order the numbers give: (3) stop rather than wait for a

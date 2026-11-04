@@ -203,7 +203,6 @@ impl Supervisor {
     }
 
     /// Whether a channel whose read end is open is attached.
-    #[doc(hidden)]
     pub fn is_live(&self) -> bool {
         match &*self.slot.lock() {
             Slot::Open(Some(attached)) => !attached.end.peer_closed(),
@@ -359,7 +358,7 @@ impl Exception {
         pending(held.state)?;
         let context = held
             .context
-            .from_supervisor(written)
+            .with_supervisors(written)
             .map_err(|_| Refused::Registers)?;
         held.context = context;
         held.changed = true;
@@ -444,6 +443,10 @@ pub(crate) struct Fault {
 }
 
 /// What became of a fault the chain was asked about.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "on the stack of one fault, and only AArch64's context is this large"
+)]
 #[derive(Debug)]
 pub(crate) enum Raised {
     /// Resume with these registers.
@@ -456,6 +459,10 @@ pub(crate) enum Raised {
 }
 
 /// What one level made of a report.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "on the stack of one fault, and only AArch64's context is this large"
+)]
 enum Asked {
     /// It could not be made or queued.
     Skipped,
@@ -603,6 +610,9 @@ impl Asked {
     }
 }
 
+/// What [`make`] makes: the exception, its report's bytes and its transfer.
+type Made = (Arc<ExceptionCore>, Vec<u8>, Vec<object::Transfer>);
+
 /// Write `report` and a new exception to `end`, and wait for a verdict
 /// until `deadline`. Every allocation is fallible and made before the write;
 /// the exception and its report are charged to the running task's job, the
@@ -643,10 +653,7 @@ fn ask(end: &Endpoint, report: &Report, context: arch::UserContext, deadline: u6
 
 /// The exception, its report's bytes and the message's one handle: all
 /// allocated before anything is written.
-fn make(
-    report: &Report,
-    context: arch::UserContext,
-) -> Result<(Arc<ExceptionCore>, Vec<u8>, Vec<object::Transfer>), AllocError> {
+fn make(report: &Report, context: arch::UserContext) -> Result<Made, AllocError> {
     let charge = ferrix_kmem::Charge::bytes(size_of::<ExceptionCore>() + REPORT_BYTES)
         .map_err(|_| AllocError)?;
     let core = fallible::try_arc(ExceptionCore {
@@ -697,9 +704,9 @@ fn report_for(
         Trap::IllegalInstruction => (KIND_ILLEGAL, 0),
         Trap::Fault { .. } | Trap::Interrupt(_) | Trap::SystemCall => (KIND_OTHER, 0),
     };
-    // x86-64's `int3` leaves the pc after itself; every other trap reported
-    // here, on every architecture, leaves it at the trapping instruction.
-    if !(cfg!(target_arch = "x86_64") && fault.trap == Trap::Breakpoint) {
+    // A breakpoint that leaves the pc after itself is the exception: every other
+    // trap reported here, on every architecture, leaves it at the instruction.
+    if !(arch::UserContext::BREAKPOINT_LEAVES_PC_AFTER && fault.trap == Trap::Breakpoint) {
         flags |= FLAG_PC_AT_TRAP;
     }
     let pc = context.program_counter();

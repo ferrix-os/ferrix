@@ -424,11 +424,6 @@
       "lines": 53,
       "recursive": false
     },
-    "user/space.rs::fork": {
-      "complexity": 15,
-      "lines": 60,
-      "recursive": false
-    },
     "user/space.rs::protect": {
       "complexity": 15,
       "lines": 30,

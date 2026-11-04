@@ -2139,7 +2139,7 @@ package FerrixX8664Requirements {
                 at the call: the number.";
             attribute :>> criterion = "The value for number 0x2222 is 0x2222 (the
                 `seccomp` line's rollback check); the handler of a trapped call reads
-                it from a real frame in a later landing.";
+                it from a real frame in a later landing. And with kernel objects alone, on every profile, the `core trp` line (arch/x86_64/rehome_check.rs::check_the_rollback).";
             attribute :>> parent = "H.TRAP.16";
             attribute :>> unit = "arch::x86_64::syscall_rollback_value";
         }
@@ -2220,7 +2220,7 @@ package FerrixX8664Requirements {
             attribute :>> statement = "image_abi shall answer no ABI for an image of
                 another machine, so that the loader refuses it.";
             attribute :>> criterion = "An ELF64 image built for another machine is
-                refused by the loader.";
+                refused by the loader. And with kernel objects alone, on every profile, the `core trp` line (arch/x86_64/rehome_check.rs::check_an_image_of_another_machine).";
             attribute :>> parent = "H.TRAP.10";
             attribute :>> unit = "arch::x86_64::image_abi";
         }
@@ -3609,7 +3609,7 @@ package FerrixX8664Requirements {
                 handler or a fault.";
             attribute :>> criterion = "0xDEAD, usize::MAX and usize::MAX - 1, each
                 dispatched as a native call through the registered entry, are
-                answered -38, 3 of 3.";
+                answered -38, 3 of 3. And with kernel objects alone, on every profile, the `item` line (syscall/rehome_check.rs::check_an_unknown_number_is_enosys).";
             attribute :>> parent = "H.TRAP.11";
             attribute :>> unit = ("syscall::dispatch_with",
                 "trap::system_call",
@@ -3677,7 +3677,7 @@ package FerrixX8664Requirements {
                 "arch::x86_64::switch::UserState::set_xstate_bv");
         }
         requirement <'L.x86_64.123'> avxWithheldWhereVectorRegistersLeak : ItemLowLevel {
-            attribute :>> statement = "With the speculation switch on, vector_leak
+            attribute :>> statement = "In every build, vector_leak
                 shall, on a Zen 2 processor (family 0x17, Linux's amd_zenbleed
                 models), set DE_CFG[9] on every processor unless the microcode is
                 at the fixed revision, and withhold AVX from XCR0 in a guest; and
@@ -3691,7 +3691,8 @@ package FerrixX8664Requirements {
                 without and with GDS_NO, with GDS_CTRL on, off and unlocked, off and
                 locked, an Alder Lake -- its verdict, and family_and_model reads a
                 Matisse and a Kaby Lake right; with the guest rule taken out, the
-                check fails. The writes, DE_CFG[9] and clearing GDS_MITG_DIS, are
+                check fails; and the same verdicts in a kernel built with
+                mitigations=off, whose boot names one. The writes, DE_CFG[9] and clearing GDS_MITG_DIS, are
                 not exercised on the gate's machines, which are not affected parts;
                 in a guest the verdict rests on the model the hypervisor presents
                 (SPECULATION.md section 9, AoU-11).";
@@ -3877,7 +3878,7 @@ package FerrixX8664Requirements {
                 asked about a call with its first argument 0x1111, -512, -516 and
                 -1; each answer is the architecture's rollback value of that call,
                 the number on x86-64 and the first argument on the Arm pair (the
-                `seccomp` line).";
+                `seccomp` line). And with kernel objects alone, on every profile, the `core trp` line (trap/rehome_check.rs::check_a_trap_verdict).";
             attribute :>> parent = "H.TRAP.16";
             attribute :>> unit = "trap::ask";
         }
@@ -3891,7 +3892,7 @@ package FerrixX8664Requirements {
                 once per call, and the errnos 0, 13, 512, 4095, 4096, 5000 and
                 4294967295 come back as 0, -13, -512, -4095, -4095, -4095 and -4095;
                 a slot with nothing registered answers nothing, and one registered
-                twice asks the first (the `seccomp` line).";
+                twice asks the first (the `seccomp` line). And with kernel objects alone, on every profile, the `core trp` line (trap/rehome_check.rs::check_the_filter_slot), on a slot of the check's own: `filter_system_call` is `ask` on the real slot, which main.rs fills first.";
             attribute :>> parent = "H.TRAP.16";
             attribute :>> unit = ("trap::filter_system_call", "trap::set_quiet_syscall_filter",
                 "trap::register", "trap::ask");
@@ -4017,7 +4018,7 @@ package FerrixX8664Requirements {
              * (docs/microkernel/K4.md section 3.2; docs/I386.md I2a, I2b). */
 
         requirement <'L.x86_64.186'> aSupervisorsRegistersAreAProgramsOnly : ItemLowLevel {
-            attribute :>> statement = "UserContext::from_supervisor shall refuse,
+            attribute :>> statement = "UserContext::with_supervisors shall refuse,
                 changing nothing, registers whose cs is not 64-bit or 32-bit user code
                 exactly, whose rip or rsp is outside the user half or, for 32-bit
                 code, whose rip is at or above 4 GiB, whose ss is not user data,
@@ -4029,7 +4030,7 @@ package FerrixX8664Requirements {
                 flag outside FLAGS_RESTORABLE, a kernel rip, a non-canonical rsp and a
                 reserved word are refused; AC and a general register are taken.";
             attribute :>> parent = ("H.TRAP.20", "H.TRAP.9");
-            attribute :>> unit = ("arch::x86_64::signal::UserContext::from_supervisor",
+            attribute :>> unit = ("arch::x86_64::signal::UserContext::with_supervisors",
                 "arch::x86_64::signal::UserContext::supervised");
         }
     }

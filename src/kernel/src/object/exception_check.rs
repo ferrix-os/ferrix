@@ -322,6 +322,10 @@ fn attach(side: &Side, task: Handle, timeout_ms: u64) -> Result<Handle, Errno> {
 }
 
 /// A call that had to be refused with `refusal`, counted when it was.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "each call hands its outcome over"
+)]
 fn expect<T>(
     outcome: Result<T, Errno>,
     refusal: Errno,
@@ -433,7 +437,7 @@ const SIGKILL: u32 = 9;
 ///
 /// Verifies: H.TRAP.20, L.trap.9, L.trap.10, L.trap.11, L.trap.12, L.trap.13
 /// Verifies: L.object.243, L.object.244, L.object.245
-/// Verifies: L.x86_64.186, L.aarch64.66, L.armv7a.28
+/// Verifies: `L.x86_64.186`, `L.aarch64.66`, `L.armv7a.28`
 fn faults(side: &Side, root: Handle, report: &mut Report) -> Result<(), &'static str> {
     let fault = image_vmo(side, arch::USER_FAULT_PROGRAM, IMAGE_AT + 0x10_0000)?;
     let breakpoint = image_vmo(
@@ -451,6 +455,8 @@ fn faults(side: &Side, root: Handle, report: &mut Report) -> Result<(), &'static
     supervisor_dies(side, root, fault, report)?;
     repeats(side, root, fault, report)?;
     unsupervised(side, root, fault)?;
+    // A seam only a kernel with its self-checks holds (`force_poison`).
+    #[cfg(ferrix_checks = "on")]
     poison_and_its_supervisors(side, root, fault, report)?;
     no_raise_under_a_supervisor(side, root, fault)?;
     raised_is_never_offered(side)?;
@@ -885,6 +891,7 @@ fn closed_undecided(
 /// again.
 ///
 /// Verifies: L.trap.9, L.trap.12
+#[cfg(ferrix_checks = "on")]
 fn poison_and_its_supervisors(
     side: &Side,
     root: Handle,

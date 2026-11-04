@@ -16,8 +16,59 @@ use crate::mm;
 use crate::object::job::Job;
 use crate::object::quota::{self, Mark, ReserveError, Resource};
 
+/// An object of every size class, made as a task of `job` and freed, so that its
+/// heap keeps a page of each.
+fn keep_a_page_of_every_class(job: &Arc<Job>) -> Result<(), &'static str> {
+    let own = crate::sched::running_group();
+    crate::sched::set_current_group(job.quota_index());
+    let mut bytes = 16;
+    while bytes <= 2048 {
+        drop(crate::fallible::try_with_capacity::<u8>(bytes));
+        bytes *= 2;
+    }
+    crate::sched::set_current_group(own);
+    Ok(())
+}
+
+/// A new job's reservation on an entry a gone job's heap kept pages of is whole:
+/// the pages went back at the bind, so one reserved fewer frames than were kept
+/// draws every one of them (ledger 6260 B1).
+fn a_rebound_reservation_is_whole(entry: mm::Reservation) -> Result<(), &'static str> {
+    const SMALL: u64 = 4;
+    if mm::reservation_usage(entry).1 <= SMALL {
+        return Err("the rebinding case's heap kept too few pages to show anything");
+    }
+    let tree = Job::new_root().map_err(|_| "no memory for a job")?;
+    let job = tree.new_child().map_err(|_| "no memory for a job")?;
+    job.set_reservation(SMALL * PAGE_SIZE)
+        .map_err(|_| "a small reservation was refused")?;
+    if job.draws_from() != entry {
+        return Err("a reservation did not take the entry a gone job's heap left");
+    }
+    if mm::reservation_usage(entry).1 != 0 {
+        return Err("a rebound reservation started with frames drawn");
+    }
+    let own = crate::sched::running_group();
+    crate::sched::set_current_group(job.quota_index());
+    let mut held = alloc::vec::Vec::new();
+    for _ in 0..SMALL {
+        if let Some(frame) = mm::allocate_user_frame() {
+            held.push(frame);
+        }
+    }
+    crate::sched::set_current_group(own);
+    let drawn = mm::reservation_usage(entry).1;
+    for frame in held {
+        let _ = mm::release_frame(frame);
+    }
+    if drawn != SMALL {
+        return Err("a rebound reservation did not give its job every frame");
+    }
+    Ok(())
+}
+
 /// Pages the check reserves.
-const RESERVED: u64 = 16;
+const RESERVED: u64 = 64;
 
 /// What the check saw, for the boot line.
 #[derive(Debug, Default)]
@@ -60,6 +111,7 @@ pub fn run() -> Result<Report, &'static str> {
         heap_pages: 0,
     };
     report.interrupts = every_interrupt_marked()?;
+    let kept_entry;
     {
         let tree = Job::new_root().map_err(|_| "no memory for a job")?;
         let reserved = tree.new_child().map_err(|_| "no memory for a job")?;
@@ -70,7 +122,10 @@ pub fn run() -> Result<Report, &'static str> {
             return Err("the reserved job's frames, all freed, did not make its promise whole");
         }
         report.heap_pages = check_the_heap(&reserved, &sibling)?;
+        keep_a_page_of_every_class(&reserved)?;
+        kept_entry = reserved.draws_from();
     }
+    a_rebound_reservation_is_whole(kept_entry)?;
     if mm::outstanding_promise() != promise {
         return Err("a gone job's reservation still promised frames");
     }
@@ -278,7 +333,11 @@ fn draws(entry: mm::Reservation, held: &mut alloc::vec::Vec<u64>) -> Result<(), 
 }
 
 /// Objects the heap case makes as each job.
-const OBJECTS: usize = 32;
+const OBJECTS: usize = 24;
+
+/// Each object's bytes: two to a page, so that the objects span more pages than
+/// the heap keeps once they are freed, and a free that missed its heap would show.
+const OBJECT_BYTES: usize = 2048;
 
 /// The reserved job's kernel heap (`L.mm.81`, `docs/microkernel/K12.md`
 /// §2.4): its objects, made in task context, lie on pages drawn from its
@@ -294,13 +353,13 @@ fn check_the_heap(reserved: &Arc<Job>, sibling: &Arc<Job>) -> Result<u64, &'stat
     let own = crate::sched::running_group();
     crate::sched::set_current_group(reserved.quota_index());
     for object in &mut mine {
-        *object = crate::fallible::try_with_capacity(64).ok();
+        *object = crate::fallible::try_with_capacity(OBJECT_BYTES).ok();
     }
     let interrupted: Option<alloc::vec::Vec<u8>> =
-        crate::irq::serviced(|| crate::fallible::try_with_capacity(64).ok());
+        crate::irq::serviced(|| crate::fallible::try_with_capacity(OBJECT_BYTES).ok());
     crate::sched::set_current_group(sibling.quota_index());
     for object in &mut theirs {
-        *object = crate::fallible::try_with_capacity(64).ok();
+        *object = crate::fallible::try_with_capacity(OBJECT_BYTES).ok();
     }
     crate::sched::set_current_group(own);
     let drawn = mm::reservation_usage(entry).1.saturating_sub(before);
@@ -324,6 +383,9 @@ fn check_the_heap(reserved: &Arc<Job>, sibling: &Arc<Job>) -> Result<u64, &'stat
     drop(mine);
     drop(theirs);
     drop(interrupted);
+    if outcome.is_ok() && mm::reserved_heap_bytes(entry) != 0 {
+        return Err("a reserved job's object freed did not go back to its heap");
+    }
     let kept = mm::reservation_usage(entry).1.saturating_sub(before);
     if outcome.is_ok() && kept > ferrix_heap::CLASSES as u64 {
         return Err("a reserved heap kept more than a page a class once its objects were freed");

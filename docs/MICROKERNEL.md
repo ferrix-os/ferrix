@@ -476,15 +476,16 @@ The item's existing rules, which today apply to half of ring 0:
 * static stack depth bounded and checked in the build, per architecture;
 * a qualified toolchain for every target the kernel builds for (F-17).
 
-**B5, the evidence the load carries for the item.** 91 of the 531 ids that
-kernel files verify are verified *only* by checks in load-ring files
-(`tools/common/gen/microkernel-surface.py orphans --list` on 5450ee1fe):
+**B5, the evidence the load carries for the item** (`docs/microkernel/B5.md`).
+135 of the 745 ids that kernel files verify (2026-11-03; 91 of 531 on 5450ee1fe,
+when this was written) are verified *only* by checks in load-ring files
+(`tools/common/gen/microkernel-surface.py orphans --list`):
 H.DEV.2/4, H.MEM.8/16, H.QUOTA.6/7/10-12, H.SCHED.9, H.TRAP.9/11/12/16, and
 L.aarch64, L.armv7a, L.device, L.object, L.quiesce, L.sched, L.syscall,
-L.trap, L.user and L.x86_64 ids. The most are in `syscall/check.rs` (31,
-which also holds ASR-7's 427 refusal assertions), `fs/mmap_check.rs` (9),
-`syscall/seccomp_check.rs` (7), `interfaces/block_ring/check.rs` (6) and
-the cgroupfs checks (22 together). In M2 and M3, before M5, each is
+L.trap, L.user and L.x86_64 ids. The most, on 2026-11-03, are in `syscall/check.rs` (38, which also holds
+ASR-7's refusal assertions), the cgroupfs checks (33 together), `fs/mmap_check.rs`
+(9), `syscall/seccomp_check.rs` (8), `interfaces/block_ring/check.rs` (6) and
+`syscall/vdso_check.rs` (6); `docs/microkernel/B5.md` lists each. In M2 and M3, before M5, each is
 re-homed to a check in a core or item file with its negative control fired
 again (`gate.sh control --expect`, FIRED). A new `xtask check` step fails when
 a core or item id is verified only from a load-ring or user-space check.
@@ -1062,8 +1063,8 @@ in the ledger, and not a gate.
 |---|---|---|---|
 | **M0** | §11's decisions written in BACKLOG; §7's rows with methods, baselines and controls; `--personality` recorded as a reference-configuration setting (C11); a ratchet in `xtask check` on the `load` ring's size, set to §11 Q10's answer (it reports growth if feature work stays allowed as now, and fails on it if not), with a planted file as its control; **§6.5's clause table checked against the purchased standards' texts** and corrected before V1, V2, T1, F1 or F2 is sized; **the research of 2026-10-13 checked with it**, each item against its source in the appendix (CC:2022's ADV_SPM.1 "entire TSF" reading, Arm's Lock-mode ratings and the A78AE manual's facts, seL4's AArch64 proofs, Ferrocene's qualifications and targets, Verus's compiler pin), confirmed or corrected before any stream or purchase is sized on it; the CI build of `core` and `item` with Ferrocene's compiler | 15 | the customer's answers; baselines on `main`; the clause table's check recorded (each row's clause, table, grade and level confirmed or corrected), and no stream's points stated before it |
 | **M1** | K5, K6, K7, K10, K12 (small and independent), each with its ids reserved first | 25 | each mechanism's boot check and controls FIRED |
-| **M2** | K2, K3, K4, K13, K15; the in-kernel page cache moved onto K3 **while still in ring 0**; B5's re-homing of the 91 ids, first half | 45 | `test-btrfs`, `test-powerfail`, `test-rustc` unchanged; F-37's charging tests; the orphan step of §6.2 passes for the ids re-homed |
-| **M3** | K1, K11 on x86-64, then AArch64; K17 (15 points, *guess*); seL4's methods for the restricted exit (fastpath, lazy vector state, a small hot path); ASIDs on AArch64; K9 on stage 14's HardRt with the static time-partition schedule; K14; B5's second half | 75, plus stage 14's own size | the restricted-mode row; a K9 interference row (a QM job at full load does not push a budgeted job past its deadline, with a control that removes the budget); the orphan step passes for all 91 |
+| **M2** | K2, K3, K4, K13, K15; the in-kernel page cache moved onto K3 **while still in ring 0**; B5's re-homing of the 135 ids, first half | 45 | `test-btrfs`, `test-powerfail`, `test-rustc` unchanged; F-37's charging tests; the orphan step of §6.2 passes for the ids re-homed |
+| **M3** | K1, K11 on x86-64, then AArch64; K17 (15 points, *guess*); seL4's methods for the restricted exit (fastpath, lazy vector state, a small hot path); ASIDs on AArch64; K9 on stage 14's HardRt with the static time-partition schedule; K14; B5's second half | 75, plus stage 14's own size | the restricted-mode row; a K9 interference row (a QM job at full load does not push a budgeted job past its deadline, with a control that removes the budget); the orphan step passes for all 135 |
 | **M4** | §7's rows that are not K-items: the round trip, the bare system call, the block read | on the backlog already | §7's rows |
 | **M5** | **The lift**: `linuxd` behind `--personality user`, with one Linux partition and every system-wide service inside it; `btrfsd` split out as a certified item (§11 Q4, yes); devmgr started by the kernel with K8's handles; the retired calls removed | 130 to 200 | every gate of `docs/BACKLOG.md`'s gate table under `--personality user`, unchanged; §7's rows; the Steam and Chrome rows; then the flip, with coverage and rows measured afresh, and the in-kernel load deleted |
 | **M6** | **Shrink**: the console's screen and input, the panic screen's drawing and the board glue out; discovery cut to §2.1's list; the retired calls' requirements withdrawn; K16, the kernel heap retired | 70 (a *guess*, re-sized after K16's design) | `check-item-boundary.py` fails on a planted load file; coverage carried (§6.2, *Moves*); boot lines identical on four boots where the code did not change |
@@ -1372,7 +1373,8 @@ Draft on branch `microkernel-plan`.
 
 (2026-11-03: the plan and the M0 flag system are on `develop`; for what M1
 and M2 hold, and which of it is landed, see `docs/roadmap/microkernel-m0.md`.
-The list below is the plan's review history.)
+The list below is the plan's review history. B5's orphan step is on `develop`
+(b4a6b3ff9); the rest of the run's work is on local branches, unlanded.)
 
 * Revision 1 (060d59ce0): the certification consultant's design review,
   **NOT YET** (B1 to B7, C1 to C16), ledger line 812 of

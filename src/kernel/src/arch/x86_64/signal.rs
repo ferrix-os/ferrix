@@ -144,6 +144,9 @@ const FLAGS_CLEARED_FOR_HANDLER: u64 = (1 << 8) | (1 << 10) | (1 << 16);
 pub struct UserContext(TrapFrame);
 
 impl UserContext {
+    /// Whether a breakpoint leaves the pc after the instruction: `int3` leaves the pc after itself.
+    pub(crate) const BREAKPOINT_LEAVES_PC_AFTER: bool = true;
+
     /// The registers a trap from ring 3 saved.
     pub const fn from_trap(frame: &TrapFrame) -> UserContext {
         UserContext(*frame)
@@ -266,7 +269,7 @@ impl UserContext {
     }
 
     /// These registers with a supervisor's `written` in place of the ones it
-    /// may change (`docs/microkernel/K4.md` §3.2, L.x86_64.186), or
+    /// may change (`docs/microkernel/K4.md` §3.2, `L.x86_64.186`), or
     /// [`BadFrame`] with nothing changed.
     ///
     /// The rules are `restore_signal_frame`'s (`docs/I386.md` I2a and I2b,
@@ -277,7 +280,7 @@ impl UserContext {
     /// flags hold `FLAGS_ALWAYS` and nothing outside `FLAGS_RESTORABLE`, so
     /// never `IOPL`, `VM`, `VIF`, `VIP`, `NT`, `RF`, `TF` or interrupts off.
     /// The vector and error code the trap saved are kept.
-    pub(crate) fn from_supervisor(
+    pub(crate) fn with_supervisors(
         &self,
         written: &ExceptionRegisters,
     ) -> Result<UserContext, BadFrame> {

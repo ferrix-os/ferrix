@@ -503,18 +503,24 @@ fn reservation_for(owner: u32) -> Reservation {
 /// Bind a free reservation, promising nothing yet, for a job's slot. `None`
 /// when every one is bound or still draining.
 pub(crate) fn reservation_bind() -> Option<Reservation> {
-    // The pages each idle reservation's heap keeps, read before the frame
-    // allocator's lock, which is taken inside a heap's and never around one.
-    // An unbound entry's heap is reached by no task, so what is read here
-    // stays true until the bind.
-    let mut kept = [u64::MAX; reservation::MOST];
-    for (kept, heap) in kept.iter_mut().zip(&HEAPS) {
-        let heap = heap.lock();
-        if heap.allocated_bytes() == 0 && heap.large_pages() == 0 {
-            *kept = heap.slab_pages() as u64;
+    // An idle reservation's heap gives back the pages it keeps, before the frame
+    // allocator's lock, which is taken inside a heap's and never around one. An
+    // unbound entry's heap is reached by no task, so nothing comes back meanwhile
+    // (ledger 6260 B1).
+    for (at, heap) in HEAPS.iter().enumerate() {
+        if !reservation::is_bound(at)
+            && let Ok(entry) = Reservation::try_from(at + 1)
+        {
+            let _ = heap.lock().release_kept(&mut ReservedPages(entry));
         }
     }
-    with_frames(|_| reservation::bind(&kept)).flatten()
+    with_frames(|_| reservation::bind()).flatten()
+}
+
+/// The bytes a reservation's heap has out, for the check that a reserved object
+/// freed goes back to its own heap.
+pub(crate) fn reserved_heap_bytes(entry: Reservation) -> usize {
+    reserved_heap(entry).map_or(0, |heap| heap.lock().allocated_bytes())
 }
 
 /// Make `entry`'s size `frames` (`L.mm.76`): refused, with nothing changed

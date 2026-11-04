@@ -227,7 +227,7 @@ before 2026-10-24). What is still on a branch is at the end of this section.
   is the same line; `feature/hyprix-gpu-backend` (hyprix's `hyprix:gpu`
   option and the helper's environment lines), `land/hyprix-gpu-backend`
   (`test-compositor --boot helper-desktop`), `feature/csd-decorations`,
-  `feature/mk/*` (the microkernel's M1, unchanged since 2026-10-21),
+  `feature/mk/*` (the microkernel's M1, unchanged since 2026-10-21; its rebase and the rest of the 2026-11-03 run's work are on local `feature/mk-*` branches, unlanded),
   `park/f95-option-a` (F-95's landing 2 conditions), `wip/stability-try`
   (the nightly stability workflow) and `docs/intel-display` (a design paused
   by 3h). `docs/roadmap/open-branches.md` has the 2026-11-02 count.
@@ -251,7 +251,12 @@ before 2026-10-24). What is still on a branch is at the end of this section.
   designs K5, K6, K7, K10 and K12 are on `main` with the consultant's OK IF and
   their ids reserved (2026-10-19); the code is on `mk/*` branches, none
   gated, about 33 of about 70 points spent (`docs/BACKLOG.md`). The ids of M2's
-  K2, K3 and K4 are reserved (2026-10-21, 2426e7038).
+  K2, K3 and K4 are reserved (2026-10-21, 2426e7038). The overnight run of
+  2026-11-03 landed B5's orphan step (b4a6b3ff9, `docs/microkernel/B5.md`): a step
+  of `xtask check` fails when a kernel requirement is verified only by checks
+  that leave with the load; it lists 135 ids and holds 299 more on raised check
+  files by a ratchet. The id blocks of the run's agents are reserved
+  (bfc8a5f00, 709c13e91). Landed since: K6 (kernel-attested sender, 671ad76a8), `smt=off` (b8a57534b) and F-91 (an ended process gives its memory back, 95e5e0e1c), each with its derived files; K17's high-level requirement and K9's scheduler ids are reserved (7818d5b82); B5's class A re-homing (3e6bc2f0e, 27ed2c039, 4fb6e5fa3, bd64fc419, 2026-11-04): the orphan list falls from 135 to 70 ids, 65 re-homed to core or item checks and 18 of the 135 moved to class B, with a BACKLOG row for the `linux_abi=off` rows B5's checks owe; mk-ci's cut M3 (05347c1a3, 68b54b00c: the kernel's lint directories without incremental state, 6,885 to 511 MB per check, control fired) and `gate.sh` keeping xtask's incremental cache in its trim (276f2fde8); mk-ci's cuts to the check and the gate hosts (clippy settings at once, side workspaces without incremental state, `gate.sh` trimming a slot's caches; e1725720e, a532f7d6e, f7034b37a, 2026-11-04) are in. `develop` is b7338d734. Everything else of that run is on the local run branches, unlanded and ungated (the agents' notes of 2026-11-04 05:30, not `develop`): `feature/mk-land`, the derived series cut from `feature/mk-base` (K10 and K4 joined a batch, `mkb-k10-k4`, at b16fd5f87; K5, K3A, K2, K12a, K7, K12b, K3B and DF6 still to join; the consultant's group-2 verdicts, ledger 6250 to 6312, hold K2 at NOT YET until its conditions are met), `feature/mk-m2` and `feature/mk-m2-land` (K15, K13 and K3b as one commit on `mk-land`; they wait for K2 to K4 to land), `feature/mk-restricted` (K1 and K11 booting on x86-64 and AArch64; the consultant's ledger 6282 holds K1 and K11 at NOT YET R1 to R8, K17, the ASIDs and K9's first section at OK IF; a stack overflow on the block ring's task was found and fixed on the way), `feature/mk-lift` (`linuxd` passes `test-shell`, `test-btrfs`, `test-vfs`, `test-threads`, `test-rustc` and the sysfs, seat, seccomp, input, auth, pkg and container rows under `--personality user`; `test-powerfail` is not run until B5's re-homing is through, ledger 6268) and `feature/mk-boot` (K8, K14, boot authority, the partition manager, `btrfsd`, M6 cuts and `netd`: `test-btrfsd`, `test-partitions` and `test-netd` pass on x86-64; the consultant, ledger 6316, wants none of it carried unreviewed into `linuxd`'s landing).
 * **Stage 13's exit is met** (`docs/CGROUPS.md` §15). `cargo xtask
   test-container` (f231cdf09, 2026-10-14) runs the criterion as one program,
   an unprivileged user namespace with a pid 1 under a memory limit with

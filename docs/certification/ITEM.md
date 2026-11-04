@@ -555,8 +555,8 @@ settings, which is most of why this item is analysable at all.
 The build flag that matters most here is `mitigations`, the side-channel
 defences and KASLR ([SPECULATION.md](SPECULATION.md)). `mitigations=off`
 builds with `cfg(ferrix_mitigations = "off")` and the static relocation
-model, set only by `xtask`, compiles the kernel's defences out and links the
-kernel at its fixed address; it exists to measure what they cost and for
+model, set only by `xtask`, compiles the kernel's speed-trade defences out (Zenbleed's
+and GDS's covers stay, no speed trade, DF6) and links the kernel at its fixed address; it exists to measure what they cost and for
 owners who have decided they need none. It is not a Cargo feature, it is an
 ad-hoc build with no claim, and the claims here are made of `present` alone
 (SAFETY-MANUAL AoU-8). `cargo xtask check` type-checks the kernel (clippy,

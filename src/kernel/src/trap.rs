@@ -17,6 +17,7 @@ use crate::arch;
 use crate::console::println;
 
 pub mod check;
+pub mod rehome_check;
 
 /// Why the kernel was entered, in terms every architecture shares.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

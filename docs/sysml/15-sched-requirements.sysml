@@ -843,7 +843,7 @@ package FerrixSchedRequirements {
                 away from them as involuntary, at least one, the two adding to how
                 often each was switched to; a task that sleeps 10 times counts at
                 least 10 voluntary and fewer than 10 involuntary; with the
-                classification inverted, the case fails with its sentence.";
+                classification inverted, the case fails with its sentence. And with kernel objects alone, on every profile, the `core sch` line (sched/rehome_check.rs::check_switches_are_counted).";
             attribute :>> parent = "H.SCHED.14";
             attribute :>> unit = ("sched::switch_chosen",
                 "sched::task::Task::note_switched_out");

@@ -10,5 +10,7 @@ pub mod cache;
 pub mod check;
 pub(crate) mod edge_check;
 pub mod memory_type;
+pub mod rehome_cache_check;
+pub mod rehome_check;
 pub mod space;
 pub mod vmo;

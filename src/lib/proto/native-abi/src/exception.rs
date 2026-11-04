@@ -88,12 +88,16 @@ impl Report {
         let mut out = [0_u8; REPORT_BYTES];
         let words32 = [self.kind, self.level, self.pid, self.repeat];
         for (index, word) in words32.iter().enumerate() {
-            out[index * 4..index * 4 + 4].copy_from_slice(&word.to_ne_bytes());
+            if let Some(room) = out.get_mut(index * 4..index * 4 + 4) {
+                room.copy_from_slice(&word.to_ne_bytes());
+            }
         }
         let words64 = [self.tid, self.job, self.address, self.code, self.pc];
         for (index, word) in words64.iter().enumerate() {
             let at = 16 + index * 8;
-            out[at..at + 8].copy_from_slice(&word.to_ne_bytes());
+            if let Some(room) = out.get_mut(at..at + 8) {
+                room.copy_from_slice(&word.to_ne_bytes());
+            }
         }
         out[56..60].copy_from_slice(&self.flags.to_ne_bytes());
         out[60..64].copy_from_slice(&self.reserved.to_ne_bytes());
@@ -158,7 +162,7 @@ pub struct X86_64Registers {
 
 /// An `AArch64` thread's registers, as `exception_state` reads and writes
 /// them: 34 words.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(C)]
 pub struct Aarch64Registers {
     /// `x0` to `x30`.
@@ -167,20 +171,9 @@ pub struct Aarch64Registers {
     pub sp: u64,
     /// The program counter.
     pub pc: u64,
-    /// `PSTATE`: the condition flags over EL0t; a write holding anything
+    /// `PSTATE`: the condition flags over `EL0t`; a write holding anything
     /// else is refused.
     pub pstate: u64,
-}
-
-impl Default for Aarch64Registers {
-    fn default() -> Aarch64Registers {
-        Aarch64Registers {
-            x: [0; 31],
-            sp: 0,
-            pc: 0,
-            pstate: 0,
-        }
-    }
 }
 
 /// An ARMv7-A thread's registers, as `exception_state` reads and writes
@@ -197,15 +190,7 @@ pub struct Armv7aRegisters {
     pub reserved: u32,
 }
 
-/// The registers of the architecture this is built for.
-#[cfg(target_arch = "x86_64")]
-pub type Registers = X86_64Registers;
-/// The registers of the architecture this is built for.
-#[cfg(target_arch = "aarch64")]
-pub type Registers = Aarch64Registers;
-/// The registers of the architecture this is built for.
-#[cfg(target_arch = "arm")]
-pub type Registers = Armv7aRegisters;
+pub use crate::arch::Registers;
 
 /// Bytes in [`X86_64Registers`].
 pub const X86_64_REGISTERS_BYTES: usize = 22 * 8;

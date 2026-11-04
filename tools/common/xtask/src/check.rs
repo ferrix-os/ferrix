@@ -327,6 +327,17 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
         "load ring size",
         &[&["tools/common/check/check-load-ring.py"]],
     ),
+    // The orphan step (docs/MICROKERNEL.md section 6.2, B5): no requirement of
+    // the kernel verified only from checks that leave with the load, but the
+    // ids on a list that only shrinks. Its scope is kernel source's `Verifies:`
+    // tags; an id whose only check is a host test or an xtask row is outside.
+    (
+        "evidence homes",
+        &[
+            &["tools/common/check/check-evidence-homes.py", "--self-test"],
+            &["tools/common/check/check-evidence-homes.py"],
+        ],
+    ),
     // A coding standard with metrics, which EN 50716 requires and the
     // other gates did not supply: how complicated one function in the
     // certified item may be, how long, and whether it calls itself. A
@@ -1106,6 +1117,13 @@ impl Beside {
             .map_err(|error| Error::new(format!("creating {}: {error}", log.display())))?;
         let child = Command::new(std::env::current_exe()?)
             .arg("check-side")
+            // rustc's incremental caches are half of what a cold side workspace
+            // writes and rarely read again, since an edit in the kernel or a
+            // host crate rebuilds none of these (`docs/TEST-TIME.md`, *Cut M2*).
+            .env(
+                "CARGO_INCREMENTAL",
+                std::env::var_os("CARGO_INCREMENTAL").unwrap_or_else(|| "0".into()),
+            )
             .current_dir(paths::workspace_root())
             .stdin(Stdio::null())
             .stdout(file.try_clone()?)
@@ -1190,6 +1208,7 @@ fn ferrocene_rust() -> Result<()> {
 /// started before the check fired. Every static check runs whichever fails.
 fn test_flags(args: &Args) -> Result<()> {
     crate::test_boot(args)?;
+    vector_verdict_named(args)?;
     let growth: &[&str] = if args.fail_on_growth {
         &["--fail-on-growth"]
     } else {
@@ -1210,6 +1229,25 @@ fn test_flags(args: &Args) -> Result<()> {
         Ok(())
     } else {
         Err(Error::new(format!("test-flags: {}", failed.join("; "))))
+    }
+}
+
+/// Whether a build with `mitigations=off` still names Zenbleed's and GDS's
+/// verdict on x86-64 (`L.x86_64.123`, `docs/microkernel/M0-B-PROPOSALS.md` DF6):
+/// the covers are no speed trade, and such a boot's `vector registers:` line says
+/// what it decided and never that it did not.
+fn vector_verdict_named(args: &Args) -> Result<()> {
+    if !crate::flags::this_run()?.mitigations_off() || !args.arches()?.contains(&Arch::X86_64) {
+        return Ok(());
+    }
+    let log = paths::build_dir(Arch::X86_64).join("serial.log");
+    let text = std::fs::read_to_string(&log)?;
+    let line = text.lines().find(|line| line.contains("vector registers:"));
+    match line {
+        Some(line) if !line.contains("not decided") => Ok(()),
+        _ => Err(Error::new(
+            "test-flags: a mitigations=off boot did not name Zenbleed's and GDS's verdict",
+        )),
     }
 }
 
@@ -2551,10 +2589,10 @@ fn python_captured(script: &str, arguments: &[&str], said: &mut Vec<u8>) -> Resu
 /// failure; one that does not resolve at all fails.
 ///
 /// `mitigations=off` changes codegen for every crate, so it is linted in the
-/// target directory `cargo::kernel` builds it into, beside the others: no
-/// cache is thrown away for another's, and cargo's lock on one directory
-/// never waits for the other. The rest differ only in the kernel crate's
-/// `cfg`s, so each relints that crate alone, one after another.
+/// target directory `cargo::kernel` builds it into; each of the others in a
+/// directory of its own ([`kernel_lint_dir`]). So no cache is thrown away for
+/// another's, cargo's lock on one directory never waits for the next, and all
+/// of them run at once.
 ///
 /// Every one of the kernel's packages is linted: the binary and whatever
 /// library crates sit beneath `src/kernel` (`docs/KERNEL-CRATES.md`), as
@@ -2622,32 +2660,89 @@ fn kernel_clippy_every_build() -> Result<()> {
         without.extend(["--config", config]);
     }
     without.extend(["--target-dir", &directory]);
-    // The off build is captured and printed after the rest, so the passes'
-    // diagnostics never interleave.
-    let (first, second) = std::thread::scope(|scope| {
-        let off = scope.spawn(|| clippy_captured(&without, &cargo::flag_environment(&off)));
-        let mut on = Ok(());
-        for (name, resolved) in &builds {
-            println!("\n   -- {name}: {}", resolved.cfg_words());
-            on = clippy_with(&every_arch, &cargo::flag_environment(resolved));
-            if on.is_err() {
-                break;
-            }
-        }
-        let off = off
-            .join()
-            .unwrap_or_else(|_| Err(Error::new("the mitigations=off clippy thread panicked")));
-        (on, off)
+    let lint_dirs: Vec<String> = builds
+        .iter()
+        .map(|(name, _)| kernel_lint_dir(name).to_string_lossy().into_owned())
+        .collect();
+    // All at once, each to its end whichever fails; what each said is
+    // printed whole afterwards in the order they always ran in, so the passes'
+    // diagnostics never interleave, and the first failure in that order is the
+    // error (`docs/TEST-TIME.md`, *Cut M1*).
+    let (results, off_result) = std::thread::scope(|scope| {
+        let running: Vec<_> = builds
+            .iter()
+            .zip(&lint_dirs)
+            .map(|((_, resolved), lint_dir)| {
+                let every_arch = &every_arch;
+                scope.spawn(move || lint_one_setting(every_arch, lint_dir, resolved))
+            })
+            .collect();
+        let off_running = scope.spawn(|| clippy_captured(&without, &cargo::flag_environment(&off)));
+        let lost = || {
+            (
+                String::new(),
+                Err(Error::new("a kernel clippy thread panicked")),
+            )
+        };
+        let results: Vec<_> = running
+            .into_iter()
+            .map(|handle| handle.join().unwrap_or_else(|_| lost()))
+            .collect();
+        (results, off_running.join().unwrap_or_else(|_| lost()))
     });
+    let mut first_failure = None;
+    for ((name, resolved), (said, result)) in builds.iter().zip(results) {
+        println!("\n   -- {name}: {}", resolved.cfg_words());
+        print!("{said}");
+        if let Err(error) = result {
+            println!("   {name}: {error}");
+            let _ = first_failure.get_or_insert(error);
+        }
+    }
     println!("\n   -- ad hoc, mitigations=off: {}", off.cfg_words());
-    second?;
-    first
+    let (said, result) = off_result;
+    print!("{said}");
+    if let Err(error) = result {
+        println!("   mitigations=off: {error}");
+        let _ = first_failure.get_or_insert(error);
+    }
+    first_failure.map_or(Ok(()), Err)
 }
 
-/// [`clippy`], with the kernel's flags in its environment and its output
-/// kept and printed whole when it ends.
-fn clippy_captured(arguments: &[&str], flags: &[(&str, String)]) -> Result<()> {
-    let output = Command::new(cargo_binary())
+/// `clippy_captured` over the kernel for one flag setting, in its directory.
+///
+/// These directories are only ever linted in, and the gate pool trims them after
+/// each run, so rustc's incremental state, 0.5 GB an architecture and setting, was
+/// written to be deleted (`docs/TEST-TIME.md`, *Cut M3*).
+fn lint_one_setting(
+    every_arch: &[&str],
+    lint_dir: &str,
+    resolved: &crate::flags::Resolved,
+) -> (String, Result<()>) {
+    let mut arguments = every_arch.to_vec();
+    arguments.extend(["--target-dir", lint_dir]);
+    let mut environment = cargo::flag_environment(resolved).to_vec();
+    environment.push(("CARGO_INCREMENTAL", "0".to_owned()));
+    clippy_captured(&arguments, &environment)
+}
+
+/// Where one of the kernel's flag settings is linted: a directory of its own
+/// under the target directory, so that no setting relints the kernel for the
+/// next one's `cfg`s and they can run at once, as `mitigations=off` always
+/// has. A name stays four levels above its `incremental` caches, where
+/// `gate.sh` trims them when the disk is short.
+fn kernel_lint_dir(build: &str) -> std::path::PathBuf {
+    let name: String = build
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    paths::target_dir().join(format!("kernel-lint-{name}"))
+}
+
+/// [`clippy`], with the kernel's flags in its environment; what it said, whole
+/// (cargo's error stream and its output), and its verdict.
+fn clippy_captured(arguments: &[&str], flags: &[(&str, String)]) -> (String, Result<()>) {
+    let output = match Command::new(cargo_binary())
         .current_dir(paths::workspace_root())
         .arg("clippy")
         .args(arguments)
@@ -2655,10 +2750,18 @@ fn clippy_captured(arguments: &[&str], flags: &[(&str, String)]) -> Result<()> {
         .envs(flags.iter().map(|(key, value)| (*key, value)))
         .stdin(Stdio::null())
         .output()
-        .map_err(|error| Error::new(format!("could not run cargo clippy: {error}")))?;
-    print!("{}", String::from_utf8_lossy(&output.stdout));
-    eprint!("{}", String::from_utf8_lossy(&output.stderr));
-    cargo::finished(output.status, "cargo clippy, mitigations=off")
+    {
+        Ok(output) => output,
+        Err(error) => {
+            return (
+                String::new(),
+                Err(Error::new(format!("could not run cargo clippy: {error}"))),
+            );
+        }
+    };
+    let mut said = String::from_utf8_lossy(&output.stdout).into_owned();
+    said.push_str(&String::from_utf8_lossy(&output.stderr));
+    (said, cargo::finished(output.status, "cargo clippy"))
 }
 
 /// The UEFI loader's `build.rs` refuses a build that names no trust-policy

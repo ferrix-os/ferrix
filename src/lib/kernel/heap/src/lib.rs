@@ -322,6 +322,35 @@ impl Heap {
         self.give_back_if_empty(backing, class, address);
     }
 
+    /// With nothing out, give back the empty page each class keeps: how many.
+    /// For a heap whose owner has gone, whose kept pages nobody may use; a heap
+    /// with an object out or a large block gives nothing back.
+    pub fn release_kept(&mut self, backing: &mut impl Backing) -> usize {
+        if self.allocated != 0 || self.large_pages != 0 {
+            return 0;
+        }
+        let mut released = 0;
+        for class in 0..CLASSES {
+            while self.pages_per_class.get(class).copied().unwrap_or(0) > 0 {
+                let cursor = self.head(class);
+                if cursor == END {
+                    break;
+                }
+                let page = page_of(cursor);
+                self.unlink_page(backing, class, page);
+                backing.set_slab_free(page, 0);
+                backing.deallocate_pages(page, 0);
+                self.slab_pages = self.slab_pages.saturating_sub(1);
+                self.slab_pages_returned += 1;
+                if let Some(count) = self.pages_per_class.get_mut(class) {
+                    *count = count.saturating_sub(1);
+                }
+                released += 1;
+            }
+        }
+        released
+    }
+
     /// One object of the page holding `address` has been handed out.
     fn take_from_page(&mut self, backing: &mut impl Backing, address: u64) {
         let page = page_of(address);

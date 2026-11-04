@@ -101,7 +101,7 @@ use alloc::vec::Vec;
 use core::any::Any;
 use core::fmt;
 use core::ops::Deref;
-use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicU64, Ordering};
 
 use crate::sync::SpinLock;
 use ferrix_bootinfo::{PAGE_SIZE, USER_VIRT_END, is_user_address};
@@ -365,9 +365,6 @@ pub struct AddressSpace {
     /// ([`AddressSpace::raises_refused`], `L.object.309`). `process_space` is
     /// refused after the start, so for a started process this only falls.
     handles: AtomicU64,
-    /// Made by a fork of a space with such a handle, or for a native child of
-    /// a process on one: as long as it lives.
-    no_raise: AtomicBool,
 }
 
 impl AddressSpace {
@@ -588,7 +585,6 @@ impl AddressSpace {
             flushes: Flushes::new(),
             layout: SleepLock::new((), &crate::sync::SchedParker),
             handles: AtomicU64::new(0),
-            no_raise: AtomicBool::new(false),
             inner: SpinLock::new(inner),
             domain: AtomicU64::new(UNCLAIMED),
         }
@@ -631,15 +627,9 @@ impl AddressSpace {
     }
 
     /// Whether a program here may be given ids by a file: not while a handle
-    /// names this space, nor in a fork or a native child of one
-    /// (`L.object.309`, ledger 5727 (1)).
+    /// names this space (`L.object.309`, ledger 5727 (1), 6256).
     pub fn raises_refused(&self) -> bool {
-        self.handles.load(Ordering::SeqCst) != 0 || self.no_raise.load(Ordering::SeqCst)
-    }
-
-    /// Refuse raises here for as long as this space lives.
-    pub fn refuse_raises(&self) {
-        self.no_raise.store(true, Ordering::SeqCst);
+        self.handles.load(Ordering::SeqCst) != 0
     }
 }
 
@@ -1173,11 +1163,6 @@ impl AddressSpace {
         // have written, which is harmless.
         .map_err(|_| unrooted(root))?;
         attach_child(&child)?;
-        // Whoever holds a handle to this space controls what forks from it
-        // (`L.object.309`).
-        if self.raises_refused() {
-            child.refuse_raises();
-        }
         Ok(child)
     }
 
@@ -2202,7 +2187,6 @@ impl AddressSpace {
     }
 
     /// How many shootdowns of this space have begun: see the field.
-    #[doc(hidden)]
     pub fn shootdowns_begun(&self) -> u64 {
         self.flushes.begun.load(Ordering::SeqCst)
     }

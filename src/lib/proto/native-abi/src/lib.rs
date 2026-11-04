@@ -44,6 +44,7 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+pub mod arch;
 pub mod bootstrap;
 pub mod directory;
 pub mod exception;

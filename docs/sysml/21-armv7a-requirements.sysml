@@ -41,7 +41,7 @@ package FerrixArmv7aRequirements {
                 the number.";
             attribute :>> criterion = "The value for first argument 0x1111 is 0x1111
                 and the token read back from a driven svc is ARMv7-A's, 0x40000028
-                (the `seccomp` line).";
+                (the `seccomp` line). And with kernel objects alone, on every profile, the `core trp` line (arch/armv7a/rehome_check.rs::check_the_token_and_the_rollback).";
             attribute :>> parent = "H.TRAP.16";
             attribute :>> unit = ("arch::armv7a::audit_arch",
                 "arch::armv7a::syscall_rollback_value");
@@ -335,7 +335,7 @@ package FerrixArmv7aRequirements {
              * (docs/microkernel/K4.md section 3.2). */
 
         requirement <'L.armv7a.28'> aSupervisorsRegistersAreAProgramsOnly : ItemLowLevel {
-            attribute :>> statement = "UserContext::from_supervisor shall refuse,
+            attribute :>> statement = "UserContext::with_supervisors shall refuse,
                 changing nothing, registers whose CPSR is not USER_CPSR with nothing
                 outside CPSR_RESTORABLE, whose pc is misaligned for the state CPSR.T
                 names (the pc's low bit never switching state), whose pc or sp is
@@ -347,7 +347,7 @@ package FerrixArmv7aRequirements {
                 the N flag, Thumb with a halfword-aligned pc, and a general register
                 are taken.";
             attribute :>> parent = ("H.TRAP.20", "H.TRAP.9");
-            attribute :>> unit = ("arch::armv7a::signal::UserContext::from_supervisor",
+            attribute :>> unit = ("arch::armv7a::signal::UserContext::with_supervisors",
                 "arch::armv7a::signal::UserContext::supervised");
         }
     }

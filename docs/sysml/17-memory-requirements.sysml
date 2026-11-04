@@ -851,13 +851,16 @@ package FerrixMemoryRequirements {
                 and by the shared heap only once it has no room; every other
                 allocation by the shared heap, whose pages are never drawn; a
                 heap object shall be freed to the heap its page's tag names;
-                and an entry whose heap keeps only empty pages shall be bound
-                again with those pages still drawn.";
+                and a free entry's heap shall give back the empty pages it keeps
+                before the entry is bound again, so that a reservation of any
+                size is whole.";
             attribute :>> criterion = "At stage 9 a reserved job's 32 objects lie
                 on pages tagged with its reservation, a sibling's 32 of the same
                 size class and one made while an interrupt is serviced on
-                untagged pages, and once freed at most a page a size class
-                stays drawn; the next reservation reads at most that drawn.";
+                untagged pages, and once freed they are back on its heap with at
+                most a page a size class drawn. A new job's reservation of 4
+                frames on an entry whose heap kept more reads none drawn and is
+                given all 4. Control: bind leaving the kept pages.";
             attribute :>> parent = "H.QUOTA.15";
             attribute :>> unit = ("mm::KernelAllocator::alloc", "mm::KernelAllocator::dealloc",
                 "mm::ReservedPages::allocate_pages", "mm::ReservedPages::deallocate_pages",
@@ -1643,7 +1646,7 @@ package FerrixMemoryRequirements {
                 it: at the new address its first page and the string across the
                 boundary read as written and the old address reads nothing; shrunk
                 to one page and moved to a fixed address, it still reads its first
-                page as written.";
+                page as written. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_adopt_and_release, user/rehome_check.rs::check_a_move_reaches_the_pages).";
             attribute :>> parent = "H.MEM.1";
             attribute :>> unit = ("user::vmo::Vmo::adopt_pages",
                 "user::vmo::Vmo::release_moved");
@@ -1732,7 +1735,7 @@ package FerrixMemoryRequirements {
                 source's byte after 1 call to the source, with 32 pages committed; a
                 private write to page 50, which nothing had read, reads back beside
                 the source's next byte, and the object's own page 50 still holds the
-                source's bytes.";
+                source's bytes. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_a_fault_fills_from_the_source).";
             attribute :>> parent = "H.MEM.8";
             attribute :>> unit = ("user::vmo::Vmo::fill_for_fault",
                 "user::vmo::Vmo::new_filled", "user::vmo::Vmo::insert_absent",
@@ -1761,7 +1764,7 @@ package FerrixMemoryRequirements {
                 (check_a_shared_file_mapping's earlier steps), truncated to one
                 page: page 0 still reads through the shared mapping, and each of the
                 other 3 pages is refused through the shared mapping and through the
-                private one, 3 of 3 each.";
+                private one, 3 of 3 each. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_a_cut_file_refuses_past_its_end).";
             attribute :>> parent = "H.TRAP.4";
             attribute :>> unit = ("user::vmo::Vmo::set_file_len",
                 "user::vmo::Vmo::past_file_end", "user::vmo::Vmo::commit_within",
@@ -1774,7 +1777,7 @@ package FerrixMemoryRequirements {
                 file grown again shows zeros there through every mapping.";
             attribute :>> criterion = "The file of L.user.39's criterion grown back
                 to two pages reads 4096 zero bytes at page 1 through the shared
-                mapping and through the private mapping that had copied it.";
+                mapping and through the private mapping that had copied it. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_a_file_grown_back_shows_zeros).";
             attribute :>> parent = "H.MEM.6";
             attribute :>> unit = ("user::vmo::Vmo::cut_mappings",
                 "user::vmo::Vmo::retire_runs", "user::vmo::forget_together",
@@ -1789,7 +1792,7 @@ package FerrixMemoryRequirements {
                 bytes.";
             attribute :>> criterion = "A tmpfs file of 3 pages and 123 bytes,
                 truncated into its second page and grown back, reads its first page
-                and 10 bytes as written and 0 in every byte after.";
+                and 10 bytes as written and 0 in every byte after. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_decommit_from).";
             attribute :>> parent = "H.MEM.6";
             attribute :>> unit = ("user::vmo::Vmo::decommit_from",
                 "user::vmo::Vmo::decommit_range", "user::vmo::Vmo::take_range",
@@ -1803,7 +1806,7 @@ package FerrixMemoryRequirements {
             attribute :>> criterion = "F_SEAL_WRITE on a memfd is refused EBUSY
                 while a writable shared mapping of it lives, refused EBUSY again
                 while only a fork child's copy of that mapping does, and accepted
-                once neither does.";
+                once neither does. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_the_may_write_count).";
             attribute :>> parent = "H.MEM.8";
             attribute :>> unit = ("user::vmo::Vmo::raise_shared_may_write",
                 "user::vmo::Vmo::lower_shared_may_write",
@@ -1852,7 +1855,7 @@ package FerrixMemoryRequirements {
                 itself.";
             attribute :>> criterion = "map_anonymous at address 0 is refused; an
                 mmap hinted at 0x10 is placed at or above 64 KiB; a MAP_FIXED mmap at
-                64 KiB lands there.";
+                64 KiB lands there. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_the_floor).";
             attribute :>> parent = "H.MEM.3";
             attribute :>> unit = ("user::space::AddressSpace::new",
                 "user::space::AddressSpace::map_anonymous",
@@ -2068,7 +2071,7 @@ package FerrixMemoryRequirements {
                 and execute permissions and keep whether it is shared.";
             attribute :>> criterion = "A memfd mapped shared and read-write and
                 protected read-write again is written through the mapping: the
-                byte is in the file (the memfd line).";
+                byte is in the file (the memfd line). And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_protect_keeps_shared).";
             attribute :>> parent = "H.MEM.16";
             attribute :>> unit = "user::space::AddressSpace::protect";
         }
@@ -2079,7 +2082,7 @@ package FerrixMemoryRequirements {
                 nothing.";
             attribute :>> criterion = "A memfd's page mapped shared with PROT_WRITE
                 alone reads what the file holds (the memfd line), while a read
-                of a PROT_NONE region is still refused (L.user.53).";
+                of a PROT_NONE region is still refused (L.user.53). And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_a_write_only_region_reads).";
             attribute :>> parent = "H.MEM.1";
             attribute :>> unit = ("user::space::AddressSpace::fault",
                 "user::space::permits");
@@ -2263,7 +2266,7 @@ package FerrixMemoryRequirements {
                 dmabuf install of a memfd's VMO, its handle holding READ, WRITE,
                 MAP and TRANSFER, is refused INVALID_ARGS, and one of a VMO from
                 vmo_create is installed; with is_anonymous answering true for
-                every VMO, stage 10 fails naming the memfd's dmabuf.";
+                every VMO, stage 10 fails naming the memfd's dmabuf. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_is_anonymous).";
             attribute :>> parent = "H.MEM.1";
             attribute :>> unit = "user::vmo::Vmo::is_anonymous";
         }
@@ -2289,7 +2292,7 @@ package FerrixMemoryRequirements {
                 ARMv7-A the same answer is refused, the program's mmap EIO and
                 the VMO unchanged; on every machine a memfd's VMO and a VMO an
                 address space already maps are refused the same way. With the
-                anonymous test or the mappers' test dropped, the boot panics.";
+                anonymous test or the mappers' test dropped, the boot panics. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_make_combining).";
             attribute :>> parent = ("H.MEM.1", "H.MEM.15");
             attribute :>> unit = ("user::vmo::Vmo::make_combining",
                 "user::vmo::Vmo::is_combining", "arch::x86_64::framebuffer::user_combining");
@@ -2364,7 +2367,7 @@ package FerrixMemoryRequirements {
                 four coherent touches; vmo_read of the VMO is BAD_STATE. With
                 resolve's write-combining choice, the coherent touch or
                 vmo_copy's refusal dropped, the boot panics. The flush's effect
-                is argued, since QEMU models no cache.";
+                is argued, since QEMU models no cache. And with kernel objects alone, on every profile, the `item` line (syscall/rehome_check.rs::check_a_combining_object).";
             attribute :>> parent = ("H.MEM.1", "H.MEM.15");
             attribute :>> unit = ("user::vmo::Vmo::commit", "user::vmo::Vmo::commit_run",
                 "user::vmo::flush_frame", "user::vmo::Vmo::flush_if_combining",
@@ -2457,7 +2460,7 @@ package FerrixMemoryRequirements {
                 back at the new address, the old address is unreadable and the
                 fourth page reads 0; shrunk to one page in place it keeps the first
                 page's string and its tail is unreadable; moved to the old address
-                with MREMAP_FIXED it lands there with the string.";
+                with MREMAP_FIXED it lands there with the string. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_remap).";
             attribute :>> parent = ("H.MEM.1", "H.MEM.6");
             attribute :>> unit = ("user::space::AddressSpace::remap",
                 "user::space::remap_object", "user::space::remap_target",
@@ -2563,7 +2566,7 @@ package FerrixMemoryRequirements {
                 object names it by.";
             attribute :>> criterion = "A parent waiting without FUTEX_PRIVATE_FLAG on a
                 MAP_SHARED word is not woken by its fork child's private-keyed wake
-                of the same word and is woken by the child's shared wake.";
+                of the same word and is woken by the child's shared wake. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_shared_object_at).";
             attribute :>> parent = "H.MEM.16";
             attribute :>> unit = "user::space::AddressSpace::shared_object_at";
         }
@@ -2672,7 +2675,7 @@ package FerrixMemoryRequirements {
                 and keep the pages' contents.";
             attribute :>> criterion = "After mprotect of a written page to read-only
                 the page does not translate, a copy into it is refused, and a copy
-                out of it reads what was written.";
+                out of it reads what was written. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_protect_takes_translations_out).";
             attribute :>> parent = "H.MEM.1";
             attribute :>> unit = ("user::space::AddressSpace::protect",
                 "user::space::AddressSpace::begin_shootdown",
@@ -2708,7 +2711,7 @@ package FerrixMemoryRequirements {
                 writable a range reaching a shared file mapping that may not write its
                 file, before changing anything.";
             attribute :>> criterion = "mprotect to read-write of a shared read-only
-                mapping of a file opened read-only answers EACCES.";
+                mapping of a file opened read-only answers EACCES. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_protect_refuses_an_unwritable_mapping).";
             attribute :>> parent = "H.MEM.1";
             attribute :>> unit = "user::space::AddressSpace::protect";
         }
@@ -2753,7 +2756,7 @@ package FerrixMemoryRequirements {
             attribute :>> criterion = "A file of 2 pages and 100 bytes, mapped 4 pages
                 shared and 4 private and cut to 1 page: page 0 still reads, pages 1
                 to 3 are refused in each mapping, 3 of 3 and 3 of 3; grown back to 2
-                pages, page 1 reads 0 in both.";
+                pages, page 1 reads 0 in both. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_a_cut_file_refuses_past_its_end, user/rehome_check.rs::check_a_file_grown_back_shows_zeros).";
             attribute :>> parent = ("H.MEM.1", "H.MEM.6");
             attribute :>> unit = ("user::space::commit_page",
                 "user::space::AddressSpace::fault_private_file",
@@ -2769,7 +2772,7 @@ package FerrixMemoryRequirements {
             attribute :>> criterion = "A shared mapping of a file of 2 pages and 100
                 bytes shows those bytes and zeros to the end of the third page; bytes
                 written through it are what the file reads back, and bytes written
-                to the file are what it shows.";
+                to the file are what it shows. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_a_shared_mapping_is_the_file).";
             attribute :>> parent = "H.MEM.1";
             attribute :>> unit = ("user::space::AddressSpace::map_file",
                 "user::space::AddressSpace::add_file", "user::space::file_placement",
@@ -2784,7 +2787,7 @@ package FerrixMemoryRequirements {
             attribute :>> criterion = "The private mapping shows the file's first page;
                 a write through it and a read() into it each show in it and in
                 neither the file nor the shared mapping; a write to the file shows
-                through a page it never copied and not through one it did.";
+                through a page it never copied and not through one it did. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_a_private_mapping_keeps_its_copies).";
             attribute :>> parent = "H.MEM.8";
             attribute :>> unit = ("user::space::AddressSpace::map_file",
                 "user::space::AddressSpace::add_file",
@@ -2799,7 +2802,7 @@ package FerrixMemoryRequirements {
                 the parent nor the file.";
             attribute :>> criterion = "A fork child reads the parent's private copy;
                 its write into a page the parent copied before the fork is seen by
-                neither the parent nor the file.";
+                neither the parent nor the file. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_a_fork_keeps_private_copies_apart).";
             attribute :>> parent = "H.MEM.8";
             attribute :>> unit = ("user::space::AddressSpace::fork",
                 "user::space::attach_child",
@@ -2827,7 +2830,7 @@ package FerrixMemoryRequirements {
             attribute :>> criterion = "A fixed read-execute file mapping lands at its
                 address, shows the file's first page and refuses a write; a fixed
                 read-write one lands next to it, takes a write, and after mprotect to
-                read-only keeps it and refuses the next write.";
+                read-only keeps it and refuses the next write. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_the_loader_pattern).";
             attribute :>> parent = ("H.MEM.1", "H.MEM.18");
             attribute :>> unit = ("user::space::AddressSpace::map_file",
                 "user::space::file_placement",
@@ -3044,7 +3047,7 @@ package FerrixMemoryRequirements {
             attribute :>> criterion = "With an eight-page file on the stage 12 disk all
                 in the cache, a read-only mapping of pages 2 to 5 counts exactly 4
                 file pages and no others; a private mapping of page 0, written,
-                counts 1 anonymous page and no file page.";
+                counts 1 anonymous page and no file page. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_a_disk_file_counts_as_a_file).";
             attribute :>> parent = "H.MEM.9";
             attribute :>> unit = ("user::space::AddressSpace::resident_split",
                 "user::vmo::Vmo::is_disk_file");
@@ -3472,6 +3475,23 @@ package FerrixMemoryRequirements {
             attribute :>> unit = ("user::vmo::Vmo::writeback_begin",
                 "user::vmo::Vmo::writeback_end", "user::vmo::Vmo::decommit_clean",
                 "user::vmo::Vmo::dirty_runs");
+        }
+        requirement <'L.user.157'> theFaultingJobPaysThroughItsTicket : ItemLowLevel {
+            attribute :>> statement = "Each page request shall carry a ticket the kernel
+                issued for the opening thread's process and job, adoptable only through
+                its pager's handle with PAGER and only while the request is
+                outstanding; pages the adopted pager commits and supplies shall stay
+                charged to that job, on its reservation where it has one. At the
+                job's object limit the fault shall end SIGBUS or FAULT with no pager
+                asked; a pager may spend the job's limit and reservation while a
+                request is open.";
+            attribute :>> criterion = "Stage 9's pager check, case o: the page is the
+                faulting job's alone and drawn from its reservation, the pager's job
+                paying nothing; another pager's handle, a handle without PAGER and a
+                request ended all adopt nothing.";
+            attribute :>> parent = "H.MEM.22";
+            attribute :>> unit = ("object::pager::PagerCore::adoptable_ticket",
+                "object::ticket::issue_for", "syscall::native::adopt_ticket");
         }
         requirement <'L.user.156'> aPagersCloseEndsItsFaults : ItemLowLevel {
             attribute :>> statement = "The close of a pager's handle, or DETACH,

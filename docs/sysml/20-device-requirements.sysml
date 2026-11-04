@@ -256,7 +256,7 @@ package FerrixDeviceRequirements {
                 placement as the node holds them.";
             attribute :>> criterion = "For the first published PCI function,
                 device_info's location, vendor and device, counts and virtio
-                blocks agree with the node and with enumeration.";
+                blocks agree with the node and with enumeration. And with kernel objects alone, on every profile, the `item dev` line (syscall/rehome_check.rs::check_described).";
             attribute :>> parent = "H.DMA.5";
             attribute :>> unit = ("device::DeviceNode::describe", "device::VirtioBlocks::of");
         }
@@ -573,7 +573,7 @@ package FerrixDeviceRequirements {
             attribute :>> statement = "device_quiesce shall be refused with
                 ACCESS_DENIED through a device handle without MANAGE.";
             attribute :>> criterion = "A quiesce through a handle to the device
-                without MANAGE answers ACCESS_DENIED.";
+                without MANAGE answers ACCESS_DENIED. And with kernel objects alone, on every profile, the `item dev` line (syscall/rehome_check.rs::check_quiesce).";
             attribute :>> parent = "H.OBJ.2";
             attribute :>> unit = "syscall::native::device_quiesce";
         }
@@ -581,7 +581,7 @@ package FerrixDeviceRequirements {
             attribute :>> statement = "A quiesce shall answer BAD_STATE, changing
                 nothing, while a driver serves the device.";
             attribute :>> criterion = "A quiesce of the device a running driver
-                serves answers BAD_STATE, and the driver goes on serving it.";
+                serves answers BAD_STATE, and the driver goes on serving it. And with kernel objects alone, on every profile, the `item dev` line (syscall/rehome_check.rs::check_quiesce), against a server of the check's own.";
             attribute :>> parent = "H.DEV.2";
             attribute :>> unit = "syscall::native::quiesce_while";
         }
@@ -592,7 +592,7 @@ package FerrixDeviceRequirements {
                 success.";
             attribute :>> criterion = "A quiesce the instant a block driver's
                 handles close answers success, and the next driver is given a ring
-                on the device.";
+                on the device. And with kernel objects alone, on every profile, the `item dev` line (syscall/rehome_check.rs::check_quiesce), against a server of the check's own that first answers still waiting.";
             attribute :>> parent = "H.DEV.4";
             attribute :>> unit = "syscall::native::quiesce_while";
         }
@@ -1138,7 +1138,7 @@ package FerrixDeviceRequirements {
                 drivers.slice and every job beneath it read as sealed. A boot
                 exercises drivers_job's first path, the named child, only; the
                 second and third, for a name taken or no memory, rest on their
-                argued coverage entries.";
+                argued coverage entries. And with kernel objects alone, on every profile, the `drv jobs` line (syscall/rehome_check.rs::check_drivers_sealed), which fails a missing slice on a boot whose devmgr bound a driver and makes one on a boot with none.";
             attribute :>> parent = "H.OBJ.22";
             attribute :>> unit = ("discovery::devmgr::drivers_job",
                 "object::job::Job::new_root_as");

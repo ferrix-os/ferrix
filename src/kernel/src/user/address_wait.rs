@@ -1041,6 +1041,7 @@ pub mod sabotage {
     /// # Errors
     ///
     /// `Err(())` when memory is refused.
+    #[expect(clippy::result_unit_err, reason = "a check's hook: no error to name")]
     pub fn list_stale_entry(key: Key) -> Result<StaleEntry, ()> {
         let bucket = key.bucket();
         let mut buckets = fallible::try_with_capacity(2).map_err(|_| ())?;

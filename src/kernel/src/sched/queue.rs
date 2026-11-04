@@ -172,6 +172,12 @@ pub struct Fired {
     pub len: usize,
 }
 
+impl Default for Fired {
+    fn default() -> Fired {
+        Fired::new()
+    }
+}
+
 impl Fired {
     /// None.
     pub const fn new() -> Fired {

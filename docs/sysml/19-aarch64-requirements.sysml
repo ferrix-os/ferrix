@@ -952,7 +952,7 @@ package FerrixAarch64Requirements {
              * (docs/microkernel/K4.md section 3.2). */
 
         requirement <'L.aarch64.66'> aSupervisorsRegistersAreAProgramsOnly : ItemLowLevel {
-            attribute :>> statement = "UserContext::from_supervisor shall refuse,
+            attribute :>> statement = "UserContext::with_supervisors shall refuse,
                 changing nothing, registers whose PSTATE is not the condition flags
                 over USER_SPSR exactly, or whose pc or sp is not a user address, or
                 whose pc is not aligned; the read it pairs with shall show PSTATE
@@ -961,7 +961,7 @@ package FerrixAarch64Requirements {
                 SS, IL, AArch32 state, a kernel pc, a misaligned pc and a kernel sp
                 are refused; the N flag and a general register are taken.";
             attribute :>> parent = ("H.TRAP.20", "H.TRAP.9");
-            attribute :>> unit = ("arch::aarch64::signal::UserContext::from_supervisor",
+            attribute :>> unit = ("arch::aarch64::signal::UserContext::with_supervisors",
                 "arch::aarch64::signal::UserContext::supervised");
         }
     }

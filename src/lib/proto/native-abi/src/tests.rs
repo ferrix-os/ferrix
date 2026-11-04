@@ -117,11 +117,6 @@ fn execute_is_never_given_with_a_new_vmo() {
     );
     assert!(Rights::SPACE.contains(Rights::EXECUTE | Rights::MAP));
     assert!(Rights::EXECUTE.is_known());
-    assert!(
-        !Rights(1 << 8).is_known(),
-        "bit 8 is K12's, not yet defined"
-    );
-    assert!(!Rights(1 << 9).is_known(), "bit 9 is K3's, not yet defined");
     assert_eq!(
         Requested::Exactly(Rights::READ | Rights::EXECUTE).resolve(Rights::VMO),
         None,
@@ -186,11 +181,6 @@ fn a_rights_request_with_an_unknown_bit_is_refused() {
         Requested::from_register(u64::from(Rights::ALL.0)),
         Some(Requested::Exactly(Rights::ALL)),
         "every defined right"
-    );
-    assert_eq!(
-        Requested::from_register(0x200),
-        None,
-        "bit 9 is not a right"
     );
     assert_eq!(
         Requested::from_register(0x100),
@@ -533,7 +523,6 @@ fn the_pager_calls_sit_where_they_were_allotted() {
     assert_eq!(nr::decode(0x1076), Some(NativeCall::PagerSupply));
     assert_eq!(nr::decode(0x1077), Some(NativeCall::PagerOp));
     assert_eq!(nr::decode(0x1078), Some(NativeCall::PagerQueryDirty));
-    assert_eq!(nr::decode(0x1079), None, "past K3's block");
 }
 
 /// A pager handle can be moved and never duplicated, and its right is bit 9,

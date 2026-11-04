@@ -401,13 +401,11 @@ impl TimerCore {
         loop {
             let next = {
                 let mut state = self.state.lock();
-                if let Some(port) = kept.take() {
-                    // NOALLOC: room for every registration was made with the
-                    // timer, and each is delivered once.
-                    if let Err(port) = fallible::push_within(&mut state.spent, port) {
-                        kept = Some(port);
-                    }
-                }
+                // NOALLOC: room for every registration was made with the
+                // timer, and each is delivered once.
+                kept = kept
+                    .take()
+                    .and_then(|port| fallible::push_within(&mut state.spent, port).err());
                 let next = state.observers.next_fired();
                 if next.is_none() {
                     state.delivering = false;

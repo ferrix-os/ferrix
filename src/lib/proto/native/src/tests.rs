@@ -1086,6 +1086,10 @@ fn an_address_query_tells_a_short_buffer_from_a_complete_one() {
 // ---------------------------------------------------------------------------
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one line for each call in the table, nothing to split"
+)]
 fn every_call_in_the_native_table_has_a_wrapper() {
     let sys = Recorder::default();
     let handle = || owned(&sys, 1);
@@ -1162,6 +1166,22 @@ fn every_call_in_the_native_table_has_a_wrapper() {
     let _ = pending::audit_read(&sys, &handle(), 0, 0, &mut []);
     let _ = pending::cpu_service(&sys, &handle(), 1, false);
     let _ = pending::memory_scrub(&sys, &handle(), 16);
+    let _ = pending::pager_create(&sys, &handle(), 0, &[0; 8]);
+    let _ = pending::pager_create_vmo(&sys, &handle(), &[0; 8]);
+    let _ = pending::pager_supply(&sys, &handle(), &handle(), &handle(), &[0; 8]);
+    let _ = pending::pager_op(&sys, &handle(), &handle(), 0, &[0; 8]);
+    let _ = pending::pager_query_dirty(&sys, &handle(), &handle(), &[0; 8], &mut [0; 8], 1);
+    let _ = pending::timer_create(&sys, 0);
+    let _ = pending::timer_set(
+        &sys,
+        &handle(),
+        types::TimerSpec {
+            deadline: 1,
+            slack: 0,
+        },
+        true,
+    );
+    let _ = pending::timer_cancel(&sys, &handle());
     let _ = port.descriptor(true);
     let _ = interrupt.bind(&port, 0);
     let _ = interrupt.ack();

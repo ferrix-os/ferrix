@@ -7,6 +7,16 @@ Moved out of [`docs/BACKLOG.md`](../BACKLOG.md) on 2026-10-16. A decision is rec
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-11-03 (customer)** **A tiny kernel in `fast` and `max`, compared,
+  by compile flags only**: all of it from one source tree, `desktop` a hybrid
+  and `present` as it is, no forks and no boot option choosing the shape. So
+  "removed", "retired", "deleted" and "the flip" in `MICROKERNEL.md` M5 and M6
+  mean compiled out of `personality=user` builds; the same `ferrix-kernel-load`
+  source builds into ring 0 for `desktop` and into `linuxd` for `fast` and `max`.
+  Softened the same evening: "don't delete" is a guideline; kernel code that no
+  profile that still builds needs may be deleted, through the consultant.
+  Deleting what the hybrid uses may come later, only if the comparison shows the
+  hit from moving it out is minimal.
 * **2026-11-03 (customer)** **The microkernel run**: five agents, each with its
   own consultant, this session as product owner, until 13:00 on 2026-11-04,
   for "everything that makes ferrix a microkernel". The certification streams

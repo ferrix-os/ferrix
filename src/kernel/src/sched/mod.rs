@@ -50,6 +50,7 @@ mod mark_check;
 mod preempt;
 mod preempt_check;
 mod queue;
+pub mod rehome_check;
 mod slice_check;
 mod task;
 pub mod trip;
@@ -89,7 +90,6 @@ pub use preempt::{preempt_disable, preempt_enable};
 /// answers for a thread that asked for none of its own.
 pub const BASE_SLICE_NS: u64 = SLICE_NS;
 pub use queue::Due;
-#[cfg(ferrix_checks = "on")]
 #[doc(hidden)]
 pub use queue::{FIRE_BATCH, Fired, take_next};
 pub(crate) use queue::{MIN_SLICE_NS, SLICE_NS};

@@ -11,6 +11,7 @@
 mod check;
 pub mod console;
 pub mod cpu;
+pub(crate) mod rehome_check;
 pub use cpu::dma_barrier;
 pub mod exception_check;
 pub(crate) mod mmio;

@@ -335,15 +335,16 @@ pub(crate) type WaitUnserved =
     fn(node: &Arc<DeviceNode>, cancelled: &dyn Fn() -> bool) -> Result<(), StillServed>;
 
 /// What a quiesce waits out, in the order it was registered: the block and
-/// net rings, the display, the renderer, input and audio, with room for two
+/// net rings, the display, the renderer, input, audio and the chardev core;
+/// on a boot whose checks run, `syscall::rehome_check`'s; and room for four
 /// more.
-static SERVERS: Hooks<Server, 8> = Hooks::new();
+static SERVERS: Hooks<Server, 12> = Hooks::new();
 
 /// Have a quiesce wait out `server`.
 ///
 /// # Errors
 ///
-/// [`Full`] past eight, which is more subsystems serving devices than the
+/// [`Full`] past twelve, which is more subsystems serving devices than the
 /// item expects.
 pub fn register_server(server: &'static Server) -> Result<(), Full> {
     SERVERS.register(server)
@@ -452,6 +453,10 @@ fn record_call(
 }
 
 /// Answer `call` for `caller`: see [`dispatch`].
+#[allow(
+    clippy::too_many_lines,
+    reason = "one arm for each native call, the table it is: nothing to split"
+)]
 fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Errno> {
     let process = caller.core();
     match call {
@@ -2886,12 +2891,36 @@ fn issue_ticket(process: &Process, channel: Handle, out: u64) -> Result<usize, E
     Ok(0)
 }
 
-/// `charge_ticket(ADOPT)`: the live ticket `id` the other end of `channel`
-/// issued becomes the calling task's adoption, once its issuer is written
-/// to `out`, so a fault there adopts nothing.
-fn adopt_ticket(process: &Process, channel: Handle, id: u64, out: u64) -> Result<usize, Errno> {
-    let endpoint = process.with_handles(|table| channel_in(table, channel, Rights::READ))?;
-    let adopted = endpoint.adoptable_ticket(id).ok_or(status::BAD_STATE)?;
+/// What `charge_ticket(ADOPT)` looks in.
+enum Either {
+    /// An outstanding request's ticket.
+    Pager(Arc<Pager>),
+    /// A ticket the channel's other end issued.
+    Channel(Arc<Endpoint>),
+}
+
+/// `charge_ticket(ADOPT)`: the live ticket `id` the other end of a channel
+/// issued, or an outstanding request's of a pager (`docs/microkernel/K3.md`
+/// §2.6), becomes the calling task's adoption, once its issuer is written to
+/// `out`, so a fault there adopts nothing.
+fn adopt_ticket(process: &Process, end: Handle, id: u64, out: u64) -> Result<usize, Errno> {
+    // The object out first, then the handle table let go: a registry's lock is
+    // never taken under the table's (ledger 2925 (6), 6261 S1).
+    let held = process.with_handles(|table| {
+        let (object, rights) = table.get(end).map_err(table_error)?;
+        match object {
+            Object::Pager(pager) if rights.contains(Rights::PAGER) => {
+                Ok(Either::Pager(Arc::clone(pager)))
+            }
+            Object::Pager(_) => Err(status::ACCESS_DENIED),
+            _ => channel_in(table, end, Rights::READ).map(Either::Channel),
+        }
+    })?;
+    let adopted = match held {
+        Either::Pager(pager) => pager.core().adoptable_ticket(id),
+        Either::Channel(endpoint) => endpoint.adoptable_ticket(id),
+    }
+    .ok_or(status::BAD_STATE)?;
     let issuer = adopted.issuer();
     let mut bytes = [0_u8; size_of::<types::TicketIssuer>()];
     for (to, word) in bytes

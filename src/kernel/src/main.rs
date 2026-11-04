@@ -511,6 +511,7 @@ fn release_boot_copies() {
 /// ran, and the unchecked one, which no boot test accepts, when they were
 /// skipped.
 fn say_booted() {
+    syscall::rehome_check::stage_drivers_sealed();
     require_hooks_disarmed();
     panic::mark_booted();
     audit::record(
@@ -1076,6 +1077,9 @@ fn check_devices(view: &BootView<'_>) {
         #[cfg(ferrix_linux_abi = "on")]
         check_config_window();
     }
+    // The native calls' answers on these nodes, before anything serves them
+    // (`docs/microkernel/B5.md`).
+    syscall::rehome_check::stage_on_devices();
 }
 
 #[cfg(ferrix_linux_abi = "on")]
@@ -1328,7 +1332,15 @@ fn start_scheduler(cpus: &'static smp::Topology) {
         "  stage 5  {} threads scheduled fairly across {} processors",
         report.threads, report.processors,
     );
+    checks_under_the_scheduler(cpus);
+}
+
+/// What needs a scheduler that has passed its own check: the memory and objects
+/// a process is built from, with no process and no file system, in every shape
+/// of the kernel (`docs/microkernel/B5.md`).
+fn checks_under_the_scheduler(cpus: &'static smp::Topology) {
     shootdowns_under_the_scheduler(cpus);
+    syscall::rehome_check::stage_core_objects();
 }
 
 /// Stage 4's shootdown checks that need the scheduler: a waiter that moves,
@@ -1696,6 +1708,7 @@ fn report_clocks_and_power(view: &BootView<'_>, clocks: &irq::Report) {
     // here in bring-up order: before device enumeration asks board support for
     // its peripherals, before `devmgr` reads its drivers, before anything is
     // mounted that a power-off must commit, and long before init.
+    syscall::rehome_check::stage_shrinker();
     register_load(view);
     power::init(view);
     #[cfg(ferrix_linux_abi = "on")]

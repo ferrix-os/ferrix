@@ -242,23 +242,24 @@ fn adjust(slot: &Slot, change: impl FnOnce(&Slot)) {
     });
 }
 
-/// Bind a free entry, of size 0: one with no owner whose drawn frames are
-/// only the empty pages its own heap keeps, `kept[at]` (`u64::MAX` for a heap
-/// still holding objects). Under the frame allocator's lock. `None` when every
-/// entry is bound or still draining.
-///
-/// A heap keeps one empty page per size class rather than give it back
-/// (`ferrix_heap`), so an entry whose objects are all freed may still have
-/// those pages drawn; they stay tagged with it and serve the next job it is
-/// bound for, from inside its size.
-pub(super) fn bind(kept: &[u64; MOST]) -> Option<Entry> {
-    let at = SLOTS.iter().zip(kept).position(|(slot, &kept)| {
-        !slot.bound.load(Ordering::Relaxed) && slot.drawn.load(Ordering::Relaxed) == kept
+/// Bind a free entry: unbound with nothing drawn from it. Its heap's kept pages
+/// are given back before this (`reservation_bind`), so that what is drawn is the
+/// new job's alone and a reservation of any size is whole (ledger 6260).
+pub(super) fn bind() -> Option<Entry> {
+    let at = SLOTS.iter().position(|slot| {
+        !slot.bound.load(Ordering::Relaxed) && slot.drawn.load(Ordering::Relaxed) == 0
     })?;
     let slot = SLOTS.get(at)?;
     slot.size.store(0, Ordering::Relaxed);
     slot.bound.store(true, Ordering::Relaxed);
     Entry::try_from(at + 1).ok()
+}
+
+/// Whether the slot at `at` is bound.
+pub(super) fn is_bound(at: usize) -> bool {
+    SLOTS
+        .get(at)
+        .is_some_and(|slot| slot.bound.load(Ordering::Relaxed))
 }
 
 /// Unbind `entry`: nothing promised by it from now on, and it drains

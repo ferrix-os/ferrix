@@ -71,6 +71,9 @@ const PSTATE_NZCV: u64 = 0xF000_0000;
 pub struct UserContext(TrapFrame);
 
 impl UserContext {
+    /// Whether a breakpoint leaves the pc after the instruction: `brk` leaves the pc at itself.
+    pub(crate) const BREAKPOINT_LEAVES_PC_AFTER: bool = false;
+
     /// The registers a trap from EL0 saved.
     pub const fn from_trap(frame: &TrapFrame) -> UserContext {
         UserContext(*frame)
@@ -117,7 +120,7 @@ impl UserContext {
 
     /// The registers as a supervisor reads them (`docs/microkernel/K4.md`
     /// §3.2): `PSTATE` only as a program may hold it, the condition flags
-    /// over EL0t, so that a set read and written back unchanged is accepted.
+    /// over `EL0t`, so that a set read and written back unchanged is accepted.
     pub(crate) const fn supervised(&self) -> ExceptionRegisters {
         ExceptionRegisters {
             x: self.0.x,
@@ -133,10 +136,10 @@ impl UserContext {
     ///
     /// `restore_signal_frame`'s rule, from the same definitions, refusing
     /// where it masks: `PSTATE` is the condition flags over `USER_SPSR`
-    /// exactly, so EL0t with `D`, `A` and `F` as a program runs and never
+    /// exactly, so `EL0t` with `D`, `A` and `F` as a program runs and never
     /// `SS`, `IL`, `I` masked or another exception level; and, stricter than
     /// `sigreturn`, `pc` and `sp` are user addresses and `pc` is aligned.
-    pub(crate) fn from_supervisor(
+    pub(crate) fn with_supervisors(
         &self,
         written: &ExceptionRegisters,
     ) -> Result<UserContext, BadFrame> {
