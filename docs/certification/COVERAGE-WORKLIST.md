@@ -110,6 +110,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | the dentry and inode caches' reclaim, stage 13's follow-on (docs/CGROUPS.md section 10, L.object.186; the consultant's review recorded in the landing's commit) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet, and the lines of user/cache.rs's reclaim (split into reclaim and reclaim_pages) and reclaim_asked it changed. | Reached by stage 13's reclaim line on every test-boot: user::cache::reclaim's call of the shrinker, shrink, install_shrinker, Reclaimed::gave and bytes, and reclaim_asked's count in bytes (and ferrix-vfs's Namespace::shrink and shrink_paged, a library the host tests also run). Not reached: shrink before a shrinker is installed, which answers nothing. |
 | vmo_pin's PIN_BLOCKS, the Intel GPU's 2 MiB blocks (docs/INTEL-GPU.md section 14.3, L.object.254-258; consultant ledger 5088) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet, and the lines of syscall/native.rs's vmo_pin option checks it changed. | Reached by stage 10's PIN_BLOCKS check on every test-boot with a PCI function (object/blocks_check.rs): vmo_pin's option-word refusals, its budget check and pre-commit, user::vmo::Vmo::commit_blocks's probe, ask, fallback, race and file arms, and run_block_hook with and without a hook armed. Not reached: commit_blocks's arm for a VMO bound to a file's length, and a commit_run refusal other than Committed and OutOfMemory (both covered by the file arm's early return). |
 | 2 MiB VT-d entries for a pin's aligned runs (docs/INTEL-GPU.md section 14.7, L.iommu.105-109; consultant ledger 5366) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet, and the lines of iommu.rs's map_all and unpin_waiting it changed (armv7a's argument for unpin_waiting's translated branch dropped with the line it named; it holds for take_down as it did). | Reached by stage 10's run check on every x86-64 VT-d test-boot (iommu/blocks_check.rs): map_all's run, fallback and block-refusal arms, starts_run, unwind, take_down's run and page arms, vtd::Unit::map_run, unmap_run, entry_span, sllps_2m and blocks, mm::map_io_run, unmap_io_run and io_entry_span, and Domain::pin_runs, entry_span and blocks_wiring. Not reached: a run's map refused other than AlreadyMapped (OutOfMemory, NotCleaned), a fallback whose run maps whole over an empty table (no product path leaves one), and take_down's refusal. On aarch64 and armv7a only take_down's page arm and the vtd() None arms run. |
+| K5, wait on a user address: the futex table lifted into the core (docs/microkernel/K5.md; ledger 2498 (1), 5854) | x86_64, aarch64, armv7a | new file, measured one boot per architecture and argued in K5.md's table, not yet in the suite's evidence. | user/address_wait.rs: 178 of 186 on x86-64, 170 of 177 on AArch64, 177 of 184 on ARMv7-A; the next `cargo xtask coverage` takes these in and the arguments move to coverage-argued-<arch>.json. |
 
 ---
 
@@ -174,7 +175,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `syscall/native.rs` | `item` | 110 | 6 | 8 | 2 | 2315, 2897 |
+| `syscall/native.rs` | `item` | 110 | 6 | 8 | 2 | 2321, 2903 |
 | `syscall/program.rs` | `item` | 6 | 4 | 2 | 2 | 89, 133 |
 | `syscall/mod.rs` | `item` | 1 | 0 | 0 | 0 | - |
 
@@ -203,7 +204,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `main.rs` | `item` | 65 | 6 | 4 | 3 | 421, 887, 1576 |
+| `main.rs` | `item` | 65 | 6 | 4 | 3 | 421, 887, 1587 |
 
 ---
 

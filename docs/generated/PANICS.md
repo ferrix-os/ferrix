@@ -108,6 +108,7 @@ Causes are listed most likely first.
 | [FX-0908](#fx-0908) | a check's hook inside the item was still armed after stage 9 |
 | [FX-0909](#fx-0909) | the SMBIOS copy's acceptance took a forged copy, or refused a good one |
 | [FX-0910](#fx-0910) | A time namespace failed its self-check |
+| [FX-0911](#fx-0911) | the waits on a user address failed their self-check |
 | [FX-0913](#fx-0913) | the timer objects failed their self-check |
 | [FX-0917](#fx-0917) | an exception channel was attached where it must be refused, or refused where it must be attached |
 | [FX-0931](#fx-0931) | spaces and objects failed the check made of kernel objects alone |
@@ -2661,6 +2662,34 @@ alone (docs/NAMESPACES.md §12.1).
 See: src/kernel/src/fs/timens_check.rs; src/kernel/src/syscall/timens.rs;
 src/kernel/src/syscall/time.rs; src/kernel/src/syscall/vdso.rs;
 src/kernel/src/syscall/namespace.rs.
+
+<a id="fx-0911"></a>
+
+## FX-0911 — the waits on a user address failed their self-check
+
+`user::address_wait_check::run` (docs/microkernel/K5.md §6) drives the native
+calls `address_wait`, `address_wake`, `address_requeue` and `address_wait_any`
+between processes it builds. A wait must sleep while its word holds the value
+given and be woken by a wake of the same word, through a private key in its own
+space or a shared key by VMO and offset, whichever process and address or handle
+names it; a wake must rouse at most its count, oldest first, by bitset; a
+requeue must move waiters to a word in another bucket; a wait on many words must
+answer which; a deadline must end a wait and never early; an ending process must
+end its waits; a wait must be charged to its job and refused at its limit; and a
+bucket must give its room back. Without these, a program's locks and condition
+variables lose wakes or sleep for ever.
+
+1. `user::address_wait::list` stopped reading the word under its bucket's lock,
+   so a wake that came between the read and the listing was lost.
+2. `Key::new` or `Key::in_object` keyed a shared word by its address rather than
+   by its VMO and offset.
+3. A wake, requeue or leaving in `user::address_wait` stopped looking in the
+   bucket an entry is recorded in.
+4. The waiter's charge was dropped or the deadline not passed to the sleep.
+
+See: src/kernel/src/user/address_wait.rs;
+src/kernel/src/user/address_wait_check.rs; src/kernel/src/syscall/native.rs
+address_wait; docs/microkernel/K5.md.
 
 <a id="fx-0913"></a>
 
