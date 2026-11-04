@@ -166,6 +166,7 @@ members = [
 
     # Host-side build and test driver (`cargo xtask ...`).
     "tools/common/release/softsign",
+    "tools/common/vtier",
     "tools/common/xtask",
 ]
 # So a bare `cargo build` builds the host tool rather than trying to compile

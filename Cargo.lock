@@ -1208,6 +1208,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrix-vtier"
+version = "0.1.0"
+
+[[package]]
 name = "ferrix-x86-power"
 version = "0.1.0"
 dependencies = [

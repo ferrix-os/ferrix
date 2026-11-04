@@ -1,0 +1,17 @@
+[package]
+name = "ferrix-vtier"
+description = "A file system in GPU memory: gate slot 8's target directory, every block checksummed (docs/TEST-TIME.md)"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license.workspace = true
+publish = false
+
+[features]
+# A control's build: a trigger file named by VTIER_TEST_TRIGGER, outside the mount,
+# flips one stored bit or stalls the device, so each refusal can be seen firing.
+# Never in the installed binary: the status file says which this is.
+fault-inject = []
+
+[lints]
+workspace = true
