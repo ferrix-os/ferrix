@@ -71,6 +71,8 @@ members = [
     "src/lib/kernel/objects",
     "src/lib/drivers/display/modes",
     "src/lib/drivers/display/stm32-display",
+    "src/lib/drivers/model-derive",
+    "src/lib/drivers/registers",
     "src/lib/drivers/usb/usb-host",
     "src/lib/drivers/usb/usb-serial",
     "src/lib/drivers/usb/usb-device",
@@ -151,6 +153,9 @@ members = [
     "src/user/system/native/drivers/gpu/intel",
     "src/user/system/native/drivers/gpu/intel-fake",
     "src/user/system/native/drivers/console/vport",
+    "src/user/system/native/drivers/test/seconds",
+    "src/user/system/native/drivers/test/model-examples",
+    "src/user/system/native/platform",
     "src/user/system/native/devmgr",
     "src/user/system/native/drvupdated",
     "src/user/system/native/devmgr-events",
@@ -244,6 +249,9 @@ ferrix-netserve = { path = "src/lib/drivers/net/netserve" }
 ferrix-netlink = { path = "src/lib/network/netlink" }
 ferrix-rt = { path = "src/user/system/native/rt" }
 ferrix-driver = { path = "src/user/system/native/driver" }
+ferrix-driver-derive = { path = "src/lib/drivers/model-derive" }
+ferrix-registers = { path = "src/lib/drivers/registers" }
+ferrix-platform = { path = "src/user/system/native/platform" }
 ferrix-net-driver = { path = "src/user/system/native/drivers/net/virtio-net" }
 ferrix-yt6801-driver = { path = "src/user/system/native/drivers/net/yt6801" }
 ferrix-rtl8169-driver = { path = "src/user/system/native/drivers/net/rtl8169" }

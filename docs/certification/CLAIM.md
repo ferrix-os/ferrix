@@ -34,9 +34,14 @@
 >   `certification-item.json`'s `reference_configuration.architectures`).
 >   Every ARMv7-A image boots with `ferrix.unisolated`, and its rows are
 >   development rows, not claim evidence; the DK1 stays a development
->   board. *Ends* when an SMMU is driven on ARMv7-A and its rows boot
->   without the word: ARMv7-A then returns to both lists, by a decision of
->   the customer's, reviewed by the consultant.
+>   board. Under `personality=user` alone, since no hybrid publishes (ledger 5896 C.1), generic device-tree publication (`docs/DRIVER-MODEL.md`
+>   step 1, ledger 4475 D22) means the drivers of the DMA-capable peripherals
+>   it publishes there can reach all memory (on the STM32MP157 DMA1/DMA2/MDMA,
+>   SDMMC IDMA, USB, LTDC, ETH), and wherever firmware leaves RCC, SYSCFG,
+>   DDRCTRL, BSEC and DBGMCU non-secure their drivers hold the SoC's
+>   integrity (VULNERABILITY-ANALYSIS V-19). *Ends* when an SMMU is driven
+>   on ARMv7-A and its rows boot without the word: ARMv7-A then returns to
+>   both lists, by a decision of the customer's, reviewed by the consultant.
 
 The customer has named Ferrix's differentiator: run Linux software on a
 kernel that can be assured. That means unmodified Linux binaries (Chrome,

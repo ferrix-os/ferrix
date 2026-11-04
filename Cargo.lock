@@ -255,6 +255,7 @@ dependencies = [
  "ferrix-devmgr-events-proto",
  "ferrix-devmgr-proto",
  "ferrix-drvupdate-proto",
+ "ferrix-fdt",
  "ferrix-native-abi",
  "ferrix-netring",
  "ferrix-restart",
@@ -279,6 +280,7 @@ name = "ferrix-devmgr-proto"
 version = "0.1.0"
 dependencies = [
  "ferrix-blkring",
+ "ferrix-fdt",
  "ferrix-native-abi",
  "ferrix-netring",
 ]
@@ -304,12 +306,35 @@ version = "0.1.0"
 dependencies = [
  "ferrix-blkring",
  "ferrix-blkserve",
+ "ferrix-devmgr-proto",
+ "ferrix-driver-derive",
+ "ferrix-fdt",
  "ferrix-inputctl",
+ "ferrix-linux-abi",
  "ferrix-native-abi",
+ "ferrix-registers",
  "ferrix-rt",
  "ferrix-virtio",
  "ferrix-virtio-blk",
  "ferrix-virtio-input",
+]
+
+[[package]]
+name = "ferrix-driver-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "ferrix-driver-model-examples"
+version = "0.1.0"
+dependencies = [
+ "ferrix-driver",
+ "ferrix-platform",
+ "ferrix-rt",
 ]
 
 [[package]]
@@ -806,6 +831,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrix-platform"
+version = "0.1.0"
+dependencies = [
+ "ferrix-driver",
+]
+
+[[package]]
 name = "ferrix-pong"
 version = "0.1.0"
 dependencies = [
@@ -834,6 +866,13 @@ version = "0.1.0"
 dependencies = [
  "qrcode",
  "rqrr",
+]
+
+[[package]]
+name = "ferrix-registers"
+version = "0.1.0"
+dependencies = [
+ "ferrix-driver-derive",
 ]
 
 [[package]]
@@ -976,6 +1015,15 @@ version = "0.1.0"
 [[package]]
 name = "ferrix-sysfs"
 version = "0.1.0"
+
+[[package]]
+name = "ferrix-test-seconds-driver"
+version = "0.1.0"
+dependencies = [
+ "ferrix-driver",
+ "ferrix-platform",
+ "ferrix-rt",
+]
 
 [[package]]
 name = "ferrix-usb-device"

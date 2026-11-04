@@ -44,7 +44,7 @@ use ferrix_blkring::control::VMO_RIGHTS;
 use ferrix_blkring::geometry::{Device as Geometry, DeviceFlags};
 use ferrix_blkserve::Disk;
 use ferrix_driver::tree::{self, Binding};
-use ferrix_driver::{Driver, Step, Stopped, Stuck, block};
+use ferrix_driver::{Probe, Step, Stopped, Stuck, block};
 use ferrix_native_abi::rights::Requested;
 use ferrix_native_abi::types::TREE_STM32_SDMMC;
 use ferrix_rt::native::handle::{Deadline, OwnedHandle};
@@ -187,7 +187,7 @@ impl fmt::Debug for Sdmmc {
     }
 }
 
-impl Driver for Sdmmc {
+impl Probe for Sdmmc {
     type Device = Device;
 
     fn probe(device: Device) -> Result<Self, Step> {

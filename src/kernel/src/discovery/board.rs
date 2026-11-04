@@ -1,6 +1,7 @@
 //! The boards' device-tree bindings: the registry board support fills at
 //! bring-up, and the [`Finder`] that publishes a node for each binding the
-//! tree has.
+//! tree has -- and after them, every other node the kernel does not use, as
+//! a generic node (`docs/DRIVER-MODEL.md` §3, `discovery::tree`).
 //!
 //! How the list is filled: board support -- `platform/`, which is load, not
 //! core -- calls [`register_board`] at bring-up with a static
@@ -18,6 +19,9 @@ use ferrix_fdt::{Fdt, GicInterrupt};
 use crate::device::{DeviceNode, DmaShape, Location, Reserved};
 use crate::discovery::description::{self, Description};
 use crate::discovery::finder::{Context, Failed, Finder, OutOfMemory};
+#[cfg(ferrix_personality = "user")]
+use crate::discovery::tree::Ownership;
+use crate::discovery::tree::{self, GenericReport};
 use crate::fallible;
 use crate::hooks::{Full, Hooks};
 
@@ -147,13 +151,18 @@ fn board_node(
 }
 
 /// A node for every registered binding whose peripheral the tree has, in
-/// the order they registered.
+/// the order they registered; then a generic node for every other enabled
+/// node that has a `compatible` and that the kernel does not use. Both are
+/// one finder so that the bindings' nodes are found first and the generic
+/// walk never publishes one of them again (`L.device.65`).
 #[derive(Debug)]
 pub struct Boards {
     /// The tree, on a machine it describes.
     tree: Option<Fdt<'static>>,
     /// Whether `find` ran out of memory adding a node.
     out_of_memory: bool,
+    /// What the generic walk did, once it has run.
+    generic: Option<(GenericReport, usize)>,
 }
 
 impl Boards {
@@ -167,6 +176,7 @@ impl Boards {
         Boards {
             tree,
             out_of_memory: false,
+            generic: None,
         }
     }
 }
@@ -188,7 +198,68 @@ impl Finder for Boards {
                 })?;
             }
         }
-        Ok(())
+        // Publication is `personality=user`'s (`docs/microkernel/K8.md` §7): a
+        // hybrid kernel publishes the bindings alone, and no board meets any
+        // of what follows.
+        #[cfg(not(ferrix_personality = "user"))]
+        return Ok(());
+        // What the kernel uses is registered and sealed before anything
+        // generic is published (`L.discovery.8`, `L.discovery.10`).
+        #[cfg(ferrix_personality = "user")]
+        let registered = tree::claim_tree_uses(tree, cx.reserved);
+        #[cfg(ferrix_personality = "user")]
+        {
+            tree::seal();
+            let ownership = registered
+                .ok()
+                .and_then(|()| tree::claims().ok())
+                .and_then(|uses| Ownership::derive(tree, &uses).ok());
+            let Some(ownership) = ownership else {
+                self.out_of_memory = true;
+                return Err(Failed);
+            };
+            let report =
+                tree::find_generic(tree, &ownership, cx.reserved, &mut cx.held, nodes, true)
+                    .map_err(|_| {
+                        self.out_of_memory = true;
+                        Failed
+                    })?;
+            self.generic = Some((report, ownership.owned()));
+            Ok(())
+        }
+    }
+
+    fn report(&self) {
+        if let (
+            Some((
+                GenericReport {
+                    stopped: Some(node),
+                    ..
+                },
+                _,
+            )),
+            Some(tree),
+        ) = (self.generic, &self.tree)
+        {
+            tree::say_stopped(tree, node);
+            return;
+        }
+        if let Some((report, owned)) = self.generic {
+            crate::console::println!(
+                "  generic  {} device-tree nodes published by compatible ({} the kernel depends \
+                 on), {} kernel-owned of {} it uses, {} of the bindings', {} bus children; {} \
+                 register ranges and {} interrupts withheld, {} private lines refused",
+                report.published,
+                report.depends,
+                report.owned,
+                owned,
+                report.bound,
+                report.children,
+                report.registers_withheld,
+                report.interrupts_withheld,
+                report.private_refused,
+            );
+        }
     }
 
     fn failure(&self) -> Option<&dyn fmt::Display> {

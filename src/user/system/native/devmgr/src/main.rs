@@ -38,9 +38,10 @@ use ferrix_native_abi::handle::Handle;
 use ferrix_native_abi::rights::{Requested, Rights};
 use ferrix_native_abi::signals::Signals;
 use ferrix_native_abi::types::{
-    CHANNEL_MAX_HANDLES, DEVICE_NOT_PCI, DEVICE_TREE_BLOCKS, DEVICE_VIRTIO_PCI, DeviceInfo,
-    PROCESS_EXITED, PROCESS_KILLED, ProcessStatus, TREE_FIRMWARE_FB, TREE_GS201_DWC3,
-    TREE_STM32_GPU, TREE_STM32_HDMI, TREE_STM32_SDMMC, TREE_STM32_USBH, TREE_X86_POWER,
+    CHANNEL_MAX_HANDLES, DEVICE_NOT_PCI, DEVICE_TREE_BLOCKS, DEVICE_TREE_GENERIC,
+    DEVICE_VIRTIO_PCI, DeviceInfo, PROCESS_EXITED, PROCESS_KILLED, ProcessStatus, TREE_FIRMWARE_FB,
+    TREE_GS201_DWC3, TREE_STM32_GPU, TREE_STM32_HDMI, TREE_STM32_SDMMC, TREE_STM32_USBH,
+    TREE_X86_POWER,
 };
 use ferrix_netring::control::{
     CONTROL_RIGHTS as NET_CONTROL_RIGHTS, DEVICE_RIGHTS as NET_DEVICE_RIGHTS, MAX_MESSAGE,
@@ -57,6 +58,7 @@ use ferrix_rt::native::port::{self, Port};
 use ferrix_rt::native::vmo::{self, Vmo};
 use ferrix_rt::{Bootstrap, Kernel};
 
+mod generic;
 mod usb;
 
 ferrix_rt::entry!(main);
@@ -258,6 +260,12 @@ enum Kind {
     /// firmware's limit back, the safe state, and a driver that dies on
     /// every start is not retried into the register.
     Power,
+    /// `docs/DRIVER-MODEL.md` §3: a generic device-tree node, matched by
+    /// `compatible` against [`GENERIC_DRIVERS`], whose row this is. Handed
+    /// its device and START as a port's driver is; it publishes through no
+    /// kernel core, so it is taken at its word, and it is not started again
+    /// when it dies until providers can rebind it (step 2).
+    Generic(usize),
 }
 
 /// A driver about to be started: its kind, carrying what only that kind
@@ -290,6 +298,8 @@ enum Plan {
     Gpu(&'static str),
     /// The x86-64 power node.
     Power,
+    /// A generic device-tree node, driven by the program named.
+    Generic(&'static str),
 }
 
 /// The table: which driver, by name in the initramfs, drives which device,
@@ -336,6 +346,28 @@ const TREE_DRIVERS: [(u16, &[u8], Kind); 7] = [
     (TREE_FIRMWARE_FB, b"efifb", Kind::Display),
     (TREE_X86_POWER, b"power", Kind::Power),
 ];
+
+/// The generic device-tree nodes' drivers (`docs/DRIVER-MODEL.md` §3): the
+/// `compatible` a node must list, the driver's name in the initramfs, and
+/// its program name. A node lists its compatibles most specific first, and
+/// the first that has a row here is its match. The kernel knows none of
+/// these strings.
+///
+/// The one row is `test-driver-model`'s (`docs/DRIVER-MODEL.md` §8): a
+/// made-up compatible on QEMU `virt`'s PL031, served by `testseconds`. It is
+/// compiled in only when the build says `FERRIX_DEVMGR_TEST_DRIVER=on`,
+/// which that test's images alone do, so no other image's table has it.
+const GENERIC_DRIVERS: &[(&str, &[u8], &str)] = if TEST_DRIVER {
+    &[("ferrix,test-seconds", b"testseconds", "testseconds")]
+} else {
+    &[]
+};
+
+/// Whether this build carries `test-driver-model`'s row.
+const TEST_DRIVER: bool = match option_env!("FERRIX_DEVMGR_TEST_DRIVER") {
+    Some(value) => matches!(value.as_bytes(), b"on"),
+    None => false,
+};
 
 /// Where devmgr gave up, as the exit status.
 #[repr(i32)]
@@ -610,9 +642,14 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
             failed += 1;
             continue;
         };
-        let Some((image, kind, driver)) =
-            driver_for(&info, &given.names, given.drivers, &given.images)
-        else {
+        let Some((image, kind, driver)) = driver_for(
+            &info,
+            &keep,
+            &given.names,
+            given.drivers,
+            &given.images,
+            outside_claim(given.unisolated_allowed),
+        ) else {
             // A device nobody drives: both handles close here.
             continue;
         };
@@ -719,7 +756,13 @@ fn settle(
 ) -> bool {
     matches!(
         kind,
-        Kind::Port | Kind::Host | Kind::Engine | Kind::Gadget | Kind::Gpu | Kind::Power
+        Kind::Port
+            | Kind::Host
+            | Kind::Engine
+            | Kind::Gadget
+            | Kind::Gpu
+            | Kind::Power
+            | Kind::Generic(_)
     ) || await_boot(channel, port, location, key, inbox)
 }
 
@@ -977,6 +1020,7 @@ fn plan_for(kind: Kind, info: &DeviceInfo, disks: &mut u32) -> Option<Plan> {
         Kind::Gadget => Plan::Gadget,
         Kind::Gpu => Plan::Gpu(gpu_program(info)),
         Kind::Power => Plan::Power,
+        Kind::Generic(row) => Plan::Generic(GENERIC_DRIVERS.get(row)?.2),
     })
 }
 
@@ -1035,11 +1079,17 @@ fn announce_drivers(
         .chain(PCI_DRIVERS.iter().map(|(_, _, name, _)| (*name, BUS_PCI)));
     let platform = TREE_DRIVERS
         .iter()
-        .map(|(_, name, _)| (*name, BUS_PLATFORM));
+        .map(|(_, name, _)| (*name, BUS_PLATFORM))
+        .chain(
+            GENERIC_DRIVERS
+                .iter()
+                .map(|(_, name, _)| (*name, BUS_PLATFORM)),
+        );
     // The kernel keeps the first bus a driver is announced on.
-    let mut ordered = [None; DRIVERS.len() + PCI_DRIVERS.len() + TREE_DRIVERS.len()];
+    let mut ordered =
+        [None; DRIVERS.len() + PCI_DRIVERS.len() + TREE_DRIVERS.len() + GENERIC_DRIVERS.len()];
     let (first, second) = ordered.split_at_mut(if board {
-        TREE_DRIVERS.len()
+        TREE_DRIVERS.len() + GENERIC_DRIVERS.len()
     } else {
         DRIVERS.len() + PCI_DRIVERS.len()
     });
@@ -2108,9 +2158,14 @@ fn launch_again(
     if worker_image(entry.plan, drivers).is_some() && !end_job_tree(&entry.job, entry.location) {
         return false;
     }
-    let Some((initramfs, _, _)) =
-        driver_for(&entry.info, drivers.names, drivers.count, drivers.images)
-    else {
+    let Some((initramfs, _, _)) = driver_for(
+        &entry.info,
+        &entry.device,
+        drivers.names,
+        drivers.count,
+        drivers.images,
+        outside_claim(drivers.unisolated_allowed),
+    ) else {
         return false;
     };
     let image = entry.image.as_ref().map_or(initramfs, |image| &image.vmo);
@@ -2153,7 +2208,13 @@ fn launch_again(
     entry.quiesced = false;
     let awaited = if matches!(
         entry.kind,
-        Kind::Port | Kind::Host | Kind::Engine | Kind::Gadget | Kind::Gpu | Kind::Power
+        Kind::Port
+            | Kind::Host
+            | Kind::Engine
+            | Kind::Gadget
+            | Kind::Gpu
+            | Kind::Power
+            | Kind::Generic(_)
     ) {
         Awaited {
             published: true,
@@ -2186,14 +2247,29 @@ fn launch_again(
     false
 }
 
+/// Whether this boot is outside the claim, where a driver may be started on
+/// a node the kernel depends on (D4): every ARMv7-A image, which is outside
+/// it until an SMMU is driven, and any boot under `ferrix.unisolated`,
+/// which carries no claim.
+const fn outside_claim(unisolated_allowed: bool) -> bool {
+    arch::ARMV7A || unisolated_allowed
+}
+
 /// The image of the driver for `info`, by the table, if the initramfs
-/// carries it, with the driver's kind and its place among the names.
+/// carries it, with the driver's kind and its place among the names. A
+/// generic device-tree node is matched by its identity record, read through
+/// `keep`, and admitted only as [`generic::driver_for`] says.
 fn driver_for<'a>(
     info: &DeviceInfo,
+    keep: &Device<Kernel>,
     names: &[[u8; NAME_BYTES]; MAX_DRIVERS],
     drivers: usize,
     images: &'a [Option<Vmo<Kernel>>; MAX_DRIVERS],
+    outside: bool,
 ) -> Option<(&'a Vmo<Kernel>, Kind, u16)> {
+    if info.virtio == DEVICE_TREE_GENERIC {
+        return generic::driver_for(info, keep, names, drivers, images, outside);
+    }
     let (wanted, kind) = match info.virtio {
         DEVICE_VIRTIO_PCI => DRIVERS
             .iter()
@@ -2284,6 +2360,7 @@ fn start(
         Plan::Gadget => start_plain(job, device, image, info, port, key, "usbdev"),
         Plan::Gpu(program) => start_plain(job, device, image, info, port, key, program),
         Plan::Power => start_plain(job, device, image, info, port, key, "power"),
+        Plan::Generic(program) => start_plain(job, device, image, info, port, key, program),
     }
 }
 
@@ -2378,6 +2455,7 @@ const fn plan_name(plan: Plan) -> &'static str {
         Plan::Gpu(_) => "gpu",
         Plan::Gadget => "gadget",
         Plan::Power => "power",
+        Plan::Generic(program) => program,
     }
 }
 

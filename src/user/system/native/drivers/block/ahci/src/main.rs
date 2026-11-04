@@ -53,7 +53,7 @@ use ferrix_blkring::geometry::{Device as Geometry, DeviceFlags};
 use ferrix_blkserve::Disk;
 use ferrix_driver::dma::{Dma, PAGE};
 use ferrix_driver::pci::{self, Function};
-use ferrix_driver::{Driver, Step, Stopped, Stuck, block, mmio};
+use ferrix_driver::{Probe, Step, Stopped, Stuck, block, mmio};
 use ferrix_native_abi::types::DeviceInfo;
 use ferrix_rt::native::handle::{Deadline, OwnedHandle};
 use ferrix_rt::native::port::{self, Port};
@@ -237,7 +237,7 @@ impl fmt::Debug for Sata {
     }
 }
 
-impl Driver for Sata {
+impl Probe for Sata {
     type Device = Device;
 
     fn probe(device: Device) -> Result<Self, Step> {

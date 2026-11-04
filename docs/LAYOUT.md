@@ -109,6 +109,7 @@ every virtio driver shares.
 | `usb/` | `usb-host`, `usb-device`, `dwc3` | `usbhid`, `usbdev` |
 | `sound/` | `virtio-snd` | `virtio-snd` |
 | `console/` | `virtio-console`, `vdagent` | `vport` |
+| `test/` | none | `seconds` (`testseconds`, `cargo xtask test-driver-model`'s driver, docs/DRIVER-MODEL.md §8), `model-examples` (the driver model page's two examples, linted, never in an image) |
 
 `display/` puts pixels on a screen (`displayctl`), `gpu/` renders
 (`renderctl`), as the protocols split them.
@@ -139,7 +140,8 @@ initramfs by xtask:
 | Path | What |
 |---|---|
 | `src/user/system/native/rt/` | The runtime every native program links: entry, the system-call instruction, exit, panic. |
-| `src/user/system/native/driver/` | `ferrix-driver`, what every driver process shares: START, register blocks, DMA memory freed only after a reset, a bus's transport (`virtio`), and the protocol a subsystem speaks to its kernel interface (`input`, `block`). A driver implements its subsystem's trait and nothing else. virtio-input and virtio-blk are on it; the other drivers move as they are touched. |
+| `src/user/system/native/driver/` | `ferrix-driver`, what every driver process shares: START, register blocks, DMA memory freed only after a reset, a bus's transport (`virtio`), and the protocol a subsystem speaks to its kernel interface (`input`, `block`). A driver implements its subsystem's trait and nothing else. virtio-input and virtio-blk are on it; the other drivers move as they are touched. Its driver model (`model`, `registers`, `class`, `bus`; `docs/DRIVER-MODEL.md`) is what a generic device-tree node's driver is written against: `Driver`, `#[derive(Resources)]` with its embedded requirement table, `register_map!`, `bitfields!`, `run::<D>()`; the derives and macros are `src/lib/drivers/model-derive` (`ferrix-driver-derive`), and the register types, host-tested, `src/lib/drivers/registers` (`ferrix-registers`). |
+| `src/user/system/native/platform/` | `ferrix-platform`: the clients of the shared platform resources providers serve -- clocks, resets, regulators (`docs/DRIVER-MODEL.md` §4.1) -- resolved from a node's references; their operations wait for step 2's providers. |
 | `src/user/system/native/devmgr/` | Matches devices to drivers and starts each in a job of its own. |
 | `src/user/system/native/drvupdated/` | Takes a new driver image from root over an abstract socket and hands it to `devmgr` (`docs/DEVMGR.md` §4.1). Only the images `test-restart --update` boots carry it. |
 | `src/user/system/native/drivers/<function>/<name>/` | One process per driver, grouped by function as in the table above. The logic lives in `src/lib/drivers/`; the program is the thin shell around it. |

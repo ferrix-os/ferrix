@@ -512,6 +512,18 @@ pub const DEVICE_VIRTIO_PCI: u16 = 1;
 /// order the binding gives, [`DeviceInfo::common`] first and
 /// [`DeviceInfo::device`] second.
 pub const DEVICE_TREE_BLOCKS: u16 = 2;
+/// [`DeviceInfo::virtio`] of a generic device-tree node: one the kernel
+/// publishes without knowing its binding (`docs/DRIVER-MODEL.md` §3).
+/// [`DeviceInfo::device_id`] holds its identity record's flags
+/// (`ferrix_fdt::identity::FLAG_*`, `FLAG_KERNEL_DEPENDS` among them),
+/// [`DeviceInfo::class`] the record's length in bytes, and the blocks its
+/// first two apertures, whole pages. The record itself -- the `compatible`
+/// list, the path, the references as provider node and specifier cells,
+/// the `*-names` and the subtree -- is read with `device_config_read`, four
+/// bytes at a time from offset 0, as a PCI function's identity is read from
+/// its configuration space; it is read-only, at most 4096 bytes, and reads
+/// zero past its end.
+pub const DEVICE_TREE_GENERIC: u16 = 3;
 /// [`DeviceInfo::device_id`] of an STM32MP15 DK board's HDMI output: the
 /// LTDC's registers in `common`, the HDMI bridge's I2C controller's in
 /// `device`, and the LTDC's interrupt as vector 0.

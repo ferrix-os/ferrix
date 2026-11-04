@@ -433,6 +433,15 @@ pub(crate) struct Args {
     /// flag sets it: only `test-ft232h` does, for the one adapter the
     /// customer approved (docs/USB-SERIAL.md §3).
     pub(crate) usb_host: Option<String>,
+    /// The device tree an Arm `virt` boot is given in place of the one QEMU
+    /// writes (`-dtb`), on the device-tree path (`acpi=off`). No flag sets
+    /// it: only `test-driver-model` does, with QEMU's own tree edited
+    /// (`docs/DRIVER-MODEL.md` §8).
+    pub(crate) device_tree: Option<std::path::PathBuf>,
+    /// Where an Arm `virt` run writes the tree QEMU would give the guest
+    /// (`-machine dumpdtb`), on the device-tree path, and then exits. Set by
+    /// `test-driver-model` alone.
+    pub(crate) dump_device_tree: Option<std::path::PathBuf>,
     /// `--screens N`: how many virtio-gpu devices are on the bus, one
     /// screen each. Zero and one both mean one. A second device rather than
     /// a second output of the first, because QEMU enables a second output

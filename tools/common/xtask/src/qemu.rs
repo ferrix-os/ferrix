@@ -236,6 +236,17 @@ pub(crate) fn judge(
             "the bind check found no function to show the bus master's half on".to_owned(),
         ));
     }
+    // K8b is dark in every profile that boots today (ledger 5896 C.3): a kernel of
+    // personality=kernel publishes no node by compatible.
+    if crate::flags::this_run()?.value("personality") != Some("user")
+        && lines
+            .iter()
+            .any(|line| line.contains("published by compatible"))
+    {
+        return Err(failed(
+            "a hybrid kernel published a node by compatible".to_owned(),
+        ));
+    }
     let off = crate::cargo::mitigations_off();
     let declined = crate::kaslr::declined(args);
     if machine == Machine::Crosvm && !off && !declined {
@@ -1506,6 +1517,36 @@ pub(crate) fn boot_until(
             watched.log.display()
         ))),
     }
+}
+
+/// Have QEMU write the device tree an Arm boot of `image` with `args` would
+/// give the guest to `args.dump_device_tree`, and exit: the first half of
+/// `test-driver-model`'s edited tree (`docs/DRIVER-MODEL.md` §8).
+///
+/// # Errors
+///
+/// No path to dump to, QEMU failing to start, or no tree written.
+pub(crate) fn dump_device_tree(arch: Arch, image: &Path, kernel: &Path, args: &Args) -> Result<()> {
+    let out = args
+        .dump_device_tree
+        .as_deref()
+        .ok_or_else(|| Error::new("no path to dump the device tree to"))?;
+    let (mut command, _network) = qemu_command(arch, image, Some(kernel), args, &Console::Owned)?;
+    let _ = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    let output = command
+        .output()
+        .map_err(|error| Error::new(format!("could not start QEMU: {error}")))?;
+    if !out.is_file() {
+        return Err(Error::new(format!(
+            "{arch}: QEMU wrote no device tree to {} ({})",
+            out.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    Ok(())
 }
 
 /// [`watch`], calling `at_marker` once `until` has been printed, while QEMU
@@ -2955,6 +2996,7 @@ fn qemu_command(
             if let Ok(extra) = std::env::var("FERRIX_ARM_MACHINE") {
                 let _ = command.args(["-machine", &extra]);
             }
+            attach_device_tree(&mut command, args);
             let _ = command.args([
                 "-cpu",
                 &cpu,
@@ -3188,6 +3230,21 @@ fn attach_asked_for(command: &mut Command, arch: Arch, args: &Args, binary: &Pat
     attach_usb(command, arch, args);
     attach_usb_serial(command, arch, args);
     attach_usb_host(command, arch, args);
+}
+
+/// `test-driver-model`'s tree: QEMU's own, dumped, then edited and given
+/// back, on the device-tree path (`docs/DRIVER-MODEL.md` §8). Both runs see
+/// the same machine, so the tree describes it.
+fn attach_device_tree(command: &mut Command, args: &Args) {
+    if args.device_tree.is_some() || args.dump_device_tree.is_some() {
+        let _ = command.args(["-machine", "acpi=off"]);
+    }
+    if let Some(dump) = &args.dump_device_tree {
+        let _ = command.args(["-machine", &format!("dumpdtb={}", display(dump))]);
+    }
+    if let Some(tree) = &args.device_tree {
+        let _ = command.args(["-dtb", &display(tree)]);
+    }
 }
 
 /// `test-ft232h`'s device: one of the host's own, by QEMU's `usb-host`

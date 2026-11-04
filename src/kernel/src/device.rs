@@ -102,6 +102,7 @@ use ferrix_native_abi::types::{
     // CHECKS-ONLY-METHODS: home: self
     DEVICE_NOT_PCI,
     DEVICE_TREE_BLOCKS,
+    DEVICE_TREE_GENERIC,
     DEVICE_VIRTIO_PCI,
     DeviceBlock,
     DeviceInfo,
@@ -136,6 +137,7 @@ use crate::sync::SpinLock;
 use crate::{arch, iommu, irq, vmap};
 
 pub mod check;
+mod generic_check;
 
 /// GIC interrupt identifiers below this are software-generated or private to
 /// one core, and neither is a device's line.
@@ -476,7 +478,28 @@ impl Reserved {
                 reserved.add(region.address, region.size);
             }
         }
+        // The console the kernel brought up, whichever it is -- the command
+        // line's, `console=`, the first UART -- as early boot mapped it.
+        #[cfg(ferrix_personality = "user")]
+        for (start, end) in crate::early::device_windows() {
+            reserved.add(start, end - start);
+        }
         reserved
+    }
+
+    /// Every reserved range that is not the memory map's, as `start..end`:
+    /// what the kernel itself uses -- the device windows it mapped, the
+    /// IOMMUs, the ECAM windows, the console and the boot framebuffer. A
+    /// device-tree node overlapping one of them is kernel-owned
+    /// (`docs/DRIVER-MODEL.md` §3, D3).
+    #[cfg_attr(not(ferrix_personality = "user"), allow(dead_code))]
+    pub(crate) fn kernel_ranges(&self) -> impl Iterator<Item = (u64, u64)> + '_ {
+        let (first, last) = self.map;
+        self.ranges
+            .iter()
+            .enumerate()
+            .filter(move |&(index, _)| index < first || index >= last)
+            .map(|(_, &range)| range)
     }
 
     /// Reserve `len` bytes at `start`.
@@ -567,6 +590,21 @@ impl Reserved {
 /// withholds the aperture ([`Reserved::covers`]).
 const fn framebuffer_span(size: u64) -> u64 {
     size.div_ceil(PAGE_SIZE).saturating_mul(PAGE_SIZE)
+}
+
+/// The whole pages `len` bytes at `phys` lie in, as `start..end`: `None`
+/// for an empty range or one that runs off the address space.
+const fn page_span(phys: u64, len: u64) -> Option<(u64, u64)> {
+    if len == 0 {
+        return None;
+    }
+    let Some(end) = phys.checked_add(len) else {
+        return None;
+    };
+    let Some(end) = end.checked_next_multiple_of(PAGE_SIZE) else {
+        return None;
+    };
+    Some((phys - phys % PAGE_SIZE, end))
 }
 
 // CHECKS-ONLY: device/config_check.rs
@@ -1377,6 +1415,12 @@ pub struct DeviceNode {
     /// For [`Location::Tree`], the binding `device_info` reports (see
     /// `DEVICE_TREE_BLOCKS`).
     binding: u16,
+    /// For a generic device-tree node (`DEVICE_TREE_GENERIC`,
+    /// `docs/DRIVER-MODEL.md` §3), its identity record as
+    /// `ferrix_fdt::identity` lays it out: what `device_config_read` reads,
+    /// as a PCI function's identity is read from its configuration space.
+    /// Empty for every other node.
+    identity: Vec<u8>,
     /// How it reaches memory.
     dma: DmaShape,
     /// For the firmware framebuffer's node, the mode firmware left it in.
@@ -1485,6 +1529,7 @@ impl DeviceNode {
             undecoded: false,
             withheld_vectors: 0,
             binding: 0,
+            identity: Vec::new(),
             dma: DmaShape::ORDINARY,
             mode: None,
             holds_framebuffer: false,
@@ -1677,6 +1722,9 @@ impl DeviceNode {
     /// Whether anything behind the node reaches memory, so that pinning
     /// pages for it means anything: every device but the firmware
     /// framebuffer's node, which is memory itself, and whose driver copies.
+    /// Every generic device-tree node does, whatever its tree says: `NO_DMA`
+    /// comes only from a node the kernel describes itself (D5,
+    /// `L.device.63`).
     pub const fn reaches_memory(&self) -> bool {
         !(matches!(self.location, Location::Tree(_))
             && (self.binding == TREE_FIRMWARE_FB || self.binding == TREE_X86_POWER))
@@ -2009,6 +2057,71 @@ impl DeviceNode {
         self.dma = dma;
     }
 
+    /// A generic device-tree node (`docs/DRIVER-MODEL.md` §3): one the
+    /// kernel publishes without knowing its binding, at `at`, the address of
+    /// its first register range or, for a node with none, its tree id. Its
+    /// apertures are minted with [`DeviceNode::mint_generic`] and its identity
+    /// record given with [`DeviceNode::set_identity`].
+    pub(crate) const fn generic(at: u64) -> Self {
+        DeviceNode::empty(Location::Tree(at))
+    }
+
+    /// Mint a generic node's register range of `len` bytes at `phys` as an
+    /// aperture of whole pages, unless the pages it lies in overlap reserved
+    /// memory (`L.device.60`): tested on the page-rounded range, so a range
+    /// that ends inside a page the kernel uses is withheld whole. Whether it
+    /// was minted.
+    pub(crate) fn mint_generic(&mut self, phys: u64, len: u64, reserved: &Reserved) -> bool {
+        let Some((start, end)) = page_span(phys, len) else {
+            self.withheld += 1;
+            return false;
+        };
+        if start == 0 || reserved.overlaps(start, end - start) {
+            self.withheld += 1;
+            return false;
+        }
+        // FATAL-ALLOC: boot only: stage 10 builds the device registry once, before any program runs.
+        self.apertures.push(Aperture {
+            phys: start,
+            len: end - start,
+            cacheable: false,
+            source: Source::Tree,
+        });
+        true
+    }
+
+    /// Give a generic node its identity record (`ferrix_fdt::identity`).
+    pub(crate) fn set_identity(&mut self, record: Vec<u8>) {
+        self.identity = record;
+    }
+
+    /// A generic node's identity record; empty for every other node.
+    pub fn identity(&self) -> &[u8] {
+        &self.identity
+    }
+
+    /// Whether the node is a generic device-tree node.
+    pub(crate) const fn is_generic(&self) -> bool {
+        !self.identity.is_empty()
+    }
+
+    /// A generic node's record flags (`ferrix_fdt::identity::FLAG_*`); 0
+    /// for any other node.
+    pub(crate) fn identity_flags(&self) -> u16 {
+        match (self.identity.get(6), self.identity.get(7)) {
+            (Some(&low), Some(&high)) => u16::from_le_bytes([low, high]),
+            _ => 0,
+        }
+    }
+
+    /// Set `flag` in a generic node's record.
+    fn flag_identity(&mut self, flag: u16) {
+        let flags = self.identity_flags() | flag;
+        if let Some(slot) = self.identity.get_mut(6..8) {
+            slot.copy_from_slice(&flags.to_le_bytes());
+        }
+    }
+
     /// The binding of a device tree node the kernel knows, `None` for any
     /// other device.
     pub const fn tree_binding(&self) -> Option<u16> {
@@ -2047,6 +2160,13 @@ impl DeviceNode {
         if let Location::Tree(_) = self.location {
             info.device_id = self.binding;
             info.virtio = DEVICE_TREE_BLOCKS;
+            // A generic node names no binding: its identity is its record,
+            // read through `device_config_read` (`L.device.64`).
+            if self.is_generic() {
+                info.virtio = DEVICE_TREE_GENERIC;
+                info.device_id = self.identity_flags();
+                info.class = u32::try_from(self.identity.len()).unwrap_or(u32::MAX);
+            }
             let window = |aperture: Option<&Aperture>| {
                 aperture.map_or_else(DeviceBlock::default, |aperture| DeviceBlock {
                     phys: aperture.phys,
@@ -2241,6 +2361,16 @@ impl DeviceNode {
     /// [`ConfigRefusal::Unmapped`] when it could not be mapped.
     pub fn config_read(&self, offset: u64, width: u64) -> Result<u32, ConfigRefusal> {
         let (offset, width) = config_access(offset, width)?;
+        // A generic device-tree node's configuration space is its identity
+        // record, read-only, zero past its end (`L.device.64`).
+        if self.is_generic() {
+            let mut value = [0u8; 4];
+            let start = usize::from(offset);
+            for (index, slot) in value.iter_mut().take(usize::from(width)).enumerate() {
+                *slot = self.identity.get(start + index).copied().unwrap_or(0);
+            }
+            return Ok(u32::from_le_bytes(value));
+        }
         if self.config_phys().is_none() {
             return Err(ConfigRefusal::NotPci);
         }
@@ -3069,6 +3199,74 @@ fn widen_lone_partial_bars(
     }
 }
 
+/// Withhold every aperture whose pages a generic device-tree node shares
+/// with another node, from both (`docs/DRIVER-MODEL.md` §3, D7;
+/// `L.device.61`): otherwise a sub-page `reg` hands one node's registers to
+/// the other's driver. Pairs of nodes neither of which is generic keep the
+/// rules they had, virtio-mmio's packed transports among them. How many
+/// apertures were withheld.
+#[cfg_attr(
+    not(ferrix_personality = "user"),
+    allow(
+        dead_code,
+        reason = "a hybrid's check alone calls it, and only where checks are built"
+    )
+)]
+fn withhold_shared_pages(nodes: &mut [DeviceNode]) -> usize {
+    // Every aperture's pages, with its node and whether that node is generic.
+    let mut pages: Vec<(u64, u64, usize, u64)> = Vec::new();
+    for (index, node) in nodes.iter().enumerate() {
+        for aperture in &node.apertures {
+            if let Some((start, end)) = page_span(aperture.phys, aperture.len) {
+                // FATAL-ALLOC: boot only: stage 10 builds the device registry once, before any program runs.
+                pages.push((start, end, index, aperture.phys));
+            }
+        }
+    }
+    let mut shared: BTreeSet<(usize, u64)> = BTreeSet::new();
+    for (position, &(start, end, owner, phys)) in pages.iter().enumerate() {
+        for &(other_start, other_end, other, other_phys) in pages.iter().skip(position + 1) {
+            let generic = nodes.get(owner).is_some_and(DeviceNode::is_generic)
+                || nodes.get(other).is_some_and(DeviceNode::is_generic);
+            if owner != other && generic && start < other_end && other_start < end {
+                // FATAL-ALLOC: boot only: stage 10 builds the device registry once, before any program runs.
+                let _ = shared.insert((owner, phys));
+                // FATAL-ALLOC: boot only: stage 10 builds the device registry once, before any program runs.
+                let _ = shared.insert((other, other_phys));
+            }
+        }
+    }
+    for (index, node) in nodes.iter_mut().enumerate() {
+        let before = node.apertures.len();
+        node.apertures
+            .retain(|aperture| !shared.contains(&(index, aperture.phys)));
+        let withheld = before - node.apertures.len();
+        node.withheld += withheld;
+        if withheld != 0 && node.is_generic() {
+            node.flag_identity(ferrix_fdt::identity::FLAG_REGISTERS_WITHHELD);
+        }
+    }
+    shared.len()
+}
+
+/// Begin [`publish`], once: refused on a second call before anything is
+/// touched; then the console and every other window early boot mapped are
+/// claimed as the kernel's, before any finder can seal the set
+/// (`L.discovery.10`).
+fn begin() -> Result<(), Stopped<'static>> {
+    if PUBLISHING.swap(true, Ordering::AcqRel) {
+        return Err(Stopped::Again);
+    }
+    #[cfg(ferrix_personality = "user")]
+    crate::discovery::tree::claim_early_windows().map_err(|_| {
+        Stopped::Node(Failure {
+            location: Location::Tree(0),
+            what: "the kernel's early device windows could not be claimed",
+        })
+    })?;
+    Ok(())
+}
+
 /// Every device node, once boot has published them.
 static DEVICES: Once<Vec<Arc<DeviceNode>>> = Once::new();
 
@@ -3114,6 +3312,9 @@ pub struct Report {
     pub msi_delivered: usize,
     /// Requests refused, each exactly as the rule requires.
     pub refusals: usize,
+    /// Apertures withheld because a generic device-tree node shares their
+    /// page with another node (`L.device.61`).
+    pub(crate) shared_pages: usize,
 }
 
 /// A device node that broke the rule its tokens exist to enforce.
@@ -3273,9 +3474,7 @@ pub fn publish<'f, P: check::Policy>(
     finders: &'f mut [&mut dyn Finder],
     reserved: &Reserved,
 ) -> Result<Report, Stopped<'f>> {
-    if PUBLISHING.swap(true, Ordering::AcqRel) {
-        return Err(Stopped::Again);
-    }
+    begin()?;
     let mut nodes = Vec::new();
     let mut cx = Context::new(reserved);
     let mut failed = None;
@@ -3322,11 +3521,33 @@ pub fn publish<'f, P: check::Policy>(
         });
         node.withheld += before - node.apertures.len();
     }
+    // The kernel-owned set is sealed once every finder has run, whether or
+    // not the machine has a tree to derive it from (`L.discovery.8`).
+    #[cfg(ferrix_personality = "user")]
+    crate::discovery::tree::seal();
+    // Only where nodes are published: in a hybrid no tree node is, and the check calls it
+    // on made-up ones (ledger 6448 K.1).
+    #[cfg(ferrix_personality = "user")]
+    {
+        report.shared_pages = withhold_shared_pages(&mut nodes);
+    }
     widen_lone_partial_bars(&mut nodes, &occupied, reserved, true);
 
     yield_framebuffer_holder(&mut nodes);
     yield_intel_gpu(&mut nodes, intel_gpu_allowed());
 
+    // Generic publication's rules first, on a made-up tree and on these
+    // nodes (`docs/DRIVER-MODEL.md` §3): its failures name the rule.
+    let generic = generic_check::check(&nodes)?;
+    crate::println!(
+        "  generic  {} rules of generic publication held on a made-up tree (kernel-owned by \
+         use and sealed, KERNEL_DEPENDS two references away, shared pages minted to neither, \
+         private lines refused, no node twice, no tree node without DMA); {} published \
+         generic nodes' records read back, {} apertures withheld for a shared page",
+        generic.rules,
+        generic.published,
+        report.shared_pages,
+    );
     for node in &nodes {
         check::check_node(node, reserved, &mut report)?;
     }

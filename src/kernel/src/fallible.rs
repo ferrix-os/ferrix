@@ -148,6 +148,16 @@ pub(crate) fn insert_held<K: Ord, V>(
     map.insert(key, value)
 }
 
+/// `set.insert(value)`, refusing rather than aborting with no memory.
+///
+/// # Errors
+///
+/// [`AllocError`] with no room for a node.
+pub(crate) fn insert_into_set<T: Ord>(set: &mut BTreeSet<T>, value: T) -> Result<bool, AllocError> {
+    let held = reserve()?;
+    Ok(insert_into_set_held(&held, set, value))
+}
+
 /// `set.insert(value)` inside a section the caller has entered.
 pub(crate) fn insert_into_set_held<T: Ord>(
     _held: &Reserved,

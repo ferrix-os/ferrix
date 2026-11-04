@@ -1,0 +1,22 @@
+[package]
+name = "ferrix-test-seconds-driver"
+description = "testseconds: test-driver-model's ring-3 driver of a device the kernel has never named, QEMU virt's PL031 real-time clock under a made-up compatible (docs/DRIVER-MODEL.md section 8)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "testseconds"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+ferrix-driver.workspace = true
+ferrix-platform.workspace = true
+ferrix-rt.workspace = true
+
+[lints]
+workspace = true

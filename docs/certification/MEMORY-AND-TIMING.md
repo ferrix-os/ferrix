@@ -2521,6 +2521,34 @@ under the `taken` lock. A function's first vector takes the unit's
 `remaps` gate across its table's allocation, the entry's write and two
 batches.
 
+### 2.2u Generic device-tree publication (`discovery::tree`, 2026-10-26)
+
+`docs/DRIVER-MODEL.md` step 1 (ledger 4475 D9, 4541 (7)). Every walk is
+boot-only, inside stage 10's `publish`, before any program runs.
+
+* **The claims lock** (`discovery::tree::CLAIMS`, a `SpinLock`). Held for
+  one push per claim (`claim_kernel_use`, `use_window` before the seal),
+  for the copy `claims()` makes once at the seal, and after the seal for
+  `use_window`'s and `covered`'s scan of the claims, which allocates
+  nothing. The claims are bounded by what was claimed before the seal: the
+  nodes `claim_tree_uses` finds (at most the tree's nodes), each
+  spin-table release address, the reserved ranges that are not the memory
+  map's, the device windows mapped then, at most `early::EARLY_WINDOWS`
+  (8) early windows, and board support's register windows. Nothing is
+  pushed after the seal. A scan after the seal is a board window's map: a
+  reboot's boot mode, a pixel clock change.
+* **The walks.** `for_each_lineage` visits each node once, none deeper
+  than `LINEAGE_DEPTH` (16). `Ownership::derive` walks the tree three
+  times and `pages_of` against the claimed ranges, O(nodes x ranges).
+  `Ownership::close` looks at each node once and finds it with
+  `node_by_id`, a walk of the tree, O(nodes x tree); each reference
+  resolves its phandle with another walk, O(references x tree), at most
+  `MAX_REFERENCES` (64) a node. `find_generic` publishes at most
+  `MAX_GENERIC` (256) nodes, each with a record of at most 4096 bytes
+  (1 MiB at most in all). `withhold_shared_pages` compares every aperture
+  page with every other, O(apertures squared). None of the walks holds a
+  lock.
+
 ### 2.2y The crash hold (`fs::crashes`, load ring, 2026-10-24)
 
 Tombstones step 2 (`docs/LOGGING.md` §21.7; the consultant's OK IF, ledger
