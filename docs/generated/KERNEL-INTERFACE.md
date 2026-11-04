@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2731 declarations in the core's files, 179 in the item's; 178 checks-only.
+2747 declarations in the core's files, 179 in the item's; 179 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1210,6 +1210,7 @@ checks above is `pub` for raised checks (F3).
 | `read_through` | fn | item |  |
 | `read_through_now` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `record` | fn | item, bin |  |
+| `reservation_refused` | fn | item |  |
 | `resource_number` | fn | item, load |  |
 | `start` | fn | bin |  |
 | `check` | mod | bin |  |
@@ -1888,6 +1889,7 @@ checks above is `pub` for raised checks (F3).
 | `DEMAND_WINDOW` | const | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `GIVE_BACK_BATCH` | const | load (checks) | checks-only |
 | `MAX_ORDER` | const | item |  |
+| `NO_RESERVATION` | const | load |  |
 | `RETIRED_CAPACITY` | const | load |  |
 | `MemoryError` | enum | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `allocate_frame_run` | fn | load |  |
@@ -1914,6 +1916,7 @@ checks above is `pub` for raised checks (F3).
 | `keep_initrd` | fn | load |  |
 | `managed_frames` | fn | load, bin |  |
 | `print_frame_delta` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `program_floor` | fn | load |  |
 | `reclaim_boot_memory` | fn | bin |  |
 | `release_frame` | fn | load |  |
 | `reserved_in` | fn | load (checks) | checks-only |
@@ -2042,6 +2045,7 @@ checks above is `pub` for raised checks (F3).
 | `port` | mod | item, load |  |
 | `process` | mod | item, load |  |
 | `quota` | mod | item, load |  |
+| `reserve_check` | mod | bin (checks) | pub for raised checks |
 | `space` | mod | item, load |  |
 | `timer` | mod | item, load |  |
 | `TOPOLOGY` | static | item |  |
@@ -2158,6 +2162,7 @@ checks above is `pub` for raised checks (F3).
 | `Job` | struct | item, load |  |
 | `NodeAttributes` | struct | load |  |
 | `Job::admits` | method | load |  |
+| `Job::admits_work_from` | method | item, load |  |
 | `Job::adopt` | method | load |  |
 | `Job::bandwidth` | method | load |  |
 | `Job::burst` | method | load |  |
@@ -2171,6 +2176,7 @@ checks above is `pub` for raised checks (F3).
 | `Job::descendants` | method | load |  |
 | `Job::display_name` | method | load |  |
 | `Job::domain` | method | item, load |  |
+| `Job::draws_from` | method | load |  |
 | `Job::events` | method | load, bin |  |
 | `Job::freeze_requested` | method | load |  |
 | `Job::freezing` | method | load |  |
@@ -2204,6 +2210,7 @@ checks above is `pub` for raised checks (F3).
 | `Job::path_names` | method | load |  |
 | `Job::quota_index` | method | item, load |  |
 | `Job::remove_named_child` | method | load |  |
+| `Job::reservation` | method | item |  |
 | `Job::sealed` | method | load, bin |  |
 | `Job::set_bandwidth` | method | load |  |
 | `Job::set_burst` | method | load |  |
@@ -2215,6 +2222,7 @@ checks above is `pub` for raised checks (F3).
 | `Job::set_max_depth` | method | load |  |
 | `Job::set_max_descendants` | method | load |  |
 | `Job::set_node` | method | load |  |
+| `Job::set_reservation` | method | item |  |
 | `Job::signals` | method | item, load, bin |  |
 | `Job::subtree` | method | load |  |
 | `Job::subtree_control` | method | load |  |
@@ -2424,6 +2432,7 @@ checks above is `pub` for raised checks (F3).
 | `UNLIMITED` | const | item, load |  |
 | `Counter` | enum | load |  |
 | `Mark` | enum | load |  |
+| `ReserveError` | enum | item |  |
 | `Resource` | enum | item, load |  |
 | `at_limit` | fn | load |  |
 | `bandwidth_in_use` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -2454,6 +2463,17 @@ checks above is `pub` for raised checks (F3).
 | `Usage::limit` | field | item, load |  |
 | `Usage::refused` | field | item, load, bin |  |
 | `Usage::used` | field | item, load |  |
+
+### `object::reserve_check`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `run` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Report` | struct | item, load, bin |  |
+| `Report::interrupts` | field | load, bin |  |
+| `Report::promise` | field | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Report::reserved` | field | item, load, bin |  |
+| `Report::rules` | field | load, bin |  |
 
 ### `object::space`
 
@@ -2599,6 +2619,7 @@ checks above is `pub` for raised checks (F3).
 | `STAGE9_PAGER` | static | bin (checks) | checks-only |
 | `STAGE9_QUOTAS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE9_REFUSALS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE9_RESERVE` | static | bin (checks) | checks-only |
 | `STAGE9_SPACES` | static | bin (checks) | checks-only |
 | `STAGE9_TIMERS` | static | bin (checks) | checks-only |
 | `SYSFS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |

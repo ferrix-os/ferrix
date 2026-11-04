@@ -110,6 +110,7 @@ Causes are listed most likely first.
 | [FX-0910](#fx-0910) | A time namespace failed its self-check |
 | [FX-0911](#fx-0911) | the waits on a user address failed their self-check |
 | [FX-0913](#fx-0913) | the timer objects failed their self-check |
+| [FX-0914](#fx-0914) | a job's memory reservation did not hold what it promises |
 | [FX-0915](#fx-0915) | a pager-backed VMO's fault, wait or dirty tracking was not as K3 states |
 | [FX-0916](#fx-0916) | an address space reached by handle was not held to the handle's rights |
 | [FX-0917](#fx-0917) | an exception channel was attached where it must be refused, or refused where it must be attached |
@@ -2716,6 +2717,33 @@ late, twice or after they were cancelled.
 
 See: src/kernel/src/object/timer_check.rs run; src/kernel/src/object/timer.rs;
 src/kernel/src/sched/queue.rs; docs/microkernel/K10.md.
+
+<a id="fx-0914"></a>
+
+## FX-0914 — a job's memory reservation did not hold what it promises
+
+`object::reserve_check::run` reserves memory for a job in a tree of its own
+beside a QM sibling (`docs/microkernel/K12.md`). Its rules must refuse a
+reservation above the job's own limit, under a limit or `memory.high` above it,
+beneath another reservation and on a job that is not empty, and must refuse a
+limit or mark above a reserved job and a limit below its reservation. The job's
+frames must be drawn from its reservation and tagged with it up to its size and
+not past it, a frame taken while an interrupt is serviced must never be drawn, a
+reclaim for anyone else must spare a drawn frame, and once the tree is gone its
+reservation must promise nothing and every quota slot be given back. A kernel
+failing this lets a QM partition take the memory a certified one was promised.
+
+1. A rule of the reservation stopped being tested, or tested under the wrong
+   lock (`quota::Quota::set_reservation`, `quota::limit_allowed`).
+2. A frame route stopped asking `mm::reservation::take` with the job's
+   reservation, or asked it in interrupt context (`mm::reservation_for`).
+3. A free path stopped calling `mm::reservation::freed`, so the drawn count or
+   the promise did not come back.
+4. A slot was freed without unbinding its reservation, or a sub-job did not copy
+   it.
+
+See: src/kernel/src/mm/reservation.rs; src/kernel/src/object/quota.rs;
+src/kernel/src/object/reserve_check.rs; docs/microkernel/K12.md.
 
 <a id="fx-0915"></a>
 
