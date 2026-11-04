@@ -1103,6 +1103,8 @@ struct Beside {
     child: std::process::Child,
     /// Where its output goes.
     log: std::path::PathBuf,
+    /// Whether the GPU tests are pinned to [`TEST_GPU`].
+    pinned: bool,
     /// When it was started.
     began: Instant,
 }
@@ -1115,6 +1117,13 @@ impl Beside {
         let log = directory.join("check-side.log");
         let file = std::fs::File::create(&log)
             .map_err(|error| Error::new(format!("creating {}: {error}", log.display())))?;
+        let node = test_gpu_node(std::path::Path::new("/sys/class/drm"));
+        match &node {
+            Some(node) => println!("GPU tests: 3090 at /dev/dri/{node}"),
+            None => println!("GPU tests: no 3090 here: default device"),
+        }
+        let pin = node.as_deref().map(test_gpu_pin);
+        let pinned = pin.is_some();
         let child = Command::new(std::env::current_exe()?)
             .arg("check-side")
             // rustc's incremental caches are half of what a cold side workspace
@@ -1124,6 +1133,7 @@ impl Beside {
                 "CARGO_INCREMENTAL",
                 std::env::var_os("CARGO_INCREMENTAL").unwrap_or_else(|| "0".into()),
             )
+            .envs(pin.iter().flatten().cloned())
             .current_dir(paths::workspace_root())
             .stdin(Stdio::null())
             .stdout(file.try_clone()?)
@@ -1138,6 +1148,7 @@ impl Beside {
         Ok(Beside {
             child,
             log,
+            pinned,
             began: Instant::now(),
         })
     }
@@ -1146,8 +1157,15 @@ impl Beside {
     fn finish(mut self) -> Result<()> {
         let status = self.child.wait();
         println!("\n== the workspaces of their own, run beside the steps above");
+        let mut on_the_pin = Ok(());
         match std::fs::read(&self.log) {
-            Ok(said) => print!("{}", String::from_utf8_lossy(&said)),
+            Ok(said) => {
+                let said = String::from_utf8_lossy(&said);
+                print!("{said}");
+                if self.pinned {
+                    on_the_pin = tole_ran_on_the_pin(&said);
+                }
+            }
             Err(error) => println!("reading {}: {error}", self.log.display()),
         }
         took("the workspaces of their own, beside", self.began);
@@ -1156,7 +1174,8 @@ impl Beside {
         cargo::finished(
             status,
             "the workspaces of their own (cargo xtask check-side)",
-        )
+        )?;
+        on_the_pin
     }
 }
 
@@ -2689,6 +2708,57 @@ fn kernel_clippy_every_build() -> Result<()> {
     first_failure.map_or(Ok(()), Err)
 }
 
+/// The GPU the side workspaces' GPU tests use: the customer's RTX 3090, not the
+/// 3060, which comes first in a driver's device order on nazuna (2026-11-04). A host
+/// without one gets no pin, and its tests take the default device or skip, as they
+/// always did.
+const TEST_GPU: (&str, &str) = ("0x10de", "0x2204");
+
+/// The first `renderD*` under `drm` that is [`TEST_GPU`].
+fn test_gpu_node(drm: &std::path::Path) -> Option<String> {
+    let read =
+        |path: std::path::PathBuf| std::fs::read_to_string(path).map(|text| text.trim().to_owned());
+    let mut nodes: Vec<String> = std::fs::read_dir(drm)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let device = entry.path().join("device");
+            (name.starts_with("renderD")
+                && read(device.join("vendor")).ok()?.as_str() == TEST_GPU.0
+                && read(device.join("device")).ok()?.as_str() == TEST_GPU.1)
+                .then_some(name)
+        })
+        .collect();
+    nodes.sort();
+    nodes.into_iter().next()
+}
+
+/// What pins tole's and virgl's tests to the render node `node`.
+fn test_gpu_pin(node: &str) -> [(&'static str, String); 2] {
+    [
+        ("TOLE_GPU_DEVICE", "3090".to_owned()),
+        ("FERRIX_VTEST_RENDERNODE", format!("/dev/dri/{node}")),
+    ]
+}
+
+/// Whether what the side workspaces said shows tole's tests on the pinned GPU.
+/// tole's tests pass with nothing checked when they find no device, so a pin that
+/// selects nothing would read as a pass, and one that fell through as the 3060
+/// (the consultant, ledger 6368).
+fn tole_ran_on_the_pin(said: &str) -> Result<()> {
+    if said.contains("on NVIDIA GeForce RTX 3060") {
+        return Err(Error::new("GPU tests pinned to the 3090 ran on the 3060"));
+    }
+    if !said.contains("on NVIDIA GeForce RTX 3090") {
+        return Err(Error::new(
+            "GPU tests pinned to the 3090: no test says it ran on it",
+        ));
+    }
+    Ok(())
+}
+
 /// `clippy_captured` over the kernel for one flag setting, in its directory.
 ///
 /// These directories are only ever linted in, and the gate pool trims them after
@@ -2908,6 +2978,43 @@ pub(crate) fn python_interpreter() -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gpu_tests_go_to_the_3090_and_a_host_without_one_gets_nothing() {
+        let dir = std::env::temp_dir().join(format!("ferrix-gpu-pin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let card = |name: &str, device: &str| {
+            let at = dir.join(name).join("device");
+            std::fs::create_dir_all(&at).unwrap();
+            std::fs::write(at.join("vendor"), "0x10de\n").unwrap();
+            std::fs::write(at.join("device"), format!("{device}\n")).unwrap();
+        };
+        card("renderD129", "0x2504");
+        assert_eq!(test_gpu_node(&dir), None, "the 3060 alone is not the 3090");
+        card("renderD130", "0x2204");
+        card("card2", "0x2204");
+        assert_eq!(test_gpu_node(&dir).as_deref(), Some("renderD130"));
+        assert_eq!(test_gpu_node(&dir.join("absent")), None);
+        assert_eq!(
+            test_gpu_pin("renderD130"),
+            [
+                ("TOLE_GPU_DEVICE", "3090".to_owned()),
+                ("FERRIX_VTEST_RENDERNODE", "/dev/dri/renderD130".to_owned()),
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_pin_that_selected_nothing_or_the_3060_fails() {
+        assert!(tole_ran_on_the_pin("on NVIDIA GeForce RTX 3090\n").is_ok());
+        assert!(tole_ran_on_the_pin("test a ... ok\n").is_err());
+        assert!(tole_ran_on_the_pin("on NVIDIA GeForce RTX 3060\n").is_err());
+        assert!(
+            tole_ran_on_the_pin("on NVIDIA GeForce RTX 3090\non NVIDIA GeForce RTX 3060\n")
+                .is_err()
+        );
+    }
+
     use super::*;
 
     /// A scratch directory of its own under the target directory.

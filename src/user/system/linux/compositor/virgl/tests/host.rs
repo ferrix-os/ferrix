@@ -1239,11 +1239,16 @@ impl Gbm {
         /// `GBM_BO_USE_RENDERING`.
         const USE_RENDERING: u32 = 1 << 2;
         let count = libc::c_uint::try_from(modifiers.len()).ok()?;
-        for number in 128..136 {
+        // The node the servers here are pinned to, or every node there may be.
+        let nodes: Vec<String> = std::env::var("FERRIX_VTEST_RENDERNODE").map_or_else(
+            |_| (128..136).map(|n| format!("/dev/dri/renderD{n}")).collect(),
+            |node| vec![node],
+        );
+        for path in nodes {
             let Ok(node) = std::fs::OpenOptions::new()
                 .read(true)
                 .write(true)
-                .open(format!("/dev/dri/renderD{number}"))
+                .open(path)
             else {
                 continue;
             };
