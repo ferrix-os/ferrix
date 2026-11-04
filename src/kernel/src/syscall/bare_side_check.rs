@@ -264,7 +264,7 @@ fn user_time_is_not_kernel_time(cpu: usize) -> Result<(), &'static str> {
 
 /// L.sched.81, L.sched.82: a program's calls and faults are kernel time.
 ///
-/// Verifies: L.sched.81, L.sched.82
+/// Verifies: L.sched.81, L.sched.82, H.SCHED.14
 fn calls_and_faults_are_kernel_time(cpu: usize) -> Result<(), &'static str> {
     let calls = Work {
         calls: CALLS,
@@ -412,6 +412,48 @@ fn a_quota_cuts_a_program_alone(cpu: usize) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// The word at [`PAGES_AT`] of `space`.
+fn word_at(space: &AddressSpace) -> Result<u8, &'static str> {
+    let mut one = [0_u8; 1];
+    uaccess::copy_from_user(space, PAGES_AT, &mut one).map_err(|_| "bare: no read")?;
+    Ok(one[0])
+}
+
+/// L.user.61, H.MEM.8: a program's own store to a private page a fork still shares is
+/// copied for the side that wrote: seen by neither the other side nor the page. S and
+/// two clones of it, `AddressSpace::fork`, the function a Linux fork and K2's clone
+/// both are; each side a program of its own, storing by its own instruction. The third
+/// holder reads the old word after either has written. Replaces stage 6's
+/// `USER_COW_PROGRAM` where there is no load (L.user.160).
+///
+/// Verifies: L.user.61, H.MEM.8
+fn a_store_copies_for_the_side_that_writes() -> Result<(), &'static str> {
+    const OLD: u8 = 0x55;
+    let work = Work {
+        pages: 1,
+        status: STATUS,
+        ..Work::default()
+    };
+    let source = AddressSpace::new().map_err(|_| "bare: no space")?;
+    put_program(&source, work)?;
+    uaccess::copy_to_user(&source, PAGES_AT, &[OLD]).map_err(|_| "bare: no copy")?;
+    let child = source.fork().map_err(|_| "bare: no memory for a fork")?;
+    let witness = source.fork().map_err(|_| "bare: no memory for a fork")?;
+    for space in [child, Arc::clone(&source)] {
+        let job = Job::new_root().map_err(|_| "bare: no job")?;
+        let host = Bare::new(space, job, None).map_err(|_| "bare: no process")?;
+        let side = BareSide { host };
+        let _task = side.start(None)?;
+        if side.ended()? != STATUS as i32 {
+            return Err("bare: a program's store to a shared page did not go through");
+        }
+        if word_at(&witness)? != OLD {
+            return Err("bare: a store to a copy-on-write page reached another holder");
+        }
+    }
+    Ok(())
+}
+
 // CHECKS-ONLY: stages_check.rs
 /// Every case: how many ran, none where the kernel does not count kernel time.
 ///
@@ -424,6 +466,7 @@ pub fn run() -> Result<u32, &'static str> {
         return Ok(0);
     }
     a_fault_is_resolved()?;
+    a_store_copies_for_the_side_that_writes()?;
     let here = crate::smp::this_cpu().ok_or("bare: no processor")?.logical;
     let count = crate::smp::count();
     let cpu = if count > 1 { (here + 1) % count } else { here };
@@ -431,9 +474,9 @@ pub fn run() -> Result<u32, &'static str> {
     a_limit_ends_its_own(cpu)?;
     a_quota_cuts_a_program_alone(cpu)?;
     if !crate::sched::vtime::counting() {
-        return Ok(4);
+        return Ok(5);
     }
     user_time_is_not_kernel_time(cpu)?;
     calls_and_faults_are_kernel_time(cpu)?;
-    Ok(6)
+    Ok(7)
 }
