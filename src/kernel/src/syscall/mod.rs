@@ -48,6 +48,7 @@
 
 pub mod native;
 pub mod program;
+#[cfg(not(ferrix_load_built = "lift"))]
 pub mod rehome_check;
 pub use ferrix_kernel_core::syscall::uaccess;
 

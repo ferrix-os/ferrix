@@ -16,6 +16,15 @@ use ferrix_sysfs::name;
 /// be a device on the driver's bus (`ENODEV`), and an unbind must be of this
 /// driver's device (`ENODEV`). Everything else is `devmgr`'s to answer.
 pub fn driver_bind(bus: Bus, driver: u16, unbind: bool, data: &[u8]) -> Result<usize, Errno> {
+    // A row's kill of a driver, which is no Linux process here (ledger 6268, L9):
+    // only in a row's image. By location; devmgr holds the handle.
+    #[cfg(ferrix_row_driver_kill)]
+    if unbind && let Some(named) = data.strip_prefix(b"kill:") {
+        let named = name::written(named).ok_or(Errno::ENODEV)?;
+        let device = sysfs::device_named(bus, named).ok_or(Errno::ENODEV)?;
+        devmgr::request(Request::Unbind, device, devmgr::KILL_DRIVER)?;
+        return Ok(data.len());
+    }
     let named = name::written(data).ok_or(Errno::ENODEV)?;
     let device = sysfs::device_named(bus, named).ok_or(Errno::ENODEV)?;
     if unbind {

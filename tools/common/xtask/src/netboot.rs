@@ -729,7 +729,10 @@ fn said(lines: &[String], what: &str) -> String {
 /// could not fetch, the stick's failure line, the server's 404, and no
 /// kernel. Answers the error line.
 fn check_refused(lines: &[String], requests: &[http::Request]) -> Result<String> {
-    if lines.iter().any(|line| line.contains(qemu::SUCCESS_MARKER)) {
+    if lines
+        .iter()
+        .any(|line| qemu::reached(line, qemu::SUCCESS_MARKER))
+    {
         return Err(Error::new(
             "the negative control booted a kernel from a server serving nothing at /ferrix/",
         ));

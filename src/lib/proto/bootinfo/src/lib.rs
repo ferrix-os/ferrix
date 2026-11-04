@@ -1336,6 +1336,32 @@ pub struct BootView<'a> {
 }
 
 impl<'a> BootView<'a> {
+    /// The time of day firmware gave the loader, in nanoseconds since the epoch, or 0
+    /// when it had no clock: what linuxd's boot page carries.
+    #[must_use]
+    pub const fn wall_clock(&self) -> u64 {
+        if self.info.firmware_flags & FIRMWARE_TIME == 0 || self.info.firmware_time < 0 {
+            0
+        } else {
+            self.info.firmware_time as u64
+        }
+    }
+
+    /// A view for a program above the kernel: linuxd's load asks it the command
+    /// line and little else (`docs/microkernel/M5-LIFT.md` §6).
+    #[must_use]
+    pub const fn from_parts(
+        info: &'a BootInfo,
+        regions: &'a [MemRegion],
+        cmdline: &'a str,
+    ) -> BootView<'a> {
+        BootView {
+            info,
+            regions,
+            cmdline,
+        }
+    }
+
     /// The raw hand-off structure, for the fields without an accessor.
     #[must_use]
     pub const fn raw(&self) -> &'a BootInfo {

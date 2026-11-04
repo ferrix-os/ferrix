@@ -666,6 +666,9 @@ pub const FRAMEBUFFER_RGBX: u16 = 1;
 /// STM32MP15 board's ([`TREE_STM32_USBH`]), or a PCI function whose class is
 /// [`PCI_CLASS_XHCI`].
 pub const USB_INPUT_FUNCTIONS: usize = 8;
+/// A bus host's message after START whose handles are its input control channels,
+/// where it cannot ask for them itself (`docs/microkernel/M5-LIFT.md` §11).
+pub const INPUT_CHANNELS_MARK: &[u8] = b"input-channels";
 /// [`DeviceInfo::class`] of an xHCI USB host controller: base class 0C
 /// (serial bus), subclass 03 (USB), programming interface 30 (xHCI). Its
 /// driver may make an input control channel for each keyboard or mouse it

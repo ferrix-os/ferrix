@@ -898,7 +898,9 @@ fn judge_checks(arch: Arch, name: &str, first: bool) -> Result<()> {
     let said = std::fs::read_to_string(&log)
         .map_err(|error| Error::new(format!("reading {}: {error}", log.display())))?;
     let skipped = !first;
-    let (want, other) = if skipped || name == ALWAYS_UNCHECKED {
+    let lifted =
+        crate::flags::this_run().is_ok_and(|flags| flags.value("personality") == Some("user"));
+    let (want, other) = if skipped || lifted || name == ALWAYS_UNCHECKED {
         (crate::qemu::UNCHECKED_MARKER, crate::qemu::SUCCESS_MARKER)
     } else {
         (crate::qemu::SUCCESS_MARKER, crate::qemu::UNCHECKED_MARKER)

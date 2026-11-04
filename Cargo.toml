@@ -121,6 +121,11 @@ members = [
     "src/kernel/core",
     "src/kernel/item",
     "src/kernel/load",
+    "src/kernel/lift/core",
+    "src/kernel/lift/item",
+    "src/kernel/lift/load",
+    "src/kernel/lift/settings",
+    "src/user/system/native/linuxd",
     "src/kernel/settings",
 
     # Native user-space programs, built for the kernel's own targets and put

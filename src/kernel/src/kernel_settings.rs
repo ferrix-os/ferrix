@@ -20,7 +20,7 @@
 // and every entry here is the Linux personality's. Never in a build with
 // `linux_abi=on`.
 #![cfg_attr(
-    ferrix_linux_abi = "off",
+    ferrix_load_built = "none",
     allow(
         dead_code,
         unused_imports,
@@ -43,7 +43,7 @@ pub const SETTINGS_FLAG_WORD: u64 =
     ferrix_kernel_core::flag_word(&ferrix_kernel_core::build_flag_word!());
 
 /// The entries, by what they set.
-#[cfg(ferrix_linux_abi = "on")]
+#[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
 pub mod settings {
     pub mod clock;
     pub mod cpu_online;
@@ -59,11 +59,11 @@ pub mod settings {
 /// This crate's implementation of the load's run-time setting entries, which
 /// a `runtime_settings = "live"` composition root binds
 /// (`ferrix_kernel_load::bind_setters!`).
-#[cfg(ferrix_linux_abi = "on")]
+#[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
 #[derive(Debug, Clone, Copy)]
 pub struct Live;
 
-#[cfg(ferrix_linux_abi = "on")]
+#[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
 mod live {
     use ferrix_kernel_load::setters::{Bus, Errno, Kernel, Process, Setters, TimeWidth};
 

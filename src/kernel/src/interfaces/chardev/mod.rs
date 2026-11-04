@@ -101,6 +101,7 @@ use crate::syscall::uaccess;
 use crate::timer;
 use crate::user::vmo::Vmo;
 
+#[cfg(not(ferrix_load_built = "lift"))]
 pub mod check;
 pub(crate) mod dmabuf;
 pub(crate) mod file;

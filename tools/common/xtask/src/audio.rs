@@ -221,6 +221,7 @@ fn describe(played: &[(u16, u16)], at: u32) -> String {
 /// A card or stream that refused a request, frames missing, repeated or
 /// changed in the file, or a negative control that passed.
 pub(crate) fn test_audio(args: &Args) -> Result<()> {
+    crate::restart::lifted_row();
     for arch in args.arches()? {
         let wav = paths::build_dir(arch).join("audio.wav");
         // Every build before the first boot, so a plan run, which stops at

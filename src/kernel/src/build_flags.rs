@@ -27,7 +27,7 @@ struct Flag {
 }
 
 /// The profile, then the level, then every flag in the flag file's order.
-const FLAGS: [Flag; 17] = [
+const FLAGS: [Flag; 17 + cfg!(ferrix_personality = "user") as usize] = [
     Flag {
         name: "profile",
         values: &[
@@ -61,6 +61,7 @@ const FLAGS: [Flag; 17] = [
             (cfg!(ferrix_fs = "server"), "server"),
             (cfg!(ferrix_fs = "kernel"), "kernel"),
             (cfg!(ferrix_fs = "none"), "none"),
+            (cfg!(ferrix_fs = "lift"), "lift"),
         ],
     },
     Flag {
@@ -98,6 +99,19 @@ const FLAGS: [Flag; 17] = [
             (cfg!(ferrix_restricted_fastpath = "on"), "on"),
             (
                 cfg!(ferrix_restricted_fastpath = "not_applicable"),
+                "not_applicable",
+            ),
+        ],
+    },
+    // `present`'s and `desktop`'s boot lines stay as they were.
+    #[cfg(ferrix_personality = "user")]
+    Flag {
+        name: "fault_ahead",
+        values: &[
+            (cfg!(ferrix_fault_ahead = "off"), "off"),
+            (cfg!(ferrix_fault_ahead = "on"), "on"),
+            (
+                cfg!(ferrix_fault_ahead = "not_applicable"),
                 "not_applicable",
             ),
         ],

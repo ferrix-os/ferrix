@@ -226,6 +226,38 @@ for round in 1 2; do
 done
 "#;
 
+/// [`KILL_GPU`] under `personality=user`, where a driver is no Linux process: no stall,
+/// since nothing can stop it (the row says NOT RUN), and the kills by the row's path
+/// through devmgr (M5-LIFT.md §11).
+const KILL_GPU_LIFTED: &str = r#"newest() {
+  most=0
+  for p in /proc/[0-9]*; do
+    read n < $p/comm 2>/dev/null
+    if [[ $n == $1 ]] && (( ${p#/proc/} > most )); then most=${p#/proc/}; fi
+  done
+  echo $most
+}
+held() {
+  [[ -e /dev/dri/card0 ]] || return 1
+  for f in /proc/$(newest hyprix)/fd/*; do
+    if [[ $f -ef /dev/dri/card0 ]]; then return 0; fi
+  done
+  return 1
+}
+until held; do :; done
+until [[ -e /tmp/pattern-two.drawn ]]; do :; done
+: > /tmp/pattern-stalled.drawn
+began=$EPOCHSECONDS
+until [[ -e /tmp/pattern-three.drawn ]] || (( EPOCHSECONDS - began >= 30 )); do :; done
+kill $(newest pattern)
+for round in 1 2; do
+  until held; do :; done
+  echo "killgpu: killing gpu $round"
+  for d in /sys/bus/pci/drivers/gpu/0*; do echo kill:${d##*/} > /sys/bus/pci/drivers/gpu/unbind; done
+  while held; do :; done
+done
+"#;
+
 /// The configuration the restart boot is given: the first boot's two
 /// windows, so the screen after the second return can be held to the
 /// picture that boot blesses, and the script.
@@ -277,12 +309,24 @@ const RESTART_PATIENCE: Duration = Duration::from_secs(150);
 /// failed nor ended. And on the screen: after that return, every pixel of
 /// the first boot's tiled picture, drawn on the third driver's card.
 pub(super) fn test_driver_restart(arch: Arch, programs: &Programs, args: &Args) -> Result<()> {
+    crate::restart::lifted_row();
+    let lifted =
+        crate::flags::this_run().is_ok_and(|flags| flags.value("personality") == Some("user"));
+    if lifted {
+        println!(
+            "  {arch}: NOT RUN under personality=user: the stall, since nothing can stop a driver"
+        );
+    }
     let carried = Carried {
         zinc: crate::zinc::build(arch)?,
         ports: vec![crate::ports::File {
             path: KILL_GPU_PATH.to_owned(),
             mode: 0o755,
-            content: crate::ports::Content::Bytes(KILL_GPU.as_bytes().to_vec()),
+            content: crate::ports::Content::Bytes(
+                if lifted { KILL_GPU_LIFTED } else { KILL_GPU }
+                    .as_bytes()
+                    .to_vec(),
+            ),
         }],
         ..Carried::none()
     };
@@ -335,7 +379,7 @@ pub(super) fn test_driver_restart(arch: Arch, programs: &Programs, args: &Args) 
         Ok(())
     };
     let _ = crate::qemu::watch_then(arch, &image, &kernel, &qemu_args, EITHER, hook)?;
-    judge_restart(arch, &said)?;
+    judge_restart(arch, &said, lifted)?;
     let Some(screen) = screen else {
         return Err(Error::new(format!(
             "{arch}: no picture was taken after the card came back"
@@ -381,7 +425,7 @@ fn back_after_the_last_kill(lines: &[String]) -> bool {
 }
 
 /// What [`test_driver_restart`] requires of what the guest said.
-fn judge_restart(arch: Arch, said: &[String]) -> Result<()> {
+fn judge_restart(arch: Arch, said: &[String], lifted: bool) -> Result<()> {
     let count = |want: &str| said.iter().filter(|line| line.contains(want)).count();
     if let Some(line) = said.iter().find(|line| {
         line.contains(FAILED) || compositor_ended(line) || line.contains(crate::qemu::PANIC_MARKER)
@@ -401,6 +445,9 @@ fn judge_restart(arch: Arch, said: &[String]) -> Result<()> {
     ];
     let mut missing = Vec::new();
     for (want, times, what) in wanted {
+        if lifted && [STOPPING, GOES_ON, DROPPED].contains(&want) {
+            continue;
+        }
         let seen = count(want);
         if seen < times {
             missing.push(format!("{what}: `{want}` {seen} of {times} times"));

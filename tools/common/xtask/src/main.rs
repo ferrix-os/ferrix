@@ -675,6 +675,14 @@ const MAIN_TASKS: &[Task] = &[
         run: |_, args| test_kaslr(args),
     },
     Task {
+        name: "test-linuxd",
+        help_at: 209,
+        help: &[
+            "test-linuxd   Boot --personality user: the kernel starts linuxd, which serves one static program's write and exit (docs/microkernel/M5-LIFT.md §7).",
+        ],
+        run: |_, args| test_linuxd(args),
+    },
+    Task {
         name: "test-shell",
         help_at: 210,
         help: &[
@@ -824,6 +832,77 @@ fn test_kaslr(args: &Args) -> Result<()> {
 /// `cargo xtask test-shell`.
 ///
 /// Verifies: L.init.1
+/// `cargo xtask test-linuxd --personality user`: milestone 2 of the lift. The
+/// built-in program's `write` and `exit`, through linuxd.
+fn test_linuxd(args: &Args) -> Result<()> {
+    if crate::flags::this_run()?.value("personality") != Some("user") {
+        return Err(Error::new("test-linuxd is for --personality user"));
+    }
+    for arch in args.arches()? {
+        let loader = cargo::build_loader(arch, args.release)?;
+        let program = hello_elf(arch)?;
+        let kernel = cargo::build_kernel_with_init(arch, args.release, &program, "")?;
+        let natives = native::build(arch, args.release)?;
+        let initramfs = initramfs::build(None, &natives, None, &[])?;
+        let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, None)?;
+        qemu::test_linuxd(arch, &image, &kernel, args)?;
+        // The rest of milestone 4: fork, exec, pipes, signals, under busybox,
+        // whose applets the shell finds at /bin as links to itself.
+        if let Some(init) = args.init.as_deref() {
+            let busybox = program_for(init, arch)?;
+            let kernel =
+                cargo::build_kernel_with_init(arch, args.release, &busybox, shell::LIFT_SCRIPT)?;
+            let carried = shell::lift_carried(&busybox)?;
+            let initramfs = initramfs::build(None, &natives, None, &carried)?;
+            let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, None)?;
+            qemu::test_lift_script(arch, &image, &kernel, args)?;
+        }
+    }
+    Ok(())
+}
+
+/// The smallest static Linux program: `write(1, "hello from ring 3\\n")`, then
+/// `exit_group(42)`, as a one-segment x86-64 ELF.
+fn hello_elf(arch: paths::Arch) -> Result<std::path::PathBuf> {
+    const BASE: u64 = 0x40_0000;
+    const HEADERS: u64 = 64 + 56;
+    let text: &[u8] = b"hello from ring 3\n";
+    let mut code: Vec<u8> = vec![
+        0xb8, 0x01, 0, 0, 0, // mov $1, %eax
+        0xbf, 0x01, 0, 0, 0, // mov $1, %edi
+        0x48, 0x8d, 0x35, 0x13, 0, 0, 0, // lea 0x13(%rip), %rsi
+        0xba, 0x12, 0, 0, 0, // mov $18, %edx
+        0x0f, 0x05, // syscall
+        0xb8, 0xe7, 0, 0, 0, // mov $231, %eax
+        0xbf, 0x2a, 0, 0, 0, // mov $42, %edi
+        0x0f, 0x05, // syscall
+    ];
+    code.extend_from_slice(text);
+    let size = HEADERS + code.len() as u64;
+    let mut elf: Vec<u8> = Vec::new();
+    elf.extend_from_slice(&[0x7f, b'E', b'L', b'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    elf.extend_from_slice(&2_u16.to_le_bytes());
+    elf.extend_from_slice(&62_u16.to_le_bytes());
+    elf.extend_from_slice(&1_u32.to_le_bytes());
+    elf.extend_from_slice(&(BASE + HEADERS).to_le_bytes());
+    elf.extend_from_slice(&64_u64.to_le_bytes());
+    elf.extend_from_slice(&0_u64.to_le_bytes());
+    elf.extend_from_slice(&0_u32.to_le_bytes());
+    for half in [64_u16, 56, 1, 64, 0, 0] {
+        elf.extend_from_slice(&half.to_le_bytes());
+    }
+    elf.extend_from_slice(&1_u32.to_le_bytes());
+    elf.extend_from_slice(&5_u32.to_le_bytes());
+    for word in [0, BASE, BASE, size, size, 4096_u64] {
+        elf.extend_from_slice(&word.to_le_bytes());
+    }
+    elf.extend_from_slice(&code);
+    let path = paths::target_dir().join(format!("linuxd-hello-{arch}"));
+    std::fs::write(&path, &elf)
+        .map_err(|error| Error::new(format!("writing {}: {error}", path.display())))?;
+    Ok(path)
+}
+
 fn test_shell(args: &Args) -> Result<()> {
     for arch in args.arches()? {
         // The shell the kernel starts. zinc, the shell this tree has,

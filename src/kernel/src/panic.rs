@@ -42,7 +42,22 @@
 
 pub mod catalog;
 pub mod reset;
+#[cfg(not(ferrix_personality = "user"))]
 pub mod screen;
+/// The panic screen in a `personality=user` kernel: none
+/// (`docs/microkernel/M6.md` §2). The panic path is serial (`MICROKERNEL.md`
+/// §2.1); a machine with no serial port says nothing of its panic but what
+/// pstore keeps, an assumption of use.
+#[cfg(ferrix_personality = "user")]
+pub mod screen {
+    /// No window.
+    pub(crate) fn draw() {}
+
+    /// The kernel holds no window on a framebuffer.
+    pub fn window() -> Option<(u64, u64)> {
+        None
+    }
+}
 
 use core::panic::PanicInfo;
 use core::ptr;

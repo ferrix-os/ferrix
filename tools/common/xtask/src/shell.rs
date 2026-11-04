@@ -58,6 +58,50 @@ printf 'script: %s %d\n' printf 42
 exit 7
 "#;
 
+/// `cargo xtask test-linuxd --init`'s script: milestone 4's paths through linuxd
+/// (`docs/microkernel/M5-LIFT.md` §7), each printing a line only it can.
+pub(crate) const LIFT_SCRIPT: &str = r#"echo "lift: started"
+a=$(echo forked)
+echo "lift: $a through a pipe"
+echo piped | { read line; echo "lift: $line both ends"; }
+sh -c 'exit 5'; echo "lift: exec status $?"
+sh -c 'kill -TERM $$'; echo "lift: killed status $?"
+trap 'echo "lift: trapped USR1"' USR1
+kill -USR1 $$
+(sleep 0; echo "lift: subshell") &
+wait $!
+echo written > /tmp/lift; echo "lift: $(cat /tmp/lift) in tmpfs"
+cat /proc/self/maps > /tmp/maps; echo "lift: maps read"
+exit 9
+"#;
+
+/// What [`LIFT_SCRIPT`] runs: busybox under each applet's name.
+pub(crate) fn lift_carried(busybox: &Path) -> Result<Vec<ports::File>> {
+    let bytes = std::fs::read(busybox)
+        .map_err(|error| Error::new(format!("reading {}: {error}", busybox.display())))?;
+    Ok(["bin/sh", "bin/cat", "bin/sleep", "bin/kill"]
+        .into_iter()
+        .map(|path| ports::File {
+            path: path.to_owned(),
+            mode: 0o755,
+            content: ports::Content::Bytes(bytes.clone()),
+        })
+        .collect())
+}
+
+/// [`LIFT_SCRIPT`]'s lines, in order.
+pub(crate) const LIFT_EXPECTED: &[&str] = &[
+    "lift: started",
+    "lift: forked through a pipe",
+    "lift: piped both ends",
+    "lift: exec status 5",
+    "lift: killed status 143",
+    "lift: trapped USR1",
+    "lift: subshell",
+    "lift: written in tmpfs",
+    "lift: maps read",
+];
+
 /// The lines the script must print, in this order.
 pub(crate) const EXPECTED: &[&str] = &[
     "script: started",

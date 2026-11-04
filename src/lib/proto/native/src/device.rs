@@ -296,6 +296,21 @@ impl<S: Syscall> Device<S> {
         .map(|_: usize| ())
     }
 
+    /// `device_served`: a server accepted this device's next driver
+    /// (`docs/microkernel/BTRFSD.md`, BD.1).
+    ///
+    /// # Errors
+    ///
+    /// The status. Needs `MANAGE`.
+    pub fn served(&self) -> Result<(), Error> {
+        decode(
+            Call::new(nr::DEVICE_SERVED)
+                .value(register(self.handle()))
+                .make(self.syscall()),
+        )
+        .map(|_: usize| ())
+    }
+
     /// Ask the kernel for a block ring on this device: the driver's end of
     /// the ring's control channel, over which HELLO goes next
     /// (`docs/BLOCK-RING.md` §6). Needs `MANAGE`.

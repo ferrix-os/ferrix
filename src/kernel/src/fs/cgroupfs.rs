@@ -69,17 +69,29 @@ use crate::syscall::native;
 use crate::syscall::process::{self, Process};
 use crate::syscall::registry;
 
+#[cfg(not(ferrix_load_built = "lift"))]
 mod controllers_check;
+#[cfg(not(ferrix_load_built = "lift"))]
 mod cpu_check;
+#[cfg(not(ferrix_load_built = "lift"))]
 mod creator_check;
+#[cfg(not(ferrix_load_built = "lift"))]
 mod delegation_check;
+#[cfg(not(ferrix_load_built = "lift"))]
 mod events_check;
+#[cfg(not(ferrix_load_built = "lift"))]
 mod freeze_check;
+#[cfg(not(ferrix_load_built = "lift"))]
 mod io_check;
+#[cfg(not(ferrix_load_built = "lift"))]
 mod limits_check;
+#[cfg(not(ferrix_load_built = "lift"))]
 mod native_check;
+#[cfg(not(ferrix_load_built = "lift"))]
 mod oom_check;
+#[cfg(not(ferrix_load_built = "lift"))]
 mod reclaim_check;
+#[cfg(not(ferrix_load_built = "lift"))]
 mod sealed_check;
 
 /// The result every operation here returns.
@@ -1655,6 +1667,7 @@ impl Harness {
     }
 }
 
+#[cfg(not(ferrix_load_built = "lift"))]
 /// Stage 13's cgroupfs check, landing G2: a mount of `cgroup2` shows the job
 /// tree, `mkdir` makes a job and `rmdir` takes an empty one, a pid written to
 /// `cgroup.procs` moves that process, `/proc/<pid>/cgroup` and

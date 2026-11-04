@@ -69,10 +69,9 @@ This is §5's table, row by row:
 start a child starts it in its own job, by K15.
 
 **The debug log's write handle** is a new small object: `Object::DebugLog`, one per kernel, rights
-`WRITE | TRANSFER | DUPLICATE`, and **`DEBUG_LOG_WRITE` (0x10C3): `(log, *bytes, len)`**, needing
+`WRITE | TRANSFER | DUPLICATE`, and **`DEBUG_WRITE` (0x10B0): `(log, *bytes, len)`**, needing
 `WRITE`, bounded per call and rate-limited (a line prefix naming the process; bytes the console's
-filter passes). It replaces M5-LIFT's open `DEBUG_WRITE`, which "until a handle guards it" was open
-to the first image only. A driver gets a duplicate from devmgr; a Linux program never does.
+filter passes). 0x10C3 is `DEVICE_SERVED` (ledger 6542, R9); the one debug log is this call. A driver gets a duplicate from devmgr; a Linux program never does.
 
 **The time page's VMO**: `TIME_PAGE` as a handle in the table, read-only, so `linuxd` needs no call.
 M5-LIFT's 0x10B7 is withdrawn before release.
@@ -126,7 +125,7 @@ safety-partition authority pass from the kernel to their holders directly*).
 | L.object.321 | each holds exactly §3's row: a test image in each role lists its handle table and each object's rights | the table compared with §3 | one more handle given: *a first process holds a handle its row does not name* |
 | L.object.322 | no first process holds the root job, and devmgr no safety device | the same; DEVICES' count | the filter removed: *devmgr was handed a safety partition's device* |
 | L.object.323 | a description naming no real device stops the boot | row with a made-up location: expected `FX-0953` | test removed: *a partition's device matches no node* |
-| L.object.324 | `DEBUG_LOG_WRITE` needs `WRITE`, is bounded, is rate-limited; a Linux program has no handle | `debug_log_check`, every boot | each removed |
+| L.object.324 | `DEBUG_WRITE` needs `WRITE`, is bounded, is rate-limited; a Linux program has no handle | `debug_log_check`, every boot | each removed |
 | L.object.325 | the parser: well-formed accepted; bad magic, overrunning count, truncation refused; never reads past the end | host tests, fuzz target, stage 9 made-up file | a bound removed: *the description was read past its end* |
 | L.object.326 | `FX-0954` on the manager's death; `linux` job killed on `linuxd`'s; `drivers` on devmgr's | row kills each from a test image | the watch removed: *the manager died and the machine ran on* |
 

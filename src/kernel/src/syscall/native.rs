@@ -75,6 +75,7 @@ use ferrix_objects::table::TableError;
 use ferrix_sync::Once;
 use ferrix_vma::VmaFlags;
 
+mod lift;
 mod region;
 
 use crate::arch;
@@ -581,6 +582,7 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         | NativeCall::DeviceGetLimit
         | NativeCall::DeviceIsolation
         | NativeCall::DeviceBindDomain
+        | NativeCall::DeviceServed
         | NativeCall::PowerControlCreate
         | NativeCall::PowerSet
         | NativeCall::PowerRead => device_call(call, process, &a),
@@ -612,6 +614,16 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         | NativeCall::SpaceAllocate
         | NativeCall::SpaceWrite
         | NativeCall::SpaceClone => space_call(call, process, &a),
+        NativeCall::DebugWrite
+        | NativeCall::ObjectKind
+        | NativeCall::ThreadYield
+        | NativeCall::ClockRead
+        | NativeCall::RandomFill
+        | NativeCall::ConsoleRead
+        | NativeCall::ThreadAffinity
+        | NativeCall::BootstrapMove
+        | NativeCall::SpaceWindow
+        | NativeCall::SpacePlace => lift::call(call, process, &a),
         NativeCall::JobDeclareBuffer => job_declare_buffer(process, handle(a[0]), handle(a[1])),
         NativeCall::RegionCreate
         | NativeCall::ProcessCreateShared
@@ -2567,6 +2579,8 @@ fn device_call(call: NativeCall, process: &Process, a: &[u64; 6]) -> Result<usiz
         NativeCall::DeviceGetLimit => device_get_limit(process, device, second),
         NativeCall::DeviceIsolation => device_isolation(process, device),
         NativeCall::DeviceBindDomain => device_bind_domain(process, device),
+        #[cfg(ferrix_personality = "user")]
+        NativeCall::DeviceServed => device_served(process, device),
         _ => power_call(call, process, a),
     }
 }
@@ -3249,8 +3263,19 @@ fn move_handle(from: &Process, to: &Process, handle: Handle) -> Result<Handle, E
 /// `BAD_HANDLE`, `ACCESS_DENIED` without `TRANSFER`, `ALREADY_BOUND` for a
 /// slot given before, `BAD_STATE` for a sealed one.
 pub fn give_bootstrap(from: &Process, to: &Process, handle: Handle) -> Result<usize, Errno> {
+    give_bootstrap_from(from, to, handle, false)
+}
+
+/// [`give_bootstrap`], from the caller's private table when `private`, whatever
+/// mode it runs in: `BOOTSTRAP_MOVE`, where linuxd has judged the Linux half.
+pub(crate) fn give_bootstrap_from(
+    from: &Process,
+    to: &Process,
+    handle: Handle,
+    private: bool,
+) -> Result<usize, Errno> {
     let level = to.exit().level();
-    from.with_handles(|source| {
+    let moved = |source: &mut crate::object::HandleTable| {
         let (object, rights) = source.get(handle).map_err(table_error)?;
         if !rights.contains(Rights::TRANSFER) {
             return Err(status::ACCESS_DENIED);
@@ -3266,7 +3291,12 @@ pub fn give_bootstrap(from: &Process, to: &Process, handle: Handle) -> Result<us
             *slot = Bootstrap::Held(object, rights);
             Ok(())
         })
-    })?;
+    };
+    if private {
+        from.with_private_handles(moved)?;
+    } else {
+        from.with_handles(moved)?;
+    }
     Ok(0)
 }
 
@@ -4866,6 +4896,30 @@ fn space_create(process: &Process) -> Result<usize, Errno> {
 /// `space_map`: [`vmo_map`] into the space the handle names, with
 /// executable mappings through handles that carry `EXECUTE`
 /// (`docs/microkernel/K2.md` §2.3, §2.4).
+/// `SPACE_WINDOW` and `SPACE_PLACE`'s look-ups (`native::lift`).
+#[cfg(ferrix_personality = "user")]
+pub(crate) fn lift_space(
+    process: &Process,
+    space: u64,
+    needed: Rights,
+) -> Result<Arc<SpaceRef>, Errno> {
+    let handle = Handle(u32::try_from(space).map_err(|_| status::BAD_HANDLE)?);
+    space_in(process, handle, needed)
+}
+#[cfg(ferrix_personality = "user")]
+pub(crate) fn lift_vmo(
+    process: &Process,
+    vmo: u64,
+    needed: Rights,
+) -> Result<(Arc<Vmo>, Rights), Errno> {
+    let handle = Handle(u32::try_from(vmo).map_err(|_| status::BAD_HANDLE)?);
+    process.with_handles(|table| vmo_held(table, handle, needed))
+}
+#[cfg(ferrix_personality = "user")]
+pub(crate) fn lift_space_status(why: SpaceError) -> Errno {
+    space_status(why)
+}
+
 fn space_map(
     process: &Process,
     space: Handle,
@@ -4885,6 +4939,10 @@ fn space_map(
         Rights::MAP
     };
     let target = space_in(process, space, on_space)?;
+    #[cfg(ferrix_personality = "user")]
+    if target.space().is_window() {
+        return Err(status::BAD_STATE);
+    }
     let mut on_vmo = Rights::MAP | Rights::READ;
     if write {
         on_vmo = on_vmo | Rights::WRITE;
@@ -4956,6 +5014,10 @@ fn space_protect(
         Rights::MAP
     };
     let target = space_in(process, space, needed)?;
+    #[cfg(ferrix_personality = "user")]
+    if target.space().is_window() {
+        return Err(status::NOT_SUPPORTED);
+    }
     let flags = VmaFlags {
         write,
         execute,
@@ -5021,6 +5083,10 @@ fn space_allocate(
 /// `fork` clones one, answered with the handle's own rights and never more.
 fn space_clone(process: &Process, space: Handle) -> Result<usize, Errno> {
     let (source, rights) = space_held(process, space, Rights::READ)?;
+    #[cfg(ferrix_personality = "user")]
+    if source.space().is_window() {
+        return Err(status::NOT_SUPPORTED);
+    }
     // Clone launders nothing: a measured caller takes no copy of a space that
     // may hold unsealed executable regions (K14.6). The clone keeps the
     // source's state, either way, in `AddressSpace::fork`.
@@ -5060,6 +5126,10 @@ fn space_write(
     length: u64,
 ) -> Result<usize, Errno> {
     let target = space_in(process, space, Rights::WRITE)?;
+    #[cfg(ferrix_personality = "user")]
+    if target.space().is_window() {
+        return Err(status::NOT_SUPPORTED);
+    }
     let length = usize::try_from(length)
         .unwrap_or(usize::MAX)
         .min(nr::SPACE_COPY_MAX);
@@ -5123,6 +5193,10 @@ fn space_read(
     length: u64,
 ) -> Result<usize, Errno> {
     let target = space_in(process, space, Rights::READ)?;
+    #[cfg(ferrix_personality = "user")]
+    if target.space().is_window() {
+        return Err(status::NOT_SUPPORTED);
+    }
     let length = usize::try_from(length)
         .unwrap_or(usize::MAX)
         .min(nr::SPACE_COPY_MAX);
@@ -5426,6 +5500,25 @@ fn timer_cancel(process: &Process, timer: Handle) -> Result<usize, Errno> {
     Ok(0)
 }
 
+/// `device_served` (`docs/microkernel/M5-LIFT.md` §11): what a core in the
+/// kernel does at an accepted HELLO, for a core that is not in the kernel. devmgr
+/// calls it on a server's word, and calling it early widens nothing the driver it
+/// holds the handle of could not already reach: V-20.
+#[cfg(ferrix_personality = "user")]
+fn device_served(process: &Process, device: Handle) -> Result<usize, Errno> {
+    let node = device_in(process, device, Rights::MANAGE)?;
+    // The two kernel steps a HELLO to the in-kernel core makes. A live driver
+    // holds MANAGE as well and could call this too: today's HELLO is the same
+    // trust. Releasing the quarantine early widens nothing translated, where
+    // an unmapped page faults, and untranslated only an unisolated or K14
+    // node is admitted (K8.3).
+    if node.verify_config().is_err() {
+        return Err(status::BAD_STATE);
+    }
+    crate::object::pin::quarantine_release(&node);
+    Ok(0)
+}
+
 /// Register `observer` on `target`, or `None` for an object with no signal
 /// that changes.
 fn observe(target: &Object, observer: Observer) -> Option<Result<(), PortError>> {
@@ -5445,6 +5538,8 @@ fn observe(target: &Object, observer: Observer) -> Option<Result<(), PortError>>
         | Object::PagerKeeper(_)
         | Object::Starter
         | Object::Audit
+        | Object::DebugLog
+        | Object::Console
         | Object::CpuService
         | Object::MemoryScrub
         | Object::Region(_)

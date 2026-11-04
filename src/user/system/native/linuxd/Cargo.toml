@@ -1,0 +1,28 @@
+[package]
+name = "ferrix-linuxd"
+description = "linuxd: the Linux personality in user space, the load's one source built against the shim (docs/microkernel/M5-LIFT.md)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+build = "build.rs"
+
+[[bin]]
+name = "linuxd"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+ferrix-kernel-core = { package = "ferrix-lift-core", path = "../../../../kernel/lift/core" }
+ferrix-kernel-item = { package = "ferrix-lift-item", path = "../../../../kernel/lift/item" }
+ferrix-kernel-load = { package = "ferrix-lift-load", path = "../../../../kernel/lift/load" }
+ferrix-native-abi.workspace = true
+ferrix-kernel-settings = { package = "ferrix-lift-settings", path = "../../../../kernel/lift/settings" }
+ferrix-rt.workspace = true
+ferrix-native.workspace = true
+ferrix-bootinfo.workspace = true
+
+[lints]
+workspace = true

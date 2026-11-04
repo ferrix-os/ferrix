@@ -125,6 +125,17 @@ pub fn init_entries(archive: &[u8]) -> impl Iterator<Item = InitEntry<'_>> {
         })
 }
 
+/// The bytes of the regular file `name` in `archive`, normalised as [`unpack`]
+/// does; `None` past its first malformed header, as [`init_entries`].
+#[must_use]
+pub fn file_named<'a>(archive: &'a [u8], name: &[u8]) -> Option<&'a [u8]> {
+    Archive::new(archive)
+        .entries()
+        .map_while(Result::ok)
+        .find(|entry| entry.is_safe_path() && entry.is_file() && normalise(entry.name) == name)
+        .map(|entry| entry.data)
+}
+
 /// Why an unpack stopped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UnpackError {

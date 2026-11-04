@@ -32,10 +32,14 @@ use ferrix_vfs::{Errno, FileType, NewNode, RenameMode};
 use crate::fs;
 use crate::interfaces::block_ring::VIRTIO_BLK_MAJOR;
 
+#[cfg(not(ferrix_load_built = "lift"))]
 mod clean_check;
+#[cfg(not(ferrix_load_built = "lift"))]
 mod mapped_check;
 mod poison_check;
+#[cfg(not(ferrix_load_built = "lift"))]
 mod reclaim_check;
+#[cfg(not(ferrix_load_built = "lift"))]
 mod stuck_check;
 
 /// Where the writable disk is mounted.
@@ -358,58 +362,61 @@ pub fn run() -> Result<Report, &'static str> {
     crate::console::println!(
         "  btrfs-rw vdc filled with {filled} bytes until ENOSPC, synced, emptied and written again"
     );
-    let reclaim = reclaim_check::run()?;
-    crate::console::println!(
-        "  reclaim  btrfs-rw: {} clean pages of a writable mount given back, {} written and not \
+    #[cfg(not(ferrix_load_built = "lift"))]
+    {
+        let reclaim = reclaim_check::run()?;
+        crate::console::println!(
+            "  reclaim  btrfs-rw: {} clean pages of a writable mount given back, {} written and not \
          written back kept and counted in Dirty, every page read back as last written; a shared \
          mapping made during a reclaim kept its page; a write at memory.max took back {} pages \
          and succeeded; a read past it took back {} pages and succeeded",
-        reclaim.given,
-        reclaim.dirty,
-        reclaim.stolen_at_max,
-        reclaim.stolen_by_fill,
-    );
-    let poison = poison_check::run()?;
-    crate::console::println!(
-        "  poison   btrfs-rw: {} clean cached pages named poisoned dropped and read again from the \
+            reclaim.given,
+            reclaim.dirty,
+            reclaim.stolen_at_max,
+            reclaim.stolen_by_fill,
+        );
+        let poison = poison_check::run()?;
+        crate::console::println!(
+            "  poison   btrfs-rw: {} clean cached pages named poisoned dropped and read again from the \
          disk, their frames retired and a mapping's page gone; {} not clean kept; a frame no \
          page holds, one not retirable and a page asked for with another frame left alone; a \
          dirty page's poisoned read failed",
-        poison.dropped,
-        poison.kept,
-    );
-    // The disk to itself for a mount of its own, then back at /mnt-rw.
-    let place = ns
-        .resolve(&ctx, None, MOUNT_POINT, true)
-        .map_err(|_| "the mount point could not be resolved before the stuck-file check")?;
-    place
-        .mount
-        .filesystem()
-        .sync()
-        .map_err(|_| "the volume could not be synced before the stuck-file check")?;
-    ns.unmount(&place)
-        .map_err(|_| "the volume could not be unmounted before the stuck-file check")?;
-    stuck_check::run(rdev)?;
-    let back = fs::btrfs::mount_rw(rdev)
-        .map_err(|_| "the volume would not mount again after the stuck-file check")?;
-    let _ = ns
-        .mount(back, &at)
-        .map_err(|_| "the volume could not be mounted again after the stuck-file check")?;
-    crate::console::println!(
-        "  btrfs-rw a sync past a file whose writeback failed answered ENOMEM and still \
+            poison.dropped,
+            poison.kept,
+        );
+        // The disk to itself for a mount of its own, then back at /mnt-rw.
+        let place = ns
+            .resolve(&ctx, None, MOUNT_POINT, true)
+            .map_err(|_| "the mount point could not be resolved before the stuck-file check")?;
+        place
+            .mount
+            .filesystem()
+            .sync()
+            .map_err(|_| "the volume could not be synced before the stuck-file check")?;
+        ns.unmount(&place)
+            .map_err(|_| "the volume could not be unmounted before the stuck-file check")?;
+        stuck_check::run(rdev)?;
+        let back = fs::btrfs::mount_rw(rdev)
+            .map_err(|_| "the volume would not mount again after the stuck-file check")?;
+        let _ = ns
+            .mount(back, &at)
+            .map_err(|_| "the volume could not be mounted again after the stuck-file check")?;
+        crate::console::println!(
+            "  btrfs-rw a sync past a file whose writeback failed answered ENOMEM and still \
          committed the other file; the next sync committed the first"
-    );
-    mapped_check::run()?;
-    let clean = clean_check::run(rdev)?;
-    crate::console::println!(
-        "  reclaim  btrfs-rw: {} bytes of clean tree nodes counted in SReclaimable and \
+        );
+        mapped_check::run()?;
+        let clean = clean_check::run(rdev)?;
+        crate::console::println!(
+            "  reclaim  btrfs-rw: {} bytes of clean tree nodes counted in SReclaimable and \
          MemAvailable, none taken by a job's reclaim, {} taken by the machine's; {} given back \
          freed {} frames, and the directory read again off the disk the same",
-        clean.held,
-        clean.reclaimed,
-        clean.given,
-        clean.frames,
-    );
+            clean.held,
+            clean.reclaimed,
+            clean.given,
+            clean.frames,
+        );
+    }
     Ok(report)
 }
 
@@ -472,4 +479,33 @@ fn fill(expected: &[Expected]) -> Result<u64, &'static str> {
         return Err("the file written after the fill read back wrong");
     }
     Ok(filled)
+}
+
+/// The read-only fixture, mounted at `/mnt` as the hybrid's boot check leaves it:
+/// test-vfs's programs read it there. Linuxd has that check's mount, not the check.
+///
+/// # Errors
+///
+/// What failed, as a sentence.
+#[cfg(ferrix_load_built = "lift")]
+pub fn mount_fixture() -> Result<bool, &'static str> {
+    const FIXTURE_DISK: u32 = 1;
+    let rdev = makedev(VIRTIO_BLK_MAJOR, FIXTURE_DISK * 16);
+    if fs::devfs::block_device(rdev).is_none() {
+        return Ok(false);
+    }
+    let ns = fs::namespace();
+    let ctx = ns.context();
+    match ns.mkdir(&ctx, None, b"/mnt", 0o755) {
+        Ok(()) | Err(ferrix_vfs::Errno::EEXIST) => {}
+        Err(_) => return Err("the mount point could not be made"),
+    }
+    let at = ns
+        .resolve(&ctx, None, b"/mnt", true)
+        .map_err(|_| "the mount point could not be resolved")?;
+    let volume = fs::btrfs::mount(rdev).map_err(|_| "the btrfs disk would not mount")?;
+    let _ = ns
+        .mount(volume, &at)
+        .map_err(|_| "the volume could not be mounted at /mnt")?;
+    Ok(true)
 }

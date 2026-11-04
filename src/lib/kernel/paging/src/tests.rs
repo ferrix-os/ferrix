@@ -489,6 +489,7 @@ fn walk_properties<E: Encoding>() {
     unmapping_reports_what_it_removed::<E>();
     unmapping_walks_through_a_hole::<E>();
     unmapping_steps_over_a_hole_whole::<E>();
+    unmapping_names_each_leaf::<E>();
     unmapping_refuses_to_cut_a_block::<E>();
     protecting_keeps_the_frame_and_changes_the_permissions::<E>();
     protecting_a_hole_is_an_error::<E>();
@@ -596,6 +597,37 @@ fn unmapping_walks_through_a_hole<E: Encoding>() {
 /// without a walk from the root for every page of the hole before it -- a
 /// quarter of a million walks, which was what a program handing back a
 /// reservation it barely touched cost.
+/// `unmap_range_named` says which address each leaf was at, and a table goes with the
+/// address of the leaf that emptied it; a hole names nothing.
+fn unmapping_names_each_leaf<E: Encoding>() {
+    let (mut memory, mapper) = Memory::with_root::<E>();
+    let at = high::<E>(0x1000_0000);
+    let last = at.checked_add(2 * PAGE_SIZE).unwrap();
+    for page in [at, last] {
+        mapper
+            .map_range(
+                &mut memory,
+                page,
+                PhysAddr(0x20_0000),
+                PAGE_SIZE,
+                MapFlags::KERNEL_DATA,
+            )
+            .unwrap();
+    }
+    let mut leaves = Vec::new();
+    let mut tables = Vec::new();
+    let removed = mapper
+        .unmap_range_named(&mut memory, at, 3 * PAGE_SIZE, |named, freed| match freed {
+            Released::Page { .. } => leaves.push(named),
+            Released::Table { .. } => tables.push(named),
+        })
+        .unwrap();
+    assert_eq!(removed, 2);
+    assert_eq!(leaves, [at, last]);
+    assert!(!tables.is_empty(), "the last leaf empties its table");
+    assert!(tables.iter().all(|&named| named == last));
+}
+
 fn unmapping_steps_over_a_hole_whole<E: Encoding>() {
     const GIB: u64 = 1 << 30;
     let (mut memory, mapper) = Memory::with_root::<E>();

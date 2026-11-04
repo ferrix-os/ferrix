@@ -30,6 +30,7 @@
 //! from one leaves through the trap stub's `IRETQ` path instead, which restores
 //! all sixteen. Linux does the same.
 
+#[cfg(not(ferrix_shape = "micro"))]
 mod compat;
 
 use ferrix_bootinfo::is_user_address;
@@ -458,6 +459,7 @@ const USER_SS: u64 = (gdt::USER_DATA | 3) as u64;
 
 /// `uc_flags`: [`UC_FLAGS`], and [`UC_FP_XSTATE`] when the frame carries an
 /// `XSAVE` area.
+#[cfg(not(ferrix_shape = "micro"))]
 fn uc_flags() -> u64 {
     if frame_has_xstate() {
         UC_FLAGS | UC_FP_XSTATE
@@ -469,12 +471,14 @@ fn uc_flags() -> u64 {
 /// Whether a frame carries an `XSAVE` area: when the switch saves AVX, so
 /// that a handler which uses it does not hand the interrupted code back
 /// different `YMM` registers.
+#[cfg(not(ferrix_shape = "micro"))]
 fn frame_has_xstate() -> bool {
     cpu::extended_state_components() & cpu::XSTATE_AVX != 0
 }
 
 /// Bytes the floating-point area takes below the frame: `FXSAVE`'s alone, or
 /// the `XSAVE` area and the magic word after it.
+#[cfg(not(ferrix_shape = "micro"))]
 fn fp_area_bytes() -> usize {
     if frame_has_xstate() {
         XSTATE_BYTES + 4
@@ -486,6 +490,7 @@ fn fp_area_bytes() -> usize {
 /// Write the program's x87 and SSE state, as `FXSAVE` lays it out, to
 /// `fpstate` -- and its AVX state after it, as `XSAVE` does, with the
 /// software-reserved words that say so, when the switch saves AVX.
+#[cfg(not(ferrix_shape = "micro"))]
 fn write_fp_area(space: &AddressSpace, fpstate: u64) -> Result<(), BadFrame> {
     // SAFETY: (CONTEXT) on the running task's own way back to ring 3, so the processor
     // holds this program's x87, SSE and AVX registers.
@@ -500,6 +505,7 @@ fn write_fp_area(space: &AddressSpace, fpstate: u64) -> Result<(), BadFrame> {
     clippy::disallowed_methods,
     reason = "the method's home: checks-only for the crates above, not here (ledger 1795, S3.2a)"
 )]
+#[cfg(not(ferrix_shape = "micro"))]
 fn fp_area(state: &UserState) -> Result<FrameBytes, BadFrame> {
     let mut area = FrameBytes::zeroed(fp_area_bytes())?;
     area.put(0, &state.fxsave())?;
@@ -520,6 +526,7 @@ fn fp_area(state: &UserState) -> Result<FrameBytes, BadFrame> {
 /// Whether a frame can be built for `request`: the handler must name a
 /// restorer, because neither mode has a default one to return through here
 /// -- there is no vDSO holding one -- and every libc gives one.
+#[cfg(not(ferrix_shape = "micro"))]
 const fn frame_is_buildable(request: &FrameRequest) -> Result<(), BadFrame> {
     if request.flags & SA_RESTORER == 0 {
         return Err(BadFrame);
@@ -531,6 +538,7 @@ const fn frame_is_buildable(request: &FrameRequest) -> Result<(), BadFrame> {
 /// 64-byte aligned, and the frame below it aligned so that on entry
 /// `(sp + 8) % 16 == 0`, which is what a function expects just after a
 /// `call` pushed its return address. Answers both addresses.
+#[cfg(not(ferrix_shape = "micro"))]
 fn place(stack: u64) -> Result<(u64, u64), BadFrame> {
     let fpstate = stack.checked_sub(fp_area_bytes() as u64).ok_or(BadFrame)? & !63;
     let below = fpstate.checked_sub(FRAME_BYTES as u64).ok_or(BadFrame)?;
@@ -552,6 +560,7 @@ fn place(stack: u64) -> Result<(u64, u64), BadFrame> {
 /// fault's, and its three fields stay zero, as the frame starts. The
 /// address is the `siginfo`'s: the processor's `CR2` may be a later fault's
 /// by now.
+#[cfg(not(ferrix_shape = "micro"))]
 fn put_cause(
     frame: &mut FrameBytes,
     context: &UserContext,
@@ -578,6 +587,7 @@ fn put_cause(
 /// Write `request`'s frame below its stack and point `context` at the handler:
 /// `RDI` the signal, `RSI` the `siginfo`, `RDX` the `ucontext`, and the stack
 /// pointer at `pretcode`, as if the handler had just been called from it.
+#[cfg(not(ferrix_shape = "micro"))]
 pub fn setup_signal_frame(
     space: &AddressSpace,
     context: &mut UserContext,
@@ -643,6 +653,7 @@ pub fn setup_signal_frame(
 /// code and the stack selector user data whatever the
 /// frame says, and `MXCSR` is masked to the bits the processor has before
 /// `FXRSTOR64` sees it.
+#[cfg(not(ferrix_shape = "micro"))]
 pub fn restore_signal_frame(
     space: &AddressSpace,
     context: &mut UserContext,
@@ -710,6 +721,7 @@ fn restored_code_selector(saved: u16, rip: u64, rsp: u64) -> Result<u64, BadFram
 /// [`write_fp_area`] writes one: both magic words, the sizes it was written
 /// with. `None` for plain `FXSAVE` -- a frame from before, or one a program
 /// built -- after which AVX is loaded in its initial state, as Linux does.
+#[cfg(not(ferrix_shape = "micro"))]
 fn xstate_in(space: &AddressSpace, at: u64, legacy: &FrameBytes) -> Option<(u64, [u8; 256])> {
     if !frame_has_xstate()
         || legacy.u32_at(SW_MAGIC1).ok()? != FP_XSTATE_MAGIC1
@@ -732,6 +744,7 @@ fn xstate_in(space: &AddressSpace, at: u64, legacy: &FrameBytes) -> Option<(u64,
     clippy::disallowed_methods,
     reason = "the method's home: checks-only for the crates above, not here (ledger 1795, S3.2a)"
 )]
+#[cfg(not(ferrix_shape = "micro"))]
 fn restore_fpu(space: &AddressSpace, at: u64) -> Result<(), BadFrame> {
     let area = FrameBytes::read(space, at, FXSAVE_BYTES)?;
     // SAFETY: (CONTEXT) inside the running task's own system call, so the registers are

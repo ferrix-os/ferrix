@@ -382,7 +382,13 @@ pub(crate) fn test_rustc(args: &Args) -> Result<()> {
     // zinc alone: the script is builtins, and every program it runs is on
     // the volume.
     let archive = initramfs::build(None, &natives, Some(&bytes), &links)?;
-    let image = fat::write_image_with(arch, &loader, &kernel, &archive, None)?;
+    let image = fat::write_image_with(
+        arch,
+        &loader,
+        &kernel,
+        &archive,
+        crate::image_cmdline(&args).as_deref(),
+    )?;
 
     println!(
         "  {arch}: compiling hello.rs on Ferrix with {} MiB (timeout {}s)",
@@ -399,7 +405,7 @@ pub(crate) fn test_rustc(args: &Args) -> Result<()> {
 fn judge(arch: Arch, lines: &[String]) -> Result<()> {
     let after_boot = lines
         .iter()
-        .position(|line| line.contains(qemu::SUCCESS_MARKER))
+        .position(|line| qemu::reached(line, qemu::SUCCESS_MARKER))
         .and_then(|at| lines.get(at..))
         .unwrap_or_default();
     let exited = after_boot

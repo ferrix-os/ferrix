@@ -36,6 +36,7 @@
 //! them overflows a `u32` in four seconds. The kernel counts in nanoseconds.
 //! The conversion is [`now`], and it is the only place the two meet.
 
+#[cfg(not(ferrix_load_built = "lift"))]
 pub mod check;
 pub(crate) mod device;
 pub(crate) mod ifreq;

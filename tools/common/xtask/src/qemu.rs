@@ -1119,6 +1119,70 @@ fn fault_problem(arch: Arch, lines: &[String]) -> Option<String> {
 ///
 /// The lines are looked for *after* the boot marker, so a kernel that happened
 /// to print one of them during its self-checks cannot satisfy the test.
+/// The lift's milestone 2 (`docs/microkernel/M5-LIFT.md` §7): the kernel's marker names
+/// `personality=user`, and after it the built-in program's line and its exit.
+pub(crate) fn test_linuxd(arch: Arch, image: &Path, kernel: &Path, args: &Args) -> Result<()> {
+    let watched = watch(arch, image, kernel, args, "linuxd   ended")?;
+    let log = watched.log.display();
+    match watched.verdict {
+        Verdict::Reached => {}
+        Verdict::Panicked => return Err(panicked(arch, &watched.log)),
+        Verdict::Silent => {
+            return Err(Error::new(format!(
+                "{arch}: linuxd never ended within {}s.\n  Serial output is in {log}",
+                args.timeout
+            )));
+        }
+    }
+    let saw = |text: &str| watched.lines.iter().any(|line| line.contains(text));
+    for want in [
+        "personality=user",
+        "linuxd   started",
+        "lift-calls 19 refusals held",
+        "hello from ring 3",
+        "exited with 42",
+    ] {
+        if !saw(want) {
+            return Err(Error::new(format!(
+                "{arch}: `{want}` is missing.\n  Serial output is in {log}"
+            )));
+        }
+    }
+    if saw(SUCCESS_MARKER) {
+        return Err(Error::new(format!(
+            "{arch}: a personality=user boot printed the reference's marker.\n  Serial output is in {log}"
+        )));
+    }
+    println!("  {arch}: linuxd served a static program's write and exit");
+    Ok(())
+}
+
+/// The lift's milestone 4, by [`crate::shell::LIFT_SCRIPT`].
+pub(crate) fn test_lift_script(arch: Arch, image: &Path, kernel: &Path, args: &Args) -> Result<()> {
+    let watched = watch(arch, image, kernel, args, crate::shell::EXITED)?;
+    let log = watched.log.display();
+    match watched.verdict {
+        Verdict::Reached => {}
+        Verdict::Panicked => return Err(panicked(arch, &watched.log)),
+        Verdict::Silent => {
+            return Err(Error::new(format!(
+                "{arch}: the lift's script never ended within {}s.\n  Serial output is in {log}",
+                args.timeout
+            )));
+        }
+    }
+    let mut remaining = watched.lines.iter();
+    for want in crate::shell::LIFT_EXPECTED {
+        if !remaining.any(|line| line.contains(want)) {
+            return Err(Error::new(format!(
+                "{arch}: the lift's script is missing `{want}`.\n  Serial output is in {log}"
+            )));
+        }
+    }
+    println!("  {arch}: fork, exec, pipes and signals through linuxd");
+    Ok(())
+}
+
 pub(crate) fn test_shell(arch: Arch, image: &Path, kernel: &Path, args: &Args) -> Result<()> {
     println!(
         "  {arch}: running the built-in script under QEMU (timeout {}s)",
@@ -1126,10 +1190,13 @@ pub(crate) fn test_shell(arch: Arch, image: &Path, kernel: &Path, args: &Args) -
     );
     let watched = watch(arch, image, kernel, args, crate::shell::EXITED)?;
     let log = watched.log.display();
+    // A `personality=user` boot has no reference marker: its checks that run
+    // a Linux program are not built, and the line that says so names it, which
+    // no other kernel's does (`docs/microkernel/M5-LIFT.md` §7, ledger 5714 (20)).
     let after_boot = watched
         .lines
         .iter()
-        .position(|line| line.contains(SUCCESS_MARKER))
+        .position(|line| reached(line, SUCCESS_MARKER))
         .and_then(|at| watched.lines.get(at..))
         .unwrap_or_default();
 
@@ -1221,7 +1288,7 @@ pub(crate) fn test_vfs(
     let after_boot = watched
         .lines
         .iter()
-        .position(|line| line.contains(SUCCESS_MARKER))
+        .position(|line| reached(line, SUCCESS_MARKER))
         .and_then(|at| watched.lines.get(at..))
         .unwrap_or_default();
     let ending = match watched.verdict {
@@ -1330,7 +1397,7 @@ pub(crate) fn test_net(
     let after_boot = watched
         .lines
         .iter()
-        .position(|line| line.contains(SUCCESS_MARKER))
+        .position(|line| reached(line, SUCCESS_MARKER))
         .and_then(|at| watched.lines.get(at..))
         .unwrap_or_default();
     let ending = match watched.verdict {
@@ -1637,6 +1704,16 @@ pub(crate) fn watch_to_power_off(
 /// itself with 0 (F-46). And the status is the one the architecture's
 /// power-off gives: 33 from x86-64's debug-exit device, its only way off, and
 /// 0 from PSCI's `SYSTEM_OFF` on Arm.
+/// Whether `line` is the point `until` names: a lifted kernel's boot line stands
+/// for the reference's marker, which it does not print.
+pub(crate) fn reached(line: &str, until: &str) -> bool {
+    line.contains(until) || (until == SUCCESS_MARKER && line.contains(LIFTED_BOOTED))
+}
+
+/// linuxd's line once its disks are up and its checks done, before pid 1: where a
+/// `personality=user` boot stands that has no reference marker to print.
+pub(crate) const LIFTED_BOOTED: &str = "  linuxd   booted";
+
 fn power_off_problem(
     arch: Arch,
     lines: &[String],
@@ -1647,7 +1724,7 @@ fn power_off_problem(
 ) -> Option<String> {
     let after = lines
         .iter()
-        .position(|line| line.contains(until))
+        .position(|line| reached(line, until))
         .and_then(|at| lines.get(at + 1..))
         .unwrap_or_default();
     let announced = after
@@ -2101,7 +2178,7 @@ fn watch_hooked(
                 let at = started.elapsed().as_secs_f64();
                 println!("  {at:6.2} | {line}");
                 writeln!(log, "{at:6.2} | {line}")?;
-                if verdict == Verdict::Silent && line.contains(until) {
+                if verdict == Verdict::Silent && reached(&line, until) {
                     verdict = Verdict::Reached;
                     // A kernel that has not said it will reset by its marker
                     // never will, and a power-off only pauses QEMU: waiting
@@ -2111,7 +2188,10 @@ fn watch_hooked(
                     }
                 } else if line.contains(PANIC_MARKER) {
                     verdict = Verdict::Panicked;
-                } else if until == SUCCESS_MARKER && line.contains(UNCHECKED_MARKER) {
+                } else if until == SUCCESS_MARKER
+                    && line.contains(UNCHECKED_MARKER)
+                    && !line.contains("personality=user")
+                {
                     unchecked = true;
                 }
                 if args.reset && verdict == Verdict::Reached {

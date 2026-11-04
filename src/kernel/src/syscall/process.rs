@@ -1474,7 +1474,7 @@ impl Process {
             let _ = object::quota::charging_nobody(|| {
                 space.unmap(
                     MMAP_MIN_ADDR,
-                    ferrix_bootinfo::USER_VIRT_END - MMAP_MIN_ADDR,
+                    crate::user::space::PROGRAM_TOP - MMAP_MIN_ADDR,
                 )
             });
         }

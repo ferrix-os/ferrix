@@ -24,6 +24,7 @@
 //!   that may have the old translation cached. A page fault that waits for
 //!   other processors with interrupts masked stops the machine here, which
 //!   is how a compositor drawing on several threads found it.
+//! * **munmap-race**: see [`munmap_race`].
 //! * **setuid**: in a forked child with a second thread blocked on a
 //!   channel, root's `setuid(1000)` goes through musl's broadcast to both
 //!   threads, leaves both uid and euid 1000, and `setuid(0)` is then `EPERM`
@@ -47,6 +48,7 @@ use std::thread;
 mod affinity;
 mod cpu_number;
 mod futex_signal;
+mod munmap_race;
 mod setuid;
 mod slice_request;
 
@@ -170,6 +172,251 @@ fn check_proc() {
     }
 }
 
+/// A read through a page another thread has just unmapped faults. A window's unmap names
+/// only the leaves it took down (`docs/microkernel/M5-LIFT.md` §13, ledger 6421), so one
+/// left unnamed is a thread on another processor reading memory that is someone else's by
+/// now: the reader keeps reading, and the child ends by the timer rather than `SIGSEGV`.
+#[allow(unsafe_code, reason = "fork, mmap and a read of a page about to go are the case")]
+fn check_unmap_stale() {
+    /// The reader has read the page, in a page both ends map.
+    static READING: std::sync::atomic::AtomicPtr<std::sync::atomic::AtomicU32> =
+        std::sync::atomic::AtomicPtr::new(core::ptr::null_mut());
+    // SAFETY: fork, and the child uses only async-signal-safe calls and its own thread.
+    let child = unsafe { libc::fork() };
+    if child < 0 {
+        fail("fork for unmap-stale");
+    }
+    if child == 0 {
+        // SAFETY: an anonymous page, read by the thread below until it is gone.
+        let page = unsafe {
+            libc::mmap(
+                core::ptr::null_mut(),
+                4096,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+                -1,
+                0,
+            )
+        };
+        if page == libc::MAP_FAILED {
+            // SAFETY: ends the child.
+            unsafe { libc::_exit(6) };
+        }
+        let word = page.cast::<std::sync::atomic::AtomicU32>();
+        // SAFETY: mapped just above; nothing else names it yet.
+        unsafe { (*word).store(1, std::sync::atomic::Ordering::SeqCst) };
+        READING.store(word, std::sync::atomic::Ordering::SeqCst);
+        let seen = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let reader_seen = Arc::clone(&seen);
+        let _reader = thread::spawn(move || {
+            let word = READING.load(std::sync::atomic::Ordering::SeqCst);
+            loop {
+                // SAFETY: mapped, until it is unmapped, which is this check's fault.
+                let value = unsafe { core::ptr::read_volatile(word.cast::<u32>()) };
+                reader_seen.store(value, std::sync::atomic::Ordering::Relaxed);
+                core::hint::spin_loop();
+            }
+        });
+        while seen.load(std::sync::atomic::Ordering::Relaxed) == 0 {
+            thread::yield_now();
+        }
+        // Let the reader settle on its processor with the translation in its TLB.
+        thread::sleep(std::time::Duration::from_millis(50));
+        // SAFETY: the page mapped above.
+        if unsafe { libc::munmap(page, 4096) } != 0 {
+            // SAFETY: ends the child.
+            unsafe { libc::_exit(6) };
+        }
+        thread::sleep(std::time::Duration::from_millis(500));
+        // SAFETY: ends the child: the reader outlived its page.
+        unsafe { libc::_exit(7) };
+    }
+    let mut status = 0;
+    // SAFETY: `status` is a valid out-parameter, and `child` is this program's child.
+    if unsafe { libc::waitpid(child, &raw mut status, 0) } != child {
+        fail("waitpid for unmap-stale");
+    }
+    if !libc::WIFSIGNALED(status) || libc::WTERMSIG(status) != libc::SIGSEGV {
+        fail("unmap-stale: a thread kept reading a page unmapped under it");
+    }
+    println!("threads: unmap-stale ok");
+}
+
+
+/// A file of `pages` pages holding its page number plus one at each page's start, and
+/// `tail` bytes more: the descriptor.
+#[allow(unsafe_code, reason = "the calls are libc's")]
+fn pattern_file(pages: usize, tail: usize) -> i32 {
+    // SAFETY: a name the kernel copies.
+    let fd = unsafe { libc::memfd_create(c"fault-ahead".as_ptr(), 0) };
+    if fd < 0 {
+        fail("fault-ahead: memfd_create");
+    }
+    // SAFETY: a descriptor just made.
+    if unsafe { libc::ftruncate(fd, (pages * PAGE + tail) as libc::off_t) } != 0 {
+        fail("fault-ahead: ftruncate");
+    }
+    for page in 0..pages {
+        let word = (page as u32 + 1).to_le_bytes();
+        // SAFETY: four bytes on this stack, in range of the file just sized.
+        let wrote = unsafe {
+            libc::pwrite(fd, word.as_ptr().cast(), 4, (page * PAGE) as libc::off_t)
+        };
+        if wrote != 4 {
+            fail("fault-ahead: pwrite");
+        }
+    }
+    fd
+}
+
+/// `fd` mapped at any address.
+#[allow(unsafe_code, reason = "the call is libc's")]
+fn map_file(fd: i32, pages: usize, protection: i32) -> *mut u8 {
+    // SAFETY: a fresh address, and a descriptor this program holds.
+    let at = unsafe {
+        libc::mmap(core::ptr::null_mut(), pages * PAGE, protection, libc::MAP_PRIVATE, fd, 0)
+    };
+    if at == libc::MAP_FAILED {
+        fail("fault-ahead: mmap");
+    }
+    at.cast()
+}
+
+/// A word at a page of a mapping.
+#[allow(unsafe_code, reason = "a read of memory the caller mapped")]
+fn word_at(mapping: *mut u8, page: usize) -> u32 {
+    // SAFETY: the caller's mapping, or the fault its case is about.
+    unsafe { core::ptr::read_volatile(mapping.add(page * PAGE).cast::<u32>()) }
+}
+
+/// Run `case` in a child and answer the signal that ended it, 0 for none.
+#[allow(unsafe_code, reason = "fork and waitpid are libc's")]
+fn ends_by(case: impl FnOnce()) -> i32 {
+    // SAFETY: the child runs `case` and leaves by `_exit`.
+    let child = unsafe { libc::fork() };
+    if child < 0 {
+        fail("fault-ahead: fork");
+    }
+    if child == 0 {
+        case();
+        // SAFETY: ends the child.
+        unsafe { libc::_exit(0) };
+    }
+    let mut status = 0;
+    // SAFETY: as in `check_unmap_stale`.
+    if unsafe { libc::waitpid(child, &raw mut status, 0) } != child {
+        fail("fault-ahead: waitpid");
+    }
+    if libc::WIFSIGNALED(status) {
+        libc::WTERMSIG(status)
+    } else {
+        0
+    }
+}
+
+/// Resident pages, by `/proc/self/statm`.
+fn resident() -> usize {
+    let statm = std::fs::read_to_string("/proc/self/statm").unwrap_or_default();
+    statm.split_whitespace().nth(1).and_then(|field| field.parse().ok()).unwrap_or(0)
+}
+
+/// What a fault brings with it (`fault_ahead`, ledger 6537) changes nothing a program can
+/// see but the time: every page reads right, and the pages it may not reach still fault.
+#[allow(unsafe_code, reason = "mappings, and writes through them")]
+fn check_fault_ahead() {
+    // A file's neighbours read right, from one in the middle out.
+    let fd = pattern_file(32, 0);
+    let mapping = map_file(fd, 32, libc::PROT_READ);
+    if word_at(mapping, 5) != 6 {
+        fail("fault-ahead: a file page read wrong");
+    }
+    for page in 0..32 {
+        if word_at(mapping, page) != page as u32 + 1 {
+            fail("fault-ahead: a neighbour read wrong");
+        }
+    }
+
+    // A page wholly past the file's end is still SIGBUS, its neighbour resident.
+    let short = pattern_file(1, 100);
+    let mapping = map_file(short, 8, libc::PROT_READ);
+    let ended = ends_by(|| {
+        let _ = word_at(mapping, 0);
+        let _ = word_at(mapping, 3);
+    });
+    if ended != libc::SIGBUS {
+        fail("fault-ahead: a page past the end did not stop the program");
+    }
+
+    // A neighbour the program may not read is still SIGSEGV.
+    let mapping = map_file(fd, 16, libc::PROT_READ);
+    // SAFETY: a page of the mapping above.
+    if unsafe { libc::mprotect(mapping.add(5 * PAGE).cast(), PAGE, libc::PROT_NONE) } != 0 {
+        fail("fault-ahead: mprotect");
+    }
+    let ended = ends_by(|| {
+        let _ = word_at(mapping, 4);
+        let _ = word_at(mapping, 5);
+    });
+    if ended != libc::SIGSEGV {
+        fail("fault-ahead: a neighbour with no access did not stop the program");
+    }
+
+    // A private page the program wrote is not put back by a neighbour's fault.
+    let mapping = map_file(fd, 16, libc::PROT_READ | libc::PROT_WRITE);
+    // SAFETY: a page of the private, writable mapping above.
+    unsafe { core::ptr::write_volatile(mapping.add(4 * PAGE).cast::<u32>(), 0xabcd) };
+    if word_at(mapping, 3) != 4 || word_at(mapping, 4) != 0xabcd {
+        fail("fault-ahead: a neighbour's fault put back a page the program wrote");
+    }
+
+    // A walk through fresh memory reads what it wrote, and stops at its region: the private
+    // file mapped right after it does not become resident.
+    // SAFETY: a fresh reservation, unmapped below in part by the fixed mappings.
+    let walk = unsafe {
+        libc::mmap(
+            core::ptr::null_mut(),
+            24 * PAGE,
+            libc::PROT_READ | libc::PROT_WRITE,
+            libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+            -1,
+            0,
+        )
+    };
+    if walk == libc::MAP_FAILED {
+        fail("fault-ahead: mmap of a walk");
+    }
+    let walk = walk.cast::<u8>();
+    // SAFETY: inside the reservation, replacing what is there.
+    let after = unsafe {
+        libc::mmap(
+            walk.add(8 * PAGE).cast(),
+            16 * PAGE,
+            libc::PROT_READ | libc::PROT_WRITE,
+            libc::MAP_PRIVATE | libc::MAP_FIXED,
+            fd,
+            0,
+        )
+    };
+    if after == libc::MAP_FAILED {
+        fail("fault-ahead: mmap of a file after a walk");
+    }
+    let before = resident();
+    for page in 0..8 {
+        // SAFETY: the walk's own pages.
+        unsafe { core::ptr::write_volatile(walk.add(page * PAGE).cast::<u32>(), page as u32) };
+    }
+    let grew = resident().saturating_sub(before);
+    for page in 0..8 {
+        if word_at(walk, page) != page as u32 {
+            fail("fault-ahead: a walk read back wrong");
+        }
+    }
+    if grew > 8 + 1 {
+        fail("fault-ahead: a walk made the mapping after its region resident");
+    }
+    println!("threads: fault-ahead ok");
+}
+
 fn main() {
     match std::env::args().nth(1).as_deref() {
         Some(slice_request::EXEC_PROBE) => slice_request::probe(),
@@ -194,6 +441,8 @@ fn main() {
     if std::env::args().nth(1).as_deref() == Some(affinity::EXEC_PROBE) {
         affinity::probe();
     }
+    check_unmap_stale();
+    check_fault_ahead();
     println!("threads: spawn {THREADS}");
     let counter = Arc::new(Mutex::new(0_u64));
     let barrier = Arc::new(Barrier::new(
@@ -258,6 +507,10 @@ fn main() {
     println!("threads: copy");
     check_copies();
     println!("threads: copy ok");
+
+    println!("threads: munmap-race");
+    munmap_race::check_munmap_race(fail);
+    println!("threads: munmap-race ok");
 
     println!("threads: setuid");
     setuid::check_setuid(fail);

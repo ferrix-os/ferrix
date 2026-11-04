@@ -320,7 +320,18 @@ pub fn unlink(path: &[u8]) -> Result<usize, Errno> {
 /// Whatever the kernel answers. A `timespec` is two words of the
 /// architecture's width, so the reading itself is `crate::arch`'s.
 pub fn monotonic_nanos() -> Result<u64, Errno> {
+    // Natively first: a kernel with no Linux layer has only this one, and the
+    // hybrid answers it ENOSYS, which is what falls through.
+    if let Ok(nanos) = ferrix_native::lift_calls::clock_read(crate::Kernel, 0) {
+        return Ok(nanos);
+    }
     let mut nanos = 0_u64;
-    let _read = decode(arch::monotonic_nanos(&mut nanos))?;
-    Ok(nanos)
+    match decode(arch::monotonic_nanos(&mut nanos)) {
+        Ok(_) => Ok(nanos),
+        // A native process in a kernel with no Linux ABI asks the native clock.
+        Err(Errno::ENOSYS) => {
+            ferrix_native::lift_calls::clock_read(crate::Kernel, 0).map_err(|_| Errno::ENOSYS)
+        }
+        Err(why) => Err(why),
+    }
 }

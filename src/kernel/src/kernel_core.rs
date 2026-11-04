@@ -14,7 +14,7 @@
 // ledger 3257 (3)), and each of the kernel's crates is compiled with its
 // flags. Never in a build with `linux_abi=on`.
 #![cfg_attr(
-    ferrix_linux_abi = "off",
+    ferrix_load_built = "none",
     allow(
         dead_code,
         unused_imports,
@@ -55,6 +55,7 @@ macro_rules! build_flag_word {
             cfg!(ferrix_fs = "server"),
             cfg!(ferrix_fs = "kernel"),
             cfg!(ferrix_fs = "none"),
+            cfg!(ferrix_fs = "lift"),
             cfg!(ferrix_mitigations = "on"),
             cfg!(ferrix_mitigations = "off"),
             cfg!(ferrix_partition_speculation = "exit"),
@@ -65,6 +66,9 @@ macro_rules! build_flag_word {
             cfg!(ferrix_restricted_fastpath = "off"),
             cfg!(ferrix_restricted_fastpath = "on"),
             cfg!(ferrix_restricted_fastpath = "not_applicable"),
+            cfg!(ferrix_fault_ahead = "off"),
+            cfg!(ferrix_fault_ahead = "on"),
+            cfg!(ferrix_fault_ahead = "not_applicable"),
             cfg!(ferrix_kernel_memory = "retyped"),
             cfg!(ferrix_kernel_memory = "heap"),
             cfg!(ferrix_schedule = "windows"),

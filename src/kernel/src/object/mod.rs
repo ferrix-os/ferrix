@@ -34,6 +34,7 @@ pub mod port;
 pub mod process;
 pub mod quota;
 pub mod region;
+#[cfg(not(ferrix_load_built = "lift"))]
 pub mod rehome_check;
 pub mod reserve_check;
 pub mod space;
@@ -107,6 +108,11 @@ pub enum Object {
     /// is, with `READ` and no other right, so it is neither duplicated nor
     /// sent; `audit_read` answers the holder, and nobody else can ask.
     Audit,
+    /// The debug log's write end, which `linuxd` alone is given
+    /// (`docs/microkernel/M5-LIFT.md` §2).
+    DebugLog,
+    /// The console's input, which `linuxd` alone is given.
+    Console,
     /// The capability to take a processor out of service or bring it back
     /// (`docs/CORE-QUARANTINE.md` §4): a token with nothing in it, the one
     /// there is given to pid 1, which gives lode a copy; `cpu_service`
@@ -160,6 +166,8 @@ impl Object {
             | Object::PagerKeeper(_)
             | Object::Starter
             | Object::Audit
+            | Object::DebugLog
+            | Object::Console
             | Object::CpuService
             | Object::MemoryScrub
             | Object::Exception(_) => Signals::NONE,
@@ -191,6 +199,8 @@ impl Object {
             | Object::PagerKeeper(_)
             | Object::Starter
             | Object::Audit
+            | Object::DebugLog
+            | Object::Console
             | Object::CpuService
             | Object::MemoryScrub
             | Object::Exception(_) => &QUIET,
@@ -367,6 +377,8 @@ impl Object {
             | Object::PagerKeeper(_)
             | Object::Starter
             | Object::Audit
+            | Object::DebugLog
+            | Object::Console
             | Object::CpuService
             | Object::MemoryScrub
             | Object::Thread(_)

@@ -51,6 +51,7 @@
 //! themselves -- the `uevent` files say what an event would carry, and no
 //! event is sent. `docs/SYSFS.md` §6 says what each would take.
 
+#[cfg(not(ferrix_load_built = "lift"))]
 pub mod check;
 
 use alloc::boxed::Box;

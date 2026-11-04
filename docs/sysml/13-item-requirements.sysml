@@ -689,6 +689,14 @@ package FerrixItemRequirements {
                 processes, and a change reaches a thread on another processor.";
             attribute :>> parent = ("O.ISOLATE");
         }
+        requirement <'H.OBJ.30'> aLiftedLinuxReachesWhatItIsGiven : ItemHighLevel {
+            attribute :>> statement = "Under personality=user a partition's Linux layer shall run as a
+                program, reaching the kernel's objects only through handles it was
+                given and its calls only from normal mode.";
+            attribute :>> criterion = "test-linuxd's `lift-calls` line; restricted-check's table of the
+                calls; the controls of docs/microkernel/M5-LIFT.md §12.";
+            attribute :>> parent = ("O.ISOLATE");
+        }
         requirement <'H.OBJ.34'> aLowerLevelReachesNothingOfAHigher : ItemHighLevel {
             attribute :>> statement = "A job shall have a criticality level fixed as it is made, at most
                 its parent's, and the kernel shall refuse, and audit, what would

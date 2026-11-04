@@ -1968,6 +1968,33 @@ pub(crate) fn unmap_in_keeping(
     Ok(())
 }
 
+/// [`unmap_in_keeping`] for a window's leaves (`AddressSpace::unmap`, ledger 6421): holes
+/// stepped whole, and `flush` asked for each leaf that came down and nothing else, which
+/// past its ceiling is the whole TLB. A table is unlinked only with a leaf, so `flush`'s
+/// tables are released by a shootdown that names that leaf. An error may leave the
+/// rest of the range unlooked at; it names the range, as `unmap_in_keeping` does.
+#[cfg(ferrix_personality = "user")]
+pub(crate) fn unmap_placed(root: u64, virt: u64, len: u64) -> crate::smp::TlbPages {
+    let len = len.next_multiple_of(PAGE_SIZE);
+    let mut mapper: Mapper<crate::arch::PageEncoding> = Mapper::new(PhysAddr(root));
+    // A window is a restricted space, whose top tables a normal root shares; its teardown's
+    // `prune_in` takes them (ledger 6458, U8).
+    mapper.keep_top();
+    let mut named = crate::smp::TlbPages::new();
+    let unmapped =
+        mapper.unmap_range_named(&mut KernelPhysMem, VirtAddr(virt), len, |at, freed| {
+            match freed {
+                // NOALLOC: the list is linked through the tables themselves.
+                Released::Table { phys } => named.tables().push(phys),
+                Released::Page { .. } => named.add(at.0),
+            }
+        });
+    if unmapped.is_err() {
+        named.add_range(virt, len);
+    }
+    named
+}
+
 /// [`unmap_in`] for a tree no processor can walk and none has a walk of
 /// cached: one never installed, one every processor that ran it has left
 /// with a flush of its whole TLB (a started processor's bring-up tree), or an

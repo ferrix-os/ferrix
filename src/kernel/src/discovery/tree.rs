@@ -155,6 +155,7 @@ static SEALED: AtomicBool = AtomicBool::new(false);
         reason = "publication is personality=user's; a hybrid's check alone reaches this"
     )
 )]
+#[cfg_attr(not(ferrix_personality = "user"), allow(dead_code))]
 pub(crate) fn claim_kernel_use(what: KernelUse) -> Result<(), ClaimRefused> {
     claim_in(&mut CLAIMS.lock(), SEALED.load(Ordering::Acquire), what)
 }
@@ -194,6 +195,7 @@ fn covered_by(claims: &[KernelUse], start: u64, end: u64) -> bool {
         reason = "publication is personality=user's; a hybrid's check alone reaches this"
     )
 )]
+#[cfg_attr(not(ferrix_personality = "user"), allow(dead_code))]
 pub(crate) fn covered(start: u64, end: u64) -> bool {
     covered_by(&CLAIMS.lock(), start, end)
 }
@@ -261,6 +263,7 @@ pub(crate) fn claim_early_windows() -> Result<(), ClaimRefused> {
         reason = "publication is personality=user's; a hybrid's check alone reaches this"
     )
 )]
+#[cfg_attr(not(ferrix_personality = "user"), allow(dead_code))]
 pub(crate) fn seal() {
     let _claims = CLAIMS.lock();
     SEALED.store(true, Ordering::Release);
@@ -274,6 +277,7 @@ pub(crate) fn seal() {
         reason = "publication is personality=user's; a hybrid's check alone reaches this"
     )
 )]
+#[cfg_attr(not(ferrix_personality = "user"), allow(dead_code))]
 pub(crate) fn sealed() -> bool {
     SEALED.load(Ordering::Acquire)
 }
@@ -290,6 +294,7 @@ pub(crate) fn sealed() -> bool {
         reason = "publication is personality=user's; a hybrid's check alone reaches this"
     )
 )]
+#[cfg_attr(not(ferrix_personality = "user"), allow(dead_code))]
 pub(crate) fn claims() -> Result<Vec<KernelUse>, AllocError> {
     fallible::try_to_vec(&CLAIMS.lock())
 }
@@ -315,6 +320,7 @@ pub(crate) fn claims() -> Result<Vec<KernelUse>, AllocError> {
         reason = "publication is personality=user's; a hybrid's check alone reaches this"
     )
 )]
+#[cfg_attr(not(ferrix_personality = "user"), allow(dead_code))]
 pub(crate) fn claim_tree_uses(tree: &Fdt<'_>, reserved: &Reserved) -> Result<(), ClaimRefused> {
     claim_accessor_nodes(tree)?;
     claim_described_nodes(tree)?;
@@ -335,6 +341,7 @@ pub(crate) fn claim_tree_uses(tree: &Fdt<'_>, reserved: &Reserved) -> Result<(),
         reason = "publication is personality=user's; a hybrid's check alone reaches this"
     )
 )]
+#[cfg_attr(not(ferrix_personality = "user"), allow(dead_code))]
 fn claim_node(node: Node<'_>) -> Result<(), ClaimRefused> {
     claim_kernel_use(KernelUse::Node(node.id()))
 }
@@ -348,6 +355,7 @@ fn claim_node(node: Node<'_>) -> Result<(), ClaimRefused> {
         reason = "publication is personality=user's; a hybrid's check alone reaches this"
     )
 )]
+#[cfg_attr(not(ferrix_personality = "user"), allow(dead_code))]
 fn claim_accessor_nodes(tree: &Fdt<'_>) -> Result<(), ClaimRefused> {
     let found = [
         tree.console(),
@@ -378,6 +386,7 @@ fn claim_accessor_nodes(tree: &Fdt<'_>) -> Result<(), ClaimRefused> {
         reason = "publication is personality=user's; a hybrid's check alone reaches this"
     )
 )]
+#[cfg_attr(not(ferrix_personality = "user"), allow(dead_code))]
 fn claim_described_nodes(tree: &Fdt<'_>) -> Result<(), ClaimRefused> {
     for found in tree.nodes() {
         let top = found.depth == 1
@@ -548,6 +557,7 @@ impl Ownership {
             reason = "publication is personality=user's; a hybrid's check alone reaches this"
         )
     )]
+    #[cfg_attr(not(ferrix_personality = "user"), allow(dead_code))]
     pub(crate) fn owned(&self) -> usize {
         self.owned.len()
     }

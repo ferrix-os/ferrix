@@ -446,10 +446,15 @@ pub(crate) fn build_native(
         .join(arch.kernel_target())
         .join(profile)
         .join(binary);
-    build(package, arch.kernel_target(), release)?
-        .env("CARGO_TARGET_DIR", target_dir)
-        .output(&path)
-        .run()?;
+    let mut build =
+        build(package, arch.kernel_target(), release)?.env("CARGO_TARGET_DIR", target_dir);
+    // The lift's crates are the kernel's and take its flags (M5-LIFT.md §1).
+    if package == crate::native::LINUXD.package {
+        for (key, value) in flag_environment(crate::flags::this_run()?) {
+            build = build.env(key, value);
+        }
+    }
+    build.output(&path).run()?;
     artifact(path)
 }
 

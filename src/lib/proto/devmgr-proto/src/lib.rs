@@ -71,6 +71,10 @@ pub const BOUND: u32 = 7;
 pub const UNBOUND: u32 = 8;
 /// BIND's message type.
 pub const BIND: u32 = 9;
+/// UNBIND's driver number in a row's image: stop the device's driver as a kill would,
+/// so devmgr starts it again (ledger 6268, L9). No other build sends or takes it.
+pub const KILL_DRIVER: u16 = u16::MAX;
+
 /// UNBIND's message type.
 pub const UNBIND: u32 = 10;
 /// DONE's message type.
@@ -92,6 +96,117 @@ pub const ANSWER_BUSY: u32 = 2;
 /// DONE's `answer`: the driver was started and did not publish, or the
 /// device could not be quiesced: `EIO`.
 pub const ANSWER_FAILED: u32 = 3;
+
+/// DEVICES flags, bit 4: the first message's handles end with a channel to
+/// the device cores, which `linuxd` serves: `devmgr` asks it for a driver's
+/// control channel, the native calls that gave one being retired in this
+/// kernel (`docs/MICROKERNEL.md` §3, *Retired calls*).
+pub const FLAG_CORES: u32 = 1 << 4;
+
+/// The device cores' protocol: one request and one answer, in turn, on the
+/// channel [`FLAG_CORES`] gives. `devmgr` to `linuxd`: [`CoreOpen`], with one
+/// handle, the device with `TRANSFER` alone, which says what it is
+/// (`device_info` takes no right) and drives nothing.
+pub const CORE_OPEN: u32 = 12;
+/// `linuxd` to `devmgr`: [`CoreOpened`]; on status 0 one handle, the driver's
+/// end of the control channel.
+pub const CORE_OPENED: u32 = 13;
+/// `linuxd` or `btrfsd` to `devmgr`: [`CorePublished`], when a driver's HELLO was
+/// accepted: the server's word, on which `devmgr` calls `device_served` and goes
+/// on as it does on the kernel's PUBLISHED.
+pub const CORE_PUBLISHED: u32 = 14;
+/// Bytes of either.
+pub const CORE_BYTES: usize = 16;
+
+/// The server's word that the driver at `location` was accepted.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CorePublished {
+    /// The location its HELLO named, checked against the device's.
+    pub location: u32,
+}
+
+impl CorePublished {
+    /// The message's bytes.
+    #[must_use]
+    pub fn encode(&self) -> [u8; CORE_BYTES] {
+        let mut out = [0; CORE_BYTES];
+        put(&mut out, 0, &CORE_PUBLISHED.to_le_bytes());
+        put(&mut out, 4, &(CORE_BYTES as u32).to_le_bytes());
+        put(&mut out, 8, &self.location.to_le_bytes());
+        out
+    }
+
+    /// Read one back; `None` for any other bytes.
+    #[must_use]
+    pub fn decode(bytes: &[u8]) -> Option<CorePublished> {
+        let word = |at: usize| Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?));
+        (bytes.len() == CORE_BYTES && word(0)? == CORE_PUBLISHED && word(4)? == CORE_BYTES as u32)
+            .then_some(())?;
+        Some(CorePublished { location: word(8)? })
+    }
+}
+
+/// Which control channel `devmgr` asks a core for: the retired call's number.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CoreOpen {
+    /// The retired native call's number.
+    pub call: u32,
+    /// The device's location, as `device_info` gives it.
+    pub location: u32,
+}
+
+impl CoreOpen {
+    /// The message's bytes.
+    #[must_use]
+    pub fn encode(&self) -> [u8; CORE_BYTES] {
+        let mut out = [0; CORE_BYTES];
+        put(&mut out, 0, &CORE_OPEN.to_le_bytes());
+        put(&mut out, 4, &(CORE_BYTES as u32).to_le_bytes());
+        put(&mut out, 8, &self.call.to_le_bytes());
+        put(&mut out, 12, &self.location.to_le_bytes());
+        out
+    }
+
+    /// Read one back; `None` for any other bytes.
+    #[must_use]
+    pub fn decode(bytes: &[u8]) -> Option<CoreOpen> {
+        let word = |at: usize| Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?));
+        (bytes.len() == CORE_BYTES && word(0)? == CORE_OPEN && word(4)? == CORE_BYTES as u32)
+            .then_some(())?;
+        Some(CoreOpen {
+            call: word(8)?,
+            location: word(12)?,
+        })
+    }
+}
+
+/// A core's answer.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CoreOpened {
+    /// 0, or the native status the retired call would have answered.
+    pub status: u32,
+}
+
+impl CoreOpened {
+    /// The message's bytes.
+    #[must_use]
+    pub fn encode(&self) -> [u8; CORE_BYTES] {
+        let mut out = [0; CORE_BYTES];
+        put(&mut out, 0, &CORE_OPENED.to_le_bytes());
+        put(&mut out, 4, &(CORE_BYTES as u32).to_le_bytes());
+        put(&mut out, 8, &self.status.to_le_bytes());
+        out
+    }
+
+    /// Read one back; `None` for any other bytes.
+    #[must_use]
+    pub fn decode(bytes: &[u8]) -> Option<CoreOpened> {
+        let word = |at: usize| Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?));
+        (bytes.len() == CORE_BYTES && word(0)? == CORE_OPENED && word(4)? == CORE_BYTES as u32)
+            .then_some(())?;
+        Some(CoreOpened { status: word(8)? })
+    }
+}
 
 /// Bytes of the type and length every message starts with.
 pub const HEADER_BYTES: usize = 8;
@@ -123,7 +238,11 @@ pub const FLAG_UNISOLATED_ALLOWED: u32 = 1 << 1;
 /// DEVICES flags, bit 2: devmgr binds each function it admits before its
 /// driver can reach it (`device_bind_domain`, `docs/microkernel/K8.md` §2).
 pub const FLAG_EXPLICIT_BIND: u32 = 1 << 2;
-const FLAGS_KNOWN: u32 = FLAG_FIRST | FLAG_UNISOLATED_ALLOWED | FLAG_EXPLICIT_BIND;
+/// DEVICES flags, bit 3: the first message's last handle is the debug log's
+/// write handle (`docs/microkernel/BOOT-AUTHORITY.md` §3).
+pub const FLAG_DEBUG_LOG: u32 = 1 << 3;
+const FLAGS_KNOWN: u32 =
+    FLAG_FIRST | FLAG_UNISOLATED_ALLOWED | FLAG_EXPLICIT_BIND | FLAG_DEBUG_LOG | FLAG_CORES;
 
 /// Why bytes on the channel are not a message.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -152,6 +271,10 @@ pub struct Devices<'a> {
     pub unisolated_allowed: bool,
     /// Whether devmgr must bind what it admits ([`FLAG_EXPLICIT_BIND`]).
     pub explicit_bind: bool,
+    /// Whether the first message ends with the debug log's handle.
+    pub debug_log: bool,
+    /// Whether the first message's handles end with the cores' channel.
+    pub cores: bool,
 }
 
 impl Devices<'_> {
@@ -171,7 +294,11 @@ impl Devices<'_> {
     /// per driver.
     #[must_use]
     pub const fn handles(&self) -> usize {
-        (self.first as usize) + 2 * self.devices as usize + self.names.len()
+        (self.first as usize)
+            + 2 * self.devices as usize
+            + self.names.len()
+            + (self.first && self.debug_log) as usize
+            + (self.first && self.cores) as usize
     }
 
     /// Encode into `out`, answering the bytes written, or `None` if `out` is
@@ -199,7 +326,9 @@ impl Devices<'_> {
                 FLAG_EXPLICIT_BIND
             } else {
                 0
-            };
+            }
+            | if self.debug_log { FLAG_DEBUG_LOG } else { 0 }
+            | if self.cores { FLAG_CORES } else { 0 };
         put(out, 20, &flags.to_le_bytes());
         for (i, name) in self.names.iter().enumerate() {
             put(out, DEVICES_HEADER_BYTES + i * NAME_BYTES, name);
@@ -224,6 +353,10 @@ pub struct DevicesView<'a> {
     pub unisolated_allowed: bool,
     /// Whether devmgr binds what it admits, under the same rule.
     pub explicit_bind: bool,
+    /// Whether the first message ends with the debug log's handle.
+    pub debug_log: bool,
+    /// Whether the first message's handles end with the cores' channel.
+    pub cores: bool,
     names: &'a [u8],
 }
 
@@ -253,7 +386,11 @@ impl DevicesView<'_> {
     /// per driver.
     #[must_use]
     pub const fn handles(&self) -> usize {
-        (self.first as usize) + 2 * self.devices as usize + self.drivers as usize
+        (self.first as usize)
+            + 2 * self.devices as usize
+            + self.drivers as usize
+            + (self.first && self.debug_log) as usize
+            + (self.first && self.cores) as usize
     }
 
     /// Decode a DEVICES message.
@@ -284,6 +421,8 @@ impl DevicesView<'_> {
             first: flags & FLAG_FIRST != 0,
             unisolated_allowed: flags & FLAG_UNISOLATED_ALLOWED != 0 && flags & !FLAGS_KNOWN == 0,
             explicit_bind: flags & FLAG_EXPLICIT_BIND != 0 && flags & !FLAGS_KNOWN == 0,
+            debug_log: flags & FLAG_DEBUG_LOG != 0 && flags & !FLAGS_KNOWN == 0,
+            cores: flags & FLAG_CORES != 0 && flags & !FLAGS_KNOWN == 0,
             names: bytes.get(DEVICES_HEADER_BYTES..).unwrap_or(&[]),
         })
     }

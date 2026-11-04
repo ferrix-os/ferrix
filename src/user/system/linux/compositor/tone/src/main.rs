@@ -387,21 +387,39 @@ mod linux {
             }
             written += BLOCK;
         }
-        let Some(pid) = wait_for(500, || {
-            let fresh: Vec<i32> = drivers()
-                .into_iter()
-                .filter(|pid| !killed.contains(pid))
-                .collect();
-            (fresh.len() == 1).then(|| fresh.first().copied()).flatten()
-        }) else {
-            fail(&format!("round {round}: no one snd driver in /proc"));
-        };
-        // SAFETY: `kill` takes a pid and a signal and touches no memory.
-        if unsafe { libc::kill(pid, libc::SIGKILL) } != 0 {
-            fail(&format!("round {round}: kill {pid}: errno {}", errno()));
+        // A driver is no Linux process under `personality=user`: a row's kill through
+        // devmgr (M5-LIFT.md §11), by its slot in sysfs.
+        let slot = std::fs::read_dir("/sys/bus/pci/drivers/snd")
+            .ok()
+            .and_then(|mut slots| {
+                slots.find_map(|entry| {
+                    let name = entry.ok()?.file_name().into_string().ok()?;
+                    name.starts_with("0").then_some(name)
+                })
+            });
+        let by_row = slot.as_ref().is_some_and(|slot| {
+            drivers().is_empty()
+                && std::fs::write("/sys/bus/pci/drivers/snd/unbind", format!("kill:{slot}")).is_ok()
+        });
+        if by_row {
+            say(&format!("round {round}: killed snd by the row's path"));
+        } else {
+            let Some(pid) = wait_for(500, || {
+                let fresh: Vec<i32> = drivers()
+                    .into_iter()
+                    .filter(|pid| !killed.contains(pid))
+                    .collect();
+                (fresh.len() == 1).then(|| fresh.first().copied()).flatten()
+            }) else {
+                fail(&format!("round {round}: no one snd driver in /proc"));
+            };
+            // SAFETY: `kill` takes a pid and a signal and touches no memory.
+            if unsafe { libc::kill(pid, libc::SIGKILL) } != 0 {
+                fail(&format!("round {round}: kill {pid}: errno {}", errno()));
+            }
+            killed.push(pid);
+            say(&format!("round {round}: killed snd {pid}"));
         }
-        killed.push(pid);
-        say(&format!("round {round}: killed snd {pid}"));
         // Writes go on until the stream says its card went: ten seconds of
         // audio is far longer than devmgr's word of a death takes.
         let mut answered = None;

@@ -503,6 +503,36 @@ log path and commit; a new sighting is added to its row the day it is seen.
 | `test-mce-restart-off`: the banks' page in the loader's hands (row fixed), and one machine that did not reset after its panic, not traced (2026-11-04, ledger 6766). [more](backlog/flakes.md#fl-092) | 8 |
 | Stage 9's timer check: "an early wake took out more or less than its own entry", once, `test-init --arch aarch64 --smp 2` (2026-11-04, K10's check, not traced). [more](backlog/flakes.md#fl-090) | 9 |
 
+### P1: M5, the lift's debts (`docs/microkernel/M5-LIFT.md`, ledger 5714, 6012, 6268, 6326)
+
+* `fs=lift` goes when `btrfsd` runs (5714 (10)). `btrfs_write_check.rs` in linuxd becomes a
+  userland test: the one entry of `lift_check_exceptions` (6268, E).
+* The boot page's device facts take BA §2's filter when BOOT-AUTHORITY lands, or linuxd
+  learns the safety partition's devices (6268, B). One boot format and one debug log
+  (0x10B0, with BA.6's prefix, rate and bound) then too (R8, R9, ledger 6542).
+* L.init.2 is not the kernel's under this shape; `job::root().new_child()` becomes the
+  `linux` job; `ferrix_vfs::initramfs` in an item file gives way to a `ferrix-cpio` walk;
+  `first_image::load_at` joins L.user.205's list; `linuxd_start.rs` enters the manifest (R8).
+* Flip preconditions, each failing until met: kernel charging and visible separation or a
+  rewritten ST (R3); a driver's handles without `TRANSFER`, and foreign windows unmapped at
+  last reference (6268, C); the rows with no check until B5 (L10); §7's rows.
+* K1 gains "all calls exit", set when Syscall User Dispatch is on (6268, Q2), and folds the
+  copy-miss rewind with its controls (6326, P1 to P6).
+* `cgroup.kill` and a cgroup's removal `JOB_KILL` its flat kernel job (6326, P8). A native
+  image in a flat child under a measured, sealed `linux` job goes into R4's agreement.
+* Owed through `gate.sh`: the row kill's absence from every profile's image;
+  `THREAD_AFFINITY`'s refusal; the bootstrap move's three refusals; 3257 (2)'s control;
+  a boot check of the ENOSYS on present and desktop (5714 (15)).
+* `check-build-flags.py` names `ferrix_load_built` as derived, with a control (5714 (2)).
+* The traceability tag scan reads `lift/`, so that L.object.310-313 and H.OBJ.30 leave the
+  baseline for `lift/core/calls_check.rs` and the rows (6542, item 1).
+* Before any claim: `native/lift.rs::call` split by call, complexity 69, and
+  `linuxd_start::start`, complexity 30 (6542, item 6).
+* The window, each a flip precondition (6411, by 6542): a control per path of `replace` and
+  the decommit paths, pager refused (W2); W3 and W8 read and controlled; W4's row on KVM
+  `--smp 2`; W5's MEMORY-AND-TIMING line; W6's sweeps; W7, a machine check under `user` fails
+  closed, where `test-mce` reads NOT RUN.
+
 ### P2 — quality and performance, on the "fast" half of the goal
 
 * **tole's test binary dies of SIGSEGV when no device matches `TOLE_GPU_DEVICE`** (mk-ci, 2026-11-04; `logs/queue/mk-ci-gpu-c1c.log`, for tole's owner): it says `no Vulkan device, nothing to check`, the documented pass, and then the binary ends on signal 11. So a host with Vulkan and no match may crash rather than pass.

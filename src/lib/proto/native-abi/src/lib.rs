@@ -49,6 +49,7 @@ pub mod bootstrap;
 pub mod directory;
 pub mod exception;
 pub mod handle;
+pub mod lift;
 pub mod nr;
 pub mod restricted;
 pub mod rights;

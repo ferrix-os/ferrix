@@ -63,6 +63,7 @@
 //! `Channel` adds no edge: what a side's queue holds is freed when that
 //! side's `Endpoint` goes, whichever end still holds the channel.
 
+#[cfg(not(ferrix_load_built = "lift"))]
 pub mod check;
 
 use alloc::collections::VecDeque;
@@ -1226,6 +1227,8 @@ fn queued_endpoints(endpoint: &Arc<Endpoint>) -> Option<Vec<Arc<Endpoint>>> {
             | Object::PagerKeeper(_)
             | Object::Starter
             | Object::Audit
+            | Object::DebugLog
+            | Object::Console
             | Object::CpuService
             | Object::MemoryScrub
             | Object::Exception(_) => None,

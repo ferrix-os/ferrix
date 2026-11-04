@@ -74,6 +74,10 @@ pub(crate) enum Built {
     /// It builds today's code of a stricter value in its place: only at
     /// level `none`.
     StandIn,
+    /// Partly: only in an ad-hoc build at level `none`, with no value in its
+    /// place (M5-LIFT.md, ledger 5714 (18)), so a certified profile that names
+    /// it stays "not yet buildable" until its own review changes this.
+    AdHoc,
     /// Not yet: refused, naming the stage it lands at.
     No,
 }
@@ -173,8 +177,13 @@ fn flag(name: &str, table: &Value, levels: &[String]) -> Result<Flag> {
         let built = match entry.get("built").and_then(Value::as_str) {
             Some("yes") => Built::Yes,
             Some("stand-in") => Built::StandIn,
+            Some("adhoc") => Built::AdHoc,
             Some("no") => Built::No,
-            _ => return Err(what(&format!("{value}: `built` is yes, stand-in or no"))),
+            _ => {
+                return Err(what(&format!(
+                    "{value}: `built` is yes, stand-in, adhoc or no"
+                )));
+            }
         };
         let pairs = |key: &str| -> Result<Vec<(String, String)>> {
             strings(key).iter().map(|pair| assignment(pair)).collect()
@@ -558,7 +567,11 @@ fn buildable(resolved: &Resolved) -> Result<()> {
         };
         match declared.built {
             Built::Yes => {}
-            Built::StandIn if resolved.level == "none" => {}
+            Built::StandIn | Built::AdHoc if resolved.level == "none" => {}
+            Built::AdHoc => waiting.push(format!(
+                "{flag}={value} (ad-hoc builds only until its flip's review; lands at {})",
+                declared.lands
+            )),
             Built::StandIn => waiting.push(format!(
                 "{flag}={value} (a stand-in, which a profile at level {} may not carry; lands at {})",
                 resolved.level, declared.lands
@@ -653,6 +666,7 @@ pub(crate) fn command() -> Result<()> {
                     declared.stands_in.as_deref().unwrap_or("?"),
                     declared.lands
                 ),
+                Built::AdHoc => format!(", ad-hoc builds only until {}", declared.lands),
                 Built::No => format!(", not built until {}", declared.lands),
             };
             format!("allows {}{built}", declared.allows.join(", "))
@@ -834,6 +848,39 @@ mod tests {
         assert_eq!((off.profile.as_str(), off.level.as_str()), ("none", "none"));
         assert!(off.cfg_words().contains(" linux_abi=off"));
         assert!(off.boot_line().ends_with("; no claim"));
+    }
+
+    /// What `--personality user` sets (M5-LIFT.md §1).
+    fn lifted() -> Vec<(String, String)> {
+        set(&[
+            ("personality", "user"),
+            ("fs", "lift"),
+            ("partition_speculation", "partition"),
+            ("restricted_fastpath", "off"),
+        ])
+    }
+
+    /// Ledger 5714 (18): the lift builds ad hoc alone, and no profile that names
+    /// it builds until its own review changes `built`.
+    #[test]
+    fn fast_and_max_stay_not_buildable_with_the_lift_in() {
+        for profile in ["max", "fast"] {
+            let why = resolve(Some(profile), &[]).unwrap_err().to_string();
+            assert!(
+                why.contains("not yet buildable") && why.contains("personality=user"),
+                "{why}"
+            );
+            assert!(resolve(Some(profile), &lifted()).is_err(), "{profile}");
+        }
+    }
+
+    /// Ledger 5714 (10): `fs=lift` with `personality=user` and no claim; not without.
+    #[test]
+    fn fs_lift_goes_only_with_the_lift_and_carries_no_claim() {
+        let resolved = resolve(None, &lifted()).unwrap();
+        assert_eq!(resolved.level, "none");
+        assert!(resolve(None, &set(&[("fs", "lift")])).is_err());
+        assert!(resolve(None, &set(&[("personality", "user")])).is_err());
     }
 
     #[test]

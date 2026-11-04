@@ -13,7 +13,7 @@
 // ledger 3257 (3)), and each of the kernel's crates is compiled with its
 // flags. Never in a build with `linux_abi=on`.
 #![cfg_attr(
-    ferrix_linux_abi = "off",
+    ferrix_load_built = "none",
     allow(
         dead_code,
         unused_imports,
@@ -41,8 +41,12 @@ pub mod build_flags;
 pub mod checks;
 pub mod discovery;
 pub mod fastpath;
+#[cfg(not(ferrix_shape = "micro"))]
 pub mod init;
+#[cfg(not(ferrix_shape = "micro"))]
 pub mod init_check;
+#[cfg(ferrix_personality = "user")]
+pub mod linuxd_start;
 pub mod power;
 pub mod random;
 pub mod syscall;
@@ -52,6 +56,7 @@ pub mod arch {
     /// x86-64's raised check.
     pub mod x86_64 {
         /// The framebuffer window's check.
+        #[cfg(not(ferrix_personality = "user"))]
         pub mod framebuffer {
             pub mod check;
         }

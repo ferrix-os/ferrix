@@ -44,7 +44,31 @@ pub mod log;
 pub mod log_check;
 pub mod output;
 pub mod pstore;
+#[cfg(not(ferrix_personality = "user"))]
 pub mod screen;
+/// The console's screen in a `personality=user` kernel: none
+/// (`docs/microkernel/M6.md` §2). Serial only; the screen is a program's.
+#[cfg(ferrix_personality = "user")]
+pub mod screen {
+    use ferrix_bootinfo::BootView;
+
+    /// Nothing to start.
+    pub fn start(_view: &BootView<'_>) {}
+
+    /// No stripes: a photo of the machine shows nothing the serial line lacks.
+    pub fn milestone(_row: usize) {}
+
+    /// Never drawing.
+    pub(crate) fn drawing() -> bool {
+        false
+    }
+
+    /// Nothing to stop.
+    pub fn stop() {}
+
+    /// Not drawn.
+    pub(super) fn put(_byte: u8) {}
+}
 
 use core::fmt::{self, Write};
 use core::hint::spin_loop;

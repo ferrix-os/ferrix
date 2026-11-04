@@ -1,0 +1,45 @@
+[package]
+name = "ferrix-lift-core"
+description = "linuxd's shim of the kernel's core: the interface the load names, in user space"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+build = "../../build.rs"
+
+[lib]
+name = "ferrix_kernel_core"
+path = "../../src/lift_core.rs"
+
+[dependencies]
+ferrix-sha256.workspace = true
+ferrix-acpi.workspace = true
+ferrix-audit.workspace = true
+ferrix-bootinfo.workspace = true
+ferrix-cgroupfs.workspace = true
+ferrix-description.workspace = true
+ferrix-elf.workspace = true
+ferrix-fallible.workspace = true
+ferrix-fbtext.workspace = true
+ferrix-fdt.workspace = true
+ferrix-frame.workspace = true
+ferrix-heap.workspace = true
+ferrix-kmem.workspace = true
+ferrix-linux-abi.workspace = true
+ferrix-objects.workspace = true
+ferrix-paging.workspace = true
+ferrix-pci.workspace = true
+ferrix-qr.workspace = true
+ferrix-sched.workspace = true
+ferrix-sync.workspace = true
+ferrix-vdso.workspace = true
+ferrix-vfs.workspace = true
+ferrix-vma.workspace = true
+ferrix-rt.workspace = true
+ferrix-native.workspace = true
+ferrix-native-abi.workspace = true
+
+
+[lints]
+workspace = true

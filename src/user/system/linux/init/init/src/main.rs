@@ -220,6 +220,9 @@ enum Pending {
     Done,
 }
 
+/// Where the numbers that stand for a native service with no Linux pid start.
+const NOT_LINUX: u32 = 0x7fff_0000;
+
 fn main() {
     let mut init = match Init::boot() {
         Ok(init) => init,
@@ -646,8 +649,18 @@ impl Init {
                     Whom::Process(pid) => vec![pid.0],
                     Whom::Group => self.groups.procs_beneath(unit),
                 };
+                // Nobody Linux can name: a native service alone, if anything.
+                if pids.is_empty() {
+                    let _ = self.groups.kill(unit);
+                }
                 for pid in pids {
-                    let _ = sys::kill(pid, signal);
+                    // A native service with no Linux pid takes no Linux signal: asked
+                    // to end, it ends with its cgroup's job (M5-LIFT.md §3a).
+                    if pid >= NOT_LINUX {
+                        let _ = self.groups.kill(unit);
+                    } else {
+                        let _ = sys::kill(pid, signal);
+                    }
                 }
             }
             Action::KillGroup { unit } => {
@@ -956,9 +969,15 @@ impl Init {
             Err(why) => return fail(self, why),
         };
         self.groups.filled(&spec.group);
-        let Some(pid) = self.groups.procs(unit).into_iter().next() else {
-            return fail(self, "started, and not in its cgroup".to_owned());
-        };
+        // Under `personality=user` a native process is no Linux process, and is in no
+        // cgroup.procs. A number no signal reaches stands for it; its end comes by
+        // its handle, and a stop by cgroup.kill (M5-LIFT.md §3a).
+        let pid = self
+            .groups
+            .procs(unit)
+            .into_iter()
+            .next()
+            .unwrap_or(NOT_LINUX + key as u32);
         if let Some(directory) = self.directory.as_mut() {
             directory.found_pid(key, pid);
         }

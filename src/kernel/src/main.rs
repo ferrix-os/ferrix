@@ -18,7 +18,7 @@
 // dependencies, unused here, and are not linked into the image (ledger 3220
 // (14) a). Never in a build with `linux_abi=on`, which every profile sets.
 #![cfg_attr(
-    ferrix_linux_abi = "off",
+    ferrix_load_built = "none",
     allow(
         dead_code,
         unused_imports,
@@ -81,12 +81,12 @@ const _: () = assert!(
 // ledger 4932 (B3)), are the only places the tree names
 // `ferrix_runtime_settings` outside the flag lists, and the only ones that
 // name the crate.
-#[cfg(all(ferrix_linux_abi = "on", ferrix_runtime_settings = "live"))]
+#[cfg(all(ferrix_load_built = "ring0", ferrix_runtime_settings = "live"))]
 ferrix_kernel_load::bind_setters!(ferrix_kernel_settings::Live);
-#[cfg(all(ferrix_linux_abi = "on", ferrix_runtime_settings = "fixed"))]
+#[cfg(all(ferrix_load_built = "ring0", ferrix_runtime_settings = "fixed"))]
 ferrix_kernel_load::bind_setters!(setters::Absent);
 
-#[cfg(ferrix_linux_abi = "on")]
+#[cfg(ferrix_load_built = "ring0")]
 pub mod stages_check;
 
 // What belongs to one system on chip rather than to an architecture: the
@@ -102,7 +102,7 @@ use console::{println, println_unlogged};
 use discovery::finder::Finder;
 use discovery::{board, devmgr, fdt, firmware, pci, tree};
 use early::EarlyMemory;
-#[cfg(ferrix_linux_abi = "on")]
+#[cfg(ferrix_load_built = "ring0")]
 use interfaces::{audio, block_ring, chardev, display, input, logctl, net_ring, render};
 use panic::{catalog, fatal};
 
@@ -158,7 +158,7 @@ extern "C" fn _start(boot_info: *const BootInfo) -> ! {
 /// nothing more (`docs/SECCOMP.md` §3.3), with the one question the fast
 /// path asks of it before running ahead of it: whether the filter would look
 /// at a call at all (`docs/OPAQUE-KERNEL.md` §9.7, T2).
-#[cfg(ferrix_linux_abi = "on")]
+#[cfg(ferrix_load_built = "ring0")]
 fn register_system_calls() {
     trap::set_syscall_entry(syscall::dispatch_with::<syscall::linux::Linux>);
     trap::set_quiet_syscall_filter(syscall::seccomp::check);
@@ -168,7 +168,7 @@ fn register_system_calls() {
 /// §11.11): the native range is answered as always, every Linux number is
 /// `ENOSYS`, and no program filter is registered, so the core's
 /// [`trap::filter_quiet`] reads none and asks nothing.
-#[cfg(ferrix_linux_abi = "off")]
+#[cfg(ferrix_load_built = "none")]
 fn register_system_calls() {
     trap::set_syscall_entry(syscall::dispatch_with::<NoLinux>);
 }
@@ -176,15 +176,15 @@ fn register_system_calls() {
 // The Linux ABI's number and error types name `NoLinux`'s call below; with
 // the Linux ABI on, the binary names the crate nowhere else, its users
 // being the item's and the load's.
-#[cfg(ferrix_linux_abi = "on")]
+#[cfg(ferrix_load_built = "ring0")]
 use ferrix_linux_abi as _;
 
 /// The personality a kernel without the Linux ABI composes: it answers no
 /// Linux call.
-#[cfg(ferrix_linux_abi = "off")]
+#[cfg(ferrix_load_built = "none")]
 struct NoLinux;
 
-#[cfg(ferrix_linux_abi = "off")]
+#[cfg(ferrix_load_built = "none")]
 impl syscall::Personality for NoLinux {
     fn answer(
         _call: ferrix_linux_abi::nr::Syscall,
@@ -205,12 +205,12 @@ fn ferrix_filter_quiet() -> bool {
 
 /// The predicate [`ferrix_filter_quiet`] forwards to: the Linux personality's
 /// seccomp filter's.
-#[cfg(ferrix_linux_abi = "on")]
+#[cfg(ferrix_load_built = "ring0")]
 use syscall::seccomp::quiet as filter_quiet_of_personality;
 
 /// Without the Linux ABI no filter is registered, so [`trap::filter_quiet`]
 /// never asks this (`docs/LINUX-ABI-SEPARATION.md` §11.11).
-#[cfg(ferrix_linux_abi = "off")]
+#[cfg(ferrix_load_built = "none")]
 const fn filter_quiet_of_personality() -> bool {
     false
 }
@@ -250,7 +250,7 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // personality's, and the core holds only a pointer to it
     // (`crate::trap::ReturnPath`). Registered here because the first user
     // program is a boot check below, not init.
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     syscall::deliver::install();
     register_system_calls();
     println!("  traps    vectors installed");
@@ -275,7 +275,7 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // are all check are gated here, in the order they run; the steps that do
     // both gate their own checks inside.
     if checks::run() {
-        #[cfg(ferrix_linux_abi = "on")]
+        #[cfg(ferrix_load_built = "ring0")]
         stages_check::check_allocators_and_traps(&stats, view);
     }
 
@@ -334,7 +334,7 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // task, which the scheduler just made this, into the ring the port's
     // interrupt empties. Early, because every line after this one is sent
     // the way it checks.
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     stages_check::check_console_output();
 
     // Stage 6, so far the memory objects a process is built from and the
@@ -343,20 +343,25 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // and requires the count to return to where it started, which is a
     // measurement the reclaim below would otherwise move under it.
     if checks::run() {
-        #[cfg(ferrix_linux_abi = "on")]
+        #[cfg(ferrix_load_built = "ring0")]
         stages_check::check_user_memory();
         #[cfg(ferrix_linux_abi = "on")]
         stages_check::check_dirty();
+        #[cfg(ferrix_personality = "user")]
+        match user::space::window_check::run() {
+            Ok(cases) => println!("  window   an unmap's {cases} decisions held"),
+            Err(why) => fatal!(catalog::WINDOW_UNMAP, "window self-check failed: {why}"),
+        }
     }
 
     // Stage 8's root filesystem. Before stage 7's checks, which open files,
     // and after stage 6's, because file contents are VMO pages and the
     // frames they take have to come back.
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     check_filesystems(view);
 
     if checks::run() {
-        #[cfg(ferrix_linux_abi = "on")]
+        #[cfg(ferrix_load_built = "ring0")]
         stages_check::check_programs();
     }
 
@@ -380,9 +385,9 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // Straight after enumeration, which builds the PCI half.
     check_devices(view);
     iommu::report(view, device::devices());
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     iommu::domain_check::check_iommu();
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     iommu::domain_check::check_rmrr_identity(view.regions());
 
     // Stage 9's device objects, on the nodes just published: an I/O mapping of
@@ -390,10 +395,10 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // child, and an interrupt held from delivery to acknowledgement. After
     // `check_devices`, because before it there are no nodes to mint from.
     if checks::run() {
-        #[cfg(ferrix_linux_abi = "on")]
+        #[cfg(ferrix_load_built = "ring0")]
         stages_check::check_device_objects();
     }
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     check_block_ring();
 
     // The rest of stage 2, deliberately last. Each of these needs something a
@@ -412,6 +417,9 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // After the marker, on purpose: see `init`. Returns at once when nothing
     // was named by `ferrix.init=` or built in, and the image has no
     // /sbin/init.
+    #[cfg(ferrix_personality = "user")]
+    linuxd_start::run(view);
+    #[cfg(not(ferrix_personality = "user"))]
     init::run();
     power::finish()
 }
@@ -419,7 +427,7 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
 /// Stage 3's timer check, when the checks run, and then the realtime clock
 /// and the random generator, which are bring-up and started either way --
 /// without the check, from a counter nobody has measured this boot.
-#[cfg(ferrix_linux_abi = "on")]
+#[cfg(ferrix_load_built = "ring0")]
 fn check_timer_and_start_clocks(view: &BootView<'_>) {
     if !checks::run() {
         report_clock_and_random(view);
@@ -449,7 +457,7 @@ fn check_timer_and_start_clocks(view: &BootView<'_>) {
 /// LINUX-ABI-SEPARATION.md §11.11), so the clock and the random generator
 /// start from a counter nobody measured, as with `ferrix.checks=skip`, and
 /// the machine's own check runs when the checks do.
-#[cfg(ferrix_linux_abi = "off")]
+#[cfg(ferrix_load_built = "none")]
 fn check_timer_and_start_clocks(view: &BootView<'_>) {
     if checks::run()
         && let Err(problem) = arch::check_machine()
@@ -505,7 +513,7 @@ fn require_hooks_disarmed() {
 /// install it waits for. Without the Linux ABI there is no root to build, and
 /// the archive stays where the loader put it.
 fn release_boot_copies() {
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     if !devmgr::by_init() {
         fs::release_boot_copies();
     }
@@ -539,31 +547,36 @@ fn say_booted() {
     // Without the Linux ABI the checks that run a Linux program are not
     // built (LINUX-ABI-SEPARATION.md §11.11), so such a kernel never says its
     // stages were checked.
-    let checked = checks::run() && cfg!(ferrix_linux_abi = "on");
+    let checked = checks::run() && cfg!(ferrix_load_built = "ring0");
     if checked {
         // After every check that counts what was given back, since it loses
         // memory on purpose.
-        #[cfg(ferrix_linux_abi = "on")]
+        #[cfg(ferrix_load_built = "ring0")]
         stages_check::check_a_give_up();
         // Last before the marker, so every driver the boot starts has run: a
         // DMA fault its unit recorded and nothing provoked fails the boot
         // here rather than sitting unread in the unit's record.
         // After the reclaim, which must have given an RMRR's frames to
         // nobody (`L.iommu.75`).
-        #[cfg(ferrix_linux_abi = "on")]
+        #[cfg(ferrix_load_built = "ring0")]
         iommu::domain_check::check_rmrr_frames();
         let dma_faults_read = iommu::check_dma_faults();
         // And after it, since reading the faults is what records them.
-        #[cfg(ferrix_linux_abi = "on")]
+        #[cfg(ferrix_load_built = "ring0")]
         stages_check::check_audit_booted(dma_faults_read);
-        #[cfg(ferrix_linux_abi = "off")]
+        #[cfg(ferrix_load_built = "none")]
         let _ = dma_faults_read;
         println!("{SUCCESS_MARKER} stages 1-12");
     } else {
         // The faults nothing else reads in a boot without checks: one line,
         // never fatal (`L.iommu.72`).
         iommu::report_unchecked_faults();
-        if cfg!(ferrix_linux_abi = "off") {
+        if cfg!(ferrix_personality = "user") {
+            println!(
+                "{UNCHECKED_MARKER} stages 1-12 brought up, the self-checks that run a Linux \
+                 program not built: personality=user, whose Linux layer is linuxd"
+            );
+        } else if cfg!(ferrix_load_built = "none") {
             println!(
                 "{UNCHECKED_MARKER} stages 1-12 brought up, the self-checks that run a Linux \
                  program not built: linux_abi=off"
@@ -577,7 +590,7 @@ fn say_booted() {
     }
 }
 
-#[cfg(ferrix_linux_abi = "on")]
+#[cfg(ferrix_load_built = "ring0")]
 /// Stage 8: build the root from the initramfs, and require it to be what the
 /// build wrote and to store what it is given.
 ///
@@ -687,7 +700,7 @@ fn check_filesystems(view: &BootView<'_>) {
     );
 }
 
-#[cfg(ferrix_linux_abi = "on")]
+#[cfg(ferrix_load_built = "ring0")]
 /// What unpacking the initramfs made, and `verified`: whether the check that
 /// it came through intact passed, or that it did not run.
 fn report_initrd(built: &fs::Report, verified: &str) {
@@ -706,7 +719,7 @@ fn report_initrd(built: &fs::Report, verified: &str) {
     }
 }
 
-#[cfg(ferrix_linux_abi = "on")]
+#[cfg(ferrix_load_built = "ring0")]
 /// Stage 10: the block ring's control plane, driven from a process that is
 /// given a device, up to a published disk and back.
 ///
@@ -768,7 +781,7 @@ fn check_block_ring() {
     }
 }
 
-#[cfg(ferrix_linux_abi = "on")]
+#[cfg(ferrix_load_built = "ring0")]
 /// The net core, over the loopback: a socket call reaches the stack, the
 /// stack builds a packet, and the packet comes back up the input path.
 ///
@@ -807,7 +820,7 @@ fn check_net() {
     stages_check::check_netlink();
 }
 
-#[cfg(ferrix_linux_abi = "on")]
+#[cfg(ferrix_load_built = "ring0")]
 /// Stage 10's exit, the half that is a driver: `/sbin/blk`, started from
 /// here the way `devmgr` will start it, serves the test disk through the
 /// block ring with the IOMMU on, and sectors read through the registry come
@@ -849,7 +862,7 @@ fn check_driver(started_by_devmgr: bool) {
     check_btrfs_write();
 }
 
-#[cfg(ferrix_linux_abi = "on")]
+#[cfg(ferrix_load_built = "ring0")]
 /// Stage 10: `devmgr`, started from the initramfs with every device and
 /// every driver image, and its REPORT (`docs/DEVMGR.md`). Answers whether it
 /// started the block drivers, so the driver check reads through them rather
@@ -877,7 +890,7 @@ fn check_devmgr() -> bool {
     report.started > 0
 }
 
-#[cfg(ferrix_linux_abi = "on")]
+#[cfg(ferrix_load_built = "ring0")]
 /// Stage 12's exit, the guest's half: a blank btrfs volume on the third disk,
 /// mounted writable, written, unmounted and mounted again, and read back —
 /// so every byte compared comes off the disk rather than out of a cache.
@@ -982,10 +995,12 @@ fn publish_devices(view: &BootView<'_>) -> (device::Report, device::Reserved) {
     let mut boards = board::Boards::new(view);
     // Last, so that the framebuffer it lends never takes an aperture from a
     // device: it adds a node only under `ferrix.efifb`.
+    #[cfg(not(ferrix_personality = "user"))]
     let mut framebuffer = firmware::FirmwareFramebuffer::new(view);
     // The power node, only under `ferrix.powerctl` on a processor the power
     // core's table names (`L.device.51`): no aperture, so its place is
     // immaterial.
+    #[cfg(not(ferrix_personality = "user"))]
     let mut power = discovery::powerctl::Power::new(view);
     // Before publishing, which yields the Intel integrated GPU unless the
     // command line lets it be driven (`L.device.44`).
@@ -993,6 +1008,7 @@ fn publish_devices(view: &BootView<'_>) -> (device::Report, device::Reserved) {
         device::allow_intel_gpu();
     }
     let reserved = device::Reserved::of(view, &[pci.reads(), tree.reads(), boards.reads()]);
+    #[cfg(not(ferrix_personality = "user"))]
     let mut finders: [&mut dyn Finder; 5] = [
         &mut pci,
         &mut tree,
@@ -1000,6 +1016,8 @@ fn publish_devices(view: &BootView<'_>) -> (device::Report, device::Reserved) {
         &mut framebuffer,
         &mut power,
     ];
+    #[cfg(ferrix_personality = "user")]
+    let mut finders: [&mut dyn Finder; 3] = [&mut pci, &mut tree, &mut boards];
     let report = match device::publish::<Discovery>(&mut finders, &reserved) {
         Ok(report) => report,
         // A failed walk halts the boot under its own entry, as it always has.
@@ -1091,7 +1109,7 @@ fn check_devices(view: &BootView<'_>) {
                 "stage 10 self-check failed: {problem}"
             ),
         }
-        #[cfg(ferrix_linux_abi = "on")]
+        #[cfg(ferrix_load_built = "ring0")]
         check_config_window();
     }
     // The native calls' answers on these nodes, before anything serves them
@@ -1099,7 +1117,7 @@ fn check_devices(view: &BootView<'_>) {
     syscall::rehome_check::stage_on_devices();
 }
 
-#[cfg(ferrix_linux_abi = "on")]
+#[cfg(ferrix_load_built = "ring0")]
 /// Stage 10's checks of a driver's configuration window and of
 /// `device_aperture` (`docs/NVIDIA.md` §12.1, W1 to W7).
 ///
@@ -1167,7 +1185,7 @@ fn report_processors(cpus: &smp::Topology) {
     arch::report_speculation();
 }
 
-#[cfg(ferrix_linux_abi = "on")]
+#[cfg(ferrix_load_built = "ring0")]
 /// The timer's skipped arm (`stages_check::check_a_skipped_arm`), on the
 /// boot processor with its record and before any other processor runs.
 fn check_the_skipped_arm() {
@@ -1205,7 +1223,7 @@ fn bring_up_processors(view: &BootView<'_>) -> &'static smp::Topology {
 
     // The timer's skipped arm, which needs this processor's record and no
     // other processor arming a timer: here, between the two.
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     check_the_skipped_arm();
 
     // Then the rest of them. Each is started, waited for, and required to
@@ -1465,7 +1483,7 @@ fn finish_memory(view: &BootView<'_>) -> Result<(), &'static str> {
     Ok(())
 }
 
-#[cfg(ferrix_linux_abi = "on")]
+#[cfg(ferrix_load_built = "ring0")]
 /// Report the clocks interrupt bring-up measured, then read what the end of
 /// boot is to do: `power::init` says so on the console, and says it after the
 /// clocks, as it always has.
@@ -1487,7 +1505,7 @@ fn report_stage3(measured: u64, view: &BootView<'_>) {
 /// read the counter the timer check has just proved.
 fn report_clock_and_random(view: &BootView<'_>) {
     let info = view.raw();
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     match syscall::time::set_boot_time(info) {
         Some(seconds) => {
             println!("  clock    {seconds} seconds since the epoch, from firmware's clock");
@@ -1496,7 +1514,7 @@ fn report_clock_and_random(view: &BootView<'_>) {
     }
     // The wall clock is the Linux ABI's (`syscall::time`); the native ABI
     // has none yet (LINUX-ABI-SEPARATION.md §7 row 6).
-    #[cfg(ferrix_linux_abi = "off")]
+    #[cfg(ferrix_load_built = "none")]
     println!(
         "  clock    not kept: the wall clock is the Linux ABI's, which this kernel is built without"
     );
@@ -1605,7 +1623,7 @@ fn start_audit(view: &BootView<'_>) {
     }
 }
 
-#[cfg(ferrix_linux_abi = "on")]
+#[cfg(ferrix_load_built = "ring0")]
 /// Register the load ring's side of every interface the certified item
 /// reaches it through, and check that each was registered.
 ///
@@ -1624,6 +1642,7 @@ fn register_load(view: &BootView<'_>) {
     // Root's way back from core quarantine is the settings crate's
     // `cpuN/online`: only a build that has it gives lode the way out.
     #[cfg(ferrix_runtime_settings = "live")]
+    #[cfg(not(ferrix_shape = "micro"))]
     init::root_can_return();
     let registered = syscall::launch::install()
         .and_then(|()| fs::install())
@@ -1690,7 +1709,7 @@ fn register_load(view: &BootView<'_>) {
 /// No filesystem flush, init launcher, `devmgr` reader or native process
 /// maker exists to be registered, and the native calls the load would have
 /// served stay unserved (LINUX-ABI-SEPARATION.md §7 rows 2 and 5, §11.11).
-#[cfg(ferrix_linux_abi = "off")]
+#[cfg(all(ferrix_load_built = "none", not(ferrix_personality = "user")))]
 fn register_load(view: &BootView<'_>) {
     let registered = platform::st::stm32mp1::install(view)
         .and_then(|()| platform::google::gs201::usb::install());
@@ -1719,6 +1738,15 @@ fn register_load(view: &BootView<'_>) {
     );
 }
 
+/// [`register_load`] under `personality=user`: the load is linuxd's, nothing
+/// above the item is in this kernel to register, and the board glue that stays
+/// in ring 0 until M6 is built for the boards that have it
+/// (docs/microkernel/M5-LIFT.md §2).
+#[cfg(ferrix_personality = "user")]
+fn register_load(_view: &BootView<'_>) {
+    println!("  hooks    the load is in user space: nothing registered above the item");
+}
+
 fn report_clocks_and_power(view: &BootView<'_>, clocks: &irq::Report) {
     report_clocks(clocks);
     // What the item reaches above it through, registered by what is above it,
@@ -1728,13 +1756,14 @@ fn report_clocks_and_power(view: &BootView<'_>, clocks: &irq::Report) {
     syscall::rehome_check::stage_shrinker();
     register_load(view);
     power::init(view);
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     fs::btrfs_powerfail::init(view);
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     fs::root_disk::init(view);
+    #[cfg(not(ferrix_shape = "micro"))]
     init::read_option(view);
     devmgr::read_option(view);
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     fs::procfs::remember_command_line(view.cmdline());
 }
 
@@ -2007,7 +2036,7 @@ fn self_check(view: &BootView<'_>, memory: &mut EarlyMemory) -> Result<(), &'sta
         return Err("the memory map reports no usable RAM");
     }
 
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     stages_check::check_loader_allocations(view)?;
 
     // Every read-only mapping the loader made, the kernel's text and rodata
@@ -2016,12 +2045,12 @@ fn self_check(view: &BootView<'_>, memory: &mut EarlyMemory) -> Result<(), &'sta
         return Err("the kernel can write through a read-only mapping: CR0.WP is clear");
     }
 
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     stages_check::check_layout(view)?;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     stages_check::check_direct_map(view, memory)?;
     check_early_mapper(view, memory)?;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     stages_check::check_no_early_window_wraps(memory)?;
     Ok(())
 }
@@ -2097,7 +2126,8 @@ fn check_early_mapper(view: &BootView<'_>, memory: &mut EarlyMemory) -> Result<(
     // boot console is on the screen before anything else runs; checked here
     // with the rest of the early mapper.
     let framebuffer = info.framebuffer;
-    if framebuffer.is_present()
+    if cfg!(not(ferrix_personality = "user"))
+        && framebuffer.is_present()
         && !framebuffer.is_reclaimable()
         && memory.translate(vmap::FRAMEBUFFER_WINDOW) != Some(framebuffer.phys)
     {
@@ -2151,23 +2181,29 @@ fn map_boot_framebuffer(view: &BootView<'_>, memory: &mut EarlyMemory) -> Result
     // write-combining from its first map only under the kernel's table.
     arch::program_memory_types();
     let framebuffer = view.raw().framebuffer;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     display::note_boot_framebuffer(framebuffer.is_present(), framebuffer.is_reclaimable());
     if !framebuffer.is_present() || framebuffer.is_reclaimable() {
         return Ok(());
     }
-    let at = vmap::FRAMEBUFFER_WINDOW;
-    let len = framebuffer_bytes(&framebuffer).min(vmap::FRAMEBUFFER_WINDOW_SIZE);
-    if memory.map_framebuffer(at, framebuffer.phys, len).is_err() {
-        return Err("could not map the framebuffer");
+    // No window on it in a kernel whose screen is a program's (M6).
+    #[cfg(ferrix_personality = "user")]
+    return Ok(());
+    #[cfg(not(ferrix_personality = "user"))]
+    {
+        let at = vmap::FRAMEBUFFER_WINDOW;
+        let len = framebuffer_bytes(&framebuffer).min(vmap::FRAMEBUFFER_WINDOW_SIZE);
+        if memory.map_framebuffer(at, framebuffer.phys, len).is_err() {
+            return Err("could not map the framebuffer");
+        }
+        if memory.translate(at) != Some(framebuffer.phys) {
+            return Err("the framebuffer mapping does not resolve to the framebuffer");
+        }
+        // No line firmware's mapping left in a cache beside the new type, before
+        // the first store (x86-64; nothing on Arm).
+        arch::flush_window(at, len);
+        panic::screen::install(&framebuffer, at, len);
+        console::screen::start(view);
+        Ok(())
     }
-    if memory.translate(at) != Some(framebuffer.phys) {
-        return Err("the framebuffer mapping does not resolve to the framebuffer");
-    }
-    // No line firmware's mapping left in a cache beside the new type, before
-    // the first store (x86-64; nothing on Arm).
-    arch::flush_window(at, len);
-    panic::screen::install(&framebuffer, at, len);
-    console::screen::start(view);
-    Ok(())
 }

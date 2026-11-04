@@ -223,8 +223,11 @@ pub(crate) fn build(arch: Arch, release: bool) -> Result<Vec<Built>> {
 
 /// [`build`], into `target_dir`.
 pub(crate) fn build_in(arch: Arch, release: bool, target_dir: &Path) -> Result<Vec<Built>> {
+    let lifted =
+        crate::flags::this_run().is_ok_and(|flags| flags.value("personality") == Some("user"));
     PROGRAMS
         .iter()
+        .chain(lifted.then_some(&LINUXD))
         .map(|program| build_one(arch, release, target_dir, program))
         .collect()
 }
@@ -238,6 +241,15 @@ pub(crate) const UPDATER: Program = Program {
     package: "ferrix-drvupdated",
     binary: "drvupdated",
     directory: DRIVERS,
+};
+
+/// `linuxd` (`docs/microkernel/M5-LIFT.md`), in a `personality=user` image alone.
+/// Not in [`PROGRAMS`]: its crates take the kernel's flags, and no other image
+/// carries it.
+pub(crate) const LINUXD: Program = Program {
+    package: "ferrix-linuxd",
+    binary: "linuxd",
+    directory: DIRECTORY,
 };
 
 /// One program of the tree, built and checked.

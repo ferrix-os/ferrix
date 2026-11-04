@@ -27,6 +27,7 @@ use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 pub use ferrix_linux_abi::kmsg::{LOG_DAEMON, Level};
 
 use ferrix_linux_abi::errno::Errno;
+use ferrix_native_abi::handle::Handle;
 
 use crate::linux::{self, numbers};
 
@@ -46,11 +47,60 @@ const UNOPENED: usize = usize::MAX;
 /// Opens refused so far.
 static TRIES: AtomicU32 = AtomicU32::new(0);
 
+/// The kernel's debug log's write handle, for a program started with one: a
+/// native process under `personality=user`, with no `/dev/kmsg` to open
+/// (`docs/microkernel/BOOT-AUTHORITY.md` §3). 0 for none.
+static DEBUG_LOG: AtomicU32 = AtomicU32::new(0);
+
+/// A first message on a bootstrap channel whose one handle is the debug log's: what
+/// a devmgr with no `/dev/kmsg` puts ahead of a driver's START.
+pub const BOOTSTRAP_MARK: &[u8] = b"ferrix-debug-log";
+
+/// Take [`BOOTSTRAP_MARK`]'s message off `channel` if it is the first: by its sizes
+/// first, which takes nothing, so no other program's first message is touched.
+pub(crate) fn take_from_bootstrap(channel: &ferrix_native::channel::Channel<crate::Kernel>) {
+    let mut mark = [0_u8; BOOTSTRAP_MARK.len()];
+    let mut log = [Handle::INVALID; 1];
+    let shape = channel.read(&mut [], &mut []);
+    let fits = matches!(
+        shape,
+        Err(ferrix_native::channel::ReadError::TooSmall { bytes, handles })
+            if bytes == BOOTSTRAP_MARK.len() && handles == 1
+    );
+    if fits
+        && let Ok(_) = channel.read(&mut mark, &mut log)
+        && mark.as_slice() == BOOTSTRAP_MARK
+    {
+        use_debug_log(log[0]);
+    }
+}
+
+/// The debug log's handle if this program was started with one, for a duplicate
+/// to hand on to what it starts.
+pub fn debug_log() -> Option<Handle> {
+    match DEBUG_LOG.load(Ordering::Relaxed) {
+        0 => None,
+        handle => Some(Handle(handle)),
+    }
+}
+
+/// Say every line on the debug log through `handle` from now on.
+pub fn use_debug_log(handle: Handle) {
+    DEBUG_LOG.store(handle.0, Ordering::Relaxed);
+}
+
 /// Say `arguments` at `level`: one record per line of it on `/dev/kmsg`, or
 /// the text on standard error while that is not open.
 pub fn line(level: Level, arguments: fmt::Arguments<'_>) {
     let mut text = Buffer::<LINE_MAX>::default();
     let _ = text.write_fmt(arguments);
+    let debug = DEBUG_LOG.load(Ordering::Relaxed);
+    if debug != 0 {
+        let _ = text.write_str("\n");
+        let _ =
+            ferrix_native::lift_calls::debug_write(crate::Kernel, Handle(debug), text.as_bytes());
+        return;
+    }
     let Some(fd) = kmsg() else {
         let _ = text.write_str("\n");
         let _ = linux::write(2, text.as_bytes());

@@ -15,7 +15,7 @@
 // ledger 3257 (3)), and each of the kernel's crates is compiled with its
 // flags. Never in a build with `linux_abi=on`.
 #![cfg_attr(
-    ferrix_linux_abi = "off",
+    ferrix_load_built = "none",
     allow(
         dead_code,
         unused_imports,
@@ -23,6 +23,19 @@
         unfulfilled_lint_expectations,
         unused_crate_dependencies,
         reason = "linux_abi=off is build-only until the checks that run a Linux program are re-homed"
+    )
+)]
+// The shared root built for linuxd (docs/microkernel/M5-LIFT.md §1): the same
+// allow, until the shim's stubs are real code. In no kernel image.
+#![cfg_attr(
+    ferrix_load_built = "lift",
+    allow(
+        dead_code,
+        unused_imports,
+        unused_variables,
+        unfulfilled_lint_expectations,
+        unused_crate_dependencies,
+        reason = "the shim's stubs leave load code unused until each milestone reaches it"
     )
 )]
 
@@ -45,29 +58,29 @@ pub const LOAD_FLAG_WORD: u64 =
 
 pub use ferrix_kernel_item::*;
 
-#[cfg(ferrix_linux_abi = "on")]
+#[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
 pub mod fs;
-#[cfg(ferrix_linux_abi = "on")]
+#[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
 pub mod interfaces;
-#[cfg(ferrix_linux_abi = "on")]
+#[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
 pub mod net;
-#[cfg(ferrix_linux_abi = "on")]
+#[cfg(ferrix_load_built = "ring0")]
 pub mod service_check;
-#[cfg(ferrix_linux_abi = "on")]
+#[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
 pub mod setters;
 /// The architecture modules (the core's), with the architecture checks raised to this crate, each declared at its position and compiled on its own architecture only.
 pub mod arch {
     pub use ferrix_kernel_item::arch::*;
     // The stage checks every architecture answers, by one name (`stage_check.rs`).
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod stage_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub use stage_check::{drive_native_words, drive_system_call};
     /// AArch64's raised checks.
     pub mod aarch64 {
         /// The trap entry's check.
         pub mod trap {
-            #[cfg(ferrix_linux_abi = "on")]
+            #[cfg(ferrix_load_built = "ring0")]
             pub mod check;
         }
     }
@@ -75,12 +88,12 @@ pub mod arch {
     pub mod armv7a {
         /// The context switch's check.
         pub mod switch {
-            #[cfg(ferrix_linux_abi = "on")]
+            #[cfg(ferrix_load_built = "ring0")]
             pub mod check;
         }
         /// The trap entry's check.
         pub mod trap {
-            #[cfg(ferrix_linux_abi = "on")]
+            #[cfg(ferrix_load_built = "ring0")]
             pub mod check;
         }
     }
@@ -88,17 +101,17 @@ pub mod arch {
     pub mod x86_64 {
         /// The paranoid entries' check.
         pub mod paranoid {
-            #[cfg(ferrix_linux_abi = "on")]
+            #[cfg(ferrix_load_built = "ring0")]
             pub mod check;
         }
         /// The context switch's check.
         pub mod switch {
-            #[cfg(ferrix_linux_abi = "on")]
+            #[cfg(ferrix_load_built = "ring0")]
             pub mod check;
         }
         /// The trap entry's check.
         pub mod trap {
-            #[cfg(ferrix_linux_abi = "on")]
+            #[cfg(ferrix_load_built = "ring0")]
             pub mod check;
         }
     }
@@ -106,7 +119,7 @@ pub mod arch {
 /// Device objects (the core's), with the configuration-space check raised to this crate.
 pub mod device {
     pub use ferrix_kernel_item::device::*;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod config_check;
 }
 /// The IOMMU (the core's), with stage 10's domain check raised to this crate.
@@ -114,62 +127,63 @@ pub mod iommu {
     pub use ferrix_kernel_core::iommu::*;
     // Stage 10's check, raised above the core with the kernel split
     // (`docs/KERNEL-CRATES.md`): `check_iommu`, which main.rs runs.
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod blocks_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod domain_check;
 }
 /// Kernel objects (the core's), with the object checks raised to this crate.
 pub mod object {
     pub use ferrix_kernel_core::object::*;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod alloc_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod authority_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod blocks_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod device_copy_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod domain_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod edge_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod exception_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod fast_path_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod format_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod level_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod pager_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod quota_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod region_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod sealing_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod sender_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod space_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod ticket_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod timer_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod write_read_check;
     /// Pinned memory (the core's), with its check raised to this crate.
     pub mod pin {
         pub use ferrix_kernel_core::object::pin::*;
-        #[cfg(ferrix_linux_abi = "on")]
+        #[cfg(ferrix_load_built = "ring0")]
         pub mod check;
     }
 }
 /// What belongs to one system on chip rather than to an architecture: the kernel's part in a board's devices.
+#[cfg(not(ferrix_load_built = "lift"))]
 pub mod platform {
     /// Google's systems on chip.
     pub mod google {
@@ -186,130 +200,130 @@ pub mod platform {
 /// The system call layer: the item's `syscall/mod.rs`, with the Linux personality's calls and the checks raised to this crate.
 pub mod syscall {
     pub use ferrix_kernel_item::syscall::*;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod attributes;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod build_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod compat;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod credentials;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod deliver;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod epoll;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod eventfd;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod exec;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod family;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod fd;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod file;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod flock;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod fsctl;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod futex;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod image;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod init_calls_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod kill;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod launch;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod limits;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod linux;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod load;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod memfd;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod memory;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod namespace;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod native_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod nsproxy;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod path;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod pidns;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod pipe;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod poll;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod process;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod program_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod registry;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod seccomp;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod seccomp_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod seccomp_filters_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod sem;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod sem_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod shm;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod shm_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod signal;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod signalfd;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod sigpage;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod sockets;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod stat;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod system;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod thread;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod thread_area;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod time;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod timens;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod timerfd;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod tty;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod unmap_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod userns;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod vdso;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod vdso_check;
 }
 /// User address spaces (the core's), with the checks raised to this crate.
 pub mod user {
     pub use ferrix_kernel_core::user::*;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod address_wait_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod alloc_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod madvise_check;
-    #[cfg(ferrix_linux_abi = "on")]
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod rmap_check;
 }

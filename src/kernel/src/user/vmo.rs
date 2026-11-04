@@ -325,6 +325,10 @@ const OVERLAP_CHUNK: usize = 64;
 /// mapped file and a `read` file, are the same object seen twice.
 #[derive(Debug)]
 pub struct Vmo {
+    /// Pages of it are placed in a window space, with no region and no rmap behind
+    /// them (ledger 6411, W2): sticky, and no path may take or change a page.
+    #[cfg(ferrix_personality = "user")]
+    placed: core::sync::atomic::AtomicBool,
     /// Which pages hold a frame, and which of those are held in place.
     pages: SpinLock<Pages>,
     /// The object's size in pages. Set at creation and only ever raised, by
@@ -769,6 +773,21 @@ impl Vmo {
         }
     }
 
+    /// Mark it placed, for good: `false`, for an object that cannot be (ledger 6411, W2).
+    #[cfg(ferrix_personality = "user")]
+    pub(crate) fn mark_placed(&self) -> bool {
+        if self.is_pager_backed() {
+            return false;
+        }
+        self.placed.store(true, Ordering::Release);
+        true
+    }
+    /// Whether a page of it may be in a window space.
+    #[cfg(ferrix_personality = "user")]
+    pub(crate) fn is_placed(&self) -> bool {
+        self.placed.load(Ordering::Acquire)
+    }
+
     /// Whether its absent pages are a pager's.
     pub fn is_pager_backed(&self) -> bool {
         self.pager().is_some()
@@ -894,6 +913,8 @@ impl Vmo {
     /// The object [`Vmo::new_filled`] allocates.
     fn unfilled(pages: u64, source: Option<Source>, charge: Charge) -> Vmo {
         Vmo {
+            #[cfg(ferrix_personality = "user")]
+            placed: core::sync::atomic::AtomicBool::new(false),
             pages: SpinLock::new(Pages::default()),
             writable_regions: AtomicU64::new(0),
             digest: SpinLock::new(None),
@@ -1270,6 +1291,8 @@ impl Vmo {
         // An object that cannot be allocated drops its frames as it goes,
         // which gives back every reference and copy taken above.
         crate::fallible::try_arc(Vmo {
+            #[cfg(ferrix_personality = "user")]
+            placed: core::sync::atomic::AtomicBool::new(false),
             pages: SpinLock::new(Pages {
                 frames,
                 held: BTreeMap::new(),
@@ -1879,6 +1902,10 @@ impl Vmo {
     /// Must not be called holding a spin lock; a caller holding an address
     /// space's lock uses [`Vmo::take_page`] and [`Vmo::retire`] instead.
     pub fn replace(&self, index: u64, frame: Frame) -> Option<Frame> {
+        #[cfg(ferrix_personality = "user")]
+        if self.is_placed() {
+            return None;
+        }
         let retired = self.take_page(index, frame).ok()?;
         let old = retired.frame(index);
         self.retire(retired, None);
@@ -1898,6 +1925,10 @@ impl Vmo {
         let mut retired = Retired::with_room(1).map_err(|_| Kept::NoMemory)?;
         // SEAL: refused
         let mut pages = self.pages.lock();
+        #[cfg(ferrix_personality = "user")]
+        if self.is_placed() {
+            return Err(Kept::Held);
+        }
         if pages.sealed || pages.held.contains_key(&index) {
             return Err(Kept::Held);
         }
@@ -1960,6 +1991,10 @@ impl Vmo {
     /// -- and the same in the end. With `clean`, for reclaim, a chunk leaves every
     /// page a mapping wrote ([`Pages::take_clean_into`]).
     fn decommit_in_chunks(&self, first: u64, end: u64, clean: bool) -> usize {
+        #[cfg(ferrix_personality = "user")]
+        if self.is_placed() {
+            return 0;
+        }
         let mut given = 0;
         let mut from = Some(first);
         while let Some(start) = from {
@@ -2651,7 +2686,9 @@ impl Vmo {
 
     /// Freeze with no hash, as a seal stands between its two steps, for the
     /// boot check alone.
+    #[cfg(not(ferrix_load_built = "lift"))]
     #[doc(hidden)]
+    #[cfg(not(ferrix_load_built = "lift"))]
     pub fn freeze_for_check(&self) -> Result<(), &'static str> {
         if !crate::boot_checks::run() {
             return Err("an object is frozen so only while boot checks run");
@@ -3547,6 +3584,10 @@ impl Vmo {
     ///
     /// [`AllocError`] with no room to list them; nothing taken.
     pub fn decommit_clean(&self, first: u64, count: u64) -> Result<u64, AllocError> {
+        #[cfg(ferrix_personality = "user")]
+        if self.is_placed() {
+            return Ok(0);
+        }
         let end = first.saturating_add(count);
         let clean = |pages: &Pages, index: u64| {
             !pages.held.contains_key(&index) && !pages.states.contains_key(&index)

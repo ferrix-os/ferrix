@@ -254,7 +254,7 @@ pub(crate) fn test_steamcmd(args: &Args) -> Result<()> {
 fn judge(arch: Arch, lines: &[String]) -> Result<()> {
     let after_boot = lines
         .iter()
-        .position(|line| line.contains(qemu::SUCCESS_MARKER))
+        .position(|line| qemu::reached(line, qemu::SUCCESS_MARKER))
         .and_then(|at| lines.get(at..))
         .unwrap_or_default();
     let exited = after_boot

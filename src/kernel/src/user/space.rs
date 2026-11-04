@@ -438,6 +438,12 @@ pub struct AddressSpace {
     /// Once it is a process's restricted space: its second root, which adds
     /// the region to it (`docs/microkernel/K11.md` §3).
     normal: Once<NormalRoot>,
+    /// A window: no regions, pages placed by `SPACE_PLACE` (ledger 6411). The objects
+    /// they come from, held until its tables are gone (W3).
+    #[cfg(ferrix_personality = "user")]
+    window: AtomicBool,
+    #[cfg(ferrix_personality = "user")]
+    placed: SpinLock<Vec<Arc<Vmo>>>,
     /// Whether its top tables stay as they emptied, so that [`NormalRoot`]'s
     /// copies of its root entries can never name a freed table: set before
     /// the normal root is made.
@@ -466,6 +472,14 @@ struct NormalRoot {
 
 /// The first root slot of a region: [`SHARED_BASE`]'s.
 const FIRST_SHARED_SLOT: usize = (SHARED_BASE >> ROOT_SLOT_SHIFT) as usize;
+/// The top of a program's space: the user half, or under `linuxd`, where the
+/// region sits above it, `SHARED_BASE` (`docs/microkernel/K11.md` §2.1).
+#[cfg(not(ferrix_load_built = "lift"))]
+pub const PROGRAM_TOP: u64 = USER_VIRT_END;
+/// The same.
+#[cfg(ferrix_load_built = "lift")]
+pub const PROGRAM_TOP: u64 = SHARED_BASE;
+
 /// One past a region's last root slot: [`USER_VIRT_END`]'s.
 const END_SHARED_SLOT: usize = (USER_VIRT_END >> ROOT_SLOT_SHIFT) as usize;
 /// The root slots of a region. Empty on ARMv7-A, which has none, whose user half ends
@@ -497,7 +511,7 @@ impl AddressSpace {
         // before it ran would have nowhere to go.
         arch::prepare_user_root(root * PAGE_SIZE);
 
-        let map = ferrix_vma::AddressSpace::new(MMAP_MIN_ADDR, USER_VIRT_END).map_err(|_| {
+        let map = ferrix_vma::AddressSpace::new(MMAP_MIN_ADDR, PROGRAM_TOP).map_err(|_| {
             // The window is a compile-time constant of the layout, so this is
             // unreachable in practice; reported rather than panicked because a
             // kernel has no supervisor to restart it.
@@ -747,6 +761,10 @@ impl AddressSpace {
             measured: AtomicBool::new(false),
             domain: AtomicU64::new(UNCLAIMED),
             normal: Once::new(),
+            #[cfg(ferrix_personality = "user")]
+            window: AtomicBool::new(false),
+            #[cfg(ferrix_personality = "user")]
+            placed: SpinLock::new(Vec::new()),
             keep_top: AtomicBool::new(false),
             region: AtomicBool::new(false),
         }
@@ -779,6 +797,141 @@ impl AddressSpace {
     /// Whether this is a region's space.
     pub fn is_region(&self) -> bool {
         self.region.load(Ordering::Acquire)
+    }
+
+    /// Whether its pages are placed, with no regions (ledger 6411).
+    #[cfg(ferrix_personality = "user")]
+    pub fn is_window(&self) -> bool {
+        self.window.load(Ordering::Acquire)
+    }
+
+    /// Make this a window: a restricted space, not measured, with nothing in it (W6).
+    #[cfg(ferrix_personality = "user")]
+    pub fn open_window(&self) -> Result<(), SpaceError> {
+        let inner = self.inner.lock();
+        if !self.is_bound() || self.is_measured() || inner.map.iter().next().is_some() {
+            return Err(SpaceError::Refused(0));
+        }
+        self.window.store(true, Ordering::Release);
+        Ok(())
+    }
+
+    /// A copy's touch of a placed page: as the page table says, under the lock a place
+    /// takes, so the frame cannot be changed under it.
+    #[cfg(ferrix_personality = "user")]
+    fn with_placed<R>(
+        &self,
+        address: u64,
+        access: Access,
+        touch: impl FnOnce(u64) -> R,
+    ) -> Result<Option<R>, SpaceError> {
+        let _inner = self.inner.lock();
+        let root = self.root * PAGE_SIZE;
+        let Some(flags) = mm::flags_in(root, address) else {
+            return Ok(None);
+        };
+        if access.write && !flags.write {
+            return Ok(None);
+        }
+        let Some(physical) = mm::translate_in(root, address) else {
+            return Ok(None);
+        };
+        let virt = mm::direct_map_ram(physical).ok_or(SpaceError::Refused(address))?;
+        Ok(Some(touch(virt)))
+    }
+
+    /// Place `entries`, in order, stopping at the first refusal: how many went in, and
+    /// the refusal. Each is a virtual page and a page of `vmo`, checked as a mapping by
+    /// handle is, and what replaced or lost a right is shot down before this returns
+    /// (W4, W5). A window has no region and no rmap: the object is held instead (W3).
+    #[cfg(ferrix_personality = "user")]
+    pub fn place(
+        &self,
+        vmo: &Arc<Vmo>,
+        ceiling_write: bool,
+        ceiling_execute: bool,
+        entries: &[(u64, u64, bool, bool)],
+    ) -> (usize, Option<SpaceError>) {
+        if !self.is_window() {
+            return (0, Some(SpaceError::Refused(0)));
+        }
+        if !vmo.mark_placed() {
+            return (0, Some(SpaceError::Refused(0)));
+        }
+        {
+            let mut held = self.placed.lock();
+            if !held.iter().any(|known| Arc::ptr_eq(known, vmo)) {
+                if held.len() >= PLACED_OBJECTS {
+                    return (0, Some(SpaceError::OutOfMemory));
+                }
+                if crate::fallible::try_push(&mut held, Arc::clone(vmo)).is_err() {
+                    return (0, Some(SpaceError::OutOfMemory));
+                }
+            }
+        }
+        let mut done = 0;
+        let mut refusal = None;
+        let mut pages = TlbPages::new();
+        let root = self.root * PAGE_SIZE;
+        let cpus = {
+            let inner = self.inner.lock();
+            for &(virt, offset, write, execute) in entries {
+                let in_range = virt.is_multiple_of(PAGE_SIZE)
+                    && offset.is_multiple_of(PAGE_SIZE)
+                    && is_user_address(virt)
+                    && virt
+                        .checked_add(PAGE_SIZE)
+                        .is_some_and(|end| end <= SHARED_BASE)
+                    && offset
+                        .checked_add(PAGE_SIZE)
+                        .is_some_and(|end| end <= vmo.len_bytes());
+                if !in_range {
+                    refusal = Some(SpaceError::BadRange);
+                    break;
+                }
+                if (write && (execute || !ceiling_write)) || (execute && !ceiling_execute) {
+                    refusal = Some(SpaceError::Refused(virt));
+                    break;
+                }
+                let Ok(frame) = vmo.commit(offset / PAGE_SIZE) else {
+                    refusal = Some(SpaceError::OutOfMemory);
+                    break;
+                };
+                let present = mm::translate_in(root, virt).is_some();
+                if present {
+                    let Ok(range) = PageRange::from_len(virt, PAGE_SIZE) else {
+                        refusal = Some(SpaceError::BadRange);
+                        break;
+                    };
+                    self.unmap_range(range, &mut pages);
+                }
+                let flags = typed(user_page(write, execute), vmo);
+                if mm::map_in(root, virt, frame * PAGE_SIZE, PAGE_SIZE, flags).is_err() {
+                    refusal = Some(SpaceError::OutOfMemory);
+                    break;
+                }
+                done += 1;
+            }
+            self.begin_shootdown(&inner)
+        };
+        self.shoot(&cpus, &mut pages);
+        (done, refusal)
+    }
+
+    /// A window's half of an unmap: its leaves in `range` down, what to flush, and who to
+    /// tell if anyone. At the shootdown's return, no translation of the range is on any
+    /// processor (W4): only what came down is named, and a shootdown still out from another
+    /// call, which may be of a leaf this one found gone, asks for everything; a range with
+    /// nothing in it and none out begins none, and `begun` stays (ledger 6421).
+    #[cfg(ferrix_personality = "user")]
+    fn window_take_down(&self, range: PageRange) -> (TlbPages, Option<CpuSet>) {
+        let inner = self.inner.lock();
+        let mut pages = mm::unmap_placed(self.root * PAGE_SIZE, range.start(), range.bytes());
+        if self.flushes.pending.load(Ordering::SeqCst) > 0 {
+            pages.everything();
+        }
+        let cpus = (!pages.is_empty()).then(|| self.begin_shootdown(&inner));
+        (pages, cpus)
     }
 
     /// Whether this is bound to a region as a process's restricted space.
@@ -2151,6 +2304,12 @@ impl AddressSpace {
         access: Access,
         touch: impl FnOnce(u64) -> R,
     ) -> Result<R, SpaceError> {
+        #[cfg(ferrix_personality = "user")]
+        if self.is_window() {
+            return self
+                .with_placed(address, access, touch)?
+                .ok_or(SpaceError::NotMapped(address));
+        }
         loop {
             {
                 let inner = self.inner.lock();
@@ -2200,6 +2359,10 @@ impl AddressSpace {
         access: Access,
         touch: impl FnOnce(u64) -> R,
     ) -> Result<Option<R>, SpaceError> {
+        #[cfg(ferrix_personality = "user")]
+        if self.is_window() {
+            return self.with_placed(address, access, touch);
+        }
         let inner = self.inner.lock();
         let region = *inner
             .map
@@ -2273,6 +2436,14 @@ impl AddressSpace {
     /// [`SpaceError::BadRange`] if the range is malformed.
     pub fn unmap(&self, at: u64, len: u64) -> Result<(), SpaceError> {
         let range = PageRange::from_len(at, len).map_err(|_| SpaceError::BadRange)?;
+        #[cfg(ferrix_personality = "user")]
+        if self.is_window() {
+            let (mut pages, cpus) = self.window_take_down(range);
+            if let Some(cpus) = cpus {
+                self.shoot(&cpus, &mut pages);
+            }
+            return Ok(());
+        }
         // Three phases, and the order between them is the whole point:
         // translations down, then every processor that may have them told, and
         // only then the frames given back. It used to be one phase that freed
@@ -2773,6 +2944,144 @@ fn typed(flags: MapFlags, vmo: &Vmo) -> MapFlags {
         ..flags
     }
 }
+
+/// linuxd's own: what a fault brings with it (`BUILD-FLAGS.md`, `fault_ahead`). Shape-specific,
+/// and in no kernel's image.
+#[cfg(ferrix_load_built = "lift")]
+impl AddressSpace {
+    /// Map for reading, in this space's tables alone, the pages of a file mapping in the
+    /// aligned group around `address` that the file's object already holds, and answer
+    /// them: linuxd's fault-around, which places them with the fault's own page. A
+    /// fault costs a program several times what it costs in the hybrid, and a warm
+    /// `rustc` takes 20,000 of them, most reading files (`docs/microkernel/PERFORMANCE.md`).
+    /// No page is read from a disk here, nothing is written, and a neighbour's trouble is
+    /// no one's: it just stays out. Under the lock each look, and the walk with it: the
+    /// shim frees an unlinked table at once (ledger 6537, A1).
+    pub fn fault_around(&self, address: u64) -> ([u64; AROUND_PAGES as usize], usize) {
+        let mut found = [0_u64; AROUND_PAGES as usize];
+        let mut count = 0;
+        let root = self.root * PAGE_SIZE;
+        let page = address & !(PAGE_SIZE - 1);
+        let group = page & !(AROUND_PAGES * PAGE_SIZE - 1);
+        let reading = Access {
+            write: false,
+            execute: false,
+        };
+        for at in (0..AROUND_PAGES).map(|index| group + index * PAGE_SIZE) {
+            if at == page {
+                continue;
+            }
+            let resident = {
+                let inner = self.inner.lock();
+                mm::translate_in(root, at).is_none()
+                    && inner.map.find(at).is_some_and(|region| {
+                        let Backing::File { id, offset } = region.backing else {
+                            return false;
+                        };
+                        let index = offset.saturating_add(at.saturating_sub(region.range.start()))
+                            / PAGE_SIZE;
+                        permits(region.flags, reading)
+                            && inner.objects.get(&id).is_some_and(|file| {
+                                !file.past_file_end(index) && file.page(index).is_some()
+                            })
+                            && (region.flags.shared
+                                || inner
+                                    .shadows
+                                    .get(&id)
+                                    .is_some_and(|shadow| shadow.page(index).is_none()))
+                    })
+            };
+            // As `write_ahead`: tables may be needed, and a refusal would count.
+            let room = crate::object::quota::at_limit(
+                crate::sched::running_group(),
+                crate::object::quota::Resource::Memory,
+                4 * PAGE_SIZE,
+            )
+            .is_none();
+            if resident && room && self.resolve(at, reading).is_ok() {
+                found[count] = at;
+                count += 1;
+            }
+        }
+        (found, count)
+    }
+
+    /// A write fault on plain private anonymous memory whose page before is in already: a
+    /// program walking up through fresh memory, whose next pages will fault one by one.
+    /// Commit those up to [`AHEAD_PAGES`] with this one, in the same region, and answer them
+    /// for linuxd's batch. A neighbour's trouble, a limit above all, is no one's: it stays
+    /// out, and its own fault says.
+    pub fn write_ahead(&self, address: u64) -> ([u64; AROUND_PAGES as usize], usize) {
+        let mut found = [0_u64; AROUND_PAGES as usize];
+        let mut count = 0;
+        let root = self.root * PAGE_SIZE;
+        let page = address & !(PAGE_SIZE - 1);
+        let writing = Access {
+            write: true,
+            execute: false,
+        };
+        // How far this region goes, if it is plain and the walk has a page behind it.
+        let end = {
+            let inner = self.inner.lock();
+            let plain = |region: &ferrix_vma::Vma| {
+                let Backing::Anonymous { id, .. } = region.backing else {
+                    return false;
+                };
+                permits(region.flags, writing)
+                    && !region.flags.shared
+                    && !region.flags.execute
+                    && inner
+                        .objects
+                        .get(&id)
+                        .is_some_and(|vmo| !vmo.is_pager_backed())
+            };
+            let behind = page
+                .checked_sub(PAGE_SIZE)
+                .is_some_and(|before| mm::translate_in(root, before).is_some());
+            match inner.map.find(page) {
+                Some(region) if behind && plain(region) => region.range.end(),
+                _ => return (found, 0),
+            }
+        };
+        for at in (1..=AHEAD_PAGES).map(|index| page + index * PAGE_SIZE) {
+            let free = {
+                let _inner = self.inner.lock();
+                at < end && mm::translate_in(root, at).is_none()
+            };
+            // Looked at first: a charge refused here would be counted and audited against
+            // a program that asked for nothing (ledger 6537, A6). A page and its tables.
+            let room = crate::object::quota::at_limit(
+                crate::sched::running_group(),
+                crate::object::quota::Resource::Memory,
+                4 * PAGE_SIZE,
+            )
+            .is_none();
+            if !free || !room || self.resolve(at, writing).is_err() {
+                break;
+            }
+            found[count] = at;
+            count += 1;
+        }
+        (found, count)
+    }
+}
+
+/// The window's boot check: a window's unmap's decisions (ledger 6421, U4).
+#[cfg(ferrix_personality = "user")]
+#[path = "window_check.rs"]
+pub mod window_check;
+
+/// How many pages a fault may bring in: the aligned group around it (`fault_around`).
+#[cfg(ferrix_load_built = "lift")]
+pub const AROUND_PAGES: u64 = 16;
+
+/// How many pages past a walking write fault are committed with it (`write_ahead`).
+#[cfg(ferrix_load_built = "lift")]
+pub const AHEAD_PAGES: u64 = 7;
+
+/// The most objects one window's pages may come from.
+#[cfg(ferrix_personality = "user")]
+const PLACED_OBJECTS: usize = 4096;
 
 /// The translation flags of a user page.
 fn user_page(write: bool, execute: bool) -> MapFlags {
@@ -4893,6 +5202,13 @@ impl Drop for AddressSpace {
         inner.objects.clear();
         inner.files.clear();
         inner.shadows.clear();
+
+        // A window's entries are in no region: the tables go, its objects keep their
+        // frames, and those objects' references go with this struct, after this.
+        #[cfg(ferrix_personality = "user")]
+        if self.window.load(Ordering::Acquire) {
+            let _ = mm::unmap_unwalked(self.root * PAGE_SIZE, 0, SHARED_BASE);
+        }
 
         // Tables a fault that ran out of memory made above the page it could
         // not map, which hold nothing and so were in no region's unmapping.

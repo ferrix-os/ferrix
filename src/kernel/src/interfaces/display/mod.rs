@@ -73,6 +73,7 @@ use ferrix_displayctl::card::{self as master, Became, OpenId, Taken};
 use ferrix_linux_abi::errno::Errno as CardErrno;
 use ferrix_sync::SleepLock;
 
+#[cfg(not(ferrix_load_built = "lift"))]
 pub mod check;
 
 pub(crate) mod drm;

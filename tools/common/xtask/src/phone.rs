@@ -180,7 +180,10 @@ fn phone_boot(args: &Args) -> Result<()> {
             log.display()
         )));
     }
-    if !lines.iter().any(|line| line.contains(qemu::SUCCESS_MARKER)) {
+    if !lines
+        .iter()
+        .any(|line| qemu::reached(line, qemu::SUCCESS_MARKER))
+    {
         return Err(Error::new(format!(
             "the {arch} kernel never printed `{}` within {}s on the phone; see {} and {PHONE_DIR}/crosvm.log there",
             qemu::SUCCESS_MARKER,

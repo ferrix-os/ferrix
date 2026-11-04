@@ -40,8 +40,37 @@ pub(crate) mod first_image;
 pub mod first_image_check;
 pub use ferrix_kernel_core::discovery::fdt;
 pub use ferrix_kernel_core::discovery::finder;
+#[cfg(not(ferrix_personality = "user"))]
 pub mod firmware;
+/// The firmware framebuffer in a `personality=user` kernel: nothing lent
+/// (`docs/microkernel/M6.md` §2, ledger 5942 M.9). `ferrix.efifb` is a word no
+/// profile with this shape permits, so what it lends is not built.
+#[cfg(ferrix_personality = "user")]
+pub mod firmware {
+    use ferrix_bootinfo::BootView;
+
+    use crate::user::memory_type::MemoryType;
+
+    /// The memory type a hold of the kernel's would have.
+    pub const KERNEL_MAPPING: MemoryType = MemoryType::Combining;
+
+    /// Never asked for.
+    pub fn asked(_view: &BootView<'_>) -> bool {
+        false
+    }
+
+    /// Nothing is lent here.
+    pub fn may_lend() -> bool {
+        false
+    }
+
+    /// No type is held here for the framebuffer.
+    pub fn refuses(_base: u64, _len: u64, _kind: MemoryType) -> bool {
+        false
+    }
+}
 pub mod pci;
+#[cfg(not(ferrix_personality = "user"))]
 pub mod powerctl;
 pub mod smbios;
 pub mod smbios_check;

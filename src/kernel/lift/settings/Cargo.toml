@@ -1,0 +1,26 @@
+[package]
+name = "ferrix-lift-settings"
+description = "The run-time setting entries' one source built for linuxd"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+build = "../../build.rs"
+
+[lib]
+name = "ferrix_kernel_settings"
+path = "../../src/kernel_settings.rs"
+
+[dependencies]
+ferrix-kernel-core = { package = "ferrix-lift-core", path = "../core" }
+ferrix-kernel-load = { package = "ferrix-lift-load", path = "../load" }
+ferrix-audit.workspace = true
+ferrix-bootinfo.workspace = true
+ferrix-linux-abi.workspace = true
+ferrix-procfs.workspace = true
+ferrix-sysfs.workspace = true
+ferrix-vfs.workspace = true
+
+[lints]
+workspace = true

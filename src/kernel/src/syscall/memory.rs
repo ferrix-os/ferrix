@@ -149,6 +149,15 @@ pub(crate) fn sys_mmap(process: &Process, request: &MmapRequest) -> Result<usize
     } = request;
     let mut vma = protection(prot)?;
     let len = pages_for(len)?;
+    // Linux's answer past its task size, for what is linuxd's above PROGRAM_TOP here.
+    // (EEXIST for a no-replace would be as true, and Wine, which goes on past it, then
+    // walks 16 TiB of address space 64 KiB at a time.)
+    #[cfg(ferrix_load_built = "lift")]
+    if flags & (MAP_FIXED | MAP_FIXED_NOREPLACE) != 0
+        && addr.saturating_add(len) > crate::user::space::PROGRAM_TOP
+    {
+        return Err(Errno::ENOMEM);
+    }
 
     // Exactly one of SHARED and PRIVATE, which is what Linux requires.
     let shared = flags & MAP_SHARED != 0;

@@ -92,6 +92,7 @@ fn flags_of<'a>(page: u64, segments: impl Iterator<Item = &'a Moved>) -> u32 {
 /// Read and judge `image`'s headers: its bias, entry and segments moved.
 fn plan<'a>(
     image: &'a [u8],
+    base: u64,
     segments: &mut [Option<Moved>; MAX_SEGMENTS],
 ) -> Result<(Elf<'a>, u64, u64), Refused> {
     let elf = Elf::parse(image).map_err(Refused::Malformed)?;
@@ -107,7 +108,7 @@ fn plan<'a>(
     }
     let (low, _) = elf.load_span(PAGE_SIZE).ok_or(Refused::Empty)?;
     let bias = if elf.is_pie() {
-        PIE_BASE.wrapping_sub(low)
+        base.wrapping_sub(low)
     } else {
         0
     };
@@ -178,8 +179,18 @@ fn apply_permissions(space: &AddressSpace, segments: &[Option<Moved>]) -> Result
 /// [`Refused`]. The space may then hold part of the image; its process is ended
 /// by the caller and never run.
 pub(crate) fn load(space: &AddressSpace, image: &[u8]) -> Result<EntryPoint, Refused> {
+    load_at(space, image, PIE_BASE)
+}
+
+/// [`load`], a position-independent image going to `base`: linuxd's, in its
+/// region (`docs/microkernel/M5-LIFT.md` §6).
+pub(crate) fn load_at(
+    space: &AddressSpace,
+    image: &[u8],
+    base: u64,
+) -> Result<EntryPoint, Refused> {
     let mut segments: [Option<Moved>; MAX_SEGMENTS] = [None; MAX_SEGMENTS];
-    let (elf, bias, entry) = plan(image, &mut segments)?;
+    let (elf, bias, entry) = plan(image, base, &mut segments)?;
     no_page_writes_and_executes(&segments)?;
     map_pages(space, &segments)?;
     // The file bytes. `.bss` is already zero.

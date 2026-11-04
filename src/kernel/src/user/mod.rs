@@ -7,11 +7,15 @@
 
 pub mod address_wait;
 pub mod cache;
+#[cfg(not(ferrix_load_built = "lift"))]
 pub mod check;
+#[cfg(not(ferrix_load_built = "lift"))]
 pub mod dirty_check;
 pub(crate) mod edge_check;
 pub mod memory_type;
+#[cfg(not(ferrix_load_built = "lift"))]
 pub mod rehome_cache_check;
+#[cfg(not(ferrix_load_built = "lift"))]
 pub mod rehome_check;
 pub mod space;
 pub mod vmo;

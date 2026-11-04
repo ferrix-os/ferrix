@@ -112,7 +112,7 @@ pub(crate) fn watch(kernel: Option<&Path>, args: &Args) -> Result<()> {
                 println!("    | {line}");
                 writeln!(log, "{line}")?;
                 log.flush()?;
-                if line.contains(SUCCESS_MARKER) {
+                if crate::qemu::reached(line.as_str(), SUCCESS_MARKER) {
                     println!("  board: boot ok");
                     return Ok(());
                 }

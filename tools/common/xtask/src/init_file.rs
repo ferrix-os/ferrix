@@ -375,7 +375,7 @@ fn read_script() -> String {
 fn after_marker(lines: &[String]) -> &[String] {
     lines
         .iter()
-        .position(|line| line.contains(SUCCESS_MARKER))
+        .position(|line| qemu::reached(line, SUCCESS_MARKER))
         .and_then(|at| lines.get(at..))
         .unwrap_or_default()
 }

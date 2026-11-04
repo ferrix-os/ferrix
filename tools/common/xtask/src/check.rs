@@ -335,6 +335,7 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
         "certification item boundary",
         &[
             &["tools/common/check/check-item-boundary.py"],
+            &["tools/common/check/check-lift.py"],
             &["tools/common/check/check-vmo-seal-tags.py"],
             &["tools/common/check/check-vmo-seal-tags.py", "--self-test"],
         ],

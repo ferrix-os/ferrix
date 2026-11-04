@@ -55,6 +55,7 @@ use crate::sync::SpinLock;
 use crate::syscall::native;
 use crate::timer;
 
+#[cfg(not(ferrix_load_built = "lift"))]
 pub mod check;
 
 /// How often a READ waiting for the log looks at it again: often enough that

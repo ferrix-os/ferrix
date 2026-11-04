@@ -74,6 +74,7 @@
 //! `/proc` numbers come from a counter and change when a name is looked up
 //! afresh.
 
+#[cfg(not(ferrix_load_built = "lift"))]
 pub mod check;
 
 /// `/proc/<pid>/status` of `process`, as a reader of it would read it: for the

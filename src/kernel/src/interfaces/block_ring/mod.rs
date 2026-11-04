@@ -106,12 +106,19 @@ use crate::hooks::Full;
 use crate::object::process::Host;
 use crate::syscall::native;
 
+#[cfg(not(ferrix_load_built = "lift"))]
 pub mod check;
+#[cfg(not(ferrix_load_built = "lift"))]
 pub mod driver_check;
+#[cfg(not(ferrix_load_built = "lift"))]
 pub(crate) mod hop_check;
+#[cfg(not(ferrix_load_built = "lift"))]
 mod offline_check;
+#[cfg(not(ferrix_load_built = "lift"))]
 pub(crate) mod reread_check;
+#[cfg(not(ferrix_load_built = "lift"))]
 pub(crate) mod tree_check;
+#[cfg(not(ferrix_load_built = "lift"))]
 pub(crate) mod trip_check;
 
 /// The block major every ring's disk is published under. Linux allocates
@@ -2142,6 +2149,7 @@ impl Serving<'_> {
                 continue;
             };
             crate::fs::seam::completed();
+            #[cfg(not(ferrix_load_built = "lift"))]
             if completed.device_ticks != 0 {
                 let _ = hop_check::DEVICE_TICKS
                     .fetch_add(u64::from(completed.device_ticks), Ordering::Relaxed);

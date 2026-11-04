@@ -81,6 +81,7 @@ use crate::sync::SpinLock;
 use crate::syscall::{fd, signal};
 use crate::trap::Abi;
 
+#[cfg(not(ferrix_load_built = "lift"))]
 pub(crate) mod check;
 use crate::syscall::process::Process;
 use crate::syscall::uaccess;

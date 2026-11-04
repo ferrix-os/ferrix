@@ -321,7 +321,9 @@
         "syscall/rehome_check.rs",
         "syscall/unmap_check.rs",
         "build_flags.rs",
-        "kernel_item.rs"
+        "kernel_item.rs",
+        "linuxd_start.rs",
+        "syscall/native/lift.rs"
       ]
     },
     "load": {
@@ -469,7 +471,7 @@
         "below": "the `WriteDevice` trait (ferrix_btrfs_write::WriteDevice, a `Device` that also writes and flushes), implemented by the kernel's `Disk`; and ferrix-btrfs, item",
         "above": "`WriteVolume` and its transaction, inode and extent operations, called by ferrix-btrfs-vfs and src/kernel/src/fs/btrfs*.rs"
       },
-    "ferrix-sha256": {
+      "ferrix-sha256": {
         "ring": "core",
         "path": "src/lib/crypto/sha256",
         "below": "byte slices its caller lends; no trait, no allocation, no dependency",
@@ -1070,7 +1072,88 @@
       "syscall/program.rs"
     ],
     "first_image_load": [
-      "discovery/devmgr.rs"
+      "discovery/devmgr.rs",
+      "linuxd_start.rs"
     ]
+  },
+  "lift_reuse": {
+    "//": "Kernel sources the shim compiles by position into linuxd (M5-LIFT §1, ledger 6012 R6): by file, no glob, each with its reason; check-lift.py walks the module tree and the set must equal this. Linuxd's runs are no evidence for any of them.",
+    "arch/x86_64/signal.rs": "signal frames, pure (MICROKERNEL §2.1)",
+    "arch/x86_64/signal/compat.rs": "signal frames, pure (MICROKERNEL §2.1)",
+    "claim.rs": "one-shot claims, pure",
+    "console/log.rs": "the log ring, pure",
+    "fallible.rs": "fallible allocation, pure",
+    "hooks.rs": "registered function pointers, pure",
+    "init.rs": "pid 1's start: the load's Launcher",
+    "object/bare.rs": "object model: same code on the arena (M5-LIFT §10)",
+    "object/channel.rs": "object model: same code on the arena (M5-LIFT §10)",
+    "object/exception.rs": "object model: same code on the arena (M5-LIFT §10)",
+    "object/interrupt.rs": "object model: same code on the arena (M5-LIFT §10)",
+    "object/io_mapping.rs": "object model: same code on the arena (M5-LIFT §10)",
+    "object/job.rs": "object model: same code on the arena (M5-LIFT §10)",
+    "object/mod.rs": "object model: same code on the arena (M5-LIFT §10)",
+    "object/oom.rs": "object model: same code on the arena (M5-LIFT §10)",
+    "object/pager.rs": "object model: same code on the arena (M5-LIFT §10)",
+    "object/pin.rs": "object model: same code on the arena (M5-LIFT §10)",
+    "object/port.rs": "object model: same code on the arena (M5-LIFT §10)",
+    "object/process.rs": "object model: same code on the arena (M5-LIFT §10)",
+    "object/quota.rs": "object model: same code on the arena (M5-LIFT §10)",
+    "object/region.rs": "object model: same code on the arena (M5-LIFT §10)",
+    "object/level.rs": "object model: same code on the arena (M5-LIFT §10)",
+    "object/space.rs": "object model: same code on the arena (M5-LIFT §10)",
+    "object/timer.rs": "object model: same code on the arena (M5-LIFT §10)",
+    "panic/catalog.rs": "panic codes, data",
+    "signal_frame.rs": "signal frames, pure (MICROKERNEL §2.1)",
+    "syscall/program.rs": "the program interface, pure",
+    "syscall/uaccess.rs": "copies through the shadow (M5-LIFT §10)",
+    "user/address_wait.rs": "memory objects: same code on the arena (M5-LIFT §10)",
+    "user/cache.rs": "memory objects: same code on the arena (M5-LIFT §10)",
+    "user/memory_type.rs": "memory objects: same code on the arena (M5-LIFT §10)",
+    "user/mod.rs": "memory objects: same code on the arena (M5-LIFT §10)",
+    "user/space.rs": "memory objects: same code on the arena (M5-LIFT §10)",
+    "user/vmo.rs": "memory objects: same code on the arena (M5-LIFT §10)",
+    "arch/x86_64/vdso.rs": "the vDSO's image: its code is a program's, never run in linuxd"
+  },
+  "lift_cfg_sites": {
+    "//": "ferrix_load_built sites in a load file: a ceiling, lowered as they go (ledger 5714 (9)).",
+    "fs/btrfs_write_check.rs": 6,
+    "fs/cgroupfs.rs": 13,
+    "fs/devfs.rs": 1,
+    "fs/mod.rs": 23,
+    "fs/procfs.rs": 1,
+    "fs/sysfs.rs": 1,
+    "interfaces/block_ring/mod.rs": 8,
+    "interfaces/chardev/mod.rs": 1,
+    "interfaces/display/mod.rs": 1,
+    "interfaces/logctl/mod.rs": 1,
+    "interfaces/net_ring/mod.rs": 1,
+    "net/mod.rs": 1,
+    "net/netlink/mod.rs": 1,
+    "object/channel.rs": 1, "syscall/mod.rs": 1,
+    "syscall/deliver.rs": 4,
+    "syscall/flock.rs": 1,
+    "syscall/registry.rs": 1,
+    "syscall/seccomp.rs": 1,
+    "user/mod.rs": 4,
+    "user/space.rs": 3,
+    "user/vmo.rs": 2,
+    "object/mod.rs": 1,
+    "syscall/uaccess.rs": 1,
+    "object/job.rs": 3,
+    "syscall/memory.rs": 1
+  },
+  "lift_check_exceptions": {
+    "//": "A ratchet: one entry, to a userland test (BACKLOG, ledger 6268 E).",
+    "fs/btrfs_write_check.rs": "test-btrfs reads its result; no id gains evidence from it"
+  },
+  "lift_packages": [
+    "ferrix-lift-core",
+    "ferrix-lift-item",
+    "ferrix-lift-load",
+    "ferrix-lift-settings"
+  ],
+  "lift_asm_exceptions": {
+    "//": "Reused files that hold asm, with why it never runs in linuxd.",
+    "arch/x86_64/vdso.rs": "global_asm! into read-only data, mapped into programs"
   }
 }

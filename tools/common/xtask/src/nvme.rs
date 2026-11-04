@@ -126,6 +126,7 @@ const BAD_BLOCK: u64 = 1000;
 /// When the image cannot be built, the boot fails or panics, or a
 /// requirement does not hold.
 pub(crate) fn test_nvme(args: &Args) -> Result<()> {
+    restart::lifted_row();
     let mode = Mode::asked(args.boot.as_deref())?;
     if mode == Mode::Up {
         return up(args);

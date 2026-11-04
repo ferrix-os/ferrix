@@ -253,6 +253,7 @@ pub(crate) static ALLOCATION_ABORTED: Explanation = Explanation {
 };
 
 /// For `check_allocation_failure` in `stages_check.rs`.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE9_ALLOCATION: Explanation = Explanation {
     code: "FX-0902",
     title: "an allocation failure was not survived",
@@ -282,6 +283,7 @@ pub static STAGE9_ALLOCATION: Explanation = Explanation {
 };
 
 /// For `check_native_refusals` in `stages_check.rs`.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE9_REFUSALS: Explanation = Explanation {
     code: "FX-0903",
     title: "a native call accepted what the ABI says it refuses",
@@ -307,6 +309,7 @@ pub static STAGE9_REFUSALS: Explanation = Explanation {
 };
 
 /// For `check_services` in `stages_check.rs`.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static SERVICES: Explanation = Explanation {
     code: "FX-0904",
     title: "a service the item leans on failed its self-check",
@@ -329,6 +332,7 @@ pub static SERVICES: Explanation = Explanation {
 };
 
 /// For `check_quotas` in `stages_check.rs`.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE9_QUOTAS: Explanation = Explanation {
     code: "FX-0905",
     title: "a job quota did not bound what it claims to",
@@ -389,6 +393,7 @@ pub static STAGE9_RESERVE: Explanation = Explanation {
 /// For `check_pager` in `stages_check.rs`, when `object::pager_check::run`
 /// fails.
 #[doc(hidden)]
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE9_PAGER: Explanation = Explanation {
     code: "FX-0915",
     title: "a pager-backed VMO's fault, wait or dirty tracking was not as K3 states",
@@ -452,6 +457,7 @@ pub static STAGE9_TICKETS: Explanation = Explanation {
 };
 
 /// For `check_kernel_memory` in `stages_check.rs`, when `fs::kmem_check::run` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE9_KMEM: Explanation = Explanation {
     code: "FX-0906",
     title: "the kernel heap a job drove through the Linux calls was not bounded by its job",
@@ -609,6 +615,7 @@ pub static VMAP_ARENA_BRING_UP: Explanation = Explanation {
 };
 
 /// For `check_allocators_and_traps` in `stages_check.rs`, when `mm::check::memory_check` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE2_ALLOCATORS: Explanation = Explanation {
     code: "FX-0203",
     title: "the memory allocators failed their self-check",
@@ -675,6 +682,7 @@ pub static STAGE2_FINISH_MEMORY: Explanation = Explanation {
 };
 
 /// For `kmain` in `main.rs`, when `trap_check` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE3_TRAPS: Explanation = Explanation {
     code: "FX-0301",
     title: "a deliberate trap did not come back correctly",
@@ -813,6 +821,7 @@ pub static CONSOLE_INPUT: Explanation = Explanation {
 };
 
 /// For `kmain` in `main.rs`, when `console::output::check` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static CONSOLE_OUTPUT: Explanation = Explanation {
     code: "FX-0504",
     title: "console output did not go out by interrupt",
@@ -841,6 +850,7 @@ pub static CONSOLE_OUTPUT: Explanation = Explanation {
 };
 
 /// For `kmain` in `main.rs`, when `logctl::check::run` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static LOG_CONTROL: Explanation = Explanation {
     code: "FX-1008",
     title: "the log core did not serve the kernel log to a driver",
@@ -908,6 +918,7 @@ pub static RANDOM_GENERATOR: Explanation = Explanation {
 };
 
 /// For `check_speculation` in `stages_check.rs`, when `arch::check_speculation` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static SPECULATION_DEFENCES: Explanation = Explanation {
     code: "FX-0307",
     title: "the side-channel defences did not hold",
@@ -1547,6 +1558,7 @@ pub static ITEM_REHOMED_CALLS: Explanation = Explanation {
 };
 
 /// For `check_user_memory` in `stages_check.rs`, when `user::check::run` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE6_USER_MEMORY: Explanation = Explanation {
     code: "FX-0601",
     title: "the memory a process is built from failed its self-check",
@@ -1574,6 +1586,7 @@ pub static STAGE6_USER_MEMORY: Explanation = Explanation {
 };
 
 /// For `check_reverse_map` in `stages_check.rs`, when `user::rmap_check::run` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE6_REVERSE_MAP: Explanation = Explanation {
     code: "FX-0602",
     title: "a page taken from a mapped object stayed reachable, or was not taken as it should be",
@@ -1637,6 +1650,7 @@ pub static STAGE10_PCI: Explanation = Explanation {
 };
 
 /// For `check_btrfs_disk` in `stages_check.rs`, when `fs::btrfs_check::run` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE11_MOUNT: Explanation = Explanation {
     code: "FX-1101",
     title: "the btrfs disk did not mount and read back as the host wrote it",
@@ -1661,6 +1675,7 @@ pub static STAGE11_MOUNT: Explanation = Explanation {
 };
 
 /// For `check_cgroupfs` in `stages_check.rs`, when `fs::cgroupfs::check` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE13_CGROUPFS: Explanation = Explanation {
     code: "FX-1301",
     title: "cgroupfs did not show the job tree as cgroup v2",
@@ -1745,6 +1760,7 @@ pub static STAGE13_CGROUPFS: Explanation = Explanation {
 
 /// For `check_seccomp` in `stages_check.rs`, when `syscall::seccomp_check::run`
 /// fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE13_SECCOMP: Explanation = Explanation {
     code: "FX-1302",
     title: "seccomp's filter was not asked first at every entry, or not as the entry's own",
@@ -1778,6 +1794,7 @@ pub static STAGE13_SECCOMP: Explanation = Explanation {
 
 /// For `check_seccomp_filters` in `stages_check.rs`, when
 /// `syscall::seccomp_filters_check::run` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE13_SECCOMP_FILTERS: Explanation = Explanation {
     code: "FX-1303",
     title: "a seccomp filter was not installed, judged, inherited, ordered or released as specified",
@@ -1824,6 +1841,7 @@ pub static STAGE13_SECCOMP_FILTERS: Explanation = Explanation {
 
 /// For `check_user_dispatch` in `stages_check.rs`, when
 /// `syscall::seccomp::user_dispatch_check::run` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE13_USER_DISPATCH: Explanation = Explanation {
     code: "FX-1304",
     title: "Syscall User Dispatch did not judge, dispatch or refuse a call as Linux does",
@@ -1861,6 +1879,7 @@ pub static STAGE13_USER_DISPATCH: Explanation = Explanation {
 /// For `check_address_waits` in `stages_check.rs`, when
 /// `user::address_wait_check::run` fails.
 #[doc(hidden)]
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE9_ADDRESS_WAIT: Explanation = Explanation {
     code: "FX-0911",
     title: "the waits on a user address failed their self-check",
@@ -1912,6 +1931,7 @@ pub static SMBIOS: Explanation = Explanation {
 /// For `check_exceptions` in `stages_check.rs`, when `object::exception_check::run`
 /// fails (`docs/microkernel/K4.md` §5).
 #[doc(hidden)]
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE9_EXCEPTIONS: Explanation = Explanation {
     code: "FX-0917",
     title: "an exception channel was attached where it must be refused, or refused where it \
@@ -1937,6 +1957,18 @@ pub static STAGE9_EXCEPTIONS: Explanation = Explanation {
           docs/microkernel/K4.md",
 };
 
+/// `AddressSpace::unmap` on a window decided wrongly.
+#[cfg(ferrix_personality = "user")]
+pub static WINDOW_UNMAP: Explanation = Explanation {
+    code: "FX-0949",
+    title: "a window's unmap flushed the wrong thing",
+    meaning: "`user::space::window_check` unmaps ranges of a made-up window and reads what the \
+              unmap would flush. A leaf it took down went unnamed, or a range with nothing in \
+              it began a shootdown, or a shootdown still out was not covered.",
+    causes: &["`AddressSpace::window_take_down` or `mm::unmap_placed` was changed."],
+    see: "docs/microkernel/M5-LIFT.md section 13; src/kernel/src/user/window_check.rs",
+};
+
 // CHECKS-ONLY: stages_check.rs
 /// For `check_levels` in `stages_check.rs`, when `object::level_check::run` fails.
 #[doc(hidden)]
@@ -1959,6 +1991,7 @@ pub static STAGE9_LEVELS: Explanation = Explanation {
 /// For `check_regions` in `stages_check.rs`, when `object::region_check::run`
 /// fails.
 #[doc(hidden)]
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE9_REGIONS: Explanation = Explanation {
     code: "FX-0925",
     title: "a shared process or restricted mode did not do what K1 and K11 say",
@@ -2084,6 +2117,7 @@ pub static NET_CORE: Explanation = Explanation {
 };
 
 /// For `check_net_ring` in `stages_check.rs`, when the net ring's self-check fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static NET_RING: Explanation = Explanation {
     code: "FX-1151",
     title: "the net ring did not carry a frame between the kernel and a driver",
@@ -2114,6 +2148,7 @@ pub static NET_RING: Explanation = Explanation {
 };
 
 /// For `check_netlink` in `stages_check.rs`, when the netlink self-check fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static NETLINK: Explanation = Explanation {
     code: "FX-1152",
     title: "AF_NETLINK did not answer the requests `ip` makes",
@@ -2172,6 +2207,7 @@ pub static DEVMGR_BY_INIT: Explanation = Explanation {
 
 /// For `fs::root_disk`'s switch under `ferrix.devmgr=init`, when pid 1 did
 /// not move onto the volume with it.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static ROOT_PID1: Explanation = Explanation {
     code: "FX-1202",
     title: "pid 1 did not move onto the root volume with the switch",
@@ -2265,6 +2301,7 @@ pub static STAGE10_DRIVER: Explanation = Explanation {
 };
 
 /// For `check_block_ring` in `main.rs`, when `block_ring::check::run` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE10_RING: Explanation = Explanation {
     code: "FX-1004",
     title: "the block ring's control plane answered a driver wrongly",
@@ -2300,6 +2337,7 @@ pub static STAGE10_RING: Explanation = Explanation {
 
 /// For `check_chardev` in `stages_check.rs`, when `chardev::check::run`
 /// fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE10_CHARDEV: Explanation = Explanation {
     code: "FX-1013",
     title: "the chardev core answered a driver or a program wrongly",
@@ -2330,6 +2368,7 @@ pub static STAGE10_CHARDEV: Explanation = Explanation {
 
 /// For `check_display_copies` in `stages_check.rs`, when
 /// `display::check::modes` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE10_DISPLAY_MODES: Explanation = Explanation {
     code: "FX-1015",
     title: "the display core would set a mode its driver did not list",
@@ -2351,6 +2390,7 @@ pub static STAGE10_DISPLAY_MODES: Explanation = Explanation {
 
 /// For `check_display_copies` in `stages_check.rs`, when
 /// `display::check::run` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE10_DISPLAY_COPIES: Explanation = Explanation {
     code: "FX-1014",
     title: "the display core would let the wrong driver copy",
@@ -2649,6 +2689,7 @@ pub(crate) static SPACE_IDS_EXHAUSTED: Explanation = Explanation {
 };
 
 /// For `check_path_calls` in `stages_check.rs`, when `syscall::check::run_paths` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE8_PATH_CALLS: Explanation = Explanation {
     code: "FX-0820",
     title: "the system calls that take a path failed their self-check",
@@ -2737,6 +2778,7 @@ pub static STAGE9_BUILD: Explanation = Explanation {
 /// For `check_spaces` in `stages_check.rs`, when `object::space_check::run`
 /// fails.
 #[doc(hidden)]
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE9_SPACES: Explanation = Explanation {
     code: "FX-0916",
     title: "an address space reached by handle was not held to the handle's rights",
@@ -2772,6 +2814,7 @@ pub static STAGE9_SPACES: Explanation = Explanation {
 };
 
 /// For `check_native_objects` in `stages_check.rs`, when `object::check::run` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE9_OBJECTS: Explanation = Explanation {
     code: "FX-0901",
     title: "the native ABI's objects failed their self-check",
@@ -2825,6 +2868,7 @@ pub static STAGE9_OBJECTS: Explanation = Explanation {
 // CHECKS-ONLY: stages_check.rs
 /// K14: sealing, measured spaces and the digest record.
 #[doc(hidden)]
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE9_SEALING: Explanation = Explanation {
     code: "FX-0951",
     title: "the sealing self-check failed",
@@ -2867,6 +2911,7 @@ pub static STAGE10_AUTHORITY: Explanation = Explanation {
 /// For `check_timers` in `stages_check.rs`, when `object::timer_check::run`
 /// fails.
 #[doc(hidden)]
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE9_TIMERS: Explanation = Explanation {
     code: "FX-0913",
     title: "the timer objects failed their self-check",
@@ -2896,6 +2941,7 @@ pub static STAGE9_TIMERS: Explanation = Explanation {
 };
 
 /// For `check_syscalls` in `stages_check.rs`, when `syscall::check::run` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE7_SYSCALLS: Explanation = Explanation {
     code: "FX-0701",
     title: "the system call dispatch path failed its self-check",
@@ -2982,6 +3028,7 @@ pub static STAGE8_FILESYSTEM: Explanation = Explanation {
 
 /// For `standard_streams` in `syscall/fd.rs`, when a new process cannot be
 /// given the console.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static CONSOLE_DESCRIPTORS: Explanation = Explanation {
     code: "FX-0810",
     title: "a new process could not be given the console as descriptors 0, 1 and 2",
@@ -3056,6 +3103,7 @@ pub static STAGE8_PSEUDO_FILESYSTEMS: Explanation = Explanation {
 
 /// For `sysrq_trigger` in `fs/procfs.rs`, when a program writes `c` to
 /// /proc/sysrq-trigger.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static SYSRQ_CRASH: Explanation = Explanation {
     code: "FX-0850",
     title: "a panic was requested through /proc/sysrq-trigger",
@@ -3122,6 +3170,7 @@ pub static STAGE8_PIPES_AND_FILESYSTEM_CALLS: Explanation = Explanation {
 };
 
 /// For `check_filesystems` in `main.rs`, when the memfd check fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE8_MEMFD: Explanation = Explanation {
     code: "FX-0880",
     title: "memfd_create or its seals failed their self-check",
@@ -3161,6 +3210,7 @@ pub static STAGE8_MEMFD: Explanation = Explanation {
 };
 
 /// For `check_epoll` in `stages_check.rs`, when the epoll check fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE8_EPOLL: Explanation = Explanation {
     code: "FX-0881",
     title: "epoll failed its self-check",
@@ -3204,6 +3254,7 @@ pub static STAGE8_EPOLL: Explanation = Explanation {
 
 /// For `check_mount_flags` in `stages_check.rs`, when `fs::mount_check::run`
 /// fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE8_MOUNT_FLAGS: Explanation = Explanation {
     code: "FX-0885",
     title: "A mount's flags failed their self-check",
@@ -3236,6 +3287,7 @@ pub static STAGE8_MOUNT_FLAGS: Explanation = Explanation {
 };
 
 /// For `check_binds` in `stages_check.rs`, when `fs::bind_check::run` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE8_BINDS: Explanation = Explanation {
     code: "FX-0886",
     title: "A bind mount failed its self-check",
@@ -3270,6 +3322,7 @@ pub static STAGE8_BINDS: Explanation = Explanation {
 
 /// For `check_namespaces` in `stages_check.rs`, when
 /// `fs::namespace_check::run` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE13_MOUNT_NAMESPACES: Explanation = Explanation {
     code: "FX-0887",
     title: "A mount namespace failed its self-check",
@@ -3311,6 +3364,7 @@ pub static STAGE13_MOUNT_NAMESPACES: Explanation = Explanation {
 
 /// For `check_user_namespaces` in `stages_check.rs`, when
 /// `fs::userns_check::run` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE13_USER_NAMESPACES: Explanation = Explanation {
     code: "FX-0888",
     title: "A user namespace failed its self-check",
@@ -3327,6 +3381,7 @@ pub static STAGE13_USER_NAMESPACES: Explanation = Explanation {
 
 /// For `check_small_namespaces` in `stages_check.rs`, when
 /// `fs::smallns_check::run` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE13_SMALL_NAMESPACES: Explanation = Explanation {
     code: "FX-0892",
     title: "A UTS, IPC or cgroup namespace, or setns, failed its self-check",
@@ -3344,6 +3399,7 @@ pub static STAGE13_SMALL_NAMESPACES: Explanation = Explanation {
 
 /// For `check_pid_namespaces` in `stages_check.rs`, when
 /// `fs::pidns_check::run` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE13_PID_NAMESPACES: Explanation = Explanation {
     code: "FX-0891",
     title: "A pid namespace failed its self-check",
@@ -3363,6 +3419,7 @@ pub static STAGE13_PID_NAMESPACES: Explanation = Explanation {
 
 /// For `check_network_namespaces` in `stages_check.rs`, when
 /// `fs::netns_check::run` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE13_NETWORK_NAMESPACES: Explanation = Explanation {
     code: "FX-0893",
     title: "A network namespace failed its self-check",
@@ -3379,6 +3436,7 @@ pub static STAGE13_NETWORK_NAMESPACES: Explanation = Explanation {
 
 /// For `check_task_view` in `stages_check.rs`, when
 /// `sched::inspect_check::run` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE5_TASK_VIEW: Explanation = Explanation {
     code: "FX-0536",
     title: "the view of a blocked task read it wrongly",
@@ -3394,6 +3452,7 @@ pub static STAGE5_TASK_VIEW: Explanation = Explanation {
 
 /// For `check_proc_access` in `stages_check.rs`, when
 /// `fs::procaccess_check::run` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE13_PROC_ACCESS: Explanation = Explanation {
     code: "FX-0894",
     title: "/proc let a process look into another's tree",
@@ -3410,6 +3469,7 @@ pub static STAGE13_PROC_ACCESS: Explanation = Explanation {
 /// For `check_time_namespaces` in `stages_check.rs`, when
 /// `fs::timens_check::run` fails.
 // CHECKS-ONLY: for `check_time_namespaces` in `stages_check.rs`.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE13_TIME_NAMESPACES: Explanation = Explanation {
     code: "FX-0910",
     title: "A time namespace failed its self-check",
@@ -3427,6 +3487,7 @@ pub static STAGE13_TIME_NAMESPACES: Explanation = Explanation {
 /// For `check_mount_permissions` in `stages_check.rs`, when
 /// `fs::mountperm_check::run` fails.
 // CHECKS-ONLY: for `check_mount_permissions` in `stages_check.rs`.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE13_MOUNT_PERMISSIONS: Explanation = Explanation {
     code: "FX-0900",
     title: "Mount permissions failed their self-check",
@@ -3442,6 +3503,7 @@ pub static STAGE13_MOUNT_PERMISSIONS: Explanation = Explanation {
 
 /// For `check_semaphores` in `stages_check.rs`, when `syscall::sem_check::run`
 /// fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE7_SEMAPHORES: Explanation = Explanation {
     code: "FX-0702",
     title: "System V semaphores failed their self-check",
@@ -3477,6 +3539,7 @@ pub static STAGE7_SEMAPHORES: Explanation = Explanation {
 
 /// For `check_shared_memory` in `stages_check.rs`, when
 /// `syscall::shm_check::run` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE7_SHARED_MEMORY: Explanation = Explanation {
     code: "FX-0703",
     title: "System V shared memory failed its self-check",
@@ -3506,6 +3569,7 @@ pub static STAGE7_SHARED_MEMORY: Explanation = Explanation {
 };
 
 /// For `check_eventfd` in `stages_check.rs`, when the eventfd check fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE8_EVENTFD: Explanation = Explanation {
     code: "FX-0882",
     title: "eventfd failed its self-check",
@@ -3546,6 +3610,7 @@ pub static STAGE8_EVENTFD: Explanation = Explanation {
 };
 
 /// For `check_timerfd` in `stages_check.rs`, when the timerfd check fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE8_TIMERFD: Explanation = Explanation {
     code: "FX-0883",
     title: "timerfd failed its self-check",
@@ -3588,6 +3653,7 @@ pub static STAGE8_TIMERFD: Explanation = Explanation {
 /// For `check_crash_hold` in `stages_check.rs`, when the crash hold's check
 /// fails.
 // CHECKS-ONLY: for `check_crash_hold` in `stages_check.rs`.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE8_CRASH_HOLD: Explanation = Explanation {
     code: "FX-0895",
     title: "the crash hold failed its self-check",
@@ -3614,6 +3680,7 @@ pub static STAGE8_CRASH_HOLD: Explanation = Explanation {
 };
 
 /// For `check_signalfd` in `stages_check.rs`, when the signalfd check fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE8_SIGNALFD: Explanation = Explanation {
     code: "FX-0884",
     title: "signalfd failed its self-check",
@@ -3650,6 +3717,7 @@ pub static STAGE8_SIGNALFD: Explanation = Explanation {
 };
 
 /// For `check_madvise` in `stages_check.rs`, when the madvise check fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE8_MADVISE: Explanation = Explanation {
     code: "FX-0872",
     title: "madvise failed its self-check",
@@ -3715,6 +3783,7 @@ pub static STAGE8_FILE_MAPPINGS: Explanation = Explanation {
 
 /// For `check_program_files` in `stages_check.rs`, when the check of programs mapped
 /// from their files fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE8_PROGRAM_FILES: Explanation = Explanation {
     code: "FX-0871",
     title: "a program mapped from its file failed its self-check",
@@ -3766,6 +3835,7 @@ pub static INIT_EXITED: Explanation = Explanation {
 };
 
 /// For `check_init_inputs` in `stages_check.rs`, when `init::check` fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static INIT_INPUTS: Explanation = Explanation {
     code: "FX-1503",
     title: "init took or refused an input other than set_inputs says",
@@ -3789,6 +3859,7 @@ pub static INIT_INPUTS: Explanation = Explanation {
 
 /// For `check_init_calls` in `stages_check.rs`, when `syscall::init_calls_check::run`
 /// fails.
+#[cfg(not(ferrix_shape = "micro"))]
 pub static INIT_CALLS: Explanation = Explanation {
     code: "FX-1502",
     title: "a kernel call init needs did not do what docs/INIT.md §11 says",
@@ -4003,14 +4074,17 @@ pub(crate) static ALL: &[&Explanation] = &[
     &STAGE1_HANDOFF,
     &MEMORY_BRING_UP,
     &VMAP_ARENA_BRING_UP,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE2_ALLOCATORS,
     &STAGE2_FINISH_MEMORY,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE3_TRAPS,
     &STAGE3_TIMER,
     &INTERRUPT_BRING_UP,
     &TIMER_REGISTRATION,
     &CONSOLE_INPUT,
     &RANDOM_GENERATOR,
+    #[cfg(not(ferrix_shape = "micro"))]
     &SPECULATION_DEFENCES,
     &STAGE3_MACHINE,
     &AUDIT_STORE,
@@ -4028,6 +4102,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &SCHEDULER_BRING_UP,
     &STAGE5_SCHEDULER,
     &SCHEDULE_WITH_PREEMPTION_HELD,
+    #[cfg(not(ferrix_shape = "micro"))]
     &CONSOLE_OUTPUT,
     &CONSOLE_LOG,
     &PREEMPT_COUNT_WITHOUT_RECORD,
@@ -4038,55 +4113,96 @@ pub(crate) static ALL: &[&Explanation] = &[
     &FAST_PATH_CONTINUATION_MASKED,
     &TASK_SLOT_RETURNED_TWICE,
     &ENDPOINT_CLOSED_MASKED,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE5_TASK_VIEW,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE6_USER_MEMORY,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE6_REVERSE_MAP,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE7_SYSCALLS,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE7_SEMAPHORES,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE7_SHARED_MEMORY,
     &STAGE8_ROOT,
     &STAGE8_FILESYSTEM,
+    #[cfg(not(ferrix_shape = "micro"))]
     &CONSOLE_DESCRIPTORS,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE8_PATH_CALLS,
     &STAGE8_PSEUDO_FILESYSTEMS,
+    #[cfg(not(ferrix_shape = "micro"))]
     &SYSRQ_CRASH,
     &STAGE8_PIPES_AND_FILESYSTEM_CALLS,
     &STAGE8_FILE_MAPPINGS,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE8_PROGRAM_FILES,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE8_MADVISE,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE8_MEMFD,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE8_EPOLL,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE8_EVENTFD,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE8_TIMERFD,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE8_SIGNALFD,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE8_MOUNT_FLAGS,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE8_BINDS,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE13_MOUNT_NAMESPACES,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE13_USER_NAMESPACES,
     &SYSFS,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE13_PID_NAMESPACES,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE13_SMALL_NAMESPACES,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE13_NETWORK_NAMESPACES,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE13_PROC_ACCESS,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE8_CRASH_HOLD,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE13_MOUNT_PERMISSIONS,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE9_OBJECTS,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE9_ALLOCATION,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE9_REFUSALS,
+    #[cfg(not(ferrix_shape = "micro"))]
     &SERVICES,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE9_QUOTAS,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE9_KMEM,
     &SPECULATION_DOMAIN_LEAVE_MAY_NOT_WAIT,
     &CHECK_HOOK_LEFT_ARMED,
     &SMBIOS,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE13_TIME_NAMESPACES,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE9_ADDRESS_WAIT,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE9_TICKETS,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE9_TIMERS,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE9_RESERVE,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE9_PAGER,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE9_SPACES,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE9_EXCEPTIONS,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE9_REGIONS,
     &STAGE9_LEVELS,
     &STAGE9_BUILD,
@@ -4096,35 +4212,53 @@ pub(crate) static ALL: &[&Explanation] = &[
     &ITEM_REHOMED_CALLS,
     &STAGE9_REBIND,
     &STAGE10_AUTHORITY,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE9_SEALING,
+    #[cfg(ferrix_personality = "user")]
+    &WINDOW_UNMAP,
     &STAGE10_PCI,
     &STAGE10_DEVICES,
     &STAGE10_IOMMU,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE10_RING,
     &STAGE10_DRIVER,
     &STAGE10_DEVMGR,
     &STAGE10_DMA_FAULT,
+    #[cfg(not(ferrix_shape = "micro"))]
     &LOG_CONTROL,
     &DEVMGR_BY_INIT,
     &STAGE10_DISTRIBUTOR,
     &STAGE10_CONFIG,
     &STAGE10_REMAP,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE10_CHARDEV,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE10_DISPLAY_COPIES,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE10_DISPLAY_MODES,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE11_MOUNT,
     &NET_CORE,
+    #[cfg(not(ferrix_shape = "micro"))]
     &NET_RING,
+    #[cfg(not(ferrix_shape = "micro"))]
     &NETLINK,
     &STAGE12_WRITE,
+    #[cfg(not(ferrix_shape = "micro"))]
     &ROOT_PID1,
     &RELEASE,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE13_CGROUPFS,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE13_SECCOMP,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE13_SECCOMP_FILTERS,
+    #[cfg(not(ferrix_shape = "micro"))]
     &STAGE13_USER_DISPATCH,
     &INIT_EXITED,
+    #[cfg(not(ferrix_shape = "micro"))]
     &INIT_CALLS,
+    #[cfg(not(ferrix_shape = "micro"))]
     &INIT_INPUTS,
     &UNHANDLED_PAGE_FAULT,
     &SYSTEM_CALL_TRAP,

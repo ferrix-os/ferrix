@@ -237,7 +237,7 @@ pub(crate) fn boot(arch: Arch, program: &Path, args: &Args) -> Result<Vec<String
     let lines = qemu::watch_then(arch, &image, &kernel, args, shell::EXITED, |_| Ok(()))?;
     let after_boot = lines
         .iter()
-        .position(|line| line.contains(qemu::SUCCESS_MARKER))
+        .position(|line| qemu::reached(line, qemu::SUCCESS_MARKER))
         .and_then(|at| lines.get(at..))
         .unwrap_or_default()
         .to_vec();

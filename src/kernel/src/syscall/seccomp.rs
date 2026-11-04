@@ -33,6 +33,7 @@
 //! a filter that makes it believe it had dropped privileges.
 
 pub(crate) mod user_dispatch;
+#[cfg(not(ferrix_load_built = "lift"))]
 pub mod user_dispatch_check;
 
 use alloc::sync::Arc;

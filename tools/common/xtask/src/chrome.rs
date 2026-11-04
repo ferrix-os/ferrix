@@ -829,7 +829,7 @@ fn test_chromium(arch: Arch, args: &Args) -> Result<()> {
 fn judge(arch: Arch, version: &str, lines: &[String]) -> Result<()> {
     let after_boot = lines
         .iter()
-        .position(|line| line.contains(qemu::SUCCESS_MARKER))
+        .position(|line| qemu::reached(line, qemu::SUCCESS_MARKER))
         .and_then(|at| lines.get(at..))
         .unwrap_or_default();
     let exited = after_boot

@@ -1406,6 +1406,10 @@ impl Job {
     /// new members all the same, through the killed job above it.
     pub fn kill(self: &Arc<Job>, status: i32) -> Result<usize, AllocError> {
         let jobs = self.walk(|_| {})?;
+        #[cfg(ferrix_load_built = "lift")]
+        for job in &jobs {
+            crate::sched::kill_kernel_job(Arc::as_ptr(job) as usize);
+        }
         for job in &jobs {
             let mut members = job.state.lock();
             members.killed = true;
@@ -1433,6 +1437,8 @@ impl Job {
     /// [`AllocError`] when the jobs or the processes could not be listed;
     /// nothing has been ended, and every job is as it was.
     pub fn kill_members(self: &Arc<Job>) -> Result<usize, AllocError> {
+        #[cfg(ferrix_load_built = "lift")]
+        crate::sched::kill_kernel_job(Arc::as_ptr(self) as usize);
         let jobs = self.walk(|_| {})?;
         for job in &jobs {
             job.state.lock().killing += 1;
@@ -1458,6 +1464,8 @@ impl Drop for Job {
     /// taken out first, and dropping it then has nothing above it to recurse
     /// into.
     fn drop(&mut self) {
+        #[cfg(ferrix_load_built = "lift")]
+        crate::sched::forget_kernel_job(core::ptr::from_ref(self) as usize);
         let mut next = self.parent.take();
         while let Some(parent) = next {
             next = match Arc::try_unwrap(parent) {

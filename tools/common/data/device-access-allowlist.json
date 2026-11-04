@@ -178,6 +178,12 @@
       "reason": "Stage 2's boot checks, moved out of main.rs: a vmap page and a kernel stack written and read back to its last word; the RAM scrubber's check marking a frame it holds and chaining the blocks it takes through their first words (docs/RAM-SCRUBBER.md §7). Ordinary RAM, read for real because that is what is being proven."
     },
     {
+      "file": "src/kernel/src/lift/core/mm/mod.rs",
+      "kind": "memory",
+      "max_sites": 2,
+      "reason": "linuxd's shim of the kernel's physical memory (`docs/microkernel/M5-LIFT.md` §3a): the `PhysMem` a page table walker reads and writes, here the arena's own frames through its direct map, one word each way. Volatile as the kernel's own is; no device behind it, and this is a program, not ring 0."
+    },
+    {
       "file": "src/kernel/src/mm/scrub.rs",
       "kind": "memory",
       "max_sites": 1,

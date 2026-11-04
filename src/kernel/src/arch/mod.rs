@@ -353,26 +353,26 @@ pub const fn start_machine_check_log(_view: &ferrix_bootinfo::BootView<'_>) {}
 // The power core, x86-64's VR current limit through typed calls on a claim
 // (`docs/POWERCTL.md`, `L.x86_64.194`-`208`, `L.device.51`-`53`); none on
 // Arm, whose kernels publish no power node and answer the calls WRONG_TYPE.
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", not(ferrix_personality = "user")))]
 pub(crate) use x86_64::restore_power;
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", not(ferrix_personality = "user")))]
 pub use x86_64::{power_claim, power_probe, power_read, power_set, power_unserved};
 
 /// No power node on Arm.
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(any(not(target_arch = "x86_64"), ferrix_personality = "user"))]
 pub const fn power_probe(_view: &ferrix_bootinfo::BootView<'_>) -> bool {
     false
 }
 
 /// No power core on Arm.
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(any(not(target_arch = "x86_64"), ferrix_personality = "user"))]
 pub fn power_claim()
 -> Result<alloc::sync::Arc<crate::object::channel::Endpoint>, ferrix_linux_abi::errno::Errno> {
     Err(ferrix_native_abi::status::WRONG_TYPE)
 }
 
 /// No power core on Arm.
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(any(not(target_arch = "x86_64"), ferrix_personality = "user"))]
 pub fn power_set(
     _claim: &alloc::sync::Arc<crate::object::channel::Endpoint>,
     _eighths: u64,
@@ -381,7 +381,7 @@ pub fn power_set(
 }
 
 /// No power core on Arm.
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(any(not(target_arch = "x86_64"), ferrix_personality = "user"))]
 pub fn power_read(
     _claim: &alloc::sync::Arc<crate::object::channel::Endpoint>,
 ) -> Result<[u64; ferrix_native_abi::types::POWER_READ_WORDS], ferrix_linux_abi::errno::Errno> {
@@ -389,13 +389,13 @@ pub fn power_read(
 }
 
 /// No power claim on Arm.
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(any(not(target_arch = "x86_64"), ferrix_personality = "user"))]
 pub const fn power_unserved() -> bool {
     true
 }
 
 /// Nothing raised on Arm, so nothing to restore.
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(any(not(target_arch = "x86_64"), ferrix_personality = "user"))]
 pub(crate) const fn restore_power(_what: &'static str) {}
 
 // The boot options an architecture's bring-up reads before its traps are
@@ -564,7 +564,7 @@ pub use x86_64::{
 pub use x86_64::{
     SIGNAL_RED_ZONE, USER_DETHREAD_PROGRAM, USER_EXITS_PROGRAM, USER_HANDOFF_PROGRAM,
     USER_SIGNAL_PROGRAM, USER_STOPPED_PROGRAM, USER_SYSLOG_PROGRAM, USER_THREAD_PROGRAM,
-    USER_XSTATE_PROGRAM, UserContext, restore_signal_frame, setup_signal_frame,
+    USER_XSTATE_PROGRAM, UserContext,
 };
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
@@ -574,6 +574,8 @@ pub use x86_64::{
 };
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::{exception_code, fault_signal};
+#[cfg(all(target_arch = "x86_64", not(ferrix_shape = "micro")))]
+pub use x86_64::{restore_signal_frame, setup_signal_frame};
 // The scoped TLB shootdown: one page invalidated, one processor interrupted,
 // and the program that checks it from user mode.
 #[cfg(target_arch = "aarch64")]

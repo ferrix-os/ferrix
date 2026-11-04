@@ -23,9 +23,11 @@ mod msi;
 mod msrlog;
 pub mod paranoid;
 mod pcid;
+#[cfg(not(ferrix_personality = "user"))]
 mod powerctl;
 pub(crate) mod restricted;
 pub(crate) mod scrub;
+#[cfg_attr(ferrix_shape = "micro", allow(dead_code, unused_imports))]
 mod signal;
 mod smp;
 pub(super) mod speculation;
@@ -34,7 +36,9 @@ pub mod syscall;
 pub mod trap;
 
 pub use cpu::hardware_random;
-pub use signal::{SIGNAL_RED_ZONE, UserContext, restore_signal_frame, setup_signal_frame};
+pub use signal::{SIGNAL_RED_ZONE, UserContext};
+#[cfg(not(ferrix_shape = "micro"))]
+pub use signal::{restore_signal_frame, setup_signal_frame};
 
 use alloc::sync::Arc;
 
@@ -197,6 +201,7 @@ pub fn check_machine() -> Result<(), &'static str> {
     // and every interleaving of a write with a restore, none of which
     // writes a register the processor has (`L.x86_64.194`-`208`); and the
     // checked write's fixup (`L.x86_64.192`).
+    #[cfg(not(ferrix_personality = "user"))]
     powerctl::check::run()?;
     cpu::check::checked_write()
 }
@@ -245,11 +250,13 @@ pub(crate) fn retire_poisoned(page: u64) {
 }
 
 /// Stage 10's question for the power node (`L.device.51`).
+#[cfg(not(ferrix_personality = "user"))]
 pub fn power_probe(view: &BootView<'_>) -> bool {
     powerctl::probe(view)
 }
 
 /// A status for a power call the core refused.
+#[cfg(not(ferrix_personality = "user"))]
 fn power_status(why: powerctl::Refused) -> Errno {
     use ferrix_native_abi::status;
     match why {
@@ -265,6 +272,7 @@ fn power_status(why: powerctl::Refused) -> Errno {
 /// # Errors
 ///
 /// `ALREADY_BOUND`, `BAD_STATE` latched off, `NO_MEMORY`.
+#[cfg(not(ferrix_personality = "user"))]
 pub fn power_claim() -> Result<Arc<Endpoint>, Errno> {
     use ferrix_native_abi::status;
     powerctl::claim().map_err(|why| match why {
@@ -279,6 +287,7 @@ pub fn power_claim() -> Result<Arc<Endpoint>, Errno> {
 /// # Errors
 ///
 /// As the core refused.
+#[cfg(not(ferrix_personality = "user"))]
 pub fn power_set(claim: &Arc<Endpoint>, eighths: u64) -> Result<usize, Errno> {
     powerctl::set(claim, eighths)
         .map(|back| usize::try_from(back).unwrap_or(usize::MAX))
@@ -290,6 +299,7 @@ pub fn power_set(claim: &Arc<Endpoint>, eighths: u64) -> Result<usize, Errno> {
 /// # Errors
 ///
 /// `BAD_STATE` for a handle that is not the claim.
+#[cfg(not(ferrix_personality = "user"))]
 pub fn power_read(
     claim: &Arc<Endpoint>,
 ) -> Result<[u64; ferrix_native_abi::types::POWER_READ_WORDS], Errno> {
@@ -297,12 +307,14 @@ pub fn power_read(
 }
 
 /// Whether no live holder has the power claim, for a quiesce.
+#[cfg(not(ferrix_personality = "user"))]
 pub fn power_unserved() -> bool {
     powerctl::unserved()
 }
 
 /// Firmware's VR current limit back if the power core raised it: on a
 /// power-off, a reset and both ends of a panic (`L.x86_64.206`).
+#[cfg(not(ferrix_personality = "user"))]
 pub(crate) fn restore_power(what: &'static str) {
     powerctl::restore(what);
 }
@@ -1893,6 +1905,7 @@ pub(crate) fn frame_pointer() -> u64 {
 /// QEMU's debug-exit device is the way out of a gate's QEMU, whose status is
 /// then 33; real hardware discards the write and is halted.
 pub fn shutdown() -> ! {
+    #[cfg(not(ferrix_personality = "user"))]
     powerctl::restore("power-off");
     crate::console::announce_power_off();
     crate::console::drain();
@@ -1911,6 +1924,7 @@ pub fn shutdown() -> ! {
 /// `HALT` stays [`shutdown`], which never enters S5 (the consultant's OK IF,
 /// ledger line 4704, condition 1).
 pub fn power_off() -> ! {
+    #[cfg(not(ferrix_personality = "user"))]
     powerctl::restore("power-off");
     crate::console::announce_power_off();
     crate::console::drain();
@@ -2039,6 +2053,7 @@ const KBC_PULSE_RESET: u8 = 0xFE;
 /// of the first two gets time to act, and one that returns is a machine that
 /// did not reset, so the next is tried. A triple fault cannot return.
 pub fn reset() -> ! {
+    #[cfg(not(ferrix_personality = "user"))]
     powerctl::restore("reset");
     crate::console::drain();
     cpu::disable_interrupts();

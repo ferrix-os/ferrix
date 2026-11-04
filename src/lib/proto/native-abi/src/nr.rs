@@ -174,6 +174,8 @@ pub const DEVICE_GET_LIMIT: usize = 0x1058;
 pub const DEVICE_ISOLATION: usize = 0x1059;
 /// [`NativeCall::DeviceBindDomain`].
 pub const DEVICE_BIND_DOMAIN: usize = 0x10C0;
+/// [`NativeCall::DeviceServed`].
+pub const DEVICE_SERVED: usize = 0x10C3;
 /// [`NativeCall::VmoDigest`].
 pub const VMO_DIGEST: usize = 0x10C1;
 /// [`NativeCall::ProcessImages`].
@@ -303,6 +305,27 @@ pub const PAGER_OP: usize = 0x1077;
 pub const PAGER_QUERY_DIRTY: usize = 0x1078;
 /// [`NativeCall::ChargeTicket`].
 pub const CHARGE_TICKET: usize = 0x1070;
+/// `(log handle, ptr, len)`. M5's lift (`docs/microkernel/M5-LIFT.md` §2): the debug log.
+pub const DEBUG_WRITE: usize = 0x10B0;
+/// `(handle)` → the object's kind in bits 32 up ([`crate::lift`]) and the handle's rights below.
+pub const OBJECT_KIND: usize = 0x10B9;
+/// `()`. Give up the processor.
+pub const THREAD_YIELD: usize = 0x10B4;
+/// `(clock)` → nanoseconds. 0 monotonic, 1 realtime.
+pub const CLOCK_READ: usize = 0x10B5;
+/// `(ptr, len)`. Entropy.
+pub const RANDOM_FILL: usize = 0x10B6;
+/// `(console handle, ptr, len, deadline ptr)` → bytes.
+pub const CONSOLE_READ: usize = 0x10B8;
+/// `(thread, ptr, words)`: which processors a region's thread may run on.
+pub const THREAD_AFFINITY: usize = 0x10BA;
+/// `(process, private)`: move a handle of the caller's private table to a process's
+/// bootstrap slot, from normal mode: it is never in the shared table on the way.
+pub const BOOTSTRAP_MOVE: usize = 0x10BB;
+/// `(space)`: a restricted space whose pages are placed, with no regions (K2's window).
+pub const SPACE_WINDOW: usize = 0x10BC;
+/// `(space, vmo, ptr, count)`: place pages of `vmo` in a window space.
+pub const SPACE_PLACE: usize = 0x10BD;
 /// The most records one [`NativeCall::AuditRead`] copies.
 pub const AUDIT_READ_MAX: u64 = 64;
 /// The largest name [`NativeCall::ProcessCreate`] takes, in bytes.
@@ -724,6 +747,11 @@ pub enum NativeCall {
     /// carries `ferrix.unisolated`, `LIMIT_REACHED` when the function's only
     /// possible domain is held already.
     DeviceBindDomain,
+    /// `(device)`. A server has accepted the next driver's HELLO: what a dead
+    /// driver's pins kept goes back and the kernel's configuration is read back,
+    /// what the kernel's cores do at HELLO (`docs/microkernel/M5-LIFT.md` §11).
+    /// Needs `MANAGE`. `personality=user` only; `ENOSYS` otherwise.
+    DeviceServed,
     /// `(vmo, *out)`. The 32 bytes of a sealed VMO's digest
     /// (`docs/microkernel/K14.md` §4). Needs `READ`. `BAD_STATE` when it is
     /// not sealed, `SHOULD_WAIT` while its hash runs.
@@ -977,6 +1005,27 @@ pub enum NativeCall {
     RestrictedEnter,
     /// `(value)` → the exit. Put `value` in the program's result register and re-enter the held context: legal after a system call exit alone.
     RestrictedResume,
+    /// `(log, ptr, len)`: bytes to the kernel's debug log.
+    DebugWrite,
+    /// `(handle)` → kind and rights.
+    ObjectKind,
+    /// `()`: give up the processor.
+    ThreadYield,
+    /// `(clock)` → nanoseconds.
+    ClockRead,
+    /// `(ptr, len)`: entropy.
+    RandomFill,
+    /// `(console, ptr, len)` → bytes, not waiting.
+    ConsoleRead,
+    /// `(thread, ptr, words)`: the processors it may run on; thread 0 is the caller.
+    ThreadAffinity,
+    /// `(process, private)`: a handle of the caller's private table to that process's
+    /// bootstrap slot. Linuxd's half of `PROCESS_GIVE`.
+    BootstrapMove,
+    /// `(space)`: a restricted space whose pages are placed.
+    SpaceWindow,
+    /// `(space, vmo, ptr, count)` → how many. Pages of a VMO placed in a window space.
+    SpacePlace,
     /// `(thread)` → 0. Exit that thread from restricted mode, now or at its next entry. Needs `SIGNAL`.
     RestrictedKick,
     /// `(out: *mut Context)` → 0. The held context, its flags normalised so that an entry accepts them.
@@ -1062,7 +1111,7 @@ pub enum NativeCall {
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 122] = [
+pub const ALL: [NativeCall; 133] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,
@@ -1181,9 +1230,20 @@ pub const ALL: [NativeCall; 122] = [
     NativeCall::ProcessRun,
     NativeCall::PagerKeep,
     NativeCall::PagerTakeUp,
+    NativeCall::DebugWrite,
+    NativeCall::ThreadYield,
+    NativeCall::ClockRead,
+    NativeCall::RandomFill,
+    NativeCall::ConsoleRead,
+    NativeCall::ObjectKind,
+    NativeCall::ThreadAffinity,
+    NativeCall::BootstrapMove,
+    NativeCall::SpaceWindow,
+    NativeCall::SpacePlace,
     NativeCall::DeviceBindDomain,
     NativeCall::VmoDigest,
     NativeCall::ProcessImages,
+    NativeCall::DeviceServed,
     NativeCall::JobDeclareBuffer,
 ];
 
@@ -1265,6 +1325,7 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         DEVICE_GET_LIMIT => NativeCall::DeviceGetLimit,
         DEVICE_ISOLATION => NativeCall::DeviceIsolation,
         DEVICE_BIND_DOMAIN => NativeCall::DeviceBindDomain,
+        DEVICE_SERVED => NativeCall::DeviceServed,
         VMO_DIGEST => NativeCall::VmoDigest,
         PROCESS_IMAGES => NativeCall::ProcessImages,
         CHARDEV_CONTROL_CREATE => NativeCall::ChardevControlCreate,
@@ -1308,6 +1369,16 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         RESTRICTED_VECTORS_READ => NativeCall::RestrictedVectorsRead,
         RESTRICTED_VECTORS_WRITE => NativeCall::RestrictedVectorsWrite,
         RESTRICTED_COPY_WINDOW => NativeCall::RestrictedCopyWindow,
+        DEBUG_WRITE => NativeCall::DebugWrite,
+        OBJECT_KIND => NativeCall::ObjectKind,
+        THREAD_YIELD => NativeCall::ThreadYield,
+        CLOCK_READ => NativeCall::ClockRead,
+        RANDOM_FILL => NativeCall::RandomFill,
+        CONSOLE_READ => NativeCall::ConsoleRead,
+        THREAD_AFFINITY => NativeCall::ThreadAffinity,
+        BOOTSTRAP_MOVE => NativeCall::BootstrapMove,
+        SPACE_WINDOW => NativeCall::SpaceWindow,
+        SPACE_PLACE => NativeCall::SpacePlace,
         REGION_CREATE => NativeCall::RegionCreate,
         PROCESS_CREATE_SHARED => NativeCall::ProcessCreateShared,
         THREAD_CREATE => NativeCall::ThreadCreate,
@@ -1397,6 +1468,7 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::DeviceGetLimit => DEVICE_GET_LIMIT,
         NativeCall::DeviceIsolation => DEVICE_ISOLATION,
         NativeCall::DeviceBindDomain => DEVICE_BIND_DOMAIN,
+        NativeCall::DeviceServed => DEVICE_SERVED,
         NativeCall::VmoDigest => VMO_DIGEST,
         NativeCall::ProcessImages => PROCESS_IMAGES,
         NativeCall::ChardevControlCreate => CHARDEV_CONTROL_CREATE,
@@ -1440,6 +1512,16 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::RestrictedVectorsRead => RESTRICTED_VECTORS_READ,
         NativeCall::RestrictedVectorsWrite => RESTRICTED_VECTORS_WRITE,
         NativeCall::RestrictedCopyWindow => RESTRICTED_COPY_WINDOW,
+        NativeCall::DebugWrite => DEBUG_WRITE,
+        NativeCall::ObjectKind => OBJECT_KIND,
+        NativeCall::ThreadYield => THREAD_YIELD,
+        NativeCall::ClockRead => CLOCK_READ,
+        NativeCall::RandomFill => RANDOM_FILL,
+        NativeCall::ConsoleRead => CONSOLE_READ,
+        NativeCall::ThreadAffinity => THREAD_AFFINITY,
+        NativeCall::BootstrapMove => BOOTSTRAP_MOVE,
+        NativeCall::SpaceWindow => SPACE_WINDOW,
+        NativeCall::SpacePlace => SPACE_PLACE,
         NativeCall::RegionCreate => REGION_CREATE,
         NativeCall::ProcessCreateShared => PROCESS_CREATE_SHARED,
         NativeCall::ThreadCreate => THREAD_CREATE,
@@ -1480,6 +1562,7 @@ pub enum FromRestricted {
 #[expect(clippy::too_many_lines, reason = "one arm a call, and nothing else")]
 pub const fn from_restricted(call: NativeCall) -> FromRestricted {
     match call {
+        NativeCall::DeviceServed => FromRestricted::Answered,
         NativeCall::DeviceBindDomain | NativeCall::VmoDigest | NativeCall::ProcessImages => {
             FromRestricted::Answered
         }
@@ -1508,13 +1591,13 @@ pub const fn from_restricted(call: NativeCall) -> FromRestricted {
         NativeCall::VmoExecutable => FromRestricted::Answered,
         NativeCall::JobCreate => FromRestricted::Answered,
         NativeCall::JobKill => FromRestricted::Answered,
-        NativeCall::JobForCgroup => FromRestricted::Answered,
+        NativeCall::JobForCgroup => FromRestricted::Exits,
         NativeCall::JobSetLimit => FromRestricted::Answered,
         NativeCall::JobGetQuota => FromRestricted::Answered,
         NativeCall::ProcessCreate => FromRestricted::Answered,
         NativeCall::ProcessStart => FromRestricted::Answered,
-        NativeCall::ProcessGive => FromRestricted::Answered,
-        NativeCall::ProcessBootstrap => FromRestricted::NormalOnly,
+        NativeCall::ProcessGive => FromRestricted::Exits,
+        NativeCall::ProcessBootstrap => FromRestricted::Answered,
         NativeCall::ProcessStatus => FromRestricted::Answered,
         NativeCall::ProcessSpace => FromRestricted::Answered,
         NativeCall::InterruptCreate => FromRestricted::Answered,
@@ -1589,6 +1672,16 @@ pub const fn from_restricted(call: NativeCall) -> FromRestricted {
         NativeCall::RestrictedVectorsRead => FromRestricted::NormalOnly,
         NativeCall::RestrictedVectorsWrite => FromRestricted::NormalOnly,
         NativeCall::RestrictedCopyWindow => FromRestricted::NormalOnly,
+        NativeCall::DebugWrite => FromRestricted::NormalOnly,
+        NativeCall::ObjectKind => FromRestricted::NormalOnly,
+        NativeCall::ThreadYield => FromRestricted::NormalOnly,
+        NativeCall::ClockRead => FromRestricted::NormalOnly,
+        NativeCall::RandomFill => FromRestricted::NormalOnly,
+        NativeCall::ConsoleRead => FromRestricted::NormalOnly,
+        NativeCall::ThreadAffinity => FromRestricted::NormalOnly,
+        NativeCall::BootstrapMove => FromRestricted::NormalOnly,
+        NativeCall::SpaceWindow => FromRestricted::NormalOnly,
+        NativeCall::SpacePlace => FromRestricted::NormalOnly,
         NativeCall::RegionCreate => FromRestricted::NormalOnly,
         NativeCall::ProcessCreateShared => FromRestricted::NormalOnly,
         NativeCall::ThreadCreate => FromRestricted::NormalOnly,
@@ -1656,6 +1749,16 @@ pub const fn copy_miss(call: NativeCall) -> CopyMiss {
         | NativeCall::PagerKeep
         | NativeCall::PagerTakeUp
         | NativeCall::ChargeTicket
+        | NativeCall::ObjectKind
+        | NativeCall::DebugWrite
+        | NativeCall::ThreadYield
+        | NativeCall::ClockRead
+        | NativeCall::RandomFill
+        | NativeCall::ConsoleRead
+        | NativeCall::ThreadAffinity
+        | NativeCall::BootstrapMove
+        | NativeCall::SpaceWindow
+        | NativeCall::SpacePlace
         | NativeCall::PortFd
         | NativeCall::VmoMap
         | NativeCall::VmoPin
@@ -1693,6 +1796,7 @@ pub const fn copy_miss(call: NativeCall) -> CopyMiss {
         | NativeCall::DeviceGetLimit
         | NativeCall::DeviceIsolation
         | NativeCall::DeviceBindDomain
+        | NativeCall::DeviceServed
         | NativeCall::ProcessImages
         | NativeCall::ChardevControlCreate
         | NativeCall::ChardevReply

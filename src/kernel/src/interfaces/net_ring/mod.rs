@@ -69,6 +69,7 @@ use crate::syscall::native;
 use crate::timer;
 use crate::user::vmo::{Held, Vmo};
 
+#[cfg(not(ferrix_load_built = "lift"))]
 pub mod check;
 
 /// How long a ring waits for its driver's HELLO.

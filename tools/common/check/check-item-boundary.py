@@ -162,6 +162,7 @@ import rustlex  # noqa: E402  (after the path insert)
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
 MANIFEST = ROOT / "tools" / "common" / "data" / "certification-item.json"
 KERNEL_SRC = ROOT / "src" / "kernel" / "src"
+LIFT_PACKAGES = tuple(json.loads(MANIFEST.read_text(encoding="utf-8")).get("lift_packages", ()))
 
 IDENT = re.compile(r"(?:r#)?[^\W\d]\w*\Z")
 # Keywords that define a named item, which a path's last segment may name.
@@ -209,7 +210,11 @@ def kernel_files() -> list[str]:
     between its parts on every host: the manifest's patterns and the module
     tree are written that way."""
     return sorted(
-        path.relative_to(KERNEL_SRC).as_posix() for path in KERNEL_SRC.rglob("*.rs")
+        rel
+        for rel in (path.relative_to(KERNEL_SRC).as_posix() for path in KERNEL_SRC.rglob("*.rs"))
+        # linuxd's shim is outside the TSF and in no ring (M5-LIFT.md §8):
+        # check-lift.py holds it apart from what the kernel builds.
+        if not rel.startswith("lift/") and rel not in ("lift_core.rs", "lift_item.rs")
     )
 
 
@@ -1388,7 +1393,10 @@ def removable_problems(removable: dict, read, crate_files: dict[str, list[str]],
         elif "ferrix-kernel-load" not in own[1].get("dependencies", {}):
             problems.append(f"{package}: does not depend on ferrix-kernel-load")
         for other, (directory, cargo) in sorted(packages.items()):
-            if package in cargo.get("dependencies", {}) and other != "ferrix-kernel":
+            named = cargo.get("dependencies", {}).get(package)
+            # A dependency renamed to this lib name is another package: the lift's.
+            renamed = isinstance(named, dict) and named.get("package", package) != package
+            if named is not None and not renamed and other != "ferrix-kernel":
                 problems.append(f"{directory}: {other} depends on {package}; only the binary may")
         binary = packages.get("ferrix-kernel")
         if binary is not None and package not in binary[1].get("dependencies", {}):
@@ -1609,6 +1617,9 @@ def kernel_crate_problems(manifest: dict, files: list[str], ring_of: dict[str, s
     if "ferrix-kernel" not in entries:
         problems.append("kernel_crates: no entry for ferrix-kernel, the kernel binary")
     for package, directory in sorted(members.items()):
+        # The lift's own packages are in no ring (M5-LIFT.md §8; check-lift.py).
+        if package in manifest.get("lift_packages", ()):
+            continue
         entry = entries.get(package)
         if entry is None:
             problems.append(f"{directory}: package {package} is under src/kernel and not in kernel_crates")
@@ -1856,7 +1867,7 @@ def build_script_problems(kernel: dict[str, str], packages: dict[str, tuple[str,
                 problems.append(f"{package}: a kernel crate builds with {KERNEL_BUILD_SCRIPT}, the kernel's "
                                 f"crates' one build script, and this one names {built or 'none'} "
                                 f"(ledger line 3282, (K1))")
-        elif built == KERNEL_BUILD_SCRIPT:
+        elif built == KERNEL_BUILD_SCRIPT and package not in LIFT_PACKAGES:
             problems.append(f"{package}: builds with {KERNEL_BUILD_SCRIPT}, which only the kernel's crates "
                             f"may (ledger line 3282, (K1))")
     for package in sorted(set(kernel) - set(packages)):
@@ -1918,7 +1929,7 @@ def loader_problems(manifest: dict, sources: dict[str, str]) -> list[str]:
     allowed = manifest.get("loader_callers", {})
     rules = (
         ("elf_parse", re.compile(r"\bElf::parse\b|\bferrix_elf::Elf\b"), "parses an ELF"),
-        ("first_image_load", re.compile(r"\bfirst_image::load\b"), "calls the kernel's one loader"),
+        ("first_image_load", re.compile(r"\bfirst_image::load(?:_at)?\b"), "calls the kernel's one loader"),
     )
     problems = []
     for key, pattern, what in rules:
@@ -2574,7 +2585,7 @@ PROFILE_DIR = ROOT / "tools" / "common" / "data" / "profiles"
 ARCH_TRIPLES = {"x86_64": "x86_64-unknown-none", "aarch64": "aarch64-unknown-none-softfloat",
                 "armv7a": "armv7a-none-eabi"}
 BUILD_RS_ARCH = {"x86_64": "x86_64", "aarch64": "aarch64", "armv7a": "arm"}
-BUILT = ("yes", "stand-in", "no")
+BUILT = ("yes", "stand-in", "adhoc", "no")
 
 
 def covers(levels: dict, standards: dict, a: str, b: str) -> bool:
@@ -2685,7 +2696,7 @@ def profile_problems(name: str, profile: dict, flags: dict) -> tuple[list[str], 
         if not allowed:
             problems.append(f"{flag}={value} does not allow level {level} (it allows "
                             f"{', '.join(spec.get('allows', []))}): refused (rule 3)")
-        if spec.get("built") == "no" or (spec.get("built") == "stand-in" and level != "none"):
+        if spec.get("built") in ("no", "adhoc") or (spec.get("built") == "stand-in" and level != "none"):
             waiting.append(f"{flag}={value} lands at {spec.get('lands')}")
     for flag, value in exceptions:
         spec = declared.get(flag, {}).get("values", {}).get(value, {})

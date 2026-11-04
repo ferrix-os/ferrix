@@ -47,6 +47,7 @@ pub mod error;
 pub mod exception;
 pub mod handle;
 pub mod job;
+pub mod lift_calls;
 pub mod pending;
 pub mod pin;
 pub mod port;

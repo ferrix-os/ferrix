@@ -820,6 +820,23 @@ impl<E: Encoding> Mapper<E> {
         len: u64,
         mut released: impl FnMut(Released),
     ) -> Result<u64, MapError> {
+        self.unmap_range_named(memory, virt, len, |_, what| released(what))
+    }
+
+    /// [`Mapper::unmap_range`], telling `released` the address of each leaf with what it
+    /// released, and of the leaf a table went with: for a caller that flushes only what
+    /// came down.
+    ///
+    /// # Errors
+    ///
+    /// As [`Mapper::unmap_range`]'s.
+    pub fn unmap_range_named(
+        &self,
+        memory: &mut impl PhysMem,
+        virt: VirtAddr,
+        len: u64,
+        mut released: impl FnMut(VirtAddr, Released),
+    ) -> Result<u64, MapError> {
         if !virt.is_aligned_to(PAGE_SIZE) || !len.is_multiple_of(PAGE_SIZE) {
             return Err(MapError::Misaligned);
         }
@@ -849,11 +866,14 @@ impl<E: Encoding> Mapper<E> {
                         return Err(MapError::BlockInTheWay(at));
                     }
                     memory.write(slot, E::ABSENT);
-                    released(Released::Page {
-                        phys: E::address(entry),
-                        level,
-                    });
-                    self.prune(memory, &path, &mut released);
+                    released(
+                        at,
+                        Released::Page {
+                            phys: E::address(entry),
+                            level,
+                        },
+                    );
+                    self.prune(memory, &path, &mut |what| released(at, what));
                     removed += 1;
                     done += span;
                 }

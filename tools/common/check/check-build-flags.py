@@ -135,6 +135,10 @@ def flag_cfg_problems(rust_files: list[tuple[str, str]], flags: set[str]) -> lis
         if rel.startswith(KERNEL):
             continue
         for line, name in cfg_names(source):
+            if rel.startswith("src/user/system/native/linuxd/") and name == "ferrix_runtime_settings":
+                # linuxd is the second composition root of one source, its crates
+                # the kernel's built again (docs/microkernel/M5-LIFT.md §1).
+                continue
             if rel.startswith("src/lib/"):
                 problems.append(f"{rel}:{line}: a library names the cfg `{name}`; flags are read in the kernel's crates alone")
             elif name in declared or name.startswith("ferrix_mitigations"):
@@ -365,7 +369,8 @@ def flag_word_problems(source: str, flag_file: dict, profiles: list[str]) -> lis
 # Rule 6e (docs/KERNEL-CRATES.md section 6; ledger 3558 (11), 3623 (R3)): a
 # removable crate's flag selects code in the composition root alone. Besides
 # main.rs, only the flag lists that name every declared value by rule 6 may
-# name it: build_flags.rs's table and kernel_core.rs's flag word.
+# name it: build_flags.rs's table and kernel_core.rs's flag word, as
+# lift_core.rs's is under linuxd (docs/microkernel/M5-LIFT.md §1).
 MANIFEST = ROOT / "tools" / "common" / "data" / "certification-item.json"
 COMPOSITION_ROOT = "src/kernel/src/main.rs"
 
@@ -380,7 +385,7 @@ def removable_flags() -> set[str]:
 def composition_root_problems(rust_files: list[tuple[str, str]], flags: set[str]) -> list[str]:
     """Rule 6e over (path, source) pairs."""
     names = {f"ferrix_{flag}" for flag in flags}
-    allowed = {COMPOSITION_ROOT, KERNEL_TABLE, KERNEL_WORD}
+    allowed = {COMPOSITION_ROOT, KERNEL_TABLE, KERNEL_WORD, "src/kernel/src/lift_core.rs"}
     problems = []
     for rel, source in rust_files:
         if not rel.startswith(KERNEL) or rel in allowed:

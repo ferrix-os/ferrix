@@ -3756,6 +3756,44 @@ package FerrixObjectRequirements {
                 "syscall::native::space_protection",
                 "user::space::AddressSpace::allocate_by_handle");
         }
+        requirement <'L.object.310'> aLiftCallAnswersItsHandleAlone : ItemLowLevel {
+            attribute :>> statement = "Each of linuxd's calls (M5-LIFT.md §2) shall refuse a handle that
+                is absent, of the wrong kind or short of the call's right, and
+                shall answer ENOSYS in a kernel other than personality=user.";
+            attribute :>> criterion = "test-linuxd's `lift-calls 19 refusals held`. Controls: mkl-c-holds,
+                mkl-c-r5.";
+            attribute :>> parent = ("H.OBJ.30");
+            attribute :>> unit = ("syscall::native::lift::call");
+        }
+        requirement <'L.object.311'> aWindowIsItsOwnMapping : ItemLowLevel {
+            attribute :>> statement = "A space opened as a window shall take no mapping by the calls that
+                name a region, and every byte placed in it shall lie in the window.";
+            attribute :>> criterion = "lift-calls' window refusals; SPACE_MAP, SPACE_WRITE and SPACE_CLONE
+                refuse it. Control: mkl-c-wmap.";
+            attribute :>> parent = ("H.OBJ.30");
+            attribute :>> unit = ("user::space::AddressSpace::open_window",
+                "user::space::AddressSpace::with_placed");
+        }
+        requirement <'L.object.312'> placedFramesAreTheHandlesOwn : ItemLowLevel {
+            attribute :>> statement = "SPACE_PLACE shall place only pages of the VMO the handle names,
+                never writable and executable at once, execute only through a handle
+                that carries EXECUTE, and shall mark the VMO's pages as held.";
+            attribute :>> criterion = "lift-calls' place refusals. Control: mkl-c-wx.";
+            attribute :>> parent = ("H.OBJ.30");
+            attribute :>> unit = ("user::space::AddressSpace::place",
+                "user::vmo::Vmo::mark_placed");
+        }
+        requirement <'L.object.313'> aCopyMissComesBackToItsServer : ItemLowLevel {
+            attribute :>> statement = "A kernel copy from a restricted program's memory that misses shall
+                come back to the region's server as a fault to fill, the copy rewound, and
+                its status shall not reach the program until the fill failed.";
+            attribute :>> criterion = "test-threads under personality=user: a copy into a page not yet
+                placed. Control: mkl-c-rewind.";
+            attribute :>> parent = ("H.OBJ.30");
+            attribute :>> unit = ("arch::x86_64::restricted::note_copy_miss",
+                "arch::x86_64::restricted::take_copy_miss",
+                "arch::x86_64::restricted::call_copy_exit");
+        }
         requirement <'L.object.309'> aSpaceHandleStopsARaise : ItemLowLevel {
             attribute :>> statement = "While a space handle names a process's space,
                 raises_refused shall say so, and execve shall give it no ids for any

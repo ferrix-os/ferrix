@@ -144,6 +144,7 @@ fn resolve<R>(
     let answer = space.route(at).with_page(user_address(at)?, access, touch);
     // A copy that missed: said, and the error goes up as ever. The dispatcher's end
     // decides (`docs/microkernel/K1.md` §2.2, ledger 6529 Q1).
+    #[cfg(not(ferrix_load_built = "lift"))]
     if answer.is_err() {
         arch::note_copy_miss(space, at, access.write);
     }
@@ -395,6 +396,7 @@ fn copy_to_user_through(
             Through::Faulting => resolve(space, at, Access::WRITE, write)?,
             Through::Present => {
                 if space
+                    .route(at)
                     .with_present_page(user_address(at)?, Access::WRITE, write)?
                     .is_none()
                 {

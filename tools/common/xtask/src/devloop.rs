@@ -520,7 +520,7 @@ fn expected(lint: bool, edit: bool) -> Vec<String> {
 fn judge(lines: &[String], lint: bool, edit: bool) -> std::result::Result<(), String> {
     let after_boot = lines
         .iter()
-        .position(|line| line.contains(qemu::SUCCESS_MARKER))
+        .position(|line| qemu::reached(line, qemu::SUCCESS_MARKER))
         .and_then(|at| lines.get(at..))
         .unwrap_or_default();
     let said: Vec<&str> = after_boot

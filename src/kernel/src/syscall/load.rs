@@ -159,7 +159,7 @@ const _: () = assert!(
 /// program on a 64-bit kernel (`docs/I386.md` §3.4).
 pub(crate) const fn user_end(abi: Abi) -> u64 {
     match abi {
-        Abi::Native => USER_VIRT_END,
+        Abi::Native => crate::user::space::PROGRAM_TOP,
         Abi::Compat => arch::COMPAT_USER_END,
     }
 }

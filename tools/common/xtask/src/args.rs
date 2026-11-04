@@ -749,6 +749,27 @@ impl Args {
                 }
                 self.sets.push(("mitigations".to_owned(), given));
             }
+            // M5's lift, as an ad-hoc build: the flags its shape needs
+            // (docs/microkernel/M5-LIFT.md §1). `kernel` is every default.
+            "--personality" => match given.as_str() {
+                "kernel" => {}
+                "user" => {
+                    for (flag, chosen) in [
+                        ("personality", "user"),
+                        ("fs", "lift"),
+                        ("partition_speculation", "partition"),
+                        ("restricted_fastpath", "off"),
+                        ("fault_ahead", "on"),
+                    ] {
+                        self.sets.push((flag.to_owned(), chosen.to_owned()));
+                    }
+                }
+                other => {
+                    return Err(Error::new(format!(
+                        "--personality takes `kernel` or `user`, not `{other}`"
+                    )));
+                }
+            },
             _ => {
                 let pair = crate::flags::assignment(&given)
                     .map_err(|_| Error::new(format!("--set wants flag=value, not `{given}`")))?;
@@ -949,7 +970,9 @@ impl Args {
             match item.as_str() {
                 "-h" | "--help" => args.help = true,
                 "--release" | "--strip-kernel" | "--iterate" => args.build(&item),
-                "--mitigations" | "--kernel-profile" | "--set" => args.flags(&item, &mut items)?,
+                "--mitigations" | "--kernel-profile" | "--set" | "--personality" => {
+                    args.flags(&item, &mut items)?;
+                }
                 "--no-claim" | "--fail-on-growth" => args.flag_switch(&item),
                 "--gdb" => args.gdb = true,
                 "--fast" => args.fast = true,

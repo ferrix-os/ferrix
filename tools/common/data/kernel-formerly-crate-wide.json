@@ -1567,10 +1567,6 @@
       "ledger": 6426
     },
     {
-      "item": "object/job.rs: Job::new_child (method)",
-      "before": "pub(crate)"
-    },
-    {
       "item": "object/job.rs: Job::new_child_domain (method)",
       "before": "pub(crate)"
     },

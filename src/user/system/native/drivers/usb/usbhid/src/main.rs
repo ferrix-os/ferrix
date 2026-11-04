@@ -530,6 +530,9 @@ where
         channels: [const { None }; MAX_FUNCTIONS],
         exports: export::Exports::new(),
         boot: boot.duplicate(Requested::Same).ok(),
+        opened: [Handle::INVALID; ferrix_native_abi::types::USB_INPUT_FUNCTIONS],
+        opened_count: 0,
+        opened_read: false,
     };
     let ended = driver.serve(boot, settle);
     let Driver { bus, .. } = driver;
@@ -563,6 +566,10 @@ struct Driver<H> {
     exports: export::Exports,
     /// The bootstrap channel, which every ATTACH goes down to devmgr.
     boot: Option<Channel<Kernel>>,
+    /// Input channels devmgr opened for this driver, where it cannot itself.
+    opened: [Handle; ferrix_native_abi::types::USB_INPUT_FUNCTIONS],
+    opened_count: usize,
+    opened_read: bool,
 }
 
 impl<H: Controller<Clock = Time>> Driver<H> {
@@ -818,13 +825,40 @@ impl<H: Controller<Clock = Time>> Driver<H> {
     /// Give `function` an input control channel and introduce it; a function
     /// the core will not take is left without one, and its reports go
     /// nowhere.
+    fn opened_control(&mut self) -> Option<Channel<Kernel>> {
+        if !self.opened_read {
+            self.opened_read = true;
+            let until = ferrix_rt::linux::monotonic_nanos()
+                .ok()?
+                .saturating_add(1_000_000_000);
+            let boot = self.boot.as_ref()?;
+            let _ = boot.wait_one(Signals::READABLE, Deadline::At(until));
+            let mut mark = [0_u8; ferrix_native_abi::types::INPUT_CHANNELS_MARK.len()];
+            let mut handles = [Handle::INVALID; ferrix_native_abi::types::USB_INPUT_FUNCTIONS];
+            let got = boot.read(&mut mark, &mut handles).ok()?;
+            if mark.as_slice() == ferrix_native_abi::types::INPUT_CHANNELS_MARK {
+                self.opened = handles;
+                self.opened_count = got.handles;
+            }
+        }
+        let at = self.opened_count.checked_sub(1)?;
+        self.opened_count = at;
+        let handle = *self.opened.get(at)?;
+        Some(Channel::from_owned(OwnedHandle::from_raw(Kernel, handle)))
+    }
+
     fn introduce(&mut self, function: usize) {
         let Some(hello) = self.bus.hello(function, self.location) else {
             return;
         };
         let kind = self.bus.kind(function).map_or("input", Kind::word);
         let name = core::str::from_utf8(hello.name.as_bytes()).unwrap_or("?");
-        let Ok(control) = self.device.input_control() else {
+        let Some(control) = self
+            .device
+            .input_control()
+            .ok()
+            .or_else(|| self.opened_control())
+        else {
             ferrix_rt::warn!("usbhid: no input channel for the {kind} {name}");
             return;
         };

@@ -458,7 +458,7 @@ pub fn start() -> Result<Option<Report>, &'static str> {
     let drivers = files.set.names.len();
     let (kernel_end, devmgr_end) =
         Endpoint::pair().map_err(|_| "no memory for devmgr's channel")?;
-    let devices = write_devices(&kernel_end, files.images()?, drivers_job()?)?;
+    let devices = write_devices(&kernel_end, files.images()?, drivers_job()?, None)?;
     let (process, at) = load(&files.set.image)?;
     start_program(&process, at, devmgr_end, &kernel_end)?;
 
@@ -472,6 +472,47 @@ pub fn start() -> Result<Option<Report>, &'static str> {
         started,
         failed,
     }))
+}
+
+/// What `linuxd` is handed of `devmgr` (`docs/microkernel/BOOT-AUTHORITY.md`).
+#[cfg(ferrix_personality = "user")]
+#[derive(Debug)]
+pub(crate) struct Detached {
+    /// What was the kernel's end: REPORT, PUBLISHED, BIND and the rest.
+    pub(crate) messages: Arc<Endpoint>,
+    /// The device cores' end.
+    pub(crate) cores: Arc<Endpoint>,
+}
+
+/// Start `devmgr` for a kernel with no load in it: DEVICES written, its task
+/// running, and the two channels above given to whoever serves the cores. The
+/// kernel waits for no REPORT and hears nothing further: the message and the
+/// core a driver's start waits on are `linuxd`'s now. `Ok(None)` when the image
+/// has no `/sbin/devmgr`.
+///
+/// # Errors
+///
+/// What did not happen, as a sentence.
+#[cfg(ferrix_personality = "user")]
+#[allow(
+    dead_code,
+    reason = "the boot authority's to call, in the commit on this one"
+)]
+pub(crate) fn start_detached() -> Result<Option<Detached>, &'static str> {
+    let Some(files) = read_files()? else {
+        return Ok(None);
+    };
+    let (messages, devmgr_end) = Endpoint::pair().map_err(|_| "no memory for devmgr's channel")?;
+    let (cores, devmgr_cores) = Endpoint::pair().map_err(|_| "no memory for the cores' channel")?;
+    let _ = write_devices(
+        &messages,
+        files.images()?,
+        drivers_job()?,
+        Some(devmgr_cores),
+    )?;
+    let (process, at) = load(&files.set.image)?;
+    start_program(&process, at, devmgr_end, &messages)?;
+    Ok(Some(Detached { messages, cores }))
 }
 
 /// What `devmgr` is started with: its own program, and every driver the
@@ -645,6 +686,7 @@ fn write_devices(
     kernel_end: &Endpoint,
     images: Vec<Arc<Vmo>>,
     job: Arc<Job>,
+    mut cores: Option<Arc<Endpoint>>,
 ) -> Result<usize, &'static str> {
     let names = {
         let bindings = BINDINGS.lock();
@@ -659,7 +701,13 @@ fn write_devices(
     let mut index = 0;
     let mut first = true;
     while first || index < nodes.len() {
-        let extra = if first { 1 + names.len() } else { 0 };
+        // The job and the images; under `personality=user` the debug log and
+        // the cores' channel too.
+        let extra = if first {
+            1 + names.len() + 2 * usize::from(cfg!(ferrix_personality = "user"))
+        } else {
+            0
+        };
         let room = CHANNEL_MAX_HANDLES.saturating_sub(extra) / 2;
         let take = room.min(nodes.len() - index);
         let message = Devices {
@@ -669,6 +717,8 @@ fn write_devices(
             names: if first { &names } else { &[] },
             unisolated_allowed: unisolated_allowed(),
             explicit_bind: device::EXPLICIT_BIND,
+            debug_log: cfg!(ferrix_personality = "user"),
+            cores: cores.is_some() && first,
         };
         let mut bytes = [0_u8; DEVICES_MAX_BYTES];
         let len = message
@@ -693,6 +743,20 @@ fn write_devices(
             for vmo in images {
                 let _ = fallible::push_within(&mut transfers, (Object::Vmo(vmo), image_rights()));
             }
+        }
+        #[cfg(ferrix_personality = "user")]
+        if first {
+            let _ = fallible::push_within(
+                &mut transfers,
+                (
+                    Object::DebugLog,
+                    Rights(Rights::WRITE.0 | Rights::DUPLICATE.0 | Rights::TRANSFER.0),
+                ),
+            );
+        }
+        if let Some(cores) = cores.take() {
+            let _ =
+                fallible::push_within(&mut transfers, (Object::Channel(cores), Rights::CHANNEL));
         }
         let handles = transfers.len();
         let body = fallible::try_to_vec(bytes.get(..len).unwrap_or(&[]))
@@ -976,8 +1040,8 @@ fn start_in(job: Arc<Job>) -> Result<Started, Errno> {
     let drivers = files.set.names.len();
     let (kernel_end, devmgr_end) = Endpoint::pair().map_err(|_| status::NO_MEMORY)?;
     let images = files.images().map_err(|_| status::NO_MEMORY)?;
-    let devices =
-        write_devices(&kernel_end, images, Arc::clone(&job)).map_err(|_| status::NO_MEMORY)?;
+    let devices = write_devices(&kernel_end, images, Arc::clone(&job), None)
+        .map_err(|_| status::NO_MEMORY)?;
     let (process, at) = load(&files.set.image).map_err(|_| status::BAD_STATE)?;
     let kill = |process: &Arc<dyn Host>| process.kill(job::KILLED_STATUS);
     if process.core().move_new_to(&job).is_err() {
@@ -1235,13 +1299,18 @@ fn name_bytes(name: &[u8; NAME_BYTES]) -> &[u8] {
 }
 
 /// `bytes` in a VMO of its own: anonymous memory the kernel filled.
-fn vmo_of(bytes: &[u8]) -> Result<Arc<Vmo>, &'static str> {
+pub(crate) fn vmo_of(bytes: &[u8]) -> Result<Arc<Vmo>, &'static str> {
     let pages = pages_of(bytes);
     let vmo = Vmo::new_anonymous(pages).map_err(|_| "no memory for a driver's image")?;
     for (index, chunk) in bytes.chunks(PAGE_SIZE as usize).enumerate() {
         vmo.write_page(index as u64, 0, chunk)
             .map_err(|_| "a driver's image did not fit its VMO")?;
     }
+    // Sealed by the kernel, its handles having no WRITE to seal with (K14.12).
+    #[cfg(ferrix_personality = "user")]
+    let _ = vmo
+        .seal()
+        .map_err(|_| "a driver's image could not be sealed")?;
     Ok(vmo)
 }
 

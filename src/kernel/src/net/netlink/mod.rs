@@ -43,6 +43,7 @@
 //! the stack's tables and writing bytes, which is the rule
 //! [`crate::net::NetCore::with`] states.
 
+#[cfg(not(ferrix_load_built = "lift"))]
 pub mod check;
 pub(crate) mod link;
 mod route;

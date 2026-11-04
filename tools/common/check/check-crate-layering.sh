@@ -184,11 +184,13 @@ forbid ferrix-blkserve "block driver serve loop" "$K|ferrix-boot"
 # `src/kernel/src/arch/mod.rs` is the facade and is where the architecture names
 # are supposed to appear -- the three architectures', and the drivers the Arm
 # pair share; everything else under src/kernel/src must go through it.
+# linuxd's shim of the core (`src/kernel/src/lift/core`) is that facade's other end,
+# built for one architecture until AArch64's half (docs/microkernel/M5-LIFT.md §3).
 # ---------------------------------------------------------------------------
 if [[ -d src/kernel/src ]]; then
     offenders=$(grep -rnE '(crate::)?arch::(x86_64|aarch64|armv7a|arm_common)::' src/kernel/src \
         --include='*.rs' \
-        | grep -v '^src/kernel/src/arch/' || true)
+        | grep -vE '^src/kernel/src/(arch/|lift/core/|lift_core\.rs)' || true)
     if [[ -n "$offenders" ]]; then
         echo "LAYERING VIOLATION: generic kernel code names an architecture module directly:" >&2
         echo "$offenders" | sed 's/^/    /' >&2
@@ -213,7 +215,7 @@ fi
 # ---------------------------------------------------------------------------
 offenders=$(grep -rnE 'cfg[^)]*target_arch' src/kernel/src src/boot/common/uefi/src src/lib src/user/system/native 2>/dev/null \
     --include='*.rs' \
-    | grep -vE '^(src/kernel/src/arch/|src/boot/common/uefi/src/arch/|src/lib/proto/native-abi/src/arch/|src/user/system/native/(drivers/[^/]+/)?[^/]+/src/arch/)' || true)
+    | grep -vE '^(src/kernel/src/arch/|src/boot/common/uefi/src/arch/|src/lib/proto/native-abi/src/arch/|src/user/system/native/(drivers/[^/]+/)?[^/]+/src/arch/|src/kernel/src/lift/core/)' || true)
 if [[ -n "$offenders" ]]; then
     echo "LAYERING VIOLATION: target_arch conditional outside an arch directory:" >&2
     echo "$offenders" | sed 's/^/    /' >&2

@@ -1,0 +1,9 @@
+pub mod devmgr;
+pub mod firmware;
+pub mod pci;
+pub mod powerctl;
+pub mod smbios;
+pub use ferrix_kernel_core::discovery::board;
+pub use ferrix_kernel_core::discovery::fdt;
+pub use ferrix_kernel_core::discovery::finder;
+pub use ferrix_kernel_core::discovery::tree;

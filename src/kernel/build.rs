@@ -74,6 +74,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             println!("cargo::rerun-if-changed=../build.rs");
             return Ok(());
         }
+        // The load's root built for linuxd, and the shim under it
+        // (docs/microkernel/M5-LIFT.md §1).
+        "ferrix-lift-core" | "ferrix-lift-item" | "ferrix-lift-load" | "ferrix-lift-settings" => {
+            let _ = build_flags()?;
+            println!("cargo::rerun-if-changed=../../build.rs");
+            return Ok(());
+        }
         other => {
             return Err(format!(
                 "src/kernel/build.rs is the kernel's crates' build script, not {other}'s"
@@ -165,6 +172,14 @@ fn relocatable_link(flags: &[(String, String)]) -> Result<&'static [&'static str
 /// the variables the build is refused: a kernel without its flags would
 /// compute no `build` line, and is no configuration anybody declared.
 fn build_flags() -> Result<Vec<(String, String)>, Box<dyn Error>> {
+    // A row's image alone, and linuxd's crates alone (ledger 6268, L9).
+    println!("cargo::rustc-check-cfg=cfg(ferrix_row_driver_kill)");
+    println!("cargo::rerun-if-env-changed=FERRIX_ROW_DRIVER_KILL");
+    if std::env::var_os("FERRIX_ROW_DRIVER_KILL").is_some()
+        && std::env::var("CARGO_PKG_NAME").is_ok_and(|name| name.starts_with("ferrix-lift-"))
+    {
+        println!("cargo::rustc-cfg=ferrix_row_driver_kill");
+    }
     println!("cargo::rerun-if-env-changed=FERRIX_BUILD_FLAGS");
     println!("cargo::rerun-if-env-changed=FERRIX_FLAG_VALUES");
     let (Ok(chosen), Ok(declared)) = (
@@ -210,6 +225,14 @@ fn build_flags() -> Result<Vec<(String, String)>, Box<dyn Error>> {
                 format!("FERRIX_BUILD_FLAGS: `{word}` is undeclared or given twice").into(),
             );
         }
+        // linuxd carries no boot checks of the kernel's: the load's own checks
+        // drive a ring-0 harness (docs/microkernel/M5-LIFT.md §1).
+        let lifted = std::env::var("CARGO_PKG_NAME")?.starts_with("ferrix-lift-");
+        let value = if lifted && name == "checks" {
+            "off"
+        } else {
+            value
+        };
         println!("cargo::rustc-cfg=ferrix_{name}=\"{value}\"");
         flags.push((name.to_owned(), value.to_owned()));
         // The one predicate for the fast path's code (BF6, ledger 1001 (1)): the
@@ -228,7 +251,44 @@ fn build_flags() -> Result<Vec<(String, String)>, Box<dyn Error>> {
     {
         return Err(format!("FERRIX_BUILD_FLAGS gives no value for `{missing}`").into());
     }
+    let personality = flags
+        .iter()
+        .find(|(name, _)| name == "personality")
+        .map_or("", |(_, value)| value.as_str());
+    load_built(personality)?;
     Ok(flags)
+}
+
+/// Where this crate finds the load, derived here alone: never a flag, never
+/// reachable by `--set` (docs/microkernel/M5-LIFT.md §1): `ring0` in a kernel
+/// that holds it, `none` in one that does not, `lift` in the crates built for
+/// linuxd, whichever the package says.
+fn load_built(personality: &str) -> Result<(), Box<dyn Error>> {
+    println!(
+        "cargo::rustc-check-cfg=cfg(ferrix_load_built, values(\"ring0\", \"none\", \"lift\"))"
+    );
+    let package = std::env::var("CARGO_PKG_NAME")?;
+    let built = if package.starts_with("ferrix-lift-") {
+        "lift"
+    } else {
+        match personality {
+            "kernel" => "ring0",
+            "user" | "none" => "none",
+            other => return Err(format!("personality={other}: no place for the load").into()),
+        }
+    };
+    println!("cargo::rustc-cfg=ferrix_load_built=\"{built}\"");
+    // The shape of what this crate is built into: `micro` for the ring-0 crates
+    // of a `personality=user` kernel (`docs/microkernel/M6.md`), `hybrid` for every
+    // other, the crates built for linuxd among them.
+    println!("cargo::rustc-check-cfg=cfg(ferrix_shape, values(\"micro\", \"hybrid\"))");
+    let shape = if personality == "user" && built != "lift" {
+        "micro"
+    } else {
+        "hybrid"
+    };
+    println!("cargo::rustc-cfg=ferrix_shape=\"{shape}\"");
+    Ok(())
 }
 
 /// A flag's or value's name: lower case, digits and `_`, which is all a `cfg`

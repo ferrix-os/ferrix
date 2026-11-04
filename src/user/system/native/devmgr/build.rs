@@ -14,5 +14,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo::rustc-link-arg-bins=-T{script}");
     println!("cargo::rerun-if-changed={script}");
     println!("cargo::rerun-if-env-changed=DEP_FERRIX_RT_LINKER_SCRIPT");
+    // A row's image alone (ledger 6268, L9).
+    println!("cargo::rustc-check-cfg=cfg(ferrix_row_driver_kill)");
+    println!("cargo::rerun-if-env-changed=FERRIX_ROW_DRIVER_KILL");
+    if std::env::var_os("FERRIX_ROW_DRIVER_KILL").is_some() {
+        println!("cargo::rustc-cfg=ferrix_row_driver_kill");
+    }
     Ok(())
 }

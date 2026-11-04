@@ -20,7 +20,7 @@
 mod arch;
 
 use core::fmt;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use core::time::Duration;
 use ferrix_rt::log::Level;
 
@@ -30,11 +30,12 @@ use ferrix_devmgr_proto::admission::{self, Admit, Admitted};
 use ferrix_devmgr_proto::choice::{self, Chooser, Wanted};
 use ferrix_devmgr_proto::gpu::{self, HandOver, SetRefused, Unanswered};
 use ferrix_devmgr_proto::{
-    ANSWER_BUSY, ANSWER_DONE, ANSWER_FAILED, ANSWER_NO_DEVICE, BUS_PCI, BUS_PLATFORM,
-    DEVICES_MAX_BYTES, DevicesView, Message, NAME_BYTES, SHORT_BYTES,
+    ANSWER_BUSY, ANSWER_DONE, ANSWER_FAILED, ANSWER_NO_DEVICE, BUS_PCI, BUS_PLATFORM, CORE_BYTES,
+    CoreOpen, CoreOpened, DEVICES_MAX_BYTES, DevicesView, Message, NAME_BYTES, SHORT_BYTES,
 };
 use ferrix_drvupdate_proto::{self as update, Answer, Fingerprint, Outcome, REQUEST_BYTES};
 use ferrix_native_abi::handle::Handle;
+use ferrix_native_abi::nr;
 use ferrix_native_abi::rights::{Requested, Rights};
 use ferrix_native_abi::signals::Signals;
 use ferrix_native_abi::types::{
@@ -1237,6 +1238,17 @@ fn receive(channel: &Channel<Kernel>) -> Result<Given, Step> {
         if view.first {
             given.unisolated_allowed = view.unisolated_allowed;
             EXPLICIT_BIND.store(view.explicit_bind, Ordering::Relaxed);
+            if view.debug_log {
+                // After the images: lines go to the kernel's debug log, this
+                // kernel having no `/dev/kmsg` of its own.
+                let at = base + 2 * devices + drivers;
+                ferrix_rt::log::use_debug_log(handles.get(at).copied().unwrap_or(Handle::INVALID));
+            }
+            if view.cores {
+                let at = base + 2 * devices + drivers + usize::from(view.debug_log);
+                let core = handles.get(at).copied().unwrap_or(Handle::INVALID);
+                CORES.store(core.0, Ordering::Relaxed);
+            }
             given.job = Some(Job::from_owned(owned(0)));
             given.drivers = drivers;
             for j in 0..drivers {
@@ -1296,7 +1308,10 @@ fn await_published(
         let mut short = [0_u8; SHORT_BYTES];
         match channel.read(&mut short, &mut []) {
             Ok(got) => match Message::decode(short.get(..got.bytes).unwrap_or(&[])) {
-                Ok(Message::Published { location: at }) if at == location => break true,
+                Ok(Message::Published { location: at }) if at == location => {
+                    tell_served(location);
+                    break true;
+                }
                 Ok(Message::Published { .. }) => continue,
                 Ok(request @ (Message::Bind { .. } | Message::Unbind { .. })) => {
                     inbox.keep(channel, request);
@@ -1777,6 +1792,12 @@ fn answer(
         done(channel, token, ANSWER_NO_DEVICE);
         return;
     };
+    #[cfg(ferrix_row_driver_kill)]
+    if driver == ferrix_devmgr_proto::KILL_DRIVER {
+        let _ = entry.job.kill();
+        done(channel, token, ANSWER_DONE);
+        return;
+    }
     if entry.driver != driver {
         done(channel, token, ANSWER_NO_DEVICE);
         return;
@@ -2366,7 +2387,7 @@ fn start(
         Plan::Input => start_input(job, device, image, info, port, key),
         Plan::Sound => start_sound(job, device, image, info, port, key),
         Plan::Port => start_plain(job, device, image, info, port, key, "vport"),
-        Plan::Host => start_plain(job, device, image, info, port, key, "usbhid"),
+        Plan::Host => start_host(job, device, image, info, port, key),
         Plan::Engine(program) => start_plain(job, device, image, info, port, key, program),
         Plan::Gadget => start_plain(job, device, image, info, port, key, "usbdev"),
         Plan::Gpu(program) => start_plain(job, device, image, info, port, key, program),
@@ -2379,6 +2400,98 @@ fn start(
 /// (`docs/microkernel/K8.md` §2): false on a hybrid kernel, where nothing here
 /// runs.
 static EXPLICIT_BIND: AtomicBool = AtomicBool::new(false);
+
+/// How long a server has to answer a driver's CORE_OPEN.
+const CORE_PATIENCE_NANOS: u64 = 30_000_000_000;
+
+/// Each admitted device's kept handle, by location, for the kernel's half of an
+/// accepted HELLO under a kernel with no core in it.
+static KEPT_HANDLES: [(AtomicU32, AtomicU32); MAX_DEVICES] =
+    [const { (AtomicU32::new(0), AtomicU32::new(0)) }; MAX_DEVICES];
+
+/// Note `keep`'s handle for [`tell_served`].
+fn note_kept(keep: &Device<Kernel>, location: u32) {
+    if CORES.load(Ordering::Relaxed) == 0 {
+        return;
+    }
+    let free = KEPT_HANDLES.iter().find(|(at, handle)| {
+        handle.load(Ordering::Relaxed) == 0 || at.load(Ordering::Relaxed) == location
+    });
+    if let Some((at, handle)) = free {
+        at.store(location, Ordering::Relaxed);
+        handle.store(keep.handle().0, Ordering::Relaxed);
+    }
+}
+
+/// A server accepted the driver at `location`: what a dead driver's pins kept goes
+/// back, and the kernel reads its configuration back (`device_served`, BD.1).
+fn tell_served(location: u32) {
+    if CORES.load(Ordering::Relaxed) == 0 {
+        return;
+    }
+    let found = KEPT_HANDLES.iter().find(|(at, handle)| {
+        at.load(Ordering::Relaxed) == location && handle.load(Ordering::Relaxed) != 0
+    });
+    if let Some((_, handle)) = found {
+        let device = core::mem::ManuallyDrop::new(Device::from_owned(OwnedHandle::from_raw(
+            Kernel,
+            Handle(handle.load(Ordering::Relaxed)),
+        )));
+        if device.served().is_err() {
+            say(
+                Level::Warning,
+                format_args!("devmgr   {location:#010x}: device_served refused"),
+            );
+        }
+    }
+}
+
+/// The cores' channel when this kernel has no device core in it, else 0.
+static CORES: AtomicU32 = AtomicU32::new(0);
+
+/// A driver's control channel for `device`: from the kernel, or, in a kernel
+/// that has retired `call`, from the core that serves it in `linuxd`
+/// (`docs/MICROKERNEL.md` §3, *Retired calls*). The core is told where the device
+/// is and nothing else: it holds no handle to it, so it can drive nothing.
+fn core_control(
+    device: &Device<Kernel>,
+    call: usize,
+    location: u32,
+    kernel: impl FnOnce(&Device<Kernel>) -> Result<Channel<Kernel>, Error>,
+) -> Result<Channel<Kernel>, ()> {
+    let core = CORES.load(Ordering::Relaxed);
+    if core == 0 {
+        return kernel(device).map_err(|_| ());
+    }
+    // Kept for the next driver: this name for it is never closed.
+    let channel = core::mem::ManuallyDrop::new(Channel::from_owned(OwnedHandle::from_raw(
+        Kernel,
+        Handle(core),
+    )));
+    let open = CoreOpen {
+        call: u32::try_from(call).map_err(|_| ())?,
+        location,
+    };
+    channel.write(&open.encode()).map_err(|_| ())?;
+    // A bound, so that a hung server costs this driver's start and no other's
+    // (ledger 6027, CO.3): the driver is then not started, on its line.
+    let deadline = ferrix_rt::linux::monotonic_nanos().map_or(Deadline::Never, |now| {
+        Deadline::At(now.saturating_add(CORE_PATIENCE_NANOS))
+    });
+    let _ = channel
+        .wait_one(Signals::READABLE | Signals::PEER_CLOSED, deadline)
+        .map_err(|_| ())?;
+    let mut bytes = [0_u8; CORE_BYTES];
+    let mut handles = [Handle::INVALID; 1];
+    let got = channel.read(&mut bytes, &mut handles).map_err(|_| ())?;
+    let opened = CoreOpened::decode(bytes.get(..got.bytes).unwrap_or(&[])).ok_or(())?;
+    if opened.status != 0 {
+        return Err(());
+    }
+    Ok(Channel::from_owned(OwnedHandle::from_raw(
+        Kernel, handles[0],
+    )))
+}
 
 /// Attach `keep`'s function to its domain, under a kernel that asks for it,
 /// before anything asks how the device is isolated. Bound already is what a
@@ -2418,6 +2531,7 @@ fn admit(
     if !bind_first(keep, info, what) {
         return None;
     }
+    note_kept(keep, info.location);
     let bits = keep.isolation().ok();
     let decided = admission::admit(bits, arch::AARCH64, unisolated_allowed, info.location);
     if let Some(line) = decided.line(what, info.location) {
@@ -2737,7 +2851,12 @@ fn start_block(
     port: &Port<Kernel>,
     key: u64,
 ) -> Result<Launched, ()> {
-    let control = device.block_ring().map_err(|_| ())?;
+    let control = core_control(
+        &device,
+        nr::BLOCK_RING_CREATE,
+        info.location,
+        Device::block_ring,
+    )?;
     let block = |block: ferrix_native_abi::types::DeviceBlock| Block {
         phys: block.phys,
         offset: block.offset,
@@ -2798,7 +2917,12 @@ fn start_net(
     port: &Port<Kernel>,
     key: u64,
 ) -> Result<Launched, ()> {
-    let control = device.net_ring().map_err(|_| ())?;
+    let control = core_control(
+        &device,
+        nr::NET_RING_CREATE,
+        info.location,
+        Device::net_ring,
+    )?;
     let start = NetStart {
         index: 0,
         location: info.location,
@@ -2853,7 +2977,12 @@ fn start_display(
         } else {
             ("gpu", &[b'g', b'p', b'u', 0, 0, 0, 0, 0])
         };
-    let control = device.display_control().map_err(|_| ())?;
+    let control = core_control(
+        &device,
+        nr::DISPLAY_CONTROL_CREATE,
+        info.location,
+        Device::display_control,
+    )?;
     let block = |block: ferrix_native_abi::types::DeviceBlock| Block {
         phys: block.phys,
         offset: block.offset,
@@ -2905,7 +3034,12 @@ fn start_input(
     port: &Port<Kernel>,
     key: u64,
 ) -> Result<Launched, ()> {
-    let control = device.input_control().map_err(|_| ())?;
+    let control = core_control(
+        &device,
+        nr::INPUT_CONTROL_CREATE,
+        info.location,
+        Device::input_control,
+    )?;
     let block = |block: ferrix_native_abi::types::DeviceBlock| Block {
         phys: block.phys,
         offset: block.offset,
@@ -2954,7 +3088,12 @@ fn start_sound(
     port: &Port<Kernel>,
     key: u64,
 ) -> Result<Launched, ()> {
-    let control = device.sound_control().map_err(|_| ())?;
+    let control = core_control(
+        &device,
+        nr::SOUND_CONTROL_CREATE,
+        info.location,
+        Device::sound_control,
+    )?;
     let block = |block: ferrix_native_abi::types::DeviceBlock| Block {
         phys: block.phys,
         offset: block.offset,
@@ -3021,6 +3160,40 @@ fn start_plain(
         .map_err(|_| ())?;
     let encoded = Ring::Start(plain_start(info, program)).encode();
     launch(job, image, program, port, key, encoded.as_bytes(), [device])
+}
+
+/// A USB host: as [`start_plain`], and where the input core is linuxd's, a host's
+/// control channels are opened here, since it asks a kernel core that is not there
+/// (M5-LIFT.md §11). As many as a host may have, in one message after START.
+fn start_host(
+    job: &Job<Kernel>,
+    device: Device<Kernel>,
+    image: &Vmo<Kernel>,
+    info: &DeviceInfo,
+    port: &Port<Kernel>,
+    key: u64,
+) -> Result<Launched, ()> {
+    let mut opened: [Option<OwnedHandle<Kernel>>; ferrix_native_abi::types::USB_INPUT_FUNCTIONS] =
+        core::array::from_fn(|_| None);
+    if CORES.load(Ordering::Relaxed) != 0 {
+        for slot in &mut opened {
+            *slot = core_control(
+                &device,
+                nr::INPUT_CONTROL_CREATE,
+                info.location,
+                Device::input_control,
+            )
+            .ok()
+            .map(Channel::into_owned);
+        }
+    }
+    let launched = start_plain(job, device, image, info, port, key, "usbhid")?;
+    if opened.iter().any(Option::is_some) {
+        let _ = launched
+            .2
+            .write_slots(ferrix_native_abi::types::INPUT_CHANNELS_MARK, &mut opened);
+    }
+    Ok(launched)
 }
 
 /// START for a driver that gets its device alone, or a keeper's.
@@ -3100,6 +3273,15 @@ fn launch_in<const N: usize>(
 ) -> Result<Launched, ()> {
     let built = build(&child_job, image, program, ferrix_rt::ELF_MACHINE).map_err(|_| ())?;
     let (near, far) = channel::create(Kernel).map_err(|_| ())?;
+    // With no /dev/kmsg to open, a driver's lines go where devmgr's do: a message
+    // ahead of START, which a driver's start takes (`ferrix_driver::model`).
+    if let Some(log) = ferrix_rt::log::debug_log() {
+        let log = core::mem::ManuallyDrop::new(OwnedHandle::from_raw(Kernel, log));
+        if let Ok(copy) = log.duplicate(Requested::Exactly(Rights::WRITE | Rights::TRANSFER)) {
+            near.write_with(ferrix_rt::log::BOOTSTRAP_MARK, [copy])
+                .map_err(|_| ())?;
+        }
+    }
     near.write_with(start, handles).map_err(|_| ())?;
     built.process().notify_on_exit(port, key).map_err(|_| ())?;
     let process = built.run(far.into_owned()).map_err(|_| ())?;

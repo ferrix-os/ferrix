@@ -76,10 +76,14 @@ use crate::syscall::uaccess;
 
 use crate::signal_frame::{BadFrame, FrameRequest, StackRecord};
 
+#[cfg(not(ferrix_load_built = "lift"))]
 mod check;
+#[cfg(not(ferrix_load_built = "lift"))]
 mod hold_check;
 
+#[cfg(not(ferrix_load_built = "lift"))]
 pub(crate) use check::check_the_delivery_cap;
+#[cfg(not(ferrix_load_built = "lift"))]
 pub use hold_check::{Report as HoldReport, check_the_crash_hold};
 
 /// How many signals one round of the way back to user mode acts on before it

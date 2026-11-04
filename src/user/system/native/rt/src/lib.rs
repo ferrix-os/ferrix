@@ -119,6 +119,9 @@ pub fn start(bootstrap: usize, main: fn(Bootstrap) -> i32) -> ! {
     let bootstrap = handle
         .is_valid()
         .then(|| Channel::from_owned(OwnedHandle::from_raw(Kernel, handle)));
+    if let Some(channel) = &bootstrap {
+        log::take_from_bootstrap(channel);
+    }
     exit(main(bootstrap))
 }
 
@@ -163,8 +166,23 @@ fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
     let text = core::str::from_utf8(bytes).unwrap_or_else(|error| {
         core::str::from_utf8(bytes.get(..error.valid_up_to()).unwrap_or(&[])).unwrap_or("panic")
     });
-    log::line(log::Level::Crit, format_args!("{text}"));
+    let writer = PANIC_WRITER.load(core::sync::atomic::Ordering::Acquire);
+    if writer.is_null() {
+        log::line(log::Level::Crit, format_args!("{text}"));
+    } else {
+        // SAFETY: only `set_panic_writer` writes it, with a `fn(&str)`.
+        let writer: fn(&str) = unsafe { core::mem::transmute(writer) };
+        writer(text);
+    }
     exit(PANIC_STATUS)
+}
+
+static PANIC_WRITER: core::sync::atomic::AtomicPtr<()> =
+    core::sync::atomic::AtomicPtr::new(core::ptr::null_mut());
+
+/// Where a panic's line goes in a program that has no Linux `write` under it.
+pub fn set_panic_writer(writer: fn(&str)) {
+    PANIC_WRITER.store(writer as *mut (), core::sync::atomic::Ordering::Release);
 }
 
 /// The panic's line, cut at its buffer's end.

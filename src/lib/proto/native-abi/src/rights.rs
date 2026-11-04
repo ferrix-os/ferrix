@@ -176,8 +176,10 @@ impl Rights {
     /// `DUPLICATE`: there is one keeper, and its close is what it is.
     pub const KEEPER: Rights = Rights(Rights::TRANSFER.0 | Rights::MANAGE.0);
     /// What a handle to a thread carries (`docs/microkernel/K11.md` §2.2).
+    /// [`Rights::MANAGE`] is `THREAD_AFFINITY`'s (ledger 6268, A).
     pub const THREAD: Rights = Rights(
-        Rights::SIGNAL.0
+        Rights::MANAGE.0
+            | Rights::SIGNAL.0
             | Rights::WAIT.0
             | Rights::READ.0
             | Rights::DUPLICATE.0

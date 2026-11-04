@@ -1015,7 +1015,9 @@ fn test_arch(arch: Arch, args: &Args, checker: &Checker) -> Result<()> {
     failures.extend(judge_units(after).err());
     failures.extend(judge_flaky(after).err());
     failures.extend(judge_shutdown(after).err());
-    failures.extend(judge_audit_power(after).err());
+    if !lifted() {
+        failures.extend(judge_audit_power(after).err());
+    }
     if !failures.is_empty() {
         let mut message = format!("{arch}: init did not do what §15 requires:\n");
         for failure in &failures {
@@ -1816,6 +1818,13 @@ fn recorded(lines: &[String], event: &str, with: &str) -> bool {
 ///
 /// Verifies: H.AUD.10
 fn audit_read_back(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
+    if lifted() {
+        println!(
+            "  test-init: NOT RUN under personality=user: the audit record: linuxd holds no \
+             audit-read handle yet (M5-LIFT.md §6, R8)"
+        );
+        return Ok(());
+    }
     let lines = audit_lines(at)?;
     let id = lines
         .iter()
@@ -1951,6 +1960,12 @@ fn checks_skipped(
     kernel: &cargo::Kernel,
     archive: &[u8],
 ) -> Result<()> {
+    if lifted() {
+        println!(
+            "  test-init: NOT RUN under personality=user: the skipped checks' record: the audit record is not read yet (R8)"
+        );
+        return Ok(());
+    }
     let options = format!("{} ferrix.checks=skip\n", command_line_of(arch).trim_end());
     let image = fat::write_image_with(arch, loader, kernel, archive, Some(&options))?;
     let volume = btrfs_disk::blank_copy(arch, VOLUME)?;
@@ -2048,6 +2063,13 @@ fn directory(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
             "rogue.service's OPEN of a name it does not declare was not REFUSED: {other:?}"
         )),
     }
+    if lifted() {
+        println!(
+            "  test-init: NOT RUN under personality=user: a native service in cgroup.procs \
+             and its ids in /proc: linuxd did not make it (M5-LIFT.md §3a)"
+        );
+        return Ok(());
+    }
     let main = ask(at, "svc status pong.service\n", "Main PID: ")?
         .and_then(|line| line.trim().strip_prefix("Main PID: ").map(str::to_owned));
     let listed = ask(
@@ -2084,6 +2106,11 @@ fn directory(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Under `personality=user`, where some of what this row reads is not Linux's to show.
+fn lifted() -> bool {
+    crate::flags::this_run().is_ok_and(|flags| flags.value("personality") == Some("user"))
 }
 
 /// What each run of the sandboxing stage's script prints last.
@@ -2446,6 +2473,10 @@ fn judge_sandbox(said: &[String]) -> Vec<String> {
 /// Verifies: L.quiesce.4
 /// Verifies: L.user.174
 fn devmgr_by_init(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
+    if lifted() {
+        println!("  test-init: NOT RUN under personality=user: devmgr is the kernel's to start");
+        return Ok(());
+    }
     let all = everything(at);
     let place = |text: &str| all.iter().position(|line| line.contains(text));
     match (place(RELEASED), place("init     / is the root volume now")) {
@@ -3032,7 +3063,7 @@ fn has(lines: &[String], text: &str) -> bool {
 fn after_marker(lines: &[String]) -> &[String] {
     lines
         .iter()
-        .position(|line| line.contains(SUCCESS_MARKER))
+        .position(|line| crate::qemu::reached(line, SUCCESS_MARKER))
         .and_then(|at| lines.get(at..))
         .unwrap_or_default()
 }

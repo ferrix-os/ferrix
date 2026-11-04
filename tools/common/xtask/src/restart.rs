@@ -92,6 +92,24 @@ pub(crate) const TASKS: &[Task] = &[
 /// How long to wait for the answer to one line.
 const PATIENCE: Duration = Duration::from_secs(30);
 
+/// Under `personality=user`, where a driver has no `/proc` entry.
+static LIFTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static NEXT_LIFTED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(100);
+
+/// Before a row that kills drivers builds anything: under `personality=user` its
+/// image holds the row's kill, and it uses it (ledger 6268, L9).
+pub(crate) fn lifted_row() {
+    if lifted() {
+        LIFTED.store(true, std::sync::atomic::Ordering::Relaxed);
+        // SAFETY: set before this row starts any thread or build.
+        unsafe { std::env::set_var("FERRIX_ROW_DRIVER_KILL", "1") };
+    }
+}
+
+fn lifted() -> bool {
+    crate::flags::this_run().is_ok_and(|flags| flags.value("personality") == Some("user"))
+}
+
 /// What the pid search prints before each pid. Typed with a quote in the
 /// middle, so the echo of the typed line never matches it.
 const PID_TAG: &str = "restart-gate-pid=";
@@ -225,6 +243,7 @@ impl Kind {
 /// driver is not found, not restarted, or the shell stops answering.
 fn test_restart(args: &Args) -> Result<()> {
     let arch = Arch::X86_64;
+    lifted_row();
     if args.arches()?.iter().any(|&asked| asked != arch) {
         return Err(Error::new(
             "test-restart runs on x86-64 only: `kill` comes from uutils, which is built \
@@ -316,6 +335,7 @@ pub(crate) fn run(command: &str, args: &Args) -> Result<()> {
 }
 
 fn test_usb(args: &Args) -> Result<()> {
+    lifted_row();
     // x86-64 only, and not only for `kill`: under QEMU's AArch64 firmware
     // the controller's memory decoding is left off, and the kernel gives no
     // driver a BAR nothing says firmware placed (`docs/XHCI.md` §8).
@@ -864,6 +884,16 @@ fn tagged(lines: &[String], tag: &str) -> Vec<String> {
 /// failed `read` leaves `n` holding the previous process's name, so testing
 /// it would list a pid that was never a driver.
 fn find_line(comm: &str) -> Vec<u8> {
+    if LIFTED.load(std::sync::atomic::Ordering::Relaxed) {
+        // Drivers are no Linux processes here: a number per device its driver has,
+        // new each search, as a new pid would be.
+        let base = NEXT_LIFTED.fetch_add(100, std::sync::atomic::Ordering::Relaxed);
+        return format!(
+            "i={base}; for d in /sys/bus/pci/drivers/{comm}/0*; do i=$((i+1)); \
+             echo restart-gate-'pid='$i; done; echo restart-gate-'listed'\n"
+        )
+        .into_bytes();
+    }
     format!(
         "for p in /proc/[0-9]*; do read n < $p/comm || continue; \
          [ \"$n\" = {comm} ] && echo restart-gate-'pid='${{p#/proc/}}; done; \
@@ -909,6 +939,16 @@ fn the_drivers(comm: &str, found: &[u32], killed: &[u32]) -> std::result::Result
 /// the shell runs the line, and says which it did. Its tags have a quote in
 /// the middle, as [`find_line`]'s have.
 fn kill_line(comm: &str, pids: &[u32]) -> Vec<u8> {
+    if LIFTED.load(std::sync::atomic::Ordering::Relaxed) {
+        let first = pids.first().copied().unwrap_or(0);
+        return format!(
+            "ok=1; for d in /sys/bus/pci/drivers/{comm}/0*; do \
+             echo kill:${{d##*/}} > /sys/bus/pci/drivers/{comm}/unbind || ok=0; done; \
+             if [ $ok = 1 ]; then echo restart-gate-'killed='{first}; \
+             else echo restart-gate-'spared='{first}; fi\n"
+        )
+        .into_bytes();
+    }
     let list: Vec<String> = pids.iter().map(u32::to_string).collect();
     let list = list.join(" ");
     let first = pids.first().copied().unwrap_or(0);

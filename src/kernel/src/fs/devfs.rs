@@ -126,6 +126,7 @@
 //!   `lseek` but take `pread64` as a `read`, as Linux's do on this host:
 //!   what their open files answer, and why, is in `crate::interfaces::display::drm`.
 
+#[cfg(not(ferrix_load_built = "lift"))]
 pub(crate) mod check;
 
 use alloc::sync::Arc;

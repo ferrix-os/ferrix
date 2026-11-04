@@ -157,8 +157,7 @@ pub(crate) fn check_futex_stop(fail: fn(&str) -> !) {
             "threads: futex-stop answered {answer} errno {error} after {} ms",
             took.as_millis()
         );
-        let right =
-            answer == -1 && error == libc::ETIMEDOUT && took < Duration::from_millis(1400);
+        let right = answer == -1 && error == libc::ETIMEDOUT && took < Duration::from_millis(1400);
         std::process::exit(i32::from(!right));
     }
     let pid = u32::try_from(child).unwrap_or(0);
