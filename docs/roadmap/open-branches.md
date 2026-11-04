@@ -80,7 +80,7 @@ blocks. At 02:10 on 2026-11-04 the others hold work too (all local, unlanded):
 `feature/mk-restricted` (K1, K11, K17's and K9's designs), `feature/mk-lift`
 (`linuxd`), `feature/mk-authority` and `feature/mk-boot` (K8, K14, boot authority,
 `btrfsd`), and `feature/mk-land`, the series cut from `mk-base`. B5's orphan step
-is landed (b4a6b3ff9), and so are K17's and K9's reserved ids (7818d5b82). B5's class A re-homing landed too (bd64fc419; the orphan list is 70 ids). At 05:30 `mk-land` is the series to land K7, K12 and K3B from, and `mk-m2-land` carries K15, K13 and K3b on it.
+is landed (b4a6b3ff9), and so are K17's and K9's reserved ids (7818d5b82). K8 and K14 §2 to §4 landed too (28ae06a61 to 40ad1851b). At 10:15 `mk-land2` (K7, compare, K3B), `mk-restricted-land`, `mk-m2`, `mk-k8b-devel` and `mk-perf` are the next series, all unlanded; `mk-land` itself was reordered into `mk-land2`. B5's class A re-homing landed too (bd64fc419; the orphan list is 70 ids). At 05:30 `mk-land` is the series to land K7, K12 and K3B from, and `mk-m2-land` carries K15, K13 and K3b on it.
 
 **Parked** (`park/*`, 58 branches, none newer than 2026-10-24): the older
 sections below describe the families as far as they were described -- the
