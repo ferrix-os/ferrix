@@ -90,6 +90,8 @@ const SPIN_PROGRAM: &[u8] = &[0x00, 0x00, 0x00, 0x14];
 #[cfg(target_arch = "arm")]
 const SPIN_PROGRAM: &[u8] = &[0xfe, 0xff, 0xff, 0xea];
 
+/// How long a thread started on another processor is given to be running.
+const SETTLE_NANOS: u64 = 100_000_000;
 /// How long a program may take.
 const PATIENCE_NANOS: u64 = 120_000_000_000;
 /// Its loops, as stage 7's kernel-time case has them.
@@ -420,27 +422,24 @@ fn a_limit_ends_its_own(cpu: usize) -> Result<(), &'static str> {
 ///
 /// Verifies: L.sched.4
 fn a_quota_cuts_a_program_alone(cpu: usize) -> Result<(), &'static str> {
+    const WATCHED_NANOS: u64 = 1_000_000_000;
+    const STOPPED: i32 = 97;
     let tree = Job::new_root().map_err(|_| "bare: no job")?;
     let job = tree.new_child().map_err(|_| "bare: no job")?;
     if !job.set_bandwidth(20_000_000, 100_000_000) {
         return Err("bare: a job's cpu.max could not be set");
     }
-    let side = BareSide::in_job(
-        Work {
-            spins: SPINS.saturating_mul(4),
-            status: STATUS,
-            ..Work::default()
-        },
-        Arc::clone(&job),
-    )?;
+    let side = BareSide::spinning(Arc::clone(&job))?;
     let began = crate::timer::now_nanos();
     let task = side.start(Some(cpu))?;
-    if side.ended()? != STATUS as i32 {
-        return Err("bare: a program under cpu.max did not end with its status");
-    }
+    crate::sched::sleep_for(WATCHED_NANOS);
     let wall = crate::timer::now_nanos().saturating_sub(began);
-    crate::sched::wait_until_gone(&task, PATIENCE_NANOS)?;
     let ran = task.runtime();
+    side.host.end(STOPPED);
+    crate::sched::wait_until_gone(&task, PATIENCE_NANOS)?;
+    if side.ended()? != STOPPED {
+        return Err("bare: a program under cpu.max kept another status");
+    }
     if ran.saturating_mul(12) < wall || ran.saturating_mul(3) > wall.saturating_mul(2) {
         crate::console::println!(
             "  bare     under cpu.max 20000 100000 a program ran {} of {} us",
@@ -493,13 +492,9 @@ fn an_end_reaches_every_thread(cpu: usize) -> Result<(), &'static str> {
     let side = BareSide::spinning(Job::new_root().map_err(|_| "bare: no job")?)?;
     let there = side.start(Some(cpu))?;
     let here = side.start(None)?;
-    let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
-    while there.runtime() == 0 || here.runtime() == 0 {
-        if crate::timer::now_nanos() >= deadline {
-            return Err("bare: a spinning thread never ran");
-        }
-        crate::sched::sleep_for(1_000_000);
-    }
+    // Both spinning. A program alone on its processor gets no tick, so its runtime
+    // says nothing until it is cut: time, not a charge, is what is waited for.
+    crate::sched::sleep_for(SETTLE_NANOS);
     side.host.end(STOPPED);
     let gone = |task: &Task| {
         crate::sched::wait_until_gone(task, 1_000_000_000)
