@@ -1019,6 +1019,11 @@ no route on the stable toolchain. **The rule `max` uses instead:**
   kernel treats a missing bit as affected; `max`'s row is always measured
   with its real barrier, never a lighter one.
 
+*Measured since, by hand and not gated (2026-11-04, `microkernel/RESTRICTED-EXIT.md`): the IBPB
+itself is 150 ns, not 230, and every taken branch after it runs cold at about 3 ns. A straight
+`getppid` with two root writes reads 650 ns on boots with an idle core, and a general null call
+1,110 to 1,190. The pricing below is kept as written.*
+
 **Is 660 ns reachable on nazuna? Only just.** seL4's round trip without the
 refill is 400 to 410 ns (ERAPS clears the return predictor on the page-table
 switch); one IBPB costs about 230 ns under KVM; so this rule at seL4's level

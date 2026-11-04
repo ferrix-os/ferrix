@@ -250,6 +250,12 @@ weaker form is written down as such in the stage's section.
 
 ---
 
+## Restricted exit's speed (`microkernel/RESTRICTED-EXIT.md`)
+
+Owed: `max`'s two-root row through `gate.sh` first, with the consultant's conditions (ledger 6747-6755);
+then the window behind `restricted_window` (6787, W2 to W12); the ordinary path's next levers. Code:
+local `feature/mk-ibpb`, not on develop; it waits for K1's fast path.
+
 ## Owners
 
 Session names change on every restart, so this file no longer keeps a
