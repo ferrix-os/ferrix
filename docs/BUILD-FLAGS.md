@@ -150,8 +150,8 @@ explicitly (§4: levels compare standard by standard, so `sc4` covers
   always-on list, since the kernel's entry defences protect the whole machine
   from the game. Turning everything off is `mitigations=off`, a build, never
   a run-time trade.
-* **Moving Zenbleed's and GDS's fixes out of the `mitigations` flag** (DF6)
-  is a core code change (`speculation::vector_leak` and the
+* **Moving Zenbleed's and GDS's fixes out of the `mitigations` flag** (DF6, built
+  2026-11-04, `L.x86_64.123` holds in every build) was a core code change (`speculation::vector_leak` and the
   `mitigations=off` build), and it changes `SPECULATION.md` §1's "off
   compiles out every side-channel defence". It gets its own small review
   with M0's flag work, and AoU-11's Zenbleed and GDS sentence is restated.

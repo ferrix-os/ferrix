@@ -96,14 +96,14 @@
     },
     {
       "file": "arch/x86_64/speculation.rs",
-      "lines": "1125, 1131, 1133",
+      "lines": "1122, 1128, 1130",
       "category": "absent-hardware",
       "match": "held &= read & plan.spec_ctrl == plan.spec_ctrl;",
       "why": "STIBP and SSBD in IA32_SPEC_CTRL, AMD's automatic IBRS in EFER, and reading each back: planned and applied only on a processor that offers them. QEMU's TCG offers none (`TCG doesn't support requested feature: CPUID.07H:EDX.spec-ctrl [bit 26]`, `stibp`, `ssbd`, `auto-ibrs`). Gate 6's KVM boot on the AMD reference host applies all three and reads them back on every processor: `speculation defences read back on 4 processors`."
     },
     {
       "file": "arch/x86_64/speculation.rs",
-      "lines": "1139",
+      "lines": "1136",
       "category": "absent-hardware",
       "match": "held &= unsafe { cpu::read_msr(AMD_VIRT_SPEC_CTRL) }",
       "why": "AMD's VIRT_SPEC_CTRL, used for SSBD only on a processor that offers it without SSBD in IA32_SPEC_CTRL: a guest of an older AMD host. Neither TCG nor the KVM reference host (which offers SSBD directly) presents that combination."
@@ -1332,6 +1332,20 @@
       "category": "absent-hardware",
       "match": "return f.write_str(\"-\")",
       "why": "`Shown` writes `-` only for a vendor or product string the table does not have. xtask gives every QEMU boot both through -smbios (tools/common/xtask/src/smbios.rs), and test-boot fails unless the kernel's line names exactly that vendor and product, so no measured run has a table lacking either. The crate's host tests cover a table without the strings (ferrix-smbios: index past the set, count 0). Measured by d1-coverage-2 on 19cb0f3df (consultant ledger line 1809 (B))."
+    },
+    {
+      "file": "arch/x86_64/speculation.rs",
+      "lines": "940, 942, 944, 945",
+      "category": "absent-hardware",
+      "match": "let config = unsafe { cpu::read_msr(AMD_DE_CFG) };",
+      "why": "The Zenbleed backup fix: read, write and read back DE_CFG, planned only on a Zen 2 outside a guest (`decide_vector_leak`). The coverage run is under TCG, which offers no such part, and nazuna's verdict is that neither Zenbleed nor GDS applies (M0-B-PROPOSALS 2.3). No run on the measured machine reaches it; DF6 moved these writes out of `HARDENED`, ledger 1012, 6311 D4. Stage 9's verdict table, L.x86_64.123, is what the decision stands on."
+    },
+    {
+      "file": "arch/x86_64/speculation.rs",
+      "lines": "952, 955, 957, 958",
+      "category": "absent-hardware",
+      "match": "let control = unsafe { cpu::read_msr(IA32_MCU_OPT_CTRL) };",
+      "why": "GDS's enable: read, write and read back IA32_MCU_OPT_CTRL, planned only where GDS_CTRL says the register exists and microcode has the mitigation turned off. The coverage run is under TCG, which offers no such part. No run on the measured machine reaches it (ledger 1012, 6311 D4); the verdict table of L.x86_64.123 stands on the decision."
     }
   ]
 }

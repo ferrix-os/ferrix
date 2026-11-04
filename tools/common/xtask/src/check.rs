@@ -1243,6 +1243,7 @@ fn ferrocene_rust() -> Result<()> {
 /// started before the check fired. Every static check runs whichever fails.
 fn test_flags(args: &Args) -> Result<()> {
     crate::test_boot(args)?;
+    vector_verdict_named(args)?;
     let growth: &[&str] = if args.fail_on_growth {
         &["--fail-on-growth"]
     } else {
@@ -1263,6 +1264,25 @@ fn test_flags(args: &Args) -> Result<()> {
         Ok(())
     } else {
         Err(Error::new(format!("test-flags: {}", failed.join("; "))))
+    }
+}
+
+/// Whether a build with `mitigations=off` still names Zenbleed's and GDS's
+/// verdict on x86-64 (`L.x86_64.123`, `docs/microkernel/M0-B-PROPOSALS.md` DF6):
+/// the covers are no speed trade, and such a boot's `vector registers:` line says
+/// what it decided and never that it did not.
+fn vector_verdict_named(args: &Args) -> Result<()> {
+    if !crate::flags::this_run()?.mitigations_off() || !args.arches()?.contains(&Arch::X86_64) {
+        return Ok(());
+    }
+    let log = paths::build_dir(Arch::X86_64).join("serial.log");
+    let text = std::fs::read_to_string(&log)?;
+    let line = text.lines().find(|line| line.contains("vector registers:"));
+    match line {
+        Some(line) if !line.contains("not decided") => Ok(()),
+        _ => Err(Error::new(
+            "test-flags: a mitigations=off boot did not name Zenbleed's and GDS's verdict",
+        )),
     }
 }
 

@@ -100,7 +100,7 @@ values.kernel = { allows = ["none"], lands = "today", built = "yes", requires = 
 values.none = { allows = ["none"], lands = "LINUX-ABI-SEPARATION.md §11.11", built = "yes", requires = ["personality=none"] }
 
 [flags.mitigations]
-why = "F-31's speculation defences and KASLR (docs/certification/SPECULATION.md); Zenbleed's and GDS's fixes leave it with DF6"
+why = "F-31's speculation defences and KASLR (docs/certification/SPECULATION.md); Zenbleed's and GDS's fixes are outside it since DF6, in every build"
 values.on = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
 values.off = { allows = ["none"], lands = "M0", built = "yes" }
 

@@ -274,7 +274,8 @@ element. (Finding F-21b.)
 
 ### AoU-8 — the configuration is the one in §1
 The claims hold for the reference configuration and no other. Changing the
-toolchain, enabling a Cargo feature, building with `--mitigations off`,
+toolchain, enabling a Cargo feature, building with `--mitigations off` (which takes every speed-trade defence out, not
+Zenbleed's and GDS's covers),
 booting with `ferrix.devmgr=init` (AoU-13), `ferrix.efifb` (AoU-31) or
 `ferrix.vtd=off` or `ferrix.amdvi=off` or `ferrix.unisolated`, or moving a
 file between rings changes what is claimed. `ferrix.unisolated` lets devmgr
@@ -336,9 +337,9 @@ must not learn each other's cache access patterns shall not share a cache: no
 cache is partitioned (V-06). QEMU's TCG, on which CI's gates and every Arm gate run, offers no
 speculation controls and executes no speculation, so its log lines are not a
 counter-example; the gate under KVM is where the controls are exercised.
-On x86-64 the boot line `cpu      program register state:` must not name
-Zenbleed or GDS as holding AVX back unless the integrator accepts programs
-without AVX; and in a guest, whose verdict rests on the CPU model and
+On x86-64, in every build, `mitigations=off` included, the boot line `cpu      program
+register state:` must not name Zenbleed or GDS as holding AVX back unless the integrator
+accepts programs without AVX; and in a guest, whose verdict rests on the CPU model and
 `IA32_ARCH_CAPABILITIES` the hypervisor presents, the integrator shall run
 the element only on a host that mitigates Zenbleed and GDS itself, and the
 hazards of the second exposure line the guest's model hides (SRSO, TSA,
