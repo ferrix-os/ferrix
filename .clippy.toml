@@ -75,6 +75,7 @@ disallowed-methods = [
     { path = "ferrix_kernel_core::iommu::Domain::id", reason = "checks-only, defined in iommu.rs", allow-invalid = true },
     { path = "ferrix_kernel_core::iommu::Domain::link_empty_table", reason = "checks-only, defined in iommu.rs", allow-invalid = true },
     { path = "ferrix_kernel_core::iommu::Domain::pin_runs", reason = "checks-only, defined in iommu.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::object::exception::Supervisor::is_live", reason = "checks-only, defined in object/exception.rs", allow-invalid = true },
     { path = "ferrix_kernel_core::object::pin::Pin::with_budget", reason = "checks-only, defined in object/pin.rs", allow-invalid = true },
     { path = "ferrix_kernel_core::user::cache::Reclaimed::stolen", reason = "checks-only, defined in user/cache.rs", allow-invalid = true },
 ]

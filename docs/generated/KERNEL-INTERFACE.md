@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2574 declarations in the core's files, 179 in the item's; 135 checks-only.
+2644 declarations in the core's files, 179 in the item's; 171 checks-only.
 
 ## ferrix-kernel-core
 
@@ -276,6 +276,9 @@ checks above is `pub` for raised checks (F3).
 | `enter_user` | re-export | load |  |
 | `enter_user` | re-export | load |  |
 | `enter_user` | re-export | load |  |
+| `exception_check` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `exception_check` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `exception_check` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `firmware_entropy` | re-export | bin |  |
 | `firmware_entropy` | re-export | bin |  |
 | `firmware_entropy` | re-export | bin |  |
@@ -501,13 +504,14 @@ checks above is `pub` for raised checks (F3).
 | `wait_for_interrupt` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `wait_for_work` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `console` | mod | item, load, bin |  |
+| `exception_check` | mod | load, bin |  |
 | `trap` | mod | item, load, bin |  |
 | `SIGNAL_RED_ZONE` | re-export | load |  |
 | `TrapFrame` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `UserContext` | re-export | load |  |
 | `UserRegs` | re-export | item, load, bin |  |
 | `UserState` | re-export | load |  |
-| `breakpoint` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `breakpoint` | re-export | load, bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `clean_for_device` | re-export | load |  |
 | `dma_barrier` | re-export | item |  |
 | `enter_user` | re-export | load |  |
@@ -535,6 +539,23 @@ checks above is `pub` for raised checks (F3).
 | `dma_barrier` | fn | item |  |
 | `hardware_random` | fn | item |  |
 | `sync_instructions` | fn | load |  |
+
+### `arch::aarch64::exception_check`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `BREAKPOINT_CODE` | const | load (checks) | checks-only |
+| `BREAKPOINT_KIND` | const | load (checks) | checks-only |
+| `BREAKPOINT_PC_AT_TRAP` | const | load (checks) | checks-only |
+| `BREAKPOINT_PROGRAM` | const | load (checks) | checks-only |
+| `BREAKPOINT_SKIP` | const | load (checks) | checks-only |
+| `FAULT_AT` | const | load (checks) | checks-only |
+| `FAULT_EXIT_AT` | const | load (checks) | checks-only |
+| `accepted` | fn | item, load |  |
+| `exit_with` | fn | load (checks) | checks-only |
+| `forgeries` | fn | load (checks) | checks-only |
+| `pc` | fn | load |  |
+| `set_pc` | fn | load (checks) | checks-only |
 
 ### `arch::aarch64::signal`
 
@@ -571,7 +592,7 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `USER_SPSR` | const | load (checks) | checks-only |
-| `breakpoint` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `breakpoint` | fn | load, bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `enter_user` | fn | load |  |
 | `resume_user` | fn | load |  |
 | `system_call` | fn | item, load |  |
@@ -673,6 +694,7 @@ checks above is `pub` for raised checks (F3).
 | `wait_for_work` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `console` | mod | item, load, bin |  |
 | `cpu` | mod | item, load |  |
+| `exception_check` | mod | load, bin |  |
 | `switch` | mod | load, bin |  |
 | `trap` | mod | item, load, bin |  |
 | `SIGNAL_RED_ZONE` | re-export | load |  |
@@ -680,7 +702,7 @@ checks above is `pub` for raised checks (F3).
 | `UserContext` | re-export | load |  |
 | `UserRegs` | re-export | item, load, bin |  |
 | `UserState` | re-export | load |  |
-| `breakpoint` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `breakpoint` | re-export | load, bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `clean_for_device` | re-export | load |  |
 | `dma_barrier` | re-export | item |  |
 | `enter_user` | re-export | load |  |
@@ -707,6 +729,23 @@ checks above is `pub` for raised checks (F3).
 | `dma_barrier` | fn | item |  |
 | `sync_instructions` | fn | load |  |
 | `user_fpu_doubles` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+
+### `arch::armv7a::exception_check`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `BREAKPOINT_CODE` | const | load (checks) | checks-only |
+| `BREAKPOINT_KIND` | const | load (checks) | checks-only |
+| `BREAKPOINT_PC_AT_TRAP` | const | load (checks) | checks-only |
+| `BREAKPOINT_PROGRAM` | const | load (checks) | checks-only |
+| `BREAKPOINT_SKIP` | const | load (checks) | checks-only |
+| `FAULT_AT` | const | load (checks) | checks-only |
+| `FAULT_EXIT_AT` | const | load (checks) | checks-only |
+| `accepted` | fn | item, load |  |
+| `exit_with` | fn | load (checks) | checks-only |
+| `forgeries` | fn | load (checks) | checks-only |
+| `pc` | fn | load |  |
+| `set_pc` | fn | load (checks) | checks-only |
 
 ### `arch::armv7a::signal`
 
@@ -760,7 +799,7 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `USER_CPSR` | const | load (checks) | checks-only |
-| `breakpoint` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `breakpoint` | fn | load, bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `enter_user` | fn | load |  |
 | `resume_user` | fn | load |  |
 | `system_call` | fn | item, load |  |
@@ -920,6 +959,7 @@ checks above is `pub` for raised checks (F3).
 | `clock` | mod | item, load |  |
 | `console` | mod | item, load, bin |  |
 | `cpu` | mod | item, load |  |
+| `exception_check` | mod | load, bin |  |
 | `framebuffer` | mod | item, load, bin |  |
 | `gdt` | mod | load (checks) | pub for raised checks |
 | `paranoid` | mod | load |  |
@@ -932,7 +972,7 @@ checks above is `pub` for raised checks (F3).
 | `UserContext` | re-export | load |  |
 | `UserRegs` | re-export | item, load, bin |  |
 | `UserState` | re-export | load |  |
-| `breakpoint` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `breakpoint` | re-export | load, bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `check_hwp_processors` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `dma_barrier` | re-export | item |  |
 | `flush_window` | re-export | bin |  |
@@ -1001,6 +1041,23 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `check_hwp_processors` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+
+### `arch::x86_64::exception_check`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `BREAKPOINT_CODE` | const | load (checks) | checks-only |
+| `BREAKPOINT_KIND` | const | load (checks) | checks-only |
+| `BREAKPOINT_PC_AT_TRAP` | const | load (checks) | checks-only |
+| `BREAKPOINT_PROGRAM` | const | load (checks) | checks-only |
+| `BREAKPOINT_SKIP` | const | load (checks) | checks-only |
+| `FAULT_AT` | const | load (checks) | checks-only |
+| `FAULT_EXIT_AT` | const | load (checks) | checks-only |
+| `accepted` | fn | item, load |  |
+| `exit_with` | fn | load (checks) | checks-only |
+| `forgeries` | fn | load (checks) | checks-only |
+| `pc` | fn | load |  |
+| `set_pc` | fn | load (checks) | checks-only |
 
 ### `arch::x86_64::framebuffer`
 
@@ -1116,7 +1173,7 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `breakpoint` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `breakpoint` | fn | load, bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `gate_check` | mod | load (checks) | pub for raised checks |
 | `TrapFrame` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
@@ -1166,6 +1223,9 @@ checks above is `pub` for raised checks (F3).
 | `DEVICE_LIMIT_SET` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `DEVMGR_STARTED` | re-export | item |  |
 | `DOMAIN` | re-export | item, load |  |
+| `EXCEPTION_ATTACHED` | re-export | item |  |
+| `EXCEPTION_CONTEXT` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `EXCEPTION_KILLED` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Event` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `JOB_KILLED` | re-export | item |  |
 | `LIMIT_SET` | re-export | item |  |
@@ -1968,6 +2028,7 @@ checks above is `pub` for raised checks (F3).
 | `as_if_draining_elsewhere` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `dispose` | fn | item, load |  |
 | `channel` | mod | item, load |  |
+| `exception` | mod | item, load |  |
 | `interrupt` | mod | item, load, bin |  |
 | `io_mapping` | mod | item, load |  |
 | `job` | mod | item, load |  |
@@ -2024,6 +2085,31 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `run` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+
+### `object::exception`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `POISON_ADDRESS` | const | load (checks) | checks-only |
+| `AttachRefused` | enum | item |  |
+| `Refused` | enum | item |  |
+| `Verdict` | enum | item |  |
+| `force_poison` | fn | load (checks) | checks-only |
+| `job_supervised` | fn | load |  |
+| `reported` | fn | load (checks) | checks-only |
+| `skipped` | fn | load (checks) | checks-only |
+| `supervised` | fn | load |  |
+| `Exception` | struct | item |  |
+| `Supervisor` | struct | item |  |
+| `Exception::registers` | method | item, load |  |
+| `Exception::resolve` | method | item, load |  |
+| `Exception::set_registers` | method | item |  |
+| `Supervisor::attach` | method | item, load, bin |  |
+| `Supervisor::close` | method | load |  |
+| `Supervisor::is_live` | method | load (checks) | checks-only |
+| `Supervisor::is_refused` | method | item, load |  |
+| `Supervisor::let_go_if_dead` | method | item |  |
+| `Supervisor::refuse` | method | item, load |  |
 
 ### `object::interrupt`
 
@@ -2126,6 +2212,7 @@ checks above is `pub` for raised checks (F3).
 | `Job::signals` | method | item, load, bin |  |
 | `Job::subtree` | method | load |  |
 | `Job::subtree_control` | method | load |  |
+| `Job::supervisor` | method | item, load |  |
 | `Job::usage` | method | item, load, bin |  |
 | `NodeAttributes::gid` | field | load |  |
 | `NodeAttributes::permissions` | field | load |  |
@@ -2277,6 +2364,7 @@ checks above is `pub` for raised checks (F3).
 | `Process::space` | method | item, load |  |
 | `Process::speculation_domain` | method | load |  |
 | `Process::started` | method | item, load, bin |  |
+| `Process::supervisor` | method | item, load |  |
 | `Process::sync_freeze` | method | load |  |
 | `Process::try_with_handles_masked` | method | item |  |
 | `Process::uncharge_tasks` | method | load |  |
@@ -2458,6 +2546,7 @@ checks above is `pub` for raised checks (F3).
 | `STAGE8_SIGNALFD` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE8_TIMERFD` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE9_ALLOCATION` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE9_EXCEPTIONS` | static | bin (checks) | checks-only |
 | `STAGE9_KMEM` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE9_OBJECTS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE9_QUOTAS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -2952,6 +3041,7 @@ checks above is `pub` for raised checks (F3).
 | `Fast` | enum | item, bin |  |
 | `FaultOutcome` | enum | load |  |
 | `Outcome` | enum | item, load, bin |  |
+| `Poison` | enum | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Verdict` | enum | load |  |
 | `ask` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `attention_due` | fn | load |  |
