@@ -38,6 +38,8 @@ pub enum Error {
     Fault,
     /// [`status::ALREADY_BOUND`].
     AlreadyBound,
+    /// A function's bind whose domain does not translate, with no opt-out.
+    Untranslated,
     /// [`status::BAD_STATE`].
     BadState,
     /// `ENOSYS`: this kernel has no such call. A gap in the table, or a call
@@ -84,6 +86,7 @@ impl Error {
             status::INVALID_ARGS => Error::InvalidArgs,
             status::FAULT => Error::Fault,
             status::ALREADY_BOUND => Error::AlreadyBound,
+            status::UNTRANSLATED => Error::Untranslated,
             status::BAD_STATE => Error::BadState,
             Errno::ENOSYS => Error::Unsupported,
             Errno::ESRCH => Error::NoProcess,
@@ -113,6 +116,7 @@ impl Error {
             Error::InvalidArgs => status::INVALID_ARGS,
             Error::Fault => status::FAULT,
             Error::AlreadyBound => status::ALREADY_BOUND,
+            Error::Untranslated => status::UNTRANSLATED,
             Error::BadState => status::BAD_STATE,
             Error::Unsupported => Errno::ENOSYS,
             Error::NoProcess => Errno::ESRCH,

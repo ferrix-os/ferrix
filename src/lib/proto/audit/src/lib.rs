@@ -201,6 +201,10 @@ pub const EXCEPTION_CONTEXT: Event = Event::new(Class::Changed, 5);
 /// handle can provoke one.
 pub const DEVICE_LIMIT: Event = Event::new(Class::Refused, 5);
 
+/// An executable mapping refused for want of a measurement
+/// (`docs/microkernel/K14.md` §3), with the call's number.
+pub const UNMEASURED: Event = Event::new(Class::Refused, 8);
+
 /// A page request of a pager-backed VMO that ended without its page
 /// (`docs/microkernel/K3.md` §2.3): failed by the pager, timed out at the
 /// pager's bound, or ended by the pager's close or detach. The subject is the
@@ -262,7 +266,7 @@ pub mod power {
 }
 
 /// Every event this crate names, with its name.
-pub const NAMED: [(Event, &str); 31] = [
+pub const NAMED: [(Event, &str); 32] = [
     (START, "START"),
     (CONFIG, "CONFIG"),
     (BOOTED, "BOOTED"),
@@ -273,6 +277,7 @@ pub const NAMED: [(Event, &str); 31] = [
     (WIDEN, "WIDEN"),
     (LIMIT, "LIMIT"),
     (DEVICE_LIMIT, "DEVICE_LIMIT"),
+    (UNMEASURED, "UNMEASURED"),
     (PAGER, "PAGER"),
     (PROCESS_MADE, "PROCESS_MADE"),
     (DELEGATED, "DELEGATED"),

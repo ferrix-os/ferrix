@@ -37,6 +37,12 @@ pub fn check_iommu() {
     if !crate::boot_checks::run() {
         return;
     }
+    if let Err(problem) = device::check::check_binding_follows_profile() {
+        fatal!(
+            catalog::STAGE10_AUTHORITY,
+            "stage 10 device authority self-check failed: {problem}"
+        );
+    }
     // First, while no function's domain is made but by bring-up's own.
     say_line(check_isolation_before_pin());
     let domains = match check_domains(device::devices()) {

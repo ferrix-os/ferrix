@@ -2,7 +2,7 @@
 
 use super::{
     ANSWER_BUSY, ANSWER_DONE, BIND, BOUND, BUS_PLATFORM, DEVICES, DEVICES_HEADER_BYTES,
-    DEVICES_MAX_BYTES, DIED, DONE, DRIVER, Devices, DevicesView, FLAG_FIRST,
+    DEVICES_MAX_BYTES, DIED, DONE, DRIVER, Devices, DevicesView, FLAG_EXPLICIT_BIND, FLAG_FIRST,
     FLAG_UNISOLATED_ALLOWED, MAX_DRIVERS, Malformed, Message, NAME_BYTES, PUBLISHED, REPORT,
     RESTARTED, SHORT_BYTES, UNBIND, UNBOUND,
 };
@@ -22,6 +22,7 @@ fn devices_round_trips_and_counts_its_handles() {
         first: true,
         names: &names,
         unisolated_allowed: false,
+        explicit_bind: false,
     };
     let mut bytes = [0_u8; DEVICES_MAX_BYTES];
     let len = message.encode(&mut bytes).expect("fits");
@@ -58,6 +59,7 @@ fn a_continuation_carries_devices_only() {
         first: false,
         names: &[],
         unisolated_allowed: false,
+        explicit_bind: false,
     };
     let mut bytes = [0_u8; DEVICES_MAX_BYTES];
     let len = message.encode(&mut bytes).expect("fits");
@@ -74,6 +76,7 @@ fn a_continuation_carries_devices_only() {
             first: false,
             names: &named,
             unisolated_allowed: false,
+            explicit_bind: false,
         }
         .encode(&mut bytes),
         None,
@@ -94,6 +97,7 @@ fn devices_carries_max_drivers_with_room_for_a_device() {
         first: true,
         names: &names,
         unisolated_allowed: false,
+        explicit_bind: false,
     };
     let mut bytes = [0_u8; DEVICES_MAX_BYTES];
     let len = message.encode(&mut bytes).expect("MAX_DRIVERS names fit");
@@ -116,6 +120,7 @@ fn devices_refuses_too_many_drivers_and_a_small_buffer() {
             first: true,
             names: &names,
             unisolated_allowed: false,
+            explicit_bind: false,
         }
         .encode(&mut bytes),
         None,
@@ -130,6 +135,7 @@ fn devices_refuses_too_many_drivers_and_a_small_buffer() {
             first: true,
             names: &one,
             unisolated_allowed: false,
+            explicit_bind: false,
         }
         .encode(&mut small),
         None,
@@ -210,6 +216,7 @@ fn bytes_that_are_not_a_message_are_malformed() {
         first: true,
         names: &[],
         unisolated_allowed: false,
+        explicit_bind: false,
     };
     let mut bytes = [0_u8; DEVICES_MAX_BYTES];
     let len = devices.encode(&mut bytes).expect("fits");
@@ -331,6 +338,7 @@ fn the_unisolated_flag_round_trips_and_an_unknown_bit_gives_no_opt_out() {
         first: false,
         names: &[],
         unisolated_allowed: true,
+        explicit_bind: false,
     };
     let mut bytes = [0_u8; DEVICES_MAX_BYTES];
     let len = message.encode(&mut bytes).expect("fits");
@@ -342,6 +350,7 @@ fn the_unisolated_flag_round_trips_and_an_unknown_bit_gives_no_opt_out() {
     );
     let off = Devices {
         unisolated_allowed: false,
+        explicit_bind: false,
         ..message
     };
     let len = off.encode(&mut bytes).expect("fits");
@@ -357,4 +366,28 @@ fn the_unisolated_flag_round_trips_and_an_unknown_bit_gives_no_opt_out() {
             .unisolated_allowed,
         "an unknown bit beside it"
     );
+}
+
+/// K8's flag travels by its bit, and a bit this crate does not define clears
+/// it, as it clears the opt-out (`docs/microkernel/K8.md` §2).
+#[test]
+fn explicit_bind_travels_by_its_bit() {
+    let names = [[0_u8; NAME_BYTES]; 0];
+    let mut out = [0_u8; DEVICES_MAX_BYTES];
+    let message = Devices {
+        devices: 0,
+        more: 0,
+        first: true,
+        names: &names,
+        unisolated_allowed: false,
+        explicit_bind: true,
+    };
+    let len = message.encode(&mut out).expect("encodes");
+    assert_eq!(out[20..24], (FLAG_FIRST | FLAG_EXPLICIT_BIND).to_le_bytes());
+    let view = DevicesView::decode(&out[..len]).expect("decodes");
+    assert!(view.explicit_bind);
+    assert!(!view.unisolated_allowed);
+    out[23] = 0x80;
+    let view = DevicesView::decode(&out[..len]).expect("decodes");
+    assert!(!view.explicit_bind, "an unknown bit clears it");
 }

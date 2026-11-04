@@ -1662,3 +1662,86 @@ fn check_combining<P: Policy>(aperture: &super::Aperture) -> Result<(), &'static
     }
     Ok(())
 }
+
+// CHECKS-ONLY: iommu/domain_check.rs
+/// `L.device.71`: every published node's rule is its profile's. First of what stage
+/// 10 asks of a domain, since every answer after this one rests on it.
+///
+/// Verifies: L.device.71
+pub fn check_binding_follows_profile() -> Result<(), &'static str> {
+    if super::devices()
+        .iter()
+        .any(|node| node.explicit_bind() != super::EXPLICIT_BIND)
+    {
+        return Err("a node's binding does not follow its profile");
+    }
+    Ok(())
+}
+
+/// The IOMMU stays the kernel's (`docs/microkernel/K8.md`): every unit's
+/// registers are reserved, no published aperture overlaps them, an aperture
+/// minted over one is withheld, and no published aperture lies over the
+/// memory map, where the units' tables are (the boot framebuffer aside, which
+/// the memory map may also hold and which one node is lent). Answers how many
+/// units and apertures it held to that.
+///
+/// Verifies: L.device.70, L.device.73
+/// Verifies: H.DEV.11
+pub fn check_iommu_held(
+    view: &ferrix_bootinfo::BootView<'_>,
+    reserved: &Reserved,
+) -> Result<(usize, usize), &'static str> {
+    let mut units = 0;
+    let mut apertures = 0;
+    for unit in crate::iommu::units(view) {
+        units += 1;
+        if !reserved.unit_reserved(unit.phys, unit.len) {
+            return Err("an IOMMU unit's registers are not reserved");
+        }
+        let mut made_up = DeviceNode::empty(Location::Tree(unit.phys));
+        made_up.mint(unit.phys, unit.len, false, reserved);
+        if !made_up.apertures.is_empty() {
+            return Err("an aperture over an IOMMU unit's registers was minted");
+        }
+    }
+    // The memory map, where the units' tables are: a mint over it is withheld.
+    if let Some(region) = view.regions().iter().find(|region| {
+        // Not at address zero: a mint of nothing proves nothing.
+        region.kind != ferrix_bootinfo::MemKind::Mmio
+            && region.base >= PAGE_SIZE
+            && region.len >= 2 * PAGE_SIZE
+    }) {
+        let mut made_up = DeviceNode::empty(Location::Tree(region.base));
+        let base = region.base.next_multiple_of(PAGE_SIZE);
+        if base + PAGE_SIZE <= region.base + region.len {
+            made_up.mint(base, PAGE_SIZE, false, reserved);
+            if !made_up.apertures.is_empty() {
+                return Err("an aperture over the memory map was minted");
+            }
+        }
+    }
+    for node in super::devices() {
+        for aperture in node.apertures() {
+            apertures += 1;
+            if crate::iommu::units(view)
+                .iter()
+                .any(|unit| aperture.overlaps(unit.phys, unit.phys.saturating_add(unit.len)))
+            {
+                return Err("a published aperture overlaps an IOMMU unit's registers");
+            }
+            if node.framebuffer_mode().is_none()
+                && !node.holds_lent_framebuffer()
+                && view
+                    .regions()
+                    .iter()
+                    .filter(|region| region.kind != ferrix_bootinfo::MemKind::Mmio)
+                    .any(|region| {
+                        aperture.overlaps(region.base, region.base.saturating_add(region.len))
+                    })
+            {
+                return Err("a published aperture lies over the memory map");
+            }
+        }
+    }
+    Ok((units, apertures))
+}

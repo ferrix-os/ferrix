@@ -278,6 +278,24 @@ impl<S: Syscall> Device<S> {
         .map(|bits: usize| bits as u64)
     }
 
+    /// `device_bind_domain`: attach the device's function to the IOMMU domain
+    /// the kernel makes and keeps for it (`docs/microkernel/K8.md`). Needs
+    /// `MANAGE` and `BIND_DOMAIN`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::AlreadyBound`] when it is bound, which is what a restart
+    /// meets; [`Error::WrongType`] for a node with no DMA;
+    /// [`Error::AccessDenied`] for a domain that would not translate.
+    pub fn bind_domain(&self) -> Result<(), Error> {
+        decode(
+            Call::new(nr::DEVICE_BIND_DOMAIN)
+                .value(register(self.handle()))
+                .make(self.syscall()),
+        )
+        .map(|_: usize| ())
+    }
+
     /// Ask the kernel for a block ring on this device: the driver's end of
     /// the ring's control channel, over which HELLO goes next
     /// (`docs/BLOCK-RING.md` §6). Needs `MANAGE`.

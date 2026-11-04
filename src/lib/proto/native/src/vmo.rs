@@ -24,6 +24,20 @@ pub fn create<S: Syscall>(sys: S, bytes: usize) -> Result<Vmo<S>, Error> {
 }
 
 impl<S: Syscall> Vmo<S> {
+    /// `vmo_digest`: a sealed VMO's measurement (`docs/microkernel/K14.md` §4).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::BadState`] when it is not sealed.
+    pub fn digest(&self, out: &mut [u8; 32]) -> Result<(), Error> {
+        decode_unit(
+            Call::new(nr::VMO_DIGEST)
+                .value(register(self.handle()))
+                .output(out.as_mut_slice())
+                .make(self.syscall()),
+        )
+    }
+
     /// `vmo_read`: fill `buffer` from the VMO, starting at `offset`.
     ///
     /// # Errors

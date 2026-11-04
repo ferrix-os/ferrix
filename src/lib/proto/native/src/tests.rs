@@ -1213,6 +1213,9 @@ fn every_call_in_the_native_table_has_a_wrapper() {
     let _ = made_space.clone_space();
     let _ = Process::from_owned(handle()).space(Requested::Same);
     let _ = Vmo::from_owned(handle()).executable();
+    let _ = Vmo::from_owned(handle()).digest(&mut [0; 32]);
+    let _ = Process::from_owned(handle()).images(&mut []);
+    let _ = Device::from_owned(handle()).bind_domain();
 
     let wrapped: BTreeSet<usize> = sys.numbers().into_iter().collect();
     let table: BTreeSet<usize> = nr::ALL.iter().map(|&call| nr::number(call)).collect();

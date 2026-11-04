@@ -125,6 +125,8 @@ pub mod object {
     #[cfg(ferrix_linux_abi = "on")]
     pub mod alloc_check;
     #[cfg(ferrix_linux_abi = "on")]
+    pub mod authority_check;
+    #[cfg(ferrix_linux_abi = "on")]
     pub mod blocks_check;
     #[cfg(ferrix_linux_abi = "on")]
     pub mod check;
@@ -144,6 +146,8 @@ pub mod object {
     pub mod pager_check;
     #[cfg(ferrix_linux_abi = "on")]
     pub mod quota_check;
+    #[cfg(ferrix_linux_abi = "on")]
+    pub mod sealing_check;
     #[cfg(ferrix_linux_abi = "on")]
     pub mod sender_check;
     #[cfg(ferrix_linux_abi = "on")]

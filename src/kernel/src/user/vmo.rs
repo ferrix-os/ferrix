@@ -72,7 +72,7 @@ use alloc::collections::BTreeMap;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::fmt;
-use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use crate::fallible::AllocError;
 use crate::sync::SpinLock;
@@ -103,6 +103,9 @@ pub enum VmoError {
     /// must act on it -- `user::cache::drop_poisoned_at` -- never turn it
     /// into a plain error, or the frame is never retired.
     Poisoned(Frame),
+    /// The object is sealed (`docs/microkernel/K14.md` §2): its pages and its
+    /// length never change again.
+    Sealed,
 }
 
 /// The frame plus one whose next read [`Vmo::read_present`] answers as
@@ -143,6 +146,7 @@ const fn injected_read_poison(_frame: Frame) -> bool {
 // CHECKS-ONLY: fs/btrfs_write_check/poison_check.rs; home: user::vmo
 /// The frame page `index` of `vmo` holds, for the poison check.
 pub fn frame_for_check(vmo: &Vmo, index: u64) -> Option<Frame> {
+    // SEAL: read
     vmo.pages.lock().frames.get(&index).copied()
 }
 
@@ -192,6 +196,7 @@ impl fmt::Display for VmoError {
             VmoError::Poisoned(frame) => {
                 write!(f, "a read of frame {frame:#x} consumed poison")
             }
+            VmoError::Sealed => f.write_str("the object is sealed"),
         }
     }
 }
@@ -342,6 +347,15 @@ pub struct Vmo {
     /// under a space's lock before a mapping's id enters its tables, lowered
     /// under it when the id leaves.
     shared_may_write: AtomicU64,
+    /// How many regions by handle name this object with a ceiling that holds
+    /// `WRITE`, a fork's copies included: what a seal refuses
+    /// ([`Vmo::writably_mapped`] counts file mappings alone). Changed only
+    /// under `pages`, so a seal and a map cannot pass each other; it falls in
+    /// phase three of an unmap, after that unmap's shootdown (K14.2).
+    writable_regions: AtomicU64,
+    /// The digest [`Vmo::seal`] computed, once it has. Sealed and `None` is a
+    /// hash under way, which nothing can run from yet.
+    digest: SpinLock<Option<[u8; 32]>>,
     /// Whether a shared mapping that may write has been made since the file's
     /// owner last asked ([`Vmo::take_mapped_writes`]): its writes mark no page
     /// dirty, so the owner writes back every page it holds instead.
@@ -468,6 +482,34 @@ fn compact(mappers: &mut Vec<Mapper>) {
     *mappers = smaller;
 }
 
+/// The most pages a seal takes: 64 MiB, so that the call has a stated bound
+/// (`docs/microkernel/K14.md` §2, MEMORY-AND-TIMING). An image over it fails
+/// its build, not silently here.
+pub(crate) const SEAL_MAX_PAGES: u64 = 16_384;
+
+// CHECKS-ONLY: object/sealing_check.rs
+/// The preempt count the last seal's hash ran under, for the boot check.
+#[doc(hidden)]
+pub static SEAL_PREEMPT_COUNT: AtomicU32 = AtomicU32::new(u32::MAX);
+
+/// Why [`Vmo::seal`] refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SealRefusal {
+    /// Pager-backed, a file's, physical, coherent, combining or holding a
+    /// kernel view: its bytes can change under the kernel.
+    Kind,
+    /// Past [`SEAL_MAX_PAGES`].
+    TooLong,
+    /// Sealed already, or being.
+    Already,
+    /// Writably mapped, or held.
+    Busy,
+    /// A frame is shared with a fork.
+    Shared,
+    /// No frame to commit.
+    NoMemory,
+}
+
 /// A VMO's pages, under one lock.
 #[derive(Debug, Default)]
 struct Pages {
@@ -478,6 +520,12 @@ struct Pages {
     /// A pager-backed object's Dirty and awaiting-clean pages; every other
     /// present page is Clean. Empty for any other object.
     states: BTreeMap<u64, PageState>,
+    /// Frozen by [`Vmo::seal`]: every path that changes a page or the page
+    /// set tests this under this lock (`docs/microkernel/K14.md` §2.1). Each
+    // SEAL: read
+    /// `pages.lock()` in this file carries a tag saying which path it is, and
+    /// `check-vmo-seal-tags.py` fails on one that carries none.
+    sealed: bool,
 }
 
 /// Frames phase one took out of an object's list, whose translations are still
@@ -740,6 +788,7 @@ impl Vmo {
         out: &mut Vec<u64>,
         pick: &mut dyn FnMut(Frame) -> bool,
     ) -> Option<u64> {
+        // SEAL: read
         let state = self.pages.lock();
         for (looked, (&index, &frame)) in state.frames.range(from..).enumerate() {
             if out.len() >= room || looked >= CHUNK {
@@ -757,6 +806,7 @@ impl Vmo {
 
     /// Call `visit` with the frame of each committed page.
     pub(crate) fn for_each_page(&self, visit: &mut dyn FnMut(Frame)) {
+        // SEAL: read
         for &frame in self.pages.lock().frames.values() {
             visit(frame);
         }
@@ -766,6 +816,8 @@ impl Vmo {
     fn unfilled(pages: u64, source: Option<Source>, charge: Charge) -> Vmo {
         Vmo {
             pages: SpinLock::new(Pages::default()),
+            writable_regions: AtomicU64::new(0),
+            digest: SpinLock::new(None),
             len: AtomicU64::new(pages),
             bound: AtomicU64::new(u64::MAX),
             mappers: SpinLock::new(Vec::new()),
@@ -819,8 +871,9 @@ impl Vmo {
     /// mappers' lock, so a mapping attached after this sees the flag, since
     /// every mapping attaches before a fault can reach it.
     pub fn make_coherent(&self) -> bool {
+        // Under the lock a seal's freeze also holds: one of the two wins.
         let mappers = self.mappers.lock();
-        if !mappers.is_empty() {
+        if !mappers.is_empty() || self.is_sealed() {
             return false;
         }
         self.coherent.store(true, Ordering::Release);
@@ -860,11 +913,13 @@ impl Vmo {
         }
         {
             let mappers = self.mappers.lock();
-            if !mappers.is_empty() || self.kernel_view.load(Ordering::Acquire) {
+            // Under the lock a seal's freeze also holds: one of the two wins.
+            if !mappers.is_empty() || self.kernel_view.load(Ordering::Acquire) || self.is_sealed() {
                 return false;
             }
             self.combining.store(true, Ordering::Release);
         }
+        // SEAL: read
         let pages = self.pages.lock();
         for &frame in pages.frames.values() {
             flush_frame(frame);
@@ -880,8 +935,9 @@ impl Vmo {
     /// write-combining, which the core then refuses. Under the mappers'
     /// lock, as [`Vmo::make_combining`]'s test, so that one of the two wins.
     pub fn take_kernel_view(&self) -> bool {
+        // Under the lock a seal's freeze also holds: one of the two wins.
         let _mappers = self.mappers.lock();
-        if self.is_combining() {
+        if self.is_combining() || self.is_sealed() {
             return false;
         }
         self.kernel_view.store(true, Ordering::Release);
@@ -915,6 +971,7 @@ impl Vmo {
     /// that has been promised and not yet paid for, which is what overcommit
     /// means and what the exit criterion measures.
     pub fn committed(&self) -> usize {
+        // SEAL: read
         self.pages.lock().frames.len()
     }
 
@@ -927,6 +984,7 @@ impl Vmo {
         let mut counted = 0u64;
         let mut from = first;
         while from < end {
+            // SEAL: read
             let pages = self.pages.lock();
             let mut taken = 0usize;
             let mut last = None;
@@ -954,6 +1012,7 @@ impl Vmo {
         let mut from = first;
         let mut chunk = [0u64; OVERLAP_CHUNK];
         while from < end {
+            // SEAL: read
             let pages = self.pages.lock();
             let mut taken = 0usize;
             for (slot, (&index, _)) in chunk
@@ -980,6 +1039,7 @@ impl Vmo {
 
     /// The frame holding page `index`, if it has been committed.
     pub fn page(&self, index: u64) -> Option<Frame> {
+        // SEAL: read
         self.pages.lock().frames.get(&index).copied()
     }
 
@@ -1098,6 +1158,7 @@ impl Vmo {
         // A second object, the forking program's to pay for, as a page cache
         // object's fork -- a private file mapping's shadow -- is too.
         let charge = Charge::running(Resource::Objects, 1).map_err(|_| VmoError::OutOfMemory)?;
+        // SEAL: read
         let pages = self.pages.lock();
 
         let mut frames = BTreeMap::new();
@@ -1133,7 +1194,11 @@ impl Vmo {
                 frames,
                 held: BTreeMap::new(),
                 states: BTreeMap::new(),
+                // A fork of a sealed object is an ordinary one, unmeasured.
+                sealed: false,
             }),
+            writable_regions: AtomicU64::new(0),
+            digest: SpinLock::new(None),
             len: AtomicU64::new(self.len_pages()),
             bound: AtomicU64::new(self.bound.load(Ordering::SeqCst)),
             mappers: SpinLock::new(Vec::new()),
@@ -1171,9 +1236,14 @@ impl Vmo {
             return Err(VmoError::OutOfRange { index, pages: len });
         }
 
+        // SEAL: refused
         let mut pages = self.pages.lock();
         if let Some(&frame) = pages.frames.get(&index) {
             return Ok(frame);
+        }
+        // Absent in a sealed object only after a machine check took the page.
+        if pages.sealed {
+            return Err(VmoError::Sealed);
         }
 
         // Room to record the page before the frame is taken, so a refusal
@@ -1201,8 +1271,9 @@ impl Vmo {
         if index >= self.len_pages() {
             return false;
         }
+        // SEAL: refused
         let mut pages = self.pages.lock();
-        if pages.frames.contains_key(&index) {
+        if pages.sealed || pages.frames.contains_key(&index) {
             return false;
         }
         // With no memory to record it, it did not go in, and stays the
@@ -1256,6 +1327,7 @@ impl Vmo {
         if !was && !still {
             return Ok(Vec::new());
         }
+        // SEAL: read
         let written = crate::fallible::try_collect(self.pages.lock().frames.keys().copied());
         if written.is_err() && was {
             self.mapped_written.store(true, Ordering::SeqCst);
@@ -1292,12 +1364,16 @@ impl Vmo {
             return Err(VmoError::OutOfRange { index, pages: len });
         }
 
+        // SEAL: refused
         let mut pages = self.pages.lock();
         if index >= self.bound.load(Ordering::SeqCst) {
             return Ok(Commit::PastEnd);
         }
         if let Some(&frame) = pages.frames.get(&index) {
             return Ok(Commit::Frame(frame));
+        }
+        if pages.sealed {
+            return Err(VmoError::Sealed);
         }
         if self.sourced(index) {
             return Ok(Commit::Unfilled);
@@ -1334,6 +1410,7 @@ impl Vmo {
         out: &mut [u8],
     ) -> Result<bool, VmoError> {
         self.check_span(index, offset, out.len())?;
+        // SEAL: read
         let pages = self.pages.lock();
         let Some(&frame) = pages.frames.get(&index) else {
             return Ok(false);
@@ -1370,6 +1447,7 @@ impl Vmo {
     pub(crate) fn index_of(&self, frame: Frame) -> Option<u64> {
         let mut from = 0;
         loop {
+            // SEAL: read
             let pages = self.pages.lock();
             let mut looked = 0;
             for (&index, &held) in pages.frames.range(from..) {
@@ -1410,6 +1488,7 @@ impl Vmo {
             if !clean.contains(&index) {
                 return 0;
             }
+            // SEAL: sourced, a file's, whose clean copy this drops.
             let mut state = self.pages.lock();
             if !self.unwritten_by_mappings() {
                 return 0;
@@ -1458,6 +1537,7 @@ impl Vmo {
     /// [`VmoError::OutOfRange`] past the end of the object or of the page.
     pub fn read_page(&self, index: u64, offset: usize, out: &mut [u8]) -> Result<(), VmoError> {
         self.check_span(index, offset, out.len())?;
+        // SEAL: read
         let pages = self.pages.lock();
         match pages.frames.get(&index) {
             None => out.fill(0),
@@ -1500,7 +1580,11 @@ impl Vmo {
         // looked at again.
         let mut room = None;
         let retired = loop {
+            // SEAL: refused
             let mut pages = self.pages.lock();
+            if pages.sealed {
+                return Err(VmoError::Sealed);
+            }
             let (frame, retired) = match pages.frames.get(&index).copied() {
                 Some(frame)
                     if mm::frame_references(frame) <= 1 || pages.held.contains_key(&index) =>
@@ -1560,7 +1644,11 @@ impl Vmo {
     /// page, or no room to record it.
     pub fn commit_and_write(&self, index: u64, offset: usize, data: &[u8]) -> Result<(), VmoError> {
         self.check_span(index, offset, data.len())?;
+        // SEAL: refused
         let mut pages = self.pages.lock();
+        if pages.sealed {
+            return Err(VmoError::Sealed);
+        }
         let frame = match pages.frames.get(&index) {
             Some(&frame) => frame,
             None => {
@@ -1588,7 +1676,11 @@ impl Vmo {
     pub fn zero_from(&self, index: u64, from: usize) -> Result<(), VmoError> {
         let len = (PAGE_SIZE as usize).saturating_sub(from);
         self.check_span(index, from, len)?;
+        // SEAL: refused
         let pages = self.pages.lock();
+        if pages.sealed {
+            return Err(VmoError::Sealed);
+        }
         if let Some(&frame) = pages.frames.get(&index) {
             let at = mm::direct_map(frame * PAGE_SIZE) as usize + from;
             // SAFETY: (FRAME) as in `commit_and_write`: the frame is the
@@ -1645,8 +1737,9 @@ impl Vmo {
     /// page is held, or there is no memory to record the change in.
     pub(crate) fn take_page(&self, index: u64, frame: Frame) -> Result<Retired, Kept> {
         let mut retired = Retired::with_room(1).map_err(|_| Kept::NoMemory)?;
+        // SEAL: refused
         let mut pages = self.pages.lock();
-        if pages.held.contains_key(&index) {
+        if pages.sealed || pages.held.contains_key(&index) {
             return Err(Kept::Held);
         }
         match pages.frames.get_mut(&index) {
@@ -1714,8 +1807,9 @@ impl Vmo {
         while let Some(start) = from {
             let mut chunk = [(0, 0); CHUNK];
             let (taken, next) = {
+                // SEAL: refused
                 let mut state = self.pages.lock();
-                if clean && !self.unwritten_by_mappings() {
+                if state.sealed || (clean && !self.unwritten_by_mappings()) {
                     break;
                 }
                 state.take_into(start, end, &mut chunk)
@@ -1759,6 +1853,7 @@ impl Vmo {
             .checked_add(pages)
             .filter(|&end| end <= self.len_pages())
             .ok_or(RunError::OutOfRange)?;
+        // SEAL: read
         if self.pages.lock().frames.range(first..end).next().is_some() {
             return Err(RunError::Committed);
         }
@@ -1773,7 +1868,15 @@ impl Vmo {
         for frame in block..block + pages {
             mm::zero_frame(frame);
         }
+        // SEAL: refused
         let mut held = self.pages.lock();
+        if held.sealed {
+            drop(held);
+            for frame in block..block + pages {
+                let _ = mm::release_frame(frame);
+            }
+            return Err(RunError::Committed);
+        }
         // As `commit` does, under the same lock (`L.user.133`).
         self.flush_if_combining(block, pages);
         let inserted = held.insert_run(first, block, pages);
@@ -1840,6 +1943,7 @@ impl Vmo {
         let mut lowered = None;
         loop {
             let len = 1_u64 << o;
+            // SEAL: read
             let absent = self
                 .pages
                 .lock()
@@ -1883,10 +1987,15 @@ impl Vmo {
         let mut page = 0;
         while page < pages {
             let mut chunk = [(0, 0); CHUNK];
-            let (taken, next) =
-                self.pages
-                    .lock()
-                    .take_ours(first, block, (page, pages), &mut chunk);
+            let (taken, next) = {
+                // SEAL: refused
+                let mut state = self.pages.lock();
+                // A sealed object's frames stay: a late give-back takes none.
+                if state.sealed {
+                    return;
+                }
+                state.take_ours(first, block, (page, pages), &mut chunk)
+            };
             page = next;
             let frames = chunk.get(..taken).unwrap_or(&[]);
             let mut runs = [(0, 0); RUNS];
@@ -1900,6 +2009,7 @@ impl Vmo {
     /// be handed to anyone else.
     pub fn holds_any(&self, first: u64, pages: u64) -> bool {
         let end = first.saturating_add(pages);
+        // SEAL: read
         self.pages.lock().held.range(first..end).next().is_some()
     }
 
@@ -1942,8 +2052,9 @@ impl Vmo {
     /// that may write has been made.
     fn take_range_if(&self, first: u64, pages: u64, clean: bool) -> Result<Retired, AllocError> {
         let end = first.saturating_add(pages);
+        // SEAL: refused
         let mut state = self.pages.lock();
-        if clean && !self.unwritten_by_mappings() {
+        if state.sealed || (clean && !self.unwritten_by_mappings()) {
             return Ok(Retired {
                 frames: Vec::new(),
                 release: true,
@@ -2263,10 +2374,16 @@ impl Vmo {
     /// new pages are uncommitted, so they read as zeros and cost nothing until
     /// touched. Never shrinks: another mapping of the object may still reach
     /// the pages a shorter length would put out of range.
-    pub(crate) fn grow_to(&self, pages: u64) {
+    pub fn grow_to(&self, pages: u64) {
         // A pager-backed object keeps the size its pager made it at: pages
         // past it are nobody's to supply.
         if self.is_pager_backed() {
+            return;
+        }
+        // SEAL: refused
+        let state = self.pages.lock();
+        // A sealed object's length is in its digest (H.MEM.29).
+        if state.sealed {
             return;
         }
         let _ = self.len.fetch_max(pages, Ordering::Relaxed);
@@ -2310,7 +2427,11 @@ impl Vmo {
         let count = count.min(self.len_pages());
         let end = first.saturating_add(count);
         let moved = {
+            // SEAL: read
             let source = from.pages.lock();
+            if source.sealed {
+                return Err(Unmoved::Held(HeldPage { index: first }));
+            }
             if let Some((&index, _)) = source.held.range(first..end).next() {
                 return Err(Unmoved::Held(HeldPage { index }));
             }
@@ -2326,6 +2447,7 @@ impl Vmo {
         // the caller, under its space's lock, can reach either object's list
         // meanwhile, and this one is emptied again if the move goes no
         // further.
+        // SEAL: sourced, the object just made here that nothing has sealed.
         let mut pages = self.pages.lock();
         for &(index, frame) in &moved {
             if crate::fallible::insert(&mut pages.frames, index - first, frame).is_err() {
@@ -2343,6 +2465,7 @@ impl Vmo {
     /// them out of its list, now that the new object names them. Allocates
     /// nothing.
     pub(crate) fn release_moved(&self, moved: &Retired) {
+        // SEAL: sourced, after `adopt_pages` refused a sealed `from`.
         let mut pages = self.pages.lock();
         for (index, _) in &moved.frames {
             let _ = pages.frames.remove(index);
@@ -2353,8 +2476,202 @@ impl Vmo {
     /// `mremap` that fails after it: forget them, without releasing them,
     /// since the object they came from still names every one.
     pub(crate) fn disown_pages(&self) {
+        // SEAL: sourced, the object `adopt_pages` made.
         let named = core::mem::take(&mut self.pages.lock().frames);
         drop(named);
+    }
+
+    /// [`Vmo::raise_writable_region`]'s refusal, for the boot check.
+    #[doc(hidden)]
+    pub fn raise_writable_for_check(&self) -> Result<(), VmoError> {
+        self.raise_writable_region()
+    }
+
+    /// Freeze with no hash, as a seal stands between its two steps, for the
+    /// boot check alone.
+    #[doc(hidden)]
+    pub fn freeze_for_check(&self) -> Result<(), &'static str> {
+        if !crate::boot_checks::run() {
+            return Err("an object is frozen so only while boot checks run");
+        }
+        // SEAL: read
+        self.pages.lock().sealed = true;
+        Ok(())
+    }
+
+    /// Whether [`Vmo::seal`] has frozen this object.
+    pub fn is_sealed(&self) -> bool {
+        // SEAL: read
+        self.pages.lock().sealed
+    }
+
+    /// The object's digest, once sealed and hashed.
+    pub fn digest(&self) -> Option<[u8; 32]> {
+        *self.digest.lock()
+    }
+
+    /// One more region by handle whose ceiling holds `WRITE`.
+    ///
+    /// # Errors
+    ///
+    /// [`VmoError::Sealed`], with nothing counted.
+    pub(crate) fn raise_writable_region(&self) -> Result<(), VmoError> {
+        // SEAL: refused
+        let pages = self.pages.lock();
+        if pages.sealed {
+            return Err(VmoError::Sealed);
+        }
+        let _ = self.writable_regions.fetch_add(1, Ordering::AcqRel);
+        Ok(())
+    }
+
+    /// One fewer. Called once the region's translations are gone everywhere
+    /// (phase three of an unmap, or the space's end).
+    pub(crate) fn lower_writable_region(&self) {
+        // SEAL: read
+        let _pages = self.pages.lock();
+        let _ = self.writable_regions.fetch_sub(1, Ordering::AcqRel);
+    }
+
+    /// Seal the object: commit every page, freeze it, and compute its digest
+    /// over its length and its frames (`docs/microkernel/K14.md` §2). The
+    /// order is commit, freeze, hash, store; the caller replaces its handle
+    /// after. No path after the freeze can fail or wait: the hash takes no
+    /// lock and no memory, and a kill takes effect only on return to user, so
+    /// a sealed object never stays unhashed.
+    ///
+    /// # Errors
+    ///
+    /// [`SealRefusal`], with the object unfrozen. Pages committed for a
+    /// refused seal stay committed, as a write would have left them.
+    pub fn seal(&self) -> Result<[u8; 32], SealRefusal> {
+        if self.source.is_some()
+            || self.coherent.load(Ordering::Acquire)
+            || self.combining.load(Ordering::Acquire)
+            || self.kernel_view.load(Ordering::Acquire)
+            || !self.is_anonymous()
+        {
+            return Err(SealRefusal::Kind);
+        }
+        let len = self.len_pages();
+        if len > SEAL_MAX_PAGES {
+            return Err(SealRefusal::TooLong);
+        }
+        for index in 0..len {
+            let _ = self.commit(index).map_err(|why| match why {
+                VmoError::Sealed => SealRefusal::Already,
+                _ => SealRefusal::NoMemory,
+            })?;
+        }
+        // Room first: nothing fails once `sealed` is set (MEMORY-AND-TIMING 2.2ah).
+        let mut frames = Vec::new();
+        frames
+            .try_reserve_exact(usize::try_from(len).map_err(|_| SealRefusal::TooLong)?)
+            .map_err(|_| SealRefusal::NoMemory)?;
+        {
+            // The kinds again, under the lock that sets them: read above with no
+            // lock, each could have changed since.
+            let _mappers = self.mappers.lock();
+            if self.coherent.load(Ordering::Acquire)
+                || self.combining.load(Ordering::Acquire)
+                || self.kernel_view.load(Ordering::Acquire)
+            {
+                return Err(SealRefusal::Kind);
+            }
+            // SEAL: read
+            let mut state = self.pages.lock();
+            if state.sealed {
+                return Err(SealRefusal::Already);
+            }
+            if self.len_pages() != len || state.frames.len() as u64 != len {
+                return Err(SealRefusal::Busy);
+            }
+            if !state.held.is_empty()
+                || self.writable_regions.load(Ordering::Acquire) != 0
+                || self.shared_may_write.load(Ordering::Acquire) != 0
+            {
+                return Err(SealRefusal::Busy);
+            }
+            if state
+                .frames
+                .values()
+                .any(|&frame| mm::frame_references(frame) > 1)
+            {
+                return Err(SealRefusal::Shared);
+            }
+            state.sealed = true;
+            // The frames' order is the page order; the list cannot change now.
+            // NOALLOC: room for `len` was had before the locks, and it is `len` long.
+            frames.extend(state.frames.values().copied());
+        }
+        // No lock from here on, and none of a caller's: the hash runs long,
+        // and is preemptible (K14.10). What the boot check reads.
+        SEAL_PREEMPT_COUNT.store(
+            crate::sched::locks_here().map_or(u32::MAX, |(_, held, _)| held),
+            Ordering::Relaxed,
+        );
+        let mut hash = ferrix_sha256::Sha256::new();
+        hash.update(&self.len_bytes().to_le_bytes());
+        for frame in frames {
+            // SAFETY: (FRAME) the frame is this object's and, frozen, stays
+            // so and unchanged for as long as the object lives; the direct map
+            // covers every frame; the slice is one page.
+            let page = unsafe {
+                core::slice::from_raw_parts(
+                    mm::direct_map(frame * PAGE_SIZE) as *const u8,
+                    PAGE_SIZE as usize,
+                )
+            };
+            hash.update(page);
+        }
+        let digest = hash.finish();
+        *self.digest.lock() = Some(digest);
+        Ok(digest)
+    }
+
+    /// [`Vmo::hold`] for a device that only reads: a sealed object's pages
+    /// may be held so, since nothing changes (`L.mm.113`). They are held as
+    /// they are: a sealed frame is never written, so a sharer's copy on write
+    /// reaches nothing of it.
+    ///
+    /// # Errors
+    ///
+    /// As [`Vmo::hold`].
+    pub fn hold_read(self: &Arc<Self>, first: u64, pages: u64) -> Result<Held, VmoError> {
+        if !self.is_sealed() {
+            return self.hold(first, pages);
+        }
+        let len = self.len_pages();
+        let end = first
+            .checked_add(pages)
+            .filter(|&end| pages > 0 && end <= len)
+            .ok_or(VmoError::OutOfRange {
+                index: first,
+                pages: len,
+            })?;
+        let count = usize::try_from(pages).map_err(|_| VmoError::OutOfMemory)?;
+        let mut frames = Vec::new();
+        frames
+            .try_reserve_exact(count)
+            .map_err(|_| VmoError::OutOfMemory)?;
+        // SEAL: read
+        let mut state = self.pages.lock();
+        if (first..end).any(|index| state.held.get(&index) == Some(&u32::MAX)) {
+            return Err(VmoError::OutOfMemory);
+        }
+        for index in first..end {
+            // Absent only after a machine check took the page: nothing to hold.
+            let frame = *state.frames.get(&index).ok_or(VmoError::Sealed)?;
+            // NOALLOC: `frames` was given room for every page above.
+            frames.push(frame);
+        }
+        state.count_held(first, end)?;
+        drop(state);
+        Ok(Held {
+            vmo: Arc::clone(self),
+            first,
+            frames,
+        })
     }
 
     /// Hold `pages` pages from `first` in place, for a device to be given
@@ -2402,7 +2719,11 @@ impl Vmo {
         // Room for every original a copy could displace, before any is.
         let mut displaced = Retired::with_room(count).map_err(|_| VmoError::OutOfMemory)?;
         let outcome = {
+            // SEAL: refused
             let mut state = self.pages.lock();
+            if state.sealed {
+                return Err(VmoError::Sealed);
+            }
             if (first..end).any(|index| state.held.get(&index) == Some(&u32::MAX)) {
                 return Err(VmoError::OutOfMemory);
             }
@@ -2610,6 +2931,7 @@ impl Held {
 impl Drop for Held {
     fn drop(&mut self) {
         let end = self.first.saturating_add(self.frames.len() as u64);
+        // SEAL: read
         self.vmo.pages.lock().uncount_held(self.first, end);
     }
 }
@@ -2753,6 +3075,7 @@ impl Vmo {
             return 0;
         }
         let end = index.saturating_add(max).min(len);
+        // SEAL: read
         let pages = self.pages.lock();
         match pages.frames.range(index..end).next() {
             Some((&present, _)) => present - index,
@@ -2762,6 +3085,7 @@ impl Vmo {
 
     /// Page `index`'s state.
     pub fn page_state(&self, index: u64) -> PageState {
+        // SEAL: read
         state_of(&self.pages.lock(), index)
     }
 
@@ -2781,6 +3105,7 @@ impl Vmo {
     ///
     /// [`VmoError::OutOfMemory`] with no room to record it.
     pub(crate) fn mark_dirty(&self, index: u64) -> Result<bool, VmoError> {
+        // SEAL: sourced, a pager-backed object's, which no seal takes.
         let mut pages = self.pages.lock();
         if !pages.frames.contains_key(&index) {
             return Ok(false);
@@ -2807,7 +3132,11 @@ impl Vmo {
         traps: bool,
     ) -> Result<PagedWrite, VmoError> {
         self.check_span(index, offset, data.len())?;
+        // SEAL: refused
         let mut pages = self.pages.lock();
+        if pages.sealed {
+            return Err(VmoError::Sealed);
+        }
         let Some(&frame) = pages.frames.get(&index) else {
             return Ok(PagedWrite::Absent);
         };
@@ -2890,6 +3219,7 @@ impl Vmo {
         let room = usize::try_from(count).map_err(|_| SupplyError::Range)?;
         let mut wanted: Vec<u64> =
             crate::fallible::try_with_capacity(room).map_err(|_| SupplyError::NoMemory)?;
+        // SEAL: read
         let pages = self.pages.lock();
         for at in (0..count).filter(|at| !pages.frames.contains_key(&(first + at))) {
             // NOALLOC: room for every page of the range.
@@ -2910,7 +3240,11 @@ impl Vmo {
     ) -> Result<Vec<(u64, Frame)>, SupplyError> {
         let mut moved: Vec<(u64, Frame)> =
             crate::fallible::try_with_capacity(wanted.len()).map_err(|_| SupplyError::NoMemory)?;
+        // SEAL: refused
         let mut source = self.pages.lock();
+        if source.sealed {
+            return Err(SupplyError::BadAux);
+        }
         let end = aux_first + count;
         let unshared = |at: u64| {
             source
@@ -2935,6 +3269,7 @@ impl Vmo {
     /// Clean and noting it in `kept`; how many went in.
     fn put_supplied(&self, moved: &[(u64, Frame)], shift: u64, kept: &mut [bool]) -> u64 {
         let mut supplied = 0;
+        // SEAL: sourced, the pager-backed object being supplied.
         let mut pages = self.pages.lock();
         for (&(aux_index, frame), keep) in moved.iter().zip(kept.iter_mut()) {
             let index = aux_index.wrapping_add(shift);
@@ -2959,6 +3294,7 @@ impl Vmo {
     /// [`VmoError::OutOfMemory`] with no room to record a mark (those already
     /// made stay: more dirty is safe).
     pub fn dirty_range(&self, first: u64, count: u64) -> Result<bool, VmoError> {
+        // SEAL: sourced, a pager-backed object's.
         let mut pages = self.pages.lock();
         let end = first.saturating_add(count);
         if pages.frames.range(first..end).count() as u64 != count {
@@ -2980,6 +3316,7 @@ impl Vmo {
         let end = first.saturating_add(count);
         let mut began = 0;
         {
+            // SEAL: sourced, a pager-backed object's.
             let mut pages = self.pages.lock();
             for (_, state) in pages.states.range_mut(first..end) {
                 if *state == PageState::Dirty {
@@ -2997,6 +3334,7 @@ impl Vmo {
     /// Dirty and stays so. How many were cleaned.
     pub fn writeback_end(&self, first: u64, count: u64) -> u64 {
         let end = first.saturating_add(count);
+        // SEAL: sourced, a pager-backed object's.
         let mut pages = self.pages.lock();
         let before = pages.states.len();
         pages.states.retain(|index, state| {
@@ -3018,6 +3356,7 @@ impl Vmo {
             !pages.held.contains_key(&index) && !pages.states.contains_key(&index)
         };
         let wanted = {
+            // SEAL: read
             let pages = self.pages.lock();
             pages
                 .frames
@@ -3030,7 +3369,11 @@ impl Vmo {
         }
         let mut retired = Retired::with_room(wanted)?;
         {
+            // SEAL: refused
             let mut pages = self.pages.lock();
+            if pages.sealed {
+                return Ok(0);
+            }
             let mut from = first;
             while retired.has_room() {
                 let next = pages
@@ -3066,6 +3409,7 @@ impl Vmo {
         let room = room.min(DIRTY_RUNS_MAX);
         let mut runs: DirtyRuns = crate::fallible::try_with_capacity(room)?;
         let end = first.saturating_add(count);
+        // SEAL: read
         let pages = self.pages.lock();
         let mut more = false;
         for (&index, &state) in pages.states.range(first..end) {

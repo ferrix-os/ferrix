@@ -209,6 +209,10 @@ pub struct Job {
     domain: u64,
     /// Sealed as it was made, as is every job made inside it (`H.OBJ.22`).
     sealed: bool,
+    /// Its processes' executable memory comes only from sealed, measured VMOs
+    /// (`docs/microkernel/K14.md` §3). Set once, never cleared; inherited by
+    /// every job made inside it.
+    measured: AtomicBool,
     /// Its supervisor slot (`docs/microkernel/K4.md` §2.2): the exception
     /// channel attached to it, if any, which hears the faults of every
     /// process in it and in the jobs inside it.
@@ -446,6 +450,7 @@ impl Job {
             audit_budget,
             domain: 0,
             sealed: false,
+            measured: AtomicBool::new(false),
             supervisor: Supervisor::new(),
         })
     }
@@ -465,6 +470,7 @@ impl Job {
         child.charge = charge;
         child.domain = domain;
         child.sealed = sealed || self.sealed;
+        child.measured = AtomicBool::new(self.measured());
         fallible::try_arc(child)
     }
 
@@ -506,6 +512,24 @@ impl Job {
     /// not yet started, which none refuses.
     pub(crate) fn seal_refuses(from: &Job, to: &Job, placing: bool) -> bool {
         !placing && (from.sealed || to.sealed)
+    }
+
+    /// Whether its processes are held to sealed, measured images.
+    pub fn measured(&self) -> bool {
+        self.measured.load(Ordering::Acquire)
+    }
+
+    /// Hold it, and every job made inside it from now on, to that. There is
+    /// no way back.
+    pub fn make_measured(&self) {
+        self.measured.store(true, Ordering::Release);
+    }
+
+    /// Whether a move from `from` to `to` would take a process across the
+    /// measured line, either way (K14.7); a process being placed by
+    /// `process_create` was made for its job.
+    pub fn measure_refuses(from: &Job, to: &Job, placing: bool) -> bool {
+        !placing && from.measured() != to.measured()
     }
 
     /// Whether it is sealed.

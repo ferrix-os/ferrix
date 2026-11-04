@@ -2303,6 +2303,28 @@ the target's own fault, no lock held, at most four times before it gives
 up. The bounce buffer is one page from the kernel heap, a fallible
 allocation charged to the caller's job for the length of the call; a
 refusal is `NO_MEMORY`. Nothing of it is on the kernel stack.
+### 2.2ah A seal's hash, a space's image record (`Vmo::seal`, K14)
+
+`Vmo::seal` commits the object's pages one at a time, as a fault does, and makes
+room for the frame list, before any lock. It then holds the mappers' lock and
+`pages`' lock once to test the kinds and freeze it, for a walk of its frame list
+(at most `SEAL_MAX_PAGES`, 16,384) to test each frame's reference count and
+copy the list out; nothing after the freeze can fail. The hash runs after the
+locks, with **no lock held and no preempt count** (the check reads the count
+there), so a long hash delays only its own caller: the time is the caller's,
+charged as a read of that size is.
+
+The stage 9 line `sealed` prints a megabyte's time. Measured (K14.10, ledger 6181
+D.8): see `docs/microkernel/K14.md` §2, whose AArch64 and ARMv7-A figures are
+emulated and set no bound. **The bound on real processors is not established**: a
+BACKLOG row, owed before a profile relies on it. No product path seals until the
+boot authority lands.
+
+A space's record of images is one fixed block of 32 digests, boxed before its
+lock; the push under the lock walks at most those 32. A writable region's count
+is changed under `pages`' lock, one load and one store, nested under the space's
+lock as `attach` is.
+
 
 ### 2.3 What is missing, per standard
 

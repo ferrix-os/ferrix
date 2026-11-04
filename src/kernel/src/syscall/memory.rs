@@ -80,6 +80,8 @@ pub(crate) fn refused(error: SpaceError) -> Errno {
     match error {
         SpaceError::OutOfMemory | SpaceError::Backing(_) => Errno::ENOMEM,
         SpaceError::Unreadable(_) | SpaceError::Evicted => Errno::EIO,
+        // No Linux program runs in a measured space (`docs/microkernel/K14.md` §3).
+        SpaceError::Unmeasured | SpaceError::ImagesFull => Errno::EPERM,
         // Linux's answer to a mapping whose memory type conflicts with a
         // mapping already made (`reserve_pfn_range`).
         SpaceError::NotUserRange(_) | SpaceError::BadRange | SpaceError::OtherMemoryType => {

@@ -1352,6 +1352,19 @@ pub(super) fn check_spaces() {
         Ok(report) => report,
         Err(problem) => fatal!(catalog::STAGE9_SPACES, "{problem}"),
     };
+    let sealing = match object::sealing_check::run() {
+        Ok(sealing) => sealing,
+        Err(problem) => fatal!(catalog::STAGE9_SEALING, "{problem}"),
+    };
+    println!(
+        "  sealed   {} VMOs frozen and hashed against a known vector, {} refusals as \
+         specified, {} digest kept across an unmap; {} bytes sealed in {} us",
+        sealing.sealed,
+        sealing.refusals,
+        sealing.recorded,
+        sealing.timed_bytes,
+        sealing.timed_nanos / 1000,
+    );
     println!(
         "  space    {} maps, protects and unmaps by handle, {} refusals as specified; \
          w^x: 0 of {} user leaves writable and executable, {} executable",
@@ -1538,6 +1551,25 @@ pub(super) fn check_device_objects() {
          {} VMO pages pinned for a device and found at their device addresses, {} refusals as \
          specified",
         report.mapped, report.combined, report.interrupts, report.pinned, report.refusals,
+    );
+    // K8: the right to bind a function to its domain, and what an unbound one
+    // is refused.
+    let authority = match object::authority_check::run() {
+        Ok(authority) => authority,
+        Err(problem) => fatal!(
+            catalog::STAGE10_AUTHORITY,
+            "stage 10 device authority self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  bind     {} refusals as specified on {} made-up nodes; {}",
+        authority.refusals,
+        authority.nodes,
+        if authority.master {
+            "a function became a bus master only after its bind"
+        } else {
+            "no idle PCI function here to show the bus master's half on"
+        },
     );
     // F-55: a copy through any of them is refused, and the boot goes on.
     let copies = match object::device_copy_check::run() {

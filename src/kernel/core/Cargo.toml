@@ -28,6 +28,7 @@ ferrix-fdt.workspace = true
 ferrix-frame.workspace = true
 ferrix-heap.workspace = true
 ferrix-kmem.workspace = true
+ferrix-sha256.workspace = true
 ferrix-linux-abi.workspace = true
 ferrix-native-abi.workspace = true
 ferrix-objects.workspace = true

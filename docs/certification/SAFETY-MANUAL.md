@@ -968,6 +968,15 @@ lost, never wrong data. The integrator:
 * knows that the loader reads only the boot processor's banks; another
   processor's record is kept out through the table, which its stop writes.
 
+### AoU-42 — a measured job's images are sealed by whoever starts it
+
+A process in a measured job (`docs/microkernel/K14.md`) runs only sealed, measured
+images and the kernel's own code pages. The digest says which bytes, not that they
+are certified: until the grant of K14 §5 lands the integrator compares
+`process_images` with the digests its configuration names. K2's alias, one VMO
+mapped writable by one handle and executable by another, is closed for measured
+jobs; it stays open outside them.
+
 ### AoU-40 — a partition that must not be killed is in a limited job
 
 H.QUOTA.22 (since 2026-10-31): a fault with the machine out of frames and

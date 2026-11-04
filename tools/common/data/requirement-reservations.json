@@ -71,10 +71,10 @@
     },
     {
       "ids": [
-        "H.DEV.9-13",
-        "L.device.66-85",
-        "H.MEM.29-33",
-        "L.mm.111-130",
+        "H.DEV.12-13",
+        "L.device.74-85",
+        "H.MEM.31-33",
+        "L.mm.123", "L.mm.127-130",
         "L.object.320-339"
       ],
       "owner": "mk-authority",

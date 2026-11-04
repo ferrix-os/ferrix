@@ -1055,6 +1055,19 @@ fn check_devices(view: &BootView<'_>) {
          digest of the others {digest:#018x}"
     );
 
+    if checks::run() {
+        match device::check::check_iommu_held(view, &reserved) {
+            Ok((held, apertures)) => println!(
+                "  iommu    {held} units reserved, none of {apertures} published apertures \
+                 over one or over the memory map, and an aperture minted over one withheld"
+            ),
+            Err(problem) => fatal!(
+                catalog::STAGE10_AUTHORITY,
+                "stage 10 device authority self-check failed: {problem}"
+            ),
+        }
+    }
+
     // After publishing, so that it can pick interrupt lines no device names.
     if checks::run() {
         match arch::check_distributor() {

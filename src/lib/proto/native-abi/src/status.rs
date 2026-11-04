@@ -69,9 +69,12 @@ pub const QUARANTINE_FULL: Errno = Errno::EDQUOT;
 /// pin budget, which `devmgr` sets (`docs/NVIDIA.md` §12.2). Nothing was
 /// pinned; a driver treats it as it treats `NO_MEMORY`.
 pub const LIMIT_REACHED: Errno = Errno::ENOSPC;
+/// A function's bind whose domain does not translate, with no opt-out
+/// (`docs/microkernel/K8.md`, K8.3): not a matter of rights.
+pub const UNTRANSLATED: Errno = Errno::ENXIO;
 
 /// Every name above, for the tests that hold them distinct.
-pub const ALL: [Errno; 18] = [
+pub const ALL: [Errno; 19] = [
     BAD_HANDLE,
     WRONG_TYPE,
     ACCESS_DENIED,
@@ -90,4 +93,5 @@ pub const ALL: [Errno; 18] = [
     NOT_CHILD,
     QUARANTINE_FULL,
     LIMIT_REACHED,
+    UNTRANSLATED,
 ];

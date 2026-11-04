@@ -306,7 +306,11 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
     // docs/certification/ITEM.md.
     (
         "certification item boundary",
-        &[&["tools/common/check/check-item-boundary.py"]],
+        &[
+            &["tools/common/check/check-item-boundary.py"],
+            &["tools/common/check/check-vmo-seal-tags.py"],
+            &["tools/common/check/check-vmo-seal-tags.py", "--self-test"],
+        ],
     ),
     // The build flags (docs/BUILD-FLAGS.md): read in the kernel crate alone
     // (rule 6 b), and no boot option read that the registry does not

@@ -3365,5 +3365,146 @@ package FerrixMemoryRequirements {
             attribute :>> unit = ("object::pager::Pager::drop", "object::pager::PagerCore::close",
                 "object::pager::PagerLink::detach", "object::pager::PagerLink::is_gone");
         }
+        requirement <'L.mm.111'> sealOnlyPlain : ItemLowLevel {
+            attribute :>> statement = "A seal shall need READ, MAP and WRITE on the handle and shall
+                refuse a VMO that is pager-backed, a file's, physical,
+                coherent, combining or holding a kernel view.";
+            attribute :>> criterion = "object::sealing_check: a coherent VMO, a kernel view and a
+                read-only handle refused; with the kind's test removed it
+                fails.";
+            attribute :>> parent = "H.MEM.29";
+            attribute :>> unit = "user::vmo::Vmo::seal";
+        }
+        requirement <'L.mm.112'> sealRefusedWhileWritable : ItemLowLevel {
+            attribute :>> statement = "A seal shall refuse a VMO with a region by handle whose
+                ceiling holds WRITE, a file mapping that may write, a live
+                hold, or a frame with a second reference; the count of such
+                regions shall fall only after that unmap's shootdown.";
+            attribute :>> criterion = "object::sealing_check: each case refused and, once unmapped,
+                sealed; with the count's test removed it fails.";
+            attribute :>> parent = "H.MEM.29";
+            attribute :>> unit = ("user::vmo::Vmo::seal",
+                "user::vmo::Vmo::raise_writable_region",
+                "user::vmo::Vmo::lower_writable_region");
+        }
+        requirement <'L.mm.113'> sealedNeverChanges : ItemLowLevel {
+            attribute :>> statement = "After a seal every path that changes a page or the page set
+                shall refuse, and each lock of a VMO's pages shall say what it
+                is to a seal.";
+            attribute :>> criterion = "object::sealing_check drives vmo_write and a writable map
+                through a kept handle and each path by name, and reads the
+                bytes back; check-vmo-seal-tags.py fails on an untagged lock,
+                with a planted control.";
+            attribute :>> parent = "H.MEM.29";
+            attribute :>> unit = ("user::vmo::Vmo::write_page",
+                "user::vmo::Vmo::commit_and_write",
+                "user::vmo::Vmo::zero_from",
+                "user::vmo::Vmo::hold",
+                "user::vmo::Vmo::hold_read");
+        }
+        requirement <'L.mm.114'> digestOfLengthAndFrames : ItemLowLevel {
+            attribute :>> statement = "A seal's digest shall be SHA-256 of the object's length in
+                bytes, little-endian, and its frames in page order.";
+            attribute :>> criterion = "object::sealing_check against a vector computed on the host,
+                and a byte's difference; with the length left out it fails.";
+            attribute :>> parent = "H.MEM.29";
+            attribute :>> unit = "user::vmo::Vmo::seal";
+        }
+        requirement <'L.mm.115'> nothingRunsBeforeItsDigest : ItemLowLevel {
+            attribute :>> statement = "Between the freeze and the digest's store vmo_digest shall
+                answer SHOULD_WAIT and an executable map BAD_STATE.";
+            attribute :>> criterion = "object::sealing_check on an object frozen for the check; with
+                the test removed it fails.";
+            attribute :>> parent = "H.MEM.30";
+            attribute :>> unit = ("syscall::native::vmo_digest",
+                "user::vmo::Vmo::freeze_for_check",
+                "user::space::AddressSpace::map_by_handle");
+        }
+        requirement <'L.mm.116'> measuredIsStickyAndInherited : ItemLowLevel {
+            attribute :>> statement = "A job made with JOB_MEASURED, and every job made inside it,
+                shall be measured, and no call shall clear it.";
+            attribute :>> criterion = "object::sealing_check; with the inheritance removed it fails.";
+            attribute :>> parent = "H.MEM.30";
+            attribute :>> unit = ("object::job::Job::make_measured",
+                "object::job::Job::measured");
+        }
+        requirement <'L.mm.117'> measuredMapOnlySealed : ItemLowLevel {
+            attribute :>> statement = "In a measured space space_map with MAP_EXECUTE, or through a
+                handle carrying EXECUTE, shall take only a sealed VMO whose
+                digest is stored, and answer BAD_STATE otherwise with an
+                UNMEASURED record.";
+            attribute :>> criterion = "object::sealing_check; with the test removed it fails.";
+            attribute :>> parent = "H.MEM.30";
+            attribute :>> unit = "user::space::AddressSpace::map_by_handle";
+        }
+        requirement <'L.mm.118'> measuredNoExecutableAnonymous : ItemLowLevel {
+            attribute :>> statement = "In a measured space space_allocate with MAP_EXECUTE shall
+                answer BAD_STATE, and its regions' ceiling shall hold no
+                EXECUTE.";
+            attribute :>> criterion = "object::sealing_check; with the test removed it fails.";
+            attribute :>> parent = "H.MEM.30";
+            attribute :>> unit = "user::space::AddressSpace::allocate_by_handle";
+        }
+        requirement <'L.mm.119'> measuredProtectWithinSealed : ItemLowLevel {
+            attribute :>> statement = "In a measured space space_protect to MAP_EXECUTE shall pass
+                only a region whose ceiling holds EXECUTE, which only a sealed
+                map has.";
+            attribute :>> criterion = "object::sealing_check on anonymous memory; with the ceiling
+                widened it fails.";
+            attribute :>> parent = "H.MEM.30";
+            attribute :>> unit = "syscall::native::space_protect";
+        }
+        requirement <'L.mm.120'> measuredNoPlainExecutable : ItemLowLevel {
+            attribute :>> statement = "A measured caller's plain vmo_executable shall answer
+                BAD_STATE.";
+            attribute :>> criterion = "object::sealing_check; with the test removed it fails.";
+            attribute :>> parent = "H.MEM.30";
+            attribute :>> unit = "syscall::native::vmo_executable";
+        }
+        requirement <'L.mm.121'> measuredCreateOnlySealed : ItemLowLevel {
+            attribute :>> statement = "process_create into a measured job shall take only a sealed
+                image, measure the new process's space and record the image's
+                digest.";
+            attribute :>> criterion = "object::sealing_check's refusal of an unsealed image; with the
+                test removed it fails.";
+            attribute :>> parent = "H.MEM.30";
+            attribute :>> unit = ("syscall::native::process_create",
+                "user::space::AddressSpace::note_image",
+                "user::space::Inner::note_image");
+        }
+        requirement <'L.mm.122'> cloneDoesNotLaunder : ItemLowLevel {
+            attribute :>> statement = "A measured caller's space_clone of an unmeasured space shall
+                answer BAD_STATE, and a clone shall keep its source's measured
+                state and record.";
+            attribute :>> criterion = "object::sealing_check; with the test removed it fails.";
+            attribute :>> parent = "H.MEM.30";
+            attribute :>> unit = ("syscall::native::space_clone",
+                "user::space::AddressSpace::fork");
+        }
+        requirement <'L.mm.124'> digestsKept : ItemLowLevel {
+            attribute :>> statement = "A space shall record the digest of each sealed VMO it maps
+                executable, once, up to MAX_IMAGES, keep it across an unmap
+                and copy it across a clone.";
+            attribute :>> criterion = "object::sealing_check; with an unmap removing it the check
+                fails.";
+            attribute :>> parent = "H.MEM.30";
+            attribute :>> unit = ("user::space::Images::note",
+                "user::space::AddressSpace::images_into");
+        }
+        requirement <'L.mm.125'> partialListSaysSo : ItemLowLevel {
+            attribute :>> statement = "process_images shall answer the digests' count with
+                IMAGES_UNMEASURED set when the space is not measured.";
+            attribute :>> criterion = "object::sealing_check; with the bit removed it fails.";
+            attribute :>> parent = "H.MEM.30";
+            attribute :>> unit = "syscall::native::process_images";
+        }
+        requirement <'L.mm.126'> noMoveAcrossTheLine : ItemLowLevel {
+            attribute :>> statement = "A process shall cross between a measured and an unmeasured job
+                by no move, either way; process_create's placement of a new
+                process excepted.";
+            attribute :>> criterion = "object::sealing_check; with the test removed it fails.";
+            attribute :>> parent = "H.MEM.30";
+            attribute :>> unit = "object::job::Job::measure_refuses";
+        }
     }
 }

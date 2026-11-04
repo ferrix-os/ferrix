@@ -1143,5 +1143,90 @@ package FerrixDeviceRequirements {
             attribute :>> unit = ("discovery::devmgr::drivers_job",
                 "object::job::Job::new_root_as");
         }
+        requirement <'L.device.66'> bindNeedsItsRight : ItemLowLevel {
+            attribute :>> statement = "device_bind_domain shall need MANAGE and
+                BIND_DOMAIN on the handle, and answer ACCESS_DENIED without
+                BIND_DOMAIN, making no domain.";
+            attribute :>> criterion = "object::authority_check: a made-up node's
+                handle with the device rights is refused and has no domain after;
+                with the right's test removed the check fails.";
+            attribute :>> parent = "H.DEV.9";
+            attribute :>> unit = "syscall::native::device_bind_domain";
+        }
+        requirement <'L.device.67'> bindRightMintedOnKeptOnly : ItemLowLevel {
+            attribute :>> statement = "GIVEN_DEVICE_RIGHTS and DEVICE_RIGHTS shall
+                not contain BIND_DOMAIN.";
+            attribute :>> criterion = "A compile-time assertion in
+                discovery/devmgr.rs; widening either constant fails the build.";
+            attribute :>> parent = "H.DEV.9";
+            attribute :>> unit = "discovery::devmgr::write_devices";
+        }
+        requirement <'L.device.68'> unboundGivesNothing : ItemLowLevel {
+            attribute :>> statement = "On an explicit node nobody bound,
+                io_mapping_create, interrupt_create, vmo_pin and device_set_limit
+                shall answer BAD_STATE, device_isolation shall answer untranslated,
+                and none shall make a domain; a node that reaches no memory has
+                nothing to bind and is exempt from the first two.";
+            attribute :>> criterion = "object::authority_check, each call on a
+                made-up node, and on an idle real PCI function where one exists;
+                with domain_for_call answering through domain the check fails.";
+            attribute :>> parent = "H.DEV.10";
+            attribute :>> unit = ("device::DeviceNode::may_drive",
+                "device::silence_found_masters",
+                "device::DeviceNode::take_domain_for_check",
+                "device::DeviceNode::domain_for_call",
+                "syscall::native::domain_of_call");
+        }
+        requirement <'L.device.69'> bindRefusalsChangeNothing : ItemLowLevel {
+            attribute :>> statement = "A bind on a bound node shall answer
+                ALREADY_BOUND, on a node reaching no memory or a function dma_exempt
+                names WRONG_TYPE, on a refused node BAD_STATE, and on a function
+                whose only possible domain is held LIMIT_REACHED, each leaving the
+                node as it was.";
+            attribute :>> criterion = "object::authority_check drives the bound,
+                no-memory and refused cases with their controls; dma_exempt and a
+                held domain are not reachable on QEMU's made-up nodes and rest on
+                their argued coverage entries.";
+            attribute :>> parent = "H.DEV.10";
+            attribute :>> unit = "device::DeviceNode::bind_domain";
+        }
+        requirement <'L.device.70'> iommuRegistersInNoAperture : ItemLowLevel {
+            attribute :>> statement = "Every IOMMU unit's registers shall be
+                reserved, an aperture minted over them shall be withheld, and no
+                published aperture shall overlap them.";
+            attribute :>> criterion = "device::check::check_iommu_held on every
+                boot with a unit; with the units left out of Reserved it fails.";
+            attribute :>> parent = "H.DEV.11";
+            attribute :>> unit = ("device::Reserved::of", "device::Reserved::unit_reserved");
+        }
+        requirement <'L.device.71'> bindingFollowsProfile : ItemLowLevel {
+            attribute :>> statement = "A node shall be explicit, and the kept handle
+                carry BIND_DOMAIN, exactly when the kernel is built with
+                personality=user.";
+            attribute :>> criterion = "A compile-time assertion, and
+                object::authority_check reads every published node; a node forced
+                to the other value fails it.";
+            attribute :>> parent = "H.DEV.9";
+            attribute :>> unit = ("device::DeviceNode::explicit_bind",
+                "device::DeviceNode::explicit_for_check");
+        }
+        requirement <'L.device.72'> untranslatedNotBound : ItemLowLevel {
+            attribute :>> statement = "A bind whose domain would not translate shall
+                be refused ACCESS_DENIED and the domain not kept, unless the boot
+                carries ferrix.unisolated.";
+            attribute :>> criterion = "object::authority_check on a made-up node,
+                without and with the word; with the test removed it fails.";
+            attribute :>> parent = "H.DEV.10";
+            attribute :>> unit = "device::DeviceNode::bind_domain";
+        }
+        requirement <'L.device.73'> tablesInNoAperture : ItemLowLevel {
+            attribute :>> statement = "No published aperture shall lie over the
+                memory map, where the IOMMU's tables are, the boot framebuffer's
+                node aside.";
+            attribute :>> criterion = "device::check::check_iommu_held's sweep on
+                every boot; with the memory map left out of Reserved it fails.";
+            attribute :>> parent = "H.DEV.11";
+            attribute :>> unit = "device::Reserved::covers";
+        }
     }
 }

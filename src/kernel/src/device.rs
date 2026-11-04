@@ -427,6 +427,9 @@ pub struct Reserved {
     /// reserved like the rest, except to the one aperture
     /// [`DeviceNode::firmware_framebuffer`] mints inside it.
     framebuffer: Option<usize>,
+    /// Which of `ranges` are the IOMMU units', as `start..end`: the kernel's own
+    /// windows over a unit it drives cover the same bytes, so a check asks these.
+    units: (usize, usize),
 }
 
 impl Reserved {
@@ -461,9 +464,11 @@ impl Reserved {
         reserved.ranges.extend(vmap::device_windows());
         // An IOMMU is programmed by the kernel alone: a driver that could map
         // its registers could hand its own device the whole of memory.
+        let first_unit = reserved.ranges.len();
         for unit in iommu::units(view) {
             reserved.add(unit.phys, unit.len);
         }
+        reserved.units = (first_unit, reserved.ranges.len());
         if let Description::Tree(tree) = description::of(view)
             && let Some(console) = tree.console()
         {
@@ -488,6 +493,15 @@ impl Reserved {
         self.ranges
             .iter()
             .any(|&(low, high)| start < high && low < end)
+    }
+
+    /// Whether a unit's registers are in the units' own reservation, whatever
+    /// else covers them.
+    pub(crate) fn unit_reserved(&self, start: u64, len: u64) -> bool {
+        let end = start.saturating_add(len);
+        self.ranges
+            .get(self.units.0..self.units.1)
+            .is_some_and(|units| units.iter().any(|&(low, high)| low <= start && end <= high))
     }
 
     /// Whether `aperture` overlaps anything reserved.
@@ -1247,6 +1261,36 @@ impl DmaShape {
     };
 }
 
+/// Whether this kernel's nodes need an explicit bind: the profile's answer
+/// (`docs/microkernel/K8.md` §2, `L.device.71`).
+pub const EXPLICIT_BIND: bool = cfg!(ferrix_personality = "user");
+
+/// Why a native call found no domain to reach.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DomainAnswer {
+    /// An explicit node `devmgr` has not bound.
+    Unbound,
+    /// No memory for the domain a hybrid's call would have made.
+    NoMemory,
+}
+
+/// Why [`DeviceNode::bind_domain`] refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BindRefusal {
+    /// The node reaches no memory, or the function is never a bus master.
+    NoDma,
+    /// It is bound.
+    Already,
+    /// The domain it would have does not translate, and the boot carries no
+    /// `ferrix.unisolated`.
+    Untranslated,
+    /// The only domain the function can have is held already (an RMRR
+    /// identity domain).
+    Held,
+    /// No memory for the domain.
+    NoMemory,
+}
+
 /// A device a driver can be given, with exactly the apertures and vectors it
 /// has.
 #[derive(Debug)]
@@ -1309,6 +1353,11 @@ pub struct DeviceNode {
     /// The IOMMU domain its DMA goes through, made the first time it is asked
     /// for.
     domain: SpinLock<Option<Arc<iommu::Domain>>>,
+    /// Whether a native call may reach this node's domain only after
+    /// `devmgr` bound it (`docs/microkernel/K8.md` §2), never making one on
+    /// the way. Every node of a `personality=user` kernel, and none of a
+    /// hybrid's outside the boot check.
+    explicit_bind: AtomicBool,
     /// Apertures not minted because the kernel or another device has that
     /// memory.
     withheld: usize,
@@ -1429,6 +1478,7 @@ impl DeviceNode {
             writable: Writable::NONE,
             bars: [None; 6],
             domain: SpinLock::new(None),
+            explicit_bind: AtomicBool::new(EXPLICIT_BIND),
             withheld: 0,
             interrupt_tables: Vec::new(),
             assigned: [None; 6],
@@ -1637,7 +1687,7 @@ impl DeviceNode {
     /// base class is display (`03`), as enumeration read them
     /// ([`is_intel_gpu`]). Or the node a boot check names in
     /// [`FORCED_INTEL_GPU`], which no product path writes.
-    pub(crate) fn intel_gpu(&self) -> bool {
+    pub fn intel_gpu(&self) -> bool {
         let forced = FORCED_INTEL_GPU.load(Ordering::Acquire);
         if forced != 0 && forced == self.index.saturating_add(1) {
             return true;
@@ -1663,7 +1713,8 @@ impl DeviceNode {
         if FORCED_UNTRANSLATED.load(Ordering::Acquire) {
             return false;
         }
-        self.domain().is_ok_and(|domain| domain.translated())
+        self.domain_for_call()
+            .is_ok_and(|domain| domain.translated())
     }
 
     /// The firmware framebuffer node's mode; `None` for any other node.
@@ -2407,6 +2458,111 @@ impl DeviceNode {
         Ok(domain)
     }
 
+    /// Turn the explicit rule on or off on a node, for the boot check alone:
+    /// `present` has no explicit node to run it on.
+    #[doc(hidden)]
+    pub fn explicit_for_check(&self, explicit: bool) -> Result<(), &'static str> {
+        if !crate::boot_checks::run() {
+            return Err("a node's bind rule is changed only while boot checks run");
+        }
+        self.explicit_bind.store(explicit, Ordering::Release);
+        Ok(())
+    }
+
+    /// Take the node's domain out, for the boot check alone, which gives it
+    /// back with [`DeviceNode::give_check_domain`].
+    #[doc(hidden)]
+    pub fn take_domain_for_check(&self) -> Result<Option<Arc<iommu::Domain>>, &'static str> {
+        if !crate::boot_checks::run() {
+            return Err("a node's domain is taken out only while boot checks run");
+        }
+        Ok(self.domain.lock().take())
+    }
+
+    /// Mark a made-up node refused, for the boot check alone.
+    #[doc(hidden)]
+    pub fn refuse_for_check(&self) {
+        self.refused.store(true, Ordering::Release);
+    }
+
+    /// Whether the node is a PCI bridge (base class 06).
+    pub fn is_bridge(&self) -> bool {
+        self.pci
+            .as_ref()
+            .is_some_and(|function| function.class >> 16 == 0x06)
+    }
+
+    /// Whether a native call needs a bind before it reaches this node's
+    /// domain (`L.device.68`).
+    pub fn explicit_bind(&self) -> bool {
+        self.explicit_bind.load(Ordering::Acquire)
+    }
+
+    /// Whether a driver may be given this node's registers, vectors and pins
+    /// yet: under an explicit bind, only once bound; a node that reaches no
+    /// memory has nothing to bind (`L.device.68`).
+    pub fn may_drive(&self) -> bool {
+        !self.explicit_bind() || !self.reaches_memory() || self.domain_made().is_some()
+    }
+
+    /// The domain as a native call may reach it: [`DeviceNode::domain`], but
+    /// under an explicit bind only one already bound, and none is made
+    /// (`L.device.68`).
+    ///
+    /// # Errors
+    ///
+    /// [`DomainAnswer::Unbound`], or [`DomainAnswer::NoMemory`].
+    pub fn domain_for_call(&self) -> Result<Arc<iommu::Domain>, DomainAnswer> {
+        if self.explicit_bind() {
+            return self.domain_made().ok_or(DomainAnswer::Unbound);
+        }
+        self.domain().map_err(|_| DomainAnswer::NoMemory)
+    }
+
+    /// Attach the function to a domain the kernel makes and keeps
+    /// (`device_bind_domain`, `H.DEV.9`). `unisolated` is the boot's
+    /// `ferrix.unisolated`: without it a domain that would not translate is
+    /// refused and not kept (`L.device.72`), whatever `devmgr`'s admission
+    /// said, since nothing confines an untranslated function.
+    ///
+    /// # Errors
+    ///
+    /// [`BindRefusal`]; the node is as it was.
+    pub fn bind_domain(&self, unisolated: bool) -> Result<(), BindRefusal> {
+        if !self.reaches_memory() {
+            return Err(BindRefusal::NoDma);
+        }
+        if let Location::Pci(function) = self.location
+            && iommu::dma_exempt(function)
+        {
+            return Err(BindRefusal::NoDma);
+        }
+        let mut held = self.domain.lock();
+        // A domain the boot made first (`ferrix.intelgpu`) or an earlier
+        // driver's start: bound is bound, and devmgr goes on (K8.4). It is
+        // still held to the rule below.
+        if let Some(domain) = held.as_ref() {
+            return if domain.translated() || unisolated {
+                Err(BindRefusal::Already)
+            } else {
+                Err(BindRefusal::Untranslated)
+            };
+        }
+        let domain = match self.location {
+            Location::Pci(address) => iommu::domain_for(address).ok_or(BindRefusal::Held)?,
+            Location::VirtioMmio(_) | Location::Tree(_) => iommu::Domain::untranslated(),
+        };
+        if !domain.translated() && !unisolated {
+            return Err(BindRefusal::Untranslated);
+        }
+        let domain = fallible::try_arc(domain).map_err(|_| BindRefusal::NoMemory)?;
+        if self.intel_gpu() {
+            crate::object::pin::give_intel_gpu_budget(&domain);
+        }
+        *held = Some(domain);
+        Ok(())
+    }
+
     /// Give the node `domain` as its domain, if it has none yet: for
     /// stage 10's AMD-Vi unity check alone, which makes `edu` an IVMD
     /// identity domain at check time (`docs/AMD-VI.md` §4.2), so the checks
@@ -2415,7 +2571,7 @@ impl DeviceNode {
     /// # Errors
     ///
     /// The node has a domain already, or boot checks do not run.
-    pub(crate) fn give_check_domain(&self, domain: Arc<iommu::Domain>) -> Result<(), &'static str> {
+    pub fn give_check_domain(&self, domain: Arc<iommu::Domain>) -> Result<(), &'static str> {
         if !crate::boot_checks::run() {
             return Err("a check's domain is given only while boot checks run");
         }
@@ -2435,7 +2591,7 @@ impl DeviceNode {
     /// Whether bus mastering is on: as enumeration found it, until
     /// `enable_dma` or `disable_dma` writes it (D10 reads it at stage 10's
     /// report, before either has, `iommu/ivrs.rs`).
-    pub(crate) fn bus_master_on(&self) -> bool {
+    pub fn bus_master_on(&self) -> bool {
         self.config.lock().bus_master
     }
 
@@ -3082,6 +3238,19 @@ fn yield_intel_gpu(nodes: &mut [DeviceNode], allowed: bool) {
     }
 }
 
+/// Under an explicit bind a device is a bus master only after it was bound
+/// (`H.DEV.10`), so a function firmware left mastering is turned off at
+/// publication. One whose switch cannot be reached is refused: nothing drives
+/// it. A bridge is left alone: it is no device whose DMA this could stop, and
+/// an Intel host bridge's enable is hardwired (`check_dma_switch`).
+fn silence_found_masters(nodes: &[Arc<DeviceNode>]) {
+    for node in nodes.iter().filter(|node| node.explicit_bind()) {
+        if !node.is_bridge() && node.bus_master_on() && node.disable_dma().is_err() {
+            node.refused.store(true, Ordering::Release);
+        }
+    }
+}
+
 /// Run `finders` in order, printing each one's lines after it, then publish
 /// every node they found after requiring each to hand out exactly what it
 /// has, and no two to hand out the same memory or the same interrupt.
@@ -3166,6 +3335,7 @@ pub fn publish<'f, P: check::Policy>(
     // FATAL-ALLOC: boot only: stage 10 builds the device registry once, before any program runs.
     let published = DEVICES.call_once(|| nodes.into_iter().map(Arc::new).collect());
     report.nodes = published.len();
+    silence_found_masters(published);
     check::check_vectors(published, &mut report)?;
     check::check_dma_switch(published)?;
     Ok(report)

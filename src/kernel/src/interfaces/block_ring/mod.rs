@@ -1404,7 +1404,11 @@ pub(crate) struct RingDisk {
     state: SpinLock<DiskState>,
     /// Woken when a request finishes, each its own caller's queue, and all
     /// of them when the ring ends.
-    done: [WaitQueue; WAKE_SLOTS],
+    ///
+    /// On the heap: sixty-four queues by value made this record 6 KiB, which `RingDisk::new`
+    /// and `run` each held on a four-page stack, and a timer's interrupt in an allocation
+    /// under them overflowed it (ledger 6282 R1).
+    done: alloc::boxed::Box<[WaitQueue]>,
     /// The queue the next caller sleeps on.
     next_slot: AtomicUsize,
     /// The serving ring's completion port, nudged when a read is queued:
@@ -1440,7 +1444,7 @@ impl RingDisk {
                 held_back: false,
                 task: TaskIs::Awake,
             }),
-            done: [const { WaitQueue::new() }; WAKE_SLOTS],
+            done: (0..WAKE_SLOTS).map(|_| WaitQueue::new()).collect(),
             next_slot: AtomicUsize::new(0),
             port: SpinLock::new(port),
         }
