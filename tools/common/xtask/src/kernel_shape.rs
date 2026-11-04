@@ -19,6 +19,14 @@ pub(crate) const FIRST_TASKS: &[Task] = &[
         run: |_, args| test_btrfsd(args),
     },
     Task {
+        name: "test-netd",
+        help_at: 963,
+        help: &[
+            "test-netd     netd as the wire's switch (docs/microkernel/M8.md §2): killed and started again under pings.",
+        ],
+        run: |_, args| test_netd(args),
+    },
+    Task {
         name: "test-btrfsd-restart",
         help_at: 962,
         help: &[
@@ -180,6 +188,49 @@ fn test_btrfsd(args: &Args) -> Result<()> {
         let initramfs = initramfs::build(None, &natives, None, &carried)?;
         let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, None)?;
         qemu::test_btrfsd(arch, &image, &kernel, args)?;
+    }
+    Ok(())
+}
+
+fn net_cost(args: &Args, arch: paths::Arch, busybox: &std::path::Path) -> Result<String> {
+    let loader = cargo::build_loader(arch, args.release)?;
+    let kernel =
+        cargo::build_kernel_with_init(arch, args.release, busybox, crate::shell::NETD_RTT_SCRIPT)?;
+    let natives = native::build(arch, args.release)?;
+    let mut carried = crate::shell::netd_carried(busybox)?;
+    carried.extend(crate::dhcp::carried(arch)?);
+    let initramfs = initramfs::build(None, &natives, None, &carried)?;
+    let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, None)?;
+    qemu::net_round_trip(arch, &image, &kernel, args)
+}
+
+fn test_netd(args: &Args) -> Result<()> {
+    let args = &Args {
+        net: true,
+        ..args.clone()
+    };
+    let init = args
+        .init
+        .as_deref()
+        .ok_or_else(|| Error::new("test-netd runs busybox: --init"))?;
+    for arch in args.arches()? {
+        let loader = cargo::build_loader(arch, args.release)?;
+        let busybox = crate::program_for(init, arch)?;
+        let without = net_cost(args, arch, &busybox)?;
+        // SAFETY: xtask is one thread here, before any build that reads them.
+        unsafe { std::env::set_var("FERRIX_TEST_NETD", "1") };
+        let with = net_cost(args, arch, &busybox)?;
+        println!("  {arch}: a ping's min/avg/max without netd {without}, with netd {with}");
+        // SAFETY: as above.
+        unsafe { std::env::set_var("FERRIX_TEST_NETD_DIES_AFTER", "300") };
+        let kernel =
+            cargo::build_kernel_with_init(arch, args.release, &busybox, crate::shell::NETD_SCRIPT)?;
+        let natives = native::build(arch, args.release)?;
+        let mut carried = crate::shell::netd_carried(&busybox)?;
+        carried.extend(crate::dhcp::carried(arch)?);
+        let initramfs = initramfs::build(None, &natives, None, &carried)?;
+        let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, None)?;
+        qemu::test_netd_restart(arch, &image, &kernel, args)?;
     }
     Ok(())
 }

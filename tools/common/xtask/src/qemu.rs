@@ -4874,6 +4874,63 @@ pub(crate) fn test_first_processes_needs(
     Ok(())
 }
 
+/// Boot an image with a program and a script built in, and require the
+/// script's output, in order, and its exit status.
+///
+/// The lines are looked for *after* the boot marker, so a kernel that happened
+/// to print one of them during its self-checks cannot satisfy the test.
+pub(crate) fn test_netd_restart(
+    arch: Arch,
+    image: &Path,
+    kernel: &Path,
+    args: &Args,
+) -> Result<()> {
+    let watched = watch(arch, image, kernel, args, "netd-row: ping after status")?;
+    let log = watched.log.display();
+    if !matches!(watched.verdict, Verdict::Reached) {
+        return Err(Error::new(format!(
+            "{arch}: the row did not end.\n  Serial output is in {log}"
+        )));
+    }
+    let saw = |text: &str| watched.lines.iter().any(|line| line.contains(text));
+    for want in [
+        "netd     up",
+        "netd-row: ping before status 0",
+        "devmgr   netd ended: started again",
+        "netd-row: ping after status 0",
+    ] {
+        if !saw(want) {
+            return Err(Error::new(format!(
+                "{arch}: `{want}` is missing.\n  Serial output is in {log}"
+            )));
+        }
+    }
+    println!("  {arch}: netd died and was started again, and pings came back");
+    Ok(())
+}
+
+pub(crate) fn net_round_trip(
+    arch: Arch,
+    image: &Path,
+    kernel: &Path,
+    args: &Args,
+) -> Result<String> {
+    let watched = watch(arch, image, kernel, args, "netd-row: rtt done")?;
+    let log = watched.log.display();
+    watched
+        .lines
+        .iter()
+        .find_map(|line| {
+            line.split_once("round-trip min/avg/max = ")
+                .map(|(_, tail)| tail.trim().to_owned())
+        })
+        .ok_or_else(|| {
+            Error::new(format!(
+                "{arch}: no ping summary.\n  Serial output is in {log}"
+            ))
+        })
+}
+
 /// A description the boot must not go on with.
 /// Verifies: `L.object.323`
 pub(crate) fn test_description_stops(

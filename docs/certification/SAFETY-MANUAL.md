@@ -765,6 +765,11 @@ its client hears nothing. The integrator's supervisor tells such a client after 
 protocol carries a deadline. A client with neither waits on. The kernel's part stops at the channel,
 which it keeps open as asked.
 
+### AoU-46 — no safety partition's traffic crosses `netd`
+
+`netd` is QM and in no claim's item (`docs/microkernel/M8.md` §2, N.6). A safety partition uses devices only through native drivers devmgr assigns to it, never `netd` or a Linux partition's device cores. The integrator keeps it so.
+
+
 ### AoU-41 — a safety partition maps no pager-backed VMO it did not choose
 A pager-backed VMO (`docs/microkernel/K3.md`) has absent pages its pager
 supplies: a fault on one waits for that pager, up to the pager's bound of at

@@ -939,6 +939,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrix-netd"
+version = "0.1.0"
+dependencies = [
+ "ferrix-blkclient",
+ "ferrix-devmgr-proto",
+ "ferrix-native-abi",
+ "ferrix-netring",
+ "ferrix-netswitch",
+ "ferrix-rt",
+]
+
+[[package]]
 name = "ferrix-netlink"
 version = "0.1.0"
 dependencies = [

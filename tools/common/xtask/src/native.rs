@@ -231,6 +231,11 @@ pub(crate) fn build_in(arch: Arch, release: bool, target_dir: &Path) -> Result<V
         .chain(lifted.then_some(&LINUXD))
         .chain(lifted.then_some(&PARTMGR))
         .chain(served.then_some(&BTRFSD))
+        .chain(
+            std::env::var_os("FERRIX_TEST_NETD")
+                .is_some()
+                .then_some(&NETD),
+        )
         .map(|program| build_one(arch, release, target_dir, program))
         .collect()
 }
@@ -266,6 +271,14 @@ pub(crate) const BTRFSD: Program = Program {
     package: "ferrix-btrfsd",
     binary: "btrfsd",
     directory: DIRECTORY,
+};
+
+/// The network switch (`docs/microkernel/M8.md` §2): only `test-netd`'s image for now,
+/// until the row's review.
+pub(crate) const NETD: Program = Program {
+    package: "ferrix-netd",
+    binary: "netd",
+    directory: DRIVERS,
 };
 
 /// A block driver over memory that misbehaves on purpose: only

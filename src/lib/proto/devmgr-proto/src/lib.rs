@@ -109,6 +109,11 @@ pub const FLAG_CORES: u32 = 1 << 4;
 /// others.
 pub const FLAG_BLOCK_CORES: u32 = 1 << 5;
 
+/// DEVICES flags, bit 6: after those, a channel to a partition's cores, for `netd`
+/// (`docs/microkernel/M8.md` §2): `devmgr` hands it on if its image set carries `netd`, and
+/// asks `netd` for `NET_RING_CREATE`'s control channel.
+pub const FLAG_NET_CORES: u32 = 1 << 6;
+
 /// The device cores' protocol: one request and one answer, in turn, on the
 /// channel [`FLAG_CORES`] gives. `devmgr` to `linuxd`: [`CoreOpen`], with one
 /// handle, the device with `TRANSFER` alone, which says what it is
@@ -252,7 +257,8 @@ const FLAGS_KNOWN: u32 = FLAG_FIRST
     | FLAG_EXPLICIT_BIND
     | FLAG_DEBUG_LOG
     | FLAG_CORES
-    | FLAG_BLOCK_CORES;
+    | FLAG_BLOCK_CORES
+    | FLAG_NET_CORES;
 
 /// Why bytes on the channel are not a message.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -287,6 +293,8 @@ pub struct Devices<'a> {
     pub cores: bool,
     /// Whether the block cores' channel comes after that.
     pub block_cores: bool,
+    /// Whether a partition's cores' channel for `netd` comes after that.
+    pub net_cores: bool,
 }
 
 impl Devices<'_> {
@@ -312,6 +320,7 @@ impl Devices<'_> {
             + (self.first && self.debug_log) as usize
             + (self.first && self.cores) as usize
             + (self.first && self.block_cores) as usize
+            + (self.first && self.net_cores) as usize
     }
 
     /// Encode into `out`, answering the bytes written, or `None` if `out` is
@@ -346,7 +355,8 @@ impl Devices<'_> {
                 FLAG_BLOCK_CORES
             } else {
                 0
-            };
+            }
+            | if self.net_cores { FLAG_NET_CORES } else { 0 };
         put(out, 20, &flags.to_le_bytes());
         for (i, name) in self.names.iter().enumerate() {
             put(out, DEVICES_HEADER_BYTES + i * NAME_BYTES, name);
@@ -377,6 +387,8 @@ pub struct DevicesView<'a> {
     pub cores: bool,
     /// Whether the block cores' channel comes after that.
     pub block_cores: bool,
+    /// Whether a partition's cores' channel for `netd` comes after that.
+    pub net_cores: bool,
     names: &'a [u8],
 }
 
@@ -412,6 +424,7 @@ impl DevicesView<'_> {
             + (self.first && self.debug_log) as usize
             + (self.first && self.cores) as usize
             + (self.first && self.block_cores) as usize
+            + (self.first && self.net_cores) as usize
     }
 
     /// Decode a DEVICES message.
@@ -445,6 +458,7 @@ impl DevicesView<'_> {
             debug_log: flags & FLAG_DEBUG_LOG != 0 && flags & !FLAGS_KNOWN == 0,
             cores: flags & FLAG_CORES != 0 && flags & !FLAGS_KNOWN == 0,
             block_cores: flags & FLAG_BLOCK_CORES != 0 && flags & !FLAGS_KNOWN == 0,
+            net_cores: flags & FLAG_NET_CORES != 0 && flags & !FLAGS_KNOWN == 0,
             names: bytes.get(DEVICES_HEADER_BYTES..).unwrap_or(&[]),
         })
     }

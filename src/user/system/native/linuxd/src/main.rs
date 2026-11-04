@@ -242,6 +242,8 @@ fn served(_argument: usize) {
     if ferrix_kernel_load::net::start().is_err() {
         console::write_bytes(b"  linuxd   no task for the network's clock\n");
     }
+    // A further partition has this and not the rest: its interface is `netd`'s to give.
+    ferrix_kernel_item::cores::start_for_netd(page.net_cores as u32);
     if page.cores != 0 {
         ferrix_kernel_item::cores::start(page.cores, page.devmgr);
         let patience = ferrix_kernel_core::timer::now_nanos().saturating_add(20_000_000_000);

@@ -135,6 +135,19 @@ pub fn start(cores: u32, messages: u32) {
     }
 }
 
+/// Serve the channel `netd` opens this partition's rings on, if it ever does: the same
+/// requests as `devmgr`'s, one at a time with them (`docs/microkernel/M8.md` §2).
+pub fn start_for_netd(net_cores: u32) {
+    if net_cores != 0
+        && crate::sched::spawn("netd cores", serve_cores, net_cores as usize, 0).is_err()
+    {
+        crate::println!("linuxd: no thread for netd's cores");
+    }
+}
+
+/// One open at a time across both channels: [`HANDED`] is one word.
+static OPENING: AtomicBool = AtomicBool::new(false);
+
 fn serve_cores(handle: usize) {
     let channel = core::mem::ManuallyDrop::new(Channel::from_owned(OwnedHandle::from_raw(
         Kernel,
@@ -159,6 +172,9 @@ fn serve_cores(handle: usize) {
         let Some(open) = CoreOpen::decode(bytes.get(..got.bytes).unwrap_or(&[])) else {
             continue;
         };
+        while OPENING.swap(true, Ordering::Acquire) {
+            crate::sched::yield_now();
+        }
         let handler = HANDLERS
             .lock()
             .iter()
@@ -188,6 +204,7 @@ fn serve_cores(handle: usize) {
         };
         let status = answered.err().unwrap_or(0);
         let handed = HANDED.lock().take();
+        OPENING.store(false, Ordering::Release);
         let reply = CoreOpened { status }.encode();
         let sent = match handed {
             Some(end) if status == 0 => {

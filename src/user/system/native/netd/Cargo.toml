@@ -1,0 +1,25 @@
+[package]
+name = "ferrix-netd"
+description = "The network switch: one wire's driver on one side, each Linux partition's stack on the other (docs/microkernel/M8.md §2)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "netd"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+ferrix-blkclient.workspace = true
+ferrix-devmgr-proto.workspace = true
+ferrix-native-abi.workspace = true
+ferrix-netring.workspace = true
+ferrix-netswitch.workspace = true
+ferrix-rt.workspace = true
+
+[lints]
+workspace = true

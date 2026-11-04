@@ -512,6 +512,10 @@ fn rows_for(path: &str, image_crates: &BTreeSet<String>, rows: &mut Rows) {
         rows.add(&["test-first-processes --personality user"]);
         reason(rows, "the first processes' row");
     }
+    if under("src/user/system/native/netd/") || under("src/lib/proto/netswitch/") {
+        rows.add(&["test-netd --personality user"]);
+        reason(rows, "netd's row");
+    }
     if under("src/user/system/native/btrfsd/")
         || under("src/lib/fs/fsproto/")
         || under("src/lib/fs/blkclient/")
@@ -1122,6 +1126,12 @@ mod tests {
             rows.commands
                 .iter()
                 .any(|c| c == "test-btrfsd --personality user --set fs=server")
+        );
+        let rows = rows_of(&["src/lib/proto/netswitch/src/lib.rs"]);
+        assert!(
+            rows.commands
+                .iter()
+                .any(|c| c == "test-netd --personality user")
         );
     }
 

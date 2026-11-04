@@ -104,7 +104,7 @@
     "discovery/devmgr.rs": {
       "bucket": "boot",
       "what": "devmgr's image VMOs and DEVICES; request, record, note_driver and published are the hybrid's, cut under M6",
-      "sites": 33
+      "sites": 34
     },
     "discovery/first_image.rs": {
       "bucket": "boot",

@@ -75,6 +75,46 @@ cat /proc/self/maps > /tmp/maps; echo "lift: maps read"
 exit 9
 "#;
 
+/// What [`NETD_SCRIPT`] runs.
+pub(crate) fn netd_carried(busybox: &Path) -> Result<Vec<ports::File>> {
+    let bytes = std::fs::read(busybox)
+        .map_err(|error| Error::new(format!("reading {}: {error}", busybox.display())))?;
+    Ok([
+        "bin/sh",
+        "bin/ip",
+        "bin/ping",
+        "bin/sleep",
+        "bin/grep",
+        "bin/cat",
+    ]
+    .into_iter()
+    .map(|path| ports::File {
+        path: path.to_owned(),
+        mode: 0o755,
+        content: ports::Content::Bytes(bytes.clone()),
+    })
+    .collect())
+}
+
+/// `cargo xtask test-netd`'s first script: pings on either side of `netd`'s death.
+pub(crate) const NETD_SCRIPT: &str = r#"ip link set eth0 up
+dhcpc -i eth0 -n -q -t 5 -T 2; echo "netd-row: dhcp status $?"
+ping -c 3 10.0.2.2 > /dev/null; echo "netd-row: ping before status $?"
+n=0; while [ $n -lt 400 ]; do ping -c 1 -W 1 10.0.2.2 > /dev/null; n=$((n+1)); grep -q . /tmp/stop 2>/dev/null && break; done
+ok=1; n=0; while [ $n -lt 30 ]; do ping -c 1 -W 1 10.0.2.2 > /dev/null && { ok=0; break; }; sleep 1; n=$((n+1)); done
+echo "netd-row: ping after status $ok"
+exit 9
+"#;
+
+/// `cargo xtask test-netd`'s measure, with `netd` and without: a ping's cost (N.7).
+pub(crate) const NETD_RTT_SCRIPT: &str = r#"ip link set eth0 up
+dhcpc -i eth0 -n -q -t 5 -T 2
+ping -c 5 10.0.2.2 > /dev/null
+ping -c 100 -q 10.0.2.2
+echo "netd-row: rtt done"
+exit 9
+"#;
+
 /// `cargo xtask test-btrfsd`'s script: a volume mounted and read through `btrfsd`.
 pub(crate) const BTRFSD_SCRIPT: &str = r#"echo "btrfsd-row: started"
 mkdir -p /mnt

@@ -117,7 +117,7 @@ fn start(
     let (archive, archive_len) = archive_vmo()?;
     let _ = crate::mm::give_back_initrd();
     let page = Vmo::new_anonymous(1).map_err(|_| "no memory for the boot page")?;
-    let (devmgr_messages, cores) = match devmgr {
+    let (devmgr_messages, cores, net_cores) = match devmgr {
         Some(given) => (
             give(
                 &region,
@@ -129,8 +129,13 @@ fn start(
                 Object::Channel(given.cores),
                 const { LINUXD.of(Held::Channel) },
             )?,
+            give(
+                &region,
+                Object::Channel(given.net_cores),
+                const { LINUXD.of(Held::Channel) },
+            )?,
         ),
-        None => (0, 0),
+        None => (0, 0, 0),
     };
     let files = match files {
         Some(end) => give(
@@ -144,6 +149,7 @@ fn start(
         devmgr: devmgr_messages,
         cores,
         files,
+        net_cores: u64::from(net_cores),
         magic: BOOT_MAGIC,
         region: give(
             &region,

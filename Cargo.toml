@@ -37,6 +37,8 @@ members = [
     "src/lib/proto/bootinfo",
     "src/lib/proto/boot-policy",
     "src/lib/proto/netswitch",
+    "src/user/system/native/netd",
+    "src/user/system/native/netd",
     "src/lib/fs/blkclient",
     "src/lib/fs/fsproto",
     "src/user/system/native/btrfsd",
@@ -195,6 +197,7 @@ license = "MIT"
 publish = false
 
 [workspace.dependencies]
+ferrix-netswitch = { path = "src/lib/proto/netswitch" }
 ferrix-blkclient = { path = "src/lib/fs/blkclient" }
 ferrix-fsproto = { path = "src/lib/fs/fsproto" }
 ferrix-blk-victim = { path = "src/user/system/native/blk-victim" }

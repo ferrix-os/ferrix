@@ -11,7 +11,7 @@ fuzz_target!(|bytes: &[u8]| {
     let Some((&count, frame)) = bytes.split_first() else {
         return;
     };
-    let count = usize::from(count % 4) + 1;
+    let count = usize::from(count % 8) + 1;
     let switch = Switch::new([2, 0, 0, 0, 0, 1], count);
     assert_eq!(switch.from_wire(frame).ports & !1, 0, "the wire reached the internal link");
     for from in 0..count {

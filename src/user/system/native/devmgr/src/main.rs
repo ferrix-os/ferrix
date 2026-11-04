@@ -639,6 +639,7 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
     let mut gpus: Option<Chooser> = None;
     let mut drv = Drivers::new(&job, &given.names, given.drivers, &given.images);
     drv.unisolated_allowed = given.unisolated_allowed;
+    start_netd(&job, &given.names[..], &given.images[..], &port);
     for (index, pair) in given.devices.into_iter().take(given.count).enumerate() {
         let Some((device, keep)) = pair else {
             continue;
@@ -893,6 +894,8 @@ struct Updater {
 /// The port key the helper's channel is watched under: below the kernel's,
 /// above every driver's, whose low half is a slot under [`MAX_DEVICES`].
 const KEY_UPDATE: u64 = u64::MAX - 1;
+/// `netd`'s end.
+const KEY_NETD: u64 = u64::MAX - 2;
 
 /// Start `drvupdated` if the initramfs carries it, in a job of its own, and
 /// answer `devmgr`'s end of its channel, watched on `port`. An image
@@ -1255,6 +1258,16 @@ fn receive(channel: &Channel<Kernel>) -> Result<Given, Step> {
                 let core = handles.get(at).copied().unwrap_or(Handle::INVALID);
                 BLOCK_CORES.store(core.0, Ordering::Relaxed);
             }
+            if view.net_cores {
+                let at = base
+                    + 2 * devices
+                    + drivers
+                    + usize::from(view.debug_log)
+                    + usize::from(view.cores)
+                    + usize::from(view.block_cores);
+                let core = handles.get(at).copied().unwrap_or(Handle::INVALID);
+                PARTITION_CORES.store(core.0, Ordering::Relaxed);
+            }
             given.job = Some(Job::from_owned(owned(0)));
             given.drivers = drivers;
             for j in 0..drivers {
@@ -1383,6 +1396,10 @@ struct Awaited {
 /// For the life of the machine: deaths -- quiesce the device, tell the
 /// kernel, start a driver of a kind that is [`restarted`] again -- and the
 /// BIND and UNBIND a write to sysfs sends (`docs/SYSFS.md` §5).
+#[expect(
+    clippy::too_many_lines,
+    reason = "one port's keys, each a few lines, in the order they are checked"
+)]
 fn serve(
     channel: &Channel<Kernel>,
     port: &Port<Kernel>,
@@ -1417,6 +1434,24 @@ fn serve(
         }
         if key == KEY_UPDATE {
             take_updates(channel, port, started, drivers, inbox, &mut updates);
+            continue;
+        }
+        // `netd` ended: started again, a bounded number of times, and each driver of
+        // the wire finds its ring closed and comes back through devmgr's own restart.
+        if key == KEY_NETD {
+            let restarts = NETD_RESTARTS.fetch_add(1, Ordering::Relaxed);
+            if restarts < MOST_NETD_RESTARTS {
+                say(
+                    Level::Warning,
+                    format_args!("devmgr   netd ended: started again"),
+                );
+                start_netd(drivers.job, drivers.names, drivers.images, port);
+            } else {
+                say(
+                    Level::Err,
+                    format_args!("devmgr   netd ended {restarts} times: not started again"),
+                );
+            }
             continue;
         }
         if take_usb(key, started, &mut children, drivers, port) {
@@ -2471,19 +2506,154 @@ fn tell_served(location: u32) {
 static CORES: AtomicU32 = AtomicU32::new(0);
 /// The block cores' channel under `fs=server`, else 0.
 static BLOCK_CORES: AtomicU32 = AtomicU32::new(0);
+/// The further partitions' cores, from the kernel's one word on [`PARTITION_CORES`], kept
+/// here since a `netd` that dies takes its copies with it (ledger 6226 N.5): each next one
+/// is given duplicates.
+static FURTHER_CORES: [AtomicU32; FURTHER_MOST] = [const { AtomicU32::new(0) }; FURTHER_MOST];
+static FURTHER_READ: AtomicBool = AtomicBool::new(false);
+/// As `netd`'s `MAX_PORTS`, less the first partition.
+const FURTHER_MOST: usize = 7;
+
+/// `netd`'s channel, if this image set carries it, else 0.
+static NET_CORES: AtomicU32 = AtomicU32::new(0);
+/// A partition's cores, for `netd`.
+static PARTITION_CORES: AtomicU32 = AtomicU32::new(0);
+
 /// The channel to the server of `call`.
 fn core_of(call: usize) -> u32 {
     let block = BLOCK_CORES.load(Ordering::Relaxed);
+    let net = NET_CORES.load(Ordering::Relaxed);
     if block != 0 && call == nr::BLOCK_RING_CREATE {
         block
+    } else if net != 0 && call == nr::NET_RING_CREATE {
+        net
     } else {
         CORES.load(Ordering::Relaxed)
     }
 }
 
+/// How many times `netd` is started again; a crash loop stops here, and the wire's
+/// partitions see a cable pulled for good.
+const MOST_NETD_RESTARTS: u32 = 3;
+static NETD_RESTARTS: AtomicU32 = AtomicU32::new(0);
+
+/// Start `netd`, if the image set carries it (`docs/microkernel/M8.md` §2), before any
+/// driver: it is what the network drivers' rings are opened on. Its job is the drivers'.
+/// The kernel's word on `partition`, once.
+fn read_further_once(partition: u32) {
+    if FURTHER_READ.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    let channel = core::mem::ManuallyDrop::new(Channel::<Kernel>::from_owned(
+        OwnedHandle::from_raw(Kernel, Handle(partition)),
+    ));
+    let mut said = [0_u8; 8];
+    let mut ends = [Handle::INVALID; FURTHER_MOST];
+    let Ok(got) = channel.read(&mut said, &mut ends) else {
+        return;
+    };
+    for (slot, end) in FURTHER_CORES.iter().zip(ends.iter().take(got.handles)) {
+        slot.store(end.0, Ordering::Relaxed);
+    }
+}
+
+/// Give `start`'s `netd` a duplicate of each further partition's cores, a message each.
+fn send_further(start: &Channel<Kernel>) -> Result<(), ()> {
+    for slot in &FURTHER_CORES {
+        let raw = slot.load(Ordering::Relaxed);
+        if raw == 0 {
+            break;
+        }
+        let kept = core::mem::ManuallyDrop::new(OwnedHandle::from_raw(Kernel, Handle(raw)));
+        let copy = kept
+            .duplicate(Requested::Exactly(Rights::CHANNEL))
+            .map_err(|_| ())?;
+        start.write_with(b"PART    ", [copy]).map_err(|_| ())?;
+    }
+    Ok(())
+}
+
+fn start_netd(
+    job: &Job<Kernel>,
+    names: &[[u8; NAME_BYTES]],
+    images: &[Option<Vmo<Kernel>>],
+    port: &Port<Kernel>,
+) {
+    let partition = PARTITION_CORES.load(Ordering::Relaxed);
+    if partition == 0 {
+        return;
+    }
+    let found = names
+        .iter()
+        .position(|name| name.split(|&byte| byte == 0).next() == Some(&b"netd"[..]));
+    let Some(image) = found.and_then(|at| images.get(at)).and_then(Option::as_ref) else {
+        return;
+    };
+    read_further_once(partition);
+    let started = (|| {
+        let (near, far) = channel::create(Kernel).map_err(|_| ())?;
+        let log = core::mem::ManuallyDrop::new(OwnedHandle::from_raw(
+            Kernel,
+            ferrix_rt::log::debug_log().unwrap_or(Handle::INVALID),
+        ));
+        let log = log
+            .duplicate(Requested::Exactly(Rights(
+                Rights::WRITE.0 | Rights::TRANSFER.0,
+            )))
+            .map_err(|why| {
+                say(Level::Warning, format_args!("netd log {why:?}"));
+            })?;
+        // A copy: the next `netd` is told the same channel (ledger 6226 N.5).
+        let cores = core::mem::ManuallyDrop::new(OwnedHandle::from_raw(Kernel, Handle(partition)))
+            .duplicate(Requested::Exactly(Rights::CHANNEL))
+            .map_err(|_| ())?;
+        // Its own space, while it can still be had (`process_space` refuses a started
+        // process): so that it can let a dead driver's ring go.
+        let child_job = job.create_sealed_child().map_err(|_| ())?;
+        let built = build(&child_job, image, "netd", ferrix_rt::ELF_MACHINE).map_err(|_| ())?;
+        let space = built
+            .process()
+            .space(Requested::Exactly(Rights(
+                Rights::MAP.0 | Rights::TRANSFER.0,
+            )))
+            .map_err(|_| ())?;
+        let (start, start_far) = channel::create(Kernel).map_err(|_| ())?;
+        start
+            .write_with(
+                b"NETD    ",
+                [far.into_owned(), space.into_owned(), log, cores],
+            )
+            .map_err(|_| ())?;
+        send_further(&start)?;
+        built
+            .process()
+            .notify_on_exit(port, KEY_NETD)
+            .map_err(|_| ())?;
+        let process = built.run(start_far.into_owned()).map_err(|_| ())?;
+        #[expect(
+            clippy::mem_forget,
+            reason = "AUDIT: netd's job, process and start channel live as long as devmgr"
+        )]
+        core::mem::forget((child_job, process, start));
+        let old = NET_CORES.swap(near.into_owned().into_raw().0, Ordering::Relaxed);
+        if old != 0 {
+            drop(OwnedHandle::from_raw(Kernel, Handle(old)));
+        }
+        Ok::<(), ()>(())
+    })();
+    if started.is_err() {
+        say(
+            Level::Warning,
+            format_args!(
+                "devmgr   netd could not be started: the partition's cores serve the rings"
+            ),
+        );
+    }
+}
+
 /// Wake `port` when `btrfsd` says something.
 fn arm_block_core(port: &Port<Kernel>) {
-    for server in [&BLOCK_CORES] {
+    for server in [&BLOCK_CORES, &NET_CORES] {
         let core = server.load(Ordering::Relaxed);
         if core == 0 {
             continue;
@@ -2498,7 +2668,7 @@ fn arm_block_core(port: &Port<Kernel>) {
 /// A server's word that the driver at `location` was accepted, if it has said so: a
 /// server's word, on which `device_served` is called and nothing else (CO.5).
 fn block_core_published(location: u32) -> bool {
-    for server in [&BLOCK_CORES] {
+    for server in [&BLOCK_CORES, &NET_CORES] {
         let core = server.load(Ordering::Relaxed);
         if core == 0 {
             continue;

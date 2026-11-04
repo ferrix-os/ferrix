@@ -189,7 +189,7 @@ two outcomes:
   beside one Linux partition*: it is what `CLAIM.md` §1 proposes, and it is
   true from M5. A safety partition uses devices only through native drivers
   devmgr assigns to it directly, never through `linuxd`'s device cores.
-* **Several Linux partitions come after M8**, when `netd`, the device servers
+* **Several Linux partitions come after M8**, when `netd`, the device servers To the outside network they are one machine, one address, one DHCP client (customer, 2026-11-04): per-partition addresses are internal only.
   and the console server are their own processes. A claim with more than one
   Linux partition is dated after M8.
 

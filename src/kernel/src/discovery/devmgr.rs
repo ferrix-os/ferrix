@@ -460,7 +460,14 @@ pub fn start() -> Result<Option<Report>, &'static str> {
     let drivers = files.set.names.len();
     let (kernel_end, devmgr_end) =
         Endpoint::pair().map_err(|_| "no memory for devmgr's channel")?;
-    let devices = write_devices(&kernel_end, files.images()?, drivers_job()?, None, None)?;
+    let devices = write_devices(
+        &kernel_end,
+        files.images()?,
+        drivers_job()?,
+        None,
+        None,
+        None,
+    )?;
     let (process, at) = load(&files.set.image)?;
     start_program(&process, at, devmgr_end, &kernel_end)?;
 
@@ -484,6 +491,8 @@ pub(crate) struct Detached {
     pub(crate) messages: Arc<Endpoint>,
     /// The device cores' end.
     pub(crate) cores: Arc<Endpoint>,
+    /// The other end of what `netd` opens a partition's rings on.
+    pub(crate) net_cores: Arc<Endpoint>,
 }
 
 /// Start `devmgr` for a kernel with no load in it: DEVICES written, its task
@@ -505,12 +514,14 @@ pub(crate) fn start_detached(
     let (messages, devmgr_end) = Endpoint::pair().map_err(|_| "no memory for devmgr's channel")?;
     let (cores, devmgr_cores) = Endpoint::pair().map_err(|_| "no memory for the cores' channel")?;
     let job = drivers_job()?;
+    let (net_cores, netd_cores) = Endpoint::pair().map_err(|_| "no memory for netd's channel")?;
     let _ = write_devices(
         &messages,
         files.images()?,
         Arc::clone(&job),
         Some(devmgr_cores),
         block_cores,
+        Some(netd_cores),
     )?;
     let (process, at) = load(&files.set.image)?;
     // Not a start refused but the boot's stop: the row says so (ledger 6564 Y.3).
@@ -522,7 +533,11 @@ pub(crate) fn start_detached(
     // Before the start, so that no death is missed (BA.8).
     watch_detached(Arc::clone(&process), job)?;
     start_program(&process, at, devmgr_end, &messages)?;
-    Ok(Some(Detached { messages, cores }))
+    Ok(Some(Detached {
+        messages,
+        cores,
+        net_cores,
+    }))
 }
 
 /// `devmgr`'s death under `personality=user` (`docs/microkernel/BOOT-AUTHORITY.md` §4,
@@ -743,6 +758,7 @@ fn write_devices(
     job: Arc<Job>,
     mut cores: Option<Arc<Endpoint>>,
     mut block_cores: Option<Arc<Endpoint>>,
+    mut net_cores: Option<Arc<Endpoint>>,
 ) -> Result<usize, &'static str> {
     let names = {
         let bindings = BINDINGS.lock();
@@ -798,6 +814,7 @@ fn write_devices(
             debug_log: cfg!(ferrix_personality = "user"),
             cores: cores.is_some() && first,
             block_cores: block_cores.is_some() && first,
+            net_cores: net_cores.is_some() && first,
         };
         let mut bytes = [0_u8; DEVICES_MAX_BYTES];
         let len = message
@@ -852,6 +869,12 @@ fn write_devices(
             let _ = fallible::push_within(
                 &mut transfers,
                 (Object::Channel(block), const { DEVMGR.of(Held::Channel) }),
+            );
+        }
+        if let Some(net) = net_cores.take() {
+            let _ = fallible::push_within(
+                &mut transfers,
+                (Object::Channel(net), const { DEVMGR.of(Held::Channel) }),
             );
         }
         #[cfg(ferrix_personality = "user")]
@@ -1145,7 +1168,7 @@ fn start_in(job: Arc<Job>) -> Result<Started, Errno> {
     let drivers = files.set.names.len();
     let (kernel_end, devmgr_end) = Endpoint::pair().map_err(|_| status::NO_MEMORY)?;
     let images = files.images().map_err(|_| status::NO_MEMORY)?;
-    let devices = write_devices(&kernel_end, images, Arc::clone(&job), None, None)
+    let devices = write_devices(&kernel_end, images, Arc::clone(&job), None, None, None)
         .map_err(|_| status::NO_MEMORY)?;
     let (process, at) = load(&files.set.image).map_err(|_| status::BAD_STATE)?;
     let kill = |process: &Arc<dyn Host>| process.kill(job::KILLED_STATUS);

@@ -57,6 +57,8 @@ pub struct BootPage {
     /// could give it at its start, so a program's memory runs out here, where the
     /// load's reclaim and OOM answer, before the kernel's does.
     pub memory_frames: u64,
+    /// The channel `netd` opens this partition's rings on; 0 with no `devmgr`.
+    pub net_cores: u64,
     /// How many [`DeviceFact`]s are at [`DEVICES_AT`] in the page.
     pub devices: u64,
     /// The time of day firmware gave at boot, in nanoseconds since the epoch; 0 for none.
@@ -167,13 +169,14 @@ impl BootPage {
         command_line_bytes: 0,
         processors: 0,
         memory_frames: 0,
+        net_cores: 0,
         wall_clock: 0,
     };
 
     /// As the kernel writes it.
     #[must_use]
-    pub fn to_bytes(&self) -> [u8; 80] {
-        let mut out = [0_u8; 80];
+    pub fn to_bytes(&self) -> [u8; 88] {
+        let mut out = [0_u8; 88];
         let words = [
             self.magic,
             u64::from(self.region) | u64::from(self.job) << 32,
@@ -183,6 +186,7 @@ impl BootPage {
             self.initramfs_bytes,
             u64::from(self.command_line_bytes) | u64::from(self.processors) << 32,
             self.memory_frames,
+            self.net_cores,
             self.devices,
             self.wall_clock,
         ];
