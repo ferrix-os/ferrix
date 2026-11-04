@@ -112,6 +112,7 @@ mod clipboard {
         },
     }];
 }
+mod compare;
 mod compositor;
 mod console;
 mod container;
@@ -624,6 +625,7 @@ const TASKS: &[&[Task]] = &[
     disk_offline::TASKS,
     rename_crash::TASKS,
     restart::TASKS,
+    compare::TASKS,
     rows_bench::TASKS,
     rustc::TASKS,
     seam::TASKS,
