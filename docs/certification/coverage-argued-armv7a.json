@@ -1394,14 +1394,14 @@
     },
     {
       "file": "object/port.rs",
-      "lines": "481",
+      "lines": "529",
       "category": "defensive",
       "match": "Err((observer, _)) => {",
       "why": "A fired registration that did not fit on its object's firing list. `register` reserves room on `firing` for every listed registration as each is listed, so moving one there never allocates and cannot fail; the arm keeps the registration listed rather than lose it if that accounting ever broke. The arm's last rows are its jump back into the loop."
     },
     {
       "file": "object/port.rs",
-      "lines": "483-485",
+      "lines": "531-533",
       "category": "defensive",
       "match": "list.listed.insert(index, observer);",
       "why": "A fired registration that did not fit on its object's firing list. `register` reserves room on `firing` for every listed registration as each is listed, so moving one there never allocates and cannot fail; the arm keeps the registration listed rather than lose it if that accounting ever broke. The arm's last rows are its jump back into the loop."
@@ -1429,133 +1429,133 @@
     },
     {
       "file": "sched/mod.rs",
-      "lines": "1094",
+      "lines": "1106",
       "category": "defensive",
       "match": "}",
       "why": "The closing row of new_idle_task is the error path's: no memory for a processor's idle task, made once per processor at bring-up with the heap all but empty. The stack is freed and the bring-up fails."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "1534",
+      "lines": "1546",
       "category": "failure-path",
       "match": "debug_assert!(",
       "why": "The debug assertion's own row is its panic call: a prepared task dropped with interrupts masked, which would free its stack waiting on every processor with interrupts off. The condition is evaluated under line 1105's and 1113's rows, which are reached (an unstarted child's drop at stage 9)."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "1773",
+      "lines": "1785",
       "category": "defensive",
       "match": "arch::wait_for_interrupt();",
       "why": "After the switch away from a dead task, which never returns to it: a dead task is never picked again (stage 5's a_dead_task_is_not_filed_as_a_sleeper, and check_invariants' DEAD_STILL_QUEUED, hold that). If it ever were picked, halting here is the only answer that corrupts nothing."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3162-3164",
+      "lines": "3338-3340",
       "category": "failure-path",
       "match": "preempt_count(cpu),",
       "why": "FX-0503: a task blocked or yielded while holding a lock that disables preemption, which the preemption count cannot survive. The report names the lock's site and stops the machine; a kernel that never blocks under a spin lock never takes it."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4133-4134",
+      "lines": "4309-4310",
       "category": "failure-path",
       "match": "pub(crate) fn report_queues() {",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4138",
+      "lines": "4314",
       "category": "failure-path",
       "match": "for (cpu, lock) in queues.iter().enumerate() {",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4143-4144",
+      "lines": "4319-4320",
       "category": "failure-path",
       "match": "queue.len(),",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4147-4148",
+      "lines": "4323-4324",
       "category": "failure-path",
       "match": ".and_then(|flags| flags.get(cpu))",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4152",
+      "lines": "4328",
       "category": "failure-path",
       "match": "}",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4155-4156",
+      "lines": "4331-4332",
       "category": "failure-path",
       "match": "pub(crate) fn print_picks(cpu: usize) {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4161",
+      "lines": "4337",
       "category": "failure-path",
       "match": "let Ok(mut picks) = fallible::try_with_capacity::<queue::Pic",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4165",
+      "lines": "4341",
       "category": "failure-path",
       "match": "for pick in lock.lock().picks() {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4172",
+      "lines": "4348",
       "category": "failure-path",
       "match": "pick.at / 1000,",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4177",
+      "lines": "4353",
       "category": "failure-path",
       "match": "for seen in pick.seen.iter().take(pick.count) {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4187",
+      "lines": "4363",
       "category": "failure-path",
       "match": "}",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/queue.rs",
-      "lines": "256",
+      "lines": "405",
       "category": "defensive",
       "match": "self.stats.wrong_picks += 1;",
       "why": "A pick the queue's tree made that a brute-force scan of the same queue disagrees with: EEVDF choosing other than the eligible task with the earliest deadline. Counted for the stage 5 fairness check, which requires zero; a correct tree never takes it."
     },
     {
       "file": "sched/queue.rs",
-      "lines": "268-269",
+      "lines": "417-418",
       "category": "failure-path",
       "match": "let (newer, older) = self.trace.split_at(self.trace_next);",
       "why": "The remembered picks, read only by print_picks, which only a failed fairness check calls."
     },
     {
       "file": "sched/queue.rs",
-      "lines": "364",
+      "lines": "513",
       "category": "defensive",
       "match": "return (self.stats.busy_ns, self.stats.idle_ns);",
       "why": "The times of a queue whose processor has not joined the scheduler: only between sched::init and a secondary's arrival, before any program can read /proc/stat, or on a machine where a processor failed to start, which stage 4 refuses."
     },
     {
       "file": "sched/queue.rs",
-      "lines": "491",
+      "lines": "721",
       "category": "defensive",
       "match": "task.return_run_slot(refused.slot);",
       "why": "A task queued without its run slot, or refused by the fair class: the slot is missing only if the task is already queued, which every caller's is_queued check rules out, and the fair class refuses only a duplicate identifier or a zero weight, neither of which the kernel makes. Counted (MISSING_SLOTS) and required zero by check_invariants."
@@ -1583,70 +1583,70 @@
     },
     {
       "file": "syscall/native.rs",
-      "lines": "306",
+      "lines": "307",
       "category": "defensive",
       "match": "None => caller.core().is_terminated(),",
       "why": "The wait's exit test on a kernel with no personality registered: every build registers one before the first program runs (register_load, checked at boot), so a native wait always asks the personality."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "535",
+      "lines": "543",
       "category": "credited-elsewhere",
       "match": "TableError::AccessDenied => status::ACCESS_DENIED,",
       "why": "Run by stage 9's object check, which duplicates a handle asking for rights it does not hold and requires ACCESS_DENIED. On AArch64 every caller that meets AccessDenied inlines table_error; the arm's row is only in the out-of-line copy."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "536",
+      "lines": "544",
       "category": "credited-elsewhere",
       "match": "TableError::Full => status::NO_HANDLES,",
       "why": "Run by the native refusal check: a duplicate into a full table answers NO_HANDLES and a message naming one handle twice answers INVALID_ARGS, both required. Those callers inline table_error; the arms' rows are only in its out-of-line copy, whose callers never meet these two errors."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "1365-1366",
+      "lines": "1373-1374",
       "category": "defensive",
       "match": "object::dispose(message.handles.into_iter().map(|(object, _)",
       "why": "The queue refusing to take back at its head a message it gave up a moment earlier: its capacity still holds the slot, so putting it back needs no memory."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2145",
+      "lines": "2153",
       "category": "defensive",
       "match": "}",
       "why": "The closing row of image_bytes is the drop of its buffer when a page of the image's VMO cannot be read: a VMO's pages up to its length always read, a decommitted one as zeros."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2211",
+      "lines": "2219",
       "category": "defensive",
       "match": "return Err(status::BAD_STATE);",
       "why": "A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2214",
+      "lines": "2222",
       "category": "defensive",
       "match": "return Err(status::NO_HANDLES);",
       "why": "A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2224",
+      "lines": "2232",
       "category": "defensive",
       "match": ".map_err(|object| source.insert(object, rights))) // FALLIBL",
       "why": "An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2231",
+      "lines": "2239",
       "category": "defensive",
       "match": "object::dispose([object]);",
       "why": "An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2770",
+      "lines": "2778",
       "category": "absent-hardware",
       "match": "return Err(status::INVALID_ARGS);",
       "why": "A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine."
