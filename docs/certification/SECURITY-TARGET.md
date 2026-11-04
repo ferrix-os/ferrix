@@ -348,6 +348,13 @@ server's own faults, page tables and kernel heap stay its own job's. A
 ticket stays live until `END` from either side or the close of either end
 of its channel; the client's library ends it when the reply arrives.
 
+*Application note (K12a).* Beside its maximum, a job may hold a reservation:
+frames for its programs' memory and page tables that the TSF keeps from
+every other job and from its own allocations (`H.QUOTA.15` to 17,
+`docs/microkernel/K12.md`). It is not yet claimed as `FRU_RSA.2`, which
+enters with K12b, when the reservation covers the job's kernel heap too
+(ledger 2550 (6)).
+
 ### FIA — identification and authentication
 **None claimed.** See §9.1.
 

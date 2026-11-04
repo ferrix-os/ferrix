@@ -828,9 +828,14 @@ package FerrixMemoryRequirements {
             attribute :>> statement = "A frame tagged with a reservation shall,
                 in the hold that frees it, leave the reservation's drawn count,
                 give O back what that makes outstanding again, and lose its
-                tag; an unbound reservation shall promise nothing and be bound
-                again only once nothing is drawn from it.";
-            attribute :>> criterion = "At stage 2 the 64 drawn frames freed bring
+                tag, and so when it is retired, where the free count does not get
+                it back, up to the retired set's capacity; the RAM scrubber shall
+                claim nothing below twice the watermark beyond O; an unbound
+                reservation shall promise nothing and be bound again only once
+                nothing is drawn from it.";
+            attribute :>> criterion = "At stage 2 a drawn frame retired leaves the
+                reservation with the free count unchanged, the scrubber claims nothing
+                while a promise covers its margin, the 64 drawn frames freed bring
                 O back to 64 and leave no tag, and the reservation unbound brings
                 O back to what it was; at stage 9 a gone job's reservation
                 promises nothing.";
@@ -3496,9 +3501,10 @@ package FerrixMemoryRequirements {
                 issued for the opening thread's process and job, adoptable only through
                 its pager's handle with PAGER and only while the request is
                 outstanding; pages the adopted pager commits and supplies shall stay
-                charged to that job. At the job's object limit the fault shall end
-                SIGBUS or FAULT with no pager asked; a pager may spend the job's limit
-                while a request is open.";
+                charged to that job, on its reservation where it has one. At the
+                job's object limit the fault shall end SIGBUS or FAULT with no pager
+                asked; a pager may spend the job's limit and reservation while a
+                request is open.";
             attribute :>> criterion = "Stage 9's pager check, case o: the page is the
                 faulting job's alone and drawn from its reservation, the pager's job
                 paying nothing; another pager's handle, a handle without PAGER and a

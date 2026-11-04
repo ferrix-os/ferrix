@@ -1420,6 +1420,12 @@ fn a_reservation_needs_reserve(side: &Side, report: &mut Report) -> Result<(), &
         "a process outside a reserved job made a job beneath it",
         report,
     )?;
+    refused(
+        side.call(nr::PROCESS_MAKE, &[reg(plain), 0, 0]),
+        status::ACCESS_DENIED,
+        "a process outside a reserved job made a process beneath it by process_make",
+        report,
+    )?;
     let child = side.handle(
         nr::JOB_CREATE,
         &[reg(reserving), 0],
