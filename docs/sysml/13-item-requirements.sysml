@@ -462,7 +462,7 @@ package FerrixItemRequirements {
                 refused; jobs made inside a sealed one read as sealed; and every
                 job in drivers.slice reads as sealed (the sysfs check);
                 test-restart --boot intel-keeper's root move of the GPU's worker
-                out of its driver job is refused (INTEL-GPU.md §12.11 S1).";
+                out of its driver job is refused (INTEL-GPU.md §12.11 S1). And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_a_seal_holds, object/rehome_check.rs::check_may_start_in, object/rehome_check.rs::check_sealed_tree).";
             attribute :>> parent = ("G.8", "O.QUOTA", "O.CAPABILITY");
         }
         requirement <'H.OBJ.19'> everyMessageSaysWhoWroteIt : ItemHighLevel {

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "d3c772a676642241e3410e35f827c5d8038d675749393859f6d9a6319f7865a7",
+  "digest": "657971a69e2b87b58ddfb349afbcba2582549da30f588184a9d25ecf822d6812",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -22095,7 +22095,7 @@
                   "qualifiedName": "FerrixItemRequirements::Objects::aSealedJobKeepsItsOwn",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Stage 13's cgroupfs check: root's moves out of, within and into a sealed tree are refused EPERM and every process stays; a sealed member's starts outside its tree are refused; jobs made inside a sealed one read as sealed; and every job in drivers.slice reads as sealed (the sysfs check); test-restart --boot intel-keeper's root move of the GPU's worker out of its driver job is refused (INTEL-GPU.md §12.11 S1).\"",
+                  "value": "\"Stage 13's cgroupfs check: root's moves out of, within and into a sealed tree are refused EPERM and every process stays; a sealed member's starts outside its tree are refused; jobs made inside a sealed one read as sealed; and every job in drivers.slice reads as sealed (the sysfs check); test-restart --boot intel-keeper's root move of the GPU's worker out of its driver job is refused (INTEL-GPU.md §12.11 S1). And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_a_seal_holds, object/rehome_check.rs::check_may_start_in, object/rehome_check.rs::check_sealed_tree).\"",
                   "source": {
                     "file": "docs/sysml/13-item-requirements.sysml",
                     "line": 465
@@ -31008,7 +31008,7 @@
                   "qualifiedName": "FerrixObjectRequirements::QuotaSlots::aLimitReadsBackAndRefuses",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"pids.max and memory.max written through cgroupfs reach the job's quota and read back as written; an empty job reads 0 used and 0 refused.\"",
+                  "value": "\"pids.max and memory.max written through cgroupfs reach the job's quota and read back as written; an empty job reads 0 used and 0 refused. And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_limits_and_usage).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 851
@@ -31236,7 +31236,7 @@
                   "qualifiedName": "FerrixObjectRequirements::QuotaSlots::kernelHeapIsMemory",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"At a 32 KiB limit each kind of personality object is refused one past its count while a sibling makes one, and every byte charged comes back when they go.\"",
+                  "value": "\"At a 32 KiB limit each kind of personality object is refused one past its count while a sibling makes one, and every byte charged comes back when they go. And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_the_kernel_charge).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 898
@@ -31521,7 +31521,7 @@
                   "qualifiedName": "FerrixObjectRequirements::QuotaSlots::theWeightIsSet",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"cpu.weight written 300 through cgroupfs reads back 300 from the job.\"",
+                  "value": "\"cpu.weight written 300 through cgroupfs reads back 300 from the job. And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_the_weight).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 948
@@ -31635,7 +31635,7 @@
                   "qualifiedName": "FerrixObjectRequirements::QuotaSlots::anIdleJobHasTheIdleWeight",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Two busy jobs of one task of weight 1024 each, beneath one parent, run at 512 each; with one at cpu.weight 10000 and then set idle, the parent's load is 1027 at once, the idle job's task runs at no more than 3 and its sibling's at more than 1000; let off, the parent's load and both tasks' weights are what they were at cpu.weight 10000 (the cpu line of stage 13, object::quota::check_idle_weight).\"",
+                  "value": "\"Two busy jobs of one task of weight 1024 each, beneath one parent, run at 512 each; with one at cpu.weight 10000 and then set idle, the parent's load is 1027 at once, the idle job's task runs at no more than 3 and its sibling's at more than 1000; let off, the parent's load and both tasks' weights are what they were at cpu.weight 10000 (the cpu line of stage 13, object::quota::check_idle_weight). And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_an_idle_job_weighs_little).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 980
@@ -32161,7 +32161,7 @@
                   "qualifiedName": "FerrixObjectRequirements::Jobs::rmdirKeepsALiveJob",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"rmdir of a cgroup holding a job native job_create made is refused EBUSY.\"",
+                  "value": "\"rmdir of a cgroup holding a job native job_create made is refused EBUSY. And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_a_busy_child_stays).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 1096
@@ -32218,7 +32218,7 @@
                   "qualifiedName": "FerrixObjectRequirements::Jobs::aRemovedJobTakesNothing",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Through a directory looked up before the rmdir, a move into the removed cgroup and a mkdir in it are each refused ENODEV, and the refused process stays where it was.\"",
+                  "value": "\"Through a directory looked up before the rmdir, a move into the removed cgroup and a mkdir in it are each refused ENODEV, and the refused process stays where it was. And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_a_removed_job_takes_nothing).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 1105
@@ -32503,7 +32503,7 @@
                   "qualifiedName": "FerrixObjectRequirements::Jobs::aJobsSignals",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"EMPTY is asserted while the job is empty and not while it has a member; a registration for EMPTY fires at the last release and not the first, and one made while the job is empty fires at once.\"",
+                  "value": "\"EMPTY is asserted while the job is empty and not while it has a member; a registration for EMPTY fires at the last release and not the first, and one made while the job is empty fires at once. And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_empty).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 1170
@@ -32845,7 +32845,7 @@
                   "qualifiedName": "FerrixObjectRequirements::Jobs::oomsAreCountedUpTheTree",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"After a scoped OOM kill, memory.events counts one OOM kill in the job and in its parent and none in a sibling, and an epoll on it is woken by the kill with EPOLLPRI.\"",
+                  "value": "\"After a scoped OOM kill, memory.events counts one OOM kill in the job and in its parent and none in a sibling, and an epoll on it is woken by the kill with EPOLLPRI. And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_oom_counts).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 1238
@@ -33370,7 +33370,7 @@
                   "qualifiedName": "FerrixObjectRequirements::Processes::oneBootstrapOnce",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A second give to one child is refused ALREADY_BOUND; the child's first process_bootstrap answers the end given with its rights and its second answers zero; a give after the take is refused ALREADY_BOUND.\"",
+                  "value": "\"A second give to one child is refused ALREADY_BOUND; the child's first process_bootstrap answers the end given with its rights and its second answers zero; a give after the take is refused ALREADY_BOUND. And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_a_bootstrap_is_given_once).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 1335
@@ -33712,7 +33712,7 @@
                   "qualifiedName": "FerrixObjectRequirements::Processes::howItEndedIsKept",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"process_status says running before the end, killed by SIGTERM for a process a signal ended, and exited with its code for one that exited.\"",
+                  "value": "\"process_status says running before the end, killed by SIGTERM for a process a signal ended, and exited with its code for one that exited. And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_exit_reports_once_ended).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 1393
@@ -34054,7 +34054,7 @@
                   "qualifiedName": "FerrixObjectRequirements::Processes::aReapedPidFindsNothing",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A child reaped by wait4 and still held is found by none of kill(pid, 0), getpgid, getsid, pidfd_open, find and the listed processes, all ESRCH or absent, where before the reap each found it; object::process::live still lists it; its pid is not free until the process is dropped, and free after. A child let go by a parent that ignores SIGCHLD is found by neither kill(pid, 0) nor find, where before its end both found it.\"",
+                  "value": "\"A child reaped by wait4 and still held is found by none of kill(pid, 0), getpgid, getsid, pidfd_open, find and the listed processes, all ESRCH or absent, where before the reap each found it; object::process::live still lists it; its pid is not free until the process is dropped, and free after. A child let go by a parent that ignores SIGCHLD is found by neither kill(pid, 0) nor find, where before its end both found it. And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_a_reaped_pid_finds_nothing).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 1461
@@ -34408,7 +34408,7 @@
                   "qualifiedName": "FerrixObjectRequirements::OomKill::burstCarriesUnusedQuota",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"On a slot under a quota of 20 ms a 100 ms period with a burst of 20 ms, charged at chosen instants: a period that used 5 ms leaves the next 35 ms (20 ms once the burst is written again, the carry then put back); 30 ms of use there neither throttles nor counts a throttle, and 36 ms throttles until that period's end; the period after has 20 ms, with one burst of 15 ms counted, and 21 ms of use there counts no burst; and with the burst at 0 a period that used 5 ms carries nothing (the cpu line of stage 13, object::quota::check_burst_carry).\"",
+                  "value": "\"On a slot under a quota of 20 ms a 100 ms period with a burst of 20 ms, charged at chosen instants: a period that used 5 ms leaves the next 35 ms (20 ms once the burst is written again, the carry then put back); 30 ms of use there neither throttles nor counts a throttle, and 36 ms throttles until that period's end; the period after has 20 ms, with one burst of 15 ms counted, and 21 ms of use there counts no burst; and with the burst at 0 a period that used 5 ms carries nothing (the cpu line of stage 13, object::quota::check_burst_carry). And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_a_burst_is_carried).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 1589
@@ -34579,7 +34579,7 @@
                   "qualifiedName": "FerrixObjectRequirements::OomKill::reclaimIsScoped",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Reclaim at one cgroup leaves a sibling's cached file untouched, spares a child using no more than its memory.min, and what it took reads back as the source has it.\"",
+                  "value": "\"Reclaim at one cgroup leaves a sibling's cached file untouched, spares a child using no more than its memory.min, and what it took reads back as the source has it. And with kernel objects alone, on every profile, the `core pc` line (user/rehome_cache_check.rs::check_reclaim_is_scoped).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 1633
@@ -34636,7 +34636,7 @@
                   "qualifiedName": "FerrixObjectRequirements::OomKill::aGoneJobStaysGone",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A task of a cgroup that was removed under it reads the disk, and the quota slots in use are back to what they were before the cgroup.\"",
+                  "value": "\"A task of a cgroup that was removed under it reads the disk, and the quota slots in use are back to what they were before the cgroup. And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_a_slot_says_its_job_went).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 1652
@@ -34693,7 +34693,7 @@
                   "qualifiedName": "FerrixObjectRequirements::OomKill::theCacheIsCounted",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"memory.stat's file equals the cache that memory.current holds, and its shmem the memory filesystem's.\"",
+                  "value": "\"memory.stat's file equals the cache that memory.current holds, and its shmem the memory filesystem's. And with kernel objects alone, on every profile, the `core pc` line (user/rehome_cache_check.rs::check_resident).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 1661
@@ -34807,7 +34807,7 @@
                   "qualifiedName": "FerrixObjectRequirements::OomKill::tablesAreCountedApart",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A job's program that faults 4 pages of a fresh anonymous mapping has memory.stat's anon at least those 4 pages and pagetables at least one page, and anon, file, kernel, pagetables and shmem add to memory.current; unmapping it gives back exactly the 4 pages from anon and some of pagetables (the reclaim line of stage 13 that names pgfault).\"",
+                  "value": "\"A job's program that faults 4 pages of a fresh anonymous mapping has memory.stat's anon at least those 4 pages and pagetables at least one page, and anon, file, kernel, pagetables and shmem add to memory.current; unmapping it gives back exactly the 4 pages from anon and some of pagetables (the reclaim line of stage 13 that names pgfault). And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_a_table_is_charged_as_a_table).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 1691
@@ -34864,7 +34864,7 @@
                   "qualifiedName": "FerrixObjectRequirements::OomKill::memoryReclaimGivesBackWhatIsAsked",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A cgroup holding 64 pages of a file's cache and 4 of a tmpfs file, beside a sibling holding 8, gives back nothing for a write of 0, at least 32 pages for a write of 32 pages' bytes, and all its file cache and none of its tmpfs pages for a write of 1G, which is EAGAIN; max is EINVAL; the sibling keeps its 8 pages; the file reads as its source has it after; a reclaim of 32 pages interrupted before its first round takes none; and at no scope a count of 1 is Short and of 0 is Given; and a cgroup with no cache, after 64 misses, gives back a write of 8192 bytes from its cached dentries (the `reclaim` line of stage 13 that names memory.reclaim and cached dentries).\"",
+                  "value": "\"A cgroup holding 64 pages of a file's cache and 4 of a tmpfs file, beside a sibling holding 8, gives back nothing for a write of 0, at least 32 pages for a write of 32 pages' bytes, and all its file cache and none of its tmpfs pages for a write of 1G, which is EAGAIN; max is EINVAL; the sibling keeps its 8 pages; the file reads as its source has it after; a reclaim of 32 pages interrupted before its first round takes none; and at no scope a count of 1 is Short and of 0 is Given; and a cgroup with no cache, after 64 misses, gives back a write of 8192 bytes from its cached dentries (the `reclaim` line of stage 13 that names memory.reclaim and cached dentries). And with kernel objects alone, on every profile, the `core pc` line (user/rehome_cache_check.rs::check_reclaim_asked) and the `core shr` line (user/rehome_cache_check.rs::check_the_shrinker).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 1719
@@ -34921,7 +34921,7 @@
                   "qualifiedName": "FerrixObjectRequirements::OomKill::reclaimTakesOnlyCleanPages",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"On a writable btrfs mount a file synced and then written again in one page loses its clean pages to a reclaim of the whole cache, keeps the written one, and reads back as it was last written, every page; a shared mapping that may write, made and written between the source's answer and the take, keeps the page it wrote, and the write reads back through the file (the `reclaim` line of test-btrfs).\"",
+                  "value": "\"On a writable btrfs mount a file synced and then written again in one page loses its clean pages to a reclaim of the whole cache, keeps the written one, and reads back as it was last written, every page; a shared mapping that may write, made and written between the source's answer and the take, keeps the page it wrote, and the write reads back through the file (the `reclaim` line of test-btrfs). And with kernel objects alone, on every profile, the `core pc` line (user/rehome_cache_check.rs::check_a_written_page_stays, user/rehome_cache_check.rs::check_a_mapping_made_at_the_take).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 1737
@@ -34978,7 +34978,7 @@
                   "qualifiedName": "FerrixObjectRequirements::OomKill::reclaimAsksTheShrinkerForTheRest",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A cgroup that looked up 64 names that are not there, beside a sibling that did the same, holds their negative dentries in memory.stat's kernel; a write of 1G to its memory.reclaim, with no cache to give, is EAGAIN and gives back at least 64 dentries' worth of that heap, and the sibling's kernel is unchanged; a reclaim of one page at the cgroup after 64 more misses gives back no page and at least one dentry's heap (the `reclaim` line of stage 13 that names cached dentries).\"",
+                  "value": "\"A cgroup that looked up 64 names that are not there, beside a sibling that did the same, holds their negative dentries in memory.stat's kernel; a write of 1G to its memory.reclaim, with no cache to give, is EAGAIN and gives back at least 64 dentries' worth of that heap, and the sibling's kernel is unchanged; a reclaim of one page at the cgroup after 64 more misses gives back no page and at least one dentry's heap (the `reclaim` line of stage 13 that names cached dentries). And with kernel objects alone, on every profile, the `core shr` line (user/rehome_cache_check.rs::check_the_shrinker).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 1761
@@ -35035,7 +35035,7 @@
                   "qualifiedName": "FerrixObjectRequirements::OomKill::theWholeCacheIsCounted",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A file written on a writable mount and synced is in Cached and in MemAvailable; a page of it written again and not synced is in Dirty and not in MemAvailable; a tmpfs file's pages are in Cached and Shmem (the `reclaim` line of test-btrfs).\"",
+                  "value": "\"A file written on a writable mount and synced is in Cached and in MemAvailable; a page of it written again and not synced is in Dirty and not in MemAvailable; a tmpfs file's pages are in Cached and Shmem (the `reclaim` line of test-btrfs). And with kernel objects alone, on every profile, the `core pc` line (user/rehome_cache_check.rs::check_totals).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 1784
@@ -35149,7 +35149,7 @@
                   "qualifiedName": "FerrixObjectRequirements::OomKill::reclaimGoesRound",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A cgroup at its memory.max of 144 pages, reading a 128-page stream in 16 steps of 8 pages and an 8-page file again after each, with a 128-page file beside it read once, has the 8-page file taken back no more than 16 pages (the `reclaim` line of stage 13 that names memory.max).\"",
+                  "value": "\"A cgroup at its memory.max of 144 pages, reading a 128-page stream in 16 steps of 8 pages and an 8-page file again after each, with a 128-page file beside it read once, has the 8-page file taken back no more than 16 pages (the `reclaim` line of stage 13 that names memory.max). And with kernel objects alone, on every profile, the `core pc` line (user/rehome_cache_check.rs::check_a_reclaim_goes_round).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 1836
@@ -35926,7 +35926,7 @@
                   "qualifiedName": "FerrixObjectRequirements::ChannelWriteRead::aSealedJobsStartsStayInside",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Stage 13's cgroupfs check: may_start_in refuses a sealed member's start outside its tree and an outside start into a sealed job, and allows a sealed member's start into its own inner job.\"",
+                  "value": "\"Stage 13's cgroupfs check: may_start_in refuses a sealed member's start outside its tree and an outside start into a sealed job, and allows a sealed member's start into its own inner job. And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_may_start_in).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 2118
@@ -36154,7 +36154,7 @@
                   "qualifiedName": "FerrixObjectRequirements::ChannelWriteRead::aPoisonedCachedPageIsDroppedOnlyClean",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Stage 12's poison check: a clean mapped page dropped, its frame retired, gone from the object and the mapping, read again with the disk's bytes; a dirty and a held page NotClean and kept; an unheld frame NotCache; a frame not retirable NotRetired; a page asked for with another frame NotCache and kept. Controls: the clean test, the retirement's answer and the frame check removed.\"",
+                  "value": "\"Stage 12's poison check: a clean mapped page dropped, its frame retired, gone from the object and the mapping, read again with the disk's bytes; a dirty and a held page NotClean and kept; an unheld frame NotCache; a frame not retirable NotRetired; a page asked for with another frame NotCache and kept. Controls: the clean test, the retirement's answer and the frame check removed. And with kernel objects alone, on every profile, the `core pc` line (user/rehome_cache_check.rs::check_a_poisoned_page_is_dropped).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 2174
@@ -36211,7 +36211,7 @@
                   "qualifiedName": "FerrixObjectRequirements::ChannelWriteRead::aCacheReadAnswersItsPoison",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Stage 12's poison check: a read whose copy is answered as poisoned retires and drops the page; test-mce-pagecache's read mode. Control: Poisoned turned into EIO.\"",
+                  "value": "\"Stage 12's poison check: a read whose copy is answered as poisoned retires and drops the page; test-mce-pagecache's read mode. Control: Poisoned turned into EIO. And with kernel objects alone, on every profile, the `core pc` line (user/rehome_cache_check.rs::check_read_present_answers_poison).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 2185
@@ -36268,7 +36268,7 @@
                   "qualifiedName": "FerrixObjectRequirements::ChannelWriteRead::aPoisonedReadIsRefilledOrFails",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Stage 12's poison check: a clean page's poisoned read refilled and answered with the disk's bytes; a dirty page's fails; test-mce-pagecache's read and dirty modes. Control: the refill on Clean removed.\"",
+                  "value": "\"Stage 12's poison check: a clean page's poisoned read refilled and answered with the disk's bytes; a dirty page's fails; test-mce-pagecache's read and dirty modes. Control: the refill on Clean removed. And with kernel objects alone, on every profile, the `core pc` line (user/rehome_cache_check.rs::check_a_poisoned_read).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 2198
