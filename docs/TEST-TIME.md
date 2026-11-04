@@ -1694,6 +1694,74 @@ A cold `check` with the whole target in 18 GiB hits `ENOSPC`, so whole side-work
 target dirs stay on the disk in a spill, each with its own fingerprints.
 Ledger 6697 and 6714 hold the conditions.
 
+**Stopped, 2026-11-04 22:12 CET.** The customer freed the 3090 for ComfyUI, so
+there is no VRAM until the customer says so. `logs/queue/vram-closed` refuses slot 8
+and the pool's default is seven slots. The slot is **not qualified and none of its
+rows may be cited**. What the unfinished qualification had shown:
+
+| What | Result |
+|---|---|
+| `check`, slot 8 against a disk slot | Same 403 test results. Warm 99 s at load 28 against 71 s at load 19, loads unmatched; from an empty store 191 s. `test-boot` warm 39 s against 44 s |
+| Store at a cold peak | test-boot 2.6 GB, test-init 2.8, release build 2.6, test-compositor 6.3, `check` 11.3 with 12.7 GB spilled to the disk |
+| Host control, warm on one store | FIRED, then PASSED on the restored hash |
+| Kernel control, warm | **Not shown.** The one tried did not fire on a disk slot either, and the rerun with a firing one was cut off |
+| Store killed mid-build, or during a guest with its status still `ok` | INFRA |
+| A flipped bit (hook) | `EIO`, INFRA, in 9 s |
+| A stalled device call (hook) | INFRA by the 60 s deadline |
+| Daemon stopped with 1.7 GB dirty | INFRA by the heartbeat, in 57 s |
+| Store too small (`ENOSPC`) | INFRA |
+
+The store itself failed one real row before that: `mkfifo` was `EPERM`, a row failed
+by the store and not by the code; fixed. Rows/h with and without the slot, the disk
+it spares in use, a neighbour's GPU tests beside a full store, and a kernel built
+byte-for-byte beside a disk slot's in that slot's worktree were not measured. A
+kernel's sha256 differs between any two slots today, disk ones included, since its
+debug info holds the worktree's path.
+
+### A shared store of the slots' builds (2026-11-04, customer's order, not built)
+
+Seven slots held 133 GB. Byte-identical files would save 36 GB (27%: `.rmeta` 15,
+`.rlib` 14, `build/` 4), and fixed 128 KiB blocks 47.6%, because most rebuilt files
+differ only in the worktree's path. zstd-3 then gets 3.75x on what is left (1.2 GB
+sample, 1.5 GB/s on the CPU), so a store could hold them in about 20 GB.
+
+**Plain hard links are unsafe, and not only short of the order's "verified on every
+read".** All names of a link share one mtime, and cargo decides a dependent is fresh
+by comparing output times. A dependent was left stale on the pinned cargo 1.97.1: edit
+a lib, build it alone, move its output's time back, build the bin: nothing compiled,
+and the bin printed the old value. Moving times forward hides a newer dependency
+instead, so no single time is safe. And 0444 does not stop the owner, so a slot could
+change another's file. Rows on such slots would not count (ledger 6859). So the 36 GB
+is a comparison figure only; no slot was touched.
+
+The GPU store was not built: the 3090 is taken back, and neither `nvcomp` nor GPU
+hashing was tried. It would have to keep per-name times to escape the above. btrfs
+deduplicates through `FIDEDUPERANGE` with per-inode times, checksums every read and
+compresses by mount option, with no GPU; it needs root and a device, and is
+unmeasured.
+
+### A source scanner for the Python checkers (2026-11-04, customer's order)
+
+Python was 11% of the host's CPU in the sample above. Lexing was a fair part of that
+only because it was repeated: `check-item-boundary.py` asked 11,555 times for 1,062
+sources. Remembering within a process took nearly all of it, with stdout and exit
+codes of all six users byte-equal over the whole tree (the commit has the figures).
+
+All 2,350 `.rs` files, 43.8 MB, once:
+
+| Lexer | Wall | MB/s |
+|---|---:|---:|
+| Python (`rustlex.py`) | 1.72 s | 25 |
+| Rust port, one thread | 0.077 s | 566 |
+| Rust port, 12 threads | 0.012 s | 3,623 |
+
+The port is measurement only, not in the tree, and its mask was byte-identical to
+Python's on every file. It shows the ceiling: a shared cache, the port or a GPU lexer
+could save at most about 1.7 s a checker, and a GPU would have to beat 12 ms including
+PCIe. The GPU lexer was not tried, with the 3090 taken back, and a cached mask in a
+certified checker was ruled not worth its risks at this size (ledger 6863). What the
+checkers spend now is their own regexes: `check-build-flags.py`'s `cfg_names`, for one.
+
 **The two open leads.** `-Zthreads=8` on `check`'s compositor unit, alternating
 in tmpfs: cold 53.7, 53.4, 66.6 s against 52.9, 96.6, 59.8 without, user CPU +4%;
 one crate touched, 23.1, 23.6, 22.9 s against 22.7, 26.9, 22.7. So it gains
