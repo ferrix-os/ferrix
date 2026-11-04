@@ -72,11 +72,12 @@ mod unlinked;
 pub(crate) use reservation::{Entry as Reservation, Refused, drawn_from};
 
 /// No reservation: what a job that draws from none draws from.
-pub(crate) const NO_RESERVATION: Reservation = reservation::NONE;
+pub const NO_RESERVATION: Reservation = reservation::NONE;
 
 /// The largest buddy block's order, for the calls that name one
 /// (`vmo_pin`'s `PIN_BLOCKS`).
 pub const MAX_ORDER: u8 = ferrix_frame::MAX_ORDER;
+
 pub use reserve::fill_reserve;
 pub(crate) use reserve::{Reserved, reserve};
 pub use reserve::{bypass_heap_in_sections, refuse_reserve_fills, reserve_counts};
@@ -533,7 +534,7 @@ pub(crate) fn reservation_usage(entry: Reservation) -> (u64, u64) {
 /// The least free count a program's frame not drawn from a reservation is
 /// given at: the watermark beyond the outstanding promise (`L.mm.77`), which
 /// is what a reclaim for one has to lift the free count over (`L.mm.82`).
-pub(crate) fn program_floor() -> u64 {
+pub fn program_floor() -> u64 {
     WATERMARK
         .load(Ordering::Relaxed)
         .saturating_add(reservation::outstanding())

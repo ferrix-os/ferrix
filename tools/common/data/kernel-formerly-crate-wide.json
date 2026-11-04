@@ -1655,6 +1655,16 @@
       "before": "pub(crate)"
     },
     {
+      "item": "object/reserve_check.rs: Report::promise (field)",
+      "born": "K12a",
+      "ledger": 6131
+    },
+    {
+      "item": "object/reserve_check.rs: run (fn)",
+      "born": "K12a",
+      "ledger": 6131
+    },
+    {
       "item": "object/timer.rs: Report::fired_at (field)",
       "born": "K10",
       "ledger": 6131

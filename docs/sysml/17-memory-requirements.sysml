@@ -828,9 +828,14 @@ package FerrixMemoryRequirements {
             attribute :>> statement = "A frame tagged with a reservation shall,
                 in the hold that frees it, leave the reservation's drawn count,
                 give O back what that makes outstanding again, and lose its
-                tag; an unbound reservation shall promise nothing and be bound
-                again only once nothing is drawn from it.";
-            attribute :>> criterion = "At stage 2 the 64 drawn frames freed bring
+                tag, and so when it is retired, where the free count does not get
+                it back, up to the retired set's capacity; the RAM scrubber shall
+                claim nothing below twice the watermark beyond O; an unbound
+                reservation shall promise nothing and be bound again only once
+                nothing is drawn from it.";
+            attribute :>> criterion = "At stage 2 a drawn frame retired leaves the
+                reservation with the free count unchanged, the scrubber claims nothing
+                while a promise covers its margin, the 64 drawn frames freed bring
                 O back to 64 and leave no tag, and the reservation unbound brings
                 O back to what it was; at stage 9 a gone job's reservation
                 promises nothing.";
