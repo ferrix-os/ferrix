@@ -36,6 +36,7 @@ members = [
     "src/lib/proto/audit",
     "src/lib/proto/bootinfo",
     "src/lib/proto/boot-policy",
+    "src/lib/proto/netswitch",
     "src/lib/proto/slots",
     "src/lib/proto/eventlog",
     "src/lib/platform/description",

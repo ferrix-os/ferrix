@@ -20,6 +20,7 @@ ferrix-fat = { path = "../../lib/fs/common/fat" }
 ferrix-argon2 = { path = "../../lib/crypto/argon2" }
 ferrix-auth-proto = { path = "../../lib/proto/auth-proto" }
 ferrix-elf = { path = "../../lib/platform/elf" }
+ferrix-netswitch = { path = "../../lib/proto/netswitch" }
 ferrix-fdt = { path = "../../lib/platform/fdt" }
 ferrix-frame = { path = "../../lib/kernel/frame" }
 ferrix-ustack = { path = "../../lib/kernel/ustack" }
@@ -342,6 +343,13 @@ bench = false
 [[bin]]
 name = "fat_read"
 path = "fuzz_targets/fat_read.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "netswitch"
+path = "fuzz_targets/netswitch.rs"
 test = false
 doc = false
 bench = false

@@ -140,6 +140,7 @@ dependencies = [
  "ferrix-native-abi",
  "ferrix-net",
  "ferrix-netlink",
+ "ferrix-netswitch",
  "ferrix-nettcp",
  "ferrix-netwire",
  "ferrix-objects",
@@ -208,6 +209,10 @@ version = "0.1.0"
 dependencies = [
  "ferrix-linux-abi",
 ]
+
+[[package]]
+name = "ferrix-netswitch"
+version = "0.1.0"
 
 [[package]]
 name = "ferrix-nettcp"

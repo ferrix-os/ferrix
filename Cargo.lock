@@ -778,6 +778,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrix-netswitch"
+version = "0.1.0"
+
+[[package]]
 name = "ferrix-nettcp"
 version = "0.1.0"
 dependencies = [
