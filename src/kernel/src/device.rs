@@ -1402,6 +1402,9 @@ pub struct DeviceNode {
     /// the way. Every node of a `personality=user` kernel, and none of a
     /// hybrid's outside the boot check.
     explicit_bind: AtomicBool,
+    /// A driver of this node must pass K14's grant (`docs/microkernel/K14.md`
+    /// §5): set before any handle exists, and never cleared.
+    needs_certified: AtomicBool,
     /// Apertures not minted because the kernel or another device has that
     /// memory.
     withheld: usize,
@@ -1529,6 +1532,7 @@ impl DeviceNode {
             bars: [None; 6],
             domain: SpinLock::new(None),
             explicit_bind: AtomicBool::new(EXPLICIT_BIND),
+            needs_certified: AtomicBool::new(false),
             withheld: 0,
             interrupt_tables: Vec::new(),
             assigned: [None; 6],
@@ -2626,6 +2630,38 @@ impl DeviceNode {
         self.pci
             .as_ref()
             .is_some_and(|function| function.class >> 16 == 0x06)
+    }
+
+    /// Whether a certified profile holds its driver to K14's grant (K14.4, G.5), given
+    /// whether anything translates its DMA: an over-approximation of "DMA-capable", every
+    /// node but the two the kernel synthesises (`L.device.57`).
+    pub const fn wants_certified(&self, translated: bool) -> bool {
+        self.reaches_memory() && !translated
+    }
+
+    /// The rights of what this node gives a driver: none of it moves on, from a node a
+    /// certified driver holds (K14 §5).
+    pub fn derived_rights(
+        &self,
+        rights: ferrix_native_abi::rights::Rights,
+    ) -> ferrix_native_abi::rights::Rights {
+        if self.needs_certified() {
+            ferrix_native_abi::rights::Rights(
+                rights.0 & !ferrix_native_abi::rights::Rights::TRANSFER.0,
+            )
+        } else {
+            rights
+        }
+    }
+
+    /// Hold this node's driver to K14's grant. There is no way back.
+    pub fn require_certified(&self) {
+        self.needs_certified.store(true, Ordering::Release);
+    }
+
+    /// Whether its driver is held to K14's grant.
+    pub fn needs_certified(&self) -> bool {
+        self.needs_certified.load(Ordering::Acquire)
     }
 
     /// Whether a native call needs a bind before it reaches this node's

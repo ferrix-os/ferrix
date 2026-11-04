@@ -65,9 +65,9 @@
     },
     {
       "ids": [
-                "L.device.74-83",
+                "L.device.74-78", "L.device.81-83",
         "H.MEM.31-33",
-        "L.mm.123", "L.mm.127-130",
+        "L.mm.123",
         "L.object.324-325", "L.object.327", "L.object.329-333", "L.object.336-339"
       ],
       "owner": "mk-authority",

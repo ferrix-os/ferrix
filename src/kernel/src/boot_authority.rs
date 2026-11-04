@@ -42,6 +42,8 @@ pub fn run(view: &ferrix_bootinfo::BootView<'_>) {
     }
     native::register_processes(&PROCESSES);
     devmgr::register_reader(read_file);
+    read_certified_list();
+    flag_nodes();
     start_manager();
     let detached = match devmgr::start_detached() {
         Ok(Some(detached)) => {
@@ -181,10 +183,6 @@ fn node_of(described: &Described<'_>) -> Result<Arc<DeviceNode>, &'static str> {
     if described.kind() != KIND_PCI {
         return Err("a device-tree device: its closure is not read yet, so it is refused");
     }
-    // The grant is K14 §5's, not in this kernel: refused, never read as nothing (ledger 6564 Y.1).
-    if described.flags() & ferrix_partition_desc::FLAG_NEEDS_CERTIFIED != 0 {
-        return Err("a device that needs a certified driver: this kernel has no grant");
-    }
     let wanted = described.bdf();
     let node = device::devices()
         .iter()
@@ -295,6 +293,11 @@ fn try_start_manager() -> Result<(), &'static str> {
     for partition in parsed.partitions() {
         for described in partition.devices() {
             let node = node_of(&described)?;
+            // Held to K14's grant from here, whatever the profile (ledger 6564 Y.1, 6803 (iv)).
+            if described.flags() & ferrix_partition_desc::FLAG_NEEDS_CERTIFIED != 0 {
+                node.require_certified();
+                println!("  certified a description holds a device to K14's grant");
+            }
             fallible::try_push(&mut HELD.lock(), Arc::clone(&node)).map_err(|_| "no memory")?;
             fallible::push_within(
                 &mut transfers,
@@ -424,4 +427,55 @@ fn watch_manager(bare: Arc<Bare>) {
     if crate::sched::spawn("manager watch", watch, 0, ferrix_sched::NICE_0_WEIGHT).is_err() {
         fatal!(catalog::FIRST_PROCESSES, "no task to watch the manager on");
     }
+}
+
+/// The certified list's path in the archive.
+const CERTIFIED: &[u8] = b"etc/ferrix/certified";
+
+/// Read the certified list, once, before any process runs (K14 §5). A malformed
+/// one is an empty list and a line, never a stop: a list names what may hold a
+/// grant, so an empty one grants nothing.
+fn read_certified_list() {
+    let Some(Some(bytes)) = crate::mm::with_initrd(|archive| {
+        ferrix_cpio::file_named(archive, CERTIFIED).and_then(|file| fallible::try_to_vec(file).ok())
+    }) else {
+        return;
+    };
+    let Some(list) = ferrix_partition_desc::certified::parse(&bytes) else {
+        println!("  certified the list is malformed: nothing is on it");
+        return;
+    };
+    let mut digests = Vec::new();
+    if fallible::try_reserve(&mut digests, list.count()).is_err() {
+        println!("  certified no memory for the list: nothing is on it");
+        return;
+    }
+    for digest in list.digests() {
+        let _ = fallible::push_within(&mut digests, digest);
+    }
+    println!("  certified {} images on the list", digests.len());
+    // NOALLOC: `try_reserve` above made the capacity the count, so nothing moves.
+    crate::user::space::certified::set(digests.into_boxed_slice());
+}
+
+/// Hold to K14's grant every node of a certified profile whose DMA nothing would
+/// translate, before any handle exists (K14.4, G.5). An over-approximation of
+/// "DMA-capable": every node but the two the kernel synthesises. A profile with no
+/// certified level flags none, whatever `ferrix.unisolated` says.
+fn flag_nodes() {
+    if !cfg!(any(ferrix_level = "sc2", ferrix_level = "sc4")) {
+        return;
+    }
+    let mut flagged = 0_usize;
+    for node in device::devices() {
+        let translated = match node.location() {
+            Location::Pci(function) => crate::iommu::would_translate(function),
+            Location::VirtioMmio(_) | Location::Tree(_) => false,
+        };
+        if node.wants_certified(translated) {
+            node.require_certified();
+            flagged += 1;
+        }
+    }
+    println!("  certified {flagged} nodes held to K14's grant by this profile");
 }

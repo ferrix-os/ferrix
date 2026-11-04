@@ -3848,5 +3848,33 @@ package FerrixMemoryRequirements {
             attribute :>> parent = "H.MEM.30";
             attribute :>> unit = "object::job::Job::measure_refuses";
         }
+        requirement <'L.mm.127'> thePassIsOfSpaceAndList : ItemLowLevel {
+            attribute :>> statement = "A process shall pass K14's test only if its space is measured,
+                untainted, and every digest on its record is on the certified list.";
+            attribute :>> criterion = "object::grant_check: a space with an unlisted digest does not pass.";
+            attribute :>> parent = "H.MEM.30";
+            attribute :>> unit = ("user::space::AddressSpace::passes", "user::space::set");
+        }
+        requirement <'L.mm.128'> aChangeByAnotherTaints : ItemLowLevel {
+            attribute :>> statement = "A change to a space by a caller that does not pass, before or after
+                the start, shall taint it for good.";
+            attribute :>> criterion = "object::grant_check.";
+            attribute :>> parent = "H.MEM.30";
+            attribute :>> unit = ("syscall::native::reach_into", "user::space::AddressSpace::reached");
+        }
+        requirement <'L.mm.129'> noSupervisorOutside : ItemLowLevel {
+            attribute :>> statement = "A passing process shall have no supervisor that does not pass, on
+                itself, its job or an ancestor.";
+            attribute :>> criterion = "object::grant_check.";
+            attribute :>> parent = "H.MEM.30";
+            attribute :>> unit = ("object::job::Job::note_grant", "object::job::Job::supervised_from_outside");
+        }
+        requirement <'L.mm.130'> aGrantHoldsAfterIt : ItemLowLevel {
+            attribute :>> statement = "After a grant the node's holder shall not lose the test by a later act
+                of anyone but itself without its grant ending.";
+            attribute :>> criterion = "object::grant_check.";
+            attribute :>> parent = "H.MEM.30";
+            attribute :>> unit = "object::job::Job::note_grant";
+        }
     }
 }

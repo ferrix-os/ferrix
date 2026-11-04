@@ -86,8 +86,9 @@ fn test_first_processes(args: &Args) -> Result<()> {
             let initramfs = initramfs::build(None, &natives, None, &held)?;
             let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, None)?;
             qemu::test_first_processes_held(arch, &image, &kernel, args)?;
-            // A device that asks for a certified driver, past the checker: this kernel has no
-            // grant, so its parser's yes is the boot's stop (ledger 6564 Y.1).
+            // A device that asks for a certified driver: the description adds the flag, the
+            // checker lets it by, and the manager holds a node held to K14's grant (ledger
+            // 6564 Y.1, reversed at 6803 (iv)).
             let mut needs = described(&root, &device(0x0200))?;
             if let crate::ports::Content::Bytes(bytes) = &mut needs.content
                 && let Some(flag) = bytes.get_mut(16 + 168 + 4)
@@ -96,7 +97,7 @@ fn test_first_processes(args: &Args) -> Result<()> {
             }
             let initramfs = initramfs::build(None, &natives, None, &[needs])?;
             let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, None)?;
-            qemu::test_description_stops(arch, &image, &kernel, args, "this kernel has no grant")?;
+            qemu::test_first_processes_needs(arch, &image, &kernel, args)?;
             let no_such = [described(&root, &device(0x7700))?];
             let initramfs = initramfs::build(None, &natives, None, &no_such)?;
             let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, None)?;

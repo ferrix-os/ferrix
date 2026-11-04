@@ -4651,6 +4651,29 @@ pub(crate) fn test_first_processes_held(
     Ok(())
 }
 
+/// A description holding a device to K14's grant: the boot goes on with it flagged.
+/// Verifies: `L.device.79`
+pub(crate) fn test_first_processes_needs(
+    arch: Arch,
+    image: &Path,
+    kernel: &Path,
+    args: &Args,
+) -> Result<()> {
+    let watched = watch(arch, image, kernel, args, "linuxd   started")?;
+    if !watched
+        .lines
+        .iter()
+        .any(|line| line.contains("a description holds a device to K14's grant"))
+    {
+        return Err(Error::new(format!(
+            "{arch}: a description's flag did not hold its device to the grant.\n  Serial output is in {}",
+            watched.log.display()
+        )));
+    }
+    println!("  {arch}: a description held its device to K14's grant");
+    Ok(())
+}
+
 /// A description the boot must not go on with.
 /// Verifies: `L.object.323`
 pub(crate) fn test_description_stops(

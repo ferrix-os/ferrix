@@ -216,6 +216,12 @@ pub struct Job {
     /// (`docs/microkernel/K14.md` §3). Set once, never cleared; inherited by
     /// every job made inside it.
     measured: AtomicBool,
+    /// A process in it, or in a job inside it, was granted a device that needs a
+    /// certified driver: nobody may attach a supervisor from now on (K14 §5).
+    granted_below: AtomicBool,
+    /// A supervisor was attached by something that does not pass: nothing in it
+    /// or below it passes, however its image reads (K14 §5, G.3).
+    supervised_outside: AtomicBool,
     /// Its criticality level, fixed as it is made and at most its parent's
     /// (`docs/microkernel/K17.md`).
     level: u8,
@@ -460,6 +466,8 @@ impl Job {
             domain: 0,
             sealed: false,
             measured: AtomicBool::new(false),
+            granted_below: AtomicBool::new(false),
+            supervised_outside: AtomicBool::new(false),
             level: ferrix_native_abi::types::JOB_LEVEL_TOP,
             declared: false,
             supervisor: Supervisor::new(),
@@ -525,6 +533,40 @@ impl Job {
     /// not yet started, which none refuses.
     pub(crate) fn seal_refuses(from: &Job, to: &Job, placing: bool) -> bool {
         !placing && (from.sealed || to.sealed)
+    }
+
+    /// Note a grant here and in every job above: a sticky word, written walking
+    /// up, so that an attach reads one load and walks no descendants.
+    pub fn note_grant(self: &Arc<Self>) {
+        let mut at = Some(Arc::clone(self));
+        while let Some(job) = at {
+            if job.granted_below.swap(true, Ordering::SeqCst) {
+                return;
+            }
+            at = job.parent.clone();
+        }
+    }
+
+    /// Whether a process at or below it was granted such a device.
+    pub fn granted_below(&self) -> bool {
+        self.granted_below.load(Ordering::SeqCst)
+    }
+
+    /// Note that something that does not pass supervises it.
+    pub fn note_outside_supervisor(&self) {
+        self.supervised_outside.store(true, Ordering::SeqCst);
+    }
+
+    /// Whether it or a job above it is supervised by something that does not pass.
+    pub fn supervised_from_outside(self: &Arc<Self>) -> bool {
+        let mut at = Some(Arc::clone(self));
+        while let Some(job) = at {
+            if job.supervised_outside.load(Ordering::SeqCst) {
+                return true;
+            }
+            at = job.parent.clone();
+        }
+        false
     }
 
     /// Whether its processes are held to sealed, measured images.

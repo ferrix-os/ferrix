@@ -102,7 +102,7 @@ use alloc::vec::Vec;
 use core::any::Any;
 use core::fmt;
 use core::ops::Deref;
-use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 
 use crate::sync::SpinLock;
 use ferrix_bootinfo::{PAGE_SIZE, USER_VIRT_END, is_user_address};
@@ -256,6 +256,32 @@ struct Inner {
     /// lock (`docs/microkernel/K14.md` §4). What ran stays recorded: an unmap
     /// leaves it, a clone copies it.
     images: Option<Box<Images>>,
+}
+
+/// [`AddressSpace::reach`]'s bits.
+const REACH_TAINTED: u8 = 1;
+const REACH_UNLISTED: u8 = 2;
+const REACH_GRANTED: u8 = 4;
+const REACH_STARTED: u8 = 8;
+
+/// The certified list (`docs/microkernel/K14.md` §5): boot-sized, read once.
+pub mod certified {
+    use alloc::boxed::Box;
+
+    use ferrix_sync::Once;
+
+    static LIST: Once<Box<[[u8; 32]]>> = Once::new();
+
+    /// The list, once, from the first process's archive: an empty one when the
+    /// image carries none.
+    pub fn set(list: Box<[[u8; 32]]>) {
+        let _ = LIST.call_once(|| list);
+    }
+
+    /// Whether `digest` is on it.
+    pub fn listed(digest: &[u8; 32]) -> bool {
+        LIST.get().is_some_and(|list| list.contains(digest))
+    }
 }
 
 /// The most image digests a space records (K14.11: a fixed block, not grown
@@ -431,6 +457,9 @@ pub struct AddressSpace {
     /// (`docs/microkernel/K14.md` §3). Set once, never cleared; read by the
     /// map calls with no job's lock taken (K14.7), and copied by a clone.
     measured: AtomicBool,
+    /// What K14's grant reads (`docs/microkernel/K14.md` §5): a word of sticky
+    /// bits, so that a pass is one load and no two spaces' locks nest.
+    reach: AtomicU8,
     /// The speculation domain its programs are in, zero for none, or
     /// [`UNCLAIMED`] before a process has claimed it: see
     /// [`AddressSpace::claim_domain`] and `docs/OPAQUE-KERNEL.md` §9.2.
@@ -759,6 +788,7 @@ impl AddressSpace {
             handles: AtomicU64::new(0),
             inner: SpinLock::new(inner),
             measured: AtomicBool::new(false),
+            reach: AtomicU8::new(0),
             domain: AtomicU64::new(UNCLAIMED),
             normal: Once::new(),
             #[cfg(ferrix_personality = "user")]
@@ -1710,6 +1740,9 @@ impl AddressSpace {
         if self.is_measured() {
             child.measure();
         }
+        // A clone carries what was done to its source, and starts unstarted.
+        let carried = self.reach.load(Ordering::Acquire) & (REACH_TAINTED | REACH_UNLISTED);
+        let _ = child.reach.fetch_or(carried, Ordering::AcqRel);
         Ok(child)
     }
 
@@ -4065,6 +4098,89 @@ impl AddressSpace {
         self.map_by_handle(at, len, vmo, offset, flags, ceiling)
     }
 
+    /// Someone reached in who may not, so it never passes K14's grant.
+    pub fn taint(&self) {
+        let _ = self.reach.fetch_or(REACH_TAINTED, Ordering::AcqRel);
+    }
+
+    /// Whether anyone reached in who may not.
+    pub fn tainted(&self) -> bool {
+        self.reach.load(Ordering::Acquire) & REACH_TAINTED != 0
+    }
+
+    /// Its process is about to run: a change from outside taints from now on.
+    pub fn mark_started(&self) {
+        let _ = self.reach.fetch_or(REACH_STARTED, Ordering::AcqRel);
+    }
+
+    /// Whether its process has been started.
+    pub fn started(&self) -> bool {
+        self.reach.load(Ordering::Acquire) & REACH_STARTED != 0
+    }
+
+    /// It passed K14's grant, if nothing has tainted it, in one step with the taint
+    /// (ledger 6316 P2.2): a change from outside, or an unlisted image, is refused
+    /// from now on, rather than tainting (§5). Answers whether it was granted.
+    pub fn try_grant(&self) -> bool {
+        self.reach
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
+                (state & (REACH_TAINTED | REACH_UNLISTED) == 0).then_some(state | REACH_GRANTED)
+            })
+            .is_ok()
+    }
+
+    /// Set `mark`, unless granted, in one step with the grant. False when granted.
+    pub(crate) fn mark_unless_granted(&self, mark: u8) -> bool {
+        self.reach
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
+                (state & REACH_GRANTED == 0).then_some(state | mark)
+            })
+            .is_ok()
+    }
+
+    /// As [`Self::taint`], unless granted: a holder that does not pass, whose supervision
+    /// a grant forbids. False when granted.
+    pub fn taint_unless_granted(&self) -> bool {
+        self.mark_unless_granted(REACH_TAINTED)
+    }
+
+    /// A by-handle change arrives from outside: refused once granted, in one step
+    /// with the grant; otherwise a taint if it has started or the caller does not pass.
+    /// False when refused.
+    pub fn reached(&self, caller_passes: bool) -> bool {
+        self.reach
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
+                if state & REACH_GRANTED != 0 {
+                    None
+                } else if state & REACH_STARTED != 0 || !caller_passes {
+                    Some(state | REACH_TAINTED)
+                } else {
+                    Some(state)
+                }
+            })
+            .is_ok()
+    }
+
+    /// Whether it was granted a device.
+    pub fn granted(&self) -> bool {
+        self.reach.load(Ordering::Acquire) & REACH_GRANTED != 0
+    }
+
+    /// K14's pass (`docs/microkernel/K14.md` §5): measured, nobody reached in, at
+    /// least one image, and every image it was given on the certified list.
+    pub fn passes(&self) -> bool {
+        if !self.is_measured()
+            || self.reach.load(Ordering::Acquire) & (REACH_TAINTED | REACH_UNLISTED) != 0
+        {
+            return false;
+        }
+        self.inner
+            .lock()
+            .images
+            .as_ref()
+            .is_some_and(|images| !images.digests().is_empty())
+    }
+
     /// Whether its executable memory comes only from sealed VMOs.
     pub fn is_measured(&self) -> bool {
         self.measured.load(Ordering::Acquire)
@@ -4084,6 +4200,9 @@ impl AddressSpace {
     ///
     /// [`SpaceError::OutOfMemory`] or [`SpaceError::ImagesFull`].
     pub fn note_image(&self, digest: [u8; 32]) -> Result<(), SpaceError> {
+        if !certified::listed(&digest) {
+            let _ = self.reach.fetch_or(REACH_UNLISTED, Ordering::AcqRel);
+        }
         let room = Images::boxed().ok_or(SpaceError::OutOfMemory)?;
         if self.inner.lock().note_image(digest, Some(room)) {
             Ok(())
@@ -4158,6 +4277,14 @@ impl AddressSpace {
         let digest = if runs { vmo.digest() } else { None };
         if runs && digest.is_none() && self.is_measured() {
             return Err(SpaceError::Unmeasured);
+        }
+        // After a grant, only what the list names (§5). Before one, a sticky
+        // mark: a pass is then one load, and no walk of the record.
+        if let Some(digest) = digest.filter(|digest| !certified::listed(digest)) {
+            let _ = digest;
+            if !self.mark_unless_granted(REACH_UNLISTED) {
+                return Err(SpaceError::Unmeasured);
+            }
         }
         let room = digest
             .is_some()

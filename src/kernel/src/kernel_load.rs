@@ -156,6 +156,8 @@ pub mod object {
     #[cfg(ferrix_load_built = "ring0")]
     pub mod format_check;
     #[cfg(ferrix_load_built = "ring0")]
+    pub mod grant_check;
+    #[cfg(ferrix_load_built = "ring0")]
     pub mod level_check;
     #[cfg(ferrix_load_built = "ring0")]
     pub mod pager_check;

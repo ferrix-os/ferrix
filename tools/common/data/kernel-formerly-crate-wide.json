@@ -2325,6 +2325,11 @@
       "ledger": 6131
     },
     {
+      "item": "user/space.rs: AddressSpace::tainted (method)",
+      "born": "K14",
+      "ledger": 6803
+    },
+    {
       "item": "user/space.rs: AddressSpace::uninstall (method)",
       "before": "pub(crate)"
     },

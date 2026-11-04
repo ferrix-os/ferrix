@@ -69,7 +69,7 @@
     "boot_authority.rs": {
       "bucket": "boot",
       "what": "the first processes' descriptions, lists and images",
-      "sites": 12
+      "sites": 16
     },
     "claim.rs": {
       "bucket": "boot",

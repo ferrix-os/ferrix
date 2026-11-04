@@ -832,7 +832,7 @@ this table before any stream is sized on it.
 * **ARMv7-A as a native-only safety target** (P7). Without an IOMMU, an
   assumption of use cannot make an uncertified DMA-capable driver trusted at
   SIL 4 or ASIL D: it would be part of the safety element. So on a
-  configuration with no IOMMU (or a refused unit), **devmgr may grant a
+  configuration with no IOMMU (or a refused unit), **the starter may grant a
   DMA-capable function only to a driver whose image digests K14 finds on the
   certified list**; any other grant is refused by the kernel, with a check
   and a negative control. **"DMA-capable" is classified per platform in the

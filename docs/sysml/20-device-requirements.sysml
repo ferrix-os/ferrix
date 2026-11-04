@@ -1461,5 +1461,19 @@ package FerrixDeviceRequirements {
             attribute :>> parent = "H.DEV.13";
             attribute :>> unit = "object::process::Process::debug_budget_takes";
         }
+        requirement <'L.device.79'> aDriverOfANeedyNodePasses : ItemLowLevel {
+            attribute :>> statement = "A node flagged needs_certified shall give its vector, I/O mapping and
+                pin only to a process that passes K14's test.";
+            attribute :>> criterion = "object::grant_check on a made-up node.";
+            attribute :>> parent = "H.DEV.11";
+            attribute :>> unit = ("syscall::native::certified_grant", "syscall::native::takes_grant", "iommu::would_translate", "device::DeviceNode::wants_certified");
+        }
+        requirement <'L.device.80'> derivedObjectsDoNotTravel : ItemLowLevel {
+            attribute :>> statement = "What a needs_certified node's vector, I/O mapping and pin give shall
+                carry no TRANSFER.";
+            attribute :>> criterion = "object::grant_check.";
+            attribute :>> parent = "H.DEV.11";
+            attribute :>> unit = "device::DeviceNode::derived_rights";
+        }
     }
 }

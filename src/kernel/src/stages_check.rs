@@ -1459,6 +1459,14 @@ pub(super) fn check_spaces() {
         Ok(sealing) => sealing,
         Err(problem) => fatal!(catalog::STAGE9_SEALING, "{problem}"),
     };
+    let grant = match object::grant_check::run() {
+        Ok(grant) => grant,
+        Err(problem) => fatal!(catalog::STAGE9_SEALING, "{problem}"),
+    };
+    println!(
+        "  grant    {} refusals as specified, {} grant passed: code bytes, its starter and who can reach it",
+        grant.refusals, grant.granted,
+    );
     println!(
         "  sealed   {} VMOs frozen and hashed against a known vector, {} refusals as \
          specified, {} digest kept across an unmap; {} bytes sealed in {} us",

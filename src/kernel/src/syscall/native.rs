@@ -3037,6 +3037,10 @@ fn new_process_handle(
             _ => status::BAD_STATE,
         });
     }
+    // Made by something that does not pass, it never does (K14 §5, G.1).
+    if !process.own_space().passes() {
+        child.core().own_space().taint();
+    }
     if job.measured() {
         let space = child.core().own_space();
         space.measure();
@@ -3187,6 +3191,13 @@ fn start_with(
         return Err(status::BAD_STATE);
     }
     let processes = processes().ok_or(status::BAD_STATE)?;
+    {
+        let space = child.core().own_space();
+        let reach = ByHandle::of(process, space);
+        let _layout = space.layout();
+        reach.apply(space)?;
+        space.mark_started();
+    }
     let mut place = || {
         if bootstrap == Handle::default() {
             return Ok(0);
@@ -3274,6 +3285,7 @@ pub(crate) fn give_bootstrap_from(
     handle: Handle,
     private: bool,
 ) -> Result<usize, Errno> {
+    reach_into(from, to.own_space())?;
     let level = to.exit().level();
     let moved = |source: &mut HandleTable| {
         let (object, rights) = source.get(handle).map_err(table_error)?;
@@ -3557,6 +3569,32 @@ fn exception_channel_create(
     {
         return Err(status::BAD_STATE);
     }
+    // A supervisor can rewrite registers, so a holder that does not pass is
+    // control of what it supervises (K14 §5, G.3).
+    // A holder that passes stays so: it may map only what is listed from here on, as a
+    // grant holds a driver to, or it could lose its pass and keep its control (P2.4).
+    let holder_passes = takes_grant(process);
+    match &supervised {
+        Supervised::Job(job) => {
+            // Published first, then the other's word read (ledger 6343), so that of this
+            // and a grant at once one sees the other. Refused, the word stays: fail closed.
+            if !holder_passes {
+                job.note_outside_supervisor();
+            }
+            if job.granted_below() {
+                return Err(status::BAD_STATE);
+            }
+        }
+        Supervised::Process(host) => {
+            let space = host.core().own_space();
+            if !holder_passes && !space.taint_unless_granted() {
+                return Err(status::BAD_STATE);
+            }
+            if holder_passes && space.granted() {
+                return Err(status::BAD_STATE);
+            }
+        }
+    }
     let read_end = attach_channel(&supervised, timeout_ms)?;
     // The read end placed last: refused, it is closed by `insert_new`'s
     // dispose, and the slot finds its peer closed and lets the kernel end
@@ -3564,7 +3602,13 @@ fn exception_channel_create(
     let placed = insert_new(
         process,
         Object::Channel(read_end),
-        Rights::EXCEPTION_CHANNEL,
+        // On a space that passes, the channel stays with the holder that was
+        // tested: it cannot be handed to one that was not (G.3).
+        if holder_passes {
+            Rights(Rights::EXCEPTION_CHANNEL.0 & !(Rights::DUPLICATE.0 | Rights::TRANSFER.0))
+        } else {
+            Rights::EXCEPTION_CHANNEL
+        },
     );
     if placed.is_err() {
         object::dispose(supervised.slot().let_go_if_dead());
@@ -3763,6 +3807,7 @@ fn interrupt_create(process: &Process, device: Handle, index: u64) -> Result<usi
     if !node.may_drive() {
         return Err(status::BAD_STATE);
     }
+    certified_grant(process, &node)?;
     // Taking a device's interrupt is what its driver does, and devmgr and a
     // quiesce never do: noted, so that a check waiting for the driver's work
     // can say how the driver ended.
@@ -3776,7 +3821,11 @@ fn interrupt_create(process: &Process, device: Handle, index: u64) -> Result<usi
         InterruptError::NotMaskable => status::INVALID_ARGS,
         InterruptError::NoMemory => status::NO_MEMORY,
     })?;
-    insert_new(process, Object::Interrupt(interrupt), Rights::INTERRUPT)
+    insert_new(
+        process,
+        Object::Interrupt(interrupt),
+        node.derived_rights(Rights::INTERRUPT),
+    )
 }
 
 /// `interrupt_ack`.
@@ -3806,6 +3855,7 @@ fn io_mapping_create(process: &Process, device: Handle, spec: u64) -> Result<usi
     if !node.may_drive() {
         return Err(status::BAD_STATE);
     }
+    certified_grant(process, &node)?;
     // Mapping a device's registers, likewise (see `interrupt_create`).
     crate::discovery::devmgr::note_driver(&node, process);
     let phys = read_u64(process, spec)?;
@@ -3815,7 +3865,11 @@ fn io_mapping_create(process: &Process, device: Handle, spec: u64) -> Result<usi
         IoMappingError::NotWholePages => status::INVALID_ARGS,
         IoMappingError::NoMemory => status::NO_MEMORY,
     })?;
-    insert_new(process, Object::IoMapping(mapping), Rights::IO_MAPPING)
+    insert_new(
+        process,
+        Object::IoMapping(mapping),
+        node.derived_rights(Rights::IO_MAPPING),
+    )
 }
 
 /// Make a device's control channel for a subsystem above the item: the
@@ -4114,6 +4168,7 @@ fn vmo_pin(
     let order = pin_block_order(options, offset, length)?;
     let read_only = options & PIN_READ_ONLY != 0;
     let node = device_isolated_in(process, device)?;
+    certified_grant(process, &node)?;
     // A node nothing behind which reaches memory -- the firmware
     // framebuffer's, whose driver copies -- has no pin to give, and so no
     // physical address to tell.
@@ -4465,6 +4520,80 @@ fn domain_of_call(node: &DeviceNode) -> Result<Arc<crate::iommu::Domain>, Errno>
     })
 }
 
+/// K14's grant at each call that gives a driver a device's vector, aperture or
+/// pin (`docs/microkernel/K14.md` §5): on a node that needs it, the calling process
+/// passes, or `BAD_STATE` and its own event. A pass is recorded: from then on the
+/// space takes no change from outside, and its job's tree no new supervisor.
+fn certified_grant(process: &Process, node: &DeviceNode) -> Result<(), Errno> {
+    if !node.needs_certified() {
+        return Ok(());
+    }
+    if !takes_grant(process) {
+        let refused = status::BAD_STATE;
+        audit::record(
+            audit::UNMEASURED,
+            audit::Outcome::Refused,
+            i16::try_from(refused.0).unwrap_or(i16::MAX),
+            audit::Subject::of(process),
+            audit::Target {
+                kind: audit::target::NONE,
+                id: 0,
+            },
+            [1, 0, 0],
+        );
+        return Err(refused);
+    }
+    Ok(())
+}
+
+/// K14's whole test (§5, ledger 6343): it passes, nothing that does not supervises its job,
+/// and from here on it is held to the list. Each side of a grant and a supervisor's attach
+/// publishes its word, then reads the other's, both sequentially consistent, so that one
+/// of two at once sees the other: a refused grant leaves the stricter state, by design.
+fn takes_grant(process: &Process) -> bool {
+    if !process.own_space().passes() || !process.own_space().try_grant() {
+        return false;
+    }
+    process.job().note_grant();
+    !process.job().supervised_from_outside()
+}
+
+/// A by-handle change to a space from `process`, K14 §5's rule: refused once the
+/// space was granted, a mark on it if the caller does not pass, or from anyone outside
+/// once its process has started. The mark is made before the change. Read in two
+/// steps, so that the caller's pass is had before the target's layout lock and no two
+/// spaces' locks nest (G.1), and the test made under that lock, the one the start is
+/// marked under (G.2).
+struct ByHandle {
+    outside: bool,
+    caller_passes: bool,
+}
+
+impl ByHandle {
+    fn of(process: &Process, target: &AddressSpace) -> ByHandle {
+        let outside = !core::ptr::eq(Arc::as_ptr(process.own_space()), target);
+        ByHandle {
+            outside,
+            caller_passes: outside && process.own_space().passes(),
+        }
+    }
+
+    /// Under `target`'s layout lock.
+    fn apply(&self, target: &AddressSpace) -> Result<(), Errno> {
+        if self.outside && !target.reached(self.caller_passes) {
+            return Err(status::BAD_STATE);
+        }
+        Ok(())
+    }
+}
+
+/// [`ByHandle`] for a call that changes nothing of the space's layout itself.
+fn reach_into(process: &Process, target: &AddressSpace) -> Result<(), Errno> {
+    let reach = ByHandle::of(process, target);
+    let _layout = target.layout();
+    reach.apply(target)
+}
+
 /// `device_bind_domain` (`docs/microkernel/K8.md` §2).
 ///
 /// `BIND_DOMAIN` is on the handle `devmgr` keeps. A successful bind writes no
@@ -4476,7 +4605,10 @@ fn domain_of_call(node: &DeviceNode) -> Result<Arc<crate::iommu::Domain>, Errno>
 fn device_bind_domain(process: &Process, device: Handle) -> Result<usize, Errno> {
     use crate::device::BindRefusal;
     let node = device_in(process, device, Rights::MANAGE | Rights::BIND_DOMAIN)?;
-    node.bind_domain(crate::discovery::devmgr::unisolated_allowed())
+    // A passing holder may bind an untranslated node that needs one (BA.10).
+    let admitted = crate::discovery::devmgr::unisolated_allowed()
+        || (node.needs_certified() && process.own_space().passes());
+    node.bind_domain(admitted)
         .map(|()| 0)
         .map_err(|why| match why {
             BindRefusal::NoDma => status::WRONG_TYPE,
@@ -4866,6 +4998,7 @@ fn process_space(process: &Process, target: Handle, rights: u64) -> Result<usize
     })?;
     let child = control.host().ok_or(status::BAD_STATE)?;
     let core = child.core();
+    reach_into(process, core.own_space())?;
     // Counted first, then judged: `execve` reads the count, so a child that starts
     // and execs a set-id file between the two either sees this handle and raises
     // nothing, or has started by the test below, and the handle goes unanswered
@@ -4904,7 +5037,9 @@ pub(crate) fn lift_space(
     needed: Rights,
 ) -> Result<Arc<SpaceRef>, Errno> {
     let handle = Handle(u32::try_from(space).map_err(|_| status::BAD_HANDLE)?);
-    space_in(process, handle, needed)
+    let target = space_in(process, handle, needed)?;
+    reach_into(process, target.space())?;
+    Ok(target)
 }
 #[cfg(ferrix_personality = "user")]
 pub(crate) fn lift_vmo(
@@ -4939,6 +5074,7 @@ fn space_map(
         Rights::MAP
     };
     let target = space_in(process, space, on_space)?;
+    let reach = ByHandle::of(process, target.space());
     #[cfg(ferrix_personality = "user")]
     if target.space().is_window() {
         return Err(status::BAD_STATE);
@@ -4967,6 +5103,7 @@ fn space_map(
     // At the level of the space it lands in, not the caller's.
     may_map_at(process, &vmo, target.level())?;
     let _layout = target.space().layout();
+    reach.apply(target.space())?;
     let mapped = target
         .charging_owner(|| {
             target
@@ -4988,10 +5125,12 @@ fn space_unmap(
     length: u64,
 ) -> Result<usize, Errno> {
     let target = space_in(process, space, Rights::MAP)?;
+    let reach = ByHandle::of(process, target.space());
     if length == 0 || !address.is_multiple_of(PAGE_SIZE) || !length.is_multiple_of(PAGE_SIZE) {
         return Err(status::INVALID_ARGS);
     }
     let _layout = target.space().layout();
+    reach.apply(target.space())?;
     target
         .space()
         .unmap(address, length)
@@ -5018,12 +5157,14 @@ fn space_protect(
     if target.space().is_window() {
         return Err(status::NOT_SUPPORTED);
     }
+    let reach = ByHandle::of(process, target.space());
     let flags = VmaFlags {
         write,
         execute,
         ..VmaFlags::READ
     };
     let _layout = target.space().layout();
+    reach.apply(target.space())?;
     target
         .space()
         .protect_by_handle(address, length, flags)
@@ -5062,6 +5203,7 @@ fn space_allocate(
         Rights::NONE
     };
     let target = space_in(process, space, Rights::MAP | runnable)?;
+    let reach = ByHandle::of(process, target.space());
     let flags = VmaFlags {
         read: readable,
         write,
@@ -5070,6 +5212,7 @@ fn space_allocate(
     };
     let at = (address != 0).then_some(address);
     let _layout = target.space().layout();
+    reach.apply(target.space())?;
     let mapped = target
         .charging_owner(|| target.space().allocate_by_handle(at, length, flags))
         .map_err(|why| match why {
@@ -5130,6 +5273,7 @@ fn space_write(
     if target.space().is_window() {
         return Err(status::NOT_SUPPORTED);
     }
+    let reach = ByHandle::of(process, target.space());
     let length = usize::try_from(length)
         .unwrap_or(usize::MAX)
         .min(nr::SPACE_COPY_MAX);
@@ -5143,6 +5287,11 @@ fn space_write(
         let chunk = bounce.get_mut(..step).ok_or(status::FAULT)?;
         uaccess::copy_from_user(process.own_space(), from, chunk).map_err(fault)?;
         let chunk = bounce.get(..step).ok_or(status::FAULT)?;
+        // Each step: a start or a grant can come between two (G.2).
+        {
+            let _layout = target.space().layout();
+            reach.apply(target.space())?;
+        }
         target.charging_owner(|| write_target(target.space(), to, chunk))
     })
 }

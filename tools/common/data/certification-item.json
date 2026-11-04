@@ -462,7 +462,7 @@
           "personality=user"
         ],
         "below": "the partitions description's bytes, from the sealed archive (L.object.323)",
-        "above": "the kernel's start of the first processes"
+        "above": "the kernel's start of the first processes; the certified list's digests"
       },
       "ferrix-cpio": {
         "ring": "item",
@@ -1012,6 +1012,11 @@
       },
       {
         "file": "object/sealing_check.rs",
+        "file_ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "object/grant_check.rs",
         "file_ring": "core",
         "crate": "ferrix-kernel-load"
       },
