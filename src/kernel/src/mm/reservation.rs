@@ -33,7 +33,7 @@
 //! the watermark plus `O`; the kernel's own below `O`. With no reservation
 //! `O` is 0 and every route is as it was before K12.
 
-use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 
 use ferrix_frame::Frame;
 use ferrix_sync::Once;
@@ -93,6 +93,16 @@ fn slot(entry: Entry) -> Option<&'static Slot> {
         .and_then(|at| SLOTS.get(at))
 }
 
+/// Entries bound: while none is, no job draws, so an allocation asks nothing more
+/// (ledger 5860, 6403). Written under the frame allocator's lock.
+static BOUND: AtomicU32 = AtomicU32::new(0);
+
+/// Whether any entry is bound.
+#[inline]
+pub(super) fn any_bound() -> bool {
+    BOUND.load(Ordering::Relaxed) != 0
+}
+
 /// Hand the tag array to the ledger: one byte for each of the frames the
 /// allocator manages from `base`, zeroed. Once, at `mm::init`.
 pub(super) fn install(tags: &'static [AtomicU8], base: Frame) {
@@ -142,6 +152,9 @@ pub(crate) enum Floor {
     Program(Entry),
     /// The kernel's own: held above the promise.
     Kernel,
+    /// A reservation's own heap pages (`L.mm.81`): drawn from it while it
+    /// has room, and refused otherwise, never taken plain.
+    Drawn(Entry),
 }
 
 /// What [`take`] decided, for the caller to finish in the same hold.
@@ -165,7 +178,8 @@ pub(crate) enum Taking {
 pub(super) fn take(floor: Floor, free: u64, n: u64, watermark: u64) -> Option<Taking> {
     let outstanding = outstanding();
     let (taking, least) = match floor {
-        Floor::Program(entry) if room(entry, n) => (Taking::Drawn(entry), 0),
+        Floor::Program(entry) | Floor::Drawn(entry) if room(entry, n) => (Taking::Drawn(entry), 0),
+        Floor::Drawn(_) => return None,
         Floor::Program(_) => (Taking::Plain, watermark.saturating_add(outstanding)),
         Floor::Kernel => (Taking::Plain, outstanding),
     };
@@ -244,9 +258,9 @@ fn adjust(slot: &Slot, change: impl FnOnce(&Slot)) {
     });
 }
 
-/// Bind a free entry, of size 0: one with nothing drawn and no owner.
-/// Under the frame allocator's lock. `None` when every entry is bound or
-/// still draining.
+/// Bind a free entry: unbound with nothing drawn from it. Its heap's kept pages
+/// are given back before this (`reservation_bind`), so that what is drawn is the
+/// new job's alone and a reservation of any size is whole (ledger 6260).
 pub(super) fn bind() -> Option<Entry> {
     let at = SLOTS.iter().position(|slot| {
         !slot.bound.load(Ordering::Relaxed) && slot.drawn.load(Ordering::Relaxed) == 0
@@ -254,7 +268,15 @@ pub(super) fn bind() -> Option<Entry> {
     let slot = SLOTS.get(at)?;
     slot.size.store(0, Ordering::Relaxed);
     slot.bound.store(true, Ordering::Relaxed);
+    let _ = BOUND.fetch_add(1, Ordering::Relaxed);
     Entry::try_from(at + 1).ok()
+}
+
+/// Whether the slot at `at` is bound.
+pub(super) fn is_bound(at: usize) -> bool {
+    SLOTS
+        .get(at)
+        .is_some_and(|slot| slot.bound.load(Ordering::Relaxed))
 }
 
 /// Unbind `entry`: nothing promised by it from now on, and it drains
@@ -262,7 +284,9 @@ pub(super) fn bind() -> Option<Entry> {
 pub(super) fn unbind(entry: Entry) {
     if let Some(slot) = slot(entry) {
         adjust(slot, |slot| slot.size.store(0, Ordering::Relaxed));
-        slot.bound.store(false, Ordering::Relaxed);
+        if slot.bound.swap(false, Ordering::Relaxed) {
+            let _ = BOUND.fetch_sub(1, Ordering::Relaxed);
+        }
     }
 }
 

@@ -1411,7 +1411,11 @@ fn a_reservation_needs_reserve(side: &Side, report: &mut Report) -> Result<(), &
     )?;
     let _ = set_limit(side, reserving, JOB_RESERVE, pages + 1)
         .map_err(|_| "a reservation with RESERVE was refused")?;
-    if quota(side, reserving, JOB_RESERVE)? != [pages, 0, 0] {
+    // Its size and no refusal. What reads as drawn may be the empty pages
+    // the reservation's heap kept from a job it served before
+    // (`mm::reservation::bind`), never more than a page a size class.
+    let [size, drawn, refusals] = quota(side, reserving, JOB_RESERVE)?;
+    if size != pages || refusals != 0 || drawn > crate::mm::HEAP_CLASSES as u64 * PAGE_SIZE {
         return Err("a reservation did not read back in whole pages");
     }
     refused(

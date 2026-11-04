@@ -400,6 +400,37 @@ fn a_new_heap_holds_nothing() {
 /// heap grew monotonically and a burst of small allocations was memory the
 /// system never saw again.
 #[test]
+fn an_idle_heap_gives_back_every_kept_page() {
+    let mut pages = Pages::with_budget(64);
+    let mut heap = Heap::new();
+    let mut live = Vec::new();
+    for &size in &CLASS_SIZES {
+        let request = Request::new(size, 1);
+        live.push((heap.allocate(&mut pages, request).unwrap(), request));
+    }
+    let (held, request) = live.pop().unwrap();
+    for (address, request) in live.drain(..) {
+        heap.deallocate(&mut pages, address, request);
+    }
+    // An object still out: nothing goes, not even the empty pages.
+    assert_eq!(heap.release_kept(&mut pages), 0);
+    assert_eq!(pages.outstanding(), CLASSES);
+
+    heap.deallocate(&mut pages, held, request);
+    assert_eq!(pages.outstanding(), CLASSES);
+    assert_eq!(heap.release_kept(&mut pages), CLASSES);
+    assert_eq!(pages.outstanding(), 0);
+    assert_eq!(heap.slab_pages(), 0);
+    assert_eq!(heap.release_kept(&mut pages), 0);
+
+    // And the heap serves again afterwards.
+    let again = Request::new(64, 8);
+    let address = heap.allocate(&mut pages, again).unwrap();
+    heap.deallocate(&mut pages, address, again);
+    assert_eq!(pages.outstanding(), 1);
+}
+
+#[test]
 fn an_emptied_class_returns_its_pages_but_keeps_one() {
     let mut pages = Pages::with_budget(64);
     let mut heap = Heap::new();
