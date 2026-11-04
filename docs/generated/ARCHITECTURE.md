@@ -123,7 +123,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 | `FerrixSigningRequirements` | `26-signing-requirements.sysml` | docs/SIGNING.md is the design (the certification consultant's OK IF at ledger lines 3667 and 3738; the customer's decisions at 3731). Slice S1 builds the verify-only crate `ferrix-sigverify` (src/lib/crypto/sigverify) and the hash it rests on, `ferrix-sha256` (src/lib/crypto/sha256), both in the item ring (certification-item.json's crates). What the UEFI loader, init's configuration verifier and devmgr do with the verifier's answer is theirs, and gets ids in their own slices (S4, S8, S9). |
 
-27 files, 163 packages, 9021 elements, 220 relations. Model digest `f7101960ab85391e`.
+27 files, 165 packages, 9095 elements, 220 relations. Model digest `e8dd9c47968fb8b8`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -4027,6 +4027,11 @@ flowchart LR
 | `L.object.187` | `anIdleJobRefusesANativeWeight` | — | — | — |
 | `L.object.160` | `theCarriedWeightIsTheWideFormula` | — | — | — |
 | `L.object.161` | `everyEntityWeightIsBelowTwoToThe32` | — | — | — |
+| `L.object.221` | `aReservationNeedsReserve` | — | — | — |
+| `L.object.222` | `aReservationIsOneLevel` | — | — | — |
+| `L.object.223` | `aReservationIsBesideItsLimit` | — | — | — |
+| `L.object.224` | `aReservationReadsBack` | — | — | — |
+| `L.object.225` | `aReservationEndsWithItsSlot` | — | — | — |
 | `L.object.63` | `everyProcessInOneJob` | — | — | — |
 | `L.object.64` | `aChildsQuotaIsInsideItsParents` | — | — | — |
 | `L.object.65` | `aChildIsAnObjectAndRefusedWhenKilled` | — | — | — |
@@ -4405,6 +4410,13 @@ flowchart LR
 | `L.mm.72` | `aProgramsFramesStopAtTheWatermark` | — | — | — |
 | `L.mm.73` | `aProgramsTablesStopAtTheWatermark` | — | — | — |
 | `L.mm.74` | `theKernelIsServedBelowTheWatermark` | — | — | — |
+| `L.mm.76` | `aReservationIsAdmittedUnderTheLock` | — | — | — |
+| `L.mm.77` | `aProgramStopsAtThePromise` | — | — | — |
+| `L.mm.78` | `theKernelStopsAtThePromise` | — | — | — |
+| `L.mm.79` | `aReservationsFramesAreDrawn` | — | — | — |
+| `L.mm.80` | `aFreedFrameGoesBackToItsPromise` | — | — | — |
+| `L.mm.82` | `aReclaimLiftsOverThePromise` | — | — | — |
+| `L.user.145` | `aReclaimSparesAnothersReservation` | — | — | — |
 | `L.mm.35` | `aSectionCompletesOnTheReserve` | — | — | — |
 | `L.mm.36` | `aSectionThatCannotFillIsRefused` | — | — | — |
 | `L.mm.37` | `theReserveServesOnlyItsSections` | — | — | — |
