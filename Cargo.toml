@@ -2,6 +2,12 @@
 # v3 makes the `rust-version` pin below bind, so a crate needing a newer
 # compiler is skipped rather than silently attempted.
 resolver = "3"
+# A workspace of its own. Without this, an app reaching this workspace's crates
+# as well as tole's (lode-viewer) finds this root first once it is loaded, and
+# gives tole-compiler these lints: 88 flags where every other app gives it 32, so
+# in their shared check directory it and they rebuilt on every `check`
+# (`docs/TEST-TIME.md`).
+exclude = ["src/user/system/linux/tole"]
 members = [
     # Architecture-neutral, host-testable logic. Everything that can be a pure
     # function of bytes lives here rather than in the kernel, because this is

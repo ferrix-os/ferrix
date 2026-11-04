@@ -1660,10 +1660,13 @@ against 133 s at loads 15.8, 23.1 and 35.3; 393 test results each way. A control
 tracked app file FIRED and the run after it passed with 393. Four of the six mirrors
 (ferrousli, zinc, pixel7, the website) lack their pins, so those stay cloned each run.
 
-What it leaves: lode-viewer resolves tole-compiler's `[lints] workspace = true` to 88
-flags where the other apps get 32, so tole-compiler rebuilds whenever lode-viewer and
-another app alternate in `apps-check-2`, and takes those apps with it. 43 crates a
-`check` remain from that and the kernel. Not fixed yet.
+lode-viewer reaches this workspace's crates as well as tole's, so cargo found the
+root workspace first for tole-compiler and gave it its lints: 88 flags where the other
+apps give 32. In their shared directory it flipped, and rebuilt itself and the apps
+above it, on every `check`. `exclude` in the root `Cargo.toml` ends that. Four apps in
+one directory, `check-unit` twice, `CARGO_INCREMENTAL=0`: 73, 53, 13 and 6 crates the
+first pass, none the second, 0.3 to 1.2 s a step; the directory 1.6 GB, where it was
+4.0 GB with incremental state.
 
 ### The pool's rules
 
