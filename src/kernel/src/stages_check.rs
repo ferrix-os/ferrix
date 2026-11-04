@@ -144,6 +144,9 @@ pub(super) fn check_programs() {
     // loader the kernel keeps (docs/microkernel/K15.md §6).
     check_build();
 
+    // B5's check host: programs on the core's own process.
+    check_bare();
+
     // What the switch gives a program back after a blocking native call,
     // and the FS base kept in the task: programs on the native calls just
     // proved (x86-64; docs/OPAQUE-KERNEL.md §9.8, 3a and 3b).
@@ -1447,6 +1450,17 @@ pub(super) fn check_build() {
         "  build    {} processes made empty and run at a checked entry and stack, {} refusals; \
          first image: {} malformed refused, 0 of {} leaves writable and executable ({} executable)",
         built.run, built.refusals, first[0], first[1], first[2],
+    );
+}
+
+pub(super) fn check_bare() {
+    let cases = match syscall::bare_side_check::run() {
+        Ok(cases) => cases,
+        Err(problem) => fatal!(catalog::STAGE9_BARE, "{problem}"),
+    };
+    println!(
+        "  bare     {cases} groups of cases on programs no personality holds: a fault resolved, user \
+         time apart from a call's and a fault's, each its own way back"
     );
 }
 

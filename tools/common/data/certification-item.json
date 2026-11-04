@@ -313,6 +313,7 @@
         "stages_check.rs",
         "syscall/mod.rs",
         "syscall/native.rs",
+        "syscall/bare_side_check.rs",
         "syscall/native/region.rs",
         "syscall/native_check.rs",
         "syscall/build_check.rs",

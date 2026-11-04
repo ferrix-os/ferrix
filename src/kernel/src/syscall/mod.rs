@@ -46,6 +46,7 @@
 //! the tree, not calls into them: `tools/common/check/check-item-boundary.py` counts
 //! them apart, as containment.
 
+pub mod bare_side_check;
 pub mod native;
 pub mod program;
 #[cfg(not(ferrix_load_built = "lift"))]

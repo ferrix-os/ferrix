@@ -2727,6 +2727,22 @@ pub static STAGE8_PATH_CALLS: Explanation = Explanation {
 };
 
 // CHECKS-ONLY: stages_check.rs
+/// For `check_bare` in `stages_check.rs`, when B5's checks on `Bare` fail.
+#[doc(hidden)]
+pub static STAGE9_BARE: Explanation = Explanation {
+    code: "FX-0936",
+    title: "a program no personality holds did not behave as the kernel promises",
+    meaning: "`syscall::bare_side_check::run` (docs/microkernel/B5-host.md) runs small native \\
+              programs on `object::bare::Bare`, so that what it proves links in a kernel with no \\
+              load: a fault resolved, kernel time charged and user time not. The message names the case.",
+    causes: &[
+        "`trap::dispatch` or `sched::vtime` stopped opening or closing a stint.",
+        "`AddressSpace::fault` stopped making a mapping true.",
+    ],
+    see: "src/kernel/src/syscall/bare_side_check.rs; docs/microkernel/B5-host.md",
+};
+
+// CHECKS-ONLY: stages_check.rs
 /// For `check_rebind` in `stages_check.rs`, when K13's check fails.
 #[doc(hidden)]
 pub static STAGE9_REBIND: Explanation = Explanation {
@@ -4252,6 +4268,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &STAGE6_REHOMED_CACHE,
     &ITEM_REHOMED_CALLS,
     &STAGE9_REBIND,
+    &STAGE9_BARE,
     #[cfg(ferrix_personality = "user")]
     &WINDOW_UNMAP,
     &STAGE10_AUTHORITY,

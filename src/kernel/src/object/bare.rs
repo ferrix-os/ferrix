@@ -214,6 +214,21 @@ impl Bare {
         self.spawn_with(entry, stack, argument, |_| true)
     }
 
+    /// [`Bare::spawn`], on processor `cpu` if one is named.
+    ///
+    /// # Errors
+    ///
+    /// As [`Bare::spawn`].
+    pub fn spawn_on(
+        &self,
+        entry: u64,
+        stack: u64,
+        argument: u64,
+        cpu: Option<usize>,
+    ) -> Result<Arc<ThreadRef>, &'static str> {
+        self.spawn_placed(entry, stack, argument, cpu, |_| true)
+    }
+
     /// [`Bare::spawn`], with `ready` asked once everything that can fail has been
     /// done but its handle's: a thread it says no to never runs.
     ///
@@ -225,6 +240,18 @@ impl Bare {
         entry: u64,
         stack: u64,
         argument: u64,
+        ready: impl FnOnce(&Arc<ThreadRef>) -> bool,
+    ) -> Result<Arc<ThreadRef>, &'static str> {
+        self.spawn_placed(entry, stack, argument, None, ready)
+    }
+
+    /// [`Bare::spawn_with`], on processor `cpu` if one is named.
+    fn spawn_placed(
+        &self,
+        entry: u64,
+        stack: u64,
+        argument: u64,
+        cpu: Option<usize>,
         ready: impl FnOnce(&Arc<ThreadRef>) -> bool,
     ) -> Result<Arc<ThreadRef>, &'static str> {
         let process = self.me.upgrade().ok_or("the process has gone")?;
@@ -244,7 +271,7 @@ impl Bare {
             object: Arc::clone(&object),
         })
         .map_err(|_| "no memory for the thread")?;
-        let prepared = sched::prepare_user("bare", run_thread, thread, None, None)?;
+        let prepared = sched::prepare_user("bare", run_thread, thread, cpu, None)?;
         object.set_task(prepared.task());
         self.core
             .list_task(prepared.task())
