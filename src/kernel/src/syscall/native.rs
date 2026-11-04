@@ -2891,12 +2891,36 @@ fn issue_ticket(process: &Process, channel: Handle, out: u64) -> Result<usize, E
     Ok(0)
 }
 
-/// `charge_ticket(ADOPT)`: the live ticket `id` the other end of `channel`
-/// issued becomes the calling task's adoption, once its issuer is written
-/// to `out`, so a fault there adopts nothing.
-fn adopt_ticket(process: &Process, channel: Handle, id: u64, out: u64) -> Result<usize, Errno> {
-    let endpoint = process.with_handles(|table| channel_in(table, channel, Rights::READ))?;
-    let adopted = endpoint.adoptable_ticket(id).ok_or(status::BAD_STATE)?;
+/// What `charge_ticket(ADOPT)` looks in.
+enum Either {
+    /// An outstanding request's ticket.
+    Pager(Arc<Pager>),
+    /// A ticket the channel's other end issued.
+    Channel(Arc<Endpoint>),
+}
+
+/// `charge_ticket(ADOPT)`: the live ticket `id` the other end of a channel
+/// issued, or an outstanding request's of a pager (`docs/microkernel/K3.md`
+/// §2.6), becomes the calling task's adoption, once its issuer is written to
+/// `out`, so a fault there adopts nothing.
+fn adopt_ticket(process: &Process, end: Handle, id: u64, out: u64) -> Result<usize, Errno> {
+    // The object out first, then the handle table let go: a registry's lock is
+    // never taken under the table's (ledger 2925 (6), 6261 S1).
+    let held = process.with_handles(|table| {
+        let (object, rights) = table.get(end).map_err(table_error)?;
+        match object {
+            Object::Pager(pager) if rights.contains(Rights::PAGER) => {
+                Ok(Either::Pager(Arc::clone(pager)))
+            }
+            Object::Pager(_) => Err(status::ACCESS_DENIED),
+            _ => channel_in(table, end, Rights::READ).map(Either::Channel),
+        }
+    })?;
+    let adopted = match held {
+        Either::Pager(pager) => pager.core().adoptable_ticket(id),
+        Either::Channel(endpoint) => endpoint.adoptable_ticket(id),
+    }
+    .ok_or(status::BAD_STATE)?;
     let issuer = adopted.issuer();
     let mut bytes = [0_u8; size_of::<types::TicketIssuer>()];
     for (to, word) in bytes

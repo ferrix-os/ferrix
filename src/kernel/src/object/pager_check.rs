@@ -51,7 +51,7 @@ use ferrix_native_abi::types::{
     MAP_NO_PAGER, MAP_READ, MAP_WRITE, PACKET_PAGE_REQUEST, PAGE_REQUEST_DIRTY, PAGE_REQUEST_READ,
     PAGER_OP_DECOMMIT, PAGER_OP_DIRTY, PAGER_OP_FAIL, PAGER_OP_WRITEBACK_BEGIN,
     PAGER_OP_WRITEBACK_END, PAGER_VMO_NO_COPY_WAIT, PAGER_VMO_TRAP_DIRTY, PAGER_WAIT_MAX_NS,
-    PAGER_WAIT_MIN_NS, PortPacket, page_request_parts,
+    PAGER_WAIT_MIN_NS, PortPacket, TICKET_ADOPT, page_request_parts,
 };
 
 use super::check::{SCRATCH, Side, reg};
@@ -207,6 +207,7 @@ pub fn run() -> Result<Report, &'static str> {
     let mut report = Report::default();
     let before = pager_records();
     case_a_supplied(&world, &mut report)?;
+    case_o_the_faulting_job_pays(&world, &mut report)?;
     case_b_shared_within_a_job(&world, &mut report)?;
     case_c_failed(&world, &mut report)?;
     case_l_one_job_failed(&world, &mut report)?;
@@ -622,6 +623,89 @@ fn case_a_supplied(world: &World, report: &mut Report) -> Result<(), &'static st
     if !served.quiet() || served.core.outstanding() != 0 || served.port.1.lost() != 0 {
         return Err("a: a supplied request stayed outstanding, sent a second packet, or lost one");
     }
+    report.supplied += 1;
+    Ok(())
+}
+
+/// Case o: the pager adopts the request's ticket through its handle, so the page it
+/// commits and supplies is the faulting job's, on that job's reservation; its own
+/// job pays nothing. Another pager's handle and a handle without the right adopt
+/// nothing, and neither does this one once the request has ended.
+///
+/// Verifies: L.user.157
+fn case_o_the_faulting_job_pays(world: &World, report: &mut Report) -> Result<(), &'static str> {
+    let reserved = world
+        .parent
+        .new_child()
+        .map_err(|_| "a job refused a child")?;
+    reserved
+        .set_reservation(64 * PAGE_SIZE)
+        .map_err(|_| "o: a reservation was refused")?;
+    let served = Served::new(0, 0)?;
+    let other = Served::new(0, 0)?;
+    let client = served.client(&reserved)?;
+    let task = fault_in(&client, Act::Read, 2)?;
+    let (_, _, id) = read_packet(&served.packet()?)?;
+    let handle = served.pager.ok_or("o: the pager's handle is gone")?;
+    let adopt = |side: &Side, end: Handle| {
+        let halves = [(id & 0xFFFF_FFFF), id >> 32];
+        side.call(
+            nr::CHARGE_TICKET,
+            &[TICKET_ADOPT, reg(end), halves[0], halves[1], OFFSET],
+        )
+    };
+    if adopt(
+        &other.side,
+        other.pager.ok_or("o: the pager's handle is gone")?,
+    ) != Err(status::BAD_STATE)
+    {
+        return Err("o: another pager's handle adopted a request's ticket");
+    }
+    report.refused += 1;
+    // A pager's handle has no `DUPLICATE`, so one without the right is made here.
+    let object = served
+        .side
+        .process
+        .with_handles(|table| table.get(handle).map(|(object, _)| object.clone()))
+        .map_err(|_| "o: the pager's handle is gone")?;
+    let no_right = served
+        .side
+        .process
+        .with_handles(|table| table.insert(object, Rights::TRANSFER))
+        .map_err(|_| "o: no room for a handle without PAGER")?;
+    if adopt(&served.side, no_right) != Err(status::ACCESS_DENIED) {
+        return Err("o: a handle without PAGER adopted a request's ticket");
+    }
+    report.refused += 1;
+    let pagers = served.side.process.job();
+    let memory = |job: &Job| {
+        job.usage(super::quota::Resource::Memory)
+            .map_or(0, |usage| usage.used)
+    };
+    let (own, theirs) = (memory(&pagers), memory(&reserved));
+    let drawn = reserved.reservation().map_or(0, |usage| usage.used);
+    if adopt(&served.side, handle).is_err() {
+        return Err("o: a pager could not adopt its own request's ticket");
+    }
+    let supplied = served.supply(2, 1);
+    let (own_after, theirs_after) = (memory(&pagers), memory(&reserved));
+    let drawn_after = reserved.reservation().map_or(0, |usage| usage.used);
+    crate::object::ticket::leave();
+    let _ = supplied?;
+    if outcome(&client, &task)?.0 != Outcome::Read(byte_of(2)) {
+        return Err("o: a supplied fault did not read what the pager supplied");
+    }
+    // The page, give or take the heap's small records coming and going.
+    if theirs_after + PAGE_SIZE / 2 < theirs + PAGE_SIZE || own_after != own {
+        return Err("o: the page a pager adopted for was not the faulting job's alone");
+    }
+    if drawn_after <= drawn {
+        return Err("o: the page a pager adopted for did not draw on the job's reservation");
+    }
+    if adopt(&served.side, handle) != Err(status::BAD_STATE) {
+        return Err("o: a request's ticket was adopted after its request ended");
+    }
+    report.refused += 1;
     report.supplied += 1;
     Ok(())
 }
