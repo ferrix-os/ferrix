@@ -478,8 +478,9 @@ fn pid_one(outside: &[String], host: &str) -> ! {
 /// `write_ahead`'s seven pages, once the walk's own tables are counted.
 fn walk_to_the_limit() {
     const PAGE: usize = 4096;
-    /// What is left: the walk's page tables, four over its length, and three pages.
-    const LEFT: usize = 7;
+    /// What is left beyond the walk: about four pages once its tables are charged, under
+    /// `write_ahead`'s seven.
+    const LEFT: usize = 4;
     let events = || {
         let text = get(&format!("{CTN}/memory.events"), "memory.events could not be read");
         field(&text, "max")
@@ -488,11 +489,13 @@ fn walk_to_the_limit() {
     let used: usize = used.trim().parse().unwrap_or(LIMIT);
     let pages = (LIMIT.saturating_sub(used) / PAGE).saturating_sub(LEFT);
     let before = events();
+    // Longer than the walk, so that a fault near its end has somewhere ahead to look.
+    let mapped = pages + 16;
     // SAFETY: a fresh anonymous mapping, touched below and unmapped before the return.
     let walk = unsafe {
         libc::mmap(
             std::ptr::null_mut(),
-            pages * PAGE,
+            mapped * PAGE,
             libc::PROT_READ | libc::PROT_WRITE,
             libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
             -1,
@@ -508,12 +511,13 @@ fn walk_to_the_limit() {
         unsafe { walk.add(page * PAGE).write_volatile(1) };
     }
     let moved = events().saturating_sub(before);
-    say(&format!("a walk of {pages} pages from {used} bytes used: memory.events max moved {moved}"));
+    let now = get(&format!("{CTN}/memory.current"), "memory.current could not be read");
+    say(&format!("a walk of {pages} pages from {used} bytes used, {} after: memory.events max moved {moved}", now.trim()));
     if moved != 0 {
         fail("a walk that fits under memory.max was refused a charge");
     }
     // SAFETY: the mapping above, which nothing else names.
-    if unsafe { libc::munmap(walk.cast(), pages * PAGE) } != 0 {
+    if unsafe { libc::munmap(walk.cast(), mapped * PAGE) } != 0 {
         fail("the walk's memory could not be unmapped");
     }
 }
