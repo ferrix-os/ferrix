@@ -1595,7 +1595,12 @@ extern "C" fn unmapper(_argument: usize) -> ! {
     let space = SHOOTDOWN_SPACE.load(Acquire);
     let done = sys(nr::SPACE_UNMAP, [space, SHOOTDOWN_AT, 0x1000, 0, 0, 0]);
     SHOOTDOWN_STEP.store(if done.is_ok() { 2 } else { 100 }, Release);
-    ferrix_rt::exit(0)
+    // This thread alone. `ferrix_rt::exit` ends the process, with status 0, under
+    // the read this case is for.
+    let _ = sys(nr::THREAD_EXIT, [0, 0, 0, 0, 0, 0]);
+    loop {
+        core::hint::spin_loop();
+    }
 }
 
 /// Case 138: a restricted page read here, so held under the restricted root's tag,
@@ -1645,9 +1650,7 @@ fn restricted_shootdown(given: &Given) -> Result<(), i32> {
     hold(
         after.reason == Reason::Fault as u64 && after.number != arch::VECTOR_BREAKPOINT,
         138,
-    )?;
-    sys(nr::HANDLE_CLOSE, [thread, 0, 0, 0, 0, 0]).map_err(|_| 138)?;
-    Ok(())
+    )
 }
 
 /// Set by a thread case 141 must not have started.
@@ -1659,7 +1662,7 @@ static FULL_TABLE_STACK: Stack = Stack(core::cell::UnsafeCell::new([0; 0x8000]))
 /// What case 141's thread does, if it ever runs.
 extern "C" fn through_a_full_table(_argument: usize) -> ! {
     RAN_THROUGH_A_FULL_TABLE.store(true, core::sync::atomic::Ordering::Release);
-    ferrix_rt::exit(0)
+    ferrix_rt::exit(141)
 }
 
 /// Case 141: with the region's table full, `THREAD_CREATE` is `NO_HANDLES` and nothing
