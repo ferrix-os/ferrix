@@ -153,6 +153,8 @@ pub mod object {
     #[cfg(ferrix_linux_abi = "on")]
     pub mod space_check;
     #[cfg(ferrix_linux_abi = "on")]
+    pub mod ticket_check;
+    #[cfg(ferrix_linux_abi = "on")]
     pub mod timer_check;
     #[cfg(ferrix_linux_abi = "on")]
     pub mod write_read_check;

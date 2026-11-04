@@ -1111,6 +1111,7 @@ fn every_call_in_the_native_table_has_a_wrapper() {
     let _ = channel.read(&mut [], &mut []);
     let _ = channel.read_attested(&mut [], &mut []);
     let _ = channel.object_id();
+    let _ = channel.issue_ticket();
     let _ = channel.write_read(None);
     let _ = port::create(&sys);
     let _ = port.queue(0, [0, 0]);
@@ -1432,4 +1433,26 @@ fn a_space_allocates_writes_and_clones_by_handle() {
     assert_eq!(calls[1].number, nr::SPACE_WRITE);
     assert_eq!(calls[2], made(nr::SPACE_CLONE, &[0xC1]));
     drop((clone, made_space));
+}
+/// `charge_ticket` sends a ticket's id as its low and high 32 bits in the
+/// third and fourth registers on every architecture, and the op first
+/// (`docs/microkernel/K7.md` §2.2).
+#[test]
+fn a_ticket_id_travels_as_two_words() {
+    let sys = Recorder::default();
+    let channel = Channel::from_owned(owned(&sys, 7));
+    let _ = channel.end_ticket(0x1_0000_0002);
+    let _ = channel.leave_ticket();
+    let calls = sys.take();
+    assert_eq!(
+        calls[0],
+        made(nr::CHARGE_TICKET, &[types::TICKET_END as usize, 7, 2, 1, 0])
+    );
+    assert_eq!(
+        calls[1],
+        made(
+            nr::CHARGE_TICKET,
+            &[types::TICKET_LEAVE as usize, 7, 0, 0, 0]
+        )
+    );
 }
