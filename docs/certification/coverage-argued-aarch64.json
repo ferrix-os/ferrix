@@ -1261,7 +1261,7 @@
     },
     {
       "file": "syscall/native.rs",
-      "lines": "3599",
+      "lines": "3623",
       "category": "absent-hardware",
       "match": "return Err(status::INVALID_ARGS);",
       "why": "A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine."

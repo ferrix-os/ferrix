@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "c04ff89c1dfa30e5f4dfcdc69a6fbaed953fe0133f3489d6f25f8ca3374e3660",
+  "digest": "b4f6b22804402308fdbb864bcfd019ec0bc1de130ae9e640c573201ccff2c135",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -113,7 +113,7 @@
   ],
   "summary": {
     "packages": 166,
-    "elements": 9135,
+    "elements": 9140,
     "maturity": {
       "implemented": 295,
       "inProgress": 23,
@@ -65610,6 +65610,63 @@
               ]
             },
             {
+              "name": "theFaultingJobPaysThroughItsTicket",
+              "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::theFaultingJobPaysThroughItsTicket",
+              "kind": "requirement",
+              "shortName": "L.user.157",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/17-memory-requirements.sysml",
+                "line": 3479
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::theFaultingJobPaysThroughItsTicket",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"Each page request shall carry a ticket the kernel issued for the opening thread's process and job, adoptable only through its pager's handle with PAGER and only while the request is outstanding; pages the adopted pager commits and supplies shall stay charged to that job, on its reservation where it has one. At the job's object limit the fault shall end SIGBUS or FAULT with no pager asked; a pager may spend the job's limit and reservation while a request is open.\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 3487
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::theFaultingJobPaysThroughItsTicket",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Stage 9's pager check, case o: the page is the faulting job's alone and drawn from its reservation, the pager's job paying nothing; another pager's handle, a handle without PAGER and a request ended all adopt nothing.\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 3491
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::theFaultingJobPaysThroughItsTicket",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.MEM.22\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 3492
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::theFaultingJobPaysThroughItsTicket",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"object::pager::PagerCore::adoptable_ticket\", \"object::ticket::issue_for\", \"syscall::native::adopt_ticket\")",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 3494
+                  }
+                }
+              ]
+            },
+            {
               "name": "aPagersCloseEndsItsFaults",
               "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::aPagersCloseEndsItsFaults",
               "kind": "requirement",
@@ -65617,7 +65674,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3479
+                "line": 3496
               },
               "children": [
                 {
@@ -65628,7 +65685,7 @@
                   "value": "\"The close of a pager's handle, or DETACH, run where it may block, shall end every outstanding request of its VMOs at once, audited, refuse every later request, and leave the present pages mapped and usable.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3483
+                    "line": 3500
                   }
                 },
                 {
@@ -65639,7 +65696,7 @@
                   "value": "\"Stage 9's pager check: a fault waiting on a pager whose handle closes is SIGBUS well within its bound; a later fault on an absent page is SIGBUS with no packet; a present page still reads.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3487
+                    "line": 3504
                   }
                 },
                 {
@@ -65650,7 +65707,7 @@
                   "value": "\"H.MEM.22\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3488
+                    "line": 3505
                   }
                 },
                 {
@@ -65661,7 +65718,7 @@
                   "value": "(\"object::pager::Pager::drop\", \"object::pager::PagerCore::close\", \"object::pager::PagerLink::detach\", \"object::pager::PagerLink::is_gone\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3490
+                    "line": 3507
                   }
                 }
               ]

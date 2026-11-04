@@ -15,16 +15,16 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 168 | 115 | 53 |
-| Low (`L.*`) | 1316 | 1052 | 264 |
+| Low (`L.*`) | 1317 | 1053 | 264 |
 
-3043 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+3046 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 3049 |
-| Accessors, covered by the requirement they serve | 1224 |
+| Named by a low-level requirement | 3052 |
+| Accessors, covered by the requirement they serve | 1225 |
 | Check code in a product file | 124 |
-| Named by none | 957 |
+| Named by none | 956 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `ferrix_boot_policy`, `ferrix_sha256`, `ferrix_sigverify`, `ferrix_slots`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -1359,6 +1359,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.user.153` | pager_supply shall move only committed pages of an anonymous VMO that no device holds and no other object shares into the absent pages of the range, skipping present ones, which stay in the aux VMO; the moved pages shall leave every mapping of the aux VMO, with its shootdown, before they are the pager VMO's; and any refusal shall move nothing. | Stage 9's pager check: a supply over a range whose second page is present leaves that page and its aux page as they were; a supply of a page another supply filled moves nothing; a supplied fault reads the aux bytes. | H.MEM.22 | `user::vmo::Vmo::supply_from`, `user::vmo::Vmo::absent_in`, `user::vmo::Vmo::take_for_supply`, `user::vmo::Vmo::put_supplied` | `src/kernel/src/object/pager_check.rs::case_a_supplied`, `src/kernel/src/object/pager_check.rs::case_m_present_skipped` | not built | not built | not built |
 | `L.user.154` | A Clean page of a pager-backed VMO shall never be mapped writable nor written in place by a kernel copy; its first write shall mark it Dirty, or, in a trap-dirty VMO, send a dirty request that PAGER_OP DIRTY lets through and FAIL refuses, the page then staying Clean; a kernel write into it shall mark it Dirty. | Stage 9's pager check: a write to a Clean trap-dirty page asks the pager, lands once DIRTY answers, and the query shows it alone Dirty; a refused one is SIGBUS and its page stays Clean; a read leaves a page mapped read-only, and a write of an untrapped page marks it Dirty with no packet and maps it writable. | H.MEM.23 | `user::vmo::Vmo::writable_page`, `user::vmo::Vmo::mark_dirty`, `user::vmo::Vmo::write_paged`, `user::vmo::Vmo::page_state`, `user::vmo::state_of`, `user::space::AddressSpace::read_only_paged`, `user::space::writable_in_place`, `user::space::writable_flags`, `user::space::writable_in`, `user::vmo::Vmo::dirty_range`, `object::pager::PagerLink::dirtied` | `src/kernel/src/object/pager_check.rs::case_h_trap_dirty`, `src/kernel/src/object/pager_check.rs::case_i_write_back` | not built | not built | not built |
 | `L.user.155` | PAGER_OP WRITEBACK_BEGIN shall make the range's Dirty pages awaiting-clean and return only once no processor holds a writable translation of the range; WRITEBACK_END shall clean only awaiting-clean pages; a write between them shall make its page Dirty again; and DECOMMIT shall take Clean pages only. | Stage 9's pager check: after BEGIN the page is no longer mapped writable; a page written after BEGIN is still Dirty after END while the other is Clean; DECOMMIT takes the Clean page and leaves the Dirty one. | H.MEM.23 | `user::vmo::Vmo::writeback_begin`, `user::vmo::Vmo::writeback_end`, `user::vmo::Vmo::decommit_clean`, `user::vmo::Vmo::dirty_runs` | `src/kernel/src/object/pager_check.rs::case_i_write_back` | not built | not built | not built |
+| `L.user.157` | Each page request shall carry a ticket the kernel issued for the opening thread's process and job, adoptable only through its pager's handle with PAGER and only while the request is outstanding; pages the adopted pager commits and supplies shall stay charged to that job, on its reservation where it has one. At the job's object limit the fault shall end SIGBUS or FAULT with no pager asked; a pager may spend the job's limit and reservation while a request is open. | Stage 9's pager check, case o: the page is the faulting job's alone and drawn from its reservation, the pager's job paying nothing; another pager's handle, a handle without PAGER and a request ended all adopt nothing. | H.MEM.22 | `object::pager::PagerCore::adoptable_ticket`, `object::ticket::issue_for`, `syscall::native::adopt_ticket` | `src/kernel/src/object/pager_check.rs::case_o_the_faulting_job_pays` | not built | not built | not built |
 | `L.user.156` | The close of a pager's handle, or DETACH, run where it may block, shall end every outstanding request of its VMOs at once, audited, refuse every later request, and leave the present pages mapped and usable. | Stage 9's pager check: a fault waiting on a pager whose handle closes is SIGBUS well within its bound; a later fault on an absent page is SIGBUS with no packet; a present page still reads. | H.MEM.22 | `object::pager::Pager::drop`, `object::pager::PagerCore::close`, `object::pager::PagerLink::detach`, `object::pager::PagerLink::is_gone` | `src/kernel/src/object/pager_check.rs::case_e_closed` | not built | not built | not built |
 
 ### Descriptors
@@ -2700,6 +2701,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/object/pager_check.rs::case_l_one_job_failed` | kernel | L.user.149 |
 | `src/kernel/src/object/pager_check.rs::case_m_present_skipped` | kernel | L.user.153 |
 | `src/kernel/src/object/pager_check.rs::case_n_decoding` | kernel | L.object.226, L.object.227, L.object.229 |
+| `src/kernel/src/object/pager_check.rs::case_o_the_faulting_job_pays` | kernel | L.user.157 |
 | `src/kernel/src/object/pager_check.rs::run` | kernel | H.MEM.22, H.MEM.23 |
 | `src/kernel/src/object/pin/check.rs::check_dead_close` | kernel | L.object.127 |
 | `src/kernel/src/object/pin/check.rs::check_failed_invalidation` | kernel | L.iommu.48, L.iommu.87 |

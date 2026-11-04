@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2777 declarations in the core's files, 184 in the item's; 191 checks-only.
+2778 declarations in the core's files, 184 in the item's; 191 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2272,6 +2272,7 @@ checks above is `pub` for raised checks (F3).
 | `PagerLink` | struct | item |  |
 | `Pager::core` | method | item, load, bin |  |
 | `Pager::new` | method | item, load, bin |  |
+| `PagerCore::adoptable_ticket` | method | item |  |
 | `PagerCore::link` | method | item, load, bin |  |
 | `PagerCore::outstanding` | method | load |  |
 | `PagerCore::serves` | method | item |  |
