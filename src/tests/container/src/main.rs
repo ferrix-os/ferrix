@@ -457,6 +457,7 @@ fn pid_one(outside: &[String], host: &str) -> ! {
         "file {} charged to the cgroup after the read",
         field(&stat, "file")
     ));
+    walk_to_the_limit();
     // The memory limit last: four times it, touched, cannot all fit.
     let mut held: Vec<Vec<u8>> = Vec::new();
     loop {
@@ -468,6 +469,52 @@ fn pid_one(outside: &[String], host: &str) -> ! {
         if held.len() > LIMIT / (1024 * 1024) * 4 {
             fail("four times memory.max was touched and nothing ended it");
         }
+    }
+}
+
+/// A program walking up through fresh memory to just under `memory.max`, and staying under it,
+/// is charged for what it touched: nothing a fault brought along pushes it over, so
+/// `memory.events` does not move (`fault_ahead`, ledger 6537). The room left is under
+/// `write_ahead`'s seven pages, once the walk's own tables are counted.
+fn walk_to_the_limit() {
+    const PAGE: usize = 4096;
+    /// What is left: the walk's page tables, four over its length, and three pages.
+    const LEFT: usize = 7;
+    let events = || {
+        let text = get(&format!("{CTN}/memory.events"), "memory.events could not be read");
+        field(&text, "max")
+    };
+    let used = get(&format!("{CTN}/memory.current"), "memory.current could not be read");
+    let used: usize = used.trim().parse().unwrap_or(LIMIT);
+    let pages = (LIMIT.saturating_sub(used) / PAGE).saturating_sub(LEFT);
+    let before = events();
+    // SAFETY: a fresh anonymous mapping, touched below and unmapped before the return.
+    let walk = unsafe {
+        libc::mmap(
+            std::ptr::null_mut(),
+            pages * PAGE,
+            libc::PROT_READ | libc::PROT_WRITE,
+            libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+            -1,
+            0,
+        )
+    };
+    if walk == libc::MAP_FAILED {
+        fail("the walk's memory could not be mapped");
+    }
+    let walk = walk.cast::<u8>();
+    for page in 0..pages {
+        // SAFETY: inside the mapping above.
+        unsafe { walk.add(page * PAGE).write_volatile(1) };
+    }
+    let moved = events().saturating_sub(before);
+    say(&format!("a walk of {pages} pages from {used} bytes used: memory.events max moved {moved}"));
+    if moved != 0 {
+        fail("a walk that fits under memory.max was refused a charge");
+    }
+    // SAFETY: the mapping above, which nothing else names.
+    if unsafe { libc::munmap(walk.cast(), pages * PAGE) } != 0 {
+        fail("the walk's memory could not be unmapped");
     }
 }
 
