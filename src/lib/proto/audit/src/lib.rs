@@ -201,6 +201,17 @@ pub const EXCEPTION_CONTEXT: Event = Event::new(Class::Changed, 5);
 /// handle can provoke one.
 pub const DEVICE_LIMIT: Event = Event::new(Class::Refused, 5);
 
+/// A page request of a pager-backed VMO that ended without its page
+/// (`docs/microkernel/K3.md` §2.3): failed by the pager, timed out at the
+/// pager's bound, or ended by the pager's close or detach. The subject is the
+/// process whose fault opened the request; the target is the faulting job
+/// ([`target::JOB`]); the detail the VMO's key, low word first, and the page
+/// index's low word; the status says how it ended -- the pager's errno for a
+/// failure, `ETIMEDOUT` at the bound, `EIDRM` for a pager gone. In the
+/// refusal ring: a pager can provoke one per fault it is sent. Bit 7 of
+/// [`Class::Refused`]; K7 holds 6.
+pub const PAGER: Event = Event::new(Class::Refused, 7);
+
 /// The resources a [`LIMIT`] or [`LIMIT_SET`] record names, by number.
 pub mod resource {
     /// Memory, in bytes.
@@ -251,7 +262,7 @@ pub mod power {
 }
 
 /// Every event this crate names, with its name.
-pub const NAMED: [(Event, &str); 30] = [
+pub const NAMED: [(Event, &str); 31] = [
     (START, "START"),
     (CONFIG, "CONFIG"),
     (BOOTED, "BOOTED"),
@@ -262,6 +273,7 @@ pub const NAMED: [(Event, &str); 30] = [
     (WIDEN, "WIDEN"),
     (LIMIT, "LIMIT"),
     (DEVICE_LIMIT, "DEVICE_LIMIT"),
+    (PAGER, "PAGER"),
     (PROCESS_MADE, "PROCESS_MADE"),
     (DELEGATED, "DELEGATED"),
     (CONTROL, "CONTROL"),

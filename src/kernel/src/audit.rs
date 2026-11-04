@@ -90,7 +90,7 @@ pub use ferrix_audit::{
     target,
 };
 #[doc(hidden)]
-pub use ferrix_audit::{EXCEPTION_CONTEXT, EXCEPTION_KILLED};
+pub use ferrix_audit::{EXCEPTION_CONTEXT, EXCEPTION_KILLED, PAGER};
 use ferrix_sync::IrqSpinLock;
 
 use crate::object::process::Process;

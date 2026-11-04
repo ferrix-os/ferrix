@@ -233,6 +233,113 @@ pub fn timer_cancel<S: Syscall>(sys: S, timer: &OwnedHandle<S>) -> Result<(), Er
     )
 }
 
+/// A pager serving requests on `port`, waited for at most `wait_ns`
+/// (`docs/microkernel/K3.md`).
+///
+/// # Errors
+///
+/// [`Error::InvalidArgs`] for a bound outside 1 ms to 30 s.
+pub fn pager_create<S: Syscall>(
+    sys: S,
+    port: &OwnedHandle<S>,
+    options: usize,
+    wait_ns: &[u8; 8],
+) -> Result<Handle, Error> {
+    decode_handle(
+        Call::new(nr::PAGER_CREATE)
+            .value(register(port.raw()))
+            .input(wait_ns)
+            .value(options)
+            .make(sys),
+    )
+}
+
+/// A VMO of the pager's, from a `PagerVmoSpec`'s bytes.
+///
+/// # Errors
+///
+/// [`Error::AccessDenied`] without `PAGER`.
+pub fn pager_create_vmo<S: Syscall>(
+    sys: S,
+    pager: &OwnedHandle<S>,
+    spec: &[u8],
+) -> Result<Handle, Error> {
+    decode_handle(
+        Call::new(nr::PAGER_CREATE_VMO)
+            .value(register(pager.raw()))
+            .input(spec)
+            .make(sys),
+    )
+}
+
+/// Move `aux`'s committed pages into `vmo`, from a `PagerSupplySpec`'s bytes.
+///
+/// # Errors
+///
+/// [`Error::AccessDenied`] without `PAGER` on the pager or the rights on `aux`.
+pub fn pager_supply<S: Syscall>(
+    sys: S,
+    pager: &OwnedHandle<S>,
+    vmo: &OwnedHandle<S>,
+    aux: &OwnedHandle<S>,
+    spec: &[u8],
+) -> Result<(), Error> {
+    decode_unit(
+        Call::new(nr::PAGER_SUPPLY)
+            .value(register(pager.raw()))
+            .value(register(vmo.raw()))
+            .value(register(aux.raw()))
+            .input(spec)
+            .make(sys),
+    )
+}
+
+/// One `PAGER_OP_*` on a range of `vmo`, from a `PagerOpSpec`'s bytes.
+///
+/// # Errors
+///
+/// [`Error::AccessDenied`] without `PAGER`.
+pub fn pager_op<S: Syscall>(
+    sys: S,
+    pager: &OwnedHandle<S>,
+    vmo: &OwnedHandle<S>,
+    op: usize,
+    spec: &[u8],
+) -> Result<(), Error> {
+    decode_unit(
+        Call::new(nr::PAGER_OP)
+            .value(register(pager.raw()))
+            .value(register(vmo.raw()))
+            .value(op)
+            .input(spec)
+            .make(sys),
+    )
+}
+
+/// The dirty runs of a `PagerRange` of `vmo` into `runs`; how many.
+///
+/// # Errors
+///
+/// [`Error::BufferTooSmall`] with the first ones written when more remain.
+pub fn pager_query_dirty<S: Syscall>(
+    sys: S,
+    pager: &OwnedHandle<S>,
+    vmo: &OwnedHandle<S>,
+    range: &[u8],
+    runs: &mut [u8],
+    capacity: usize,
+) -> Result<usize, Error> {
+    decode(
+        Call::new(nr::PAGER_QUERY_DIRTY)
+            .value(register(pager.raw()))
+            .value(register(vmo.raw()))
+            .input(range)
+            .output(runs)
+            .value(capacity)
+            .make(sys),
+    )
+}
+
 /// What one [`memory_scrub`] batch did (`docs/RAM-SCRUBBER.md` §4).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ScrubBatch {
