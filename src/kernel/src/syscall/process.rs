@@ -389,6 +389,26 @@ impl Process {
         Process::reading(space, Reading::Never)
     }
 
+    /// [`Process::new`], shared and not registered, built in its `Arc`: a native
+    /// call stands deep on a four-page kernel stack, and a timer's interrupt comes
+    /// on top of it, so a `Process` held by value here overflowed it.
+    ///
+    /// # Errors
+    ///
+    /// As [`Process::new`].
+    #[inline(never)]
+    pub(crate) fn new_shared(space: Arc<AddressSpace>) -> Result<Arc<Process>, AllocError> {
+        let files = fallible::try_arc(SpinLock::new(fd::standard_streams(Reading::Never)?))?;
+        let fs = fallible::try_arc(SpinLock::new(fs::root_disk::process_context()))?;
+        Process::shared_with_context(
+            space,
+            object::process::allocate().unwrap_or(0),
+            Arc::clone(job::root()),
+            files,
+            fs,
+        )
+    }
+
     /// [`Process::new`], with the console on its descriptors reading as
     /// `reading` says.
     fn reading(space: Arc<AddressSpace>, reading: Reading) -> Result<Process, AllocError> {
@@ -628,7 +648,10 @@ impl Process {
         files: Arc<SpinLock<FdTable<Arc<OpenFile>>>>,
         fs: Arc<SpinLock<Context>>,
     ) -> Result<Arc<Process>, AllocError> {
-        fallible::try_arc(Process::with_context(space, pid, job, files, fs)?)
+        match Process::with_context(space, pid, job, files, fs) {
+            Ok(process) => fallible::try_arc(process),
+            Err(error) => Err(error),
+        }
     }
 
     /// The network namespace it is in.

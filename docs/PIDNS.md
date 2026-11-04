@@ -456,3 +456,5 @@ in `~/.local/share/ferrix/logs/pidns-controls-2026-10-01/` on nazuna.
 The other controls of the table above ran on 383ff664, before the fork path
 was reworked and the tree rebased; none of the code they sabotage has moved
 but by lines.
+
+Stack depth (2026-11-04, ledger 6623, F-101): a native process is numbered on the PROCESS_MAKE path through `Process::new_shared`, built in its `Arc`; `make_native_in` 352 bytes where it was 5,280 on AArch64's dev profile. The owed depth check is in BACKLOG.

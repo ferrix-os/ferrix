@@ -286,9 +286,10 @@ pub(crate) fn load_native_in(
     pids: Option<&Arc<crate::syscall::pidns::PidNamespace>>,
 ) -> Result<Arc<Process>, ExecError> {
     let space = AddressSpace::new().map_err(ExecError::Space)?;
-    let mut process =
-        Process::new(Arc::clone(&space)).map_err(|_| ExecError::Space(SpaceError::OutOfMemory))?;
-    set_up_native(&mut process, credentials, context, pids)?;
+    let mut shared = Process::new_shared(Arc::clone(&space))
+        .map_err(|_| ExecError::Space(SpaceError::OutOfMemory))?;
+    let process = Arc::get_mut(&mut shared).ok_or(ExecError::Space(SpaceError::OutOfMemory))?;
+    set_up_native(process, credentials, context, pids)?;
     let loaded = load_into(&space, Source::Bytes(image), None)?;
     // A native process's start argument is a 64-bit handle, and it speaks
     // the native ABI through `SYSCALL`: a 32-bit image cannot be one.
@@ -297,7 +298,7 @@ pub(crate) fn load_native_in(
     }
     process.record_exec(name, None, &[name]);
     process.set_startup(native_startup(loaded.loaded.start, loaded.stack_top));
-    Ok(registry::register(process))
+    Ok(registry::register_shared(shared))
 }
 
 /// [`load_native_in`] without the loader: a process with an empty space, findable
@@ -314,10 +315,12 @@ pub(crate) fn make_native_in(
     pids: Option<&Arc<crate::syscall::pidns::PidNamespace>>,
 ) -> Result<Arc<Process>, ExecError> {
     let space = AddressSpace::new().map_err(ExecError::Space)?;
-    let mut process = Process::new(space).map_err(|_| ExecError::Space(SpaceError::OutOfMemory))?;
-    set_up_native(&mut process, credentials, context, pids)?;
+    let mut shared =
+        Process::new_shared(space).map_err(|_| ExecError::Space(SpaceError::OutOfMemory))?;
+    let process = Arc::get_mut(&mut shared).ok_or(ExecError::Space(SpaceError::OutOfMemory))?;
+    set_up_native(process, credentials, context, pids)?;
     process.record_exec(name, None, &[name]);
-    Ok(registry::register(process))
+    Ok(registry::register_shared(shared))
 }
 
 /// A native process's start, which nothing but its entry and stack tell apart.

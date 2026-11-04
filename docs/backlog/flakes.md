@@ -583,3 +583,9 @@ Done 2026-10-24 (kernel-flakes).
 | Item | Owner | Stage |
 |---|---|---|
 | **Open (2026-11-04, mk-merge, filed for mk-base's batch).** `test-boot --arch aarch64`: the kernel never printed `FERRIX-BOOT-OK` within 120 s, batch 20261104T053606Z on 75ba515da, not landed in that form, load 13.69 at its start, `logs/queue/batch-20261104T053606Z-5.log`; passed on rerun. Not traced. | open |
+
+### fl-090
+
+| Item | Owner | Stage |
+|---|---|---|
+| **Open (2026-11-04, mk-merge).** `test-init --arch aarch64 --smp 2` on ae0bf31a1 stopped in stage 9's timer check (K10, `object/timer_check.rs`) with "an early wake took out more or less than its own entry", `logs/queue/mkm-s2-inita2c.log`; the same row passed on 9e44200e6, which differs by `fire_timers`' cut, `logs/queue/mkm-s3-inita2c.log`. The only firing in the gate logs but its own control's. Not traced. The check reads `sleepers_here` twice around a wake, on two processors at this row, so another entry filed or fired between the reads is a reading; not shown. | open |
