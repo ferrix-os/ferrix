@@ -269,6 +269,7 @@ reservations, BACKLOG and the roll-ups' documents.
 | 2026-11-01 | 0 | 0 | nothing landed |
 | 2026-11-02 | 0 | 1 | `check-fallible-alloc` reaches `process_create`'s load (782dd08d4) |
 | 2026-11-03 | 0 | 1 | one fetch at a time per component mirror (4379d9b3e) |
+| 2026-11-04 | 0 | 0 | not sized yet: K6, `smt=off` and F-91 landed (671ad76a8, b8a57534b, 95e5e0e1c) with B5's orphan step of the evening before; the product owner sizes the day at the wind-down |
 
 The running total is **≈ 3,586 points in 51 calendar days, ≈ 70 a day**, or
 ≈ 1,662 (≈ 33 a day) counting only what had an estimate. Nothing sized came off
