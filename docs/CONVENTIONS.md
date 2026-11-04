@@ -43,6 +43,15 @@ git config core.hooksPath .githooks
 **Never use `git commit --no-verify` or `git push --no-verify` here.** If a hook
 refuses a message, fix the message.
 
+### A tool is never the author (customer, 2026-11-04)
+
+No commit names a tool as its author or committer: no name or address matching
+`claude` or `anthropic`. The customer: "even worse than a co author". An agent
+commits under the owner's `user.name` and `user.email`; a session with no such
+identity sets it before committing. Twelve commits of 2026-11-02 came from a
+session whose git identity was `Claude <noreply@anthropic.com>`. The same three
+places refuse it: `commit-msg`, `pre-push` and CI's **One author per commit**.
+
 ## Where a landing goes
 
 Landings go to `develop`; `main` moves only by promotion, a

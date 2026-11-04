@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Assert no commit carries a `Co-authored-by:` trailer.
+"""Assert no commit carries a `Co-authored-by:` trailer, or names a tool as its
+author or committer (customer, 2026-11-04: worse than a co-author).
 
 Ferrix records one author per commit. `.githooks/commit-msg` refuses a trailer
 when a message is written and `.githooks/pre-push` refuses it again over the
@@ -48,6 +49,11 @@ import sys
 # that write them use. `git interpret-trailers` is case-insensitive here, so
 # this is too.
 TRAILER = re.compile(r"^[ \t]*co-authored-by[ \t]*:", re.IGNORECASE | re.MULTILINE)
+
+# A tool as the author or the committer, in the name or the address. Twelve
+# commits of 2026-11-02 came from a session whose identity was
+# `Claude <noreply@anthropic.com>`; no trailer check could see them.
+TOOL_IDENTITY = re.compile(r"claude|anthropic", re.IGNORECASE)
 
 # The all-zero object id GitHub sends for `github.event.before` when a branch is
 # new or has been force-pushed, and Git sends for a deletion.
@@ -129,6 +135,13 @@ def offending_lines(commit: str) -> list[str]:
     ]
 
 
+def tool_identities(commit: str) -> list[str]:
+    """The author or committer of one commit, where either is a tool."""
+    author = git("log", "-1", "--format=author %an <%ae>", commit)
+    committer = git("log", "-1", "--format=committer %cn <%ce>", commit)
+    return [ident for ident in (author, committer) if TOOL_IDENTITY.search(ident)]
+
+
 def report_unarmed() -> None:
     """Explain the one step that turns the hooks from files into checks."""
     print("check-commit-authors: this clone's hooks are not armed.", file=sys.stderr)
@@ -167,11 +180,15 @@ def main() -> int:
         print(f"check-commit-authors: {error}", file=sys.stderr)
         return 1
 
-    offenders = [(commit, lines) for commit in commits if (lines := offending_lines(commit))]
+    offenders = [
+        (commit, lines)
+        for commit in commits
+        if (lines := offending_lines(commit) + tool_identities(commit))
+    ]
 
     if offenders:
         print(
-            "check-commit-authors: refusing commits with a Co-authored-by trailer.",
+            "check-commit-authors: refusing commits by a tool, or with a Co-authored-by trailer.",
             file=sys.stderr,
         )
         print(file=sys.stderr)
@@ -181,13 +198,13 @@ def main() -> int:
                 print(f"      {line}", file=sys.stderr)
         print(file=sys.stderr)
         print(
-            "Ferrix commits name one author. Rewrite them -- `git rebase -i`, or\n"
+            "Ferrix commits name one author, never a tool. Rewrite them -- `git rebase -i`, or\n"
             "`git commit --amend` for the tip -- and push again.",
             file=sys.stderr,
         )
         return 1
 
-    print(f"commit-authors: {len(commits)} commit(s) in range, none co-authored")
+    print(f"commit-authors: {len(commits)} commit(s) in range, none co-authored, none by a tool")
     return 0
 
 

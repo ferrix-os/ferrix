@@ -28,6 +28,16 @@ while read -r _local_ref local_sha _remote_ref remote_sha; do
     [ -z "$range" ] && continue
 
     for commit in $range; do
+        who=$(git log -1 --format='%an <%ae>%n%cn <%ce>' "$commit" | grep -iE 'claude|anthropic' || true)
+        if [ -n "$who" ]; then
+            if [ "$failed" -eq 0 ]; then
+                echo "pre-push: refusing to publish commits by a tool, or with a Co-authored-by trailer." >&2
+                echo >&2
+                failed=1
+            fi
+            echo "  $(git log -1 --format='%h %s' "$commit")" >&2
+            printf '%s\n' "$who" | sed 's/^/      /' >&2
+        fi
         trailer=$(
             git log -1 --format=%B "$commit" \
                 | grep -inE '^[[:space:]]*co-authored-by[[:space:]]*:' || true

@@ -12,6 +12,18 @@
 
 set -eu
 
+# Refuse a tool as the author or the committer. A Ferrix commit is its owner's:
+# twelve commits of 2026-11-02 came from a session whose git identity was
+# Claude <noreply@anthropic.com>, which no trailer check could see.
+for ident in "$(git var GIT_AUTHOR_IDENT)" "$(git var GIT_COMMITTER_IDENT)"; do
+    who=${ident% * *}
+    if printf '%s\n' "$who" | grep -qiE 'claude|anthropic'; then
+        echo "commit-msg: refusing a commit by \"$who\": a tool is never the author." >&2
+        echo "Set user.name and user.email to the owner's, then commit again." >&2
+        exit 1
+    fi
+done
+
 message="$1"
 
 # What git will actually keep. Two things have to come off first or the check
