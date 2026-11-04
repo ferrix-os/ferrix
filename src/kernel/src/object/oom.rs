@@ -159,6 +159,13 @@ pub fn is_charge_refusal(error: &SpaceError) -> bool {
 /// As [`AddressSpace::fault`], and the refusal itself when nothing could be
 /// killed.
 pub fn user_fault(space: &AddressSpace, address: u64, access: Access) -> Result<(), SpaceError> {
+    // The faulting task's own memory, adopted ticket or not
+    // (`docs/microkernel/K7.md` §2.3).
+    quota::charging_own(|| user_fault_own(space, address, access))
+}
+
+/// [`user_fault`], charging the task's own job.
+fn user_fault_own(space: &AddressSpace, address: u64, access: Access) -> Result<(), SpaceError> {
     quota::count(crate::sched::running_group(), Counter::Faults, 1);
     // Retried here rather than by running the instruction again, so that the
     // answers one fault takes are counted ([`out_of_memory_at`]).
@@ -191,6 +198,14 @@ pub fn user_fault(space: &AddressSpace, address: u64, access: Access) -> Result<
 /// As [`AddressSpace::fault`], and the refusal itself when the running
 /// process was the victim or nothing could be killed.
 pub fn fault(space: &AddressSpace, address: u64, access: Access) -> Result<(), SpaceError> {
+    // The faulting task's own memory, adopted ticket or not: a user copy a
+    // native call makes from or to the caller's own buffers is the caller's
+    // (`docs/microkernel/K7.md` §2.3).
+    quota::charging_own(|| fault_own(space, address, access))
+}
+
+/// [`fault`], charging the task's own job.
+fn fault_own(space: &AddressSpace, address: u64, access: Access) -> Result<(), SpaceError> {
     quota::count(crate::sched::running_group(), Counter::Faults, 1);
     let mut attempt = 0_u32;
     loop {

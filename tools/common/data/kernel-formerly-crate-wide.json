@@ -1665,6 +1665,11 @@
       "ledger": 6131
     },
     {
+      "item": "object/ticket.rs: Ticket (struct)",
+      "born": "K7",
+      "ledger": 6131
+    },
+    {
       "item": "object/timer.rs: Report::fired_at (field)",
       "born": "K10",
       "ledger": 6131

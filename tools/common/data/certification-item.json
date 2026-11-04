@@ -965,6 +965,11 @@
         "crate": "ferrix-kernel-load"
       },
       {
+        "file": "object/ticket_check.rs",
+        "file_ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
         "file": "object/timer_check.rs",
         "file_ring": "core",
         "crate": "ferrix-kernel-load"

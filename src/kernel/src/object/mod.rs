@@ -34,6 +34,7 @@ pub mod quota;
 pub mod rehome_check;
 pub mod reserve_check;
 pub mod space;
+pub mod ticket;
 pub mod timer;
 
 use alloc::sync::Arc;

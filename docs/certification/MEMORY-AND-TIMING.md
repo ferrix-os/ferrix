@@ -608,6 +608,17 @@ refusal and back to zero, and its `kmem` line fills a limited job with each
 kind of heap in turn until `ENOMEM`, with a sibling unrefused and every
 byte given back.
 
+**Charging that follows the client (K7, `docs/microkernel/K7.md`).** A
+server thread that adopted a live ticket has the VMO commits and new objects
+of its native calls charged to the ticket's job (`quota::charge_target`),
+against that job's limits. The ticket is checked at the call's entry, so a
+ticket ended while an adopted call runs still pays for **at most the rest
+of that one call per adopted thread, charged to the client within its own
+limits** (`L.object.210`). A ticket is itself one object of its issuer's,
+and at most 64 are live per end of a channel. The cost on every native call
+is one load of the task's adoption flag at entry, and on every charge one
+load of its per-call target.
+
 ### 1.8 The per-processor heap caches (docs/HEAP-CACHES.md)
 
 Each processor keeps up to `CACHE_DEPTH` (16) free objects of each of the 9
@@ -2366,6 +2377,17 @@ the target's own fault, no lock held, at most four times before it gives
 up. The bounce buffer is one page from the kernel heap, a fallible
 allocation charged to the caller's job for the length of the call; a
 refusal is `NO_MEMORY`. Nothing of it is on the kernel stack.
+### 2.2ag A channel's ticket registry (`Channel::tickets`, K7)
+
+A spin lock of its own per channel, never the inbox lock, taken only by
+`charge_ticket` (issue, adopt, end) and by an end's close: no read, write or
+round trip takes it, so the IPC paths do not wait on it. Under it an issue
+pushes into room reserved first, an adoption and an end walk the issuing
+side's list, and a close takes both lists out whole: each list holds at most
+`MAX_TICKETS` (64), so every walk under it is bounded by 64 entries of a
+compare each. Nothing is freed under it: an ended ticket is handed out and
+dropped after the lock goes. Lock order: a process's membership lock
+(released) before it; a task's adoption lock is never taken under it.
 
 ### 2.3 What is missing, per standard
 
