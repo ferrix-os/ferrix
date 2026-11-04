@@ -1415,7 +1415,7 @@ impl Task {
     /// and installs a root, all under the run queue lock, and raising a
     /// reference count on every switch to say what a borrow already says would
     /// be a contended atomic on the hottest path in the kernel.
-    pub(crate) fn address_space(&self) -> Option<&Arc<AddressSpace>> {
+    pub fn address_space(&self) -> Option<&Arc<AddressSpace>> {
         self.address_space.as_ref()
     }
 

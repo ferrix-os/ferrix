@@ -46,6 +46,11 @@ impl Rights {
     /// `cgroup.procs` and root still owns `memory.max`. A job made with
     /// `job_create` carries it, so a limit can be set on what one makes.
     pub const SET_LIMIT: Rights = Rights(1 << 7);
+    /// A pager may be served through the handle: VMOs made over it, pages
+    /// supplied, requests failed, pages marked dirty and written back
+    /// (`docs/microkernel/K3.md`). Bit 8 is K12's.
+    pub const PAGER: Rights = Rights(1 << 9);
+
     /// Instructions may be fetched from the object's memory: on a VMO, its
     /// pages may be mapped executable; on an address space, executable
     /// mappings may be made in it. An executable mapping by handle needs it on
@@ -69,7 +74,8 @@ impl Rights {
     pub const SUPERVISE: Rights = Rights(1 << 11);
 
     /// Every defined right.
-    pub const ALL: Rights = Rights(0xFF | Rights::EXECUTE.0 | Rights::SUPERVISE.0);
+    pub const ALL: Rights =
+        Rights(0xFF | Rights::PAGER.0 | Rights::EXECUTE.0 | Rights::SUPERVISE.0);
 
     /// What a new channel endpoint carries.
     pub const CHANNEL: Rights = Rights(
@@ -134,6 +140,12 @@ impl Rights {
             | Rights::MAP.0
             | Rights::EXECUTE.0,
     );
+    /// What a new pager carries.
+    ///
+    /// No [`Rights::DUPLICATE`]: there is one handle, so its close is the
+    /// pager's death, which fails every fault waiting on it. It can be moved,
+    /// so that a restarted server can take it up (K13).
+    pub const PAGER_OBJECT: Rights = Rights(Rights::TRANSFER.0 | Rights::PAGER.0);
     /// What a handle to a process carries.
     ///
     /// [`Rights::WAIT`] to hear that it has ended, directly or through a port,

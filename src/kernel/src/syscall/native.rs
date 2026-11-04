@@ -63,9 +63,11 @@ use ferrix_native_abi::status;
 use ferrix_native_abi::types::{
     self, ADDRESS_BY_VMO, ADDRESS_COMPARE, ADDRESS_SHARED, ADDRESS_WAIT_ANY_MAX,
     APERTURE_INFO_BYTES, AddressWord, ApertureInfo, CHANNEL_MAX_BYTES, CHANNEL_MAX_HANDLES,
-    DEVICE_INFO_BYTES, DeviceInfo, JOB_SEALED, JOB_SPECULATION_DOMAIN, MAP_EXECUTE, MAP_READ,
-    MAP_WRITE, POWER_READ_WORDS, PortPacket, ProcessStatus, ReadActual, ReadAttested,
-    TREE_X86_POWER,
+    DEVICE_INFO_BYTES, DIRTY_STATE_AWAITING_CLEAN, DIRTY_STATE_DIRTY, DeviceInfo, JOB_SEALED,
+    JOB_SPECULATION_DOMAIN, MAP_EXECUTE, MAP_NO_PAGER, MAP_READ, MAP_WRITE, PAGER_OP_DECOMMIT,
+    PAGER_OP_DETACH, PAGER_OP_DIRTY, PAGER_OP_FAIL, PAGER_OP_WRITEBACK_BEGIN,
+    PAGER_OP_WRITEBACK_END, PAGER_VMO_NO_COPY_WAIT, PAGER_VMO_TRAP_DIRTY, POWER_READ_WORDS,
+    PortPacket, ProcessStatus, ReadActual, ReadAttested, TREE_X86_POWER,
 };
 use ferrix_objects::message::Message;
 use ferrix_objects::reach::Reach;
@@ -84,6 +86,7 @@ use crate::object::exception::{self, AttachRefused, Exception, Supervisor};
 use crate::object::interrupt::{Interrupt, InterruptError};
 use crate::object::io_mapping::{IoMapping, IoMappingError};
 use crate::object::job::{self, Job};
+use crate::object::pager::{Command, FaultMode, Pager, PagerLink, Refusal};
 use crate::object::port::{Observer, Port, PortError};
 use crate::object::process::{Bootstrap, GiveRefused, Host, Process, ProcessRef};
 use crate::object::quota::{self, Resource, Usage};
@@ -94,7 +97,7 @@ use crate::syscall::uaccess::{self, UserError};
 use crate::trap::SyscallArgs;
 use crate::user::address_wait::{self as waits, Key, Place, WaitError, Word};
 use crate::user::space::{Access, AddressSpace, Ceiling, ProtectRefused, SpaceError};
-use crate::user::vmo::{Vmo, VmoError};
+use crate::user::vmo::{PageState, PagedWrite, SupplyError, Vmo, VmoError};
 
 /// The largest VMO a program may create, in pages: four gibibytes.
 ///
@@ -467,9 +470,9 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         | NativeCall::ExceptionChannelCreate
         | NativeCall::ExceptionState
         | NativeCall::ExceptionResolve => job_call(call, caller, &a),
-        NativeCall::InterruptCreate => interrupt_create(process, handle(a[0]), a[1]),
-        NativeCall::InterruptAck => interrupt_ack(process, handle(a[0])),
-        NativeCall::InterruptBind => interrupt_bind(process, handle(a[0]), handle(a[1]), a[2]),
+        NativeCall::InterruptCreate | NativeCall::InterruptAck | NativeCall::InterruptBind => {
+            interrupt_call(call, process, &a)
+        }
         NativeCall::BlockRingCreate
         | NativeCall::NetRingCreate
         | NativeCall::DisplayControlCreate
@@ -497,6 +500,11 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         NativeCall::MemoryScrub => memory_scrub(process, handle(a[0]), a[1], a[2]),
         NativeCall::ProcessBootstrap => process_bootstrap(process),
         NativeCall::ProcessStatus => process_status(process, handle(a[0]), a[1]),
+        NativeCall::PagerCreate
+        | NativeCall::PagerCreateVmo
+        | NativeCall::PagerSupply
+        | NativeCall::PagerOp
+        | NativeCall::PagerQueryDirty => pager_call(call, process, &a),
         NativeCall::IoMappingCreate
         | NativeCall::IoMappingMap
         | NativeCall::IoMappingMapCombining
@@ -1493,6 +1501,17 @@ fn vmo_in(table: &HandleTable, vmo: Handle, needed: Rights) -> Result<Arc<Vmo>, 
     Ok(Arc::clone(vmo))
 }
 
+/// [`vmo_in`] for a call that pins: a pager's object is refused
+/// `BAD_STATE`, since its pages are the pager's to supply and take back
+/// (`docs/microkernel/K3.md` §4).
+fn unpaged_vmo_in(table: &HandleTable, vmo: Handle, needed: Rights) -> Result<Arc<Vmo>, Errno> {
+    let vmo = vmo_in(table, vmo, needed)?;
+    if vmo.is_pager_backed() {
+        return Err(status::BAD_STATE);
+    }
+    Ok(vmo)
+}
+
 /// A count from a register, if it is at most `max`.
 fn within(count: u64, max: usize) -> Result<usize, Errno> {
     usize::try_from(count)
@@ -1627,6 +1646,9 @@ fn copy_page(
     direction: Direction,
 ) -> Result<(), Errno> {
     let within = (at % PAGE_SIZE) as usize;
+    if let Some(link) = vmo.pager() {
+        return copy_paged(process, vmo, link, at, user, slot, direction);
+    }
     match direction {
         Direction::Read => {
             vmo.read_page(at / PAGE_SIZE, within, slot)
@@ -1639,6 +1661,350 @@ fn copy_page(
                 .map_err(vmo_error)
         }
     }
+}
+
+/// [`copy_page`] for a pager-backed object: an absent page is asked of the
+/// pager, a write into a Clean page of a trap-dirty one is asked to be let
+/// Dirty, each with the bounded wait of a kernel copy, and the copy is made
+/// under the pages lock once the page is there (`docs/microkernel/K3.md`
+/// §2.4). A refusal, or a page taken again [`PAGED_TRIES`] times, is
+/// `FAULT` (the consultant's Q1, ledger 2858).
+fn copy_paged(
+    process: &Process,
+    vmo: &Vmo,
+    link: &PagerLink,
+    at: u64,
+    user: u64,
+    slot: &mut [u8],
+    direction: Direction,
+) -> Result<(), Errno> {
+    let (index, within) = (at / PAGE_SIZE, (at % PAGE_SIZE) as usize);
+    let asked = |command| match link.request(vmo, index, command, FaultMode::Copy) {
+        Ok(()) => Ok(()),
+        Err(Refusal::NoMemory) => Err(status::NO_MEMORY),
+        Err(_) => Err(status::FAULT),
+    };
+    if direction == Direction::Write {
+        uaccess::copy_from_user(process.space(), user, slot).map_err(fault)?;
+    }
+    for _ in 0..PAGED_TRIES {
+        let wanted = match direction {
+            Direction::Read => read_paged(vmo, index, within, slot)?,
+            Direction::Write => write_paged(vmo, link, index, within, slot)?,
+        };
+        let Some(command) = wanted else {
+            return match direction {
+                Direction::Read => {
+                    uaccess::copy_to_user(process.space(), user, slot).map_err(fault)
+                }
+                Direction::Write => Ok(()),
+            };
+        };
+        asked(command)?;
+    }
+    Err(status::FAULT)
+}
+
+/// One try of [`copy_paged`]'s read: `None` once `slot` holds the page's
+/// bytes, or the request the page needs first.
+fn read_paged(
+    vmo: &Vmo,
+    index: u64,
+    within: usize,
+    slot: &mut [u8],
+) -> Result<Option<Command>, Errno> {
+    let present = vmo.read_present(index, within, slot).map_err(vmo_error)?;
+    Ok((!present).then_some(Command::Read))
+}
+
+/// One try of [`copy_paged`]'s write: `None` once `slot` is written and its
+/// page Dirty, or the request the page needs first.
+fn write_paged(
+    vmo: &Vmo,
+    link: &PagerLink,
+    index: u64,
+    within: usize,
+    slot: &[u8],
+) -> Result<Option<Command>, Errno> {
+    let written = vmo
+        .write_paged(index, within, slot, link.traps_dirty())
+        .map_err(vmo_error)?;
+    Ok(match written {
+        PagedWrite::Done => None,
+        PagedWrite::Absent => Some(Command::Read),
+        PagedWrite::NeedsDirty => Some(Command::Dirty),
+    })
+}
+
+/// The pager calls, 0x1074 to 0x1078 (`docs/microkernel/K3.md` §4).
+fn pager_call(call: NativeCall, process: &Process, a: &[u64; 6]) -> Result<usize, Errno> {
+    match call {
+        NativeCall::PagerCreate => pager_create(process, handle(a[0]), a[1], a[2]),
+        NativeCall::PagerCreateVmo => pager_create_vmo(process, handle(a[0]), a[1]),
+        NativeCall::PagerSupply => {
+            pager_supply(process, handle(a[0]), handle(a[1]), handle(a[2]), a[3])
+        }
+        NativeCall::PagerOp => pager_op(process, handle(a[0]), handle(a[1]), a[2], a[3]),
+        _ => pager_query_dirty(
+            process,
+            handle(a[0]),
+            handle(a[1]),
+            a[2],
+            buffer(a[3], a[4]),
+        ),
+    }
+}
+
+/// The interrupt calls.
+fn interrupt_call(call: NativeCall, process: &Process, a: &[u64; 6]) -> Result<usize, Errno> {
+    match call {
+        NativeCall::InterruptCreate => interrupt_create(process, handle(a[0]), a[1]),
+        NativeCall::InterruptAck => interrupt_ack(process, handle(a[0])),
+        _ => interrupt_bind(process, handle(a[0]), handle(a[1]), a[2]),
+    }
+}
+
+/// How many times [`copy_paged`] asks for a page that is taken again before
+/// it can be copied: as often as a fault fills one (`user::space`).
+const PAGED_TRIES: usize = 64;
+
+/// The pager `handle` names, if it carries `needed`.
+fn pager_in(table: &HandleTable, handle: Handle, needed: Rights) -> Result<Arc<Pager>, Errno> {
+    let (object, rights) = table.get(handle).map_err(table_error)?;
+    let Object::Pager(pager) = object else {
+        return Err(status::WRONG_TYPE);
+    };
+    if !rights.contains(needed) {
+        return Err(status::ACCESS_DENIED);
+    }
+    Ok(Arc::clone(pager))
+}
+
+/// `N` native-endian words from the caller's memory at `at`: a pager call's
+/// spec, read whole on every architecture, as `timer_set`'s is.
+fn read_words<const N: usize>(process: &Process, at: u64) -> Result<[u64; N], Errno> {
+    let mut words = [0_u64; N];
+    for (index, word) in words.iter_mut().enumerate() {
+        *word = read_u64(process, at.saturating_add(8 * index as u64))?;
+    }
+    Ok(words)
+}
+
+/// `pager_create`: a pager over `port` (WRITE), its faults bounded by the
+/// `u64` at `wait_at`.
+fn pager_create(
+    process: &Process,
+    port: Handle,
+    wait_at: u64,
+    options: u64,
+) -> Result<usize, Errno> {
+    if options != 0 {
+        return Err(status::INVALID_ARGS);
+    }
+    let port = port_in(process, port, Rights::WRITE)?;
+    let wait_ns = read_u64(process, wait_at)?;
+    let pager = Pager::new(port, wait_ns).map_err(|_| status::NO_MEMORY)?;
+    let pager = fallible::try_arc(pager).map_err(|_| status::NO_MEMORY)?;
+    insert_new(process, Object::Pager(pager), Rights::PAGER_OBJECT)
+}
+
+/// `pager_create_vmo`: a pager-backed VMO of `pages` pages with `key`.
+fn pager_create_vmo(process: &Process, pager: Handle, spec_at: u64) -> Result<usize, Errno> {
+    let pager = process.with_handles(|table| pager_in(table, pager, Rights::PAGER))?;
+    let [key, pages, options] = read_words::<3>(process, spec_at)?;
+    if options & !(PAGER_VMO_TRAP_DIRTY | PAGER_VMO_NO_COPY_WAIT) != 0 || pages == 0 {
+        return Err(status::INVALID_ARGS);
+    }
+    if pages > MAX_VMO_PAGES {
+        return Err(status::NO_MEMORY);
+    }
+    let link = pager
+        .core()
+        .link(key, options)
+        .map_err(|_| status::NO_MEMORY)?;
+    drop(pager);
+    let vmo = Vmo::new_paged(pages, link).map_err(|_| status::NO_MEMORY)?;
+    insert_new(process, Object::Vmo(vmo), Rights::VMO)
+}
+
+/// A pager, one of its VMOs and the VMO's link to it.
+type PagerVmo = (Arc<Pager>, Arc<Vmo>, Arc<PagerLink>);
+
+/// The pager `pager` names (with `PAGER`), the VMO `vmo` names, and its link
+/// to that pager: `BAD_STATE` for a VMO that is not this pager's.
+fn pager_and_vmo(process: &Process, pager: Handle, vmo: Handle) -> Result<PagerVmo, Errno> {
+    let (pager, vmo) = process.with_handles(|table| {
+        Ok((
+            pager_in(table, pager, Rights::PAGER)?,
+            vmo_in(table, vmo, Rights::NONE)?,
+        ))
+    })?;
+    let link = vmo
+        .pager()
+        .filter(|link| pager.core().serves(link))
+        .map(Arc::clone)
+        .ok_or(status::BAD_STATE)?;
+    Ok((pager, vmo, link))
+}
+
+/// A byte range of `vmo` as its first page and page count: both
+/// page-aligned, not empty, inside the object.
+fn page_range(vmo: &Vmo, offset: u64, length: u64) -> Result<(u64, u64), Errno> {
+    if length == 0
+        || !offset.is_multiple_of(PAGE_SIZE)
+        || !length.is_multiple_of(PAGE_SIZE)
+        || offset
+            .checked_add(length)
+            .is_none_or(|end| end > vmo.len_bytes())
+    {
+        return Err(status::INVALID_ARGS);
+    }
+    Ok((offset / PAGE_SIZE, length / PAGE_SIZE))
+}
+
+/// `pager_supply` (`docs/microkernel/K3.md` §2.7).
+fn pager_supply(
+    process: &Process,
+    pager: Handle,
+    vmo: Handle,
+    aux: Handle,
+    spec_at: u64,
+) -> Result<usize, Errno> {
+    let (pager, vmo, link) = pager_and_vmo(process, pager, vmo)?;
+    let aux = process.with_handles(|table| vmo_in(table, aux, Rights::READ | Rights::WRITE))?;
+    let [offset, length, aux_offset, options] = read_words::<4>(process, spec_at)?;
+    if options != 0 || !aux_offset.is_multiple_of(PAGE_SIZE) {
+        return Err(status::INVALID_ARGS);
+    }
+    let (first, count) = page_range(&vmo, offset, length)?;
+    if !aux.is_anonymous() || link.is_gone() {
+        return Err(status::BAD_STATE);
+    }
+    let _ = vmo
+        .supply_from(&aux, aux_offset / PAGE_SIZE, first, count)
+        .map_err(|why| match why {
+            SupplyError::BadAux => status::BAD_STATE,
+            SupplyError::Range => status::INVALID_ARGS,
+            SupplyError::NoMemory => status::NO_MEMORY,
+        })?;
+    let _ = link.supplied(first, count);
+    drop(pager);
+    Ok(0)
+}
+
+/// `pager_op` (`docs/microkernel/K3.md` §2.5, §2.8).
+fn pager_op(
+    process: &Process,
+    pager: Handle,
+    vmo: Handle,
+    op: u64,
+    spec_at: u64,
+) -> Result<usize, Errno> {
+    let (pager, vmo, link) = pager_and_vmo(process, pager, vmo)?;
+    let [offset, length, value, request] = read_words::<4>(process, spec_at)?;
+    if op == PAGER_OP_DETACH {
+        link.detach();
+        drop(pager);
+        return Ok(0);
+    }
+    let range = page_range(&vmo, offset, length)?;
+    let done = if op == PAGER_OP_FAIL {
+        pager_fail(&link, range, value, request)
+    } else if value != 0 || request != 0 {
+        Err(status::INVALID_ARGS)
+    } else {
+        pager_page_op(&vmo, &link, op, range)
+    };
+    drop(pager);
+    done.map(|()| 0)
+}
+
+/// `PAGER_OP_FAIL` over `(first, count)`: `EIO` or `ENOSPC`, of every request
+/// or of the one named.
+fn pager_fail(
+    link: &PagerLink,
+    (first, count): (u64, u64),
+    value: u64,
+    request: u64,
+) -> Result<(), Errno> {
+    let errno = match value {
+        5 => Errno::EIO,
+        28 => Errno::ENOSPC,
+        _ => return Err(status::INVALID_ARGS),
+    };
+    let _ = link.fail(first, count, errno, request);
+    Ok(())
+}
+
+/// Every `pager_op` but `FAIL` and `DETACH`, over `(first, count)`.
+fn pager_page_op(
+    vmo: &Vmo,
+    link: &PagerLink,
+    op: u64,
+    (first, count): (u64, u64),
+) -> Result<(), Errno> {
+    match op {
+        PAGER_OP_DIRTY => match vmo.dirty_range(first, count) {
+            Ok(true) => {
+                let _ = link.dirtied(first, count);
+                Ok(())
+            }
+            Ok(false) => Err(status::BAD_STATE),
+            Err(_) => Err(status::NO_MEMORY),
+        },
+        PAGER_OP_WRITEBACK_BEGIN => {
+            let _ = vmo.writeback_begin(first, count);
+            Ok(())
+        }
+        PAGER_OP_WRITEBACK_END => {
+            let _ = vmo.writeback_end(first, count);
+            Ok(())
+        }
+        PAGER_OP_DECOMMIT => vmo
+            .decommit_clean(first, count)
+            .map(|_| ())
+            .map_err(|_| status::NO_MEMORY),
+        _ => Err(status::INVALID_ARGS),
+    }
+}
+
+/// `pager_query_dirty`: the Dirty and awaiting-clean runs of a range, as
+/// `DirtyRange` records into `out`.
+fn pager_query_dirty(
+    process: &Process,
+    pager: Handle,
+    vmo: Handle,
+    range_at: u64,
+    out: Buffer,
+) -> Result<usize, Errno> {
+    let (pager, vmo, _) = pager_and_vmo(process, pager, vmo)?;
+    drop(pager);
+    let [offset, length] = read_words::<2>(process, range_at)?;
+    let (first, count) = page_range(&vmo, offset, length)?;
+    let room = usize::try_from(out.count).unwrap_or(usize::MAX);
+    let (runs, more) = vmo
+        .dirty_runs(first, count, room)
+        .map_err(|_| status::NO_MEMORY)?;
+    for (at, &(start, pages, state)) in runs.iter().enumerate() {
+        let code = match state {
+            PageState::AwaitingClean => DIRTY_STATE_AWAITING_CLEAN,
+            _ => DIRTY_STATE_DIRTY,
+        };
+        let mut record = [0_u8; 24];
+        for (bytes, word) in
+            record
+                .chunks_exact_mut(8)
+                .zip([start * PAGE_SIZE, pages * PAGE_SIZE, code])
+        {
+            bytes.copy_from_slice(&word.to_ne_bytes());
+        }
+        let to = out.at.saturating_add(24 * at as u64);
+        uaccess::copy_to_user(process.space(), to, &record).map_err(fault)?;
+    }
+    if more {
+        return Err(status::BUFFER_TOO_SMALL);
+    }
+    Ok(runs.len())
 }
 
 /// The status a VMO refusal travels as.
@@ -2955,7 +3321,7 @@ fn quiesce_while(node: &Arc<DeviceNode>, cancelled: &dyn Fn() -> bool) -> Result
     // What the dead driver, or its device's firmware, may have rewritten
     // through a BAR: a node whose kernel-owned registers read back other
     // than minted is refused, and so is the quiesce, so that no driver is
-    // started on it again (SAFETY-MANUAL AoU-22).
+    // started on it again (SAFETY-MANUAL assumption of use-22).
     node.verify_config().map_err(|_| status::BAD_STATE)?;
     for release in SERVERS.iter().filter_map(|server| server.release) {
         release(node);
@@ -3036,7 +3402,7 @@ fn vmo_pin(
         if !read_only {
             let _ = vmo_in(table, vmo, Rights::WRITE)?;
         }
-        vmo_in(table, vmo, Rights::READ)
+        unpaged_vmo_in(table, vmo, Rights::READ)
     })?;
     let past_caches = options & PIN_COHERENT != 0 && !node.dma_shape().coherent;
     if past_caches && (offset != 0 || length != vmo.len_bytes()) {
@@ -3501,9 +3867,13 @@ fn vmo_map(
     protection: u64,
     offset_at: u64,
 ) -> Result<usize, Errno> {
-    let write = match u32::try_from(protection) {
-        Ok(MAP_READ) => false,
-        Ok(bits) if bits == MAP_READ | MAP_WRITE => true,
+    let bits = u32::try_from(protection).map_err(|_| status::INVALID_ARGS)?;
+    // A safety partition maps what it chose and no pager's object: the
+    // kernel's part of K3's assumption of use (`docs/microkernel/K3.md` §5).
+    let no_pager = bits & MAP_NO_PAGER != 0;
+    let write = match bits & !MAP_NO_PAGER {
+        MAP_READ => false,
+        bits if bits == MAP_READ | MAP_WRITE => true,
         _ => return Err(status::INVALID_ARGS),
     };
     let needed = if write {
@@ -3512,6 +3882,9 @@ fn vmo_map(
         Rights::MAP | Rights::READ
     };
     let (vmo, held) = process.with_handles(|table| vmo_held(table, vmo, needed))?;
+    if no_pager && vmo.is_pager_backed() {
+        return Err(status::WRONG_TYPE);
+    }
     let offset = read_u64(process, offset_at)?;
     let flags = VmaFlags {
         write,
@@ -3546,8 +3919,8 @@ fn vmo_held(table: &HandleTable, vmo: Handle, needed: Rights) -> Result<(Arc<Vmo
 
 /// What a protection word asks for, as `(write, execute)`: `MAP_READ`,
 /// `MAP_READ | MAP_WRITE` or `MAP_READ | MAP_EXECUTE`. Writable and
-/// executable together is never valid (ASR-2), nor is any other bit; K3's
-/// `MAP_NO_PAGER` (`1 << 3`) is reserved until it lands.
+/// executable together is never valid (ASR-2), nor is any other bit;
+/// `SPACE_MAP` takes `MAP_NO_PAGER` off before it asks.
 fn space_protection(protection: u64) -> Result<(bool, bool), Errno> {
     match u32::try_from(protection) {
         Ok(MAP_READ) => Ok((false, false)),
@@ -3667,7 +4040,10 @@ fn space_map(
     protection: u64,
     offset_at: u64,
 ) -> Result<usize, Errno> {
-    let (write, execute) = space_protection(protection)?;
+    // As `vmo_map`: a safety partition maps no pager's object it did not
+    // choose, by handle no more than into itself (L.object.231).
+    let no_pager = protection & u64::from(MAP_NO_PAGER) != 0;
+    let (write, execute) = space_protection(protection & !u64::from(MAP_NO_PAGER))?;
     let on_space = if execute {
         Rights::MAP | Rights::EXECUTE
     } else {
@@ -3681,6 +4057,9 @@ fn space_map(
     // `EXECUTE` on the VMO handle is the ceiling's to require: an executable
     // mapping past it is refused by the space, `ACCESS_DENIED` as any right.
     let (vmo, held) = process.with_handles(|table| vmo_held(table, vmo, on_vmo))?;
+    if no_pager && vmo.is_pager_backed() {
+        return Err(status::WRONG_TYPE);
+    }
     let offset = read_u64(process, offset_at)?;
     let flags = VmaFlags {
         write,
@@ -4178,6 +4557,7 @@ fn observe(target: &Object, observer: Observer) -> Option<Result<(), PortError>>
         | Object::Interrupt(_)
         | Object::IoMapping(_)
         | Object::Pin(_)
+        | Object::Pager(_)
         | Object::Starter
         | Object::Audit
         | Object::CpuService
