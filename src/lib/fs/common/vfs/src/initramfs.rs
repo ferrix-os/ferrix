@@ -129,11 +129,7 @@ pub fn init_entries(archive: &[u8]) -> impl Iterator<Item = InitEntry<'_>> {
 /// does; `None` past its first malformed header, as [`init_entries`].
 #[must_use]
 pub fn file_named<'a>(archive: &'a [u8], name: &[u8]) -> Option<&'a [u8]> {
-    Archive::new(archive)
-        .entries()
-        .map_while(Result::ok)
-        .find(|entry| entry.is_safe_path() && entry.is_file() && normalise(entry.name) == name)
-        .map(|entry| entry.data)
+    ferrix_cpio::file_named(archive, name)
 }
 
 /// Why an unpack stopped.

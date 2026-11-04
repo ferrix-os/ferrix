@@ -37,10 +37,13 @@ pub const ITEM_FLAG_WORD: u64 =
 
 pub use ferrix_kernel_core::*;
 
+#[cfg(ferrix_personality = "user")]
+pub mod boot_authority;
 pub mod build_flags;
 pub mod checks;
 pub mod discovery;
 pub mod fastpath;
+pub mod first_rows;
 #[cfg(not(ferrix_shape = "micro"))]
 pub mod init;
 #[cfg(not(ferrix_shape = "micro"))]

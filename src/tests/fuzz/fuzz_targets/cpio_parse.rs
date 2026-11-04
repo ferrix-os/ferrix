@@ -24,6 +24,8 @@
 //! 6. **A round trip**: every archive that walks to its trailer, written out
 //!    again with the fields the reader reported, reads back as exactly the
 //!    same entries at the same offsets.
+//! 7. **`file_named` is the walk's first regular file of a safe name** (L.object.335),
+//!    ring 0's one read of the archive under `personality=user`.
 
 #![no_main]
 
@@ -199,6 +201,23 @@ fn walk(bytes: &[u8]) -> (Vec<Entry<'_>>, Option<CpioError>) {
 fuzz_target!(|bytes: &[u8]| {
     let archive = Archive::new(bytes);
     let (entries, error) = walk(bytes);
+
+    // 7. For each name the walk saw, and for one it did not.
+    for entry in &entries {
+        let name = entry.name.trim_start_matches("./").trim_start_matches('/');
+        let wanted = entries
+            .iter()
+            .find(|other| {
+                other.is_safe_path()
+                    && other.is_file()
+                    && other.name.trim_start_matches("./").trim_start_matches('/') == name
+            })
+            .map(|found| found.data);
+        if !name.starts_with("./") && !name.starts_with('/') && name != "." {
+            assert_eq!(ferrix_cpio::file_named(bytes, name.as_bytes()), wanted);
+        }
+    }
+    assert_eq!(ferrix_cpio::file_named(bytes, b"\0not a name"), None);
 
     // 1. Layout, entry by entry, and each next header where the last one said.
     let mut expected_header = 0;

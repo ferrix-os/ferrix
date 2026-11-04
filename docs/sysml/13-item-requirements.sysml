@@ -2321,5 +2321,22 @@ package FerrixItemRequirements {
                 truncation and a create, and the disk holds the last commit.";
             attribute :>> parent = "ASR-9";
         }
+        requirement <'H.DEV.12'> deviceAuthorityFromTheKernelDirectly : ItemHighLevel {
+            attribute :>> statement = "Under personality=user, device authority and a safety partition's
+                authority shall pass from the kernel to their holders directly, and a
+                safety partition's device shall reach no other holder.";
+            attribute :>> criterion = "test-first-processes: a described device goes to the manager and is
+                kept from devmgr; a description naming no node, or malformed, stops
+                the boot; L.object.322, 323.";
+            attribute :>> parent = ("O.CAPABILITY", "ASR-3");
+        }
+        requirement <'H.DEV.13'> eachFirstProcessEndsSafely : ItemHighLevel {
+            attribute :>> statement = "Each first process's death shall leave nothing running on its
+                authority: the manager's is the machine's safe state, devmgr's kills
+                its drivers and quiesces their devices, linuxd's kills its programs.
+                This family stands in H.DEV because the block holds no H.OBJ.";
+            attribute :>> criterion = "test-first-processes' deaths; L.object.326, 327, 328.";
+            attribute :>> parent = ("O.CAPABILITY", "ASR-3");
+        }
     }
 }

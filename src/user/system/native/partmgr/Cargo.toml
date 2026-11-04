@@ -1,0 +1,23 @@
+[package]
+name = "ferrix-partmgr"
+description = "The partition manager: starts the safety partitions a static description names, holds their authority and supervises them (docs/microkernel/BOOT-AUTHORITY.md)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "partmgr"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+ferrix-rt.workspace = true
+ferrix-native-abi.workspace = true
+ferrix-partition-desc.workspace = true
+ferrix-process-builder.workspace = true
+
+[lints]
+workspace = true

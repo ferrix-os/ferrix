@@ -44,8 +44,10 @@ use ferrix_native_abi::status;
 use ferrix_native_abi::types::{CHANNEL_MAX_BYTES, CHANNEL_MAX_HANDLES};
 use ferrix_sync::Once;
 
+#[cfg(not(ferrix_personality = "user"))]
 use super::first_image;
 use crate::fallible::{self, AllocError};
+use crate::first_rows::{DEVMGR, Held};
 use crate::object::channel::{Endpoint, ReadError, Sender};
 use crate::object::job::{self, Job};
 use crate::object::process::{Exit, Host, Process, ProcessRef};
@@ -82,7 +84,7 @@ const REPORT_PATIENCE_NANOS: u64 = 20_000_000_000;
 /// `devmgr`'s to set and never the driver's: every launch path narrows the
 /// handle to exactly a driver's rights before it goes (`docs/NVIDIA.md`
 /// §12.2).
-const GIVEN_DEVICE_RIGHTS: Rights = Rights(DEVICE_RIGHTS.0 | Rights::SET_LIMIT.0);
+pub(crate) const GIVEN_DEVICE_RIGHTS: Rights = Rights(DEVICE_RIGHTS.0 | Rights::SET_LIMIT.0);
 
 /// The rights of the device handle `devmgr` keeps, the second of each pair:
 /// the first's, and `DUPLICATE`, so a driver that died can be started again
@@ -92,7 +94,7 @@ const GIVEN_DEVICE_RIGHTS: Rights = Rights(DEVICE_RIGHTS.0 | Rights::SET_LIMIT.0
 /// In a kernel whose nodes need an explicit bind it also has `BIND_DOMAIN`
 /// (`docs/microkernel/K8.md` §2, `L.device.67`, `L.device.71`), the one
 /// handle of the pair that ever does.
-const KEPT_DEVICE_RIGHTS: Rights = Rights(
+pub(crate) const KEPT_DEVICE_RIGHTS: Rights = Rights(
     GIVEN_DEVICE_RIGHTS.0
         | Rights::DUPLICATE.0
         | if device::EXPLICIT_BIND {
@@ -494,25 +496,70 @@ pub(crate) struct Detached {
 ///
 /// What did not happen, as a sentence.
 #[cfg(ferrix_personality = "user")]
-#[allow(
-    dead_code,
-    reason = "the boot authority's to call, in the commit on this one"
-)]
 pub(crate) fn start_detached() -> Result<Option<Detached>, &'static str> {
     let Some(files) = read_files()? else {
         return Ok(None);
     };
     let (messages, devmgr_end) = Endpoint::pair().map_err(|_| "no memory for devmgr's channel")?;
     let (cores, devmgr_cores) = Endpoint::pair().map_err(|_| "no memory for the cores' channel")?;
+    let job = drivers_job()?;
     let _ = write_devices(
         &messages,
         files.images()?,
-        drivers_job()?,
+        Arc::clone(&job),
         Some(devmgr_cores),
     )?;
     let (process, at) = load(&files.set.image)?;
+    // Not a start refused but the boot's stop: the row says so (ledger 6564 Y.3).
+    crate::boot_authority::must_be_measured(&process.core().job());
+    crate::boot_authority::must_be_measured(&job);
+    if !process.core().own_space().is_measured() {
+        crate::boot_authority::not_measured("devmgr's space is not measured");
+    }
+    // Before the start, so that no death is missed (BA.8).
+    watch_detached(Arc::clone(&process), job)?;
     start_program(&process, at, devmgr_end, &messages)?;
     Ok(Some(Detached { messages, cores }))
+}
+
+/// `devmgr`'s death under `personality=user` (`docs/microkernel/BOOT-AUTHORITY.md` §4,
+/// BA.8): nothing is left to quiesce its devices through its kept handles, so the
+/// kernel does. The drivers' job is killed and every device it may have driven has its
+/// DMA turned off. A dead driver's pins stay quarantined: no next HELLO is coming, so
+/// they stay for the boot, each device's quarantine bounded by its budget. No device
+/// of a safety partition's is among these. `linuxd` then finds its cores' channel closed.
+#[cfg(ferrix_personality = "user")]
+fn watch_detached(process: Arc<dyn Host>, job: Arc<Job>) -> Result<(), &'static str> {
+    static WATCHED: SpinLock<Option<(Arc<dyn Host>, Arc<Job>)>> = SpinLock::new(None);
+    *WATCHED.lock() = Some((process, job));
+    fn watch(_argument: usize) {
+        let Some((process, job)) = WATCHED.lock().take() else {
+            return;
+        };
+        let core = process.core();
+        let _ = core.exited().wait_trusting(|| core.is_terminated());
+        crate::audit::first_process_ended(core);
+        let _ = job.kill(137);
+        let mut quiesced = 0_usize;
+        let mut refused = 0_usize;
+        for node in device::devices() {
+            if crate::boot_authority::held_by_manager(node) {
+                continue;
+            }
+            match native::quiesce(node) {
+                Ok(()) => quiesced += 1,
+                Err(_) => refused += 1,
+            }
+        }
+        crate::console::println!(
+            "  devmgr   ended with {:?}: its drivers' job killed, {quiesced} devices quiesced, \
+             {refused} would not be",
+            core.exit_status(),
+        );
+    }
+    sched::spawn("devmgr watch", watch, 0, ferrix_sched::NICE_0_WEIGHT)
+        .map(|_| ())
+        .map_err(|_| "no task to watch devmgr on")
 }
 
 /// What `devmgr` is started with: its own program, and every driver the
@@ -692,6 +739,28 @@ fn write_devices(
         let bindings = BINDINGS.lock();
         fallible::try_to_vec(&bindings.names).map_err(|_| "no memory for the drivers' names")?
     };
+    // A safety partition's devices never reach devmgr: the filter is the
+    // kernel's (`docs/microkernel/BOOT-AUTHORITY.md` §2).
+    #[cfg(ferrix_personality = "user")]
+    let kept: Vec<Arc<device::DeviceNode>> = {
+        let mut kept = fallible::try_with_capacity(device::devices().len())
+            .map_err(|_| "no memory for the devices' list")?;
+        for node in device::devices()
+            .iter()
+            .filter(|node| !crate::boot_authority::held_by_manager(node))
+        {
+            let _ = fallible::push_within(&mut kept, Arc::clone(node));
+        }
+        crate::console::println!(
+            "  devmgr   given {} devices, {} of a safety partition's kept back",
+            kept.len(),
+            device::devices().len() - kept.len(),
+        );
+        kept
+    };
+    #[cfg(ferrix_personality = "user")]
+    let nodes = kept.as_slice();
+    #[cfg(not(ferrix_personality = "user"))]
     let nodes = device::devices();
     // As many DEVICES messages as the handles need: the first with the job
     // and the images, the rest with devices only. ARMv7-A publishes 36
@@ -727,37 +796,50 @@ fn write_devices(
         let mut transfers: Vec<Transfer> = fallible::try_with_capacity(message.handles())
             .map_err(|_| "no memory for a DEVICES message's handles")?;
         if let Some(job) = job.take() {
-            let _ = fallible::push_within(&mut transfers, (Object::Job(job), Rights::JOB));
+            let _ = fallible::push_within(
+                &mut transfers,
+                (Object::Job(job), const { DEVMGR.of(Held::Job) }),
+            );
         }
         for node in nodes.iter().skip(index).take(take) {
             let _ = fallible::push_within(
                 &mut transfers,
-                (Object::Device(Arc::clone(node)), GIVEN_DEVICE_RIGHTS),
+                (
+                    Object::Device(Arc::clone(node)),
+                    const { DEVMGR.of(Held::DeviceGiven) },
+                ),
             );
             let _ = fallible::push_within(
                 &mut transfers,
-                (Object::Device(Arc::clone(node)), KEPT_DEVICE_RIGHTS),
+                (
+                    Object::Device(Arc::clone(node)),
+                    const { DEVMGR.of(Held::DeviceKept) },
+                ),
             );
         }
         if let Some(images) = images.take() {
             for vmo in images {
-                let _ = fallible::push_within(&mut transfers, (Object::Vmo(vmo), image_rights()));
+                let _ = fallible::push_within(
+                    &mut transfers,
+                    (Object::Vmo(vmo), const { DEVMGR.of(Held::Image) }),
+                );
             }
         }
         #[cfg(ferrix_personality = "user")]
         if first {
             let _ = fallible::push_within(
                 &mut transfers,
-                (
-                    Object::DebugLog,
-                    Rights(Rights::WRITE.0 | Rights::DUPLICATE.0 | Rights::TRANSFER.0),
-                ),
+                (Object::DebugLog, const { DEVMGR.of(Held::DebugLog) }),
             );
         }
         if let Some(cores) = cores.take() {
-            let _ =
-                fallible::push_within(&mut transfers, (Object::Channel(cores), Rights::CHANNEL));
+            let _ = fallible::push_within(
+                &mut transfers,
+                (Object::Channel(cores), const { DEVMGR.of(Held::Channel) }),
+            );
         }
+        #[cfg(ferrix_personality = "user")]
+        DEVMGR.judge(transfers.iter().map(|(object, rights)| (object, *rights)))?;
         let handles = transfers.len();
         let body = fallible::try_to_vec(bytes.get(..len).unwrap_or(&[]))
             .map_err(|_| "no memory for a DEVICES message")?;
@@ -775,7 +857,7 @@ fn write_devices(
 /// What the kernel hands `devmgr` a driver's image with: read, map executable,
 /// move; no write, no duplicate (`docs/microkernel/K15.md` §2.5, L.object.299).
 pub(crate) const fn image_rights() -> Rights {
-    ferrix_native_abi::rights::IMAGE_RIGHTS
+    const { DEVMGR.of(Held::Image) }
 }
 
 /// Load `devmgr`'s `image` into a process of its own, not started, by the one
@@ -785,11 +867,18 @@ pub(crate) const fn image_rights() -> Rights {
 fn load(image: &[u8]) -> Result<(Arc<dyn Host>, EntryPoint), &'static str> {
     let processes = native::processes().ok_or("nothing is registered to start devmgr with")?;
     let process = (processes.make)(None, NAME).map_err(|_| "no memory for devmgr's process")?;
-    match first_image::load(process.core().own_space(), image) {
+    #[cfg(ferrix_personality = "user")]
+    let loaded = vmo_of(image).and_then(|sealed| {
+        crate::boot_authority::load_sealed(process.core().own_space(), &sealed, image.len())
+    });
+    #[cfg(not(ferrix_personality = "user"))]
+    let loaded = first_image::load(process.core().own_space(), image)
+        .map_err(|_| "/sbin/devmgr does not load");
+    match loaded {
         Ok(at) => Ok((process, at)),
-        Err(_) => {
+        Err(why) => {
             process.kill(job::KILLED_STATUS);
-            Err("/sbin/devmgr does not load")
+            Err(why)
         }
     }
 }
@@ -1263,10 +1352,15 @@ const DRIVERS_JOB: &str = "drivers.slice";
 /// When there was no memory for any job at all.
 fn drivers_job() -> Result<Arc<Job>, &'static str> {
     let root = job::root();
-    root.new_named_child_as(DRIVERS_JOB, job::Budget::Own, true)
+    let job = root
+        .new_named_child_as(DRIVERS_JOB, job::Budget::Own, true)
         .or_else(|_| root.new_child_as(false, true))
         .or_else(|_| Job::new_root_as(true))
-        .map_err(|_| "no memory for the drivers' job")
+        .map_err(|_| "no memory for the drivers' job")?;
+    // K14 holds of drivers where the kernel's first processes are measured (BA.4).
+    #[cfg(ferrix_personality = "user")]
+    job.make_measured();
+    Ok(job)
 }
 
 /// The manifest's names, each NUL-padded to a driver name; an image without

@@ -87,7 +87,8 @@ pub use ferrix_audit::{
     CGROUP_KILLED, CGROUP_LIMIT, DEVICE_LIMIT, DEVICE_LIMIT_SET, Event, NO_UID, saturated,
 };
 pub(crate) use ferrix_audit::{
-    CONFIG, CPU_SERVICE, Class, DMA_FAULT, INTERRUPT_FAULT, LIMIT, OOM_KILLED, POWER, SUPPRESSED,
+    CONFIG, CPU_SERVICE, Class, DMA_FAULT, FIRST_PROCESS_ENDED, INTERRUPT_FAULT, LIMIT, OOM_KILLED,
+    POWER, SUPPRESSED,
 };
 #[doc(hidden)]
 pub use ferrix_audit::{EXCEPTION_CONTEXT, EXCEPTION_KILLED, PAGER};
@@ -897,4 +898,24 @@ pub fn id() -> u128 {
 /// Read the kernel's store: see [`Store::read_at`].
 pub fn read(which: Which, from: u64, out: &mut [Record]) -> Read {
     STORE.read_at(crate::timer::now_nanos(), which, from, out)
+}
+
+/// A first process's end, in one record (`docs/microkernel/BOOT-AUTHORITY.md` §4).
+#[cfg(ferrix_personality = "user")]
+pub fn first_process_ended(process: &Process) {
+    record(
+        FIRST_PROCESS_ENDED,
+        Outcome::Done,
+        0,
+        Subject::of(process),
+        Target {
+            kind: target::PROCESS,
+            id: u64::from(process.pid()),
+        },
+        [
+            process.exit_status().map_or(0, |status| status as u32),
+            0,
+            0,
+        ],
+    );
 }

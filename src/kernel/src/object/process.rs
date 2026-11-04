@@ -75,6 +75,9 @@ use crate::user::space::AddressSpace;
 /// A process, as the core enforces and reports it.
 #[derive(Debug)]
 pub struct Process {
+    /// What it may still write to the debug log this second (BA.6).
+    #[cfg(ferrix_personality = "user")]
+    debug_budget: DebugBudget,
     /// What it can see.
     space: Arc<AddressSpace>,
     /// Its number, from [`allocate`]: what the pid table finds it by. Zero
@@ -272,7 +275,45 @@ impl Bootstrap {
 /// [`Process::leave_speculation_domain`]. Read as zero, no domain.
 const LEFT: u64 = u64::MAX;
 
+/// A holder's rate on the debug log (`docs/microkernel/BOOT-AUTHORITY.md` §3, BA.6): so
+/// many bytes a second, per process, so that no holder can starve another's lines.
+#[cfg(ferrix_personality = "user")]
+#[derive(Debug)]
+struct DebugBudget {
+    second: core::sync::atomic::AtomicU64,
+    used: core::sync::atomic::AtomicU64,
+}
+
+#[cfg(ferrix_personality = "user")]
+impl DebugBudget {
+    /// Bytes a second, more than a serial line takes.
+    const BYTES_A_SECOND: u64 = 1024 * 1024;
+
+    const fn new() -> DebugBudget {
+        DebugBudget {
+            second: core::sync::atomic::AtomicU64::new(0),
+            used: core::sync::atomic::AtomicU64::new(0),
+        }
+    }
+}
+
 impl Process {
+    /// Whether this process may write `bytes` more to the debug log this second.
+    /// Racing writers of one process can pass it by a call's bound, no more.
+    #[cfg(ferrix_personality = "user")]
+    pub fn debug_budget_takes(&self, bytes: u64) -> bool {
+        use core::sync::atomic::Ordering::Relaxed;
+        let now = crate::timer::now_nanos() / 1_000_000_000;
+        if self.debug_budget.second.swap(now, Relaxed) != now {
+            self.debug_budget.used.store(0, Relaxed);
+        }
+        self.debug_budget
+            .used
+            .fetch_add(bytes, Relaxed)
+            .saturating_add(bytes)
+            <= DebugBudget::BYTES_A_SECOND
+    }
+
     /// A process over `space`, numbered `pid` -- which the caller has
     /// reserved with [`allocate`] or [`allocate_init`], or zero -- and
     /// counted in `job` from now on.
@@ -298,6 +339,8 @@ impl Process {
         space.claim_domain(domain);
         let frozen = job.freezing();
         Ok(Process {
+            #[cfg(ferrix_personality = "user")]
+            debug_budget: DebugBudget::new(),
             space,
             pid,
             started: crate::timer::now_nanos(),

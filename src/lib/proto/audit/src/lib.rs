@@ -284,8 +284,13 @@ pub mod power {
     pub const PANIC: u32 = 4;
 }
 
+/// A first process ended, whatever it answered: the partition manager, `devmgr` or
+/// `linuxd` (`docs/microkernel/BOOT-AUTHORITY.md` §4).
+pub const FIRST_PROCESS_ENDED: Event = Event::new(Class::Ended, 5);
+
 /// Every event this crate names, with its name.
 pub const NAMED: [(Event, &str); 35] = [
+    (FIRST_PROCESS_ENDED, "FIRST_PROCESS_ENDED"),
     (LEVEL, "LEVEL"),
     (BUFFER_DECLARED, "BUFFER_DECLARED"),
     (START, "START"),

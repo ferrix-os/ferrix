@@ -16,6 +16,7 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 ferrix-acpi = { path = "../../lib/platform/acpi" }
 ferrix-cpio = { path = "../../lib/fs/common/cpio" }
+ferrix-partition-desc = { path = "../../lib/proto/partition-desc" }
 ferrix-fat = { path = "../../lib/fs/common/fat" }
 ferrix-argon2 = { path = "../../lib/crypto/argon2" }
 ferrix-auth-proto = { path = "../../lib/proto/auth-proto" }
@@ -350,6 +351,13 @@ bench = false
 [[bin]]
 name = "netswitch"
 path = "fuzz_targets/netswitch.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "partition_desc"
+path = "fuzz_targets/partition_desc.rs"
 test = false
 doc = false
 bench = false

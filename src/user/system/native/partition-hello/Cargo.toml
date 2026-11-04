@@ -1,0 +1,21 @@
+[package]
+name = "ferrix-partition-hello"
+description = "A test image of a safety partition: says it is up, then ends. It never ships in a product image."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "partition-hello"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+ferrix-rt.workspace = true
+ferrix-native-abi.workspace = true
+
+[lints]
+workspace = true

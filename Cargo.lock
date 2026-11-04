@@ -563,6 +563,7 @@ dependencies = [
  "ferrix-audit",
  "ferrix-blkring",
  "ferrix-bootinfo",
+ "ferrix-cpio",
  "ferrix-crng",
  "ferrix-devmgr-proto",
  "ferrix-elf",
@@ -572,6 +573,7 @@ dependencies = [
  "ferrix-native-abi",
  "ferrix-objects",
  "ferrix-paging",
+ "ferrix-partition-desc",
  "ferrix-pci",
  "ferrix-sched",
  "ferrix-smbios",
@@ -960,6 +962,28 @@ version = "0.1.0"
 [[package]]
 name = "ferrix-partition"
 version = "0.1.0"
+
+[[package]]
+name = "ferrix-partition-desc"
+version = "0.1.0"
+
+[[package]]
+name = "ferrix-partition-hello"
+version = "0.1.0"
+dependencies = [
+ "ferrix-native-abi",
+ "ferrix-rt",
+]
+
+[[package]]
+name = "ferrix-partmgr"
+version = "0.1.0"
+dependencies = [
+ "ferrix-native-abi",
+ "ferrix-partition-desc",
+ "ferrix-process-builder",
+ "ferrix-rt",
+]
 
 [[package]]
 name = "ferrix-pci"

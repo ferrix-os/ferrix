@@ -1141,3 +1141,33 @@ fn truncating_at_any_length_never_panics() {
         "every prefix of the archive was walked to completion without a panic"
     );
 }
+
+/// Verifies: L.object.335
+#[test]
+fn file_named_finds_a_regular_file_of_a_safe_name_and_nothing_else() {
+    let archive = realistic_archive();
+    assert_eq!(
+        file_named(&archive, b"bin/sh"),
+        Some(&[0x7F, b'E', b'L', b'F', 2, 1, 1, 0][..])
+    );
+    assert_eq!(file_named(&archive, b"bin"), None);
+    assert_eq!(file_named(&archive, b"dev/console"), None);
+    assert_eq!(file_named(&archive, b"bin/init"), None);
+    assert_eq!(file_named(&archive, b"nothing"), None);
+}
+
+/// Verifies: L.object.335
+#[test]
+fn file_named_sees_no_unsafe_name_and_nothing_past_a_malformed_header() {
+    let mut builder = Builder::new();
+    builder.push(&file("../sbin/partmgr", 0o755, b"up"));
+    let archive = builder.finish();
+    assert_eq!(file_named(&archive, b"../sbin/partmgr"), None);
+    let whole = realistic_archive();
+    for length in 0..whole.len() {
+        let _ = file_named(&whole[..length], b"bin/sh");
+    }
+    let mut bad = realistic_archive();
+    bad[0] = b'x';
+    assert_eq!(file_named(&bad, b"bin/sh"), None);
+}

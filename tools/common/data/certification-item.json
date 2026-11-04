@@ -323,6 +323,8 @@
         "build_flags.rs",
         "kernel_item.rs",
         "linuxd_start.rs",
+        "boot_authority.rs",
+        "first_rows.rs",
         "syscall/native/lift.rs"
       ]
     },
@@ -453,6 +455,24 @@
       "it is written against the VFS, which is load."
     ],
     "members": {
+      "ferrix-partition-desc": {
+        "ring": "item",
+        "path": "src/lib/proto/partition-desc",
+        "in_ring0_when": [
+          "personality=user"
+        ],
+        "below": "the partitions description's bytes, from the sealed archive (L.object.323)",
+        "above": "the kernel's start of the first processes"
+      },
+      "ferrix-cpio": {
+        "ring": "item",
+        "path": "src/lib/fs/common/cpio",
+        "in_ring0_when": [
+          "personality=user"
+        ],
+        "below": "the archive's bytes, read in ring 0 (`file_named`, L.object.335)",
+        "above": "the first processes' images and the partitions description"
+      },
       "ferrix-btrfs": {
         "ring": "item",
         "path": "src/lib/fs/btrfs/format",
@@ -1072,6 +1092,7 @@
       "syscall/program.rs"
     ],
     "first_image_load": [
+      "boot_authority.rs",
       "discovery/devmgr.rs",
       "linuxd_start.rs"
     ]

@@ -753,6 +753,10 @@ the core's task; an unorderly reset (a watchdog, a triple fault, the reset
 button) writes nothing back (VULNERABILITY-ANALYSIS V-16). The integrator
 shall not set `ferrix.powerctl` on a system of which a claim is made.
 
+### AoU-45 — a safety partition's device stands on hardware that keeps root ports apart
+
+A description holds a device for a safety partition only directly below a root port, on a bus of its own, with a translation domain of its own (`boot_authority::node_of`, BA.3). Peer-to-peer across root ports turns in the root complex, whose ACS the kernel does not read yet. The integrator states that the root complex does not route between its ports, or holds no such device on it.
+
 ### AoU-43 — a supervisor that keeps a server's channel end tells its clients what the server lost
 
 K13 (`docs/microkernel/K13.md`): a supervisor that holds a duplicate of a server's channel end keeps

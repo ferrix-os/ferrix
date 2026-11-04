@@ -497,6 +497,17 @@ fn rows_for(path: &str, image_crates: &BTreeSet<String>, rows: &mut Rows) {
         .iter()
         .any(|dir| path.starts_with(&format!("{dir}/")));
     let reason = |rows: &mut Rows, why: &str| rows.reasons.push(format!("{path}: {why}"));
+    // Judged by its own lines, since a `personality=user` kernel prints FERRIX-BOOT-UNCHECKED
+    // (BOOT-AUTHORITY.md BA.13), on top of the kernel's rows.
+    if path.ends_with("src/kernel/src/boot_authority.rs")
+        || path.ends_with("src/kernel/src/first_rows.rs")
+        || path.ends_with("src/kernel/src/linuxd_start.rs")
+        || under("src/user/system/native/partmgr/")
+        || under("src/lib/proto/partition-desc/")
+    {
+        rows.add(&["test-first-processes --personality user"]);
+        reason(rows, "the first processes' row");
+    }
     if under("src/user/system/linux/ferrousli/") {
         rows.add(&[
             "check --ferrousli",

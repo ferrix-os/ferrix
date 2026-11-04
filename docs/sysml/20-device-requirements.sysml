@@ -1445,5 +1445,21 @@ package FerrixDeviceRequirements {
             attribute :>> parent = "H.DEV.7";
             attribute :>> unit = "discovery::board::Boards::find";
         }
+        requirement <'L.device.84'> theDebugLogTakesAHandle : ItemLowLevel {
+            attribute :>> statement = "DEBUG_WRITE shall need a handle of the debug log with WRITE, shall take at
+                most one line's bound a call, and a measured process's line shall carry a prefix from the
+                kernel's own record of the writer.";
+            attribute :>> criterion = "test-first-processes reads each first process's line with its prefix; a
+                call with no such handle is refused by native_check; a QM process's line reads as anything, stated.";
+            attribute :>> parent = "H.DEV.13";
+            attribute :>> unit = "syscall::native::lift::call";
+        }
+        requirement <'L.device.85'> theDebugLogHasABudget : ItemLowLevel {
+            attribute :>> statement = "A process shall write at most its budget of bytes a second to the debug log,
+                past which DEBUG_WRITE answers SHOULD_WAIT, so that a QM process cannot starve a safety partition's lines.";
+            attribute :>> criterion = "test-first-processes; the console lock's hold bound is in MEMORY-AND-TIMING.";
+            attribute :>> parent = "H.DEV.13";
+            attribute :>> unit = "object::process::Process::debug_budget_takes";
+        }
     }
 }

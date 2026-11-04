@@ -48,6 +48,7 @@ pub mod arch;
 pub mod bootstrap;
 pub mod directory;
 pub mod exception;
+pub mod first;
 pub mod handle;
 pub mod lift;
 pub mod nr;

@@ -3907,5 +3907,70 @@ package FerrixObjectRequirements {
             attribute :>> parent = "H.MEM.22";
             attribute :>> unit = ("syscall::native::vmo_map", "syscall::native::space_map");
         }
+        requirement <'L.object.320'> firstProcessesStartMeasured : ItemLowLevel {
+            attribute :>> statement = "The manager and each partition it starts shall start measured, in a
+                sealed job, from a sealed image whose digest is on its record, before
+                devmgr and linuxd.";
+            attribute :>> criterion = "test-first-processes: its lines, in that order, and the manager's
+                comparison of the record with the description.";
+            attribute :>> parent = "H.DEV.12";
+            attribute :>> unit = ("boot_authority::run", "boot_authority::try_start_manager");
+        }
+        requirement <'L.object.321'> firstProcessesHoldTheirRows : ItemLowLevel {
+            attribute :>> statement = "Before each first process runs, the kernel shall hold what that process
+                is about to hold against its role's const table, by kind, rights and number, from the objects
+                themselves, none being the root job, and shall stop the boot on a miss.";
+            attribute :>> criterion = "Every personality=user boot runs it; test-first-processes, and a control
+                giving one handle more, which stops the boot; check-first-rows.py holds the tables to the design.";
+            attribute :>> parent = "H.DEV.13";
+            attribute :>> unit = ("first_rows::Rows::judge", "first_rows::Rows::of");
+        }
+        requirement <'L.object.322'> noSafetyDeviceToDevmgr : ItemLowLevel {
+            attribute :>> statement = "A device a description names shall not be in devmgr's DEVICES.";
+            attribute :>> criterion = "test-first-processes: 1 kept back, with the filter removed it fails.";
+            attribute :>> parent = "H.DEV.12";
+            attribute :>> unit = ("boot_authority::held_by_manager", "iommu::would_translate");
+        }
+        requirement <'L.object.323'> aBadDescriptionStopsTheBoot : ItemLowLevel {
+            attribute :>> statement = "A description naming no real device, or malformed, shall stop the
+                boot.";
+            attribute :>> criterion = "test-first-processes: a made-up location and a truncated file, each
+                stopping it with its reason.";
+            attribute :>> parent = "H.DEV.12";
+            attribute :>> unit = ("boot_authority::node_of", "boot_authority::start_manager");
+        }
+        requirement <'L.object.326'> theManagersDeathStopsTheMachine : ItemLowLevel {
+            attribute :>> statement = "The manager's end, a clean exit included, shall stop the machine with
+                FX-0954.";
+            attribute :>> criterion = "test-first-processes: an image ending at once in its place.";
+            attribute :>> parent = "H.DEV.13";
+            attribute :>> unit = "boot_authority::watch_manager";
+        }
+        requirement <'L.object.328'> devmgrsDeathQuiesces : ItemLowLevel {
+            attribute :>> statement = "devmgr's end shall kill the drivers' job and quiesce every device not
+                a safety partition's; a dead driver's pins stay quarantined.";
+            attribute :>> criterion = "test-first-processes: an image ending at once in devmgr's place, and
+                the kernel's line.";
+            attribute :>> parent = "H.DEV.13";
+            attribute :>> unit = "discovery::devmgr::watch_detached";
+        }
+        requirement <'L.object.334'> firstImagesFromSealed : ItemLowLevel {
+            attribute :>> statement = "A first process's pages shall be made by the kernel from the bytes of
+                its sealed image, no other copy, and that image's digest recorded on its measured space: the
+                one exception to executable only from sealed.";
+            attribute :>> criterion = "test-first-processes boots the manager and devmgr so measured;
+                review of boot_authority::load_sealed, its one caller each.";
+            attribute :>> parent = "H.DEV.13";
+            attribute :>> unit = "boot_authority::load_sealed";
+        }
+        requirement <'L.object.335'> theKernelsCpioWalk : ItemLowLevel {
+            attribute :>> statement = "ferrix_cpio::file_named shall answer the regular file of a safe name,
+                inside the archive's bounds, stop at the first malformed header, allocate nothing and write
+                nothing: ring 0's one parser of the archive under personality=user.";
+            attribute :>> criterion = "ferrix-cpio's host tests of it, its fuzz target, and a refused
+                archive's boot in test-first-processes.";
+            attribute :>> parent = "H.DEV.13";
+            attribute :>> unit = "ferrix_cpio::file_named";
+        }
     }
 }

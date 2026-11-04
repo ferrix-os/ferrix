@@ -144,6 +144,7 @@ dependencies = [
  "ferrix-nettcp",
  "ferrix-netwire",
  "ferrix-objects",
+ "ferrix-partition-desc",
  "ferrix-pci",
  "ferrix-renderctl",
  "ferrix-seccomp",
@@ -234,6 +235,10 @@ dependencies = [
  "ferrix-native-abi",
  "ferrix-sync",
 ]
+
+[[package]]
+name = "ferrix-partition-desc"
+version = "0.1.0"
 
 [[package]]
 name = "ferrix-pci"

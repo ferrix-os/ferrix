@@ -513,6 +513,8 @@ This section is the design (po10-drv, 2026-10-07); "as built" notes follow
 each landing. The other kinds and `devmgr`'s own restart are outside it, as
 they are outside §4.
 
+Under `personality=user` a driver's job is measured, so an update is refused, failing closed: `copy_image` makes an unsealed copy, and a plain VMO becomes no image there. Driver updates in that shape wait for D19's store design. The kernel-made images are sealed and carry `READ|MAP|EXECUTE|TRANSFER`, no `WRITE` (BA.4).
+
 **Where the new image comes from.** Every image `devmgr` has comes from the
 initramfs, through the kernel (§2), and `devmgr` reads no files. An update's
 image comes from root at run time, through a helper and not through the

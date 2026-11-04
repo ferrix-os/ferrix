@@ -228,6 +228,7 @@ pub(crate) fn build_in(arch: Arch, release: bool, target_dir: &Path) -> Result<V
     PROGRAMS
         .iter()
         .chain(lifted.then_some(&LINUXD))
+        .chain(lifted.then_some(&PARTMGR))
         .map(|program| build_one(arch, release, target_dir, program))
         .collect()
 }
@@ -241,6 +242,28 @@ pub(crate) const UPDATER: Program = Program {
     package: "ferrix-drvupdated",
     binary: "drvupdated",
     directory: DRIVERS,
+};
+
+/// The partition manager (`docs/microkernel/BOOT-AUTHORITY.md` §8), likewise.
+pub(crate) const PARTMGR: Program = Program {
+    package: "ferrix-partmgr",
+    binary: "partmgr",
+    directory: DIRECTORY,
+};
+
+/// A program that ends at once: under a first process's name in
+/// `test-first-processes`' images.
+pub(crate) const CRASH_AT_START: Program = Program {
+    package: "ferrix-crash-at-start",
+    binary: "crash-at-start",
+    directory: DRIVERS,
+};
+
+/// A test image of a safety partition: only `test-first-processes`' archive.
+pub(crate) const PARTITION_HELLO: Program = Program {
+    package: "ferrix-partition-hello",
+    binary: "partition-hello",
+    directory: DIRECTORY,
 };
 
 /// `linuxd` (`docs/microkernel/M5-LIFT.md`), in a `personality=user` image alone.

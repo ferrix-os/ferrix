@@ -28,6 +28,16 @@ mod served {
     /// The most bytes one call moves: its time is bounded by this.
     const MOST: u64 = 4096;
 
+    /// A line's text, as far as it is text: a holder's bytes go on the console.
+    struct LogText<'a>(&'a [u8]);
+
+    impl core::fmt::Display for LogText<'_> {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            let text = self.0.strip_suffix(b"\n").unwrap_or(self.0);
+            f.write_str(core::str::from_utf8(text).unwrap_or("(not text)"))
+        }
+    }
+
     fn holds(process: &Process, handle: u64, wanted: &Object, right: Rights) -> Result<(), Errno> {
         let handle = Handle(u32::try_from(handle).map_err(|_| status::BAD_HANDLE)?);
         process.with_handles(|table| {
@@ -53,8 +63,17 @@ mod served {
                 if a[2] > MOST {
                     return Err(status::INVALID_ARGS);
                 }
+                if !process.debug_budget_takes(a[2]) {
+                    return Err(status::SHOULD_WAIT);
+                }
                 let bytes = copy_in(process, a[1], a[2] as usize)?;
-                crate::console::write_bytes(&bytes);
+                // Who said a measured process's line is the kernel's to say: a QM
+                // process's line can read as anything, and carries no such word.
+                if process.own_space().is_measured() {
+                    crate::console::println!("  [{}] {}", process.pid(), LogText(&bytes));
+                } else {
+                    crate::console::write_bytes(&bytes);
+                }
                 Ok(0)
             }
             NativeCall::ObjectKind => {

@@ -126,6 +126,9 @@ members = [
     "src/kernel/lift/load",
     "src/kernel/lift/settings",
     "src/user/system/native/linuxd",
+    "src/lib/proto/partition-desc",
+    "src/user/system/native/partmgr",
+    "src/user/system/native/partition-hello",
     "src/kernel/settings",
 
     # Native user-space programs, built for the kernel's own targets and put
@@ -188,6 +191,7 @@ license = "MIT"
 publish = false
 
 [workspace.dependencies]
+ferrix-partition-desc = { path = "src/lib/proto/partition-desc" }
 ferrix-acpi = { path = "src/lib/platform/acpi" }
 ferrix-block = { path = "src/lib/fs/common/block" }
 ferrix-blkring = { path = "src/lib/proto/blkring" }

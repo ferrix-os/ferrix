@@ -2309,6 +2309,23 @@ fn endpoints<'a>(unit: &dmar::Drhd<'a>) -> impl Iterator<Item = Address> + 'a {
         .filter_map(move |(bus, device, function)| Address::new(segment, bus, device, function))
 }
 
+/// Whether a function's DMA would be translated, with no domain made: what K14's
+/// `needs_certified` reads (`docs/microkernel/K14.md` §5).
+pub fn would_translate(function: Address) -> bool {
+    PROGRAMMED.get().is_some_and(|programmed| {
+        matches!(vtd_placed(programmed, function), topology::Placed::Unit(_))
+            || matches!(
+                amdvi_placed(programmed, function),
+                topology::Placed::Unit(_)
+            )
+    })
+}
+
+/// Whether `function` is directly below a root port, by the bridges enumeration found.
+pub fn directly_below_root_port(function: Address) -> bool {
+    topology::directly_below_root_port(function, &BRIDGES.lock())
+}
+
 /// The domain `function`'s DMA goes through: one on the VT-d unit the DMAR puts
 /// it behind, or on the `SMMUv3` an IORT root complex sends it to, when that
 /// unit is translating, and an untranslated one otherwise.

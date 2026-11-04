@@ -152,6 +152,24 @@ impl<S: Syscall> Job<S> {
         self.create_with(types::JOB_SEALED)
     }
 
+    /// A measured child (`docs/microkernel/K14.md` §3): what runs in it runs only
+    /// sealed images.
+    ///
+    /// # Errors
+    ///
+    /// As [`Job::create_child`].
+    pub fn create_measured_child(&self) -> Result<Job<S>, Error> {
+        let value = Call::new(nr::JOB_CREATE)
+            .value(register(self.handle()))
+            .value(usize::try_from(types::JOB_MEASURED).unwrap_or(usize::MAX))
+            .make(self.syscall());
+        let handle = decode_handle(value)?;
+        Ok(Job::from_owned(OwnedHandle::from_raw(
+            self.syscall(),
+            handle,
+        )))
+    }
+
     /// `job_create` with `options`.
     fn create_with(&self, options: u64) -> Result<Job<S>, Error> {
         let value = Call::new(nr::JOB_CREATE)

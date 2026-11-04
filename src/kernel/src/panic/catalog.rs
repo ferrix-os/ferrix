@@ -4060,6 +4060,47 @@ pub(crate) static NESTED_INTERRUPT_STACK: Explanation = Explanation {
     dead_code,
     reason = "tools/common/gen/gen-panic-catalog.py checks every entry is listed here; the kernel names entries directly"
 )]
+/// `docs/microkernel/BOOT-AUTHORITY.md` §1: a first process did not start.
+pub static FIRST_PROCESSES: Explanation = Explanation {
+    code: "FX-0952",
+    title: "a first process did not start",
+    meaning: "Under `personality=user` the kernel starts the partition manager, `devmgr` and \
+              `linuxd` from the initramfs, each with its own row of handles, and nothing on the \
+              machine can run without them.",
+    causes: &[
+        "The archive lacks the image, or a sealed image over `SEAL_MAX_PAGES`.",
+        "The manager said nothing within the description's bound.",
+    ],
+    see: "src/kernel/src/boot_authority.rs; docs/microkernel/BOOT-AUTHORITY.md",
+};
+
+/// `docs/microkernel/BOOT-AUTHORITY.md` §2: the description cannot be honoured.
+pub static PARTITION_DESCRIPTION: Explanation = Explanation {
+    code: "FX-0953",
+    title: "the partitions' description cannot be honoured",
+    meaning: "`.ferrix/partitions` is malformed, or names a device no node matches, or one that \
+              shares its requester id or its pages with something it does not also name. Reading \
+              it as empty would hand a safety partition's device to `devmgr`, so the boot stops.",
+    causes: &[
+        "The image was built with a description for another board.",
+        "A multi-function device was only partly assigned.",
+    ],
+    see: "src/kernel/src/boot_authority.rs; src/lib/proto/partition-desc",
+};
+
+/// `docs/microkernel/BOOT-AUTHORITY.md` §4: the manager ended.
+pub static PARTITION_MANAGER_ENDED: Explanation = Explanation {
+    code: "FX-0954",
+    title: "the partition manager ended",
+    meaning: "The supervisor of the safety partitions is gone and nothing else may hold their \
+              authority, so this is the machine's safe state, a clean exit included.",
+    causes: &[
+        "The manager panicked or was killed.",
+        "It stopped at a step of its own: its status.",
+    ],
+    see: "src/user/system/native/partmgr/src/main.rs; docs/microkernel/BOOT-AUTHORITY.md",
+};
+
 pub(crate) static ALL: &[&Explanation] = &[
     &SHOOTDOWN_TIMEOUT,
     &GRACE_PERIOD_TIMEOUT,
@@ -4216,6 +4257,9 @@ pub(crate) static ALL: &[&Explanation] = &[
     &STAGE9_SEALING,
     #[cfg(ferrix_personality = "user")]
     &WINDOW_UNMAP,
+    &FIRST_PROCESSES,
+    &PARTITION_DESCRIPTION,
+    &PARTITION_MANAGER_ENDED,
     &STAGE10_PCI,
     &STAGE10_DEVICES,
     &STAGE10_IOMMU,

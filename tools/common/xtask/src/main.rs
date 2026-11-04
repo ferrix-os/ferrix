@@ -130,6 +130,7 @@ mod edid;
 mod everything;
 mod fat;
 mod ferrousli;
+mod first_processes;
 mod flags;
 mod flash;
 mod frames;
@@ -599,6 +600,7 @@ const TASKS: &[&[Task]] = &[
     lode_budget::TASKS,
     lode_pstore::TASKS,
     lode_remote::TASKS,
+    first_processes::TASKS,
     machine_check::TASKS,
     mce_cmci::TASKS,
     mce_copy::TASKS,

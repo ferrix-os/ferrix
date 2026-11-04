@@ -2913,6 +2913,8 @@ the investigation's bench, its variants, binaries (`SHA256SUMS`), runs and
 The board was not written: the program went over the serial line with
 `loady`, and the board was left booted as it was found.
 
+**The debug log under `personality=user` (L.device.84-85, BA.6).** `DEBUG_WRITE` copies one call's bound in, outside the console lock, and holds that lock for one line's output through the UART, as any kernel line does: its hold is a line's bytes at the port's rate, the same term the console already has, stated against HardRt. A process past its bytes a second is answered `SHOULD_WAIT` before any of that.
+
 ## 3. Why F-24 is not closed, and F-23 is
 
 A document that says "the property does not hold" is not a closed finding, and

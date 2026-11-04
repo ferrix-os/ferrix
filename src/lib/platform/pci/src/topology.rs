@@ -137,6 +137,23 @@ fn above(segment: u16, bus: u8, bridges: &[Bridge]) -> Above {
     }
 }
 
+/// Whether `function` sits directly below a root port: the bridge above it forwards
+/// requester IDs and has no bridge above it. A switch's downstream port has one, so that
+/// peer-to-peer inside a switch, below any translation, is never in this answer
+/// (`docs/microkernel/BOOT-AUTHORITY.md`, BA.3).
+#[must_use]
+pub fn directly_below_root_port(function: Address, bridges: &[Bridge]) -> bool {
+    match above(function.segment(), function.bus(), bridges) {
+        Above::One(port) if port.forwards_requester => {
+            matches!(
+                above(function.segment(), port.address.bus(), bridges),
+                Above::None
+            )
+        }
+        _ => false,
+    }
+}
+
 /// Whether `function`'s DMA reaches its root bus carrying its own requester
 /// ID: every bridge above it is a PCIe port, up to a bus no bridge has
 /// behind it.
@@ -276,8 +293,8 @@ pub fn agrees<U: PartialEq>(placed: Placed<U>, unit: &U) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        Behind, Bridge, CatchAll, Explicit, Placed, agrees, behind, claims, follow_path,
-        own_to_root, place,
+        Behind, Bridge, CatchAll, Explicit, Placed, agrees, behind, claims,
+        directly_below_root_port, follow_path, own_to_root, place,
     };
     use crate::Address;
 
@@ -344,6 +361,17 @@ mod tests {
         assert_eq!(follow_path(0, 0, [(7, 0), (0, 0)], &machine()), None);
         assert_eq!(follow_path(0, 0, [], &machine()), None);
         assert_eq!(follow_path(0, 0, [(32, 0)], &machine()), None);
+    }
+
+    #[test]
+    fn only_a_root_ports_own_bus_is_directly_below_one() {
+        let bridges = machine();
+        assert!(directly_below_root_port(at(1, 0, 0), &bridges));
+        assert!(directly_below_root_port(at(3, 0, 0), &bridges));
+        // Behind the PCIe-to-PCI bridge, behind a switch, and on the root bus.
+        assert!(!directly_below_root_port(at(2, 0, 0), &bridges));
+        assert!(!directly_below_root_port(at(5, 0, 0), &bridges));
+        assert!(!directly_below_root_port(at(0, 5, 0), &bridges));
     }
 
     /// Verifies: L.iommu.45

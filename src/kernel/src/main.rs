@@ -418,7 +418,7 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // was named by `ferrix.init=` or built in, and the image has no
     // /sbin/init.
     #[cfg(ferrix_personality = "user")]
-    linuxd_start::run(view);
+    boot_authority::run(view);
     #[cfg(not(ferrix_personality = "user"))]
     init::run();
     power::finish()

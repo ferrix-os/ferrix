@@ -13,6 +13,7 @@ use ferrix_native_abi::rights::Rights;
 use ferrix_vma::VmaFlags;
 
 use crate::console::println;
+use crate::first_rows::{Held, LINUXD};
 use crate::object::Object;
 use crate::object::bare::Bare;
 use crate::object::job;
@@ -109,8 +110,16 @@ fn start(
     let page = Vmo::new_anonymous(1).map_err(|_| "no memory for the boot page")?;
     let (devmgr_messages, cores) = match devmgr {
         Some(given) => (
-            give(&region, Object::Channel(given.messages), Rights::CHANNEL)?,
-            give(&region, Object::Channel(given.cores), Rights::CHANNEL)?,
+            give(
+                &region,
+                Object::Channel(given.messages),
+                const { LINUXD.of(Held::Channel) },
+            )?,
+            give(
+                &region,
+                Object::Channel(given.cores),
+                const { LINUXD.of(Held::Channel) },
+            )?,
         ),
         None => (0, 0),
     };
@@ -118,23 +127,36 @@ fn start(
         devmgr: devmgr_messages,
         cores,
         magic: BOOT_MAGIC,
-        region: give(&region, Object::Region(Arc::clone(&region)), Rights::REGION)?,
-        job: give(&region, Object::Job(Arc::clone(&partition)), Rights::JOB)?,
+        region: give(
+            &region,
+            Object::Region(Arc::clone(&region)),
+            const { LINUXD.of(Held::Region) },
+        )?,
+        job: give(
+            &region,
+            Object::Job(Arc::clone(&partition)),
+            const { LINUXD.of(Held::Job) },
+        )?,
         initramfs: give(
             &region,
             Object::Vmo(archive),
-            Rights(Rights::VMO.0 & !Rights::WRITE.0),
+            const { LINUXD.of(Held::Archive) },
         )?,
         initramfs_bytes: archive_len,
         command_line_bytes: cmdline.len() as u32,
         processors: crate::smp::count() as u32,
         devices: write_devices(&page)?,
-        debug_log: give(&region, Object::DebugLog, Rights::WRITE)?,
-        console: give(&region, Object::Console, Rights::READ)?,
+        debug_log: give(
+            &region,
+            Object::DebugLog,
+            const { LINUXD.of(Held::DebugLog) },
+        )?,
+        console: give(&region, Object::Console, const { LINUXD.of(Held::Console) })?,
         memory_frames: crate::mm::free_frames() / 8 * 7,
         wall_clock,
         ..BootPage::EMPTY
     };
+    judge_table(&region, &LINUXD);
     page.commit_and_write(0, 0, &boot.to_bytes())
         .map_err(|_| "the boot page")?;
     let line = cmdline.as_bytes();
@@ -193,6 +215,22 @@ fn start(
     Ok(())
 }
 
+/// Hold a region's whole table to its row, before anything runs in it; a miss stops the
+/// boot, not this one partition (L.object.321).
+fn judge_table(region: &Region, row: &crate::first_rows::Rows) {
+    let judged = region.with_handles(|table| {
+        row.judge(table.handles().filter_map(|(handle, rights)| {
+            table.get(handle).ok().map(|(object, _)| (object, rights))
+        }))
+    });
+    if let Err(why) = judged {
+        crate::panic::fatal!(
+            crate::panic::catalog::FIRST_PROCESSES,
+            "first processes: {why}"
+        );
+    }
+}
+
 fn give(region: &Region, object: Object, rights: Rights) -> Result<u32, &'static str> {
     region
         // NOALLOC: `insert` reserves room fallibly and answers `Err` without it.
@@ -220,7 +258,7 @@ fn load(
     space: &Arc<AddressSpace>,
     archive: &[u8],
 ) -> Result<crate::syscall::native::EntryPoint, &'static str> {
-    let image = ferrix_vfs::initramfs::file_named(archive, PATH).ok_or("no sbin/linuxd")?;
+    let image = ferrix_cpio::file_named(archive, PATH).ok_or("no sbin/linuxd")?;
     crate::discovery::first_image::load_at(space, image, IMAGE_BASE).map_err(|why| {
         println!("  linuxd   image refused: {why:?}");
         "linuxd's image was refused"
