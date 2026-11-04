@@ -46,7 +46,9 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 
 use ferrix_native_abi::signals::Signals;
-use ferrix_native_abi::types::{PACKET_INTERRUPT, PACKET_SIGNAL, PACKET_USER, PortPacket};
+use ferrix_native_abi::types::{
+    PACKET_INTERRUPT, PACKET_PAGE_REQUEST, PACKET_SIGNAL, PACKET_USER, PortPacket,
+};
 use ferrix_sync::IrqSpinLock;
 
 use crate::arch;
@@ -214,6 +216,35 @@ impl Port {
         self.waiters.wake_all();
     }
 
+    /// Queue a packet on the room `promise` holds, and keep the promise
+    /// counted until the packet is taken, as a fired registration's is: a
+    /// pager's page request (`object::pager`, `docs/microkernel/K3.md`
+    /// §2.2). Allocates nothing. With no lock held that the port's wake-up
+    /// might need. A port nobody holds any more takes nothing.
+    pub(crate) fn queue_promised(
+        mut promise: Promise,
+        kind: u32,
+        key: u64,
+        signals: u32,
+        data: [u64; 2],
+    ) {
+        let port = core::mem::take(&mut promise.port);
+        drop(promise);
+        let Some(port) = port.upgrade() else {
+            return;
+        };
+        let _ = port.queue.lock().push_fitting(
+            PortPacket {
+                key,
+                kind,
+                signals,
+                data,
+            },
+            false,
+        );
+        port.waiters.wake_all();
+    }
+
     /// Queue a bound interrupt's packet, from its interrupt handler.
     ///
     /// Touches only this queue's interrupt-safe lock and allocates nothing:
@@ -245,7 +276,9 @@ impl Port {
         let packet = queue.packets.pop_front()?;
         match packet.kind {
             PACKET_USER => queue.users = queue.users.saturating_sub(1),
-            PACKET_SIGNAL => queue.promised = queue.promised.saturating_sub(1),
+            PACKET_SIGNAL | PACKET_PAGE_REQUEST => {
+                queue.promised = queue.promised.saturating_sub(1);
+            }
             _ => {}
         }
         Some(packet)
@@ -271,7 +304,7 @@ impl Port {
             if queue.push_fitting(packet, true) {
                 match kind {
                     PACKET_USER => queue.users += 1,
-                    PACKET_SIGNAL => queue.promised += 1,
+                    PACKET_SIGNAL | PACKET_PAGE_REQUEST => queue.promised += 1,
                     _ => {}
                 }
             }

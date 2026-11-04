@@ -158,17 +158,15 @@ pub fn is_charge_refusal(error: &SpaceError) -> bool {
 ///
 /// As [`AddressSpace::fault`], and the refusal itself when nothing could be
 /// killed.
-pub(crate) fn user_fault(
-    space: &AddressSpace,
-    address: u64,
-    access: Access,
-) -> Result<(), SpaceError> {
+pub fn user_fault(space: &AddressSpace, address: u64, access: Access) -> Result<(), SpaceError> {
     quota::count(crate::sched::running_group(), Counter::Faults, 1);
     // Retried here rather than by running the instruction again, so that the
     // answers one fault takes are counted ([`out_of_memory_at`]).
     let mut attempt = 0_u32;
     loop {
-        match space.fault(address, access) {
+        // A program's own fault: never refused for a pager-backed object's
+        // `PAGER_VMO_NO_COPY_WAIT`, which is about copies (K3.md §2.4).
+        match space.fault_with(address, access, crate::object::pager::FaultMode::Program) {
             Err(error) if is_charge_refusal(&error) => match out_of_memory_at(space, attempt) {
                 Answer::Refused => return Err(error),
                 Answer::Victim => return Ok(()),
