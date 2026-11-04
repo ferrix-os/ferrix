@@ -878,7 +878,9 @@ pub fn retired_for_check() -> usize {
 
 // CHECKS-ONLY: fs/btrfs_write_check/poison_check.rs; home: mm
 /// Forget the last `count` retirements, which the calling check made itself
-/// ([`forget_checked_retirements`]).
+/// ([`forget_checked_retirements`]). Each of those frames goes back to the
+/// allocator, so none may still be in use: a retired page kept in its object
+/// has to be dropped first.
 pub fn forget_retired_for_check(count: usize) {
     forget_checked_retirements(count);
 }
@@ -887,6 +889,19 @@ pub fn forget_retired_for_check(count: usize) {
 /// retired frame unread (`L.object.262`).
 pub(crate) fn frame_retired(frame: Frame) -> bool {
     with_frames(|_| holds_retired(frame, 0)).unwrap_or(false)
+}
+
+// CHECKS-ONLY: fs/btrfs_write_check/poison_check.rs; home: mm
+/// Whether the allocator has `frame` as allocated: for the poison check to hold
+/// a frame a file's object names against a retirement it forgot.
+pub fn frame_allocated_for_check(frame: Frame) -> bool {
+    with_frames(|frames| {
+        !matches!(
+            frames.state(frame),
+            None | Some(ferrix_frame::State::Free | ferrix_frame::State::FreeTail)
+        )
+    })
+    .unwrap_or(false)
 }
 
 // CHECKS-ONLY: fs/btrfs_write_check/poison_check.rs; home: mm
