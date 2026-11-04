@@ -12,9 +12,12 @@ otherwise; one a later decision replaced is deleted, and the history keeps it.
   So block claude from commiting and fix the already commited comiits". The
   reading taken (consultant, ledger 6775): no tool identity as author or
   committer, which `commit-msg`, `pre-push` and CI's range check refuse; agents
-  go on committing, under the owner's identity. Thirteen commits already public
-  on `develop` and `main` stay: a rewrite is not asked for and the branch
-  rules refuse it; the check runs over the range a push adds. Git's author names
+  go on committing, under the owner's identity. The customer then allowed the rewrite, "replace the author": main
+  a06733bad and develop 4b531e0ee were force-pushed with the twelve
+  `Claude <noreply@anthropic.com>` commits re-authored to the owner, trees
+  identical, on 2026-11-04 (`main`'s ruleset off for that one push, active
+  again). Their old tips were fbae70aed and 04bc13f28. 935a7f246 (10-02, an
+  agent's address on the owner's domain) stays: fixing it would move 14 tags. Git's author names
   the accountable owner, not who or what made the change (F-29).
 * **2026-11-04 (customer, evening)** **The finished agents' build
   directories are deleted and the gate pool goes back to seven slots**, as the
