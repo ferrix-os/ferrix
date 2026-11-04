@@ -1705,6 +1705,12 @@ measured 89 to 53 s on a cold `build`, an unstable flag, no use on a saturated C
 unmeasured on `check`); `check-item-boundary.py`'s 20 s, an audit beside a longer main
 workspace and the side lanes, so it shortens no `check`.
 
+Seven slots did not fit the disk: 25 to 31 GB each while running, on a budget of about
+205 GB with the agents' trees. At 04:42Z, 19 GB free, 86 runs in an hour were refused,
+and the pool went back to five with the shed line at 40 GB, an idle slot giving way
+for any waiting run. Seven remains right for the processor, which sat 50 to 80% idle;
+it waits for a disk with room.
+
 Local full `check`s were the largest cost: four running cold at once held load at
 70-100, and gates fell to about 3 per 10 minutes with 49 queued.
 
