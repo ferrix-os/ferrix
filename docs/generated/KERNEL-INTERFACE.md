@@ -1239,7 +1239,7 @@ checks above is `pub` for raised checks (F3).
 | `ROOT_SWITCHED` | re-export | item |  |
 | `Record` | re-export | item, load |  |
 | `STARTER_GIVEN` | re-export | item |  |
-| `UNMEASURED` | re-export | item |  |
+| `UNMEASURED` | re-export | item, load |  |
 | `WIDEN` | re-export | item |  |
 | `saturated` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `target` | re-export | item, load |  |
