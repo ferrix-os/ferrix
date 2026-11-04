@@ -13,6 +13,17 @@
   "reservations": [
     {
       "ids": [
+        "H.OBJ.34",
+        "H.SCHED.26-27",
+        "L.sched.153-170"
+      ],
+      "owner": "mk-restricted",
+      "branch": "feature/mk-restricted",
+      "date": "2026-11-04",
+      "purpose": "K17's one high-level requirement, past the block allotted (consultant 6222 refused folding K11's to free one); K9's charge and windows, whose ids are the scheduler's and not L.user or L.trap (consultant 6208 (10))."
+    },
+    {
+      "ids": [
         "H.MEM.26-28",
         "H.OBJ.27-29",
         "L.object.290-309",
