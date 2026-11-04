@@ -7,6 +7,24 @@ Moved out of [`docs/BACKLOG.md`](../BACKLOG.md) on 2026-10-16. A decision is rec
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-11-04 (customer, answers of about 07:10 to the microkernel run's
+  questions)**
+  * **Tests use the RTX 3090 for GPU work, never the 3060**: "use the 3090".
+    This limits the 2026-10-02 line "the 3090 is never touched" to the NVIDIA
+    port (`docs/NVIDIA.md`), whose work stays on the 3060; the tests' GPU work
+    is the other way round.
+  * **`max` keeps per-job heaps, as a stated and justified deviation**; "no
+    allocator after boot" (K16's strict form, and for `btrfsd`) applies "only
+    max plus", that is, only to `max_plus`.
+  * **`linuxd`'s one arena VMO with shadow page tables**: agreed.
+  * **`netd`'s per-partition addresses are internal "only internally, never
+    external"**: the outside network sees one machine, one address, one DHCP
+    client. This replaces the consultant's default for `netd`.
+  * **Tooling**: the component mirrors are repointed (yes), and the agents'
+    incremental caches are trimmed (yes; mk-ci does it).
+  * Not answered, so the consultant's defaults stand: console input staying
+    in ring 0, `ferrix-elf`'s ring, and deleting `PROCESS_CREATE` and
+    `PROCESS_START`.
 * **2026-11-03 (customer)** **A tiny kernel in `fast` and `max`, compared,
   by compile flags only**: all of it from one source tree, `desktop` a hybrid
   and `present` as it is, no forks and no boot option choosing the shape. So
