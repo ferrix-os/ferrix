@@ -444,6 +444,11 @@
       "lines": 18,
       "recursive": false
     },
+    "syscall/native.rs::job_set_limit": {
+      "complexity": 15,
+      "lines": 39,
+      "recursive": false
+    },
     "syscall/native.rs::vmo_executable": {
       "complexity": 15,
       "lines": 33,

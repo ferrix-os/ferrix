@@ -119,10 +119,6 @@ fn execute_is_never_given_with_a_new_vmo() {
     );
     assert!(Rights::SPACE.contains(Rights::EXECUTE | Rights::MAP));
     assert!(Rights::EXECUTE.is_known());
-    assert!(
-        !Rights(1 << 8).is_known(),
-        "bit 8 is K12's, not yet defined"
-    );
     assert_eq!(
         Requested::Exactly(Rights::READ | Rights::EXECUTE).resolve(Rights::VMO),
         None,
@@ -190,8 +186,8 @@ fn a_rights_request_with_an_unknown_bit_is_refused() {
     );
     assert_eq!(
         Requested::from_register(0x100),
-        None,
-        "bit 8 is not a right"
+        Some(Requested::Exactly(Rights::RESERVE)),
+        "bit 8 is RESERVE"
     );
     assert_eq!(
         Requested::from_register(1 << 14),
@@ -242,6 +238,20 @@ fn default_rights_are_defined_rights() {
         Rights::INTERRUPT.contains(Rights::TRANSFER),
         "devmgr hands it on"
     );
+    for rights in [
+        Rights::CHANNEL,
+        Rights::PORT,
+        Rights::VMO,
+        Rights::JOB,
+        Rights::INTERRUPT,
+        Rights::IO_MAPPING,
+        Rights::DEVICE,
+    ] {
+        assert!(
+            !rights.contains(Rights::RESERVE),
+            "{rights:?}: no new object carries RESERVE"
+        );
+    }
 }
 
 #[test]

@@ -152,6 +152,7 @@ fn cases(world: &World, report: &mut Report) -> Result<(), &'static str> {
     check_the_issuer(world, client_end, server_end, &mut ids)?;
     report.refused = check_refused_adoptions(world, client_end, server_end, &mut ids)?;
     check_adopted_charges(world, client_end, server_end, report, &mut ids)?;
+    check_a_reserved_client(world)?;
     check_the_end(world, client_end, server_end, &mut ids)?;
     report.bound = check_the_bound(world, &mut ids)?;
     if !ids.is_sorted_by(|earlier, later| earlier < later) {
@@ -633,6 +634,49 @@ fn check_the_bound(world: &World, ids: &mut Vec<u64>) -> Result<usize, &'static 
     close(&world.other, client_end);
     close(&world.server, server_end);
     Ok(MAX_TICKETS)
+}
+
+/// A server's commit for a reserved client draws on the client's reservation,
+/// as the client's own would (K12's wiring, ledger 2550 (3), 2925 (5)).
+///
+/// Verifies: L.object.208
+fn check_a_reserved_client(world: &World) -> Result<(), &'static str> {
+    let job = world
+        .parent
+        .new_child()
+        .map_err(|_| "a job refused a child")?;
+    // 65: a size of this case's own, so a control can key on it (ledger 6681).
+    job.set_reservation(65 * PAGE_SIZE)
+        .map_err(|_| "a reservation for a ticket's client was refused")?;
+    let client = Side::new()?;
+    client
+        .process
+        .move_new_to(&job)
+        .map_err(|_| "a job refused a process")?;
+    let (near, far) = Endpoint::pair().map_err(|_| "no memory for a channel")?;
+    let near_end = client
+        .process
+        .with_handles(|table| table.insert(Object::Channel(near), Rights::CHANNEL))
+        .map_err(|_| "no room for a channel end")?;
+    let far_end = world
+        .server
+        .process
+        .with_handles(|table| table.insert(Object::Channel(far), Rights::CHANNEL))
+        .map_err(|_| "no room for a channel end")?;
+    let id = issue(&client, &job, near_end)?;
+    let _ = adopt(world, far_end, id).map_err(|_| "a live ticket was not adopted")?;
+    let before = job.reservation().map_or(0, |usage| usage.used);
+    let vmo = commit(world, PAGES);
+    let after = job.reservation().map_or(0, |usage| usage.used);
+    super::ticket::leave();
+    let vmo = vmo.map_err(|_| "an adopted commit for a reserved client was refused")?;
+    close(&world.server, vmo);
+    close(&world.server, far_end);
+    client.close_everything();
+    if after <= before {
+        return Err("an adopted commit for a reserved client did not draw on its reservation");
+    }
+    Ok(())
 }
 
 /// Case 6: what the tickets charged stayed the client's until it went, and

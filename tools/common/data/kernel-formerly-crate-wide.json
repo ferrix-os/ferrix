@@ -1685,6 +1685,16 @@
       "before": "pub(crate)"
     },
     {
+      "item": "object/reserve_check.rs: Report::promise (field)",
+      "born": "K12a",
+      "ledger": 6131
+    },
+    {
+      "item": "object/reserve_check.rs: run (fn)",
+      "born": "K12a",
+      "ledger": 6131
+    },
+    {
       "item": "object/ticket.rs: Ticket (struct)",
       "born": "K7",
       "ledger": 6131
@@ -1910,6 +1920,11 @@
     {
       "item": "panic/catalog.rs: STAGE9_REFUSALS (static)",
       "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE9_RESERVE (static)",
+      "born": "K12a",
+      "ledger": 6131
     },
     {
       "item": "panic/catalog.rs: SYSFS (static)",
