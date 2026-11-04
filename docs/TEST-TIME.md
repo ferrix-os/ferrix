@@ -1611,6 +1611,70 @@ benches on the 3090, is the customer's to say; hardware use is the product owner
 neither timed nor run. The consultant has no certification objection either way
 (ledger 5999): neither crate is in the item and CI has no GPU. Left as it is, with
 the question in `docs/BACKLOG.md`.
+## The microkernel run's night, 2026-11-03/04 (mk-ci)
+
+Five agents and their gates on nazuna, measured from `logs/queue/` and a 30 s
+sample of the host (`~/.local/share/ferrix/po-2026-11-03/mk-ci/sample.log`). No
+check, row, control or timeout changed. The host was never quiet, so each figure
+gives its load. Reviews: ledger lines 5878, 5937, 5939.
+
+**What limited the pool was the disk.** Load reached 100 at 60-80% iowait, on one
+NVMe at 100% utilisation writing 66-95 MB/s. Free space fell from 205 GB to 44 GB
+in an hour.
+
+### Cut M1: the kernel's clippy settings at once
+
+Each flag setting flips the kernel build script's env-dependent `cfg`s, so in one
+target directory every setting relinted the kernel crates on every run. Now each
+has a directory of its own, `<target>/kernel-lint-<name>`, and all run at once, as
+`mitigations=off` already did: same arguments but `--target-dir`, each to its end,
+output whole in the old order, first failure in that order the error.
+
+| `check` in a warm slot | Kernel clippy | Load |
+|---|---:|---:|
+| in turn (`mk-ci-ab-old-1`, `-old-2`, `-new-1`, `-new-2`) | 188.9, 85.4, 92.2, 629.2 s | 15.8, 23.1, 35.3, 19.7 |
+| at once, first run in new directories (`mk-ci-b-base`) | 117.5 s | 35.4 |
+| at once, after a control's edit (`mk-ci-b-again`) | 41.4 s | 23.4 |
+
+The 629 s fell in the hour's worst IO. One sample at once is not a mean. With the
+caches trimmed a setting's directory is 80-108 MB. Controls: a lint inside
+`cfg(ferrix_linux_abi = "off")` and a `disallowed-types` entry in `.clippy.toml`
+with no source edit. Both FIRED, in slot 2 after `mk-ci-b-base` passed there: `mk-ci-b-c1b` with all five settings shown and only `linux_abi=off` failing, `mk-ci-b-c2` with every setting failing. Other runs used slot 2 between them, so its `kernel-lint-*` directories were warm from the base run but not untouched in between. `disallowed-methods` is one
+TOML key, in kernel-interface's checked block, so the entry outside it is that
+sibling key.
+
+### Cut M2: side workspaces without incremental state
+
+`check` starts `check-side` with `CARGO_INCREMENTAL=0` unless the variable is set.
+bs-c's alternation above measured what it does: half the bytes and a third to a half
+of the directory, no wall time either way. The first run in each target directory
+rebuilds the side workspaces once, since the setting is in cargo's fingerprint.
+
+### Component checkouts kept
+
+`gate.sh` deleted every component before each run, and the clones' new mtimes
+rebuilt the apps and tole in every `check`. A checkout now stays when the commit does
+not track its path, its HEAD is the pin and its files equal the pin's tree through
+the mirror. Same tree, slot 1: 80 crates compiled before, 43 after; 237 and 146 s
+against 133 s at loads 15.8, 23.1 and 35.3; 393 test results each way. A control in a
+tracked app file FIRED and the run after it passed with 393. Four of the six mirrors
+(ferrousli, zinc, pixel7, the website) lack their pins, so those stay cloned each run.
+
+What it leaves: lode-viewer resolves tole-compiler's `[lints] workspace = true` to 88
+flags where the other apps get 32, so tole-compiler rebuilds whenever lode-viewer and
+another app alternate in `apps-check-2`, and takes those apps with it. 43 crates a
+`check` remain from that and the kernel. Not fixed yet.
+
+### The pool's rules
+
+| Rule | Why | Measured |
+|---|---|---|
+| A slot with no target dir waits up to 180 s for a warm one | three rows of one commit filled two cold slots | 894 and 931 s cold against about 200 s warm (`mk-m2-b5-*`) |
+| Under 150 GB free, a slot taken loses rustc's caches but the three kernels' | they were 23-27 GB of a slot's 34-37 GB | slots 37 to 16, 43 to 18, 34 to 17 GB; free 44 to 94 GB in 3 min, still warm |
+| The load ceiling holds only at 3 busy slots or more | all five slots stood free with 51 runs queued, at load 44-60 from local builds | not yet measured: runs already queued keep the old script |
+
+Local full `check`s were the largest cost: four running cold at once held load at
+70-100, and gates fell to about 3 per 10 minutes with 49 queued.
 
 ## Next
 

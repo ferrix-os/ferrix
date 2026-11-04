@@ -475,6 +475,8 @@ log path and commit; a new sighting is added to its row the day it is seen.
 
 ### P2 — quality and performance, on the "fast" half of the goal
 
+* **Four component mirrors lack their pins** (mk-ci, 2026-11-04; ledger 5937): `~/.local/share/ferrix/components/{ferrousli,zinc,pixel7,website}.git` still have `~/.local/share/ferrix/split/*` as origin, so `gate.sh` cannot compare those checkouts and clones them each run, and each clone fetches from GitHub. Safe. Repointing them was refused by the session's permission rules; the customer decides. **tole-compiler flips in `apps-check-2`**: lode-viewer resolves its `[lints] workspace = true` to 88 flags where other apps get 32, so it and the apps above it rebuild each `check` (`docs/TEST-TIME.md`).
+
 * **`trap::ReturnPath` as a static trait seam** (the consultant, ledger 3934 (b)): the personality's return-path hooks, a struct of function pointers the load registers in the core at run time, would follow `docs/KERNEL-CRATES.md` §6.3's link-time binding. It is a core interface whose `fault_signal` changes under 3570 (2), so it comes after `CrashHook` and that change, alone, with its own design review. Open.
 
 190 items: performance, hardening, certification follow-ups the

@@ -1117,6 +1117,13 @@ impl Beside {
             .map_err(|error| Error::new(format!("creating {}: {error}", log.display())))?;
         let child = Command::new(std::env::current_exe()?)
             .arg("check-side")
+            // rustc's incremental caches are half of what a cold side workspace
+            // writes and rarely read again, since an edit in the kernel or a
+            // host crate rebuilds none of these (`docs/TEST-TIME.md`, *Cut M2*).
+            .env(
+                "CARGO_INCREMENTAL",
+                std::env::var_os("CARGO_INCREMENTAL").unwrap_or_else(|| "0".into()),
+            )
             .current_dir(paths::workspace_root())
             .stdin(Stdio::null())
             .stdout(file.try_clone()?)
