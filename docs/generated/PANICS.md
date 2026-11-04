@@ -109,6 +109,7 @@ Causes are listed most likely first.
 | [FX-0909](#fx-0909) | the SMBIOS copy's acceptance took a forged copy, or refused a good one |
 | [FX-0910](#fx-0910) | A time namespace failed its self-check |
 | [FX-0913](#fx-0913) | the timer objects failed their self-check |
+| [FX-0917](#fx-0917) | an exception channel was attached where it must be refused, or refused where it must be attached |
 | [FX-0931](#fx-0931) | spaces and objects failed the check made of kernel objects alone |
 | [FX-0932](#fx-0932) | jobs, quotas, switch counts or the filter failed the check of kernel objects alone |
 | [FX-0933](#fx-0933) | the page cache failed the check made of kernel objects alone |
@@ -2688,6 +2689,30 @@ late, twice or after they were cancelled.
 
 See: src/kernel/src/object/timer_check.rs run; src/kernel/src/object/timer.rs;
 src/kernel/src/sched/queue.rs; docs/microkernel/K10.md.
+
+<a id="fx-0917"></a>
+
+## FX-0917 — an exception channel was attached where it must be refused, or refused where it must be attached
+
+`object::exception_check::run` attaches exception channels to a job and to a
+process it made, through `exception_channel_create` as a program would: one each
+is attached, a second is `ALREADY_BOUND`, closing the read end detaches, a
+process that has ended is `BAD_STATE` and its supervisor saw `PEER_CLOSED`, a
+handle without `SUPERVISE` is `ACCESS_DENIED`, a bad timeout or option is
+`INVALID_ARGS`, the read end cannot be written, and the channel pair is charged
+to the caller's job and refused at its limit. A failure means a supervisor --
+which may come to control how the faults beneath it end -- could be attached
+without the right, twice, or past a limit.
+
+1. `exception_channel_create` in src/kernel/src/syscall/native.rs stopped
+   checking `SUPERVISE`, the timeout or the options.
+2. `Supervisor::attach` in src/kernel/src/object/exception.rs replaced a live
+   channel, or a process's slot was not closed as it ended.
+3. `process_create` or `job_create` stopped answering `Rights::PROCESS_CREATED`
+   or `Rights::JOB_CREATED`.
+
+See: src/kernel/src/object/exception.rs;
+src/kernel/src/object/exception_check.rs; docs/microkernel/K4.md.
 
 <a id="fx-0931"></a>
 
