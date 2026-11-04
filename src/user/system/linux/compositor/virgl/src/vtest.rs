@@ -554,12 +554,44 @@ impl Vtest {
         name: &str,
         version: u32,
     ) -> io::Result<Option<Self>> {
+        let Some(node) = std::env::var_os("FERRIX_VTEST_RENDERNODE") else {
+            return Self::start_on(program, name, version);
+        };
+        // A pin that selects nothing must not read as a test skipped for want of a
+        // server (the consultant, ledger 6368). The server takes a node it cannot
+        // open and carries on elsewhere, so that is asked first.
+        let started = if std::path::Path::new(&node).exists() {
+            Self::start_on(program, name, version)
+        } else {
+            Ok(None)
+        };
+        #[expect(
+            clippy::panic,
+            reason = "only `check`'s pinned test runs set this variable"
+        )]
+        if !matches!(started, Ok(Some(_))) {
+            panic!(
+                "FERRIX_VTEST_RENDERNODE={}: no vtest server on the pinned GPU",
+                node.display()
+            );
+        }
+        started
+    }
+
+    /// [`Vtest::start_program`], without its look at the pin.
+    fn start_on(program: &std::path::Path, name: &str, version: u32) -> io::Result<Option<Self>> {
         let socket =
             std::env::temp_dir().join(format!("ferrix-vtest-{}-{name}.sock", std::process::id()));
         let _ = std::fs::remove_file(&socket);
-        let spawned = Command::new(program)
-            .arg("--no-fork")
-            .arg("--use-egl-surfaceless")
+        // On one render node when `FERRIX_VTEST_RENDERNODE` names it: surfaceless EGL
+        // takes the driver's first device, whichever that is on this host.
+        let mut server = Command::new(program);
+        let _ = server.arg("--no-fork");
+        let _ = match std::env::var_os("FERRIX_VTEST_RENDERNODE") {
+            Some(node) => server.arg("--rendernode").arg(node),
+            None => server.arg("--use-egl-surfaceless"),
+        };
+        let spawned = server
             .arg("--socket-path")
             .arg(&socket)
             .stdin(Stdio::null())
