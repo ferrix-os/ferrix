@@ -441,7 +441,10 @@ forces a decision for both of them for every flag added from M0 on.
 
 ## Where it stands
 
-Design on branch `microkernel-plan`, 2026-10-13.
+Design on branch `microkernel-plan`, 2026-10-13; the flag system, the
+resolver and the boot line have been on `develop` since 2026-10-17 (see
+`docs/roadmap/microkernel-m0.md`). On the run's unlanded branches `fast` and `max`
+are still validated, not built; `--personality user` is `feature/mk-lift`'s.
 
 * First design review before code: **OK IF** BF1 to BF9, ledger line 914 of
   `~/.local/share/ferrix/cert-consultant/reviews.md`. This text folds them

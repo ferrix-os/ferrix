@@ -238,10 +238,16 @@ about 33 of the program's about 70 points were spent at the wind-down of
 2026-10-19 (`docs/BACKLOG.md`).
 
 **The overnight run, 2026-11-03 to 2026-11-04** (the customer's order: work on
-everything that makes Ferrix a microkernel until 13:00). Nothing of it is on
-`develop` at 23:15 on 2026-11-03. The M1 and K2 to K4 stack is rebased onto
+everything that makes Ferrix a microkernel until 13:00). The first landing is B5's orphan step (b4a6b3ff9, 2026-11-03,
+`docs/microkernel/B5.md`): a `xtask check` step
+(`check-evidence-homes.py`) failing a core or item requirement that only checks
+leaving with the load verify, 135 ids on its list and 299 more on a ratchet,
+two gated controls. Nothing else of it was on `develop` at 02:10 on 2026-11-04. The M1 and K2 to K4 stack is rebased onto
 `develop` on the local `feature/mk-base` (K2 slices A and B, K3 slice A, K4
 landings 1 and 2, K5, K6, K7, K10, K12a and K12b, `smt=off`), unlanded and
 ungated; `feature/mk-reserve` (`bfc8a5f00`) reserves the id blocks of the other
 four agents' work (K13, K15, K1, K11, K17, `linuxd`, K8, K14, K16 and the
 partition manager). This page is updated as those land.
+
+Branch-only milestones in the agents' notes (02:00 on 2026-11-04; unlanded, ungated
+unless said): on the local run branches, unlanded and ungated (the agents' notes of 2026-11-04 02:00, not `develop`): `feature/mk-base` (K2 to K7, K10, K12a/b, `smt=off` rebased on `develop`; a derived landing series `feature/mk-land` is being cut from it, its consultant's diff check of the first group at ledger 6131 to 6139), `feature/mk-m2` (K15, K13, K3b and B5's class C text), `feature/mk-m2-rehome` (B5's class A re-homing, 65 ids), `feature/mk-restricted` (K1 and K11 booting on x86-64 and AArch64, K17's and K9's designs; the diff check was NOT YET, ledger 6064), `feature/mk-lift` (`linuxd`: `test-shell` with busybox, and `test-btrfs` under `--personality user`, 2026-11-04) and `feature/mk-boot` (K8, K14, boot authority, the partition manager and `btrfsd`, whose `test-btrfsd` row reads a volume read-only on x86-64). The id blocks of the run (`feature/mk-reserve`) are on `develop`.
