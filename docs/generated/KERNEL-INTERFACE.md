@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2659 declarations in the core's files, 184 in the item's; 180 checks-only.
+2685 declarations in the core's files, 184 in the item's; 183 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2361,6 +2361,7 @@ checks above is `pub` for raised checks (F3).
 | `Process::over_quota` | method | load |  |
 | `Process::pid` | method | item, load |  |
 | `Process::post_to_tasks` | method | load |  |
+| `Process::quota_slot` | method | item, load |  |
 | `Process::seal_bootstrap` | method | load |  |
 | `Process::space` | method | item, load |  |
 | `Process::speculation_domain` | method | load |  |
@@ -2556,6 +2557,7 @@ checks above is `pub` for raised checks (F3).
 | `STAGE8_ROOT` | static | bin |  |
 | `STAGE8_SIGNALFD` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE8_TIMERFD` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE9_ADDRESS_WAIT` | static | bin (checks) | checks-only |
 | `STAGE9_ALLOCATION` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE9_EXCEPTIONS` | static | bin (checks) | checks-only |
 | `STAGE9_KMEM` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -3026,7 +3028,6 @@ checks above is `pub` for raised checks (F3).
 | `UserError` | enum | item, load |  |
 | `copy_cstr_from_user` | fn | load |  |
 | `copy_from_user` | fn | item, load |  |
-| `copy_from_user_present` | fn | load |  |
 | `copy_to_user` | fn | item, load |  |
 | `copy_to_user_present` | fn | item |  |
 | `fault_in_for_write` | fn | item |  |
@@ -3109,6 +3110,7 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `address_wait` | mod | item, load, bin |  |
 | `cache` | mod | load |  |
 | `check` | mod | bin (checks) | pub for raised checks |
 | `memory_type` | mod | item, load, bin |  |
@@ -3116,6 +3118,41 @@ checks above is `pub` for raised checks (F3).
 | `rehome_check` | mod | item (checks) | pub for raised checks |
 | `space` | mod | item, load |  |
 | `vmo` | mod | item, load, bin |  |
+
+### `user::address_wait`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `MATCH_ANY` | const | item, load |  |
+| `MIN_ROOM` | const | load (checks) | checks-only |
+| `Key` | enum | item, load |  |
+| `Place` | enum | item, load |  |
+| `WaitError` | enum | item, load |  |
+| `bucket_of` | fn | load |  |
+| `bucket_room` | fn | load (checks) | checks-only |
+| `requeue` | fn | item, load |  |
+| `seed` | fn | bin |  |
+| `wait_on` | fn | item, load |  |
+| `waiters_on` | fn | load |  |
+| `wake` | fn | item, load |  |
+| `sabotage` | mod | load |  |
+| `Word` | struct | item, load |  |
+| `Key::in_object` | method | item |  |
+| `Key::new` | method | item, load, bin |  |
+| `Word::bitset` | field | item, load |  |
+| `Word::expected` | field | item, load, bin |  |
+| `Word::key` | field | item, load |  |
+| `Word::place` | field | item, load |  |
+
+### `user::address_wait::sabotage`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `forget_waiters` | fn | load |  |
+| `list_stale_entry` | fn | load |  |
+| `requeue_without_moving` | fn | load |  |
+| `StaleEntry` | struct | load |  |
+| `StaleEntry::remove` | method | item, load |  |
 
 ### `user::cache`
 
@@ -3235,7 +3272,6 @@ checks above is `pub` for raised checks (F3).
 | `AddressSpace::root_table` | method | item, load |  |
 | `AddressSpace::set_ceiling` | method | load |  |
 | `AddressSpace::shared_code_at` | method | load |  |
-| `AddressSpace::shared_object_at` | method | load |  |
 | `AddressSpace::uninstall` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `AddressSpace::unmap` | method | load |  |
 | `AddressSpace::with_page` | method | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
