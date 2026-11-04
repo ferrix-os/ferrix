@@ -1138,7 +1138,7 @@ package FerrixDeviceRequirements {
                 drivers.slice and every job beneath it read as sealed. A boot
                 exercises drivers_job's first path, the named child, only; the
                 second and third, for a name taken or no memory, rest on their
-                argued coverage entries.";
+                argued coverage entries. And with kernel objects alone, on every profile, the `drv jobs` line (syscall/rehome_check.rs::check_drivers_sealed), which fails a missing slice on a boot whose devmgr bound a driver and makes one on a boot with none.";
             attribute :>> parent = "H.OBJ.22";
             attribute :>> unit = ("discovery::devmgr::drivers_job",
                 "object::job::Job::new_root_as");

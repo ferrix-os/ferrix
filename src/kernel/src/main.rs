@@ -511,6 +511,7 @@ fn release_boot_copies() {
 /// ran, and the unchecked one, which no boot test accepts, when they were
 /// skipped.
 fn say_booted() {
+    syscall::rehome_check::stage_drivers_sealed();
     require_hooks_disarmed();
     panic::mark_booted();
     audit::record(
