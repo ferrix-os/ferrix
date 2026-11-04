@@ -584,6 +584,21 @@ pub(crate) fn command_line() -> String {
     format!("{} {DEVMGR_OPTION}\n", qemu::init_option(PATH))
 }
 
+/// [`command_line`] for an image of `arch`: on ARMv7-A with the word every image of
+/// it carries, or since the DMA gate devmgr starts no driver there and the root's disk
+/// never comes up (`crate::ARMV7A_DEVELOPMENT_WORD`, `docs/DMA-GATE.md`).
+fn command_line_of(arch: Arch) -> String {
+    if arch == Arch::Armv7a {
+        format!(
+            "{} {}\n",
+            command_line().trim_end(),
+            crate::ARMV7A_DEVELOPMENT_WORD
+        )
+    } else {
+        command_line()
+    }
+}
+
 /// The kernel option that has pid 1 start `devmgr`.
 const DEVMGR_OPTION: &str = "ferrix.devmgr=init";
 
@@ -979,7 +994,7 @@ fn test_arch(arch: Arch, args: &Args, checker: &Checker) -> Result<()> {
     let kernel = cargo::build_kernel(arch, args.release)?;
     let natives = native::build(arch, args.release)?;
     let archive = initramfs::build(None, &natives, None, &files)?;
-    let options = command_line();
+    let options = command_line_of(arch);
     let image = fat::write_image_with(arch, &loader, &kernel, &archive, Some(&options))?;
 
     let volume = btrfs_disk::blank_copy(arch, VOLUME)?;
@@ -1936,7 +1951,7 @@ fn checks_skipped(
     kernel: &cargo::Kernel,
     archive: &[u8],
 ) -> Result<()> {
-    let options = format!("{} ferrix.checks=skip\n", command_line().trim_end());
+    let options = format!("{} ferrix.checks=skip\n", command_line_of(arch).trim_end());
     let image = fat::write_image_with(arch, loader, kernel, archive, Some(&options))?;
     let volume = btrfs_disk::blank_copy(arch, VOLUME)?;
     let mut with_volume = args.clone();
