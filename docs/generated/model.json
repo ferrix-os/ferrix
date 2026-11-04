@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "b2387a1be043ddc1f9ccfecd0dda1774ab23abb1e9014eea55d801fb24a7e3d5",
+  "digest": "0c3dbe03b08ea2d89f75f2d33df209f7ee0b172a978d4672b42acd227d111e06",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -65054,7 +65054,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::measuredMapOnlySealed",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"object::sealing_check; with the test removed it fails.\"",
+                  "value": "\"object::sealing_check; with the test removed it fails, and the refusal's record read from the ring.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 3436
@@ -65076,7 +65076,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::measuredMapOnlySealed",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "\"user::space::AddressSpace::map_by_handle\"",
+                  "value": "(\"user::space::AddressSpace::map_by_handle\", \"syscall::native::space_map\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 3438
