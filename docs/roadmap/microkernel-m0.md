@@ -243,9 +243,8 @@ everything that makes Ferrix a microkernel until 13:00). The first landing is B5
 (`check-evidence-homes.py`) failing a core or item requirement that only checks
 leaving with the load verify, 135 ids on its list (70 after class A, bd64fc419; 69 at 1fcd9afb2) and 299 more on a ratchet,
 two gated controls. Landed by 02:47 on 2026-11-04: K6 (kernel-attested sender, 671ad76a8), `smt=off` (b8a57534b) and F-91 (an ended process gives its memory back, 95e5e0e1c), each with its derived files; K17's high-level requirement and K9's scheduler ids are reserved (7818d5b82); B5's class A re-homing (3e6bc2f0e, 27ed2c039, 4fb6e5fa3, bd64fc419, 2026-11-04): the orphan list falls from 135 to 70 ids, 65 re-homed to core or item checks and 18 of the 135 moved to class B, with a BACKLOG row for the `linux_abi=off` rows B5's checks owe; mk-ci's cut M3 (05347c1a3, 68b54b00c: the kernel's lint directories without incremental state, 6,885 to 511 MB per check, control fired) and `gate.sh` keeping xtask's incremental cache in its trim (276f2fde8); **K10 (9f99d9cd5), K4 (landings 1 and 2, 694ab07a8 to 50487ef7c), K5 (4472c8239), K2 (slices A and B, 4d0a661ee, 7908891c0) and K3 slice A (pager-backed VMOs, 46fafb730)**, each with its design text and derived files, up to df6a06e6f (2026-11-04, the consultant's rulings at ledger 6355 to 6365); B5's list at 69 ids (`drivers.slice`, 1fcd9afb2); `gate.sh`'s requeue, and why the pool went back to five slots (27f314070); mk-ci's cuts to the check and the gate hosts (clippy settings at once, side workspaces without incremental state, `gate.sh` trimming a slot's caches; e1725720e, a532f7d6e, f7034b37a, 2026-11-04) are in. `develop` is b7338d734. The rest of the M1 and K2 to K4 stack is rebased onto
-`develop` on the local `feature/mk-base` (K2 slices A and B, K3 slice A, K4
-landings 1 and 2, K5, K7, K10, K12a and K12b; K6 and `smt=off` have landed), unlanded and
-ungated; `feature/mk-reserve` (`bfc8a5f00`) reserves the id blocks of the other
+`develop` on the local `feature/mk-base` (K7, K12a and K12b are still unlanded; K2, K3 slice A, K4, K5, K6, K10 and
+`smt=off` have landed), ungated; `feature/mk-reserve` (`bfc8a5f00`) reserves the id blocks of the other
 four agents' work (K13, K15, K1, K11, K17, `linuxd`, K8, K14, K16 and the
 partition manager). This page is updated as those land.
 
