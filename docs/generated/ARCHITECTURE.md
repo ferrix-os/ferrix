@@ -123,7 +123,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 | `FerrixSigningRequirements` | `26-signing-requirements.sysml` | docs/SIGNING.md is the design (the certification consultant's OK IF at ledger lines 3667 and 3738; the customer's decisions at 3731). Slice S1 builds the verify-only crate `ferrix-sigverify` (src/lib/crypto/sigverify) and the hash it rests on, `ferrix-sha256` (src/lib/crypto/sha256), both in the item ring (certification-item.json's crates). What the UEFI loader, init's configuration verifier and devmgr do with the verifier's answer is theirs, and gets ids in their own slices (S4, S8, S9). |
 
-27 files, 167 packages, 9915 elements, 220 relations. Model digest `a8c606157ac27f0b`.
+27 files, 167 packages, 10002 elements, 220 relations. Model digest `43a33e2a0fbc066f`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -298,9 +298,10 @@ Handles, rights and the objects they name: O.CAPABILITY and ASR-3 (FDP_ACC.1, FD
 | `H.OBJ.24` | A handle shall cross between the shared and private tables only through HANDLE_TO_SHARED and HANDLE_TO_PRIVATE, its rights checked. | The `regions` line on every boot of x86-64: restricted-check holds every case; the moves refused without TRANSFER, with wider rights, or naming nothing. | `O.CAPABILITY` |
 | `H.OBJ.25` | PROCESS_CREATE_SHARED shall make a process with a restricted space of its own, and no reach into another's. | The `regions` line on every boot of x86-64: restricted-check holds every case; a second process's copy of the first's restricted memory faults. | `O.ISOLATE` |
 | `H.OBJ.26` | A region's mappings shall reach every process of its partition in normal mode and none in restricted mode. | The `regions` line on every boot of x86-64: restricted-check holds every case; a word and a page of the region are seen by two processes, and a change reaches a thread on another processor. | `O.ISOLATE` |
+| `H.OBJ.30` | Under personality=user a partition's Linux layer shall run as a program, reaching the kernel's objects only through handles it was given and its calls only from normal mode. | test-linuxd's `lift-calls` line; restricted-check's table of the calls; the controls of docs/microkernel/M5-LIFT.md §12. | `O.ISOLATE` |
 | `H.OBJ.34` | A job shall have a criticality level fixed as it is made, at most its parent's, and the kernel shall refuse, and audit, what would let a lower level hold a handle to a higher job's processes, threads, jobs, spaces, region or exceptions, write a VMO a higher level maps other than a declared buffer, or serve as its pager. | The `levels` line on every boot. | `O.ISOLATE` |
 
-27 requirements.
+28 requirements.
 
 ### Scheduling
 
@@ -4238,6 +4239,11 @@ flowchart LR
 | `L.object.238` | `aCopyByHandleNeedsItsRightAndChargesTheOwner` | — | — | — |
 | `L.object.239` | `aCloneCarriesItsSourcesRights` | — | — | — |
 | `L.object.297` | `protectionZeroIsAllocateOnly` | — | — | — |
+| `L.object.310` | `aLiftCallAnswersItsHandleAlone` | — | — | — |
+| `L.object.311` | `aWindowIsItsOwnMapping` | — | — | — |
+| `L.object.312` | `placedFramesAreTheHandlesOwn` | — | — | — |
+| `L.object.313` | `aCopyMissComesBackToItsServer` | — | — | — |
+| `L.object.314` | `aFaultsNeighboursAreOnlyWhatIsResident` | — | — | — |
 | `L.object.309` | `aSpaceHandleStopsARaise` | — | — | — |
 | `L.object.240` | `anExecutableVmoHandleCannotWrite` | — | — | — |
 | `L.object.226` | `aPagerHasOneHandle` | — | — | — |
@@ -4246,6 +4252,14 @@ flowchart LR
 | `L.object.229` | `aPagerOpIsChecked` | — | — | — |
 | `L.object.230` | `aPageRequestSaysWhatItAsks` | — | — | — |
 | `L.object.231` | `noPagerMapsWhenAsked` | — | — | — |
+| `L.object.320` | `firstProcessesStartMeasured` | — | — | — |
+| `L.object.321` | `firstProcessesHoldTheirRows` | — | — | — |
+| `L.object.322` | `noSafetyDeviceToDevmgr` | — | — | — |
+| `L.object.323` | `aBadDescriptionStopsTheBoot` | — | — | — |
+| `L.object.326` | `theManagersDeathStopsTheMachine` | — | — | — |
+| `L.object.328` | `devmgrsDeathQuiesces` | — | — | — |
+| `L.object.334` | `firstImagesFromSealed` | — | — | — |
+| `L.object.335` | `theKernelsCpioWalk` | — | — | — |
 | `L.sched.1` | `aDecisionWithinASlice` | — | — | — |
 | `L.sched.2` | `aLoneYieldAsksNothing` | — | — | — |
 | `L.sched.3` | `aThrottledTaskLeavesForAKill` | — | — | — |
@@ -5129,6 +5143,8 @@ flowchart LR
 | `L.device.63` | `treeNodeNeverNoDma` | — | — | — |
 | `L.device.64` | `genericIdentityThroughItsConfiguration` | — | — | — |
 | `L.device.65` | `noNodePublishedTwice` | — | — | — |
+| `L.device.84` | `theDebugLogTakesAHandle` | — | — | — |
+| `L.device.85` | `theDebugLogHasABudget` | — | — | — |
 | `L.armv7a.1` | `theFilterIsAskedFirstAtTheSvc` | — | — | — |
 | `L.armv7a.2` | `aRolledBackFrameReadsAsAtTheCall` | — | — | — |
 | `L.armv7a.3` | `nothingInsideADomain` | — | — | — |

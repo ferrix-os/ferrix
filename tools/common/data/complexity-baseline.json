@@ -59,6 +59,11 @@
       "lines": 22,
       "recursive": false
     },
+    "boot_authority.rs::try_start_manager": {
+      "complexity": 35,
+      "lines": 97,
+      "recursive": false
+    },
     "device.rs::publish": {
       "complexity": 14,
       "lines": 60,
@@ -70,8 +75,8 @@
       "recursive": false
     },
     "discovery/devmgr.rs::write_devices": {
-      "complexity": 17,
-      "lines": 52,
+      "complexity": 23,
+      "lines": 101,
       "recursive": false
     },
     "discovery/pci.rs::check_function": {
@@ -114,6 +119,11 @@
       "lines": 47,
       "recursive": false
     },
+    "linuxd_start.rs::start": {
+      "complexity": 30,
+      "lines": 108,
+      "recursive": false
+    },
     "main.rs::bring_up_processors": {
       "complexity": 9,
       "lines": 60,
@@ -125,8 +135,8 @@
       "recursive": false
     },
     "main.rs::kmain": {
-      "complexity": 11,
-      "lines": 84,
+      "complexity": 13,
+      "lines": 91,
       "recursive": false
     },
     "main.rs::start_scheduler": {
@@ -364,6 +374,21 @@
       "lines": 64,
       "recursive": false
     },
+    "src/lib/fs/common/cpio/src/lib.rs::is_safe_path": {
+      "complexity": 1,
+      "lines": 1,
+      "recursive": true
+    },
+    "src/lib/fs/common/cpio/src/lib.rs::parse_entry": {
+      "complexity": 16,
+      "lines": 47,
+      "recursive": false
+    },
+    "src/lib/fs/common/cpio/src/lib.rs::parse_header": {
+      "complexity": 17,
+      "lines": 26,
+      "recursive": false
+    },
     "src/lib/platform/elf/src/fixups.rs::decode": {
       "complexity": 16,
       "lines": 35,
@@ -394,6 +419,11 @@
       "lines": 20,
       "recursive": false
     },
+    "src/lib/proto/partition-desc/src/lib.rs::parse": {
+      "complexity": 15,
+      "lines": 39,
+      "recursive": false
+    },
     "src/lib/proto/slots/src/gpt.rs::find": {
       "complexity": 26,
       "lines": 48,
@@ -420,8 +450,8 @@
       "recursive": false
     },
     "syscall/native.rs::answer": {
-      "complexity": 42,
-      "lines": 137,
+      "complexity": 43,
+      "lines": 148,
       "recursive": false
     },
     "syscall/native.rs::channel_read": {
@@ -440,13 +470,18 @@
       "recursive": false
     },
     "syscall/native.rs::device_call": {
-      "complexity": 15,
-      "lines": 18,
+      "complexity": 16,
+      "lines": 20,
       "recursive": false
     },
     "syscall/native.rs::job_set_limit": {
       "complexity": 15,
       "lines": 39,
+      "recursive": false
+    },
+    "syscall/native.rs::space_map": {
+      "complexity": 15,
+      "lines": 41,
       "recursive": false
     },
     "syscall/native.rs::vmo_executable": {
@@ -457,6 +492,11 @@
     "syscall/native.rs::vmo_pin": {
       "complexity": 20,
       "lines": 28,
+      "recursive": false
+    },
+    "syscall/native/lift.rs::call": {
+      "complexity": 71,
+      "lines": 161,
       "recursive": false
     },
     "syscall/native/region.rs::answer": {
@@ -507,6 +547,11 @@
     "user/space.rs::map_by_handle": {
       "complexity": 26,
       "lines": 68,
+      "recursive": false
+    },
+    "user/space.rs::place": {
+      "complexity": 19,
+      "lines": 53,
       "recursive": false
     },
     "user/space.rs::protect": {

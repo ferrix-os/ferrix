@@ -123,8 +123,12 @@ Causes are listed most likely first.
 | [FX-0933](#fx-0933) | the page cache failed the check made of kernel objects alone |
 | [FX-0934](#fx-0934) | the native calls failed the check made of kernel objects alone |
 | [FX-0935](#fx-0935) | a pager with a keeper was not held to the rebind contract |
+| [FX-0949](#fx-0949) | a window's unmap flushed the wrong thing |
 | [FX-0950](#fx-0950) | the device authority self-check failed |
 | [FX-0951](#fx-0951) | the sealing self-check failed |
+| [FX-0952](#fx-0952) | a first process did not start |
+| [FX-0953](#fx-0953) | the partitions' description cannot be honoured |
+| [FX-0954](#fx-0954) | the partition manager ended |
 | [FX-1001](#fx-1001) | PCI enumeration failed its self-check |
 | [FX-1002](#fx-1002) | a device node handed out memory or an interrupt it does not have |
 | [FX-1003](#fx-1003) | an IOMMU domain gave a device the wrong addresses |
@@ -3029,6 +3033,19 @@ paid. The message names the case.
 See: src/kernel/src/object/pager.rs; src/kernel/src/object/pager_check.rs;
 docs/microkernel/K13.md.
 
+<a id="fx-0949"></a>
+
+## FX-0949 — a window's unmap flushed the wrong thing
+
+`user::space::window_check` unmaps ranges of a made-up window and reads what the
+unmap would flush. A leaf it took down went unnamed, or a range with nothing in
+it began a shootdown, or a shootdown still out was not covered.
+
+1. `AddressSpace::window_take_down` or `mm::unmap_placed` was changed.
+
+See: docs/microkernel/M5-LIFT.md section 13;
+src/kernel/src/user/space/window_check.rs.
+
 <a id="fx-0950"></a>
 
 ## FX-0950 — the device authority self-check failed
@@ -3066,6 +3083,46 @@ digests do not name.
 
 See: src/kernel/src/object/sealing_check.rs run; src/kernel/src/user/vmo.rs
 seal; docs/microkernel/K14.md.
+
+<a id="fx-0952"></a>
+
+## FX-0952 — a first process did not start
+
+Under `personality=user` the kernel starts the partition manager, `devmgr` and
+`linuxd` from the initramfs, each with its own row of handles, and nothing on
+the machine can run without them.
+
+1. The archive lacks the image, or a sealed image over `SEAL_MAX_PAGES`.
+2. The manager said nothing within the description's bound.
+
+See: src/kernel/src/boot_authority.rs; docs/microkernel/BOOT-AUTHORITY.md.
+
+<a id="fx-0953"></a>
+
+## FX-0953 — the partitions' description cannot be honoured
+
+`.ferrix/partitions` is malformed, or names a device no node matches, or one
+that shares its requester id or its pages with something it does not also name.
+Reading it as empty would hand a safety partition's device to `devmgr`, so the
+boot stops.
+
+1. The image was built with a description for another board.
+2. A multi-function device was only partly assigned.
+
+See: src/kernel/src/boot_authority.rs; src/lib/proto/partition-desc.
+
+<a id="fx-0954"></a>
+
+## FX-0954 — the partition manager ended
+
+The supervisor of the safety partitions is gone and nothing else may hold their
+authority, so this is the machine's safe state, a clean exit included.
+
+1. The manager panicked or was killed.
+2. It stopped at a step of its own: its status.
+
+See: src/user/system/native/partmgr/src/main.rs;
+docs/microkernel/BOOT-AUTHORITY.md.
 
 <a id="fx-1001"></a>
 
