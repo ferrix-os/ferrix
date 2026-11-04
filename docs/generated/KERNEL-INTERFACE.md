@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2745 declarations in the core's files, 184 in the item's; 186 checks-only.
+2781 declarations in the core's files, 184 in the item's; 194 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1239,6 +1239,7 @@ checks above is `pub` for raised checks (F3).
 | `ROOT_SWITCHED` | re-export | item |  |
 | `Record` | re-export | item, load |  |
 | `STARTER_GIVEN` | re-export | item |  |
+| `UNMEASURED` | re-export | item |  |
 | `WIDEN` | re-export | item |  |
 | `saturated` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `target` | re-export | item, load |  |
@@ -1425,8 +1426,11 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `EXPLICIT_BIND` | const | item, load |  |
 | `INTEL_GPU_OPTION` | const | bin |  |
+| `BindRefusal` | enum | item, load |  |
 | `ConfigRefusal` | enum | item |  |
+| `DomainAnswer` | enum | item |  |
 | `Location` | enum | item, load |  |
 | `Register` | enum | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Stopped` | enum | bin |  |
@@ -1484,8 +1488,10 @@ checks above is `pub` for raised checks (F3).
 | `DeviceNode::aperture_info` | method | item, load |  |
 | `DeviceNode::apertures` | method | item, load, bin |  |
 | `DeviceNode::bind_board` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `DeviceNode::bind_domain` | method | item, load |  |
 | `DeviceNode::binding` | method | load |  |
 | `DeviceNode::breach` | method | load, bin |  |
+| `DeviceNode::bus_master_on` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `DeviceNode::config_phys` | method | item, load |  |
 | `DeviceNode::config_read` | method | item |  |
 | `DeviceNode::config_write` | method | item |  |
@@ -1494,16 +1500,22 @@ checks above is `pub` for raised checks (F3).
 | `DeviceNode::disable_dma` | method | item, load |  |
 | `DeviceNode::dma_shape` | method | item, load |  |
 | `DeviceNode::domain` | method | item, load |  |
+| `DeviceNode::domain_for_call` | method | item |  |
 | `DeviceNode::domain_made` | method | item, load |  |
 | `DeviceNode::empty` | method | load |  |
 | `DeviceNode::enable_dma` | method | item, load |  |
+| `DeviceNode::explicit_bind` | method | item |  |
+| `DeviceNode::explicit_for_check` | method | load (checks) | checks-only |
 | `DeviceNode::firmware_framebuffer` | method | item |  |
 | `DeviceNode::framebuffer_mode` | method | item, load |  |
+| `DeviceNode::give_check_domain` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `DeviceNode::hello_accepted` | method | load |  |
 | `DeviceNode::host_visible` | method | item, load |  |
 | `DeviceNode::index` | method | item, load, bin |  |
 | `DeviceNode::input_functions` | method | load |  |
+| `DeviceNode::intel_gpu` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `DeviceNode::interrupts_isolated` | method | item, load |  |
+| `DeviceNode::is_bridge` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `DeviceNode::is_refused` | method | item, load |  |
 | `DeviceNode::isolated_marked` | method | item, load |  |
 | `DeviceNode::lend_framebuffer_held` | method | item |  |
@@ -1511,6 +1523,7 @@ checks above is `pub` for raised checks (F3).
 | `DeviceNode::mapped_config` | method | load (checks) | checks-only |
 | `DeviceNode::mark_isolated` | method | item |  |
 | `DeviceNode::may_copy_lent` | method | load |  |
+| `DeviceNode::may_drive` | method | item |  |
 | `DeviceNode::may_have_client_nodes` | method | load |  |
 | `DeviceNode::may_take_vectors_and_pins` | method | item, load |  |
 | `DeviceNode::pci` | method | item, load, bin |  |
@@ -1518,6 +1531,8 @@ checks above is `pub` for raised checks (F3).
 | `DeviceNode::power` | method | item, load, bin |  |
 | `DeviceNode::reaches_memory` | method | item, load |  |
 | `DeviceNode::reads_log` | method | load |  |
+| `DeviceNode::refuse_for_check` | method | load (checks) | checks-only |
+| `DeviceNode::take_domain_for_check` | method | load (checks) | checks-only |
 | `DeviceNode::tree_binding` | method | item |  |
 | `DeviceNode::vector` | method | item, load |  |
 | `DeviceNode::vector_count` | method | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -1591,7 +1606,9 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `EDU` | const | load (checks) | checks-only |
+| `check_binding_follows_profile` | fn | load (checks) | checks-only |
 | `check_held_off` | fn | item (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `check_iommu_held` | fn | bin |  |
 | `order` | fn | bin |  |
 | `reserved` | fn | bin |  |
 | `HELD_OFF` | static | item (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -2043,7 +2060,7 @@ checks above is `pub` for raised checks (F3).
 | `process` | mod | item, load |  |
 | `quota` | mod | item, load |  |
 | `rehome_check` | mod | item (checks) | pub for raised checks |
-| `space` | mod | item |  |
+| `space` | mod | item, load |  |
 | `timer` | mod | item, load |  |
 | `TOPOLOGY` | static | item |  |
 | `HandleTable` | type | item, load |  |
@@ -2186,8 +2203,11 @@ checks above is `pub` for raised checks (F3).
 | `Job::kill_members` | method | load |  |
 | `Job::limits` | method | load |  |
 | `Job::live` | method | item, load |  |
+| `Job::make_measured` | method | item |  |
 | `Job::mark` | method | load |  |
 | `Job::may_start_in` | method | item, load |  |
+| `Job::measure_refuses` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Job::measured` | method | item, load, bin |  |
 | `Job::memory_events` | method | load |  |
 | `Job::name` | method | item, load, bin |  |
 | `Job::new_child` | method | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -2466,7 +2486,7 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `SpaceRef` | struct | item |  |
+| `SpaceRef` | struct | item, load |  |
 | `SpaceRef::charging_owner` | method | item |  |
 | `SpaceRef::clone_space` | method | item |  |
 | `SpaceRef::create` | method | item, load |  |
@@ -2544,6 +2564,7 @@ checks above is `pub` for raised checks (F3).
 | `SERVICES` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `SMBIOS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `SPECULATION_DEFENCES` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE10_AUTHORITY` | static | load, bin |  |
 | `STAGE10_CHARDEV` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE10_CONFIG` | static | bin |  |
 | `STAGE10_DEVICES` | static | bin |  |
@@ -2610,6 +2631,7 @@ checks above is `pub` for raised checks (F3).
 | `STAGE9_PAGER` | static | bin (checks) | checks-only |
 | `STAGE9_QUOTAS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE9_REFUSALS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE9_SEALING` | static | bin (checks) | checks-only |
 | `STAGE9_SPACES` | static | bin (checks) | checks-only |
 | `STAGE9_TIMERS` | static | bin (checks) | checks-only |
 | `SYSFS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -3274,6 +3296,7 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `MAX_IMAGES` | const | item |  |
 | `MMAP_MIN_ADDR` | const | load |  |
 | `Advice` | enum | load |  |
 | `Ceiling` | enum | item, load |  |
@@ -3301,7 +3324,9 @@ checks above is `pub` for raised checks (F3).
 | `AddressSpace::fill_file_page_alone` | method | load |  |
 | `AddressSpace::fork` | method | load |  |
 | `AddressSpace::highest_mapped` | method | load |  |
+| `AddressSpace::images_into` | method | item, load |  |
 | `AddressSpace::install` | method | load, bin |  |
+| `AddressSpace::is_measured` | method | item, load |  |
 | `AddressSpace::layout` | method | item, load |  |
 | `AddressSpace::map_anonymous` | method | load |  |
 | `AddressSpace::map_anywhere` | method | load |  |
@@ -3313,7 +3338,9 @@ checks above is `pub` for raised checks (F3).
 | `AddressSpace::map_window` | method | load |  |
 | `AddressSpace::map_window_typed` | method | load |  |
 | `AddressSpace::mapped_file` | method | load |  |
+| `AddressSpace::measure` | method | item, load |  |
 | `AddressSpace::new` | method | item, load, bin |  |
+| `AddressSpace::note_image` | method | item |  |
 | `AddressSpace::object` | method | item, load, bin |  |
 | `AddressSpace::protect` | method | load |  |
 | `AddressSpace::protect_by_handle` | method | item, load |  |
@@ -3355,6 +3382,7 @@ checks above is `pub` for raised checks (F3).
 | `PageState` | enum | item, load |  |
 | `PagedWrite` | enum | item |  |
 | `RunError` | enum | item |  |
+| `SealRefusal` | enum | item, load |  |
 | `SupplyError` | enum | item |  |
 | `VmoError` | enum | item, load |  |
 | `arm_block_hook` | fn | load (checks) | checks-only |
@@ -3366,6 +3394,7 @@ checks above is `pub` for raised checks (F3).
 | `inject_read_poison` | fn | load (checks) | checks-only |
 | `inject_read_poison` | fn | load (checks) | checks-only |
 | `reclaim_hook_armed_by` | fn | bin |  |
+| `SEAL_PREEMPT_COUNT` | static | load (checks) | checks-only |
 | `BlockHook` | struct | load (checks) | checks-only |
 | `Held` | struct | item, load |  |
 | `ReclaimHook` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -3385,17 +3414,22 @@ checks above is `pub` for raised checks (F3).
 | `Vmo::decommit_clean` | method | item |  |
 | `Vmo::decommit_from` | method | load |  |
 | `Vmo::decommit_range` | method | load |  |
+| `Vmo::digest` | method | item, load, bin |  |
 | `Vmo::dirty_range` | method | item |  |
 | `Vmo::dirty_runs` | method | item |  |
 | `Vmo::fork` | method | load |  |
+| `Vmo::freeze_for_check` | method | load (checks) | checks-only |
 | `Vmo::give_back_run` | method | item |  |
+| `Vmo::grow_to` | method | load |  |
 | `Vmo::hold` | method | item, load |  |
+| `Vmo::hold_read` | method | item, load |  |
 | `Vmo::holds_any` | method | load |  |
 | `Vmo::insert_absent` | method | load |  |
 | `Vmo::is_anonymous` | method | item, load |  |
 | `Vmo::is_coherent` | method | item |  |
 | `Vmo::is_combining` | method | item, load |  |
 | `Vmo::is_pager_backed` | method | item |  |
+| `Vmo::is_sealed` | method | item |  |
 | `Vmo::len_bytes` | method | item, load |  |
 | `Vmo::len_pages` | method | item, load |  |
 | `Vmo::make_coherent` | method | item, load |  |
@@ -3408,9 +3442,11 @@ checks above is `pub` for raised checks (F3).
 | `Vmo::page_state` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Vmo::pager` | method | item, load |  |
 | `Vmo::past_file_end` | method | load |  |
+| `Vmo::raise_writable_for_check` | method | load (checks) | checks-only |
 | `Vmo::read_page` | method | item, load |  |
 | `Vmo::read_present` | method | item, load |  |
 | `Vmo::replace` | method | item, load |  |
+| `Vmo::seal` | method | item, load |  |
 | `Vmo::set_file_len` | method | load |  |
 | `Vmo::sourced` | method | load |  |
 | `Vmo::supply_from` | method | item |  |
@@ -3541,7 +3577,7 @@ checks above is `pub` for raised checks (F3).
 | `register_reader` | fn | load |  |
 | `request` | fn | load |  |
 | `start` | fn | bin |  |
-| `unisolated_allowed` | fn | bin |  |
+| `unisolated_allowed` | fn | load, bin |  |
 | `wait_reported` | fn | load |  |
 | `DriverName` | struct | - |  |
 | `Report` | struct | load, bin |  |
