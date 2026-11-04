@@ -3190,8 +3190,9 @@ package FerrixMemoryRequirements {
                 on the scheduler's own deadline and no timer of its own; a waiter
                 woken answers woken even when its deadline has also passed.";
             attribute :>> criterion = "A wait whose deadline has passed answers
-                TIMED_OUT at once; a wait 5 ms long answers TIMED_OUT no sooner than
-                5 ms after it began (the `addrwait` line; control C7 fails it).";
+                TIMED_OUT at once; a wait whose deadline is 5 ms on answers TIMED_OUT
+                no sooner than that deadline, on the clock that set it (the
+                `addrwait` line; control C7 fails it).";
             attribute :>> parent = "H.OBJ.20";
             attribute :>> unit = ("user::address_wait::wait_on",
                 "user::address_wait::sleep");
