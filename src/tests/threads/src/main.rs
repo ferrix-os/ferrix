@@ -314,12 +314,6 @@ fn ends_by(case: impl FnOnce()) -> i32 {
     }
 }
 
-/// Resident pages, by `/proc/self/statm`.
-fn resident() -> usize {
-    let statm = std::fs::read_to_string("/proc/self/statm").unwrap_or_default();
-    statm.split_whitespace().nth(1).and_then(|field| field.parse().ok()).unwrap_or(0)
-}
-
 /// What a fault brings with it (`fault_ahead`, ledger 6537) changes nothing a program can
 /// see but the time: every page reads right, and the pages it may not reach still fault.
 #[allow(unsafe_code, reason = "mappings, and writes through them")]
@@ -370,7 +364,7 @@ fn check_fault_ahead() {
     }
 
     // A walk through fresh memory reads what it wrote, and stops at its region: the private
-    // file mapped right after it does not become resident.
+    // file mapped right after it is not copied, so a later write to the file shows there.
     // SAFETY: a fresh reservation, unmapped below in part by the fixed mappings.
     let walk = unsafe {
         libc::mmap(
@@ -400,19 +394,22 @@ fn check_fault_ahead() {
     if after == libc::MAP_FAILED {
         fail("fault-ahead: mmap of a file after a walk");
     }
-    let before = resident();
     for page in 0..8 {
         // SAFETY: the walk's own pages.
         unsafe { core::ptr::write_volatile(walk.add(page * PAGE).cast::<u32>(), page as u32) };
     }
-    let grew = resident().saturating_sub(before);
     for page in 0..8 {
         if word_at(walk, page) != page as u32 {
             fail("fault-ahead: a walk read back wrong");
         }
     }
-    if grew > 8 + 1 {
-        fail("fault-ahead: a walk made the mapping after its region resident");
+    let word = 0x5555_u32.to_le_bytes();
+    // SAFETY: four bytes on this stack, in range of the file.
+    if unsafe { libc::pwrite(fd, word.as_ptr().cast(), 4, 0) } != 4 {
+        fail("fault-ahead: pwrite after a walk");
+    }
+    if word_at(walk, 8) != 0x5555 {
+        fail("fault-ahead: a walk copied the mapping after its region");
     }
     println!("threads: fault-ahead ok");
 }
