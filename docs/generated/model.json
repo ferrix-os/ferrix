@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "2e4d190a47dc36e6661b63aeb321ee7df52795a513fe55a77d5ff737908075a5",
+  "digest": "0531fcd77a647316d2fa34c4f23a739afab2e8bf39ef10b404d078e7e7f80799",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -81585,7 +81585,7 @@
                   "qualifiedName": "FerrixX8664Requirements::Dispatch::avxWithheldWhereVectorRegistersLeak",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"With the speculation switch on, vector_leak shall, on a Zen 2 processor (family 0x17, Linux's amd_zenbleed models), set DE_CFG[9] on every processor unless the microcode is at the fixed revision, and withhold AVX from XCR0 in a guest; and on an Intel model Linux lists for Gather Data Sampling without GDS_NO, keep AVX only where GDS_CTRL's microcode mitigation is on or can be turned back on, which it does on every processor; the boot line shall say which.\"",
+                  "value": "\"In every build, vector_leak shall, on a Zen 2 processor (family 0x17, Linux's amd_zenbleed models), set DE_CFG[9] on every processor unless the microcode is at the fixed revision, and withhold AVX from XCR0 in a guest; and on an Intel model Linux lists for Gather Data Sampling without GDS_NO, keep AVX only where GDS_CTRL's microcode mitigation is on or can be turned back on, which it does on every processor; the boot line shall say which.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
                     "line": 3687
@@ -81596,10 +81596,10 @@
                   "qualifiedName": "FerrixX8664Requirements::Dispatch::avxWithheldWhereVectorRegistersLeak",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"decide_vector_leak gives each of twelve processors -- Zen 2 bare metal with old, fixed and unlisted microcode, a Zen 2 guest, one without AVX, a Zen 5, Kaby Lake without and with GDS_NO, with GDS_CTRL on, off and unlocked, off and locked, an Alder Lake -- its verdict, and family_and_model reads a Matisse and a Kaby Lake right; with the guest rule taken out, the check fails. The writes, DE_CFG[9] and clearing GDS_MITG_DIS, are not exercised on the gate's machines, which are not affected parts; in a guest the verdict rests on the model the hypervisor presents (SPECULATION.md section 9, AoU-11).\"",
+                  "value": "\"decide_vector_leak gives each of twelve processors -- Zen 2 bare metal with old, fixed and unlisted microcode, a Zen 2 guest, one without AVX, a Zen 5, Kaby Lake without and with GDS_NO, with GDS_CTRL on, off and unlocked, off and locked, an Alder Lake -- its verdict, and family_and_model reads a Matisse and a Kaby Lake right; with the guest rule taken out, the check fails; and the same verdicts in a kernel built with mitigations=off, whose boot names one. The writes, DE_CFG[9] and clearing GDS_MITG_DIS, are not exercised on the gate's machines, which are not affected parts; in a guest the verdict rests on the model the hypervisor presents (SPECULATION.md section 9, AoU-11).\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3697
+                    "line": 3698
                   }
                 },
                 {
@@ -81610,7 +81610,7 @@
                   "value": "\"H.TRAP.3\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3698
+                    "line": 3699
                   }
                 },
                 {
@@ -81621,7 +81621,7 @@
                   "value": "(\"arch::x86_64::speculation::vector_leak\", \"arch::x86_64::speculation::decide_vector_leak\", \"arch::x86_64::speculation::zenbleed\", \"arch::x86_64::speculation::gds\", \"arch::x86_64::speculation::is_zen2\", \"arch::x86_64::speculation::is_gds_model\", \"arch::x86_64::speculation::zenbleed_fixed_at\", \"arch::x86_64::speculation::family_and_model\", \"arch::x86_64::speculation::vector_facts\", \"arch::x86_64::speculation::set_zenbleed_bit\", \"arch::x86_64::speculation::enable_gds_mitigation\", \"arch::x86_64::speculation::apply_vector_cover\", \"arch::x86_64::speculation::VectorLeak::describe\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3711
+                    "line": 3712
                   }
                 }
               ]
@@ -81634,7 +81634,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 3713
+                "line": 3714
               },
               "children": [
                 {
@@ -81645,7 +81645,7 @@
                   "value": "\"dispatch_with shall send a native-entry number in the native range to native_call, which answers it for the calling task's own process.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3716
+                    "line": 3717
                   }
                 },
                 {
@@ -81656,7 +81656,7 @@
                   "value": "\"Two programs whose every native call is made by SYSCALL -- vmo_create, channel_write with a handle, object_wait_one, channel_read, vmo_read -- each exit 0.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3719
+                    "line": 3720
                   }
                 },
                 {
@@ -81667,7 +81667,7 @@
                   "value": "\"H.OBJ.1\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3720
+                    "line": 3721
                   }
                 },
                 {
@@ -81678,7 +81678,7 @@
                   "value": "(\"syscall::dispatch_with\", \"syscall::native_call\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3721
+                    "line": 3722
                   }
                 }
               ]
@@ -81691,7 +81691,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 3723
+                "line": 3724
               },
               "children": [
                 {
@@ -81702,7 +81702,7 @@
                   "value": "\"dispatch_with shall answer an int $0x80 number in the native range with -ENOSYS, never as a native call.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3725
+                    "line": 3726
                   }
                 },
                 {
@@ -81713,7 +81713,7 @@
                   "value": "\"An int $0x80 with a number in 0x1000..0x1FFF answers -38.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3727
+                    "line": 3728
                   }
                 },
                 {
@@ -81724,7 +81724,7 @@
                   "value": "\"H.TRAP.12\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3728
+                    "line": 3729
                   }
                 },
                 {
@@ -81735,7 +81735,7 @@
                   "value": "\"syscall::dispatch_with\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3729
+                    "line": 3730
                   }
                 }
               ]
@@ -81748,7 +81748,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 3731
+                "line": 3732
               },
               "children": [
                 {
@@ -81759,7 +81759,7 @@
                   "value": "\"unanswered shall print a call answered ENOSYS by name while report_unanswered's bound lasts, and nothing once it is spent.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3734
+                    "line": 3735
                   }
                 },
                 {
@@ -81770,7 +81770,7 @@
                   "value": "\"After report_unanswered(1), two unanswered calls print exactly one `syscall ... answered ENOSYS` line.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3736
+                    "line": 3737
                   }
                 },
                 {
@@ -81781,7 +81781,7 @@
                   "value": "\"H.TRAP.11\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3737
+                    "line": 3738
                   }
                 },
                 {
@@ -81792,7 +81792,7 @@
                   "value": "\"syscall::unanswered\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3738
+                    "line": 3739
                   }
                 }
               ]
@@ -81805,7 +81805,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 3740
+                "line": 3741
               },
               "children": [
                 {
@@ -81816,7 +81816,7 @@
                   "value": "\"The personality, an interface the item states: its Process::end, the one path exit_group, a kill, a job's kill, an OOM kill and a last thread's exit take, shall record the end through the core's end_record; and a task it launches after its process began to end, or while another thread replaces the program, shall be posted END through notify once it is listed, unless has_end says it holds it.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3746
+                    "line": 3747
                   }
                 },
                 {
@@ -81827,7 +81827,7 @@
                   "value": "\"As L.sched.35's: the OOM-killed program ends.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3747
+                    "line": 3748
                   }
                 },
                 {
@@ -81838,7 +81838,7 @@
                   "value": "(\"H.OBJ.9\", \"H.QUOTA.6\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3748
+                    "line": 3749
                   }
                 },
                 {
@@ -81849,7 +81849,7 @@
                   "value": "(\"object::process::Process::end_record\", \"sched::work::has_end\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3750
+                    "line": 3751
                   }
                 }
               ]
@@ -81862,7 +81862,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 3752
+                "line": 3753
               },
               "children": [
                 {
@@ -81873,7 +81873,7 @@
                   "value": "\"The personality, an interface the item states: execve's end_other_threads shall post END through post_to_tasks to every task of the process but the caller's after it records the replacing thread, waking each and interrupting its processor.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3756
+                    "line": 3757
                   }
                 },
                 {
@@ -81884,7 +81884,7 @@
                   "value": "\"In a program of three threads, two counting in user mode and one waiting, the first thread's replacement of the program sees the other two leave within a second (stage 7's replacement check); with the post removed the counting one outlives it and the check fails by name.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3761
+                    "line": 3762
                   }
                 },
                 {
@@ -81895,7 +81895,7 @@
                   "value": "\"H.TRAP.4\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3762
+                    "line": 3763
                   }
                 },
                 {
@@ -81906,7 +81906,7 @@
                   "value": "\"object::process::Process::post_to_tasks\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3763
+                    "line": 3764
                   }
                 }
               ]
@@ -81919,7 +81919,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 3765
+                "line": 3766
               },
               "children": [
                 {
@@ -81930,7 +81930,7 @@
                   "value": "\"The personality, an interface the item states: enter_stop shall post STOP to every task of the process after it stores the stop: the caller's own through post_own when it is one of the process's threads, and every other's through post_to_tasks, woken and interrupted.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3770
+                    "line": 3771
                   }
                 },
                 {
@@ -81941,7 +81941,7 @@
                   "value": "\"The stop check's second stop, made with no signal, parks both counting threads; with the post to the other tasks removed it fails by name, and with the look of L.sched.33 on it stops with FX-0520.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3774
+                    "line": 3775
                   }
                 },
                 {
@@ -81952,7 +81952,7 @@
                   "value": "\"H.TRAP.4\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3775
+                    "line": 3776
                   }
                 },
                 {
@@ -81963,7 +81963,7 @@
                   "value": "(\"object::process::Process::post_to_tasks\", \"sched::work::post_own\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3777
+                    "line": 3778
                   }
                 }
               ]
@@ -81976,7 +81976,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 3779
+                "line": 3780
               },
               "children": [
                 {
@@ -81987,7 +81987,7 @@
                   "value": "\"The personality, an interface the item states: SIGNAL shall be posted wherever needs_attention can turn true for a thread's signals: by Process::post with every signal it records, to the thread it was sent to or to every thread that does not block it; by change_blocked when a change unblocks a signal or saves a mask, to that thread; by force and by a marked restart, to the running task; to the thread a signal is handed on to; to a task launched with a signal it can take already pending; and by return_to_user to its own task when a pass ends on its delivery cap of 65, so the masked look goes round again for the rest.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3789
+                    "line": 3790
                   }
                 },
                 {
@@ -81998,7 +81998,7 @@
                   "value": "\"A signal sent to a process whose first thread blocks it is taken by its second, which spins alone on its processor (stage 7's hand-off check); with Process::post's and the wake's SIGNAL removed it never is, and the check fails by name. 35 ignored signals pending for a check's process and for its thread, 70 deliveries, are all taken before the way back returns (the `capped` line); with the capped pass's post removed the boot stops on FX-0520.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3797
+                    "line": 3798
                   }
                 },
                 {
@@ -82009,7 +82009,7 @@
                   "value": "(\"H.TRAP.4\", \"H.TRAP.9\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3798
+                    "line": 3799
                   }
                 },
                 {
@@ -82020,7 +82020,7 @@
                   "value": "(\"sched::work::post\", \"sched::work::post_own\", \"sched::work::notify\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3800
+                    "line": 3801
                   }
                 }
               ]
@@ -82033,7 +82033,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 3802
+                "line": 3803
               },
               "children": [
                 {
@@ -82044,7 +82044,7 @@
                   "value": "\"memory_scrub shall answer only a handle to the memory scrub token with MANAGE (ACCESS_DENIED without, WRONG_TYPE for another object), refuse a budget of 0 or past 64 (INVALID_ARGS), refuse where the scrubber stands down (WRONG_TYPE) or while a batch runs (SHOULD_WAIT), and copy the batch's seven words to the answer.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3808
+                    "line": 3809
                   }
                 },
                 {
@@ -82055,7 +82055,7 @@
                   "value": "\"The native boot check: the refusals for a budget of 0 and 65, a handle without MANAGE and a channel end, and the stand-down's WRONG_TYPE at stage 9, before the gate's override can apply; test-scrub: memscrub's batches answered.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3812
+                    "line": 3813
                   }
                 },
                 {
@@ -82066,7 +82066,7 @@
                   "value": "\"H.FAIL.9\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3813
+                    "line": 3814
                   }
                 },
                 {
@@ -82077,7 +82077,7 @@
                   "value": "(\"syscall::native::memory_scrub\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3814
+                    "line": 3815
                   }
                 }
               ]
@@ -82090,7 +82090,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 3816
+                "line": 3817
               },
               "children": [
                 {
@@ -82101,7 +82101,7 @@
                   "value": "\"uaccess's reads of a program's memory shall copy through arch::copy_mc; a copy a machine check stopped shall be checked against the frame it read (stopping as FX-9005 on another), recorded on the current task with no lock -- only inside a program's system call, stopping as FX-9005 anywhere else, and a second record in one call stopping -- and fail as Poisoned, which its caller treats as a fault at that page; at the call's way out the frame shall be retired -- and a clean cached page holding it dropped (L.x86_64.248) -- and, where the memory was the task's own, SIGBUS BUS_MCEERR_AR raised at its user page through the personality's fault_signal; copy_cstr_from_user shall read no further than the 64-byte line holding the terminator.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3828
+                    "line": 3829
                   }
                 },
                 {
@@ -82112,7 +82112,7 @@
                   "value": "\"sched/check.rs's poison_record: recorded only in a call, signalling only the caller's own memory, stopping elsewhere; sched/check.rs's poison_record: the record holds one, refuses a second and empties; test-mce-copy: write fails EFAULT or ends short at the poisoned page under KVM with AMD's records, SIGBUS code 4 at the injected page's user address, mce: frame retired. Controls: the signal not raised; the frame not retired. test-mce-driver-copy (KVM, AMD's records): a native driver's channel_write consuming its page\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3836
+                    "line": 3837
                   }
                 },
                 {
@@ -82123,7 +82123,7 @@
                   "value": "\"H.FAIL.10\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3837
+                    "line": 3838
                   }
                 },
                 {
@@ -82134,7 +82134,7 @@
                   "value": "(\"syscall::uaccess::poisoned\", \"syscall::uaccess::poison_action\", \"syscall::uaccess::copy_from_user_through\", \"syscall::uaccess::copy_cstr_from_user\", \"sched::task::PoisonRecord::record\", \"sched::task::PoisonRecord::take\", \"sched::task::Task::record_copy_poison\", \"sched::task::Task::take_copy_poison\", \"trap::copy_poisoned\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3838
+                    "line": 3839
                   }
                 }
               ]
@@ -82147,7 +82147,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 3840
+                "line": 3841
               },
               "children": [
                 {
@@ -82158,7 +82158,7 @@
                   "value": "\"A copy of another process's space a machine check stopped shall retire the frame and fail the read, signalling neither the reader nor the space's owner.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3843
+                    "line": 3844
                   }
                 },
                 {
@@ -82169,7 +82169,7 @@
                   "value": "\"sched/check.rs's poison_record (the actions); test-mce-copy's environ mode under KVM with AMD's records: /proc/<pid>/environ read while the target's page is injected ends short, the frame is retired, no process is signalled, the kernel goes on. Control: the another-space test removed.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3848
+                    "line": 3849
                   }
                 },
                 {
@@ -82180,7 +82180,7 @@
                   "value": "\"H.FAIL.10\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3849
+                    "line": 3850
                   }
                 },
                 {
@@ -82191,7 +82191,7 @@
                   "value": "(\"syscall::uaccess::poisoned\", \"syscall::uaccess::poison_action\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3850
+                    "line": 3851
                   }
                 }
               ]
@@ -82204,7 +82204,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 3852
+                "line": 3853
               },
               "children": [
                 {
@@ -82215,7 +82215,7 @@
                   "value": "\"system_call shall answer ENOSYS with no entry registered, and the first registration shall stand.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3854
+                    "line": 3855
                   }
                 },
                 {
@@ -82226,7 +82226,7 @@
                   "value": "\"With no entry registered, system_call answers -38; a second set_syscall_entry leaves the first in place.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3856
+                    "line": 3857
                   }
                 },
                 {
@@ -82237,7 +82237,7 @@
                   "value": "\"H.TRAP.11\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3857
+                    "line": 3858
                   }
                 },
                 {
@@ -82248,7 +82248,7 @@
                   "value": "(\"trap::system_call\", \"trap::set_syscall_entry\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3858
+                    "line": 3859
                   }
                 }
               ]
@@ -82261,7 +82261,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 3860
+                "line": 3861
               },
               "children": [
                 {
@@ -82272,7 +82272,7 @@
                   "value": "\"system_call and dispatch shall regroup the running task after a call or a trap from user mode, so that a process moved to another job runs in it from then on.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3863
+                    "line": 3864
                   }
                 },
                 {
@@ -82283,7 +82283,7 @@
                   "value": "\"After a program writes its pid to another cgroup's cgroup.procs, its next charges land in that job.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3865
+                    "line": 3866
                   }
                 },
                 {
@@ -82294,7 +82294,7 @@
                   "value": "\"H.OBJ.12\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3866
+                    "line": 3867
                   }
                 },
                 {
@@ -82305,7 +82305,7 @@
                   "value": "(\"trap::system_call\", \"trap::dispatch\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3867
+                    "line": 3868
                   }
                 }
               ]
@@ -82318,7 +82318,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 3869
+                "line": 3870
               },
               "children": [
                 {
@@ -82329,7 +82329,7 @@
                   "value": "\"A Trap verdict shall carry nothing, and ask shall answer it with the architecture's syscall_rollback_value of the call as the entry read it and no other value: a value taken from the caller's own registers, so that nothing of the kernel's can be put in a program's return register, and one that is never a restart code the dispatcher marks.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3875
+                    "line": 3876
                   }
                 },
                 {
@@ -82340,7 +82340,7 @@
                   "value": "\"A slot with a filter that answers Trap is asked about a call with its first argument 0x1111, -512, -516 and -1; each answer is the architecture's rollback value of that call, the number on x86-64 and the first argument on the Arm pair (the `seccomp` line). And with kernel objects alone, on every profile, the `core trp` line (trap/rehome_check.rs::check_a_trap_verdict).\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3880
+                    "line": 3881
                   }
                 },
                 {
@@ -82351,7 +82351,7 @@
                   "value": "\"H.TRAP.16\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3881
+                    "line": 3882
                   }
                 },
                 {
@@ -82362,7 +82362,7 @@
                   "value": "\"trap::ask\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3882
+                    "line": 3883
                   }
                 }
               ]
@@ -82375,7 +82375,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 3884
+                "line": 3885
               },
               "children": [
                 {
@@ -82386,7 +82386,7 @@
                   "value": "\"filter_system_call shall answer nothing with no filter registered and ask the registered filter otherwise, the first registration shall stand, and an errno the filter answers shall be cut to 4095 before it is written as the call's result.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3888
+                    "line": 3889
                   }
                 },
                 {
@@ -82397,7 +82397,7 @@
                   "value": "\"Every entry of the running architecture, driven with frames of the check's own, asks the registered filter exactly once per call, and the errnos 0, 13, 512, 4095, 4096, 5000 and 4294967295 come back as 0, -13, -512, -4095, -4095, -4095 and -4095; a slot with nothing registered answers nothing, and one registered twice asks the first (the `seccomp` line). And with kernel objects alone, on every profile, the `core trp` line (trap/rehome_check.rs::check_the_filter_slot), on a slot of the check's own: `filter_system_call` is `ask` on the real slot, which main.rs fills first.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3894
+                    "line": 3895
                   }
                 },
                 {
@@ -82408,7 +82408,7 @@
                   "value": "\"H.TRAP.16\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3895
+                    "line": 3896
                   }
                 },
                 {
@@ -82419,7 +82419,7 @@
                   "value": "(\"trap::filter_system_call\", \"trap::set_quiet_syscall_filter\", \"trap::register\", \"trap::ask\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3897
+                    "line": 3898
                   }
                 }
               ]
@@ -82433,7 +82433,7 @@
           "doc": "NVIDIA's N0g on x86-64 (docs/NVIDIA.md section 12.3): remapped messages, the console's I/O APIC line converted at bring-up, and x2APIC handled on every processor.",
           "source": {
             "file": "docs/sysml/18-x86-64-requirements.sysml",
-            "line": 3901
+            "line": 3902
           },
           "children": [
             {
@@ -82444,7 +82444,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 3906
+                "line": 3907
               },
               "children": [
                 {
@@ -82455,7 +82455,7 @@
                   "value": "\"Where a unit remaps, msi_allocate shall write the vector's interrupt remapping entry, indexed by the vector's slot among the sixty-four, for the function's requester ID and the asking processor, and answer a remappable-format message naming it with data 0; where no unit remaps, a compatibility-format message as before. The check vector 0xFC shall be outside the sixty-four, only counted and acknowledged, and counted stray outside checks R1 and R2.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3914
+                    "line": 3915
                   }
                 },
                 {
@@ -82466,7 +82466,7 @@
                   "value": "\"On x86-64 under KVM and TCG edu's remapped MSI is delivered unmasked and not masked (R4) and virtio-rng's MSI-X completes; edu's MSI capability programmed in compatibility format to 0xFC (R1), and as an NMI (R2), faults 0x25 and arrives nowhere, and programmed with another function's entry (R3) faults 0x26 and arrives nowhere within the unit's patience; with remapping left off the forged 0xFC arrives and R1 fails. Host test: a remappable message names its handle by bits 19:5 and 2, format bit 4.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3922
+                    "line": 3923
                   }
                 },
                 {
@@ -82477,7 +82477,7 @@
                   "value": "\"H.DMA.9\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3923
+                    "line": 3924
                   }
                 },
                 {
@@ -82488,7 +82488,7 @@
                   "value": "(\"arch::x86_64::msi::msi_allocate\", \"iommu::remapping::route\", \"iommu::remapping::remap_message\", \"arch::x86_64::service_interrupts\", \"iommu::remapping::note_check_vector\", \"iommu::remapping::stray_deliveries\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3927
+                    "line": 3928
                   }
                 }
               ]
@@ -82501,7 +82501,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 3929
+                "line": 3930
               },
               "children": [
                 {
@@ -82512,7 +82512,7 @@
                   "value": "\"At a unit's interrupt remapping bring-up, the console's I/O APIC line, live in compatibility format since stage 3, shall be converted when that unit's DMAR scope names its I/O APIC by its MADT identifier: masked under its lock; a fresh vector V1 taken and its entry written, with the line's destination, trigger and the I/O APIC's source ID, outside the lock; V0 kept taken for good; and its handler moved to V1 through the generic interrupt layer, still masked, leaving V0 a handler that counts. No vector shall have been handed out by then but the line's, or the boot stops by name. After IRE, its entry shall be rewritten in remappable format with V1 as its vector, unmasked, and the port serviced once. With no scope naming its I/O APIC, no unit shall remap. A delivery on V0 afterwards shall be counted and fail the boot.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3942
+                    "line": 3943
                   }
                 },
                 {
@@ -82523,7 +82523,7 @@
                   "value": "\"On x86-64 under KVM (split irqchip) and TCG the bring-up line says the console's line is converted, V0 retired; check R9's line says every vector handed out is the console's; a byte looped back while the line is masked is read by the service once, by reading the port; check R5 sees a looped-back byte arrive through V1 and none on V0, and on a UART that raises no interrupt in loopback says it is not observable and fails only on a delivery to V0 (test-boot requires the positive line on the reference machine); the end-of-boot line counts 0 on V0. Controls: the line left unmasked through the conversion lets KVM's old compatibility route deliver on V0 after IRE, which is counted, and the boot fails; the entry left not present, the byte never arrives; the service dropped, the masked byte is not read; edu minted before bring-up, the boot stops on R9. Host tests: the remappable entry's handle and vector, and the I/O APIC's source ID matched by its identifier.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3956
+                    "line": 3957
                   }
                 },
                 {
@@ -82534,7 +82534,7 @@
                   "value": "(\"H.DMA.9\", \"H.IRQ.1\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3957
+                    "line": 3958
                   }
                 },
                 {
@@ -82545,7 +82545,7 @@
                   "value": "(\"arch::x86_64::console_receive_irq\", \"arch::x86_64::route_console\", \"arch::x86_64::mask_console_line\", \"arch::x86_64::unmask_console_line\", \"arch::x86_64::convert_console_line\", \"arch::x86_64::retire_console_line\", \"arch::x86_64::restore_console_line\", \"irq::return_handler\", \"arch::x86_64::apic::IoApicInput::mask\", \"arch::x86_64::apic::IoApicInput::routed\", \"arch::x86_64::apic::IoApicInput::redirection\", \"arch::x86_64::apic::IoApicInput::write\", \"irq::move_handler\", \"iommu::remapping::note_hooks\", \"iommu::remapping::console_source\", \"iommu::remapping::prepare_console\", \"iommu::remapping::unmask_console\", \"iommu::remapping::finish_console\", \"iommu::remapping::require_no_compatibility_vector\", \"iommu::remapping::console_vectors\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3971
+                    "line": 3972
                   }
                 }
               ]
@@ -82558,7 +82558,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 3973
+                "line": 3974
               },
               "children": [
                 {
@@ -82569,7 +82569,7 @@
                   "value": "\"Every processor, the boot processor in apic::init and each application processor first in secondary_start, shall read its own IA32_APIC_BASE before it uses its local APIC. The boot processor shall choose x2APIC mode where the platform locks legacy xAPIC (IA32_XAPIC_DISABLE_STATUS), firmware left x2APIC on, or ferrix.apic=x2apic asks and CPUID offers it, and xAPIC mode otherwise; every processor shall run in that mode, every local APIC register access going through one accessor that picks the MSR or the MMIO window. In xAPIC mode one left in x2APIC mode shall be taken to disabled and then to xAPIC, and one locked there shall stop the boot naming the processor.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3984
+                    "line": 3985
                   }
                 },
                 {
@@ -82580,7 +82580,7 @@
                   "value": "\"On x86-64 under KVM and TCG the check puts the first application processor in x2APIC mode before its own look; every processor looks, that one is switched to xAPIC and comes up, and stage 4's apic line counts them; with secondary_start's look removed that processor never comes up and stage 4 fails. With ferrix.apic=x2apic every processor says it runs in x2APIC mode and the boot passes; with the x2APIC end-of-interrupt write removed it never reaches stage 3's line.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3992
+                    "line": 3993
                   }
                 },
                 {
@@ -82591,7 +82591,7 @@
                   "value": "(\"H.IRQ.1\", \"H.FAIL.1\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3993
+                    "line": 3994
                   }
                 },
                 {
@@ -82602,7 +82602,7 @@
                   "value": "(\"arch::x86_64::apic::leave_x2apic\", \"arch::x86_64::apic::choose_mode\", \"arch::x86_64::apic::enter_mode\", \"arch::x86_64::apic::read_reg\", \"arch::x86_64::apic::write_reg\", \"arch::x86_64::apic::xapic_locked\", \"arch::x86_64::apic::init\", \"arch::x86_64::smp::secondary_start\", \"arch::x86_64::smp::CpuStarter::finish\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 3998
+                    "line": 3999
                   }
                 }
               ]
@@ -82615,7 +82615,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 4000
+                "line": 4001
               },
               "children": [
                 {
@@ -82626,7 +82626,7 @@
                   "value": "\"An interrupt remapping entry's destination shall be built only by ferrix_paging::vtd::remap::destination, in xAPIC format (the APIC ID in bits 15:8), and an APIC ID above 255 shall be refused rather than truncated; the x2APIC work must set EIME and widen it.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4005
+                    "line": 4006
                   }
                 },
                 {
@@ -82637,7 +82637,7 @@
                   "value": "\"Host tests: IDs 0 and 255 encode in bits 15:8, 256 and above are refused, and an entry carries the encoded destination in DST.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4008
+                    "line": 4009
                   }
                 },
                 {
@@ -82648,7 +82648,7 @@
                   "value": "\"H.DMA.9\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4009
+                    "line": 4010
                   }
                 },
                 {
@@ -82659,7 +82659,7 @@
                   "value": "(\"iommu::remapping::remap_message\", \"iommu::remapping::prepare_console\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4011
+                    "line": 4012
                   }
                 }
               ]
@@ -82673,7 +82673,7 @@
           "doc": "A supervisor's registers checked as sigreturn's are (docs/microkernel/K4.md section 3.2; docs/I386.md I2a, I2b).",
           "source": {
             "file": "docs/sysml/18-x86-64-requirements.sysml",
-            "line": 4015
+            "line": 4016
           },
           "children": [
             {
@@ -82684,7 +82684,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 4019
+                "line": 4020
               },
               "children": [
                 {
@@ -82695,7 +82695,7 @@
                   "value": "\"UserContext::with_supervisors shall refuse, changing nothing, registers whose cs is not 64-bit or 32-bit user code exactly, whose rip or rsp is outside the user half or, for 32-bit code, whose rip is at or above 4 GiB, whose ss is not user data, whose rflags lacks the always-set bits or holds one outside FLAGS_RESTORABLE, or whose reserved words are not zero; the read it pairs with shall show rflags only within FLAGS_RESTORABLE.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4026
+                    "line": 4027
                   }
                 },
                 {
@@ -82706,7 +82706,7 @@
                   "value": "\"Case b: a kernel and a data cs, 32-bit cs with rip 4 GiB, a kernel ss, IOPL, VM, TF, NT, RF, interrupts off, every flag outside FLAGS_RESTORABLE, a kernel rip, a non-canonical rsp and a reserved word are refused; AC and a general register are taken.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4030
+                    "line": 4031
                   }
                 },
                 {
@@ -82717,7 +82717,7 @@
                   "value": "(\"H.TRAP.20\", \"H.TRAP.9\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4031
+                    "line": 4032
                   }
                 },
                 {
@@ -82728,7 +82728,7 @@
                   "value": "(\"arch::x86_64::signal::UserContext::with_supervisors\", \"arch::x86_64::signal::UserContext::supervised\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4033
+                    "line": 4034
                   }
                 }
               ]
