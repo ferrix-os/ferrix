@@ -3433,9 +3433,9 @@ package FerrixMemoryRequirements {
                 handle carrying EXECUTE, shall take only a sealed VMO whose
                 digest is stored, and answer BAD_STATE otherwise with an
                 UNMEASURED record.";
-            attribute :>> criterion = "object::sealing_check; with the test removed it fails.";
+            attribute :>> criterion = "object::sealing_check; with the test removed it fails, and the refusal's record read from the ring.";
             attribute :>> parent = "H.MEM.30";
-            attribute :>> unit = "user::space::AddressSpace::map_by_handle";
+            attribute :>> unit = ("user::space::AddressSpace::map_by_handle", "syscall::native::space_map");
         }
         requirement <'L.mm.118'> measuredNoExecutableAnonymous : ItemLowLevel {
             attribute :>> statement = "In a measured space space_allocate with MAP_EXECUTE shall
