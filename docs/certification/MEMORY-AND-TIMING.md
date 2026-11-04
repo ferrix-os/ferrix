@@ -2310,7 +2310,9 @@ room for the frame list, before any lock. It then holds the mappers' lock and
 `pages`' lock once to test the kinds and freeze it, for a walk of its frame list
 (at most `SEAL_MAX_PAGES`, 16,384) to test each frame's reference count and
 copy the list out; nothing after the freeze can fail. The hash runs after the
-locks, with **no lock held and no preempt count** (the check reads the count
+locks, with **no lock held and no preempt count**, the freeze nesting the mappers' lock
+outside `pages`' (never the other way, as `attach` and `make_combining` take them) and
+making at most those 16,384 reference-count reads under both (the check reads the count
 there), so a long hash delays only its own caller: the time is the caller's,
 charged as a read of that size is.
 

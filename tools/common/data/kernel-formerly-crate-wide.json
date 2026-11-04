@@ -1135,22 +1135,22 @@
     {
       "item": "device.rs: DeviceNode::bus_master_on (method)",
       "born": "K8",
-      "ledger": 6181
+      "ledger": 6426
     },
     {
       "item": "device.rs: DeviceNode::give_check_domain (method)",
       "born": "K8",
-      "ledger": 6181
+      "ledger": 6426
     },
     {
       "item": "device.rs: DeviceNode::intel_gpu (method)",
       "born": "K8",
-      "ledger": 6181
+      "ledger": 6426
     },
     {
       "item": "device.rs: DeviceNode::is_bridge (method)",
       "born": "K8",
-      "ledger": 6181
+      "ledger": 6426
     },
     {
       "item": "device.rs: DeviceNode::vector_count (method)",
@@ -1534,7 +1534,7 @@
     {
       "item": "object/job.rs: Job::measure_refuses (method)",
       "born": "K8",
-      "ledger": 6181
+      "ledger": 6426
     },
     {
       "item": "object/job.rs: Job::new_child (method)",
