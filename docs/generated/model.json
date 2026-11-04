@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "eeac7c7c40a2aed401691f90de7604f412ae3a6f1c005142d32fe3ab4bcd8e90",
+  "digest": "eb76b1d4e10a30a554950c26ee8bb270d44a3be7866a09fa285368d6e6b496a8",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -81874,7 +81874,7 @@
                   "qualifiedName": "FerrixDeviceRequirements::DevmgrStart::driversSliceIsSealed",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"The sysfs check, once devmgr has reported (or, under ferrix.devmgr=init, before init has started it): drivers.slice and every job beneath it read as sealed. A boot exercises drivers_job's first path, the named child, only; the second and third, for a name taken or no memory, rest on their argued coverage entries.\"",
+                  "value": "\"The sysfs check, once devmgr has reported (or, under ferrix.devmgr=init, before init has started it): drivers.slice and every job beneath it read as sealed. A boot exercises drivers_job's first path, the named child, only; the second and third, for a name taken or no memory, rest on their argued coverage entries. And with kernel objects alone, on every profile, the `drv jobs` line (syscall/rehome_check.rs::check_drivers_sealed), which fails a missing slice on a boot whose devmgr bound a driver and makes one on a boot with none.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
                     "line": 1141

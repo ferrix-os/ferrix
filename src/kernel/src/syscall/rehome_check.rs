@@ -23,6 +23,7 @@ use ferrix_vma::VmaFlags;
 use crate::claim::StillServed;
 use crate::console::println;
 use crate::device::{self, DeviceNode};
+use crate::discovery::devmgr;
 use crate::object::Object;
 use crate::object::job::Job;
 use crate::object::process::{Host, Process};
@@ -471,6 +472,57 @@ fn check_a_combining_object() -> Result<bool, &'static str> {
     Ok(true)
 }
 
+/// `drivers_job` makes `drivers.slice` sealed, and every job beneath it is. On a
+/// boot whose devmgr bound a driver the slice is there already and its absence is
+/// the failure; on one with no devmgr this makes it, as `ferrix.devmgr=init` does.
+///
+/// Verifies: L.device.54
+fn check_drivers_sealed() -> Result<u64, &'static str> {
+    let named = || -> Result<Option<Arc<Job>>, &'static str> {
+        let children = crate::object::job::root()
+            .children()
+            .map_err(|_| "no memory to list the root job's children")?;
+        Ok(children
+            .into_iter()
+            .find(|job| job.name() == Some("drivers.slice")))
+    };
+    let bound = (0..device::devices().len()).any(|at| devmgr::driver_of(at).is_some());
+    let drivers = match named()? {
+        Some(drivers) => drivers,
+        None if bound => return Err("a boot whose devmgr bound a driver has no drivers.slice"),
+        None => {
+            devmgr::make_drivers_job()?;
+            named()?.ok_or("make_drivers_job made no drivers.slice")?
+        }
+    };
+    let made = drivers
+        .new_child()
+        .map_err(|_| "no job could be made beneath drivers.slice")?;
+    if !made.sealed() {
+        return Err("a job made beneath drivers.slice is not sealed");
+    }
+    drop(made);
+    let mut pending = alloc::vec![drivers];
+    let mut seen = 0;
+    while let Some(job) = pending.pop() {
+        if !job.sealed() {
+            return Err("a job in drivers.slice is not sealed");
+        }
+        seen += 1;
+        if seen > 4096 {
+            return Err("drivers.slice holds more jobs than the check walks");
+        }
+        let below = job
+            .children()
+            .map_err(|_| "no memory to list a driver job's children")?;
+        pending
+            .try_reserve(below.len())
+            .map_err(|_| "no memory to walk drivers.slice")?;
+        pending.extend(below);
+    }
+    Ok(seen)
+}
+
 /// The cases that need nothing but the scheduler and the entry, before any
 /// other check calls what they break, and answer how many there were.
 ///
@@ -584,4 +636,19 @@ pub fn stage_on_devices() {
         ),
     };
     println!("  item dev {cases} cases of the native calls on the device nodes");
+}
+
+/// `drivers.slice`, once what starts it has run.
+pub fn stage_drivers_sealed() {
+    if !crate::checks::run() {
+        return;
+    }
+    let seen = match check_drivers_sealed() {
+        Ok(seen) => seen,
+        Err(problem) => fatal!(
+            catalog::ITEM_REHOMED_CALLS,
+            "stage 10 drivers' job self-check failed: {problem}"
+        ),
+    };
+    println!("  drv jobs {seen} jobs of drivers.slice read as sealed");
 }

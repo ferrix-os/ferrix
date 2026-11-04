@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2550 declarations in the core's files, 183 in the item's; 133 checks-only.
+2550 declarations in the core's files, 184 in the item's; 133 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2097,7 +2097,7 @@ checks above is `pub` for raised checks (F3).
 | `Job::may_start_in` | method | item, load |  |
 | `Job::memory_events` | method | load |  |
 | `Job::name` | method | item, load, bin |  |
-| `Job::new_child` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Job::new_child` | method | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Job::new_child_as` | method | item |  |
 | `Job::new_child_domain` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Job::new_named_child` | method | load |  |
@@ -3501,5 +3501,6 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `stage_core_objects` | fn | bin |  |
+| `stage_drivers_sealed` | fn | bin |  |
 | `stage_on_devices` | fn | bin |  |
 | `stage_shrinker` | fn | bin |  |
