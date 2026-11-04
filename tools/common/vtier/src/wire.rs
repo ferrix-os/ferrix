@@ -64,7 +64,7 @@ fn open_bytes(flags: u32, out: &mut Vec<u8>) {
 }
 
 /// The kernel's INIT, answered with what this file system does.
-fn init(body: &[u8], out: &mut Vec<u8>) -> Result<(), i32> {
+fn init<B: Backend>(tree: &mut Tree<B>, body: &[u8], out: &mut Vec<u8>) -> Result<(), i32> {
     const ASYNC_READ: u32 = 1;
     const ATOMIC_O_TRUNC: u32 = 1 << 3;
     const BIG_WRITES: u32 = 1 << 5;
@@ -75,6 +75,7 @@ fn init(body: &[u8], out: &mut Vec<u8>) -> Result<(), i32> {
     }
     let offered = u32_at(body, 12)?;
     let wanted = ASYNC_READ | ATOMIC_O_TRUNC | BIG_WRITES | WRITEBACK_CACHE | MAX_PAGES;
+    tree.kernel_times = offered & WRITEBACK_CACHE != 0;
     for v in [7, 31, MAX_WRITE, offered & wanted] {
         out.extend_from_slice(&v.to_le_bytes());
     }
@@ -275,7 +276,7 @@ fn answer<B: Backend>(
         // FSYNC: the barrier a `verify` stands on, and the only thing a sync can owe here.
         20 => tree.store.barrier()?,
         25 | 30 => {}
-        26 => init(b, out)?,
+        26 => init(tree, b, out)?,
         28 => readdir(tree, ino, u64_at(b, 8)?, u32_at(b, 16)? as usize, out)?,
         35 => {
             let attr = tree.create(
@@ -379,6 +380,10 @@ mod tests {
         assert_eq!(
             u32::from_le_bytes(reply[28..32].try_into().unwrap()),
             1 | (1 << 16)
+        );
+        assert!(
+            t.kernel_times,
+            "writeback cache agreed: the kernel owns the times"
         );
         let mut old = body.clone();
         old[0] = 6;

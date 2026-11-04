@@ -1627,8 +1627,8 @@ writes at 101 ms each while reads took 0.3 ms, so readers are not what waits. On
 load 15: the disk is bursty and not broken (40 C, last trimmed 2026-11-02).
 
 **The stores.** `vramfs` was fetched but not run, because the permission
-classifier refused building it. The FUSE figures are from `vtier` (small, our
-own, not in the tree): blocks in one OpenCL buffer, or in RAM to show
+classifier refused building it. The FUSE figures are from a first `vtier` (small,
+then not in the tree; the slot's is `tools/common/vtier`, below): blocks in one OpenCL buffer, or in RAM to show
 FUSE's own cost, a CRC32C on every block. Unprivileged FUSE works here.
 
 | | Disk | tmpfs | FUSE on RAM | FUSE on 3090 |
@@ -1669,6 +1669,30 @@ a flipped bit would reach the build silently.
 | Kernel's incremental dir on tmpfs | Relink after a touch: 2.1-2.3 s; on disk 2.1-7.9 s, worst when the host is busy. A lost dir is only a rebuild | Saves seconds, adds no slot. Not done |
 | Whole target on tmpfs | Fastest, but 5 slots at 19-37 GB do not fit 59 GB of RAM | No |
 | A bigger or second disk | `/` is 98% full. `aosp17` holds 297 GB and `comfy` 189 GB, both the customer's. `nvme0` is BitLocker and `nvme1` has an NTFS partition and the swap | Customer's call; it would remove the limit |
+
+### GPU memory as a gate slot (customer's order, 2026-11-04)
+
+The section above asked whether VRAM is faster, and its figures stand. The
+customer's answer changed the question: "Its not about if it is slower by 10 or
+20% its more about we can either run or or we can't. And GPU gives us additional
+compute" (`docs/backlog/DECISIONS.md`). So slot 8 is built, as added capacity, with
+`tools/common/vtier` in the tree rather than a throwaway.
+
+**The store.** A FUSE file system (raw `/dev/fuse`, no libfuse; `OpenCL` loaded at run
+time) over several buffers past the driver's 6.3 GB limit: 18 GiB, so that 4 GiB of
+the 3090 stays free. Each 128 KiB block has a CRC32C seeded with its inode, place and
+generation, in host memory, checked on every read. The first bad block or device
+error, or a device call over 60 s, makes the store dead for good. `vtier verify` is
+what a verdict stands on: `syncfs`, a sentinel past the page cache, a barrier, and a
+newer status from the same store with every counter nought.
+
+**The slot.** `gate.sh`'s slot 8 exists only if `GATE_SLOTS` reaches it, a 3090 is
+there and the store starts; otherwise a run simply has seven slots. Any fault during
+a run makes the verdict `run: INFRA` or `control: INFRA`, exit 76, whatever xtask
+said, and the run goes once more on a disk slot. Two INFRA in a day close the slot.
+A cold `check` with the whole target in 18 GiB hits `ENOSPC`, so whole side-workspace
+target dirs stay on the disk in a spill, each with its own fingerprints.
+Ledger 6697 and 6714 hold the conditions.
 
 **The two open leads.** `-Zthreads=8` on `check`'s compositor unit, alternating
 in tmpfs: cold 53.7, 53.4, 66.6 s against 52.9, 96.6, 59.8 without, user CPU +4%;

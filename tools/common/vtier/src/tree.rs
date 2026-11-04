@@ -99,6 +99,11 @@ pub struct Tree<B> {
     inodes: HashMap<u64, Inode>,
     next: u64,
     scratch: Vec<u8>,
+    /// The kernel keeps regular files' times itself (FUSE's writeback cache) and
+    /// sends them by `setattr`. A write arriving after that must not move the time
+    /// forward: an inode evicted later would show a target newer than it is, and
+    /// cargo would take a changed source for an older one.
+    pub kernel_times: bool,
 }
 
 impl<B> std::fmt::Debug for Tree<B> {
@@ -134,6 +139,7 @@ impl<B: Backend> Tree<B> {
             inodes,
             next: ROOT + 1,
             scratch: vec![0; BLOCK],
+            kernel_times: false,
         }
     }
 
@@ -551,7 +557,9 @@ impl<B: Backend> Tree<B> {
             self.scratch = buffer;
             done?;
         }
-        self.touch(ino);
+        if !self.kernel_times {
+            self.touch(ino);
+        }
         Ok(())
     }
 
@@ -625,7 +633,9 @@ impl<B: Backend> Tree<B> {
         if let Body::File { size, .. } = &mut self.node_mut(ino)?.body {
             *size = (*size).max(offset + written as u64);
         }
-        self.touch(ino);
+        if !self.kernel_times {
+            self.touch(ino);
+        }
         Ok(written)
     }
 
@@ -862,6 +872,39 @@ mod tests {
         assert_eq!(all[2].3, b"a");
         assert_eq!(t.readdir(ROOT, all[2].0).unwrap()[0].3, b"b");
         assert!(t.readdir(ROOT, 4).unwrap().is_empty());
+    }
+
+    #[test]
+    fn with_the_kernel_keeping_times_a_late_write_does_not_move_them() {
+        let mut t = tree(2);
+        let f = t.create(ROOT, b"f", 0o644, WHO).unwrap().ino;
+        t.kernel_times = true;
+        let stamp = Time(1_000, 5);
+        t.change(
+            f,
+            Change {
+                mtime: Some(stamp),
+                ..Change::default()
+            },
+        )
+        .unwrap();
+        t.write(f, 0, b"written back later").unwrap();
+        assert_eq!(t.attr(f).unwrap().mtime, stamp);
+        assert_eq!(t.attr(f).unwrap().size, 18);
+        // A truncate too, when it carries no time of its own.
+        t.change(
+            f,
+            Change {
+                size: Some(4),
+                ..Change::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(t.attr(f).unwrap().mtime, stamp);
+        // Without that mode a write is what stamps the file.
+        t.kernel_times = false;
+        t.write(f, 0, b"x").unwrap();
+        assert_ne!(t.attr(f).unwrap().mtime, stamp);
     }
 
     #[test]

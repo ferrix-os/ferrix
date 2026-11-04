@@ -88,7 +88,8 @@ fn sentinel(mountpoint: &Path) -> Result<(), String> {
     if unsafe { syncfs(root.as_raw_fd()) } != 0 {
         return Err(format!("syncfs: {}", std::io::Error::last_os_error()));
     }
-    let path = mountpoint.join(".vtier-sentinel");
+    // One name each: heartbeats and a final check may overlap.
+    let path = mountpoint.join(format!(".vtier-sentinel-{}", std::process::id()));
     let mut file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -118,7 +119,20 @@ fn sentinel(mountpoint: &Path) -> Result<(), String> {
         return Err("sentinel came back wrong".into());
     }
     // The barrier: the card is done, and a new status is written.
-    file.sync_all().map_err(|e| format!("sentinel fsync: {e}"))
+    file.sync_all()
+        .map_err(|e| format!("sentinel fsync: {e}"))?;
+    drop(file);
+    std::fs::remove_file(&path).map_err(|e| format!("sentinel remove: {e}"))
+}
+
+/// Whether the mount table has a store at exactly this path. No stat: on a bare
+/// directory the sentinel would pass on the disk, and a hung store would hang this.
+fn is_store_mount(table: &str, mountpoint: &str) -> bool {
+    table.lines().any(|line| {
+        let at = line.split(' ').nth(4);
+        let kind = line.split(' ').skip_while(|f| *f != "-").nth(1);
+        at == Some(mountpoint) && kind == Some("fuse.vtier")
+    })
 }
 
 /// The subcommand: 0 and `<instance> <seq>` when all is well.
@@ -143,7 +157,13 @@ pub(super) fn run() -> Result<(), String> {
         }
     }
     let status = status.ok_or("--status is required")?;
-    sentinel(&mountpoint.ok_or("no mountpoint")?)?;
+    let mountpoint = mountpoint.ok_or("no mountpoint")?;
+    let table =
+        std::fs::read_to_string("/proc/self/mountinfo").map_err(|e| format!("mount table: {e}"))?;
+    if !is_store_mount(&table, &mountpoint.to_string_lossy()) {
+        return Err(format!("no store is mounted at {}", mountpoint.display()));
+    }
+    sentinel(&mountpoint)?;
     let text = std::fs::read_to_string(&status).map_err(|e| format!("status: {e}"))?;
     let (id, seq) = judge(&text, since, instance.as_deref(), allow)?;
     println!("{id} {seq}");
@@ -152,7 +172,7 @@ pub(super) fn run() -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::judge;
+    use super::{is_store_mount, judge};
 
     const GOOD: &str = "instance=a\nseq=5\ninject=no\nstate=ok\ncrc_errors=0\ndevice_errors=0\nno_space=0\nused_blocks=1\nblocks=2\nwhy=\n";
 
@@ -182,6 +202,18 @@ mod tests {
         }
         assert!(judge("", None, None, false).is_err());
     }
+    #[test]
+    fn only_a_store_at_exactly_that_path_counts_as_mounted() {
+        let table = "36 35 98:0 / /home/x rw,noatime master:1 - ext4 /dev/d rw\n\
+                     37 35 0:153 / /data/slot rw,nosuid shared:2 - fuse.vtier vtier rw,user_id=1000\n\
+                     38 35 0:154 / /data/other rw,nosuid - fuse.portal portal rw\n";
+        assert!(is_store_mount(table, "/data/slot"), "the store");
+        assert!(!is_store_mount(table, "/home/x"), "a disk");
+        assert!(!is_store_mount(table, "/data/other"), "another FUSE");
+        assert!(!is_store_mount(table, "/data/slot/sub"), "beneath it");
+        assert!(!is_store_mount(table, "/data"), "above it");
+    }
+
     #[test]
     fn inject_passes_only_when_a_test_asks() {
         let text = GOOD.replace("inject=no", "inject=yes");
