@@ -1635,6 +1635,7 @@ output whole in the old order, first failure in that order the error.
 | in turn (`mk-ci-ab-old-1`, `-old-2`, `-new-1`, `-new-2`) | 188.9, 85.4, 92.2, 629.2 s | 15.8, 23.1, 35.3, 19.7 |
 | at once, first run in new directories (`mk-ci-b-base`) | 117.5 s | 35.4 |
 | at once, after a control's edit (`mk-ci-b-again`) | 41.4 s | 23.4 |
+| at once, one hash again on one slot, nothing changed (`mk-ci-b3-2`) | **0.4 s**, no kernel crate relinted | 35.5 |
 
 The 629 s fell in the hour's worst IO. One sample at once is not a mean. With the
 caches trimmed a setting's directory is 80-108 MB. Controls: a lint inside
@@ -1643,12 +1644,23 @@ with no source edit. Both FIRED, in slot 2 after `mk-ci-b-base` passed there: `m
 TOML key, in kernel-interface's checked block, so the entry outside it is that
 sibling key.
 
+`check` on one hash twice running on slot 2, `mk-ci-b3-1` then `mk-ci-b3-2`: 444 s,
+then **66 s** with one crate compiled, at load 35; the same run in turn took 146 to
+237 s. The units' test results are equal, 393 lines. The 66 s is the floor for a
+repeat of one tree, not for a new one.
+
 ### Cut M2: side workspaces without incremental state
 
 `check` starts `check-side` with `CARGO_INCREMENTAL=0` unless the variable is set.
 bs-c's alternation above measured what it does: half the bytes and a third to a half
 of the directory, no wall time either way. The first run in each target directory
 rebuilds the side workspaces once, since the setting is in cargo's fingerprint.
+Until it lands everywhere, a slot alternating between trees with and without it also
+rebuilds them each way (`mk-ci-b3-1`'s 421 s of side workspaces). One hash, on one
+slot, `CARGO_INCREMENTAL=1` against the default (`mk-ci-m2-on`, `-off`): all 27 units'
+test results equal, loom's included. The figures for bytes are bs-c's; 26% more was on
+offer from `line-tables-only` on the side tests (tole 635 to 469 MB, no wall time), not
+taken.
 
 ### Component checkouts kept
 
@@ -1675,6 +1687,11 @@ first pass, none the second, 0.3 to 1.2 s a step; the directory 1.6 GB, where it
 | A slot with no target dir waits up to 180 s for a warm one | three rows of one commit filled two cold slots | 894 and 931 s cold against about 200 s warm (`mk-m2-b5-*`) |
 | Under 150 GB free, a slot taken loses rustc's caches but the three kernels' | they were 23-27 GB of a slot's 34-37 GB | slots 37 to 16, 43 to 18, 34 to 17 GB; free 44 to 94 GB in 3 min, still warm |
 | The load ceiling holds only at 3 busy slots or more | all five slots stood free with 51 runs queued, at load 44-60 from local builds | not yet measured: runs already queued keep the old script |
+
+Looked at and not taken, by what is on the critical path: `-Zthreads=8` (mk-ci: mk-gpu
+measured 89 to 53 s on a cold `build`, an unstable flag, no use on a saturated CPU,
+unmeasured on `check`); `check-item-boundary.py`'s 20 s, an audit beside a longer main
+workspace and the side lanes, so it shortens no `check`.
 
 Local full `check`s were the largest cost: four running cold at once held load at
 70-100, and gates fell to about 3 per 10 minutes with 49 queued.
