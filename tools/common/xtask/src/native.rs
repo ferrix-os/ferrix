@@ -281,6 +281,13 @@ pub(crate) const NETD: Program = Program {
     directory: DRIVERS,
 };
 
+/// A partition's `linuxd` that dies at once: only `test-partitions`' images.
+pub(crate) const LINUXD_DIES: Program = Program {
+    package: "ferrix-linuxd-dies",
+    binary: "linuxd-dies",
+    directory: DIRECTORY,
+};
+
 /// A block driver over memory that misbehaves on purpose: only
 /// `test-btrfsd-restart`'s archive, under the name `blk`.
 pub(crate) const BLK_VICTIM: Program = Program {

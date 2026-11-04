@@ -507,6 +507,7 @@ pub(crate) struct Detached {
 #[cfg(ferrix_personality = "user")]
 pub(crate) fn start_detached(
     block_cores: Option<Arc<Endpoint>>,
+    further_net_cores: Vec<Arc<Endpoint>>,
 ) -> Result<Option<Detached>, &'static str> {
     let Some(files) = read_files()? else {
         return Ok(None);
@@ -515,6 +516,25 @@ pub(crate) fn start_detached(
     let (cores, devmgr_cores) = Endpoint::pair().map_err(|_| "no memory for the cores' channel")?;
     let job = drivers_job()?;
     let (net_cores, netd_cores) = Endpoint::pair().map_err(|_| "no memory for netd's channel")?;
+    // `netd`'s first read on this channel: the further partitions' ends, by this
+    // channel so that `devmgr` carries one handle however many partitions there are.
+    let mut more = Vec::new();
+    fallible::try_reserve(&mut more, further_net_cores.len()).map_err(|_| "no memory")?;
+    let count = further_net_cores.len();
+    for end in further_net_cores {
+        let _ = fallible::push_within(
+            &mut more,
+            (Object::Channel(end), const { DEVMGR.of(Held::Channel) }),
+        );
+    }
+    net_cores
+        .write(
+            Sender::KERNEL,
+            fallible::try_to_vec(b"PARTS").map_err(|_| "no memory")?,
+            count,
+            || Ok::<_, Infallible>(more),
+        )
+        .map_err(|_| "netd's partitions could not be said")?;
     let _ = write_devices(
         &messages,
         files.images()?,

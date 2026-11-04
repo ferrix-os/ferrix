@@ -115,6 +115,47 @@ echo "netd-row: rtt done"
 exit 9
 "#;
 
+/// `cargo xtask test-netd`'s second script: the first takes an address by DHCP, the
+/// second has its own by hand, and pings the first through the switch.
+pub(crate) const NETD_TWO_SCRIPT: &str = r#"read line < /proc/cmdline
+case "$line" in
+*ferrix.partition=1*)
+  until ip link set int0 up 2>/dev/null; do sleep 1; done
+  ip addr add 10.9.0.2/24 dev int0; ip -o link show
+  ok=1; n=0; while [ $n -lt 30 ]; do ping -c 1 -W 1 10.9.0.1 > /dev/null && { ok=0; break; }; sleep 1; n=$((n+1)); done
+  cat /proc/net/dev; ip neigh
+  echo "netd-row: the second reached the first, status $ok"
+  ip link show eth0 > /dev/null 2>&1; echo "netd-row: the second has an interface to the outside, status $?"
+  ping -c 2 -W 1 10.0.2.2 > /dev/null; echo "netd-row: the second reached the outside, status $?"
+  dhcpc -i int0 -n -q -t 2 -T 1; echo "netd-row: the second's DHCP client, status $?"
+  ip link set int0 up; ip addr add 10.9.0.2/24 dev int0
+  n=0; while [ $n -lt 150 ]; do ping -c 1 -W 1 10.9.0.1 > /dev/null; n=$((n+1)); done
+  ok=1; n=0; while [ $n -lt 30 ]; do ping -c 1 -W 1 10.9.0.1 > /dev/null && { ok=0; break; }; sleep 1; n=$((n+1)); done
+  echo "netd-row: the second came back after netd's deaths, status $ok"; exit 3 ;;
+esac
+until ip link set eth0 up 2>/dev/null; do sleep 1; done
+dhcpc -i eth0 -n -q -t 5 -T 2; echo "netd-row: dhcp status $?"
+ip link set int0 up; ip addr add 10.9.0.1/24 dev int0
+ip -o link show; ip -o addr show
+# netd's restart takes the interface's address with its ring.
+n=0; while [ $n -lt 30 ]; do sleep 5; ip link set int0 up 2>/dev/null; ip addr add 10.9.0.1/24 dev int0 2>/dev/null; n=$((n+1)); done
+cat /proc/net/dev; ip neigh
+echo "netd-row: the first still runs"
+exit 9
+"#;
+
+/// `cargo xtask test-partitions`'s script: the second partition says so and ends; the
+/// first outlives it, and says so after.
+pub(crate) const PARTITIONS_SCRIPT: &str = r#"read line < /proc/cmdline
+case "$line" in
+*ferrix.partition=1*) echo "partition-row: the second runs programs: $(echo forked)"; exit 3 ;;
+esac
+echo "partition-row: the first is up"
+sleep 5
+echo "partition-row: the first still runs: $(echo forked)"
+exit 9
+"#;
+
 /// `cargo xtask test-btrfsd`'s script: a volume mounted and read through `btrfsd`.
 pub(crate) const BTRFSD_SCRIPT: &str = r#"echo "btrfsd-row: started"
 mkdir -p /mnt

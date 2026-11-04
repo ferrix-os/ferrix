@@ -3984,5 +3984,25 @@ package FerrixObjectRequirements {
             attribute :>> parent = "H.DEV.13";
             attribute :>> unit = "ferrix_cpio::file_named";
         }
+        requirement <'L.object.327'> linuxdsDeathKillsItsJob : ItemLowLevel {
+            attribute :>> statement = "linuxd's end shall kill what remains of its partition's job.";
+            attribute :>> criterion = "test-partitions: a partition's linuxd dying, its line with the count.";
+            attribute :>> parent = "H.DEV.13";
+            attribute :>> unit = ("linuxd_start::start", "linuxd_start::start_further");
+        }
+        requirement <'L.object.346'> aFurtherPartitionHoldsItsRow : ItemLowLevel {
+            attribute :>> statement = "A further Linux partition shall be started in a job and a region of its own with the
+                FURTHER row alone: no console, no cores, no devmgr channel, and its end shall kill its job and nothing else.";
+            attribute :>> criterion = "test-partitions: a second partition runs programs and ends, and one that dies at once, the
+                first going on; Rows::judge at its start; the first's end ends the machine, shown.";
+            attribute :>> parent = "H.DEV.13";
+            attribute :>> unit = "linuxd_start::start_further";
+        }
+        requirement <'L.object.347'> eachPartitionASpeculationDomain : ItemLowLevel {
+            attribute :>> statement = "With more than one Linux partition, each shall be a speculation domain of its own.";
+            attribute :>> criterion = "test-partitions reads two distinct non-zero domains from the kernel's lines; n10 FIRED.";
+            attribute :>> parent = "H.DEV.13";
+            attribute :>> unit = "linuxd_start::start";
+        }
     }
 }

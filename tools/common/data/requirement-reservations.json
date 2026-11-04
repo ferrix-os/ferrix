@@ -13,7 +13,7 @@
   "reservations": [
     {
       "ids": [
-        "L.object.340-369"
+        "L.object.340-345", "L.object.348-369"
       ],
       "owner": "mk-authority",
       "branch": "feature/mk-authority",
@@ -68,7 +68,7 @@
                 "L.device.74-78",
         "H.MEM.31-33",
         "L.mm.123",
-        "L.object.324-325", "L.object.327", "L.object.329-333", "L.object.336-339"
+        "L.object.324-325", "L.object.329-333", "L.object.336-339"
       ],
       "owner": "mk-authority",
       "branch": "feature/mk-authority",

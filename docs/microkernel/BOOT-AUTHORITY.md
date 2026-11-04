@@ -110,6 +110,11 @@ comes from M8 (N.9). What a role is given today (the prose table above says what
 | `LINUXD` | `Archive` | `ARCHIVE` |
 | `LINUXD` | `Console` | `Rights::READ` |
 | `LINUXD` | `Channel` | `Rights::CHANNEL` |
+| `FURTHER` | `Job` | `Rights::JOB` |
+| `FURTHER` | `DebugLog` | `Rights::WRITE` |
+| `FURTHER` | `Region` | `Rights::REGION` |
+| `FURTHER` | `Archive` | `ARCHIVE` |
+| `FURTHER` | `Channel` | `Rights::CHANNEL` |
 
 **`linuxd`'s audit-read handle (BA.7):** it can read every audit record, safety partitions' included, on a promise outside the TSF. ST
 FAU_SAR and AUDIT.md name the authorised reader under `max`, or the handle is filtered, with a V row. Nothing in the initramfs VMO is a

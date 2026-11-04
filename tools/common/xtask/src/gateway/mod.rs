@@ -533,6 +533,7 @@ impl Core {
     /// Dispatch one frame from the guest.
     fn on_frame(&mut self, frame: &[u8]) -> Result<()> {
         let (header, payload) = ethernet::Header::parse(frame)?;
+        note_source(header.source);
         if header.source != ethernet::BROADCAST {
             self.guest_mac = Some(header.source);
         }
@@ -767,6 +768,22 @@ fn put(out: &mut [u8], at: usize, field: &[u8]) -> Result<()> {
         .ok_or(ferrix_netwire::Error::NoSpace)?
         .copy_from_slice(field);
     Ok(())
+}
+
+/// The first source MAC this run's gateway saw, and how many frames came from another: the
+/// outside's own count of how many machines it sees (customer, 2026-11-04, `M8.md` §2).
+static FIRST_SOURCE: std::sync::OnceLock<Mac> = std::sync::OnceLock::new();
+static OTHER_SOURCES: AtomicU64 = AtomicU64::new(0);
+
+fn note_source(source: Mac) {
+    if *FIRST_SOURCE.get_or_init(|| source) != source {
+        let _ = OTHER_SOURCES.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// How many frames the outside saw from a second machine.
+pub(crate) fn frames_from_a_second_machine() -> u64 {
+    OTHER_SOURCES.load(Ordering::Relaxed)
 }
 
 /// Whether `address` is on the guest network, `10.0.2.0/24`, where nothing but

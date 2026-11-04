@@ -513,7 +513,10 @@ fn rows_for(path: &str, image_crates: &BTreeSet<String>, rows: &mut Rows) {
         reason(rows, "the first processes' row");
     }
     if under("src/user/system/native/netd/") || under("src/lib/proto/netswitch/") {
-        rows.add(&["test-netd --personality user"]);
+        rows.add(&[
+            "test-netd --personality user",
+            "test-partitions --personality user",
+        ]);
         reason(rows, "netd's row");
     }
     if under("src/user/system/native/btrfsd/")

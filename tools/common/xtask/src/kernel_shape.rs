@@ -22,9 +22,17 @@ pub(crate) const FIRST_TASKS: &[Task] = &[
         name: "test-netd",
         help_at: 963,
         help: &[
-            "test-netd     netd as the wire's switch (docs/microkernel/M8.md §2): killed and started again under pings.",
+            "test-netd     netd as the wire's switch (docs/microkernel/M8.md §2): killed and started again under pings, and two partitions reaching each other.",
         ],
         run: |_, args| test_netd(args),
+    },
+    Task {
+        name: "test-partitions",
+        help_at: 964,
+        help: &[
+            "test-partitions  Two Linux partitions (docs/microkernel/M8.md §3): one ends or dies, and the other goes on; partial.",
+        ],
+        run: |_, args| test_partitions(args),
     },
     Task {
         name: "test-btrfsd-restart",
@@ -231,6 +239,106 @@ fn test_netd(args: &Args) -> Result<()> {
         let initramfs = initramfs::build(None, &natives, None, &carried)?;
         let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, None)?;
         qemu::test_netd_restart(arch, &image, &kernel, args)?;
+        let kernel = cargo::build_kernel_with_init(
+            arch,
+            args.release,
+            &busybox,
+            crate::shell::NETD_TWO_SCRIPT,
+        )?;
+        let natives = native::build(arch, args.release)?;
+        let root = paths::target_dir().join("netd-image");
+        let image_dir = root.join("sbin");
+        std::fs::create_dir_all(&image_dir).map_err(|e| Error::new(e.to_string()))?;
+        let linuxd = natives
+            .iter()
+            .find(|built| built.name == "linuxd")
+            .ok_or_else(|| Error::new("linuxd was not built"))?;
+        std::fs::write(image_dir.join("linuxd"), &linuxd.bytes)
+            .map_err(|e| Error::new(e.to_string()))?;
+        let row = "[[partition]]\nname = \"second\"\nimage = \"sbin/linuxd\"\nrole = \"linux\"\nreserve_pages = 40000\n";
+        let mut carried = crate::shell::netd_carried(&busybox)?;
+        carried.extend(crate::dhcp::carried(arch)?);
+        carried.push(described(&root, row)?);
+        let initramfs = initramfs::build(None, &natives, None, &carried)?;
+        let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, None)?;
+        qemu::test_netd_two(arch, &image, &kernel, args)?;
+    }
+    Ok(())
+}
+
+fn test_partitions(args: &Args) -> Result<()> {
+    // Two partitions each unpack the archive into memory of their own, and a kernel of
+    // kernel_memory=retyped promises what it has up front (K16 §4).
+    let args = &Args {
+        memory: if args.memory_given { args.memory } else { 1024 },
+        ..args.clone()
+    };
+    let init = args
+        .init
+        .as_deref()
+        .ok_or_else(|| Error::new("test-partitions runs busybox: --init"))?;
+    for arch in args.arches()? {
+        let loader = cargo::build_loader(arch, args.release)?;
+        let busybox = crate::program_for(init, arch)?;
+        let kernel = cargo::build_kernel_with_init(
+            arch,
+            args.release,
+            &busybox,
+            crate::shell::PARTITIONS_SCRIPT,
+        )?;
+        let natives = native::build(arch, args.release)?;
+        let target = paths::target_dir();
+        let dies = native::build_one(arch, args.release, &target, &native::LINUXD_DIES)?;
+        let root = target.join("partitions-image");
+        let image_dir = root.join("sbin");
+        std::fs::create_dir_all(&image_dir).map_err(|e| Error::new(e.to_string()))?;
+        let linuxd = natives
+            .iter()
+            .find(|built| built.name == "linuxd")
+            .ok_or_else(|| Error::new("linuxd was not built"))?;
+        std::fs::write(image_dir.join("linuxd"), &linuxd.bytes)
+            .map_err(|e| Error::new(e.to_string()))?;
+        std::fs::write(image_dir.join("dies"), &dies.bytes)
+            .map_err(|e| Error::new(e.to_string()))?;
+        for (image, ends) in [("sbin/linuxd", false), ("sbin/dies", true)] {
+            let row = format!(
+                "[[partition]]\nname = \"second\"\nimage = \"{image}\"\nrole = \"linux\"\nreserve_pages = 40000\n"
+            );
+            let mut carried = crate::shell::lift_carried(&busybox)?;
+            carried.push(described(&root, &row)?);
+            if ends {
+                carried.push(crate::ports::File {
+                    path: "sbin/dies".to_owned(),
+                    mode: 0o755,
+                    content: crate::ports::Content::Bytes(dies.bytes.clone()),
+                });
+            }
+            let initramfs = initramfs::build(None, &natives, None, &carried)?;
+            let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, None)?;
+            qemu::test_partitions(arch, &image, &kernel, args, ends)?;
+        }
+        // The other way round (ledger 6226 N.8): what the first's death costs is shown. Its
+        // `linuxd` ends at once, the second a real one, and the machine ends with it.
+        let row = "[[partition]]\nname = \"second\"\nimage = \"sbin/second\"\nrole = \"linux\"\nreserve_pages = 40000\n";
+        std::fs::write(image_dir.join("second"), &linuxd.bytes)
+            .map_err(|e| Error::new(e.to_string()))?;
+        let mut carried = crate::shell::lift_carried(&busybox)?;
+        carried.push(described(&root, row)?);
+        carried.push(crate::ports::File {
+            path: "sbin/second".to_owned(),
+            mode: 0o755,
+            content: crate::ports::Content::Bytes(linuxd.bytes.clone()),
+        });
+        let mut dying = natives.clone();
+        dying
+            .iter_mut()
+            .find(|built| built.name == "linuxd")
+            .ok_or_else(|| Error::new("linuxd was not built"))?
+            .bytes
+            .clone_from(&dies.bytes);
+        let initramfs = initramfs::build(None, &dying, None, &carried)?;
+        let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, None)?;
+        qemu::test_first_partition_dies(arch, &image, &kernel, args)?;
     }
     Ok(())
 }

@@ -38,6 +38,7 @@ members = [
     "src/lib/proto/boot-policy",
     "src/lib/proto/netswitch",
     "src/user/system/native/netd",
+    "src/user/system/native/linuxd-dies",
     "src/user/system/native/netd",
     "src/lib/fs/blkclient",
     "src/lib/fs/fsproto",

@@ -4931,6 +4931,161 @@ pub(crate) fn net_round_trip(
         })
 }
 
+pub(crate) fn test_netd_two(arch: Arch, image: &Path, kernel: &Path, args: &Args) -> Result<()> {
+    let watched = watch(arch, image, kernel, args, "netd-row: the first still runs")?;
+    let log = watched.log.display();
+    if !matches!(watched.verdict, Verdict::Reached) {
+        return Err(Error::new(format!(
+            "{arch}: the row did not end.\n  Serial output is in {log}"
+        )));
+    }
+    if !watched
+        .lines
+        .iter()
+        .any(|line| line.contains("netd-row: the second reached the first, status 0"))
+    {
+        return Err(Error::new(format!(
+            "{arch}: the second partition did not reach the first through the switch.\n  Serial output is in {log}"
+        )));
+    }
+    // One machine to the outside (customer, 2026-11-04): a further partition's address is
+    // internal, so neither a ping nor a DHCP client of its gets an answer from out there.
+    let refused = |text: &str| {
+        watched
+            .lines
+            .iter()
+            .any(|line| line.contains(text) && !line.trim_end().ends_with("status 0"))
+    };
+    if !refused("the second has an interface to the outside, status") {
+        return Err(Error::new(format!(
+            "{arch}: a further partition has eth0.\n  Serial output is in {log}"
+        )));
+    }
+    if !refused("the second reached the outside, status") {
+        return Err(Error::new(format!(
+            "{arch}: a further partition reached the outside: the outside sees more than one machine.\n  Serial output is in {log}"
+        )));
+    }
+    if !refused("the second's DHCP client, status") {
+        return Err(Error::new(format!(
+            "{arch}: a further partition got an address from outside: there is more than one DHCP client.\n  Serial output is in {log}"
+        )));
+    }
+    let others = crate::gateway::frames_from_a_second_machine();
+    if others != 0 {
+        return Err(Error::new(format!(
+            "{arch}: a further partition reached the outside: the gateway saw {others} frames from a second machine.\n  Serial output is in {log}"
+        )));
+    }
+    let at = |text: &str| watched.lines.iter().position(|line| line.contains(text));
+    match (
+        at("netd ended: started again"),
+        at("the second came back after netd's deaths, status 0"),
+    ) {
+        (Some(died), Some(back)) if died < back => {}
+        (died, back) => {
+            return Err(Error::new(format!(
+                "{arch}: a further partition did not come back after netd's restart: netd's death {died:?}, the ping {back:?}.\n  Serial output is in {log}"
+            )));
+        }
+    }
+    println!(
+        "  {arch}: two partitions reached each other through netd and again after it died; partial, as test-partitions"
+    );
+    Ok(())
+}
+
+pub(crate) fn test_first_partition_dies(
+    arch: Arch,
+    image: &Path,
+    kernel: &Path,
+    args: &Args,
+) -> Result<()> {
+    let watched = watch(arch, image, kernel, args, "linuxd   its job killed")?;
+    let log = watched.log.display();
+    let reached = matches!(watched.verdict, Verdict::Reached);
+    if !reached
+        || !watched
+            .lines
+            .iter()
+            .any(|line| line.contains("linuxd 1 started"))
+    {
+        return Err(Error::new(format!(
+            "{arch}: the first partition's end was not seen with a second running.\n  Serial output is in {log}"
+        )));
+    }
+    println!(
+        "  {arch}: the first partition's end ends the machine, the second with it: it holds the cores (§3)"
+    );
+    Ok(())
+}
+
+pub(crate) fn test_partitions(
+    arch: Arch,
+    image: &Path,
+    kernel: &Path,
+    args: &Args,
+    second_dies: bool,
+) -> Result<()> {
+    let watched = watch(
+        arch,
+        image,
+        kernel,
+        args,
+        "partition-row: the first still runs",
+    )?;
+    let log = watched.log.display();
+    if matches!(watched.verdict, Verdict::Panicked) {
+        return Err(panicked(arch, &watched.log));
+    }
+    let at = |text: &str| watched.lines.iter().position(|line| line.contains(text));
+    // Each partition its own speculation domain, so that a switch between them is a
+    // barrier (ledger 6226 N.10): read from the kernel's record, by its numbers.
+    let domain = |text: &str| -> Option<u64> {
+        watched.lines.iter().find_map(|line| {
+            let (_, tail) = line.split_once(text)?;
+            tail.trim().parse().ok()
+        })
+    };
+    match (
+        domain("the first partition's speculation domain: "),
+        domain("linuxd 1 speculation domain: "),
+    ) {
+        (Some(first), Some(second)) if first != 0 && second != 0 && first != second => {}
+        (first, second) => {
+            return Err(Error::new(format!(
+                "{arch}: two partitions are not two speculation domains: {first:?} and {second:?}.\n  Serial output is in {log}"
+            )));
+        }
+    }
+    let ended = at("linuxd 1 ended with");
+    let still = at("partition-row: the first still runs: forked");
+    let (Some(ended), Some(still)) = (ended, still) else {
+        return Err(Error::new(format!(
+            "{arch}: no second partition ended, or the first did not outlive it.\n  Serial output is in {log}"
+        )));
+    };
+    if ended > still {
+        return Err(Error::new(format!(
+            "{arch}: the second partition outlived the row: it did not show the first going on.\n  Serial output is in {log}"
+        )));
+    }
+    if !second_dies && at("partition-row: the second runs programs: forked").is_none() {
+        return Err(Error::new(format!(
+            "{arch}: the second partition ran no program.\n  Serial output is in {log}"
+        )));
+    }
+    println!(
+        "  {arch}: {} partial: no device, no disk, no memory isolation shown",
+        if second_dies {
+            "a second partition's linuxd died at once, and the first went on;"
+        } else {
+            "a second partition ran programs and ended, and the first went on;"
+        }
+    );
+    Ok(())
+}
+
 /// A description the boot must not go on with.
 /// Verifies: `L.object.323`
 pub(crate) fn test_description_stops(

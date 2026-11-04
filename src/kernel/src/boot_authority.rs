@@ -15,7 +15,7 @@ use ferrix_native_abi::first::{self, READY_MAGIC};
 use ferrix_native_abi::rights::Rights;
 use ferrix_native_abi::status;
 use ferrix_native_abi::types::{CHANNEL_MAX_BYTES, CHANNEL_MAX_HANDLES};
-use ferrix_partition_desc::{Description, Device as Described, KIND_PCI, ROLE_FILES};
+use ferrix_partition_desc::{Description, Device as Described, KIND_PCI, ROLE_FILES, ROLE_LINUX};
 
 use crate::console::println;
 use crate::device::{self, DeviceNode, Location};
@@ -45,11 +45,11 @@ pub fn run(view: &ferrix_bootinfo::BootView<'_>) {
     read_certified_list();
     flag_nodes();
     let served = start_manager();
-    let (block_cores, files) = match served {
-        Some(ends) => (ends.block_cores, ends.files),
-        None => (None, None),
+    let (block_cores, files, further, netd_ends) = match served {
+        Some(ends) => (ends.block_cores, ends.files, ends.further, ends.netd_ends),
+        None => (None, None, Vec::new(), Vec::new()),
     };
-    let detached = match devmgr::start_detached(block_cores) {
+    let detached = match devmgr::start_detached(block_cores, netd_ends) {
         Ok(Some(detached)) => {
             println!("  devmgr   started: its channels go to linuxd");
             Some(detached)
@@ -63,7 +63,7 @@ pub fn run(view: &ferrix_bootinfo::BootView<'_>) {
             None
         }
     };
-    crate::linuxd_start::run_with(view, detached, files);
+    crate::linuxd_start::run_with(view, detached, files, &further);
 }
 
 /// Held at each start site rather than taken on trust (ledger 6564 Y.3): what the kernel
@@ -239,6 +239,10 @@ fn start_manager() -> Option<Served> {
 struct Served {
     block_cores: Option<Arc<Endpoint>>,
     files: Option<Arc<Endpoint>>,
+    /// Further Linux partitions: each one's image in the archive and its memory.
+    further: Vec<crate::linuxd_start::Further>,
+    /// `netd`'s end of each further partition's cores.
+    netd_ends: Vec<Arc<Endpoint>>,
 }
 
 #[cfg_attr(
@@ -322,7 +326,24 @@ fn try_start_manager() -> Result<Option<Served>, &'static str> {
     let mut served = Served {
         block_cores: None,
         files: None,
+        further: Vec::new(),
+        netd_ends: Vec::new(),
     };
+    for partition in parsed
+        .partitions()
+        .filter(|partition| partition.role() == ROLE_LINUX)
+    {
+        let (linux_end, netd_end) =
+            Endpoint::pair().map_err(|_| "no memory for a partition's channel")?;
+        fallible::try_push(&mut served.netd_ends, netd_end).map_err(|_| "no memory")?;
+        let further = crate::linuxd_start::Further::of(
+            partition.image(),
+            partition.reserve_pages(),
+            linux_end,
+        )
+        .ok_or("a further partition's image name")?;
+        fallible::try_push(&mut served.further, further).map_err(|_| "no memory")?;
+    }
     if parsed
         .partitions()
         .any(|partition| partition.role() == ROLE_FILES)

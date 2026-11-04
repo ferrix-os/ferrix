@@ -13,7 +13,7 @@ use ferrix_native_abi::rights::Rights;
 use ferrix_vma::VmaFlags;
 
 use crate::console::println;
-use crate::first_rows::{Held, LINUXD};
+use crate::first_rows::{FURTHER, Held, LINUXD};
 use crate::object::Object;
 use crate::object::bare::Bare;
 use crate::object::job;
@@ -30,9 +30,42 @@ const BOOT_PAGE: u64 = SHARED_BASE + (3 << 40);
 /// linuxd's path in the initramfs (`xtask`, `native::LINUXD`).
 const PATH: &[u8] = b"sbin/linuxd";
 
+/// A further Linux partition (`docs/microkernel/M8.md` §3): less than the first, which
+/// alone holds the device cores, the file server's channel, the console and `devmgr`'s
+/// channels. It has an initramfs, a debug log, and its memory.
+#[derive(Debug, Clone)]
+pub(crate) struct Further {
+    image: [u8; 64],
+    frames: u64,
+    /// Its end of what `netd` opens its ring on.
+    net_cores: Arc<crate::object::channel::Endpoint>,
+}
+
+impl Further {
+    /// A partition running `image`, with `frames` of memory.
+    pub(crate) fn of(
+        image: &[u8],
+        frames: u64,
+        net_cores: Arc<crate::object::channel::Endpoint>,
+    ) -> Option<Further> {
+        let mut stored = [0_u8; 64];
+        stored.get_mut(..image.len())?.copy_from_slice(image);
+        Some(Further {
+            image: stored,
+            frames,
+            net_cores,
+        })
+    }
+
+    fn image(&self) -> &[u8] {
+        let end = self.image.iter().position(|&byte| byte == 0).unwrap_or(64);
+        self.image.get(..end).unwrap_or(&[])
+    }
+}
+
 /// Start linuxd, or say why not. Its end is the kernel's end: `power::finish`.
 pub(crate) fn run(view: &ferrix_bootinfo::BootView<'_>) {
-    run_with(view, None, None);
+    run_with(view, None, None, &[]);
 }
 
 /// [`run`], with `devmgr` when something started it first: what the boot
@@ -41,12 +74,13 @@ pub(crate) fn run_with(
     view: &ferrix_bootinfo::BootView<'_>,
     devmgr: Option<crate::discovery::devmgr::Detached>,
     files: Option<Arc<crate::object::channel::Endpoint>>,
+    further: &[Further],
 ) {
     if !matches!(crate::mm::keep_initrd(view), Ok(Some(_))) {
         println!("  linuxd   did not start: no initramfs");
         return;
     }
-    if let Err(why) = start(view.wall_clock(), view.cmdline(), devmgr, files) {
+    if let Err(why) = start(view.wall_clock(), view.cmdline(), devmgr, files, further) {
         println!("  linuxd   did not start: {why}");
     }
 }
@@ -103,18 +137,33 @@ fn start(
     cmdline: &str,
     devmgr: Option<crate::discovery::devmgr::Detached>,
     files: Option<Arc<crate::object::channel::Endpoint>>,
+    further: &[Further],
 ) -> Result<(), &'static str> {
     // An option past the room would just not apply, silently: not started, said why.
     if cmdline.len() > COMMAND_LINE_MOST {
         return Err("the command line is longer than the boot page holds");
     }
+    // Before any partition's: the kernel's own copy.
+    let (archive, archive_len) = archive_vmo()?;
+    // Each partition one speculation domain, so a switch between them is a barrier
+    // (ledger 6226 N.10); with one partition this changes nothing it can see.
     let partition = job::root()
-        .new_child()
+        .new_child_as(!further.is_empty(), false)
         .map_err(|_| "no job for the partition")?;
+    if !further.is_empty() {
+        println!(
+            "  linuxd   the first partition's speculation domain: {}",
+            partition.domain()
+        );
+    }
     let region = Region::new(Arc::clone(&partition)).map_err(|_| "no memory for a region")?;
     let entry = crate::mm::with_initrd(|archive| load(region.space(), archive, PATH))
         .ok_or("no initramfs")??;
-    let (archive, archive_len) = archive_vmo()?;
+    for (index, row) in further.iter().enumerate() {
+        if let Err(why) = start_further(cmdline, index + 1, row, &archive, archive_len) {
+            println!("  linuxd {} did not start: {why}", index + 1);
+        }
+    }
     let _ = crate::mm::give_back_initrd();
     let page = Vmo::new_anonymous(1).map_err(|_| "no memory for the boot page")?;
     let (devmgr_messages, cores, net_cores) = match devmgr {
@@ -202,6 +251,7 @@ fn start(
         .bind_region(region.space(), partition.quota_index())
         .map_err(|_| "bind")?;
     region.enter().map_err(|_| "the region ended")?;
+    let partition_of_linuxd = Arc::clone(&partition);
     let host = Bare::new(restricted, partition, Some(Arc::clone(&region)))
         .map_err(|_| "no memory for the process")?;
     host.start(entry.entry, entry.stack, BOOT_PAGE)?;
@@ -212,7 +262,12 @@ fn start(
     );
     let core = host.core();
     let _ = core.exited().wait_trusting(|| core.is_terminated());
+    crate::audit::first_process_ended(core);
     println!("  linuxd   ended with {:?}", core.exit_status());
+    // Its programs go with it (L.object.327): what is left of the `linux` job has
+    // nobody to answer its system calls.
+    let killed = partition_of_linuxd.kill(137).unwrap_or(0);
+    println!("  linuxd   its job killed: {killed} processes left");
     // What `reboot(2)` asked of the machine, which only the kernel can do. Otherwise
     // init ended, and the kernel's own rule for that follows (`power::finish`).
     use ferrix_bootinfo::pstore::Stop;
@@ -274,6 +329,126 @@ fn archive_vmo() -> Result<(Arc<Vmo>, u64), &'static str> {
         Ok((vmo, archive.len() as u64))
     })
     .ok_or("no initramfs")?
+}
+
+/// A further partition: started now, and watched by a task of its own, since its end
+/// is not the kernel's.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one partition's start, its boot page's rows in one place"
+)]
+fn start_further(
+    cmdline: &str,
+    index: usize,
+    row: &Further,
+    archive: &Arc<Vmo>,
+    archive_len: u64,
+) -> Result<(), &'static str> {
+    use core::fmt::Write as _;
+    let partition = job::root()
+        .new_child_as(true, false)
+        .map_err(|_| "no job for it")?;
+    println!(
+        "  linuxd {index} speculation domain: {}",
+        partition.domain()
+    );
+    let region = Region::new(Arc::clone(&partition)).map_err(|_| "no memory for a region")?;
+    let entry = crate::mm::with_initrd(|file| load(region.space(), file, row.image()))
+        .ok_or("no initramfs")??;
+    let page = Vmo::new_anonymous(1).map_err(|_| "no memory for the boot page")?;
+    let mut line = alloc::string::String::new();
+    let _ = write!(line, "{cmdline} ferrix.partition={index}");
+    let boot = BootPage {
+        magic: BOOT_MAGIC,
+        region: give(
+            &region,
+            Object::Region(Arc::clone(&region)),
+            const { FURTHER.of(Held::Region) },
+        )?,
+        job: give(
+            &region,
+            Object::Job(Arc::clone(&partition)),
+            const { FURTHER.of(Held::Job) },
+        )?,
+        initramfs: give(
+            &region,
+            Object::Vmo(Arc::clone(archive)),
+            const { FURTHER.of(Held::Archive) },
+        )?,
+        initramfs_bytes: archive_len,
+        command_line_bytes: line.len().min(COMMAND_LINE_MOST) as u32,
+        processors: crate::smp::count() as u32,
+        debug_log: give(
+            &region,
+            Object::DebugLog,
+            const { FURTHER.of(Held::DebugLog) },
+        )?,
+        memory_frames: row.frames,
+        net_cores: u64::from(give(
+            &region,
+            Object::Channel(Arc::clone(&row.net_cores)),
+            const { FURTHER.of(Held::Channel) },
+        )?),
+        ..BootPage::EMPTY
+    };
+    judge_table(&region, &FURTHER);
+    page.commit_and_write(0, 0, &boot.to_bytes())
+        .map_err(|_| "the boot page")?;
+    let bytes = line.as_bytes();
+    let bytes = bytes
+        .get(..boot.command_line_bytes as usize)
+        .unwrap_or(bytes);
+    page.commit_and_write(0, COMMAND_LINE_AT, bytes)
+        .map_err(|_| "the boot page")?;
+    let _ = region
+        .space()
+        .map_object(
+            Some(BOOT_PAGE),
+            PAGE_SIZE,
+            Arc::clone(&page),
+            0,
+            VmaFlags::READ,
+        )
+        .map_err(|_| "the boot page's mapping")?;
+    let restricted = AddressSpace::new().map_err(|_| "no memory for a space")?;
+    restricted
+        .bind_region(region.space(), partition.quota_index())
+        .map_err(|_| "bind")?;
+    region.enter().map_err(|_| "the region ended")?;
+    let host = Bare::new(
+        restricted,
+        Arc::clone(&partition),
+        Some(Arc::clone(&region)),
+    )
+    .map_err(|_| "no memory for the process")?;
+    host.start(entry.entry, entry.stack, BOOT_PAGE)?;
+    println!(
+        "  linuxd {index} started at {:#x}, pid {}",
+        entry.entry,
+        host.core().pid()
+    );
+    /// Each further partition's, until its watching task takes one.
+    type Watched = (Arc<Bare>, Arc<job::Job>, usize);
+    static WATCHED: crate::sync::SpinLock<alloc::vec::Vec<Watched>> =
+        crate::sync::SpinLock::new(alloc::vec::Vec::new());
+    crate::fallible::try_push(&mut WATCHED.lock(), (host, partition, index))
+        .map_err(|_| "no memory to watch it")?;
+    fn watch(_argument: usize) {
+        let Some((host, partition, index)) = WATCHED.lock().pop() else {
+            return;
+        };
+        let core = host.core();
+        let _ = core.exited().wait_trusting(|| core.is_terminated());
+        crate::audit::first_process_ended(core);
+        let killed = partition.kill(137).unwrap_or(0);
+        println!(
+            "  linuxd {index} ended with {:?}: its job killed, {killed} processes left",
+            core.exit_status()
+        );
+    }
+    crate::sched::spawn("partition watch", watch, 0, ferrix_sched::NICE_0_WEIGHT)
+        .map(|_| ())
+        .map_err(|_| "no task to watch it")
 }
 
 /// linuxd's image out of `archive` and into `space`.

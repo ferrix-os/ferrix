@@ -262,3 +262,33 @@ pub(crate) const LINUXD: Rows = Rows(&[
         most: 4,
     },
 ]);
+
+/// A further partition's `linuxd`: no console, no cores, no `devmgr` (N.9).
+#[cfg(ferrix_personality = "user")]
+pub(crate) const FURTHER: Rows = Rows(&[
+    Row {
+        held: Held::Job,
+        rights: Rights::JOB,
+        most: 1,
+    },
+    Row {
+        held: Held::DebugLog,
+        rights: Rights::WRITE,
+        most: 1,
+    },
+    Row {
+        held: Held::Region,
+        rights: Rights::REGION,
+        most: 1,
+    },
+    Row {
+        held: Held::Archive,
+        rights: ARCHIVE,
+        most: 1,
+    },
+    Row {
+        held: Held::Channel,
+        rights: Rights::CHANNEL,
+        most: 1,
+    },
+]);

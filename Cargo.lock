@@ -839,6 +839,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrix-linuxd-dies"
+version = "0.1.0"
+dependencies = [
+ "ferrix-rt",
+]
+
+[[package]]
 name = "ferrix-lode"
 version = "0.1.0"
 dependencies = [
