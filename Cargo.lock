@@ -258,6 +258,7 @@ dependencies = [
  "ferrix-fdt",
  "ferrix-native-abi",
  "ferrix-netring",
+ "ferrix-process-builder",
  "ferrix-restart",
  "ferrix-rt",
  "ferrix-usbif",
@@ -467,6 +468,7 @@ dependencies = [
  "ferrix-intel-xelp",
  "ferrix-linux-abi",
  "ferrix-native-abi",
+ "ferrix-process-builder",
  "ferrix-rt",
 ]
 
@@ -494,6 +496,7 @@ name = "ferrix-ipc-bench"
 version = "0.1.0"
 dependencies = [
  "ferrix-native-abi",
+ "ferrix-process-builder",
  "ferrix-rt",
 ]
 
@@ -502,6 +505,7 @@ name = "ferrix-ipc-equiv"
 version = "0.1.0"
 dependencies = [
  "ferrix-native-abi",
+ "ferrix-process-builder",
  "ferrix-rt",
 ]
 
@@ -854,6 +858,16 @@ dependencies = [
  "ferrix-native-abi",
  "ferrix-rt",
  "ferrix-x86-power",
+]
+
+[[package]]
+name = "ferrix-process-builder"
+version = "0.1.0"
+dependencies = [
+ "ferrix-bootinfo",
+ "ferrix-elf",
+ "ferrix-native",
+ "ferrix-native-abi",
 ]
 
 [[package]]

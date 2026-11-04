@@ -547,12 +547,17 @@ fn make_native(
     let name = name
         .get(..name.len().min(ferrix_native_abi::nr::PROCESS_NAME_MAX))
         .unwrap_or(name);
-    let process = pending::create_process(&job, &elf, name)
-        .map_err(|error| format!("process_create: {error:?}"))?;
-    process
-        .start(end.into_owned())
-        .map_err(|(error, _)| format!("process_start: {error:?}"))?;
-    Ok(process)
+    let elf = ferrix_process_builder::image(elf).map_err(|error| format!("image: {error:?}"))?;
+    let built = ferrix_process_builder::build(
+        &job,
+        &elf,
+        name,
+        ferrix_process_builder::machine_named(std::env::consts::ARCH),
+    )
+    .map_err(|error| format!("build: {error:?}"))?;
+    built
+        .run(end.into_owned())
+        .map_err(|(error, _)| format!("process_run: {error:?}"))
 }
 
 /// [`make_native`] as `ids`: in a forked helper that becomes them first, so

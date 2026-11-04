@@ -114,6 +114,10 @@ pub const PROCESS_GIVE: usize = 0x1032;
 pub const PROCESS_BOOTSTRAP: usize = 0x1033;
 /// [`NativeCall::ProcessStatus`].
 pub const PROCESS_STATUS: usize = 0x1034;
+/// [`NativeCall::ProcessMake`].
+pub const PROCESS_MAKE: usize = 0x10A0;
+/// [`NativeCall::ProcessRun`].
+pub const PROCESS_RUN: usize = 0x10A1;
 /// [`NativeCall::ProcessSpace`].
 pub const PROCESS_SPACE: usize = 0x1035;
 
@@ -249,6 +253,10 @@ pub const SPACE_CLONE: usize = 0x1080;
 /// copies: sixteen pages, each a step that holds one address space's lock
 /// and never two.
 pub const SPACE_COPY_MAX: usize = 64 * 1024;
+/// [`NativeCall::PagerKeep`].
+pub const PAGER_KEEP: usize = 0x10A2;
+/// [`NativeCall::PagerTakeUp`].
+pub const PAGER_TAKE_UP: usize = 0x10A3;
 /// [`NativeCall::PagerCreate`].
 pub const PAGER_CREATE: usize = 0x1074;
 /// [`NativeCall::PagerCreateVmo`].
@@ -492,6 +500,21 @@ pub enum NativeCall {
     /// reads an end. Needs `WAIT`; `WRONG_TYPE` for a handle to anything but
     /// a process, `FAULT` for `out`.
     ProcessStatus,
+    /// `(job, name, name_len)` → process handle. A process in `job` with an
+    /// empty address space, not started: K15's [`NativeCall::ProcessCreate`]
+    /// with the image taken out. The kernel parses nothing; the creator maps
+    /// what the process runs through [`NativeCall::ProcessSpace`], with the
+    /// loader library `ferrix-process-builder`. The same job rules as
+    /// `ProcessCreate`: `MANAGE` on `job`, and a sealed creator stays in its
+    /// tree. `name_len` is at most [`PROCESS_NAME_MAX`].
+    ProcessMake,
+    /// `(process, entry, stack, bootstrap)`. Run a process made by
+    /// [`NativeCall::ProcessMake`], entering it at `entry` on `stack`, with the
+    /// handle's value in its first argument register, zero meaning none. Needs
+    /// `MANAGE` and, on the bootstrap, `TRANSFER`. `INVALID_ARGS` for an entry
+    /// or a stack outside user space, before anything is claimed; `BAD_STATE`
+    /// once started. A refused start moves nothing.
+    ProcessRun,
     /// `(process, rights)` → handle. A handle to the address space of a
     /// process made by [`NativeCall::ProcessCreate`] that has not started,
     /// with `rights`, a subset of [`crate::rights::Rights::SPACE`]. Its
@@ -922,6 +945,17 @@ pub enum NativeCall {
     /// `DUPLICATE`, so its close is the pager's death
     /// (`docs/microkernel/K3.md` §2.1).
     PagerCreate,
+    /// `(pager)` → keeper handle. A keeper of the pager, at most one, with
+    /// `Rights::KEEPER`: with it, the pager's handle closing parks the pager
+    /// rather than failing its requests, so the next instance of its server can
+    /// take them up (K13, `docs/microkernel/K13.md`). Needs `PAGER`;
+    /// `ALREADY_BOUND` for a second.
+    PagerKeep,
+    /// `(keeper, port)` → pager handle. Take up a parked pager: its open requests
+    /// are sent again, each under its own id, to `port`. Needs `MANAGE` on the
+    /// keeper and `WRITE` on the port; `BAD_STATE` unless parked; on `NO_MEMORY` it
+    /// stays parked.
+    PagerTakeUp,
     /// `(pager, spec: *PagerVmoSpec)` → VMO. A VMO of `pages` pages whose
     /// absent pages are the pager's, with `key` in its requests and the
     /// `PAGER_VMO_*` options. Needs `PAGER` on the pager.
@@ -940,7 +974,7 @@ pub enum NativeCall {
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 100] = [
+pub const ALL: [NativeCall; 104] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,
@@ -1038,6 +1072,10 @@ pub const ALL: [NativeCall; 100] = [
     NativeCall::ExceptionChannelCreate,
     NativeCall::ExceptionState,
     NativeCall::ExceptionResolve,
+    NativeCall::ProcessMake,
+    NativeCall::ProcessRun,
+    NativeCall::PagerKeep,
+    NativeCall::PagerTakeUp,
     NativeCall::DeviceBindDomain,
     NativeCall::VmoDigest,
     NativeCall::ProcessImages,
@@ -1093,6 +1131,8 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         PROCESS_GIVE => NativeCall::ProcessGive,
         PROCESS_BOOTSTRAP => NativeCall::ProcessBootstrap,
         PROCESS_STATUS => NativeCall::ProcessStatus,
+        PROCESS_MAKE => NativeCall::ProcessMake,
+        PROCESS_RUN => NativeCall::ProcessRun,
         PROCESS_SPACE => NativeCall::ProcessSpace,
         INTERRUPT_CREATE => NativeCall::InterruptCreate,
         INTERRUPT_BIND => NativeCall::InterruptBind,
@@ -1156,6 +1196,8 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         SPACE_WRITE => NativeCall::SpaceWrite,
         SPACE_CLONE => NativeCall::SpaceClone,
         PAGER_CREATE => NativeCall::PagerCreate,
+        PAGER_KEEP => NativeCall::PagerKeep,
+        PAGER_TAKE_UP => NativeCall::PagerTakeUp,
         PAGER_CREATE_VMO => NativeCall::PagerCreateVmo,
         PAGER_SUPPLY => NativeCall::PagerSupply,
         PAGER_OP => NativeCall::PagerOp,
@@ -1203,6 +1245,8 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::ProcessGive => PROCESS_GIVE,
         NativeCall::ProcessBootstrap => PROCESS_BOOTSTRAP,
         NativeCall::ProcessStatus => PROCESS_STATUS,
+        NativeCall::ProcessMake => PROCESS_MAKE,
+        NativeCall::ProcessRun => PROCESS_RUN,
         NativeCall::ProcessSpace => PROCESS_SPACE,
         NativeCall::InterruptCreate => INTERRUPT_CREATE,
         NativeCall::InterruptBind => INTERRUPT_BIND,
@@ -1266,6 +1310,8 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::SpaceWrite => SPACE_WRITE,
         NativeCall::SpaceClone => SPACE_CLONE,
         NativeCall::PagerCreate => PAGER_CREATE,
+        NativeCall::PagerKeep => PAGER_KEEP,
+        NativeCall::PagerTakeUp => PAGER_TAKE_UP,
         NativeCall::PagerCreateVmo => PAGER_CREATE_VMO,
         NativeCall::PagerSupply => PAGER_SUPPLY,
         NativeCall::PagerOp => PAGER_OP,

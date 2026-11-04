@@ -1159,3 +1159,286 @@ fn case_n_decoding() -> Result<u32, &'static str> {
     }
     Ok(refused)
 }
+
+// K13 (`docs/microkernel/K13.md`): the keeper.
+
+/// Make `served`'s keeper.
+fn keeper_of(served: &Served) -> Result<Handle, &'static str> {
+    served.side.handle(
+        nr::PAGER_KEEP,
+        &[reg(served.pager()?)],
+        "pager_keep refused a pager's holder",
+    )
+}
+
+/// `pager_take_up` onto `port`: the new pager handle, which `served` then holds.
+fn take_up(served: &mut Served, keeper: Handle, port: Handle) -> Result<(), &'static str> {
+    let pager = served.side.handle(
+        nr::PAGER_TAKE_UP,
+        &[reg(keeper), reg(port)],
+        "rebind: pager_take_up refused a parked pager",
+    )?;
+    served.pager = Some(pager);
+    Ok(())
+}
+
+/// A new port of `served`'s process, which it then reads its packets from.
+fn new_port(served: &mut Served) -> Result<Handle, &'static str> {
+    let port = served
+        .side
+        .handle(nr::PORT_CREATE, &[], "port_create failed")?;
+    let object = served
+        .side
+        .process
+        .with_handles(|table| match table.get(port) {
+            Ok((Object::Port(port), _)) => Some(Arc::clone(port)),
+            _ => None,
+        })
+        .ok_or("a port handle named no port")?;
+    served.port = (port, object);
+    Ok(port)
+}
+
+/// L.object.300: one keeper, with exactly its rights, one object charged.
+///
+/// Verifies: L.object.300
+fn rebind_a_keeper(report: &mut Report) -> Result<(), &'static str> {
+    let served = Served::new(0, 0)?;
+    let keeper = keeper_of(&served)?;
+    let rights = served
+        .side
+        .process
+        .with_handles(|table| table.get(keeper).ok().map(|(_, rights)| rights));
+    if rights != Some(Rights::KEEPER) {
+        return Err("a: a keeper's handle does not carry Rights::KEEPER exactly");
+    }
+    if served.side.call(nr::PAGER_KEEP, &[reg(served.pager()?)]) != Err(status::ALREADY_BOUND) {
+        return Err("a: a second keeper was made");
+    }
+    report.refused += 1;
+    // Live: the keeper's close changes nothing.
+    close(&served.side, keeper);
+    let client = served.client(&Job::new_root().map_err(|_| "no memory for a job")?)?;
+    let task = fault_in(&client, Act::Read, 0)?;
+    let _ = served.packet()?;
+    let _ = served.supply(0, 1)?;
+    if outcome(&client, &task)?.0 != Outcome::Read(byte_of(0)) {
+        return Err("a: a keeper's close stopped a live pager serving");
+    }
+    Ok(())
+}
+
+/// L.object.301, L.object.302: parked, nothing ends and nothing is sent; taken up,
+/// each open request comes again under its own id, and the client is answered.
+/// A read and a dirty request, from two jobs, a copy's wait among them; two cycles,
+/// the second with the same port back.
+///
+/// Verifies: L.object.301, L.object.302, L.object.307, H.OBJ.28
+fn rebind_across_a_restart(world: &World, report: &mut Report) -> Result<(), &'static str> {
+    let mut served = Served::new(0, PAGER_VMO_TRAP_DIRTY)?;
+    let keeper = keeper_of(&served)?;
+    let _ = served.supply(3, 1)?;
+    let reader = served.client(&world.c)?;
+    let reading = fault_in(&reader, Act::Read, 0)?;
+    let (_, _, read_id) = read_packet(&served.packet()?)?;
+    let writer = served.client(&world.d)?;
+    let writing = fault_in(&writer, Act::Write, 3)?;
+    let dirty = served.packet()?;
+    let dirty_id = dirty.data[1];
+    let before = served.core.outstanding();
+
+    // The server dies: its handle closes, and nothing ends.
+    served.close_pager();
+    sched::sleep_for(SETTLE_NANOS);
+    if !still_waiting(&reader) || !still_waiting(&writer) {
+        return Err("b: a pager with a keeper closed and a waiter ended");
+    }
+    // A fault while parked, a kernel copy's, is listed and sends nothing.
+    let copier = served.client(&world.d)?;
+    let copying = fault_in(&copier, Act::Copy, 1)?;
+    until_waiting(&served, 3)?;
+    if !served.port.1.is_empty() {
+        return Err("b: a fault on a parked pager sent a packet");
+    }
+    if served.core.outstanding() != before + 1 {
+        return Err("b: a fault on a parked pager was not listed");
+    }
+
+    // Its next instance.
+    let port = new_port(&mut served)?;
+    take_up(&mut served, keeper, port)?;
+    let mut ids = Vec::new();
+    for _ in 0..3 {
+        ids.push(served.packet()?.data[1]);
+    }
+    if !ids.contains(&read_id) || !ids.contains(&dirty_id) {
+        return Err("c: a take-up did not send a request again under its own id");
+    }
+    let refused = served
+        .side
+        .call(nr::PAGER_TAKE_UP, &[reg(keeper), reg(port)]);
+    if refused != Err(status::BAD_STATE) {
+        return Err("c: a live pager was taken up");
+    }
+    report.refused += 1;
+    let _ = served.supply(0, 3)?;
+    if served
+        .op(PAGER_OP_DIRTY, 3, 1, 0, 0)
+        .map_err(|_| "c: pager_op DIRTY by the new handle refused")?
+        != 0
+    {
+        return Err("c: pager_op DIRTY answered something");
+    }
+    if outcome(&reader, &reading)?.0 != Outcome::Read(byte_of(0)) {
+        return Err("c: a fault across a restart did not read what the next server supplied");
+    }
+    if outcome(&writer, &writing)?.0 != Outcome::Wrote {
+        return Err("c: a write across a restart did not land");
+    }
+    if outcome(&copier, &copying)?.0 != Outcome::Read(byte_of(1)) {
+        return Err("c: a copy across a restart did not read its page");
+    }
+    report.supplied += 3;
+
+    // L.object.305: the page written stays Dirty, seen by the new handle.
+    if !served.dirty()?.iter().any(|run| run.0 == 3) {
+        return Err("c: a page written before a restart is not reported Dirty after it");
+    }
+
+    // A second cycle, the same port handed back: two packets are harmless.
+    let again = served.client(&world.c)?;
+    let faulting = fault_in(&again, Act::Read, 5)?;
+    let first = served.packet()?.data[1];
+    served.close_pager();
+    take_up(&mut served, keeper, port)?;
+    let second = served.packet()?.data[1];
+    if first != second {
+        return Err("c: a second take-up sent another request's id");
+    }
+    let _ = served.supply(5, 1)?;
+    if outcome(&again, &faulting)?.0 != Outcome::Read(byte_of(5)) {
+        return Err("c: a second cycle's fault was not answered");
+    }
+    report.supplied += 1;
+    close(&served.side, keeper);
+    Ok(())
+}
+
+/// L.object.303, L.object.304: a parked wait keeps its bound; a kill reaches it; the
+/// keeper's close while parked is the pager's death.
+///
+/// Verifies: L.object.303, L.object.304
+fn rebind_nothing_waits_for_ever(world: &World, report: &mut Report) -> Result<(), &'static str> {
+    let mut served = Served::new(SHORT_WAIT_NANOS, 0)?;
+    let _keeper = keeper_of(&served)?;
+    served.close_pager();
+    let client = served.client(&world.c)?;
+    let began = sched_now();
+    let task = fault_in(&client, Act::Read, 0)?;
+    let (ended, _) = outcome(&client, &task)?;
+    if ended != Outcome::Bus || sched_now().saturating_sub(began) < SHORT_WAIT_NANOS {
+        return Err("d: a wait on a parked pager did not end in SIGBUS at its bound");
+    }
+    report.ended += 1;
+
+    let mut served = Served::new(0, 0)?;
+    let keeper = keeper_of(&served)?;
+    served.close_pager();
+    let doomed = served.client(&world.c)?;
+    let killed_task = fault_in(&doomed, Act::Read, 1)?;
+    until_waiting(&served, 1)?;
+    process::kill(&doomed.process, KILLED_STATUS);
+    if outcome(&doomed, &killed_task)?.0 != Outcome::Left {
+        return Err("d: a waiter killed on a parked pager did not leave");
+    }
+    let client = served.client(&world.c)?;
+    let task = fault_in(&client, Act::Read, 0)?;
+    until_waiting(&served, 1)?;
+    let closed_at = sched_now();
+    close(&served.side, keeper);
+    let (ended, _) = outcome(&client, &task)?;
+    if ended != Outcome::Bus || sched_now().saturating_sub(closed_at) > PROMPTLY_NANOS {
+        return Err("e: a keeper closed on a parked pager did not end its waiter at once");
+    }
+    report.ended += 1;
+    Ok(())
+}
+
+/// L.object.305: what a parked request holds stays charged to the job that opened
+/// it, and comes back.
+///
+/// Verifies: L.object.305
+fn rebind_charges_stay(world: &World) -> Result<(), &'static str> {
+    use super::quota::Resource;
+    let used = || {
+        world
+            .c
+            .usage(Resource::Memory)
+            .map_or(0, |usage| usage.used)
+    };
+    let mut served = Served::new(0, 0)?;
+    let keeper = keeper_of(&served)?;
+    served.close_pager();
+    let client = served.client(&world.c)?;
+    let before = used();
+    let task = fault_in(&client, Act::Read, 2)?;
+    until_waiting(&served, 1)?;
+    if used() <= before {
+        return Err("f: a request opened on a parked pager is not charged to the faulting job");
+    }
+    let port = new_port(&mut served)?;
+    take_up(&mut served, keeper, port)?;
+    if used() <= before {
+        return Err("f: a take-up took a request's charge from the faulting job");
+    }
+    let _ = served.packet()?;
+    let _ = served.supply(2, 1)?;
+    let _ = outcome(&client, &task)?;
+    close(&served.side, keeper);
+    Ok(())
+}
+
+/// Every case of K13's.
+///
+/// # Errors
+///
+/// Which property failed.
+pub fn run_rebind() -> Result<Report, &'static str> {
+    let slots = super::quota::live_slots();
+    let report = rebind_cases()?;
+    // Everything of the check's is gone before the next check counts, a killed
+    // client's reaping included: nothing a parked pager held stays behind.
+    let deadline = sched_now().saturating_add(PATIENCE_NANOS);
+    while super::quota::live_slots() != slots {
+        if sched_now() >= deadline {
+            return Err("the rebind check's jobs are gone and their quota slots are not");
+        }
+        sched::sleep_for(POLL_NANOS);
+    }
+    Ok(report)
+}
+
+/// The cases, with their jobs let go on the way out.
+fn rebind_cases() -> Result<Report, &'static str> {
+    let tree = Job::new_root().map_err(|_| "no memory for a job")?;
+    let parent = tree.new_child().map_err(|_| "a job refused a child")?;
+    let world = World {
+        c: parent.new_child().map_err(|_| "a job refused a child")?,
+        d: parent.new_child().map_err(|_| "a job refused a child")?,
+        parent,
+        tree,
+    };
+    let mut report = Report::default();
+    let before = pager_records();
+    rebind_a_keeper(&mut report)?;
+    rebind_across_a_restart(&world, &mut report)?;
+    rebind_nothing_waits_for_ever(&world, &mut report)?;
+    rebind_charges_stay(&world)?;
+    report.audited = pager_records().saturating_sub(before);
+    // Five parks and three take-ups, one record each, beside the ended requests'.
+    if report.audited < 8 {
+        return Err("a park or a take-up was not audited");
+    }
+    let _ = (&world.tree, &world.parent);
+    Ok(report)
+}

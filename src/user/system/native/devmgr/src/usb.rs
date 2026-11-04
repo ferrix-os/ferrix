@@ -27,13 +27,14 @@ use core::time::Duration;
 
 use ferrix_native_abi::handle::Handle;
 use ferrix_native_abi::signals::Signals;
+use ferrix_process_builder::build;
 use ferrix_restart::{Decision, Ended, Policy, Restart};
 use ferrix_rt::Kernel;
 use ferrix_rt::native::channel::{self, Channel, ReadError};
 use ferrix_rt::native::error::Error;
 use ferrix_rt::native::handle::{Deadline, Object, OwnedHandle};
 use ferrix_rt::native::job::Job;
-use ferrix_rt::native::pending::{self, Process};
+use ferrix_rt::native::pending::Process;
 use ferrix_rt::native::port::Port;
 use ferrix_usbif::{Identity, MAX_BYTES, Message};
 
@@ -408,14 +409,14 @@ fn start(
         .and_then(Option::as_ref)
         .ok_or(())?;
     let job = drivers.job.create_sealed_child().map_err(|_| ())?;
-    let process = pending::create_process(&job, image, name).map_err(|_| ())?;
+    let built = build(&job, image, name, ferrix_rt::ELF_MACHINE).map_err(|_| ())?;
     let (near, far) = channel::create(Kernel).map_err(|_| ())?;
     near.write_with(
         Message::Bind { number }.encode().as_bytes(),
         [interface.into_owned()],
     )
     .map_err(|_| ())?;
-    process.notify_on_exit(port, key).map_err(|_| ())?;
-    process.start(far.into_owned()).map_err(|_| ())?;
+    built.process().notify_on_exit(port, key).map_err(|_| ())?;
+    let process = built.run(far.into_owned()).map_err(|_| ())?;
     Ok((job, process, near))
 }

@@ -61,7 +61,7 @@
     },
     "discovery/devmgr.rs::write_devices": {
       "complexity": 17,
-      "lines": 58,
+      "lines": 52,
       "recursive": false
     },
     "discovery/pci.rs::check_function": {
@@ -349,6 +349,36 @@
       "lines": 64,
       "recursive": false
     },
+    "src/lib/platform/elf/src/fixups.rs::decode": {
+      "complexity": 16,
+      "lines": 35,
+      "recursive": false
+    },
+    "src/lib/platform/elf/src/lib.rs::next": {
+      "complexity": 16,
+      "lines": 30,
+      "recursive": false
+    },
+    "src/lib/platform/elf/src/lib.rs::read": {
+      "complexity": 17,
+      "lines": 19,
+      "recursive": false
+    },
+    "src/lib/platform/elf/src/lib.rs::relocations": {
+      "complexity": 28,
+      "lines": 59,
+      "recursive": false
+    },
+    "src/lib/platform/elf/src/symbols.rs::decode": {
+      "complexity": 20,
+      "lines": 32,
+      "recursive": false
+    },
+    "src/lib/platform/elf/src/symbols.rs::read": {
+      "complexity": 31,
+      "lines": 20,
+      "recursive": false
+    },
     "src/lib/proto/slots/src/gpt.rs::find": {
       "complexity": 26,
       "lines": 48,
@@ -376,7 +406,7 @@
     },
     "syscall/native.rs::answer": {
       "complexity": 40,
-      "lines": 115,
+      "lines": 119,
       "recursive": false
     },
     "syscall/native.rs::channel_read": {
@@ -392,11 +422,6 @@
     "syscall/native.rs::device_call": {
       "complexity": 15,
       "lines": 18,
-      "recursive": false
-    },
-    "syscall/native.rs::process_create": {
-      "complexity": 19,
-      "lines": 51,
       "recursive": false
     },
     "syscall/native.rs::vmo_executable": {

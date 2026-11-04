@@ -75,7 +75,7 @@ handles: [job (first only), device 0, device 0 again, ..., image 0 ...
   directory listing of its own to spend on this. For each, the kernel reads
   the file into a VMO it creates for the purpose — anonymous memory, filled
   by the kernel from the initramfs — and hands the VMO with
-  `READ | TRANSFER`. The name is the file's name. `process_create` (0x1030)
+  `IMAGE_RIGHTS`, `READ | MAP | EXECUTE | TRANSFER` (K15). The name is the file's name. `process_create` (0x1030)
   takes exactly this: a job, an image VMO with `READ`, a name. There are at
   most 32 (`MAX_DRIVERS` in `ferrix-devmgr-proto`), all in the first
   message: with the job they leave room for 15 devices beside them in its 64
@@ -468,7 +468,7 @@ the driver's device, mappings and `IoMapping` (F-92).
 initramfs carries `intel-gt`, the GT's worker, `intel` is started as a
 keeper: its START carries two more handles after the device, its own job
 (`TRANSFER | WAIT | MANAGE`, so it can start the worker in a child of it)
-and a read-only copy of `intel-gt`'s image (`READ | TRANSFER`; devmgr
+and an executable copy of `intel-gt`'s image (`IMAGE_RIGHTS`; devmgr
 copies the image once, since the kernel hands images without
 `DUPLICATE`). This one driver alone; without `intel-gt` it is started as
 any engine. The keeper replaces a dead worker itself, and devmgr never sees

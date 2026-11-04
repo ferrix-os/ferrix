@@ -22,6 +22,7 @@ ferrix-log-shed = { path = "../../../../../lib/log/shed" }
 # directory (docs/INIT.md §6): the numbers and layouts, and the typed
 # wrappers over them.
 ferrix-native = { path = "../../../../../lib/proto/native" }
+ferrix-process-builder = { path = "../../../../../lib/proto/process-builder" }
 ferrix-native-abi = { path = "../../../../../lib/proto/native-abi" }
 # The audit record's layout, for the reader (docs/certification/AUDIT.md §4).
 ferrix-audit = { path = "../../../../../lib/proto/audit" }

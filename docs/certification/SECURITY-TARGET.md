@@ -195,6 +195,11 @@ Access Control SFP** on **subjects: processes and threads; objects: VMOs,
 channels, ports, jobs, interrupts, I/O mappings; operations: all operations
 named by the native ABI**.
 
+*Application note (K15).* `process_make` and `process_run` are controlled by `MANAGE` on
+the job and the process and `TRANSFER` on the bootstrap, as `process_create` and
+`process_start` are; `process_run` checks that its entry and stack lie in user space. In
+a `personality=user` build the two earlier calls are compiled out.
+
 **FDP_ACF.1** Security attribute based access control. The TSF shall enforce
 the Capability Access Control SFP based on **the handle a subject presents and
 the rights that handle carries**. A subject may perform an operation only if it

@@ -828,7 +828,7 @@ fn writes(_argument: usize) {
     let Some((_, process, device, cap)) = RACE.lock().clone() else {
         return;
     };
-    let side = Side { process };
+    let side = Side::of(process);
     for round in 0..ROUNDS {
         if write(&side, device, cap + PCI_CFG_OFFSET, 4, (round as u32) << 2).is_err() {
             let _ = WRITES_REFUSED.fetch_add(1, Ordering::SeqCst);

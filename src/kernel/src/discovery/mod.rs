@@ -36,6 +36,8 @@
 pub use ferrix_kernel_core::discovery::board;
 pub(crate) use ferrix_kernel_core::discovery::description;
 pub mod devmgr;
+pub(crate) mod first_image;
+pub mod first_image_check;
 pub use ferrix_kernel_core::discovery::fdt;
 pub use ferrix_kernel_core::discovery::finder;
 pub mod firmware;

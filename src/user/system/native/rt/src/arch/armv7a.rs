@@ -221,3 +221,6 @@ pub(crate) fn exit(status: i32) -> ! {
         );
     }
 }
+
+/// The ELF machine of a native program here (`ferrix-process-builder`).
+pub const ELF_MACHINE: u16 = 40;

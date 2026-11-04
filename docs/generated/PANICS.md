@@ -113,10 +113,12 @@ Causes are listed most likely first.
 | [FX-0915](#fx-0915) | a pager-backed VMO's fault, wait or dirty tracking was not as K3 states |
 | [FX-0916](#fx-0916) | an address space reached by handle was not held to the handle's rights |
 | [FX-0917](#fx-0917) | an exception channel was attached where it must be refused, or refused where it must be attached |
+| [FX-0930](#fx-0930) | a process built by its creator was not held to the rules of its making |
 | [FX-0931](#fx-0931) | spaces and objects failed the check made of kernel objects alone |
 | [FX-0932](#fx-0932) | jobs, quotas, switch counts or the filter failed the check of kernel objects alone |
 | [FX-0933](#fx-0933) | the page cache failed the check made of kernel objects alone |
 | [FX-0934](#fx-0934) | the native calls failed the check made of kernel objects alone |
+| [FX-0935](#fx-0935) | a pager with a keeper was not held to the rebind contract |
 | [FX-0950](#fx-0950) | the device authority self-check failed |
 | [FX-0951](#fx-0951) | the sealing self-check failed |
 | [FX-1001](#fx-1001) | PCI enumeration failed its self-check |
@@ -2814,6 +2816,30 @@ without the right, twice, or past a limit.
 See: src/kernel/src/object/exception.rs;
 src/kernel/src/object/exception_check.rs; docs/microkernel/K4.md.
 
+<a id="fx-0930"></a>
+
+## FX-0930 — a process built by its creator was not held to the rules of its making
+
+`syscall::build_check::run` and `discovery::first_image_check::run`
+(docs/microkernel/K15.md) drive `process_make` and `process_run` through the
+native dispatcher, and the kernel's one loader with kernel objects alone. A
+process must be made with an empty space by `process_create`'s job rules,
+entered only at an entry and on a stack in user space, where it was told;
+`execve` must raise no ids while a handle names the process's space; the loader
+must leave no page writable and executable and refuse a malformed image without
+a stop. The message names the case.
+
+1. `process_make` or `process_run` in src/kernel/src/syscall/native.rs stopped
+   asking a right, or `in_user_space` a bound.
+2. `start_native` in src/kernel/src/syscall/launch.rs did not set the entry
+   under the claim.
+3. `ids_it_may_raise` in src/kernel/src/syscall/exec.rs stopped asking
+   `AddressSpace::handles`.
+4. `load` in src/kernel/src/discovery/first_image.rs took an image it should
+   refuse, or left a segment's permissions unapplied.
+
+See: docs/microkernel/K15.md; src/kernel/src/syscall/build_check.rs.
+
 <a id="fx-0931"></a>
 
 ## FX-0931 — spaces and objects failed the check made of kernel objects alone
@@ -2882,6 +2908,28 @@ walks `drivers.slice`. The sentence names the case that was not true.
    verifies is in the check's `Verifies:` tag.
 
 See: src/kernel/src/syscall/rehome_check.rs; docs/microkernel/B5.md.
+
+<a id="fx-0935"></a>
+
+## FX-0935 — a pager with a keeper was not held to the rebind contract
+
+`object::pager_check::run_rebind` (docs/microkernel/K13.md) drives a pager's
+keeper through the architecture's system call entry. With a keeper a pager's
+close must end no request, a fault while parked must send nothing and stay
+bounded, a take-up must send every open request to the new port under its own id
+and leave the client's access answered, the keeper's close while parked must end
+the requests, and what requests were charged for must stay with the jobs that
+paid. The message names the case.
+
+1. `PagerCore::close` or `keeper_closed` in src/kernel/src/object/pager.rs
+   decided the state apart from the registry's lock, or ended requests it should
+   hold.
+2. `Keeper::take_up` did not send a listed request, or kept the old port.
+3. `LinkRequest` listed a fault against a port from before a park (the
+   generation).
+
+See: src/kernel/src/object/pager.rs; src/kernel/src/object/pager_check.rs;
+docs/microkernel/K13.md.
 
 <a id="fx-0950"></a>
 

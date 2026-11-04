@@ -2583,6 +2583,54 @@ pub static STAGE8_PATH_CALLS: Explanation = Explanation {
 };
 
 // CHECKS-ONLY: stages_check.rs
+/// For `check_rebind` in `stages_check.rs`, when K13's check fails.
+#[doc(hidden)]
+pub static STAGE9_REBIND: Explanation = Explanation {
+    code: "FX-0935",
+    title: "a pager with a keeper was not held to the rebind contract",
+    meaning: "`object::pager_check::run_rebind` (docs/microkernel/K13.md) drives a pager's \
+              keeper through the architecture's system call entry. With a keeper a pager's close \
+              must end no request, a fault while parked must send nothing and stay bounded, a \
+              take-up must send every open request to the new port under its own id and leave the \
+              client's access answered, the keeper's close while parked must end the requests, \
+              and what requests were charged for must stay with the jobs that paid. The message \
+              names the case.",
+    causes: &[
+        "`PagerCore::close` or `keeper_closed` in src/kernel/src/object/pager.rs decided the state \
+         apart from the registry's lock, or ended requests it should hold.",
+        "`Keeper::take_up` did not send a listed request, or kept the old port.",
+        "`LinkRequest` listed a fault against a port from before a park (the generation).",
+    ],
+    see: "src/kernel/src/object/pager.rs; src/kernel/src/object/pager_check.rs; \
+          docs/microkernel/K13.md",
+};
+
+// CHECKS-ONLY: stages_check.rs
+/// For `check_build` in `stages_check.rs`, when K15's checks fail.
+#[doc(hidden)]
+pub static STAGE9_BUILD: Explanation = Explanation {
+    code: "FX-0930",
+    title: "a process built by its creator was not held to the rules of its making",
+    meaning: "`syscall::build_check::run` and `discovery::first_image_check::run` \
+              (docs/microkernel/K15.md) drive `process_make` and `process_run` through the native \
+              dispatcher, and the kernel's one loader with kernel objects alone. A process must be \
+              made with an empty space by `process_create`'s job rules, entered only at an entry and \
+              on a stack in user space, where it was told; `execve` must raise no ids while a handle \
+              names the process's space; the loader must leave no page writable and executable and \
+              refuse a malformed image without a stop. The message names the case.",
+    causes: &[
+        "`process_make` or `process_run` in src/kernel/src/syscall/native.rs stopped asking a \
+         right, or `in_user_space` a bound.",
+        "`start_native` in src/kernel/src/syscall/launch.rs did not set the entry under the claim.",
+        "`ids_it_may_raise` in src/kernel/src/syscall/exec.rs stopped asking \
+         `AddressSpace::handles`.",
+        "`load` in src/kernel/src/discovery/first_image.rs took an image it should refuse, or \
+         left a segment's permissions unapplied.",
+    ],
+    see: "docs/microkernel/K15.md; src/kernel/src/syscall/build_check.rs",
+};
+
+// CHECKS-ONLY: stages_check.rs
 /// For `check_spaces` in `stages_check.rs`, when `object::space_check::run`
 /// fails.
 #[doc(hidden)]
@@ -3934,10 +3982,12 @@ pub(crate) static ALL: &[&Explanation] = &[
     &STAGE9_PAGER,
     &STAGE9_SPACES,
     &STAGE9_EXCEPTIONS,
+    &STAGE9_BUILD,
     &STAGE6_REHOMED_MEMORY,
     &STAGE6_REHOMED_OBJECTS,
     &STAGE6_REHOMED_CACHE,
     &ITEM_REHOMED_CALLS,
+    &STAGE9_REBIND,
     &STAGE10_AUTHORITY,
     &STAGE9_SEALING,
     &STAGE10_PCI,

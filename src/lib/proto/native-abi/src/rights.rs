@@ -154,6 +154,9 @@ impl Rights {
     /// pager's death, which fails every fault waiting on it. It can be moved,
     /// so that a restarted server can take it up (K13).
     pub const PAGER_OBJECT: Rights = Rights(Rights::TRANSFER.0 | Rights::PAGER.0);
+    /// What a pager's keeper carries (K13): it takes the pager up, and moves. No
+    /// `DUPLICATE`: there is one keeper, and its close is what it is.
+    pub const KEEPER: Rights = Rights(Rights::TRANSFER.0 | Rights::MANAGE.0);
     /// What a handle to a process carries.
     ///
     /// [`Rights::WAIT`] to hear that it has ended, directly or through a port,
@@ -283,3 +286,10 @@ impl Requested {
         }
     }
 }
+
+/// What a handle to a native image carries (K15): it can be read and mapped
+/// executable and moved, and neither written through nor duplicated. What the
+/// kernel hands `devmgr` for each driver, and what `ferrix-process-builder`'s
+/// `Image::new` narrows a VMO handle to.
+pub const IMAGE_RIGHTS: Rights =
+    Rights(Rights::READ.0 | Rights::MAP.0 | Rights::EXECUTE.0 | Rights::TRANSFER.0);

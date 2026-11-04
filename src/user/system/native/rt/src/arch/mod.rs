@@ -51,8 +51,14 @@ pub(crate) use x86_64::{
 // Public, where the rest is the crate's: `crate::linux` hands it on to
 // programs.
 #[cfg(target_arch = "aarch64")]
+pub use aarch64::ELF_MACHINE;
+#[cfg(target_arch = "aarch64")]
 pub use aarch64::numbers;
 #[cfg(target_arch = "arm")]
+pub use armv7a::ELF_MACHINE;
+#[cfg(target_arch = "arm")]
 pub use armv7a::numbers;
+#[cfg(target_arch = "x86_64")]
+pub use x86_64::ELF_MACHINE;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::numbers;

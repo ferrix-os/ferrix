@@ -80,6 +80,58 @@ pub struct Images {
     pub unmeasured: bool,
 }
 
+/// `process_make`: a process in `job` with an empty address space, named
+/// `name`. Not started. What it runs is the creator's to map, by
+/// [`Process::space`](crate::space); the loader library
+/// `ferrix-process-builder` does all of it.
+///
+/// # Errors
+///
+/// As [`create_process`], less the image's.
+pub fn make_process<S: Syscall>(job: &Job<S>, name: &str) -> Result<Process<S>, Error> {
+    let value = Call::new(nr::PROCESS_MAKE)
+        .value(register(job.handle()))
+        .input(name.as_bytes())
+        .value(name.len())
+        .make(job.syscall());
+    let handle = decode_handle(value)?;
+    Ok(Process::from_owned(OwnedHandle::from_raw(
+        job.syscall(),
+        handle,
+    )))
+}
+
+impl<S: Syscall> Process<S> {
+    /// `process_run`: run the process at `entry` on `stack`, giving it
+    /// `bootstrap`. The handle leaves this process only if the call succeeds,
+    /// so a failure gives it back.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidArgs`] for an entry or a stack outside user space, with
+    /// `bootstrap`; [`Error::BadState`] once started.
+    pub fn run(
+        &self,
+        entry: usize,
+        stack: usize,
+        bootstrap: OwnedHandle<S>,
+    ) -> Result<(), (Error, OwnedHandle<S>)> {
+        let value = Call::new(nr::PROCESS_RUN)
+            .value(register(self.handle()))
+            .value(entry)
+            .value(stack)
+            .value(register(bootstrap.raw()))
+            .make(self.syscall());
+        match decode_unit(value) {
+            Ok(()) => {
+                let _ = bootstrap.into_raw();
+                Ok(())
+            }
+            Err(error) => Err((error, bootstrap)),
+        }
+    }
+}
+
 impl<S: Syscall> Process<S> {
     /// `process_images`: the kernel's record of what it was given to run
     /// (`docs/microkernel/K14.md` §4).
@@ -601,4 +653,32 @@ impl<S: Syscall> Vmo<S> {
             .make(self.syscall());
         decode(value)
     }
+}
+
+/// `pager_keep`, by handle value: the pager's one keeper (K13). The server asks,
+/// and passes it to its supervisor, which takes the pager up after a restart.
+///
+/// # Errors
+///
+/// [`Error::AlreadyBound`] for a second; [`Error::AccessDenied`] without `PAGER`.
+pub fn pager_keep<S: Syscall>(sys: S, pager: Handle) -> Result<OwnedHandle<S>, Error> {
+    let value = Call::new(nr::PAGER_KEEP).value(register(pager)).make(sys);
+    Ok(OwnedHandle::from_raw(sys, decode_handle(value)?))
+}
+
+/// `pager_take_up`: a parked pager's handle again, its requests sent to `port`.
+///
+/// # Errors
+///
+/// [`Error::BadState`] unless parked; [`Error::NoMemory`], still parked.
+pub fn pager_take_up<S: Syscall>(
+    keeper: &OwnedHandle<S>,
+    port: &Port<S>,
+) -> Result<OwnedHandle<S>, Error> {
+    let sys = port.syscall();
+    let value = Call::new(nr::PAGER_TAKE_UP)
+        .value(register(keeper.raw()))
+        .value(register(port.handle()))
+        .make(sys);
+    Ok(OwnedHandle::from_raw(sys, decode_handle(value)?))
 }

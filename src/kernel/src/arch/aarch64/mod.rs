@@ -8,6 +8,8 @@ pub use cpu::dma_barrier;
 pub mod exception_check;
 mod gic;
 pub(crate) mod mmio;
+// CHECKS-ONLY: syscall/build_check.rs
+pub mod programs_check;
 pub(crate) mod scrub;
 mod signal;
 mod smp;

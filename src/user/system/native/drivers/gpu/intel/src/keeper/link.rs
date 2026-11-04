@@ -26,7 +26,7 @@ use ferrix_rt::native::device::{Device, Interrupt};
 use ferrix_rt::native::error::Error;
 use ferrix_rt::native::handle::{Deadline, Object, OwnedHandle};
 use ferrix_rt::native::job::Job;
-use ferrix_rt::native::pending::{self, Process, Protection};
+use ferrix_rt::native::pending::{Process, Protection};
 use ferrix_rt::native::pin::{DeviceAddress, Pin, PinAccess};
 use ferrix_rt::native::port::Port;
 use ferrix_rt::native::vmo::{self, Vmo};
@@ -344,7 +344,9 @@ impl KeeperLink for Link<'_> {
         let Ok(job) = self.job.create_child() else {
             return false;
         };
-        let Ok(process) = pending::create_process(&job, &self.image, WORKER) else {
+        let Ok(built) =
+            ferrix_process_builder::build(&job, &self.image, WORKER, ferrix_rt::ELF_MACHINE)
+        else {
             return false;
         };
         let Ok((near, far)) = channel::create(Kernel) else {
@@ -357,10 +359,14 @@ impl KeeperLink for Link<'_> {
             revision: self.identity.revision,
             system_memory_bytes: self.identity.system_memory_bytes,
         };
-        if near.write(&hello.encode()).is_err() || process.start(far.into_owned()).is_err() {
+        if near.write(&hello.encode()).is_err() {
             let _ = job.kill();
             return false;
         }
+        let Ok(process) = built.run(far.into_owned()) else {
+            let _ = job.kill();
+            return false;
+        };
         // Armed at once, so its READY wakes the serving loop.
         let armed = near
             .wait_async(

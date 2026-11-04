@@ -546,6 +546,11 @@
       "ledger": 6131
     },
     {
+      "item": "arch/mod.rs: programs_check (re-export)",
+      "born": "K15",
+      "ledger": 6162
+    },
+    {
       "item": "arch/mod.rs: forget_root (re-export)",
       "before": "pub(crate)"
     },

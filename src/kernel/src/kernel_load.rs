@@ -183,6 +183,8 @@ pub mod syscall {
     #[cfg(ferrix_linux_abi = "on")]
     pub mod attributes;
     #[cfg(ferrix_linux_abi = "on")]
+    pub mod build_check;
+    #[cfg(ferrix_linux_abi = "on")]
     pub mod check;
     #[cfg(ferrix_linux_abi = "on")]
     pub mod compat;

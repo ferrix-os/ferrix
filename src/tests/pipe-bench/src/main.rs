@@ -458,12 +458,18 @@ fn run_in_domain() -> Result<(), String> {
     if unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) } != 0 {
         return Err(format!("mkfifo: {}", std::io::Error::last_os_error()));
     }
-    let process = pending::create_process(&domain, &elf, "pipe-bench")
-        .map_err(|error| format!("process_create: {error:?}"))?;
+    let elf = ferrix_process_builder::image(elf).map_err(|error| format!("image: {error:?}"))?;
+    let built = ferrix_process_builder::build(
+        &domain,
+        &elf,
+        "pipe-bench",
+        ferrix_process_builder::machine_named(std::env::consts::ARCH),
+    )
+    .map_err(|error| format!("build: {error:?}"))?;
     let (ours, theirs) = channel::create(Native).map_err(|error| format!("channel: {error:?}"))?;
-    process
-        .start(theirs.into_owned())
-        .map_err(|(error, _)| format!("process_start: {error:?}"))?;
+    let process = built
+        .run(theirs.into_owned())
+        .map_err(|(error, _)| format!("process_run: {error:?}"))?;
     let lines = read_member(&fifo)?;
     print!("{lines}");
     drop((ours, process));

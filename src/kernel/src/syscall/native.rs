@@ -86,7 +86,9 @@ use crate::object::exception::{self, AttachRefused, Exception, Supervisor};
 use crate::object::interrupt::{Interrupt, InterruptError};
 use crate::object::io_mapping::{IoMapping, IoMappingError};
 use crate::object::job::{self, Job};
-use crate::object::pager::{Command, FaultMode, Pager, PagerLink, Refusal};
+use crate::object::pager::{
+    Command, FaultMode, Pager, PagerLink, Refusal, TakeUpRefused, record_rebind,
+};
 use crate::object::port::{Observer, Port, PortError};
 use crate::object::process::{Bootstrap, GiveRefused, Host, Process, ProcessRef};
 use crate::object::quota::{self, Resource, Usage};
@@ -256,6 +258,9 @@ pub struct Processes {
     /// A new process with the ELF `image` loaded, named `name`, made and not
     /// started. Refused with the native status the caller hears.
     pub load: LoadNative,
+    /// A new process with an empty address space, named `name`, made and not
+    /// started: `load` without the loader (`docs/microkernel/K15.md` §2.1).
+    pub make: MakeNative,
     /// Claim the process's start and make its first task; then ask the
     /// argument for the value its first argument register starts with, and
     /// run it. A refused argument gives the start back with nothing run.
@@ -276,12 +281,29 @@ pub struct Processes {
 pub(crate) type LoadNative =
     fn(creator: Option<&dyn Host>, image: &[u8], name: &[u8]) -> Result<Arc<dyn Host>, Errno>;
 
+/// [`Processes::make`]: as [`LoadNative`], with nothing loaded.
+pub(crate) type MakeNative =
+    fn(creator: Option<&dyn Host>, name: &[u8]) -> Result<Arc<dyn Host>, Errno>;
+
+/// Where a process's first task enters and on what stack, each checked to lie
+/// in user space by whoever chose them (`docs/microkernel/K15.md` §2.1).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct EntryPoint {
+    /// The first instruction; on ARMv7-A bit 0 says Thumb.
+    pub entry: u64,
+    /// The stack pointer it starts with.
+    pub stack: u64,
+}
+
 /// What gives a starting process its first argument, or refuses to.
 pub type Argument<'a> = &'a mut dyn FnMut() -> Result<u64, Errno>;
 
 /// [`Processes::start`].
-pub(crate) type StartNative =
-    fn(process: &Arc<dyn Host>, argument: Argument<'_>) -> Result<(), StartRefused>;
+pub(crate) type StartNative = fn(
+    process: &Arc<dyn Host>,
+    at: Option<EntryPoint>,
+    argument: Argument<'_>,
+) -> Result<(), StartRefused>;
 
 /// Why [`Processes::start`] did not start a process.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -472,6 +494,8 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         | NativeCall::JobGetQuota
         | NativeCall::ProcessCreate
         | NativeCall::ProcessStart
+        | NativeCall::ProcessMake
+        | NativeCall::ProcessRun
         | NativeCall::ExceptionChannelCreate
         | NativeCall::ExceptionState
         | NativeCall::ExceptionResolve => job_call(call, caller, &a),
@@ -509,7 +533,9 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         | NativeCall::PagerCreateVmo
         | NativeCall::PagerSupply
         | NativeCall::PagerOp
-        | NativeCall::PagerQueryDirty => pager_call(call, process, &a),
+        | NativeCall::PagerQueryDirty
+        | NativeCall::PagerKeep
+        | NativeCall::PagerTakeUp => pager_call(call, process, &a),
         NativeCall::IoMappingCreate
         | NativeCall::IoMappingMap
         | NativeCall::IoMappingMapCombining
@@ -1750,6 +1776,8 @@ fn write_paged(
 fn pager_call(call: NativeCall, process: &Process, a: &[u64; 6]) -> Result<usize, Errno> {
     match call {
         NativeCall::PagerCreate => pager_create(process, handle(a[0]), a[1], a[2]),
+        NativeCall::PagerKeep => pager_keep(process, handle(a[0])),
+        NativeCall::PagerTakeUp => pager_take_up(process, handle(a[0]), handle(a[1])),
         NativeCall::PagerCreateVmo => pager_create_vmo(process, handle(a[0]), a[1]),
         NativeCall::PagerSupply => {
             pager_supply(process, handle(a[0]), handle(a[1]), handle(a[2]), a[3])
@@ -1814,6 +1842,44 @@ fn pager_create(
     let port = port_in(process, port, Rights::WRITE)?;
     let wait_ns = read_u64(process, wait_at)?;
     let pager = Pager::new(port, wait_ns).map_err(|_| status::NO_MEMORY)?;
+    let pager = fallible::try_arc(pager).map_err(|_| status::NO_MEMORY)?;
+    insert_new(process, Object::Pager(pager), Rights::PAGER_OBJECT)
+}
+
+/// `pager_keep`: the pager's one keeper (`docs/microkernel/K13.md`).
+fn pager_keep(process: &Process, pager: Handle) -> Result<usize, Errno> {
+    let pager = process.with_handles(|table| pager_in(table, pager, Rights::PAGER))?;
+    let keeper = pager
+        .keep()
+        .map_err(|_| status::NO_MEMORY)?
+        .ok_or(status::ALREADY_BOUND)?;
+    drop(pager);
+    let keeper = fallible::try_arc(keeper).map_err(|_| status::NO_MEMORY)?;
+    insert_new(process, Object::PagerKeeper(keeper), Rights::KEEPER)
+}
+
+/// `pager_take_up`: a parked pager's handle again, its requests sent to `port`.
+/// Audited: it is a grant of authority over the pager's clients.
+fn pager_take_up(process: &Process, keeper: Handle, port: Handle) -> Result<usize, Errno> {
+    let keeper = process.with_handles(|table| {
+        let (object, rights) = table.get(keeper).map_err(table_error)?;
+        let Object::PagerKeeper(keeper) = object else {
+            return Err(status::WRONG_TYPE);
+        };
+        if !rights.contains(Rights::MANAGE) {
+            return Err(status::ACCESS_DENIED);
+        }
+        Ok(Arc::clone(keeper))
+    })?;
+    let port = port_in(process, port, Rights::WRITE)?;
+    let pager = keeper.take_up(&port).map_err(|why| match why {
+        TakeUpRefused::NotParked => status::BAD_STATE,
+        TakeUpRefused::NoMemory => status::NO_MEMORY,
+    })?;
+    record_rebind(
+        audit::Subject::of(process),
+        u32::try_from(pager.core().outstanding()).unwrap_or(u32::MAX),
+    );
     let pager = fallible::try_arc(pager).map_err(|_| status::NO_MEMORY)?;
     insert_new(process, Object::Pager(pager), Rights::PAGER_OBJECT)
 }
@@ -2134,6 +2200,7 @@ fn job_call(call: NativeCall, caller: &dyn Host, a: &[u64; 6]) -> Result<usize, 
         NativeCall::JobKill => job_kill(process, handle(first)),
         NativeCall::JobSetLimit => job_set_limit(process, handle(first), second, third),
         NativeCall::JobGetQuota => job_get_quota(process, handle(first), second, third),
+        #[cfg(not(ferrix_personality = "user"))]
         NativeCall::ProcessCreate => process_create(
             caller,
             handle(first),
@@ -2143,7 +2210,17 @@ fn job_call(call: NativeCall, caller: &dyn Host, a: &[u64; 6]) -> Result<usize, 
                 count: fourth,
             },
         ),
+        #[cfg(not(ferrix_personality = "user"))]
         NativeCall::ProcessStart => process_start(process, handle(first), handle(second)),
+        NativeCall::ProcessMake => process_make(
+            caller,
+            handle(first),
+            Buffer {
+                at: second,
+                count: third,
+            },
+        ),
+        NativeCall::ProcessRun => process_run(process, a),
         NativeCall::ExceptionChannelCreate => {
             exception_channel_create(process, handle(first), second, third)
         }
@@ -2504,6 +2581,7 @@ const MAX_IMAGE_BYTES: u64 = 16 << 20;
 /// mapped executable. The process is in `job` before the caller hears of it,
 /// so a kill of the job reaches a process that was never started. It runs as
 /// its creator, the `caller`, runs ([`LoadNative`]).
+#[cfg(not(ferrix_personality = "user"))]
 fn process_create(
     caller: &dyn Host,
     job: Handle,
@@ -2538,7 +2616,22 @@ fn process_create(
     crate::sched::set_current_group(own);
     let child = loaded?;
     drop(image);
-    if let Err(why) = child.core().move_new_to(&job) {
+    new_process_handle(process, &job, child, digest)
+}
+
+/// Put `child`, just made, in `job`, and answer a handle to it: what
+/// `process_create` and `process_make` end with. The process is in `job` before
+/// the caller hears of it, so a kill of the job reaches one never started. In a
+/// measured job its space is measured before anyone can map into it, with `digest`,
+/// the sealed image `process_create` loaded, recorded (`docs/microkernel/K14.md` §3);
+/// `process_make` has none, and each sealed map records its own.
+fn new_process_handle(
+    process: &Process,
+    job: &Arc<Job>,
+    child: Arc<dyn Host>,
+    digest: Option<[u8; 32]>,
+) -> Result<usize, Errno> {
+    if let Err(why) = child.core().move_new_to(job) {
         // A killed job takes nothing new, and one at its task limit no more
         // tasks. What was made is ended here, in the caller's task, where a
         // kill may run.
@@ -2548,7 +2641,7 @@ fn process_create(
             _ => status::BAD_STATE,
         });
     }
-    if measured {
+    if job.measured() {
         let space = child.core().space();
         space.measure();
         if let Some(digest) = digest
@@ -2574,6 +2667,59 @@ fn process_create(
         [made_in as u32, (made_in >> 32) as u32, 0],
     );
     Ok(handle)
+}
+
+/// `process_make`: `process_create` with the image taken out
+/// (`docs/microkernel/K15.md` §2.1). The same job rules and the same audit
+/// record; an empty address space, and no parser reached. The child is its job's
+/// from before the caller hears of it, and what it costs to make is that job's.
+fn process_make(caller: &dyn Host, job: Handle, name: Buffer) -> Result<usize, Errno> {
+    let process = caller.core();
+    let job = job_in(process, job, Rights::MANAGE)?;
+    if !process.job().may_start_in(&job, true) {
+        return Err(status::ACCESS_DENIED);
+    }
+    let name_len = usize::try_from(name.count)
+        .ok()
+        .filter(|&count| count <= nr::PROCESS_NAME_MAX)
+        .ok_or(status::INVALID_ARGS)?;
+    let name = copy_in(process, name.at, name_len)?;
+    let processes = processes().ok_or(Errno::ENOSYS)?;
+    let own = crate::sched::running_group();
+    crate::sched::set_current_group(job.quota_index());
+    let made = (processes.make)(Some(caller), &name);
+    crate::sched::set_current_group(own);
+    new_process_handle(process, &job, made?, None)
+}
+
+/// Whether a value may be entered at or started on: below the end of user space.
+/// A process that a program can make runs in the machine's own word width, so
+/// the end is `USER_VIRT_END`. `sysretq` raises `#GP` *in ring 0* on an address
+/// that is not canonical, so this is the kernel's own safety, not the child's. On
+/// ARMv7-A bit 0 of an entry says Thumb: the bound is even, so that bit cannot
+/// move an address from one side of it to the other.
+fn in_user_space(address: u64) -> bool {
+    const _: () = assert!(
+        ferrix_bootinfo::USER_VIRT_END.is_multiple_of(2),
+        "the Thumb bit could cross the bound"
+    );
+    ferrix_bootinfo::is_user_address(address)
+}
+
+/// `process_run`: `process_start` with an entry point and a stack, each checked
+/// before anything is claimed. A stack may be the very end of user space: the
+/// first push goes below it.
+fn process_run(process: &Process, a: &[u64; 6]) -> Result<usize, Errno> {
+    let [target, entry, stack, bootstrap, ..] = *a;
+    if !in_user_space(entry) || stack > ferrix_bootinfo::USER_VIRT_END {
+        return Err(status::INVALID_ARGS);
+    }
+    start_with(
+        process,
+        handle(target),
+        handle(bootstrap),
+        Some(EntryPoint { entry, stack }),
+    )
 }
 
 /// Every byte of a VMO, for `process_create` to load.
@@ -2614,7 +2760,18 @@ pub fn image_bytes(vmo: &Vmo) -> Result<crate::vmap::Buffer, Errno> {
 /// way out, after both tables' locks are let go. The `Control` held here keeps
 /// a last handle closed meanwhile from killing the process under a start that
 /// is about to succeed.
+#[cfg(not(ferrix_personality = "user"))]
 fn process_start(process: &Process, target: Handle, bootstrap: Handle) -> Result<usize, Errno> {
+    start_with(process, target, bootstrap, None)
+}
+
+/// [`process_start`]'s steps, entering where the program loaded says, or at `at`.
+fn start_with(
+    process: &Process,
+    target: Handle,
+    bootstrap: Handle,
+    at: Option<EntryPoint>,
+) -> Result<usize, Errno> {
     let control = process.with_handles(|table| {
         let (object, rights) = table.get(target).map_err(table_error)?;
         let Object::Process(child) = object else {
@@ -2633,7 +2790,7 @@ fn process_start(process: &Process, target: Handle, bootstrap: Handle) -> Result
         }
         move_handle(process, child.core(), bootstrap).map(|placed| u64::from(placed.0))
     };
-    (processes.start)(&child, &mut place).map_err(|why| match why {
+    (processes.start)(&child, at, &mut place).map_err(|why| match why {
         StartRefused::Claimed => status::BAD_STATE,
         StartRefused::NoTask => status::NO_MEMORY,
         StartRefused::Argument(status) => status,
@@ -4178,12 +4335,16 @@ fn process_space(process: &Process, target: Handle, rights: u64) -> Result<usize
     })?;
     let child = control.host().ok_or(status::BAD_STATE)?;
     let core = child.core();
+    // Counted first, then judged: `execve` reads the count, so a child that starts
+    // and execs a set-id file between the two either sees this handle and raises
+    // nothing, or has started by the test below, and the handle goes unanswered
+    // (ledger 6162 N1, L.object.309).
+    let space =
+        SpaceRef::of(Arc::clone(core.space()), core.quota_slot()).map_err(|_| status::NO_MEMORY)?;
     if !control.is_unstarted() || core.is_terminated() || core.with_tasks(|tasks| !tasks.is_empty())
     {
         return Err(status::BAD_STATE);
     }
-    let space =
-        SpaceRef::of(Arc::clone(core.space()), core.quota_slot()).map_err(|_| status::NO_MEMORY)?;
     insert_new(process, Object::Space(space), rights)
 }
 
@@ -4242,8 +4403,11 @@ fn space_map(
     let at = (address != 0).then_some(address);
     let _layout = target.space().layout();
     let mapped = target
-        .space()
-        .map_by_handle(at, length, vmo, offset, flags, ceiling)
+        .charging_owner(|| {
+            target
+                .space()
+                .map_by_handle(at, length, vmo, offset, flags, ceiling)
+        })
         .map_err(|why| match why {
             SpaceError::Unmeasured => unmeasured(process, NativeCall::SpaceMap),
             why => space_status(why),
@@ -4338,8 +4502,7 @@ fn space_allocate(
     let at = (address != 0).then_some(address);
     let _layout = target.space().layout();
     let mapped = target
-        .space()
-        .allocate_by_handle(at, length, flags)
+        .charging_owner(|| target.space().allocate_by_handle(at, length, flags))
         .map_err(|why| match why {
             SpaceError::Unmeasured => unmeasured(process, NativeCall::SpaceAllocate),
             why => space_status(why),
@@ -4746,6 +4909,7 @@ fn observe(target: &Object, observer: Observer) -> Option<Result<(), PortError>>
         | Object::IoMapping(_)
         | Object::Pin(_)
         | Object::Pager(_)
+        | Object::PagerKeeper(_)
         | Object::Starter
         | Object::Audit
         | Object::CpuService

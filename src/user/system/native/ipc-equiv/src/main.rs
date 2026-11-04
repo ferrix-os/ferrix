@@ -31,10 +31,11 @@ use core::fmt::Write as _;
 
 use ferrix_native_abi::rights::{Requested, Rights};
 use ferrix_native_abi::types::{PROCESS_KILLED, PROCESS_RUNNING};
+use ferrix_process_builder::build;
 use ferrix_rt::linux::{self, numbers};
 use ferrix_rt::native::channel::{self, Channel};
 use ferrix_rt::native::job::{Job, for_cgroup};
-use ferrix_rt::native::pending::{Process, create_process};
+use ferrix_rt::native::pending::Process;
 use ferrix_rt::native::port;
 use ferrix_rt::native::vmo::{self, Vmo};
 use ferrix_rt::native::{Deadline, Error, Object, OwnedHandle, Signals};
@@ -221,9 +222,14 @@ impl Place {
     /// A server in `job`, or this place's job.
     fn server_in(&self, job: Option<&Job<Kernel>>) -> Result<Server, i32> {
         let (mine, theirs) = channel::create(Kernel).map_err(|_| 8)?;
-        let process = create_process(job.unwrap_or(&self.job), &self.image, "ipc-equiv-server")
-            .map_err(|_| 9)?;
-        process.start(theirs.into_owned()).map_err(|_| 9)?;
+        let built = build(
+            job.unwrap_or(&self.job),
+            &self.image,
+            "ipc-equiv-server",
+            ferrix_rt::ELF_MACHINE,
+        )
+        .map_err(|_| 9)?;
+        let process = built.run(theirs.into_owned()).map_err(|_| 9)?;
         Ok(Server {
             channel: mine,
             process,
@@ -541,6 +547,7 @@ fn prepare() -> Result<Place, i32> {
     )
     .map_err(|_| 7)?;
     let _ = linux::close(dir);
+    let image = ferrix_process_builder::image(image).map_err(|_| 5)?;
     Ok(Place { image, job })
 }
 

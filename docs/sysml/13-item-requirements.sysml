@@ -258,6 +258,49 @@ package FerrixItemRequirements {
         }
         // K2 of docs/MICROKERNEL.md section 3 (docs/microkernel/K2.md; the
         // consultant's OK IF, ledger 2845 and 2857).
+        requirement <'H.OBJ.28'> aPagerSurvivesItsServer : ItemHighLevel {
+            attribute :>> statement = "A pager with a keeper whose handle closes shall hold its
+                outstanding requests until pager_take_up, which shall send each again to the new
+                port under its own id, or the keeper's close, or each waiter's bound, whichever
+                comes first; present pages and their Dirty state shall stay; and everything held
+                meanwhile shall stay charged to the job that was charged for it.";
+            attribute :>> criterion = "Stage 9's `rebind` line: read, dirty and copy waits across a
+                close answered by the next instance, two cycles, each waiter's bound and the
+                keeper's close ending parked waits.";
+            attribute :>> parent = ("O.ISOLATE");
+        }
+
+        requirement <'H.OBJ.27'> aProcessRunsWhatItsCreatorMapped : ItemHighLevel {
+            attribute :>> statement = "A native process made by process_make shall begin with an
+                empty address space, and shall run only what its creator mapped, entered at an
+                entry point and on a stack the kernel has checked lie in user space. In a kernel
+                built with personality=user the kernel shall parse no image on any call a program
+                can make.";
+            attribute :>> criterion = "Stage 9's `build` line; in a personality=user build, the
+                numbers of process_create and process_start answer ENOSYS.";
+            attribute :>> parent = ("O.VALIDATE", "O.ISOLATE");
+        }
+
+        requirement <'H.MEM.26'> theFirstImagesComeFromTheInitramfs : ItemHighLevel {
+            attribute :>> statement = "In a kernel built with personality=user, the kernel's one
+                loader shall load only images read from the initramfs, for the processes the
+                kernel itself starts, and constants of the in-kernel checks.";
+            attribute :>> criterion = "check-item-boundary.py's loader rule: first_image::load is
+                called only from discovery/devmgr.rs and check files, with a planted caller
+                failing it. In present and desktop ferrix.devmgr=init still parses what pid 1
+                left at /sbin/devmgr, as ITEM.md section 5 and VULNERABILITY-ANALYSIS.md say.";
+            attribute :>> parent = ("O.VALIDATE");
+        }
+
+        requirement <'H.MEM.27'> theKernelsLoaderKeepsWXorX : ItemHighLevel {
+            attribute :>> statement = "On every profile, the kernel's one loader shall leave no
+                page both writable and executable, and shall refuse a malformed image and never
+                panic; what a refused devmgr then does is stage 10's stated fatal.";
+            attribute :>> criterion = "Stage 9's `build` line: 0 leaves writable and executable,
+                7 malformed images refused.";
+            attribute :>> parent = ("O.WXN", "ASR-2");
+        }
+
         requirement <'H.MEM.24'> aSpaceByHandleIsHeldToItsRights : ItemHighLevel {
             attribute :>> statement = "An address space reached by handle shall be
                 mapped, unmapped, protected and read only as that handle's rights

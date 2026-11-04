@@ -26,6 +26,7 @@ path = "src/bin/domain-exec.rs"
 libc = "0.2"
 # The native calls that start the second run in a speculation domain.
 ferrix-native = { path = "../../lib/proto/native" }
+ferrix-process-builder = { path = "../../lib/proto/process-builder" }
 
 [features]
 # Only the test named by `PIPE_BENCH_ONLY` at build time (default the pipe),

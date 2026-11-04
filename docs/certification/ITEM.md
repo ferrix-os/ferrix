@@ -429,6 +429,19 @@ function is total over any bytes firmware wrote. What it hands sysfs, the
 refusal to anyone but root are a claim about the configuration, not the
 item (VULNERABILITY-ANALYSIS.md, T.IDENTIFY).
 
+### ferrix-elf — one parser, in the core, and the one loader in the item
+
+K15 (`docs/microkernel/K15.md`) takes the native ELF loader out of the kernel: a process
+`process_make` made is empty, and its creator maps it, with the library
+`ferrix-process-builder`, which is in no ring. What is left is `discovery/first_image.rs`
+(item), for the processes the kernel starts itself, on the same bounds-checked,
+fuzzed, `forbid(unsafe_code)` parser. `ferrix-elf` is classed in the core since the core's
+`image_abi` names its `Class` and the item and the Linux loader call it, closing F-76 for
+this crate (the ring is the customer's to overrule: ledger 5726, 4923). Its `symbols.rs`
+and `fixups.rs` are the boot loaders' and xtask's: no kernel file names them, and they
+are not reached from any kernel crate's code, so they are not linked and not deactivated
+code; `check-item-boundary.py`'s loader rule holds who may call the parser.
+
 ### `load` — everything it runs and does not vouch for
 
 The VFS, btrfs's glue into it (`ferrix-btrfs-vfs` and the kernel's

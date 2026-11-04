@@ -9,7 +9,7 @@
 
 use ferrix_native_abi::nr;
 use ferrix_native_abi::rights::Requested;
-use ferrix_native_abi::types::{MAP_EXECUTE, MAP_READ, MAP_WRITE};
+use ferrix_native_abi::types::{MAP_EXECUTE, MAP_NO_PAGER, MAP_NONE, MAP_READ, MAP_WRITE};
 
 use crate::call::{Call, Syscall};
 use crate::error::{Error, decode, decode_handle, decode_unit};
@@ -32,6 +32,8 @@ pub enum Access {
     ReadWrite,
     /// `MAP_READ | MAP_EXECUTE`.
     ReadExecute,
+    /// `MAP_NONE`: no access, a guard. [`Space::allocate`] alone takes it.
+    None,
 }
 
 impl Access {
@@ -42,6 +44,7 @@ impl Access {
             Access::Read => MAP_READ as usize,
             Access::ReadWrite => (MAP_READ | MAP_WRITE) as usize,
             Access::ReadExecute => (MAP_READ | MAP_EXECUTE) as usize,
+            Access::None => MAP_NONE as usize,
         }
     }
 }
@@ -84,6 +87,32 @@ impl<S: Syscall> Space<S> {
             .value(at.unwrap_or(0))
             .value(length)
             .value(access.register())
+            .input(&offset)
+            .make(self.syscall());
+        decode(value)
+    }
+
+    /// [`Space::map`] with `MAP_NO_PAGER`: a pager-backed VMO is refused, so
+    /// nothing mapped here can make the process wait on a server.
+    ///
+    /// # Errors
+    ///
+    /// As [`Space::map`]; [`Error::WrongType`] for a pager-backed VMO.
+    pub fn map_no_pager(
+        &self,
+        vmo: &Vmo<S>,
+        at: Option<usize>,
+        length: usize,
+        access: Access,
+        offset: u64,
+    ) -> Result<usize, Error> {
+        let offset = offset.to_ne_bytes();
+        let value = Call::new(nr::SPACE_MAP)
+            .value(register(self.handle()))
+            .value(register(vmo.handle()))
+            .value(at.unwrap_or(0))
+            .value(length)
+            .value(access.register() | MAP_NO_PAGER as usize)
             .input(&offset)
             .make(self.syscall());
         decode(value)
@@ -237,10 +266,27 @@ impl<S: Syscall> Vmo<S> {
     /// [`Error::AccessDenied`] without `MAP` and `READ`, with the handle
     /// back.
     pub fn executable(self) -> Result<Vmo<S>, (Error, Vmo<S>)> {
+        self.executable_with(false)
+    }
+
+    /// [`Vmo::executable`] with `VMO_SEAL`: frozen for every holder, and measured by
+    /// the kernel, which is what a measured job's process may map
+    /// (`docs/microkernel/K14.md` §2).
+    ///
+    /// # Errors
+    ///
+    /// As [`Vmo::executable`], and [`Error::BadState`] for an object that cannot be
+    /// sealed, with the handle given back.
+    pub fn sealed_executable(self) -> Result<Vmo<S>, (Error, Vmo<S>)> {
+        self.executable_with(true)
+    }
+
+    /// `vmo_executable`, whose option `VMO_SEAL` is 1.
+    fn executable_with(self, seal: bool) -> Result<Vmo<S>, (Error, Vmo<S>)> {
         let sys = self.syscall();
         let value = Call::new(nr::VMO_EXECUTABLE)
             .value(register(self.handle()))
-            .value(0)
+            .value(usize::from(seal))
             .make(sys);
         match decode_handle(value) {
             Ok(handle) => {

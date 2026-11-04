@@ -295,6 +295,8 @@
         "checks.rs",
         "fastpath.rs",
         "discovery/devmgr.rs",
+        "discovery/first_image.rs",
+        "discovery/first_image_check.rs",
         "discovery/firmware.rs",
         "discovery/mod.rs",
         "discovery/pci.rs",
@@ -312,6 +314,7 @@
         "syscall/mod.rs",
         "syscall/native.rs",
         "syscall/native_check.rs",
+        "syscall/build_check.rs",
         "syscall/program.rs",
         "syscall/program_check.rs",
         "syscall/rehome_check.rs",
@@ -470,26 +473,26 @@
         "path": "src/lib/crypto/sha256",
         "below": "byte slices its caller lends; no trait, no allocation, no dependency",
         "above": "Sha256 (new, update, finish), digest, finish_192 and digest_192: SHA-256 (FIPS 180-4) and SHA-256/192 (RFC 9858), called by ferrix-sigverify and ferrix-slots (docs/SIGNING.md section 5.1)"
-    },
-    "ferrix-boot-policy": {
+      },
+      "ferrix-boot-policy": {
         "ring": "item",
         "path": "src/lib/proto/boot-policy",
         "below": "ferrix-sigverify and ferrix-slots, and byte slices its caller lends: the trust-policy block, the slot's header page and manifest block; no trait, no allocation",
         "above": "decide, rescue, parse_block, encode_block and generic_family: whether the UEFI loader may start a slot (docs/SIGNING.md section 10.6), called by src/boot/common/uefi/src/slots.rs, which starts only on Start with every blob matched (H.SIGN.7)"
-    },
-    "ferrix-sigverify": {
+      },
+      "ferrix-sigverify": {
         "ring": "item",
         "path": "src/lib/crypto/sigverify",
         "below": "ferrix-sha256, and byte slices its caller lends: the 4 KiB manifest block, the anchors and the revoked trees; no trait, no allocation",
         "above": "manifest::verify, Verified::check_payload and Verified::revoked, and lms::hss_verify: verify-only LMS/HSS (RFC 8554, RFC 9858, SP 800-208) and the signed manifest of docs/SIGNING.md, for the UEFI loader, init's configuration verifier and devmgr; no profile links it into ring 0 (SIGNING.md section 5.2)"
-    },
-    "ferrix-slots": {
+      },
+      "ferrix-slots": {
         "ring": "item",
         "path": "src/lib/proto/slots",
         "below": "ferrix-sha256, and byte slices its caller lends; the ControlDisk trait for the record's one write, implemented by the loader's Disk and bootctl's device; no allocation",
         "above": "the slot header (versions 1 and 2, its seal), the boot control record, the GPT scan, the loader's plan and command-line words (docs/AB-BOOT.md sections 2-4), called by src/boot/common/uefi, bootctl and ferrix-boot-policy; in the item since slice S4 because the seal a slot manifest signs passes through it (docs/SIGNING.md section 5.3)"
-    },
-    "ferrix-smbios": {
+      },
+      "ferrix-smbios": {
         "ring": "item",
         "path": "src/lib/platform/smbios",
         "below": "byte slices its caller lends; no trait, no allocation, no dependency",
@@ -503,6 +506,12 @@
         ],
         "below": "`Volume` and `WriteVolume`, the item's interface above btrfs; it implements `Device` over a cache for them",
         "above": "ferrix-vfs's `FileSystem` and `Inode`: it is written against the VFS, which is load, and so is load itself"
+      },
+      "ferrix-elf": {
+        "ring": "core",
+        "path": "src/lib/platform/elf",
+        "below": "none: bytes a caller lent",
+        "above": "`Elf::parse` and the readers of its headers, called by discovery/first_image.rs (item), syscall/load.rs and syscall/program.rs (load); `arch::*::image_abi` names `Class`. symbols.rs and fixups.rs are the boot loaders' and xtask's: no kernel file names them, argued in ITEM.md section 2 (K15, ledger 5726 (4))"
       }
     },
     "infrastructure_allowlist": {
@@ -771,7 +780,6 @@
         "ferrix-bootinfo": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-cgroupfs": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-description": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
-        "ferrix-elf": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-fbtext": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-fdt": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-frame": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
@@ -801,7 +809,6 @@
         "ferrix-bootinfo": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-crng": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-devmgr-proto": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
-        "ferrix-elf": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-fdt": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-linux-abi": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-native-abi": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
@@ -995,6 +1002,11 @@
         "crate": "ferrix-kernel"
       },
       {
+        "file": "syscall/build_check.rs",
+        "file_ring": "item",
+        "crate": "ferrix-kernel-load"
+      },
+      {
         "file": "syscall/native_check.rs",
         "file_ring": "item",
         "crate": "ferrix-kernel-load"
@@ -1029,6 +1041,19 @@
         "file_ring": "core",
         "crate": "ferrix-kernel-load"
       }
+    ]
+  },
+  "loader_callers": {
+    "//": [
+      "K15 (docs/microkernel/K15.md section 5), held by check-item-boundary.py: the product files that may call ferrix-elf's parser, and first_image::load, in the kernel. Check files are outside it."
+    ],
+    "elf_parse": [
+      "discovery/first_image.rs",
+      "syscall/load.rs",
+      "syscall/program.rs"
+    ],
+    "first_image_load": [
+      "discovery/devmgr.rs"
     ]
   }
 }
