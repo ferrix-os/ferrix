@@ -4084,7 +4084,9 @@ their objects with their frames retired, and `forget_retired_for_check`
 deallocated them. One frame then had two owners, in the item's ring, in check
 code, on every boot that runs the check on a third virtio disk; without that disk
 it skips with "no third disk is served". `present` and `desktop` reach it.
-PROFILELINE
+`max` does not build yet (mkgh5-max: "profile max is not yet buildable"), so no
+boot log shows it either way; `fast` was not run. Its call has no fs cfg, so it
+is owed a look when those profiles build.
 
 A probe printed it: "clean4 still in its object as frame 0x3493: allocator says
 free=true refcount=0", and the same of dirty1. As a reading, not shown: `run()`
