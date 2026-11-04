@@ -63,6 +63,32 @@ const PROGRAM: &[u8] = &[
     0x00, 0x00, 0x00, 0xef, 0xfe, 0xff, 0xff, 0xea,
 ];
 
+/// L.x86_64.55, L.x86_64.68: holds its start argument, writes it to a new VMO at
+/// offset 8 (R10 names the word that says so) and reads 16 bytes from offset 0, then
+/// ends with the word it read at byte 8: so the status is the argument only if RDI, RSI,
+/// RDX and R10 all arrived and RAX answered the VMO's handle. `as --64`, read back with `objcopy`.
+#[cfg(target_arch = "x86_64")]
+const ARGUMENTS_PROGRAM: &[u8] = &[
+    0x49, 0x89, 0xfc, 0xbb, 0x00, 0x00, 0x41, 0x00, 0x4c, 0x89, 0xa3, 0x80, 0x00, 0x00, 0x00, 0x48,
+    0xc7, 0x83, 0x90, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0xb8, 0x20, 0x10, 0x00, 0x00, 0xbf,
+    0x00, 0x10, 0x00, 0x00, 0x0f, 0x05, 0x49, 0x89, 0xc5, 0xb8, 0x22, 0x10, 0x00, 0x00, 0x4c, 0x89,
+    0xef, 0x48, 0x8d, 0xb3, 0x80, 0x00, 0x00, 0x00, 0xba, 0x08, 0x00, 0x00, 0x00, 0x4c, 0x8d, 0x93,
+    0x90, 0x00, 0x00, 0x00, 0x0f, 0x05, 0xb8, 0x21, 0x10, 0x00, 0x00, 0x4c, 0x89, 0xef, 0x48, 0x8d,
+    0xb3, 0x00, 0x01, 0x00, 0x00, 0xba, 0x10, 0x00, 0x00, 0x00, 0x4c, 0x8d, 0x93, 0x98, 0x00, 0x00,
+    0x00, 0x0f, 0x05, 0xb8, 0x9a, 0x10, 0x00, 0x00, 0x8b, 0xbb, 0x08, 0x01, 0x00, 0x00, 0xbe, 0x01,
+    0x00, 0x00, 0x00, 0x0f, 0x05, 0xeb, 0xfe,
+];
+
+/// A program that spins until its end reaches it: a jump to itself.
+#[cfg(target_arch = "x86_64")]
+const SPIN_PROGRAM: &[u8] = &[0xeb, 0xfe];
+/// See the x86-64 one.
+#[cfg(target_arch = "aarch64")]
+const SPIN_PROGRAM: &[u8] = &[0x00, 0x00, 0x00, 0x14];
+/// See the x86-64 one.
+#[cfg(target_arch = "arm")]
+const SPIN_PROGRAM: &[u8] = &[0xfe, 0xff, 0xff, 0xea];
+
 /// How long a program may take.
 const PATIENCE_NANOS: u64 = 120_000_000_000;
 /// Its loops, as stage 7's kernel-time case has them.
@@ -105,6 +131,14 @@ impl BareSide {
         Ok(BareSide { host })
     }
 
+    /// A program in `job` that spins until its end reaches it.
+    fn spinning(job: Arc<Job>) -> Result<BareSide, &'static str> {
+        let space = AddressSpace::new().map_err(|_| "bare: no space")?;
+        put_text(&space, SPIN_PROGRAM, Work::default())?;
+        let host = Bare::new(space, job, None).map_err(|_| "bare: no process")?;
+        Ok(BareSide { host })
+    }
+
     /// Start it on `cpu` and hold its task.
     fn start(&self, cpu: Option<usize>) -> Result<Arc<Task>, &'static str> {
         let thread = self.host.spawn_on(TEXT, STACK_TOP, 0, cpu)?;
@@ -133,6 +167,11 @@ impl BareSide {
 
 /// The program, its words, its pages and its stack, in `space`.
 fn put_program(space: &AddressSpace, work: Work) -> Result<(), &'static str> {
+    put_text(space, PROGRAM, work)
+}
+
+/// `program`, `work`'s words, its pages and its stack, in `space`.
+fn put_text(space: &AddressSpace, program: &[u8], work: Work) -> Result<(), &'static str> {
     let map = |at, length, flags| {
         space
             .map_anonymous(at, length, flags)
@@ -140,7 +179,7 @@ fn put_program(space: &AddressSpace, work: Work) -> Result<(), &'static str> {
             .map_err(|_| "bare: a program's memory would not map")
     };
     map(TEXT, PAGE_SIZE, VmaFlags::READ_WRITE)?;
-    uaccess::copy_to_user(space, TEXT, PROGRAM).map_err(|_| "bare: no copy")?;
+    uaccess::copy_to_user(space, TEXT, program).map_err(|_| "bare: no copy")?;
     space
         .protect(TEXT, PAGE_SIZE, VmaFlags::READ_EXECUTE)
         .map_err(|_| "bare: a program's text would not protect")?;
@@ -412,6 +451,88 @@ fn a_quota_cuts_a_program_alone(cpu: usize) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// L.sched.3: a program its job's `cpu.max` holds leaves the wait for its end, within
+/// a quarter of a second where waiting out the period takes nine tenths of one.
+///
+/// Verifies: L.sched.3
+fn a_throttled_program_leaves_for_its_end(cpu: usize) -> Result<(), &'static str> {
+    const QUOTA: u64 = 1_000_000;
+    const STOPPED: i32 = 99;
+    let tree = Job::new_root().map_err(|_| "bare: no job")?;
+    let job = tree.new_child().map_err(|_| "bare: no job")?;
+    if !job.set_bandwidth(QUOTA, 1_000_000_000) {
+        return Err("bare: a job's cpu.max could not be set");
+    }
+    let side = BareSide::spinning(Arc::clone(&job))?;
+    let task = side.start(Some(cpu))?;
+    let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    while task.runtime() < QUOTA {
+        if crate::timer::now_nanos() >= deadline {
+            return Err("bare: a program under cpu.max did not run its quota");
+        }
+        crate::sched::sleep_for(1_000_000);
+    }
+    // Into the wait: it has used its millisecond, and the period has most of its second left.
+    crate::sched::sleep_for(50_000_000);
+    side.host.end(STOPPED);
+    crate::sched::wait_until_gone(&task, 250_000_000)
+        .map_err(|_| "bare: a program held by cpu.max did not leave the wait for its end")?;
+    if side.ended()? != STOPPED {
+        return Err("bare: a program held by cpu.max ended with another status");
+    }
+    Ok(())
+}
+
+/// L.sched.35: a process's end tells every task it lists, a spinning one on another
+/// processor included, which then leaves by its next way back to user mode.
+///
+/// Verifies: L.sched.35
+fn an_end_reaches_every_thread(cpu: usize) -> Result<(), &'static str> {
+    const STOPPED: i32 = 98;
+    let side = BareSide::spinning(Job::new_root().map_err(|_| "bare: no job")?)?;
+    let there = side.start(Some(cpu))?;
+    let here = side.start(None)?;
+    let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    while there.runtime() == 0 || here.runtime() == 0 {
+        if crate::timer::now_nanos() >= deadline {
+            return Err("bare: a spinning thread never ran");
+        }
+        crate::sched::sleep_for(1_000_000);
+    }
+    side.host.end(STOPPED);
+    let gone = |task: &Task| {
+        crate::sched::wait_until_gone(task, 1_000_000_000)
+            .map_err(|_| "bare: a process's end did not reach a spinning thread")
+    };
+    gone(&there)?;
+    gone(&here)?;
+    if side.ended()? != STOPPED {
+        return Err("bare: an ended process kept another status");
+    }
+    Ok(())
+}
+
+/// L.x86_64.68: a native program enters at its entry on its stack with the start argument
+/// in RDI. L.x86_64.55: a call dispatches on RAX with RDI, RSI, RDX and R10, and answers
+/// in RAX. The argument reaches the status only through all of these.
+///
+/// Verifies: L.x86_64.55, L.x86_64.68
+#[cfg(target_arch = "x86_64")]
+fn a_program_has_its_argument_and_its_calls_theirs() -> Result<(), &'static str> {
+    let space = AddressSpace::new().map_err(|_| "bare: no space")?;
+    put_text(&space, ARGUMENTS_PROGRAM, Work::default())?;
+    let job = Job::new_root().map_err(|_| "bare: no job")?;
+    let host = Bare::new(space, job, None).map_err(|_| "bare: no process")?;
+    let side = BareSide { host };
+    let _thread = side
+        .host
+        .spawn_on(TEXT, STACK_TOP, u64::from(STATUS), None)?;
+    if side.ended()? != STATUS as i32 {
+        return Err("bare: a program's start argument or a call's four did not arrive");
+    }
+    Ok(())
+}
+
 /// The word at [`PAGES_AT`] of `space`.
 fn word_at(space: &AddressSpace) -> Result<u8, &'static str> {
     let mut one = [0_u8; 1];
@@ -473,10 +594,14 @@ pub fn run() -> Result<u32, &'static str> {
     a_write_after_protect_faults(cpu)?;
     a_limit_ends_its_own(cpu)?;
     a_quota_cuts_a_program_alone(cpu)?;
+    a_throttled_program_leaves_for_its_end(cpu)?;
+    an_end_reaches_every_thread(cpu)?;
+    #[cfg(target_arch = "x86_64")]
+    a_program_has_its_argument_and_its_calls_theirs()?;
     if !crate::sched::vtime::counting() {
-        return Ok(5);
+        return Ok(8);
     }
     user_time_is_not_kernel_time(cpu)?;
     calls_and_faults_are_kernel_time(cpu)?;
-    Ok(7)
+    Ok(10)
 }
