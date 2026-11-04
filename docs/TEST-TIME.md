@@ -1662,6 +1662,18 @@ test results equal, loom's included. The figures for bytes are bs-c's; 26% more 
 offer from `line-tables-only` on the side tests (tole 635 to 469 MB, no wall time), not
 taken.
 
+### Cut M3: the kernel's lint directories without incremental state
+
+Only lint runs use them and `gate.sh` trims their caches after each run, so the state was
+written to be deleted. On slot 2 with the trim off, the directories emptied first, on
+the commit before and on the commit itself (`mk-ci-m3-base`, `-new`): 6,885 MB, of it
+6,752 MB incremental state, against 511 MB, of it 1 MB. All 27 units' test results are
+equal, 393 lines. Kernel clippy took 72.0 and 31.2 s and the runs 278 and 129 s at
+loads 27.5 and 32.6, but the second run also had the slot warm from the first, so the
+wall times do not compare; the bytes do. `mk-ci-m3-ctl` FIRED with all six settings
+shown and only `linux_abi=off` failing. A local `check` loses incremental reuse in
+these lints.
+
 ### Component checkouts kept
 
 `gate.sh` deleted every component before each run, and the clones' new mtimes
