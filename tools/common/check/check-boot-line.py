@@ -103,6 +103,10 @@ def compare(want: dict[str, str], got: dict[str, str], claim_none: bool, no_clai
     """What differs, as `name=got (profile: want)`; empty when the line matches."""
     problems = []
     for name, value in want.items():
+        # A kernel with no linuxd does not print it: present's and desktop's lines stay
+        # as they were (ledger 6537, A6).
+        if name == "fault_ahead" and value == "not_applicable" and name not in got:
+            continue
         if got.get(name) != value:
             problems.append(f"{name}={got.get(name, '(absent)')} (expected {value})")
     for name in got:
