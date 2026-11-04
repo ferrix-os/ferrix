@@ -13,6 +13,15 @@
   "reservations": [
     {
       "ids": [
+        "L.object.340-369"
+      ],
+      "owner": "mk-authority",
+      "branch": "feature/mk-authority",
+      "date": "2026-11-04",
+      "purpose": "MICROKERNEL.md K16 and M8's kernel half (the second Linux partition): the first block was spent, ledger N.11; allotted by the product owner"
+    },
+    {
+      "ids": [
         "H.OBJ.34",
         "H.SCHED.26-27",
         "L.sched.153-170"
