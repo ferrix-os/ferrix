@@ -6,7 +6,7 @@ The statements in the certified item that the measured suite did not reach, on e
 
 | Architecture | Profile | Unreached | Argued | Hardware absent | Needs a test |
 |---|---|---:|---:|---:|---:|
-| x86_64 | coverage | 1924 | 400 | 264 | **1260** |
+| x86_64 | coverage | 1924 | 400 | 272 | **1252** |
 | aarch64 | debug | 632 | 311 | 157 | **164** |
 | armv7a | debug | 977 | 414 | 346 | **217** |
 
@@ -24,8 +24,8 @@ The statements in the certified item that the measured suite did not reach, on e
 | Reached only when the kernel is stopping | 145 | 8% |
 | Reached only when something has already failed | 64 | 3% |
 | Run, and credited to another line | 5 | 0% |
-| Hardware the measured machine does not have | 264 | 14% |
-| Needs a test | 1260 | 65% |
+| Hardware the measured machine does not have | 272 | 14% |
+| Needs a test | 1252 | 65% |
 
 ### x86_64: Unreachable on the measured architecture — 186 statements
 
@@ -103,7 +103,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `mm.rs` |
 | 1 | `core` | `user/space.rs` |
 
-### x86_64: Hardware the measured machine does not have — 264 statements
+### x86_64: Hardware the measured machine does not have — 272 statements
 
 **Not a justification, a configuration statement.** Enumeration and setup for devices this QEMU invocation does not present. A different machine would reach some of it, so the honest closure is either to measure on a machine that has the hardware or to state which devices the claim excludes.
 
@@ -112,9 +112,9 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 104 | `core` | `device.rs` |
 | 83 | `item` | `discovery/pci.rs` |
 | 41 | `core` | `iommu/vtd.rs` |
+| 12 | `core` | `arch/x86_64/speculation.rs` |
 | 6 | `core` | `discovery/fdt.rs` |
 | 5 | `core` | `arch/x86_64/clock.rs` |
-| 4 | `core` | `arch/x86_64/speculation.rs` |
 | 4 | `core` | `iommu.rs` |
 | 3 | `item` | `init.rs` |
 | 3 | `item` | `main.rs` |
@@ -128,7 +128,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `item` | `discovery/smbios.rs` |
 | 1 | `item` | `syscall/native.rs` |
 
-### x86_64: Needs a test — 1260 statements
+### x86_64: Needs a test — 1252 statements
 
 **The real gap.** No argument covers these; they are reachable on the measured configuration and nothing exercised them. This is the number that has to reach zero for DO-178C table A-7 objective 5. [COVERAGE-WORKLIST.md](COVERAGE-WORKLIST.md) groups them by module.
 
@@ -144,8 +144,8 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 40 | `item` | `discovery/pci/virtio.rs` |
 | 39 | `core` | `sched/direct.rs` |
 | 38 | `core` | `arch/x86_64/mod.rs` |
-| 38 | `core` | `arch/x86_64/speculation.rs` |
 | 32 | `core` | `object/channel.rs` |
+| 30 | `core` | `arch/x86_64/speculation.rs` |
 | 28 | `core` | `arch/x86_64/clock.rs` |
 | 28 | `core` | `arch/x86_64/trap.rs` |
 | 26 | `core` | `discovery/board.rs` |
@@ -161,7 +161,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 20 | `core` | `sched/mod.rs` |
 | 252 | | *and 45 more files* |
 
-### x86_64: argued line by line — 262 statements
+### x86_64: argued line by line — 270 statements
 
 From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it names and no others; the category is the one it is counted in above.
 
@@ -179,8 +179,10 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | `arch/x86_64/paranoid.rs` | 185 | Reached only when the kernel is stopping | A #DB in the kernel that no armed hardware breakpoint raised -- a single step or a general detect, neither of which the kernel asks for -- which it stops on. The breakpoints the stage 3 check arms each set their DR6 bit. |
 | `arch/x86_64/smp.rs` | 59 | Hardware the measured machine does not have | An x2APIC entry in the MADT, which firmware writes only for a processor whose APIC ID does not fit the eight bits of a local APIC entry: on QEMU, more than 255 processors with interrupt remapping in x2APIC mode. The suite boots four and one; q35's firmware describes each with a local APIC entry. |
 | `arch/x86_64/smp.rs` | 324 | Reached only when something has already failed | The trampoline's length is fixed when the image is built, by three symbols around the assembly in this file, and is well under a page. The refusal defends against an edit that grows it past 4 KiB, which would otherwise be copied over whatever follows its frame below one mebibyte. |
-| `arch/x86_64/speculation.rs` | 1125, 1131, 1133 | Hardware the measured machine does not have | STIBP and SSBD in IA32_SPEC_CTRL, AMD's automatic IBRS in EFER, and reading each back: planned and applied only on a processor that offers them. QEMU's TCG offers none (`TCG doesn't support requested feature: CPUID.07H:EDX.spec-ctrl [bit 26]`, `stibp`, `ssbd`, `auto-ibrs`). Gate 6's KVM boot on the AMD reference host applies all three and reads them back on every processor: `speculation defences read back on 4 processors`. |
-| `arch/x86_64/speculation.rs` | 1139 | Hardware the measured machine does not have | AMD's VIRT_SPEC_CTRL, used for SSBD only on a processor that offers it without SSBD in IA32_SPEC_CTRL: a guest of an older AMD host. Neither TCG nor the KVM reference host (which offers SSBD directly) presents that combination. |
+| `arch/x86_64/speculation.rs` | 940, 942, 944, 945 | Hardware the measured machine does not have | The Zenbleed backup fix: read, write and read back DE_CFG, planned only on a Zen 2 outside a guest (`decide_vector_leak`). The coverage run is under TCG, which offers no such part, and nazuna's verdict is that neither Zenbleed nor GDS applies (M0-B-PROPOSALS 2.3). No run on the measured machine reaches it; DF6 moved these writes out of `HARDENED`, ledger 1012, 6311 D4. Stage 9's verdict table, L.x86_64.123, is what the decision stands on. |
+| `arch/x86_64/speculation.rs` | 952, 955, 957, 958 | Hardware the measured machine does not have | GDS's enable: read, write and read back IA32_MCU_OPT_CTRL, planned only where GDS_CTRL says the register exists and microcode has the mitigation turned off. The coverage run is under TCG, which offers no such part. No run on the measured machine reaches it (ledger 1012, 6311 D4); the verdict table of L.x86_64.123 stands on the decision. |
+| `arch/x86_64/speculation.rs` | 1122, 1128, 1130 | Hardware the measured machine does not have | STIBP and SSBD in IA32_SPEC_CTRL, AMD's automatic IBRS in EFER, and reading each back: planned and applied only on a processor that offers them. QEMU's TCG offers none (`TCG doesn't support requested feature: CPUID.07H:EDX.spec-ctrl [bit 26]`, `stibp`, `ssbd`, `auto-ibrs`). Gate 6's KVM boot on the AMD reference host applies all three and reads them back on every processor: `speculation defences read back on 4 processors`. |
+| `arch/x86_64/speculation.rs` | 1136 | Hardware the measured machine does not have | AMD's VIRT_SPEC_CTRL, used for SSBD only on a processor that offers it without SSBD in IA32_SPEC_CTRL: a guest of an older AMD host. Neither TCG nor the KVM reference host (which offers SSBD directly) presents that combination. |
 | `arch/x86_64/trap.rs` | 579, 603 | Reached only when the kernel is stopping | `vector_name`'s standalone copy, called by `report_trap` and by the paranoid entry's fatal arms, both of which run only when the kernel is stopping. `classify` carries its own inlined copy, which the stage 3 fault check reaches with a program's `hlt`. |
 | `arch/x86_64/trap.rs` | 710, 713-714, 733 | Reached only when the kernel is stopping | The register dump the trap path prints when the kernel stops on an exception it cannot handle (`trap::report`); a passing run never prints it. |
 | `console.rs` | 206-207 | Reached only when the kernel is stopping | `Unlocked::write_str`, and in it the kernel log's record of a failure report written without the port's lock. `Unlocked` is used only by `write_panicking` after `PANIC_SPINS` failed attempts at the lock, which is a processor stopping with the lock held by itself or by another processor that will never release it. A passing run never reaches it. `console::log_check` runs `write_panicking` on every boot, and it takes the lock at the first attempt. |
