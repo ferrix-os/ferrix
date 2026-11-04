@@ -117,6 +117,8 @@ Causes are listed most likely first.
 | [FX-0932](#fx-0932) | jobs, quotas, switch counts or the filter failed the check of kernel objects alone |
 | [FX-0933](#fx-0933) | the page cache failed the check made of kernel objects alone |
 | [FX-0934](#fx-0934) | the native calls failed the check made of kernel objects alone |
+| [FX-0950](#fx-0950) | the device authority self-check failed |
+| [FX-0951](#fx-0951) | the sealing self-check failed |
 | [FX-1001](#fx-1001) | PCI enumeration failed its self-check |
 | [FX-1002](#fx-1002) | a device node handed out memory or an interrupt it does not have |
 | [FX-1003](#fx-1003) | an IOMMU domain gave a device the wrong addresses |
@@ -2880,6 +2882,44 @@ walks `drivers.slice`. The sentence names the case that was not true.
    verifies is in the check's `Verifies:` tag.
 
 See: src/kernel/src/syscall/rehome_check.rs; docs/microkernel/B5.md.
+
+<a id="fx-0950"></a>
+
+## FX-0950 — the device authority self-check failed
+
+`object::authority_check::run` and `device::check::check_iommu_held` hold K8's
+rules (`docs/microkernel/K8.md`): the right to attach a function to its IOMMU
+domain sits on one handle, an explicit node gives a driver no aperture, vector
+or pin before its bind and makes no domain on the way, an untranslated function
+is not bound without the boot's opt-out, and the IOMMU's registers and tables
+are in no aperture. A kernel failing one could hand a device memory, or its
+IOMMU, to whoever holds the handle.
+
+1. `DeviceNode::domain_for_call` makes a domain, or a native path calls
+   `DeviceNode::domain` directly.
+2. `DeviceNode::bind_domain` lost a refusal, or `device_bind_domain` its right.
+3. `Reserved::of` stopped adding `iommu::units`.
+
+See: src/kernel/src/object/authority_check.rs run; src/kernel/src/device.rs
+bind_domain; docs/microkernel/K8.md.
+
+<a id="fx-0951"></a>
+
+## FX-0951 — the sealing self-check failed
+
+`object::sealing_check::run` holds K14's rules (`docs/microkernel/K14.md`): a
+sealed VMO's bytes and length never change, its digest is the kernel's over its
+length and frames, a measured space runs only sealed images, and what it was
+given to run stays on its record. A kernel failing one could run code its
+digests do not name.
+
+1. A path in `user/vmo.rs` that changes a page stopped testing `Pages::sealed`.
+2. `AddressSpace::map_by_handle` lost its test of the digest, or a clone its
+   state.
+3. `Vmo::seal` hashed something other than the frames in page order.
+
+See: src/kernel/src/object/sealing_check.rs run; src/kernel/src/user/vmo.rs
+seal; docs/microkernel/K14.md.
 
 <a id="fx-1001"></a>
 
