@@ -7,6 +7,13 @@ Moved out of [`docs/BACKLOG.md`](../BACKLOG.md) on 2026-10-16. A decision is rec
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-11-04 (customer, 22:12 CET)** **The 3090 is freed for ComfyUI: no VRAM
+  store until the customer says so.** Through the coordinator: "free the GPU now, for
+  ComfyUI". vtier is stopped and slot 8 is closed by `logs/queue/vram-closed` and
+  unqualified; only the customer's word removes it. The scope, as the coordinator
+  settled it with the customer: this is the store. `check`'s small pinned GPU tests
+  stay on the 3090 and share the card with ComfyUI, which the customer knows. The
+  entry below stands as the reason the slot exists, and is on hold.
 * **2026-11-04 (customer, evening)** **Build a gate slot on the RTX 3090's
   memory, as added capacity.** mk-gpu's measurement said the VRAM adds no slot
   because it is no faster than the disk (`docs/TEST-TIME.md`). The customer:

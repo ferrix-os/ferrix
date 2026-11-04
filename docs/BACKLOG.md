@@ -638,6 +638,8 @@ taken.
 
 ## Waiting on the customer
 
+* **Slot 8 on the 3090's memory** (2026-11-04; `docs/TEST-TIME.md`, *GPU memory as a gate slot*): closed since the customer took the card back for ComfyUI. Reopening is the customer's word, and owes V2's kernel control, V10(h) with a control that fires, V7's neighbours and `mount-semantics.py` on the binary then installed (ledger 6697, 6858), before any of its rows count.
+* **btrfs for a shared store of the slots' builds** (2026-11-04; `docs/TEST-TIME.md`, *A shared store of the slots' builds*): hard links are out, a stale build reproduced (ledger 6859). btrfs may meet the order with no GPU, needing root and a device; unmeasured. Put to the customer by the coordinator. The GPU store and GPU lexer wait for the 3090.
 * **F-76, the core's and the item's unclassified libraries** (2026-10-23,
   filed with the kernel split, `docs/KERNEL-CRATES.md` §5.1; ledger 1585 Q1):
   the core links 21 first-party libraries and the item 16 that no ring
