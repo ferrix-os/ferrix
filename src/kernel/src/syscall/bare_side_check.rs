@@ -15,6 +15,7 @@ use ferrix_vma::VmaFlags;
 
 use crate::object::bare::Bare;
 use crate::object::job::Job;
+use crate::object::quota::Resource;
 use crate::sched::Task;
 use crate::syscall::uaccess;
 use crate::user::space::AddressSpace;
@@ -93,7 +94,11 @@ struct BareSide {
 impl BareSide {
     /// A program ready to run `work`, in a new job.
     fn new(work: Work) -> Result<BareSide, &'static str> {
-        let job = Job::new_root().map_err(|_| "bare: no job")?;
+        Self::in_job(work, Job::new_root().map_err(|_| "bare: no job")?)
+    }
+
+    /// A program ready to run `work`, in `job`.
+    fn in_job(work: Work, job: Arc<Job>) -> Result<BareSide, &'static str> {
         let space = AddressSpace::new().map_err(|_| "bare: no space")?;
         put_program(&space, work)?;
         let host = Bare::new(space, job, None).map_err(|_| "bare: no process")?;
@@ -327,6 +332,86 @@ fn a_write_after_protect_faults(cpu: usize) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// L.object.100, H.QUOTA.6, L.object.80: a fault refused by a job's memory limit
+/// ends a process of that job and none outside it, and counts the kill there and
+/// above. A program with a program's own faults, as a thread of the `Bare`, so the
+/// charge is its job's (ledger 6110 (5)).
+///
+/// Verifies: L.object.100, L.object.80, H.QUOTA.6
+fn a_limit_ends_its_own(cpu: usize) -> Result<(), &'static str> {
+    let tree = Job::new_root().map_err(|_| "bare: no job")?;
+    let limited = tree.new_child().map_err(|_| "bare: no job")?;
+    let sibling = tree.new_child().map_err(|_| "bare: no job")?;
+    if !limited.set_limit(Resource::Memory, 1 << 20) {
+        return Err("bare: the job's memory limit could not be set");
+    }
+    let victim = BareSide::in_job(
+        Work {
+            pages: PAGES,
+            status: STATUS,
+            ..Work::default()
+        },
+        Arc::clone(&limited),
+    )?;
+    let other = BareSide::in_job(
+        Work {
+            spins: SPINS,
+            status: STATUS,
+            ..Work::default()
+        },
+        Arc::clone(&sibling),
+    )?;
+    let _running = other.start(Some(cpu))?;
+    let _faulting = victim.start(Some(cpu))?;
+    if victim.ended()? == STATUS as i32 {
+        return Err("bare: a program past its job's memory limit ran to its end");
+    }
+    if other.ended()? != STATUS as i32 {
+        return Err("bare: a limit's kill reached a process outside the job");
+    }
+    if limited.oom_counts().1 != 1 || tree.oom_counts().1 != 1 || sibling.oom_counts().1 != 0 {
+        return Err("bare: a limit's kill was not counted in its job and above, and only there");
+    }
+    Ok(())
+}
+
+/// L.sched.4: a `cpu.max` set before a program runs alone on its processor, which gets
+/// no tick, still cuts it: held between a twelfth and two thirds of the processor.
+///
+/// Verifies: L.sched.4
+fn a_quota_cuts_a_program_alone(cpu: usize) -> Result<(), &'static str> {
+    let tree = Job::new_root().map_err(|_| "bare: no job")?;
+    let job = tree.new_child().map_err(|_| "bare: no job")?;
+    if !job.set_bandwidth(20_000_000, 100_000_000) {
+        return Err("bare: a job's cpu.max could not be set");
+    }
+    let side = BareSide::in_job(
+        Work {
+            spins: SPINS.saturating_mul(4),
+            status: STATUS,
+            ..Work::default()
+        },
+        Arc::clone(&job),
+    )?;
+    let began = crate::timer::now_nanos();
+    let task = side.start(Some(cpu))?;
+    if side.ended()? != STATUS as i32 {
+        return Err("bare: a program under cpu.max did not end with its status");
+    }
+    let wall = crate::timer::now_nanos().saturating_sub(began);
+    crate::sched::wait_until_gone(&task, PATIENCE_NANOS)?;
+    let ran = task.runtime();
+    if ran.saturating_mul(12) < wall || ran.saturating_mul(3) > wall.saturating_mul(2) {
+        crate::console::println!(
+            "  bare     under cpu.max 20000 100000 a program ran {} of {} us",
+            ran / 1000,
+            wall / 1000
+        );
+        return Err("bare: a program alone on its processor was not held to its cpu.max");
+    }
+    Ok(())
+}
+
 // CHECKS-ONLY: stages_check.rs
 /// Every case: how many ran, none where the kernel does not count kernel time.
 ///
@@ -343,10 +428,12 @@ pub fn run() -> Result<u32, &'static str> {
     let count = crate::smp::count();
     let cpu = if count > 1 { (here + 1) % count } else { here };
     a_write_after_protect_faults(cpu)?;
+    a_limit_ends_its_own(cpu)?;
+    a_quota_cuts_a_program_alone(cpu)?;
     if !crate::sched::vtime::counting() {
-        return Ok(2);
+        return Ok(4);
     }
     user_time_is_not_kernel_time(cpu)?;
     calls_and_faults_are_kernel_time(cpu)?;
-    Ok(4)
+    Ok(6)
 }
