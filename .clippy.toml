@@ -78,5 +78,6 @@ disallowed-methods = [
     { path = "ferrix_kernel_core::object::exception::Supervisor::is_live", reason = "checks-only, defined in object/exception.rs", allow-invalid = true },
     { path = "ferrix_kernel_core::object::pin::Pin::with_budget", reason = "checks-only, defined in object/pin.rs", allow-invalid = true },
     { path = "ferrix_kernel_core::user::cache::Reclaimed::stolen", reason = "checks-only, defined in user/cache.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::user::space::AddressSpace::shootdowns_begun", reason = "checks-only, defined in user/space.rs", allow-invalid = true },
 ]
 # END kernel-interface.py
