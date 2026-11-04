@@ -1306,7 +1306,7 @@ fn rebind_a_keeper(report: &mut Report) -> Result<(), &'static str> {
 /// L.object.301, L.object.302: parked, nothing ends and nothing is sent; taken up,
 /// each open request comes again under its own id, and the client is answered.
 /// A read and a dirty request, from two jobs, a copy's wait among them; two cycles,
-/// the second with the same port back.
+/// the second with the same port back, whose request's ticket the next instance adopts.
 ///
 /// Verifies: L.object.301, L.object.302, L.object.307, H.OBJ.28
 fn rebind_across_a_restart(world: &World, report: &mut Report) -> Result<(), &'static str> {
@@ -1380,22 +1380,76 @@ fn rebind_across_a_restart(world: &World, report: &mut Report) -> Result<(), &'s
         return Err("c: a page written before a restart is not reported Dirty after it");
     }
 
+    second_cycle_across_a_restart(world, &mut served, keeper, port)?;
+    report.supplied += 1;
+    close(&served.side, keeper);
+    Ok(())
+}
+
+/// [`rebind_across_a_restart`]'s second cycle: the same port handed back, whose
+/// request's ticket the next instance adopts.
+///
+/// Verifies: L.object.302, L.user.157
+fn second_cycle_across_a_restart(
+    world: &World,
+    served: &mut Served,
+    keeper: Handle,
+    port: Handle,
+) -> Result<(), &'static str> {
     // A second cycle, the same port handed back: two packets are harmless.
     let again = served.client(&world.c)?;
     let faulting = fault_in(&again, Act::Read, 5)?;
     let first = served.packet()?.data[1];
+    // This instance adopts the request's ticket and dies with the page unsupplied.
+    let adopt = |side: &Side, end: Handle, id: u64| {
+        side.call(
+            nr::CHARGE_TICKET,
+            &[TICKET_ADOPT, reg(end), id & 0xFFFF_FFFF, id >> 32, OFFSET],
+        )
+    };
+    let dying = served.pager.ok_or("c: the pager's handle is gone")?;
+    if adopt(&served.side, dying, first).is_err() {
+        return Err("c: a pager could not adopt its own request's ticket");
+    }
     served.close_pager();
-    take_up(&mut served, keeper, port)?;
+    // Closed with the page unsupplied and the adoption kept: the ticket stays live, and
+    // a thread of the instance that lives on goes on charging the job whose fault it was.
+    if served.core.adoptable_ticket(first).is_none() {
+        return Err("c: a pager's close ended a kept request's ticket");
+    }
+    let side = &served.side;
+    let memory = |job: &Job| {
+        job.usage(super::quota::Resource::Memory)
+            .map_or(0, |usage| usage.used)
+    };
+    let before = memory(&world.c);
+    let charged = side.handle(nr::VMO_CREATE, &[PAGE_SIZE], "vmo_create failed")?;
+    side.put(OFFSET, &0_u64.to_ne_bytes())?;
+    let _ = side
+        .call(nr::VMO_WRITE, &[reg(charged), OFFSET, 8, OFFSET])
+        .map_err(|_| "c: a commit under a kept adoption was refused")?;
+    if memory(&world.c) < before + PAGE_SIZE / 2 {
+        return Err("c: a closed instance's adoption stopped charging the faulting job");
+    }
+    close(side, charged);
+    crate::object::ticket::leave();
+    take_up(served, keeper, port)?;
     let second = served.packet()?.data[1];
     if first != second {
         return Err("c: a second take-up sent another request's id");
     }
-    let _ = served.supply(5, 1)?;
+    // The ticket outlives that server: the next instance adopts it again, by the
+    // id the packet sent again carries, and so charges the job whose fault it was.
+    let handle = served.pager.ok_or("c: the taken-up pager has no handle")?;
+    if adopt(&served.side, handle, second).is_err() {
+        return Err("c: the next instance could not adopt a request's ticket");
+    }
+    let supplied = served.supply(5, 1);
+    crate::object::ticket::leave();
+    let _ = supplied?;
     if outcome(&again, &faulting)?.0 != Outcome::Read(byte_of(5)) {
         return Err("c: a second cycle's fault was not answered");
     }
-    report.supplied += 1;
-    close(&served.side, keeper);
     Ok(())
 }
 

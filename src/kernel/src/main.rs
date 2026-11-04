@@ -343,6 +343,8 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     if checks::run() {
         #[cfg(ferrix_linux_abi = "on")]
         stages_check::check_user_memory();
+        #[cfg(ferrix_linux_abi = "on")]
+        stages_check::check_dirty();
     }
 
     // Stage 8's root filesystem. Before stage 7's checks, which open files,

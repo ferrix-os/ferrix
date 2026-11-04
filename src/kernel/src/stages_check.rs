@@ -206,6 +206,20 @@ pub(super) fn check_native_refusals() {
 ///
 /// Halts rather than returning, as every other stage's check does: the useful
 /// report is which property failed, not that stage 6 did.
+pub(super) fn check_dirty() {
+    let pages = match user::dirty_check::run() {
+        Ok(pages) => pages,
+        Err(problem) => fatal!(
+            catalog::STAGE6_USER_MEMORY,
+            "stage 6 self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  dirty    {pages} cases of a disk file's page: read-only until written, reported until \
+         written back, taken by reclaim only when Clean"
+    );
+}
+
 pub(super) fn check_user_memory() {
     let report = match user::check::run() {
         Ok(report) => report,

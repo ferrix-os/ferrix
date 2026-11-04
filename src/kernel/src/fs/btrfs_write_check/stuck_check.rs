@@ -86,8 +86,12 @@ impl Pages for Poisoned {
     fn object(&self) -> Option<Arc<dyn Any + Send + Sync>> {
         self.pages.object()
     }
-    fn mapped_writes(&self) -> (Vec<u64>, bool) {
+    fn mapped_writes(&self) -> ferrix_vfs::Result<(Vec<u64>, bool)> {
         self.pages.mapped_writes()
+    }
+
+    fn mapped_writes_done(&self, failed_from: Option<u64>) {
+        self.pages.mapped_writes_done(failed_from);
     }
 }
 

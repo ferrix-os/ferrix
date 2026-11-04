@@ -777,6 +777,14 @@ reader has the bytes when a frame goes.
   images for the boot (`L.user.174`): 398 pages on the box's image, 378 of
   them the driver images a running devmgr holds anyway.
 
+### K3b: a disk file's mapped pages
+
+A sourced object's `states` holds one entry per non-Clean page, on the kernel heap, paid by the job
+whose write faulted; a write to a present page of a shared file mapping can so end in the fault's OOM
+path, a new case on the file path. `begin_mapped_writes` runs under the volume's sleeping lock and takes
+one shootdown over the runs written, so a volume's other waiters can wait for it; with nothing written
+it takes none. A write-back's list is allocated first, and with no memory `fsync` answers `ENOMEM`.
+
 ### K15: who pays for a process's image
 
 `ferrix-process-builder` maps text and read-only data from the image's VMO. Those frames

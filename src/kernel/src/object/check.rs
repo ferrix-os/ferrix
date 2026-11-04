@@ -2343,6 +2343,7 @@ pub fn run_devices() -> Result<DeviceReport, &'static str> {
 /// closed. On an untranslated one they stay held, which the console says.
 ///
 /// Verifies: L.object.45, L.object.46, L.iommu.24
+/// Verifies: L.user.212
 fn check_a_pin_gives_a_device_exactly_its_pages(counter: &mut Counter) -> Result<(), &'static str> {
     let Some(node) = device::devices()
         .iter()
@@ -2363,6 +2364,18 @@ fn check_a_pin_gives_a_device_exactly_its_pages(counter: &mut Counter) -> Result
     check_pin_refusals(&side, handle, vmo, counter)?;
     check_a_coherent_pin_of_a_snooping_device_changes_nothing(&side, handle)?;
     counter.refusals += object::blocks_check::run(&node)?;
+
+    // A disk file's object: a device's write would mark no page (K3b).
+    let sourced = crate::user::dirty_check::sourced_object().map_err(|_| "no sourced object")?;
+    let sourced = side
+        .process
+        .with_handles(|table| table.insert(Object::Vmo(sourced), Rights::VMO))
+        .map_err(|_| "no room for a sourced object")?;
+    if side.call(nr::VMO_PIN, &[reg(handle), reg(sourced), 0, PAGE_SIZE, 0])
+        != Err(status::BAD_STATE)
+    {
+        return Err("a pin of a disk file's object was not refused BAD_STATE");
+    }
 
     side.put(PAYLOAD, SECRET)?;
     side.put_offset(PAGE_SIZE)?;

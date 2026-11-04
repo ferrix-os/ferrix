@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2901 declarations in the core's files, 194 in the item's; 216 checks-only.
+2910 declarations in the core's files, 194 in the item's; 221 checks-only.
 
 ## ferrix-kernel-core
 
@@ -575,6 +575,7 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `STORE` | const | load (checks) | checks-only |
 | `USER_STACK_PROGRAM` | const | load (checks) | checks-only |
 
 ### `arch::aarch64::restricted`
@@ -780,6 +781,7 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `STORE` | const | load (checks) | checks-only |
 | `USER_STACK_PROGRAM` | const | load (checks) | checks-only |
 
 ### `arch::armv7a::signal`
@@ -1148,6 +1150,7 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `STORE` | const | load (checks) | checks-only |
 | `USER_STACK_PROGRAM` | const | load (checks) | checks-only |
 
 ### `arch::x86_64::restricted`
@@ -2171,7 +2174,7 @@ checks above is `pub` for raised checks (F3).
 | `Sender` | struct | item, load |  |
 | `Small` | struct | - |  |
 | `ChannelMessage` | type | item, load |  |
-| `Endpoint::adoptable_ticket` | method | item |  |
+| `Endpoint::adoptable_ticket` | method | item, load |  |
 | `Endpoint::end_ticket` | method | item |  |
 | `Endpoint::issue_ticket` | method | item |  |
 | `Endpoint::observe` | method | item, load |  |
@@ -2393,7 +2396,7 @@ checks above is `pub` for raised checks (F3).
 | `Pager::keep` | method | item, load |  |
 | `Pager::level` | method | item, load |  |
 | `Pager::new` | method | item, load, bin |  |
-| `PagerCore::adoptable_ticket` | method | item |  |
+| `PagerCore::adoptable_ticket` | method | item, load |  |
 | `PagerCore::link` | method | item, load, bin |  |
 | `PagerCore::outstanding` | method | item, load |  |
 | `PagerCore::serves` | method | item |  |
@@ -3344,6 +3347,7 @@ checks above is `pub` for raised checks (F3).
 | `address_wait` | mod | item, load, bin |  |
 | `cache` | mod | load |  |
 | `check` | mod | bin (checks) | pub for raised checks |
+| `dirty_check` | mod | load, bin (checks) | pub for raised checks |
 | `memory_type` | mod | item, load, bin |  |
 | `rehome_cache_check` | mod | item (checks) | pub for raised checks |
 | `rehome_check` | mod | item (checks) | pub for raised checks |
@@ -3427,6 +3431,13 @@ checks above is `pub` for raised checks (F3).
 | `Report::reserved` | field | item, load, bin |  |
 | `Report::swapped` | field | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Report::walked` | field | load, bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+
+### `user::dirty_check`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `run` | fn | bin (checks) | checks-only |
+| `sourced_object` | fn | load (checks) | checks-only |
 
 ### `user::memory_type`
 
@@ -3570,6 +3581,7 @@ checks above is `pub` for raised checks (F3).
 | `Held::frames` | method | item, load, bin |  |
 | `ReclaimHook::armed_by` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `ReclaimHook::run` | field | item, load, bin |  |
+| `Vmo::begin_mapped_writes` | method | load |  |
 | `Vmo::commit` | method | item, load |  |
 | `Vmo::commit_and_write` | method | load |  |
 | `Vmo::commit_blocks` | method | item, load |  |
@@ -3583,6 +3595,7 @@ checks above is `pub` for raised checks (F3).
 | `Vmo::digest` | method | item, load, bin |  |
 | `Vmo::dirty_range` | method | item |  |
 | `Vmo::dirty_runs` | method | item |  |
+| `Vmo::end_mapped_writes` | method | load |  |
 | `Vmo::fork` | method | load |  |
 | `Vmo::freeze_for_check` | method | load (checks) | checks-only |
 | `Vmo::give_back_run` | method | item |  |
@@ -3622,6 +3635,7 @@ checks above is `pub` for raised checks (F3).
 | `Vmo::supply_from` | method | item |  |
 | `Vmo::take_kernel_view` | method | item, load |  |
 | `Vmo::take_mapped_writes` | method | load |  |
+| `Vmo::tracks_dirty` | method | item, load |  |
 | `Vmo::writably_mapped` | method | load |  |
 | `Vmo::write_page` | method | item, load |  |
 | `Vmo::write_paged` | method | item |  |

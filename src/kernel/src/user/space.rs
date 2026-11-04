@@ -1649,7 +1649,7 @@ impl AddressSpace {
             Backing::File { id, offset } if region.flags.shared => (id, offset),
             _ => return None,
         };
-        let vmo = inner.objects.get(&id).filter(|vmo| vmo.is_pager_backed())?;
+        let vmo = inner.objects.get(&id).filter(|vmo| vmo.tracks_dirty())?;
         let into = (address & !(PAGE_SIZE - 1)).saturating_sub(region.range.start());
         Some((
             Arc::clone(vmo),
@@ -1840,7 +1840,7 @@ impl AddressSpace {
         (page, address): (u64, u64),
         access: Access,
     ) -> Result<Option<Frame>, SpaceError> {
-        if !access.write || !vmo.is_pager_backed() {
+        if !access.write || !vmo.tracks_dirty() {
             return Ok(None);
         }
         if !vmo.writable_page(index) {
@@ -2677,7 +2677,22 @@ struct Placement {
 /// lock held.
 fn ask(vmo: &Vmo, index: u64, writes: bool, mode: FaultMode) -> Result<(), Refusal> {
     let Some(link) = vmo.pager() else {
-        return Ok(());
+        // A disk file's page: filled by the fault's own path, and marked here, by
+        // the kernel, as a pager VMO that does not trap (K3b).
+        return if writes && vmo.tracks_dirty() && vmo.page_state(index) != PageState::Dirty {
+            // Still absent once the fill has looked: a hole, past what the file's
+            // source holds, whose page a write commits as zeros. Committed here,
+            // so that it is marked before a mapping can write it. Past the file's
+            // end nothing goes in, and `resolve` refuses it.
+            if vmo.page_state(index) == PageState::Absent {
+                let _ = vmo.commit_within(index).map_err(|_| Refusal::NoMemory)?;
+            }
+            vmo.mark_dirty(index)
+                .map(|_| ())
+                .map_err(|_| Refusal::NoMemory)
+        } else {
+            Ok(())
+        };
     };
     match vmo.page_state(index) {
         PageState::Absent => link.request(vmo, index, Command::Read, mode),

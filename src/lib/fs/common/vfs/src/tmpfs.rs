@@ -155,8 +155,20 @@ pub trait Pages: Send + Sync + fmt::Debug {
     /// mapped, or about to be, so that the file must stay in memory. A store
     /// over a disk writes the pages back as it does what `write` stored. The
     /// default, for a store nothing maps, is no page and no.
-    fn mapped_writes(&self) -> (Vec<u64>, bool) {
-        (Vec::new(), false)
+    ///
+    /// # Errors
+    ///
+    /// `ENOMEM` with no room for the list: the caller's `fsync` fails rather
+    /// than answer without those pages.
+    fn mapped_writes(&self) -> Result<(Vec<u64>, bool)> {
+        Ok((Vec::new(), false))
+    }
+
+    /// The write-back [`Pages::mapped_writes`] began is over: its pages are
+    /// clean, but from `failed_from` on, which did not reach the disk and are
+    /// reported again next time.
+    fn mapped_writes_done(&self, failed_from: Option<u64>) {
+        let _ = failed_from;
     }
 }
 

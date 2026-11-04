@@ -311,9 +311,9 @@ fn map_and_write(vmo: &Vmo) {
 }
 
 /// A shared mapping that may write the file, made and written after the
-/// source's answer and before the take, keeps the take from taking: such a
-/// write marks no page dirty, so the take looks again under the pages lock
-/// (`Vmo::take_clean_range`). The interleaving is forced through
+/// source's answer and before the take, keeps its page from being taken: the
+/// write marks the page Dirty, and the take looks at each page under the pages
+/// lock (`Vmo::take_clean_range`, K3b). The interleaving is forced through
 /// `user::vmo`'s reclaim hook, as stage 9's domain check forces its cases 11
 /// and 12; this shows the look holds there, not that the window opens
 /// unforced.

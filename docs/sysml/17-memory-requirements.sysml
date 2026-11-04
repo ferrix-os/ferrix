@@ -1689,7 +1689,7 @@ package FerrixMemoryRequirements {
                 "user::vmo::Vmo::writably_mapped");
         }
         requirement <'L.user.43'> mappedWritesAreReported : ItemLowLevel {
-            attribute :>> statement = "Vmo::take_mapped_writes shall report every
+            attribute :>> statement = "For an object with no source (K3b: a disk file's keeps a page's state), Vmo::take_mapped_writes shall report every
                 page the object holds while a shared mapping that may write has
                 been made since the last report or still lives, none otherwise, and
                 on running out of memory keep the mark so that the next report
@@ -3157,6 +3157,55 @@ package FerrixMemoryRequirements {
             attribute :>> unit = ("discovery::first_image::load");
         }
 
+        requirement <'L.user.206'> aMappedWriteIsSeen : ItemLowLevel {
+            attribute :>> statement = "A Clean page of a sourced object shall be installed read-only by every mapping, and its first write through a mapping, a fork child's included, shall mark it Dirty.";
+            attribute :>> criterion = "Through the fault a store takes: leaf read-only, state Clean, then Dirty and writable; a program's own store from ring 3 marks its page and no other (the `dirty` and btrfs-rw lines).";
+            attribute :>> parent = "H.MEM.28";
+            attribute :>> unit = ("user::vmo::Vmo::tracks_dirty", "user::vmo::Vmo::writable_page", "user::space::ask", "user::space::AddressSpace::read_only_paged");
+        }
+
+        requirement <'L.user.207'> aWriteBackAnswersWhatWasWritten : ItemLowLevel {
+            attribute :>> statement = "begin_mapped_writes shall answer exactly the present Dirty pages, make them awaiting-clean, and take their translations, and only theirs, out of every mapping before it returns, with no shootdown when there are none.";
+            attribute :>> criterion = "Of 8 pages the 2 written answered; their leaves absent, a page only read keeps its own, shootdowns advanced; none with nothing to do (the `dirty` line).";
+            attribute :>> parent = "H.MEM.28";
+            attribute :>> unit = ("user::vmo::Vmo::begin_mapped_writes");
+        }
+
+        requirement <'L.user.208'> aWriteDuringAWriteBackStays : ItemLowLevel {
+            attribute :>> statement = "A write after begin_mapped_writes shall make its page Dirty again, and end_mapped_writes shall leave that page Dirty.";
+            attribute :>> criterion = "The page written again is Dirty after the end and answered by the next begin (the `dirty` line).";
+            attribute :>> parent = "H.MEM.28";
+            attribute :>> unit = ("user::vmo::Vmo::end_mapped_writes");
+        }
+
+        requirement <'L.user.209'> aFailedWriteBackIsReportedAgain : ItemLowLevel {
+            attribute :>> statement = "A write-back that failed from a page on shall leave those pages to be reported again, and with no memory for the list fsync shall answer ENOMEM with no page changed.";
+            attribute :>> criterion = "end_mapped_writes with a failed page leaves it Dirty; fsync under an injected failure answers ENOMEM, the page Dirty, and the next writes it (the `dirty` and btrfs-rw lines).";
+            attribute :>> parent = "H.MEM.28";
+            attribute :>> unit = ("user::vmo::Vmo::end_mapped_writes", "user::vmo::Vmo::begin_mapped_writes");
+        }
+
+        requirement <'L.user.210'> reclaimTakesCleanMappedPages : ItemLowLevel {
+            attribute :>> statement = "Reclaim shall take Clean pages of a sourced object whether or not a mapping may write it, and neither Dirty nor awaiting-clean ones; a page taken shall leave no state, so that one refilled starts Clean.";
+            attribute :>> criterion = "Of three pages only the Clean one goes; a page cut and refilled reads Clean (the `dirty` line); stage 12's hook case (L.object.188).";
+            attribute :>> parent = "H.MEM.28";
+            attribute :>> unit = ("user::vmo::Pages::take_clean_into", "user::vmo::Pages::take_into", "user::vmo::Vmo::insert_absent");
+        }
+
+        requirement <'L.user.211'> aMappedWriteSurvivesAPowerCut : ItemLowLevel {
+            attribute :>> statement = "A write through a shared mapping shall reach the disk across a power cut once fsync returned.";
+            attribute :>> criterion = "test-powerfail's mapped round: every fourth body written through a shared mapping, its trailer's CRC judged after replay.";
+            attribute :>> parent = "H.MEM.28";
+            attribute :>> unit = ("user::vmo::Vmo::begin_mapped_writes");
+        }
+
+        requirement <'L.user.212'> aPinRefusesADiskFile : ItemLowLevel {
+            attribute :>> statement = "vmo_pin shall refuse a pager's or a disk file's object with BAD_STATE, so that no device writes one of its pages unseen.";
+            attribute :>> criterion = "A pin of a sourced object is BAD_STATE, where an anonymous one is given (the iommu line).";
+            attribute :>> parent = "H.MEM.28";
+            attribute :>> unit = ("syscall::native::unpaged_vmo_in");
+        }
+
         requirement <'L.user.158'> aRegionByHandleKeepsItsCeiling : ItemLowLevel {
             attribute :>> statement = "A region vmo_map or space_map made shall record
                 the most its handle allowed, readable always, writable only with
@@ -3501,11 +3550,16 @@ package FerrixMemoryRequirements {
                 outstanding; pages the adopted pager commits and supplies shall stay
                 charged to that job. At the job's object limit the fault shall end
                 SIGBUS or FAULT with no pager asked; a pager may spend the job's limit
-                while a request is open.";
+                while a request is open, a request a keeper keeps across its pager's close
+                included: the ticket stays live and adoptable through the next
+                instance, and a thread of the closed instance that adopted it goes
+                on charging that job until the request ends.";
             attribute :>> criterion = "Stage 9's pager check, case o: the page is the
                 faulting job's alone, the pager's job
                 paying nothing; another pager's handle, a handle without PAGER and a
-                request ended all adopt nothing.";
+                request ended all adopt nothing. The rebind check's second cycle: an
+                instance adopts a request's ticket and closes unanswered, and the
+                next adopts the same ticket by the id sent again.";
             attribute :>> parent = "H.MEM.22";
             attribute :>> unit = ("object::pager::PagerCore::adoptable_ticket",
                 "object::ticket::issue_for", "syscall::native::adopt_ticket");

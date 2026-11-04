@@ -8,6 +8,7 @@
 pub mod address_wait;
 pub mod cache;
 pub mod check;
+pub mod dirty_check;
 pub(crate) mod edge_check;
 pub mod memory_type;
 pub mod rehome_cache_check;

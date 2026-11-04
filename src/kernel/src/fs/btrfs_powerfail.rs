@@ -26,18 +26,25 @@
 //! what puts a real driver, a real block ring and a real host filesystem's
 //! flushes under it.
 
+use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::any::Any;
 use core::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 
 use ferrix_bootinfo::BootView;
+use ferrix_bootinfo::PAGE_SIZE;
 use ferrix_btrfs::crc32c::crc32c_update;
 use ferrix_vfs::initramfs::makedev;
 use ferrix_vfs::{Errno, NewNode};
+use ferrix_vma::VmaFlags;
 
 use crate::console::println;
 use crate::fs;
 use crate::interfaces::block_ring::VIRTIO_BLK_MAJOR;
+use crate::syscall::uaccess;
+use crate::user::space::{AddressSpace, FileMapping, FilePlace};
+use crate::user::vmo::Vmo;
 
 /// Where the writable disk is mounted.
 const MOUNT_POINT: &[u8] = b"/mnt-pf";
@@ -269,6 +276,84 @@ fn pass(which: u64, seq: u64, len: u64) -> Result<(), &'static str> {
         .map_err(|_| "a trailer could not be made durable")
 }
 
+/// [`pass`]'s body, written through a shared mapping of the file rather than
+/// with `write`: what `fsync` must carry to the disk because a mapping wrote it.
+/// The trailer goes on by `write`, after a durable body, as ever, so a body a
+/// mapped write's page never reached is a promise rolled back, and `replay`
+/// finds it (K3b, `docs/microkernel/K3b.md` section 4).
+///
+/// Verifies: L.user.211
+fn pass_mapped(which: u64, seq: u64, len: u64) -> Result<(), &'static str> {
+    let ns = fs::namespace();
+    let ctx = ns.context();
+    let name = path(which);
+    match ns.mknod(&ctx, None, &name, NewNode::Regular, 0o644) {
+        Ok(()) | Err(Errno::EEXIST) => {}
+        Err(_) => return Err("a file of the mapped round could not be created"),
+    }
+    let at = ns
+        .resolve(&ctx, None, &name, true)
+        .map_err(|_| "a file of the mapped round is gone")?;
+    ns.truncate(&at, 0)
+        .map_err(|_| "a mapped file would not empty")?;
+    ns.truncate(&at, len)
+        .map_err(|_| "a mapped file would not grow")?;
+    let inode = at
+        .inode()
+        .map_err(|_| "a file of the mapped round has no inode")?;
+    let object = inode
+        .mapping()
+        .and_then(|object| object.downcast::<Vmo>().ok())
+        .ok_or("a file of the mapped round has no object to map")?;
+    let space = AddressSpace::new().map_err(|_| "no address space for the mapped round")?;
+    let mapped = len.div_ceil(PAGE_SIZE).max(1) * PAGE_SIZE;
+    let base = space
+        .map_file(
+            FilePlace::Anywhere(None),
+            mapped,
+            VmaFlags {
+                shared: true,
+                ..VmaFlags::READ_WRITE
+            },
+            object,
+            0,
+            FileMapping {
+                file: Arc::new(()) as Arc<dyn Any + Send + Sync>,
+                may_write: true,
+            },
+        )
+        .map_err(|_| "a file of the mapped round would not map")?;
+    let mut register = !0u32;
+    let mut done = 0u64;
+    while done < len {
+        let take = PIECE.min((len - done) as usize);
+        let piece: Vec<u8> = (0..take).map(|i| byte(seq, done as usize + i)).collect();
+        uaccess::copy_to_user(&space, base + done, &piece)
+            .map_err(|_| "a write through a mapping of the churn failed")?;
+        register = crc32c_update(register, &piece);
+        done = done.saturating_add(take as u64);
+    }
+    inode
+        .fsync(false)
+        .map_err(|_| "a mapped body could not be made durable")?;
+    let _ = space.unmap(base, mapped);
+    drop(space);
+    let trailer = Trailer {
+        len,
+        crc: !register,
+    }
+    .encode(seq);
+    let (written, _) = inode
+        .write_at(len, &trailer, false)
+        .map_err(|_| "a mapped file's trailer could not be written")?;
+    if written != TRAILER {
+        return Err("a mapped file's trailer was written short");
+    }
+    inode
+        .fsync(false)
+        .map_err(|_| "a mapped file's trailer could not be made durable")
+}
+
 /// Write until the power goes, which is what the host is about to do.
 ///
 /// # Errors
@@ -292,7 +377,12 @@ pub fn churn(seed: u64) -> Result<Report, &'static str> {
         seq = seq.saturating_add(1);
         let which = next(&mut state) % FILES;
         let len = next(&mut state) % MAX_BODY;
-        pass(which, seq, len)?;
+        // Every fourth body goes through a shared mapping.
+        if seq.is_multiple_of(4) {
+            pass_mapped(which, seq, len)?;
+        } else {
+            pass(which, seq, len)?;
+        }
         // Now and then the whole volume is committed rather than logged, so
         // the cut lands inside both kinds of promise.
         if seq.is_multiple_of(8) {
@@ -395,10 +485,7 @@ fn log_root() -> Result<u64, &'static str> {
 }
 
 /// The CRC-32C of the first `len` bytes of a file, a piece at a time.
-fn checksum(
-    inode: &alloc::sync::Arc<dyn ferrix_vfs::Inode>,
-    len: u64,
-) -> Result<u32, &'static str> {
+fn checksum(inode: &Arc<dyn ferrix_vfs::Inode>, len: u64) -> Result<u32, &'static str> {
     let mut buffer = vec![0u8; PIECE];
     let mut register = !0u32;
     let mut at = 0u64;

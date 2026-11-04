@@ -796,20 +796,28 @@ impl Vmo {
         self.filler().is_some()
     }
 
-    /// Whether reclaim may drop this object's pages: its source can read
-    /// them again and has no newer copy, and no shared mapping may write
-    /// them without a mark (`user::cache`).
+    /// Whether reclaim may drop this object's pages: its source can read them
+    /// again. A page a shared mapping wrote is Dirty in the object, and
+    /// [`Vmo::take_clean_range`] leaves it (K3b, `docs/microkernel/K3b.md`).
     pub(crate) fn reclaimable(&self) -> bool {
         self.filler().is_some_and(|filler| filler.reclaimable())
-            && !self.writably_mapped()
-            && !self.mapped_written.load(Ordering::SeqCst)
+    }
+
+    /// Whether this object keeps K3's per-page state: a pager's, and a disk
+    /// file's (K3b). A Clean page of one is installed read-only by every mapping,
+    /// so a write through one faults and is seen.
+    pub fn tracks_dirty(&self) -> bool {
+        self.source.is_some()
     }
 
     /// How many of this object's pages its file has written and not yet
     /// written back ([`Filler::dirty_pages`]); none for an object that is not
     /// a disk file's.
     pub(crate) fn dirty_pages(&self) -> u64 {
-        self.filler().map_or(0, |filler| filler.dirty_pages())
+        // SEAL: read
+        let mapped = self.pages.lock().states.len() as u64;
+        self.filler()
+            .map_or(0, |filler| filler.dirty_pages().saturating_add(mapped))
     }
 
     /// Give back those of `picked` (page indices, lowest first) the source
@@ -818,11 +826,9 @@ impl Vmo {
     /// How many pages went; none for an object that is not
     /// [`Vmo::reclaimable`] now.
     ///
-    /// The look at [`Vmo::reclaimable`] here is only the early way out. A
-    /// shared mapping that may write can be made after it and after the
-    /// source's answer, fault a picked page in and write it, and such a write
-    /// marks no page dirty; so the take itself looks again, under the pages
-    /// lock ([`Vmo::take_clean_range`]), and takes nothing if one was.
+    /// A shared mapping can be made after the source's answer, fault a picked
+    /// page in and write it; so the take itself looks at each page, under the
+    /// pages lock ([`Vmo::take_clean_range`]), and leaves one that was written.
     ///
     /// Must be called with no spin lock held, as [`Vmo::decommit_range`] must.
     pub(crate) fn reclaim_clean(&self, picked: &mut Vec<u64>) -> u64 {
@@ -847,14 +853,6 @@ impl Vmo {
             }
             stolen
         })
-    }
-
-    /// Whether no shared mapping that may write has been made since the
-    /// file's owner last took its writes: what a page reclaim takes must not
-    /// have been written through one. Read under the pages lock by
-    /// [`Vmo::take_clean_range`].
-    fn unwritten_by_mappings(&self) -> bool {
-        !self.writably_mapped() && !self.mapped_written.load(Ordering::SeqCst)
     }
 
     /// Note, in `out`, the index of each committed page from `from` whose
@@ -1359,6 +1357,8 @@ impl Vmo {
         if pages.sealed || pages.frames.contains_key(&index) {
             return false;
         }
+        // A page refilled starts Clean, whatever a page once here was.
+        let _ = pages.states.remove(&index);
         // With no memory to record it, it did not go in, and stays the
         // caller's, as when another fill won.
         crate::fallible::insert(&mut pages.frames, index, frame).is_ok()
@@ -1393,6 +1393,82 @@ impl Vmo {
     pub(crate) fn raise_shared_may_write(&self) {
         let _ = self.shared_may_write.fetch_add(1, Ordering::SeqCst);
         self.mapped_written.store(true, Ordering::SeqCst);
+    }
+
+    /// The write-back of what shared mappings wrote, begun (K3b): the Dirty pages
+    /// become awaiting-clean, and their translations go, with one shootdown,
+    /// before this returns, so a write after it faults and is Dirty again. With
+    /// none, nothing is shot down. Answers the pages. Must not be called holding a
+    /// spin lock.
+    ///
+    /// # Errors
+    ///
+    /// [`AllocError`] with no memory for the list: no page changed state, and
+    /// the caller fails its `fsync` rather than answer without them.
+    pub fn begin_mapped_writes(&self) -> Result<Vec<u64>, AllocError> {
+        debug_assert!(
+            !crate::sched::started() || crate::sched::may_block(),
+            "a write-back began where nothing may block"
+        );
+        let dirty = |pages: &Pages| {
+            pages
+                .states
+                .iter()
+                .filter(|(index, state)| {
+                    **state == PageState::Dirty && pages.frames.contains_key(index)
+                })
+                .count()
+        };
+        // SEAL: read
+        let wanted = dirty(&self.pages.lock());
+        if wanted == 0 {
+            return Ok(Vec::new());
+        }
+        let mut written: Vec<u64> = crate::fallible::try_with_capacity(wanted)?;
+        let mut runs: Vec<(u64, u64)> = crate::fallible::try_with_capacity(wanted)?;
+        {
+            // SEAL: sourced, a disk file's: only its write-back marks pages
+            let mut guard = self.pages.lock();
+            let pages = &mut *guard;
+            for (index, state) in &mut pages.states {
+                if *state == PageState::Dirty
+                    && pages.frames.contains_key(index)
+                    && written.len() < wanted
+                {
+                    *state = PageState::AwaitingClean;
+                    // NOALLOC: room for `wanted`.
+                    written.push(*index);
+                    match runs.last_mut() {
+                        Some((first, count)) if *first + *count == *index => *count += 1,
+                        // NOALLOC: room for `wanted`.
+                        _ => runs.push((*index, 1)),
+                    }
+                }
+            }
+        }
+        self.retire_runs(&[], false, &runs, None, false);
+        Ok(written)
+    }
+
+    /// The write-back [`Vmo::begin_mapped_writes`] began, ended: its pages are
+    /// Clean, unless written since, and from `failed_from` on it did not reach
+    /// the volume and they are Dirty again, to be reported next time.
+    pub fn end_mapped_writes(&self, failed_from: Option<u64>) {
+        // SEAL: sourced, a disk file's: only its write-back marks pages
+        let mut guard = self.pages.lock();
+        let pages = &mut *guard;
+        pages.states.retain(|index, state| {
+            if *state != PageState::AwaitingClean {
+                return true;
+            }
+            match failed_from {
+                Some(first) if *index >= first => {
+                    *state = PageState::Dirty;
+                    true
+                }
+                _ => false,
+            }
+        });
     }
 
     /// The pages a shared mapping may have written since the last call:
@@ -1573,7 +1649,7 @@ impl Vmo {
             }
             // SEAL: sourced, a file's, whose clean copy this drops.
             let mut state = self.pages.lock();
-            if !self.unwritten_by_mappings() {
+            if state.states.contains_key(&index) {
                 return 0;
             }
             match state.frames.get(&index) {
@@ -1881,9 +1957,8 @@ impl Vmo {
     /// [`Vmo::decommit_range`] over `first..end` with no memory for the list
     /// of what it takes: [`CHUNK`] pages at a time, each chunk through all
     /// three phases before the next is taken. Slower -- a shootdown a chunk
-    /// -- and the same in the end. With `clean`, for reclaim, each chunk is
-    /// taken only while [`Vmo::unwritten_by_mappings`] holds, under the lock
-    /// it is taken under.
+    /// -- and the same in the end. With `clean`, for reclaim, a chunk leaves every
+    /// page a mapping wrote ([`Pages::take_clean_into`]).
     fn decommit_in_chunks(&self, first: u64, end: u64, clean: bool) -> usize {
         let mut given = 0;
         let mut from = Some(first);
@@ -1892,10 +1967,14 @@ impl Vmo {
             let (taken, next) = {
                 // SEAL: refused
                 let mut state = self.pages.lock();
-                if state.sealed || (clean && !self.unwritten_by_mappings()) {
+                if state.sealed {
                     break;
                 }
-                state.take_into(start, end, &mut chunk)
+                if clean {
+                    state.take_clean_into(start, end, &mut chunk)
+                } else {
+                    state.take_into(start, end, &mut chunk)
+                }
             };
             let frames = chunk.get(..taken).unwrap_or(&[]);
             given += frames.len();
@@ -2110,19 +2189,15 @@ impl Vmo {
         self.take_range_if(first, pages, false)
     }
 
-    /// [`Vmo::take_range`] for reclaim: nothing is taken if a shared mapping
-    /// that may write the file has been made ([`Vmo::unwritten_by_mappings`]),
-    /// looked at under the same hold of the pages lock as the take.
+    /// [`Vmo::take_range`] for reclaim: no page a shared mapping wrote, looked at
+    /// under the same hold of the pages lock as the take.
     ///
-    /// Why under that lock is enough: such a mapping is counted
-    /// ([`Vmo::raise_shared_may_write`]) under its space's lock, before that
-    /// lock is let go and so before any fault through it, and a fault puts a
-    /// page in a space's tables only under this object's pages lock. So a
-    /// look that finds no such mapping is made before any fault through one
-    /// could map a page taken here: a later fault finds the page gone and
-    /// fills it again from the file, as it holds it -- clean, which is why it
-    /// was handed over. A mapping counted before the look takes nothing,
-    /// whether or not it has written yet, since its writes mark no page.
+    /// Why under that lock is enough: a write through a mapping marks its page
+    /// Dirty under this lock before the page can be mapped writable (K3b). So a
+    /// page marked before the look stays; a page taken first has no translation
+    /// left after the take's three phases, and a later fault finds it gone and
+    /// fills it again from the file, as it holds it -- clean, which is why it was
+    /// handed over.
     ///
     /// # Errors
     ///
@@ -2137,7 +2212,7 @@ impl Vmo {
         let end = first.saturating_add(pages);
         // SEAL: refused
         let mut state = self.pages.lock();
-        if state.sealed || (clean && !self.unwritten_by_mappings()) {
+        if state.sealed {
             return Ok(Retired {
                 frames: Vec::new(),
                 release: true,
@@ -2151,7 +2226,11 @@ impl Vmo {
             .filter(|&(index, _)| !state.held.contains_key(index))
             .count();
         let mut frames = crate::fallible::try_filled((0, 0), count)?;
-        let (taken, _) = state.take_into(first, end, &mut frames);
+        let (taken, _) = if clean {
+            state.take_clean_into(first, end, &mut frames)
+        } else {
+            state.take_into(first, end, &mut frames)
+        };
         frames.truncate(taken);
         Ok(Retired {
             frames,
@@ -2984,6 +3063,40 @@ impl Pages {
                 return (taken, Some(index));
             };
             if let Some(frame) = self.frames.remove(&index) {
+                let _ = self.states.remove(&index);
+                *slot = (index, frame);
+                taken += 1;
+            }
+            from = index.saturating_add(1);
+        }
+        (taken, None)
+    }
+
+    /// [`Pages::take_into`] for reclaim: only a page that is neither held nor
+    /// Dirty nor awaiting-clean. Looked at under the hold a write fault marks a
+    /// page under, so one marked first stays, and one taken first faults in again
+    /// from the file, as it holds it (K3b).
+    fn take_clean_into(
+        &mut self,
+        first: u64,
+        end: u64,
+        out: &mut [(u64, Frame)],
+    ) -> (usize, Option<u64>) {
+        let mut taken = 0;
+        let mut from = first;
+        while from < end {
+            let Some(index) = self
+                .frames
+                .range(from..end)
+                .map(|(&index, _)| index)
+                .find(|index| !self.held.contains_key(index) && !self.states.contains_key(index))
+            else {
+                return (taken, None);
+            };
+            let Some(slot) = out.get_mut(taken) else {
+                return (taken, Some(index));
+            };
+            if let Some(frame) = self.frames.remove(&index) {
                 *slot = (index, frame);
                 taken += 1;
             }
@@ -3177,7 +3290,7 @@ impl Vmo {
     /// A Clean page is never mapped writable, so that its first write faults
     /// and is seen (H.MEM.23).
     pub(crate) fn writable_page(&self, index: u64) -> bool {
-        !self.is_pager_backed() || self.page_state(index) == PageState::Dirty
+        !self.tracks_dirty() || self.page_state(index) == PageState::Dirty
     }
 
     /// Make present page `index` Dirty, from Clean or awaiting-clean: the

@@ -305,14 +305,14 @@ impl ferrix_vfs::tmpfs::Pages for MappedPages {
     fn object(&self) -> Option<Arc<dyn core::any::Any + Send + Sync>> {
         Some(Arc::clone(&self.0) as Arc<dyn core::any::Any + Send + Sync>)
     }
-    fn mapped_writes(&self) -> (Vec<u64>, bool) {
-        let mut written = self.0.written.lock().unwrap();
+    fn mapped_writes(&self) -> ferrix_vfs::Result<(Vec<u64>, bool)> {
+        let mut written = self.0.written.lock().map_err(|_| Errno::EIO)?;
         let pages = if core::mem::take(&mut written.1) {
             written.0.keys().copied().collect()
         } else {
             Vec::new()
         };
-        (pages, Arc::strong_count(&self.0) > 1)
+        Ok((pages, Arc::strong_count(&self.0) > 1))
     }
 }
 

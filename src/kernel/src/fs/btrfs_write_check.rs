@@ -33,6 +33,7 @@ use crate::fs;
 use crate::interfaces::block_ring::VIRTIO_BLK_MAJOR;
 
 mod clean_check;
+mod mapped_check;
 mod poison_check;
 mod reclaim_check;
 mod stuck_check;
@@ -398,6 +399,7 @@ pub fn run() -> Result<Report, &'static str> {
         "  btrfs-rw a sync past a file whose writeback failed answered ENOMEM and still \
          committed the other file; the next sync committed the first"
     );
+    mapped_check::run()?;
     let clean = clean_check::run(rdev)?;
     crate::console::println!(
         "  reclaim  btrfs-rw: {} bytes of clean tree nodes counted in SReclaimable and \

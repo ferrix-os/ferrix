@@ -673,10 +673,21 @@ impl Pages for VmoPages {
     /// What the VMO says shared mappings may have written, and whether any
     /// other reference to it is out: a mapping's, or the one `mmap` holds
     /// between asking for the object and counting its mapping in.
-    fn mapped_writes(&self) -> (Vec<u64>, bool) {
-        // With no memory for the list, none this time: the object keeps its
-        // mark, and the next call reports them.
-        let written = self.vmo.take_mapped_writes().unwrap_or_default();
-        (written, Arc::strong_count(&self.vmo) > 1)
+    fn mapped_writes(&self) -> Result<(Vec<u64>, bool)> {
+        // With no memory for the list the writeback fails closed: `fsync` answers
+        // ENOMEM rather than OK without the pages (ledger 5981 (3)).
+        let written = if self.vmo.tracks_dirty() {
+            self.vmo.begin_mapped_writes()
+        } else {
+            self.vmo.take_mapped_writes()
+        }
+        .map_err(|_| Errno::ENOMEM)?;
+        Ok((written, Arc::strong_count(&self.vmo) > 1))
+    }
+
+    fn mapped_writes_done(&self, failed_from: Option<u64>) {
+        if self.vmo.tracks_dirty() {
+            self.vmo.end_mapped_writes(failed_from);
+        }
     }
 }

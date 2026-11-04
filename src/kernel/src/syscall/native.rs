@@ -1807,12 +1807,13 @@ fn vmo_in(table: &HandleTable, vmo: Handle, needed: Rights) -> Result<Arc<Vmo>, 
     Ok(Arc::clone(vmo))
 }
 
-/// [`vmo_in`] for a call that pins: a pager's object is refused
-/// `BAD_STATE`, since its pages are the pager's to supply and take back
-/// (`docs/microkernel/K3.md` §4).
+/// [`vmo_in`] for a call that pins: a pager's object or a disk file's is refused
+/// `BAD_STATE`, since its pages are its source's to supply and take back
+/// (`docs/microkernel/K3.md` §4), and a device's write would mark no page
+/// (K3b, ledger 5981 (10)).
 fn unpaged_vmo_in(table: &HandleTable, vmo: Handle, needed: Rights) -> Result<Arc<Vmo>, Errno> {
     let vmo = vmo_in(table, vmo, needed)?;
-    if vmo.is_pager_backed() {
+    if vmo.tracks_dirty() {
         return Err(status::BAD_STATE);
     }
     Ok(vmo)

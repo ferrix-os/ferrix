@@ -1821,11 +1821,10 @@ package FerrixObjectRequirements {
         requirement <'L.object.188'> reclaimTakesOnlyCleanPages : ItemLowLevel {
             attribute :>> statement = "reclaim shall give back a page of a disk
                 file only through reclaim_clean: only the pages the file's source
-                hands it, only while the object is reclaimable at the take --
-                no shared mapping that may write the file made since its owner
-                last took its writes, looked at under the pages lock the take is
-                made under -- and a page written and not yet written back shall
-                stay and read back as last written.";
+                hands it, and of those only a page Clean at the take, looked at under
+                the pages lock the take is made under; a page written, by write or
+                through a shared mapping, and not yet written back shall stay and
+                read back as last written.";
             attribute :>> criterion = "On a writable btrfs mount a file synced
                 and then written again in one page loses its clean pages to a
                 reclaim of the whole cache, keeps the written one, and reads back
@@ -1837,7 +1836,7 @@ package FerrixObjectRequirements {
             attribute :>> unit = ("user::cache::take_from", "user::vmo::Vmo::reclaim_clean",
                 "user::vmo::reclaim_clean", "user::vmo::Vmo::decommit_clean_range",
                 "user::vmo::Vmo::take_clean_range", "user::vmo::Vmo::take_range_if",
-                "user::vmo::Vmo::unwritten_by_mappings", "user::vmo::Vmo::decommit_in_chunks");
+                "user::vmo::Pages::take_clean_into", "user::vmo::Vmo::decommit_in_chunks");
         }
         // The dentry and inode caches as reclaimable (docs/CGROUPS.md
         // section 10): the follow-on of stage 13 M1's note left open, in

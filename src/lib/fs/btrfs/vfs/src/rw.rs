@@ -26,10 +26,15 @@
 //! it is why a program that does not `fsync` can lose its last writes, as on
 //! any filesystem.
 //!
-//! A write through a shared mapping marks no page: the program writes the
-//! page directly. So the store says which pages such a mapping may have
-//! written (`Pages::mapped_writes`) -- every page it holds, once a mapping
-//! that may write has been made -- and a writeback writes those as well.
+//! A write through a shared mapping reaches no method here: the program writes
+//! the page directly. The store knows which, since a Clean page is mapped
+//! read-only and its first write faults (`docs/microkernel/K3b.md`): a writeback
+//! asks it (`Pages::mapped_writes`), before the dirty set's spin lock and under the
+//! volume's sleeping lock, and tells it how that went (`Pages::mapped_writes_done`)
+//! before the lock goes, so one inode's write-backs never overlap. This is the one
+//! call into the page cache made holding the volume lock on purpose: it reads no
+//! file and waits for nothing but a shootdown, and it takes nothing that waits for
+//! the volume. "Done" means in extents of the open transaction, not committed.
 //!
 //! # What is written stays
 //!
@@ -640,6 +645,21 @@ struct Node<D> {
     writers: core::sync::atomic::AtomicIsize,
 }
 
+/// Tells the store how a write-back went, on every way out of it: until the runs
+/// are written, every page counts as failed.
+struct MappedDone<'a> {
+    pages: Option<&'a Arc<dyn Pages>>,
+    failed_from: Option<u64>,
+}
+
+impl Drop for MappedDone<'_> {
+    fn drop(&mut self) {
+        if let Some(pages) = self.pages {
+            pages.mapped_writes_done(self.failed_from);
+        }
+    }
+}
+
 /// What a writable file holds still against reclaim.
 #[derive(Debug, Default)]
 struct Still {
@@ -887,6 +907,18 @@ impl<D: WriteHandle> Node<D> {
     /// page is, because something wrote it.
     fn write_back(&self, volume: &mut WriteVolume<D>) -> Result<()> {
         let store = self.pages.lock().clone();
+        // What shared mappings wrote, before the spin lock below: taking their
+        // translations down is a shootdown (ledger 5981 (1)). With no memory for
+        // the list nothing changed state, and the `fsync` fails closed (5981 (3)).
+        let (written, mapped) = store
+            .as_ref()
+            .map_or(Ok((Vec::new(), false)), |pages| pages.mapped_writes())?;
+        let began = written.first().copied();
+        // Told how it went on every way out from here (5981 (2)).
+        let mut reported = MappedDone {
+            pages: store.as_ref(),
+            failed_from: began,
+        };
         let (dirty, held, _still) = {
             let mut dirty = self.dirty.lock();
             // Held still before they leave the dirty set: every page this
@@ -898,11 +930,8 @@ impl<D: WriteHandle> Node<D> {
             // Every page dirty now took its room; the ones taken out below
             // give it back, and the ones put back take it again.
             self.shared.release(dirty.len() as u64);
-            // What a shared mapping may have written, which marked nothing:
-            // pages the store holds, so reading them takes no fill.
-            let (written, mapped) = store
-                .as_ref()
-                .map_or((Vec::new(), false), |pages| pages.mapped_writes());
+            // What a shared mapping wrote: pages the store holds, so reading them
+            // takes no fill.
             dirty.extend(written);
             // Written back from here on, so the mount lets go, unless the
             // file is mapped or about to be; a write after this marks its
@@ -917,15 +946,18 @@ impl<D: WriteHandle> Node<D> {
         // Never the last reference: whoever called this holds one.
         drop(held);
         if dirty.is_empty() {
+            reported.failed_from = None;
             return Ok(());
         }
         let Some(pages) = self.pages.lock().clone() else {
+            reported.failed_from = None;
             return Ok(());
         };
         let size = self.meta.lock().size;
         let written = self.write_runs(volume, &pages, &dirty, size);
         self.shared.note_room(volume);
         if let Err((error, first)) = written {
+            reported.failed_from = Some(first);
             // The pages from the run that failed on stay dirty, to be written
             // when there is room, or to go with the file.
             let mut still = self.dirty.lock();
@@ -938,6 +970,7 @@ impl<D: WriteHandle> Node<D> {
                 .reserve_anyway(still.len().saturating_sub(before) as u64);
             return Err(error);
         }
+        reported.failed_from = None;
         self.refresh(volume)
     }
 

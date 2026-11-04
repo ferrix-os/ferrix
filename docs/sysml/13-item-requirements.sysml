@@ -301,6 +301,15 @@ package FerrixItemRequirements {
             attribute :>> parent = ("O.WXN", "ASR-2");
         }
 
+        requirement <'H.MEM.28'> aMappedWriteStaysInTheDirtySet : ItemHighLevel {
+            attribute :>> statement = "A write through a shared mapping of a disk file shall keep
+                its page in the set fsync writes until a write-back that began after the write has
+                ended; a page in that set shall not be reclaimed, and a page not written shall not
+                be reported.";
+            attribute :>> criterion = "Stage 6's `dirty` line and test-powerfail's mapped round.";
+            attribute :>> parent = ("O.ISOLATE");
+        }
+
         requirement <'H.MEM.24'> aSpaceByHandleIsHeldToItsRights : ItemHighLevel {
             attribute :>> statement = "An address space reached by handle shall be
                 mapped, unmapped, protected and read only as that handle's rights

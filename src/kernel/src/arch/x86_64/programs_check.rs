@@ -1,7 +1,15 @@
-//! The little program K15's check runs (`syscall/build_check.rs`).
+//! The little programs K15's checks run (`syscall/build_check.rs`,
+//! `fs/btrfs_write_check/mapped_check.rs`).
 
 // CHECKS-ONLY: syscall/build_check.rs
 /// Exits with its stack's page number: `movq %rsp, %rdi; shrq $12, %rdi; movl $231, %eax; syscall`.
 pub const USER_STACK_PROGRAM: &[u8] = &[
     0x48, 0x89, 0xe7, 0x48, 0xc1, 0xef, 0x0c, 0xb8, 0xe7, 0x00, 0x00, 0x00, 0x0f, 0x05,
+];
+
+// CHECKS-ONLY: syscall/build_check.rs
+/// `movb $0xab, 0x60000000; xorl %edi, %edi; movl $231, %eax; syscall`.
+pub const STORE: &[u8] = &[
+    0xc6, 0x04, 0x25, 0x00, 0x00, 0x00, 0x60, 0xab, 0x31, 0xff, 0xb8, 0xe7, 0x00, 0x00, 0x00, 0x0f,
+    0x05,
 ];
