@@ -15,6 +15,7 @@
     "for what no CHECKS-ONLY marker stands on, says `born` (its mechanism) and `ledger` (ledger 6137).",
     "for what no CHECKS-ONLY marker stands on, says `born` (its mechanism) and `ledger` (ledger 6137).",
     "for what no CHECKS-ONLY marker stands on, says `born` (its mechanism) and `ledger` (ledger 6137).",
+    "for what no CHECKS-ONLY marker stands on, says `born` (its mechanism) and `ledger` (ledger 6137).",
     "The 545 entries the split generated may shrink and never grow. An entry born after it,",
     "for what no CHECKS-ONLY marker stands on, says `born` (its mechanism) and `ledger` (ledger 6137)."
   ],
@@ -1655,6 +1656,16 @@
     {
       "item": "object/quota.rs: uncharge (fn)",
       "before": "pub(crate)"
+    },
+    {
+      "item": "object/reserve_check.rs: Report::promise (field)",
+      "born": "K12a",
+      "ledger": 6131
+    },
+    {
+      "item": "object/reserve_check.rs: run (fn)",
+      "born": "K12a",
+      "ledger": 6131
     },
     {
       "item": "object/timer.rs: Report::fired_at (field)",

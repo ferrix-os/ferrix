@@ -697,7 +697,7 @@ pub(crate) fn limit_refused(
 /// want of free memory, `free` bytes being free beyond the watermark and the
 /// outstanding promise (`docs/microkernel/K12.md` §2.6): [`LIMIT`] against
 /// `resource::RESERVE`.
-pub(crate) fn reservation_refused(subject: Subject, job: u64, asked: u64, free: u64) {
+pub fn reservation_refused(subject: Subject, job: u64, asked: u64, free: u64) {
     let target = Target {
         kind: target::RESOURCE,
         id: ferrix_audit::resource::RESERVE,

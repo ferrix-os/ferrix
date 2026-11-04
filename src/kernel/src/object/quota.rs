@@ -545,7 +545,7 @@ static RESERVING: SpinLock<()> = SpinLock::new(());
 
 /// Why a reservation was refused.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum ReserveError {
+pub enum ReserveError {
     /// One of its rules (`docs/microkernel/K12.md` §2.6): the job not empty
     /// at its first one, a reservation above or beneath it, a limit or mark
     /// above it, or its own limit below it.

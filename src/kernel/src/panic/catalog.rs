@@ -387,8 +387,12 @@ pub static STAGE9_PAGER: Explanation = Explanation {
     ],
     see: "src/kernel/src/object/pager.rs; src/kernel/src/object/pager_check.rs; \
           src/kernel/src/user/vmo.rs; src/kernel/src/user/space.rs; docs/microkernel/K3.md",
+};
+
+// CHECKS-ONLY: stages_check.rs
 /// For `check_reservations` in `stages_check.rs`.
-pub(crate) static STAGE9_RESERVE: Explanation = Explanation {
+#[doc(hidden)]
+pub static STAGE9_RESERVE: Explanation = Explanation {
     code: "FX-0914",
     title: "a job's memory reservation did not hold what it promises",
     meaning: "`object::reserve_check::run` reserves memory for a job in a tree of its own \

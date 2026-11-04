@@ -2130,6 +2130,61 @@ fn caches_on_every_processor() -> Result<(), &'static str> {
 /// Frames a reservation of the floors check is admitted for.
 const PROMISED: u64 = 64;
 
+/// A drawn frame retired, its last reference dropped, leaves its reservation
+/// as a freed frame does, though the free count does not get it back: so a
+/// retirement can cost the promise one frame (`L.mm.80`, ledger 5841 R1, R2).
+fn a_retired_drawn_frame_leaves_its_reservation(
+    entry: mm::Reservation,
+    before: u64,
+) -> Result<(), &'static str> {
+    let promise = before + PROMISED;
+    let frame = super::take_frames(0, super::reservation::Floor::Program(entry))
+        .ok_or("a frame drawn from its reservation was refused")?;
+    if super::reservation::outstanding() != promise - 1 {
+        return Err("a drawn frame did not leave the promise");
+    }
+    let count = super::RETIRED_COUNT.load(Ordering::Relaxed);
+    super::hold_table(true);
+    let marked = mm::retire_frame(frame) == mm::Retired::Marked;
+    let free = mm::free_frames();
+    mm::deallocate_frames(frame, 0);
+    let kept = mm::free_frames() == free;
+    let left =
+        mm::drawn_from(frame) == mm::NO_RESERVATION && super::reservation::outstanding() == promise;
+    let retired = super::RETIRED_COUNT
+        .load(Ordering::Relaxed)
+        .saturating_sub(count);
+    super::forget_checked_retirements(retired);
+    if !marked || !kept {
+        return Err("a drawn frame retired went back to the free lists");
+    }
+    if !left {
+        return Err("a retired drawn frame stayed drawn from its reservation");
+    }
+    Ok(())
+}
+
+/// The scrubber takes no frame a reservation has promised: with the free
+/// count past twice the watermark and under that beyond the promise, a batch
+/// stops (ledger 5841 R3).
+fn the_scrubber_leaves_a_promise_alone() -> Result<(), &'static str> {
+    let frame = fresh_free_frame()?;
+    let entry = mm::reservation_bind().ok_or("no reservation for the scrubber's case")?;
+    let free = mm::free_frames();
+    let size = free.saturating_sub(mm::program_floor() + 64);
+    let admitted = mm::reservation_resize(entry, size).is_ok();
+    let stopped = free < 2 * mm::watermark()
+        || matches!(super::scrub::claim(frame), super::scrub::Claim::Low);
+    mm::reservation_unbind(entry);
+    if !admitted {
+        return Err("a reservation the free frames cover was refused");
+    }
+    if !stopped {
+        return Err("the scrubber claimed a frame a reservation had promised");
+    }
+    Ok(())
+}
+
 /// The reservations' floors (`mm::reservation`, `docs/microkernel/K12.md`
 /// §3 steps 1 to 4), at stage 2 for the reason [`check_the_watermark`] runs
 /// there: one processor, no program, so nothing else moves the free count.
@@ -2243,6 +2298,7 @@ fn reservation_floors(
     if super::reservation::outstanding() != before {
         return Err("a refused reservation changed the promise");
     }
+    the_scrubber_leaves_a_promise_alone()?;
     mm::reservation_resize(entry, PROMISED)
         .map_err(|_| "a reservation the free frames cover was refused")?;
     let promise = before + PROMISED;
@@ -2269,6 +2325,7 @@ fn reservation_floors(
     }
     // Drawn from the reservation: given below both, each tagged, the promise
     // falling one for one.
+    a_retired_drawn_frame_leaves_its_reservation(entry, before)?;
     let mut first = None;
     for left in (0..PROMISED).rev() {
         let frame = super::take_frames(0, super::reservation::Floor::Program(entry))

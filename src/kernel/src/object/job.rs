@@ -616,7 +616,7 @@ impl Job {
     ///
     /// [`quota::ReserveError`], with nothing changed; the tree's root takes
     /// none.
-    pub(crate) fn set_reservation(&self, bytes: u64) -> Result<(), quota::ReserveError> {
+    pub fn set_reservation(&self, bytes: u64) -> Result<(), quota::ReserveError> {
         let quota = self.quota.as_ref().ok_or(quota::ReserveError::Rule)?;
         match quota.set_reservation(bytes) {
             Err(quota::ReserveError::Short(short)) => {
@@ -629,12 +629,12 @@ impl Job {
 
     /// Its reservation's size and what is drawn from it, in bytes, and the
     /// reservations refused it (`L.object.224`): `None` for the root.
-    pub(crate) fn reservation(&self) -> Option<Usage> {
+    pub fn reservation(&self) -> Option<Usage> {
         self.quota.as_ref().map(Quota::reservation)
     }
 
     /// The reservation it draws from, its own or an ancestor's.
-    pub(crate) fn draws_from(&self) -> crate::mm::Reservation {
+    pub fn draws_from(&self) -> crate::mm::Reservation {
         self.quota
             .as_ref()
             .map_or(crate::mm::NO_RESERVATION, Quota::draws_from)
@@ -645,7 +645,7 @@ impl Job {
     /// carries `RESERVE` (`docs/microkernel/K12.md` §2.6, ledger 2550 (2)):
     /// it draws from no reservation, or `from` draws from the same one, so
     /// nothing from outside a reserved subtree draws from its promise.
-    pub(crate) fn admits_work_from(&self, from: &Job) -> bool {
+    pub fn admits_work_from(&self, from: &Job) -> bool {
         let into = self.draws_from();
         into == crate::mm::NO_RESERVATION || into == from.draws_from()
     }
