@@ -1583,6 +1583,9 @@ package FerrixItemRequirements {
         // K12 (docs/microkernel/K12.md): a job's reservation beside its
         // limit. K12a held frames and page tables; K12b widened it by the
         // kernel heap's pages (ledger 2550 (4)).
+        // A frame retired for a hardware error costs the promise that frame,
+        // up to the retired set's capacity: lost memory, stated, not hidden
+        // (ledger 5841 R1).
         requirement <'H.QUOTA.15'> aReservationIsThere : ItemHighLevel {
             attribute :>> statement = "A frame of a job's memory or page tables,
                 or a page of the kernel heap its objects are made on, taken in

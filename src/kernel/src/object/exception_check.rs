@@ -451,6 +451,7 @@ fn faults(side: &Side, root: Handle, report: &mut Report) -> Result<(), &'static
     supervisor_dies(side, root, fault, report)?;
     repeats(side, root, fault, report)?;
     unsupervised(side, root, fault)?;
+    poison_and_its_supervisors(side, root, fault, report)?;
     no_raise_under_a_supervisor(side, root, fault)?;
     raised_is_never_offered(side)?;
     close(side, fault)?;
@@ -872,6 +873,57 @@ fn closed_undecided(
         return Err("case f: a fault closed undecided waited out its timeout");
     }
     for handle in [channel, process, job] {
+        close(side, handle)?;
+    }
+    Ok(())
+}
+
+/// Case p: a machine check's two rules, through the seam (ledger 5840, M2 to
+/// M4). One that cannot be restarted reaches no supervisor and the program
+/// ends. One that can is reported as a bus fault at its address, and an
+/// unchanged `RESUME` goes on to the signal rather than consume the poison
+/// again.
+///
+/// Verifies: L.trap.9, L.trap.12
+fn poison_and_its_supervisors(
+    side: &Side,
+    root: Handle,
+    image: Handle,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    use crate::object::exception::{POISON_ADDRESS, force_poison};
+    use crate::trap::Poison;
+    use ferrix_linux_abi::types::SIGBUS;
+    use ferrix_native_abi::exception::KIND_BUS;
+
+    let (job, process) = made(side, root, image)?;
+    let channel = attach(side, process, LONG_MS).map_err(|_| "case p: attach failed")?;
+    force_poison(Poison::Ending);
+    start(side, process, None)?;
+    if ended(side, process)? != (KILLED, SIGBUS) {
+        return Err("case p: a machine check that cannot restart did not end its program");
+    }
+    if wait(side, channel, Signals::READABLE, 0).is_ok() {
+        return Err("case p: a machine check that cannot restart reached its supervisor");
+    }
+    for handle in [channel, process, job] {
+        close(side, handle)?;
+    }
+
+    let (job, process) = made(side, root, image)?;
+    let channel = attach(side, process, LONG_MS).map_err(|_| "case p: attach failed")?;
+    force_poison(Poison::Resumable);
+    start(side, process, None)?;
+    let (fault, exception) = next_report(side, channel)?;
+    report.faults += 1;
+    if fault.kind != KIND_BUS || fault.address != POISON_ADDRESS {
+        return Err("case p: a machine check was not reported as a bus fault at its address");
+    }
+    resolve(side, exception, RESUME).map_err(|_| "case p: resume failed")?;
+    if ended(side, process)? != (KILLED, SIGBUS) {
+        return Err("case p: an unchanged resume of poison did not go on to the signal");
+    }
+    for handle in [exception, channel, process, job] {
         close(side, handle)?;
     }
     Ok(())

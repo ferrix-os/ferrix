@@ -379,7 +379,10 @@ and every frame route makes one decision with the free count `F` in the hold
 of the frame allocator's lock that takes the frames: a reserved job's frame
 with room is given while one is free, tagged and drawn; any other program's
 frame is refused below `W + O`; the kernel's own frames and the heap's pages
-below `O`. With no reservation `O` is 0 and every route is as it was.
+below `O`. With no reservation `O` is 0 and every route is as it was. A frame retired for a hardware error costs the promise one
+frame, up to the retired set's 256: free may then be below `O`, and take refuses
+rather than underflows, failing closed. The scrubber stops at twice the watermark
+beyond `O`.
 
 * **What the kernel keeps.** Below the promise the kernel keeps the
   watermark, F-23's per-processor reserve, and what reclaim and writeback
@@ -1347,7 +1350,12 @@ entry back), then detaches it and inserts it on the receiver. So one hold
 is bounded by one queue walk and one timeline walk of the parking
 processor -- both bounded by the tasks homed there, each a task's own slot
 -- plus one insert. The walk repeats, one hold at a time, until nothing
-moves.
+moves. Since K10 the sleeper timeline holds timer objects' arms too, and a
+move with no task left takes one (`take_timer_arm`, `move_one_off`): so one
+hold is **O(tasks + arms)** homed on the parking processor, every entry its
+owner's slot, an arm's made with its timer and charged to its job. Stage 9's
+`timer` line reports the hold after moving 260 arms, the check's figure at
+that count on that boot.
 
 **Measured** (ledger 4932 (B4)): `/proc/ferrix-service`'s `move-hold-max-ns`
 is the longest such hold since boot. In `test-quarantine` -- four
@@ -1955,6 +1963,13 @@ A timer's arm is filed on its processor's sleeper set beside sleeping
 tasks (`docs/microkernel/K10.md`, `L.object.218`), and fired by that
 processor's timer interrupt. Its bounds:
 
+A set or cancel that races a processor leaving service looks where the arm was
+filed, finds it gone, and looks again where it went (`TimerCore::take_back`): at
+most once for each processor that leaves while it runs, each look one run
+queue's lock and one descent by the arm's key. An arm moved to an idle processor
+is noticed through the move's kick: without one it would wait for that processor's
+next interrupt, since an idle queue's timer is stopped.
+
 * **The sleeper set** is an AVL tree keyed by instant and id. Filing,
   taking the first, and removing by the key an entry was filed under are
   each O(log n), n the tasks and timer arms filed on that processor, under
@@ -2316,6 +2331,14 @@ times when this landed, hence §2.2ad, which K5.md calls §2.2r.
   growth and shrinking swap in a vector allocated with no lock held and
   free the old one after (`grow`, `shrink`), a wake's entries go to an
   array on the stack, and a requeue reserves its room before it locks.
+* **What a bucket's room costs, uncharged** (the consultant's condition 5,
+  option (b)). A wait's record is charged to its job; a bucket's vector is not,
+  since no one job owns it. A bucket over four times its live entries is shrunk,
+  to no less than `MIN_ROOM`, outside its lock, at the end of each wait, wake and
+  requeue that took entries out (`shrink`). So what stays uncharged is at most
+  `MIN_ROOM` entries a bucket once any was used, plus four times the entries
+  listed, each of which a job is paying for: the slack is proportional to what
+  the jobs pay, never a pool they could fill and leave.
 * **The bound on a walk.** n is the entries of one bucket. **Worst case:**
   every entry listed machine-wide, at most 128 per waiting task (one wait
   at a time per task, of at most 128 words) times the tasks, which

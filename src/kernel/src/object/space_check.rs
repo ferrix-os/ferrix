@@ -66,9 +66,11 @@ use super::job::Job;
 use super::process::{Host, ProcessRef};
 use super::quota::Resource;
 use crate::arch;
+use crate::fs::SetIds;
 use crate::sched::Task;
 use crate::sync::SpinLock;
 use crate::syscall::check::spawn_in;
+use crate::syscall::exec::ids_it_may_raise;
 use crate::syscall::image::{self, Shape};
 use crate::syscall::process::{self, Process};
 use crate::syscall::uaccess;
@@ -389,6 +391,9 @@ fn cases(setup: &Setup) -> Result<Report, &'static str> {
         return Err("space self-check failed: the user-root sweep found nothing executable");
     }
     a_running_childs_text_unmapped(setup, &scratch, &mut report)?;
+    an_ended_processs_space_charges_its_owner(setup, &scratch, &mut report)?;
+    a_space_handle_stops_a_raise(setup, &scratch)?;
+    protection_zero(&scratch, &mut report)?;
     let _ = call(nr::HANDLE_CLOSE, &[reg(space)]);
     private_memory_by_handle(&scratch, &mut report)?;
     clone_rights(&mut report)?;
@@ -749,6 +754,192 @@ fn each_call_needs_its_right(
     Ok(())
 }
 
+/// A created process, its handle, and its image's VMO closed: for the cases
+/// after [`a_created_process`].
+fn another_child(setup: &Setup, scratch: &Scratch<'_>) -> Result<Handle, &'static str> {
+    let image = child_image();
+    scratch.put(IMAGE, &image)?;
+    let vmo = made(
+        nr::VMO_CREATE,
+        &[image.len() as u64],
+        "space self-check failed: vmo_create for a child's image failed",
+    )?;
+    scratch.put(OFFSET, &0_u64.to_ne_bytes())?;
+    let _ = call(
+        nr::VMO_WRITE,
+        &[reg(vmo), IMAGE, image.len() as u64, OFFSET],
+    )
+    .map_err(|_| "space self-check failed: a child's image could not be written")?;
+    scratch.put(NAME, CHILD_NAME)?;
+    let child = made(
+        nr::PROCESS_CREATE,
+        &[
+            reg(setup.owner_handle),
+            reg(vmo),
+            NAME,
+            CHILD_NAME.len() as u64,
+        ],
+        "space self-check failed: process_create failed",
+    )?;
+    let _ = call(nr::HANDLE_CLOSE, &[reg(vmo)]);
+    Ok(child)
+}
+
+/// The process a handle names.
+fn process_of(setup: &Setup, handle: Handle) -> Result<Arc<Process>, &'static str> {
+    setup.process.with_handles(|table| match table.get(handle) {
+        Ok((Object::Process(child), _)) => child
+            .control()
+            .and_then(|control| control.process::<Process>())
+            .ok_or("space self-check failed: a made process has gone"),
+        _ => Err("space self-check failed: that handle names no process"),
+    })
+}
+
+/// While a space handle names a process's space, no file gives it ids, because
+/// the holder may write into what runs on them; it may again once the last is
+/// closed. A fork of such a space, and a native child of a process on one, stay
+/// refused (ledger 5727 (1)).
+///
+/// Verifies: L.object.309
+fn a_space_handle_stops_a_raise(setup: &Setup, scratch: &Scratch<'_>) -> Result<(), &'static str> {
+    const RAISED: SetIds = SetIds {
+        uid: Some(0),
+        gid: None,
+    };
+    let child = another_child(setup, scratch)?;
+    let process = process_of(setup, child)?;
+    let held = made(
+        nr::PROCESS_SPACE,
+        &[reg(child), u64::from(SAME_RIGHTS)],
+        "space self-check failed: process_space failed",
+    )?;
+    if ids_it_may_raise(&process, RAISED) != SetIds::NONE {
+        return Err("a set-id file raised a process a space handle names");
+    }
+    let forked = process
+        .space()
+        .fork()
+        .map_err(|_| "space self-check failed: a fork failed")?;
+    if !forked.raises_refused() {
+        return Err("a fork of a space a handle names could be raised");
+    }
+    let _ = call(nr::HANDLE_CLOSE, &[reg(held)]);
+    if ids_it_may_raise(&process, RAISED) != RAISED {
+        return Err("a process no space handle names was not raised by a set-id file");
+    }
+    if !forked.raises_refused() {
+        return Err("a fork of a space a handle named stopped being refused");
+    }
+    let _ = call(nr::HANDLE_CLOSE, &[reg(child)]);
+    // A native child of a process on such a space: this one, through a handle
+    // to its own space held for the call.
+    let own = setup.process.space();
+    let mine = super::space::SpaceRef::of(Arc::clone(own), setup.process.quota_slot())
+        .map_err(|_| "space self-check failed: no memory for a handle")?;
+    let refused_child = another_child(setup, scratch)?;
+    let inherited = process_of(setup, refused_child)?.space().raises_refused();
+    drop(mine);
+    let _ = call(nr::HANDLE_CLOSE, &[reg(refused_child)]);
+    if !inherited {
+        return Err("a native child of a process a handle names could be raised");
+    }
+    Ok(())
+}
+
+/// A process that has ended leaves its space to the handles on it, and what
+/// they commit there is still its job's, not the caller's (ledger 2962 C1).
+///
+/// Verifies: L.user.161
+fn an_ended_processs_space_charges_its_owner(
+    setup: &Setup,
+    scratch: &Scratch<'_>,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    let child = another_child(setup, scratch)?;
+    let space = made(
+        nr::PROCESS_SPACE,
+        &[reg(child), u64::from(SAME_RIGHTS)],
+        "space self-check failed: process_space failed",
+    )?;
+    let ended = process_of(setup, child)?;
+    process::kill(&ended, 137);
+    drop(ended);
+    let mapped = call(
+        nr::SPACE_ALLOCATE,
+        &[
+            reg(space),
+            AT_ENDED,
+            PAGE_SIZE,
+            u64::from(MAP_READ | MAP_WRITE),
+        ],
+    );
+    if mapped != Ok(AT_ENDED as usize) {
+        return Err("space self-check failed: space_allocate in an ended process's space failed");
+    }
+    let (owner_before, caller_before) = (memory(&setup.owner)?, memory(&setup.caller)?);
+    if read(space, AT_ENDED, 8) != Ok(8) {
+        return Err("space self-check failed: a read in an ended process's space failed");
+    }
+    if memory(&setup.owner)? < owner_before + PAGE_SIZE || memory(&setup.caller)? != caller_before {
+        return Err("a page committed in an ended process's space was not charged to its job");
+    }
+    report.changes += 1;
+    let _ = call(nr::HANDLE_CLOSE, &[reg(space)]);
+    let _ = call(nr::HANDLE_CLOSE, &[reg(child)]);
+    Ok(())
+}
+
+/// Protection 0 makes a region with no access on `SPACE_ALLOCATE` alone: a
+/// read through the handle stops short of it, and `SPACE_MAP` and
+/// `SPACE_PROTECT` refuse it (K15, ledger 5729 (3)).
+///
+/// Verifies: L.object.297
+fn protection_zero(scratch: &Scratch<'_>, report: &mut Report) -> Result<(), &'static str> {
+    let space = made(
+        nr::SPACE_CREATE,
+        &[],
+        "space self-check failed: space_create failed",
+    )?;
+    let vmo = made(
+        nr::VMO_CREATE,
+        &[PAGE_SIZE],
+        "space self-check failed: vmo_create failed",
+    )?;
+    if call(nr::SPACE_ALLOCATE, &[reg(space), AT_NONE, PAGE_SIZE, 0]) != Ok(AT_NONE as usize) {
+        return Err("space_allocate refused protection 0");
+    }
+    if read(space, AT_NONE, 8).is_ok_and(|got| got != 0) {
+        return Err("a read through a space handle reached a region with no access");
+    }
+    refused(
+        call(nr::SPACE_PROTECT, &[reg(space), AT_NONE, PAGE_SIZE, 0]),
+        status::INVALID_ARGS,
+        "space_protect took protection 0",
+        report,
+    )?;
+    scratch.put(OFFSET, &0_u64.to_ne_bytes())?;
+    refused(
+        call(
+            nr::SPACE_MAP,
+            &[
+                reg(space),
+                reg(vmo),
+                AT_NONE + 2 * PAGE_SIZE,
+                PAGE_SIZE,
+                0,
+                OFFSET,
+            ],
+        ),
+        status::INVALID_ARGS,
+        "space_map took protection 0",
+        report,
+    )?;
+    let _ = call(nr::HANDLE_CLOSE, &[reg(vmo)]);
+    let _ = call(nr::HANDLE_CLOSE, &[reg(space)]);
+    Ok(())
+}
+
 /// The image the child runs: it spins, so it is still running when its
 /// creator reads it, until its text is taken away.
 fn child_image() -> Vec<u8> {
@@ -904,6 +1095,10 @@ fn after_the_start(
 
 /// Where the private memory of cases 9 and 11 goes.
 const AT_PRIVATE: u64 = 0x5010_0000;
+/// Where the ended process's case allocates.
+const AT_ENDED: u64 = 0x5020_0000;
+/// Where protection 0's case allocates.
+const AT_NONE: u64 = 0x5021_0000;
 /// Where the shared mapping of case 11 goes.
 const AT_SHARED: u64 = 0x5011_0000;
 

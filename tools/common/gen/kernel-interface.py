@@ -372,6 +372,11 @@ def register_key(e) -> str:
     return f"{e.file}: {what} ({e.kind})"
 
 
+# The split's own entries: `formerly_crate_wide` was generated with these, and they
+# only shrink. Anything later is `born` with a mechanism and a ledger line (6137).
+BORNLESS_MOST = 545
+
+
 def analyse(manifest, files, read, exists, register=None):
     """(entries of core and item files, crate of each file, problems)."""
     crate = crates_of(manifest, files, read, exists)
@@ -516,8 +521,15 @@ def analyse(manifest, files, read, exists, register=None):
     by_key = defaultdict(list)
     for e in entries:
         by_key[register_key(e)].append(e)
+    bornless = sum(1 for item in listed.values() if "born" not in item)
+    if bornless > BORNLESS_MOST:
+        problems.append(f"formerly_crate_wide: {bornless} entries with no `born`, where the split's {BORNLESS_MOST} "
+                        f"only shrink: a new entry says the mechanism it was born with and its ledger line")
     for key, item in sorted(listed.items()):
-        if item.get("before") != "pub(crate)":
+        if "born" in item:
+            if not item.get("ledger"):
+                problems.append(f"formerly_crate_wide: {key} was born with {item['born']} and names no ledger line")
+        elif item.get("before") != "pub(crate)":
             problems.append(f"formerly_crate_wide: {key} was {item.get('before')} before the split, narrower "
                             f"than pub(crate): it is marked CHECKS-ONLY with its home, never listed")
             continue
@@ -679,6 +691,12 @@ _REGISTER_CASES = [
      {"fs.rs": _FIX["fs.rs"] + "fn p() { crate::mm::checked(); }\n"}, "used by a higher crate's product code"),
     ("an entry narrower than pub(crate)",
      {"entries": [{"item": "mm.rs: checked (fn)", "before": "pub(super)"}]}, None, "narrower than pub(crate)"),
+    ("a born entry with no ledger line",
+     {"entries": _REGISTER["entries"] + [{"item": "mm.rs: LIMIT (const)", "born": "K0"}]}, None,
+     "names no ledger line"),
+    ("a new entry with no born",
+     {"entries": [{"item": f"mm.rs: x{n} (fn)", "before": "pub(crate)"} for n in range(BORNLESS_MOST + 1)]}, None,
+     "entries with no `born`"),
 ]
 
 

@@ -2941,8 +2941,9 @@ package FerrixX8664Requirements {
                 si_code BUS_MCEERR_AR, si_addr the lowest address in the
                 program's half that maps the frame (0 past 2^18 leaves) and
                 si_addr_lsb 12, ending the program without its handler where RIPV
-                is clear -- but for a clean cached page dropped as L.x86_64.247
-                says, which raises nothing.";
+                is clear and asking its supervisors first where it is not -- but
+                for a clean cached page dropped as L.x86_64.247 says, which raises
+                nothing.";
             attribute :>> criterion = "test-mce-srar under KVM and TCG: the victim's
                 handler prints code=4, its own page's address, lsb=12 and err=0
                 (no physical address in its context), the frame is listed in

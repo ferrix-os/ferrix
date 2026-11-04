@@ -2804,8 +2804,9 @@ package FerrixObjectRequirements {
                 (TRACEABILITY.md argues it; no allocation guard runs in the
                 interrupt). */
             attribute :>> statement = "A timer's arm shall be fired only by its
-                processor's timer interrupt, with no run queue's lock held, or by
-                a set whose deadline has passed; never before its deadline; the
+                processor's timer interrupt, with no run queue's lock held, by a
+                processor leaving service for what its buffer holds, or by a set
+                whose deadline has passed; never before its deadline; the
                 fire shall assert READABLE, deliver the registrations that want it
                 and wake its waiters, allocating nothing, and one interrupt pass
                 shall fire at most FIRE_BATCH arms.";
@@ -2958,7 +2959,7 @@ package FerrixObjectRequirements {
                 "syscall::native::job_create");
         }
         requirement <'L.trap.9'> theChainIsNearestFirst : ItemLowLevel {
-            attribute :>> statement = "A user-mode fault its address space does not
+            attribute :>> statement = "Save a machine check that cannot be restarted, which no supervisor hears, a user-mode fault its address space does not
                 resolve shall be offered, before the personality's fault_signal, to
                 the faulting process's channel (level 0) and then to each job's from
                 the process's own to the root (levels 1 and up). A level with no
@@ -2972,6 +2973,7 @@ package FerrixObjectRequirements {
                 and the program ends with SIGSEGV.";
             attribute :>> parent = "H.TRAP.20";
             attribute :>> unit = ("object::exception::raise",
+                "trap::user_fault_ending",
                 "object::exception::Asked::into_raised", "trap::user_fault_as",
                 "trap::user_fault",
                 "object::exception::Supervisor::live");
@@ -3006,7 +3008,9 @@ package FerrixObjectRequirements {
         requirement <'L.trap.12'> theVerdictsAreKept : ItemLowLevel {
             attribute :>> statement = "RESUME shall return to the program with the
                 exception's registers through the trap's own exit, recording
-                EXCEPTION_CONTEXT with both pcs when a supervisor wrote them; KILL
+                EXCEPTION_CONTEXT with both pcs when a supervisor wrote them, but
+                that of a machine check at an unchanged pc shall go on to the
+                signal; KILL
                 shall end the process as a job kill does, recording EXCEPTION_KILLED
                 with detail 1; HAND_ON, or the exception's last handle closed
                 undecided, shall go to the next level.";
@@ -3270,6 +3274,35 @@ package FerrixObjectRequirements {
             attribute :>> unit = ("syscall::native::space_clone",
                 "syscall::native::space_held", "object::space::SpaceRef::clone_space");
         }
+        requirement <'L.object.297'> protectionZeroIsAllocateOnly : ItemLowLevel {
+            attribute :>> statement = "space_allocate with protection 0 shall make a
+                private region with no access; space_map and space_protect shall
+                refuse protection 0 with INVALID_ARGS.";
+            attribute :>> criterion = "Stage 9's space line: a read through the handle
+                gets nothing of such a region, and the two other calls refuse it.
+                Control: protection 0 treated as MAP_READ.";
+            attribute :>> parent = ("H.MEM.24", "H.MEM.25");
+            attribute :>> unit = ("syscall::native::space_allocate",
+                "syscall::native::space_protection",
+                "user::space::AddressSpace::allocate_by_handle");
+        }
+        requirement <'L.object.309'> aSpaceHandleStopsARaise : ItemLowLevel {
+            attribute :>> statement = "While a space handle names a process's space,
+                ids_it_may_raise shall answer no ids for any set-id file, and so in a
+                fork of that space or a native child of that process; the count
+                shall fall as handles close, and nothing but a process not yet
+                started shall raise it.";
+            attribute :>> criterion = "Stage 9's space line: a process with a handle
+                kept is not raised and with it closed is; a fork made while one lived
+                and a native child of a process on one are not. Control: the test
+                removed from ids_it_may_raise.";
+            attribute :>> parent = ("H.MEM.24", "H.MEM.25");
+            attribute :>> unit = ("user::space::AddressSpace::raises_refused",
+                "user::space::AddressSpace::handle_made",
+                "user::space::AddressSpace::handle_gone",
+                "user::space::AddressSpace::refuse_raises",
+                "object::space::SpaceRef::of");
+        }
         requirement <'L.object.240'> anExecutableVmoHandleCannotWrite : ItemLowLevel {
             attribute :>> statement = "vmo_executable shall replace a VMO handle that
                 carries MAP and READ with one that carries EXECUTE and not WRITE,
@@ -3358,13 +3391,14 @@ package FerrixObjectRequirements {
                 "object::pager::Command::number");
         }
         requirement <'L.object.231'> noPagerMapsWhenAsked : ItemLowLevel {
-            attribute :>> statement = "vmo_map with MAP_NO_PAGER shall refuse a
-                pager-backed VMO with WRONG_TYPE, and map any other VMO as without
-                it.";
+            attribute :>> statement = "vmo_map and space_map with MAP_NO_PAGER
+                shall refuse a pager-backed VMO with WRONG_TYPE, and map any other VMO
+                as without it.";
             attribute :>> criterion = "Stage 9's pager check: a pager VMO is refused
-                WRONG_TYPE and an anonymous one mapped, both with MAP_NO_PAGER.";
+                WRONG_TYPE and an anonymous one mapped, both with MAP_NO_PAGER, by
+                either call.";
             attribute :>> parent = "H.MEM.22";
-            attribute :>> unit = "syscall::native::vmo_map";
+            attribute :>> unit = ("syscall::native::vmo_map", "syscall::native::space_map");
         }
     }
 }

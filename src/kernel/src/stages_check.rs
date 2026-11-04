@@ -1258,6 +1258,13 @@ pub(super) fn check_timers() {
          a batch over {} passes; {} refusals as specified; an early wake took out its own entry",
         report.fired, report.passes, report.refusals,
     );
+    if report.moved != 0 {
+        println!(
+            "  timers   {} arms moved off a processor leaving service, each as set; \
+             the longest move's hold {} ns",
+            report.moved, report.move_hold_ns,
+        );
+    }
 }
 
 /// Stage 9: the native ABI's objects, driven through their handlers by two

@@ -677,8 +677,23 @@ fn user_fault(frame: &mut arch::TrapFrame, trap: &Trap) {
         // again from the disk when it re-runs the load
         // (`docs/MACHINE-CHECK-PAGECACHE.md` §3.3).
         if let Some((signal, code, address, end)) = raised {
-            user_fault_ending(frame, trap, (signal, code, address), end);
+            let poison = if end {
+                Poison::Ending
+            } else {
+                Poison::Resumable
+            };
+            user_fault_ending(frame, trap, (signal, code, address), poison);
         }
+        return;
+    }
+    #[cfg(ferrix_checks = "on")]
+    if let Some(poison) = crate::object::exception::take_poison() {
+        let raised = (
+            ferrix_linux_abi::types::SIGBUS,
+            0,
+            crate::object::exception::POISON_ADDRESS,
+        );
+        user_fault_ending(frame, trap, raised, poison);
         return;
     }
     let raised = arch::fault_signal(frame, trap);
@@ -695,18 +710,31 @@ fn user_fault(frame: &mut arch::TrapFrame, trap: &Trap) {
 /// return; an end leaves on the way out; and the end of the chain, or an
 /// expiry, goes on to the signal below as a fault with no supervisor does.
 fn user_fault_as(frame: &mut arch::TrapFrame, trap: &Trap, raised: (u32, i32, u64)) {
-    user_fault_ending(frame, trap, raised, false);
+    user_fault_ending(frame, trap, raised, Poison::None);
 }
 
-/// [`user_fault_as`], ending the program without a handler when `end`
-/// ([`ReturnPath::fault_end`]). Such a fault goes to no supervisor: the
-/// instruction cannot be restarted (`RIPV` clear, `L.x86_64.228`), so a
-/// `RESUME` could only run on from a state the machine did not keep.
+/// What a fault consumed, as far as its supervisors are concerned.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Poison {
+    /// No poison: every fault but a machine check.
+    None,
+    /// A machine check that can be restarted: a supervisor is told, but an
+    /// unchanged `RESUME` would consume the same poison again (L.trap.12).
+    Resumable,
+    /// A machine check that cannot be restarted (`RIPV` clear,
+    /// `L.x86_64.228`): no supervisor hears it.
+    Ending,
+}
+
+/// [`user_fault_as`], ending the program without a handler for
+/// [`Poison::Ending`] ([`ReturnPath::fault_end`]). Such a fault goes to no
+/// supervisor: the instruction cannot be restarted, so a `RESUME` could only
+/// run on from a state the machine did not keep.
 fn user_fault_ending(
     frame: &mut arch::TrapFrame,
     trap: &Trap,
     (signal, code, address): (u32, i32, u64),
-    end: bool,
+    poison: Poison,
 ) {
     let Some(path) = return_path() else {
         // No personality registered, so nothing can turn a fault into a
@@ -730,6 +758,7 @@ fn user_fault_ending(
     // link register, read from the processor.
     let context = arch::UserContext::from_trap(frame);
     arch::enable_interrupts();
+    let end = poison == Poison::Ending;
     if !end {
         let fault = crate::object::exception::Fault {
             trap: *trap,
@@ -738,6 +767,12 @@ fn user_fault_ending(
             code: arch::exception_code(frame),
         };
         match crate::object::exception::raise(context, &fault) {
+            // An unchanged resume of poison would consume it again, each
+            // round a machine check where a page fault's costs a little CPU:
+            // it goes on to the default below, as an expiry does.
+            crate::object::exception::Raised::Resume(context)
+                if poison == Poison::Resumable
+                    && context.program_counter() == frame.instruction_pointer() => {}
             crate::object::exception::Raised::Resume(context) => {
                 // Masked first, as the way back stores them: on ARMv7-A this
                 // writes the processor's banked USR pair.

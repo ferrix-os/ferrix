@@ -230,6 +230,9 @@ the frames, since only frames free at that moment are promised. Since K12b
 the reservation covers the kernel objects its programs make too, on pages
 drawn from it alone; objects it gives away stay on its pages until freed,
 which the partition's own design bounds.
+A frame retired for a hardware error while drawn, or while free, costs the promise
+that frame: at most the retired set's capacity, 256 frames, is the machine's lost
+memory, and a holder within its size may then be refused (ledger 5841 R1).
 
 A process's memory is given back before its end can be seen (F-91): its
 release, in the load, unmaps its user half before a parent's `wait4` or a
@@ -861,6 +864,13 @@ every machine check halts (L.x86_64.231). Either way:
   SMCA. On an SMCA processor the kernel sets `MCA_CONFIG.McaX` on every
   bank, which AMD requires before an uncorrectable error can be survived;
   `ferrix.mce.recover=off` halts on AMD as on Intel.
+
+Under `smt=off` a machine check taken on a parked thread stops the machine: such a
+thread has no bring-up record to recover with, and the kernel has no local machine
+check. So on hardware that broadcasts a machine check to every thread, a recoverable
+one stops the machine under `smt=off` even with recovery on, where `stibp` would
+recover. That fails safe, and `max` accepts it (ledger 6135, S1). Nobody polls a
+parked thread's thread-scoped banks either.
 
 ### AoU-37 — core quarantine is an availability aid, not a safety mechanism (x86-64)
 lode takes a physical core out of service once it has reported enough

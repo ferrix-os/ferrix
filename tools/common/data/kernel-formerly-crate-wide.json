@@ -8,7 +8,18 @@
     "of 2026-10-23, kept with the landing's evidence). kernel-interface.py --check fails on a pub declaration used above only by",
     "checks that is neither CHECKS-ONLY nor listed, and on an entry that is no longer pub,",
     "is used by a higher crate's product code now (a change to the interface), is used by",
-    "no check, or was narrower than pub(crate). The list may shrink and never grow."
+    "for what no CHECKS-ONLY marker stands on, says `born` (its mechanism) and `ledger` (ledger 6137).",
+    "for what no CHECKS-ONLY marker stands on, says `born` (its mechanism) and `ledger` (ledger 6137).",
+    "for what no CHECKS-ONLY marker stands on, says `born` (its mechanism) and `ledger` (ledger 6137).",
+    "for what no CHECKS-ONLY marker stands on, says `born` (its mechanism) and `ledger` (ledger 6137).",
+    "for what no CHECKS-ONLY marker stands on, says `born` (its mechanism) and `ledger` (ledger 6137).",
+    "for what no CHECKS-ONLY marker stands on, says `born` (its mechanism) and `ledger` (ledger 6137).",
+    "for what no CHECKS-ONLY marker stands on, says `born` (its mechanism) and `ledger` (ledger 6137).",
+    "for what no CHECKS-ONLY marker stands on, says `born` (its mechanism) and `ledger` (ledger 6137).",
+    "for what no CHECKS-ONLY marker stands on, says `born` (its mechanism) and `ledger` (ledger 6137).",
+    "for what no CHECKS-ONLY marker stands on, says `born` (its mechanism) and `ledger` (ledger 6137).",
+    "The 545 entries the split generated may shrink and never grow. An entry born after it,",
+    "for what no CHECKS-ONLY marker stands on, says `born` (its mechanism) and `ledger` (ledger 6137)."
   ],
   "entries": [
     {
@@ -541,7 +552,8 @@
     },
     {
       "item": "arch/mod.rs: exception_check (re-export)",
-      "before": "pub(crate)"
+      "born": "K4",
+      "ledger": 6131
     },
     {
       "item": "arch/mod.rs: forget_root (re-export)",
@@ -1005,11 +1017,13 @@
     },
     {
       "item": "audit.rs: EXCEPTION_CONTEXT (re-export)",
-      "before": "pub(crate)"
+      "born": "K4",
+      "ledger": 6131
     },
     {
       "item": "audit.rs: EXCEPTION_KILLED (re-export)",
-      "before": "pub(crate)"
+      "born": "K4",
+      "ledger": 6131
     },
     {
       "item": "audit.rs: Event (re-export)",
@@ -1021,7 +1035,8 @@
     },
     {
       "item": "audit.rs: PAGER (re-export)",
-      "before": "pub(crate)"
+      "born": "K3",
+      "ledger": 6131
     },
     {
       "item": "audit.rs: read_through_now (fn)",
@@ -1429,7 +1444,8 @@
     },
     {
       "item": "mm/check.rs: WxReport::leaves (field)",
-      "before": "pub(crate)"
+      "born": "K2",
+      "ledger": 6131
     },
     {
       "item": "mm/check.rs: hole_in_ram (fn)",
@@ -1445,7 +1461,8 @@
     },
     {
       "item": "mm/check.rs: sweep_user_root (fn)",
-      "before": "pub(crate)"
+      "born": "K2",
+      "ledger": 6131
     },
     {
       "item": "mm/reserve.rs: bypass_heap_in_sections (fn)",
@@ -1541,11 +1558,13 @@
     },
     {
       "item": "object/oom.rs: user_fault (fn)",
-      "before": "pub(crate)"
+      "born": "K3",
+      "ledger": 6131
     },
     {
       "item": "object/pager.rs: PagerCore (struct)",
-      "before": "pub(crate)"
+      "born": "K3",
+      "ledger": 6131
     },
     {
       "item": "object/pin.rs: Counts (struct)",
@@ -1589,7 +1608,8 @@
     },
     {
       "item": "object/process.rs: Process::job_id (method)",
-      "before": "pub(crate)"
+      "born": "K6",
+      "ledger": 6131
     },
     {
       "item": "object/process.rs: Process::move_to (method)",
@@ -1641,51 +1661,48 @@
     },
     {
       "item": "object/reserve_check.rs: Report::promise (field)",
-      "before": "pub(crate)"
+      "born": "K12a",
+      "ledger": 6131
+    },
+    {
+      "item": "object/reserve_check.rs: run (fn)",
+      "born": "K12a",
+      "ledger": 6131
     },
     {
       "item": "object/ticket.rs: Ticket (struct)",
-      "before": "pub(crate)"
-    },
-    {
-      "item": "object/timer.rs: Armed (struct)",
-      "before": "pub(crate)"
+      "born": "K7",
+      "ledger": 6131
     },
     {
       "item": "object/timer.rs: Report::fired_at (field)",
-      "before": "pub(crate)"
+      "born": "K10",
+      "ledger": 6131
     },
     {
       "item": "object/timer.rs: Report::fired_in (field)",
-      "before": "pub(crate)"
+      "born": "K10",
+      "ledger": 6131
     },
     {
       "item": "object/timer.rs: Report::fires (field)",
-      "before": "pub(crate)"
+      "born": "K10",
+      "ledger": 6131
     },
     {
       "item": "object/timer.rs: Report::home (field)",
-      "before": "pub(crate)"
+      "born": "K10",
+      "ledger": 6131
     },
     {
       "item": "object/timer.rs: TimerCore (struct)",
-      "before": "pub(crate)"
+      "born": "K10",
+      "ledger": 6131
     },
     {
       "item": "object/timer.rs: TimerCore::timeline_id (method)",
-      "before": "pub(crate)"
-    },
-    {
-      "item": "object/timer.rs: fire (fn)",
-      "before": "pub(crate)"
-    },
-    {
-      "item": "object/timer.rs: heap_bytes (fn)",
-      "before": "pub(crate)"
-    },
-    {
-      "item": "object/timer.rs: take_arm (fn)",
-      "before": "pub(crate)"
+      "born": "K10",
+      "ledger": 6131
     },
     {
       "item": "panic/catalog.rs: CONSOLE_OUTPUT (static)",
@@ -1909,15 +1926,18 @@
     },
     {
       "item": "sched/mod.rs: Due (re-export)",
-      "before": "pub(crate)"
+      "born": "K10",
+      "ledger": 6131
     },
     {
       "item": "sched/mod.rs: FIRE_BATCH (re-export)",
-      "before": "pub(crate)"
+      "born": "K10",
+      "ledger": 6131
     },
     {
       "item": "sched/mod.rs: Fired (re-export)",
-      "before": "pub(crate)"
+      "born": "K10",
+      "ledger": 6131
     },
     {
       "item": "sched/mod.rs: REAPER_PATIENCE_NANOS (const)",
@@ -1989,7 +2009,8 @@
     },
     {
       "item": "sched/mod.rs: take_next (re-export)",
-      "before": "pub(crate)"
+      "born": "K10",
+      "ledger": 6131
     },
     {
       "item": "sched/mod.rs: wait_until_reaper_quiet (fn)",
@@ -2004,12 +2025,9 @@
       "before": "pub(crate)"
     },
     {
-      "item": "sched/queue.rs: Due (enum)",
-      "before": "pub(crate)"
-    },
-    {
       "item": "sched/task.rs: Task::address_space (method)",
-      "before": "pub(crate)"
+      "born": "K3",
+      "ledger": 6131
     },
     {
       "item": "sched/task.rs: Task::base_weight (method)",
@@ -2025,7 +2043,8 @@
     },
     {
       "item": "sched/task.rs: Task::filed_at (method)",
-      "before": "pub(crate)"
+      "born": "K10",
+      "ledger": 6131
     },
     {
       "item": "sched/task.rs: Task::group_word (method)",
@@ -2196,6 +2215,11 @@
       "before": "pub(crate)"
     },
     {
+      "item": "trap.rs: Poison (enum)",
+      "born": "K4",
+      "ledger": 6131
+    },
+    {
       "item": "trap.rs: SyscallFilter (type)",
       "before": "pub(crate)"
     },
@@ -2245,7 +2269,8 @@
     },
     {
       "item": "user/space.rs: AddressSpace::resident_pages (method)",
-      "before": "pub(crate)"
+      "born": "F-91",
+      "ledger": 6131
     },
     {
       "item": "user/space.rs: AddressSpace::uninstall (method)",
@@ -2273,7 +2298,8 @@
     },
     {
       "item": "user/vmo.rs: Vmo::page_state (method)",
-      "before": "pub(crate)"
+      "born": "K3",
+      "ledger": 6131
     },
     {
       "item": "user/vmo.rs: arm_reclaim_hook (fn)",

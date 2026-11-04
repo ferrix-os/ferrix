@@ -90,8 +90,10 @@ pub enum Clock {
     Boot,
 }
 
+// CHECKS-ONLY: object/timer_check.rs; home: in crate
 /// One arm of a timer, as its processor's sleeper set holds it.
 #[derive(Debug)]
+#[doc(hidden)]
 pub struct Armed {
     /// The timer.
     pub(crate) timer: Arc<TimerCore>,
@@ -181,8 +183,10 @@ impl From<AllocError> for TimerError {
     }
 }
 
+// CHECKS-ONLY: object/timer_check.rs; home: in crate
 /// The kernel heap one timer holds: what its job is charged as kernel
 /// memory (`L.object.213`).
+#[doc(hidden)]
 pub fn heap_bytes() -> usize {
     ferrix_kmem::arc_footprint::<TimerCore>()
         .saturating_add(ferrix_kmem::arc_footprint::<Timer>())
@@ -547,20 +551,16 @@ impl Drop for TimerCore {
     }
 }
 
-/// The timer checks' hook, compiled only into a kernel with its self-checks
-/// and seen only by `object` (the K10 delta review, ledger 2919, (1)):
-/// the product never takes an arm off its sleeper set without its lock.
+// CHECKS-ONLY: object/timer_check.rs
+/// Take `timer`'s arm off its sleeper set as a pass would, without its lock,
+/// leaving the slot out: an arm in flight. Compiled only into a kernel with its
+/// self-checks, and the boundary gate keeps product code from naming it (the K10
+/// delta review, ledger 2919, (1), 6137): the product never takes an arm off its
+/// sleeper set without its lock.
 #[cfg(ferrix_checks = "on")]
-pub mod sabotage {
-    use super::{Armed, Ordering, SleepSlot, TimerCore, sched};
-
-    // CHECKS-ONLY: object/timer_check.rs
-    /// Take `timer`'s arm off its sleeper set as a pass would, without its
-    /// lock, leaving the slot out: an arm in flight.
-    #[doc(hidden)]
-    pub fn take_arm(timer: &TimerCore) -> Option<(Armed, SleepSlot)> {
-        sched::unfile_timer(timer.filed_cpu.load(Ordering::Relaxed), timer)
-    }
+#[doc(hidden)]
+pub fn take_arm(timer: &TimerCore) -> Option<(Armed, SleepSlot)> {
+    sched::unfile_timer(timer.filed_cpu.load(Ordering::Relaxed), timer)
 }
 
 /// Ports a timer kept, handed back to be dropped with no lock held.
@@ -582,6 +582,7 @@ pub struct Report {
     pub home: bool,
 }
 
+// CHECKS-ONLY: object/timer_check.rs; home: in crate
 /// Fire `armed`, which a run queue's pass took off its sleeper set with
 /// `slot`: from the timer interrupt, with no run queue's lock held, during
 /// pass `pass` (`L.object.216`, `L.object.219`).
@@ -590,6 +591,7 @@ pub struct Report {
 /// nothing, and files the newer arm on this processor if one is waiting. A
 /// current one asserts `READABLE`, delivers its registrations and wakes its
 /// waiters. Allocates nothing.
+#[doc(hidden)]
 pub fn fire(armed: Armed, slot: SleepSlot, pass: u64) {
     let Armed {
         timer, generation, ..

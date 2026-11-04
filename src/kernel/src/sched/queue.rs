@@ -34,11 +34,13 @@ use ferrix_sched::{
 use super::task::{BLOCKED, RUNNABLE, SleepSlot, Task, TaskId};
 use crate::object::timer::Armed;
 
+// CHECKS-ONLY: object/timer_check.rs; home: in crate
 /// What a processor's sleeper set holds: one set for every deadline the
 /// processor keeps, so that one hardware one-shot, armed by
 /// [`CpuQueue::arm_timer`] for the set's first key, serves them all
 /// (`docs/microkernel/K10.md` §2.1).
 #[derive(Debug)]
+#[doc(hidden)]
 pub enum Due {
     /// A sleeping task, made runnable at its instant.
     Wake(Arc<Task>),
@@ -46,7 +48,7 @@ pub enum Due {
     Fire(Armed),
 }
 
-// CHECKS-ONLY: object/timer_check.rs
+// CHECKS-ONLY: object/timer_check.rs; home: in crate
 /// The most timer arms one processor holds between being taken off its
 /// sleeper set and being fired by its timer interrupt, and the most a pass
 /// re-files when that is full (`L.object.218`).
@@ -157,7 +159,7 @@ pub(crate) struct Pick {
     pub(crate) count: usize,
 }
 
-// CHECKS-ONLY: object/timer_check.rs
+// CHECKS-ONLY: object/timer_check.rs; home: in crate
 /// Timer arms a pass took off a sleeper set and the timer interrupt has not
 /// fired yet: at most [`FIRE_BATCH`], in a fixed array, so that a pass
 /// allocates nothing.
@@ -186,7 +188,7 @@ impl Fired {
     }
 }
 
-// CHECKS-ONLY: object/timer_check.rs
+// CHECKS-ONLY: object/timer_check.rs; home: in crate
 /// One pass's next step over `sleepers` at `now`: entries leave in key
 /// order while the first is due. A timer's arm goes into `fired`, which only
 /// the timer interrupt empties: a decision holds the run queue's lock across

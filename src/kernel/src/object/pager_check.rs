@@ -1051,6 +1051,34 @@ fn case_k_no_pager() -> Result<u32, &'static str> {
             &[reg(plain), MAP_AT, PAGE_SIZE, protection, OFFSET],
         )
         .map_err(|_| "k: vmo_map with MAP_NO_PAGER refused an anonymous VMO")?;
+    let space = side.handle(nr::SPACE_CREATE, &[], "space_create failed")?;
+    if side.call(
+        nr::SPACE_MAP,
+        &[
+            reg(space),
+            reg(served.vmo.0),
+            MAP_AT,
+            PAGE_SIZE,
+            protection,
+            OFFSET,
+        ],
+    ) != Err(status::WRONG_TYPE)
+    {
+        return Err("k: space_map with MAP_NO_PAGER mapped a pager's VMO");
+    }
+    let _ = side
+        .call(
+            nr::SPACE_MAP,
+            &[
+                reg(space),
+                reg(plain),
+                MAP_AT,
+                PAGE_SIZE,
+                protection,
+                OFFSET,
+            ],
+        )
+        .map_err(|_| "k: space_map with MAP_NO_PAGER refused an anonymous VMO")?;
     Ok(1)
 }
 

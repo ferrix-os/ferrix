@@ -89,7 +89,6 @@ pub use ferrix_audit::{
     PROCESS_MADE, QUIESCED, READER_GIVEN, RIGHTS, ROOT_SWITCHED, Record, STARTER_GIVEN, TICKET,
     WIDEN, target,
 };
-// CHECKS-ONLY: object/exception_check.rs, object/pager_check.rs
 #[doc(hidden)]
 pub use ferrix_audit::{EXCEPTION_CONTEXT, EXCEPTION_KILLED, PAGER};
 use ferrix_sync::IrqSpinLock;

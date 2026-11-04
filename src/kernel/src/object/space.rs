@@ -39,6 +39,12 @@ pub struct SpaceRef {
     charge: Charge,
 }
 
+impl Drop for SpaceRef {
+    fn drop(&mut self) {
+        self.space.handle_gone();
+    }
+}
+
 impl SpaceRef {
     /// A new, empty space, charged as one object to the running task's job,
     /// which owns it.
@@ -50,6 +56,7 @@ impl SpaceRef {
         let charge = Charge::running(Resource::Objects, 1).map_err(|_| AllocError)?;
         let owner = crate::sched::running_group();
         let space = AddressSpace::new().map_err(|_| AllocError)?;
+        space.handle_made();
         fallible::try_arc(SpaceRef {
             space,
             owner,
@@ -66,6 +73,7 @@ impl SpaceRef {
     pub fn of(space: Arc<AddressSpace>, owner: u32) -> Result<Arc<SpaceRef>, AllocError> {
         // Nothing charged, and the owner's slot held all the same.
         let charge = Charge::to(owner, Resource::Objects, 0).map_err(|_| AllocError)?;
+        space.handle_made();
         fallible::try_arc(SpaceRef {
             space,
             owner,
@@ -83,6 +91,7 @@ impl SpaceRef {
         let charge = Charge::running(Resource::Objects, 1).map_err(|_| AllocError)?;
         let owner = crate::sched::running_group();
         let space = self.space.fork().map_err(|_| AllocError)?;
+        space.handle_made();
         fallible::try_arc(SpaceRef {
             space,
             owner,

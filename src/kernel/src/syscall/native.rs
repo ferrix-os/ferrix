@@ -4104,8 +4104,8 @@ fn vmo_held(table: &HandleTable, vmo: Handle, needed: Rights) -> Result<(Arc<Vmo
 
 /// What a protection word asks for, as `(write, execute)`: `MAP_READ`,
 /// `MAP_READ | MAP_WRITE` or `MAP_READ | MAP_EXECUTE`. Writable and
-/// executable together is never valid (ASR-2), nor is any other bit; K3's
-/// `MAP_NO_PAGER` (`1 << 3`) is reserved until it lands.
+/// executable together is never valid (ASR-2), nor is any other bit;
+/// `SPACE_MAP` takes `MAP_NO_PAGER` off before it asks.
 fn space_protection(protection: u64) -> Result<(bool, bool), Errno> {
     match u32::try_from(protection) {
         Ok(MAP_READ) => Ok((false, false)),
@@ -4225,7 +4225,10 @@ fn space_map(
     protection: u64,
     offset_at: u64,
 ) -> Result<usize, Errno> {
-    let (write, execute) = space_protection(protection)?;
+    // As `vmo_map`: a safety partition maps no pager's object it did not
+    // choose, by handle no more than into itself (L.object.231).
+    let no_pager = protection & u64::from(MAP_NO_PAGER) != 0;
+    let (write, execute) = space_protection(protection & !u64::from(MAP_NO_PAGER))?;
     let on_space = if execute {
         Rights::MAP | Rights::EXECUTE
     } else {
@@ -4239,6 +4242,9 @@ fn space_map(
     // `EXECUTE` on the VMO handle is the ceiling's to require: an executable
     // mapping past it is refused by the space, `ACCESS_DENIED` as any right.
     let (vmo, held) = process.with_handles(|table| vmo_held(table, vmo, on_vmo))?;
+    if no_pager && vmo.is_pager_backed() {
+        return Err(status::WRONG_TYPE);
+    }
     let offset = read_u64(process, offset_at)?;
     let flags = VmaFlags {
         write,
@@ -4318,7 +4324,13 @@ fn space_allocate(
     length: u64,
     protection: u64,
 ) -> Result<usize, Errno> {
-    let (write, execute) = space_protection(protection)?;
+    // Protection 0 here alone: a reservation with no access, which a creator
+    // protects later (`L.object.297`); `SPACE_MAP` and `SPACE_PROTECT` refuse it.
+    let (readable, (write, execute)) = if protection == 0 {
+        (false, (false, false))
+    } else {
+        (true, space_protection(protection)?)
+    };
     // Private memory has no VMO handle to ask: the space handle's EXECUTE is
     // the only right an executable allocation needs, and it is asked here.
     let runnable = if execute {
@@ -4328,9 +4340,10 @@ fn space_allocate(
     };
     let target = space_in(process, space, Rights::MAP | runnable)?;
     let flags = VmaFlags {
+        read: readable,
         write,
         execute,
-        ..VmaFlags::READ
+        ..VmaFlags::NONE
     };
     let at = (address != 0).then_some(address);
     let _layout = target.space().layout();

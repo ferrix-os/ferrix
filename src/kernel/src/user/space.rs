@@ -101,7 +101,7 @@ use alloc::vec::Vec;
 use core::any::Any;
 use core::fmt;
 use core::ops::Deref;
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::sync::SpinLock;
 use ferrix_bootinfo::{PAGE_SIZE, USER_VIRT_END, is_user_address};
@@ -360,6 +360,14 @@ pub struct AddressSpace {
     /// [`UNCLAIMED`] before a process has claimed it: see
     /// [`AddressSpace::claim_domain`] and `docs/OPAQUE-KERNEL.md` §9.2.
     domain: AtomicU64,
+    /// Space handles naming this space: while any lives, whoever holds one
+    /// may write into what runs here, so no file gives it ids
+    /// ([`AddressSpace::raises_refused`], `L.object.309`). `process_space` is
+    /// refused after the start, so for a started process this only falls.
+    handles: AtomicU64,
+    /// Made by a fork of a space with such a handle, or for a native child of
+    /// a process on one: as long as it lives.
+    no_raise: AtomicBool,
 }
 
 impl AddressSpace {
@@ -579,6 +587,8 @@ impl AddressSpace {
             cpus: CpuMask::new(),
             flushes: Flushes::new(),
             layout: SleepLock::new((), &crate::sync::SchedParker),
+            handles: AtomicU64::new(0),
+            no_raise: AtomicBool::new(false),
             inner: SpinLock::new(inner),
             domain: AtomicU64::new(UNCLAIMED),
         }
@@ -608,6 +618,30 @@ const UNCLAIMED: u64 = u64::MAX;
 /// domains claimed it, or its process left its domain. Zero, by contrast, is
 /// a space claimed by a process in no domain, which a birth may still place.
 const OUT: u64 = u64::MAX - 1;
+
+impl AddressSpace {
+    /// A space handle to this space was made.
+    pub(crate) fn handle_made(&self) {
+        let _ = self.handles.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// A space handle to this space is gone.
+    pub(crate) fn handle_gone(&self) {
+        let _ = self.handles.fetch_sub(1, Ordering::SeqCst);
+    }
+
+    /// Whether a program here may be given ids by a file: not while a handle
+    /// names this space, nor in a fork or a native child of one
+    /// (`L.object.309`, ledger 5727 (1)).
+    pub fn raises_refused(&self) -> bool {
+        self.handles.load(Ordering::SeqCst) != 0 || self.no_raise.load(Ordering::SeqCst)
+    }
+
+    /// Refuse raises here for as long as this space lives.
+    pub fn refuse_raises(&self) {
+        self.no_raise.store(true, Ordering::SeqCst);
+    }
+}
 
 impl AddressSpace {
     /// The speculation domain the switch barrier decision reads: zero for
@@ -1139,6 +1173,11 @@ impl AddressSpace {
         // have written, which is harmless.
         .map_err(|_| unrooted(root))?;
         attach_child(&child)?;
+        // Whoever holds a handle to this space controls what forks from it
+        // (`L.object.309`).
+        if self.raises_refused() {
+            child.refuse_raises();
+        }
         Ok(child)
     }
 
@@ -3783,7 +3822,6 @@ impl AddressSpace {
         flags: VmaFlags,
     ) -> Result<u64, SpaceError> {
         let flags = VmaFlags {
-            read: true,
             shared: false,
             grows_down: false,
             ..flags

@@ -251,7 +251,6 @@ fn check_the_kill(
 /// An OOM-killed program's memory was given back before its end could be
 /// seen (F-91): its space holds no page and its cgroup is charged for none.
 ///
-/// Verifies: L.object.80
 fn require_given_back(harness: &Harness, program: &Arc<Process>) -> Checked<()> {
     // Its memory was given back before its end could be seen: once
     // `wait_for_exit` has answered, which is what `wait4` reaps by, its space

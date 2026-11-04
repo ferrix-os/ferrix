@@ -15,14 +15,14 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`sched`](#sched) | 156 | 2 | 2 | 11 |
 | [`syscall`](#syscall) | 117 | 10 | 10 | 3 |
 | [`iommu`](#iommu) | 99 | - | 1 | 2 |
-| [`user`](#user) | 73 | - | 1 | 3 |
+| [`user`](#user) | 72 | - | 1 | 3 |
 | [`main`](#main) | 65 | 6 | 4 | 1 |
 | [`object`](#object) | 51 | 13 | 34 | 8 |
 | [`console`](#console) | 40 | 6 | 7 | 6 |
-| [`init`](#init) | 24 | 14 | 14 | 1 |
+| [`init`](#init) | 24 | 12 | 12 | 1 |
 | [`trap`](#trap) | 13 | - | - | 1 |
 | [`smp`](#smp) | 8 | 4 | 4 | 1 |
-| [`mm`](#mm) | 7 | 1 | 4 | 1 |
+| [`mm`](#mm) | 7 | 1 | 3 | 1 |
 | [`irq`](#irq) | 6 | - | 1 | 1 |
 | [`sync`](#sync) | 4 | - | - | 1 |
 | [`vmap`](#vmap) | 2 | 2 | 4 | 1 |
@@ -36,7 +36,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`audit`](#audit) | 1 | - | - | 1 |
 | [`signal_frame`](#signal_frame) | - | - | 1 | 1 |
 | [`timer`](#timer) | - | - | 1 | 1 |
-| **Total** | **1261** | **166** | **220** | 77 |
+| **Total** | **1260** | **164** | **217** | 77 |
 
 ---
 
@@ -119,10 +119,10 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 |---|---|---:|---:|---:|---:|---|
 | `arch/x86_64/powerctl.rs` | `core` | 93 | - | - | 93 | 132-133, 149, 177, 180-182, 191, 229, 253, 262, 266, 418, 439, 466, 510, 556, 563, 609, 614-615, 622, 641, 644, 652, 656, 658, 670-671, 673, 678, 682-685, 688, 697, 705, 710, 719, 743-745, 747, 751-755, 758, 760, 762, 768, 772, 774-775, 779, 783, 787-788, 790, 795-797, 805-806, 808, 820-823, 855-856, 866, 868, 876-877, 881, 885, 887-888, 897, 900, 902-903, 909-914, 917, 920 |
 | `arch/x86_64/msrlog.rs` | `core` | 65 | - | - | 65 | 79, 81, 92-93, 96, 100, 105, 109, 111, 115-116, 118, 123, 125, 127, 130, 133, 138-139, 149, 152-154, 159-160, 163, 165, 169-171, 174-175, 178-179, 182-183, 186, 188, 191, 194-195, 199, 203-206, 209, 222, 225, 231-232, 240, 243, 245, 247-249, 252-253, 255-256, 259, 266-268 |
-| `arch/x86_64/mod.rs` | `core` | 38 | - | - | 38 | 200, 253, 266, 268, 273, 280, 284, 291, 295, 298-299, 353, 356, 445-446, 457, 462, 1429, 1431, 1503, 1505-1506, 1534-1535, 1734-1735, 1739, 1864, 2028, 2033, 2043, 2207, 2242, 2321, 2323, 2326, 2328, 2399 |
+| `arch/x86_64/mod.rs` | `core` | 38 | - | - | 38 | 203, 256, 269, 271, 276, 283, 287, 294, 298, 301-302, 356, 359, 448-449, 460, 465, 1432, 1434, 1506, 1508-1509, 1537-1538, 1739-1740, 1744, 1869, 2033, 2038, 2048, 2212, 2247, 2326, 2328, 2331, 2333, 2404 |
 | `arch/x86_64/speculation.rs` | `core` | 38 | - | - | 38 | 253, 275, 342, 527, 549-550, 561-563, 565, 582-584, 586, 777-780, 902, 906, 924, 932, 946, 948, 950-951, 958, 961, 963-964, 1122, 1124, 1129, 1137, 1145, 1160, 1163, 1194 |
 | `arch/x86_64/clock.rs` | `core` | 28 | - | - | 28 | 280, 306, 407, 410, 413, 416, 498, 500-502, 511, 524-526, 529, 536, 563, 697, 710, 730, 740, 744-745, 771-772, 774-775, 818 |
-| `arch/x86_64/trap.rs` | `core` | 28 | - | - | 28 | 61-74, 77, 79, 84-88, 564-565, 567, 571, 681, 697, 732 |
+| `arch/x86_64/trap.rs` | `core` | 28 | - | - | 28 | 61-74, 77, 79, 84-88, 564-565, 567, 571, 688, 704, 739 |
 | `arch/x86_64/cpu.rs` | `core` | 23 | - | - | 23 | 164, 432, 434-435, 755, 758, 796-797, 801-802, 870, 877, 879, 889, 891-892, 1000, 1081, 1086, 1199, 1215, 1384, 1720 |
 | `arch/x86_64/syscall.rs` | `core` | 22 | - | - | 22 | 458, 500, 584-585, 590, 592, 684, 693, 699, 703, 731-732, 738-739, 843, 876, 879-880, 882, 884, 890, 968 |
 | `arch/x86_64/msrlog/decode.rs` | `core` | 21 | - | - | 21 | 29-31, 37, 44-45, 67-69, 72, 91, 105-107, 122-123, 151-153, 180, 183 |
@@ -130,7 +130,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | `arch/x86_64/framebuffer.rs` | `core` | 15 | - | - | 15 | 104, 108, 173, 184, 186, 190, 192-193, 198-199, 201, 203-204, 206-207 |
 | `arch/x86_64/powerctl/logic.rs` | `core` | 11 | - | - | 11 | 56, 59, 67, 76, 82, 90, 92, 128, 131-133 |
 | `arch/x86_64/switch.rs` | `core` | 9 | - | - | 9 | 347, 350, 352, 767, 778, 936, 945, 947, 951 |
-| `arch/x86_64/smp.rs` | `core` | 2 | - | - | 2 | 455, 476 |
+| `arch/x86_64/smp.rs` | `core` | 2 | - | - | 2 | 486, 507 |
 | `arch/x86_64/gdt.rs` | `core` | 1 | - | - | 1 | 398 |
 | `arch/x86_64/inspect.rs` | `core` | 1 | - | - | 1 | 55 |
 | `arch/x86_64/signal/compat.rs` | `core` | 1 | - | - | 1 | 339 |
@@ -141,7 +141,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `discovery/devmgr.rs` | `item` | 24 | 73 | 77 | 12 | 423, 707, 745, 752, 937, 967, 1031, 1035-1036, 1059, 1064, 1275 |
+| `discovery/devmgr.rs` | `item` | 24 | 73 | 77 | 12 | 423, 709, 747, 754, 939, 969, 1033, 1037-1038, 1061, 1066, 1277 |
 | `discovery/pci/virtio.rs` | `item` | 40 | 33 | 49 | 30 | 332-333, 379, 382, 388, 435, 437-438, 471, 480, 486, 495, 498-499, 506, 514, 529, 550, 558, 560, 569, 617, 622, 627, 655, 681, 686, 699, 706, 797 |
 | `discovery/firmware.rs` | `item` | 46 | - | - | 46 | 96, 104-107, 110-112, 123, 126, 128-129, 142, 151, 153, 160, 165-166, 170, 200-201, 204, 206, 214-215, 217-220, 224-227, 230-232, 237, 242-243, 245, 250-251, 253, 256, 258, 269 |
 | `discovery/board.rs` | `core` | 26 | - | - | 26 | 100, 102, 104, 115-119, 124-127, 130, 136-137, 146, 164, 175, 177, 183-186, 194-195, 197 |
@@ -158,14 +158,14 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 |---|---|---:|---:|---:|---:|---|
 | `sched/direct.rs` | `core` | 39 | - | - | 39 | 109, 117, 132, 167-169, 173-174, 186, 194, 201, 204-206, 213, 228, 234, 237, 239, 251, 272-273, 281, 283, 294-295, 297-298, 303-305, 307, 309, 314, 317-318, 331-332, 340 |
 | `sched/queue.rs` | `core` | 26 | 0 | 0 | 0 | - |
-| `sched/mod.rs` | `core` | 20 | 2 | 1 | 1 | 1475 |
+| `sched/mod.rs` | `core` | 20 | 2 | 1 | 1 | 1488 |
 | `sched/wait.rs` | `core` | 15 | 0 | 0 | 0 | - |
 | `sched/inspect.rs` | `core` | 13 | - | - | 13 | 101, 161-163, 165-166, 168, 172, 178, 180, 183, 188, 191 |
 | `sched/preempt.rs` | `core` | 12 | - | - | 12 | 188, 355, 365-366, 370, 375-376, 378, 390, 414-415, 417 |
 | `sched/vtime.rs` | `core` | 11 | - | - | 11 | 125, 137, 141, 215, 269-270, 274, 279, 281, 285, 289 |
 | `sched/task.rs` | `core` | 10 | 0 | 1 | 0 | - |
 | `sched/borrow.rs` | `core` | 5 | - | - | 5 | 143, 218, 225-226, 233 |
-| `sched/work.rs` | `core` | 4 | - | - | 4 | 155, 339, 377, 380 |
+| `sched/work.rs` | `core` | 4 | - | - | 4 | 155, 347, 385, 388 |
 | `sched/trip.rs` | `core` | 1 | - | - | 1 | 365 |
 
 ---
@@ -174,7 +174,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `syscall/native.rs` | `item` | 110 | 6 | 8 | 2 | 2232, 2579 |
+| `syscall/native.rs` | `item` | 110 | 6 | 8 | 2 | 2815, 3480 |
 | `syscall/program.rs` | `item` | 6 | 4 | 2 | 2 | 89, 133 |
 | `syscall/mod.rs` | `item` | 1 | 0 | 0 | 0 | - |
 
@@ -193,7 +193,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `user/vmo.rs` | `core` | 49 | 0 | 1 | 0 | - |
+| `user/vmo.rs` | `core` | 48 | 0 | 1 | 0 | - |
 | `user/space.rs` | `core` | 23 | 0 | 0 | 0 | - |
 | `user/cache.rs` | `core` | 1 | - | - | 1 | 123 |
 
@@ -203,7 +203,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `main.rs` | `item` | 65 | 6 | 4 | 3 | 421, 886, 1564 |
+| `main.rs` | `item` | 65 | 6 | 4 | 3 | 421, 886, 1575 |
 
 ---
 
@@ -211,9 +211,9 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `object/channel.rs` | `core` | 32 | 4 | 4 | 4 | 614-616, 621 |
+| `object/channel.rs` | `core` | 32 | 4 | 4 | 4 | 690-692, 697 |
 | `object/pin.rs` | `core` | 3 | 1 | 21 | 0 | - |
-| `object/process.rs` | `core` | 8 | 3 | 3 | 2 | 186, 221 |
+| `object/process.rs` | `core` | 8 | 3 | 3 | 2 | 199, 234 |
 | `object/quota.rs` | `core` | 4 | 0 | 0 | 0 | - |
 | `object/interrupt.rs` | `core` | 3 | 0 | 0 | 0 | - |
 | `object/oom.rs` | `core` | 1 | 3 | 2 | 0 | - |
@@ -239,7 +239,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `init.rs` | `item` | 24 | 14 | 14 | 3 | 209, 441, 751 |
+| `init.rs` | `item` | 24 | 12 | 12 | 3 | 209, 451, 761 |
 
 ---
 
@@ -263,7 +263,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `mm.rs` | `core` | 7 | 1 | 4 | 1 | 1346 |
+| `mm.rs` | `core` | 7 | 1 | 3 | 1 | 1560 |
 
 ---
 
@@ -311,7 +311,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `arch/armv7a/mod.rs` | `core` | - | - | 1 | 1 | 1341 |
+| `arch/armv7a/mod.rs` | `core` | - | - | 1 | 1 | 1344 |
 | `arch/armv7a/speculation.rs` | `core` | - | - | 1 | 1 | 99 |
 
 ---

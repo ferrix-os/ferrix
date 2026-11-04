@@ -89,11 +89,10 @@ pub use preempt::{preempt_disable, preempt_enable};
 /// answers for a thread that asked for none of its own.
 pub const BASE_SLICE_NS: u64 = SLICE_NS;
 pub use queue::Due;
-pub(crate) use queue::{MIN_SLICE_NS, SLICE_NS};
-// CHECKS-ONLY: object/timer_check.rs
 #[cfg(ferrix_checks = "on")]
 #[doc(hidden)]
 pub use queue::{FIRE_BATCH, Fired, take_next};
+pub(crate) use queue::{MIN_SLICE_NS, SLICE_NS};
 pub(crate) use task::SleepSlot;
 pub use task::Task;
 pub use task::{TaskId, UserThread};
@@ -2625,9 +2624,16 @@ pub(crate) fn put_back_in_service(cpu: usize, deadline: u64) -> Result<(), Servi
 
 /// Move every movable task and timer arm off processor `me` to processors
 /// in service, one at a time under both queues' locks, lower first; how many
-/// moved. First the arms a decision's pass already took into the fired
-/// buffer are fired: the interrupt that would have is one this processor,
-/// its timer about to stop, may never take (L.sched.104).
+/// tasks moved, which is what a parked processor's drained count means. Arms
+/// are not counted: a task that set one on a parked processor would have been
+/// counted when it was found there.
+///
+/// First the arms a decision's pass already took into the fired buffer are
+/// fired: the interrupt that would have is one this processor, its timer
+/// about to stop, may never take (L.sched.104). A superseded arm's fire may
+/// file the newer arm here, which programs this processor's stopped timer
+/// once; the loop below moves that arm on before the wait, and the one
+/// interrupt it can cost finds nothing filed.
 fn evacuate(me: usize) -> u64 {
     let saved = <arch::Irq as IrqControl>::disable();
     fire_timers(me);
@@ -2639,9 +2645,12 @@ fn evacuate(me: usize) -> u64 {
     loop {
         let mut moved = false;
         for to in (0..count).filter(|&to| to != me && in_service(to)) {
-            if move_one_off(me, to) {
+            let what = move_one_off(me, to);
+            if what != Moved::Nothing {
                 kick(to);
                 moved = true;
+            }
+            if what == Moved::Task {
                 tasks += 1;
             }
         }
@@ -2651,11 +2660,22 @@ fn evacuate(me: usize) -> u64 {
     }
 }
 
-/// Move one task from `me` to `to`: a queued one, else a sleeper, due when
-/// it was. Whether one moved.
-fn move_one_off(me: usize, to: usize) -> bool {
+/// What one [`move_one_off`] moved.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Moved {
+    /// A queued task or a sleeper.
+    Task,
+    /// A timer object's arm.
+    Arm,
+    /// Nothing is left that may go to that processor.
+    Nothing,
+}
+
+/// Move one thing from `me` to `to`: a queued task, else a sleeper, due when
+/// it was, else a timer's arm, as due. What moved.
+fn move_one_off(me: usize, to: usize) -> Moved {
     let (Some(mine), Some(theirs)) = (queue_of(me), queue_of(to)) else {
-        return false;
+        return Moved::Nothing;
     };
     let saved = <arch::Irq as IrqControl>::disable();
     let (first, second) = if me < to {
@@ -2676,7 +2696,7 @@ fn move_one_off(me: usize, to: usize) -> bool {
         .and_then(|id| mine_queue.release(id))
     {
         move_onto(&task, Some(state), to, theirs_queue);
-        true
+        Moved::Task
     } else if let Some((at, task)) = mine_queue.take_movable_sleeper(to) {
         task.set_cpu(to);
         if !theirs_queue.file_sleeper(at, &task) {
@@ -2686,7 +2706,7 @@ fn move_one_off(me: usize, to: usize) -> bool {
             // NOALLOC: `CpuQueue::insert` queues the task in its own run slot.
             theirs_queue.insert(&task);
         }
-        true
+        Moved::Task
     } else if let Some((at, armed, slot)) = mine_queue.take_timer_arm() {
         // A parked processor's timer is stopped, so an arm left on it would
         // not fire until it came back (L.sched.104). The new home is written
@@ -2694,9 +2714,9 @@ fn move_one_off(me: usize, to: usize) -> bool {
         armed.timer.filed_on(to);
         let id = armed.timer.timeline_id();
         theirs_queue.file_timer(at, id, armed, slot);
-        true
+        Moved::Arm
     } else {
-        false
+        Moved::Nothing
     };
     let _ = MOVE_HOLD_MAX.fetch_max(
         crate::timer::now_nanos().saturating_sub(held),
@@ -2990,7 +3010,8 @@ pub(crate) fn timer_expired() {
 /// Take every timer arm due on processor `cpu` off its sleeper set, and
 /// fire them once its lock is let go (`L.object.216`, `L.object.218`).
 ///
-/// From the timer interrupt alone, with interrupts masked: a decision holds
+/// From the timer interrupt, or a processor leaving service ([`evacuate`]);
+/// with interrupts masked either way: a decision holds
 /// the queue's lock across its switch, and a fire wakes waiters, which takes
 /// run queue locks, so no fire happens under it. The pass wakes no task: it
 /// stops at a due one, for the decision this interrupt asks for
@@ -3059,6 +3080,44 @@ pub(crate) fn unfile_timer(
         return None;
     }
     queue.unfile_timer(key, timer.timeline_id())
+}
+
+// CHECKS-ONLY: object/timer_check.rs
+/// Whether processor `cpu`'s sleeper set holds a timer's arm; a pinned task may
+/// stay on it (`L.sched.104`).
+#[cfg(ferrix_checks = "on")]
+#[doc(hidden)]
+pub fn holds_arm_on(cpu: usize) -> bool {
+    let saved = <arch::Irq as IrqControl>::disable();
+    let held = queue_of(cpu).is_some_and(|lock| {
+        let mut queue = lock.lock();
+        match queue.take_timer_arm() {
+            Some((at, armed, slot)) => {
+                let id = armed.timer.timeline_id();
+                queue.file_timer(at, id, armed, slot);
+                true
+            }
+            None => false,
+        }
+    });
+    <arch::Irq as IrqControl>::restore(saved);
+    held
+}
+
+// CHECKS-ONLY: object/timer_check.rs
+/// With interrupts masked: take what is due here into the fired buffer as a
+/// decision's pass does, then evacuate as a processor parking does. So a
+/// check reaches [`evacuate`]'s fire of that buffer with nothing else able
+/// to fire it first (L.sched.104).
+#[cfg(ferrix_checks = "on")]
+#[doc(hidden)]
+pub fn evacuate_with_fired_for_check() {
+    let saved = <arch::Irq as IrqControl>::disable();
+    if let Some((cpu, lock)) = this_cpu().and_then(|cpu| Some((cpu, queue_of(cpu)?))) {
+        lock.lock().take_due_timers(crate::timer::now_nanos());
+        let _ = evacuate(cpu);
+    }
+    <arch::Irq as IrqControl>::restore(saved);
 }
 
 // CHECKS-ONLY: object/timer_check.rs

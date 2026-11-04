@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2757 declarations in the core's files, 179 in the item's; 174 checks-only.
+2763 declarations in the core's files, 179 in the item's; 183 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2048,7 +2048,7 @@ checks above is `pub` for raised checks (F3).
 | `process` | mod | item, load |  |
 | `quota` | mod | item, load |  |
 | `reserve_check` | mod | bin (checks) | pub for raised checks |
-| `space` | mod | item |  |
+| `space` | mod | item, load |  |
 | `ticket` | mod | item, load |  |
 | `timer` | mod | item, load |  |
 | `TOPOLOGY` | static | item |  |
@@ -2107,9 +2107,11 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `POISON_ADDRESS` | const | load (checks) | checks-only |
 | `AttachRefused` | enum | item |  |
 | `Refused` | enum | item |  |
 | `Verdict` | enum | item |  |
+| `force_poison` | fn | load (checks) | checks-only |
 | `job_supervised` | fn | load |  |
 | `reported` | fn | load (checks) | checks-only |
 | `skipped` | fn | load (checks) | checks-only |
@@ -2215,7 +2217,7 @@ checks above is `pub` for raised checks (F3).
 | `Job::path_names` | method | load |  |
 | `Job::quota_index` | method | item, load |  |
 | `Job::remove_named_child` | method | load |  |
-| `Job::reservation` | method | item |  |
+| `Job::reservation` | method | item, load |  |
 | `Job::sealed` | method | load, bin |  |
 | `Job::set_bandwidth` | method | load |  |
 | `Job::set_burst` | method | load |  |
@@ -2227,7 +2229,7 @@ checks above is `pub` for raised checks (F3).
 | `Job::set_max_depth` | method | load |  |
 | `Job::set_max_descendants` | method | load |  |
 | `Job::set_node` | method | load |  |
-| `Job::set_reservation` | method | item |  |
+| `Job::set_reservation` | method | item, load |  |
 | `Job::signals` | method | item, load, bin |  |
 | `Job::subtree` | method | load |  |
 | `Job::subtree_control` | method | load |  |
@@ -2474,7 +2476,7 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `run` | fn | bin (checks) | checks-only |
+| `run` | fn | bin (checks) | checks-only; formerly crate-wide, used above only by checks (1531 C1) |
 | `Report` | struct | item, load, bin |  |
 | `Report::heap_pages` | field | load, bin |  |
 | `Report::interrupts` | field | load, bin |  |
@@ -2486,7 +2488,7 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `SpaceRef` | struct | item |  |
+| `SpaceRef` | struct | item, load |  |
 | `SpaceRef::charging_owner` | method | item |  |
 | `SpaceRef::clone_space` | method | item |  |
 | `SpaceRef::create` | method | item, load |  |
@@ -2510,10 +2512,10 @@ checks above is `pub` for raised checks (F3).
 |---|---|---|---|
 | `Clock` | enum | item, load |  |
 | `TimerError` | enum | - |  |
-| `fire` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
-| `heap_bytes` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
-| `sabotage` | mod | load (checks) | pub for raised checks |
-| `Armed` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `fire` | fn | load (checks) | checks-only |
+| `heap_bytes` | fn | load (checks) | checks-only |
+| `take_arm` | fn | load (checks) | checks-only |
+| `Armed` | struct | load (checks) | checks-only |
 | `Report` | struct | item, load, bin |  |
 | `Timer` | struct | item, load |  |
 | `TimerCore` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -2529,12 +2531,6 @@ checks above is `pub` for raised checks (F3).
 | `TimerCore::report` | method | item, load, bin |  |
 | `TimerCore::set` | method | item, load |  |
 | `TimerCore::timeline_id` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
-
-### `object::timer::sabotage`
-
-| Item | Kind | Named by | Note |
-|---|---|---|---|
-| `take_arm` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `panic`
 
@@ -2698,7 +2694,9 @@ checks above is `pub` for raised checks (F3).
 | `current_runtime` | fn | load |  |
 | `decision_pending_here` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `drained` | fn | load |  |
+| `evacuate_with_fired_for_check` | fn | load (checks) | checks-only |
 | `exit_leaving` | fn | load |  |
+| `holds_arm_on` | fn | load (checks) | checks-only |
 | `in_call_here` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `init` | fn | bin |  |
 | `may_block` | fn | item, load |  |
@@ -2854,7 +2852,7 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `FIRE_BATCH` | const | load (checks) | checks-only |
-| `Due` | enum | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Due` | enum | load (checks) | checks-only |
 | `take_next` | fn | load (checks) | checks-only |
 | `Fired` | struct | load (checks) | checks-only |
 | `Fired::len` | field | item, load, bin | pub for raised checks; type unobtainable from product API |
@@ -3135,6 +3133,7 @@ checks above is `pub` for raised checks (F3).
 | `Fast` | enum | item, bin |  |
 | `FaultOutcome` | enum | load |  |
 | `Outcome` | enum | item, load, bin |  |
+| `Poison` | enum | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Verdict` | enum | load |  |
 | `ask` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `attention_due` | fn | load |  |
@@ -3320,6 +3319,8 @@ checks above is `pub` for raised checks (F3).
 | `AddressSpace::object` | method | item, load, bin |  |
 | `AddressSpace::protect` | method | load |  |
 | `AddressSpace::protect_by_handle` | method | item, load |  |
+| `AddressSpace::raises_refused` | method | load |  |
+| `AddressSpace::refuse_raises` | method | load |  |
 | `AddressSpace::region_count` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `AddressSpace::regions` | method | item, load, bin |  |
 | `AddressSpace::remap` | method | load |  |

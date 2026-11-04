@@ -805,7 +805,8 @@ speculation defences' application, `apic::init_this_cpu` and
   the records, `cpus` and `parked`, comparing addresses, with no lock, no
   allocation, no index) and two counter increments, then the return to the
   halt.
-* **A machine check**: `trap::fatal` → `panic::begin_report` (one
+* **A machine check**: `mce::on_kernel_stack`, which finds no bring-up for a parked
+  thread in `record_of` and stops, → `panic::begin_report` (one
   atomic), the console's lock (the one every report takes), `conclude`:
   `this_cpu_for_report` (the same walk; it names the thread "processor 3
   (hardware id 0x3)", its logical number past `count()`), `stop_others`
@@ -813,11 +814,13 @@ speculation defences' application, `apic::init_this_cpu` and
   ICR, which a local APIC software-disabled since INIT may still send,
   Intel SDM Vol. 3A §11.4.7.2), the console's drain and the pstore
   write-back, and `halt`.
-None of them indexes an array by the thread's logical number: every array
-sized for the processors is indexed by `cpus`' logical numbers, which the
-parked records' numbers (`count()` and up) never are, and `smp::record(n)`
-reads `cpus` alone, so a parked number would read `None`, never another
-processor's record.
+`counts(index)` and `record_of(index)` take the thread's logical number, each a bounded
+`.get` over `MAX_CPUS`, so a parked thread's number past the count finds nothing; no
+other array is indexed by it.
+
+On hardware that broadcasts a machine check, then, a recoverable one stops the machine
+under `smt=off` with recovery on (AoU-36, ledger 6135 S1), and nobody polls a parked
+thread's thread-scoped banks.
 
 **(2) A machine check on a parked thread** is reported from the parked
 thread itself, as above. `test-mce` with `--smp-threads` injects into

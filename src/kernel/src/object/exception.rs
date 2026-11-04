@@ -772,3 +772,40 @@ fn audit_context(process: &Process, before: u64, after: u64, level: u32) {
         [before as u32, after as u32, level],
     );
 }
+
+// CHECKS-ONLY: object/exception_check.rs; home: in crate
+/// The address a report forced through [`force_poison`] names.
+#[cfg(ferrix_checks = "on")]
+#[doc(hidden)]
+pub const POISON_ADDRESS: u64 = 0x7_0000;
+
+/// What the next user fault is taken as: 0 for what it is. The seam a boot check
+/// reaches the machine check's two supervisor rules by, with no machine check to
+/// take (ledger 5840, M2).
+#[cfg(ferrix_checks = "on")]
+static NEXT_POISON: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+
+// CHECKS-ONLY: object/exception_check.rs
+/// Take the next user fault on any processor as `poison`.
+#[cfg(ferrix_checks = "on")]
+#[doc(hidden)]
+pub fn force_poison(poison: crate::trap::Poison) {
+    use crate::trap::Poison;
+    let value = match poison {
+        Poison::None => 0,
+        Poison::Resumable => 1,
+        Poison::Ending => 2,
+    };
+    NEXT_POISON.store(value, Ordering::SeqCst);
+}
+
+/// What the next user fault is taken as, once.
+#[cfg(ferrix_checks = "on")]
+pub(crate) fn take_poison() -> Option<crate::trap::Poison> {
+    use crate::trap::Poison;
+    match NEXT_POISON.swap(0, Ordering::SeqCst) {
+        1 => Some(Poison::Resumable),
+        2 => Some(Poison::Ending),
+        _ => None,
+    }
+}

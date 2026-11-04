@@ -685,11 +685,9 @@ Spent about 33 points of about 70 estimated.
 - `mk/k5` (56f1ddbac, WIP, partly built): wait on a user address, K5.md,
   OK IF ledger 2498. Next: build the native calls, sysml ids, FX-0911's check,
   controls C1-C7, the futex ABAB. About 12 points left.
-- `mk/k7` (13 commits of code, found 2026-11-03; the "no code yet" this row
-  once said was false): charging that follows the client, K7.md, OK IF 2525.
-  Rebased onto `develop` as `d9b014bfc` on the local `feature/mk-base`
-  (2026-11-03, unlanded, not yet on `develop`). About 9 points left; it lands on K6, and whichever of K7 and K12 lands second
-  wires K12's lookup to `charge_target`.
+- K7's residual: the kernel heap of objects an adopted call makes for a client
+  stays the server's, bounded as K7.md 2.3 says; charge it to the ticket's job when
+  K12b's reservation heap can (ledger 2925 (1)).
 - `mk/k10` (5509676d1, WIP, unbuilt): timer objects, K10.md, OK IF 2538.
   Next: the native handlers, `timer_check.rs`, sysml, boots, controls N1-N8,
   the ABAB. About 5 points left.

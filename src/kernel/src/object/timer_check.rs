@@ -34,7 +34,7 @@ use crate::sync::SpinLock;
 /// in a kernel built with its self-checks (the K10 delta review, ledger
 /// 2919, (1)).
 #[cfg(ferrix_checks = "on")]
-use crate::object::timer::sabotage::take_arm;
+use crate::object::timer::take_arm;
 
 /// What stands for it in a kernel built `checks=off`, where no check runs:
 /// nothing here is ever called, and the product has no hook to call.
@@ -67,6 +67,12 @@ pub struct Report {
     pub passes: u64,
     /// Refusals as specified.
     pub refusals: u64,
+    /// Arms a processor leaving service moved to others: 0 where none can
+    /// leave (the Arm architectures, one processor, or a refusal).
+    pub moved: u64,
+    /// The longest hold of two run queues' locks since boot, in nanoseconds,
+    /// after those moves: MEMORY-AND-TIMING 2.2e2's figure at that count.
+    pub move_hold_ns: u64,
 }
 
 /// Run every case.
@@ -108,6 +114,201 @@ pub fn run() -> Result<Report, &'static str> {
         .ok_or("the timer checks never finished")?;
     while !task.is_dead() {
         sched::yield_now();
+    }
+    let mut report = outcome?;
+    arms_leave_a_processor_going_out_of_service(&mut report)?;
+    Ok(report)
+}
+
+/// How many far arms the move case adds, to hold its hold to account:
+/// MEMORY-AND-TIMING 2.2e2's bound at a count past what a check would meet.
+const FAR_ARMS: usize = 256;
+
+/// How many arms stand for a receiver asleep: more than `MAX_CPUS` needs on any
+/// machine a check boots on, so a move deals one to every receiver, and one with
+/// nothing to wake it would leave its arm unfired (`arm_timer` stops an idle
+/// queue's timer, so a move that did not kick it would not be noticed).
+const IDLE_ARMS: usize = 16;
+
+/// The timers of [`arms_leave_a_processor_going_out_of_service`], set on the
+/// processor it takes out by a task pinned there.
+#[derive(Default)]
+struct ToMove {
+    /// Fire while their first processor is out, the checking task asleep: at
+    /// least one for each receiver, since a move deals the arms round them.
+    idle: Vec<Arc<Timer>>,
+    /// Fires while its first processor is out, the checking task running.
+    busy: Option<Arc<Timer>>,
+    /// Cancelled once moved.
+    cancelled: Option<Arc<Timer>>,
+    /// Set again once moved.
+    again: Option<Arc<Timer>>,
+    /// Armed far ahead, for the count.
+    far: Vec<Arc<Timer>>,
+    /// Whether the fired-buffer case held, and what went wrong if not.
+    outcome: Option<Result<(), &'static str>>,
+}
+
+/// What the pinned task hands the case.
+static TO_MOVE: SpinLock<Option<ToMove>> = SpinLock::new(None);
+
+/// Woken when the pinned task has set them.
+static SET: WaitQueue = WaitQueue::new();
+
+/// A timer on the monotonic clock.
+fn timer_here() -> Result<Arc<Timer>, &'static str> {
+    Timer::new(Clock::Monotonic).map_err(|_| "a timer could not be made")
+}
+
+/// On the processor going out: the fired buffer's case, then the arms. The
+/// buffer's arm is due with interrupts masked, so only `evacuate` can fire it
+/// before the case looks.
+fn set_on_the_processor_going_out(_argument: usize) {
+    let mut set = ToMove::default();
+    let outcome = (|| {
+        let due = timer_here()?;
+        let core = due.core();
+        let saved = <crate::arch::Irq as ferrix_sync::IrqControl>::disable();
+        // An arm whose deadline has passed fires in the call: this one is
+        // filed one millisecond on and waited out, masked.
+        core.set(crate::timer::now_nanos().saturating_add(MS), 0, false);
+        let until = crate::timer::now_nanos().saturating_add(2 * MS);
+        while crate::timer::now_nanos() < until {
+            core::hint::spin_loop();
+        }
+        sched::evacuate_with_fired_for_check();
+        let fired = core.report().fires;
+        <crate::arch::Irq as ferrix_sync::IrqControl>::restore(saved);
+        if fired != 1 {
+            return Err("arms case d: an arm in the fired buffer was not fired by evacuation");
+        }
+        let at = |after: u64| crate::timer::now_nanos().saturating_add(after);
+        let (busy, cancelled, again) = (timer_here()?, timer_here()?, timer_here()?);
+        for _ in 0..IDLE_ARMS {
+            let idle = timer_here()?;
+            idle.core().set(at(300 * MS), 0, false);
+            crate::fallible::try_push(&mut set.idle, idle)
+                .map_err(|_| "no memory for the idle arms' list")?;
+        }
+        busy.core().set(at(1500 * MS), 0, false);
+        cancelled.core().set(at(400 * MS), 0, false);
+        again.core().set(at(120_000 * MS), 0, false);
+        for _ in 0..FAR_ARMS {
+            let far = timer_here()?;
+            far.core().set(at(120_000 * MS), 0, false);
+            crate::fallible::try_push(&mut set.far, far)
+                .map_err(|_| "no memory for the far arms' list")?;
+        }
+        set.busy = Some(busy);
+        set.cancelled = Some(cancelled);
+        set.again = Some(again);
+        Ok(())
+    })();
+    set.outcome = Some(outcome);
+    *TO_MOVE.lock() = Some(set);
+    SET.wake_all();
+}
+
+/// A processor leaving service takes its timers' arms to others (L.sched.104):
+/// (a) an arm fires there, at its time, with the receiver idle and with it
+/// busy; (b) a moved arm cancelled comes home and does not fire; (c) a moved
+/// arm set again fires at its new time, not at the old one; (d) an arm already
+/// in the fired buffer is fired before the processor's timer stops.
+///
+/// Verifies: L.sched.104
+fn arms_leave_a_processor_going_out_of_service(report: &mut Report) -> Result<(), &'static str> {
+    use crate::smp::service::{Door, Refusal, set_in_service};
+
+    const OUT: usize = 1;
+    if crate::smp::count() < 2 {
+        return Ok(());
+    }
+    *TO_MOVE.lock() = None;
+    let setter = sched::spawn_on(
+        "check-timer-arms",
+        set_on_the_processor_going_out,
+        0,
+        NICE_0_WEIGHT,
+        OUT,
+        CpuSet::of(OUT),
+    )?;
+    let far = crate::timer::now_nanos().saturating_add(60_000 * MS);
+    let _ = SET.wait_until_deadline(|| TO_MOVE.lock().is_some(), far);
+    let mut set = TO_MOVE
+        .lock()
+        .take()
+        .ok_or("the timers to move were never set")?;
+    set.outcome
+        .take()
+        .unwrap_or(Err("the pinned task said nothing"))?;
+    while !setter.is_dead() {
+        sched::yield_now();
+    }
+    let (Some(busy), Some(cancelled), Some(again)) =
+        (set.busy.take(), set.cancelled.take(), set.again.take())
+    else {
+        return Err("a timer to move was missing");
+    };
+    let subject = crate::audit::Subject::KERNEL;
+    match set_in_service(OUT, false, Door::Lode, subject) {
+        Ok(()) => {}
+        // Where no processor can leave, or this one's interrupts cannot move.
+        Err(Refusal::Unsupported | Refusal::Interrupts) => {
+            crate::console::println!(
+                "  timers   no arm moved: processor {OUT} cannot leave service on this boot"
+            );
+            return Ok(());
+        }
+        Err(_) => return Err("arms: processor 1 did not leave service"),
+    }
+    let outcome = (|| {
+        if sched::holds_arm_on(OUT) {
+            return Err("arms case a: arms stayed on a processor out of service");
+        }
+        // (b): home at once, wherever it was filed; (c): from now, not its
+        // old two minutes.
+        let cancel_core = cancelled.core();
+        cancel_core.cancel();
+        if !cancel_core.report().home {
+            return Err("arms case b: a moved arm cancelled did not come home");
+        }
+        let again_core = again.core();
+        let asked = crate::timer::now_nanos().saturating_add(50 * MS);
+        again_core.set(asked, 0, false);
+        // (a), idle: this task sleeps past every idle arm's deadline, and each
+        // receiver has one. A receiver's timer is stopped while it idles, so only
+        // the kick the move sends it, or some other interrupt it happens to take,
+        // brings its first decision and the arm's timer; `kick` is what the case
+        // shows, with sixteen arms for one receiver it could miss.
+        let quiet = crate::timer::now_nanos().saturating_add(1000 * MS);
+        let _ = SET.wait_until_deadline(|| false, quiet);
+        if set.idle.iter().any(|idle| idle.core().report().fires != 1) {
+            return Err("arms case a: a moved arm did not fire with its receiver idle");
+        }
+        let again_report = again_core.report();
+        if again_report.fires != 1 || again_report.fired_at < asked {
+            return Err("arms case c: a moved arm set again did not fire at its new time");
+        }
+        // (a), busy: this task runs on, on whichever receiver it has.
+        let patience = crate::timer::now_nanos().saturating_add(10_000 * MS);
+        while busy.core().report().fires == 0 && crate::timer::now_nanos() < patience {
+            core::hint::spin_loop();
+        }
+        if busy.core().report().fires != 1 {
+            return Err("arms case a: a moved arm did not fire with its receiver busy");
+        }
+        if cancel_core.report().fires != 0 {
+            return Err("arms case b: a moved arm cancelled fired");
+        }
+        Ok(())
+    })();
+    report.moved = (FAR_ARMS + IDLE_ARMS + 3) as u64;
+    report.move_hold_ns = sched::move_hold_max();
+    for far in &set.far {
+        far.core().cancel();
+    }
+    if set_in_service(OUT, true, Door::Lode, subject).is_err() {
+        return Err("arms: processor 1 did not come back into service");
     }
     outcome
 }
