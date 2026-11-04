@@ -1024,6 +1024,11 @@
       "before": "pub(crate)"
     },
     {
+      "item": "audit.rs: PAGER (re-export)",
+      "born": "K3",
+      "ledger": 6131
+    },
+    {
       "item": "audit.rs: read_through_now (fn)",
       "before": "pub(crate)"
     },
@@ -1547,6 +1552,16 @@
       "before": "pub(crate)"
     },
     {
+      "item": "object/oom.rs: user_fault (fn)",
+      "born": "K3",
+      "ledger": 6131
+    },
+    {
+      "item": "object/pager.rs: PagerCore (struct)",
+      "born": "K3",
+      "ledger": 6131
+    },
+    {
       "item": "object/pin.rs: Counts (struct)",
       "before": "pub(crate)"
     },
@@ -1990,6 +2005,11 @@
       "before": "pub(crate)"
     },
     {
+      "item": "sched/task.rs: Task::address_space (method)",
+      "born": "K3",
+      "ledger": 6131
+    },
+    {
       "item": "sched/task.rs: Task::base_weight (method)",
       "before": "pub(crate)"
     },
@@ -2260,6 +2280,11 @@
     {
       "item": "user/vmo.rs: Vmo::mapper_count (method)",
       "before": "pub(crate)"
+    },
+    {
+      "item": "user/vmo.rs: Vmo::page_state (method)",
+      "born": "K3",
+      "ledger": 6131
     },
     {
       "item": "user/vmo.rs: arm_reclaim_hook (fn)",

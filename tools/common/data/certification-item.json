@@ -940,6 +940,11 @@
         "crate": "ferrix-kernel-load"
       },
       {
+        "file": "object/pager_check.rs",
+        "file_ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
         "file": "object/pin/check.rs",
         "file_ring": "core",
         "crate": "ferrix-kernel-load"
