@@ -1611,7 +1611,7 @@ fn restricted_shootdown(given: &Given) -> Result<(), i32> {
         nr::SPACE_ALLOCATE,
         [given.space, SHOOTDOWN_AT, 0x1000, write, 0, 0],
     )
-    .map_err(|_| 138)?;
+    .map_err(|e| 138_100_000 - e.as_return_value() as i32)?;
     let thread = sys(
         nr::THREAD_CREATE,
         [
@@ -1623,30 +1623,32 @@ fn restricted_shootdown(given: &Given) -> Result<(), i32> {
             0,
         ],
     )
-    .map_err(|_| 138)?;
+    .map_err(|e| 138_200_000 - e.as_return_value() as i32)?;
     ask(given, ASK_PIN, 1, Some(thread))?;
-    let me = sys(nr::THREAD_SELF, [0; 6]).map_err(|_| 138)?;
+    let me = sys(nr::THREAD_SELF, [0; 6]).map_err(|_| 138_300_000)?;
     ask(given, ASK_PIN, 0, Some(me))?;
     let mut touch = at(arch::touch());
     arch::set_first(&mut touch, SHOOTDOWN_AT);
-    fault_exit(&enter(&touch), arch::VECTOR_BREAKPOINT, 138)?;
+    let e = enter(&touch);
+    fault_exit(&e, arch::VECTOR_BREAKPOINT, 138_400_000 + (e.reason as i32) * 1000 + (e.number as i32 & 0x3ff))?;
     let mut load = at(arch::load());
     arch::set_first(&mut load, SHOOTDOWN_AT);
-    fault_exit(&enter(&load), arch::VECTOR_BREAKPOINT, 138)?;
+    let e = enter(&load);
+    fault_exit(&e, arch::VECTOR_BREAKPOINT, 138_500_000 + (e.reason as i32) * 1000 + (e.number as i32 & 0x3ff))?;
     SHOOTDOWN_STEP.store(1, Release);
     loop {
         match SHOOTDOWN_STEP.load(Acquire) {
             2 => break,
-            100 => return Err(138),
+            100 => return Err(138_600_000),
             _ => core::hint::spin_loop(),
         }
     }
     let after = enter(&load);
     hold(
         after.reason == Reason::Fault as u64 && after.number != arch::VECTOR_BREAKPOINT,
-        138,
+        138_700_000 + (after.reason as i32) * 1000 + (after.number as i32 & 0x3ff),
     )?;
-    sys(nr::HANDLE_CLOSE, [thread, 0, 0, 0, 0, 0]).map_err(|_| 138)?;
+    sys(nr::HANDLE_CLOSE, [thread, 0, 0, 0, 0, 0]).map_err(|_| 138_800_000)?;
     Ok(())
 }
 
