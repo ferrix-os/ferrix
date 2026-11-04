@@ -210,6 +210,8 @@ fn jobs() -> Result<Jobs, &'static str> {
 
 /// Reclaim gives back clean pages charged at or beneath its job, never a
 /// sibling's or a child's under its `memory.min`, and each reads as its source.
+///
+/// Verifies: L.object.109
 fn check_reclaim_is_scoped() -> Result<(), &'static str> {
     let (_root, one, sibling, child) = jobs()?;
     if !child.set_mark(Mark::Min, 256 * PAGE_SIZE) {
@@ -236,6 +238,8 @@ fn check_reclaim_is_scoped() -> Result<(), &'static str> {
 
 /// `resident` counts the cached pages charged to a job and beneath it, a disk
 /// file's apart from a memory filesystem's.
+///
+/// Verifies: L.object.111
 fn check_resident() -> Result<(), &'static str> {
     let (_root, one, sibling, child) = jobs()?;
     let (_mine, _) = cached_file(&one, 8)?;
@@ -250,6 +254,8 @@ fn check_resident() -> Result<(), &'static str> {
 
 /// A reclaim begins where the last stopped, so a page is not taken again before
 /// the pages after it have been looked at.
+///
+/// Verifies: L.object.191
 fn check_a_reclaim_goes_round() -> Result<(), &'static str> {
     let (_root, one, _sibling, _child) = jobs()?;
     let (first, _) = cached_file(&one, 16)?;
@@ -279,6 +285,8 @@ fn check_a_reclaim_goes_round() -> Result<(), &'static str> {
 
 /// `reclaim_asked` in rounds of at most 32 pages, `Short` after 16 empty rounds,
 /// `Interrupted` between rounds, and at no scope `Short` for any count but zero.
+///
+/// Verifies: L.object.183
 fn check_reclaim_asked() -> Result<(), &'static str> {
     let (_root, one, sibling, _child) = jobs()?;
     let scope = one.quota_index();
@@ -374,6 +382,7 @@ fn check_shrinker(takes: &dyn Fn(u32) -> bool, want: u64) -> u64 {
 /// are at no scope, which takes any page, and hold nothing of anyone's: nothing
 /// else is on the list yet.
 ///
+/// Verifies: L.object.186, L.object.183
 ///
 /// # Errors
 ///
@@ -441,6 +450,8 @@ pub fn check_the_shrinker() -> Result<u64, &'static str> {
 
 /// A page written and not written back stays, and reads back as last written:
 /// reclaim takes only what the source hands it.
+///
+/// Verifies: L.object.188
 fn check_a_written_page_stays() -> Result<(), &'static str> {
     const WRITTEN: &[u8] = b"written and not yet written back";
     let (_root, one, _sibling, _child) = jobs()?;
@@ -506,6 +517,8 @@ static TAKE_HOOK: ReclaimHook = ReclaimHook {
 
 /// A shared mapping that may write, made and written between the source's
 /// answer and the take: the object is no longer reclaimable at the take.
+///
+/// Verifies: L.object.188
 fn check_a_mapping_made_at_the_take() -> Result<(), &'static str> {
     let (_root, one, _sibling, _child) = jobs()?;
     let (file, _) = cached_file(&one, 1)?;
@@ -534,6 +547,8 @@ fn check_a_mapping_made_at_the_take() -> Result<(), &'static str> {
 
 /// Every live cached file's pages, whoever they are charged to: a disk file's, a
 /// memory file's, those written, and those reclaim may take.
+///
+/// Verifies: L.object.189
 fn check_totals() -> Result<(), &'static str> {
     let (_root, one, sibling, _child) = jobs()?;
     let before = cache::totals();
@@ -576,6 +591,8 @@ fn retiring(work: impl FnOnce() -> Result<(), &'static str>) -> Result<(), &'sta
 
 /// A copy a machine check stopped answers `Poisoned(frame)` after checking the
 /// page against the frame it read.
+///
+/// Verifies: L.object.260
 fn check_read_present_answers_poison() -> Result<(), &'static str> {
     let (_root, one, _sibling, _child) = jobs()?;
     let (file, _) = cached_file(&one, 2)?;
@@ -593,6 +610,8 @@ fn check_read_present_answers_poison() -> Result<(), &'static str> {
 
 /// The frame retired first, the page found by a walk of the list, taken only
 /// through reclaim's test, with what came of it answered.
+///
+/// Verifies: L.object.259
 fn check_a_poisoned_page_is_dropped() -> Result<(), &'static str> {
     let (_root, one, _sibling, _child) = jobs()?;
     let (file, disk) = cached_file(&one, 8)?;
@@ -675,6 +694,8 @@ fn check_a_poisoned_page_is_dropped() -> Result<(), &'static str> {
 
 /// A read that consumed poison goes round the fill loop only after a clean page
 /// is dropped, and fails after one that is not.
+///
+/// Verifies: L.object.261
 fn check_a_poisoned_read() -> Result<(), &'static str> {
     let (_root, one, _sibling, _child) = jobs()?;
     let (file, disk) = cached_file(&one, 4)?;

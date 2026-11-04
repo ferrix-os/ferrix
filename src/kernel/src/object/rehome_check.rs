@@ -78,6 +78,8 @@ fn member(job: &Arc<Job>) -> Result<Process, &'static str> {
 
 /// `set_limit` is what the next charge is judged against, and `usage` says the
 /// use, the limit and the refusals.
+///
+/// Verifies: L.object.52
 fn check_limits_and_usage() -> Result<(), &'static str> {
     let (_root, job) = fresh()?;
     let empty = job
@@ -113,6 +115,8 @@ fn check_limits_and_usage() -> Result<(), &'static str> {
 }
 
 /// `set_cpu_weight` makes the job's weight the value written.
+///
+/// Verifies: L.object.61
 fn check_the_weight() -> Result<(), &'static str> {
     let (_root, job) = fresh()?;
     if !job.set_cpu_weight(300) || job.cpu_weight() != 300 {
@@ -123,6 +127,8 @@ fn check_the_weight() -> Result<(), &'static str> {
 
 /// Kernel heap is charged against the memory limit and counted again as kernel
 /// memory, both or neither, and given back from both.
+///
+/// Verifies: L.object.56
 fn check_the_kernel_charge() -> Result<(), &'static str> {
     let (_root, job) = fresh()?;
     let slot = job.quota_index();
@@ -155,6 +161,8 @@ fn check_the_kernel_charge() -> Result<(), &'static str> {
 }
 
 /// A named child holding a live anonymous job is not removed.
+///
+/// Verifies: L.object.68
 fn check_a_busy_child_stays() -> Result<(), &'static str> {
     let (_root, job) = fresh()?;
     let named = job
@@ -174,6 +182,8 @@ fn check_a_busy_child_stays() -> Result<(), &'static str> {
 }
 
 /// A removed job takes no process and no child.
+///
+/// Verifies: L.object.69
 fn check_a_removed_job_takes_nothing() -> Result<(), &'static str> {
     let (_root, job) = fresh()?;
     let named = job
@@ -200,6 +210,8 @@ fn check_a_removed_job_takes_nothing() -> Result<(), &'static str> {
 
 /// EMPTY exactly while not populated, and a registration fires at once if
 /// empty and otherwise as it empties.
+///
+/// Verifies: L.object.74
 fn check_empty() -> Result<(), &'static str> {
     let (_root, job) = fresh()?;
     if !job.signals().intersects(Signals::EMPTY) {
@@ -243,6 +255,8 @@ fn check_empty() -> Result<(), &'static str> {
 
 /// `count_oom` counts in the job and every job above it and no other, and wakes
 /// whatever polls their `memory.events`.
+///
+/// Verifies: L.object.80
 fn check_oom_counts() -> Result<(), &'static str> {
     let (root, job) = fresh()?;
     let sibling = root
@@ -271,6 +285,8 @@ fn check_oom_counts() -> Result<(), &'static str> {
 }
 
 /// One object, given once and handed over once.
+///
+/// Verifies: L.object.89
 fn check_a_bootstrap_is_given_once() -> Result<(), &'static str> {
     let object = || {
         Port::new()
@@ -306,6 +322,8 @@ fn check_a_bootstrap_is_given_once() -> Result<(), &'static str> {
 }
 
 /// An `Exit` reports nothing before its end, and its status and signal after.
+///
+/// Verifies: L.object.94
 fn check_exit_reports_once_ended() -> Result<(), &'static str> {
     let (_root, job) = fresh()?;
     let signalled = member(&job)?;
@@ -392,6 +410,8 @@ fn check_throttling() -> Result<(), &'static str> {
 
 /// `job_ended` is true from the moment the job goes, though a task holds the
 /// slot, and false once the slot is claimed anew.
+///
+/// Verifies: L.object.110
 fn check_a_slot_says_its_job_went() -> Result<(), &'static str> {
     let job = Quota::new(None).map_err(|_| "no quota slot")?;
     let index = job.index();
@@ -421,6 +441,8 @@ fn check_a_slot_says_its_job_went() -> Result<(), &'static str> {
 
 /// A program's page table is charged as memory and as a table, and a frame's
 /// free gives back a table's two charges and a page's one.
+///
+/// Verifies: L.object.182
 fn check_a_table_is_charged_as_a_table() -> Result<(), &'static str> {
     const PAGES: u64 = 4;
     let (_root, job) = fresh()?;
@@ -464,16 +486,22 @@ fn check_a_table_is_charged_as_a_table() -> Result<(), &'static str> {
 }
 
 /// The burst's carry, charged at chosen instants, on a slot of its own.
+///
+/// Verifies: L.object.184
 fn check_a_burst_is_carried() -> Result<(), &'static str> {
     quota::check_burst_carry(crate::timer::now_nanos())
 }
 
 /// A job set idle has the entity weight 3, and its own again once let off.
+///
+/// Verifies: L.object.185
 fn check_an_idle_job_weighs_little() -> Result<(), &'static str> {
     quota::check_idle_weight()
 }
 
 /// A started process moves out of or into a sealed job by no move, and stays.
+///
+/// Verifies: H.OBJ.22
 fn check_a_seal_holds() -> Result<(), &'static str> {
     let root = Job::new_root().map_err(|_| "no root job")?;
     let sealed = root
@@ -502,6 +530,8 @@ fn check_a_seal_holds() -> Result<(), &'static str> {
 
 /// A sealed job's members start only within its tree, and into a sealed job
 /// from outside only native `process_create` starts.
+///
+/// Verifies: L.object.249, H.OBJ.22
 fn check_may_start_in() -> Result<(), &'static str> {
     let root = Job::new_root().map_err(|_| "no root job")?;
     let sealed = root
@@ -528,6 +558,8 @@ fn check_may_start_in() -> Result<(), &'static str> {
 
 /// A job made inside a sealed job is sealed, and the job it was made under is
 /// not unsealed or sealed by it.
+///
+/// Verifies: H.OBJ.22
 fn check_sealed_tree() -> Result<(), &'static str> {
     let root = Job::new_root().map_err(|_| "no root job")?;
     let sealed = root
@@ -589,6 +621,8 @@ impl Host for Listed {
 
 /// Once unlisted a pid finds nothing and `listed` leaves it out; `live` still
 /// lists it, and the number stays taken until the process is dropped.
+///
+/// Verifies: L.object.181
 fn check_a_reaped_pid_finds_nothing() -> Result<(), &'static str> {
     let (_root, job) = fresh()?;
     let pid = process::allocate().ok_or("no pid for the table's case")?;
