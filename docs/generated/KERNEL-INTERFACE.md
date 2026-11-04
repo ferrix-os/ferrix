@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2799 declarations in the core's files, 193 in the item's; 205 checks-only.
+2813 declarations in the core's files, 193 in the item's; 207 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1263,6 +1263,7 @@ checks above is `pub` for raised checks (F3).
 | `ROOT_SWITCHED` | re-export | item |  |
 | `Record` | re-export | item, load |  |
 | `STARTER_GIVEN` | re-export | item |  |
+| `TICKET` | re-export | item, load |  |
 | `UNMEASURED` | re-export | item |  |
 | `WIDEN` | re-export | item |  |
 | `saturated` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -2086,6 +2087,7 @@ checks above is `pub` for raised checks (F3).
 | `quota` | mod | item, load |  |
 | `rehome_check` | mod | item (checks) | pub for raised checks |
 | `space` | mod | item, load |  |
+| `ticket` | mod | item, load |  |
 | `timer` | mod | item, load |  |
 | `TOPOLOGY` | static | item |  |
 | `HandleTable` | type | item, load |  |
@@ -2100,11 +2102,15 @@ checks above is `pub` for raised checks (F3).
 | `ReadError` | enum | item, load |  |
 | `WriteFailure` | enum | item, load |  |
 | `check_carry` | fn | item |  |
+| `heap_footprint` | fn | load (checks) | checks-only |
 | `check` | mod | load (checks) | pub for raised checks |
 | `Endpoint` | struct | item, load |  |
 | `Sender` | struct | item, load |  |
 | `Small` | struct | - |  |
 | `ChannelMessage` | type | item, load |  |
+| `Endpoint::adoptable_ticket` | method | item |  |
+| `Endpoint::end_ticket` | method | item |  |
+| `Endpoint::issue_ticket` | method | item |  |
 | `Endpoint::observe` | method | item, load |  |
 | `Endpoint::pair` | method | item, load |  |
 | `Endpoint::park` | method | item, load |  |
@@ -2201,7 +2207,7 @@ checks above is `pub` for raised checks (F3).
 | `Job` | struct | item, load |  |
 | `NodeAttributes` | struct | load |  |
 | `Job::admits` | method | load |  |
-| `Job::adopt` | method | load |  |
+| `Job::adopt` | method | item, load |  |
 | `Job::bandwidth` | method | load |  |
 | `Job::burst` | method | load |  |
 | `Job::change_subtree_control` | method | load |  |
@@ -2434,6 +2440,7 @@ checks above is `pub` for raised checks (F3).
 | `Process::id` | method | item, load, bin |  |
 | `Process::is_frozen` | method | load |  |
 | `Process::is_terminated` | method | item, load |  |
+| `Process::issuer_and_slot` | method | item |  |
 | `Process::job` | method | item, load |  |
 | `Process::job_id` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Process::leave_job` | method | load |  |
@@ -2523,6 +2530,17 @@ checks above is `pub` for raised checks (F3).
 | `SpaceRef::create` | method | item, load |  |
 | `SpaceRef::of` | method | item, load, bin |  |
 | `SpaceRef::space` | method | item, load |  |
+
+### `object::ticket`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `IssueError` | enum | item |  |
+| `adopt` | fn | item |  |
+| `charging_for_call` | fn | item |  |
+| `leave` | fn | item, load |  |
+| `Ticket` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Ticket::issuer` | method | item, load |  |
 
 ### `object::timer`
 
@@ -2666,6 +2684,7 @@ checks above is `pub` for raised checks (F3).
 | `STAGE9_REFUSALS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE9_SEALING` | static | bin (checks) | checks-only |
 | `STAGE9_SPACES` | static | bin (checks) | checks-only |
+| `STAGE9_TICKETS` | static | bin (checks) | checks-only |
 | `STAGE9_TIMERS` | static | bin (checks) | checks-only |
 | `SYSFS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `SYSRQ_CRASH` | static | load |  |
