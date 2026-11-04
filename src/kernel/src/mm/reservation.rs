@@ -139,6 +139,9 @@ pub(crate) enum Floor {
     Program(Entry),
     /// The kernel's own: held above the promise.
     Kernel,
+    /// A reservation's own heap pages (`L.mm.81`): drawn from it while it
+    /// has room, and refused otherwise, never taken plain.
+    Drawn(Entry),
 }
 
 /// What [`take`] decided, for the caller to finish in the same hold.
@@ -161,7 +164,8 @@ pub(crate) enum Taking {
 pub(super) fn take(floor: Floor, free: u64, n: u64, watermark: u64) -> Option<Taking> {
     let outstanding = outstanding();
     let (taking, least) = match floor {
-        Floor::Program(entry) if room(entry, n) => (Taking::Drawn(entry), 0),
+        Floor::Program(entry) | Floor::Drawn(entry) if room(entry, n) => (Taking::Drawn(entry), 0),
+        Floor::Drawn(_) => return None,
         Floor::Program(_) => (Taking::Plain, watermark.saturating_add(outstanding)),
         Floor::Kernel => (Taking::Plain, outstanding),
     };
@@ -238,9 +242,9 @@ fn adjust(slot: &Slot, change: impl FnOnce(&Slot)) {
     });
 }
 
-/// Bind a free entry, of size 0: one with nothing drawn and no owner.
-/// Under the frame allocator's lock. `None` when every entry is bound or
-/// still draining.
+/// Bind a free entry: unbound with nothing drawn from it. Its heap's kept pages
+/// are given back before this (`reservation_bind`), so that what is drawn is the
+/// new job's alone and a reservation of any size is whole (ledger 6260).
 pub(super) fn bind() -> Option<Entry> {
     let at = SLOTS.iter().position(|slot| {
         !slot.bound.load(Ordering::Relaxed) && slot.drawn.load(Ordering::Relaxed) == 0
@@ -249,6 +253,13 @@ pub(super) fn bind() -> Option<Entry> {
     slot.size.store(0, Ordering::Relaxed);
     slot.bound.store(true, Ordering::Relaxed);
     Entry::try_from(at + 1).ok()
+}
+
+/// Whether the slot at `at` is bound.
+pub(super) fn is_bound(at: usize) -> bool {
+    SLOTS
+        .get(at)
+        .is_some_and(|slot| slot.bound.load(Ordering::Relaxed))
 }
 
 /// Unbind `entry`: nothing promised by it from now on, and it drains
