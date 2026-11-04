@@ -130,7 +130,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | `arch/x86_64/framebuffer.rs` | `core` | 15 | - | - | 15 | 104, 108, 173, 184, 186, 190, 192-193, 198-199, 201, 203-204, 206-207 |
 | `arch/x86_64/powerctl/logic.rs` | `core` | 11 | - | - | 11 | 56, 59, 67, 76, 82, 90, 92, 128, 131-133 |
 | `arch/x86_64/switch.rs` | `core` | 9 | - | - | 9 | 347, 350, 352, 767, 778, 936, 945, 947, 951 |
-| `arch/x86_64/smp.rs` | `core` | 2 | - | - | 2 | 455, 476 |
+| `arch/x86_64/smp.rs` | `core` | 2 | - | - | 2 | 486, 507 |
 | `arch/x86_64/gdt.rs` | `core` | 1 | - | - | 1 | 398 |
 | `arch/x86_64/inspect.rs` | `core` | 1 | - | - | 1 | 55 |
 | `arch/x86_64/signal/compat.rs` | `core` | 1 | - | - | 1 | 339 |

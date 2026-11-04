@@ -739,10 +739,10 @@
     "smp.rs": {
       "ring": "core",
       "lines": [
-        992,
-        996,
-        997,
-        1122
+        1079,
+        1083,
+        1084,
+        1209
       ]
     },
     "object/channel.rs": {
@@ -773,9 +773,9 @@
     "arch/aarch64/smp.rs": {
       "ring": "core",
       "lines": [
-        122,
-        404,
-        417
+        145,
+        427,
+        440
       ]
     },
     "arch/arm_common/pl011.rs": {

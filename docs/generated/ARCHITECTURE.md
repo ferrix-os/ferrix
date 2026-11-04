@@ -123,7 +123,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 | `FerrixSigningRequirements` | `26-signing-requirements.sysml` | docs/SIGNING.md is the design (the certification consultant's OK IF at ledger lines 3667 and 3738; the customer's decisions at 3731). Slice S1 builds the verify-only crate `ferrix-sigverify` (src/lib/crypto/sigverify) and the hash it rests on, `ferrix-sha256` (src/lib/crypto/sha256), both in the item ring (certification-item.json's crates). What the UEFI loader, init's configuration verifier and devmgr do with the verifier's answer is theirs, and gets ids in their own slices (S4, S8, S9). |
 
-27 files, 152 packages, 8603 elements, 220 relations. Model digest `7ef3d15121bf21d9`.
+27 files, 152 packages, 8632 elements, 220 relations. Model digest `8baa9766d4ffe89f`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -4598,6 +4598,9 @@ flowchart LR
 | `L.x86_64.42` | `nativeSignalRoundTrip` | — | — | — |
 | `L.x86_64.174` | `faultInTheSignalContext` | — | — | — |
 | `L.x86_64.175` | `machineCheckTakenOnEveryProcessor` | — | — | — |
+| `L.x86_64.183` | `threadsOfACoreFromCpuid` | — | — | — |
+| `L.x86_64.184` | `siblingsParkedByTheKernel` | — | — | — |
+| `L.x86_64.185` | `oneThreadACoreRunsWork` | — | — | — |
 | `L.x86_64.43` | `nativeForgedFrameRefused` | — | — | — |
 | `L.x86_64.44` | `sanitisedContext` | — | — | — |
 | `L.x86_64.45` | `fpStateRoundTrip` | — | — | — |
@@ -4808,6 +4811,7 @@ flowchart LR
 | `L.aarch64.48` | `watchdogsAreFed` | — | — | — |
 | `L.aarch64.50` | `registerAccessesAreEmulable` | — | — | — |
 | `L.aarch64.51` | `theFilterIsAskedFirstAtTheSvc` | — | — | — |
+| `L.aarch64.65` | `noTwoThreadsOfACoreFromThePptt` | — | — | — |
 | `L.claim.1` | `aNodeIsClaimedOnce` | — | — | — |
 | `L.claim.2` | `aSharedNodeUpToItsLimit` | — | — | — |
 | `L.claim.3` | `refusedUnderAnyLiveDriver` | — | — | — |
@@ -4899,6 +4903,7 @@ flowchart LR
 | `L.armv7a.25` | `theRecordIsTheStateWhileOff` | — | — | — |
 | `L.armv7a.26` | `aVfpUserIsResumedWhole` | — | — | — |
 | `L.armv7a.29` | `scrubStandsDownOnArmv7a` | — | — | — |
+| `L.armv7a.27` | `noTwoThreadsOfACoreFromTheCpuMap` | — | — | — |
 | `L.smp.1` | `impossibleListsAreRefused` | — | — | — |
 | `L.smp.2` | `theBootProcessorIsZero` | — | — | — |
 | `L.smp.3` | `eachProcessorFindsItsOwnRecord` | — | — | — |
