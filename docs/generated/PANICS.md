@@ -108,6 +108,7 @@ Causes are listed most likely first.
 | [FX-0908](#fx-0908) | a check's hook inside the item was still armed after stage 9 |
 | [FX-0909](#fx-0909) | the SMBIOS copy's acceptance took a forged copy, or refused a good one |
 | [FX-0910](#fx-0910) | A time namespace failed its self-check |
+| [FX-0913](#fx-0913) | the timer objects failed their self-check |
 | [FX-1001](#fx-1001) | PCI enumeration failed its self-check |
 | [FX-1002](#fx-1002) | a device node handed out memory or an interrupt it does not have |
 | [FX-1003](#fx-1003) | an IOMMU domain gave a device the wrong addresses |
@@ -2655,6 +2656,34 @@ alone (docs/NAMESPACES.md §12.1).
 See: src/kernel/src/fs/timens_check.rs; src/kernel/src/syscall/timens.rs;
 src/kernel/src/syscall/time.rs; src/kernel/src/syscall/vdso.rs;
 src/kernel/src/syscall/namespace.rs.
+
+<a id="fx-0913"></a>
+
+## FX-0913 — the timer objects failed their self-check
+
+`object::timer_check::run` drives `timer_create`, `timer_set` and `timer_cancel`
+through the native dispatch from a check process (`docs/microkernel/K10.md` §5).
+A timer must be heard on its port no earlier than its deadline; a deadline past
+2^32 ns must reach it whole; a cancelled timer must stay quiet; an arm
+superseded while in flight must signal nothing, and the newer arm fire once; a
+timer whose window is open must fire in the same interrupt pass as the one due
+beside it; a past deadline must fire in the call; no pass may fire more than a
+batch, and none may be lost; a closed timer must never fire; a timer must be
+charged to its job; the calls must refuse what they specify; and a sleeping task
+woken early must take out its own sleeper-set entry and nothing else. A kernel
+failing any of these would give the Linux personality timers that fire early,
+late, twice or after they were cancelled.
+
+1. `TimerCore::set` or `cancel` stopped moving the timer to a new generation, or
+   `fire` stopped comparing it, so a superseded arm signals.
+2. `CpuQueue::wake_sleepers` lost a timer arm when the fired buffer was full, or
+   stopped taking an arm whose window had opened.
+3. `CpuQueue::remove_sleeper` took out an entry by the wrong key, or the task's
+   filed key was not kept where it was filed.
+4. `Timer::new` stopped charging its job, or its drop stopped cancelling.
+
+See: src/kernel/src/object/timer_check.rs run; src/kernel/src/object/timer.rs;
+src/kernel/src/sched/queue.rs; docs/microkernel/K10.md.
 
 <a id="fx-1001"></a>
 

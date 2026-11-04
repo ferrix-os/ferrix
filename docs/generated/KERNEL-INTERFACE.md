@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2535 declarations in the core's files, 179 in the item's; 123 checks-only.
+2574 declarations in the core's files, 179 in the item's; 135 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1976,6 +1976,7 @@ checks above is `pub` for raised checks (F3).
 | `port` | mod | item, load |  |
 | `process` | mod | item, load |  |
 | `quota` | mod | item, load |  |
+| `timer` | mod | item, load |  |
 | `TOPOLOGY` | static | item |  |
 | `HandleTable` | type | item, load |  |
 | `Transfer` | type | item, load |  |
@@ -2331,6 +2332,32 @@ checks above is `pub` for raised checks (F3).
 | `Usage::refused` | field | item, load, bin |  |
 | `Usage::used` | field | item, load |  |
 
+### `object::timer`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `Clock` | enum | item, load |  |
+| `TimerError` | enum | - |  |
+| `fire` | fn | load (checks) | checks-only |
+| `heap_bytes` | fn | load (checks) | checks-only |
+| `take_arm` | fn | load (checks) | checks-only |
+| `Armed` | struct | load (checks) | checks-only |
+| `Report` | struct | item, load, bin |  |
+| `Timer` | struct | item, load |  |
+| `TimerCore` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Report::armed` | field | load |  |
+| `Report::fired_at` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Report::fired_in` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Report::fires` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Report::home` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Timer::core` | method | item, load, bin |  |
+| `Timer::new` | method | item, load, bin |  |
+| `TimerCore::cancel` | method | item, load |  |
+| `TimerCore::observe` | method | item, load |  |
+| `TimerCore::report` | method | item, load, bin |  |
+| `TimerCore::set` | method | item, load |  |
+| `TimerCore::timeline_id` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+
 ### `panic`
 
 | Item | Kind | Named by | Note |
@@ -2435,6 +2462,7 @@ checks above is `pub` for raised checks (F3).
 | `STAGE9_OBJECTS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE9_QUOTAS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE9_REFUSALS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE9_TIMERS` | static | bin (checks) | checks-only |
 | `SYSFS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `SYSRQ_CRASH` | static | load |  |
 | `TIMER_REGISTRATION` | static | bin |  |
@@ -2486,7 +2514,9 @@ checks above is `pub` for raised checks (F3).
 | `current_runtime` | fn | load |  |
 | `decision_pending_here` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `drained` | fn | load |  |
+| `evacuate_with_fired_for_check` | fn | load (checks) | checks-only |
 | `exit_leaving` | fn | load |  |
+| `holds_arm_on` | fn | load (checks) | checks-only |
 | `in_call_here` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `init` | fn | bin |  |
 | `may_block` | fn | item, load |  |
@@ -2506,6 +2536,7 @@ checks above is `pub` for raised checks (F3).
 | `set_weight` | fn | load |  |
 | `sleep_for` | fn | load |  |
 | `sleep_until` | fn | load |  |
+| `sleepers_here` | fn | load (checks) | checks-only |
 | `spawn` | fn | item, load |  |
 | `spawn_in_group` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `spawn_on` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -2526,6 +2557,9 @@ checks above is `pub` for raised checks (F3).
 | `vtime` | mod | load |  |
 | `work` | mod | item, load, bin |  |
 | `AffinityRefusal` | re-export | load |  |
+| `Due` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `FIRE_BATCH` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Fired` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `LastLook` | re-export | item |  |
 | `Mark` | re-export | load |  |
 | `ReadyList` | re-export | load |  |
@@ -2540,6 +2574,7 @@ checks above is `pub` for raised checks (F3).
 | `records_kept` | re-export | load |  |
 | `run_checks` | re-export | bin |  |
 | `set_affinity` | re-export | load |  |
+| `take_next` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `with_current` | re-export | item, load |  |
 | `CpuReport` | struct | - |  |
 | `CpuTime` | struct | load |  |
@@ -2632,6 +2667,19 @@ checks above is `pub` for raised checks (F3).
 | `preempt_enable` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Preempt` | struct | - |  |
 
+### `sched::queue`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `FIRE_BATCH` | const | load (checks) | checks-only |
+| `Due` | enum | load (checks) | checks-only |
+| `take_next` | fn | load (checks) | checks-only |
+| `Fired` | struct | load (checks) | checks-only |
+| `Fired::len` | field | item, load, bin | pub for raised checks; type unobtainable from product API |
+| `Fired::slots` | field | item, load | pub for raised checks; type unobtainable from product API |
+| `Fired::new` | method | item, load, bin |  |
+| `Fired::take` | method | item, load |  |
+
 ### `sched::task`
 
 | Item | Kind | Named by | Note |
@@ -2646,6 +2694,7 @@ checks above is `pub` for raised checks (F3).
 | `Task::cpu` | method | item, load |  |
 | `Task::cpus_run_on` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Task::entity_state` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Task::filed_at` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Task::group_word` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Task::involuntary_switches` | method | load |  |
 | `Task::is_blocked` | method | load |  |

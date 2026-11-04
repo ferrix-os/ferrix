@@ -123,7 +123,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 | `FerrixSigningRequirements` | `26-signing-requirements.sysml` | docs/SIGNING.md is the design (the certification consultant's OK IF at ledger lines 3667 and 3738; the customer's decisions at 3731). Slice S1 builds the verify-only crate `ferrix-sigverify` (src/lib/crypto/sigverify) and the hash it rests on, `ferrix-sha256` (src/lib/crypto/sha256), both in the item ring (certification-item.json's crates). What the UEFI loader, init's configuration verifier and devmgr do with the verifier's answer is theirs, and gets ids in their own slices (S4, S8, S9). |
 
-27 files, 152 packages, 8632 elements, 220 relations. Model digest `8baa9766d4ffe89f`.
+27 files, 153 packages, 8682 elements, 220 relations. Model digest `9f6af5cf11f3635b`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -281,8 +281,9 @@ Handles, rights and the objects they name: O.CAPABILITY and ASR-3 (FDP_ACC.1, FD
 | `H.OBJ.18` | Every result of channel_write_read answered by the fast path shall be a result the general path gives in the same circumstances, and the fast path shall bypass no filter, audit record or speculation barrier. x86-64 only, behind ferrix.fastpath. | ipc-equiv's transcripts with the fast path on and off are the same line for line, with trips taken on and no counter moved off (`cargo xtask test-ipc-equiv`); stage 9's fast path cases hold both boots to the general path's results (the `fastcase` line); a filtered call is refused with the filter's errno. | `G.7, O.CAPABILITY` |
 | `H.OBJ.22` | A process in a sealed job shall leave that job's tree only by ending and shall start no process outside it; a job made inside a sealed job shall be sealed, and no job shall be unsealed. | Stage 13's cgroupfs check: root's moves out of, within and into a sealed tree are refused EPERM and every process stays; a sealed member's starts outside its tree are refused; jobs made inside a sealed one read as sealed; and every job in drivers.slice reads as sealed (the sysfs check); test-restart --boot intel-keeper's root move of the GPU's worker out of its driver job is refused (INTEL-GPU.md §12.11 S1). | `G.8, O.QUOTA, O.CAPABILITY` |
 | `H.OBJ.19` | Every channel message shall carry the identity of the process that wrote it and of the job that process was in at the write, written by the kernel at the write and never taken from the message or the writer's arguments, and readable by its reader with the message; a process's identity shall never be given to another process while the kernel runs. A message the kernel writes shall carry zero and zero, which attest that the kernel wrote it, not that its content is the kernel's own. The identity is the writer's, not its credentials (docs/microkernel/K6.md, MICROKERNEL.md §3 K6). | Stage 9's `sender` line: messages read with channel_read_attested carry their writer's process and job ids, which object_id confirms, whatever the body says, through the slot, either end's transfer, the writer's end and a move between jobs; the kernel's read as zero and zero; every process made has an id above every earlier one; channel_write_read answers none. Stage 8's exec check: a process's id survives its execve. Each with its negative control (K6.md §7). | `G.7, O.CAPABILITY` |
+| `H.OBJ.21` | A timer object shall signal its waiters and the ports registered on it no earlier than its deadline and within its slack plus the lateness MEMORY-AND-TIMING.md §2.2ab states, at most once a set; never for an arm a later set or cancel superseded, nor after its last handle closed; and shall be charged to the job that made it, one object and its heap as kernel memory. | Stage 9's `timers` line on every boot: a timer is heard no earlier than its deadline, a cancelled or superseded arm and a closed timer are never heard, and a timer is charged to its job and refused past its object limit (object::timer_check). | `G.7, O.CAPABILITY, O.QUOTA` |
 
-20 requirements.
+21 requirements.
 
 ### Scheduling
 
@@ -4121,6 +4122,14 @@ flowchart LR
 | `L.object.200` | `anIdNamesAProcessOrAJob` | — | — | — |
 | `L.object.201` | `theJobIsTheJobAtTheWrite` | — | — | — |
 | `L.object.202` | `theRoundTripAnswersNoSender` | — | — | — |
+| `L.object.213` | `aTimerIsChargedToItsJob` | — | — | — |
+| `L.object.214` | `aSetIsOneShotInItsWindow` | — | — | — |
+| `L.object.215` | `aCancelledArmNeverSignals` | — | — | — |
+| `L.object.216` | `aFireIsTheInterruptsAndNeverEarly` | — | — | — |
+| `L.object.217` | `anOpenWindowFiresWithTheHead` | — | — | — |
+| `L.object.218` | `timersShareTheSleeperSet` | — | — | — |
+| `L.object.219` | `aSupersededArmSignalsNothing` | — | — | — |
+| `L.object.220` | `aClosedTimerIsDisarmed` | — | — | — |
 | `L.sched.1` | `aDecisionWithinASlice` | — | — | — |
 | `L.sched.2` | `aLoneYieldAsksNothing` | — | — | — |
 | `L.sched.3` | `aThrottledTaskLeavesForAKill` | — | — | — |
@@ -4192,6 +4201,7 @@ flowchart LR
 | `L.sched.100` | `theSetterWaitsForARunningTarget` | — | — | — |
 | `L.sched.101` | `aThreadStartsWithItsCreatorsMask` | — | — | — |
 | `L.sched.123` | `aMaskNeverVetoesAPark` | — | — | — |
+| `L.sched.84` | `aSleeperLeavesByItsKey` | — | — | — |
 | `L.iommu.1` | `unitsAreFoundOnce` | — | — | — |
 | `L.iommu.2` | `placementsAreCounted` | — | — | — |
 | `L.iommu.3` | `dmarEndpointsArePlaced` | — | — | — |
