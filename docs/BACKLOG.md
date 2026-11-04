@@ -884,3 +884,25 @@ mentions of an unlanded branch (`docs/AUTH.md`, `docs/CONVENTIONS.md`,
 list of every open branch is `docs/roadmap/open-branches.md`, landed the same
 evening; this section keeps the detail of the families and the decisions
 above, and the page links here.
+
+## Microkernel performance (mk-perf, 2026-11-04)
+
+| Row | State |
+|---|---|
+| K1's fast path for page faults | Built, not landed: `feature/mk-perf-fault-lazy` f519018db, `mmap-touch-munmap-4K` -6%, `fork-exec-wait` -4%. OK IF V1-V7, ledger 6458: 14 cases and 11 controls owed. K1's owner decides |
+| K1's general `RESTRICTED_CONTINUE` after a fault | Takes `store_syscall` when `rcx == rip` and `r11 == rflags`, and a program can arrange that after a fault. Believed safe; K1's owner to say why in a comment and hold it with a case (ledger 6458, V2) |
+| K1's three cuts from a crossing | `feature/mk-perf` ea9d3e8a2, `null-getppid` 630 to 570 ns. OK IF Z1-Z4, ledger 6464, on K1's stack |
+| No `CR0.TS` under `partition` | NOT YET, ledger 6464: a named lever of 100 ns a crossing in `docs/microkernel/PERFORMANCE.md` |
+| Program counter and stack in K1's exit registers | Would drop a context read a park: 320 ns a futex round trip. Unreviewed |
+
+## `fault_ahead`, what its review still owes (mk-perf, ledger 6597)
+
+| Row | State |
+|---|---|
+| E1, one control per hold, seen by a neighbour alone: rights, the file's end (shared and private), a private copy | Not built. A control dropped from the look did not fire because `resolve` holds each, which shows redundancy and not that the cases reach the holds |
+| E2, `end` and `room` through `gate.sh` on these patches | NOT RUN: withdrawn from the queue for a landing on 2026-11-04. Both fired locally on this base, which is not evidence |
+| E3, `test-threads` and `test-container` with `fault_ahead` on and off, through `gate.sh` at the tip | NOT RUN. `LEFT = 4` in the walk rests on its table count: a flake there is a row here, not a retry |
+| E4, W+X and foreign neighbours | No case and no control. A read neighbour is mapped read-only and a walk's is not executable, so W+X should not arise; foreign pages need a driver's VMO, which no row here maps. Neither is shown |
+| A `test-rustc` hang in the warm loop | One run in about ten on the first fault-around build, not diagnosed, and its log not kept. Two ways to it are fixed; later runs passed, which does not prove it |
+
+Until these are met, L.object.314 stays baselined unverified (ledger 6590).
