@@ -419,13 +419,16 @@ fn a_limit_ends_its_own(cpu: usize) -> Result<(), &'static str> {
 
 /// L.sched.4: a `cpu.max` set before a program runs alone on its processor, which gets
 /// no tick, still cuts it: held between a twelfth and two thirds of the processor.
+/// H.QUOTA.10, L.object.106: its periods count as throttled, and what it used is charged
+/// to its job and the one above, by the end as user time alone counts it a spinner's.
 ///
-/// Verifies: L.sched.4
+/// Verifies: L.sched.4, H.QUOTA.10, L.object.106
 fn a_quota_cuts_a_program_alone(cpu: usize) -> Result<(), &'static str> {
     const WATCHED_NANOS: u64 = 1_000_000_000;
     const STOPPED: i32 = 97;
     let tree = Job::new_root().map_err(|_| "bare: no job")?;
-    let job = tree.new_child().map_err(|_| "bare: no job")?;
+    let above = tree.new_child().map_err(|_| "bare: no job")?;
+    let job = above.new_child().map_err(|_| "bare: no job")?;
     if !job.set_bandwidth(20_000_000, 100_000_000) {
         return Err("bare: a job's cpu.max could not be set");
     }
@@ -447,6 +450,21 @@ fn a_quota_cuts_a_program_alone(cpu: usize) -> Result<(), &'static str> {
             wall / 1000
         );
         return Err("bare: a program alone on its processor was not held to its cpu.max");
+    }
+    if job.counted(Counter::Throttled) < 3 {
+        return Err("bare: a program's periods under cpu.max did not count as throttled");
+    }
+    crate::sched::charge_running();
+    let charged = |job: &Job| {
+        let (user, kernel) = job.cpu_times();
+        user.saturating_add(kernel)
+    };
+    // What ran, give or take the last slice: in the job and the one above alike.
+    if charged(&job).saturating_mul(2) < ran || charged(&above) < charged(&job) {
+        return Err("bare: a program's processor time was not charged to its job and above");
+    }
+    if job.cpu_times().0 == 0 {
+        return Err("bare: a spinning program's time counted as no user time");
     }
     Ok(())
 }

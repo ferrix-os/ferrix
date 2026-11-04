@@ -38,8 +38,14 @@ the ratchet with this as their way down.
 | L.trap.2 | pages touched, the program goes on to its status | SP-3 |
 | L.x86_64.59, 79 | two spinners on one processor, each cut | SP-3 |
 | L.user.87 | `map_anonymous` on `own_space`, protected read-only by the check, the store faults | SP-3 |
-| L.sched.3, 4 | a job's `cpu.max` set by the check; no Linux signal in the wait's cases | restated: "a signal" to its kernel half |
-| L.sched.30, 31, 33, 35 | a kick and END on a `Bare` | restated: they name the personality's `needs_attention` |
+| L.sched.3, 4 | a job's `cpu.max` set by the check, a spinner its end stops; no Linux signal in the wait's cases | restated: "a signal" to its kernel half |
+| H.QUOTA.10, L.object.106 | the same run's periods and `cpu_times`; the tick's user-or-system half is L.sched.80's | restated (6142 (8)) |
+| L.sched.35 | a spinner on another processor and one here, ended by `Bare::end` | restated: "a program past its memory.max" to any end |
+| L.sched.30, 31, 33 | a kick and END on a `Bare`; STOP and the audit stay with the personality's `needs_attention` | not yet tagged: ask |
+| L.object.108 | a file over a check `Filler`, pages taken as the job, `oom::throttle` called as the trap's way out does | SP-3 |
+| L.user.62, H.MEM.16 | a clone's own stores to two shared pages and a private one | restated: "fork" to the clone |
+| L.object.107 | `Process::sync_freeze` on `Bare`s born, moved and thawed; the parking is the personality's | restated, its core half |
+| H.TRAP.16, L.aarch64.51, L.armv7a.1, L.x86_64.124 | the entries' drive is raised and the core's slot holds seccomp's rule, which a kernel with no load does not register | no route yet: ask |
 | L.object.100, 108, H.QUOTA.6, 12 | a sourced `Vmo` over a check `PageSource`, cache charged to the job, as a thread of the `Bare` | restated where they name a Linux status |
 | L.user.61, H.MEM.8 | two `Bare`s on S and its clone, each a program's own store; replaces stage 6's `USER_COW_PROGRAM` in user builds (L.user.160, 6110 (7)) | restated: "fork" to the clone |
 | L.user.96 | K2 cannot make a private `Backing::File`: class C, successor `linuxd`'s private-file row | moved, here first |
