@@ -3992,6 +3992,35 @@ package FerrixObjectRequirements {
             attribute :>> parent = "H.DEV.13";
             attribute :>> unit = ("linuxd_start::start", "linuxd_start::start_further");
         }
+        requirement <'L.object.336'> aPostSealRequestWithNoPromiseIsRefused : ItemLowLevel {
+            attribute :>> statement = "After the seal a request charged to a job with no promise shall be refused.";
+            attribute :>> criterion = "mm::seal::check's plant, on a job of its own; its control FIRED.";
+            attribute :>> parent = "H.MEM.32";
+            attribute :>> unit = ("mm::seal::route", "mm::seal::note_shared");
+            attribute :>> scope = "kernel_memory=retyped";
+        }
+        requirement <'L.object.337'> anObjectIsOnItsJobsPage : ItemLowLevel {
+            attribute :>> statement = "An object shall be on a page of the promise of the job it is charged to.";
+            attribute :>> criterion = "mm::seal::check, against the job's draws_from; its control FIRED.";
+            attribute :>> parent = "H.MEM.32";
+            attribute :>> unit = "mm::heap_drawn_from";
+            attribute :>> scope = "kernel_memory=retyped";
+        }
+        requirement <'L.object.338'> aKernelTaskChargesNobody : ItemLowLevel {
+            attribute :>> statement = "A task with no job and no ticket shall draw on the pool, whichever job the
+                processor last ran, and nothing shall be served in an interrupt.";
+            attribute :>> criterion = "mm::seal::check with the processor's group forced to another job's; its control FIRED.";
+            attribute :>> parent = "H.MEM.32";
+            attribute :>> unit = ("mm::seal::charged", "mm::seal::note_payer", "mm::seal::seal_after_boot", "mm::seal::report");
+            attribute :>> scope = "kernel_memory=retyped";
+        }
+        requirement <'L.object.340'> aFrameGoesBackWithNothingOnIt : ItemLowLevel {
+            attribute :>> statement = "A frame a job's heap gives back shall hold none of that job's bytes.";
+            attribute :>> criterion = "mm::seal::check's large allocation; its control FIRED.";
+            attribute :>> parent = "H.MEM.32";
+            attribute :>> unit = "mm::ReservedPages::deallocate_pages";
+            attribute :>> scope = "kernel_memory=retyped";
+        }
         requirement <'L.object.346'> aFurtherPartitionHoldsItsRow : ItemLowLevel {
             attribute :>> statement = "A further Linux partition shall be started in a job and a region of its own with the
                 FURTHER row alone: no console, no cores, no devmgr channel, and its end shall kill its job and nothing else.";

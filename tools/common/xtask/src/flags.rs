@@ -764,6 +764,26 @@ mod tests {
     }
 
     #[test]
+    fn retyped_kernel_memory_needs_the_user_personality() {
+        let alone = resolve(None, &set(&[("kernel_memory", "retyped")]));
+        assert!(alone.is_err(), "retyped without personality=user");
+        let with = resolve(
+            None,
+            &set(&[
+                ("kernel_memory", "retyped"),
+                ("personality", "user"),
+                ("fs", "lift"),
+                ("partition_speculation", "partition"),
+                ("restricted_fastpath", "off"),
+                ("fault_ahead", "off"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(with.value("kernel_memory"), Some("retyped"));
+        assert_eq!(with.level, "none");
+    }
+
+    #[test]
     fn present_is_the_default_and_builds_with_its_claim() {
         let resolved = resolve(None, &[]).unwrap();
         assert_eq!(resolved.profile, "present");

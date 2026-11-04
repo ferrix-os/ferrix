@@ -1211,6 +1211,12 @@ unsafe impl Backing for ReservedPages {
     }
 
     fn deallocate_pages(&mut self, address: u64, order: u8) {
+        // Nothing of this job's stays on a frame that goes back to untyped (K16.8).
+        #[cfg(ferrix_kernel_memory = "retyped")]
+        // SAFETY: (KMEM) the heap gives these pages back whole: nothing else names them.
+        unsafe {
+            (address as *mut u8).write_bytes(0, (PAGE_SIZE as usize) << order);
+        }
         KernelPages.deallocate_pages(address, order);
     }
 
@@ -1250,6 +1256,11 @@ pub(crate) fn heap_drawn_from(address: u64) -> Reservation {
 /// The kernel's `alloc` implementation.
 struct KernelAllocator;
 
+#[cfg(ferrix_kernel_memory = "retyped")]
+pub mod seal;
+#[cfg(ferrix_kernel_memory = "retyped")]
+pub mod seal_check;
+
 // SAFETY: (KMEM) `alloc` returns either null or the address of a block of at least
 // `layout.size()` bytes, aligned to `layout.align()`, which no other live
 // allocation overlaps — that is `ferrix_heap`'s contract, and its tests are
@@ -1266,18 +1277,29 @@ unsafe impl GlobalAlloc for KernelAllocator {
         // A job with a reservation, in task context, is served by its own
         // heap while the reservation has room, and by the shared heap after
         // (`L.mm.81`); interrupt context never draws (`reservation_for`).
+        #[cfg(not(ferrix_kernel_memory = "retyped"))]
         let entry = if reservation::any_bound() {
             reservation_for(crate::sched::running_group())
         } else {
             NO_RESERVATION
         };
+        // K16: whoever the request is charged to, a call's ticket included.
+        #[cfg(ferrix_kernel_memory = "retyped")]
+        let entry = seal::route(seal::charged());
         let address = reserved_heap(entry)
             .and_then(|heap| {
                 heap.lock()
                     .allocate(&mut ReservedPages(entry), request)
                     .ok()
             })
-            .or_else(|| heap_or_drain(|| allocate_through_caches(request)))
+            .or_else(|| {
+                // After the seal the shared heap serves nobody (K16 §2, H.MEM.32).
+                #[cfg(ferrix_kernel_memory = "retyped")]
+                if seal::note_shared(request.size) {
+                    return None;
+                }
+                heap_or_drain(|| allocate_through_caches(request))
+            })
             // Refused even after the drain: inside a reserved section, the
             // reserve serves it instead (`mm/reserve.rs`, finding F-23).
             .or_else(|| reserve::draw(request));

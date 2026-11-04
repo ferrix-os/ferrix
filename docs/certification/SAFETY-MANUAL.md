@@ -191,6 +191,8 @@ N150's every core from every other program for 1 to 3 s, and a forking
 [MEMORY-AND-TIMING.md](MEMORY-AND-TIMING.md) §2.2y).
 
 ### AoU-5 — the heap is not bounded per partition, and exhaustion outside the element is fatal
+
+*Amended by K16 (`docs/microkernel/K16.md`), for a build of `kernel_memory=retyped` only, which no claim's profile builds yet:* after the seal no shared heap serves anyone; a job allocates on its own promise, and exhaustion is that job's `ENOMEM`. Dynamic objects remain, per job: `max`'s stated, justified deviation (customer, 2026-11-04). Page tables, stacks and IOMMU tables are not sealed. For every other build this AoU stands as written:
 The element allocates dynamically, and reports allocation failure at every
 site in its own source. A native call answers `NO_MEMORY`, a Linux call
 `ENOMEM` (`EAGAIN` from `madvise`), and the element carries on. The btrfs

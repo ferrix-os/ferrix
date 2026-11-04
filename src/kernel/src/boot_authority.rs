@@ -79,6 +79,54 @@ pub(crate) fn not_measured(what: &str) -> ! {
     fatal!(catalog::FIRST_PROCESSES, "first processes: {what}");
 }
 
+/// The seal's check, which the composition root hands in: product code names no check.
+#[cfg(ferrix_kernel_memory = "retyped")]
+pub type SealCheck = fn(&job::Job, &job::Job) -> Result<(), &'static str>;
+#[cfg(ferrix_kernel_memory = "retyped")]
+static SEAL_CHECK: ferrix_sync::Once<SealCheck> = ferrix_sync::Once::new();
+
+/// Hand in the seal's check, before [`run`].
+#[cfg(ferrix_kernel_memory = "retyped")]
+pub fn set_seal_check(check: SealCheck) {
+    let _ = SEAL_CHECK.call_once(|| check);
+}
+
+/// K16: from here on the shared heap refuses, after the first processes are made and
+/// before they run, and the seal holds itself to its rule (`docs/microkernel/K16.md`).
+#[cfg(ferrix_kernel_memory = "retyped")]
+pub(crate) fn seal() {
+    /// The kernel pool: its name, its size, and past it a refusal (K16.4).
+    const KERNEL_POOL: u64 = 16 << 20;
+    /// The check's own job's promise.
+    const PROBE: u64 = 256 << 10;
+    let pool = job::root().new_child().ok();
+    let promised = job::root().new_child().ok();
+    let bare = job::root().new_child().ok();
+    let (Some(pool), Some(promised), Some(bare)) = (pool, promised, bare) else {
+        fatal!(catalog::FIRST_PROCESSES, "no jobs for the seal");
+    };
+    if pool.set_reservation(KERNEL_POOL).is_err() || promised.set_reservation(PROBE).is_err() {
+        fatal!(catalog::FIRST_PROCESSES, "no promise for the kernel pool");
+    }
+    crate::mm::seal::seal_after_boot(pool.draws_from());
+    if let Some(check) = SEAL_CHECK.get()
+        && let Err(why) = check(&promised, &bare)
+    {
+        fatal!(catalog::FIRST_PROCESSES, "the seal: {why}");
+    }
+    core::mem::forget(pool);
+    fn report(_argument: usize) {
+        loop {
+            crate::sched::sleep_for(10_000_000_000);
+            crate::mm::seal::report();
+        }
+    }
+    if crate::sched::spawn("seal report", report, 0, ferrix_sched::NICE_0_WEIGHT).is_err() {
+        println!("  retyped  no task to report on");
+    }
+    println!("  retyped  sealed");
+}
+
 /// A file of the initramfs, whole, for `devmgr`'s start.
 fn read_file(path: &[u8]) -> Result<vmap::Buffer, Errno> {
     let name = path.strip_prefix(b"/").unwrap_or(path);
@@ -119,6 +167,9 @@ fn make(creator: Option<&dyn Host>, _name: &[u8]) -> Result<Arc<dyn Host>, Errno
             // driver is shown there too (BA.4, ledger 6316 P1.4).
             let job = job::root().new_child().map_err(|_| status::NO_MEMORY)?;
             job.make_measured();
+            #[cfg(ferrix_kernel_memory = "retyped")]
+            job.set_reservation(16 << 20)
+                .map_err(|_| status::NO_MEMORY)?;
             job
         }
     };
@@ -272,6 +323,23 @@ fn try_start_manager() -> Result<Option<Served>, &'static str> {
         .map_err(|_| "no job for the partitions")?;
     job.make_measured();
     must_be_measured(&job);
+    // The manager's and its partitions' promise, one entry (K12's one level), each partition's
+    // job drawing on it by inheritance; a file server keeps its heap there too (§1, K16 §4).
+    #[cfg(ferrix_kernel_memory = "retyped")]
+    {
+        const MANAGER_OWN: u64 = 16 << 20;
+        const FILE_SERVER: u64 = 128 << 20;
+        let mut bytes = MANAGER_OWN;
+        for partition in parsed.partitions() {
+            if partition.role() == ROLE_FILES {
+                bytes += FILE_SERVER;
+            } else if partition.role() != ROLE_LINUX {
+                bytes += partition.reserve_pages().saturating_mul(PAGE_SIZE);
+            }
+        }
+        job.set_reservation(bytes)
+            .map_err(|_| "no promise for the partitions")?;
+    }
     fallible::push_within(
         &mut transfers,
         (

@@ -179,6 +179,21 @@ fn per_cpu_words(online: usize) {
     let _ = RUNNING_SEEN.call_once(|| (0..online).map(|_| AtomicU64::new(0)).collect());
 }
 
+/// `work` with this processor's published group `group`, as if another job's task had just
+/// run on it: what K16's check shows a kernel task's allocation does not read.
+#[cfg(ferrix_kernel_memory = "retyped")]
+pub(crate) fn with_running_group_for_check<R>(group: u32, work: impl FnOnce() -> R) -> R {
+    let saved = <arch::Irq as IrqControl>::disable();
+    let slot = this_cpu().and_then(|cpu| RUNNING_GROUP.get()?.get(cpu));
+    let before = slot.map(|slot| slot.swap(group, Ordering::AcqRel));
+    let done = work();
+    if let (Some(slot), Some(before)) = (slot, before) {
+        slot.store(before, Ordering::Release);
+    }
+    <arch::Irq as IrqControl>::restore(saved);
+    done
+}
+
 /// Record that `cpu` now runs task `id`, charged to `group`, which had seen
 /// `seen` moves between jobs.
 fn note_running(cpu: usize, id: TaskId, group: u32, seen: u64) {

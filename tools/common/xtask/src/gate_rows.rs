@@ -515,6 +515,15 @@ fn rows_for(path: &str, image_crates: &BTreeSet<String>, rows: &mut Rows) {
         ]);
         reason(rows, "the first processes' row");
     }
+    if path.ends_with("src/kernel/src/mm/seal.rs")
+        || path.ends_with("src/kernel/src/mm/seal_check.rs")
+    {
+        rows.add(&[
+            "test-first-processes --personality user --set kernel_memory=retyped",
+            "test-rustc --personality user --set kernel_memory=retyped",
+        ]);
+        reason(rows, "K16's seal, no-claim rows");
+    }
     if under("src/user/system/native/netd/") || under("src/lib/proto/netswitch/") {
         rows.add(&[
             "test-netd --personality user",

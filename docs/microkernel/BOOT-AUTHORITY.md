@@ -98,7 +98,7 @@ comes from M8 (N.9). What a role is given today (the prose table above says what
 | `MANAGER` | `Image` | `IMAGE_RIGHTS` |
 | `MANAGER` | `DeviceKept` | `KEPT_DEVICE_RIGHTS` |
 | `MANAGER` | `Channel` | `Rights::CHANNEL` |
-| `DEVMGR` | `Job` | `Rights::JOB` |
+| `DEVMGR` | `Job` | `DRIVERS_JOB` |
 | `DEVMGR` | `DebugLog` | `LOG_TO_PASS_ON` |
 | `DEVMGR` | `Image` | `IMAGE_RIGHTS` |
 | `DEVMGR` | `DeviceGiven` | `GIVEN_DEVICE_RIGHTS` |
@@ -115,6 +115,8 @@ comes from M8 (N.9). What a role is given today (the prose table above says what
 | `FURTHER` | `Region` | `Rights::REGION` |
 | `FURTHER` | `Archive` | `ARCHIVE` |
 | `FURTHER` | `Channel` | `Rights::CHANNEL` |
+
+`DRIVERS_JOB` is `Rights::JOB`, with `RESERVE` under `kernel_memory=retyped` alone, for the jobs `devmgr` makes (K16 §4). Nothing but free memory bounds what a compromised `devmgr` promises, and it starts before `linuxd` takes its own: a QM denial on QM, no claim, K16.9.
 
 **`linuxd`'s audit-read handle (BA.7):** it can read every audit record, safety partitions' included, on a promise outside the TSF. ST
 FAU_SAR and AUDIT.md name the authorised reader under `max`, or the handle is filtered, with a V row. Nothing in the initramfs VMO is a

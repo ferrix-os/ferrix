@@ -188,11 +188,22 @@ pub(crate) const MANAGER: Rows = Rows(&[
     },
 ]);
 
+/// The drivers' job as `devmgr` holds it: under `kernel_memory=retyped` with `RESERVE`, since `devmgr` puts
+/// work into a job that may have a reservation it does not draw from itself (K16 §4).
+const DRIVERS_JOB: Rights = Rights(
+    Rights::JOB.0
+        | if cfg!(ferrix_kernel_memory = "retyped") {
+            Rights::RESERVE.0
+        } else {
+            0
+        },
+);
+
 /// `devmgr`'s.
 pub(crate) const DEVMGR: Rows = Rows(&[
     Row {
         held: Held::Job,
-        rights: Rights::JOB,
+        rights: DRIVERS_JOB,
         most: 1,
     },
     Row {

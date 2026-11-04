@@ -172,6 +172,12 @@
       "reason": "The boot checks' probes: demand paging and the kernel image's own bytes. Ordinary RAM, read for real because that is what is being proven."
     },
     {
+      "file": "src/kernel/src/mm/seal_check.rs",
+      "kind": "memory",
+      "max_sites": 2,
+      "reason": "K16's seal check: a frame given back is read through the direct map, to see it was zeroed; no device."
+    },
+    {
       "file": "src/kernel/src/mm/check.rs",
       "kind": "memory",
       "max_sites": 9,

@@ -418,7 +418,7 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // was named by `ferrix.init=` or built in, and the image has no
     // /sbin/init.
     #[cfg(ferrix_personality = "user")]
-    boot_authority::run(view);
+    first_processes(view);
     #[cfg(not(ferrix_personality = "user"))]
     init::run();
     power::finish()
@@ -2206,4 +2206,12 @@ fn map_boot_framebuffer(view: &BootView<'_>, memory: &mut EarlyMemory) -> Result
         console::screen::start(view);
         Ok(())
     }
+}
+
+/// The kernel's first processes, handing in the seal's check: product code names no check.
+#[cfg(ferrix_personality = "user")]
+fn first_processes(view: &BootView<'_>) {
+    #[cfg(ferrix_kernel_memory = "retyped")]
+    boot_authority::set_seal_check(mm::seal_check::check);
+    boot_authority::run(view);
 }

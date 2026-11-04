@@ -3878,5 +3878,14 @@ package FerrixMemoryRequirements {
             attribute :>> parent = "H.MEM.30";
             attribute :>> unit = "object::job::Job::note_grant";
         }
+        requirement <'H.MEM.32'> noSharedHeapAfterTheSeal : ItemHighLevel {
+            attribute :>> statement = "After the seal the kernel's global allocator shall serve a job only from the
+                retyped pages of its own promise, a task with no job only from the named kernel pool, and refuse
+                every other request.";
+            attribute :>> criterion = "A personality=user kernel_memory=retyped boot's mm::seal::check, and
+                test-rustc, test-btrfsd-restart, test-partitions under it reporting zero refused.";
+            attribute :>> parent = ("O.CAPABILITY", "ASR-3");
+            attribute :>> scope = "kernel_memory=retyped";
+        }
     }
 }

@@ -1409,6 +1409,10 @@ const DRIVERS_JOB: &str = "drivers.slice";
 /// # Errors
 ///
 /// When there was no memory for any job at all.
+/// What the drivers' job has for its kernel objects, until a description says (K16 §4).
+#[cfg(ferrix_kernel_memory = "retyped")]
+const DRIVERS_RESERVATION: u64 = 64 << 20;
+
 fn drivers_job() -> Result<Arc<Job>, &'static str> {
     let root = job::root();
     let job = root
@@ -1419,6 +1423,10 @@ fn drivers_job() -> Result<Arc<Job>, &'static str> {
     // K14 holds of drivers where the kernel's first processes are measured (BA.4).
     #[cfg(ferrix_personality = "user")]
     job.make_measured();
+    // K16 §4: the drivers' kernel objects are theirs (`docs/microkernel/K16.md`).
+    #[cfg(ferrix_kernel_memory = "retyped")]
+    job.set_reservation(DRIVERS_RESERVATION)
+        .map_err(|_| "no reservation for the drivers' job")?;
     Ok(job)
 }
 

@@ -124,7 +124,7 @@ values.not_applicable = { allows = ["sc4", "present", "sc2", "none"], lands = "t
 
 [flags.kernel_memory]
 why = "K16's memory retyped from the job's own reservation, or today's fallible, charged shared heap"
-values.retyped = { allows = ["sc4", "present", "sc2", "none"], lands = "M6", built = "no" }
+values.retyped = { allows = ["sc4", "present", "sc2", "none"], lands = "M6", built = "adhoc", requires = ["personality=user"] }
 values.heap = { allows = ["present", "sc2", "none"], lands = "today", built = "yes" }
 
 [flags.schedule]

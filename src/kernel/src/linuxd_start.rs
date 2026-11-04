@@ -18,6 +18,8 @@ use crate::object::Object;
 use crate::object::bare::Bare;
 use crate::object::job;
 use crate::object::process::Host;
+#[cfg(ferrix_kernel_memory = "retyped")]
+use crate::object::quota;
 use crate::object::region::Region;
 use crate::syscall::uaccess;
 use crate::user::space::AddressSpace;
@@ -150,6 +152,39 @@ fn start(
     let partition = job::root()
         .new_child_as(!further.is_empty(), false)
         .map_err(|_| "no job for the partition")?;
+    for (index, row) in further.iter().enumerate() {
+        if let Err(why) = start_further(cmdline, index + 1, row, &archive, archive_len) {
+            println!("  linuxd {} did not start: {why}", index + 1);
+        }
+    }
+    // K16 §4: the partition's memory is a promise, its kernel objects and its arena alike.
+    // What is left over is the pool's, the watermark's and the kernel's own; a further
+    // partition's is its own row's, and is taken out first.
+    #[cfg(ferrix_kernel_memory = "retyped")]
+    let promised = {
+        // What can be promised at all, which the allocator knows and says: an eighth stays
+        // for the pool and what the kernel asks at a job's expense, and further partitions'
+        // rows have been promised by their own starts, above.
+        let mut promised = crate::mm::free_frames();
+        while let Err(quota::ReserveError::Short(short)) =
+            partition.set_reservation(promised * PAGE_SIZE)
+        {
+            // `Short` names a shortfall of at least a frame, or this would not end: a zero
+            // is refused here rather than spun on at boot.
+            if short == 0 {
+                return Err("a reservation short by nothing");
+            }
+            promised = promised.saturating_sub(short);
+        }
+        promised = (promised / 8 * 7);
+        partition
+            .set_reservation(promised * PAGE_SIZE)
+            .map_err(|why| {
+                println!("  linuxd   no reservation of {promised} frames: {why:?}");
+                "no reservation for the partition"
+            })?;
+        promised
+    };
     if !further.is_empty() {
         println!(
             "  linuxd   the first partition's speculation domain: {}",
@@ -159,11 +194,6 @@ fn start(
     let region = Region::new(Arc::clone(&partition)).map_err(|_| "no memory for a region")?;
     let entry = crate::mm::with_initrd(|archive| load(region.space(), archive, PATH))
         .ok_or("no initramfs")??;
-    for (index, row) in further.iter().enumerate() {
-        if let Err(why) = start_further(cmdline, index + 1, row, &archive, archive_len) {
-            println!("  linuxd {} did not start: {why}", index + 1);
-        }
-    }
     let _ = crate::mm::give_back_initrd();
     let page = Vmo::new_anonymous(1).map_err(|_| "no memory for the boot page")?;
     let (devmgr_messages, cores, net_cores) = match devmgr {
@@ -225,6 +255,9 @@ fn start(
             const { LINUXD.of(Held::DebugLog) },
         )?,
         console: give(&region, Object::Console, const { LINUXD.of(Held::Console) })?,
+        #[cfg(ferrix_kernel_memory = "retyped")]
+        memory_frames: promised / 8 * 7,
+        #[cfg(not(ferrix_kernel_memory = "retyped"))]
         memory_frames: crate::mm::free_frames() / 8 * 7,
         wall_clock,
     };
@@ -254,6 +287,11 @@ fn start(
     let partition_of_linuxd = Arc::clone(&partition);
     let host = Bare::new(restricted, partition, Some(Arc::clone(&region)))
         .map_err(|_| "no memory for the process")?;
+    #[cfg(ferrix_kernel_memory = "retyped")]
+    {
+        crate::mm::seal::note_payer(&partition_of_linuxd);
+        crate::boot_authority::seal();
+    }
     host.start(entry.entry, entry.stack, BOOT_PAGE)?;
     println!(
         "  linuxd   started at {:#x}, pid {}",
@@ -264,6 +302,8 @@ fn start(
     let _ = core.exited().wait_trusting(|| core.is_terminated());
     crate::audit::first_process_ended(core);
     println!("  linuxd   ended with {:?}", core.exit_status());
+    #[cfg(ferrix_kernel_memory = "retyped")]
+    crate::mm::seal::report();
     // Its programs go with it (L.object.327): what is left of the `linux` job has
     // nobody to answer its system calls.
     let killed = partition_of_linuxd.kill(137).unwrap_or(0);
@@ -348,6 +388,14 @@ fn start_further(
     let partition = job::root()
         .new_child_as(true, false)
         .map_err(|_| "no job for it")?;
+    // K16 §4: this partition's memory is a promise, as the first's is.
+    #[cfg(ferrix_kernel_memory = "retyped")]
+    partition
+        .set_reservation(row.frames * PAGE_SIZE)
+        .map_err(|why| {
+            println!("  linuxd {index} no reservation: {why:?}");
+            "no reservation for it"
+        })?;
     println!(
         "  linuxd {index} speculation domain: {}",
         partition.domain()
