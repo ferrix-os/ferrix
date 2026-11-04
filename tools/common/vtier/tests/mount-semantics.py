@@ -11,6 +11,7 @@ import errno
 import fcntl
 import mmap
 import os
+import socket
 import stat
 import subprocess
 import sys
@@ -265,13 +266,28 @@ def directory_ops():
     assert len(os.listdir(many)) == 2000
 
 
+def fifos_and_sockets():
+    os.mkfifo(path("fifo"))
+    assert stat.S_ISFIFO(os.stat(path("fifo")).st_mode)
+    r = os.open(path("fifo"), os.O_RDONLY | os.O_NONBLOCK)
+    w = os.open(path("fifo"), os.O_WRONLY)
+    os.write(w, b"x")
+    assert os.read(r, 1) == b"x"
+    os.close(r)
+    os.close(w)
+    s = socket.socket(socket.AF_UNIX)
+    s.bind(os.path.relpath(path("sock")))
+    assert stat.S_ISSOCK(os.stat(path("sock")).st_mode)
+    s.close()
+
+
 CASES = [
     hard_links, rename_over_an_open_file, rename_noreplace_refused_by_link, unlink_while_open,
     shared_mmap, private_mmap, flock_excludes, posix_lock, exec_from_the_mount,
     o_tmpfile_refused_or_working, symlinks, sparse_files, ftruncate, utimensat_nanoseconds,
     a_write_stamps_a_time_comparable_with_the_disks, a_rewrite_changes_the_time_after_close,
     fsync_returns, statfs_reports_the_store, exdev_to_the_disk,
-    a_big_file_through_several_buffers, directory_ops,
+    a_big_file_through_several_buffers, directory_ops, fifos_and_sockets,
 ]
 for case in CASES:
     try:

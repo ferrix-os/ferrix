@@ -17,6 +17,8 @@ const S_IFDIR: u32 = 0o040_000;
 const S_IFREG: u32 = 0o100_000;
 const S_IFLNK: u32 = 0o120_000;
 const S_IFMT: u32 = 0o170_000;
+const S_IFIFO: u32 = 0o010_000;
+const S_IFSOCK: u32 = 0o140_000;
 
 /// A time.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -284,7 +286,7 @@ impl<B: Backend> Tree<B> {
     /// A new regular file; the kernel holds a reference.
     ///
     /// # Errors
-    /// `EEXIST`, `ENOENT`, `ENOTDIR`, `EPERM` for a device or a pipe.
+    /// `EEXIST`, `ENOENT`, `ENOTDIR`, `EPERM` for a device.
     pub fn create(
         &mut self,
         parent: u64,
@@ -292,7 +294,15 @@ impl<B: Backend> Tree<B> {
         mode: u32,
         who: (u32, u32),
     ) -> Result<Attr, i32> {
+        // Pipes and sockets: the kernel is all they ever talk to; here they are names.
         let kind = mode & S_IFMT;
+        if kind == S_IFIFO || kind == S_IFSOCK {
+            let body = Body::File {
+                blocks: Vec::new(),
+                size: 0,
+            };
+            return self.make(parent, name, body, kind | (mode & 0o7777), who);
+        }
         if kind != 0 && kind != S_IFREG {
             return Err(EPERM);
         }
@@ -905,6 +915,14 @@ mod tests {
         t.kernel_times = false;
         t.write(f, 0, b"x").unwrap();
         assert_ne!(t.attr(f).unwrap().mtime, stamp);
+    }
+
+    #[test]
+    fn a_pipe_is_a_name_and_a_device_is_refused() {
+        let mut t = tree(1);
+        let p = t.create(ROOT, b"p", S_IFIFO | 0o600, WHO).unwrap();
+        assert_eq!(p.mode, S_IFIFO | 0o600);
+        assert_eq!(t.create(ROOT, b"c", 0o020_000 | 0o600, WHO), Err(EPERM));
     }
 
     #[test]
