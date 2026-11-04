@@ -108,6 +108,10 @@ Causes are listed most likely first.
 | [FX-0908](#fx-0908) | a check's hook inside the item was still armed after stage 9 |
 | [FX-0909](#fx-0909) | the SMBIOS copy's acceptance took a forged copy, or refused a good one |
 | [FX-0910](#fx-0910) | A time namespace failed its self-check |
+| [FX-0931](#fx-0931) | spaces and objects failed the check made of kernel objects alone |
+| [FX-0932](#fx-0932) | jobs, quotas, switch counts or the filter failed the check of kernel objects alone |
+| [FX-0933](#fx-0933) | the page cache failed the check made of kernel objects alone |
+| [FX-0934](#fx-0934) | the native calls failed the check made of kernel objects alone |
 | [FX-1001](#fx-1001) | PCI enumeration failed its self-check |
 | [FX-1002](#fx-1002) | a device node handed out memory or an interrupt it does not have |
 | [FX-1003](#fx-1003) | an IOMMU domain gave a device the wrong addresses |
@@ -2655,6 +2659,75 @@ alone (docs/NAMESPACES.md §12.1).
 See: src/kernel/src/fs/timens_check.rs; src/kernel/src/syscall/timens.rs;
 src/kernel/src/syscall/time.rs; src/kernel/src/syscall/vdso.rs;
 src/kernel/src/syscall/namespace.rs.
+
+<a id="fx-0931"></a>
+
+## FX-0931 — spaces and objects failed the check made of kernel objects alone
+
+`user::rehome_check::run` drives `AddressSpace` and `Vmo`, with a page source of
+its own and no process or file system: the floor of a space's map, an `mremap`'s
+move and its pages, a fault filling from a source, the resident counts of a disk
+file, a file's cut reaching its mappings, the may-write count, a page shared
+across a fork, `protect`, and shared and private file mappings. The sentence
+names the case that was not true.
+
+1. `user/space.rs` or `user/vmo.rs` changed what a mapping shows or refuses: the
+   sentence names which, and the requirement it verifies is in the check's
+   `Verifies:` tag.
+2. A frame an object or a space was given did not come back (the frame count's
+   sentence).
+
+See: src/kernel/src/user/rehome_check.rs; docs/microkernel/B5.md.
+
+<a id="fx-0932"></a>
+
+## FX-0932 — jobs, quotas, switch counts or the filter failed the check of kernel objects alone
+
+`object::rehome_check::run` drives `Job`, `Quota`, a bootstrap slot, an end
+record and a core `Process` with no personality: limits and usage, the
+kernel-heap charge, removal of a job, `EMPTY`, the OOM counts, the charge of
+processor time and `cpu.max`, the seal, and the process table's lookup.
+`sched::rehome_check::run` counts the switches of kernel tasks, and
+`trap::rehome_check::run` asks the filter slots of its own and the
+architectures' values. The sentence names the case that was not true.
+
+1. `object/job.rs`, `object/quota.rs`, `object/process.rs`, `sched/` or
+   `trap.rs` changed what it answers: the sentence names which, and the
+   requirement it verifies is in the check's `Verifies:` tag.
+
+See: src/kernel/src/object/rehome_check.rs; docs/microkernel/B5.md.
+
+<a id="fx-0933"></a>
+
+## FX-0933 — the page cache failed the check made of kernel objects alone
+
+`user::rehome_cache_check::run` drives `user::cache` over objects with a source
+of its own, in jobs made for it, with no file system or process: reclaim's scope
+and its hand, `reclaim_asked`, the shrinker's slot, a written page kept, a
+mapping made at the take, `totals`, `resident`, and poison in a cached page. The
+sentence names the case that was not true.
+
+1. `user/cache.rs`, `user/vmo.rs` or `object/quota.rs` changed what reclaim
+   takes or what the cache counts: the sentence names which, and the requirement
+   it verifies is in the check's `Verifies:` tag.
+
+See: src/kernel/src/user/rehome_cache_check.rs; docs/microkernel/B5.md.
+
+<a id="fx-0934"></a>
+
+## FX-0934 — the native calls failed the check made of kernel objects alone
+
+`syscall::rehome_check` makes native calls for a core `Process` with no
+personality: an unknown number's `ENOSYS`, `job_create`'s options and the seal,
+a node's description, a quiesce against a server of the check's own, and a
+write-combining object's mappings, copies and refusals; `check_drivers_sealed`
+walks `drivers.slice`. The sentence names the case that was not true.
+
+1. `syscall/native.rs`, `device.rs`, `user/vmo.rs` or `user/space.rs` changed
+   what a call answers: the sentence names which, and the requirement it
+   verifies is in the check's `Verifies:` tag.
+
+See: src/kernel/src/syscall/rehome_check.rs; docs/microkernel/B5.md.
 
 <a id="fx-1001"></a>
 

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "8baa9766d4ffe89fe5cd182f84d20698fdc7cd66660895fff89bc0b44d8316e5",
+  "digest": "d3c772a676642241e3410e35f827c5d8038d675749393859f6d9a6319f7865a7",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -34750,7 +34750,7 @@
                   "qualifiedName": "FerrixObjectRequirements::OomKill::anEvictedPageIsNoHole",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A page reclaim took reads back as the source has it, never as zeros, through a read and through a fault.\"",
+                  "value": "\"A page reclaim took reads back as the source has it, never as zeros, through a read and through a fault. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_a_fill_reclaimed_is_filled_again).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 1673
@@ -35092,7 +35092,7 @@
                   "qualifiedName": "FerrixObjectRequirements::OomKill::aWriteIsCopiedUnderThePagesLock",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A 16-page write on a writable btrfs mount, in a job at its memory.max holding 32 pages of clean cache of that mount, succeeds after its commit was refused and reclaim gave pages back, and both files read back as written (the `reclaim` line of test-btrfs); a tmpfs file written across pages, cut into its second page and grown again reads back its head and zeros after the cut (stage 8's tmpfs check).\"",
+                  "value": "\"A 16-page write on a writable btrfs mount, in a job at its memory.max holding 32 pages of clean cache of that mount, succeeds after its commit was refused and reclaim gave pages back, and both files read back as written (the `reclaim` line of test-btrfs); a tmpfs file written across pages, cut into its second page and grown again reads back its head and zeros after the cut (stage 8's tmpfs check). And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_commit_and_write).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 1818
@@ -54833,7 +54833,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::VirtualMemoryObjects::aMoveTakesThePagesWithIt",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A two-page private mapping, written across its page boundary, grown to four pages by an mremap that must move it: at the new address its first page and the string across the boundary read as written and the old address reads nothing; shrunk to one page and moved to a fixed address, it still reads its first page as written.\"",
+                  "value": "\"A two-page private mapping, written across its page boundary, grown to four pages by an mremap that must move it: at the new address its first page and the string across the boundary read as written and the old address reads nothing; shrunk to one page and moved to a fixed address, it still reads its first page as written. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_adopt_and_release, user/rehome_check.rs::check_a_move_reaches_the_pages).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 1525
@@ -55232,7 +55232,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::VirtualMemoryObjects::aFaultFillsFromTheFile",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Through a 64-page object over a page source mapped shared and privately (check_a_mapping_faults_in_its_source's setup), a read of page 5 through the shared mapping returns the source's byte after 1 call to the source, with 32 pages committed; a private write to page 50, which nothing had read, reads back beside the source's next byte, and the object's own page 50 still holds the source's bytes.\"",
+                  "value": "\"Through a 64-page object over a page source mapped shared and privately (check_a_mapping_faults_in_its_source's setup), a read of page 5 through the shared mapping returns the source's byte after 1 call to the source, with 32 pages committed; a private write to page 50, which nothing had read, reads back beside the source's next byte, and the object's own page 50 still holds the source's bytes. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_a_fault_fills_from_the_source).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 1614
@@ -55346,7 +55346,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::VirtualMemoryObjects::pagesPastTheFileEndAreRefused",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A tmpfs file mapped shared and privately over 4 pages, the private mapping having copied pages 0 and 1 (check_a_shared_file_mapping's earlier steps), truncated to one page: page 0 still reads through the shared mapping, and each of the other 3 pages is refused through the shared mapping and through the private one, 3 of 3 each.\"",
+                  "value": "\"A tmpfs file mapped shared and privately over 4 pages, the private mapping having copied pages 0 and 1 (check_a_shared_file_mapping's earlier steps), truncated to one page: page 0 still reads through the shared mapping, and each of the other 3 pages is refused through the shared mapping and through the private one, 3 of 3 each. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_a_cut_file_refuses_past_its_end).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 1643
@@ -55403,7 +55403,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::VirtualMemoryObjects::aCutTakesThePrivateCopies",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"The file of L.user.39's criterion grown back to two pages reads 4096 zero bytes at page 1 through the shared mapping and through the private mapping that had copied it.\"",
+                  "value": "\"The file of L.user.39's criterion grown back to two pages reads 4096 zero bytes at page 1 through the shared mapping and through the private mapping that had copied it. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_a_file_grown_back_shows_zeros).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 1656
@@ -55460,7 +55460,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::VirtualMemoryObjects::aTruncationTakesTheFilesPages",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A tmpfs file of 3 pages and 123 bytes, truncated into its second page and grown back, reads its first page and 10 bytes as written and 0 in every byte after.\"",
+                  "value": "\"A tmpfs file of 3 pages and 123 bytes, truncated into its second page and grown back, reads its first page and 10 bytes as written and 0 in every byte after. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_decommit_from).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 1671
@@ -55517,7 +55517,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::VirtualMemoryObjects::theWriteSealCountsWritableMappings",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"F_SEAL_WRITE on a memfd is refused EBUSY while a writable shared mapping of it lives, refused EBUSY again while only a fork child's copy of that mapping does, and accepted once neither does.\"",
+                  "value": "\"F_SEAL_WRITE on a memfd is refused EBUSY while a writable shared mapping of it lives, refused EBUSY again while only a fork child's copy of that mapping does, and accepted once neither does. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_the_may_write_count).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 1685
@@ -55700,7 +55700,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::nothingIsMappedBelowTheFloor",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"map_anonymous at address 0 is refused; an mmap hinted at 0x10 is placed at or above 64 KiB; a MAP_FIXED mmap at 64 KiB lands there.\"",
+                  "value": "\"map_anonymous at address 0 is refused; an mmap hinted at 0x10 is placed at or above 64 KiB; a MAP_FIXED mmap at 64 KiB lands there. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_the_floor).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 1734
@@ -56612,7 +56612,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::protectKeepsAMappingShared",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A memfd mapped shared and read-write and protected read-write again is written through the mapping: the byte is in the file (the memfd line).\"",
+                  "value": "\"A memfd mapped shared and read-write and protected read-write again is written through the mapping: the byte is in the file (the memfd line). And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_protect_keeps_shared).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 1950
@@ -56669,7 +56669,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::aWritableRegionReads",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A memfd's page mapped shared with PROT_WRITE alone reads what the file holds (the memfd line), while a read of a PROT_NONE region is still refused (L.user.53).\"",
+                  "value": "\"A memfd's page mapped shared with PROT_WRITE alone reads what the file holds (the memfd line), while a read of a PROT_NONE region is still refused (L.user.53). And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_a_write_only_region_reads).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 1961
@@ -57296,7 +57296,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::onlyPlainMemoryIsAnonymous",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"In stage 10's chardev self-check, a dmabuf install of a memfd's VMO, its handle holding READ, WRITE, MAP and TRANSFER, is refused INVALID_ARGS, and one of a VMO from vmo_create is installed; with is_anonymous answering true for every VMO, stage 10 fails naming the memfd's dmabuf.\"",
+                  "value": "\"In stage 10's chardev self-check, a dmabuf install of a memfd's VMO, its handle holding READ, WRITE, MAP and TRANSFER, is refused INVALID_ARGS, and one of a VMO from vmo_create is installed; with is_anonymous answering true for every VMO, stage 10 fails naming the memfd's dmabuf. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_is_anonymous).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 2145
@@ -57354,7 +57354,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::onlyTheDriversOwnVmoCombines",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Stage 10's chardev check: on x86-64 the driver's own anonymous VMO answered MAP_VMO with MAP_WRITE_COMBINING is made write-combining; on AArch64 and ARMv7-A the same answer is refused, the program's mmap EIO and the VMO unchanged; on every machine a memfd's VMO and a VMO an address space already maps are refused the same way. With the anonymous test or the mappers' test dropped, the boot panics.\"",
+                  "value": "\"Stage 10's chardev check: on x86-64 the driver's own anonymous VMO answered MAP_VMO with MAP_WRITE_COMBINING is made write-combining; on AArch64 and ARMv7-A the same answer is refused, the program's mmap EIO and the VMO unchanged; on every machine a memfd's VMO and a VMO an address space already maps are refused the same way. With the anonymous test or the mappers' test dropped, the boot panics. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_make_combining).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 2171
@@ -57754,7 +57754,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::mremapCarriesTheContents",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Two written pages with a neighbour after them: growing to four without MREMAP_MAYMOVE is ENOMEM; with it they move, a string in the first page and one across the page boundary read back at the new address, the old address is unreadable and the fourth page reads 0; shrunk to one page in place it keeps the first page's string and its tail is unreadable; moved to the old address with MREMAP_FIXED it lands there with the string.\"",
+                  "value": "\"Two written pages with a neighbour after them: growing to four without MREMAP_MAYMOVE is ENOMEM; with it they move, a string in the first page and one across the page boundary read back at the new address, the old address is unreadable and the fourth page reads 0; shrunk to one page in place it keeps the first page's string and its tail is unreadable; moved to the old address with MREMAP_FIXED it lands there with the string. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_remap).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 2339
@@ -58153,7 +58153,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::aSharedWordIsOneFutexAcrossFork",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A parent waiting without FUTEX_PRIVATE_FLAG on a MAP_SHARED word is not woken by its fork child's private-keyed wake of the same word and is woken by the child's shared wake.\"",
+                  "value": "\"A parent waiting without FUTEX_PRIVATE_FLAG on a MAP_SHARED word is not woken by its fork child's private-keyed wake of the same word and is woken by the child's shared wake. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_shared_object_at).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 2445
@@ -58609,7 +58609,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::protectTakesTheOldTranslationDown",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"After mprotect of a written page to read-only the page does not translate, a copy into it is refused, and a copy out of it reads what was written.\"",
+                  "value": "\"After mprotect of a written page to read-only the page does not translate, a copy into it is refused, and a copy out of it reads what was written. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_protect_takes_translations_out).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 2554
@@ -58780,7 +58780,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::anUnwritableFileMappingStaysUnwritable",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"mprotect to read-write of a shared read-only mapping of a file opened read-only answers EACCES.\"",
+                  "value": "\"mprotect to read-write of a shared read-only mapping of a file opened read-only answers EACCES. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_protect_refuses_an_unwritable_mapping).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 2590
@@ -58951,7 +58951,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::aTruncationReachesBothKindsOfFileMapping",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A file of 2 pages and 100 bytes, mapped 4 pages shared and 4 private and cut to 1 page: page 0 still reads, pages 1 to 3 are refused in each mapping, 3 of 3 and 3 of 3; grown back to 2 pages, page 1 reads 0 in both.\"",
+                  "value": "\"A file of 2 pages and 100 bytes, mapped 4 pages shared and 4 private and cut to 1 page: page 0 still reads, pages 1 to 3 are refused in each mapping, 3 of 3 and 3 of 3; grown back to 2 pages, page 1 reads 0 in both. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_a_cut_file_refuses_past_its_end, user/rehome_check.rs::check_a_file_grown_back_shows_zeros).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 2635
@@ -59008,7 +59008,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::aSharedFileMappingIsTheFile",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A shared mapping of a file of 2 pages and 100 bytes shows those bytes and zeros to the end of the third page; bytes written through it are what the file reads back, and bytes written to the file are what it shows.\"",
+                  "value": "\"A shared mapping of a file of 2 pages and 100 bytes shows those bytes and zeros to the end of the third page; bytes written through it are what the file reads back, and bytes written to the file are what it shows. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_a_shared_mapping_is_the_file).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 2651
@@ -59065,7 +59065,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::aPrivateFileMappingKeepsItsWrites",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"The private mapping shows the file's first page; a write through it and a read() into it each show in it and in neither the file nor the shared mapping; a write to the file shows through a page it never copied and not through one it did.\"",
+                  "value": "\"The private mapping shows the file's first page; a write through it and a read() into it each show in it and in neither the file nor the shared mapping; a write to the file shows through a page it never copied and not through one it did. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_a_private_mapping_keeps_its_copies).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 2666
@@ -59122,7 +59122,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::aForkKeepsPrivateFileCopiesApart",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A fork child reads the parent's private copy; its write into a page the parent copied before the fork is seen by neither the parent nor the file.\"",
+                  "value": "\"A fork child reads the parent's private copy; its write into a page the parent copied before the fork is seen by neither the parent nor the file. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_a_fork_keeps_private_copies_apart).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 2681
@@ -59236,7 +59236,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::aLoaderMapsItsFileAsItNeeds",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A fixed read-execute file mapping lands at its address, shows the file's first page and refuses a write; a fixed read-write one lands next to it, takes a write, and after mprotect to read-only keeps it and refuses the next write.\"",
+                  "value": "\"A fixed read-execute file mapping lands at its address, shows the file's first page and refuses a write; a fixed read-write one lands next to it, takes a write, and after mprotect to read-only keeps it and refuses the next write. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_the_loader_pattern).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 2709
@@ -59978,7 +59978,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::aDiskFilesMappedPagesAreItsRss",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"With an eight-page file on the stage 12 disk all in the cache, a read-only mapping of pages 2 to 5 counts exactly 4 file pages and no others; a private mapping of page 0, written, counts 1 anonymous page and no file page.\"",
+                  "value": "\"With an eight-page file on the stage 12 disk all in the cache, a read-only mapping of pages 2 to 5 counts exactly 4 file pages and no others; a private mapping of page 0, written, counts 1 anonymous page and no file page. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_a_disk_file_counts_as_a_file).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 2926

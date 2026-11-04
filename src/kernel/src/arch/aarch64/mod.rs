@@ -3,6 +3,7 @@
 mod check;
 pub mod console;
 mod cpu;
+pub(crate) mod rehome_check;
 pub use cpu::dma_barrier;
 mod gic;
 pub(crate) mod mmio;

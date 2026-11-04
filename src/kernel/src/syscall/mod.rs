@@ -48,6 +48,7 @@
 
 pub mod native;
 pub mod program;
+pub mod rehome_check;
 pub use ferrix_kernel_core::syscall::uaccess;
 
 use core::sync::atomic::{AtomicU32, Ordering};

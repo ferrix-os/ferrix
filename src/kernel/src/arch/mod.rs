@@ -16,6 +16,12 @@ pub mod x86_64;
 // Side-channel defences: what every architecture shares, its boot check, and
 // each architecture's own half, which the shared part reaches by one name.
 // `docs/certification/SPECULATION.md`.
+#[cfg(target_arch = "aarch64")]
+pub(crate) use aarch64::rehome_check;
+#[cfg(target_arch = "arm")]
+pub(crate) use armv7a::rehome_check;
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::rehome_check;
 mod speculation;
 mod speculation_check;
 #[cfg(target_arch = "aarch64")]

@@ -314,6 +314,7 @@
         "syscall/native_check.rs",
         "syscall/program.rs",
         "syscall/program_check.rs",
+        "syscall/rehome_check.rs",
         "syscall/unmap_check.rs",
         "build_flags.rs",
         "kernel_item.rs"

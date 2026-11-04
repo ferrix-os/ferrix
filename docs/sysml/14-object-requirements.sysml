@@ -1670,7 +1670,7 @@ package FerrixObjectRequirements {
                 read_present shall answer that the page is absent.";
             attribute :>> criterion = "A page reclaim took reads back as the
                 source has it, never as zeros, through a read and through a
-                fault.";
+                fault. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_a_fill_reclaimed_is_filled_again).";
             attribute :>> parent = "H.QUOTA.12";
             attribute :>> unit = ("user::space::copy_or_zero", "user::vmo::Vmo::read_present");
         }
@@ -1815,7 +1815,7 @@ package FerrixObjectRequirements {
                 pages back, and both files read back as written (the `reclaim`
                 line of test-btrfs); a tmpfs file written across pages, cut into
                 its second page and grown again reads back its head and zeros
-                after the cut (stage 8's tmpfs check).";
+                after the cut (stage 8's tmpfs check). And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_commit_and_write).";
             attribute :>> parent = "H.QUOTA.12";
             attribute :>> unit = ("user::vmo::Vmo::commit_and_write", "user::vmo::Vmo::zero_from");
         }
