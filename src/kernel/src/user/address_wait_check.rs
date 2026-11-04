@@ -158,8 +158,12 @@ fn answer(slot: usize, nanos: u64) -> Option<Result<usize, Errno>> {
 /// A deadline `nanos` from now, staged for slot `slot` in `side`; the
 /// pointer to it.
 fn deadline_in(side: &Side, slot: usize, nanos: u64) -> Result<u64, &'static str> {
+    stage_deadline(side, slot, crate::timer::now_nanos().saturating_add(nanos))
+}
+
+/// The deadline `deadline`, staged for slot `slot` in `side`; the pointer to it.
+fn stage_deadline(side: &Side, slot: usize, deadline: u64) -> Result<u64, &'static str> {
     let at = DEADLINES + 8 * slot as u64;
-    let deadline = crate::timer::now_nanos().saturating_add(nanos);
     side.put(at, &deadline.to_ne_bytes())?;
     Ok(at)
 }
@@ -688,17 +692,21 @@ fn a_deadline_ends_a_wait_and_never_early(
         "addrwait: a wait whose deadline had passed did not answer TIMED_OUT",
         report,
     )?;
-    let at = deadline_in(a, 1, SHORT_NANOS)?;
-    let started = crate::timer::now_nanos();
+    // Held to the deadline itself, on the clock it was set by. Staging it writes
+    // into `a`'s memory, which takes time of its own, so a clock read after the
+    // staging is later than the deadline's base, and a wait ending on time could
+    // measure short of `SHORT_NANOS` from it (FX-0911 on CI's TCG, 2026-11-04).
+    let deadline = crate::timer::now_nanos().saturating_add(SHORT_NANOS);
+    let at = stage_deadline(a, 1, deadline)?;
     let answer = a.call(nr::ADDRESS_WAIT, &[WORD, 1, u64::from(u32::MAX), 0, at, 0]);
-    let took = crate::timer::now_nanos().saturating_sub(started);
+    let ended = crate::timer::now_nanos();
     if answer != Err(status::TIMED_OUT) {
         return Err("addrwait: a wait outlived its deadline or did not answer TIMED_OUT");
     }
-    if took < SHORT_NANOS {
+    if ended < deadline {
         return Err("addrwait: a wait answered TIMED_OUT before its deadline");
     }
-    if took > SHORT_NANOS + LATE_NANOS {
+    if ended > deadline.saturating_add(LATE_NANOS) {
         return Err("addrwait: a wait outlived its deadline");
     }
     report.refusals += 1;
