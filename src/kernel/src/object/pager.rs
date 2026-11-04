@@ -59,8 +59,10 @@ use ferrix_native_abi::types::{
 
 use crate::audit;
 use crate::fallible::{self, AllocError};
+use crate::object::channel::Sender;
 use crate::object::port::{Port, Promise};
 use crate::object::quota::{Charge, Resource};
+use crate::object::ticket::{Ticket, issue_for};
 use crate::sched::{self, WaitQueue};
 use crate::sync::SpinLock;
 use crate::user::vmo::Vmo;
@@ -77,10 +79,6 @@ const END_BATCH: usize = 16;
 
 /// The links' ids: one counter, never reused.
 static NEXT_LINK: AtomicU64 = AtomicU64::new(1);
-
-/// The requests' ids: one counter, never reused, never 0. Until K7's
-/// tickets are wired in, the id a packet carries; then the ticket's.
-static NEXT_REQUEST: AtomicU64 = AtomicU64::new(1);
 
 /// How a fault came to ask: what decides whether it may wait and what may end
 /// its wait (K3.md §2.4).
@@ -146,8 +144,11 @@ const ABANDONED: u8 = 4;
 /// One outstanding request: one run, one job.
 #[derive(Debug)]
 struct Request {
-    /// Its id, in its packet: what `PAGER_OP_FAIL` may name.
+    /// Its id, its ticket's, in its packet: what `PAGER_OP_FAIL` may name.
     id: u64,
+    /// The ticket a pager adopts to charge the job whose fault opened it
+    /// (`L.user.157`). It ends with the request.
+    ticket: Arc<Ticket>,
     /// The link of the VMO it is for.
     link: u64,
     /// The quota slot of the job whose fault opened it.
@@ -556,6 +557,7 @@ impl PagerCore {
             for request in batch.iter().flatten() {
                 request.errno.store(u32::from(errno.0), Ordering::Relaxed);
                 request.state.store(state, Ordering::Release);
+                let _ = request.ticket.end();
                 request.queue.wake_all();
             }
             if state == FAILED || state == GONE {
@@ -623,6 +625,19 @@ impl PagerCore {
         }
     }
 
+    /// The live ticket of the outstanding request `id` of this pager: what
+    /// `CHARGE_TICKET ADOPT` through a pager handle finds, so a pager can adopt
+    /// only its own requests' while they wait (K3.md §2.6).
+    pub fn adoptable_ticket(&self, id: u64) -> Option<Arc<Ticket>> {
+        let registry = self.requests.lock();
+        registry
+            .list
+            .iter()
+            .find(|request| request.id == id && request.state() == OPEN)
+            .map(|request| Arc::clone(&request.ticket))
+            .filter(|ticket| ticket.is_live())
+    }
+
     /// A waiter leaves `request`: the state it found, read under the lock.
     /// The last waiter to leave an open request abandons it, and says so.
     fn leave(&self, request: &Arc<Request>) -> (u8, bool) {
@@ -643,6 +658,7 @@ impl PagerCore {
             let _ = registry.list.swap_remove(at);
         }
         request.state.store(ABANDONED, Ordering::Release);
+        let _ = request.ticket.end();
         (OPEN, true)
     }
 }
@@ -694,15 +710,19 @@ impl PagerLink {
             // Supplied since the caller looked: retry.
             return Ok(());
         }
-        let subject = sched::current()
-            .and_then(|task| task.core_process().map(audit::Subject::of))
-            .unwrap_or(audit::Subject::KERNEL);
+        let task = sched::current();
+        let faulting = task.as_ref().and_then(|task| task.core_process());
+        let subject = faulting.map_or(audit::Subject::KERNEL, audit::Subject::of);
+        let issuer = faulting.map_or(Sender::KERNEL, Sender::of);
+        let job = sched::running_group();
+        let ticket = issue_for(issuer, job).map_err(|_| Refusal::NoMemory)?;
         let heap = ferrix_kmem::Charge::bytes(ferrix_kmem::arc_footprint::<Request>())
             .map_err(|_| Refusal::NoMemory)?;
         let fresh = fallible::try_arc(Request {
-            id: NEXT_REQUEST.fetch_add(1, Ordering::Relaxed),
+            id: ticket.id(),
+            ticket,
             link: self.id,
-            job: sched::running_group(),
+            job,
             command,
             first: index,
             count,

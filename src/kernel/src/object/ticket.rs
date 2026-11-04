@@ -88,10 +88,34 @@ impl Ticket {
         self.live.load(Ordering::Acquire)
     }
 
+    /// Its id.
+    pub(crate) fn id(&self) -> u64 {
+        self.id
+    }
+
     /// End it. Whether this call was the one that did.
-    fn end(&self) -> bool {
+    pub(crate) fn end(&self) -> bool {
         self.live.swap(false, Ordering::AcqRel)
     }
+}
+
+/// A ticket no channel lists, for a request the kernel opens: `issuer`'s, charged
+/// to `slot`, found through the pager's own registry and ended with its request
+/// (`docs/microkernel/K3.md` §2.6).
+pub(crate) fn issue_for(issuer: Sender, slot: u32) -> Result<Arc<Ticket>, IssueError> {
+    let charge =
+        Charge::to(slot, Resource::Objects, 1).map_err(|quota::Exceeded| IssueError::NoMemory)?;
+    let id = NEXT_ID
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+        .map_err(|_| IssueError::NoMemory)?;
+    crate::fallible::try_arc(Ticket {
+        id,
+        issuer,
+        slot,
+        live: AtomicBool::new(true),
+        charge,
+    })
+    .map_err(|_| IssueError::NoMemory)
 }
 
 /// Why an issue was refused.
