@@ -30,66 +30,6 @@ const PAGES_AT: u64 = 0x5000_0000;
 /// The top of its stack.
 const STACK_TOP: u64 = 0x7000_0000;
 
-/// See the module. `as --64`, read back with `objcopy`.
-#[cfg(target_arch = "x86_64")]
-const PROGRAM: &[u8] = &[
-    0xbb, 0x00, 0x00, 0x41, 0x00, 0x44, 0x8b, 0x23, 0x45, 0x85, 0xe4, 0x74, 0x0e, 0xb8, 0x00, 0x10,
-    0x00, 0x00, 0x31, 0xff, 0x0f, 0x05, 0x41, 0xff, 0xcc, 0x75, 0xf2, 0x44, 0x8b, 0x63, 0x04, 0x45,
-    0x85, 0xe4, 0x74, 0x17, 0x41, 0xbd, 0x00, 0x00, 0x00, 0x50, 0x41, 0xc6, 0x45, 0x00, 0x01, 0x49,
-    0x81, 0xc5, 0x00, 0x10, 0x00, 0x00, 0x41, 0xff, 0xcc, 0x75, 0xef, 0x8b, 0x4b, 0x08, 0x85, 0xc9,
-    0x74, 0x04, 0xff, 0xc9, 0x75, 0xfc, 0xb8, 0x9a, 0x10, 0x00, 0x00, 0x8b, 0x7b, 0x0c, 0xbe, 0x01,
-    0x00, 0x00, 0x00, 0x0f, 0x05, 0xeb, 0xfe,
-];
-/// See the module. `aarch64-linux-gnu-as`, read back with `objcopy`.
-#[cfg(target_arch = "aarch64")]
-const PROGRAM: &[u8] = &[
-    0x33, 0x08, 0xa0, 0xd2, 0x74, 0x02, 0x40, 0xb9, 0xd4, 0x00, 0x00, 0x34, 0x08, 0x00, 0x82, 0xd2,
-    0x00, 0x00, 0x80, 0xd2, 0x01, 0x00, 0x00, 0xd4, 0x94, 0x06, 0x00, 0x71, 0x81, 0xff, 0xff, 0x54,
-    0x74, 0x06, 0x40, 0xb9, 0xf4, 0x00, 0x00, 0x34, 0x15, 0x00, 0xaa, 0xd2, 0x36, 0x00, 0x80, 0x52,
-    0xb6, 0x02, 0x00, 0x39, 0xb5, 0x06, 0x40, 0x91, 0x94, 0x06, 0x00, 0x71, 0xa1, 0xff, 0xff, 0x54,
-    0x77, 0x0a, 0x40, 0xb9, 0x77, 0x00, 0x00, 0x34, 0xf7, 0x06, 0x00, 0x71, 0xe1, 0xff, 0xff, 0x54,
-    0x48, 0x13, 0x82, 0xd2, 0x60, 0x0e, 0x40, 0xb9, 0x21, 0x00, 0x80, 0xd2, 0x01, 0x00, 0x00, 0xd4,
-    0x00, 0x00, 0x00, 0x14,
-];
-/// See the module. `arm-linux-gnueabihf-as`, read back with `objcopy`.
-#[cfg(target_arch = "arm")]
-const PROGRAM: &[u8] = &[
-    0x00, 0x40, 0x00, 0xe3, 0x41, 0x40, 0x40, 0xe3, 0x00, 0x50, 0x94, 0xe5, 0x00, 0x00, 0x55, 0xe3,
-    0x04, 0x00, 0x00, 0x0a, 0x00, 0x70, 0x01, 0xe3, 0x00, 0x00, 0xa0, 0xe3, 0x00, 0x00, 0x00, 0xef,
-    0x01, 0x50, 0x55, 0xe2, 0xfa, 0xff, 0xff, 0x1a, 0x04, 0x50, 0x94, 0xe5, 0x00, 0x00, 0x55, 0xe3,
-    0x06, 0x00, 0x00, 0x0a, 0x00, 0x60, 0x00, 0xe3, 0x00, 0x60, 0x45, 0xe3, 0x01, 0x80, 0xa0, 0xe3,
-    0x00, 0x80, 0xc6, 0xe5, 0x01, 0x6a, 0x86, 0xe2, 0x01, 0x50, 0x55, 0xe2, 0xfb, 0xff, 0xff, 0x1a,
-    0x08, 0x90, 0x94, 0xe5, 0x00, 0x00, 0x59, 0xe3, 0x01, 0x00, 0x00, 0x0a, 0x01, 0x90, 0x59, 0xe2,
-    0xfd, 0xff, 0xff, 0x1a, 0x9a, 0x70, 0x01, 0xe3, 0x0c, 0x00, 0x94, 0xe5, 0x01, 0x10, 0xa0, 0xe3,
-    0x00, 0x00, 0x00, 0xef, 0xfe, 0xff, 0xff, 0xea,
-];
-
-/// L.x86_64.55, L.x86_64.68: holds its start argument, writes it to a new VMO at
-/// offset 8 (R10 names the word that says so) and reads 16 bytes from offset 0, then
-/// ends with the word it read at byte 8: so the status is the argument only if RDI, RSI,
-/// RDX and R10 all arrived and RAX answered the VMO's handle. `as --64`, read back with `objcopy`.
-#[cfg(target_arch = "x86_64")]
-const ARGUMENTS_PROGRAM: &[u8] = &[
-    0x49, 0x89, 0xfc, 0xbb, 0x00, 0x00, 0x41, 0x00, 0x4c, 0x89, 0xa3, 0x80, 0x00, 0x00, 0x00, 0x48,
-    0xc7, 0x83, 0x90, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0xb8, 0x20, 0x10, 0x00, 0x00, 0xbf,
-    0x00, 0x10, 0x00, 0x00, 0x0f, 0x05, 0x49, 0x89, 0xc5, 0xb8, 0x22, 0x10, 0x00, 0x00, 0x4c, 0x89,
-    0xef, 0x48, 0x8d, 0xb3, 0x80, 0x00, 0x00, 0x00, 0xba, 0x08, 0x00, 0x00, 0x00, 0x4c, 0x8d, 0x93,
-    0x90, 0x00, 0x00, 0x00, 0x0f, 0x05, 0xb8, 0x21, 0x10, 0x00, 0x00, 0x4c, 0x89, 0xef, 0x48, 0x8d,
-    0xb3, 0x00, 0x01, 0x00, 0x00, 0xba, 0x10, 0x00, 0x00, 0x00, 0x4c, 0x8d, 0x93, 0x98, 0x00, 0x00,
-    0x00, 0x0f, 0x05, 0xb8, 0x9a, 0x10, 0x00, 0x00, 0x8b, 0xbb, 0x08, 0x01, 0x00, 0x00, 0xbe, 0x01,
-    0x00, 0x00, 0x00, 0x0f, 0x05, 0xeb, 0xfe,
-];
-
-/// A program that spins until its end reaches it: a jump to itself.
-#[cfg(target_arch = "x86_64")]
-const SPIN_PROGRAM: &[u8] = &[0xeb, 0xfe];
-/// See the x86-64 one.
-#[cfg(target_arch = "aarch64")]
-const SPIN_PROGRAM: &[u8] = &[0x00, 0x00, 0x00, 0x14];
-/// See the x86-64 one.
-#[cfg(target_arch = "arm")]
-const SPIN_PROGRAM: &[u8] = &[0xfe, 0xff, 0xff, 0xea];
-
 /// How long a thread started on another processor is given to be running.
 const SETTLE_NANOS: u64 = 100_000_000;
 /// How long a program may take.
@@ -137,14 +77,14 @@ impl BareSide {
     /// A program in `job` that spins until its end reaches it.
     fn spinning(job: Arc<Job>) -> Result<BareSide, &'static str> {
         let space = AddressSpace::new().map_err(|_| "bare: no space")?;
-        put_text(&space, SPIN_PROGRAM, Work::default())?;
+        put_text(&space, crate::arch::bare_programs().1, Work::default())?;
         let host = Bare::new(space, job, None).map_err(|_| "bare: no process")?;
         Ok(BareSide { host })
     }
 
     /// Start it on `cpu` and hold its task.
     fn start(&self, cpu: Option<usize>) -> Result<Arc<Task>, &'static str> {
-        let thread = self.host.spawn_on(TEXT, STACK_TOP, 0, cpu)?;
+        let thread = crate::object::bare::spawn_on(&self.host, TEXT, STACK_TOP, 0, cpu)?;
         thread
             .task()
             .ok_or("bare: a thread ended before its task could be read")
@@ -170,7 +110,7 @@ impl BareSide {
 
 /// The program, its words, its pages and its stack, in `space`.
 fn put_program(space: &AddressSpace, work: Work) -> Result<(), &'static str> {
-    put_text(space, PROGRAM, work)
+    put_text(space, crate::arch::bare_programs().0, work)
 }
 
 /// `program`, `work`'s words, its pages and its stack, in `space`.
@@ -256,10 +196,14 @@ fn spun_as_user(one: Charged) -> bool {
 
 /// Whether it did nothing but enter the kernel and was charged over half of it.
 fn mostly_kernel(one: Charged) -> bool {
-    one.kernel.saturating_mul(2) >= one.runtime
+    // Three quarters, not half: the program's end is kernel time too, and without its
+    // faults counted it reaches near half alone (`bh-82`).
+    one.kernel.saturating_mul(4) >= one.runtime.saturating_mul(3)
 }
 
-/// `work` alone on `cpu`, up to [`ATTEMPTS`] times, until `holds`.
+/// `work` alone on `cpu`, up to [`ATTEMPTS`] times, until `holds`. These cases read a
+/// fraction of time and not a charge, so scheduling is allowed for; it proves the rule
+/// held in one run of three, and a charge wrong two times in three passes (ledger 6946).
 fn attempted(
     work: Work,
     cpu: usize,
@@ -281,7 +225,7 @@ fn attempted(
 /// and interrupt's way out).
 ///
 /// Verifies: L.sched.80
-/// Verifies: L.x86_64.59, L.x86_64.79
+/// Verifies: `L.x86_64.59`, `L.x86_64.79`
 fn user_time_is_not_kernel_time(cpu: usize) -> Result<(), &'static str> {
     const SPUN: &str = "bare: a program spinning in user mode was charged as kernel time";
     let spin = Work {
@@ -334,7 +278,7 @@ fn calls_and_faults_are_kernel_time(cpu: usize) -> Result<(), &'static str> {
 
 /// L.trap.2: a fault in a mapped region makes the mapping true and the instruction is
 /// retried: every page touched is resident, and the program went on to end.
-/// L.x86_64.79: an interrupt from user mode preempts: the two programs above were cut.
+/// `L.x86_64.79`: an interrupt from user mode preempts: the two programs above were cut.
 ///
 /// Verifies: L.trap.2
 fn a_fault_is_resolved() -> Result<(), &'static str> {
@@ -526,21 +470,19 @@ fn an_end_reaches_every_thread(cpu: usize) -> Result<(), &'static str> {
     Ok(())
 }
 
-/// L.x86_64.68: a native program enters at its entry on its stack with the start argument
-/// in RDI. L.x86_64.55: a call dispatches on RAX with RDI, RSI, RDX and R10, and answers
+/// `L.x86_64.68`: a native program enters at its entry on its stack with the start argument
+/// in RDI. `L.x86_64.55`: a call dispatches on RAX with RDI, RSI, RDX and R10, and answers
 /// in RAX. The argument reaches the status only through all of these.
 ///
-/// Verifies: L.x86_64.55, L.x86_64.68
-#[cfg(target_arch = "x86_64")]
-fn a_program_has_its_argument_and_its_calls_theirs() -> Result<(), &'static str> {
+/// Verifies: `L.x86_64.55`, `L.x86_64.68`
+fn a_program_has_its_argument_and_its_calls_theirs(program: &[u8]) -> Result<(), &'static str> {
     let space = AddressSpace::new().map_err(|_| "bare: no space")?;
-    put_text(&space, ARGUMENTS_PROGRAM, Work::default())?;
+    put_text(&space, program, Work::default())?;
     let job = Job::new_root().map_err(|_| "bare: no job")?;
     let host = Bare::new(space, job, None).map_err(|_| "bare: no process")?;
     let side = BareSide { host };
-    let _thread = side
-        .host
-        .spawn_on(TEXT, STACK_TOP, u64::from(STATUS), None)?;
+    let _thread =
+        crate::object::bare::spawn_on(&side.host, TEXT, STACK_TOP, u64::from(STATUS), None)?;
     if side.ended()? != STATUS as i32 {
         return Err("bare: a program's start argument or a call's four did not arrive");
     }
@@ -680,7 +622,7 @@ fn a_shared_store_reaches_the_other_side() -> Result<(), &'static str> {
         shared: true,
         ..VmaFlags::READ_WRITE
     };
-    let _ = source
+    source
         .unmap(PAGES_AT, 2 * PAGE_SIZE)
         .map_err(|_| "bare: a program's pages would not unmap")?;
     let _ = source
@@ -779,8 +721,9 @@ pub fn run() -> Result<u32, &'static str> {
     a_quota_cuts_a_program_alone(cpu)?;
     a_throttled_program_leaves_for_its_end(cpu)?;
     an_end_reaches_every_thread(cpu)?;
-    #[cfg(target_arch = "x86_64")]
-    a_program_has_its_argument_and_its_calls_theirs()?;
+    if let Some(program) = crate::arch::bare_programs().2 {
+        a_program_has_its_argument_and_its_calls_theirs(program)?;
+    }
     if !crate::sched::vtime::counting() {
         return Ok(11);
     }

@@ -18,8 +18,12 @@ from user mode, and today's harness (`object/check.rs`'s `Side`, `syscall/check.
   and `desktop` today. **It does not run in `fast` yet** (6110 (1)): on `feature/mk-lift` `stages_check` builds only
   with the load in ring 0, and a user boot prints `UNCHECKED_MARKER`. So an id re-homed here counts for `present`
   and `desktop` until a caller in item or core is agreed with mk-lift and a `--personality user` row prints the
-  line; M5's gate does not read it as met before then. ARMv7-A has no K11, so its programs do not run: `run`
-  answers 0 cases there (the program for it is kept for M5). Dispatch's calls claim nothing about the entry; the
+  line; M5's gate does not read it as met before then. `run` answers 2 on ARMv7-A (`over_its_mark_a_job_gives_back` and
+  `a_job_says_who_is_frozen`, the two with no program, since it has no K11 and its programs do not run; the program
+  is kept for M5), 11 or 13 on AArch64 and x86-64 (the two time cases where the boot counts kernel time), and the
+  arguments case on x86-64 alone. So L.object.107 and 108 count on all three; L.x86_64.55, 68 on x86-64; the rest on
+  AArch64 and x86-64. `attempted`'s time cases read a fraction of time: one run in three holding passes, so a charge
+  wrong two times in three would (6946 (2)). Dispatch's calls claim nothing about the entry; the
   stubs are that evidence, and a charge or job case runs as a thread of the `Bare` (6110 (5)).
 * **Class B's ids on it**, each with a sabotage in product code: L.sched.30, 31, 33, 35, 80, 81, 82, 3, 4; L.trap.2;
   L.user.61, 87, 96; L.x86_64.55, 59, 68, 79; L.object.100, 107, 108; H.QUOTA.6, 10, 11, 12; H.SCHED.14; H.MEM.8; and the
@@ -44,10 +48,11 @@ the ratchet with this as their way down.
 | L.sched.30, 31, 33 | a kick and END on a `Bare`; STOP and the audit stay with the personality's `needs_attention` | not yet tagged: ask |
 | L.object.108 | a file over a check `Filler`, pages taken as the job, `oom::throttle` called as the trap's way out does | SP-3 |
 | L.user.62, H.MEM.16 | a clone's own stores to two shared pages and a private one | restated: "fork" to the clone |
-| L.object.107 | `Process::sync_freeze` on `Bare`s born, moved and thawed; the parking is the personality's | restated, its core half |
 | H.TRAP.16, L.aarch64.51, L.armv7a.1, L.x86_64.124 | the entries' drive is raised and the core's slot holds seccomp's rule, which a kernel with no load does not register | no route yet: ask |
 | L.object.100, 108, H.QUOTA.6, 12 | a sourced `Vmo` over a check `PageSource`, cache charged to the job, as a thread of the `Bare` | restated where they name a Linux status |
 | L.user.61, H.MEM.8 | two `Bare`s on S and its clone, each a program's own store; replaces stage 6's `USER_COW_PROGRAM` in user builds (L.user.160, 6110 (7)) | restated: "fork" to the clone |
 | L.user.96 | K2 cannot make a private `Backing::File`: class C, successor `linuxd`'s private-file row | moved, here first |
-| H.QUOTA.11, L.object.107 | `Bare` does not honour freeze (`needs_attention` is `own_end`): split with mk-restricted; the parking scoped, its successor named | restated |
-| L.x86_64.55, 68 | a native call's four registers; the start argument: K15's L.object.293 program on `Bare` | SP-3 |
+| L.object.107 | `Process::sync_freeze` on `Bare`s born, moved and thawed; `Bare` does not honour freeze (`needs_attention` is `own_end`), so the parking and SIGCONT stay the load check's, and H.QUOTA.11 is not tagged here | restated, its core half |
+| L.x86_64.55, 68 | a native call's four registers; the start argument: K15's L.object.293 program on `Bare`; the control on the four changes R10 in the entry's Rust, not the assembly's own lines | SP-3 |
+
+Controls that fire elsewhere than the case's sentence: `v-59b`, no preemption of a program with no region: the first case to notice is `a_quota_cuts_a_program_alone`'s "was not held to its cpu.max", and the two spinners' sentence is not shown to fire; `v-35a`, an end not posted: "a program did not end within the check's patience", the earlier case's (`v-35b`, narrowed, gives `an_end_reaches_every_thread`'s own). `t-61`, a private store made shared: the guard "a VMO backing a private region would have more than one mapper" fires in the clone, and "reached another holder" is not shown to fire. A real failure of a case with a spinning program can take `PATIENCE_NANOS`, 120 s, as long as `test-boot`'s own wait: BACKLOG's row.

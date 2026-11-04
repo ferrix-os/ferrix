@@ -1405,7 +1405,7 @@ package FerrixObjectRequirements {
                 their memory.events.";
             attribute :>> criterion = "After a scoped OOM kill, memory.events counts
                 one OOM kill in the job and in its parent and none in a sibling, and
-                an epoll on it is woken by the kill with EPOLLPRI. And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_oom_counts).";
+                an epoll on it is woken by the kill with EPOLLPRI. And with kernel objects alone, on every profile, the `core obj` line (object/rehome_check.rs::check_oom_counts). On Bare, present and desktop (bare_side_check): a_limit_ends_its_own.";
             attribute :>> parent = "H.QUOTA.6";
             attribute :>> unit = ("object::job::Job::count_oom",
                 "object::job::Job::oom_counts");
@@ -1642,13 +1642,13 @@ package FerrixObjectRequirements {
             attribute :>> statement = "A user fault refused by a memory limit shall
                 first take back clean file cache charged to the job whose limit was
                 full or beneath it and retry the fault, and only when that gave
-                back nothing end, with the kill's status, a process of that job or
+                back nothing end, with the kill's status (under a personality its signal), a process of that job or
                 beneath it and none outside it, count the kill there, and retry the
                 fault.";
             attribute :>> criterion = "A program writing 8 MiB in a job limited to 1
                 MiB ends by SIGKILL, exactly 1 process killed, while a process with
                 more resident memory in a sibling job lives; a read of a file past
-                memory.max kills no process where the job's clean cache was room.";
+                memory.max kills no process where the job's clean cache was room. On Bare, present and desktop (bare_side_check): a_limit_ends_its_own.";
             attribute :>> parent = ("H.QUOTA.6", "H.QUOTA.12");
             attribute :>> unit = ("object::oom::user_fault", "object::oom::out_of_memory",
                 "object::oom::kill_within", "object::oom::at_or_above",
@@ -1723,7 +1723,7 @@ package FerrixObjectRequirements {
                 with cpu.max 20000 100000 is held to between a twelfth and two
                 thirds of a processor, its cpu.stat counts at least 3 throttled
                 periods and its user and system time add to its usage, and with
-                cpu.max max it takes more than six tenths.";
+                cpu.max max it takes more than six tenths. On Bare, present and desktop (bare_side_check): the tree's charges and periods on a spinner, a_quota_cuts_a_program_alone; the tick's user-or-system half is L.sched.80's.";
             attribute :>> parent = "H.QUOTA.10";
             attribute :>> unit = ("object::quota::charge_cpu",
                 "object::quota::throttled_until", "object::quota::refresh_period",
@@ -1767,12 +1767,12 @@ package FerrixObjectRequirements {
                 its job or one above it has cgroup.freeze set, whether the freeze
                 came before the process was made, before it was moved in, or after
                 it was running, and a frozen process shall report is_frozen until
-                its job is thawed, which SIGCONT does not do.";
+                its job is thawed, which under a personality SIGCONT does not do.";
             attribute :>> criterion = "A program of three threads in a frozen
                 cgroup stops counting and reports frozen through cgroup.events; a
                 fork made in it, a process moved into it and one made by clone3 into
                 it start frozen; SIGCONT leaves it frozen; one moved out of it is
-                not.";
+                not. On Bare, present and desktop (bare_side_check): sync_freeze on Bares born, moved and thawed, a_job_says_who_is_frozen; the parking and SIGCONT are the load check above.";
             attribute :>> parent = "H.QUOTA.11";
             attribute :>> unit = ("object::process::Process::sync_freeze",
                 "object::process::Process::is_frozen", "object::job::Job::freezing",
@@ -1786,7 +1786,7 @@ package FerrixObjectRequirements {
                 pause a millisecond if that gave back less than the excess.";
             attribute :>> criterion = "A cgroup reading a file twice its memory.high
                 holds no more than the mark afterwards, memory.events counts the
-                crossing, and a second read takes more.";
+                crossing, and a second read takes more. On Bare, present and desktop (bare_side_check): over_its_mark_a_job_gives_back; the millisecond's pause is the load check's.";
             attribute :>> parent = "H.QUOTA.12";
             attribute :>> unit = ("object::oom::throttle", "object::quota::over_high",
                 "object::quota::count", "object::quota::bump", "object::quota::Counter::at",
@@ -2983,6 +2983,8 @@ package FerrixObjectRequirements {
             attribute :>> parent = "H.OBJ.25";
             attribute :>> unit = ("object::bare::Bare::spawn",
                 "object::bare::Bare::spawn_with",
+                "object::bare::Bare::spawn_placed",
+                "object::bare::spawn_on",
                 "object::bare::current_thread");
         }
         requirement <'L.object.273'> threadExitEndsAThreadOrAProcess : ItemLowLevel {

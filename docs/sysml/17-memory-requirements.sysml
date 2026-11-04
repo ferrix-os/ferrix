@@ -2093,10 +2093,10 @@ package FerrixMemoryRequirements {
         }
         requirement <'L.user.61'> aProgramsCopyOnWriteWriteIsItsOwn : ItemLowLevel {
             attribute :>> statement = "A write by a program's own instruction to a
-                private page its fork still shares shall be copied for the side that
+                private page its fork or clone still shares shall be copied for the side that
                 wrote it and be seen by neither the other side nor the page.";
             attribute :>> criterion = "The `cow` program, whose parent and child each
-                write a page both shared after the fork, exits 61 (the `cow` line).";
+                write a page both shared after the fork, exits 61 (the `cow` line). On Bare, present and desktop (bare_side_check): two Bares on a space and its clone, each a program's own store, a_store_copies_for_the_side_that_writes, which replaces the `cow` line in user builds once a caller is built there (6110 (1), (7)).";
             attribute :>> parent = "H.MEM.8";
             attribute :>> unit = ("user::space::AddressSpace::fork",
                 "user::space::AddressSpace::resolve", "user::space::copy_on_write",
@@ -2105,11 +2105,11 @@ package FerrixMemoryRequirements {
                 "user::space::AddressSpace::shoot");
         }
         requirement <'L.user.62'> aProgramsSharedWriteReachesItsParent : ItemLowLevel {
-            attribute :>> statement = "A forked program's write to a MAP_SHARED
+            attribute :>> statement = "A forked or cloned program's write to a MAP_SHARED
                 anonymous page shall reach its parent, a page the child faults in
                 first included, and its write to a MAP_PRIVATE page shall not.";
             attribute :>> criterion = "The `shared` program exits 62 (the `shared`
-                line).";
+                line). On Bare, present and desktop (bare_side_check): a clone's own stores to two shared pages and a private one, a_shared_store_reaches_the_other_side; the `shared` program is the load's.";
             attribute :>> parent = "H.MEM.16";
             attribute :>> unit = ("user::space::AddressSpace::fork",
                 "user::space::attach_child", "user::space::shared_object",
@@ -3382,7 +3382,7 @@ package FerrixMemoryRequirements {
                 other; a shared VMO's write is seen by both; a page both hold has
                 two references, and one once the clone is closed. A program's own
                 store through a stale translation is stage 6's USER_COW_PROGRAM
-                check (H.MEM.8, L.user.61; F-41 itself is L.user.60).";
+                check (H.MEM.8, L.user.61; F-41 itself is L.user.60). In user builds L.user.61 on Bare replaces that stage 6 check (6110 (7)).";
             attribute :>> parent = "H.MEM.25";
             attribute :>> unit = ("user::space::AddressSpace::fork",
                 "user::space::AddressSpace::allocate_by_handle");

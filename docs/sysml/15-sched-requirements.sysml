@@ -45,12 +45,11 @@ package FerrixSchedRequirements {
         requirement <'L.sched.3'> aThrottledTaskLeavesForAKill : ItemLowLevel {
             attribute :>> statement = "throttle_current shall hold a task whose job
                 or one above it has used its cpu.max quota until the period ends,
-                and leave the wait before then when a kill, a signal or a stop is
-                posted to the task.";
+                and leave the wait before then when its end, or under a personality a kill, a signal or a stop, is posted to the task.";
             attribute :>> criterion = "A program in a job with cpu.max 1000 1000000
                 that has used its millisecond ends within a quarter of a second of
                 its SIGKILL, where waiting out the period takes nine tenths of a
-                second.";
+                second. On Bare, present and desktop (bare_side_check): a spinner under cpu.max leaves the wait for its end, a_throttled_program_leaves_for_its_end; the signal and the stop are the load check above.";
             attribute :>> parent = "H.QUOTA.10";
             attribute :>> unit = ("sched::throttle_current", "trap::must_attend");
         }
@@ -62,7 +61,7 @@ package FerrixSchedRequirements {
             attribute :>> criterion = "A program already running alone on its
                 processor is held to between a twelfth and two thirds of a
                 processor by a cpu.max 20000 100000 written under it, and by being
-                moved beneath one.";
+                moved beneath one. On Bare, present and desktop (bare_side_check): a spinner alone on a processor is held to its cpu.max, a_quota_cuts_a_program_alone.";
             attribute :>> parent = "H.QUOTA.10";
             attribute :>> unit = ("sched::rearm_timers", "sched::rearm_here",
                 "sched::set_task_group", "sched::note_moved");
@@ -225,7 +224,7 @@ package FerrixSchedRequirements {
             attribute :>> criterion = "A program past its cgroup's memory.max is
                 OOM-killed and ends (the `cgroups` line's OOM case, which no signal
                 reaches first); with end_record's post removed it never ends and
-                the check fails by name.";
+                the check fails by name. On Bare, present and desktop (bare_side_check): a spinner on another processor and one here ended by Bare::end, an_end_reaches_every_thread.";
             attribute :>> parent = ("H.OBJ.9", "H.QUOTA.6");
             attribute :>> unit = ("object::process::Process::end_record",
                 "object::process::Process::list_task",

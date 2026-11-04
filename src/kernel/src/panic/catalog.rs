@@ -2732,8 +2732,8 @@ pub static STAGE8_PATH_CALLS: Explanation = Explanation {
 pub static STAGE9_BARE: Explanation = Explanation {
     code: "FX-0936",
     title: "a program no personality holds did not behave as the kernel promises",
-    meaning: "`syscall::bare_side_check::run` (docs/microkernel/B5-host.md) runs small native \\
-              programs on `object::bare::Bare`, so that what it proves links in a kernel with no \\
+    meaning: "`syscall::bare_side_check::run` (docs/microkernel/B5-host.md) runs small native \
+              programs on `object::bare::Bare`, so that what it proves links in a kernel with no \
               load: a fault resolved, kernel time charged and user time not. The message names the case.",
     causes: &[
         "`trap::dispatch` or `sched::vtime` stopped opening or closing a stint.",

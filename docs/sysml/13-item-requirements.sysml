@@ -136,10 +136,10 @@ package FerrixItemRequirements {
             attribute :>> parent = ("O.ISOLATE", "ASR-1");
         }
         requirement <'H.MEM.8'> privateCopiesStayPrivate : ItemHighLevel {
-            attribute :>> statement = "After a fork, a write by the parent or the
+            attribute :>> statement = "After a fork or a clone by handle, a write by the parent or the
                 child to a private page shall not be visible to the other.";
             attribute :>> criterion = "The `cow` program, in which each side writes a
-                page both shared, exits 61 (neither saw the other's write).";
+                page both shared, exits 61 (neither saw the other's write). On Bare, present and desktop (bare_side_check): as L.user.61.";
             attribute :>> parent = ("O.ISOLATE", "ASR-1");
         }
         requirement <'H.MEM.9'> framesComeBack : ItemHighLevel {
@@ -215,11 +215,11 @@ package FerrixItemRequirements {
             attribute :>> parent = ("O.ISOLATE", "ASR-1");
         }
         requirement <'H.MEM.16'> sharedWritesAreSeen : ItemHighLevel {
-            attribute :>> statement = "After a fork, a write by the child to a
+            attribute :>> statement = "After a fork or a clone by handle, a write by the child to a
                 MAP_SHARED mapping shall be visible to the parent, and its write to a
                 MAP_PRIVATE mapping shall not.";
             attribute :>> criterion = "The `shared` program exits 62 (its MAP_SHARED
-                write reached the parent and its MAP_PRIVATE write did not).";
+                write reached the parent and its MAP_PRIVATE write did not). On Bare, present and desktop (bare_side_check): as L.user.62.";
             attribute :>> parent = ("O.ISOLATE", "ASR-1");
         }
         requirement <'H.MEM.17'> framesWaitForTheirInvalidation : ItemHighLevel {
@@ -1692,7 +1692,7 @@ package FerrixItemRequirements {
             attribute :>> criterion = "A program writing 8 MiB in a job limited to 1
                 MiB ends by SIGKILL while a larger process in a sibling job lives;
                 exactly 1 process is killed; memory.events counts one OOM kill in the
-                job and its parent and none in the sibling.";
+                job and its parent and none in the sibling. On Bare, present and desktop (bare_side_check): a_limit_ends_its_own, its status the kill's.";
             attribute :>> parent = ("G.8", "O.QUOTA");
         }
         // Split out of H.QUOTA.2 and H.QUOTA.4 by the pilot, for one check each.
@@ -1733,12 +1733,12 @@ package FerrixItemRequirements {
             attribute :>> statement = "A job's tasks, with those of every job
                 beneath it, shall use no more processor time in a period than the
                 job's cpu.max allows, and a task kept waiting for the period to
-                end shall leave the wait at once for a kill or a signal.";
+                end shall leave the wait at once for its end, under a personality a kill or a signal.";
             attribute :>> criterion = "A program in a job limited to 20000 of
                 100000 microseconds is held to between a twelfth and two thirds of
                 a processor with the throttling counted in cpu.stat, and one in a
                 job limited to 1000 of 1000000 ends within a quarter of a second
-                of its SIGKILL (the `cgroups` line, cpu).";
+                of its SIGKILL (the `cgroups` line, cpu). On Bare, present and desktop (bare_side_check): a_quota_cuts_a_program_alone and a_throttled_program_leaves_for_its_end; the signal is the load check above.";
             attribute :>> parent = "O.QUOTA";
         }
         requirement <'H.QUOTA.11'> aFrozenJobStops : ItemHighLevel {

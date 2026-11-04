@@ -214,21 +214,6 @@ impl Bare {
         self.spawn_with(entry, stack, argument, |_| true)
     }
 
-    /// [`Bare::spawn`], on processor `cpu` if one is named.
-    ///
-    /// # Errors
-    ///
-    /// As [`Bare::spawn`].
-    pub fn spawn_on(
-        &self,
-        entry: u64,
-        stack: u64,
-        argument: u64,
-        cpu: Option<usize>,
-    ) -> Result<Arc<ThreadRef>, &'static str> {
-        self.spawn_placed(entry, stack, argument, cpu, |_| true)
-    }
-
     /// [`Bare::spawn`], with `ready` asked once everything that can fail has been
     /// done but its handle's: a thread it says no to never runs.
     ///
@@ -438,7 +423,7 @@ fn fault_signal(signal: u32, code: i32, address: u64, pc: u64) -> FaultOutcome {
     let pid = thread.process.core.pid();
     crate::console::println!(
         "  bare     process {pid}: a fault in normal mode at pc {pc:#x}, address {address:#x}, \
-         signal {signal} code {code}: its region's job is ended"
+         signal {signal} code {code}: it ends, with its region's job if it has one"
     );
     let status = 128 + signal as i32;
     match thread.process.core.region() {
@@ -468,6 +453,23 @@ pub(crate) static RETURN_PATH: ReturnPath = ReturnPath {
     fault_signal,
     fault_end: fault_signal,
 };
+
+// CHECKS-ONLY: syscall/bare_side_check.rs
+/// [`Bare::spawn`], on processor `cpu` if one is named.
+///
+/// # Errors
+///
+/// As [`Bare::spawn`].
+#[doc(hidden)]
+pub fn spawn_on(
+    bare: &Bare,
+    entry: u64,
+    stack: u64,
+    argument: u64,
+    cpu: Option<usize>,
+) -> Result<Arc<ThreadRef>, &'static str> {
+    bare.spawn_placed(entry, stack, argument, cpu, |_| true)
+}
 
 // CHECKS-ONLY: object/level_check.rs
 /// A thread's handle object at `level`, with no task: what the level door reads.

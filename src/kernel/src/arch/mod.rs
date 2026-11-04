@@ -46,6 +46,19 @@ pub use speculation::{
 };
 pub use speculation_check::check as check_speculation;
 
+// CHECKS-ONLY: syscall/bare_side_check.rs
+/// The programs of `syscall::bare_side_check`: its work program, its spinner, and the
+/// arguments case's where there is one.
+pub fn bare_programs() -> (&'static [u8], &'static [u8], Option<&'static [u8]>) {
+    #[cfg(target_arch = "aarch64")]
+    use aarch64::{BARE_ARGUMENTS_PROGRAM, BARE_PROGRAM, BARE_SPIN_PROGRAM};
+    #[cfg(target_arch = "arm")]
+    use armv7a::{BARE_ARGUMENTS_PROGRAM, BARE_PROGRAM, BARE_SPIN_PROGRAM};
+    #[cfg(target_arch = "x86_64")]
+    use x86_64::{BARE_ARGUMENTS_PROGRAM, BARE_PROGRAM, BARE_SPIN_PROGRAM};
+    (BARE_PROGRAM, BARE_SPIN_PROGRAM, BARE_ARGUMENTS_PROGRAM)
+}
+
 /// `L.x86_64.211`'s check: every processor's `RDTSCP` named its own logical
 /// number; `Ok(None)` where the architecture or the processor has none.
 ///
