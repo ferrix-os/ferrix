@@ -2984,7 +2984,10 @@ impl AddressSpace {
                         // to the region's rights, the file's end and a private copy as it
                         // holds the fault (the controls that dropped each here did not
                         // fire, ledger 6537).
-                        inner.objects.get(&id).is_some_and(|file| file.page(index).is_some())
+                        inner
+                            .objects
+                            .get(&id)
+                            .is_some_and(|file| file.page(index).is_some())
                     })
             };
             // As `write_ahead`: tables may be needed, and a refusal would count.

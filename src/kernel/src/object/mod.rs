@@ -36,6 +36,7 @@ pub mod quota;
 pub mod region;
 #[cfg(not(ferrix_load_built = "lift"))]
 pub mod rehome_check;
+#[cfg(not(ferrix_load_built = "lift"))]
 pub mod reserve_check;
 pub mod space;
 pub mod ticket;

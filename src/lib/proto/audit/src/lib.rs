@@ -289,7 +289,7 @@ pub mod power {
 pub const FIRST_PROCESS_ENDED: Event = Event::new(Class::Ended, 5);
 
 /// Every event this crate names, with its name.
-pub const NAMED: [(Event, &str); 35] = [
+pub const NAMED: [(Event, &str); 36] = [
     (FIRST_PROCESS_ENDED, "FIRST_PROCESS_ENDED"),
     (LEVEL, "LEVEL"),
     (BUFFER_DECLARED, "BUFFER_DECLARED"),

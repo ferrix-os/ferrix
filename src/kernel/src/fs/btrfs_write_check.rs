@@ -36,6 +36,7 @@ use crate::interfaces::block_ring::VIRTIO_BLK_MAJOR;
 mod clean_check;
 #[cfg(not(ferrix_load_built = "lift"))]
 mod mapped_check;
+#[cfg(not(ferrix_load_built = "lift"))]
 mod poison_check;
 #[cfg(not(ferrix_load_built = "lift"))]
 mod reclaim_check;

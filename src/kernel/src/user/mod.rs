@@ -11,6 +11,7 @@ pub mod cache;
 pub mod check;
 #[cfg(not(ferrix_load_built = "lift"))]
 pub mod dirty_check;
+#[cfg(not(ferrix_load_built = "lift"))]
 pub(crate) mod edge_check;
 pub mod memory_type;
 #[cfg(not(ferrix_load_built = "lift"))]

@@ -345,7 +345,7 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     if checks::run() {
         #[cfg(ferrix_load_built = "ring0")]
         stages_check::check_user_memory();
-        #[cfg(ferrix_linux_abi = "on")]
+        #[cfg(ferrix_load_built = "ring0")]
         stages_check::check_dirty();
         #[cfg(ferrix_personality = "user")]
         match user::space::window_check::run() {

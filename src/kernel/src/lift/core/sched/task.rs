@@ -203,6 +203,30 @@ impl Task {
             self.call[8].load(Ordering::Relaxed),
         ))
     }
+    /// Whether it adopted a ticket: never in `linuxd`, whose threads make no native
+    /// adoption of their own (K7's calls are the kernel's, by number).
+    pub fn has_adoption(&self) -> bool {
+        false
+    }
+
+    /// The ticket it adopted: none, as [`Task::has_adoption`].
+    pub fn adopted_ticket(&self) -> Option<Arc<crate::object::ticket::Ticket>> {
+        None
+    }
+
+    /// Nothing to replace: what is handed in is dropped by the caller's hold ending.
+    pub fn replace_adoption(
+        &self,
+        _ticket: Option<Arc<crate::object::ticket::Ticket>>,
+    ) -> Option<Arc<crate::object::ticket::Ticket>> {
+        None
+    }
+
+    /// Nothing to take.
+    pub fn take_adoption(&self) -> Option<Arc<crate::object::ticket::Ticket>> {
+        None
+    }
+
     pub fn charge_target(&self) -> u32 {
         self.charge.load(Ordering::Relaxed)
     }

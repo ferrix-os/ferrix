@@ -288,3 +288,10 @@ pub unsafe fn uninstall_user_root() {}
 pub fn nospec_below(at: u64, end: u64) -> Option<u64> {
     (at < end).then_some(at)
 }
+
+/// K1's copy-miss note: `linuxd`'s own copies go through the shadow, and a miss there is
+/// the shim's, never a native call's (`docs/microkernel/K1.md` §2.2).
+pub(crate) fn note_copy_miss(_: &crate::user::space::AddressSpace, _: u64, _: bool) {}
+
+/// See [`note_copy_miss`].
+pub(crate) fn forget_copy_miss() {}
