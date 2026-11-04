@@ -3394,6 +3394,22 @@ package FerrixMemoryRequirements {
                 "user::vmo::Vmo::writeback_end", "user::vmo::Vmo::decommit_clean",
                 "user::vmo::Vmo::dirty_runs");
         }
+        requirement <'L.user.157'> theFaultingJobPaysThroughItsTicket : ItemLowLevel {
+            attribute :>> statement = "Each page request shall carry a ticket the kernel
+                issued for the opening thread's process and job, adoptable only through
+                its pager's handle with PAGER and only while the request is
+                outstanding; pages the adopted pager commits and supplies shall stay
+                charged to that job. At the job's object limit the fault shall end
+                SIGBUS or FAULT with no pager asked; a pager may spend the job's limit
+                while a request is open.";
+            attribute :>> criterion = "Stage 9's pager check, case o: the page is the
+                faulting job's alone, the pager's job
+                paying nothing; another pager's handle, a handle without PAGER and a
+                request ended all adopt nothing.";
+            attribute :>> parent = "H.MEM.22";
+            attribute :>> unit = ("object::pager::PagerCore::adoptable_ticket",
+                "object::ticket::issue_for", "syscall::native::adopt_ticket");
+        }
         requirement <'L.user.156'> aPagersCloseEndsItsFaults : ItemLowLevel {
             attribute :>> statement = "The close of a pager's handle, or DETACH,
                 run where it may block, shall end every outstanding request of its
