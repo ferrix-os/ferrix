@@ -1966,7 +1966,7 @@ pub static WINDOW_UNMAP: Explanation = Explanation {
               unmap would flush. A leaf it took down went unnamed, or a range with nothing in \
               it began a shootdown, or a shootdown still out was not covered.",
     causes: &["`AddressSpace::window_take_down` or `mm::unmap_placed` was changed."],
-    see: "docs/microkernel/M5-LIFT.md section 13; src/kernel/src/user/window_check.rs",
+    see: "docs/microkernel/M5-LIFT.md section 13; src/kernel/src/user/space/window_check.rs",
 };
 
 // CHECKS-ONLY: stages_check.rs
@@ -4055,11 +4055,6 @@ pub(crate) static NESTED_INTERRUPT_STACK: Explanation = Explanation {
           ferrix_paranoid_common; src/kernel/src/arch/x86_64/gdt.rs",
 };
 
-/// Every entry, in code order.
-#[expect(
-    dead_code,
-    reason = "tools/common/gen/gen-panic-catalog.py checks every entry is listed here; the kernel names entries directly"
-)]
 /// `docs/microkernel/BOOT-AUTHORITY.md` §1: a first process did not start.
 pub static FIRST_PROCESSES: Explanation = Explanation {
     code: "FX-0952",
@@ -4101,6 +4096,11 @@ pub static PARTITION_MANAGER_ENDED: Explanation = Explanation {
     see: "src/user/system/native/partmgr/src/main.rs; docs/microkernel/BOOT-AUTHORITY.md",
 };
 
+/// Every entry, in code order.
+#[expect(
+    dead_code,
+    reason = "tools/common/gen/gen-panic-catalog.py checks every entry is listed here; the kernel names entries directly"
+)]
 pub(crate) static ALL: &[&Explanation] = &[
     &SHOOTDOWN_TIMEOUT,
     &GRACE_PERIOD_TIMEOUT,
@@ -4252,11 +4252,11 @@ pub(crate) static ALL: &[&Explanation] = &[
     &STAGE6_REHOMED_CACHE,
     &ITEM_REHOMED_CALLS,
     &STAGE9_REBIND,
+    #[cfg(ferrix_personality = "user")]
+    &WINDOW_UNMAP,
     &STAGE10_AUTHORITY,
     #[cfg(not(ferrix_shape = "micro"))]
     &STAGE9_SEALING,
-    #[cfg(ferrix_personality = "user")]
-    &WINDOW_UNMAP,
     &FIRST_PROCESSES,
     &PARTITION_DESCRIPTION,
     &PARTITION_MANAGER_ENDED,

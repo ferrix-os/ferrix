@@ -23,7 +23,7 @@ GIVING = re.compile(r"\b(give\(\s*&region|push_within\(\s*&mut\s+(?:transfers|mo
 
 def tables_in_source(text: str) -> dict[str, list[tuple[str, str]]]:
     tables = {}
-    for name, body in re.findall(r"pub const (\w+): Rows = Rows\(&\[(.*?)\]\);", text, re.S):
+    for name, body in re.findall(r"pub(?:\(crate\))? const (\w+): Rows = Rows\(&\[(.*?)\]\);", text, re.S):
         rows = re.findall(r"Row \{\s*held: Held::(\w+),\s*rights: (.*?),\s*most: \w+,?\s*\},", body, re.S)
         tables[name] = [(held, " ".join(rights.split())) for held, rights in rows]
     return tables

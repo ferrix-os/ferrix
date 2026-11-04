@@ -232,6 +232,13 @@ fn start_manager() {
     }
 }
 
+#[cfg_attr(
+    ferrix_personality = "user",
+    expect(
+        clippy::too_many_lines,
+        reason = "the manager's start is one order of steps, BOOT-AUTHORITY.md BA.2 to BA.6"
+    )
+)]
 fn try_start_manager() -> Result<(), &'static str> {
     let Some((description, _)) = sealed_file(DESCRIPTION)? else {
         println!("  partmgr  no description in the image: no safety partition, no manager");
@@ -326,8 +333,10 @@ fn try_start_manager() -> Result<(), &'static str> {
                 crate::object::dispose(message.handles.into_iter().map(|(object, _)| object));
                 if message.bytes.get(..4) == Some(&READY_MAGIC.to_le_bytes()[..]) {
                     println!("  partmgr  ready: {images} partitions, {devices} devices held");
-                    // Kept open for its life: its peer closing is not its end.
-                    core::mem::forget(kernel_end);
+                    // AUDIT: never dropped, a leak of one endpoint once a boot. The
+                    // manager lives as long as the machine, and dropping this end would
+                    // close its channel: its peer closing is not its end, the watch is.
+                    let _kept_for_good = Arc::into_raw(kernel_end);
                     return Ok(());
                 }
             }

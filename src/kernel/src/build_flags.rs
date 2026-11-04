@@ -103,19 +103,6 @@ const FLAGS: [Flag; 17 + cfg!(ferrix_personality = "user") as usize] = [
             ),
         ],
     },
-    // `present`'s and `desktop`'s boot lines stay as they were.
-    #[cfg(ferrix_personality = "user")]
-    Flag {
-        name: "fault_ahead",
-        values: &[
-            (cfg!(ferrix_fault_ahead = "off"), "off"),
-            (cfg!(ferrix_fault_ahead = "on"), "on"),
-            (
-                cfg!(ferrix_fault_ahead = "not_applicable"),
-                "not_applicable",
-            ),
-        ],
-    },
     Flag {
         name: "kernel_memory",
         values: &[
@@ -150,6 +137,19 @@ const FLAGS: [Flag; 17 + cfg!(ferrix_personality = "user") as usize] = [
         values: &[
             (cfg!(ferrix_ssbd = "always"), "always"),
             (cfg!(ferrix_ssbd = "on_request"), "on_request"),
+        ],
+    },
+    // `present`'s and `desktop`'s boot lines stay as they were.
+    #[cfg(ferrix_personality = "user")]
+    Flag {
+        name: "fault_ahead",
+        values: &[
+            (cfg!(ferrix_fault_ahead = "off"), "off"),
+            (cfg!(ferrix_fault_ahead = "on"), "on"),
+            (
+                cfg!(ferrix_fault_ahead = "not_applicable"),
+                "not_applicable",
+            ),
         ],
     },
     Flag {

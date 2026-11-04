@@ -52,6 +52,27 @@ mod served {
         })
     }
 
+    /// The thread a `THREAD_AFFINITY` names, if its handle may manage it.
+    fn managed_thread(
+        object: &Object,
+        rights: Rights,
+    ) -> Result<alloc::sync::Arc<crate::object::bare::ThreadRef>, Errno> {
+        let Object::Thread(thread) = object else {
+            return Err(status::WRONG_TYPE);
+        };
+        if !rights.contains(Rights::MANAGE) {
+            return Err(status::ACCESS_DENIED);
+        }
+        Ok(alloc::sync::Arc::clone(thread))
+    }
+
+    #[cfg_attr(
+        ferrix_personality = "user",
+        expect(
+            clippy::too_many_lines,
+            reason = "the lift's calls, one arm each, as the native table's dispatch"
+        )
+    )]
     pub(in super::super) fn call(
         call: NativeCall,
         process: &Process,
@@ -106,13 +127,7 @@ mod served {
                     let handle = Handle(u32::try_from(a[0]).map_err(|_| status::BAD_HANDLE)?);
                     let thread = process.with_handles(|table| {
                         let (object, rights) = table.get(handle).map_err(table_error)?;
-                        let Object::Thread(thread) = object else {
-                            return Err(status::WRONG_TYPE);
-                        };
-                        if !rights.contains(Rights::MANAGE) {
-                            return Err(status::ACCESS_DENIED);
-                        }
-                        Ok(alloc::sync::Arc::clone(thread))
+                        managed_thread(object, rights)
                     })?;
                     if thread.has_ended() || !thread.in_region() {
                         return Err(status::BAD_STATE);
@@ -241,10 +256,14 @@ mod served {
                     let Some(byte) = crate::arch::read_console_byte() else {
                         break;
                     };
-                    bytes[got] = byte;
+                    let Some(slot) = bytes.get_mut(got) else {
+                        break;
+                    };
+                    *slot = byte;
                     got += 1;
                 }
-                uaccess::copy_to_user(process.caller_space(), a[1], &bytes[..got])
+                let read = bytes.get(..got).ok_or(status::INVALID_ARGS)?;
+                uaccess::copy_to_user(process.caller_space(), a[1], read)
                     .map_err(|_| status::FAULT)?;
                 Ok(got)
             }

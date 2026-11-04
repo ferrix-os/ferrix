@@ -131,7 +131,7 @@ fn mm_present(space: &AddressSpace, at: u64) -> bool {
 }
 
 /// Place one page of `memory` at each of `pages`.
-fn place(space: &AddressSpace, memory: &Arc<vmo::Vmo>, pages: &[u64]) -> Result<(), &'static str> {
+fn place(space: &AddressSpace, memory: &Arc<Vmo>, pages: &[u64]) -> Result<(), &'static str> {
     for (index, &at) in pages.iter().enumerate() {
         let (done, refused) = space.place(
             memory,
@@ -147,6 +147,6 @@ fn place(space: &AddressSpace, memory: &Arc<vmo::Vmo>, pages: &[u64]) -> Result<
 }
 
 /// [`place`], while a test holds `pending` up, which a place does not read.
-fn place_held(space: &AddressSpace, memory: &Arc<vmo::Vmo>, at: u64) -> Result<(), &'static str> {
+fn place_held(space: &AddressSpace, memory: &Arc<Vmo>, at: u64) -> Result<(), &'static str> {
     place(space, memory, &[at])
 }

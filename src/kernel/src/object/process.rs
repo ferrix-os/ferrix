@@ -280,8 +280,8 @@ const LEFT: u64 = u64::MAX;
 #[cfg(ferrix_personality = "user")]
 #[derive(Debug)]
 struct DebugBudget {
-    second: core::sync::atomic::AtomicU64,
-    used: core::sync::atomic::AtomicU64,
+    second: AtomicU64,
+    used: AtomicU64,
 }
 
 #[cfg(ferrix_personality = "user")]
@@ -291,8 +291,8 @@ impl DebugBudget {
 
     const fn new() -> DebugBudget {
         DebugBudget {
-            second: core::sync::atomic::AtomicU64::new(0),
-            used: core::sync::atomic::AtomicU64::new(0),
+            second: AtomicU64::new(0),
+            used: AtomicU64::new(0),
         }
     }
 }

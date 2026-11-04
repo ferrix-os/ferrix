@@ -2251,8 +2251,11 @@ fn prune_pages(store: &std::path::Path) -> Result<()> {
 /// target: `cargo xtask native-clippy --arch ARCH`.
 pub(crate) fn native_clippy(arch: Arch) -> Result<()> {
     let native = sorted_members()?.native;
+    // linuxd links the lift, which builds only with a kernel's flags: it is linted
+    // with it, in `check`'s pass for `personality=user`.
     let mut arguments: Vec<&str> = native
         .iter()
+        .filter(|package| package.as_str() != "ferrix-linuxd")
         .flat_map(|package| ["-p", package.as_str()])
         .collect();
     arguments.extend(["--target", arch.kernel_target()]);
@@ -2652,6 +2655,10 @@ fn python_captured(script: &str, arguments: &[&str], said: &mut Vec<u8>) -> Resu
 /// library crates sit beneath `src/kernel` (`docs/KERNEL-CRATES.md`), as
 /// `workspace::members` finds them, so a crate split out of the kernel
 /// cannot leave the lint pass by being missed from a list.
+#[allow(
+    clippy::too_many_lines,
+    reason = "every build's lint, set up and joined in one place"
+)]
 fn kernel_clippy_every_build() -> Result<()> {
     let packages = workspace::members(&paths::workspace_root())?.kernel;
     if !packages.iter().any(|name| name == "ferrix-kernel") {
@@ -2659,6 +2666,11 @@ fn kernel_clippy_every_build() -> Result<()> {
             "the workspace has no ferrix-kernel package under src/kernel to lint",
         ));
     }
+    // The lift's crates are built only for x86-64 under personality=user: their own
+    // pass below, after the kernel's every build.
+    let (lift, packages): (Vec<String>, Vec<String>) = packages
+        .into_iter()
+        .partition(|name| name.starts_with("ferrix-lift"));
     let mut every_arch: Vec<&str> = Vec::new();
     for package in &packages {
         every_arch.extend(["-p", package.as_str()]);
@@ -2722,6 +2734,29 @@ fn kernel_clippy_every_build() -> Result<()> {
     // printed whole afterwards in the order they always ran in, so the passes'
     // diagnostics never interleave, and the first failure in that order is the
     // error (`docs/TEST-TIME.md`, *Cut M1*).
+    let personality_user: Vec<(String, String)> = [
+        ("personality", "user"),
+        ("fs", "lift"),
+        ("partition_speculation", "partition"),
+        ("restricted_fastpath", "off"),
+        ("fault_ahead", "on"),
+    ]
+    .iter()
+    .map(|(flag, value)| ((*flag).to_owned(), (*value).to_owned()))
+    .collect();
+    let lifted = crate::flags::resolve(None, &personality_user)?;
+    let mut lift_args: Vec<&str> = Vec::new();
+    for package in packages.iter().chain(&lift) {
+        lift_args.extend(["-p", package.as_str()]);
+    }
+    lift_args.extend(["-p", "ferrix-linuxd"]);
+    lift_args.extend(["--target", Arch::X86_64.kernel_target()]);
+    let lift_dir = kernel_lint_dir("personality user")
+        .to_string_lossy()
+        .into_owned();
+    let (lift_output, lift_result) = lint_one_setting(&lift_args, &lift_dir, &lifted);
+    print!("{lift_output}");
+    lift_result?;
     let (results, off_result) = std::thread::scope(|scope| {
         let running: Vec<_> = builds
             .iter()

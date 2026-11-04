@@ -17,7 +17,7 @@ pub(crate) const TASKS: &[Task] = &[Task {
     run: |_, args| test_first_processes(args),
 }];
 
-/// The file [`SERVER_ROW`] describes, generated and judged against the images.
+/// The file `SERVER_ROW` describes, generated and judged against the images.
 fn described(root: &std::path::Path, row: &str) -> Result<crate::ports::File> {
     let toml = root.join("partitions.toml");
     std::fs::write(&toml, row).map_err(|e| Error::new(e.to_string()))?;
@@ -89,8 +89,10 @@ fn test_first_processes(args: &Args) -> Result<()> {
             // A device that asks for a certified driver, past the checker: this kernel has no
             // grant, so its parser's yes is the boot's stop (ledger 6564 Y.1).
             let mut needs = described(&root, &device(0x0200))?;
-            if let crate::ports::Content::Bytes(bytes) = &mut needs.content {
-                bytes[16 + 168 + 4] = 1;
+            if let crate::ports::Content::Bytes(bytes) = &mut needs.content
+                && let Some(flag) = bytes.get_mut(16 + 168 + 4)
+            {
+                *flag = 1;
             }
             let initramfs = initramfs::build(None, &natives, None, &[needs])?;
             let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, None)?;

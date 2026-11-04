@@ -237,7 +237,7 @@ fn again_resume(value: u64) -> k1::Exit {
 }
 fn again_enter(context: &Context) -> k1::Exit {
     sched::account::entering();
-    k1::enter(context)
+    k1::enter_with(context, ferrix_native::region::ENTER_COPY_MISS_EXITS)
 }
 
 fn run(mut exit: k1::Exit) -> ! {

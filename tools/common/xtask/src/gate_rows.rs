@@ -491,6 +491,10 @@ fn machine_rows(path: &str, rows: &mut Rows) {
 }
 
 /// What one path adds to `rows`.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one arm an option or row, in one place"
+)]
 fn rows_for(path: &str, image_crates: &BTreeSet<String>, rows: &mut Rows) {
     let under = |prefix: &str| path.starts_with(prefix);
     let image_crate = image_crates

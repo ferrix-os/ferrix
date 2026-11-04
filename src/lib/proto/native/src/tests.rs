@@ -1237,6 +1237,17 @@ fn every_call_in_the_native_table_has_a_wrapper() {
     let _ = Vmo::from_owned(handle()).digest(&mut [0; 32]);
     let _ = Process::from_owned(handle()).images(&mut []);
     let _ = Device::from_owned(handle()).bind_domain();
+    let _ = Device::from_owned(handle()).served();
+    let _ = crate::lift_calls::debug_write(&sys, Handle(1), b"");
+    let _ = crate::lift_calls::thread_yield(&sys);
+    let _ = crate::lift_calls::clock_read(&sys, 0);
+    let _ = crate::lift_calls::thread_affinity(&sys, 0, &[0; 8]);
+    let _ = crate::lift_calls::bootstrap_move(&sys, Handle(1), Handle(2), false);
+    let _ = crate::lift_calls::space_window(&sys, Handle(1));
+    let _ = crate::lift_calls::space_place(&sys, Handle(1), Handle(2), &[0; 16]);
+    let _ = crate::lift_calls::random_fill(&sys, &mut [0; 8]);
+    let _ = crate::lift_calls::console_read(&sys, Handle(1), &mut [0; 8]);
+    let _ = crate::lift_calls::object_kind(&sys, Handle(1));
 
     let wrapped: BTreeSet<usize> = sys.numbers().into_iter().collect();
     let table: BTreeSet<usize> = nr::ALL.iter().map(|&call| nr::number(call)).collect();

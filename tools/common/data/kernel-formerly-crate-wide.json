@@ -1251,10 +1251,6 @@
       "before": "pub(crate)"
     },
     {
-      "item": "init_check.rs: CheckReport::cases (field)",
-      "before": "pub(crate)"
-    },
-    {
       "item": "init_check.rs: check (fn)",
       "before": "pub(crate)"
     },

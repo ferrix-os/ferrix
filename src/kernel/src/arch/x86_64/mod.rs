@@ -27,7 +27,10 @@ mod pcid;
 mod powerctl;
 pub(crate) mod restricted;
 pub(crate) mod scrub;
-#[cfg_attr(ferrix_shape = "micro", allow(dead_code, unused_imports))]
+#[cfg_attr(
+    ferrix_shape = "micro",
+    allow(dead_code, unused_imports, reason = "the lift's signals are linuxd's")
+)]
 mod signal;
 mod smp;
 pub(super) mod speculation;

@@ -510,15 +510,20 @@ fn walk_to_the_limit() {
         // SAFETY: inside the mapping above.
         unsafe { walk.add(page * PAGE).write_volatile(1) };
     }
-    let moved = events().saturating_sub(before);
-    let now = get(&format!("{CTN}/memory.current"), "memory.current could not be read");
-    say(&format!("a walk of {pages} pages from {used} bytes used, {} after: memory.events max moved {moved}", now.trim()));
-    if moved != 0 {
-        fail("a walk that fits under memory.max was refused a charge");
-    }
     // SAFETY: the mapping above, which nothing else names.
     if unsafe { libc::munmap(walk.cast(), mapped * PAGE) } != 0 {
         fail("the walk's memory could not be unmapped");
+    }
+    // Read after the unmap: `memory.events` only counts up, so it still holds anything the walk was
+    // refused, and opening a file at the limit is a charge of its own, which is not the walk's.
+    let moved = events().saturating_sub(before);
+    let now = get(&format!("{CTN}/memory.current"), "memory.current could not be read");
+    say(&format!(
+        "a walk of {pages} pages from {used} bytes used, {} once unmapped: memory.events max moved {moved}",
+        now.trim()
+    ));
+    if moved != 0 {
+        fail("a walk that fits under memory.max was refused a charge");
     }
 }
 

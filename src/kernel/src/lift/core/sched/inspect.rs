@@ -40,7 +40,7 @@ pub fn chain_of(task: &Arc<Task>, out: &mut [u64; MAX_FRAMES]) -> Option<usize> 
     if !task.is_blocked() {
         return None;
     }
-    *out.first_mut()? = crate::sys::park as usize as u64;
+    *out.first_mut()? = crate::sys::park as *const () as usize as u64;
     *out.get_mut(1)? = pc;
     Some(2)
 }

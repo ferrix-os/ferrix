@@ -37,19 +37,25 @@ pub const ITEM_FLAG_WORD: u64 =
 
 pub use ferrix_kernel_core::*;
 
+// Only `boot_authority`, under `personality=user`, names these.
+#[cfg(not(ferrix_personality = "user"))]
+use ferrix_cpio as _;
+#[cfg(not(ferrix_personality = "user"))]
+use ferrix_partition_desc as _;
+
 #[cfg(ferrix_personality = "user")]
 pub mod boot_authority;
 pub mod build_flags;
 pub mod checks;
 pub mod discovery;
 pub mod fastpath;
-pub mod first_rows;
+pub(crate) mod first_rows;
 #[cfg(not(ferrix_shape = "micro"))]
 pub mod init;
 #[cfg(not(ferrix_shape = "micro"))]
 pub mod init_check;
 #[cfg(ferrix_personality = "user")]
-pub mod linuxd_start;
+pub(crate) mod linuxd_start;
 pub mod power;
 pub mod random;
 pub mod syscall;

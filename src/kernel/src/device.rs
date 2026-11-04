@@ -499,7 +499,6 @@ impl Reserved {
             reason = "publication is personality=user's; a hybrid's check alone reaches this"
         )
     )]
-    #[cfg_attr(not(ferrix_personality = "user"), allow(dead_code))]
     pub(crate) fn kernel_ranges(&self) -> impl Iterator<Item = (u64, u64)> + '_ {
         let (first, last) = self.map;
         self.ranges

@@ -192,7 +192,7 @@ fn give_bootstrap(process: &crate::object::process::Process, kernel: u32) {
 fn launch(task: &Arc<Task>) -> Result<(), &'static str> {
     reap_stacks();
     let top = stack_for(task)?;
-    let entry = thread_main as usize;
+    let entry = thread_main as *const () as usize;
     // A program's first thread starts a kernel process of its own (K11); every
     // other thread of it starts from one already in that process, as a Linux
     // thread's `clone` does, and a worker from linuxd's own.

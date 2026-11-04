@@ -313,6 +313,10 @@ fn verify(expected: &[Expected], report: &mut Report) -> Result<(), &'static str
 /// # Errors
 ///
 /// What did not match, as a sentence.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one sequence; a line over with the lift's cfg round its reclaim and poison steps"
+)]
 pub fn run() -> Result<Report, &'static str> {
     let rdev = makedev(VIRTIO_BLK_MAJOR, DISK_INDEX * 16);
     let mut report = Report {
@@ -498,7 +502,7 @@ pub fn mount_fixture() -> Result<bool, &'static str> {
     let ns = fs::namespace();
     let ctx = ns.context();
     match ns.mkdir(&ctx, None, b"/mnt", 0o755) {
-        Ok(()) | Err(ferrix_vfs::Errno::EEXIST) => {}
+        Ok(()) | Err(Errno::EEXIST) => {}
         Err(_) => return Err("the mount point could not be made"),
     }
     let at = ns

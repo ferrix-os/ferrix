@@ -955,6 +955,10 @@ impl Args {
         }
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one arm an option or row, in one place"
+    )]
     pub(crate) fn parse(raw: impl Iterator<Item = String>) -> Result<Self> {
         let mut args = Args {
             smp: 4,

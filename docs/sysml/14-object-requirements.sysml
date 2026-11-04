@@ -3772,7 +3772,9 @@ package FerrixObjectRequirements {
                 refuse it. Control: mkl-c-wmap.";
             attribute :>> parent = ("H.OBJ.30");
             attribute :>> unit = ("user::space::AddressSpace::open_window",
-                "user::space::AddressSpace::with_placed");
+                "user::space::AddressSpace::with_placed",
+                "user::space::AddressSpace::window_take_down",
+                "mm::unmap_placed");
         }
         requirement <'L.object.312'> placedFramesAreTheHandlesOwn : ItemLowLevel {
             attribute :>> statement = "SPACE_PLACE shall place only pages of the VMO the handle names,
@@ -3791,8 +3793,18 @@ package FerrixObjectRequirements {
                 placed. Control: mkl-c-rewind.";
             attribute :>> parent = ("H.OBJ.30");
             attribute :>> unit = ("arch::x86_64::restricted::note_copy_miss",
-                "arch::x86_64::restricted::take_copy_miss",
+                "arch::x86_64::restricted::forget_copy_miss",
                 "arch::x86_64::restricted::call_copy_exit");
+        }
+        requirement <'L.object.314'> aFaultsNeighboursAreOnlyWhatIsResident : ItemLowLevel {
+            attribute :>> statement = "Under fault_ahead=on a fault shall bring in only pages the region's
+                object already holds, or a run of fresh memory, each with no more than its own
+                rights, under the space's lock; a neighbour's refusal shall not be the program's.";
+            attribute :>> criterion = "test-threads' `fault-ahead` under personality=user (ledger 6537,
+                A1-A7).";
+            attribute :>> parent = ("H.OBJ.30");
+            attribute :>> unit = ("user::space::AddressSpace::fault_around",
+                "user::space::AddressSpace::write_ahead");
         }
         requirement <'L.object.309'> aSpaceHandleStopsARaise : ItemLowLevel {
             attribute :>> statement = "While a space handle names a process's space,

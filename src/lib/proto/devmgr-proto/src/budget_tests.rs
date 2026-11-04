@@ -121,7 +121,9 @@ const DEVMGR: &str = include_str!("../../../../user/system/native/devmgr/src/mai
 /// and its control channel, for either ring; and the Intel GPU keeper's job
 /// and its worker's image (`docs/INTEL-GPU.md` §12.3), neither with
 /// `SET_LIMIT` (checked below).
-const NARROWED: [&str; 6] = [
+const NARROWED: [&str; 7] = [
+    // The debug log devmgr hands a driver under personality=user: it writes, and passes it on.
+    "Requested::Exactly(Rights::WRITE | Rights::TRANSFER)",
     "Requested::Exactly(DEVICE_RIGHTS)",
     "Requested::Exactly(NET_DEVICE_RIGHTS)",
     "Requested::Exactly(CONTROL_RIGHTS)",
@@ -185,7 +187,8 @@ fn every_launch_path_narrows_the_device_to_a_drivers_rights() {
     let mut paths = 0;
     for (name, body) in functions(DEVMGR) {
         let starts_a_driver = name.starts_with("start_") || name == "launch_again";
-        if !starts_a_driver || name == "start_name" {
+        // `start_host` hands its device to `start_plain`, which narrows it.
+        if !starts_a_driver || name == "start_name" || name == "start_host" {
             continue;
         }
         paths += 1;

@@ -14,8 +14,15 @@ use crate::discovery::devmgr::{GIVEN_DEVICE_RIGHTS, KEPT_DEVICE_RIGHTS};
 use crate::object::Object;
 
 /// A kind of handle a first process may hold.
+#[cfg_attr(
+    not(ferrix_personality = "user"),
+    expect(
+        dead_code,
+        reason = "only `devmgr`'s row is read without `personality=user`"
+    )
+)]
 #[derive(Clone, Copy, Debug)]
-pub enum Held {
+pub(crate) enum Held {
     /// The job its children go in: never the root's.
     Job,
     /// The debug log's write handle.
@@ -40,12 +47,16 @@ pub enum Held {
 
 /// One kind of handle and what it may do.
 #[derive(Debug)]
-pub struct Row {
+pub(crate) struct Row {
     /// The kind.
     pub held: Held,
     /// Its rights.
     pub rights: Rights,
     /// How many of it this role may hold: what bounds a role's count.
+    #[cfg_attr(
+        not(ferrix_personality = "user"),
+        expect(dead_code, reason = "only `judge` reads it, under `personality=user`")
+    )]
     pub most: usize,
 }
 
@@ -66,13 +77,18 @@ fn is_of(object: &Object, held: Held) -> bool {
 
 /// A role's whole table.
 #[derive(Debug)]
-pub struct Rows(&'static [Row]);
+pub(crate) struct Rows(&'static [Row]);
 
 impl Rows {
     /// The rights of `held` in this row: not in it, and this does not compile, since
     /// every use is in a const expression.
     #[must_use]
-    pub const fn of(&self, held: Held) -> Rights {
+    #[expect(
+        clippy::indexing_slicing,
+        clippy::panic,
+        reason = "AUDIT: const evaluated at every use: `at` is below the length, and a panic here is a compile error"
+    )]
+    pub(crate) const fn of(&self, held: Held) -> Rights {
         let mut at = 0;
         while at < self.0.len() {
             if self.0[at].held as u8 == held as u8 {
@@ -92,7 +108,7 @@ impl Rows {
     ///
     /// What was out of its row.
     #[cfg(ferrix_personality = "user")]
-    pub fn judge<'a>(
+    pub(crate) fn judge<'a>(
         &self,
         given: impl Iterator<Item = (&'a Object, Rights)>,
     ) -> Result<(), &'static str> {
@@ -122,10 +138,24 @@ const MOST_ROWS: usize = 8;
 const MANY: usize = CHANNEL_MAX_HANDLES;
 
 const LOG_TO_PASS_ON: Rights = Rights(Rights::WRITE.0 | Rights::DUPLICATE.0 | Rights::TRANSFER.0);
+#[cfg_attr(
+    not(ferrix_personality = "user"),
+    expect(
+        dead_code,
+        reason = "only `devmgr`'s row is read without `personality=user`"
+    )
+)]
 const ARCHIVE: Rights = Rights(Rights::VMO.0 & !Rights::WRITE.0);
 
 /// The partition manager's.
-pub const MANAGER: Rows = Rows(&[
+#[cfg_attr(
+    not(ferrix_personality = "user"),
+    expect(
+        dead_code,
+        reason = "only `devmgr`'s row is read without `personality=user`"
+    )
+)]
+pub(crate) const MANAGER: Rows = Rows(&[
     Row {
         held: Held::Job,
         rights: Rights::JOB,
@@ -154,7 +184,7 @@ pub const MANAGER: Rows = Rows(&[
 ]);
 
 /// `devmgr`'s.
-pub const DEVMGR: Rows = Rows(&[
+pub(crate) const DEVMGR: Rows = Rows(&[
     Row {
         held: Held::Job,
         rights: Rights::JOB,
@@ -188,7 +218,14 @@ pub const DEVMGR: Rows = Rows(&[
 ]);
 
 /// The first `linuxd`'s.
-pub const LINUXD: Rows = Rows(&[
+#[cfg_attr(
+    not(ferrix_personality = "user"),
+    expect(
+        dead_code,
+        reason = "only `devmgr`'s row is read without `personality=user`"
+    )
+)]
+pub(crate) const LINUXD: Rows = Rows(&[
     Row {
         held: Held::Job,
         rights: Rights::JOB,

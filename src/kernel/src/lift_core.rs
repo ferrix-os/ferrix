@@ -5,6 +5,10 @@
 
 #![no_std]
 #![allow(
+    unused_qualifications,
+    unused_unsafe,
+    unused_extern_crates,
+    unused_crate_dependencies,
     dead_code,
     unused_imports,
     unused_variables,

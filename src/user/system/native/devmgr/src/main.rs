@@ -2401,7 +2401,7 @@ fn start(
 /// runs.
 static EXPLICIT_BIND: AtomicBool = AtomicBool::new(false);
 
-/// How long a server has to answer a driver's CORE_OPEN.
+/// How long a server has to answer a driver's `CORE_OPEN`.
 const CORE_PATIENCE_NANOS: u64 = 30_000_000_000;
 
 /// Each admitted device's kept handle, by location, for the kernel's half of an

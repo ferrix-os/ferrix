@@ -864,7 +864,7 @@ impl AddressSpace {
                 if held.len() >= PLACED_OBJECTS {
                     return (0, Some(SpaceError::OutOfMemory));
                 }
-                if crate::fallible::try_push(&mut held, Arc::clone(vmo)).is_err() {
+                if fallible::try_push(&mut held, Arc::clone(vmo)).is_err() {
                     return (0, Some(SpaceError::OutOfMemory));
                 }
             }
@@ -898,6 +898,7 @@ impl AddressSpace {
                     break;
                 };
                 let present = mm::translate_in(root, virt).is_some();
+                #[allow(clippy::excessive_nesting, reason = "one walk's page, in place")]
                 if present {
                     let Ok(range) = PageRange::from_len(virt, PAGE_SIZE) else {
                         refusal = Some(SpaceError::BadRange);
@@ -2957,7 +2958,7 @@ impl AddressSpace {
     /// No page is read from a disk here, nothing is written, and a neighbour's trouble is
     /// no one's: it just stays out. Under the lock each look, and the walk with it: the
     /// shim frees an unlinked table at once (ledger 6537, A1).
-    pub fn fault_around(&self, address: u64) -> ([u64; AROUND_PAGES as usize], usize) {
+    pub(crate) fn fault_around(&self, address: u64) -> ([u64; AROUND_PAGES as usize], usize) {
         let mut found = [0_u64; AROUND_PAGES as usize];
         let mut count = 0;
         let root = self.root * PAGE_SIZE;
@@ -2992,7 +2993,7 @@ impl AddressSpace {
             };
             // As `write_ahead`: tables may be needed, and a refusal would count.
             let room = crate::object::quota::at_limit(
-                crate::sched::running_group(),
+                crate::object::quota::charge_target(),
                 crate::object::quota::Resource::Memory,
                 4 * PAGE_SIZE,
             )
@@ -3010,7 +3011,7 @@ impl AddressSpace {
     /// Commit those up to [`AHEAD_PAGES`] with this one, in the same region, and answer them
     /// for linuxd's batch. A neighbour's trouble, a limit above all, is no one's: it stays
     /// out, and its own fault says.
-    pub fn write_ahead(&self, address: u64) -> ([u64; AROUND_PAGES as usize], usize) {
+    pub(crate) fn write_ahead(&self, address: u64) -> ([u64; AROUND_PAGES as usize], usize) {
         let mut found = [0_u64; AROUND_PAGES as usize];
         let mut count = 0;
         let root = self.root * PAGE_SIZE;
@@ -3050,7 +3051,7 @@ impl AddressSpace {
             // Looked at first: a charge refused here would be counted and audited against
             // a program that asked for nothing (ledger 6537, A6). A page and its tables.
             let room = crate::object::quota::at_limit(
-                crate::sched::running_group(),
+                crate::object::quota::charge_target(),
                 crate::object::quota::Resource::Memory,
                 4 * PAGE_SIZE,
             )
@@ -3067,16 +3068,16 @@ impl AddressSpace {
 
 /// The window's boot check: a window's unmap's decisions (ledger 6421, U4).
 #[cfg(ferrix_personality = "user")]
-#[path = "window_check.rs"]
+#[cfg(not(ferrix_load_built = "lift"))]
 pub mod window_check;
 
 /// How many pages a fault may bring in: the aligned group around it (`fault_around`).
 #[cfg(ferrix_load_built = "lift")]
-pub const AROUND_PAGES: u64 = 16;
+pub(crate) const AROUND_PAGES: u64 = 16;
 
 /// How many pages past a walking write fault are committed with it (`write_ahead`).
 #[cfg(ferrix_load_built = "lift")]
-pub const AHEAD_PAGES: u64 = 7;
+pub(crate) const AHEAD_PAGES: u64 = 7;
 
 /// The most objects one window's pages may come from.
 #[cfg(ferrix_personality = "user")]

@@ -678,7 +678,7 @@ const MAIN_TASKS: &[Task] = &[
     },
     Task {
         name: "test-linuxd",
-        help_at: 209,
+        help_at: 201,
         help: &[
             "test-linuxd   Boot --personality user: the kernel starts linuxd, which serves one static program's write and exit (docs/microkernel/M5-LIFT.md §7).",
         ],
@@ -837,7 +837,7 @@ fn test_kaslr(args: &Args) -> Result<()> {
 /// `cargo xtask test-linuxd --personality user`: milestone 2 of the lift. The
 /// built-in program's `write` and `exit`, through linuxd.
 fn test_linuxd(args: &Args) -> Result<()> {
-    if crate::flags::this_run()?.value("personality") != Some("user") {
+    if flags::this_run()?.value("personality") != Some("user") {
         return Err(Error::new("test-linuxd is for --personality user"));
     }
     for arch in args.arches()? {
@@ -865,7 +865,7 @@ fn test_linuxd(args: &Args) -> Result<()> {
 
 /// The smallest static Linux program: `write(1, "hello from ring 3\\n")`, then
 /// `exit_group(42)`, as a one-segment x86-64 ELF.
-fn hello_elf(arch: paths::Arch) -> Result<std::path::PathBuf> {
+fn hello_elf(arch: Arch) -> Result<PathBuf> {
     const BASE: u64 = 0x40_0000;
     const HEADERS: u64 = 64 + 56;
     let text: &[u8] = b"hello from ring 3\n";

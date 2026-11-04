@@ -98,7 +98,7 @@ added to the item under this cfg alone:
 
 | Number | Call | Why |
 |---|---|---|
-| 0x10B0 | `DEBUG_WRITE(log, ptr, len)` | §2.1's write-only debug log, by a handle. Moves to BOOT-AUTHORITY's 0x10C3 when that lands: one debug log (ledger 6012, R9) |
+| 0x10B0 | `DEBUG_WRITE(log, ptr, len)` | §2.1's write-only debug log, by a handle. It stays here: boot authority holds a budget per holder and a measured process's prefix on this one call (L.device.84-85). |
 | 0x10B1 | `OBJECT_KIND(handle)` → kind, rights | what a handle in a driver's message is, for the bridge (§11) |
 | 0x10B4 | `THREAD_YIELD()` | a contended shim lock; `sched_yield` |
 | 0x10B5 | `CLOCK_READ(which)` → value | 0 the clock, 2 the counter's frequency when ring 3 can read the counter, 3 the processors. Ends with the time page |
@@ -478,7 +478,7 @@ objects. `lift/core/bridge.rs` is the edge, a thread per direction:
   uaccess notes it and the error goes up; at the dispatcher's end a call whose
   `nr::copy_miss` row says it may run again exits with `FaultKind::CallCopy`, pc back
   at its `SYSCALL`. Linuxd fills and continues, or answers the `FAULT` status, never a
-  signal. Controls and the fold into K1 are owed (P1 to P6, mk-restricted's).
+  signal. Folded into K1 by 2f2f68b27's copy-miss (P1 to P6): linuxd passes `ENTER_COPY_MISS_EXITS` on its own entry, and a row and real init's negative control are this landing's (6529 Q5).
 * **A row's kill of a driver** (L9): `kill:<slot>` to a driver's `unbind`, compiled only
   with `FERRIX_ROW_DRIVER_KILL`. It shows a restart after a kill, not after a crash.
 
@@ -511,8 +511,9 @@ a baseline**; §7's targets are 1.00x and these **miss**:
 | `fork-exec-wait` | 391 us | 494 us | 0.8x |
 | `pagecache-miss-4K` | 100 us | 75 us | 1.3x |
 
-`restricted_fastpath` is off here. Levers not yet taken: K1's fastpath, map-ahead and
-batched `SPACE_MAP`, fewer context and vector reads on a signal.
+`restricted_fastpath` is off here. These are superseded by
+[PERFORMANCE.md](PERFORMANCE.md), which also corrects the `fork-exec-wait` baseline: 231 us on
+the same tree, so this row's 0.8x was 1.6x to 1.9x.
 
 `test-rustc --release`, one run, load near 12, 51c84db32, against the baselines page's
 readings (a dev kernel at load 30): `cold-test-rustc` 3,190 ms against 3,140,
@@ -543,6 +544,13 @@ shape-specific kernel code: **it goes if K3 comes back** (M6, R3).
   are gone, 4,096 objects at most.
 * A batch of at most 64 entries is copied in before any lock, each checked, and stops at the
   first refusal, answering how many went in. What it replaced is shot down before it returns.
+* **An unmap** (ledger 6421, U1-U9): at its return, no translation of the range is on any
+  processor. Holes are stepped whole; each leaf that came down is named for the flush, the
+  whole TLB past `TlbPages`' ceiling; a shootdown of another call's still out asks for
+  everything, read under the space's lock; a range with nothing in it and none out begins
+  no shootdown. Held at boot by `user::space::window_check` (`window   an unmap's 8 decisions
+  held`), and a stale read across processors by `test-threads`' `unmap-stale` at `--smp 2`.
+  Controls FIRED at 303f9c8c6: mkp4-c2, c3, c4, c5, c5t, c6b. Requirement id owed from the PO.
 * **Owed**: W1's absence from `present` and `desktop`; W5's hold-time line in MEMORY-AND-TIMING;
   W6's sweeps; **W7, a machine check or scrub on a placed frame, which finds no mappers and
   must fail closed, is not built**: until it is, `test-mce` under user shows nothing about

@@ -328,7 +328,7 @@ pub struct Vmo {
     /// Pages of it are placed in a window space, with no region and no rmap behind
     /// them (ledger 6411, W2): sticky, and no path may take or change a page.
     #[cfg(ferrix_personality = "user")]
-    placed: core::sync::atomic::AtomicBool,
+    placed: AtomicBool,
     /// Which pages hold a frame, and which of those are held in place.
     pages: SpinLock<Pages>,
     /// The object's size in pages. Set at creation and only ever raised, by
@@ -914,7 +914,7 @@ impl Vmo {
     fn unfilled(pages: u64, source: Option<Source>, charge: Charge) -> Vmo {
         Vmo {
             #[cfg(ferrix_personality = "user")]
-            placed: core::sync::atomic::AtomicBool::new(false),
+            placed: AtomicBool::new(false),
             pages: SpinLock::new(Pages::default()),
             writable_regions: AtomicU64::new(0),
             digest: SpinLock::new(None),
@@ -1292,7 +1292,7 @@ impl Vmo {
         // which gives back every reference and copy taken above.
         crate::fallible::try_arc(Vmo {
             #[cfg(ferrix_personality = "user")]
-            placed: core::sync::atomic::AtomicBool::new(false),
+            placed: AtomicBool::new(false),
             pages: SpinLock::new(Pages {
                 frames,
                 held: BTreeMap::new(),

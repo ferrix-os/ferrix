@@ -3275,7 +3275,7 @@ pub(crate) fn give_bootstrap_from(
     private: bool,
 ) -> Result<usize, Errno> {
     let level = to.exit().level();
-    let moved = |source: &mut crate::object::HandleTable| {
+    let moved = |source: &mut HandleTable| {
         let (object, rights) = source.get(handle).map_err(table_error)?;
         if !rights.contains(Rights::TRANSFER) {
             return Err(status::ACCESS_DENIED);
@@ -5515,7 +5515,7 @@ fn device_served(process: &Process, device: Handle) -> Result<usize, Errno> {
     if node.verify_config().is_err() {
         return Err(status::BAD_STATE);
     }
-    crate::object::pin::quarantine_release(&node);
+    object::pin::quarantine_release(&node);
     Ok(0)
 }
 

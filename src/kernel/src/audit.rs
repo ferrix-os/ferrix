@@ -77,6 +77,8 @@ pub mod check;
 
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
+#[cfg(ferrix_personality = "user")]
+pub(crate) use ferrix_audit::FIRST_PROCESS_ENDED;
 pub use ferrix_audit::{BOOTED, Config};
 pub use ferrix_audit::{
     BUFFER_DECLARED, CONTROL, DELEGATED, DEVMGR_STARTED, DOMAIN, EXCEPTION_ATTACHED, JOB_KILLED,
@@ -87,8 +89,7 @@ pub use ferrix_audit::{
     CGROUP_KILLED, CGROUP_LIMIT, DEVICE_LIMIT, DEVICE_LIMIT_SET, Event, NO_UID, saturated,
 };
 pub(crate) use ferrix_audit::{
-    CONFIG, CPU_SERVICE, Class, DMA_FAULT, FIRST_PROCESS_ENDED, INTERRUPT_FAULT, LIMIT, OOM_KILLED,
-    POWER, SUPPRESSED,
+    CONFIG, CPU_SERVICE, Class, DMA_FAULT, INTERRUPT_FAULT, LIMIT, OOM_KILLED, POWER, SUPPRESSED,
 };
 #[doc(hidden)]
 pub use ferrix_audit::{EXCEPTION_CONTEXT, EXCEPTION_KILLED, PAGER};

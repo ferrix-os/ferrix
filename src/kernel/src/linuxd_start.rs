@@ -31,7 +31,7 @@ const BOOT_PAGE: u64 = SHARED_BASE + (3 << 40);
 const PATH: &[u8] = b"sbin/linuxd";
 
 /// Start linuxd, or say why not. Its end is the kernel's end: `power::finish`.
-pub fn run(view: &ferrix_bootinfo::BootView<'_>) {
+pub(crate) fn run(view: &ferrix_bootinfo::BootView<'_>) {
     run_with(view, None);
 }
 
@@ -90,6 +90,13 @@ fn write_devices(page: &Arc<Vmo>) -> Result<u32, &'static str> {
     Ok(written)
 }
 
+#[cfg_attr(
+    ferrix_personality = "user",
+    expect(
+        clippy::too_many_lines,
+        reason = "linuxd's start is one order of handles given and judged (L.object.321)"
+    )
+)]
 fn start(
     wall_clock: u64,
     cmdline: &str,
@@ -154,7 +161,6 @@ fn start(
         console: give(&region, Object::Console, const { LINUXD.of(Held::Console) })?,
         memory_frames: crate::mm::free_frames() / 8 * 7,
         wall_clock,
-        ..BootPage::EMPTY
     };
     judge_table(&region, &LINUXD);
     page.commit_and_write(0, 0, &boot.to_bytes())

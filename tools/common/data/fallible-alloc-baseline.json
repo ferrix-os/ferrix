@@ -9,6 +9,7 @@
     "being re-recorded. The target is an empty map."
   ],
   "files": {
+    "boot_authority.rs": 1,
     "discovery/first_image.rs": 1,
     "syscall/exec.rs": 13,
     "syscall/launch.rs": 1,
@@ -38,10 +39,22 @@
       "count": 0,
       "by_file": {}
     },
+    "ferrix-cpio": {
+      "//": "Target zero. Nobody is named as converting it yet.",
+      "count": 0,
+      "by_file": {}
+    },
     "ferrix-elf": {
       "//": "Target zero. Nobody is named as converting it yet.",
       "count": 0,
       "by_file": {}
+    },
+    "ferrix-partition-desc": {
+      "//": "Target zero. Nobody is named as converting it yet.",
+      "count": 2,
+      "by_file": {
+        "src/lib/proto/partition-desc/src/lib.rs": 2
+      }
     },
     "ferrix-sha256": {
       "//": "Target zero. Nobody is named as converting it yet.",

@@ -163,7 +163,7 @@ process holds exactly its row, and none the root job.*
 
 | Id | Rule | Check | Control |
 |---|---|---|---|
-| L.object.320 | the three start in order, each measured, in a sealed job, with its image sealed and its digest on its record | `test-first-processes` reads `PROCESS_IMAGES` of its children from the manager, and asks each its table | a job left unmeasured: *a first process's job is not measured* |
+| L.object.320 | the three start in order, each measured where its job is, narrowed by Y.2's head, with its image sealed and its digest on its record | `test-first-processes` reads `PROCESS_IMAGES` of its children from the manager, and asks each its table | a job left unmeasured: *a first process's job is not measured* |
 | L.object.321 | each holds exactly §3's row: a test image in each role lists its handle table and each object's rights | the table compared with §3 | one more handle given: *a first process holds a handle its row does not name* |
 | L.object.322 | no first process holds the root job, and devmgr no safety device | the same; DEVICES' count | the filter removed: *devmgr was handed a safety partition's device* |
 | L.object.323 | a description naming no real device stops the boot | row with a made-up location: expected `FX-0953` | test removed: *a partition's device matches no node* |

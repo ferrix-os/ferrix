@@ -67,9 +67,9 @@ that one event, and the design says so rather than claiming a record. Linux-pers
 them through the same interface (§4), marked as its own.
 
 The `BOOTED` record's build word has 32 bits, and under `personality=user` `FLAGS` is 18,
-so they are exactly full: the next flag overflows the shift, and `fault_ahead`'s three bits
-moved the places after it in the flag word of every image, present's and desktop's too,
-though no flag there changed (ledger 6590).
+so they are exactly full: the next flag overflows the shift. `fault_ahead` stands after
+`ssbd`, in the flag file's order, past every flag `present` and `desktop` read, so their flag
+word does not move (ledger 6873; 6590 had read the word moved, in the earlier order).
 
 ## 2. What a record holds (FAU_GEN.1, FAU_GEN.2, FPT_STM.1)
 

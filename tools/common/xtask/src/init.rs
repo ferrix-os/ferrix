@@ -3063,7 +3063,7 @@ fn has(lines: &[String], text: &str) -> bool {
 fn after_marker(lines: &[String]) -> &[String] {
     lines
         .iter()
-        .position(|line| crate::qemu::reached(line, SUCCESS_MARKER))
+        .position(|line| qemu::reached(line, SUCCESS_MARKER))
         .and_then(|at| lines.get(at..))
         .unwrap_or_default()
 }

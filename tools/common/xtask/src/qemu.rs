@@ -2108,6 +2108,7 @@ pub(crate) fn redacted(line: &str, secrets: &[String]) -> String {
     line
 }
 
+#[allow(clippy::too_many_lines, reason = "one watch, in order")]
 fn watch_hooked(
     arch: Arch,
     image: &Path,
@@ -4572,6 +4573,149 @@ fn smp_topology(processors: u32, threads: u32) -> Result<String> {
     ))
 }
 
+/// Boot an image with a program and a script built in, and require the
+/// script's output, in order, and its exit status.
+///
+/// The lines are looked for *after* the boot marker, so a kernel that happened
+/// to print one of them during its self-checks cannot satisfy the test.
+/// The lift's milestone 2 (`docs/microkernel/M5-LIFT.md` §7): the kernel's
+/// marker names `personality=user`, and after it the built-in program's line and
+/// its exit, which only linuxd could have served.
+/// Verifies: `L.object.320`
+/// Verifies: `L.object.321`
+/// Verifies: `L.object.334`
+/// Verifies: `L.device.84`
+/// Verifies: `L.device.85`
+/// Verifies: `H.DEV.12`
+pub(crate) fn test_first_processes(
+    arch: Arch,
+    image: &Path,
+    kernel: &Path,
+    args: &Args,
+) -> Result<()> {
+    let watched = watch(arch, image, kernel, args, "linuxd   ended")?;
+    let log = watched.log.display();
+    if matches!(watched.verdict, Verdict::Panicked) {
+        return Err(panicked(arch, &watched.log));
+    }
+    let saw = |text: &str| watched.lines.iter().any(|line| line.contains(text));
+    for want in [
+        "partmgr  hello started, its image's digest checked",
+        "partition-hello  up in a safety partition",
+        "partmgr  ready: 1 partitions, 0 devices held",
+        "partmgr  hello started again",
+        "partmgr  hello stays down: no restart left",
+        "devmgr   started",
+        "linuxd   started",
+    ] {
+        if !saw(want) {
+            return Err(Error::new(format!(
+                "{arch}: `{want}` is missing.\n  Serial output is in {log}"
+            )));
+        }
+    }
+    println!("  {arch}: the manager started its partition, then devmgr and linuxd");
+    Ok(())
+}
+
+/// A description naming a device: the manager holds it, and `devmgr` is not given it.
+/// Verifies: `L.object.322`
+pub(crate) fn test_first_processes_held(
+    arch: Arch,
+    image: &Path,
+    kernel: &Path,
+    args: &Args,
+) -> Result<()> {
+    let watched = watch(arch, image, kernel, args, "linuxd   started")?;
+    if !watched
+        .lines
+        .iter()
+        .any(|line| line.contains("partmgr  ready: 1 partitions, 1 devices held"))
+    {
+        return Err(Error::new(format!(
+            "{arch}: the manager does not hold its device.\n  Serial output is in {}",
+            watched.log.display()
+        )));
+    }
+    if !watched
+        .lines
+        .iter()
+        .any(|line| line.contains("1 of a safety partition's kept back"))
+    {
+        return Err(Error::new(format!(
+            "{arch}: devmgr was handed a safety partition's device.\n  Serial output is in {}",
+            watched.log.display()
+        )));
+    }
+    println!("  {arch}: a safety partition's device went to the manager, and not to devmgr");
+    Ok(())
+}
+
+/// A description the boot must not go on with.
+/// Verifies: `L.object.323`
+pub(crate) fn test_description_stops(
+    arch: Arch,
+    image: &Path,
+    kernel: &Path,
+    args: &Args,
+    why: &str,
+) -> Result<()> {
+    let watched = watch(arch, image, kernel, args, "linuxd   started")?;
+    if !matches!(watched.verdict, Verdict::Panicked)
+        || !watched.lines.iter().any(|line| line.contains(why))
+    {
+        return Err(Error::new(format!(
+            "{arch}: a description that says `{why}` did not stop the boot.\n  Serial output is in {}",
+            watched.log.display()
+        )));
+    }
+    println!("  {arch}: the boot stopped: {why}");
+    Ok(())
+}
+
+/// A first process that dies at its start: the manager's death is the machine's safe
+/// state, and devmgr's a line and its devices quiesced.
+/// Verifies: `L.object.326`, `L.object.328`
+/// Verifies: `H.DEV.13`
+pub(crate) fn test_first_process_dies(
+    arch: Arch,
+    image: &Path,
+    kernel: &Path,
+    args: &Args,
+    victim: &str,
+) -> Result<()> {
+    if victim == "partmgr" {
+        let watched = watch(arch, image, kernel, args, "linuxd   ended")?;
+        if !matches!(watched.verdict, Verdict::Panicked) {
+            return Err(Error::new(format!(
+                "{arch}: the manager died and the machine ran on.\n  Serial output is in {}",
+                watched.log.display()
+            )));
+        }
+        let saw = watched
+            .lines
+            .iter()
+            .any(|line| line.contains("the partition manager ended"));
+        if !saw {
+            return Err(Error::new(format!(
+                "{arch}: a panic, but not FX-0954's.\n  Serial output is in {}",
+                watched.log.display()
+            )));
+        }
+        println!("  {arch}: the manager's death stopped the machine (FX-0954)");
+        return Ok(());
+    }
+    let watched = watch(arch, image, kernel, args, "its drivers' job killed")?;
+    if !matches!(watched.verdict, Verdict::Reached) {
+        return Err(Error::new(format!(
+            "{arch}: devmgr died and nothing quiesced its devices.\n  Serial output is in {}",
+            watched.log.display()
+        )));
+    }
+    println!("  {arch}: devmgr's death killed its drivers' job and quiesced its devices");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -5295,147 +5439,4 @@ mod tests {
         assert_eq!(unisolated_problem(Arch::X86_64, &lines(&[said])), None);
         assert!(unisolated_problem(Arch::X86_64, &lines(&[one, count])).is_some());
     }
-}
-
-/// Boot an image with a program and a script built in, and require the
-/// script's output, in order, and its exit status.
-///
-/// The lines are looked for *after* the boot marker, so a kernel that happened
-/// to print one of them during its self-checks cannot satisfy the test.
-/// The lift's milestone 2 (`docs/microkernel/M5-LIFT.md` §7): the kernel's
-/// marker names `personality=user`, and after it the built-in program's line and
-/// its exit, which only linuxd could have served.
-/// Verifies: `L.object.320`
-/// Verifies: `L.object.321`
-/// Verifies: `L.object.334`
-/// Verifies: `L.device.84`
-/// Verifies: `L.device.85`
-/// Verifies: `H.DEV.12`
-pub(crate) fn test_first_processes(
-    arch: Arch,
-    image: &Path,
-    kernel: &Path,
-    args: &Args,
-) -> Result<()> {
-    let watched = watch(arch, image, kernel, args, "linuxd   ended")?;
-    let log = watched.log.display();
-    if matches!(watched.verdict, Verdict::Panicked) {
-        return Err(panicked(arch, &watched.log));
-    }
-    let saw = |text: &str| watched.lines.iter().any(|line| line.contains(text));
-    for want in [
-        "partmgr  hello started, its image's digest checked",
-        "partition-hello  up in a safety partition",
-        "partmgr  ready: 1 partitions, 0 devices held",
-        "partmgr  hello started again",
-        "partmgr  hello stays down: no restart left",
-        "devmgr   started",
-        "linuxd   started",
-    ] {
-        if !saw(want) {
-            return Err(Error::new(format!(
-                "{arch}: `{want}` is missing.\n  Serial output is in {log}"
-            )));
-        }
-    }
-    println!("  {arch}: the manager started its partition, then devmgr and linuxd");
-    Ok(())
-}
-
-/// A description naming a device: the manager holds it, and `devmgr` is not given it.
-/// Verifies: `L.object.322`
-pub(crate) fn test_first_processes_held(
-    arch: Arch,
-    image: &Path,
-    kernel: &Path,
-    args: &Args,
-) -> Result<()> {
-    let watched = watch(arch, image, kernel, args, "linuxd   started")?;
-    if !watched
-        .lines
-        .iter()
-        .any(|line| line.contains("partmgr  ready: 1 partitions, 1 devices held"))
-    {
-        return Err(Error::new(format!(
-            "{arch}: the manager does not hold its device.\n  Serial output is in {}",
-            watched.log.display()
-        )));
-    }
-    if !watched
-        .lines
-        .iter()
-        .any(|line| line.contains("1 of a safety partition's kept back"))
-    {
-        return Err(Error::new(format!(
-            "{arch}: devmgr was handed a safety partition's device.\n  Serial output is in {}",
-            watched.log.display()
-        )));
-    }
-    println!("  {arch}: a safety partition's device went to the manager, and not to devmgr");
-    Ok(())
-}
-
-/// A description the boot must not go on with.
-/// Verifies: `L.object.323`
-pub(crate) fn test_description_stops(
-    arch: Arch,
-    image: &Path,
-    kernel: &Path,
-    args: &Args,
-    why: &str,
-) -> Result<()> {
-    let watched = watch(arch, image, kernel, args, "linuxd   started")?;
-    if !matches!(watched.verdict, Verdict::Panicked)
-        || !watched.lines.iter().any(|line| line.contains(why))
-    {
-        return Err(Error::new(format!(
-            "{arch}: a description that says `{why}` did not stop the boot.\n  Serial output is in {}",
-            watched.log.display()
-        )));
-    }
-    println!("  {arch}: the boot stopped: {why}");
-    Ok(())
-}
-
-/// A first process that dies at its start: the manager's death is the machine's safe
-/// state, and devmgr's a line and its devices quiesced.
-/// Verifies: `L.object.326`, `L.object.328`
-/// Verifies: `H.DEV.13`
-pub(crate) fn test_first_process_dies(
-    arch: Arch,
-    image: &Path,
-    kernel: &Path,
-    args: &Args,
-    victim: &str,
-) -> Result<()> {
-    if victim == "partmgr" {
-        let watched = watch(arch, image, kernel, args, "linuxd   ended")?;
-        if !matches!(watched.verdict, Verdict::Panicked) {
-            return Err(Error::new(format!(
-                "{arch}: the manager died and the machine ran on.\n  Serial output is in {}",
-                watched.log.display()
-            )));
-        }
-        let saw = watched
-            .lines
-            .iter()
-            .any(|line| line.contains("the partition manager ended"));
-        if !saw {
-            return Err(Error::new(format!(
-                "{arch}: a panic, but not FX-0954's.\n  Serial output is in {}",
-                watched.log.display()
-            )));
-        }
-        println!("  {arch}: the manager's death stopped the machine (FX-0954)");
-        return Ok(());
-    }
-    let watched = watch(arch, image, kernel, args, "its drivers' job killed")?;
-    if !matches!(watched.verdict, Verdict::Reached) {
-        return Err(Error::new(format!(
-            "{arch}: devmgr died and nothing quiesced its devices.\n  Serial output is in {}",
-            watched.log.display()
-        )));
-    }
-    println!("  {arch}: devmgr's death killed its drivers' job and quiesced its devices");
-    Ok(())
 }

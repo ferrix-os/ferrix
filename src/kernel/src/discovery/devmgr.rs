@@ -530,7 +530,8 @@ pub(crate) fn start_detached() -> Result<Option<Detached>, &'static str> {
 /// of a safety partition's is among these. `linuxd` then finds its cores' channel closed.
 #[cfg(ferrix_personality = "user")]
 fn watch_detached(process: Arc<dyn Host>, job: Arc<Job>) -> Result<(), &'static str> {
-    static WATCHED: SpinLock<Option<(Arc<dyn Host>, Arc<Job>)>> = SpinLock::new(None);
+    type Watched = (Arc<dyn Host>, Arc<Job>);
+    static WATCHED: SpinLock<Option<Watched>> = SpinLock::new(None);
     *WATCHED.lock() = Some((process, job));
     fn watch(_argument: usize) {
         let Some((process, job)) = WATCHED.lock().take() else {
@@ -729,6 +730,10 @@ fn pages_of(bytes: &[u8]) -> u64 {
 /// Write the DEVICES messages on `kernel_end`: `job` for the drivers, every
 /// device node twice, and `images` by the names [`read_files`] noted.
 /// Answers how many device nodes went.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one message, written in its order, and what each arch adds to it"
+)]
 fn write_devices(
     kernel_end: &Endpoint,
     images: Vec<Arc<Vmo>>,

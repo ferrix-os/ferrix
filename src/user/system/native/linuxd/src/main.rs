@@ -97,7 +97,7 @@ fn arena() -> Result<(), &'static str> {
         )
         .map_err(|_| "  linuxd   no arena's mapping\n")?;
     let copy = writable
-        .duplicate(ferrix_native_abi::rights::Requested::Same)
+        .duplicate(Requested::Same)
         .map_err(|_| "  linuxd   no arena's second handle\n")?;
     let executable = copy
         .executable()
@@ -123,7 +123,15 @@ fn arena() -> Result<(), &'static str> {
     );
     use ferrix_native::handle::Object as _;
     sys::arena::set(writable.handle().0, executable.handle().0);
+    #[expect(
+        clippy::mem_forget,
+        reason = "kept mapped for the program's life: its handle stays open"
+    )]
     core::mem::forget(writable);
+    #[expect(
+        clippy::mem_forget,
+        reason = "kept mapped for the program's life: its handle stays open"
+    )]
     core::mem::forget(executable);
     // SAFETY: the boot page, as in `ferrix_rt_start`.
     let page = unsafe { &*(BOOT.load(Ordering::Acquire) as *const BootPage) };
@@ -132,6 +140,10 @@ fn arena() -> Result<(), &'static str> {
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "linuxd's bring-up is one order of steps, as the kernel's `kmain`"
+)]
 fn served(_argument: usize) {
     // SAFETY: the kernel mapped a boot page here, and it stays.
     let page = unsafe { &*(BOOT.load(Ordering::Acquire) as *const BootPage) };
@@ -142,6 +154,10 @@ fn served(_argument: usize) {
         return;
     };
     mm::set_initrd(at as u64, page.initramfs_bytes);
+    #[expect(
+        clippy::mem_forget,
+        reason = "kept mapped for the program's life: its handle stays open"
+    )]
     core::mem::forget(initramfs);
     sys::set_partition(page.region, page.job);
     sys::set_console_handle(page.console);
@@ -154,19 +170,19 @@ fn served(_argument: usize) {
         Ok(held) => console::write(format_args!("  lift-calls {held} refusals held\n")),
         Err(why) => console::write(format_args!("  lift-calls FAILED: {why}\n")),
     }
-    ferrix_kernel_core::sched::account::start_keeper();
+    sched::account::start_keeper();
     // SAFETY: mapped just above, read only, and it stays.
     ferrix_kernel_item::discovery::devmgr::read_manifest(unsafe {
         core::slice::from_raw_parts(at as *const u8, page.initramfs_bytes as usize)
     });
-    ferrix_kernel_core::device::set_devices((0..page.devices as usize).filter_map(|index| {
+    ferrix_kernel_core::device::set_devices((0..page.devices as usize).map(|index| {
         let start = core::ptr::from_ref(page).cast::<u8>().wrapping_add(
             ferrix_native_abi::lift::DEVICES_AT
                 + index * ferrix_native_abi::lift::DeviceFact::BYTES,
         );
         // SAFETY: inside the boot page, which the kernel mapped here and stays.
         let bytes = unsafe { &*start.cast::<[u8; ferrix_native_abi::lift::DeviceFact::BYTES]>() };
-        Some(ferrix_native_abi::lift::DeviceFact::from_bytes(bytes))
+        ferrix_native_abi::lift::DeviceFact::from_bytes(bytes)
     }));
     restricted::set_dispatch(syscall::dispatch_with::<syscall::linux::Linux>);
     restricted::set_quiet(syscall::seccomp::quiet);
@@ -186,12 +202,10 @@ fn served(_argument: usize) {
         .cast::<u8>()
         .wrapping_add(COMMAND_LINE_AT);
     // SAFETY: the kernel wrote this many bytes of the boot page, from a `str`.
-    let command_line = unsafe {
-        core::str::from_utf8_unchecked(core::slice::from_raw_parts(
-            start,
-            page.command_line_bytes as usize,
-        ))
-    };
+    let command_line =
+        unsafe { core::slice::from_raw_parts(start, page.command_line_bytes as usize) };
+    // SAFETY: from a `str`, as above.
+    let command_line = unsafe { core::str::from_utf8_unchecked(command_line) };
     let view = ferrix_bootinfo::BootView::from_parts(&info, &[], command_line);
     // HTTPS needs the time of day, and so does anything that checks a certificate.
     if page.wall_clock != 0 {

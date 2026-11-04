@@ -180,7 +180,9 @@ fn the_real_workspace_keeps_the_item_s_test_binaries_running() {
                 .get(package)
                 .cloned()
                 .flatten()
-                .is_some_and(|why| why.starts_with("it verifies")),
+                .is_some_and(|why| why.starts_with("it verifies")
+                    || (package == "ferrix-native"
+                        && why == "linked by the item's ferrix-lift-core")),
             "{package}: {:?}",
             verdicts.get(package)
         );

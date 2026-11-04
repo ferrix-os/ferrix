@@ -857,6 +857,7 @@ mod tests {
             ("fs", "lift"),
             ("partition_speculation", "partition"),
             ("restricted_fastpath", "off"),
+            ("fault_ahead", "on"),
         ])
     }
 
