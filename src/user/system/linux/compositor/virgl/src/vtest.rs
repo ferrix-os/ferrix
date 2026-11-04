@@ -559,8 +559,13 @@ impl Vtest {
         };
         // A pin that selects nothing must not read as a test skipped for want of a
         // server (the consultant, ledger 6368). The server takes a node it cannot
-        // open and carries on elsewhere, so that is asked first.
-        let started = if std::path::Path::new(&node).exists() {
+        // open and carries on on the driver's first device, so that is asked first.
+        let opens = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&node)
+            .is_ok();
+        let started = if opens {
             Self::start_on(program, name, version)
         } else {
             Ok(None)
