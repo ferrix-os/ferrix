@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2781 declarations in the core's files, 184 in the item's; 194 checks-only.
+2782 declarations in the core's files, 184 in the item's; 194 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1511,6 +1511,7 @@ checks above is `pub` for raised checks (F3).
 | `DeviceNode::give_check_domain` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `DeviceNode::hello_accepted` | method | load |  |
 | `DeviceNode::host_visible` | method | item, load |  |
+| `DeviceNode::identity` | method | item, load, bin |  |
 | `DeviceNode::index` | method | item, load, bin |  |
 | `DeviceNode::input_functions` | method | load |  |
 | `DeviceNode::intel_gpu` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |

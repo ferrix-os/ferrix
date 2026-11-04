@@ -540,21 +540,21 @@
     },
     {
       "file": "early.rs",
-      "lines": "123",
+      "lines": "165",
       "category": "credited-elsewhere",
       "match": "fn translate(&self, virt: u64) -> Option<u64> {",
       "why": "`EarlyMemory::translate` runs at every boot: stage 1's `check_early_mapper` and `check_no_early_window_wraps` (main.rs) call it, inlined, and its body's rows there are reached. Its opening and closing lines have their only statement rows in the out-of-line copy, which on this machine no caller uses."
     },
     {
       "file": "early.rs",
-      "lines": "126",
+      "lines": "168",
       "category": "credited-elsewhere",
       "match": "}",
       "why": "`EarlyMemory::translate` runs at every boot: stage 1's `check_early_mapper` and `check_no_early_window_wraps` (main.rs) call it, inlined, and its body's rows there are reached. Its opening and closing lines have their only statement rows in the out-of-line copy, which on this machine no caller uses."
     },
     {
       "file": "early.rs",
-      "lines": "178",
+      "lines": "234",
       "category": "defensive",
       "match": "return Err(EarlyError::KernelImage(phys));",
       "why": "A device window firmware describes over the kernel's own image. Refused so that a console or framebuffer whose address the device tree or the loader got wrong cannot open a writable window onto the kernel's text. Every machine measured describes its UART and framebuffer apart from the image, and the image is placed by the loader, not by firmware; reaching it needs firmware to describe a device where the kernel was loaded."

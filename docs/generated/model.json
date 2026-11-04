@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "cf5db81721786af5682e29fa92686b8e6c1b89e270391df331e7790edae9cd94",
+  "digest": "b2387a1be043ddc1f9ccfecd0dda1774ab23abb1e9014eea55d801fb24a7e3d5",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -112,8 +112,8 @@
     }
   ],
   "summary": {
-    "packages": 163,
-    "elements": 9156,
+    "packages": 164,
+    "elements": 9220,
     "maturity": {
       "implemented": 295,
       "inProgress": 23,
@@ -24371,6 +24371,98 @@
                       }
                     }
                   ]
+                },
+                {
+                  "name": "genericTreeNodesPublished",
+                  "qualifiedName": "FerrixItemRequirements::Scheduling::Devices::genericTreeNodesPublished",
+                  "kind": "requirement",
+                  "shortName": "H.DEV.7",
+                  "type": "ItemHighLevel",
+                  "source": {
+                    "file": "docs/sysml/13-item-requirements.sysml",
+                    "line": 1089
+                  },
+                  "children": [
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixItemRequirements::Scheduling::Devices::genericTreeNodesPublished",
+                      "kind": "attribute",
+                      "redefines": "statement",
+                      "value": "\"On a machine described by its device tree, the kernel shall publish every enabled node that has a compatible, sits on memory-mapped buses and is not kernel-owned, and that no binding the kernel knows and no virtio-mmio transport already holds, as a generic node whose identity -- compatible list, path, references and subtree -- is data the kernel does not interpret; so that a driver for it needs no change to the kernel. Only personality=user publishes real nodes: present and desktop publish none, and every profile's check holds this on made-up trees.\"",
+                      "source": {
+                        "file": "docs/sysml/13-item-requirements.sysml",
+                        "line": 1098
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixItemRequirements::Scheduling::Devices::genericTreeNodesPublished",
+                      "kind": "attribute",
+                      "redefines": "criterion",
+                      "value": "\"cargo xtask test-driver-model: on one kernel ELF whose sha256 is recorded before the test exists, QEMU virt's PL031 under a made-up compatible is published, devmgr matches it by that compatible from its image-time table and checks its driver's requirement table, and the driver reads the device's identification, its counter and its match interrupt through its own aperture and vector; with the clock's provider gone it is not started and devmgr names the reference (D13). Stage 10's check holds a made-up tree to the publication rules on every boot.\"",
+                      "source": {
+                        "file": "docs/sysml/13-item-requirements.sysml",
+                        "line": 1108
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixItemRequirements::Scheduling::Devices::genericTreeNodesPublished",
+                      "kind": "attribute",
+                      "redefines": "parent",
+                      "value": "(\"O.CAPABILITY\", \"ASR-3\")",
+                      "source": {
+                        "file": "docs/sysml/13-item-requirements.sysml",
+                        "line": 1109
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "kernelOwnedNodesExcludedAndSealed",
+                  "qualifiedName": "FerrixItemRequirements::Scheduling::Devices::kernelOwnedNodesExcludedAndSealed",
+                  "kind": "requirement",
+                  "shortName": "H.DEV.8",
+                  "type": "ItemHighLevel",
+                  "source": {
+                    "file": "docs/sysml/13-item-requirements.sysml",
+                    "line": 1111
+                  },
+                  "children": [
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixItemRequirements::Scheduling::Devices::kernelOwnedNodesExcludedAndSealed",
+                      "kind": "attribute",
+                      "redefines": "statement",
+                      "value": "\"A device-tree node the kernel uses, a node under one, or a node whose registers share a page with what the kernel uses, shall never be published; the set shall be fixed by one registration that is sealed before anything is published; and a node a kernel-owned node depends on through clocks, resets, power domains, pin control, supplies or interconnects, directly or transitively, shall be published flagged KERNEL_DEPENDS. Only personality=user publishes real nodes: present and desktop publish none, and every profile's check holds this on made-up trees.\"",
+                      "source": {
+                        "file": "docs/sysml/13-item-requirements.sysml",
+                        "line": 1120
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixItemRequirements::Scheduling::Devices::kernelOwnedNodesExcludedAndSealed",
+                      "kind": "attribute",
+                      "redefines": "criterion",
+                      "value": "\"Stage 10's check: on a made-up tree the console and a node overlapping its page are kernel-owned, its clock and that clock's clock are flagged, and a claim after the seal is refused; each with a gate.sh control that fires.\"",
+                      "source": {
+                        "file": "docs/sysml/13-item-requirements.sysml",
+                        "line": 1124
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixItemRequirements::Scheduling::Devices::kernelOwnedNodesExcludedAndSealed",
+                      "kind": "attribute",
+                      "redefines": "parent",
+                      "value": "(\"O.CAPABILITY\", \"ASR-3\")",
+                      "source": {
+                        "file": "docs/sysml/13-item-requirements.sysml",
+                        "line": 1125
+                      }
+                    }
+                  ]
                 }
               ]
             },
@@ -24381,7 +24473,7 @@
               "doc": "The system call boundary and the exceptions a program raises: O.VALIDATE and ASR-7 (FPT_TDC.1), with O.ISOLATE for what a program may leave in the registers the kernel is entered with.",
               "source": {
                 "file": "docs/sysml/13-item-requirements.sysml",
-                "line": 1091
+                "line": 1129
               },
               "children": [
                 {
@@ -24392,7 +24484,7 @@
                   "type": "ItemHighLevel",
                   "source": {
                     "file": "docs/sysml/13-item-requirements.sysml",
-                    "line": 1096
+                    "line": 1134
                   },
                   "children": [
                     {
@@ -24403,7 +24495,7 @@
                       "value": "\"Every pointer and length a system call is given shall be checked to lie wholly within the user half before any access through it, and a range that does not shall be refused with EFAULT.\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1100
+                        "line": 1138
                       }
                     },
                     {
@@ -24414,7 +24506,7 @@
                       "value": "\"Each system call given a kernel-half pointer, a range that wraps past the user half's end and a null pointer is refused EFAULT, with 0 accesses made.\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1103
+                        "line": 1141
                       }
                     },
                     {
@@ -24425,7 +24517,7 @@
                       "value": "(\"O.VALIDATE\", \"ASR-7\")",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1104
+                        "line": 1142
                       }
                     }
                   ]
@@ -24438,7 +24530,7 @@
                   "type": "ItemHighLevel",
                   "source": {
                     "file": "docs/sysml/13-item-requirements.sysml",
-                    "line": 1106
+                    "line": 1144
                   },
                   "children": [
                     {
@@ -24449,7 +24541,7 @@
                       "value": "\"An access to user memory on a system call's behalf that meets an unmapped or protected page shall return EFAULT to the caller and shall not fault the kernel.\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1109
+                        "line": 1147
                       }
                     },
                     {
@@ -24460,7 +24552,7 @@
                       "value": "\"Copies to an unmapped and to a read-only user page, and from an unmapped one, each return EFAULT, and the boot goes on to FERRIX-BOOT-OK.\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1112
+                        "line": 1150
                       }
                     },
                     {
@@ -24471,7 +24563,7 @@
                       "value": "(\"O.VALIDATE\", \"ASR-7\")",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1113
+                        "line": 1151
                       }
                     }
                   ]
@@ -24484,7 +24576,7 @@
                   "type": "ItemHighLevel",
                   "source": {
                     "file": "docs/sysml/13-item-requirements.sysml",
-                    "line": 1115
+                    "line": 1153
                   },
                   "children": [
                     {
@@ -24495,7 +24587,7 @@
                       "value": "\"Every table index a program chooses shall be clamped at the system call boundary so that it cannot be used out of bounds under speculation, and each processor's speculation controls shall be applied and read back.\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1119
+                        "line": 1157
                       }
                     },
                     {
@@ -24506,7 +24598,7 @@
                       "value": "\"The boot reads the speculation defences back on every one of the N online processors (the `cpu` line), and the `--mitigations off` build is the only one without the clamps.\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1122
+                        "line": 1160
                       }
                     },
                     {
@@ -24517,7 +24609,7 @@
                       "value": "(\"O.ISOLATE\", \"O.VALIDATE\")",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1123
+                        "line": 1161
                       }
                     }
                   ]
@@ -24530,7 +24622,7 @@
                   "type": "ItemHighLevel",
                   "source": {
                     "file": "docs/sysml/13-item-requirements.sysml",
-                    "line": 1125
+                    "line": 1163
                   },
                   "children": [
                     {
@@ -24541,7 +24633,7 @@
                       "value": "\"A processor exception a user-mode instruction raises shall end in a signal to the faulting thread, the one Linux sends for it, and shall not stop the kernel.\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1128
+                        "line": 1166
                       }
                     },
                     {
@@ -24552,7 +24644,7 @@
                       "value": "\"A divide error, an invalid opcode, an unmapped read, a privileged instruction, a floating-point exception and a read past a mapped file's end end their programs with SIGFPE, SIGILL, SIGSEGV, SIGSEGV, SIGFPE and SIGBUS, 6 of 6 (the `fault` line).\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1132
+                        "line": 1170
                       }
                     },
                     {
@@ -24563,7 +24655,7 @@
                       "value": "(\"O.ISOLATE\", \"ASR-1\")",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1133
+                        "line": 1171
                       }
                     }
                   ]
@@ -24576,7 +24668,7 @@
                   "type": "ItemHighLevel",
                   "source": {
                     "file": "docs/sysml/13-item-requirements.sysml",
-                    "line": 1135
+                    "line": 1173
                   },
                   "children": [
                     {
@@ -24587,7 +24679,7 @@
                       "value": "\"Restoring a signal frame a program supplies shall not raise its privilege: the restored mode, segment selectors, interrupt masks and I/O privilege shall be the user's whatever the frame holds, and a return address outside the user half shall be refused.\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1140
+                        "line": 1178
                       }
                     },
                     {
@@ -24598,7 +24690,7 @@
                       "value": "\"A sigreturn through frames asking for kernel mode, masked interrupts, I/O privilege and a kernel-half return address resumes the program in user mode with user flags, or ends it with SIGSEGV, on each architecture: 0 in kernel mode.\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1144
+                        "line": 1182
                       }
                     },
                     {
@@ -24609,7 +24701,7 @@
                       "value": "(\"O.VALIDATE\", \"O.ISOLATE\", \"ASR-7\")",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1145
+                        "line": 1183
                       }
                     }
                   ]
@@ -24622,7 +24714,7 @@
                   "type": "ItemHighLevel",
                   "source": {
                     "file": "docs/sysml/13-item-requirements.sysml",
-                    "line": 1147
+                    "line": 1185
                   },
                   "children": [
                     {
@@ -24633,7 +24725,7 @@
                       "value": "\"On every entry from user mode the kernel shall establish its own stack and per-processor state before using either, whatever the program left in its registers, including for an exception taken on the entry path itself.\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1151
+                        "line": 1189
                       }
                     },
                     {
@@ -24644,7 +24736,7 @@
                       "value": "\"Breakpoints on the system call entry and on its return, and an NMI taken with interrupts masked, each run on the kernel's own stack with its own per-processor base, and the program exits 42 (the `debug` and `nmi` lines, x86-64).\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1155
+                        "line": 1193
                       }
                     },
                     {
@@ -24655,7 +24747,7 @@
                       "value": "(\"O.ISOLATE\", \"O.FAILSAFE\")",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1156
+                        "line": 1194
                       }
                     }
                   ]
@@ -24668,7 +24760,7 @@
                   "type": "ItemHighLevel",
                   "source": {
                     "file": "docs/sysml/13-item-requirements.sysml",
-                    "line": 1158
+                    "line": 1196
                   },
                   "children": [
                     {
@@ -24679,7 +24771,7 @@
                       "value": "\"A program shall load only the segment selectors meant for user mode: one naming a kernel descriptor, the TSS, the LDT or a forged thread-local descriptor shall be refused. x86-64 only.\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1162
+                        "line": 1200
                       }
                     },
                     {
@@ -24690,7 +24782,7 @@
                       "value": "\"7 user selectors load at RPL 3 and 18 others are refused (the `gdt` line).\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1164
+                        "line": 1202
                       }
                     },
                     {
@@ -24701,7 +24793,7 @@
                       "value": "(\"O.ISOLATE\", \"O.VALIDATE\")",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1165
+                        "line": 1203
                       }
                     }
                   ]
@@ -24714,7 +24806,7 @@
                   "type": "ItemHighLevel",
                   "source": {
                     "file": "docs/sysml/13-item-requirements.sysml",
-                    "line": 1167
+                    "line": 1205
                   },
                   "children": [
                     {
@@ -24725,7 +24817,7 @@
                       "value": "\"A 32-bit x86 program shall run in ring 3 in compatibility mode, in Linux's user segments and its own thread-local descriptors, and shall enter the kernel only through int $0x80, answered as i386 Linux answers it. x86-64 only.\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1171
+                        "line": 1209
                       }
                     },
                     {
@@ -24736,7 +24828,7 @@
                       "value": "\"An ELF32 i386 program's calls through int $0x80 answer as i386 Linux's do and it exits 42; a 64-bit program's int $0x80 is an i386 call; SYSCALL from 32-bit code answers -ENOSYS or is #UD, and SYSENTER ends the program (the first `i386` line).\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1175
+                        "line": 1213
                       }
                     },
                     {
@@ -24747,7 +24839,7 @@
                       "value": "(\"O.ISOLATE\", \"G.5\")",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1176
+                        "line": 1214
                       }
                     }
                   ]
@@ -24760,7 +24852,7 @@
                   "type": "ItemHighLevel",
                   "source": {
                     "file": "docs/sysml/13-item-requirements.sysml",
-                    "line": 1178
+                    "line": 1216
                   },
                   "children": [
                     {
@@ -24771,7 +24863,7 @@
                       "value": "\"A 64-bit program's signal handler shall be entered on a frame in Linux's layout, and its return shall resume the registers and mask the frame holds.\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1181
+                        "line": 1219
                       }
                     },
                     {
@@ -24782,7 +24874,7 @@
                       "value": "\"The 64-bit signal program's SA_SIGINFO handler is entered with the signal, the siginfo and the ucontext, a register it changes through the frame comes back through rt_sigreturn, and the mask after the return is empty: exit 77 (the `signals` line).\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1186
+                        "line": 1224
                       }
                     },
                     {
@@ -24793,7 +24885,7 @@
                       "value": "\"G.3\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1187
+                        "line": 1225
                       }
                     }
                   ]
@@ -24806,7 +24898,7 @@
                   "type": "ItemHighLevel",
                   "source": {
                     "file": "docs/sysml/13-item-requirements.sysml",
-                    "line": 1189
+                    "line": 1227
                   },
                   "children": [
                     {
@@ -24817,7 +24909,7 @@
                       "value": "\"A program's registers shall pass the kernel as its ABI says: a call's arguments are read from its argument registers and its result returned in its return register, a fork child resumes from its parent's registers with the call answering zero, and a program started or replaced begins at its entry with its start argument and no kernel value in any register.\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1195
+                        "line": 1233
                       }
                     },
                     {
@@ -24828,7 +24920,7 @@
                       "value": "\"A call with six arguments answers from all six; a fork child's registers are its parent's with the return register zero; a program started with an argument finds it, and one that ORs its registers on entry finds nothing else set, for each ABI.\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1200
+                        "line": 1238
                       }
                     },
                     {
@@ -24839,7 +24931,7 @@
                       "value": "(\"G.4\", \"G.5\")",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1201
+                        "line": 1239
                       }
                     }
                   ]
@@ -24852,7 +24944,7 @@
                   "type": "ItemHighLevel",
                   "source": {
                     "file": "docs/sysml/13-item-requirements.sysml",
-                    "line": 1203
+                    "line": 1241
                   },
                   "children": [
                     {
@@ -24863,7 +24955,7 @@
                       "value": "\"A system call number no table carries shall be refused with ENOSYS, never answered by a handler or a fault.\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1205
+                        "line": 1243
                       }
                     },
                     {
@@ -24874,7 +24966,7 @@
                       "value": "\"0xDEAD, usize::MAX and usize::MAX - 1, each dispatched as a native call through the registered entry, are answered -38, 3 of 3. And with kernel objects alone, on every profile, the `item` line (syscall/rehome_check.rs::check_an_unknown_number_is_enosys).\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1208
+                        "line": 1246
                       }
                     },
                     {
@@ -24885,7 +24977,7 @@
                       "value": "\"O.VALIDATE\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1209
+                        "line": 1247
                       }
                     }
                   ]
@@ -24898,7 +24990,7 @@
                   "type": "ItemHighLevel",
                   "source": {
                     "file": "docs/sysml/13-item-requirements.sysml",
-                    "line": 1211
+                    "line": 1249
                   },
                   "children": [
                     {
@@ -24909,7 +25001,7 @@
                       "value": "\"A system call's number shall be decoded through the table of the architecture it was built for.\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1213
+                        "line": 1251
                       }
                     },
                     {
@@ -24920,7 +25012,7 @@
                       "value": "\"Of getpid's numbers in the three tables, exactly the running architecture's decodes to getpid, and dispatching it answers a pid above zero.\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1216
+                        "line": 1254
                       }
                     },
                     {
@@ -24931,7 +25023,7 @@
                       "value": "\"O.VALIDATE\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1217
+                        "line": 1255
                       }
                     },
                     {
@@ -24942,7 +25034,7 @@
                       "type": "ItemHighLevel",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1221
+                        "line": 1259
                       },
                       "children": [
                         {
@@ -24953,7 +25045,7 @@
                           "value": "\"A read of a log ring -- the kernel log is one -- shall copy into the reader's buffer, up to its length, only bytes the ring recorded, in order from the reader's cursor or from the oldest byte kept if that is later, and shall count as lost exactly the bytes it skips or finds replaced while it copied.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1226
+                            "line": 1264
                           }
                         },
                         {
@@ -24964,7 +25056,7 @@
                           "value": "\"On a 64-byte ring of the log check's own given 100 bytes, a reader at 0 is told 37 lost and given the last 63 in order across a 10-byte read and a longer one, and 200 bytes later is told 137 lost and given 63; while two writers record 20,000 bytes each into a 256-byte ring, a reader reads only bytes they wrote, and the bytes it read and was told it lost come to exactly 40,000 (the `log` line).\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1233
+                            "line": 1271
                           }
                         },
                         {
@@ -24975,7 +25067,7 @@
                           "value": "(\"O.VALIDATE\", \"O.ISOLATE\")",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1234
+                            "line": 1272
                           }
                         }
                       ]
@@ -24988,7 +25080,7 @@
                       "type": "ItemHighLevel",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1236
+                        "line": 1274
                       },
                       "children": [
                         {
@@ -24999,7 +25091,7 @@
                           "value": "\"A program's write to the console shall reach the port byte for byte in the order written, each bare newline as CRLF unless the program turned output processing off.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1239
+                            "line": 1277
                           }
                         },
                         {
@@ -25010,7 +25102,7 @@
                           "value": "\"A write of text holding bare newlines reaches the port with CRLF for each, and the same write with output processing off with LF alone, every other byte the same and in order.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1242
+                            "line": 1280
                           }
                         },
                         {
@@ -25021,7 +25113,7 @@
                           "value": "\"G.5\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1243
+                            "line": 1281
                           }
                         }
                       ]
@@ -25034,7 +25126,7 @@
                       "type": "ItemHighLevel",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1245
+                        "line": 1283
                       },
                       "children": [
                         {
@@ -25045,7 +25137,7 @@
                           "value": "\"The kernel log shall hold every byte the console is given to send, a kernel line or a program's output, as it was written and before a newline becomes CRLF, except the lines the kernel sends unlogged.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1249
+                            "line": 1287
                           }
                         },
                         {
@@ -25056,7 +25148,7 @@
                           "value": "\"Over a boot, the kernel log read from its oldest byte holds, in order and without CRs, every kernel line the serial log holds but the unlogged ones, and every program's output.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1252
+                            "line": 1290
                           }
                         },
                         {
@@ -25067,7 +25159,7 @@
                           "value": "\"G.5\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1253
+                            "line": 1291
                           }
                         }
                       ]
@@ -25080,7 +25172,7 @@
                       "type": "ItemHighLevel",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1255
+                        "line": 1293
                       },
                       "children": [
                         {
@@ -25091,7 +25183,7 @@
                           "value": "\"A look a personality registers with the core at its system call entries, before any answer of the entry's own, shall be able to make a call do only less than it could: let it go on, fail it with an errno the core bounds to 0 to 4095, or have the core give its registers back as the program made it, a value the core takes from the caller's own registers. It shall have no way to answer with anything else, so that it cannot start a program or choose what a program's registers hold; a filter that must end the program does so through the paths exit and a fatal signal already take. It shall be asked about every call of every entry once, first, with the entry's own architecture token and the instruction after the call, and nothing registered shall change what the core does.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1268
+                            "line": 1306
                           }
                         },
                         {
@@ -25102,7 +25194,7 @@
                           "value": "\"Driven through each entry this architecture has, every call the entry answers itself reaches a test-only filter once, before that answer, and the filter's value is the one the program gets; an int $0x80 call carries i386's token; a number with bits above the 32nd set is judged as its low half and dispatched as no call; a native-range call carries a token of its own; an errno a filter answers is cut to 4095 by the core, and 512 is an ordinary errno (the `seccomp` line).\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1276
+                            "line": 1314
                           }
                         },
                         {
@@ -25113,7 +25205,7 @@
                           "value": "(\"O.ISOLATE\", \"O.VALIDATE\")",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1277
+                            "line": 1315
                           }
                         }
                       ]
@@ -25126,7 +25218,7 @@
                       "type": "ItemHighLevel",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1279
+                        "line": 1317
                       },
                       "children": [
                         {
@@ -25137,7 +25229,7 @@
                           "value": "\"A switch between the address spaces of two programs not in one speculation domain shall issue the predictor barrier; a switch between two address spaces of one domain shall not. A domain is a job marked at its creation by the holder of MANAGE on its parent, and holds only the programs born in it that have not left it.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1285
+                            "line": 1323
                           }
                         },
                         {
@@ -25148,7 +25240,7 @@
                           "value": "\"The `domain` line: switches inside one domain decide no barrier, and switches to and from no domain, another domain, a domain inside it, a mover, a leaver and a sharer decide one each way, on every architecture the suite boots.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1289
+                            "line": 1327
                           }
                         },
                         {
@@ -25159,7 +25251,7 @@
                           "value": "\"O.ISOLATE\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1290
+                            "line": 1328
                           }
                         }
                       ]
@@ -25173,7 +25265,7 @@
                       "doc": "smt=off (BUILD-FLAGS.md section 3.1 DF4): siblings share a core's predictors and buffers, so a build that claims one thread a core keeps every other thread of a core out of kernel and program code, and sets each up to take a machine check so a broadcast does not shut the machine down (F-73). The consultant's ledger 2563, condition (4).",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1292
+                        "line": 1330
                       },
                       "children": [
                         {
@@ -25184,7 +25276,7 @@
                           "value": "\"Under smt=off no two hardware threads of one core shall run kernel or program code: each thread of a core but one shall be parked by the kernel, set up to take a machine check, or absent; and a topology the kernel cannot read shall stop the boot rather than be read as one thread a core.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1303
+                            "line": 1341
                           }
                         },
                         {
@@ -25195,7 +25287,7 @@
                           "value": "\"Stage 4's `smt` line under smt=off, on every architecture: no two online processors of one core, every parked thread reported with CR4.MCE set (x86-64), and no core of the PPTT or cpu-map listing two threads of processors that run work (Arm); with one sibling started for work, or a parked thread's CR4.MCE left clear, or two threads a core in the Arm tables, it fails by name.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1310
+                            "line": 1348
                           }
                         },
                         {
@@ -25206,7 +25298,7 @@
                           "value": "\"O.ISOLATE\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1311
+                            "line": 1349
                           }
                         }
                       ]
@@ -25219,7 +25311,7 @@
                       "type": "ItemHighLevel",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1313
+                        "line": 1351
                       },
                       "children": [
                         {
@@ -25230,7 +25322,7 @@
                           "value": "\"A fault a program takes in user mode that its address space does not resolve shall be offered to the supervisors attached to its process and to its jobs, nearest first, before the personality sees it. Each shall answer resume, with registers checked as sigreturn checks a frame, kill or hand on, within a bounded wait; a fault unanswered, or handed on past the last, shall take the path it takes with no supervisor. Only a holder of SUPERVISE attaches one, and no process raises its ids while one watches it.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1321
+                            "line": 1359
                           }
                         },
                         {
@@ -25241,7 +25333,7 @@
                           "value": "\"The `exceptions` line on every boot: a fault resumed with written registers exits as written, forged registers are refused, KILL ends the process, a hand on reaches the job's channel at level 1, an unanswered fault ends with SIGSEGV after its timeout, an exception closed or held by a supervisor that died is handed on at once; a cgroup move into a supervised job is EBUSY (the `cgroups` line).\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1328
+                            "line": 1366
                           }
                         },
                         {
@@ -25252,7 +25344,7 @@
                           "value": "(\"O.CAPABILITY\", \"O.ISOLATE\")",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1329
+                            "line": 1367
                           }
                         }
                       ]
@@ -25266,7 +25358,7 @@
                   "doc": "What the kernel does with what it is handed before anything runs above it, and what a boot claims: O.FAILSAFE and ASR-6 (FPT_FLS.1), and O.ISOLATE for the layout.",
                   "source": {
                     "file": "docs/sysml/13-item-requirements.sysml",
-                    "line": 1333
+                    "line": 1371
                   },
                   "children": [
                     {
@@ -25277,7 +25369,7 @@
                       "type": "ItemHighLevel",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1338
+                        "line": 1376
                       },
                       "children": [
                         {
@@ -25288,7 +25380,7 @@
                           "value": "\"Before using what the loader hands over, the kernel shall verify the memory map, the page tables and its own placement, and shall halt with a diagnostic if any check fails.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1341
+                            "line": 1379
                           }
                         },
                         {
@@ -25299,7 +25391,7 @@
                           "value": "\"Stage 1 reports the hand-off verified on every architecture; a hand-off with a field made inconsistent ends in the catalogued panic, not in a boot.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1344
+                            "line": 1382
                           }
                         },
                         {
@@ -25310,7 +25402,7 @@
                           "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1345
+                            "line": 1383
                           }
                         }
                       ]
@@ -25323,7 +25415,7 @@
                       "type": "ItemHighLevel",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1347
+                        "line": 1385
                       },
                       "children": [
                         {
@@ -25334,7 +25426,7 @@
                           "value": "\"Every boot shall run every stage's self-checks unless told not to, and shall print FERRIX-BOOT-OK only when all of them passed; a boot that skipped them shall end with FERRIX-BOOT-UNCHECKED instead.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1351
+                            "line": 1389
                           }
                         },
                         {
@@ -25345,7 +25437,7 @@
                           "value": "\"`cargo xtask test-boot` finds FERRIX-BOOT-OK on each architecture; a boot with `ferrix.checks=skip` ends with FERRIX-BOOT-UNCHECKED and never prints FERRIX-BOOT-OK.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1354
+                            "line": 1392
                           }
                         },
                         {
@@ -25356,7 +25448,7 @@
                           "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1355
+                            "line": 1393
                           }
                         }
                       ]
@@ -25369,7 +25461,7 @@
                       "type": "ItemHighLevel",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1357
+                        "line": 1395
                       },
                       "children": [
                         {
@@ -25380,7 +25472,7 @@
                           "value": "\"The kernel shall run with its image, direct map and vmap arena at the offsets the loader drew from the firmware's random-number protocol, and shall verify the move at stage 1.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1360
+                            "line": 1398
                           }
                         },
                         {
@@ -25391,7 +25483,7 @@
                           "value": "\"Two boots of one image report two different layouts (`cargo xtask test-kaslr`), and stage 1 verifies the slide each reports.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1363
+                            "line": 1401
                           }
                         },
                         {
@@ -25402,7 +25494,7 @@
                           "value": "\"O.ISOLATE\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1364
+                            "line": 1402
                           }
                         }
                       ]
@@ -25415,7 +25507,7 @@
                       "type": "ItemHighLevel",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1366
+                        "line": 1404
                       },
                       "children": [
                         {
@@ -25426,7 +25518,7 @@
                           "value": "\"The kernel shall refuse an ACPI table, a device tree, or an SMBIOS entry point or structure table whose declared length is shorter than its header or reaches beyond the memory mapped for it, rather than read past it.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1370
+                            "line": 1408
                           }
                         },
                         {
@@ -25437,7 +25529,7 @@
                           "value": "\"The ACPI, device-tree and SMBIOS parsers' host tests feed truncated, oversized and misaligned tables and each is refused with its error, 0 read out of bounds; the kernel refuses a table outside the direct map, and an SMBIOS copy outside its region of the memory map.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1375
+                            "line": 1413
                           }
                         },
                         {
@@ -25448,7 +25540,7 @@
                           "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1376
+                            "line": 1414
                           }
                         }
                       ]
@@ -25461,7 +25553,7 @@
                       "type": "ItemHighLevel",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1380
+                        "line": 1418
                       },
                       "children": [
                         {
@@ -25472,7 +25564,7 @@
                           "value": "\"Every processor firmware describes shall be running kernel code on its own per-processor record before the scheduler starts, or the boot shall halt with a diagnostic saying which step failed.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1384
+                            "line": 1422
                           }
                         },
                         {
@@ -25483,7 +25575,7 @@
                           "value": "\"On each configuration `cargo xtask test-boot` boots, the `cpus` line counts as many processors online as firmware described (4 of 4 on x86-64 and AArch64, 2 of 2 on ARMv7-A at `--smp 2`); a secondary made never to report in ends the boot in FX-0402.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1388
+                            "line": 1426
                           }
                         },
                         {
@@ -25494,7 +25586,7 @@
                           "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1389
+                            "line": 1427
                           }
                         }
                       ]
@@ -25507,7 +25599,7 @@
                       "type": "ItemHighLevel",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1391
+                        "line": 1429
                       },
                       "children": [
                         {
@@ -25518,7 +25610,7 @@
                           "value": "\"When init exits and ferrix.onexit asks for nothing else, the machine shall power itself off after the console has drained.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1394
+                            "line": 1432
                           }
                         },
                         {
@@ -25529,7 +25621,7 @@
                           "value": "\"After init exits, QEMU exits by itself within the grace, with status 0 or 33, and init's exit line is in the log.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1396
+                            "line": 1434
                           }
                         },
                         {
@@ -25540,7 +25632,7 @@
                           "value": "\"O.FAILSAFE\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1397
+                            "line": 1435
                           }
                         }
                       ]
@@ -25553,7 +25645,7 @@
                       "type": "ItemHighLevel",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1399
+                        "line": 1437
                       },
                       "children": [
                         {
@@ -25564,7 +25656,7 @@
                           "value": "\"When init exits and ferrix.onexit=reset asks for it, the machine shall restart from firmware after the console has drained.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1402
+                            "line": 1440
                           }
                         },
                         {
@@ -25575,7 +25667,7 @@
                           "value": "\"Under ferrix.onexit=reset the kernel says it is resetting and the loader's banner is printed again after it.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1404
+                            "line": 1442
                           }
                         },
                         {
@@ -25586,7 +25678,7 @@
                           "value": "\"O.FAILSAFE\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1405
+                            "line": 1443
                           }
                         }
                       ]
@@ -25599,7 +25691,7 @@
                       "type": "ItemHighLevel",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1407
+                        "line": 1445
                       },
                       "children": [
                         {
@@ -25610,7 +25702,7 @@
                           "value": "\"The serial console shall carry the kernel's lines out, and a person's typed bytes in to the program reading them, in order and without waiting unboundedly on the port.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1410
+                            "line": 1448
                           }
                         },
                         {
@@ -25621,7 +25713,7 @@
                           "value": "\"test-boot reads every stage's line and FERRIX-BOOT-OK from the serial port, and test-jobs's 18 typed steps each have their answer after them.\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1413
+                            "line": 1451
                           }
                         },
                         {
@@ -25632,7 +25724,7 @@
                           "value": "\"O.FAILSAFE\"",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1414
+                            "line": 1452
                           }
                         },
                         {
@@ -25643,7 +25735,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1418
+                            "line": 1456
                           },
                           "children": [
                             {
@@ -25654,7 +25746,7 @@
                               "value": "\"The kernel log shall hold neither the KASLR slide nor any kernel virtual address the kernel prints: a panic's slide and backtrace, a fatal trap's registers, stage 2's placement of the image, the direct map and the page array, and the sweeps' failure lines shall go to the port and never into the log.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1423
+                                "line": 1461
                               }
                             },
                             {
@@ -25665,7 +25757,7 @@
                               "value": "\"After a boot, and after a panic with a backtrace, the kernel log read whole holds 0 occurrences of the slide or of any image, direct-map or vmap address the serial log printed.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1426
+                                "line": 1464
                               }
                             },
                             {
@@ -25676,7 +25768,7 @@
                               "value": "\"O.ISOLATE\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1427
+                                "line": 1465
                               }
                             }
                           ]
@@ -25689,7 +25781,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1429
+                            "line": 1467
                           },
                           "children": [
                             {
@@ -25700,7 +25792,7 @@
                               "value": "\"Pid 1 shall be the program the boot names: the file ferrix.init= names, else the commands or the program the boot initramfs carries under .ferrix/init, else /sbin/init; an input that cannot be one shall be refused with a line saying which and why, and never replaced by a guess.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1434
+                                "line": 1472
                               }
                             },
                             {
@@ -25711,7 +25803,7 @@
                               "value": "\"Each way of starting pid 1 boots as named (test-shell, test-vfs, test-init); malformed inputs are each refused and taken as absent (L.init.1 to L.init.3); and none is unpacked into a root, which SAFETY-MANUAL AoU-24 assumes of the unpacker.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1438
+                                "line": 1476
                               }
                             },
                             {
@@ -25722,7 +25814,7 @@
                               "value": "\"O.FAILSAFE\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1439
+                                "line": 1477
                               }
                             }
                           ]
@@ -25735,7 +25827,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1442
+                            "line": 1480
                           },
                           "children": [
                             {
@@ -25746,7 +25838,7 @@
                               "value": "\"The kernel shall show the firmware's identity only from an SMBIOS table it validated, with the values the table holds, and nothing when there is none or it does not validate; the boot shall go on either way.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1446
+                                "line": 1484
                               }
                             },
                             {
@@ -25757,7 +25849,7 @@
                               "value": "\"A test boot under QEMU with -smbios accepts the table and names exactly the vendor and the product QEMU was given, and no serial or UUID of it appears in the log; forged copies are each refused by name at boot, and refused tables leave nothing shown.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1451
+                                "line": 1489
                               }
                             },
                             {
@@ -25768,7 +25860,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1452
+                                "line": 1490
                               }
                             }
                           ]
@@ -25782,7 +25874,7 @@
                       "doc": "What a job, with every job beneath it, may hold at once: O.QUOTA (FRU_RSA.1), against T.EXHAUST.",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1456
+                        "line": 1494
                       },
                       "children": [
                         {
@@ -25793,7 +25885,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1460
+                            "line": 1498
                           },
                           "children": [
                             {
@@ -25804,7 +25896,7 @@
                               "value": "\"Creating a task in a job that, with the jobs beneath it, holds its task limit shall be refused, and no task shall be counted beyond the limit.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1463
+                                "line": 1501
                               }
                             },
                             {
@@ -25815,7 +25907,7 @@
                               "value": "\"A fork loop in a job limited to 8 tasks is refused at the limit, 0 tasks beyond it (the `quota` line).\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1465
+                                "line": 1503
                               }
                             },
                             {
@@ -25826,7 +25918,7 @@
                               "value": "\"O.QUOTA\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1466
+                                "line": 1504
                               }
                             }
                           ]
@@ -25839,7 +25931,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1468
+                            "line": 1506
                           },
                           "children": [
                             {
@@ -25850,7 +25942,7 @@
                               "value": "\"A job's programs shall not hold more memory than the job's limit, counting the frames of their address spaces and their page tables together with every job beneath it; a sibling job shall be unaffected.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1472
+                                "line": 1510
                               }
                             },
                             {
@@ -25861,7 +25953,7 @@
                               "value": "\"Faults in a job limited to 48 pages' worth are refused when the next page would not fit, and the refusal is counted, while a sibling job faults 48 pages in (the `quota` line).\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1476
+                                "line": 1514
                               }
                             },
                             {
@@ -25872,7 +25964,7 @@
                               "value": "\"O.QUOTA\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1477
+                                "line": 1515
                               }
                             }
                           ]
@@ -25885,7 +25977,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1479
+                            "line": 1517
                           },
                           "children": [
                             {
@@ -25896,7 +25988,7 @@
                               "value": "\"Creating a channel or a port in a job at its object limit shall be refused, and no object shall be counted beyond the limit.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1482
+                                "line": 1520
                               }
                             },
                             {
@@ -25907,7 +25999,7 @@
                               "value": "\"Object creation in a job limited to 5 objects is refused at the limit, 0 objects beyond it (the `quota` line).\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1484
+                                "line": 1522
                               }
                             },
                             {
@@ -25918,7 +26010,7 @@
                               "value": "\"O.QUOTA\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1485
+                                "line": 1523
                               }
                             }
                           ]
@@ -25931,7 +26023,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1487
+                            "line": 1525
                           },
                           "children": [
                             {
@@ -25942,7 +26034,7 @@
                               "value": "\"Every charge against a job shall be returned when the resource it paid for is freed, and a job's quota slot shall be given back when the job goes.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1490
+                                "line": 1528
                               }
                             },
                             {
@@ -25953,7 +26045,7 @@
                               "value": "\"After the quota checks every counter of their jobs is back to zero, and as many quota slots are in use as before them (the `quota` line).\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1493
+                                "line": 1531
                               }
                             },
                             {
@@ -25964,7 +26056,7 @@
                               "value": "\"O.QUOTA\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1494
+                                "line": 1532
                               }
                             }
                           ]
@@ -25977,7 +26069,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1496
+                            "line": 1534
                           },
                           "children": [
                             {
@@ -25988,7 +26080,7 @@
                               "value": "\"A limit set on a job shall bound it together with every job beneath it, and a charge refused at any level shall leave no level charged.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1499
+                                "line": 1537
                               }
                             },
                             {
@@ -25999,7 +26091,7 @@
                               "value": "\"A charge that would pass a grandparent's limit is refused although the child's own limit allows it, and each level's counter reads as before the attempt.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1502
+                                "line": 1540
                               }
                             },
                             {
@@ -26010,7 +26102,7 @@
                               "value": "\"O.QUOTA\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1503
+                                "line": 1541
                               }
                             }
                           ]
@@ -26023,7 +26115,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1511
+                            "line": 1549
                           },
                           "children": [
                             {
@@ -26034,7 +26126,7 @@
                               "value": "\"A user page fault refused by a job's memory limit shall end a process in the job whose limit was full or beneath it, never one outside it, count the kill in that job and every job above it, and retry the fault.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1515
+                                "line": 1553
                               }
                             },
                             {
@@ -26045,7 +26137,7 @@
                               "value": "\"A program writing 8 MiB in a job limited to 1 MiB ends by SIGKILL while a larger process in a sibling job lives; exactly 1 process is killed; memory.events counts one OOM kill in the job and its parent and none in the sibling.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1519
+                                "line": 1557
                               }
                             },
                             {
@@ -26056,7 +26148,7 @@
                               "value": "(\"G.8\", \"O.QUOTA\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1520
+                                "line": 1558
                               }
                             }
                           ]
@@ -26069,7 +26161,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1523
+                            "line": 1561
                           },
                           "children": [
                             {
@@ -26080,7 +26172,7 @@
                               "value": "\"The kernel heap the Linux personality keeps for a job's programs shall be charged against the job's memory limit, and every byte of it returned when it is freed; a sibling job shall be unaffected.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1527
+                                "line": 1565
                               }
                             },
                             {
@@ -26091,7 +26183,7 @@
                               "value": "\"At a 32 KiB limit each kind of personality object is refused one past its count with ENOMEM (ENOLCK for a lock) while a sibling makes one, and with them gone every byte charged has come back (the `kmem` line).\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1531
+                                "line": 1569
                               }
                             },
                             {
@@ -26102,7 +26194,7 @@
                               "value": "\"O.QUOTA\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1532
+                                "line": 1570
                               }
                             }
                           ]
@@ -26115,7 +26207,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1535
+                            "line": 1573
                           },
                           "children": [
                             {
@@ -26126,7 +26218,7 @@
                               "value": "\"A creation the task limit refuses shall be answered as Linux and the native ABI answer it -- a fork with EAGAIN, a native process_create with SHOULD_WAIT -- and the refused process shall never start.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1539
+                                "line": 1577
                               }
                             },
                             {
@@ -26137,7 +26229,7 @@
                               "value": "\"A fork past pids.max is answered EAGAIN and counted in pids.events; process_create into a job at its task limit is answered SHOULD_WAIT and the job's task count is unchanged.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1542
+                                "line": 1580
                               }
                             },
                             {
@@ -26148,7 +26240,7 @@
                               "value": "\"O.QUOTA\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1543
+                                "line": 1581
                               }
                             }
                           ]
@@ -26161,7 +26253,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1545
+                            "line": 1583
                           },
                           "children": [
                             {
@@ -26172,7 +26264,7 @@
                               "value": "\"Creating a VMO, a job or a pin in a job at its object limit shall be refused with NO_MEMORY, and each shall be counted as an object for as long as it exists.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1548
+                                "line": 1586
                               }
                             },
                             {
@@ -26183,7 +26275,7 @@
                               "value": "\"In a job limited to 5 objects and holding 5, vmo_create, job_create and vmo_pin are each refused NO_MEMORY, 0 objects counted beyond the limit, and the job holds 0 once they are all closed.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1552
+                                "line": 1590
                               }
                             },
                             {
@@ -26194,7 +26286,7 @@
                               "value": "\"O.QUOTA\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1553
+                                "line": 1591
                               }
                             }
                           ]
@@ -26207,7 +26299,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1556
+                            "line": 1594
                           },
                           "children": [
                             {
@@ -26218,7 +26310,7 @@
                               "value": "\"A job's tasks, with those of every job beneath it, shall use no more processor time in a period than the job's cpu.max allows, and a task kept waiting for the period to end shall leave the wait at once for a kill or a signal.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1560
+                                "line": 1598
                               }
                             },
                             {
@@ -26229,7 +26321,7 @@
                               "value": "\"A program in a job limited to 20000 of 100000 microseconds is held to between a twelfth and two thirds of a processor with the throttling counted in cpu.stat, and one in a job limited to 1000 of 1000000 ends within a quarter of a second of its SIGKILL (the `cgroups` line, cpu).\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1565
+                                "line": 1603
                               }
                             },
                             {
@@ -26240,7 +26332,7 @@
                               "value": "\"O.QUOTA\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1566
+                                "line": 1604
                               }
                             }
                           ]
@@ -26253,7 +26345,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1568
+                            "line": 1606
                           },
                           "children": [
                             {
@@ -26264,7 +26356,7 @@
                               "value": "\"A process in a job, or beneath one, whose cgroup.freeze is set shall run no user code until the job is thawed or the process is killed; SIGCONT shall not thaw it, and cgroup.events shall say frozen only once every live process beneath has stopped.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1573
+                                "line": 1611
                               }
                             },
                             {
@@ -26275,7 +26367,7 @@
                               "value": "\"A program of three threads in a frozen cgroup stops counting, cgroup.events says frozen 1 and wakes its poller, SIGCONT changes neither, and thawing restarts its futex wait (the `cgroups` line, freeze).\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1577
+                                "line": 1615
                               }
                             },
                             {
@@ -26286,7 +26378,7 @@
                               "value": "\"O.QUOTA\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1578
+                                "line": 1616
                               }
                             }
                           ]
@@ -26299,7 +26391,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1580
+                            "line": 1618
                           },
                           "children": [
                             {
@@ -26310,7 +26402,7 @@
                               "value": "\"A charge refused by a job's memory limit, and a program over its memory.high, shall first take back clean file cache charged to that job or beneath it, never a sibling's and never a child's at or under its memory.min, and read back as its source has it, and then the heap of the cached names and files nothing else holds charged to that job or beneath it, before anything is killed.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1587
+                                "line": 1625
                               }
                             },
                             {
@@ -26321,7 +26413,7 @@
                               "value": "\"A cgroup reading a file twice its memory.high is brought back to it, its sibling's cache untouched, every page read back as the source has it, and a read at memory.max kills nothing where its clean cache was room (the `cgroups` line, reclaim).\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1592
+                                "line": 1630
                               }
                             },
                             {
@@ -26332,7 +26424,7 @@
                               "value": "(\"G.8\", \"O.QUOTA\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1593
+                                "line": 1631
                               }
                             }
                           ]
@@ -26345,7 +26437,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1595
+                            "line": 1633
                           },
                           "children": [
                             {
@@ -26356,7 +26448,7 @@
                               "value": "\"A frame for a program's memory or page tables shall be refused when taking it would leave fewer frames free than the kernel's watermark, whatever job the program is in, with nothing taken; the kernel's own allocations shall not be refused by it.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1600
+                                "line": 1638
                               }
                             },
                             {
@@ -26367,7 +26459,7 @@
                               "value": "\"At stage 2, program frames taken until refused leave exactly the watermark free; at that count a program's page table is refused and a kernel frame and a fresh heap page are given; a run of two frames is given at two above it and refused at one above with a block of two free; every frame comes back (the `watermark` line).\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1606
+                                "line": 1644
                               }
                             },
                             {
@@ -26378,7 +26470,7 @@
                               "value": "(\"G.8\", \"O.QUOTA\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1607
+                                "line": 1645
                               }
                             }
                           ]
@@ -26391,7 +26483,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1609
+                            "line": 1647
                           },
                           "children": [
                             {
@@ -26402,7 +26494,7 @@
                               "value": "\"A user page fault refused for want of memory with no job's memory limit full shall take back clean file cache anywhere and retry, a bounded number of times; once that gives back nothing or the bound is spent, it shall end the live process with the most resident memory anywhere, never pid 1, count the kill in that process's job and every job above it, and retry; it shall make at most one such kill within a grace period while a victim's memory comes back, and fail as it would without a kill after a bounded number of answers.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1618
+                                "line": 1656
                               }
                             },
                             {
@@ -26413,7 +26505,7 @@
                               "value": "\"Stage 5's quota check: with reclaims left and clean cache the fault retries and kills nobody; with them spent the process with the most resident pages among three in two jobs is ended and counted in its job alone; a second kill is not made while it ends or within the grace; a fault's last answer refuses.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1623
+                                "line": 1661
                               }
                             },
                             {
@@ -26424,7 +26516,7 @@
                               "value": "(\"G.8\", \"O.QUOTA\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1624
+                                "line": 1662
                               }
                             }
                           ]
@@ -26438,7 +26530,7 @@
                       "doc": "The audit record of the TSF's own decisions: O.AUDIT (FAU_GEN.1, FAU_GEN.2, FAU_SAR.1, FAU_SAR.2, FAU_STG.1, FAU_STG.4), for P.ACCOUNTABILITY. docs/certification/AUDIT.md is the design.",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1628
+                        "line": 1666
                       },
                       "children": [
                         {
@@ -26449,7 +26541,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1633
+                            "line": 1671
                           },
                           "children": [
                             {
@@ -26460,7 +26552,7 @@
                               "value": "\"Each audit ring shall number its records from zero without a gap, the high-value ring's first being the start-up record with the boot's whole audit id and both ring lengths; a second start shall change nothing, and a reader asking for a record the ring overwrote shall be moved on and told exactly how many it lost.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1639
+                                "line": 1677
                               }
                             },
                             {
@@ -26471,7 +26563,7 @@
                               "value": "\"On a store of four high-value records, the start-up record is number 0 and carries the id and lengths; a second start is refused; after six grants a read from 0 copies records 3 to 6 and reports 3 lost; a read of two from 3 resumes at 5.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1644
+                                "line": 1682
                               }
                             },
                             {
@@ -26482,7 +26574,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1645
+                                "line": 1683
                               }
                             }
                           ]
@@ -26495,7 +26587,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1647
+                            "line": 1685
                           },
                           "children": [
                             {
@@ -26506,7 +26598,7 @@
                               "value": "\"The first twelve system records shall stay readable, numbered as the high-value ring numbered them, however far that ring has wrapped, and no record after them shall join them.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1651
+                                "line": 1689
                               }
                             },
                             {
@@ -26517,7 +26609,7 @@
                               "value": "\"Thirteen system records and a grant in a ring of four: the boot records read back 0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, the ring reports records lost, and a read of the boot records from 6 copies 7 and resumes at 13.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1655
+                                "line": 1693
                               }
                             },
                             {
@@ -26528,7 +26620,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1656
+                                "line": 1694
                               }
                             }
                           ]
@@ -26541,7 +26633,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1658
+                            "line": 1696
                           },
                           "children": [
                             {
@@ -26552,7 +26644,7 @@
                               "value": "\"A refusal shall be kept in the refusal ring and a record of every other class in the high-value ring, so that no flood of refusals can overwrite a grant.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1661
+                                "line": 1699
                               }
                             },
                             {
@@ -26563,7 +26655,7 @@
                               "value": "\"One record of each of the six classes: the refusal alone in the refusal ring, the other five in the high-value ring in the order made.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1664
+                                "line": 1702
                               }
                             },
                             {
@@ -26574,7 +26666,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1665
+                                "line": 1703
                               }
                             }
                           ]
@@ -26587,7 +26679,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1667
+                            "line": 1705
                           },
                           "children": [
                             {
@@ -26598,7 +26690,7 @@
                               "value": "\"A job shall be charged, for the fairness of the refusal ring, to the budget its maker gave it: its parent's for a job its members could make themselves, its own otherwise.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1670
+                                "line": 1708
                               }
                             },
                             {
@@ -26609,7 +26701,7 @@
                               "value": "\"An anonymous job and one inside it are charged to their unit, a cgroup made in a delegated unit to that unit, and a cgroup root made in a unit to itself: 6 jobs' budgets as given.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1674
+                                "line": 1712
                               }
                             },
                             {
@@ -26620,7 +26712,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1675
+                                "line": 1713
                               }
                             }
                           ]
@@ -26633,7 +26725,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1677
+                            "line": 1715
                           },
                           "children": [
                             {
@@ -26644,7 +26736,7 @@
                               "value": "\"Past 64 refusals charged to one budget in a second, the TSF shall count that budget's further refusals rather than keep them, and write the count once the second has ended, while another budget's refusals and every grant are kept.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1681
+                                "line": 1719
                               }
                             },
                             {
@@ -26655,7 +26747,7 @@
                               "value": "\"104 refusals from a unit's three jobs keep 64 between them and, once the second has ended, one suppressed record counting 40 under the unit; the delegated unit's refusal in the same second is kept, and a grant made before is still read with none lost.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1686
+                                "line": 1724
                               }
                             },
                             {
@@ -26666,7 +26758,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1687
+                                "line": 1725
                               }
                             }
                           ]
@@ -26679,7 +26771,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1689
+                            "line": 1727
                           },
                           "children": [
                             {
@@ -26690,7 +26782,7 @@
                               "value": "\"A budget whose fairness window is taken to make room for another shall have its count written, not dropped.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1692
+                                "line": 1730
                               }
                             },
                             {
@@ -26701,7 +26793,7 @@
                               "value": "\"A budget one over its limit, then 32 more budgets: the first's window is closed and its suppressed record counts 1.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1695
+                                "line": 1733
                               }
                             },
                             {
@@ -26712,7 +26804,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1696
+                                "line": 1734
                               }
                             }
                           ]
@@ -26725,7 +26817,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1698
+                            "line": 1736
                           },
                           "children": [
                             {
@@ -26736,7 +26828,7 @@
                               "value": "\"The boot shall start its audit record with the start-up record of the id reads answer, and record whether its self-checks run, who starts devmgr, the mitigations it was built with, the KASLR state and the build flags it was compiled with, as bring-up read them.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1703
+                                "line": 1741
                               }
                             },
                             {
@@ -26747,7 +26839,7 @@
                               "value": "\"The kernel's boot records begin with the start-up record, its id the one reads answer and its lengths 512 and 4096, and hold the 5 configuration records with bring-up's values; the boot is not yet recorded as brought up.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1707
+                                "line": 1745
                               }
                             },
                             {
@@ -26758,7 +26850,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1708
+                                "line": 1746
                               }
                             }
                           ]
@@ -26771,7 +26863,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1710
+                            "line": 1748
                           },
                           "children": [
                             {
@@ -26782,7 +26874,7 @@
                               "value": "\"Each decision the TSF makes at a recording site -- a call its rights refused, a widening refused, a limit's refusal, a process made, a job given for a cgroup, a control channel given, a job killed, a cgroup killed, an OOM kill, a device quiesced, a limit set by handle or by cgroup file, a DMA fault -- shall be recorded with its outcome and the subject that made it, the kernel for the decisions it makes alone.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1717
+                                "line": 1755
                               }
                             },
                             {
@@ -26793,7 +26885,7 @@
                               "value": "\"At the end of a boot with checks, the record holds each of the 12 events the boot's checks provoke, and DMA_FAULT where a unit reported a DMA fault, with the outcome of its class and its subject; none of the OOM kill, the quiesce and the fault names a process; the boot is recorded as brought up.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1722
+                                "line": 1760
                               }
                             },
                             {
@@ -26804,7 +26896,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1723
+                                "line": 1761
                               }
                             }
                           ]
@@ -26817,7 +26909,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1725
+                            "line": 1763
                           },
                           "children": [
                             {
@@ -26828,7 +26920,7 @@
                               "value": "\"The audit record shall be read only through the audit handle with READ, which can be neither duplicated nor sent; a read shall copy whole records from a cursor, and a read that copies none or cannot copy them out shall leave the cursor, the buffer and the reader's position where they were.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1730
+                                "line": 1768
                               }
                             },
                             {
@@ -26839,7 +26931,7 @@
                               "value": "\"A handle with pid 1's rights reads the boot records, the start-up record first with the kernel's id; a count of 0 copies nothing and moves nothing; a read into unmapped memory is FAULT and counts nothing read; a handle without READ, a channel end and a ring that does not exist are refused; the handle is not duplicated and not sent.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1736
+                                "line": 1774
                               }
                             },
                             {
@@ -26850,7 +26942,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1737
+                                "line": 1775
                               }
                             }
                           ]
@@ -26863,7 +26955,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1739
+                            "line": 1777
                           },
                           "children": [
                             {
@@ -26874,7 +26966,7 @@
                               "value": "\"A boot with init shall keep its audit record on the root volume in a file named by the boot's audit id, holding the start-up record, the configuration, and the decisions only a boot with init makes.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1743
+                                "line": 1781
                               }
                             },
                             {
@@ -26885,7 +26977,7 @@
                               "value": "\"svc audit reads back the start-up record with the id init named the file by, the checks' configuration as run, STARTER_GIVEN, READER_GIVEN, DEVMGR_STARTED by pid 1 and ROOT_SWITCHED with pid 1 moved.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1747
+                                "line": 1785
                               }
                             },
                             {
@@ -26896,7 +26988,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1748
+                                "line": 1786
                               }
                             }
                           ]
@@ -26909,7 +27001,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1750
+                            "line": 1788
                           },
                           "children": [
                             {
@@ -26920,7 +27012,7 @@
                               "value": "\"Every record up to a power action shall be in the reader's file or on the console: the kernel shall record the power action last, say how far the reader read, and print every record past that, and a run the ring overwrote as one line.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1754
+                                "line": 1792
                               }
                             },
                             {
@@ -26931,7 +27023,7 @@
                               "value": "\"At test-init's power-off, init's last read is where the kernel saw it stop, and every number from there to the power action is printed as unread or in a lost run.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1757
+                                "line": 1795
                               }
                             },
                             {
@@ -26942,7 +27034,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1758
+                                "line": 1796
                               }
                             }
                           ]
@@ -26955,7 +27047,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1760
+                            "line": 1798
                           },
                           "children": [
                             {
@@ -26966,7 +27058,7 @@
                               "value": "\"A boot that skips its self-checks shall record that it did, where a reader outside it can see.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1762
+                                "line": 1800
                               }
                             },
                             {
@@ -26977,7 +27069,7 @@
                               "value": "\"A boot with ferrix.checks=skip, read back through svc audit, holds the checks' configuration record with value 0.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1765
+                                "line": 1803
                               }
                             },
                             {
@@ -26988,7 +27080,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1766
+                                "line": 1804
                               }
                             }
                           ]
@@ -27001,7 +27093,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1768
+                            "line": 1806
                           },
                           "children": [
                             {
@@ -27012,7 +27104,7 @@
                               "value": "\"An audit record shall be 64 bytes, each field little-endian at a fixed offset, so that a reader decodes what the kernel wrote.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1771
+                                "line": 1809
                               }
                             },
                             {
@@ -27023,7 +27115,7 @@
                               "value": "\"A record of distinct bytes encodes to them in order at the offsets the layout names and decodes back equal.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1773
+                                "line": 1811
                               }
                             },
                             {
@@ -27034,7 +27126,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1774
+                                "line": 1812
                               }
                             }
                           ]
@@ -27048,7 +27140,7 @@
                       "doc": "The safe state and what brings the kernel to it: O.FAILSAFE and ASR-6 (FPT_FLS.1). SAFETY-MANUAL.md §3 defines the safe state.",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1778
+                        "line": 1816
                       },
                       "children": [
                         {
@@ -27059,7 +27151,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1782
+                            "line": 1820
                           },
                           "children": [
                             {
@@ -27070,7 +27162,7 @@
                               "value": "\"On a failed internal consistency check the kernel shall stop every other processor, print a diagnostic naming the failure and its catalogued explanation, and halt without returning to user mode, or, where H.FAIL.5 applies, reset the machine after the report.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1787
+                                "line": 1825
                               }
                             },
                             {
@@ -27081,7 +27173,7 @@
                               "value": "\"A boot told to panic at its end (`ferrix.onexit=panic`) ends with the FX-1501 report and no program output after it; every panic site in the item has a catalogue entry (`check-panic-audit.py`).\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1791
+                                "line": 1829
                               }
                             },
                             {
@@ -27092,7 +27184,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1792
+                                "line": 1830
                               }
                             }
                           ]
@@ -27105,7 +27197,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1794
+                            "line": 1832
                           },
                           "children": [
                             {
@@ -27116,7 +27208,7 @@
                               "value": "\"The allocator every kernel stack comes from shall give each an unmapped guard page directly below and above it.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1797
+                                "line": 1835
                               }
                             },
                             {
@@ -27127,7 +27219,7 @@
                               "value": "\"A kernel stack allocated, written at its first and last word and freed has the page below and the page above it untranslated, and gives back every frame it took.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1800
+                                "line": 1838
                               }
                             },
                             {
@@ -27138,7 +27230,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1801
+                                "line": 1839
                               }
                             }
                           ]
@@ -27151,7 +27243,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1804
+                            "line": 1842
                           },
                           "children": [
                             {
@@ -27162,7 +27254,7 @@
                               "value": "\"A kernel stack overflow shall end in the halt and diagnostic of the safe state, never in a write below the stack.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1806
+                                "line": 1844
                               }
                             },
                             {
@@ -27173,7 +27265,7 @@
                               "value": "\"A kernel thread that recurses past its stack ends the boot in a report naming the fault -- on x86-64 a double fault taken on its own stack (FX-9004) -- on each architecture, 3 of 3.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1809
+                                "line": 1847
                               }
                             },
                             {
@@ -27184,7 +27276,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1810
+                                "line": 1848
                               }
                             }
                           ]
@@ -27197,7 +27289,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1814
+                            "line": 1852
                           },
                           "children": [
                             {
@@ -27208,7 +27300,7 @@
                               "value": "\"Once a failure report has begun, a line the kernel writes shall reach the console port after a bounded wait even when the port's lock is held and will never be released.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1817
+                                "line": 1855
                               }
                             },
                             {
@@ -27219,7 +27311,7 @@
                               "value": "\"A report begun while another context holds the port's lock for good reaches the port whole, after at most 10,000,000 attempts at the lock, on each architecture, 3 of 3.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1820
+                                "line": 1858
                               }
                             },
                             {
@@ -27230,7 +27322,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1821
+                                "line": 1859
                               }
                             }
                           ]
@@ -27243,7 +27335,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1825
+                            "line": 1863
                           },
                           "children": [
                             {
@@ -27254,7 +27346,7 @@
                               "value": "\"With ferrix.panic=reset read after stage 1's check, the first failure report shall, once its diagnostic and the reset line are on the port, in the pstore record and on the screen, wait 10 seconds on the free-running counter where its rate is known and reset the machine; with no value, halt, any other value, or in a report on another processor, it shall halt.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1831
+                                "line": 1869
                               }
                             },
                             {
@@ -27265,7 +27357,7 @@
                               "value": "\"In cargo xtask test-postmortem (x86-64 under KVM, AArch64): a boot with ferrix.onexit=panic ferrix.panic=reset prints the reset line and the loader's banner comes again at least 9.5 s and at most 60 s later, quoting the panic; the same boot without the option and with ferrix.panic=Reset says it halts and prints no reset line.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1837
+                                "line": 1875
                               }
                             },
                             {
@@ -27276,7 +27368,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1838
+                                "line": 1876
                               }
                             }
                           ]
@@ -27290,7 +27382,7 @@
                           "doc": "docs/MACHINE-CHECK.md (customer, 2026-10-30; consultant M10). H.FAIL.1 stops on every failed consistency check; these are the hardware errors that are not one: the kernel's own state is intact, and only a program's page or nothing at all is lost.",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1840
+                            "line": 1878
                           },
                           "children": [
                             {
@@ -27301,7 +27393,7 @@
                               "value": "\"On x86-64 with recovery on, the kernel shall go on after a machine check only where every record is, by its vendor's rules (L.x86_64.233): on Intel's, corrected, uncorrected with no action required, action-optional with the interrupted code restartable, another processor's action-required record, or one action-required record a ring-3 program consumed at a usable address; on AMD's and Hygon's, corrected, deferred, or one action-required record a ring-3 program consumed with EIPV at a usable address where the processor reports SUCCOR, the program signalled, or ended where RIPV is clear or TCC set; on any other vendor's, corrected. It shall then retire the frame of each uncorrected record with a usable address (a deferred one only by PhysAddrV), never hand it out again, and end or signal that program -- a program whose restartable load consumed a clean cached page goes on unsignalled, as H.FAIL.11 says; a system call's copy that consumed poison goes on as H.FAIL.10 says; every other machine check stops as H.FAIL.1.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1862
+                                "line": 1900
                               }
                             },
                             {
@@ -27312,7 +27404,7 @@
                               "value": "\"L.x86_64.221-232, L.x86_64.249-253 and L.mm.91-92 each verified; test-mce and its five recovery modes pass under KVM and TCG; test-mce-cmci's modes pass under TCG on QEMU with patch 0008 (docs/MACHINE-CHECK-CMCI.md). test-mce-driver's Own, Kill and Bystander: a ring-3 driver that consumes poison ends alone, status 135, its frame retired and left unread (docs/MACHINE-CHECK-DRIVER.md; devmgr's restart the evidence's environment)\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1869
+                                "line": 1907
                               }
                             },
                             {
@@ -27323,7 +27415,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1870
+                                "line": 1908
                               }
                             }
                           ]
@@ -27337,7 +27429,7 @@
                           "doc": "docs/RAM-SCRUBBER.md (customer, 2026-10-30, item 7; consultant NOT YET ledger 5045, OK IF ledger 5057).",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1872
+                            "line": 1910
                           },
                           "children": [
                             {
@@ -27348,7 +27440,7 @@
                               "value": "\"The RAM scrubber shall touch no frame in use, make no allocation fail but for the window of one frame's test in which two requests of one order meet the last two free blocks of it, never halt the machine where the firmware reports that the memory corrects errors, and never take more than its share of the retired set; a frame that fails its pattern test twice shall not be handed out again.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1880
+                                "line": 1918
                               }
                             },
                             {
@@ -27359,7 +27451,7 @@
                               "value": "\"test-scrub on x86-64 and AArch64: a full sweep of free memory, no allocation failed, nothing tested while busy, the stand-down without the gate's override; ARMv7-A's stand-down; mm/check.rs's check_scrubber, run only where the scrubber itself runs; L.mm.101-108, L.x86_64.243, L.aarch64.68, L.armv7a.29, L.object.252 and L.syscall.24 each with its check (L.object.253 released unwritten, ledger 5140 (3)). An ECC machine whose firmware reports Other or Unknown is the SAFETY-MANUAL's residual.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1889
+                                "line": 1927
                               }
                             },
                             {
@@ -27370,7 +27462,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1890
+                                "line": 1928
                               }
                             }
                           ]
@@ -27384,7 +27476,7 @@
                           "doc": "docs/MACHINE-CHECK-COPY.md (customer, 2026-10-30, machine-check item 2; consultant OK IF ledger 5216).",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1892
+                            "line": 1930
                           },
                           "children": [
                             {
@@ -27395,7 +27487,7 @@
                               "value": "\"On x86-64 with recovery on, a system call's read of a program's memory that consumes poison shall end with the call failing (or, for a write that already stored the pages before it, ending short at that page), the frame retired and, where the memory is the caller's own and it has signals, SIGBUS BUS_MCEERR_AR at the page; the kernel shall resume only at the copy's own exit, never inside the copy past the poison, and stop in every other ring-0 case it stops in under H.FAIL.8.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1902
+                                "line": 1940
                               }
                             },
                             {
@@ -27406,7 +27498,7 @@
                               "value": "\"test-mce-copy under KVM with AMD's records (the guest has SUCCOR), at one and two processors: the victim's write fails EFAULT or ends short at the poisoned page, its handler gets SIGBUS code 4 at the injected page's user address, the frame is retired and the kernel goes on; its modes stop where they must; the TCG rows and, on an AMD host, Intel's records are fail-closed rows only (TCG runs rep movsb in one step and reports no recovery; Intel's model has no MCG_SER_P there), so Intel's recovery is shown by stage 3's tables and frame; L.x86_64.244-246 and L.syscall.25-26 each with its check. test-mce-driver-copy: a driver's channel_write of its poisoned page fails, the driver ends with status 135\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1914
+                                "line": 1952
                               }
                             },
                             {
@@ -27417,7 +27509,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1915
+                                "line": 1953
                               }
                             }
                           ]
@@ -27431,7 +27523,7 @@
                           "doc": "docs/MACHINE-CHECK-RESTART.md slice 8a (customer, 2026-10-30, item 8; consultant OK IF ledger 5467, code OK IF ledger 5487). Arm has nothing that retires frames today. Residual: a table frame the boot info area or firmware holds by the time the loader reads the table is not kept out (said). TCG only; KVM injection across a reset not tried. A bad_frames = choice image (desktop, no claim; MACHINE-CHECK-RESTART §10, ledger 5579) gives it only with ferrix.badframes absent or persist.",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1917
+                            "line": 1955
                           },
                           "children": [
                             {
@@ -27442,7 +27534,7 @@
                               "value": "\"In an image built bad_frames=persist, whatever its command line, after a warm reset, the kernel shall hand out no frame the boot before retired, nor the frame of an uncorrected record the machine check named, where the loader marked it left out (the assumption of use: the loader marks exactly the frames of the version-3 table, the banks and the event log's set, and never drops one).\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1925
+                                "line": 1963
                               }
                             },
                             {
@@ -27453,7 +27545,7 @@
                               "value": "\"L.console.58-59, L.mm.109-110 and L.x86_64.254 each verified; test-mce-restart under TCG with Intel's records: a fatal record under ferrix.panic=reset, then boot 2's loader says boot 1 ended in a machine check and keeps the page out (left and table), its kernel leaves the frame out and its poll finds it already retired; test-mce-restart-retired: a frame a recovered machine check retired kept out of boots 2 and 3 from the table alone. TCG only; KVM injection across a reset not tried; xtask check: the persist loader carries no ferrix.badframes on any architecture, the choice loader does.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1934
+                                "line": 1972
                               }
                             },
                             {
@@ -27464,7 +27556,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1935
+                                "line": 1973
                               }
                             }
                           ]
@@ -27478,7 +27570,7 @@
                           "doc": "docs/MACHINE-CHECK-RESTART.md §9, slice 8b (customer, 2026-10-30, item 8; consultant design OK IF ledger 5511). The kernel is unchanged: the loader (outside the item) keeps the set in the boot disk's event log and marks it left out (AoU-39). Residuals: a frame retired in a run that ended by a power cut or a power-off before any warm reset is not in the set; another boot disk or a reinstall starts with an empty set; an older writer (a loader or inspection tool from before 8b) drops the set on its first header write; a set frame firmware holds is not kept out (said); TCG only; nothing retires frames on Arm. A bad_frames = choice image (desktop, no claim; MACHINE-CHECK-RESTART §10, ledger 5579) gives it only with ferrix.badframes absent or persist.",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1937
+                            "line": 1975
                           },
                           "children": [
                             {
@@ -27489,7 +27581,7 @@
                               "value": "\"In an image built bad_frames=persist, whatever its command line, after a power cycle, the kernel shall hand out no frame of the boot disk's event-log bad-frame set, where the loader marked it left out (AoU-39).\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1942
+                                "line": 1980
                               }
                             },
                             {
@@ -27500,7 +27592,7 @@
                               "value": "\"L.mm.110 verified; test-mce-restart-power under TCG with Intel's records: a frame a recovered machine check retired is kept in the event log by boot 2's loader, kept out of a cold boot 3 after a power cut from the log alone, nothing written by boots 3 and 4, and gone from a cold boot 5 after the host's clear-bad-frames; an attempt whose victim page firmware holds at boot 2's table read or boot 3's log read (the loader's exact in-use line, the frame still in the log) is inconclusive and made again from a fresh disk, at most 3, all 3 inconclusive failing; with ferrix.badframes=off on the command line, ignored. xtask check: the persist loader carries no ferrix.badframes on any architecture, the choice loader does. TCG only.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1954
+                                "line": 1992
                               }
                             },
                             {
@@ -27511,7 +27603,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1955
+                                "line": 1993
                               }
                             }
                           ]
@@ -27525,7 +27617,7 @@
                           "doc": "docs/MACHINE-CHECK-PAGECACHE.md (customer, 2026-10-30, machine-check item 3; consultant OK IF ledger 5294).",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1957
+                            "line": 1995
                           },
                           "children": [
                             {
@@ -27536,7 +27628,7 @@
                               "value": "\"On x86-64 with recovery on, poison in a clean page-cache frame shall cost a disk read and nothing else: a read that consumes it refilled from the disk and answered, a program whose restartable load consumed it faulting the page in again without a signal, the poll dropping it first; a page that is not clean -- or a clean one held still at that moment by a write, a truncation, a writeback or a reclaim of its file -- shall never be dropped or refilled (its read fails EIO, its mapper is signalled as H.FAIL.8 says), and a frame that cannot be retired shall never be taken.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1968
+                                "line": 2006
                               }
                             },
                             {
@@ -27547,7 +27639,7 @@
                               "value": "\"test-mce-pagecache's read and mapped modes under KVM with AMD's records (the read answered with the disk's bytes, the mapper unsignalled), its dirty modes on a memfd's pages under KVM (the read failing EIO or ending short exactly at the poisoned page, the mapper SIGBUS), its poll mode with Intel's UCNA record under TCG (the page dropped before it is read), and test-mce-copy-file under KVM (the copy fails, SIGBUS, the page dropped), each frame retired; the TCG copy rows fail-closed only; stage 12's poison check (the dirty disk page among its cases); L.object.259-261 and L.x86_64.247-248 each with its check.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1978
+                                "line": 2016
                               }
                             },
                             {
@@ -27558,7 +27650,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1979
+                                "line": 2017
                               }
                             }
                           ]
@@ -27572,7 +27664,7 @@
                       "doc": "The btrfs reader and write path, `ferrix-btrfs` and `ferrix-btrfs-write`, in the item since 2026-10-02: O.MEDIA and ASR-9 (FPT_TDC.1, FDP_SDI.2). Their interface below is the `Device` and `WriteDevice` traits the kernel's block layer answers, above it `Volume` and `WriteVolume`; the VFS glue on top (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs*.rs) is load, so these promise what the two crates do at `Volume` and `WriteVolume`, not what a program sees through a mount. The low-level requirements are part 24. Some sit under a requirement here by decomposition rather than as a case of its criterion: L.btrfs.31 and .70 (a node's address and generation) refine H.STORE.2, whose criterion tests a data sector, and L.btrfs.16 and .92 (superblock stripes) refine H.STORE.5, whose criterion tests the trees' consistency.",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1983
+                        "line": 2021
                       },
                       "children": [
                         {
@@ -27583,7 +27675,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1999
+                            "line": 2037
                           },
                           "children": [
                             {
@@ -27594,7 +27686,7 @@
                               "value": "\"The btrfs reader and writer shall answer every volume image, whatever its bytes, with a value or an error, without reading or writing outside a buffer, panicking or looping without bound.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 2003
+                                "line": 2041
                               }
                             },
                             {
@@ -27605,7 +27697,7 @@
                               "value": "\"Each of 4,096 single-byte patches of a superblock, and of a leaf, parses or is refused, and every accessor of what parses answers, 0 panics. The decoders' own totality, and the `btrfs_read` fuzzer's resealed images, are their low-level requirements' and outside this criterion; the write path, which parses every node through the reader, has no hostile-image check of its own yet (TODO.md).\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 2010
+                                "line": 2048
                               }
                             },
                             {
@@ -27616,7 +27708,7 @@
                               "value": "\"O.MEDIA\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 2011
+                                "line": 2049
                               }
                             }
                           ]
@@ -27629,7 +27721,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 2013
+                            "line": 2051
                           },
                           "children": [
                             {
@@ -27640,7 +27732,7 @@
                               "value": "\"A block whose checksum disagrees with its contents shall never be returned as valid: the reader shall read another copy where the chunk keeps one, and otherwise answer an error.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 2017
+                                "line": 2055
                               }
                             },
                             {
@@ -27651,7 +27743,7 @@
                               "value": "\"With the first copy of a DUP data sector damaged, a file read returns the file's bytes from the second; with both damaged, it answers DataChecksum and hands back none of the sector's bytes.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 2021
+                                "line": 2059
                               }
                             },
                             {
@@ -27662,7 +27754,7 @@
                               "value": "(\"O.MEDIA\", \"ASR-9\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 2022
+                                "line": 2060
                               }
                             }
                           ]
@@ -27675,7 +27767,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 2024
+                            "line": 2062
                           },
                           "children": [
                             {
@@ -27686,7 +27778,7 @@
                               "value": "\"Until a commit's superblock is written, the volume on the device shall be exactly the last commit, whatever of the commit's other writes have reached it.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 2027
+                                "line": 2065
                               }
                             },
                             {
@@ -27697,7 +27789,7 @@
                               "value": "\"500 inserts committed, and the commit's writes replayed without its superblocks onto the volume as it was, leave a volume that checks clean and holds exactly the last commit's items.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 2030
+                                "line": 2068
                               }
                             },
                             {
@@ -27708,7 +27800,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 2031
+                                "line": 2069
                               }
                             }
                           ]
@@ -27721,7 +27813,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 2033
+                            "line": 2071
                           },
                           "children": [
                             {
@@ -27732,7 +27824,7 @@
                               "value": "\"What a commit or a log commit returned success for shall be found, no older, when the volume is opened after a power cut at any later point, the log replayed if the superblock names one.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 2037
+                                "line": 2075
                               }
                             },
                             {
@@ -27743,7 +27835,7 @@
                               "value": "\"Of 100 cuts over 4 random scenarios of writes, logs and commits, each rebuilt as the device may have left the disk, every one opens, checks clean down to free space and checksums, and rolls back no completed promise.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 2041
+                                "line": 2079
                               }
                             },
                             {
@@ -27754,7 +27846,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 2042
+                                "line": 2080
                               }
                             }
                           ]
@@ -27767,7 +27859,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 2044
+                            "line": 2082
                           },
                           "children": [
                             {
@@ -27778,7 +27870,7 @@
                               "value": "\"Each commit shall leave the extent tree, the block groups' usage, the free-space tree and the superblock's totals agreeing with the trees, so that no block in use is free.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 2047
+                                "line": 2085
                               }
                             },
                             {
@@ -27789,7 +27881,7 @@
                               "value": "\"After 3,000 random edits on the blank fixture, committed as they go, the writer's checker finds every tree block's and data extent's references, each block group's usage and free space and the superblock's total consistent.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 2051
+                                "line": 2089
                               }
                             },
                             {
@@ -27800,7 +27892,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 2052
+                                "line": 2090
                               }
                             }
                           ]
@@ -27813,7 +27905,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 2054
+                            "line": 2092
                           },
                           "children": [
                             {
@@ -27824,7 +27916,7 @@
                               "value": "\"An operation the volume has no room for shall be refused with no space before it changes anything, leaving the transaction able to commit.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 2057
+                                "line": 2095
                               }
                             },
                             {
@@ -27835,7 +27927,7 @@
                               "value": "\"On a 128 MiB volume, creates until its trees are full end in NoSpace with the transaction not aborted, its commit succeeds, and a deletion still makes room for another create.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 2060
+                                "line": 2098
                               }
                             },
                             {
@@ -27846,7 +27938,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 2061
+                                "line": 2099
                               }
                             }
                           ]
@@ -27859,7 +27951,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 2063
+                            "line": 2101
                           },
                           "children": [
                             {
@@ -27870,7 +27962,7 @@
                               "value": "\"An allocation the btrfs writer cannot make shall be answered to its caller as an error, aborting the transaction if an edit had begun, and never as a panic or a stop of the element.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 2066
+                                "line": 2104
                               }
                             },
                             {
@@ -27881,7 +27973,7 @@
                               "value": "\"With every allocation of the writer's operations failed in turn, each operation succeeds or answers an error, no panic is taken, and the volume reopened from the device is the last commit and checks clean.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 2070
+                                "line": 2108
                               }
                             },
                             {
@@ -27892,7 +27984,7 @@
                               "value": "(\"O.QUOTA\", \"ASR-9\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 2071
+                                "line": 2109
                               }
                             }
                           ]
@@ -27905,7 +27997,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 2073
+                            "line": 2111
                           },
                           "children": [
                             {
@@ -27916,7 +28008,7 @@
                               "value": "\"An operation that fails after it changed something shall abort its transaction, so that none of it is committed, and the volume reloaded at its last commit shall take no further change.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 2077
+                                "line": 2115
                               }
                             },
                             {
@@ -27927,7 +28019,7 @@
                               "value": "\"Through a mount, a commit whose device write fails answers EIO; the mount then reads the last commit, has no trace of the aborted transaction, answers EROFS to a write, a truncation and a create, and the disk holds the last commit.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 2081
+                                "line": 2119
                               }
                             },
                             {
@@ -27938,7 +28030,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 2082
+                                "line": 2120
                               }
                             }
                           ]
@@ -87820,6 +87912,645 @@
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
                     "line": 1229
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "GenericNodes",
+          "qualifiedName": "FerrixDeviceRequirements::GenericNodes",
+          "kind": "package",
+          "doc": "Generic device-tree nodes (docs/DRIVER-MODEL.md section 3, step 1; the consultant's D3-D10 and D21, ledger 4475): the kernel-owned set, sealed; the identity record; the minting rules a generic node is held to.",
+          "source": {
+            "file": "docs/sysml/20-device-requirements.sysml",
+            "line": 1233
+          },
+          "children": [
+            {
+              "name": "kernelOwnedSetSealed",
+              "qualifiedName": "FerrixDeviceRequirements::GenericNodes::kernelOwnedSetSealed",
+              "kind": "requirement",
+              "shortName": "L.discovery.8",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/20-device-requirements.sysml",
+                "line": 1239
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::kernelOwnedSetSealed",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"claim_kernel_use and use_window shall be the one way into the kernel-owned set, and every claim shall be refused once stage 10 has sealed the set, which it does when every finder has run and before anything is published; after the seal, use_window -- the one way board support maps a register window -- shall allow only a window wholly inside a range claimed before the seal. Under personality=user only: a hybrid registers no claim and seals nothing.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1247
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::kernelOwnedSetSealed",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Stage 10's check: a claim after the seal is refused Sealed, a window outside every claim NotClaimed; with either refusal removed the boot panics naming a kernel claim after the seal, or a window outside every claim mapped after it.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1251
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::kernelOwnedSetSealed",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DEV.8\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1252
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::kernelOwnedSetSealed",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"discovery::tree::claim_kernel_use\", \"discovery::tree::seal\", \"discovery::tree::sealed\", \"discovery::tree::claims\", \"discovery::tree::use_window\", \"discovery::tree::covered\", \"discovery::tree::covered_by\")",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1256
+                  }
+                }
+              ]
+            },
+            {
+              "name": "referencesCopiedUninterpreted",
+              "qualifiedName": "FerrixDeviceRequirements::GenericNodes::referencesCopiedUninterpreted",
+              "kind": "requirement",
+              "shortName": "L.discovery.9",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/20-device-requirements.sysml",
+                "line": 1258
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::referencesCopiedUninterpreted",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A generic node's identity record shall carry each clocks, resets, power-domains, pinctrl-N, *-supply, interconnects, interrupts-extended, gpios, dmas, mboxes and iommus reference as the provider node, the node the phandle names, the phandle and the specifier cells the provider's #cells says, copied and not interpreted; a phandle that names no node, or a disabled one, shall be a reference marked missing or disabled, and the record its compatible list, path, *-names and subtree. Only personality=user publishes real nodes: present and desktop publish none, and every profile's check holds this on made-up trees.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1268
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::referencesCopiedUninterpreted",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"ferrix-fdt's host tests: references of every kind, a missing and a disabled provider, a pin configuration's controller, the record read back; test-driver-model reads the PL031's path and its apb_pclk reference out of the record devmgr is given.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1273
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::referencesCopiedUninterpreted",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DEV.7\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1274
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::referencesCopiedUninterpreted",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"discovery::tree::Walk::node\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1275
+                  }
+                }
+              ]
+            },
+            {
+              "name": "kernelOwnedDerivedByUse",
+              "qualifiedName": "FerrixDeviceRequirements::GenericNodes::kernelOwnedDerivedByUse",
+              "kind": "requirement",
+              "shortName": "L.discovery.10",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/20-device-requirements.sysml",
+                "line": 1277
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::kernelOwnedDerivedByUse",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"Every device window early boot mapped -- the console the kernel brought up, whichever the command line or the tree named -- shall be claimed before the seal on every machine; claim_tree_uses shall register as used the nodes the kernel's own accessors find (the console stdout-path names, the primary interrupt controller, the architected timer, PSCI, the SMMUv3s, /cpus, /memory, /reserved-memory, /chosen), each spin-table release address, every reserved range not the memory map's and every device window mapped; Ownership::derive shall make kernel-owned every used node, every node under one, and every node whose page-rounded registers overlap a used range or a used node's registers; and no node sharing a page with any kernel-owned node's registers, however that node came to be kernel-owned, shall be published. Under personality=user only: a hybrid registers no claim and seals nothing.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1292
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::kernelOwnedDerivedByUse",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Stage 10's check: on a made-up tree the console is not published, a node in its page is kernel-owned and a node in that node's other page is not published; every early window is claimed and no published generic node holds one of its pages. With a used node's registers left out, with only used nodes' pages tested, or with the early windows unclaimed, the boot panics naming the rule.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1299
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::kernelOwnedDerivedByUse",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DEV.8\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1300
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::kernelOwnedDerivedByUse",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"discovery::tree::claim_tree_uses\", \"discovery::tree::claim_accessor_nodes\", \"discovery::tree::claim_described_nodes\", \"discovery::tree::claim_node\", \"discovery::tree::Ownership::derive\", \"discovery::tree::split\", \"discovery::tree::pages_of\", \"discovery::tree::Ownership::owns\", \"discovery::tree::Ownership::owned\", \"discovery::tree::Ownership::owns_pages\", \"discovery::tree::claim_early_windows\", \"discovery::tree::Walk::publishes\", \"discovery::tree::say_stopped\", \"discovery::tree::PathOf::fmt\", \"early::device_windows\", \"early::record_window\", \"device::begin\", \"device::Reserved::kernel_ranges\")",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1311
+                  }
+                }
+              ]
+            },
+            {
+              "name": "kernelDependsClosed",
+              "qualifiedName": "FerrixDeviceRequirements::GenericNodes::kernelDependsClosed",
+              "kind": "requirement",
+              "shortName": "L.discovery.11",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/20-device-requirements.sysml",
+                "line": 1313
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::kernelDependsClosed",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"Every node a kernel-owned node references as a clock, reset, power domain, pin configuration (and its controller), supply or interconnect, directly or through nodes so referenced, shall be published with FLAG_KERNEL_DEPENDS in its record and in device_info's device_id; and when a kernel-owned or depended-on node's references cannot all be read -- past the record's bound, a provider that does not say how wide its specifiers are, or a phandle that names no node with words after it -- nothing of the tree shall be published, with a line naming the node. Only personality=user publishes real nodes: present and desktop publish none, and every profile's check holds this on made-up trees.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1325
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::kernelDependsClosed",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Stage 10's check: a made-up console's clock and that clock's clock are flagged, a node it does not reference is not, and a made-up console whose clock's provider has no #clock-cells, or whose clocks name no node before a provider, stops publication; with the walk stopped after one reference, or the stop removed, the boot panics naming the rule. devmgr's refusal of a flagged node inside the claim is ring 3, outside this requirement, and unchecked (DRIVER-MODEL.md §12, BACKLOG).\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1334
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::kernelDependsClosed",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DEV.8\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1335
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::kernelDependsClosed",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"discovery::tree::Ownership::close\", \"discovery::tree::Ownership::depend\", \"discovery::tree::Ownership::depends_on\", \"discovery::tree::Ownership::incomplete\")",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1339
+                  }
+                }
+              ]
+            },
+            {
+              "name": "genericParsingBounded",
+              "qualifiedName": "FerrixDeviceRequirements::GenericNodes::genericParsingBounded",
+              "kind": "requirement",
+              "shortName": "L.discovery.12",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/20-device-requirements.sysml",
+                "line": 1341
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::genericParsingBounded",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"Generic publication's parsing shall be bounded: no node deeper than 16 levels visited, at most 64 references a node read and at most 8 cells each, at most 512 bytes of compatible and 256 of path copied, a record of at most 4096 bytes with what does not fit cut and flagged, a ranges translation of at most 16 hops over addresses of at most two cells, and at most 256 generic nodes a tree; the walk holds no lock. Only personality=user publishes real nodes: present and desktop publish none, and every profile's check holds this on made-up trees.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1351
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::genericParsingBounded",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"ferrix-fdt's host tests of each bound, and the fdt_generic fuzz target: every node visited once with its depth of ancestors, references within their bound, every record read back within its buffer.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1355
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::genericParsingBounded",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DEV.7\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1356
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::genericParsingBounded",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"discovery::tree::find_generic\", \"discovery::tree::stop_on\", \"discovery::tree::primary_controller\")",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1358
+                  }
+                }
+              ]
+            },
+            {
+              "name": "genericAperturesByWholePages",
+              "qualifiedName": "FerrixDeviceRequirements::GenericNodes::genericAperturesByWholePages",
+              "kind": "requirement",
+              "shortName": "L.device.60",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/20-device-requirements.sysml",
+                "line": 1360
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::genericAperturesByWholePages",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A generic node's register range shall be minted as an aperture of the whole pages it lies in, and withheld whole when those pages overlap reserved memory or the range is empty, starts in the page at physical address 0, runs off the address space or does not translate. Only personality=user publishes real nodes: present and desktop publish none, and every profile's check holds this on made-up trees.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1367
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::genericAperturesByWholePages",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Stage 10's check: a made-up range in a page the kernel reserves another part of is withheld, a whole page minted; with the overlap tested on the exact range the boot panics naming a range sharing a page with reserved memory.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1371
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::genericAperturesByWholePages",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DEV.7\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1372
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::genericAperturesByWholePages",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"device::DeviceNode::mint_generic\", \"device::page_span\", \"device::DeviceNode::generic\")",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1374
+                  }
+                }
+              ]
+            },
+            {
+              "name": "sharedPageMintedToNeither",
+              "qualifiedName": "FerrixDeviceRequirements::GenericNodes::sharedPageMintedToNeither",
+              "kind": "requirement",
+              "shortName": "L.device.61",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/20-device-requirements.sysml",
+                "line": 1376
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::sharedPageMintedToNeither",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A page an aperture of a generic node shares with an aperture of any other node shall be minted to neither, and the generic node's record flagged REGISTERS_WITHHELD. Only personality=user publishes real nodes: present and desktop publish none, and every profile's check holds this on made-up trees.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1381
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::sharedPageMintedToNeither",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Stage 10's check: two made-up nodes in one page keep no aperture, and no published generic node shares a page; with the rule off the boot panics naming a page two published nodes share.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1385
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::sharedPageMintedToNeither",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DEV.7\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1386
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::sharedPageMintedToNeither",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"device::withhold_shared_pages\", \"device::DeviceNode::flag_identity\")",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1388
+                  }
+                }
+              ]
+            },
+            {
+              "name": "genericVectorsSharedLinesOnly",
+              "qualifiedName": "FerrixDeviceRequirements::GenericNodes::genericVectorsSharedLinesOnly",
+              "kind": "requirement",
+              "shortName": "L.device.62",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/20-device-requirements.sysml",
+                "line": 1390
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::genericVectorsSharedLinesOnly",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A generic node shall be given its interrupts only on the primary interrupt controller, in order, each only if it is a shared peripheral interrupt no kernel handler and no other node holds, the first refused ending the list. Only personality=user publishes real nodes: present and desktop publish none, and every profile's check holds this on made-up trees.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1396
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::genericVectorsSharedLinesOnly",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Stage 10's check: a made-up private line is refused and a shared one minted; with claim_line taking private lines the boot panics naming a private interrupt minted to a generic node.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1400
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::genericVectorsSharedLinesOnly",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DEV.7\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1401
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::genericVectorsSharedLinesOnly",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"discovery::tree::Walk::node\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1402
+                  }
+                }
+              ]
+            },
+            {
+              "name": "treeNodeNeverNoDma",
+              "qualifiedName": "FerrixDeviceRequirements::GenericNodes::treeNodeNeverNoDma",
+              "kind": "requirement",
+              "shortName": "L.device.63",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/20-device-requirements.sysml",
+                "line": 1404
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::treeNodeNeverNoDma",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"Every generic node shall be described as reaching memory, whatever its tree says: NO_DMA comes only from nodes the kernel describes itself. Only personality=user publishes real nodes: present and desktop publish none, and every profile's check holds this on made-up trees.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1409
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::treeNodeNeverNoDma",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Stage 10's check: every made-up and every published generic node reaches memory; with generic nodes described as reaching none the boot panics naming a generic node described as reaching no memory.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1413
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::treeNodeNeverNoDma",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DEV.7\", \"H.DMA.9\")",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1414
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::treeNodeNeverNoDma",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"device::DeviceNode::reaches_memory\", \"device::DeviceNode::is_generic\")",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1416
+                  }
+                }
+              ]
+            },
+            {
+              "name": "genericIdentityThroughItsConfiguration",
+              "qualifiedName": "FerrixDeviceRequirements::GenericNodes::genericIdentityThroughItsConfiguration",
+              "kind": "requirement",
+              "shortName": "L.device.64",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/20-device-requirements.sysml",
+                "line": 1418
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::genericIdentityThroughItsConfiguration",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"device_info shall describe a generic node with virtio DEVICE_TREE_GENERIC, its record's flags in device_id and the record's length in class; and device_config_read shall read the record, read-only, zero past its end, where device_config_write is refused. Only personality=user publishes real nodes: present and desktop publish none, and every profile's check holds this on made-up trees.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1425
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::genericIdentityThroughItsConfiguration",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Stage 10's check: every published generic node's device_info and its record's first word read back; devmgr matches the PL031 of test-driver-model through them.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1428
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::genericIdentityThroughItsConfiguration",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DEV.7\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1429
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::genericIdentityThroughItsConfiguration",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"device::DeviceNode::describe\", \"device::DeviceNode::config_read\", \"device::DeviceNode::set_identity\", \"device::DeviceNode::identity\", \"device::DeviceNode::identity_flags\")",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1432
+                  }
+                }
+              ]
+            },
+            {
+              "name": "noNodePublishedTwice",
+              "qualifiedName": "FerrixDeviceRequirements::GenericNodes::noNodePublishedTwice",
+              "kind": "requirement",
+              "shortName": "L.device.65",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/20-device-requirements.sysml",
+                "line": 1434
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::noNodePublishedTwice",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"Generic publication shall leave alone every node whose registers an earlier finder's node holds -- a binding the kernel knows, or a virtio-mmio transport -- and every virtio,mmio node, so that no tree node is published twice. Only personality=user publishes real nodes: present and desktop publish none, and every profile's check holds this on made-up trees.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1440
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::noNodePublishedTwice",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Stage 10's check: a made-up node a binding holds is not published again, and no tree node's record is published twice; with the hold not tested the boot panics naming a node a binding holds published again.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1444
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::noNodePublishedTwice",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DEV.7\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1445
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::noNodePublishedTwice",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"discovery::board::Boards::find\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1446
                   }
                 }
               ]
