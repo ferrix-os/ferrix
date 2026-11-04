@@ -1590,27 +1590,101 @@ rustc's query engine. It cannot pay off, so no prototype was built.
 | Alternative | Measured | Verdict |
 |---|---|---|
 | Name table in `sysml` | `sysml/tests.py` 25.8 to 2.9 s, `gen-arch-doc --check` 3.3 to 0.8 s, answers identical. The step's slowest member, so about 14 s of a `check`'s wall until the item boundary (20 s) sets it | **Done**, this landing |
-| `-Zthreads=8`, cold `build` | Alternating, 5 rounds each, load 18-38: 88.7 s mean to 52.6 s (83.7, 69.0, 123.1, 92.4, 75.4 against 36.9, 75.9, 44.2, 43.6, 62.5), user CPU +4%, kernel byte-identical | **Open**, the best lead here. Unstable (needs `RUSTC_BOOTSTRAP=1`), so the consultant first. The A/B on `check` was stopped by the queue after its seed; not measured |
+| `-Zthreads=8`, cold `build` | Alternating, 5 rounds each, load 18-38: 88.7 s mean to 52.6 s (83.7, 69.0, 123.1, 92.4, 75.4 against 36.9, 75.9, 44.2, 43.6, 62.5), user CPU +4%, kernel byte-identical | Helps a cold kernel only. Unstable (needs `RUSTC_BOOTSTRAP=1`), so the consultant first. Measured later on a `check` unit, no gain: **not adopted**, see *GPU memory as a gate tier* |
 | tmpfs target, cold `build` | Quiet host, load 7: disk 48.2, 45.9 s; tmpfs 48.3, 53.6 s. No gain when the disk is idle; not measured under load. Five slots' targets, 16-18 GB each even trimmed, do not fit 59 GB of RAM | Not worth it quiet |
 | A faster or emptier root disk | From the iowait above: the only thing here that lifts the pool at saturation. Not an experiment this host allows | Customer's to weigh |
 | `check-item-boundary.py` | 20 s, a Python Rust lexer (`rustlex.py`, `mask` 10,571 calls), now the slowest of the at-once step. A certified checker, so left alone | To mk-ci, with its consultant |
 | sccache, a shared target | Not measured. A warm slot already does what they do; cold slots are mk-ci's | Not pursued |
 
-One thing to decide, separate from time: `tole`'s device ranking takes the first
-discrete GPU in the driver's order when none is named, and the compositor's tests
-start `virgl_test_server --use-egl-surfaceless`, which by glvnd's order means
-NVIDIA's EGL (read, not run). So a `check` on nazuna draws on the 3090 or the 3060:
-the logs above name both for `tole_examples`, and one look at `nvidia-smi` by hand
-at 23:28, not logged, showed both programs on the 3060. The 3060 went off the bus
-on 2026-10-10 while bound to vfio-pci during card-VM boots, cause unknown and no
-host test in the record; only a reboot or a suspend brings it back.
-`docs/backlog/DECISIONS.md` (2026-10-02) says "the 3090 is never touched". It was
-written for the NVIDIA port, and whether it reaches host tests, or this section's
-benches on the 3090, is the customer's to say; hardware use is the product owner's.
-`tole_examples` on lavapipe is no slower; the virgl tests on Mesa's EGL were
-neither timed nor run. The consultant has no certification objection either way
-(ledger 5999): neither crate is in the item and CI has no GPU. Left as it is, with
-the question in `docs/BACKLOG.md`.
+Settled since: the customer's answer of 2026-11-04 is that tests use the RTX 3090
+for GPU work, never the 3060 (`docs/backlog/DECISIONS.md`), and `check` pins them.
+
+### GPU memory as a gate tier: measured, adds no slot (2026-11-04)
+
+The customer asked whether the 36 GB of VRAM could add one or two gate slots.
+**It adds none, because VRAM is not what limits the slots: free disk space is.**
+Freeing space adds two slots without a GPU, and tmpfs beats VRAM as a fast tier.
+Everything ran on the 3090. The 3060 was not used, since the idea failed before
+it was due. Scripts and logs: `~/.local/share/ferrix/mk-gpu-bench/vram/`.
+
+**What limits a slot.** On 2026-11-04 the pool ran 7 slots from 00:05Z to 04:00Z
+and 5 from 05:00Z to 12:00Z. Different rows ran, so this is a guide:
+
+| | Rows/h | Slots busy on average | Median row | Median wait |
+|---|---:|---:|---:|---:|
+| 7 slots | 158 | 6.0 | 97 s | 274 s |
+| 5 slots | 120 | 4.3 | 90 s | 55 s |
+
+Two more slots gave 32% more rows and each row 8% slower, and what ended it was
+86 runs refused at 12-19 GB free. A warm slot holds 19-37 GB. In 20 minutes at
+load 15, the CPU was 48% idle and 6% in iowait.
+
+**A slot's I/O.** Over 40 busy minutes a slot rewrote 10.7-13.2 GB of its target
+dir: incremental 6.1-6.6 GB, `deps` 3.3-4.6, build scripts 0.6-0.7, plus images
+under `build/` (`ferrix.img` 512 MiB, `root-test.img` 1 GiB). The disk took
+writes at 101 ms each while reads took 0.3 ms, so readers are not what waits. One
+512 MiB write with fsync did 924 MB/s at load 21, one of 2 GiB did 105 MB/s at
+load 15: the disk is bursty and not broken (40 C, last trimmed 2026-11-02).
+
+**The stores.** `vramfs` was fetched but not run, because the permission
+classifier refused building it. The FUSE figures are from `vtier` (small, our
+own, not in the tree): blocks in one OpenCL buffer, or in RAM to show
+FUSE's own cost, a CRC32C on every block. Unprivileged FUSE works here.
+
+| | Disk | tmpfs | FUSE on RAM | FUSE on 3090 |
+|---|---:|---:|---:|---:|
+| 2 GiB write + fsync | 105 MB/s | 7,760 | 2,854 | 3,000 |
+| 2 GiB read, evicted | 1,371 MB/s | (cached) | 5,119 | 3,405 |
+| 4 KiB random read | 72 us | 1 | 49 | 61 |
+| 4 KiB write + fsync | 3,913 us | 1 | 39 | 71 |
+| Create 20,000 16 KiB files | 0.19 s | 0.12 | 1.10 | 1.27 |
+| Read them | 0.08 s | 0.08 | 0.22 | 0.18 |
+| Cold `build --arch x86_64`, 2 rounds | 81.4, 59.2 s | 74.0, 50.3 | | 88.7, 71.5 |
+
+The cold builds alternated at unmatched loads of 5-37, so they rank the stores
+and no more; the kernel was byte-identical on all three. VRAM's speed is FUSE's:
+the 13 GB/s link is not the limit. VRAM wins only against the disk's fsync and
+sequential writes, and a build mostly writes into the page cache, so it does not
+gain from that. The driver also caps one buffer at 6.3 GB, and the gates' own
+GPU tests share the 3090's memory.
+
+**What a fault does**, each run on a real build:
+
+| Fault | Result |
+|---|---|
+| Store killed mid-build | `ENOTCONN`, cargo fails, xtask exit 1, so the row is FAILED |
+| One bit flipped in VRAM | CRC mismatch, `EIO`, SIGBUS in a mapped read, xtask exit 135, so FAILED |
+| Driver reset | Not run: provoking one is forbidden here. The code treats a CL error as `EIO` and refuses everything after it |
+| Reboot | An empty store, so a cold rebuild |
+
+None gave a false pass, but the first two read as build failures, so a real tier
+would need `gate.sh` to tell them apart. The 3090 has no ECC, so without the CRC
+a flipped bit would reach the build silently.
+
+**The plain ways.**
+
+| Way | Measured | Verdict |
+|---|---|---|
+| Free disk space, then `GATE_SLOTS=7` | 7 slots above. Finished agents' `target-mk-*` hold 74 GB; with 57 GB free and shedding at 40, that fits two slots. `GATE_OPEN_GB` already keeps a cold slot from opening without room | **Adds 2.** Owner's decision: the dirs are not this branch's to delete |
+| Kernel's incremental dir on tmpfs | Relink after a touch: 2.1-2.3 s; on disk 2.1-7.9 s, worst when the host is busy. A lost dir is only a rebuild | Saves seconds, adds no slot. Not done |
+| Whole target on tmpfs | Fastest, but 5 slots at 19-37 GB do not fit 59 GB of RAM | No |
+| A bigger or second disk | `/` is 98% full. `aosp17` holds 297 GB and `comfy` 189 GB, both the customer's. `nvme0` is BitLocker and `nvme1` has an NTFS partition and the swap | Customer's call; it would remove the limit |
+
+**The two open leads.** `-Zthreads=8` on `check`'s compositor unit, alternating
+in tmpfs: cold 53.7, 53.4, 66.6 s against 52.9, 96.6, 59.8 without, user CPU +4%;
+one crate touched, 23.1, 23.6, 22.9 s against 22.7, 26.9, 22.7. So it gains
+nothing on a unit, and a warm gate rarely recompiles a kernel crate, the one
+place it helped (the cold `build` above). It is unstable as well, so **not
+adopted**. A whole `check` was not A/B'd.
+
+**The compositor rows through virgl on the 3090:** `test-compositor --gl
+--rendernode /dev/dri/renderD130` did draw there (59 MiB on the card, 0-2%
+utilisation). Its one boot took 44.7-48.3 s, against 42.5-54.2 s on QEMU's default
+node, with the same screenshot verdict. Rendering is not what that boot waits on.
+**It would also change what the rows test:** a GL card's console cannot be
+screendumped (`docs/GPU.md` §3.1), so `--gl` replaces all the pixel-judged boots
+with one boot judged from inside the guest. The rows stay as they are.
+
 ## The microkernel run's night, 2026-11-03/04 (mk-ci)
 
 Five agents and their gates on nazuna, measured from `logs/queue/` and a 30 s
