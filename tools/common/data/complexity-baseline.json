@@ -49,6 +49,11 @@
       "lines": 22,
       "recursive": false
     },
+    "device.rs::publish": {
+      "complexity": 14,
+      "lines": 60,
+      "recursive": false
+    },
     "discovery/devmgr.rs::request": {
       "complexity": 17,
       "lines": 44,

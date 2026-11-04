@@ -6,7 +6,7 @@ The statements in the certified item that the measured suite did not reach, on e
 
 | Architecture | Profile | Unreached | Argued | Hardware absent | Needs a test |
 |---|---|---:|---:|---:|---:|
-| x86_64 | coverage | 1924 | 400 | 264 | **1260** |
+| x86_64 | coverage | 1923 | 400 | 263 | **1260** |
 | aarch64 | debug | 633 | 312 | 157 | **164** |
 | armv7a | debug | 978 | 414 | 346 | **218** |
 
@@ -16,7 +16,7 @@ The statements in the certified item that the measured suite did not reach, on e
 
 ## x86_64
 
-**1924** unreached statements, coverage profile.
+**1923** unreached statements, coverage profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
@@ -24,8 +24,8 @@ The statements in the certified item that the measured suite did not reach, on e
 | Reached only when the kernel is stopping | 145 | 8% |
 | Reached only when something has already failed | 64 | 3% |
 | Run, and credited to another line | 5 | 0% |
-| Hardware the measured machine does not have | 264 | 14% |
-| Needs a test | 1260 | 65% |
+| Hardware the measured machine does not have | 263 | 14% |
+| Needs a test | 1260 | 66% |
 
 ### x86_64: Unreachable on the measured architecture — 186 statements
 
@@ -103,13 +103,13 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `mm.rs` |
 | 1 | `core` | `user/space.rs` |
 
-### x86_64: Hardware the measured machine does not have — 264 statements
+### x86_64: Hardware the measured machine does not have — 263 statements
 
 **Not a justification, a configuration statement.** Enumeration and setup for devices this QEMU invocation does not present. A different machine would reach some of it, so the honest closure is either to measure on a machine that has the hardware or to state which devices the claim excludes.
 
 | Statements | Ring | File |
 |---:|---|---|
-| 104 | `core` | `device.rs` |
+| 103 | `core` | `device.rs` |
 | 83 | `item` | `discovery/pci.rs` |
 | 41 | `core` | `iommu/vtd.rs` |
 | 6 | `core` | `discovery/fdt.rs` |
@@ -578,7 +578,7 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 | `discovery/devmgr.rs` | 1242 | Reached only when the kernel is stopping | A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
 | `discovery/devmgr.rs` | 1253 | Reached only when the kernel is stopping | A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
 | `discovery/devmgr.rs` | 1309 | Reached only when something has already failed | The listener's end when devmgr's channel closes: devmgr does not exit in a running system, so the loop never meets a closed channel. |
-| `early.rs` | 178 | Reached only when something has already failed | A device window firmware describes over the kernel's own image. Refused so that a console or framebuffer whose address the device tree or the loader got wrong cannot open a writable window onto the kernel's text. Every machine measured describes its UART and framebuffer apart from the image, and the image is placed by the loader, not by firmware; reaching it needs firmware to describe a device where the kernel was loaded. |
+| `early.rs` | 234 | Reached only when something has already failed | A device window firmware describes over the kernel's own image. Refused so that a console or framebuffer whose address the device tree or the loader got wrong cannot open a writable window onto the kernel's text. Every machine measured describes its UART and framebuffer apart from the image, and the image is placed by the loader, not by firmware; reaching it needs firmware to describe a device where the kernel was loaded. |
 | `hooks.rs` | 62 | Run, and credited to another line | Run by every registration the boot makes -- board bindings, flushes, the quiesce servers -- and by the service check's list of two, which takes two and refuses a third. The loop over the slots is unrolled, and the first slots' call_once is inlined with its closure, under line 48's and 50's rows, which are reached; these lines' rows are only in the out-of-line call of the unrolled tail of Hooks<BoardBinding, 8>, for a slot past the ones the boards fill. |
 | `hooks.rs` | 64 | Run, and credited to another line | Run by every registration the boot makes -- board bindings, flushes, the quiesce servers -- and by the service check's list of two, which takes two and refuses a third. The loop over the slots is unrolled, and the first slots' call_once is inlined with its closure, under line 48's and 50's rows, which are reached; these lines' rows are only in the out-of-line call of the unrolled tail of Hooks<BoardBinding, 8>, for a slot past the ones the boards fill. |
 | `init.rs` | 734 | Hardware the measured machine does not have | A named init that opened and then would not start: an image whose named program is there and is not one the loader takes. The suite's options boot names one that is not there, which is the refusal's other arm. |
@@ -951,9 +951,9 @@ From `coverage-argued-armv7a.json`. Each row is one argument, for the lines it n
 | `discovery/devmgr.rs` | 419 | Reached only when something has already failed | devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it. |
 | `discovery/devmgr.rs` | 548 | Hardware the measured machine does not have | An image with no /sbin/devmgr: every image xtask builds carries it. |
 | `discovery/devmgr.rs` | 1309 | Reached only when something has already failed | The listener's end when devmgr's channel closes: devmgr does not exit in a running system, so the loop never meets a closed channel. |
-| `early.rs` | 123 | Run, and credited to another line | `EarlyMemory::translate` runs at every boot: stage 1's `check_early_mapper` and `check_no_early_window_wraps` (main.rs) call it, inlined, and its body's rows there are reached. Its opening and closing lines have their only statement rows in the out-of-line copy, which on this machine no caller uses. |
-| `early.rs` | 126 | Run, and credited to another line | `EarlyMemory::translate` runs at every boot: stage 1's `check_early_mapper` and `check_no_early_window_wraps` (main.rs) call it, inlined, and its body's rows there are reached. Its opening and closing lines have their only statement rows in the out-of-line copy, which on this machine no caller uses. |
-| `early.rs` | 178 | Reached only when something has already failed | A device window firmware describes over the kernel's own image. Refused so that a console or framebuffer whose address the device tree or the loader got wrong cannot open a writable window onto the kernel's text. Every machine measured describes its UART and framebuffer apart from the image, and the image is placed by the loader, not by firmware; reaching it needs firmware to describe a device where the kernel was loaded. |
+| `early.rs` | 165 | Run, and credited to another line | `EarlyMemory::translate` runs at every boot: stage 1's `check_early_mapper` and `check_no_early_window_wraps` (main.rs) call it, inlined, and its body's rows there are reached. Its opening and closing lines have their only statement rows in the out-of-line copy, which on this machine no caller uses. |
+| `early.rs` | 168 | Run, and credited to another line | `EarlyMemory::translate` runs at every boot: stage 1's `check_early_mapper` and `check_no_early_window_wraps` (main.rs) call it, inlined, and its body's rows there are reached. Its opening and closing lines have their only statement rows in the out-of-line copy, which on this machine no caller uses. |
+| `early.rs` | 234 | Reached only when something has already failed | A device window firmware describes over the kernel's own image. Refused so that a console or framebuffer whose address the device tree or the loader got wrong cannot open a writable window onto the kernel's text. Every machine measured describes its UART and framebuffer apart from the image, and the image is placed by the loader, not by firmware; reaching it needs firmware to describe a device where the kernel was loaded. |
 | `hooks.rs` | 62 | Run, and credited to another line | Run by every registration the boot makes -- board bindings, flushes, the quiesce servers -- and by the service check's list of two, which takes two and refuses a third. The loop over the slots is unrolled, and the first slots' call_once is inlined with its closure, under line 48's and 50's rows, which are reached; these lines' rows are only in the out-of-line call of the unrolled tail of Hooks<BoardBinding, 8>, for a slot past the ones the boards fill. |
 | `hooks.rs` | 64 | Run, and credited to another line | Run by every registration the boot makes -- board bindings, flushes, the quiesce servers -- and by the service check's list of two, which takes two and refuses a third. The loop over the slots is unrolled, and the first slots' call_once is inlined with its closure, under line 48's and 50's rows, which are reached; these lines' rows are only in the out-of-line call of the unrolled tail of Hooks<BoardBinding, 8>, for a slot past the ones the boards fill. |
 | `init.rs` | 734 | Hardware the measured machine does not have | A named init that opened and then would not start: an image whose named program is there and is not one the loader takes. The suite's options boot names one that is not there, which is the refusal's other arm. |
