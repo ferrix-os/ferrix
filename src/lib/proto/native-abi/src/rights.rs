@@ -46,6 +46,16 @@ impl Rights {
     /// `cgroup.procs` and root still owns `memory.max`. A job made with
     /// `job_create` carries it, so a limit can be set on what one makes.
     pub const SET_LIMIT: Rights = Rights(1 << 7);
+    /// Memory may be promised to the job: its reservation set
+    /// (`job_set_limit` with `JOB_RESERVE`, `docs/microkernel/K12.md`).
+    ///
+    /// Apart from [`Rights::SET_LIMIT`], and in no set a new object carries,
+    /// because a limit binds the job while a reservation binds every other
+    /// job on the machine: what it promises, nobody else may take. A job made
+    /// with `job_create` carries it only when the handle it was made through
+    /// does, so it is delegated only by whoever holds it.
+    pub const RESERVE: Rights = Rights(1 << 8);
+
     /// A pager may be served through the handle: VMOs made over it, pages
     /// supplied, requests failed, pages marked dirty and written back
     /// (`docs/microkernel/K3.md`). Bit 8 is K12's.
@@ -82,7 +92,11 @@ impl Rights {
 
     /// Every defined right.
     pub const ALL: Rights = Rights(
-        0xFF | Rights::PAGER.0 | Rights::EXECUTE.0 | Rights::SUPERVISE.0 | Rights::BIND_DOMAIN.0,
+        0xFF | Rights::RESERVE.0
+            | Rights::PAGER.0
+            | Rights::EXECUTE.0
+            | Rights::SUPERVISE.0
+            | Rights::BIND_DOMAIN.0,
     );
 
     /// What a new channel endpoint carries.

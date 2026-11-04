@@ -628,18 +628,22 @@ fn case_a_supplied(world: &World, report: &mut Report) -> Result<(), &'static st
 }
 
 /// Case o: the pager adopts the request's ticket through its handle, so the page it
-/// commits and supplies is the faulting job's; its own job pays nothing. Another pager's handle and a handle without the right adopt
+/// commits and supplies is the faulting job's, on that job's reservation; its own
+/// job pays nothing. Another pager's handle and a handle without the right adopt
 /// nothing, and neither does this one once the request has ended.
 ///
 /// Verifies: L.user.157
 fn case_o_the_faulting_job_pays(world: &World, report: &mut Report) -> Result<(), &'static str> {
-    let faulting = world
+    let reserved = world
         .parent
         .new_child()
         .map_err(|_| "a job refused a child")?;
+    reserved
+        .set_reservation(64 * PAGE_SIZE)
+        .map_err(|_| "o: a reservation was refused")?;
     let served = Served::new(0, 0)?;
     let other = Served::new(0, 0)?;
-    let client = served.client(&faulting)?;
+    let client = served.client(&reserved)?;
     let task = fault_in(&client, Act::Read, 2)?;
     let (_, _, id) = read_packet(&served.packet()?)?;
     let handle = served.pager.ok_or("o: the pager's handle is gone")?;
@@ -678,12 +682,14 @@ fn case_o_the_faulting_job_pays(world: &World, report: &mut Report) -> Result<()
         job.usage(super::quota::Resource::Memory)
             .map_or(0, |usage| usage.used)
     };
-    let (own, theirs) = (memory(&pagers), memory(&faulting));
+    let (own, theirs) = (memory(&pagers), memory(&reserved));
+    let drawn = reserved.reservation().map_or(0, |usage| usage.used);
     if adopt(&served.side, handle).is_err() {
         return Err("o: a pager could not adopt its own request's ticket");
     }
     let supplied = served.supply(2, 1);
-    let (own_after, theirs_after) = (memory(&pagers), memory(&faulting));
+    let (own_after, theirs_after) = (memory(&pagers), memory(&reserved));
+    let drawn_after = reserved.reservation().map_or(0, |usage| usage.used);
     crate::object::ticket::leave();
     let _ = supplied?;
     if outcome(&client, &task)?.0 != Outcome::Read(byte_of(2)) {
@@ -692,6 +698,9 @@ fn case_o_the_faulting_job_pays(world: &World, report: &mut Report) -> Result<()
     // The page, give or take the heap's small records coming and going.
     if theirs_after + PAGE_SIZE / 2 < theirs + PAGE_SIZE || own_after != own {
         return Err("o: the page a pager adopted for was not the faulting job's alone");
+    }
+    if drawn_after <= drawn {
+        return Err("o: the page a pager adopted for did not draw on the job's reservation");
     }
     if adopt(&served.side, handle) != Err(status::BAD_STATE) {
         return Err("o: a request's ticket was adopted after its request ended");

@@ -156,6 +156,9 @@ pub(super) fn check_programs() {
 
     // K13: a pager's restart without its clients' loss.
     check_rebind();
+    // K12: a job's memory reservation, beside its limit.
+    check_reservations();
+
     // K7: charging that follows the client, by a ticket the kernel issued
     // (`docs/microkernel/K7.md`).
     check_tickets();
@@ -1456,6 +1459,27 @@ pub(super) fn check_a_give_up() {
         "  give-up  a close {} drops deep in place with no memory gave up {given_up} object, \
          counted, and the kernel ran on",
         object::IN_PLACE_DEPTH
+    );
+}
+
+/// K12: a job's memory reservation (`docs/microkernel/K12.md` §3): its
+/// rules, its frames drawn from it, an interrupt's never, a reclaim for
+/// anyone else sparing them, and nothing promised once its job is gone.
+///
+/// Halts rather than returning, as every other stage's check does.
+pub(super) fn check_reservations() {
+    let report = match object::reserve_check::run() {
+        Ok(report) => report,
+        Err(problem) => fatal!(
+            catalog::STAGE9_RESERVE,
+            "reservation self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  reserve  {} pages reserved for a job and drawn by its frames, an interrupt's never, \
+         and all {} interrupts so far marked; {} rules refused; a reclaim for another spared \
+         them; the promise back to {} pages and every slot given back",
+        report.reserved, report.interrupts, report.rules, report.promise,
     );
 }
 
