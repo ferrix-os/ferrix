@@ -581,7 +581,7 @@ fn uncharge_owner(owner: u32) {
 /// under whatever lock: the frame record keeps the job's slot, and
 /// [`release_frame`] and [`deallocate_frames`] take the charge back from it.
 pub fn allocate_user_frame() -> Option<Frame> {
-    let owner = crate::sched::running_group();
+    let owner = crate::object::quota::charge_target();
     crate::object::quota::charge_frame(owner).ok()?;
     let frame = allocate_program_frames(0, owner).and_then(|frame| {
         with_frames(|frames| frames.set_owner(frame, owner))
@@ -606,7 +606,7 @@ pub fn allocate_user_frame() -> Option<Frame> {
 /// is refused with nothing taken; `None` then, or with no block free, and
 /// nothing is charged.
 pub(crate) fn allocate_user_run(order: u8) -> Option<Frame> {
-    let owner = crate::sched::running_group();
+    let owner = crate::object::quota::charge_target();
     let count = 1u64 << order;
     let uncharge = |charged: u64| {
         for _ in 0..charged {

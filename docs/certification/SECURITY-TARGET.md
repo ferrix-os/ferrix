@@ -341,6 +341,15 @@ every other job and from its own allocations (`H.QUOTA.15` to 17,
 enters with K12b, when the reservation covers the job's kernel heap too
 (ledger 2550 (6)).
 
+*Application note (K7, `docs/microkernel/K7.md`).* "A job's programs" counts
+what a server's native calls make *for* a client while the server's thread
+holds a live ticket the client issued (`charge_ticket`, H.QUOTA.14): the VMO
+commits and new objects of those calls are charged to the client's job,
+against the client's limits, and never to a job the server names. The
+server's own faults, page tables and kernel heap stay its own job's. A
+ticket stays live until `END` from either side or the close of either end
+of its channel; the client's library ends it when the reply arrives.
+
 ### FIA — identification and authentication
 **None claimed.** See §9.1.
 

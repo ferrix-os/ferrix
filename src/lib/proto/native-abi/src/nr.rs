@@ -253,6 +253,8 @@ pub const PAGER_SUPPLY: usize = 0x1076;
 pub const PAGER_OP: usize = 0x1077;
 /// [`NativeCall::PagerQueryDirty`].
 pub const PAGER_QUERY_DIRTY: usize = 0x1078;
+/// [`NativeCall::ChargeTicket`].
+pub const CHARGE_TICKET: usize = 0x1070;
 /// The most records one [`NativeCall::AuditRead`] copies.
 pub const AUDIT_READ_MAX: u64 = 64;
 /// The largest name [`NativeCall::ProcessCreate`] takes, in bytes.
@@ -913,10 +915,26 @@ pub enum NativeCall {
     /// count. The Dirty and awaiting-clean runs of a range, lowest first;
     /// `BUFFER_TOO_SMALL` with the first `capacity` written when more remain.
     PagerQueryDirty,
+    /// `(op, channel, id_low, id_high, out)`, the id's low and high 32 bits
+    /// in two registers on every architecture. Charging that follows the client
+    /// (`docs/microkernel/K7.md`): a ticket the kernel issues for the
+    /// caller's own job on a channel, which a server thread adopts through
+    /// the other end so that what its native calls make for the request is
+    /// charged to the client. `op` is one of
+    /// [`crate::types::TICKET_ISSUE`] (needs `WRITE`; writes the new id, a
+    /// `u64`, to `out`; `SHOULD_WAIT` past
+    /// [`crate::types::MAX_TICKETS`] live on this end, `PEER_CLOSED`),
+    /// [`crate::types::TICKET_ADOPT`] (needs `READ`; writes the issuer, a
+    /// [`crate::types::TicketIssuer`], to `out`; `BAD_STATE` for an id the
+    /// other end of this channel did not issue or that has ended),
+    /// [`crate::types::TICKET_LEAVE`] (the other arguments ignored) and
+    /// [`crate::types::TICKET_END`] (either end; `BAD_STATE` for an id this
+    /// channel has no live ticket for). `INVALID_ARGS` for another `op`.
+    ChargeTicket,
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 97] = [
+pub const ALL: [NativeCall; 98] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,
@@ -995,6 +1013,7 @@ pub const ALL: [NativeCall; 97] = [
     NativeCall::AddressWake,
     NativeCall::AddressRequeue,
     NativeCall::AddressWaitAny,
+    NativeCall::ChargeTicket,
     NativeCall::TimerCreate,
     NativeCall::TimerSet,
     NativeCall::TimerCancel,
@@ -1126,6 +1145,7 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         PAGER_SUPPLY => NativeCall::PagerSupply,
         PAGER_OP => NativeCall::PagerOp,
         PAGER_QUERY_DIRTY => NativeCall::PagerQueryDirty,
+        CHARGE_TICKET => NativeCall::ChargeTicket,
         _ => return None,
     };
     Some(call)
@@ -1232,5 +1252,6 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::PagerSupply => PAGER_SUPPLY,
         NativeCall::PagerOp => PAGER_OP,
         NativeCall::PagerQueryDirty => PAGER_QUERY_DIRTY,
+        NativeCall::ChargeTicket => CHARGE_TICKET,
     }
 }

@@ -201,6 +201,15 @@ pub const EXCEPTION_CONTEXT: Event = Event::new(Class::Changed, 5);
 /// handle can provoke one.
 pub const DEVICE_LIMIT: Event = Event::new(Class::Refused, 5);
 
+/// A `charge_ticket` refused or ending a ticket (`docs/microkernel/K7.md`):
+/// an `ADOPT` of an id the other end of the channel did not issue or that
+/// has ended, an `END` of one with no live ticket (`BAD_STATE`), and every
+/// `END` done. The detail is the call's number, the op and the id's low
+/// word. Successful issues, adoptions and leaves are not recorded: one of
+/// each per request would flood the ring. In the refusal ring, since any
+/// holder of a channel end can provoke one.
+pub const TICKET: Event = Event::new(Class::Refused, 6);
+
 /// A page request of a pager-backed VMO that ended without its page
 /// (`docs/microkernel/K3.md` §2.3): failed by the pager, timed out at the
 /// pager's bound, or ended by the pager's close or detach. The subject is the
@@ -264,7 +273,7 @@ pub mod power {
 }
 
 /// Every event this crate names, with its name.
-pub const NAMED: [(Event, &str); 31] = [
+pub const NAMED: [(Event, &str); 32] = [
     (START, "START"),
     (CONFIG, "CONFIG"),
     (BOOTED, "BOOTED"),
@@ -275,6 +284,7 @@ pub const NAMED: [(Event, &str); 31] = [
     (WIDEN, "WIDEN"),
     (LIMIT, "LIMIT"),
     (DEVICE_LIMIT, "DEVICE_LIMIT"),
+    (TICKET, "TICKET"),
     (PAGER, "PAGER"),
     (PROCESS_MADE, "PROCESS_MADE"),
     (DELEGATED, "DELEGATED"),
