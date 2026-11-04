@@ -167,7 +167,7 @@ process holds exactly its row, and none the root job.*
 | L.object.321 | each holds exactly §3's row: a test image in each role lists its handle table and each object's rights | the table compared with §3 | one more handle given: *a first process holds a handle its row does not name* |
 | L.object.322 | no first process holds the root job, and devmgr no safety device | the same; DEVICES' count | the filter removed: *devmgr was handed a safety partition's device* |
 | L.object.323 | a description naming no real device stops the boot | row with a made-up location: expected `FX-0953` | test removed: *a partition's device matches no node* |
-| L.object.324 | `DEBUG_LOG_WRITE` needs `WRITE`, is bounded, is rate-limited; a Linux program has no handle | `debug_log_check`, every boot | each removed |
+| L.object.324 | `DEBUG_WRITE` (0x10B0) needs `WRITE`, is bounded, is rate-limited; a Linux program has no handle | `debug_log_check`, every boot | each removed |
 | L.object.325 | the parser: well-formed accepted; bad magic, overrunning count, truncation refused; never reads past the end | host tests, fuzz target, stage 9 made-up file | a bound removed: *the description was read past its end* |
 | L.object.326 | `FX-0954` on the manager's death | row kills it from a test image | the watch removed: *the manager died and the machine ran on* |
 | L.object.327 | the `linux` job killed on `linuxd`'s death | the same | removed: its text |

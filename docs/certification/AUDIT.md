@@ -66,6 +66,11 @@ that one event, and the design says so rather than claiming a record. Linux-pers
 `execve` of a set-id file -- are outside the TOE; the personality may submit
 them through the same interface (§4), marked as its own.
 
+The `BOOTED` record's build word has 32 bits, and under `personality=user` `FLAGS` is 18,
+so they are exactly full: the next flag overflows the shift, and `fault_ahead`'s three bits
+moved the places after it in the flag word of every image, present's and desktop's too,
+though no flag there changed (ledger 6590).
+
 ## 2. What a record holds (FAU_GEN.1, FAU_GEN.2, FPT_STM.1)
 
 A fixed 64-byte record, so the store never allocates (`audit::Record`):

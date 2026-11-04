@@ -533,6 +533,17 @@ log path and commit; a new sighting is added to its row the day it is seen.
   baseline for `lift/core/calls_check.rs` and the rows (6542, item 1).
 * Before any claim: `native/lift.rs::call` split by call, complexity 69, and
   `linuxd_start::start`, complexity 30 (6542, item 6).
+* K7's landing restores `quota::charging_own` around `write_ahead` and `fault_around`
+  in `fill::resolve`: no ticket can be adopted before it, so the running group is right
+  until then (6537, A3; 6590, item 1).
+* `fault_ahead`'s five controls of 6537, A7, on this tree, with L.object.314's tag: its
+  cases ran on `feature/mk-perf` (`logs/queue/mkp7-*`), not here; a neighbour's refused
+  charge moving nothing in memory.events is still to read.
+* A control for `Job::drop` forgetting its kernel job (6542, item 7).
+* `build_flag_word!`'s word: `FLAGS` is 18 under `personality=user`, so `audit_words`' 32
+  bits are exactly full; a const assert before the next flag (6590).
+* `test-rustc` hung in its warm loop once in about five runs on fault-around
+  (mk-perf, 449c63ddc's message), and not in ten since. Not diagnosed (6537 (3)).
 * The window, each a flip precondition (6411, by 6542): a control per path of `replace` and
   the decommit paths, pager refused (W2); W3 and W8 read and controlled; W4's row on KVM
   `--smp 2`; W5's MEMORY-AND-TIMING line; W6's sweeps; W7, a machine check under `user` fails

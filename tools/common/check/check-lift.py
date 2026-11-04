@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -202,6 +203,15 @@ def main() -> int:
         for dep in sorted(dependencies(cargo)):
             if dep in {"ferrix-kernel-core", "ferrix-kernel-item", "ferrix-kernel-load", "ferrix-kernel"}:
                 problems.append(f"{cargo.relative_to(ROOT)}: the lift names the kernel crate {dep}")
+
+    # The shim's map is true of the tree (5714 (1)): an item no rule places, or a stale map.
+    mapped = subprocess.run(
+        [sys.executable, str(ROOT / "tools/common/gen/m5-shim-map.py"), "--check"],
+        capture_output=True,
+        text=True,
+    )
+    if mapped.returncode != 0:
+        problems.append(f"the shim's map: {mapped.stderr.strip()}")
 
     if problems:
         print(f"check-lift: {len(problems)} problem(s)", file=sys.stderr)
