@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2685 declarations in the core's files, 184 in the item's; 183 checks-only.
+2705 declarations in the core's files, 184 in the item's; 184 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1967,9 +1967,12 @@ checks above is `pub` for raised checks (F3).
 | `hole_in_ram` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `memory_check` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `past_ram` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `sweep_user_root` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `sweep_w_xor_x` | fn | bin |  |
 | `WriteExecute` | struct | load |  |
 | `WxReport` | struct | - |  |
+| `WxReport::executable` | field | load, bin |  |
+| `WxReport::leaves` | field | load, bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `mm::reserve`
 
@@ -2038,6 +2041,7 @@ checks above is `pub` for raised checks (F3).
 | `process` | mod | item, load |  |
 | `quota` | mod | item, load |  |
 | `rehome_check` | mod | item (checks) | pub for raised checks |
+| `space` | mod | item |  |
 | `timer` | mod | item, load |  |
 | `TOPOLOGY` | static | item |  |
 | `HandleTable` | type | item, load |  |
@@ -2228,7 +2232,7 @@ checks above is `pub` for raised checks (F3).
 | `Answer` | enum | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `fault` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `forget_last_machine_kill_for_check` | fn | load (checks) | checks-only |
-| `is_charge_refusal` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `is_charge_refusal` | fn | item, load |  |
 | `kills` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `machine_answer` | fn | load (checks) | checks-only |
 | `machine_out_of_memory_among` | fn | load (checks) | checks-only |
@@ -2329,6 +2333,7 @@ checks above is `pub` for raised checks (F3).
 | `Bootstrap::refusal` | method | item, load |  |
 | `Bootstrap::take` | method | item, load |  |
 | `Control::host` | method | item, load |  |
+| `Control::is_unstarted` | method | item |  |
 | `Control::process` | method | item, load |  |
 | `Control::started` | method | item, load, bin |  |
 | `Exit::close` | method | load |  |
@@ -2373,7 +2378,7 @@ checks above is `pub` for raised checks (F3).
 | `Process::uncharge_thread` | method | load |  |
 | `Process::with_bootstrap` | method | item, load |  |
 | `Process::with_handles` | method | item, load |  |
-| `Process::with_tasks` | method | load |  |
+| `Process::with_tasks` | method | item, load |  |
 | `ProcessRef::control` | method | item, load |  |
 | `ProcessRef::created` | method | item, load |  |
 | `ProcessRef::exit` | method | item, load |  |
@@ -2427,6 +2432,17 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `run` | fn | item (checks) | checks-only |
+
+### `object::space`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `SpaceRef` | struct | item |  |
+| `SpaceRef::charging_owner` | method | item |  |
+| `SpaceRef::clone_space` | method | item |  |
+| `SpaceRef::create` | method | item, load |  |
+| `SpaceRef::of` | method | item, load, bin |  |
+| `SpaceRef::space` | method | item, load |  |
 
 ### `object::timer`
 
@@ -2564,6 +2580,7 @@ checks above is `pub` for raised checks (F3).
 | `STAGE9_OBJECTS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE9_QUOTAS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE9_REFUSALS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE9_SPACES` | static | bin (checks) | checks-only |
 | `STAGE9_TIMERS` | static | bin (checks) | checks-only |
 | `SYSFS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `SYSRQ_CRASH` | static | load |  |
@@ -2686,7 +2703,7 @@ checks above is `pub` for raised checks (F3).
 | `CpuReport::worst_overrun` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `CpuTime::busy_ns` | field | load |  |
 | `CpuTime::idle_ns` | field | load |  |
-| `CpuTime::runnable` | field | load |  |
+| `CpuTime::runnable` | field | item, load |  |
 | `CpuTime::switches` | field | load, bin |  |
 | `PreparedTask::launch` | method | load, bin |  |
 | `Summary::switches` | field | load, bin |  |
@@ -3028,6 +3045,7 @@ checks above is `pub` for raised checks (F3).
 | `UserError` | enum | item, load |  |
 | `copy_cstr_from_user` | fn | load |  |
 | `copy_from_user` | fn | item, load |  |
+| `copy_from_user_present` | fn | item |  |
 | `copy_to_user` | fn | item, load |  |
 | `copy_to_user_present` | fn | item |  |
 | `fault_in_for_write` | fn | item |  |
@@ -3227,9 +3245,11 @@ checks above is `pub` for raised checks (F3).
 |---|---|---|---|
 | `MMAP_MIN_ADDR` | const | load |  |
 | `Advice` | enum | load |  |
+| `Ceiling` | enum | item, load |  |
 | `Declined` | enum | load |  |
 | `Destination` | enum | load |  |
 | `FilePlace` | enum | load |  |
+| `ProtectRefused` | enum | item, load |  |
 | `SpaceError` | enum | item, load |  |
 | `coherent_touches` | fn | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Access` | struct | item, load |  |
@@ -3240,9 +3260,10 @@ checks above is `pub` for raised checks (F3).
 | `WindowPages` | struct | load |  |
 | `Access::READ` | associated const | item, load |  |
 | `Access::WRITE` | associated const | item, load |  |
-| `Access::execute` | field | load |  |
+| `Access::execute` | field | item, load |  |
 | `Access::write` | field | item, load |  |
 | `AddressSpace::advise` | method | load |  |
+| `AddressSpace::allocate_by_handle` | method | item |  |
 | `AddressSpace::ceiling` | method | item, load |  |
 | `AddressSpace::domain` | method | item, load |  |
 | `AddressSpace::fault` | method | item, load |  |
@@ -3253,6 +3274,7 @@ checks above is `pub` for raised checks (F3).
 | `AddressSpace::layout` | method | item, load |  |
 | `AddressSpace::map_anonymous` | method | load |  |
 | `AddressSpace::map_anywhere` | method | load |  |
+| `AddressSpace::map_by_handle` | method | item, load |  |
 | `AddressSpace::map_code_page` | method | load |  |
 | `AddressSpace::map_file` | method | load |  |
 | `AddressSpace::map_object` | method | item, load |  |
@@ -3263,6 +3285,8 @@ checks above is `pub` for raised checks (F3).
 | `AddressSpace::new` | method | item, load, bin |  |
 | `AddressSpace::object` | method | item, load, bin |  |
 | `AddressSpace::protect` | method | load |  |
+| `AddressSpace::protect_by_handle` | method | item, load |  |
+| `AddressSpace::raises_refused` | method | load |  |
 | `AddressSpace::region_count` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `AddressSpace::regions` | method | item, load, bin |  |
 | `AddressSpace::remap` | method | load |  |
@@ -3272,8 +3296,9 @@ checks above is `pub` for raised checks (F3).
 | `AddressSpace::root_table` | method | item, load |  |
 | `AddressSpace::set_ceiling` | method | load |  |
 | `AddressSpace::shared_code_at` | method | load |  |
+| `AddressSpace::shootdowns_begun` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `AddressSpace::uninstall` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
-| `AddressSpace::unmap` | method | load |  |
+| `AddressSpace::unmap` | method | item, load |  |
 | `AddressSpace::with_page` | method | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `AddressSpace::with_present_page` | method | load |  |
 | `AddressSpace::with_regions` | method | load |  |
