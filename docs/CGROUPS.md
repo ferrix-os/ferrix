@@ -1012,7 +1012,7 @@ class, the one `account_in` charges; the same boot then held the program
 with 47 periods throttled. Those failing runs are the cpu-arm-order row's
 control: the code before the fix is its sabotage. The fast path's three
 exits now wait out a used quota as the general way out does; the boot with
-`ferrix.fastpath=on` that would prove it is owed (BACKLOG, step 4's F9).
+`ipc_fastpath=on` that would prove it is owed (BACKLOG, step 4's F9).
 
 ## 15. Stage 13's exit test (2026-10-12)
 

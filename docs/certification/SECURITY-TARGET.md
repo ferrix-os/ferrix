@@ -376,7 +376,8 @@ claim.
 audit record of the following auditable events: a) start-up of the audit
 functions -- **the start-up record, and, as the last record before a power
 action, the power action**; b) **the TOE's configuration at start-up:
-`ferrix.checks`, `ferrix.devmgr`, the mitigations, KASLR, whether the
+`ferrix.checks`, `ferrix.devmgr`, the mitigations, `ipc_fastpath` from
+`Config::Build`, KASLR, whether the
 kernel log is kept across a reset (`ferrix.pstore`) and
 `ferrix.efifb`, and the build
 flags the kernel was compiled with**; c) **a

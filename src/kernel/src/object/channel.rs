@@ -206,7 +206,7 @@ struct Inbox {
     /// the inbox is empty and the task blocked, under this lock; taken by a
     /// fast commit, by any general write or close, which then wakes it, and
     /// by the task as it leaves its call. Set only where the fast path is
-    /// (`arch::FAST_WRITE_READ`): elsewhere nothing parks.
+    /// (`fastpath::BUILT`): elsewhere nothing parks.
     parked: Option<Arc<Task>>,
 }
 
@@ -1021,6 +1021,7 @@ impl Endpoint {
     /// until the switch: the halves' locks are held under that mask, counted
     /// for A3 but without the site record or the deferred decision
     /// (`sync::try_lock_masked`).
+    #[cfg(ferrix_fast_ipc)]
     pub unsafe fn send_direct(
         &self,
         caller: &Task,
@@ -1067,6 +1068,7 @@ impl Endpoint {
     /// (T6 to T8, under this side's lock, the order a writer and a close
     /// read it in). Answers whether it parked; the caller then makes the
     /// last look and blocks (`sched::direct::block_parked`).
+    #[cfg(ferrix_fast_ipc)]
     pub fn park(&self, task: &Arc<Task>) -> bool {
         let own = self.own();
         let mut inbox = own.inbox.lock();
@@ -1081,6 +1083,7 @@ impl Endpoint {
 
     /// Clear this side's record if it still names `task`: a parked task
     /// leaving its park by any way but a commit, which cleared it already.
+    #[cfg(ferrix_fast_ipc)]
     pub fn unpark(&self, task: &Task) {
         let taken = {
             let mut inbox = self.own().inbox.lock();
@@ -1104,6 +1107,7 @@ impl Endpoint {
 /// (T8) -- and a reader is parked on the peer's side (T9) with nobody else
 /// to be told of the message (T10). Answers the reader. A record beside a
 /// message or on a closed end stops the machine (A2, FX-0531).
+#[cfg(ferrix_fast_ipc)]
 fn sendable<'a>(
     own: &Half,
     own_inbox: &Inbox,

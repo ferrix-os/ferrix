@@ -61,11 +61,6 @@ pub const ARCH: Arch = Arch::X86_64;
 /// Which `struct stat` the stat calls fill in: x86-64's own, 144 bytes, from
 /// `arch/x86/include/uapi/asm/stat.h`. x86-64 kept the layout it grew rather
 /// than adopting the generic one, so this is not the AArch64 answer.
-/// Whether this architecture's `SYSCALL`-style entry takes step 4's fast
-/// path for `channel_write_read` when one is registered
-/// (`docs/OPAQUE-KERNEL.md` §9.7): x86-64's alone.
-pub const FAST_WRITE_READ: bool = true;
-
 /// The `struct stat` layout x86-64's `stat` family writes: the legacy one.
 pub const STAT_LAYOUT: super::StatLayout = super::StatLayout::Legacy;
 
@@ -2581,3 +2576,7 @@ pub(crate) mod inspect;
 pub(crate) fn check_smt() -> Result<(), &'static str> {
     smp::check::check_smt()
 }
+
+/// Whether this architecture's system-call entry has the fast path for `channel_write_read` to take, so
+/// that its stage-9 cases, answered by the general path in an image built without it, run here.
+pub const FAST_WRITE_READ: bool = true;

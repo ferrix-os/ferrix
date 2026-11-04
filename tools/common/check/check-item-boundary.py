@@ -1074,6 +1074,17 @@ def _closing(masked: str, open_at: int) -> int:
     return len(masked)
 
 
+def _carries_cfg(masked: str, at: int, cfg: str) -> bool:
+    """Whether the attributes directly above the line at `at` hold `#[cfg(<cfg>)]`."""
+    for line in reversed(masked[:masked.rfind("\n", 0, at) + 1].splitlines()):
+        stripped = line.strip()
+        if stripped == f"#[cfg({cfg})]":
+            return True
+        if stripped and not stripped.startswith("#["):
+            return False
+    return False
+
+
 def hook_problems(ring_of: dict[str, str], read, hooks: list[dict], root: str | None) -> list[str]:
     """What breaks the link-time hook rule, over `ring_of`'s files."""
     listed = {entry["name"]: entry for entry in hooks}
@@ -1089,10 +1100,14 @@ def hook_problems(ring_of: dict[str, str], read, hooks: list[dict], root: str | 
                 continue
             open_at = block.end() - 1
             body = masked[open_at:_closing(masked, open_at)]
-            for name in _FN_NAME.findall(body):
+            for name_at in _FN_NAME.finditer(body):
+                name = name_at.group(1)
                 if ring_of[rel] not in ("core", "item"):
                     continue
                 declared[name] = rel
+                wanted = listed.get(name, {}).get("cfg")
+                if wanted and not _carries_cfg(masked, open_at + name_at.start(), wanted):
+                    problems.append(f"{rel}: hook `{name}`'s declaration is not under #[cfg({wanted})]")
                 if name not in listed:
                     problems.append(
                         f"{rel}: `{name}` is declared in an extern \"Rust\" block of the "
@@ -1103,6 +1118,9 @@ def hook_problems(ring_of: dict[str, str], read, hooks: list[dict], root: str | 
             open_at = masked.find("{", found.end())
             body = masked[open_at + 1:_closing(masked, open_at)].strip()
             defined[name].append((rel, body))
+            wanted = listed.get(name, {}).get("cfg")
+            if wanted and not _carries_cfg(masked, found.start(), wanted):
+                problems.append(f"{rel}: hook `{name}`'s definition is not under #[cfg({wanted})]")
     for name, sites in sorted(defined.items()):
         if name not in listed and name not in declared:
             continue
@@ -2156,15 +2174,24 @@ def _crate_self_test() -> list[str]:
 # The hook rule's cases: a tree that keeps it, and the three ways to break it
 # the consultant asked to see fail (ledger line 415, H1), each on its own.
 _HOOK_RINGS = {"main.rs": "load", "trap.rs": "core", "up.rs": "load"}
-_HOOK_LIST = [{"name": "hook_up", "declared_in": "trap.rs", "forwards_to": "up::go"}]
+_HOOK_LIST = [{"name": "hook_up", "declared_in": "trap.rs", "forwards_to": "up::go"},
+              {"name": "hook_on", "cfg": "f_on", "declared_in": "trap.rs", "forwards_to": "up::go"}]
 _HOOK_TREE = {
     "main.rs": "mod trap; mod up;\n#[unsafe(no_mangle)]\nfn hook_up(a: &[u64; 6]) -> bool {\n"
+               "    up::go(a)\n}\n#[cfg(f_on)]\n#[unsafe(no_mangle)]\nfn hook_on(a: &[u64; 6]) -> bool {\n"
                "    up::go(a)\n}\n",
-    "trap.rs": "// SAFETY: (LINK) x\nunsafe extern \"Rust\" {\n    safe fn hook_up(a: &[u64; 6]) -> bool;\n}\n"
+    "trap.rs": "// SAFETY: (LINK) x\nunsafe extern \"Rust\" {\n    safe fn hook_up(a: &[u64; 6]) -> bool;\n"
+               "    #[cfg(f_on)]\n    safe fn hook_on(a: &[u64; 6]) -> bool;\n}\n"
                "unsafe extern \"C\" {\n    fn stub();\n}\n",
     "up.rs": "pub fn go(a: &[u64; 6]) -> bool { a[0] == 1 }\n",
 }
 _HOOK_BREAKS = [
+    ("a flagged hook declared without its cfg",
+     {"trap.rs": _HOOK_TREE["trap.rs"].replace("    #[cfg(f_on)]\n", "")},
+     "declaration is not under"),
+    ("a flagged hook defined without its cfg",
+     {"main.rs": _HOOK_TREE["main.rs"].replace("#[cfg(f_on)]\n", "")},
+     "definition is not under"),
     ("an undeclared hook in the core",
      {"trap.rs": _HOOK_TREE["trap.rs"] + "unsafe extern \"Rust\" { fn sneak(); }\n"},
      "not in composition_root.hooks"),

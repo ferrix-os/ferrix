@@ -705,7 +705,7 @@ Spent about 33 points of about 70 estimated.
   stays the server's, bounded as K7.md 2.3 says; charge it to the ticket's job when
   K12b's reservation heap can (ledger 2925 (1)).
 - K10's fast path on a quiet host: `bench-ipc --release --accel kvm --smp 1 --arch x86_64
-  --alternate <before K10> --rounds 9 --kernel-option ferrix.fastpath=on` under
+  --alternate <before K10> --rounds 9 --set ipc_fastpath=on --no-claim` under
   `fleet/bench.lock` read 1.013 with A/A 1.000 (0.805 to 1.040), load about 35: not shown
   either way (ledger 5860 (ii)). Limit 1.01, fix or revert past it on a quiet host.
 - `mk/k12` (8af71f23d, WIP, never compiled, most of K12a): kernel-memory

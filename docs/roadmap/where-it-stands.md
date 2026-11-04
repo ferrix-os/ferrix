@@ -429,7 +429,7 @@ Since the 2026-09-27 wind-down, everything finished is on `main` and pushed:
   (2026-10-06, 445d09420 to 98fdf69cc). A send of at most 24 bytes to a reader
   parked on the other end of a channel is handed over directly, with the
   processor; every other call goes the general way. It runs behind
-  `ferrix.fastpath=on`, on x86-64 only, and is off in the certified
+  `ipc_fastpath=on`, on x86-64 only, and is off in the certified
   configuration for the first release (the customer, §9.7). `domain-call`
   p50, every mitigation on, was 2,556 ns at the 2026-10-05 wind-down (37 us
   before step 1); step 4 read 1,548 to 1,558 ns against 2,576 ns without it.

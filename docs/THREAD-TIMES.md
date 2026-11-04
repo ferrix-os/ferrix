@@ -117,7 +117,7 @@ mode, which take the paranoid entry and do not reach `dispatch` -- take no
 stamp, so they never write the state under a stamp they interrupted.
 
 **The fast path takes no reading.** The native `channel_write_read` fast
-path (`ferrix.fastpath=on`, outside `present`) enters before the entry
+path (`ipc_fastpath=on`, outside `present`) enters before the entry
 stamp and leaves by the frame tail's quiet exit or its `Done` answer,
 unstamped, so its time in the kernel counts as user time (the consultant's
 ruling: accepted as stated behaviour, written as an exclusion in L.sched.81,

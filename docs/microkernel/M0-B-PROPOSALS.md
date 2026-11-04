@@ -13,6 +13,9 @@ other three values M0 builds: `smt=off`, `ssbd=on_request` and
 files, the checks and the controls, and list what the code will have to
 decide.
 
+**Where it stands (2026-11-04):** §1 BF6 and §2 DF6 are code on `feature/mk-land`
+under review; `smt=off` (§3) landed `b8a57534b`; §4 and §5 still plans.
+
 **Reviewed 2026-10-14** (`~/.local/share/ferrix/cert-consultant/reviews.md`,
 reviewer m0-b-cert, at `ef59e4115` on `main` `65608f7a0`):
 

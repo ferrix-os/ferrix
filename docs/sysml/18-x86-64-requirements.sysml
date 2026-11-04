@@ -415,36 +415,38 @@ package FerrixX8664Requirements {
                 "arch::x86_64::set_cpu_local");
         }
         requirement <'L.x86_64.159'> theFastPathIsEnteredFromSyscallOnly : ItemLowLevel {
-            attribute :>> statement = "ferrix_syscall_entry shall call the fast path
-                only for 0x1013 and only while the core's fast-path flag is raised,
-                read at every call, which fastpath::init does for ferrix.fastpath=on
-                alone; before the filter and with interrupts masked, after every
-                entry measure the stub makes; raising the vector mark first and
-                lowering it on a decline.";
-            attribute :>> criterion = "Booted with the fast path off, no counter
-                moves; on, trips are taken (test-ipc-equiv).";
+            attribute :>> statement = "In a kernel built with ipc_fastpath=on for
+                x86-64, ferrix_syscall_entry shall call the fast path for 0x1013 and
+                for no other number, before the filter and with interrupts masked,
+                after every entry measure the stub makes, raising the vector mark
+                first and lowering it on a decline; in a kernel built with
+                ipc_fastpath=off the entry shall contain no call of it.";
+            attribute :>> criterion = "The on image's boot takes trips
+                (test-ipc-equiv); the off image holds neither the hook nor the marker
+                (test-ipc-equiv's symbol check, its control FIRED) and its stage-9
+                line says off.";
             attribute :>> parent = "H.OBJ.18";
-            attribute :>> unit = ("trap::fast_write_read", "trap::fast_path_on",
-                "trap::fast_write_read_now");
+            attribute :>> unit = ("fastpath::report", "trap::fast_write_read_now");
         }
         requirement <'L.x86_64.161'> theCoreCallsUpOnlyThroughListedHooks : ItemLowLevel {
             attribute :>> statement = "The core shall reach the fast path and T2's
                 quiet predicate only through the two link-time hooks
                 composition_root.hooks names, each declared once in trap.rs, defined
                 once in main.rs as one call of the function the entry names, and
-                tied on both sides to one fn alias; and shall make each call only
-                while a core flag read at that call says so: the fast path while
-                the fast-path flag is raised, the predicate only for a filter
+                tied on both sides to one fn alias; the fast path only in a kernel
+                built with ipc_fastpath=on for x86-64, through a hook declared and
+                defined under that predicate; the predicate only for a filter
                 registered with it by trap::set_quiet_syscall_filter, which raises
                 that flag after the filter is in place and only for the filter it
                 installed.";
             attribute :>> criterion = "check-item-boundary.py refuses an
                 extern-Rust declaration in the core that the list does not name, a
-                hook defined outside main.rs and one whose body does more than
-                forward (its self-test cases, each made on the tree as well); booted
-                with ferrix.fastpath=off no fast path counter moves and with on
-                trips are taken, and stage 9's case 11 is refused through the
-                predicate on both boots (`cargo xtask test-ipc-equiv`).";
+                hook defined outside main.rs, one whose body does more than forward
+                and a flagged hook declared or defined without its cfg (its self-test
+                cases, each made on the tree as well); on the off image no fast path
+                counter moves and on the on image trips are taken, and stage 9's case
+                11 is refused through the predicate on both (`cargo xtask
+                test-ipc-equiv`).";
             attribute :>> parent = "H.OBJ.18";
             attribute :>> unit = ("trap::filter_quiet", "trap::set_quiet_syscall_filter",
                 "trap::fast_write_read_now");
@@ -455,11 +457,13 @@ package FerrixX8664Requirements {
                 with nothing due and the filter quiet, otherwise opening interrupts,
                 stopping with FX-0533 where the task may not block, and running
                 regroup_current, call_left and the way out.";
-            attribute :>> criterion = "ipc-equiv's cases 1 and 2 with the fast path
-                on; case 14 and the continuation's kill leave by the general branch.";
+            attribute :>> criterion = "ipc-equiv's cases 1 and 2 in the on build;
+                stage 9 in the on build holds a reply to its four registers (a fifth
+                written is refused, its control FIRED); case 14 and the continuation's kill leave by the general branch.";
             attribute :>> parent = "H.OBJ.18";
             attribute :>> unit = ("arch::x86_64::syscall::frame_tail",
-                "arch::x86_64::syscall::write_outcome", "arch::x86_64::syscall::leave");
+                "arch::x86_64::syscall::write_outcome", "arch::x86_64::syscall::leave",
+                "arch::x86_64::syscall::reply_writes_four_registers");
         }
         requirement <'L.x86_64.13'> sigreturnLoadsFpu : ItemLowLevel {
             attribute :>> statement = "load_fpu shall load the x87 and SSE registers
@@ -2157,24 +2161,6 @@ package FerrixX8664Requirements {
             attribute :>> parent = ("H.TRAP.3", "H.TRAP.12");
             attribute :>> unit = ("arch::x86_64::syscall::early",
                 "arch::x86_64::syscall::ferrix_syscall_entry");
-        }
-        requirement <'L.x86_64.150'> theFastPathSwitchIsReadOnce : ItemLowLevel {
-            attribute :>> statement = "fastpath::init shall read ferrix.fastpath once,
-                before the first program, from the loader's command line and then the
-                device tree's bootargs; on shall be true only for ferrix.fastpath=on,
-                off for off, for no option and for any other value, which is reported
-                as ignored; it shall raise the core's fast-path flag
-                (trap::set_fast_write_read) for on alone, before the first program,
-                and nothing shall lower it; and stage 9 shall print which path
-                channel_write_read takes and how the option was read.";
-            attribute :>> criterion = "Booted with ferrix.fastpath=off and with
-                ferrix.fastpath=on, x86-64's stage-9 line says off and on as asked,
-                and ipc-equiv's transcripts on the two boots are the same line for
-                line (`cargo xtask test-ipc-equiv`); test-boot, which passes no
-                option, says off by default.";
-            attribute :>> parent = "H.BOOT.2";
-            attribute :>> unit = ("fastpath::init", "fastpath::on", "fastpath::report",
-                "trap::set_fast_write_read");
         }
     }
 

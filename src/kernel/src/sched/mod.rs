@@ -45,6 +45,7 @@ mod borrow;
 mod borrow_check;
 mod check;
 mod deadline_check;
+#[cfg(ferrix_fast_ipc)]
 pub mod direct;
 mod mark_check;
 mod preempt;
@@ -282,10 +283,7 @@ pub fn regroup_current() {
 /// asked of this processor, and no move between jobs since it last looked.
 /// When any is there, the tail takes the general way out instead, which
 /// reads each again and acts on it.
-#[cfg_attr(
-    not(target_arch = "x86_64"),
-    expect(dead_code, reason = "only x86-64's SYSCALL entry takes the fast path")
-)]
+#[cfg(ferrix_fast_ipc)]
 pub(crate) fn nothing_due_here() -> bool {
     let Some(cpu) = this_cpu() else {
         return false;
@@ -305,6 +303,7 @@ pub(crate) fn nothing_due_here() -> bool {
 /// quota: what the frame tail asks so that a task making only fast-path calls
 /// is held to its quota as the general way out ([`throttle_current`]) holds
 /// it. A machine with no `cpu.max` set pays one load. With interrupts masked.
+#[cfg(ferrix_fast_ipc)]
 fn throttled_here(cpu: usize) -> bool {
     if !quota::bandwidth_in_use() {
         return false;

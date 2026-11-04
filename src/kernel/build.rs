@@ -212,6 +212,15 @@ fn build_flags() -> Result<Vec<(String, String)>, Box<dyn Error>> {
         }
         println!("cargo::rustc-cfg=ferrix_{name}=\"{value}\"");
         flags.push((name.to_owned(), value.to_owned()));
+        // The one predicate for the fast path's code (BF6, ledger 1001 (1)): the
+        // flag on x86-64. Never retyped at a site.
+        println!("cargo::rustc-check-cfg=cfg(ferrix_fast_ipc)");
+        if name == "ipc_fastpath"
+            && value == "on"
+            && std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("x86_64")
+        {
+            println!("cargo::rustc-cfg=ferrix_fast_ipc");
+        }
     }
     if let Some((missing, _)) = values
         .iter()

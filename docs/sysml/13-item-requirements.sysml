@@ -570,7 +570,7 @@ package FerrixItemRequirements {
             attribute :>> statement = "Every result of channel_write_read answered by
                 the fast path shall be a result the general path gives in the same
                 circumstances, and the fast path shall bypass no filter, audit record
-                or speculation barrier. x86-64 only, behind ferrix.fastpath.";
+                or speculation barrier. x86-64 only, in a kernel built with ipc_fastpath=on.";
             attribute :>> criterion = "ipc-equiv's transcripts with the fast path on
                 and off are the same line for line, with trips taken on and no
                 counter moved off (`cargo xtask test-ipc-equiv`); stage 9's fast path

@@ -1291,7 +1291,7 @@ pub(super) fn check_native_objects() {
          {} refusals as specified, {} frames leaked",
         report.messages, report.moved, report.refusals, report.leaked,
     );
-    // Which path `channel_write_read` takes on this boot (`ferrix.fastpath`).
+    // Which path `channel_write_read` takes in this build (`ipc_fastpath`).
     fastpath::report();
     println!(
         "  jobs     {} processes in a tree of three jobs ended by two kills, \

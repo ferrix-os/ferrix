@@ -125,7 +125,7 @@
     "the return-stack refill (A2) except where the processor provably empties it (ERAPS, its own review)",
     "the switch barrier between programs not in one speculation domain",
     "FDP_RIP.2: no register of one program reaches another, vector, MXCSR, x87, XINUSE, selectors, bases",
-    "the general path's observable results: the fast path is a tested equivalence of it, off in the certified configuration (ferrix.fastpath) for the first release",
+    "the general path's observable results: the fast path is a tested equivalence of it, off in the certified configuration (ipc_fastpath) for the first release",
     "one landing, one consultant review; requirement ids reserved before rows are written"
   ]
 }

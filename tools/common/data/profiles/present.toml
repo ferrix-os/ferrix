@@ -61,7 +61,6 @@ runtime_settings = "live"
 console = ["*"]
 "drm.edid_firmware" = ["*"]
 "ferrix.devmgr" = ["kernel"]
-"ferrix.fastpath" = ["off"]
 
 # The build settings that change code without a cfg (BF4), compared with the
 # tree by check-item-boundary.py: the toolchain with rust-toolchain.toml, the

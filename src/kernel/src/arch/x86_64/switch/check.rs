@@ -1499,14 +1499,18 @@ fn read_twice(_argument: usize) {
 ///
 /// Verifies: `L.x86_64.155`
 fn run_sending_vector_case(wake: Wake) -> Result<(), &'static str> {
+    #[cfg(ferrix_fast_ipc)]
     use crate::sched::direct::{Count, counts};
     // On one processor the check's own task is runnable beside the victim as
     // it starts -- the victim's arrival preempts it -- so the victim's send
     // finds a task waiting and goes the general way (T12): there the case is
     // made once, holding the general path to the reset.
-    let fast = crate::trap::fast_write_read().is_some() && crate::smp::count() >= 2;
+    let fast = crate::fastpath::BUILT && crate::smp::count() >= 2;
     for _ in 0..6 {
+        #[cfg(ferrix_fast_ipc)]
         let trips = || counts().get(Count::Trip as usize).copied().unwrap_or(0);
+        #[cfg(not(ferrix_fast_ipc))]
+        let trips = || 0_u64;
         let before = trips();
         send_then_wake(wake)?;
         if !fast || trips() != before {

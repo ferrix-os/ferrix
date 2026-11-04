@@ -266,6 +266,7 @@ fn settle_slot(slot: &Slot, running: Option<&Task>, now: Option<u64>) {
 /// closed, into it with a reading should an entry have opened it, so that
 /// the task switched to, which leaves by the frame tail's quiet exit, starts
 /// in user time. Under the queue's lock with interrupts masked.
+#[cfg(ferrix_fast_ipc)]
 pub(super) fn direct_switch(cpu: usize, previous: &Task) {
     if !counting() {
         return;

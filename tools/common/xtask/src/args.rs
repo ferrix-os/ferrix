@@ -1114,6 +1114,12 @@ fn kernel_option(items: &mut impl Iterator<Item = String>) -> Result<String> {
             "--kernel-option wants one word, not `{option}`; give the flag once for each"
         )));
     }
+    if option.starts_with("ferrix.fastpath") {
+        return Err(Error::new(format!(
+            "--kernel-option {option}: the boot option is retired, and the fast path is built or \
+             not; use `--set ipc_fastpath=on --no-claim` or `--kernel-profile desktop`"
+        )));
+    }
     Ok(option)
 }
 
@@ -1427,6 +1433,19 @@ mod tests {
     fn reset_is_off_unless_asked_for() {
         assert!(!parse(&["test-boot"]).unwrap().reset);
         assert!(parse(&["test-boot", "--reset"]).unwrap().reset);
+    }
+
+    #[test]
+    fn the_fast_paths_retired_option_is_refused_by_name() {
+        let refused = parse(&["test-boot", "--kernel-option", "ferrix.fastpath=on"]);
+        let message = refused
+            .err()
+            .map(|error| error.to_string())
+            .unwrap_or_default();
+        assert!(
+            message.contains("--set ipc_fastpath=on --no-claim"),
+            "{message}"
+        );
     }
 
     #[test]

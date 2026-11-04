@@ -190,7 +190,7 @@ distortion. Timing builds never land.
   `XINUSE` as a program can read it (`XGETBV 1`), selectors and their RPL
   bits, FS/GS bases.
 - **The general path's observable results.** The fast path is a second
-  implementation, accepted as a *tested equivalence*: `ferrix.fastpath` off
+  implementation, accepted as a *tested equivalence*: `ipc_fastpath` off
   and on must agree on every return word, code, order, a peer's close, a
   signal or kill during the wait. It is off in the certified configuration
   for the first release (customer, 2026-10-02).
@@ -354,7 +354,7 @@ added after the fact, so each measurement records it when it is taken.
    that crosses the change says so at that point.
 2. **The configuration.** Record:
    - the tree's full hash and kernel options;
-   - mitigations on or off, the speculation domain, and `ferrix.fastpath`;
+   - mitigations on or off, the speculation domain, and `ipc_fastpath`;
    - the reference: a tree, or another kernel with its build options.
 
    A baseline kernel is named, built matched, and the reason it is the

@@ -89,7 +89,6 @@ reference configuration). **DT** = also read from `/chosen/bootargs`.
 | `ferrix.efifb` | flag | off | lend the firmware framebuffer to the ring-3 `efifb` driver (GPU-less PC, firmware-screen desktop); the PCI function holding it is left undriven. Arm: recorded, not honoured | x86-64 | item (`discovery/firmware.rs`) | — (AoU-31) | L.device.38–43, L.device.46 | admin |
 | `ferrix.intelgpu` | flag | off | let the Intel integrated GPU (00:02.0) be driven by the ring-3 `intel` driver | x86-64 | core (`device.rs`, read in `main.rs`) | — | H.DMA.10, L.device.44, L.device.46 | admin (hardware enablement) |
 | `ferrix.devmgr` | `kernel`, `init` | `kernel` | `init`: pid 1 starts `devmgr` and `/` waits for its disk (every image that boots `/sbin/init` uses it). DT. | all | item (`discovery/devmgr.rs`) | `kernel` only | L.device.54 | admin (retires at M5) |
-| `ferrix.fastpath` | `on`, `off` | `off` | the `channel_write_read` IPC fast path; `on` only takes effect on x86-64. Others said and ignored. DT. | x86-64 (recorded elsewhere) | item (`fastpath.rs`) | `off` only | L.x86_64.159, L.x86_64.161, L.sched.81 | developer (becomes build flag `ipc_fastpath`) |
 | `ferrix.vtd` | `on`, `off` | `on` | `off` leaves every VT-d unit alone (no DMA translation, no interrupt remapping): recovery only. Since the DMA gate devmgr then starts no driver, so a recovery boot needs `ferrix.unisolated` as well | x86-64 | core (`iommu.rs`) | `on` only | L.iommu.71 | admin (recovery) |
 | `ferrix.amdvi` | `on`, `off` | `on` | `off` leaves every AMD-Vi unit alone (no DMA translation, no interrupt remapping): recovery only. Since the DMA gate devmgr then starts no driver, so a recovery boot needs `ferrix.unisolated` as well | x86-64 | core (`iommu/ivrs.rs`) | `on` only | L.iommu.98 | admin (recovery) |
 | `ferrix.unisolated` | flag | off | devmgr may start the drivers of bus masters whose DMA is not translated or whose interrupts are not isolated, each said on an `UNISOLATED` line; the kernel says it at stage 10 and audits it (`Config::Unisolated`). Every ARMv7-A image carries it (outside the claim, G4). No certified profile may permit it (`claimless`) | all | item (`discovery/devmgr.rs`) and ring 3 (`devmgr-proto::admission`) | — (AoU-8) | L.device.57–59 | developer (development images only) |
@@ -509,7 +508,7 @@ changed by a running system or a Settings app**. Source:
 | `fs` | server, kernel, none | kernel | kernel | kernel, none |
 | `mitigations` | on, off | on | on | both (off: no claim; also turns KASLR off) |
 | `partition_speculation` | exit, partition, not_applicable | n/a | n/a | n/a |
-| `ipc_fastpath` | off, on | off | on (stand-in for off) | off; the run-time switch today is `ferrix.fastpath` |
+| `ipc_fastpath` | off, on | off | on | off; never a run-time switch (BF6) |
 | `restricted_fastpath` | off, on, not_applicable | n/a | n/a | n/a |
 | `kernel_memory` | retyped, heap | heap | heap | heap |
 | `schedule` | windows, edf, fair | fair | fair | fair |

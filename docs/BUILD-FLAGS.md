@@ -98,7 +98,7 @@ explicitly (§4: levels compare standard by standard, so `sc4` covers
 | `fs` | `server`, `kernel`, `none` | btrfs as `btrfsd`, the btrfs crates in ring 0 with today's glue, or no filesystem (the VFS is the Linux ABI's). `kernel` requires `personality=kernel`, `none` requires `personality=none` | `server` | `server` | `kernel` | `kernel` (the same exception) | `server`: all; `kernel`: `none`; `none`: `none` (the same) | in ring 0, or `none` | M5 |
 | `mitigations` | `on`, `off` | F-31's speculation defences (Zenbleed's and GDS's fixes are outside it, below) | `on` | `on` | `on` | `on` | `on`: all; `off`: `none` | `--cfg ferrix_mitigations_off`, renamed | M0 |
 | `partition_speculation` | `exit`, `partition` | `exit`: an IBPB (with IBPB_BRTYPE's semantics) on every restricted exit, none on entry, the full IBPB at every switch between programs and partitions; on a processor reporting SRSO_NO, BTC_NO, no BHI (`speculation::bhi` answering not affected, never `BHI_NO` alone; F-85) and no ITS, with the return predictor cleared at the root switch, the exit IBPB may be skipped, decided at boot, printed, failing closed (`MICROKERNEL.md` §7, ledger 941; nazuna does not qualify); on AArch64 the Spectre-BHB clearing sequence on every exit. `partition`: barriers only at partition switches. Requires `personality=user` | `exit` (the customer: 1.5x seL4 for `max`, 660 ns) | `partition` | not applicable | not applicable | `exit`: all; `partition`: `sc2`, `none` | — | M3 |
-| `ipc_fastpath` | `off`, `on` | the fast path for `channel_write_read` (0x1013) | `off` until the 2026-10-02 rule is met, then `on` | `on` (the rule binds `max` only) | `on` | `off` (today's certified default) | `off`: all; `on`: `sc2`, `none`, and `sc4` and `present` once the rule is met | boot option `ferrix.fastpath` (L.x86_64.159) | M0 |
+| `ipc_fastpath` | `off`, `on` | the fast path for `channel_write_read` (0x1013) | `off` until the 2026-10-02 rule is met, then `on` | `on` (the rule binds `max` only) | `on` | `off` (today's certified default) | `off`: all; `on`: `sc2`, `none`, and `sc4` and `present` once the rule is met | the boot option `ferrix.fastpath` until BF6; the flag since (L.x86_64.159) | M0, built |
 | `restricted_fastpath` | `off`, `on` | K1's fastpath for the restricted exit and re-entry. Requires `personality=user` | per K1's review | `on` | not applicable | not applicable | per K1's review | — | M3 |
 | `kernel_memory` | `retyped`, `heap` | K16's memory from the job's own reservation, or today's fallible, charged shared heap | `retyped` | `heap` | `heap` | `heap` | `retyped`: all; `heap`: `present` (AoU-5), `sc2` (under `fast`'s justification), `none` | `heap` only | M6 |
 | `schedule` | `windows`, `edf`, `fair` | K9's static windows with EDF inside them; stage 14's HardRt (partitioned EDF with CBS); or today's fair scheduler | `windows` | `edf` | `fair` | `fair` | `windows`: all; `edf`: `sc2`, `present`, `none`; `fair`: `present` (with AoU-4: no timing claim), `none` | `fair` only | M3 |
@@ -276,7 +276,7 @@ L.x86_64.161 restated; the composition-root hook entry in
 `certification-item.json` and `ITEM.md` §2's link-time hooks; whether the
 system-call entry's flag test compiles out (a core and architecture change);
 stage 9's boot line; FAU_GEN.1 b); the gate rows that pass
-`--kernel-option ferrix.fastpath=on` today (BACKLOG row 436 among them),
+`--kernel-option ferrix.fastpath=on` until BF6 (`--set ipc_fastpath=on --no-claim` since) (BACKLOG row 436 among them),
 moved to profile builds; the fast path's negative controls fired again under
 the flag; coverage per profile, since the code is absent from `max`'s image
 while the flag is off; and `ITEM.md` §5's count of boot options.
@@ -492,7 +492,7 @@ are still validated, not built; `--personality user` is `feature/mk-lift`'s.
   value, only at level `none`, and the line still names it, which
   overstates what the image relaxes and never understates it; (2) the
   registry also declares `noactlr` (ARMv7-A, read today) and
-  `ferrix.fastpath` (until BF6 moves it); (3) `ferrix-sync`'s clamp reads no
+  `ferrix.fastpath` (until BF6 moved it; retired since); (3) `ferrix-sync`'s clamp reads no
   cfg any more (rule 6 b), so `mitigations=off` keeps the two library
   clamps; (4) `max` has `restricted_fastpath=off` until K1's review; (5) a
   `--set` boot is refused by the gate unless `--no-claim` names it ad hoc.

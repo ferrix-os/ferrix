@@ -795,8 +795,8 @@ package FerrixSchedRequirements {
                 switch back after it blocked or was preempted, a decision that kept
                 it running, its own read of its CPU time) to its return; on x86-64, the three native calls that block
                 (channel_write_read, object_wait_one, port_wait) up to their
-                decision; the fast path's own time in the kernel, with
-                ferrix.fastpath=on, outside the present configuration, which counts
+                decision; the fast path's own time in the kernel, in a build
+                with ipc_fastpath=on, outside the present configuration, which counts
                 as user time; the instructions of the entry and exit stubs before
                 the entry's stamp and after the return's; and the paranoid entries
                 (a non-maskable interrupt, a machine check, a debug exception from

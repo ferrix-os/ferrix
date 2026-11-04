@@ -62,3 +62,7 @@ pub use ferrix_kernel_item::arch::x86_64::framebuffer::check::check_framebuffer_
 pub const fn check_framebuffer_window() -> Result<(), &'static str> {
     Ok(())
 }
+
+/// Whether a reply of words writes its four registers alone (`L.x86_64.160`).
+#[cfg(ferrix_fast_ipc)]
+pub use ferrix_kernel_core::arch::x86_64::syscall::reply_writes_four_registers;

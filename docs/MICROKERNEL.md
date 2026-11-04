@@ -1278,8 +1278,8 @@ code in that profile, which is why compile time is the right place for
 this, as `ITEM.md` §5 already argues for `--mitigations`.
 
 **The IPC fast path becomes a flag** (the customer, 2026-10-13, asked:
-"Build-time flag"). It is a boot option today (`ferrix.fastpath`, off unless
-set to `on`; L.x86_64.159), and the customer's call of 2026-10-02
+"Build-time flag"). It was a boot option until BF6 (`ferrix.fastpath`, retired;
+L.x86_64.159), and the customer's call of 2026-10-02
 (`OPAQUE-KERNEL.md` §9.7, *The customer's calls*) keeps its rule with the
 mechanism changed: `max` builds with `ipc_fastpath=off` until one coverage
 run has measured the fast path and its vulnerability-analysis entry exists,

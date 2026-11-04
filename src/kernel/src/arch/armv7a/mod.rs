@@ -106,11 +106,6 @@ pub const ARCH: Arch = Arch::Armv7a;
 /// from `arch/arm/include/uapi/asm/stat.h`. This architecture's plain
 /// `struct stat` cannot hold a 64-bit size, so musl calls only the `64` forms,
 /// and the table carries no `newfstatat` for the plain one to be filled by.
-/// Whether this architecture's `SYSCALL`-style entry takes step 4's fast
-/// path for `channel_write_read` when one is registered
-/// (`docs/OPAQUE-KERNEL.md` §9.7): x86-64's alone.
-pub const FAST_WRITE_READ: bool = false;
-
 /// The switches that left `DS` and `ES` unloaded (x86-64's `DS`/`ES` skip,
 /// `docs/OPAQUE-KERNEL.md` §9.8, 3b): none here, which has no segments.
 pub const fn selector_skips_total() -> Option<[u64; 3]> {
@@ -1725,3 +1720,7 @@ pub(crate) fn mpidr() -> u64 {
 pub(crate) fn check_smt() -> Result<(), &'static str> {
     super::arm_common::smt::check::check_arm_smt()
 }
+
+/// Whether this architecture's system-call entry has the fast path for `channel_write_read` to take, so
+/// that its stage-9 cases, answered by the general path in an image built without it, run here.
+pub const FAST_WRITE_READ: bool = false;

@@ -13,7 +13,7 @@ for it is in [Status](status.md).
 `bench-ipc`'s `domain-call` p50: the time of one `channel_write_read`
 (0x1013) call to a server that is waiting and back, between a client and an
 echo server in one speculation domain, with every mitigation on and
-`ferrix.fastpath=on` (from step 4's point on). Matched to how seL4 was
+`ipc_fastpath=on`, a boot option until BF6 (from step 4's point on). Matched to how seL4 was
 measured on the same machine: KVM, one processor, QEMU pinned to one host
 processor (11), nazuna's Ryzen 9 9900X (Zen 5), which has no PCID. The
 samples are every one of a run, sorted, read through a fenced counter
