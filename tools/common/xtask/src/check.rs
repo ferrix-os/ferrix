@@ -340,6 +340,11 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
             &["tools/common/check/check-lift.py"],
             &["tools/common/check/check-vmo-seal-tags.py"],
             &["tools/common/check/check-vmo-seal-tags.py", "--self-test"],
+            &["tools/common/check/check-kernel-alloc-audit.py"],
+            &[
+                "tools/common/check/check-kernel-alloc-audit.py",
+                "--self-test",
+            ],
         ],
     ),
     // The build flags (docs/BUILD-FLAGS.md): read in the kernel crate alone

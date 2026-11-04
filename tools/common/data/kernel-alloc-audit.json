@@ -1,0 +1,355 @@
+{
+  "//": [
+    "docs/microkernel/K16.md section 3 (ledger 5942 K16.3, K16.4): where a kernel of personality=user allocates, by file,",
+    "each with who pays after the seal. check-kernel-alloc-audit.py fails on a file that allocates and is not here, and on one here that no longer does.",
+    "bucket, its worst site's: boot = sized before the seal, refused after; job = the job the call is charged to; pool = the named kernel pool of section 4, no job; frames = the frame allocator itself; none = every site marked NOALLOC, room had elsewhere; nojob = a context with no job: an open finding.",
+    "frames = the frame allocator itself, what every other row draws from; nojob = a context with no job, must allocate nothing after the seal: an open finding until it does."
+  ],
+  "files": {
+    "arch/aarch64/gic/gicv3.rs": {
+      "bucket": "boot",
+      "what": "the distributor's and redistributors' windows, mapped once at bring-up",
+      "sites": 2
+    },
+    "arch/aarch64/gic/gicv3_its.rs": {
+      "bucket": "boot",
+      "what": "the ITS's window and its tables, made at bring-up",
+      "sites": 3
+    },
+    "arch/aarch64/restricted.rs": {
+      "bucket": "job",
+      "what": "a task's restricted state, boxed on its first entry, in the call of a job's own task",
+      "sites": 1
+    },
+    "arch/aarch64/smp.rs": {
+      "bucket": "boot",
+      "what": "processors listed and started at bring-up, as x86-64's are",
+      "sites": 8
+    },
+    "arch/arm_common/gicv2.rs": {
+      "bucket": "boot",
+      "what": "the distributor's, CPU interface's and V2M's windows, at bring-up",
+      "sites": 4
+    },
+    "arch/x86_64/apic.rs": {
+      "bucket": "boot",
+      "what": "I/O APIC windows and the mask: quiesce_io_apics' one caller is init at bring-up, line 418, so no panic path reaches it",
+      "sites": 3
+    },
+    "arch/x86_64/clock.rs": {
+      "bucket": "boot",
+      "what": "HPET's window",
+      "sites": 1
+    },
+    "arch/x86_64/gdt.rs": {
+      "bucket": "boot",
+      "what": "each secondary's GDT and TSS",
+      "sites": 2
+    },
+    "arch/x86_64/mce.rs": {
+      "bucket": "none",
+      "what": "one site, marked NOALLOC: a poll list with its room made before",
+      "sites": 1
+    },
+    "arch/x86_64/msrlog.rs": {
+      "bucket": "none",
+      "what": "one site, marked NOALLOC",
+      "sites": 1
+    },
+    "arch/x86_64/restricted.rs": {
+      "bucket": "job",
+      "what": "a restricted thread's saved state: the thread's job",
+      "sites": 1
+    },
+    "arch/x86_64/smp.rs": {
+      "bucket": "boot",
+      "what": "trampoline and per-processor records",
+      "sites": 7
+    },
+    "boot_authority.rs": {
+      "bucket": "boot",
+      "what": "the first processes' descriptions, lists and images",
+      "sites": 12
+    },
+    "claim.rs": {
+      "bucket": "boot",
+      "what": "the device tree's claims, before the seal",
+      "sites": 2
+    },
+    "console/input.rs": {
+      "bucket": "none",
+      "what": "marked NOALLOC: the input ring, sized once",
+      "sites": 1
+    },
+    "console/log.rs": {
+      "bucket": "boot",
+      "what": "the log ring, sized once",
+      "sites": 4
+    },
+    "console/output.rs": {
+      "bucket": "none",
+      "what": "marked NOALLOC: the output queue, sized once",
+      "sites": 2
+    },
+    "device.rs": {
+      "bucket": "boot",
+      "what": "the registry; domain() and bind_domain are per device at devmgr's call: job, devmgr's",
+      "sites": 27
+    },
+    "discovery/board.rs": {
+      "bucket": "boot",
+      "what": "board's windows",
+      "sites": 1
+    },
+    "discovery/devmgr.rs": {
+      "bucket": "boot",
+      "what": "devmgr's image VMOs and DEVICES; request, record, note_driver and published are the hybrid's, cut under M6",
+      "sites": 32
+    },
+    "discovery/first_image.rs": {
+      "bucket": "boot",
+      "what": "the first images' segments",
+      "sites": 1
+    },
+    "discovery/pci.rs": {
+      "bucket": "boot",
+      "what": "enumeration; a function's drop gives back",
+      "sites": 15
+    },
+    "discovery/pci/virtio.rs": {
+      "bucket": "boot",
+      "what": "the kernel's entropy device; vector at bring-up",
+      "sites": 6
+    },
+    "discovery/tree.rs": {
+      "bucket": "boot",
+      "what": "the tree's derived tables, once",
+      "sites": 17
+    },
+    "fallible.rs": {
+      "bucket": "frames",
+      "what": "the wrappers themselves: what they call is the global allocator",
+      "sites": 13
+    },
+    "iommu.rs": {
+      "bucket": "job",
+      "what": "pin_with's list: the pinning driver's job",
+      "sites": 25
+    },
+    "iommu/amdvi.rs": {
+      "bucket": "pool",
+      "what": "unit tables at open (boot); a domain's tables per bind: the pool, charged to devmgr's job",
+      "sites": 16
+    },
+    "iommu/ivrs.rs": {
+      "bucket": "boot",
+      "what": "AMD-Vi's tables, marked FATAL-ALLOC, bring-up",
+      "sites": 9
+    },
+    "iommu/smmuv3.rs": {
+      "bucket": "pool",
+      "what": "as amdvi",
+      "sites": 7
+    },
+    "iommu/vtd.rs": {
+      "bucket": "pool",
+      "what": "as amdvi",
+      "sites": 9
+    },
+    "linuxd_start.rs": {
+      "bucket": "boot",
+      "what": "the shared table's first handles",
+      "sites": 1
+    },
+    "main.rs": {
+      "bucket": "boot",
+      "what": "kmain",
+      "sites": 3
+    },
+    "mm.rs": {
+      "bucket": "frames",
+      "what": "the buddy: allocate_frames, _below, _run, user frames (charged), program frames (owner), page tables (the space's owner), the per-processor caches",
+      "sites": 36
+    },
+    "mm/reserve.rs": {
+      "bucket": "frames",
+      "what": "K12's reservations draw on the buddy",
+      "sites": 1
+    },
+    "mm/unlinked.rs": {
+      "bucket": "frames",
+      "what": "tables freed after a shootdown: frees",
+      "sites": 2
+    },
+    "object/bare.rs": {
+      "bucket": "job",
+      "what": "a first or native process: its job",
+      "sites": 5
+    },
+    "object/channel.rs": {
+      "bucket": "job",
+      "what": "endpoints and messages: writer's job or a ticket's",
+      "sites": 14
+    },
+    "object/exception.rs": {
+      "bucket": "job",
+      "what": "the channel: its creator's",
+      "sites": 5
+    },
+    "object/interrupt.rs": {
+      "bucket": "job",
+      "what": "the driver's; register_handler under the IRQ table is sized at boot",
+      "sites": 5
+    },
+    "object/io_mapping.rs": {
+      "bucket": "job",
+      "what": "the driver's",
+      "sites": 1
+    },
+    "object/job.rs": {
+      "bucket": "job",
+      "what": "a child is its parent's; walk's snapshot is the caller's; new_root_as, new_tree_root are boot",
+      "sites": 17
+    },
+    "object/mod.rs": {
+      "bucket": "nojob",
+      "what": "defer: ORPHANS grows from any close, with a drop in place and then an abandon as its fallback: shared, and fine for no job; to be the objects' own link under retyped. BACKLOG",
+      "sites": 2
+    },
+    "object/oom.rs": {
+      "bucket": "frames",
+      "what": "machine_answer: a frame to test the machine has none: no job, frees it at once",
+      "sites": 1
+    },
+    "object/pager.rs": {
+      "bucket": "job",
+      "what": "the pager's",
+      "sites": 11
+    },
+    "object/pin.rs": {
+      "bucket": "job",
+      "what": "the pinning driver's",
+      "sites": 3
+    },
+    "object/port.rs": {
+      "bucket": "job",
+      "what": "the port's creator; a registration's room is promised beforehand",
+      "sites": 15
+    },
+    "object/process.rs": {
+      "bucket": "job",
+      "what": "the process's job; gather's list is the caller's; process::TABLE must be sized by max_processes (K16.9)",
+      "sites": 9
+    },
+    "object/quota.rs": {
+      "bucket": "pool",
+      "what": "the slot table's chunks: sized by the description under retyped",
+      "sites": 2
+    },
+    "object/region.rs": {
+      "bucket": "job",
+      "what": "the partition's",
+      "sites": 1
+    },
+    "object/space.rs": {
+      "bucket": "job",
+      "what": "the creator's",
+      "sites": 3
+    },
+    "object/ticket.rs": {
+      "bucket": "job",
+      "what": "the ticket's issuer",
+      "sites": 4
+    },
+    "object/timer.rs": {
+      "bucket": "job",
+      "what": "the creator's; delivery allocates nothing",
+      "sites": 4
+    },
+    "sched/mod.rs": {
+      "bucket": "job",
+      "what": "a task and its stack: the job's; new_idle_task, adopt_boot_task boot; reap_* free; cpu_times the caller's",
+      "sites": 40
+    },
+    "sched/queue.rs": {
+      "bucket": "none",
+      "what": "marked NOALLOC: run-queue trees with node room in the task",
+      "sites": 9
+    },
+    "sched/task.rs": {
+      "bucket": "job",
+      "what": "the thread's",
+      "sites": 1
+    },
+    "sched/wait.rs": {
+      "bucket": "job",
+      "what": "a waiter's entries, in the call; hook's room is the waiter's",
+      "sites": 19
+    },
+    "signal_frame.rs": {
+      "bucket": "job",
+      "what": "the caller's scratch",
+      "sites": 1
+    },
+    "smp.rs": {
+      "bucket": "boot",
+      "what": "start_secondaries",
+      "sites": 10
+    },
+    "sync.rs": {
+      "bucket": "job",
+      "what": "a sleep lock's parking, made with its owner",
+      "sites": 1
+    },
+    "syscall/native.rs": {
+      "bucket": "job",
+      "what": "each call's scratch and new objects: the caller's, or the ticket's through charge_target",
+      "sites": 36
+    },
+    "syscall/native/region.rs": {
+      "bucket": "job",
+      "what": "the shared table's handles: the region's",
+      "sites": 3
+    },
+    "syscall/program.rs": {
+      "bucket": "job",
+      "what": "first_image's scratch, the kernel's at boot",
+      "sites": 2
+    },
+    "syscall/uaccess.rs": {
+      "bucket": "job",
+      "what": "the caller's copy",
+      "sites": 2
+    },
+    "user/address_wait.rs": {
+      "bucket": "job",
+      "what": "the waiter's job; grow and shrink of the shared table are a finding: a fixed block under retyped",
+      "sites": 20
+    },
+    "user/cache.rs": {
+      "bucket": "job",
+      "what": "register and take_from under a job's cache",
+      "sites": 5
+    },
+    "user/memory_type.rs": {
+      "bucket": "boot",
+      "what": "a type's frames, held at bring-up of the object: the device's",
+      "sites": 2
+    },
+    "user/space.rs": {
+      "bucket": "job",
+      "what": "regions and tables: the space's owner; fork's copies the forker's",
+      "sites": 67
+    },
+    "user/vmo.rs": {
+      "bucket": "job",
+      "what": "the object's payer or charge_target",
+      "sites": 59
+    },
+    "vmap.rs": {
+      "bucket": "pool",
+      "what": "kernel stacks and windows: a stack is its task's job, its virtual range the pool's, boot-sized",
+      "sites": 10
+    }
+  }
+}
