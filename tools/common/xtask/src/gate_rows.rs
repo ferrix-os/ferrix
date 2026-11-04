@@ -417,9 +417,28 @@ fn reaches_smt(path: &str) -> bool {
         || path.starts_with("src/kernel/src/arch/x86_64/smp")
 }
 
+/// The `mitigations=off` row: a build that decides no barrier at a restricted exit,
+/// so K1's count check is read against what the build decides (ledger 6773).
+const TEST_MITIGATIONS_OFF: &[&str] =
+    &["test-flags --arch x86_64 --accel kvm --set mitigations=off --no-claim"];
+
+/// Whether a change to `path` reaches what `mitigations=off` turns off at a
+/// restricted exit: the region check, the speculation decisions, restricted mode.
+fn reaches_mitigations_off(path: &str) -> bool {
+    path == "src/kernel/src/object/region_check.rs"
+        || path.ends_with("/speculation.rs")
+        || path.ends_with("/restricted.rs")
+}
+
 /// The rows a change to the processors' bring-up adds to the image row:
-/// `smt=off`'s.
+/// `smt=off`'s, and `mitigations=off`'s for a restricted exit's barrier.
 fn processor_rows(path: &str, rows: &mut Rows) {
+    if reaches_mitigations_off(path) {
+        rows.add(TEST_MITIGATIONS_OFF);
+        rows.reasons.push(format!(
+            "{path}: a restricted exit's barrier: the build that decides none"
+        ));
+    }
     if reaches_smt(path) {
         rows.add(TEST_SMT);
         rows.reasons.push(format!(
@@ -896,6 +915,16 @@ pub(crate) fn run(args: &Args) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_restricted_exits_barrier_owes_the_build_that_decides_none() {
+        let rows = rows_of(&["src/kernel/src/object/region_check.rs"]);
+        assert!(
+            rows.commands
+                .iter()
+                .any(|row| row.contains("mitigations=off"))
+        );
+    }
 
     fn rows_of(paths: &[&str]) -> Rows {
         let crates = BTreeSet::from(["src/lib/proto/blkring".to_owned()]);

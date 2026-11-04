@@ -366,6 +366,12 @@ pub(crate) fn exit_barrier_offered() -> bool {
     HARDENED && EXIT_BARRIER && machine::exit_barrier_offered(this_cpu())
 }
 
+/// Whether a restricted exit decides a barrier in this build: `mitigations=off` and
+/// `partition_speculation=partition` decide none, and count none.
+pub(crate) const fn exit_barrier_built() -> bool {
+    HARDENED && EXIT_BARRIER
+}
+
 /// Barriers decided and issued at restricted exits, on every processor: for
 /// the check's count (K1 §6, §10).
 pub(crate) fn restricted_barriers() -> (u64, u64) {

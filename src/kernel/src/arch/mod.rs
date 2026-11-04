@@ -28,6 +28,7 @@ mod speculation_check;
 use aarch64::speculation as machine_speculation;
 #[cfg(target_arch = "arm")]
 use armv7a::speculation as machine_speculation;
+pub(crate) use speculation::exit_barrier_built;
 pub(crate) use speculation::exit_barrier_offered;
 pub use speculation::nospec_index;
 pub(crate) use speculation::restricted_barriers;

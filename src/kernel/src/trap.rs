@@ -716,6 +716,14 @@ fn user_fault_as(frame: &mut arch::TrapFrame, trap: &Trap, raised: (u32, i32, u6
 }
 
 // CHECKS-ONLY: object/region_check.rs
+/// Whether a restricted exit decides a barrier in this build (`arch::speculation`).
+#[doc(hidden)]
+#[must_use]
+pub const fn exit_barrier_built() -> bool {
+    arch::exit_barrier_built()
+}
+
+// CHECKS-ONLY: object/region_check.rs
 /// Whether this processor offers the exit's barrier (`docs/microkernel/K1.md` §6).
 #[doc(hidden)]
 pub fn exit_barrier_offered() -> bool {

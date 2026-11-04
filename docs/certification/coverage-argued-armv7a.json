@@ -1779,35 +1779,35 @@
     },
     {
       "file": "trap.rs",
-      "lines": "796",
+      "lines": "804",
       "category": "failure-path",
       "match": "fatal(",
       "why": "A fault from user mode with no personality registered, which the kernel stops on; `main.rs` registers the Linux personality's return path before the first program."
     },
     {
       "file": "trap.rs",
-      "lines": "852",
+      "lines": "860",
       "category": "failure-path",
       "match": "FaultOutcome::NoProcess => fatal(",
       "why": "A fault from user mode that the personality finds no process for, which the kernel stops on: every task that enters ring 3 is a process's thread."
     },
     {
       "file": "trap.rs",
-      "lines": "889",
+      "lines": "897",
       "category": "defensive",
       "match": "return Err(None);",
       "why": "A fault from user mode on a task with no address space. `sched` gives a task made for a thread its process's space before it first runs, so this would be the kernel having entered ring 3 without recording who was running; it is reported as fatal rather than resolved."
     },
     {
       "file": "trap.rs",
-      "lines": "1021, 1023, 1026-1029",
+      "lines": "1029, 1031, 1034-1037",
       "category": "failure-path",
       "match": "report(",
       "why": "The report of a page fault the kernel could not resolve -- one in the kernel outside the demand window, or a user one with no program to blame -- printed as the kernel stops."
     },
     {
       "file": "trap.rs",
-      "lines": "1043, 1048, 1058, 1073-1075, 1077",
+      "lines": "1051, 1056, 1066, 1081-1083, 1085",
       "category": "failure-path",
       "match": "pub(crate) fn fatal(",
       "why": "`fatal` and `report`, the trap path's stop: the architecture's register dump, the abridged report for a second failure, and the panic's conclusion. Reached only when the kernel stops on a trap."

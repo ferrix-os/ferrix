@@ -540,12 +540,21 @@ fn serve(
                 report.issued = issued - started.1 == word;
                 // What was issued against what the processor offers, not against the
                 // exit's own answer: a machine with no IBPB issues none.
-                report.barriers == word && report.issued == crate::trap::exit_barrier_offered()
+                let decided_here = if crate::trap::exit_barrier_built() {
+                    word
+                } else {
+                    0
+                };
+                report.barriers == decided_here
+                    && report.issued == crate::trap::exit_barrier_offered()
             }
             ASK_PIN => pin(side, word)?,
             ASK_ON_PROCESSOR => on_processor(side, word)?,
             ASK_TWO_PROCESSORS => crate::smp::count() >= 2,
-            ASK_COUNT_MOVED => crate::trap::restricted_barriers().0 > started.0,
+            ASK_COUNT_MOVED => {
+                !crate::trap::exit_barrier_built()
+                    || crate::trap::restricted_barriers().0 > started.0
+            }
             ASK_NOTHING => true,
             ASK_ROW_START => {
                 row_started = crate::timer::now_nanos();
