@@ -615,6 +615,10 @@ fn is_board(devices: &[Option<(Device<Kernel>, Device<Kernel>)>]) -> bool {
 
 /// Everything, in `docs/DEVMGR.md`'s order: read DEVICES, start a driver per
 /// match one at a time, REPORT, then serve deaths for ever.
+#[expect(
+    clippy::too_many_lines,
+    reason = "devmgr's whole order, read in one place"
+)]
 fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
     let given = receive(channel)?;
     let Some(job) = given.job else {
