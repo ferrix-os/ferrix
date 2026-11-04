@@ -877,8 +877,16 @@ fn an_ended_processs_space_charges_its_owner(
     if read(space, AT_ENDED, 8) != Ok(8) {
         return Err("space self-check failed: a read in an ended process's space failed");
     }
-    if memory(&alone)? < owner_before + PAGE_SIZE || memory(&setup.caller)? != caller_before {
+    // The caller's count may fall meanwhile and may not rise (ledger 6599, flake
+    // row fl-087): seen once, 256 bytes fell here, which reads as what this job's
+    // heap held for an earlier case's child, reaped on another processor when it
+    // is. A fall is not a charge. A rise is, and the page must show in a job
+    // nothing else is charged to.
+    if memory(&alone)? < owner_before + PAGE_SIZE {
         return Err("a page committed in an ended process's space was not charged to its job");
+    }
+    if memory(&setup.caller)? > caller_before {
+        return Err("a page committed in an ended process's space was charged to the caller");
     }
     report.changes += 1;
     let _ = call(nr::HANDLE_CLOSE, &[reg(space)]);

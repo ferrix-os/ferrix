@@ -485,6 +485,9 @@ log path and commit; a new sighting is added to its row the day it is seen.
 | Stage 4's lock check stopped release boots four times with "no two processors' increments overlapped in any round" (2026-10-24, F-95's sched-wake-latency, `test-stall --release` at host load 35-80), with and without F-95's option A; never in a debug boot. Rerun once. [more](backlog/flakes.md#fl-083) | open | 4 |
 | The System V semaphore check's deadline case failed boots under load, "a waiter returned without waiting" (FX-0702, 2026-10-25): the check's timing; fixed on sem-waiter. [more](backlog/flakes.md#fl-084) | fixed | 7 |
 | ARMv7-A `test-threads` timed out twice at 120 s on one commit with its block-ring reads ten times slower (TCG under host load, 2026-10-30, game-mode-sched); passed on the next. [more](backlog/flakes.md#fl-086) | 7 |
+| K2's boot check, FX-0916: the ended-process case's caller count fell 256 bytes under it, 4 of about 522 boots; it now fails only on a rise, not shown gone (2026-11-04, mk-merge, ledger 6599). [more](backlog/flakes.md#fl-087) | 9 |
+| ARMv7-A `test-boot`: "the kernel read no entropy by DMA", twice at load 34, passed on rerun (2026-11-04). [more](backlog/flakes.md#fl-088) | 9 |
+| AArch64 `test-boot` never printed `FERRIX-BOOT-OK` within 120 s at load 14, passed on rerun (2026-11-04). [more](backlog/flakes.md#fl-089) | 9 |
 
 ### P2 — quality and performance, on the "fast" half of the goal
 

@@ -565,3 +565,21 @@ Done 2026-10-24 (kernel-flakes).
 |---|---|---|
 | **Open (2026-11-04, mk-base).** `test-quarantine --arch x86_64 --accel kvm` on 8425ca36c (K10 on F-91, K6 and smt=off) stopped once at stage 8: `madvise did not give the frames of the pages it dropped back to the allocator`, FX-0872, `logs/queue/mkb-k10-quar.log`, after a 2 s stall at 8.11 to 10.15 under load 30. The window read released 8, exactly madvise's; freed 5 and heap -9704 are another party's inside `FrameWindow`'s global count, unattributed. Its rerun passed. Not read as a madvise defect, but F-91 (frees at release) and K10 are not excluded (ledger 6136); a second sighting goes to the consultant. | flake owner | 8 |
 | **Open (2026-10-30, game-mode-sched).** `test-threads --arch all` and `--smp 2` on 5fe02f4ec (feature/game-mode-affinity) both timed out on ARMv7-A: "`init     the shell exited with` was not printed within 120s". In both, the armv7a boot's block-ring read took about ten times its usual time (depth 1 p50 4982 and 4996 us, p99 174 and 141 ms, against 508 to 572 us and about 1.1 to 1.4 ms in the passing runs on 1ab0bca33 and 9248cddad), and the boot reached btrfs at 90 s where it does at 38 to 40 s. The x86_64 and aarch64 halves of the same runs passed. The commit's code differs from the passing ones only by a move of `choose_next`'s departure into a function (no behaviour), and the same tree's armv7a boot rows passed; host load at the runs' starts 7.7 to 25. Read as TCG under host load until it recurs. Logs: `~/.local/share/ferrix/logs/game-mode/flake-v7/`. | game-mode-sched | 7 |
+
+### fl-087
+
+| Item | Owner | Stage |
+|---|---|---|
+| **Open (2026-11-04, mk-merge).** K2's boot check stopped with FX-0916, "a page committed in an ended process's space was not charged to its job", 4 of about 522 logged boots: `logs/queue/mkb-df6-off.log`, `mkbh-e3.log`, `mkd-a-make.log`, `mk-m2-r-rustc.log`, all x86-64 KVM. One shared sentence, so the four can't say which half fired. Trace (scratch patch, never landed, x86-64 KVM only, one fire): `space_check::run` 400 times at boot, in run 20 `owner 512 -> 16896 caller 51200 -> 50944`: the owner paid, and the caller's count fell 256 bytes between the snapshots. That reads as heap this job held for an earlier case's child, reaped on another processor; the reap path was not followed to prove it. The caller half now fails only on a rise, with its own sentence (ledger 6599); the same loop with that comparison passed 400 of 400. Not shown gone: at 4 in 522 no set of rows can show it. A later fire on the caller's sentence, "was charged to the caller", reopens this row. A fire on the owner's sentence is a defect, for the consultant. | open |
+
+### fl-088
+
+| Item | Owner | Stage |
+|---|---|---|
+| **Open (2026-11-04, mk-merge, filed for po-mk's batches).** `test-boot --arch armv7a` and `--smp 2`: "the kernel read no entropy by DMA", failed once and passed on rerun on the same tip, at load 34 both times: batch 20261104T073502Z on 01c85431c, `logs/queue/batch-20261104T073502Z-6.log`; batch 20261104T104137Z on 68902c69d, `logs/queue/batch-20261104T104137Z-5.log`. Not traced. | open |
+
+### fl-089
+
+| Item | Owner | Stage |
+|---|---|---|
+| **Open (2026-11-04, mk-merge, filed for mk-base's batch).** `test-boot --arch aarch64`: the kernel never printed `FERRIX-BOOT-OK` within 120 s, batch 20261104T053606Z on 75ba515da, not landed in that form, load 13.69 at its start, `logs/queue/batch-20261104T053606Z-5.log`; passed on rerun. Not traced. | open |
