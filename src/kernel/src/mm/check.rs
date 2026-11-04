@@ -2321,6 +2321,15 @@ fn reservation_floors(
     if mm::free_frames() != floor + promise {
         return Err("a program took a promised frame");
     }
+    // And `take`'s own arm, a frame for a job whose reservation has no room: the same
+    // floor, its second site (ledger 6512 Q3).
+    if let Some(frame) = super::take_frames(
+        0,
+        super::reservation::Floor::Program(mm::NO_RESERVATION),
+    ) {
+        programs.push(frame);
+        return Err("a frame through the reservation's ledger took a promised frame");
+    }
     // The kernel's own: refused at the promise.
     while let Some(frame) = mm::allocate_frames(0) {
         kernels.push(frame);
