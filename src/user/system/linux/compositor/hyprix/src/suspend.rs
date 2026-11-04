@@ -49,7 +49,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// Where the cgroup v2 tree is mounted.
 pub const CGROUP_ROOT: &str = "/sys/fs/cgroup";
@@ -59,6 +61,12 @@ pub const CGROUP_ROOT: &str = "/sys/fs/cgroup";
 /// forked between two looks by a process not yet moved; a program that
 /// forks faster than eight looks is not one this is for.
 const LOOKS: usize = 8;
+
+/// How many times [`release`] looks again at a cgroup that reads empty and is
+/// still busy, and how long it waits each time: a second at most.
+const BUSY_LOOKS: usize = 40;
+/// See [`BUSY_LOOKS`].
+const BUSY_WAIT: Duration = Duration::from_millis(25);
 
 /// One process, as `/proc` shows it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -288,7 +296,7 @@ pub fn freeze(root: u32, own: u32) -> Result<Frozen, String> {
     let dir = path(&made);
     match fs::create_dir(&dir) {
         Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
         Err(error) => return Err(format!("{}: {error}", dir.display())),
     }
     write(&made, "cgroup.freeze", "1")?;
@@ -361,14 +369,28 @@ pub fn release(frozen: &Frozen) -> Result<(), String> {
     }
     let above = parent_of(&frozen.cgroup);
     let procs = path(&frozen.cgroup).join("cgroup.procs");
-    for _ in 0..LOOKS {
+    let mut busy = 0;
+    let mut looks = 0;
+    while looks < LOOKS {
         let text =
             fs::read_to_string(&procs).map_err(|error| format!("{}: {error}", procs.display()))?;
         let pids = pids_in(&text);
         if pids.is_empty() {
             let dir = path(&frozen.cgroup);
-            return fs::remove_dir(&dir).map_err(|error| format!("{}: {error}", dir.display()));
+            match fs::remove_dir(&dir) {
+                Ok(()) => return Ok(()),
+                // A process that has ended leaves `cgroup.procs` before it
+                // leaves the cgroup's count, on Linux as here: one the thaw let
+                // end, a `sleep` that ran out while frozen, is on its way out.
+                Err(error) if error.kind() == ErrorKind::ResourceBusy && busy < BUSY_LOOKS => {
+                    busy += 1;
+                    std::thread::sleep(BUSY_WAIT);
+                    continue;
+                }
+                Err(error) => return Err(format!("{}: {error}", dir.display())),
+            }
         }
+        looks += 1;
         for pid in pids {
             // One that ended meanwhile is no loss; any other refusal is.
             if let Err(why) = write(above, "cgroup.procs", &pid.to_string())
