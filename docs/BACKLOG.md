@@ -496,6 +496,7 @@ log path and commit; a new sighting is added to its row the day it is seen.
 | K2's boot check, FX-0916: the ended-process case's caller count fell 256 bytes under it, 4 of about 522 boots; it now fails only on a rise, not shown gone (2026-11-04, mk-merge, ledger 6599). [more](backlog/flakes.md#fl-087) | 9 |
 | ARMv7-A `test-boot`: "the kernel read no entropy by DMA", twice at load 34, passed on rerun (2026-11-04). [more](backlog/flakes.md#fl-088) | 9 |
 | AArch64 `test-boot` never printed `FERRIX-BOOT-OK` within 120 s at load 14, passed on rerun (2026-11-04). [more](backlog/flakes.md#fl-089) | 9 |
+| FX-9001 in stage 12's stuck check, once on CI's aarch64 boot; F-102 likely, not shown; 16 clean boots close it (2026-11-04, ledger 6899). [more](backlog/flakes.md#fl-095) | 12 |
 | Stage 7's kernel time check, once on AArch64 TCG at load 19 (2026-11-04). [more](backlog/flakes.md#fl-091) | 7 |
 | Restricted-check's case 82 once under TCG on an on image, and K1's check owes both figures (2026-11-04, ledger 6869). [more](backlog/flakes.md#fl-093) | 9 |
 | test-ipc-equiv's on image panicked once, serial lost; `gate.sh` should keep a failed run's serial (2026-11-04, ledger 6869). [more](backlog/flakes.md#fl-094) | 9 |

@@ -878,7 +878,9 @@ pub fn retired_for_check() -> usize {
 
 // CHECKS-ONLY: fs/btrfs_write_check/poison_check.rs; home: mm
 /// Forget the last `count` retirements, which the calling check made itself
-/// ([`forget_checked_retirements`]).
+/// ([`forget_checked_retirements`]). Each of those frames goes back to the
+/// allocator, so none may still be in use: a retired page kept in its object
+/// has to be dropped first.
 pub fn forget_retired_for_check(count: usize) {
     forget_checked_retirements(count);
 }

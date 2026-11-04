@@ -15,7 +15,8 @@
 //! * a read whose copy is answered as poisoned: a clean page refilled and the
 //!   read answered with the disk's bytes; a dirty page's read fails.
 //!
-//! Every frame the check retires is forgotten after.
+//! Every frame the check retires is out of its object by the end, and is
+//! forgotten after.
 
 use alloc::sync::Arc;
 use core::any::Any;
@@ -64,9 +65,21 @@ pub(super) fn run() -> Result<Found, &'static str> {
     cache::quiet_for_check(true);
     let outcome = cases();
     cache::quiet_for_check(false);
+    // Asked before forgetting, which frees: a frame still in a file's object
+    // would then have two owners.
+    let still_held = [CLEAN_FILE, DIRTY_FILE].iter().any(|path| {
+        object_of(path).is_ok_and(|object| {
+            (0..PAGES as u64)
+                .any(|page| vmo::frame_for_check(&object, page).is_some_and(mm::is_retired))
+        })
+    });
     let retired = mm::retired_for_check().saturating_sub(before);
     mm::forget_retired_for_check(retired);
-    outcome
+    let found = outcome?;
+    if still_held {
+        return Err("a frame the poison check retired is still in a file's object");
+    }
+    Ok(found)
 }
 
 /// The cases, in order.
@@ -163,20 +176,28 @@ fn cases() -> Result<Found, &'static str> {
     }
     found.kept += 1;
 
-    read_cases(&clean, clean_want, &mut found)?;
+    let dirty = read_cases(&clean, clean_want, &mut found)?;
     // Written back now, so the volume is as the next check expects.
     sync()?;
+    // The two pages kept above were retired all the same, and are clean now.
+    // Out of their objects, as `run`'s forgetting needs.
+    let clean_kept = cache::drop_poisoned_at_for_check(&clean, 4, frame);
+    let dirty_kept = cache::drop_poisoned_at_for_check(&dirty.0, 1, dirty.1);
+    if clean_kept != "Clean" || dirty_kept != "Clean" {
+        return Err("a page kept while it was not clean was not dropped once it was");
+    }
     Ok(found)
 }
 
 /// The read path's cases: a clean page whose read is answered as poisoned is
 /// refilled with the disk's bytes, its frame retired and the page dropped; a
-/// page written and not written back is kept, and its read fails.
+/// page written and not written back is kept, and its read fails. Its object
+/// and frame, for the caller to drop once it is clean.
 fn read_cases(
     clean: &Arc<Vmo>,
     clean_want: (usize, u32),
     found: &mut Found,
-) -> Result<(), &'static str> {
+) -> Result<(Arc<Vmo>, u64), &'static str> {
     // A read whose copy is answered as poisoned: refilled, the disk's bytes.
     let frame = vmo::frame_for_check(clean, 5).ok_or("page 5 is not in the cache")?;
     vmo::inject_read_poison(frame);
@@ -202,7 +223,7 @@ fn read_cases(
     if read_pattern(DIRTY_FILE).is_ok() {
         return Err("a read that consumed poison in a dirty page did not fail");
     }
-    Ok(())
+    Ok((dirty, frame))
 }
 
 /// Sync the writable volume.

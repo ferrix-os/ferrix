@@ -595,7 +595,7 @@ Done 2026-10-24 (kernel-flakes).
 
 | Item | Owner | Stage |
 |---|---|---|
-| **Open (2026-11-04, mk-merge).** Stage 7's kernel time check: "a program spinning in user mode was charged its user time as kernel time (the return to user mode left its stint open)", AArch64 TCG, load 19, `logs/queue/mkm-cm7-plant-a.log`, on a scratch tree of copy-miss with a plant in `read_target`; the same tree passed on rerun, `mkm-cm7-plant-a2.log`. Second sighting: `test-boot --arch armv7a --smp 2` on BF6's ec8da68fa, `logs/queue/mkm-b6r-15.log`, where BF6 builds nothing; passed as `mkm-b7-a32s2`. Not traced. | open |
+| **Second sighting (2026-11-04, mk-gh-ci):** `test-boot --arch aarch64`, `logs/queue/mkgh4-a64.log`, the same panic at 41.89 s, before stage 12, on a tree that does not touch it. **Open (2026-11-04, mk-merge).** Stage 7's kernel time check: "a program spinning in user mode was charged its user time as kernel time (the return to user mode left its stint open)", AArch64 TCG, load 19, `logs/queue/mkm-cm7-plant-a.log`, on a scratch tree of copy-miss with a plant in `read_target`; the same tree passed on rerun, `mkm-cm7-plant-a2.log`. Second sighting: `test-boot --arch armv7a --smp 2` on BF6's ec8da68fa, `logs/queue/mkm-b6r-15.log`, where BF6 builds nothing; passed as `mkm-b7-a32s2`. Not traced. | open |
 
 ### fl-092
 
@@ -615,3 +615,9 @@ Done 2026-10-24 (kernel-flakes).
 | Item | Owner | Stage |
 |---|---|---|
 | **Open (2026-11-04, mk-merge, ledger 6869).** `test-ipc-equiv --arch x86_64 --accel tcg` on 42ea4a06c, BF6 before K12's stack fix and fire_timers' cut: the on image's boot panicked, `logs/queue/mkj-w5b.log`, its serial lost to the slot. Cause unknown; not seen on BF6's tree since. A next sighting goes to the consultant. Owed, the PO's queue: `gate.sh` keeps a FAILED run's serial. | open |
+
+### fl-095
+
+| Item | Owner | Stage |
+|---|---|---|
+| **Open (2026-11-04, mk-gh-ci, ledger 6899).** CI 41912394401, Boot in QEMU (aarch64), on f3dbd4db6: FX-9001 in `stuck_check::Poisoned::resize` at 45.84 s, its `Box<dyn Pages>` read as 0xe667e868e96aea6b and 0xe061e263e364e565, bytes of the file pattern. F-102 is the likely cause, not shown. Closes on no sighting in 16 aarch64 boots after F-102's landing; a sighting goes to the consultant with its log. | mk-gh-ci | 12 |
