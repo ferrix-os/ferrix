@@ -1753,6 +1753,9 @@ pub(crate) fn exit() -> ! {
 
 /// [`exit`] and [`exit_leaving`]: `leaving` when [`begin_leaving`] counted it.
 fn exit_counted(leaving: bool) -> ! {
+    // A ticket it adopted is let go of here, with interrupts still open: the
+    // last reference frees memory (`docs/microkernel/K7.md`, 2525 (5)).
+    crate::object::ticket::leave();
     // The dead before this one, if too many wait: see `reap_ahead`.
     reap_ahead();
     // **Nothing switches it out while this frame holds the task.** From the

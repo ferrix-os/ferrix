@@ -546,11 +546,6 @@
       "ledger": 6131
     },
     {
-      "item": "arch/mod.rs: programs_check (re-export)",
-      "born": "K15",
-      "ledger": 6162
-    },
-    {
       "item": "arch/mod.rs: forget_root (re-export)",
       "before": "pub(crate)"
     },
@@ -561,6 +556,11 @@
     {
       "item": "arch/mod.rs: last_domain_on (re-export)",
       "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: programs_check (re-export)",
+      "born": "K15",
+      "ledger": 6162
     },
     {
       "item": "arch/mod.rs: refill_wanted_in_domain (re-export)",
@@ -1683,6 +1683,11 @@
     {
       "item": "object/quota.rs: uncharge (fn)",
       "before": "pub(crate)"
+    },
+    {
+      "item": "object/ticket.rs: Ticket (struct)",
+      "born": "K7",
+      "ledger": 6131
     },
     {
       "item": "object/timer.rs: Report::fired_at (field)",

@@ -156,6 +156,9 @@ pub(super) fn check_programs() {
 
     // K13: a pager's restart without its clients' loss.
     check_rebind();
+    // K7: charging that follows the client, by a ticket the kernel issued
+    // (`docs/microkernel/K7.md`).
+    check_tickets();
     check_kernel_memory();
 }
 
@@ -1512,6 +1515,36 @@ pub(super) fn check_pager() {
     println!(
         "  pager    {} faults forwarded, shared within a job, apart across jobs, and supplied;          {} waits ended unsupplied -- failed, timed out after {} us at a 5 ms bound, closed,          killed -- and {} audited; copies waited or refused; trap-dirty and write-back kept          every write Dirty; {} refusals as specified",
         report.supplied, report.ended, report.timed_out_micros, report.audited, report.refused,
+    );
+}
+
+/// K7: a server's adopted calls charge the client that issued the ticket,
+/// only while it is live, and what they charged comes back
+/// (`docs/microkernel/K7.md` §4).
+///
+/// Halts rather than returning, as every other stage's check does.
+pub(super) fn check_tickets() {
+    let report = match object::ticket_check::run() {
+        Ok(report) => report,
+        Err(problem) => fatal!(
+            catalog::STAGE9_TICKETS,
+            "ticket self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  ticket   issued to the caller's job and process; {} adoptions refused and audited; \
+         {} pages and {} objects charged to the client, none to the server, and {} pages of \
+         the server's own faults to the server; refused at the client's limit with no wait \
+         and no kill; ended by either side and by a close; {} live at the bound; every \
+         counter back to zero; {} bytes of the server's own heap stayed the server's, and a \
+         native object's record is at most {} bytes",
+        report.refused,
+        report.pages,
+        report.objects,
+        report.own_pages,
+        report.bound,
+        report.server_heap,
+        report.largest_object,
     );
 }
 

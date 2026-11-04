@@ -169,13 +169,6 @@
       "purpose": "The kernel's lines start with their time as Linux's do, [    1.234567] , on the port, in dmesg and in the pstore copy (the customer's request of 2026-10-18, with the boot-time analysis)"
     },
     {
-      "ids": ["L.object.207-212", "H.QUOTA.14"],
-      "owner": "mk-k7",
-      "branch": "mk/k7",
-      "date": "2026-10-19",
-      "purpose": "MICROKERNEL.md §3 K7, charging that follows the client (OPAQUE-KERNEL.md §2 point 5, ledger 35-36): H.QUOTA.14, memory a server holds for a client's request charged to the client's job, only through a ticket the kernel issued for that request and only until it is answered; L.object.207-212, the ticket's issue, adoption through the issuing end's peer, charging while adopted, its end, the charges' return and the per-end bound"
-    },
-    {
       "ids": ["H.QUOTA.15-17", "L.mm.76-82", "L.object.221-225", "L.user.145"],
       "owner": "mk-k12",
       "branch": "mk/k12",
