@@ -3562,7 +3562,7 @@ package FerrixObjectRequirements {
 
         requirement <'L.object.295'> theOldCallsAreCompiledOut : ItemLowLevel {
             attribute :>> statement = "In a kernel built with personality=user, process_create and process_start shall answer ENOSYS.";
-            attribute :>> criterion = "The case in syscall/build_check.rs under that flag; until that build boots, BACKLOG's row.";
+            attribute :>> criterion = "The case in syscall/region_check.rs under that flag, run by every personality=user boot (test-first-processes --personality user), and its control with the comparison inverted (ledger 7558).";
             attribute :>> parent = "H.OBJ.27";
             attribute :>> unit = ("syscall::native::job_call");
         }

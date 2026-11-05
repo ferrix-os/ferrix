@@ -636,19 +636,6 @@ fn no_pager_and_the_image_rights(
     Ok(())
 }
 
-/// L.object.295: in a kernel with no load, the two calls that parsed are gone.
-///
-/// Verifies: L.object.295
-#[cfg(ferrix_personality = "user")]
-fn the_old_calls_are_gone(side: &Side) -> Result<(), &'static str> {
-    for number in [nr::PROCESS_CREATE, nr::PROCESS_START] {
-        if side.call(number, &[0; 4]) != Err(Errno::ENOSYS) {
-            return Err("build self-check failed: a call that parsed an image still answers");
-        }
-    }
-    Ok(())
-}
-
 /// Every case, on a process of the check's own.
 ///
 /// Verifies: H.OBJ.27
@@ -671,8 +658,6 @@ pub fn run() -> Result<Report, &'static str> {
     a_guard(&side, root, &mut report)?;
     a_kept_handle_raises_no_ids(&side, root)?;
     no_pager_and_the_image_rights(&side, root, &mut report)?;
-    #[cfg(ferrix_personality = "user")]
-    the_old_calls_are_gone(&side)?;
     side.close_everything();
     crate::syscall::process::kill(&side.process, crate::object::job::KILLED_STATUS);
     Ok(report)

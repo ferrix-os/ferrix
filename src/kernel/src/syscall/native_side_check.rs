@@ -31,6 +31,14 @@ impl NativeSide {
         Ok(NativeSide { host })
     }
 
+    /// End its process with `status`: what it holds, its handles among them,
+    /// is let go once no thread of it is live, and it never had one
+    /// (`Bare::end`).
+    #[cfg(ferrix_personality = "user")]
+    pub(crate) fn end(&self, status: i32) {
+        self.host.end(status);
+    }
+
     /// Its address space.
     pub(crate) fn space(&self) -> &Arc<AddressSpace> {
         self.host.core().own_space()

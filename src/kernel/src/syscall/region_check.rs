@@ -143,6 +143,16 @@ pub fn check() {
     if !crate::checks::run() {
         return;
     }
+    #[cfg(ferrix_personality = "user")]
+    match the_old_calls_are_gone() {
+        Ok(()) => crate::println!(
+            "  regions  process_create and process_start answer ENOSYS: no image is parsed in ring 0"
+        ),
+        Err(problem) => crate::panic::fatal!(
+            crate::panic::catalog::STAGE9_REGIONS,
+            "stage 9 region and restricted-mode check failed: {problem}"
+        ),
+    }
     if !crate::arch::HAS_RESTRICTED {
         crate::println!("  regions  none on this architecture: K1's and K11's calls answer ENOSYS");
         return;
@@ -185,6 +195,25 @@ pub fn check() {
             "stage 9 region and restricted-mode check failed: {problem}"
         ),
     }
+}
+
+/// L.object.295: in a kernel with no load, the two calls that parsed an image
+/// are gone. On a process of its own, which makes nothing: both are refused
+/// before any argument is read, and the process ends before `check` goes on.
+///
+/// Verifies: L.object.295
+#[cfg(ferrix_personality = "user")]
+fn the_old_calls_are_gone() -> Result<(), &'static str> {
+    let side = Side::new()?;
+    let answers = [nr::PROCESS_CREATE, nr::PROCESS_START].map(|number| side.call(number, &[0; 4]));
+    side.end(crate::object::job::KILLED_STATUS);
+    if answers
+        .iter()
+        .any(|answer| *answer != Err(ferrix_linux_abi::errno::Errno::ENOSYS))
+    {
+        return Err("build self-check failed: a call that parsed an image still answers");
+    }
+    Ok(())
 }
 
 /// The window's slot's first address, as the case aims at it (`mm::WINDOW_ROOT_SLOT`).
