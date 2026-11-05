@@ -1943,7 +1943,7 @@ waiting, and much of the rest is one processor spinning out a timing check. x86-
 and the Arm TCGs run multi-threaded (7 host threads to 4 vCPUs on AArch64).
 
 **The first cuts**, ledger 7021 P1 to P3: `cpu_check` keeps its reference 20000 of
-100000 for 600 ms, and asks the other cases on 10000 of 50000 for 300 ms; `io_check`
+100000 for 600 ms, and asks the other cases on 15000 of 75000 for 450 ms; `io_check`
 keeps rbps=16384, gives the parent's limit forty a second, and races until 120
 reads, a count; `bare`'s quota as `cpu_check`'s short form; `idle`'s sleeps 200 us;
 a dmabuf's negative look 20 ms, against 1.1 ms for a due one on AArch64 TCG; timers'

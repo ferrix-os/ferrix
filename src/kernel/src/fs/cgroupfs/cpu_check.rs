@@ -14,7 +14,7 @@
 //! two its threads would take: `cpu.stat`'s `usage_usec` moves by a fifth of
 //! the wall clock, `nr_throttled` and `throttled_usec` count, `nr_periods`
 //! counts, and the threads still count, a little. The same program in a
-//! cgroup beneath one with a fifth, in half the period, is held to it
+//! cgroup beneath one with a fifth, in three quarters of the period, is held to it
 //! too, and with `max` back the program takes more than half a processor
 //! again.
 //!
@@ -42,16 +42,17 @@ use crate::syscall::signal::Origin;
 /// 100000` that H.QUOTA.10 and L.object.106 name: 600 ms, six periods.
 const WINDOW_NANOS: u64 = 600_000_000;
 
-/// The same fifth with half the period, for the cases that ask where a quota
-/// binds rather than how well it holds (ledger 7021 W1 to W4): ten slices of
-/// quota, and six periods again, 300 ms. A quarter of the period held only 29
-/// thousandths on ARMv7-A under the coverage plugin, a wake's lateness being
-/// most of so short a period.
-const SHORT_MAX: &[u8] = b"10000 50000\n";
+/// The same fifth with three quarters of the period, for the cases that ask where
+/// a quota binds rather than how well it holds (ledger 7021 W1 to W4): fifteen
+/// slices of quota, and six periods again, 450 ms. A quarter of the period held only
+/// 29 thousandths on ARMv7-A under the coverage plugin, a wake's lateness being most
+/// of so short a period, and half of it 654 of 650 on AArch64 at load 20: each
+/// period adds a cut's slice, so a lengthened period rather than a wider bound.
+const SHORT_MAX: &[u8] = b"15000 75000\n";
 /// [`SHORT_MAX`]'s window: six of its periods.
-const SHORT_WINDOW_NANOS: u64 = 300_000_000;
+const SHORT_WINDOW_NANOS: u64 = 450_000_000;
 /// Two of its periods, for a quota to come to bind before a window opens.
-const SHORT_SETTLE_NANOS: u64 = 100_000_000;
+const SHORT_SETTLE_NANOS: u64 = 150_000_000;
 
 /// The most, in thousandths of the wall clock, that a program under
 /// `cpu.max 20000 100000` may be found to have used: two thirds of a processor.
@@ -429,7 +430,7 @@ fn late_write(harness: &mut Harness, program: &Running) -> Checked<()> {
     crate::sched::sleep_for(SHORT_SETTLE_NANOS);
     let _ = harness
         .write(b"/check-c/cpu.max", SHORT_MAX)
-        .map_err(|_| "cpu.max refused 10000 50000")?;
+        .map_err(|_| "cpu.max refused 15000 75000")?;
     held_to_a_fifth(
         harness,
         "a running program was not held to a fifth of a processor by a cpu.max written under it",
@@ -440,7 +441,7 @@ fn late_write(harness: &mut Harness, program: &Running) -> Checked<()> {
 fn late_move(harness: &mut Harness, program: &Running) -> Checked<()> {
     let _ = harness
         .write(b"/check-c/cpu.max", SHORT_MAX)
-        .map_err(|_| "cpu.max refused 10000 50000")?;
+        .map_err(|_| "cpu.max refused 15000 75000")?;
     freeze_check::wait_running(&program.process)?;
     crate::sched::sleep_for(SHORT_SETTLE_NANOS);
     let listed = alloc::format!("{}\n", program.process.pid());
@@ -567,7 +568,7 @@ fn beneath(harness: &mut Harness) -> Checked<u64> {
     harness.report.made += 1;
     let _ = harness
         .write(b"/check-c/cpu.max", SHORT_MAX)
-        .map_err(|_| "cpu.max refused 10000 50000")?;
+        .map_err(|_| "cpu.max refused 15000 75000")?;
     let program = freeze_check::start(harness, b"/check-c/k")?;
     let outcome = held_beneath(harness, &program);
     kill::send(&program.process, SIGKILL, Origin::Kernel);
@@ -592,7 +593,7 @@ fn held_beneath(harness: &Harness, program: &Running) -> Checked<u64> {
         crate::console::println!(
             "  cpu      beneath, held to {held} thousandths of the wall clock"
         );
-        return Err("a program beneath a cgroup with cpu.max 10000 50000 was not held to it");
+        return Err("a program beneath a cgroup with cpu.max 15000 75000 was not held to it");
     }
     let mut own = Vec::new();
     own.extend_from_slice(b"/check-c/k/cpu.stat");
