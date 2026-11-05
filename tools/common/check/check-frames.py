@@ -152,6 +152,13 @@ def lower_guard_pages():
     return int(re.search(r"const KERNEL_STACK_LOWER_GUARD_PAGES: u64 = (\d+);", source).group(1))
 
 
+# A baseline entry's stack and what limits a frame on it. `boot` is the 64 KiB boot stack with no
+# guard below it (`BOOT_STACK_SIZE`): its frames are judged against the baseline only. `task` is a
+# task's kernel stack and `worker` a boot check's worker stack (`stages_check::WORKER_CHECKS`), both
+# guarded: a frame there may not exceed the guard. No entry is `worker` today (ledger 7415 C).
+STACKS = {"boot": None, "task": "guard", "worker": "guard"}
+
+
 def judge_baseline(found, build, baseline, guard_bytes):
     """ARMv7-A: lines, problems, and what a record would write for this build."""
     problems, record = [], {}
@@ -166,9 +173,11 @@ def judge_baseline(found, build, baseline, guard_bytes):
             problems.append(f"{name}: a new frame of {frame} bytes over a page on ARMv7-A, which has no probes (F-100)")
         elif frame > was["frame"]:
             problems.append(f"{name}: its frame grew from {was['frame']} to {frame} bytes on ARMv7-A (F-100)")
-        if frame > guard_bytes and stack != "boot":
+        if stack not in STACKS:
+            problems.append(f"{name}: its baseline names stack {stack!r}, which is none of {sorted(STACKS)} (F-100)")
+        elif STACKS[stack] == "guard" and frame > guard_bytes:
             problems.append(
-                f"{name}: a frame of {frame} bytes off the boot stack steps over ARMv7-A's guard of {guard_bytes} (F-100)"
+                f"{name}: a frame of {frame} bytes on a {stack} stack steps over ARMv7-A's guard of {guard_bytes} (F-100)"
             )
     gone = sorted(set(held) - set(over))
     lines = [
@@ -212,6 +221,17 @@ def self_test():
     held["b"]["f"]["frame"] = 9520
     _, problems, _ = judge_baseline(armed, "b", held, 8000)
     assert len(problems) == 2 and all("steps over" in problem for problem in problems), problems
+    held["b"]["f"]["stack"] = "boot"
+    _, problems, _ = judge_baseline(armed, "b", held, 8000)
+    assert len(problems) == 1 and "g: a frame of 8192 bytes on a task stack" in problems[0], problems
+    held["b"]["g"]["stack"] = "worker"
+    _, problems, _ = judge_baseline(armed, "b", held, 8000)
+    assert len(problems) == 1 and "on a worker stack steps over" in problems[0], problems
+    _, problems, _ = judge_baseline(armed, "b", held, 12288)
+    assert not problems, problems
+    held["b"]["g"]["stack"] = "elsewhere"
+    _, problems, _ = judge_baseline(armed, "b", held, 12288)
+    assert len(problems) == 1 and "none of" in problems[0], problems
 
 
 def main():

@@ -4087,10 +4087,12 @@ either form LLVM writes; no baseline. ARMv7-A: the guard below a kernel stack is
 product frame on a task's stack being 9,544; a frame over it is refused off the boot stack with no baseline,
 and a frame over a page is in `tools/common/data/frame-baseline-armv7a.json` with its figure, a new or a
 larger one refused. The boot stack is 64 KiB, unguarded (`BOOT_STACK_SIZE`), against the largest frames on it, `sched::init`'s 12,816 and
-`kmain`'s 11,608. A departure, ledger 7172: since mk-boot-time's change the boot's checks run on 16-page workers, so three
-frames of 17,280, 15,656 and 14,096 stand over a 12,288 guard off the boot stack. They are checks, ARMv7-A is in no claim, and
-each fits on a 64 KiB stack unless more than 47 KiB already stands above it, which is not walked. The baseline still labels
-them `boot`; a `worker` label with a limit is owed (BACKLOG).
+`kmain`'s 11,608. The three largest check frames, 17,280, 15,656 and 14,096, are the device checks', run by `kmain`'s
+`check_devices` on the adopted boot stack (`sched::adopt_boot_task`), so the baseline's `boot` label is right for them.
+Corrected 2026-11-05, ledger 7415 (C): an earlier sentence here said the boot's checks run on 16-page workers since
+mk-boot-time and called that a departure (ledger 7172 (iv)); the one worker check is the crash hold
+(`stages_check::WORKER_CHECKS`), so no departure existed. `check-frames` now also knows a `worker` label, limited by
+the guard as `task` is and self-tested, for a frame on a worker's stack; no entry uses it.
 
 Closed on x86-64 and AArch64 by that check, on ARMv7-A by the three-page guard and the check (ledger 7033 C7). Moving
 ARMv7-A's product frames off the stack is a BACKLOG row. ARMv7-A is in no profile's
