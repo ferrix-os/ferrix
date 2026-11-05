@@ -67,7 +67,7 @@ entries is a three-slot array on the stack and a pass over an iterator, so
 an archive with any number of entries under `.ferrix/` costs time in
 proportion to them and no memory; each refusal is one console line.
 
-**A kernel stack's address space and the emergency stacks (2026-11-05, F-100, F-103).** Each processor holds one emergency stack, four pages on x86-64's pattern of `IST`, from bring-up for good, on both Arm architectures. On ARMv7-A a kernel stack takes three pages of the 512 MiB `vmap` arena below it rather than one, 8 KiB of address space a task and no memory: the arena's room for tasks falls from 512 MiB / 24 KiB to 512 MiB / 32 KiB, about 21,800 to about 16,400, before anything else it holds.
+**A kernel stack's address space and the emergency stacks (2026-11-05, F-100, F-103).** AArch64's kernel stack is 24 KiB since F-101, 8 KiB a task more than it was, two frames mapped and zeroed at each task's start; the price is argued, not measured, as `bench-rows` does not link for AArch64 here (BACKLOG). Each processor holds one emergency stack, `STACK_PAGES` long, six pages on AArch64 and four on ARMv7-A, on x86-64's pattern of `IST`, from bring-up for good, on both Arm architectures. On ARMv7-A a kernel stack takes three pages of the 512 MiB `vmap` arena below it rather than one, 8 KiB of address space a task and no memory: the arena's room for tasks falls from 512 MiB / 24 KiB to 512 MiB / 32 KiB, about 21,800 to about 16,400, before anything else it holds.
 
 **A native call's process make on the kernel stack (2026-11-04, F-101, ledger 6623).** PROCESS_MAKE stands at 10,016 bytes on AArch64's dev profile when it enters `Process::with_context`, by frame sizes measured from the binary, on a 16 KiB stack; its callees add 1,392 and a timer's interrupt from entry 3,680, with no last reference dropped in it, 15,088 together, indirect calls not followed. Measured, not a check; the check is owed in BACKLOG.
 
@@ -78,7 +78,7 @@ array on the calling task's kernel stack before copying it to the heap
 `ferrix.devmgr=init`, from `devmgr_start`'s system call (`start_in`). Its
 size is `DEVICES_HEADER_BYTES + MAX_DRIVERS x NAME_BYTES`, 24 + 32 x 32 =
 1,048 bytes at `MAX_DRIVERS` 32 (536 at 16), on a 16 KiB kernel stack
-(`vmap::STACK_PAGES` 4). It is not nested or recursive, and
+(`vmap::STACK_PAGES` 4; 24 KiB and 6 on AArch64 since F-101). It is not nested or recursive, and
 `write_devices` holds no lock of its own while it is live. All three
 constants are `ferrix-devmgr-proto`'s, a crate the item does not classify
 (F-76's class), so a review of `MAX_DRIVERS` or `NAME_BYTES` is a review of

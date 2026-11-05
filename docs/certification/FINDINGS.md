@@ -4086,8 +4086,11 @@ architectures. x86-64 and AArch64: no function moves the stack pointer more than
 either form LLVM writes; no baseline. ARMv7-A: the guard below a kernel stack is three pages, the largest
 product frame on a task's stack being 9,544; a frame over it is refused off the boot stack with no baseline,
 and a frame over a page is in `tools/common/data/frame-baseline-armv7a.json` with its figure, a new or a
-larger one refused. The boot stack is 64 KiB, unguarded (`BOOT_STACK_SIZE`), against the largest frame on it,
-17,280.
+larger one refused. The boot stack is 64 KiB, unguarded (`BOOT_STACK_SIZE`), against the largest frames on it, `sched::init`'s 12,816 and
+`kmain`'s 11,608. A departure, ledger 7172: since mk-boot-time's change the boot's checks run on 16-page workers, so three
+frames of 17,280, 15,656 and 14,096 stand over a 12,288 guard off the boot stack. They are checks, ARMv7-A is in no claim, and
+each fits on a 64 KiB stack unless more than 47 KiB already stands above it, which is not walked. The baseline still labels
+them `boot`; a `worker` label with a limit is owed (BACKLOG).
 
 Closed on x86-64 and AArch64 by that check, on ARMv7-A by the three-page guard and the check (ledger 7033 C7). Moving
 ARMv7-A's product frames off the stack is a BACKLOG row. ARMv7-A is in no profile's
