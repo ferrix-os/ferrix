@@ -669,3 +669,9 @@ what would reach them is what reaches every image (RESTRICTED-EXIT.md). To be ru
 | Item | Owner | Stage |
 |---|---|---|
 | **Open (2026-11-05, mk-issues).** A local, ungated `test-boot --arch aarch64 --accel tcg --smp 2`, no dump, `po-2026-11-03/mk-issues/early2.log`: nothing after stage 9's `spawn` line at 18.18 s to the 120 s limit, no panic, no dump. The three boots after it under the dump catcher passed. One sighting; fl-092's silent AArch64 boot in shape, and no relation to it or to the early-expiry fix is claimed. Not traced. A next one gets a dump (`mk-issues/hang.py`). | mk-issues | 9 |
+
+### fl-101
+
+| Item | Owner | Stage |
+|---|---|---|
+| **Closed on the row (2026-11-05, mk-issues, ledger 7145 (a)).** `test-log`'s behind on ARMv7-A: 5 to 7 s, the writer held up by `lode cat`'s evict, which walked its whole queue for every line; fixed, baa30507a. Then 13 0 1 once, `mkiq-x-4`, load 16 to 18: nothing was shed, as lode came back after the row's 4 s with the queue short of full. Why the writer took 13 s is not shown: the figures below do not support a lode catching up. A limit on what `lode cat` flushes between reads was tried: the writer's last 20,000 lines against its first 10,000 read 2.06 and 2.00 with it, 2.30 and 2.17 without (`mkio2-*`, `mkio3-c7`, `c8`), which no honest limit tells apart, so it is not in. The row now keeps lode stopped until the writer ends, or 60 s: under 4 s, one or more said, the error kept, as they were. The row's scenario can no longer shed nothing. A lode that has returned and is slow is not in this row. A writer's figure over 4 s under a stopped lode is a new sighting, for the consultant. | closed | 7 |

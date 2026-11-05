@@ -433,10 +433,10 @@ $bb sleep 3
 # least severe when its queue is full, and says so once lode takes lines.
 pid=$(lode_pid)
 kill -STOP $pid
-( $bb sleep 4; kill -CONT $pid ) &
+( $bb sleep 60; kill -CONT $pid ) &
 pad=$($bb printf '%0200d' 0)
 began=$($bb date +%s)
-( i=0; while [ $i -lt 30000 ]; do echo "<7>behindy: $i $pad"; i=$((i+1)); done; echo "<3>behindy: the error after"; $bb date +%s > /tmp/behind.end ) | /bin/lode cat -t behindy
+( i=0; while [ $i -lt 30000 ]; do echo "<7>behindy: $i $pad"; i=$((i+1)); done; echo "<3>behindy: the error after"; $bb date +%s > /tmp/behind.end; kill -CONT $pid ) | /bin/lode cat -t behindy
 $bb sleep 3
 say "behind: $(( $($bb cat /tmp/behind.end) - began )) $(/bin/lode -b -t behindy -o cat | $bb grep -c 'while lode was behind') $(/bin/lode -b -t behindy -o cat | $bb grep -c 'the error after')"
 # lode reload says what changed: an event kind switched, retention given
