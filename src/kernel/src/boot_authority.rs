@@ -314,43 +314,30 @@ fn promise_for_partitions(job: &job::Job, parsed: &Description<'_>) -> Result<()
         .map_err(|_| "no promise for the partitions")
 }
 
-fn try_start_manager() -> Result<Option<Served>, &'static str> {
-    let Some((description, _)) = sealed_file(DESCRIPTION)? else {
-        println!("  partmgr  no description in the image: no safety partition, no manager");
-        return Ok(None);
-    };
-    // Read back whole from the archive, and parsed by the one parser.
-    let bytes = crate::mm::with_initrd(|archive| {
-        ferrix_cpio::file_named(archive, DESCRIPTION)
-            .and_then(|file| fallible::try_to_vec(file).ok())
-    })
-    .flatten()
-    .ok_or("the description could not be read")?;
-    let parsed = Description::parse(&bytes).map_err(|_| "the description is malformed")?;
-    let mut transfers = Vec::new();
-    fallible::try_reserve(&mut transfers, CHANNEL_MAX_HANDLES).map_err(|_| "no memory")?;
-    let job = job::root()
-        .new_child_as(false, true)
-        .map_err(|_| "no job for the partitions")?;
-    job.make_measured();
-    must_be_measured(&job);
-    #[cfg(ferrix_kernel_memory = "retyped")]
-    promise_for_partitions(&job, &parsed)?;
+/// What the manager's first message carries, onto `transfers`, in the order of its row:
+/// its job, the debug log, the description, the images, the devices kept, and a file
+/// server's channels. Answers how many images and devices, and what stays the kernel's.
+fn manager_transfers(
+    parsed: &Description<'_>,
+    job: &Arc<job::Job>,
+    description: Arc<Vmo>,
+    transfers: &mut Vec<(Object, Rights)>,
+) -> Result<(u32, u32, Served), &'static str> {
     fallible::push_within(
-        &mut transfers,
+        transfers,
         (
-            Object::Job(Arc::clone(&job)),
+            Object::Job(Arc::clone(job)),
             const { MANAGER.of(Held::Job) },
         ),
     )
     .map_err(|_| TOO_MANY)?;
     fallible::push_within(
-        &mut transfers,
+        transfers,
         (Object::DebugLog, const { MANAGER.of(Held::DebugLog) }),
     )
     .map_err(|_| TOO_MANY)?;
     fallible::push_within(
-        &mut transfers,
+        transfers,
         (
             Object::Vmo(description),
             const { MANAGER.of(Held::Description) },
@@ -362,7 +349,7 @@ fn try_start_manager() -> Result<Option<Served>, &'static str> {
         let (image, _) =
             sealed_file(partition.image())?.ok_or("a partition's image is not in the archive")?;
         fallible::push_within(
-            &mut transfers,
+            transfers,
             (Object::Vmo(image), const { MANAGER.of(Held::Image) }),
         )
         .map_err(|_| TOO_MANY)?;
@@ -379,7 +366,7 @@ fn try_start_manager() -> Result<Option<Served>, &'static str> {
             }
             fallible::try_push(&mut HELD.lock(), Arc::clone(&node)).map_err(|_| "no memory")?;
             fallible::push_within(
-                &mut transfers,
+                transfers,
                 (Object::Device(node), const { MANAGER.of(Held::DeviceKept) }),
             )
             .map_err(|_| TOO_MANY)?;
@@ -421,7 +408,7 @@ fn try_start_manager() -> Result<Option<Served>, &'static str> {
             Endpoint::pair().map_err(|_| "no memory for the files' channel")?;
         for end in [server_cores, server_files] {
             fallible::push_within(
-                &mut transfers,
+                transfers,
                 (Object::Channel(end), const { MANAGER.of(Held::Channel) }),
             )
             .map_err(|_| TOO_MANY)?;
@@ -429,6 +416,32 @@ fn try_start_manager() -> Result<Option<Served>, &'static str> {
         served.block_cores = Some(block_cores);
         served.files = Some(files);
     }
+    Ok((images, devices, served))
+}
+
+fn try_start_manager() -> Result<Option<Served>, &'static str> {
+    let Some((description, _)) = sealed_file(DESCRIPTION)? else {
+        println!("  partmgr  no description in the image: no safety partition, no manager");
+        return Ok(None);
+    };
+    // Read back whole from the archive, and parsed by the one parser.
+    let bytes = crate::mm::with_initrd(|archive| {
+        ferrix_cpio::file_named(archive, DESCRIPTION)
+            .and_then(|file| fallible::try_to_vec(file).ok())
+    })
+    .flatten()
+    .ok_or("the description could not be read")?;
+    let parsed = Description::parse(&bytes).map_err(|_| "the description is malformed")?;
+    let mut transfers = Vec::new();
+    fallible::try_reserve(&mut transfers, CHANNEL_MAX_HANDLES).map_err(|_| "no memory")?;
+    let job = job::root()
+        .new_child_as(false, true)
+        .map_err(|_| "no job for the partitions")?;
+    job.make_measured();
+    must_be_measured(&job);
+    #[cfg(ferrix_kernel_memory = "retyped")]
+    promise_for_partitions(&job, &parsed)?;
+    let (images, devices, served) = manager_transfers(&parsed, &job, description, &mut transfers)?;
     MANAGER.judge(transfers.iter().map(|(object, rights)| (object, *rights)))?;
     let (kernel_end, manager_end) = Endpoint::pair().map_err(|_| "no memory for its channel")?;
     let body = fallible::try_to_vec(&first::encode(images, devices)).map_err(|_| "no memory")?;

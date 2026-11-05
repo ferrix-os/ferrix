@@ -785,6 +785,21 @@ fn devices_given() -> Result<Vec<Arc<device::DeviceNode>>, &'static str> {
     Ok(kept)
 }
 
+/// Each of `nodes` twice over: devmgr's own handle and the one it keeps for the driver.
+fn give_devices<'a>(
+    transfers: &mut Vec<Transfer>,
+    nodes: impl Iterator<Item = &'a Arc<device::DeviceNode>>,
+) {
+    for node in nodes {
+        for held in [
+            const { DEVMGR.of(Held::DeviceGiven) },
+            const { DEVMGR.of(Held::DeviceKept) },
+        ] {
+            let _ = fallible::push_within(transfers, (Object::Device(Arc::clone(node)), held));
+        }
+    }
+}
+
 /// Write the DEVICES messages on `kernel_end`: `job` for the drivers, every
 /// device node twice, and `images` by the names [`read_files`] noted.
 /// Answers how many device nodes went.
@@ -847,22 +862,7 @@ fn write_devices(
                 (Object::Job(job), const { DEVMGR.of(Held::Job) }),
             );
         }
-        for node in nodes.iter().skip(index).take(take) {
-            let _ = fallible::push_within(
-                &mut transfers,
-                (
-                    Object::Device(Arc::clone(node)),
-                    const { DEVMGR.of(Held::DeviceGiven) },
-                ),
-            );
-            let _ = fallible::push_within(
-                &mut transfers,
-                (
-                    Object::Device(Arc::clone(node)),
-                    const { DEVMGR.of(Held::DeviceKept) },
-                ),
-            );
-        }
+        give_devices(&mut transfers, nodes.iter().skip(index).take(take));
         if let Some(images) = images.take() {
             for vmo in images {
                 let _ = fallible::push_within(

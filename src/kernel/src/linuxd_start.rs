@@ -156,6 +156,83 @@ fn promise_for_partition(partition: &job::Job) -> Result<u64, &'static str> {
     Ok(promised)
 }
 
+/// What linuxd's boot page says, its handles given as they are named.
+fn boot_page(
+    region: &Arc<Region>,
+    partition: &Arc<job::Job>,
+    page: &Arc<Vmo>,
+    (archive, archive_len): (Arc<Vmo>, u64),
+    cmdline: &str,
+    (devmgr, files): (
+        Option<crate::discovery::devmgr::Detached>,
+        Option<Arc<crate::object::channel::Endpoint>>,
+    ),
+    (memory_frames, wall_clock): (u64, u64),
+) -> Result<BootPage, &'static str> {
+    let (devmgr_messages, cores, net_cores) = match devmgr {
+        Some(given) => (
+            give(
+                region,
+                Object::Channel(given.messages),
+                const { LINUXD.of(Held::Channel) },
+            )?,
+            give(
+                region,
+                Object::Channel(given.cores),
+                const { LINUXD.of(Held::Channel) },
+            )?,
+            give(
+                region,
+                Object::Channel(given.net_cores),
+                const { LINUXD.of(Held::Channel) },
+            )?,
+        ),
+        None => (0, 0, 0),
+    };
+    let files = match files {
+        Some(end) => give(
+            region,
+            Object::Channel(end),
+            const { LINUXD.of(Held::Channel) },
+        )?,
+        None => 0,
+    };
+    Ok(BootPage {
+        devmgr: devmgr_messages,
+        cores,
+        files,
+        net_cores: u64::from(net_cores),
+        magic: BOOT_MAGIC,
+        region: give(
+            region,
+            Object::Region(Arc::clone(region)),
+            const { LINUXD.of(Held::Region) },
+        )?,
+        job: give(
+            region,
+            Object::Job(Arc::clone(partition)),
+            const { LINUXD.of(Held::Job) },
+        )?,
+        initramfs: give(
+            region,
+            Object::Vmo(archive),
+            const { LINUXD.of(Held::Archive) },
+        )?,
+        initramfs_bytes: archive_len,
+        command_line_bytes: cmdline.len() as u32,
+        processors: crate::smp::count() as u32,
+        devices: u64::from(write_devices(page)?),
+        debug_log: give(
+            region,
+            Object::DebugLog,
+            const { LINUXD.of(Held::DebugLog) },
+        )?,
+        console: give(region, Object::Console, const { LINUXD.of(Held::Console) })?,
+        memory_frames,
+        wall_clock,
+    })
+}
+
 fn start(
     wall_clock: u64,
     cmdline: &str,
@@ -192,71 +269,19 @@ fn start(
         .ok_or("no initramfs")??;
     let _ = crate::mm::give_back_initrd();
     let page = Vmo::new_anonymous(1).map_err(|_| "no memory for the boot page")?;
-    let (devmgr_messages, cores, net_cores) = match devmgr {
-        Some(given) => (
-            give(
-                &region,
-                Object::Channel(given.messages),
-                const { LINUXD.of(Held::Channel) },
-            )?,
-            give(
-                &region,
-                Object::Channel(given.cores),
-                const { LINUXD.of(Held::Channel) },
-            )?,
-            give(
-                &region,
-                Object::Channel(given.net_cores),
-                const { LINUXD.of(Held::Channel) },
-            )?,
-        ),
-        None => (0, 0, 0),
-    };
-    let files = match files {
-        Some(end) => give(
-            &region,
-            Object::Channel(end),
-            const { LINUXD.of(Held::Channel) },
-        )?,
-        None => 0,
-    };
-    let boot = BootPage {
-        devmgr: devmgr_messages,
-        cores,
-        files,
-        net_cores: u64::from(net_cores),
-        magic: BOOT_MAGIC,
-        region: give(
-            &region,
-            Object::Region(Arc::clone(&region)),
-            const { LINUXD.of(Held::Region) },
-        )?,
-        job: give(
-            &region,
-            Object::Job(Arc::clone(&partition)),
-            const { LINUXD.of(Held::Job) },
-        )?,
-        initramfs: give(
-            &region,
-            Object::Vmo(archive),
-            const { LINUXD.of(Held::Archive) },
-        )?,
-        initramfs_bytes: archive_len,
-        command_line_bytes: cmdline.len() as u32,
-        processors: crate::smp::count() as u32,
-        devices: u64::from(write_devices(&page)?),
-        debug_log: give(
-            &region,
-            Object::DebugLog,
-            const { LINUXD.of(Held::DebugLog) },
-        )?,
-        console: give(&region, Object::Console, const { LINUXD.of(Held::Console) })?,
-        #[cfg(ferrix_kernel_memory = "retyped")]
-        memory_frames: promised / 8 * 7,
-        #[cfg(not(ferrix_kernel_memory = "retyped"))]
-        memory_frames: crate::mm::free_frames() / 8 * 7,
-        wall_clock,
-    };
+    #[cfg(ferrix_kernel_memory = "retyped")]
+    let memory_frames = promised / 8 * 7;
+    #[cfg(not(ferrix_kernel_memory = "retyped"))]
+    let memory_frames = crate::mm::free_frames() / 8 * 7;
+    let boot = boot_page(
+        &region,
+        &partition,
+        &page,
+        (archive, archive_len),
+        cmdline,
+        (devmgr, files),
+        (memory_frames, wall_clock),
+    )?;
     judge_table(&region, &LINUXD);
     page.commit_and_write(0, 0, &boot.to_bytes())
         .map_err(|_| "the boot page")?;
