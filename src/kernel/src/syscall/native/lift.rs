@@ -232,6 +232,11 @@ mod served {
                 } else {
                     0
                 }),
+                3 => Ok(crate::arch::user_hwcaps().0 as usize),
+                4 => Ok(crate::arch::user_hwcaps().1 as usize),
+                5 => crate::smp::this_cpu()
+                    .map(|cpu| cpu.logical)
+                    .ok_or(status::BAD_STATE),
                 _ => Err(status::INVALID_ARGS),
             },
             NativeCall::RandomFill => {

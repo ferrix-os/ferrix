@@ -95,6 +95,25 @@ pub fn run(job: Handle, arena: Handle, executable: Handle) -> Result<u32, &'stat
     // Asked of a kernel whose clock is the counter: a frequency, and it ticks.
     let _ = lift_calls::clock_read(Kernel, CLOCK_COUNTER_HZ)
         .map_err(|_| "CLOCK_READ, the frequency")?;
+    // L.object.315: the three questions EL0 cannot answer itself, and any other refused.
+    let hwcaps = lift_calls::clock_read(Kernel, ferrix_native_abi::lift::CLOCK_HWCAP)
+        .map_err(|_| "CLOCK_READ, the hwcaps")?;
+    // Every AArch64 core has fp and asimd; x86-64's answer is the kernel's own, unasked here.
+    if cfg!(not(target_arch = "x86_64")) && hwcaps == 0 {
+        return Err("CLOCK_READ answered no hwcaps");
+    }
+    let _ = lift_calls::clock_read(Kernel, ferrix_native_abi::lift::CLOCK_HWCAP2)
+        .map_err(|_| "CLOCK_READ, the second hwcaps")?;
+    let processor = lift_calls::clock_read(Kernel, ferrix_native_abi::lift::CLOCK_CPU)
+        .map_err(|_| "CLOCK_READ, the processor")?;
+    if processor as usize >= crate::smp::count() {
+        return Err("CLOCK_READ answered a processor past the last");
+    }
+    expect(
+        "CLOCK_READ with an unknown question",
+        lift_calls::clock_read(Kernel, 1_000),
+        Error::InvalidArgs,
+    )?;
     window(job, arena, executable)?;
     Ok(19)
 }

@@ -12,11 +12,9 @@ use ferrix_native::region::{Context, FaultKind, Reason};
 use ferrix_rt::Kernel;
 use ferrix_rt::restricted as k1;
 
-use crate::arch::UserContext;
+#[cfg(target_arch = "x86_64")]
 use crate::arch::x86_64::gdt::{USER_CODE, USER_CODE32, USER_DATA};
-use crate::arch::x86_64::switch::UserState;
-use crate::arch::x86_64::syscall::{SyscallFrame, UserRegs};
-use crate::arch::x86_64::trap::TrapFrame;
+use crate::arch::{TrapFrame, UserContext, UserRegs, UserState};
 use crate::sched;
 use crate::trap::{self, Abi, Outcome, SyscallArgs};
 
@@ -40,11 +38,17 @@ fn dispatch(args: &SyscallArgs, regs: Option<&UserRegs>) -> Outcome {
 }
 
 /// Where `FXSAVE` keeps `MXCSR_MASK`, and the word the first capture read there.
+#[cfg(target_arch = "x86_64")]
 const MXCSR_MASK_AT: usize = 28;
+#[cfg(target_arch = "x86_64")]
 static MXCSR_MASK: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 
+#[cfg(target_arch = "x86_64")]
 const RFLAGS_USER: u64 = 0x202;
+#[cfg(target_arch = "x86_64")]
 const SYSCALL_BYTES: u64 = 2;
+#[cfg(target_arch = "aarch64")]
+const SYSCALL_BYTES: u64 = 4;
 
 /// The program's registers as K1 holds them: read once per change, written back
 /// by the next `enter`.
@@ -55,6 +59,41 @@ fn read_context() -> Context {
     })
 }
 
+#[cfg(target_arch = "aarch64")]
+fn to_trap(c: &Context) -> TrapFrame {
+    TrapFrame {
+        x: c.x,
+        sp: c.sp,
+        elr: c.pc,
+        spsr: c.pstate,
+        esr: 0,
+        far: 0,
+    }
+}
+#[cfg(target_arch = "aarch64")]
+fn from_trap(f: &TrapFrame, c: &mut Context) {
+    c.x = f.x;
+    c.sp = f.sp;
+    c.pc = f.elr;
+    c.pstate = f.spsr;
+}
+#[cfg(target_arch = "aarch64")]
+const fn set_call_answer(c: &mut Context, value: u64) {
+    c.x[0] = value;
+}
+#[cfg(target_arch = "x86_64")]
+const fn set_call_answer(c: &mut Context, value: u64) {
+    c.rax = value;
+}
+#[cfg(target_arch = "aarch64")]
+const fn program_counter(c: &Context) -> u64 {
+    c.pc
+}
+#[cfg(target_arch = "x86_64")]
+const fn program_counter(c: &Context) -> u64 {
+    c.rip
+}
+#[cfg(target_arch = "x86_64")]
 fn to_trap(c: &Context) -> TrapFrame {
     TrapFrame {
         r15: c.r15,
@@ -81,6 +120,7 @@ fn to_trap(c: &Context) -> TrapFrame {
         ss: c.ss,
     }
 }
+#[cfg(target_arch = "x86_64")]
 fn from_trap(f: &TrapFrame, c: &mut Context) {
     c.r15 = f.r15;
     c.r14 = f.r14;
@@ -148,7 +188,7 @@ fn back(value: u64, not_a_call: bool) -> k1::Exit {
     let mut context = pending.unwrap_or_else(read_context);
     // A call's answer; after any other exit the program's own register stays.
     if !not_a_call {
-        context.rax = value;
+        set_call_answer(&mut context, value);
     }
     if let (true, Some(path)) = (due, path) {
         let mut user = UserContext::from_trap(&to_trap(&context));
@@ -164,6 +204,15 @@ fn back(value: u64, not_a_call: bool) -> k1::Exit {
     again_enter(&context)
 }
 
+#[cfg(target_arch = "aarch64")]
+fn fresh(entry: u64, stack: u64, argument: u64, _abi: Abi) -> Context {
+    let mut context = Context::default();
+    context.pc = entry;
+    context.sp = stack;
+    context.x[0] = argument;
+    context
+}
+#[cfg(target_arch = "x86_64")]
 fn fresh(entry: u64, stack: u64, argument: u64, abi: Abi) -> Context {
     let mut context = Context::default();
     context.rip = entry;
@@ -197,6 +246,11 @@ fn needs_context(abi: Abi, number: usize) -> bool {
     /// x86-64 number: clone, clone3, fork, vfork, sigaltstack, arch_prctl, rt_sigreturn.
     const READS: [u64; 8] = {
         let mut bits = [0_u64; 8];
+        // By AArch64's numbers: clone, clone3, sigaltstack, rt_sigreturn; it has no fork,
+        // vfork or arch_prctl.
+        #[cfg(target_arch = "aarch64")]
+        let numbers = [220_usize, 435, 132, 139];
+        #[cfg(target_arch = "x86_64")]
         let numbers = [56_usize, 435, 57, 58, 131, 158, 15];
         let mut at = 0;
         while at < numbers.len() {
@@ -289,11 +343,9 @@ fn run(mut exit: k1::Exit) -> ! {
                     abi,
                     number,
                     args: exit.words,
-                    ip: context.as_ref().map_or(0, |context| context.rip),
+                    ip: context.as_ref().map_or(0, program_counter),
                 };
-                let regs = context
-                    .as_ref()
-                    .map(|context| UserRegs::Trap(to_trap(context)));
+                let regs = context.as_ref().map(|context| regs_of(to_trap(context)));
                 match context
                     .as_ref()
                     .and_then(|context| answer_early(&args, context))
@@ -309,10 +361,7 @@ fn run(mut exit: k1::Exit) -> ! {
                         Outcome::Return(value) => back(value as u64, false),
                         Outcome::ReturnWords { value, words } => {
                             let mut context = context.unwrap_or_else(read_context);
-                            context.rax = value as u64;
-                            context.rsi = words[0];
-                            context.rdx = words[1];
-                            context.r10 = words[2];
+                            set_answer_words(&mut context, value as u64, words);
                             again_enter(&context)
                         }
                         Outcome::Enter { entry, stack, abi } => {
@@ -336,6 +385,30 @@ fn run(mut exit: k1::Exit) -> ! {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
+const fn regs_of(frame: TrapFrame) -> UserRegs {
+    UserRegs::Trap(frame)
+}
+#[cfg(target_arch = "aarch64")]
+const fn regs_of(frame: TrapFrame) -> UserRegs {
+    UserRegs(frame)
+}
+/// A native call's answer with its words, where the native ABI has them.
+#[cfg(target_arch = "x86_64")]
+fn set_answer_words(context: &mut Context, value: u64, words: [u64; 3]) {
+    context.rax = value;
+    context.rsi = words[0];
+    context.rdx = words[1];
+    context.r10 = words[2];
+}
+#[cfg(target_arch = "aarch64")]
+fn set_answer_words(context: &mut Context, value: u64, words: [u64; 3]) {
+    context.x[0] = value;
+    context.x[1] = words[0];
+    context.x[2] = words[1];
+    context.x[3] = words[2];
+}
+
 /// `arch_prctl` and `rt_sigreturn`, which the kernel's entry answers before
 /// dispatch for the same reasons: each changes registers the dispatch does not hold.
 fn answer_early(args: &SyscallArgs, context: &Context) -> Option<k1::Exit> {
@@ -344,6 +417,7 @@ fn answer_early(args: &SyscallArgs, context: &Context) -> Option<k1::Exit> {
         return None;
     }
     match crate::arch::decode_syscall(args.number)? {
+        #[cfg(target_arch = "x86_64")]
         Syscall::ArchPrctl => {
             const ARCH_SET_GS: u64 = 0x1001;
             const ARCH_SET_FS: u64 = 0x1002;
@@ -391,16 +465,12 @@ fn answer_early(args: &SyscallArgs, context: &Context) -> Option<k1::Exit> {
 fn fault(exit: &k1::Exit) -> k1::Exit {
     let vector = exit.number;
     let code = exit.words[ferrix_native_abi::restricted::FAULT_CODE];
+    let (is_page_fault, write, execute) = page_fault_of(vector, code);
     let address = exit.words[ferrix_native_abi::restricted::FAULT_ADDRESS];
     let mut kind = exit.words[ferrix_native_abi::restricted::FAULT_KIND];
     let pc = exit.words[ferrix_native_abi::restricted::EXIT_PC];
-    const PF_WRITE: u64 = 1 << 1;
-    const PF_FETCH: u64 = 1 << 4;
-    if vector == 14 {
-        let access = crate::user::space::Access {
-            write: code & PF_WRITE != 0,
-            execute: code & PF_FETCH != 0,
-        };
+    if is_page_fault {
+        let access = crate::user::space::Access { write, execute };
         // The kernel's window has no regions, so only the shadow's answer says why: a page
         // past a file's end is the program's SIGBUS.
         use crate::user::space::SpaceError;
@@ -417,7 +487,7 @@ fn fault(exit: &k1::Exit) -> k1::Exit {
         }
         if kind == ferrix_native_abi::restricted::FaultKind::CallCopy as u64 {
             // A bad pointer in a native call: its status, never a signal (P4).
-            with_pending(|context| context.rip += SYSCALL_BYTES);
+            with_pending(|context| step_past_call(context));
             return back(
                 ferrix_native_abi::status::FAULT.as_return_value() as u64,
                 false,
@@ -439,6 +509,54 @@ fn fault(exit: &k1::Exit) -> k1::Exit {
     back(0, true)
 }
 
+#[cfg(target_arch = "x86_64")]
+const fn step_past_call(context: &mut Context) {
+    context.rip += SYSCALL_BYTES;
+}
+#[cfg(target_arch = "aarch64")]
+const fn step_past_call(context: &mut Context) {
+    context.pc += SYSCALL_BYTES;
+}
+/// Whether this fault's vector is a translation's, and what it asked.
+#[cfg(target_arch = "x86_64")]
+const fn page_fault_of(vector: u64, code: u64) -> (bool, bool, bool) {
+    const PF_WRITE: u64 = 1 << 1;
+    const PF_FETCH: u64 = 1 << 4;
+    (vector == 14, code & PF_WRITE != 0, code & PF_FETCH != 0)
+}
+/// The exception class, and the syndrome: `WnR` of a data abort; an instruction abort
+/// is a fetch.
+#[cfg(target_arch = "aarch64")]
+const fn page_fault_of(vector: u64, code: u64) -> (bool, bool, bool) {
+    const DATA_ABORT_LOWER: u64 = 0b100100;
+    const INSTRUCTION_ABORT_LOWER: u64 = 0b100000;
+    const WNR: u64 = 1 << 6;
+    let data = vector == DATA_ABORT_LOWER;
+    (
+        data || vector == INSTRUCTION_ABORT_LOWER,
+        data && code & WNR != 0,
+        vector == INSTRUCTION_ABORT_LOWER,
+    )
+}
+
+#[cfg(target_arch = "aarch64")]
+fn signal_for(vector: u64, kind: u64) -> (u32, i32) {
+    use ferrix_linux_abi::types::{SIGBUS, SIGFPE, SIGILL, SIGSEGV, SIGTRAP};
+    match vector {
+        0b100100 | 0b100000 => match kind {
+            2 => (SIGSEGV, 2),
+            3 => (SIGBUS, 2),
+            4 => (SIGBUS, 4),
+            _ => (SIGSEGV, 1),
+        },
+        0b100010 | 0b100110 => (SIGBUS, 1),
+        0b101100 => (SIGFPE, 128),
+        0b111100 => (SIGTRAP, 1),
+        _ => (SIGILL, 1),
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
 fn signal_for(vector: u64, kind: u64) -> (u32, i32) {
     use ferrix_linux_abi::types::{SIGBUS, SIGFPE, SIGILL, SIGSEGV, SIGTRAP};
     match vector {
@@ -462,6 +580,16 @@ pub fn enter(entry: u64, stack: u64, argument: u64, abi: Abi) -> ! {
     prepare_first();
     run(again_enter(&context))
 }
+/// A fork child's first entry: its parent's registers, from the system call.
+#[cfg(target_arch = "aarch64")]
+pub fn resume(regs: &UserRegs) -> ! {
+    let mut context = Context::default();
+    from_trap(&regs.0, &mut context);
+    apply_state(&mut context);
+    prepare_first();
+    run(again_enter(&context))
+}
+#[cfg(target_arch = "x86_64")]
 /// A fork child's first entry: its parent's registers, from the system call.
 pub fn resume(regs: &UserRegs) -> ! {
     let mut context = Context::default();
@@ -492,12 +620,31 @@ fn prepare_first() {
     let task = sched::current().expect("a program's thread has a task");
     let state = task.user_state.lock().take();
     if let Some(state) = state {
-        let _ = ferrix_native::region::vectors_write(Kernel, state.image());
+        load_vectors(&state);
     }
     sched::account::starts_program(&task);
     task.in_restricted.store(true, Ordering::Release);
 }
 
+/// What K1 holds of this thread, as a record.
+#[cfg(target_arch = "aarch64")]
+pub fn capture_state() -> UserState {
+    let context = with_pending(|context| *context);
+    let mut state = UserState::new();
+    state.read_context(&context);
+    let mut image = [0_u8; 528];
+    if ferrix_native::region::vectors_read(Kernel, &mut image).is_ok() {
+        let _ = state.set_vector_image(&image);
+    }
+    state
+}
+/// Load `state` as `rt_sigreturn` does: the vectors now, the thread pointer at the next entry.
+#[cfg(target_arch = "aarch64")]
+pub fn load_state(state: &UserState) {
+    with_pending(|context| state.write_context(context));
+    load_vectors(state);
+}
+#[cfg(target_arch = "x86_64")]
 pub fn capture_state() -> UserState {
     let context = with_pending(|context| *context);
     let mut state = UserState::new();
@@ -528,8 +675,22 @@ pub fn capture_state() -> UserState {
     state
 }
 pub fn load_vectors(state: &UserState) {
-    let _ = ferrix_native::region::vectors_write(Kernel, state.image());
+    let _ = ferrix_native::region::vectors_write(Kernel, as_bytes(&state.image()));
 }
+#[cfg(target_arch = "aarch64")]
+const fn as_bytes(image: &[u8; 528]) -> &[u8] {
+    image
+}
+#[cfg(target_arch = "x86_64")]
+const fn as_bytes(image: &[u8]) -> &[u8] {
+    image
+}
+#[cfg(target_arch = "aarch64")]
+pub fn reset_state() {
+    with_pending(|context| context.tpidr = 0);
+    let _ = ferrix_native::region::vectors_write(Kernel, &UserState::new().image());
+}
+#[cfg(target_arch = "x86_64")]
 pub fn reset_state() {
     with_pending(|context| {
         context.fs_base = 0;
@@ -542,6 +703,7 @@ pub fn reset_state() {
     });
     let _ = ferrix_native::region::vectors_write(Kernel, UserState::new().image());
 }
+#[cfg(target_arch = "x86_64")]
 pub fn set_thread_area(index: Option<usize>, descriptor: u64) -> Option<usize> {
     with_pending(|context| {
         let at = index.or_else(|| context.tls.iter().position(|&slot| slot == 0))?;
@@ -549,9 +711,11 @@ pub fn set_thread_area(index: Option<usize>, descriptor: u64) -> Option<usize> {
         Some(at)
     })
 }
+#[cfg(target_arch = "x86_64")]
 pub fn thread_area(index: usize) -> Option<u64> {
     with_pending(|context| context.tls.get(index).copied())
 }
+#[cfg(target_arch = "x86_64")]
 pub fn selectors() -> [u16; 4] {
     with_pending(|context| {
         [
@@ -562,6 +726,7 @@ pub fn selectors() -> [u16; 4] {
         ]
     })
 }
+#[cfg(target_arch = "x86_64")]
 pub fn set_selectors(selectors: [u16; 4]) {
     with_pending(|context| {
         context.ds = u64::from(selectors[0]);
@@ -570,6 +735,7 @@ pub fn set_selectors(selectors: [u16; 4]) {
         context.gs = u64::from(selectors[3]);
     });
 }
+#[cfg(target_arch = "x86_64")]
 pub fn set_compat() {
     with_pending(|context| {
         context.cs = u64::from(USER_CODE32 | 3);

@@ -101,7 +101,7 @@ added to the item under this cfg alone:
 | 0x10B0 | `DEBUG_WRITE(log, ptr, len)` | §2.1's write-only debug log, by a handle. It stays here: boot authority holds a budget per holder and a measured process's prefix on this one call (L.device.84-85). |
 | 0x10B1 | `OBJECT_KIND(handle)` → kind, rights | what a handle in a driver's message is, for the bridge (§11) |
 | 0x10B4 | `THREAD_YIELD()` | a contended shim lock; `sched_yield` |
-| 0x10B5 | `CLOCK_READ(which)` → value | 0 the clock, 2 the counter's frequency when ring 3 can read the counter, 3 the processors. Ends with the time page |
+| 0x10B5 | `CLOCK_READ(which)` → value | 0 the clock, 2 the counter's frequency when ring 3 can read the counter, 3 and 4 the hwcaps, 5 the processor. Ends with the time page |
 | 0x10B6 | `RANDOM_FILL(ptr, len)` | §2.1's entropy call |
 | 0x10B7 | `THREAD_AFFINITY(thread, ptr, words)` | `sched_setaffinity`; a region's threads only |
 | 0x10B8 | `CONSOLE_READ(console, ptr, len)` → bytes | the console's input, in the kernel until M6, by a handle |
@@ -355,8 +355,9 @@ each reported, none loosened; a miss goes to `morning-questions.md`.
   nothing under `present`, which never compiles it.
 * **`fs=lift`** is a stopgap so milestone 5 can run: `fast` and `max` set
   `fs=server`, and the flip waits for `btrfsd`.
-* **AArch64** is milestone 6: K1's AArch64 half and the shim's arch module. ARMv7-A
-  stays native-only (Q7).
+* **AArch64** is milestone 6: K1's AArch64 half and the shim's arch module, built
+  2026-11-05 (`lift/core/arch/aarch64`; `FLIP.md` has its rows). `CLOCK_READ` gains 3 and 4, the
+  hwcaps, and 5, the processor (L.object.315), since EL0 cannot ask. ARMv7-A stays native-only (Q7).
 * **What no milestone tonight gives**: K11's two tables before K11, §2.5's K17, the
   speculation rule of §7 (K1's), the deletion from `fast` and `max` of the
   Linux-shaped core (M6).

@@ -867,27 +867,48 @@ fn test_linuxd(args: &Args) -> Result<()> {
 }
 
 /// The smallest static Linux program: `write(1, "hello from ring 3\\n")`, then
-/// `exit_group(42)`, as a one-segment x86-64 ELF.
+/// `exit_group(42)`, as a one-segment ELF of `arch`.
 fn hello_elf(arch: Arch) -> Result<PathBuf> {
     const BASE: u64 = 0x40_0000;
     const HEADERS: u64 = 64 + 56;
     let text: &[u8] = b"hello from ring 3\n";
-    let mut code: Vec<u8> = vec![
-        0xb8, 0x01, 0, 0, 0, // mov $1, %eax
-        0xbf, 0x01, 0, 0, 0, // mov $1, %edi
-        0x48, 0x8d, 0x35, 0x13, 0, 0, 0, // lea 0x13(%rip), %rsi
-        0xba, 0x12, 0, 0, 0, // mov $18, %edx
-        0x0f, 0x05, // syscall
-        0xb8, 0xe7, 0, 0, 0, // mov $231, %eax
-        0xbf, 0x2a, 0, 0, 0, // mov $42, %edi
-        0x0f, 0x05, // syscall
-    ];
+    let (machine, mut code): (u16, Vec<u8>) = match arch {
+        Arch::AArch64 => (
+            183,
+            [
+                0xd280_0808_u32, // mov x8, #64
+                0xd280_0020,     // mov x0, #1
+                0x1000_00c1,     // adr x1, the text below
+                0xd280_0242,     // mov x2, #18
+                0xd400_0001,     // svc #0
+                0xd280_0bc8,     // mov x8, #94
+                0xd280_0540,     // mov x0, #42
+                0xd400_0001,     // svc #0
+            ]
+            .iter()
+            .flat_map(|word| word.to_le_bytes())
+            .collect(),
+        ),
+        _ => (
+            62,
+            vec![
+                0xb8, 0x01, 0, 0, 0, // mov $1, %eax
+                0xbf, 0x01, 0, 0, 0, // mov $1, %edi
+                0x48, 0x8d, 0x35, 0x13, 0, 0, 0, // lea 0x13(%rip), %rsi
+                0xba, 0x12, 0, 0, 0, // mov $18, %edx
+                0x0f, 0x05, // syscall
+                0xb8, 0xe7, 0, 0, 0, // mov $231, %eax
+                0xbf, 0x2a, 0, 0, 0, // mov $42, %edi
+                0x0f, 0x05, // syscall
+            ],
+        ),
+    };
     code.extend_from_slice(text);
     let size = HEADERS + code.len() as u64;
     let mut elf: Vec<u8> = Vec::new();
     elf.extend_from_slice(&[0x7f, b'E', b'L', b'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     elf.extend_from_slice(&2_u16.to_le_bytes());
-    elf.extend_from_slice(&62_u16.to_le_bytes());
+    elf.extend_from_slice(&machine.to_le_bytes());
     elf.extend_from_slice(&1_u32.to_le_bytes());
     elf.extend_from_slice(&(BASE + HEADERS).to_le_bytes());
     elf.extend_from_slice(&64_u64.to_le_bytes());

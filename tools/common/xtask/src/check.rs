@@ -2785,6 +2785,7 @@ fn kernel_clippy_every_build() -> Result<()> {
     }
     lift_args.extend(["-p", "ferrix-linuxd"]);
     lift_args.extend(["--target", Arch::X86_64.kernel_target()]);
+    lift_args.extend(["--target", Arch::AArch64.kernel_target()]);
     let lift_dir = kernel_lint_dir("personality user")
         .to_string_lossy()
         .into_owned();

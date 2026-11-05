@@ -3798,6 +3798,19 @@ package FerrixObjectRequirements {
                 "arch::x86_64::restricted::forget_copy_miss",
                 "arch::x86_64::restricted::call_copy_exit");
         }
+        requirement <'L.object.315'> aClockReadAnswersWhatEl0CannotAsk : ItemLowLevel {
+            attribute :>> statement = "CLOCK_READ, under personality=user alone, shall answer 3
+                and 4 with the kernel's hwcaps for a program and 5 with the processor the caller
+                was on, a stale hint by its return, and a question it does not know with
+                INVALID_ARGS.";
+            attribute :>> criterion = "lift/core/calls_check.rs: each question answered and the
+                processor below the count, an unknown one refused, the hwcaps nonzero on AArch64, on
+                x86-64 and AArch64. Controls: an unknown question answered, 5 past the last. In
+                the baseline: its unit is the item's, its check the lift crate's, which the tag
+                scan does not read (ledger 7126).";
+            attribute :>> parent = ("H.OBJ.30");
+            attribute :>> unit = ("syscall::native::lift::call");
+        }
         requirement <'L.object.314'> aFaultsNeighboursAreOnlyWhatIsResident : ItemLowLevel {
             attribute :>> statement = "Under fault_ahead=on a fault shall bring in only pages the region's
                 object already holds, or a run of fresh memory, each with no more than its own

@@ -2677,7 +2677,7 @@ def profile_problems(name: str, profile: dict, flags: dict) -> tuple[list[str], 
     # A claim's image starts only a slot for the claim's own architectures (ledger 7011 LV.2).
     # Not `present`: its ARMv7-A family predates this rule, ARMv7-A being its dated exception
     # from the claim (the customer's G4, ledger 3906), and it leaves at M5's flip.
-    if profile.get("level") != "none":
+    if profile.get("level") != "none" and name != "present":
         families = tomllib.loads((ROOT / "tools/common/data/hardware-families.toml").read_text()).get("family", {})
         for family in profile.get("slot_families", []):
             if families.get(family, {}).get("arch") not in profile.get("claim_architectures", []):

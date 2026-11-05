@@ -11,6 +11,8 @@
 
 extern crate alloc;
 
+mod arch;
+
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use ferrix_kernel_core::heap::Heap;
@@ -84,17 +86,7 @@ extern "C" fn ferrix_rt_start(boot: usize) -> ! {
     };
     // SAFETY: `top` is the top of a stack just allocated for this thread, whose
     // task names `served`. Nothing on the old stack is used again.
-    unsafe {
-        core::arch::asm!(
-            "mov rsp, {top}",
-            "xor ebp, ebp",
-            "call {start}",
-            "ud2",
-            top = in(reg) top,
-            start = sym on_its_stack,
-            options(noreturn),
-        );
-    }
+    unsafe { arch::onto_stack(top, on_its_stack) }
 }
 
 extern "C" fn on_its_stack() -> ! {

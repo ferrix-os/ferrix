@@ -1,6 +1,6 @@
 use crate::arch;
-use crate::arch::x86_64::signal::UserContext;
-use crate::arch::x86_64::syscall::UserRegs;
+use crate::arch::UserContext;
+use crate::arch::UserRegs;
 use crate::console::println;
 use core::ptr;
 use core::sync::atomic::AtomicBool;

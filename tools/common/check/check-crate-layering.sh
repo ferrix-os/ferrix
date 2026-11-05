@@ -16,7 +16,9 @@
 #      by name. Generic kernel code that says `arch::x86_64::` compiles on one
 #      machine and breaks the other, and the break is discovered by whoever
 #      next builds for AArch64 rather than by whoever wrote it.
-#   4. `#[cfg(target_arch)]` appears only under `src/kernel/src/arch/`,
+#   4. `#[cfg(target_arch)]` appears only under `src/kernel/src/arch/`, the shim's own
+#      `src/kernel/src/lift/core/` and its composition root `lift_core.rs` (one module per
+#      architecture, ledger 7088),
 #      `src/boot/common/uefi/src/arch/` and `src/lib/proto/native-abi/src/arch/`. This is rule 3's teeth: without it, "the facade" is a
 #      naming convention that erodes one conditional at a time.
 #   5. Every workspace member inherits the workspace lint table.
@@ -215,7 +217,13 @@ fi
 # ---------------------------------------------------------------------------
 offenders=$(grep -rnE 'cfg[^)]*target_arch' src/kernel/src src/boot/common/uefi/src src/lib src/user/system/native 2>/dev/null \
     --include='*.rs' \
-    | grep -vE '^(src/kernel/src/arch/|src/boot/common/uefi/src/arch/|src/lib/proto/native-abi/src/arch/|src/user/system/native/(drivers/[^/]+/)?[^/]+/src/arch/|src/kernel/src/lift/core/)' || true)
+    | grep -vE '^(src/kernel/src/arch/|src/boot/common/uefi/src/arch/|src/lib/proto/native-abi/src/arch/|src/user/system/native/(drivers/[^/]+/)?[^/]+/src/arch/|src/kernel/src/lift_core\.rs|src/kernel/src/lift/core/)' || true)
+# The shim's composition root may hold one module per architecture and no more (ledger 7126 L1.1).
+composition_arch=$(grep -cE 'cfg[^)]*target_arch' src/kernel/src/lift_core.rs || true)
+if [[ "$composition_arch" -gt 3 ]]; then
+    echo "LAYERING VIOLATION: src/kernel/src/lift_core.rs holds $composition_arch target_arch conditionals, at most 3" >&2
+    status=1
+fi
 if [[ -n "$offenders" ]]; then
     echo "LAYERING VIOLATION: target_arch conditional outside an arch directory:" >&2
     echo "$offenders" | sed 's/^/    /' >&2

@@ -71,11 +71,18 @@ pub fn count() -> usize {
 }
 /// The processor this thread was on a moment ago: the kernel keeps its number in
 /// `IA32_TSC_AUX`, and a program reads it the same way.
+#[cfg(target_arch = "x86_64")]
 pub fn this_cpu() -> Option<&'static PerCpu> {
     let mut aux = 0_u32;
     // SAFETY: reads the counter and the number; CR4.TSD is clear.
     let _ = unsafe { core::arch::x86_64::__rdtscp(&raw mut aux) };
     records().get(aux as usize & 0xfff)
+}
+/// The processor this thread was on a moment ago: asked of the kernel, as EL0 has no
+/// register that says.
+#[cfg(not(target_arch = "x86_64"))]
+pub fn this_cpu() -> Option<&'static PerCpu> {
+    records().get(crate::sys::clock(ferrix_native_abi::lift::CLOCK_CPU) as usize)
 }
 
 /// A set of processors joined and left: nothing asks it in ring 3.

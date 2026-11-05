@@ -209,8 +209,12 @@ impl Task {
             && self.call[8].load(Ordering::Relaxed) == 0
             && let Ok(context) = ferrix_native::region::context_read(ferrix_rt::Kernel)
         {
-            self.call[7].store(context.rsp, Ordering::Relaxed);
-            self.call[8].store(context.rip, Ordering::Relaxed);
+            #[cfg(target_arch = "x86_64")]
+            let (stack, pc) = (context.rsp, context.rip);
+            #[cfg(target_arch = "aarch64")]
+            let (stack, pc) = (context.sp, context.pc);
+            self.call[7].store(stack, Ordering::Relaxed);
+            self.call[8].store(pc, Ordering::Relaxed);
         }
     }
     pub(crate) fn call_seen(&self) -> Option<(u64, [u64; 6], u64, u64)> {

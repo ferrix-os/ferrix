@@ -110,8 +110,7 @@ fn stack_for(task: &Arc<Task>) -> Result<usize, &'static str> {
     let top = base as usize + STACK_BYTES - 16;
     // SAFETY: inside the allocation just made, aligned to 16.
     unsafe { *(top as *mut *const Task) = Arc::into_raw(Arc::clone(task)) };
-    // As a `call` leaves it: the ABI wants rsp + 8 aligned to 16 at an entry.
-    Ok((top & !15) - 8)
+    Ok(crate::arch::entry_stack(top))
 }
 
 fn new_task(

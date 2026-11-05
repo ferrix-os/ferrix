@@ -311,7 +311,9 @@ impl Profile {
             .and_then(Value::as_str)
             .map(str::to_owned);
         if target_level.is_some() && level != "none" {
-            return Err(what("only a profile at level `none` names a `target_level`"));
+            return Err(what(
+                "only a profile at level `none` names a `target_level`",
+            ));
         }
         let mut values = Vec::new();
         for (flag, value) in root.get("flags").map(Value::entries).unwrap_or_default() {
@@ -823,7 +825,9 @@ pub(crate) fn this_image() -> Result<(String, String)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Built, FlagFile, Profile, buildable, built_for, consistent, resolve, resolve_unbuilt};
+    use super::{
+        Built, FlagFile, Profile, buildable, built_for, consistent, resolve, resolve_unbuilt,
+    };
 
     fn set(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
         pairs
@@ -1031,7 +1035,10 @@ mod tests {
     fn built_on_refuses_by_architecture_and_only_above_none() {
         let resolved = resolve_unbuilt(Some("fast"), &[]).unwrap();
         let why = built_for(&resolved, "armv7a").unwrap_err().to_string();
-        assert!(why.contains("not built for armv7a") && why.contains("fs=server"), "{why}");
+        assert!(
+            why.contains("not built for armv7a") && why.contains("fs=server"),
+            "{why}"
+        );
         assert!(built_for(&resolved, "x86_64").is_ok());
         let ad_hoc = resolve_unbuilt(None, &lifted()).unwrap();
         assert!(built_for(&ad_hoc, "armv7a").is_ok());

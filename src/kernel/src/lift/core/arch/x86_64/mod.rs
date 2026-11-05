@@ -238,9 +238,6 @@ pub const USER_GETUID_PROGRAM: &[u8] = &[
 pub type PageEncoding = ferrix_paging::x86_64::X86_64;
 
 pub const fn flush_cache_lines(_virt: u64, _len: u64) {}
-pub const fn user_combining() -> bool {
-    false
-}
 pub const fn write_combining_processors() -> Option<usize> {
     None
 }
@@ -295,3 +292,8 @@ pub(crate) fn note_copy_miss(_: &crate::user::space::AddressSpace, _: u64, _: bo
 
 /// See [`note_copy_miss`].
 pub(crate) fn forget_copy_miss() {}
+
+/// As a `call` leaves it: the ABI wants rsp + 8 aligned to 16 at an entry.
+pub const fn entry_stack(top: usize) -> usize {
+    (top & !15) - 8
+}

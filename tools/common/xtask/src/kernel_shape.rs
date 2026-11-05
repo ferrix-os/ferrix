@@ -54,6 +54,7 @@ fn test_kernel_symbols(args: &Args) -> Result<()> {
         let base_target = tree.join("target-symbols");
         let built = std::process::Command::new("cargo")
             .args(["xtask", "build", "--arch", arch.name()])
+            .args(["--kernel-profile", &crate::flags::asked_profile()])
             .args(
                 args.sets
                     .iter()

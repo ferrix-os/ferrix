@@ -3,6 +3,15 @@
 /// `CLOCK_READ`'s question for the counter's frequency: the TSC's, in hertz, when
 /// the kernel's clock is the TSC and ring 3 can make the same sum; 0 when it is not.
 pub const CLOCK_COUNTER_HZ: usize = 2;
+/// `CLOCK_READ`'s question for `AT_HWCAP`, the boot processor's (the kernel's own
+/// `user_hwcaps`, which all processors are held to at bring-up): AArch64's identification
+/// registers are closed to EL0. On x86-64 linuxd asks CPUID and nothing asks this.
+pub const CLOCK_HWCAP: usize = 3;
+/// As [`CLOCK_HWCAP`], for `AT_HWCAP2`.
+pub const CLOCK_HWCAP2: usize = 4;
+/// `CLOCK_READ`'s question for the processor this thread was on as it asked, a stale hint
+/// by its return: AArch64 has no `RDTSCP`. Answered alike on x86-64, where linuxd reads it.
+pub const CLOCK_CPU: usize = 5;
 
 /// `linuxd`'s exit status for `reboot(2)`'s restart: the kernel resets the machine.
 pub const EXIT_RESTART: i32 = 82;

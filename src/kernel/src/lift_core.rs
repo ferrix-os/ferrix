@@ -136,14 +136,22 @@ pub mod signal_frame;
 /// The architecture modules: the shim's, and the files that are the same source.
 pub mod arch {
     pub use crate::lift::core::arch::*;
+    #[cfg(target_arch = "x86_64")]
     pub use x86_64::vdso::{vdso_can_read_counter, vdso_spec};
     /// x86-64.
+    #[cfg(target_arch = "x86_64")]
     pub mod x86_64 {
         pub use crate::lift::core::arch::x86_64::*;
         pub mod signal;
         /// The vDSO's code is a program's, never run here: the image linuxd maps
         /// (lift_reuse's one file holding `global_asm!`).
         pub mod vdso;
+    }
+    /// AArch64.
+    #[cfg(target_arch = "aarch64")]
+    pub mod aarch64 {
+        pub use crate::lift::core::arch::aarch64::*;
+        pub mod signal;
     }
 }
 /// The console: the shim's, and the log ring, which is the same source.

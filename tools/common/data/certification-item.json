@@ -1123,6 +1123,7 @@
   },
   "lift_reuse": {
     "//": "Kernel sources the shim compiles by position into linuxd (M5-LIFT §1, ledger 6012 R6): by file, no glob, each with its reason; check-lift.py walks the module tree and the set must equal this. Linuxd's runs are no evidence for any of them.",
+    "arch/aarch64/signal.rs": "signal frames, pure, as x86-64's: its register state through the shim's switch.rs",
     "arch/x86_64/signal.rs": "signal frames, pure (MICROKERNEL §2.1)",
     "arch/x86_64/signal/compat.rs": "signal frames, pure (MICROKERNEL §2.1)",
     "claim.rs": "one-shot claims, pure",

@@ -228,7 +228,10 @@ const fn chosen(values: &'static [(bool, &'static str)]) -> (&'static str, u32) 
 /// or `max` before M7 gives them their level (ledger 7011 LV.1).
 const AD_HOC: bool = cfg!(any(
     ferrix_profile = "none",
-    all(ferrix_level = "none", any(ferrix_profile = "fast", ferrix_profile = "max")),
+    all(
+        ferrix_level = "none",
+        any(ferrix_profile = "fast", ferrix_profile = "max")
+    ),
 ));
 
 /// Print the `build` line: `profile=`, `level=`, then each flag, and for an
