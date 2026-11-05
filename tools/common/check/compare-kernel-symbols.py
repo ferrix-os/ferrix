@@ -57,7 +57,7 @@ def bodies(path: str) -> dict[str, str]:
             out.setdefault(name, [])
         elif name is not None and "\t" in line:
             text = line.split("\t", 1)[1]
-            text = re.sub(r"0x[0-9a-f]+|\b[0-9a-f]{6,}\b", "#", text)
+            text = re.sub(r"-?0x[0-9a-f]+|\b[0-9a-f]{6,}\b", "#", text)
             text = re.sub(r"<[^>]*>", "<>", text)
             out[name].append(text)
     return {key: hashlib.sha256("\n".join(value).encode()).hexdigest() for key, value in out.items()}
