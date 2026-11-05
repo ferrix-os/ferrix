@@ -106,6 +106,13 @@
       "purpose": "schedule=edf and schedule=windows, ledger 7011 S.1-S.8: partitioned EDF with a hard CBS and its admission, THREAD_RESERVE; native 0x10E1-0x10E4 and panic FX-0970-0971 with them. K9's H.SCHED.26-27 and L.sched.153-170 pass from the finished mk-restricted to mk-flip for windows, with FX-0927."
     },
     {
+      "ids": ["L.sched.174"],
+      "owner": "mk-issues",
+      "branch": "feature/mk-issues-3",
+      "date": "2026-11-05",
+      "purpose": "ledger 7103 (5): an expiry between timer::after_from's arm and its record lost every later deadline on that processor. Released in the commit that writes it"
+    },
+    {
       "ids": ["H.FAIL.14", "L.lockup.6-9"],
       "owner": "s4-lockup",
       "branch": "s4-lockup",
