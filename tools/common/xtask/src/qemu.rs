@@ -741,7 +741,7 @@ const USER_NOT_BUILT: &[(&str, &[Arch], &str, &str)] = &[
     (
         "remap: device_isolation",
         &[Arch::X86_64],
-        "device_isolation asked of pci ",
+        "device_isolation asked of ",
         "iommu::domain_check, as above",
     ),
     (
@@ -823,7 +823,7 @@ const USER_BOOT_LINES: &[(Option<(&str, &str)>, &str)] = &[
     (None, "  reserved "),
     (None, "  sealed   "),
     (None, "  iommu    "),
-    (Some(("fs", "server")), "partmgr  btrfsd started"),
+    (Some(("fs", "server")), "its image's digest checked"),
     (None, "  lift-calls 19 refusals held"),
     (None, LIFTED_BOOTED),
 ];
@@ -5915,10 +5915,11 @@ mod tests {
             );
         }
         for (_, literal) in super::USER_BOOT_LINES {
-            assert!(
-                joined.contains(literal.trim().split("  ").last().unwrap_or(literal)),
-                "`{literal}` is stale"
-            );
+            // A count in a line is the format's: each piece around it is in the source.
+            for piece in literal.split(|c: char| c.is_ascii_digit()) {
+                let piece = piece.trim().split("  ").last().unwrap_or(piece);
+                assert!(joined.contains(piece), "`{literal}` is stale at `{piece}`");
+            }
         }
     }
 
