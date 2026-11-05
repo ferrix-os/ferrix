@@ -444,7 +444,7 @@ Done; removed from the backlog on 2026-10-16.
 
 | Item | Owner | Stage |
 |---|---|---|
-| `test-auth --arch all` failed once on x86-64 on 2026-10-03, in stage 20's matrix record run on 184fa4c7d at a load of 10 to 26: init's log line `auth.service[533]: auth: service=passwd ... result=changed` reached the console on the same line as `passwd`'s own "the password for ferrix is changed", so the check read neither, and it saw no `authd: running as auth (uid 90)`. A rerun of the same tree right after passed on all three architectures. The check reads the console, which init's journal and the shell share; matching within a line rather than whole lines, or reading the journal, would end it. Kept: `~/.local/share/ferrix/selfhost-matrix/run-2026-10-03/record/auth.log` on nazuna | fixed: test-auth reads passwd's answer from its line's start (2026-11-05, ledger 7184 Q.5, `mkf2e-auth`) | 15 |
+| `test-auth --arch all` failed once on x86-64 on 2026-10-03, in stage 20's matrix record run on 184fa4c7d at a load of 10 to 26: init's log line `auth.service[533]: auth: service=passwd ... result=changed` reached the console on the same line as `passwd`'s own "the password for ferrix is changed", so the check read neither, and it saw no `authd: running as auth (uid 90)`. A rerun of the same tree right after passed on all three architectures. The check reads the console, which init's journal and the shell share; matching within a line rather than whole lines, or reading the journal, would end it. Kept: `~/.local/share/ferrix/selfhost-matrix/run-2026-10-03/record/auth.log` on nazuna | fixed: test-auth reads passwd's answer from its line's start (2026-11-05, ledger 7184 Q.5, `mkf2g-auth`) | 15 |
 
 ### fl-068
 
