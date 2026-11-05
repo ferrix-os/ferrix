@@ -130,8 +130,12 @@ text; the kernel's native-call path, about 95 taken a call, which `mmap` and `fo
 ## Where the code is
 
 On develop, at the customer's order of 2026-11-05 ("I told you to land what you have to develop"): the
-K1 fast path and these cuts, behind `restricted_fastpath`, off in every profile, so no image changes
-behaviour until the flag is set. Not landed: K1's `FS` cut (6464 Z2) and the window's prototype, whose
+K1 fast path and these cuts, behind `restricted_fastpath`, which only `fast` sets, and `fast` is refused
+until M5, so no image that builds has it (`nm` of an off image shows no fast function). What does reach
+every image: VERW out of line; K1's record change in the general path; the `#NM` test and FX-0928;
+`vectors_elsewhere`; `parent_pid_kept`. linuxd's straight path and cuts run in any `personality=user`
+build, flag or not. Ledger 6966. By `gate.sh` at the landing's code: `check`, four test-boots, test-linuxd,
+test-threads at two processors, test-shell and test-rustc with the fast path on, all passed. Not landed: K1's `FS` cut (6464 Z2) and the window's prototype, whose
 slot is safe on one processor only; `feature/mk-ibpb` and
 `~/.local/share/ferrix/mk-ibpb/mk-ibpb-code.patch` on nazuna hold them. Without the `FS` cut, on one
 boot of a busy host, the row reads 720 ns and a general null call 1,030.
