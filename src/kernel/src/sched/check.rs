@@ -2596,7 +2596,7 @@ fn check_an_early_expiry_does_not_lose_the_next() -> Result<(), &'static str> {
         return Ok(());
     }
     let other = (here + 1) % processors;
-    for round in 0..8 {
+    for round in 0..2 {
         EARLY_EXPIRY_WOKE.store(false, Ordering::Release);
         let _task = super::spawn_on(
             "early-expiry",

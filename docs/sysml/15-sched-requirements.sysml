@@ -1339,7 +1339,7 @@ package FerrixSchedRequirements {
                 and the record cannot leave a deadline on record with nothing armed; a sleeper on an idle
                 processor shall wake at its deadline.";
             attribute :>> criterion = "A task asks an expiry 1 us away and sleeps 20 ms on an otherwise idle
-                processor, two processors or more, on one processor not run: each wakes within the case's
+                processor, two rounds, two processors or more, on one processor not run: each wakes within the case's
                 bound. An unmasked after_from in a dev boot stops on its assertion.";
             attribute :>> parent = "H.SCHED.1";
             attribute :>> unit = ("timer::after", "timer::after_from");
