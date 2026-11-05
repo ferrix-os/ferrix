@@ -4048,5 +4048,31 @@ package FerrixObjectRequirements {
             attribute :>> parent = "H.DEV.13";
             attribute :>> unit = "linuxd_start::start";
         }
+        requirement <'L.object.370'> aHeapChargeReclaimsFirst : ItemLowLevel {
+            attribute :>> statement = "A kernel-heap charge refused at a job's memory
+                limit, made for the running task's own job where it may block and not
+                inside a reclaim, shall first reclaim clean cache charged to the job
+                whose limit is full or beneath it and then be tried once more. In linuxd
+                (the lift) such a charge shall be refused without a reclaim, as before:
+                the lift's may_block answers yes whatever is held, so the charge could not
+                tell a context holding a spin lock from one holding none.";
+            attribute :>> criterion = "test-container's heap-reclaim step: at memory.max
+                beside the cgroup's file cache, 128 opens of memory.events held and a read
+                given, pgscan moving, and the file's own mapping reading as before once
+                its pages were taken down and filled again; with the reclaim taken out the
+                step fails on its refusal sentence (mki3f-c1, FIRED).";
+            attribute :>> parent = "H.QUOTA.7";
+            attribute :>> unit = ("object::quota::KernelHeap::charge",
+                "object::oom::reclaim_within", "sched::heap_charge_may_reclaim");
+        }
+        requirement <'L.object.371'> aReclaimNeverNests : ItemLowLevel {
+            attribute :>> statement = "A reclaim begun inside a reclaim of the same task
+                shall stop the machine (FX-0973).";
+            attribute :>> criterion = "With KernelHeap's guard taken out and a refused
+                charge planted at the head of the reclaim, test-container stops as
+                FX-0973, 'a reclaim began inside a reclaim' (mki3f-c2, FIRED).";
+            attribute :>> parent = "H.QUOTA.7";
+            attribute :>> unit = "user::cache::reclaim";
+        }
     }
 }

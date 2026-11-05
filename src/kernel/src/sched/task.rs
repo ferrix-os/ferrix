@@ -255,6 +255,10 @@ pub struct Task {
     /// Whether it is inside a system call, as the processor running it last
     /// had it (`crate::sched::IN_CALL`): kept here while it does not run.
     in_call: AtomicBool,
+    /// Whether it is inside `user::cache::reclaim`: a kernel-heap charge it
+    /// makes there is not answered by a second reclaim
+    /// (`object::quota::KernelHeap`), and a second one begun is FX-0973.
+    reclaiming: AtomicBool,
     /// A system call's copy that consumed poison, for the call's way out
     /// (`docs/MACHINE-CHECK-COPY.md` §3.3).
     copy_poison: PoisonRecord,
@@ -809,6 +813,7 @@ impl Task {
             cpu: AtomicU64::new(cpu as u64),
             queued: AtomicBool::new(false),
             in_call: AtomicBool::new(false),
+            reclaiming: AtomicBool::new(false),
             copy_poison: PoisonRecord::new(),
             wakees: Wakees::new(crate::timer::now_nanos()),
             affinity: Affinity::new(affinity),
@@ -875,6 +880,7 @@ impl Task {
             cpu: AtomicU64::new(cpu as u64),
             queued: AtomicBool::new(false),
             in_call: AtomicBool::new(false),
+            reclaiming: AtomicBool::new(false),
             copy_poison: PoisonRecord::new(),
             wakees: Wakees::new(0),
             // An adopted context — the boot task, or a processor's idle task —
@@ -1661,6 +1667,16 @@ impl Task {
     /// processor's flag has it.
     pub(crate) fn in_call(&self) -> bool {
         self.in_call.load(Ordering::Relaxed)
+    }
+
+    /// Mark it inside a reclaim, or not: what the mark was before.
+    pub(crate) fn swap_reclaiming(&self, now: bool) -> bool {
+        self.reclaiming.swap(now, Ordering::Relaxed)
+    }
+
+    /// Whether it is inside a reclaim ([`Task::swap_reclaiming`]).
+    pub(crate) fn reclaiming(&self) -> bool {
+        self.reclaiming.load(Ordering::Relaxed)
     }
 
     /// Record a system call's copy that consumed poison ([`PoisonRecord::record`]).

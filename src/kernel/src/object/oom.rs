@@ -318,7 +318,7 @@ pub fn reclaim_for(pages: u64) -> bool {
     let run = pages.clamp(1, RECLAIM_FOR_MOST);
     let group = crate::sched::running_group();
     match quota::at_limit(group, Resource::Memory, PAGE_SIZE) {
-        Some(full) => cache::reclaim(full, run).gave(),
+        Some(full) => reclaim_within(full, run),
         None => {
             let short = crate::mm::watermark()
                 .saturating_add(1)
@@ -326,6 +326,17 @@ pub fn reclaim_for(pages: u64) -> bool {
             cache::reclaim(quota::NONE, run.saturating_add(short)).gave()
         }
     }
+}
+
+/// Give back up to `pages` clean cache pages, at most [`RECLAIM_FOR_MOST`],
+/// charged to `full` -- the job whose memory limit refused a charge -- or
+/// beneath it, never a sibling's: whether any came back. [`reclaim_for`]'s
+/// scoped half, and what a kernel-heap charge refused at the limit asks for
+/// (`quota::KernelHeap`, fl-096), which has no machine-wide half.
+///
+/// Must be called with no spin lock held, as [`cache::reclaim`] must.
+pub(crate) fn reclaim_within(full: u32, pages: u64) -> bool {
+    cache::reclaim(full, pages.clamp(1, RECLAIM_FOR_MOST)).gave()
 }
 
 /// No limit full: the machine out of frames. Clean cache anywhere is room,

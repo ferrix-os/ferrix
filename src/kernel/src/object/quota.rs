@@ -1098,7 +1098,32 @@ impl ferrix_kmem::Account for KernelHeap {
         crate::sched::running_group()
     }
 
+    /// [`charge_kernel`], and a refusal at a memory limit answered as Linux's
+    /// charge is (fl-096, ledger 7326): by a reclaim of the clean cache
+    /// charged to the job whose limit is full, or beneath it, and one more
+    /// try, whose answer is final. Only for the running task's own job, where
+    /// it may block, and not inside a reclaim, which is never begun twice
+    /// ([`crate::user::cache::reclaim`]). With no limit full by then, the try
+    /// again alone. The refusal is counted as a fault's is: once a try.
     fn charge(&self, owner: u32, bytes: u64) -> Result<(), ferrix_kmem::Refused> {
+        if charge_kernel(owner, bytes).is_ok() {
+            return Ok(());
+        }
+        // No in the lift, whose `may_block` cannot tell a spin lock from none:
+        // linuxd's charges refuse as before (`sched::heap_charge_may_reclaim`).
+        if !crate::sched::heap_charge_may_reclaim() {
+            return Err(ferrix_kmem::Refused);
+        }
+        let own = owner != NONE && owner == crate::sched::running_group();
+        if !own
+            || !crate::sched::may_block()
+            || crate::sched::with_current(crate::sched::Task::reclaiming) != Some(false)
+        {
+            return Err(ferrix_kmem::Refused);
+        }
+        if let Some(full) = at_limit(owner, Resource::Memory, bytes) {
+            let _ = super::oom::reclaim_within(full, bytes.div_ceil(FRAME_BYTES));
+        }
         charge_kernel(owner, bytes).map_err(|Exceeded| ferrix_kmem::Refused)
     }
 

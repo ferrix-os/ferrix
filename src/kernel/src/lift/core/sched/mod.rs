@@ -134,6 +134,7 @@ fn new_task(
         #[cfg(ferrix_schedule = "edf")]
         reserved: core::sync::atomic::AtomicBool::new(false),
         sigreturning: core::sync::atomic::AtomicBool::new(false),
+        reclaiming: core::sync::atomic::AtomicBool::new(false),
         locks_held: core::cell::Cell::new(0),
         core_kept: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),
         wakes_held: core::cell::Cell::new(0),
@@ -241,6 +242,15 @@ pub fn current_id() -> Option<TaskId> {
 }
 pub fn may_block() -> bool {
     true
+}
+/// Whether a kernel-heap charge refused at a job's limit may answer with a
+/// reclaim (`object::quota::KernelHeap::charge`, fl-096): no in the lift. Its
+/// [`may_block`] answers yes whatever is held, so the charge's branch could not
+/// tell a spin lock from none, and linuxd's charges refuse as before (BACKLOG).
+/// One of a pair with the kernel's `sched::heap_charge_may_reclaim`, which
+/// answers yes.
+pub fn heap_charge_may_reclaim() -> bool {
+    false
 }
 pub fn spawn(
     name: &'static str,

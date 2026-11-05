@@ -20,6 +20,9 @@ path = "src/main.rs"
 [features]
 # `runtime_settings=fixed`: sethostname is refused, by the build.
 fixed-settings = []
+# Under `personality=user`: linuxd's kernel-heap charges do not reclaim (BACKLOG), so the
+# heap-reclaim step says so and is not judged.
+lift = []
 
 [dependencies]
 libc = "0.2"

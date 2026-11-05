@@ -63,6 +63,9 @@ pub struct Task {
     pub(crate) reserved: AtomicBool,
     /// In a sigreturn, whose capture wants only the processor's mask.
     pub(crate) sigreturning: AtomicBool,
+    /// Whether it is inside `user::cache::reclaim`, as the kernel's task keeps
+    /// it (`object::quota::KernelHeap`, FX-0973).
+    pub(crate) reclaiming: AtomicBool,
     pub(crate) locks_held: core::cell::Cell<u32>,
     /// What [`Task::core_kept`] keeps.
     pub(crate) core_kept: core::sync::atomic::AtomicPtr<crate::object::process::Process>,
@@ -271,6 +274,14 @@ impl Task {
 
     pub fn charge_target(&self) -> u32 {
         self.charge.load(Ordering::Relaxed)
+    }
+    /// Mark it inside a reclaim, or not: what the mark was before.
+    pub(crate) fn swap_reclaiming(&self, now: bool) -> bool {
+        self.reclaiming.swap(now, Ordering::Relaxed)
+    }
+    /// Whether it is inside a reclaim.
+    pub(crate) fn reclaiming(&self) -> bool {
+        self.reclaiming.load(Ordering::Relaxed)
     }
     pub fn set_charge_target(&self, slot: u32) {
         self.charge.store(slot, Ordering::Relaxed);

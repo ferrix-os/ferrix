@@ -30,19 +30,34 @@ const STEPS: &[&str] = &[
     "container: seccomp ok",
     "container: reclaim ok",
     "container: oom ok",
+    "container: heap-reclaim ok",
     "container: isolation ok",
     "container: all ok",
 ];
 
 /// The test on every architecture asked for.
+///
+/// Verifies: L.object.370
 pub(crate) fn run(args: &Args) -> Result<()> {
     for arch in args.arches()? {
         let log = paths::build_dir(arch).join("serial.log");
-        let fixed = crate::flags::this_run()?.value("runtime_settings") == Some("fixed");
-        let program = build_test("container", arch, fixed.then_some("fixed-settings"), false)?;
+        let run = crate::flags::this_run()?;
+        let fixed = run.value("runtime_settings") == Some("fixed");
+        // linuxd's kernel-heap charges do not reclaim (BACKLOG): the step is not built there.
+        let lift = run.value("personality") == Some("user");
+        let features = match (fixed, lift) {
+            (false, false) => None,
+            (true, false) => Some("fixed-settings"),
+            (false, true) => Some("lift"),
+            (true, true) => Some("fixed-settings,lift"),
+        };
+        let program = build_test("container", arch, features, false)?;
         let lines = boot(arch, &program, args)?;
         let mut remaining = lines.iter();
-        for want in STEPS {
+        for want in STEPS
+            .iter()
+            .filter(|want| !lift || **want != "container: heap-reclaim ok")
+        {
             if !remaining.any(|line| says(line, want)) {
                 let failed = lines.iter().find(|line| line.contains("container: FAILED"));
                 return Err(Error::new(format!(

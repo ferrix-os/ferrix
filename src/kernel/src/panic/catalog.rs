@@ -226,6 +226,22 @@ pub(crate) static HEAP_DRAIN_UNDER_CACHE_LOCK: Explanation = Explanation {
     see: "docs/HEAP-CACHES.md; src/kernel/src/mm.rs",
 };
 
+/// For `user::cache::reclaim` begun by a task already inside one.
+pub(crate) static RECLAIM_IN_RECLAIM: Explanation = Explanation {
+    code: "FX-0973",
+    title: "a reclaim began inside a reclaim",
+    meaning: "A reclaim gives back clean file cache and dentry heap for a charge refused at a \
+              memory limit or a machine out of frames. A kernel-heap charge refused on its way \
+              is not answered by a reclaim of its own (`quota::KernelHeap`, fl-096), so a reclaim \
+              never nests; one that would, re-entering the cache's walk from inside it with no \
+              bound but the stack, stops the machine instead.",
+    causes: &[
+        "A path that reclaims was reached from inside a reclaim: a fault or a `vmo_pin` \
+         refusal on the way, or the kernel-heap charge's guard taken out.",
+    ],
+    see: "src/kernel/src/user/cache.rs; src/kernel/src/object/quota.rs; src/kernel/src/object/oom.rs",
+};
+
 /// For the panic the standard library's allocation error handler raises,
 /// recognised by `panic.rs`.
 pub(crate) static ALLOCATION_ABORTED: Explanation = Explanation {
@@ -4402,6 +4418,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &SCHEDULE_EDF,
     #[cfg(not(ferrix_shape = "micro"))]
     &BOOT_CHECK_WORKER,
+    &RECLAIM_IN_RECLAIM,
     &STAGE10_PCI,
     &STAGE10_DEVICES,
     &STAGE10_IOMMU,

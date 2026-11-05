@@ -791,6 +791,16 @@ pub fn may_block() -> bool {
     preempt::count_here() == 0 && borrow::running()
 }
 
+/// Whether a kernel-heap charge refused at a job's limit may answer with a
+/// reclaim (`object::quota::KernelHeap::charge`, fl-096): yes in the kernel,
+/// where [`may_block`] tells a context holding a spin lock from one holding
+/// none. One of a pair with the lift's, which answers no
+/// (`lift/core/sched/mod.rs`), so the shared `quota.rs` asks no build cfg.
+#[inline(always)]
+pub(crate) fn heap_charge_may_reclaim() -> bool {
+    true
+}
+
 /// The next identifier to give a task.
 fn next_id() -> TaskId {
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);

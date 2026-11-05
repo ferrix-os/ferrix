@@ -407,6 +407,12 @@ fn container(outside: &[String], host: &str) -> ! {
         fail("memory.events did not count one OOM kill");
     }
     step("oom");
+    if cfg!(feature = "lift") {
+        say("heap-reclaim not judged: linuxd's kernel-heap charges do not reclaim (BACKLOG)");
+    } else {
+        heap_charge_reclaims();
+        step("heap-reclaim");
+    }
     // SAFETY: `_exit` takes a status and never returns.
     unsafe { libc::_exit(0) }
 }
@@ -461,6 +467,198 @@ fn reparented_in_the_namespace() {
         }
     }
     step("pid reparent");
+}
+
+/// Why a call at the limit failed, for [`heap_charge_reclaims`]: the one sentence a refusal the
+/// file cache could have spared prints (fl-096), and the error otherwise.
+fn refused(what: &str, error: &std::io::Error) -> ! {
+    if error.raw_os_error() == Some(libc::ENOMEM) {
+        fail(&format!(
+            "{what} was refused at memory.max beside reclaimable file cache ({error})"
+        ));
+    }
+    fail(&format!("{what} failed at memory.max ({error})"))
+}
+
+/// A kernel-heap charge at `memory.max` reclaims before it refuses, as Linux's does (fl-096,
+/// ledger 7326). After the kill, in the same cgroup: `FILE` mapped and read, so its clean pages
+/// are charged here and mapped in this space; anonymous memory touched until fewer than `NEAR`
+/// pages are left, so that no fault comes near the limit, whose refusal would reclaim the file's
+/// pages for itself; a pipe written until its buffer's growth is refused, which brings what is
+/// left under one growth step; then `HOLD` opens of `memory.events`, held, whose kernel heap does
+/// not fit in that. Each must succeed, `pgscan` must move, and `FILE`'s mapping must read as it
+/// did, its pages taken down in this same task and filled again from the disk.
+///
+/// A pipe's buffer, a map entry and a descriptor table's slots are charged under a spin lock,
+/// where no reclaim can run, so those refuse at the limit still (BACKLOG): the table is grown
+/// first, while there is room, and the pipe's refusal is what brings the job to the limit.
+fn heap_charge_reclaims() {
+    const PAGE: usize = 4096;
+    const FILE_BYTES: usize = 140_000;
+    /// Pages walked a look at a time, the rest in one run.
+    const CLOSE: usize = 64;
+    /// Pages left when the walk stops: over a fault's seven pages of `write_ahead`.
+    const NEAR: usize = 24;
+    /// Opens held at the limit: over twice what one growth step leaves, at a few hundred bytes
+    /// of heap each.
+    const HOLD: usize = 128;
+    let file = fs::File::open(FILE)
+        .unwrap_or_else(|error| fail(&format!("{FILE} could not be opened ({error})")));
+    // SAFETY: a fresh private read-only mapping of the file, read below and unmapped at the end.
+    let held = unsafe {
+        libc::mmap(
+            std::ptr::null_mut(),
+            FILE_BYTES,
+            libc::PROT_READ,
+            libc::MAP_PRIVATE,
+            std::os::fd::AsRawFd::as_raw_fd(&file),
+            0,
+        )
+    };
+    if held == libc::MAP_FAILED {
+        fail("the file could not be mapped");
+    }
+    let held = held.cast::<u8>();
+    let sum = || {
+        (0..FILE_BYTES).fold(0_u64, |sum, at| {
+            // SAFETY: inside the mapping above.
+            sum.wrapping_mul(31)
+                .wrapping_add(u64::from(unsafe { held.add(at).read_volatile() }))
+        })
+    };
+    let before_sum = sum();
+    let stat = get(
+        &format!("{CTN}/memory.stat"),
+        "memory.stat could not be read",
+    );
+    let (cached, scanned) = (field(&stat, "file"), field(&stat, "pgscan"));
+    if cached < 80 * 1024 {
+        fail(&format!(
+            "only {cached} bytes of file cache were charged to the cgroup after the file was mapped"
+        ));
+    }
+    // Pipes enough for the room the walk leaves, `NEAR` pages at most, at 64 KiB each.
+    let mut ends: [c_int; 16] = [0; 16];
+    for pair in ends.chunks_exact_mut(2) {
+        // SAFETY: `pair` is a valid place for the kernel to write two descriptors.
+        if unsafe { libc::pipe2(pair.as_mut_ptr(), libc::O_NONBLOCK) } != 0 {
+            fail("a pipe could not be made");
+        }
+    }
+    // The descriptor table's room for the opens below, had now: its slots are kept when the
+    // descriptor closes again.
+    // SAFETY: `dup2` and `close` of descriptors this process holds.
+    if unsafe { libc::dup2(ends[0], 255) != 255 || libc::close(255) != 0 } {
+        fail("the descriptor table could not be grown");
+    }
+    // Opened afresh each time: a cgroup file's text is made at its open, as Linux's seq files'
+    // is at the first read, so a read again from its start gives the same figure.
+    let used = || {
+        fs::read_to_string(format!("{CTN}/memory.current"))
+            .unwrap_or_else(|error| refused("an open and read of memory.current", &error))
+            .trim()
+            .parse::<usize>()
+            .unwrap_or(LIMIT)
+    };
+    let room = LIMIT.saturating_sub(used());
+    let pages = room / PAGE + CLOSE;
+    // SAFETY: a fresh anonymous mapping, touched below and unmapped before the return.
+    let walk = unsafe {
+        libc::mmap(
+            std::ptr::null_mut(),
+            pages * PAGE,
+            libc::PROT_READ | libc::PROT_WRITE,
+            libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+            -1,
+            0,
+        )
+    };
+    if walk == libc::MAP_FAILED {
+        fail("the walk's memory could not be mapped");
+    }
+    let walk = walk.cast::<u8>();
+    // A page in every 2 MiB first, while there is room: no page table is needed near the limit,
+    // where a fault's refusal would reclaim the file's pages for itself.
+    for page in (0..pages).step_by(512) {
+        // SAFETY: inside the mapping above.
+        unsafe { walk.add(page * PAGE).write_volatile(1) };
+    }
+    let run = (LIMIT.saturating_sub(used()) / PAGE)
+        .saturating_sub(CLOSE)
+        .min(pages);
+    for page in 0..run {
+        // SAFETY: inside the mapping above.
+        unsafe { walk.add(page * PAGE).write_volatile(1) };
+    }
+    let mut next = run;
+    while LIMIT.saturating_sub(used()) >= NEAR * PAGE {
+        if next == pages {
+            fail("the walk never came near memory.max");
+        }
+        // SAFETY: inside the mapping above.
+        unsafe { walk.add(next * PAGE).write_volatile(1) };
+        next += 1;
+    }
+    let page = [7_u8; PAGE];
+    let mut filled = 0_usize;
+    let mut writing = ends.iter().skip(1).step_by(2);
+    let mut end = writing.next().copied().unwrap_or(-1);
+    loop {
+        // SAFETY: `page` is valid for its length; the descriptor is a pipe's write end.
+        let wrote = unsafe { libc::write(end, page.as_ptr().cast(), page.len()) };
+        if let Ok(wrote) = usize::try_from(wrote)
+            && wrote > 0
+        {
+            filled += wrote;
+            continue;
+        }
+        let error = std::io::Error::last_os_error();
+        match error.raw_os_error() {
+            Some(libc::ENOMEM) => break,
+            // Full: the next pipe.
+            Some(libc::EAGAIN) if let Some(next) = writing.next() => end = *next,
+            _ => fail(&format!(
+                "the pipes stopped at {filled} bytes, not at memory.max, {} bytes under it ({error})",
+                LIMIT.saturating_sub(used())
+            )),
+        }
+    }
+    let left = LIMIT.saturating_sub(used());
+    let mut opened = Vec::with_capacity(HOLD);
+    for _ in 0..HOLD {
+        let file = fs::File::open(format!("{CTN}/memory.events"))
+            .unwrap_or_else(|error| refused("an open of memory.events", &error));
+        opened.push(file);
+    }
+    let events = fs::read_to_string(format!("{CTN}/memory.events"))
+        .unwrap_or_else(|error| refused("an open and read of memory.events", &error));
+    drop(opened);
+    let stat = get(
+        &format!("{CTN}/memory.stat"),
+        "memory.stat could not be read",
+    );
+    let moved = field(&stat, "pgscan").saturating_sub(scanned);
+    say(&format!(
+        "a pipe refused at {filled} bytes, {left} under memory.max, beside {cached} bytes of file \
+         cache: {HOLD} opens held and a read given, pgscan moved {moved}, pgsteal {}, \
+         memory.events max {}",
+        field(&stat, "pgsteal"),
+        field(&events, "max")
+    ));
+    if moved == 0 {
+        fail("charges at memory.max were given with no page scanned for them");
+    }
+    if sum() != before_sum {
+        fail("the file's mapping read otherwise once its pages were reclaimed and filled again");
+    }
+    // SAFETY: the mappings above and the pipe's ends, which nothing else names.
+    unsafe {
+        let _ = libc::munmap(walk.cast(), pages * PAGE);
+        let _ = libc::munmap(held.cast(), FILE_BYTES);
+        for end in ends {
+            let _ = libc::close(end);
+        }
+    }
 }
 
 /// The first process of the pid namespace.

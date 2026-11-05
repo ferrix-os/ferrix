@@ -699,8 +699,12 @@ out of every mapping, a shootdown, then the frame and its charge).
   that a cgroup's lookups stay charged to it until the queue evicts them no
   longer holds. Linux's `shrink_slab` runs beside its page reclaim the same
   way. A kernel-heap charge refused at `memory.max` (an `open` or a lookup
-  that would make a dentry) is still `ENOMEM` without a reclaim first: the
-  charge is taken where a reclaim may not run. The `reclaim` line of stage 13
+  that would make a dentry) was `ENOMEM` without a reclaim first; since
+  2026-11-05 (fl-096, L.object.370, ledger 7326) it reclaims the full job's
+  clean cache and tries once more where it may block, for the running task's
+  own job. A charge taken under a spin lock, where no reclaim may run -- a
+  pipe's buffer, a map entry, a descriptor table's slots -- is still
+  `ENOMEM` (BACKLOG). The `reclaim` line of stage 13
   checks it (`/check-rd` beside `/check-rc`), and that `memory.reclaim`,
   which counts what it gave in bytes since, meets a write of 8192 bytes from
   dentries alone. The consultant's review (a certification-consultant
@@ -710,7 +714,8 @@ out of every mapping, a shootdown, then the frame and its charge).
   the cached names' heap; the controls through `gate.sh` and the rows on the
   landing hash owed on the gate host.
 * **Not built.** `memory.low` events, proportional
-  protection, a reclaim before a refused kernel-heap charge, `workingset_*`,
+  protection, a reclaim before a kernel-heap charge refused under a spin
+  lock or for another job, `workingset_*`,
   and an audit record for the three marks.
 
 ## 11. `cgroup.freeze` (F1, 2026-09-30)

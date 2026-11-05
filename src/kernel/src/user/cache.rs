@@ -445,10 +445,26 @@ fn object_at(at: usize) -> Option<Arc<Vmo>> {
 /// (a)). An object made meanwhile is past the walk's count, for the next.
 ///
 /// Must be called with no spin lock held, as [`Vmo::decommit_range`] must.
+///
+/// The running task is marked inside a reclaim for its length, so that a
+/// kernel-heap charge refused on the way is not answered by a reclaim of its
+/// own (`quota::KernelHeap`, fl-096); one begun all the same stops the
+/// machine (FX-0973). Not in interrupt context, where the task is not the
+/// one reclaiming.
 pub fn reclaim(scope: u32, want: u64) -> Reclaimed {
+    let marked = !crate::irq::in_interrupt();
+    if marked && crate::sched::with_current(|task| task.swap_reclaiming(true)) == Some(true) {
+        crate::panic::fatal!(
+            crate::panic::catalog::RECLAIM_IN_RECLAIM,
+            "a reclaim began inside a reclaim of the same task"
+        );
+    }
     let mut done = reclaim_pages(scope, want);
     if done.stolen < want {
         done.heap = shrink(scope, (want - done.stolen).saturating_mul(PAGE_SIZE));
+    }
+    if marked {
+        let _ = crate::sched::with_current(|task| task.swap_reclaiming(false));
     }
     done
 }
