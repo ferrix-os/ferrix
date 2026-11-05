@@ -4120,7 +4120,10 @@ package FerrixX8664Requirements {
             attribute :>> statement = "Under restricted_fastpath=on a SYSCALL exit with no work due and null
                 selectors shall set CR0.TS and leave the vector registers as they are,
                 and normal mode's first vector instruction shall take them down.";
-            attribute :>> criterion = "Cases 74-76, 142.";
+            attribute :>> criterion = "restricted-check's cases 176 (a vector instruction in the gap
+                takes #NM, by count; the program's come back, normal mode's are never seen)
+                and 177 (VECTORS_WRITE then RESUME reads what was written), in an image
+                built restricted_fastpath=on (K1.md §7.1, ledger 7363).";
             attribute :>> parent = "H.TRAP.24";
             attribute :>> unit = ("arch::x86_64::restricted::materialise",
                 "arch::x86_64::restricted::lazy_vector_trap");
@@ -4128,7 +4131,10 @@ package FerrixX8664Requirements {
         requirement <'L.x86_64.273'> aSwitchTakesTheVectorsDown : ItemLowLevel {
             attribute :>> statement = "Every switch shall clear CR0.TS first, a dead task's too, and a task
                 that lives on shall have the registers saved as the program's.";
-            attribute :>> criterion = "Cases 143, 134.";
+            attribute :>> criterion = "restricted-check's cases 134 (a kill with the mark up in the gap;
+                the next task's XRSTOR takes no #NM) and 174 (blocked in the gap: the next
+                task's FS and vectors its own, the program's after), in an image built
+                restricted_fastpath=on (K1.md §7.1, ledger 7363).";
             attribute :>> parent = "H.TRAP.24";
             attribute :>> unit = ("arch::x86_64::restricted::before_switch",
                 "arch::x86_64::restricted::is_vector_in_kernel",
@@ -4139,7 +4145,9 @@ package FerrixX8664Requirements {
         requirement <'L.x86_64.274'> aFastResumeKeepsEveryRule : ItemLowLevel {
             attribute :>> statement = "RESTRICTED_RESUME shall go back in by the fast path only after a SYSCALL
                 exit with the mark up, raising the barrier's mark first.";
-            attribute :>> criterion = "Case 144: 51 barriers on 51 exits, 50 of them after a fast entry.";
+            attribute :>> criterion = "restricted-check's cases 144 (a barrier per exit over RESUME-only
+                trips, under exit) and 170 (FS: normal mode's base zero, the program's across
+                fast trips), in an image built restricted_fastpath=on (K1.md §7.1, ledger 7363).";
             attribute :>> parent = "H.TRAP.24";
             attribute :>> unit = ("arch::x86_64::restricted::fast_resume",
                 "arch::x86_64::restricted::fast_resume_here",
@@ -4149,18 +4157,29 @@ package FerrixX8664Requirements {
                 "arch::x86_64::syscall::ferrix_syscall_fast",
                 "arch::x86_64::pcid::tagged_install");
         }
-        requirement <'L.x86_64.275'> theRecordsAreNotCopied : ItemLowLevel {
-            attribute :>> statement = "A thread's record of the mode it is in shall be chosen by a pointer, so
-                neither path copies a record; the two bases shall be written as the mode
-                asks, FS whenever normal mode's is not zero.";
-            attribute :>> criterion = "The regions line under both settings of restricted_fastpath.";
+        requirement <'L.x86_64.275'> theBasesAreWrittenAsTheModeAsks : ItemLowLevel {
+            attribute :>> statement = "Under restricted_fastpath=on the two bases shall be written as the mode
+                asks, FS whenever normal mode's is not zero. (Split from the record's
+                pointer, L.x86_64.282, ledger 7363 F.4.)";
+            attribute :>> criterion = "restricted-check's cases 171 (FS: normal mode's non-zero, each mode
+                reads its own) and 172 (GS of normal mode set, read, and given back), in an
+                image built restricted_fastpath=on (K1.md §7.1, ledger 7363).";
             attribute :>> parent = "H.TRAP.22";
-            attribute :>> unit = ("arch::x86_64::restricted::swap_user_state",
-                "arch::x86_64::restricted::write_exit_bases",
+            attribute :>> unit = ("arch::x86_64::restricted::write_exit_bases",
                 "arch::x86_64::restricted::write_entry_bases",
                 "arch::x86_64::restricted::both_modes_clean",
                 "arch::x86_64::cpu::set_task_switched",
                 "arch::x86_64::cpu::clear_task_switched");
+        }
+        requirement <'L.x86_64.282'> theRecordsAreNotCopied : ItemLowLevel {
+            attribute :>> statement = "A thread's record of the mode it is in shall be chosen by a pointer, so
+                neither path copies a record.";
+            attribute :>> criterion = "The regions line under both settings of restricted_fastpath. By
+                inspection: swap_user_state exchanges which record the thread names and
+                moves no register state, and no fast or general path copies a record
+                (ledger 7363 F.4).";
+            attribute :>> parent = "H.TRAP.22";
+            attribute :>> unit = "arch::x86_64::restricted::swap_user_state";
         }
         requirement <'L.x86_64.277'> aWindowOpensAlone : ItemLowLevel {
             attribute :>> statement = "Under restricted_window a stub shall run only on a processor alone in its

@@ -212,6 +212,7 @@ const fn reg(handle: Handle) -> u64 {
 /// Verifies: L.object.277, L.object.278, L.object.279, L.object.280, L.object.281, L.object.282
 /// Verifies: L.user.193
 /// Verifies: L.trap.30, L.user.190, L.user.191, L.user.192
+/// Verifies: `L.x86_64.272`, `L.x86_64.273`, `L.x86_64.274`, `L.x86_64.275`, `L.x86_64.282`
 /// Verifies: L.user.180, L.user.181, L.user.182, L.user.183, L.user.184
 /// Verifies: L.aarch64.70, L.aarch64.71, L.aarch64.72, L.aarch64.73, L.aarch64.74
 ///

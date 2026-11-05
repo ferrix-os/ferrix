@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "bf81529d5dab4dd4bc479e901eb29072c1dc57b61ef18de7bc92090f85ce2cff",
+  "digest": "475c28b7d82f2c3ad970974a35552472a6ea5db8d5ca1d582a7ee6f37cf20ae6",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -113,7 +113,7 @@
   ],
   "summary": {
     "packages": 167,
-    "elements": 10225,
+    "elements": 10230,
     "maturity": {
       "implemented": 295,
       "inProgress": 23,
@@ -89655,10 +89655,10 @@
                   "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aFastExitLeavesTheVectorsUp",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Cases 74-76, 142.\"",
+                  "value": "\"restricted-check's cases 176 (a vector instruction in the gap takes #NM, by count; the program's come back, normal mode's are never seen) and 177 (VECTORS_WRITE then RESUME reads what was written), in an image built restricted_fastpath=on (K1.md §7.1, ledger 7363).\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4123
+                    "line": 4126
                   }
                 },
                 {
@@ -89669,7 +89669,7 @@
                   "value": "\"H.TRAP.24\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4124
+                    "line": 4127
                   }
                 },
                 {
@@ -89680,7 +89680,7 @@
                   "value": "(\"arch::x86_64::restricted::materialise\", \"arch::x86_64::restricted::lazy_vector_trap\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4126
+                    "line": 4129
                   }
                 }
               ]
@@ -89693,7 +89693,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 4128
+                "line": 4131
               },
               "children": [
                 {
@@ -89704,7 +89704,7 @@
                   "value": "\"Every switch shall clear CR0.TS first, a dead task's too, and a task that lives on shall have the registers saved as the program's.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4130
+                    "line": 4133
                   }
                 },
                 {
@@ -89712,10 +89712,10 @@
                   "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aSwitchTakesTheVectorsDown",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Cases 143, 134.\"",
+                  "value": "\"restricted-check's cases 134 (a kill with the mark up in the gap; the next task's XRSTOR takes no #NM) and 174 (blocked in the gap: the next task's FS and vectors its own, the program's after), in an image built restricted_fastpath=on (K1.md §7.1, ledger 7363).\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4131
+                    "line": 4137
                   }
                 },
                 {
@@ -89726,7 +89726,7 @@
                   "value": "\"H.TRAP.24\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4132
+                    "line": 4138
                   }
                 },
                 {
@@ -89737,7 +89737,7 @@
                   "value": "(\"arch::x86_64::restricted::before_switch\", \"arch::x86_64::restricted::is_vector_in_kernel\", \"arch::x86_64::restricted::with_vectors_down\", \"arch::x86_64::switch::UserState::save_vectors_only\", \"arch::x86_64::switch::UserState::restore_vectors_only\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4137
+                    "line": 4143
                   }
                 }
               ]
@@ -89750,7 +89750,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 4139
+                "line": 4145
               },
               "children": [
                 {
@@ -89761,7 +89761,7 @@
                   "value": "\"RESTRICTED_RESUME shall go back in by the fast path only after a SYSCALL exit with the mark up, raising the barrier's mark first.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4141
+                    "line": 4147
                   }
                 },
                 {
@@ -89769,10 +89769,10 @@
                   "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aFastResumeKeepsEveryRule",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Case 144: 51 barriers on 51 exits, 50 of them after a fast entry.\"",
+                  "value": "\"restricted-check's cases 144 (a barrier per exit over RESUME-only trips, under exit) and 170 (FS: normal mode's base zero, the program's across fast trips), in an image built restricted_fastpath=on (K1.md §7.1, ledger 7363).\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4142
+                    "line": 4150
                   }
                 },
                 {
@@ -89783,7 +89783,7 @@
                   "value": "\"H.TRAP.24\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4143
+                    "line": 4151
                   }
                 },
                 {
@@ -89794,7 +89794,64 @@
                   "value": "(\"arch::x86_64::restricted::fast_resume\", \"arch::x86_64::restricted::fast_resume_here\", \"arch::x86_64::restricted::fast_exit_here\", \"arch::x86_64::restricted::flip_to\", \"arch::x86_64::restricted::copy_kept\", \"arch::x86_64::syscall::ferrix_syscall_fast\", \"arch::x86_64::pcid::tagged_install\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4150
+                    "line": 4158
+                  }
+                }
+              ]
+            },
+            {
+              "name": "theBasesAreWrittenAsTheModeAsks",
+              "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::theBasesAreWrittenAsTheModeAsks",
+              "kind": "requirement",
+              "shortName": "L.x86_64.275",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/18-x86-64-requirements.sysml",
+                "line": 4160
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::theBasesAreWrittenAsTheModeAsks",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"Under restricted_fastpath=on the two bases shall be written as the mode asks, FS whenever normal mode's is not zero. (Split from the record's pointer, L.x86_64.282, ledger 7363 F.4.)\"",
+                  "source": {
+                    "file": "docs/sysml/18-x86-64-requirements.sysml",
+                    "line": 4163
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::theBasesAreWrittenAsTheModeAsks",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"restricted-check's cases 171 (FS: normal mode's non-zero, each mode reads its own) and 172 (GS of normal mode set, read, and given back), in an image built restricted_fastpath=on (K1.md §7.1, ledger 7363).\"",
+                  "source": {
+                    "file": "docs/sysml/18-x86-64-requirements.sysml",
+                    "line": 4166
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::theBasesAreWrittenAsTheModeAsks",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.TRAP.22\"",
+                  "source": {
+                    "file": "docs/sysml/18-x86-64-requirements.sysml",
+                    "line": 4167
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::theBasesAreWrittenAsTheModeAsks",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"arch::x86_64::restricted::write_exit_bases\", \"arch::x86_64::restricted::write_entry_bases\", \"arch::x86_64::restricted::both_modes_clean\", \"arch::x86_64::cpu::set_task_switched\", \"arch::x86_64::cpu::clear_task_switched\")",
+                  "source": {
+                    "file": "docs/sysml/18-x86-64-requirements.sysml",
+                    "line": 4172
                   }
                 }
               ]
@@ -89803,11 +89860,11 @@
               "name": "theRecordsAreNotCopied",
               "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::theRecordsAreNotCopied",
               "kind": "requirement",
-              "shortName": "L.x86_64.275",
+              "shortName": "L.x86_64.282",
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 4152
+                "line": 4174
               },
               "children": [
                 {
@@ -89815,10 +89872,10 @@
                   "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::theRecordsAreNotCopied",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"A thread's record of the mode it is in shall be chosen by a pointer, so neither path copies a record; the two bases shall be written as the mode asks, FS whenever normal mode's is not zero.\"",
+                  "value": "\"A thread's record of the mode it is in shall be chosen by a pointer, so neither path copies a record.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4155
+                    "line": 4176
                   }
                 },
                 {
@@ -89826,10 +89883,10 @@
                   "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::theRecordsAreNotCopied",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"The regions line under both settings of restricted_fastpath.\"",
+                  "value": "\"The regions line under both settings of restricted_fastpath. By inspection: swap_user_state exchanges which record the thread names and moves no register state, and no fast or general path copies a record (ledger 7363 F.4).\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4156
+                    "line": 4180
                   }
                 },
                 {
@@ -89840,7 +89897,7 @@
                   "value": "\"H.TRAP.22\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4157
+                    "line": 4181
                   }
                 },
                 {
@@ -89848,10 +89905,10 @@
                   "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::theRecordsAreNotCopied",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"arch::x86_64::restricted::swap_user_state\", \"arch::x86_64::restricted::write_exit_bases\", \"arch::x86_64::restricted::write_entry_bases\", \"arch::x86_64::restricted::both_modes_clean\", \"arch::x86_64::cpu::set_task_switched\", \"arch::x86_64::cpu::clear_task_switched\")",
+                  "value": "\"arch::x86_64::restricted::swap_user_state\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4163
+                    "line": 4182
                   }
                 }
               ]
@@ -89864,7 +89921,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 4165
+                "line": 4184
               },
               "children": [
                 {
@@ -89875,7 +89932,7 @@
                   "value": "\"Under restricted_window a stub shall run only on a processor alone in its space's set, read after its flag is up, and a processor joining the space shall write no root until that flag is down, or stop by name past its limit.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4168
+                    "line": 4187
                   }
                 },
                 {
@@ -89886,7 +89943,7 @@
                   "value": "\"restricted-check's two threads: trips and declines both above zero, cases 171 to 173; a stop named FX-0929 with the wait taken out, the set's read taken out, and the flag never given back.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4171
+                    "line": 4190
                   }
                 },
                 {
@@ -89897,7 +89954,7 @@
                   "value": "\"H.TRAP.24\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4172
+                    "line": 4191
                   }
                 },
                 {
@@ -89908,7 +89965,7 @@
                   "value": "(\"arch::x86_64::restricted::window_open\", \"arch::x86_64::restricted::window_shut\", \"user::space::AddressSpace::window_take\", \"user::space::AddressSpace::window_give\", \"user::space::AddressSpace::wait_for_the_window\", \"user::space::AddressSpace::window_entry\", \"smp::CpuMask::only\", \"arch::x86_64::restricted::window_close_if_open\", \"arch::x86_64::restricted::window_trap_check\", \"arch::x86_64::restricted::window_space\", \"arch::x86_64::restricted::window_release_for_stop\", \"arch::x86_64::restricted::window_counts\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4184
+                    "line": 4203
                   }
                 }
               ]
@@ -89921,7 +89978,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 4186
+                "line": 4205
               },
               "children": [
                 {
@@ -89932,7 +89989,7 @@
                   "value": "\"A stub's close shall clear the slot and invalidate its pages before the program's next instruction, a program shall reach nothing under the slot once it has, and software reading the restricted root at or above SHARED_BASE shall be refused before the walk.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4189
+                    "line": 4208
                   }
                 },
                 {
@@ -89943,7 +90000,7 @@
                   "value": "\"Cases 164 to 166 and 178; case 164 fires with the invalidation out, case 178 with the refusal out. Under KVM's nested tables; bare metal is a BACKLOG row.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4191
+                    "line": 4210
                   }
                 },
                 {
@@ -89954,7 +90011,7 @@
                   "value": "\"H.TRAP.24\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4192
+                    "line": 4211
                   }
                 },
                 {
@@ -89965,7 +90022,7 @@
                   "value": "(\"arch::x86_64::restricted::window_shut\", \"user::space::AddressSpace::translate_master\", \"user::space::AddressSpace::flags_master\", \"user::space::AddressSpace::master_refuses\", \"user::space::AddressSpace::window_readers_refuse\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4197
+                    "line": 4216
                   }
                 }
               ]
@@ -89978,7 +90035,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 4199
+                "line": 4218
               },
               "children": [
                 {
@@ -89989,7 +90046,7 @@
                   "value": "\"The boot shall make no window unless CR4.PCIDE and EFER.TCE are clear on every processor, IBPB is offered, the image is smt=off and the family is AMD's 1Ah, and shall say which on a line; a thread on any other machine takes two roots.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4202
+                    "line": 4221
                   }
                 },
                 {
@@ -90000,7 +90057,7 @@
                   "value": "\"The rwindow line on qemu64: two roots, and the row reads as two roots do; on the host's model: a stub.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4204
+                    "line": 4223
                   }
                 },
                 {
@@ -90011,7 +90068,7 @@
                   "value": "\"H.TRAP.24\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4205
+                    "line": 4224
                   }
                 },
                 {
@@ -90022,7 +90079,7 @@
                   "value": "(\"arch::x86_64::restricted::window_decide\", \"arch::x86_64::restricted::window_decide_here\", \"arch::x86_64::restricted::window_barred_here\", \"arch::x86_64::restricted::window_report\", \"arch::x86_64::cpu::ibpb_clears_returns\", \"arch::x86_64::speculation::window_barrier\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4211
+                    "line": 4230
                   }
                 }
               ]
@@ -90035,7 +90092,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 4213
+                "line": 4232
               },
               "children": [
                 {
@@ -90046,7 +90103,7 @@
                   "value": "\"An armed number shall be answered by a stub only across consecutive trips: any other number, any kick and any entry shall drop it, and a change another thread makes to what the answer rests on shall be written before its kick.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4216
+                    "line": 4235
                   }
                 },
                 {
@@ -90057,7 +90114,7 @@
                   "value": "\"Cases 167 and 176; test-threads' armed steps; the control is a reparent with no kick on four processors: nothing else stands behind the kicks for a move, a cpu.max or a TSYNC.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4218
+                    "line": 4237
                   }
                 },
                 {
@@ -90068,7 +90125,7 @@
                   "value": "\"H.TRAP.24\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4219
+                    "line": 4238
                   }
                 },
                 {
@@ -90079,7 +90136,7 @@
                   "value": "(\"arch::x86_64::restricted::fast_resume\", \"arch::x86_64::restricted::leave_restricted\", \"object::process::Process::drop_arms\", \"object::job::Job::set_bandwidth\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4223
+                    "line": 4242
                   }
                 }
               ]
@@ -90092,7 +90149,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 4225
+                "line": 4244
               },
               "children": [
                 {
@@ -90103,7 +90160,7 @@
                   "value": "\"A thread's window shall be charged to its job, shall not be made where the charge or a frame is refused, and shall go, with its charge, as the thread ends.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4227
+                    "line": 4246
                   }
                 },
                 {
@@ -90114,7 +90171,7 @@
                   "value": "\"Case 177: the count of windows back to its figure before the thread, on four processors. The refused half, a job at its limit, has no case yet.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4229
+                    "line": 4248
                   }
                 },
                 {
@@ -90125,7 +90182,7 @@
                   "value": "\"H.TRAP.24\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4230
+                    "line": 4249
                   }
                 },
                 {
@@ -90136,7 +90193,7 @@
                   "value": "(\"arch::x86_64::restricted::window_make\", \"arch::x86_64::restricted::window_forget_own\", \"arch::x86_64::restricted::Window::drop\", \"arch::x86_64::restricted::window_shared\", \"mm::window_frame\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4235
+                    "line": 4254
                   }
                 }
               ]
@@ -90149,7 +90206,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 4237
+                "line": 4256
               },
               "children": [
                 {
@@ -90160,7 +90217,7 @@
                   "value": "\"A switch that brings a normal-mode thread in, where restricted code ran last on the processor, shall issue the barrier under the exit rule, a kernel thread between them changing nothing.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4240
+                    "line": 4259
                   }
                 },
                 {
@@ -90171,7 +90228,7 @@
                   "value": "\"Cases 124, 125.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4241
+                    "line": 4260
                   }
                 },
                 {
@@ -90182,7 +90239,7 @@
                   "value": "\"H.TRAP.24\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4242
+                    "line": 4261
                   }
                 },
                 {
@@ -90193,7 +90250,7 @@
                   "value": "(\"arch::speculation::restricted_left\", \"arch::speculation::restricted_ran\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4244
+                    "line": 4263
                   }
                 }
               ]

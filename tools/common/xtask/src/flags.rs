@@ -881,16 +881,16 @@ mod tests {
     }
 
     #[test]
-    fn desktop_builds_and_max_and_fast_are_refused_by_lands() {
+    fn desktop_and_fast_build_and_max_is_refused_by_lands() {
         assert_eq!(resolve(Some("desktop"), &[]).unwrap().level, "none");
-        for profile in ["max", "fast"] {
-            let why = resolve(Some(profile), &[]).unwrap_err().to_string();
-            assert!(
-                why.contains("not yet buildable") && why.contains("M5"),
-                "{why}"
-            );
-            assert!(resolve_unbuilt(Some(profile), &[]).is_ok());
-        }
+        // `fast` since its flip (ledger 7363), at no claim until M7 writes its level.
+        assert_eq!(resolve(Some("fast"), &[]).unwrap().level, "none");
+        let why = resolve(Some("max"), &[]).unwrap_err().to_string();
+        assert!(
+            why.contains("not yet buildable") && why.contains("M3") && why.contains("M6"),
+            "{why}"
+        );
+        assert!(resolve_unbuilt(Some("max"), &[]).is_ok());
     }
 
     #[test]
@@ -963,19 +963,13 @@ mod tests {
         (
             "fast",
             "sc2",
-            &[
-                "personality=user",
-                "partition_speculation=partition",
-                "restricted_fastpath=on",
-                "schedule=edf",
-                "fault_ahead=on",
-            ],
+            // Empty since the flip (ledger 7363): `fast` builds, at level none, held to sc2.
+            &[],
         ),
         (
             "max",
             "sc4",
             &[
-                "personality=user",
                 "partition_speculation=exit",
                 "restricted_fastpath=off",
                 "kernel_memory=retyped",
@@ -1042,12 +1036,36 @@ mod tests {
     #[test]
     fn built_on_refuses_by_architecture_and_only_above_none() {
         let resolved = resolve_unbuilt(Some("fast"), &[]).unwrap();
-        let why = built_for(&resolved, "armv7a").unwrap_err().to_string();
-        assert!(
-            why.contains("not built for armv7a") && why.contains("fs=server"),
-            "{why}"
+        let refused = |arch: &str| {
+            let why = built_for(&resolved, arch).unwrap_err().to_string();
+            assert!(why.contains(&format!("not built for {arch}")), "{why}");
+            let named: Vec<String> = why
+                .split_once(": ")
+                .map_or("", |(_, rest)| rest)
+                .split(", ")
+                .filter_map(|one| one.split(' ').next())
+                .filter(|word| word.contains('='))
+                .map(str::to_owned)
+                .collect();
+            named
+        };
+        // Each value `fast` flipped, and only those: armv7a is in no claim of
+        // `personality=user` (ledger 7016 B.1, 7363 F.2).
+        assert_eq!(
+            refused("armv7a"),
+            [
+                "personality=user",
+                "fs=server",
+                "partition_speculation=partition",
+                "restricted_fastpath=on",
+                "schedule=edf",
+                "fault_ahead=on",
+            ]
         );
-        assert!(built_for(&resolved, "x86_64").is_ok());
+        // x86-64 by `personality=user` alone, whose `test-net` has not passed every run
+        // there (ledger 7485 D.1 (b), BACKLOG's paced row); the other five were.
+        assert_eq!(refused("x86_64"), ["personality=user"]);
+        assert!(built_for(&resolved, "aarch64").is_ok());
         let ad_hoc = resolve_unbuilt(None, &lifted()).unwrap();
         assert!(built_for(&ad_hoc, "armv7a").is_ok());
     }
