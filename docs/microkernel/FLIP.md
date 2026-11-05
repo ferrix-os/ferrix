@@ -71,6 +71,10 @@ Its loader starts only a verifying slot, so each image built for it signs one le
 
 M5's flip and M7 keep all of theirs: nothing here is dropped by being moved off `built`.
 
+## K14 at no memory (ledger 7166 F.3)
+
+`flag_nodes` runs first, so a later `attach` failure gives `Domain::untranslated` with no flag, on all three units: K14 fails open at no memory. M5's flip: under `fast` and `max`, no domain rather than untranslated.
+
 ## §12's failing rows
 
 Not owed for `built` (B.8) but each is a row in the sweep, by name, with cause: test-sud, test-wine's 32-bit half,
