@@ -4401,9 +4401,14 @@ fn attach_home(command: &mut Command, arch: Arch, home: &Path, said: &str) {
 /// afterwards.
 ///
 /// Writable, of course, and rewritten from the fixture for every boot, so no
-/// run ever starts from what the last one left. `cache=writeback` is QEMU's
-/// default and is what makes the guest's flush mean something: the guest's
-/// flush becomes a host `fsync`, which is the ordering the commit rests on.
+/// run ever starts from what the last one left. `cache=unsafe`: the guest still
+/// sees a device with a write cache, negotiates its flush and has it answered
+/// in order, which is what the commit rests on and all a guest can observe. It
+/// leaves out only the host's `fsync` behind each flush, which protects this
+/// image from the host losing power, and nothing outlives this boot but the
+/// `btrfs check` that reads the image back through the same page cache. Those
+/// `fsync`s took stage 12's check from 0.7 s to 8.6 s on a host writing
+/// elsewhere (`docs/TEST-TIME.md`, boot time).
 fn attach_btrfs_write_disk(command: &mut Command, arch: Arch) -> Result<()> {
     let disk = btrfs_disk::ensure_blank(arch)?;
     println!(
@@ -4414,7 +4419,7 @@ fn attach_btrfs_write_disk(command: &mut Command, arch: Arch) -> Result<()> {
     let _ = command.args([
         "-drive",
         &format!(
-            "file={},if=none,format=raw,id=btrfswrite,cache=writeback",
+            "file={},if=none,format=raw,id=btrfswrite,cache=unsafe",
             display(&disk)
         ),
     ]);
