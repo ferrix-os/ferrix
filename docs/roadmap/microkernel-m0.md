@@ -248,6 +248,8 @@ two gated controls. Landed by 02:47 on 2026-11-04: K6 (kernel-attested sender, 6
 four agents' work (K13, K15, K1, K11, K17, `linuxd`, K8, K14, K16 and the
 partition manager). This page is updated as those land.
 
+**`fast` and `max`, what still refuses them:** [`FLIP.md`](../microkernel/FLIP.md), a plain checklist. Landed 2026-11-05: level none held to a target, `built_on`, a signed slot at level none, linuxd on AArch64 (9b5fa6957); `schedule=edf` dark, `lode`'s reload a build value (fb32c5f77). Neither profile builds yet.
+
 **Landed 2026-11-05, on the lift (14ccf6a64):** K16's audit (153b65ce4), K14 §5's grant (cf83b1791), `btrfsd` under `fs=server` and `netd` (c4d607c44), further Linux partitions, partial (bfb1026a0), M6's cuts and gate (6a8c566f7), K16's seal under `kernel_memory=retyped`, no claim (dc87e598a), and the virtio self-check out of a user kernel (d787152e7). All are dark in `present` and `desktop`, and neither `fast` nor `max` builds yet. Ring 0's size under `personality=user`, x86_64, a debug figure: 63,046 product lines in the files rustc reads, 60,586 by a brace walk of what no cfg rules out, which is no evidence; neither is M.7's release figure. Open: an unexplained fault under `retyped` (BACKLOG, ledger 6956 SX.2), `fs=server` on AArch64, L.object.329-333 to M7, `desktop`'s symbol comparison, a user-kernel row for a real device's out-of-domain write, and K8.4's restart row.
 
 Branch-only milestones in the agents' notes (02:00 on 2026-11-04; unlanded, ungated
