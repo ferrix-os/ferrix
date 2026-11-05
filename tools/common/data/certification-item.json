@@ -790,6 +790,30 @@
       }
     ]
   },
+  "kernel_source_roots": {
+    "//": [
+      "The directories whose Rust files are kernel source (docs/microkernel/CRATE-SPLIT.md",
+      "section 2.5 and S0; the consultant's ledger line 7346 (4), (5)). Today the one tree;",
+      "each optional part moved out of src/kernel/src adds its crate's src/ here in its own landing.",
+      "Every tool that walks kernel files reads this list through tools/common/check/kernel_roots.py,",
+      "and check-kernel-roots.py fails a tool naming a kernel path that is not classed in",
+      "tools/common/data/kernel-path-literals.json, and a walker that did not walk every file",
+      "`git ls-files` lists under these roots.",
+      "",
+      "`parts_place` is where the optional parts live, each at <parts_place>/<group>/<name>/,",
+      "and the one place the directory is named: every Python tool reads it through",
+      "kernel_roots.py, xtask's one constant KERNEL_PARTS_PLACE is held to it by a unit test,",
+      "and check-kernel-roots.py fails any other tool naming it literally (ledger 7445 B.1-B.3).",
+      "The name is the customer's (2026-11-05, \"ok i like src/kernel/extensions\"; DECISIONS.md).",
+      "kernel_roots.py refuses a root nested in another, one under src/kernel/src, one other",
+      "than src/kernel/src not under parts_place, and a parts_place outside src/kernel/ unless",
+      "a `parts_place_why` says why (ledger 7429 Q.2, 7445 B.1)."
+    ],
+    "parts_place": "src/kernel/extensions",
+    "roots": [
+      "src/kernel/src"
+    ]
+  },
   "kernel_crates": {
     "//": [
       "The kernel's Cargo packages and the rings each holds (docs/KERNEL-CRATES.md;",

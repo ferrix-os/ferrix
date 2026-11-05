@@ -26,6 +26,12 @@ const FREESTANDING_PLACES: &[&str] = &["src/boot/common/uefi", "src/boot/vendor/
 /// Where the kernel's packages live: the binary at `src/kernel`, and its
 /// library crates beneath it (`docs/KERNEL-CRATES.md`).
 const KERNEL_PLACE: &str = "src/kernel";
+/// Where the kernel's optional parts live, each a package with its lift twin
+/// (`docs/microkernel/CRATE-SPLIT.md` §2.1): kernel packages as much as those
+/// beneath `src/kernel`. xtask's one copy of `kernel_source_roots.parts_place`
+/// in `certification-item.json`; a unit test holds the two equal (ledger 7445
+/// B.3), so a rename is that value and this one.
+pub(crate) const KERNEL_PARTS_PLACE: &str = "src/kernel/extensions";
 
 /// The directory freestanding native programs live under.
 const NATIVE_PLACE: &str = "src/user/system/native/";
@@ -104,9 +110,11 @@ pub(crate) fn members(root: &Path) -> Result<Members> {
 /// Whether a member at `member` is one of the kernel's packages: the
 /// binary at `src/kernel` or a crate beneath it.
 fn is_kernel_place(member: &str) -> bool {
-    member
-        .strip_prefix(KERNEL_PLACE)
-        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+    [KERNEL_PLACE, KERNEL_PARTS_PLACE].iter().any(|place| {
+        member
+            .strip_prefix(place)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+    })
 }
 
 /// The strings in the manifest's `members = [ ... ]`, comments skipped.
@@ -158,7 +166,7 @@ fn read(path: &Path) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_kernel_place, member_paths, members, package_name};
+    use super::{KERNEL_PARTS_PLACE, is_kernel_place, member_paths, members, package_name};
     use crate::paths;
 
     #[test]
@@ -179,6 +187,27 @@ mod tests {
         }
         assert!(sorted.host.iter().any(|name| name == "xtask"));
         assert!(sorted.host.iter().any(|name| name == "ferrix-net"));
+    }
+
+    #[test]
+    fn the_parts_place_is_the_records() {
+        // `kernel_source_roots.parts_place` in the item's classification is the
+        // one place the parts' directory is named; this constant is xtask's copy
+        // of it (ledger 7445 B.3).
+        let path = paths::workspace_root().join("tools/common/data/certification-item.json");
+        let text = std::fs::read_to_string(&path).expect("the classification reads");
+        let place = text
+            .split_once("\"kernel_source_roots\"")
+            .map(|(_, rest)| rest)
+            .expect("kernel_source_roots")
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("\"parts_place\": \""))
+            .and_then(|rest| rest.split('"').next())
+            .expect("kernel_source_roots.parts_place");
+        assert_eq!(KERNEL_PARTS_PLACE, place);
+        assert!(is_kernel_place(&format!(
+            "{KERNEL_PARTS_PLACE}/device/logctl"
+        )));
     }
 
     #[test]

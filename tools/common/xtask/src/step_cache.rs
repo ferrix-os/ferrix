@@ -1061,7 +1061,17 @@ fn civil_from_days(days: u64) -> (u64, u64, u64) {
 /// core, and the crates on its infrastructure allow-list, which item
 /// crates build on.
 pub(crate) fn item_paths(root: &Path) -> Result<Vec<String>> {
-    let mut item = vec!["src/kernel/".to_owned(), "src/boot/".to_owned()];
+    // The optional parts are kernel code as much as src/kernel/ is (CRATE-SPLIT.md
+    // S0, ledger 7346 (5c)): a part file's change must invalidate the kernel's steps.
+    // Beneath src/kernel/ today, the entry is kept so a place moved elsewhere
+    // stays covered (ledger 7445 Q-A (4)).
+    let mut item = vec![
+        "src/kernel/".to_owned(),
+        format!("{}/", crate::workspace::KERNEL_PARTS_PLACE),
+        "src/boot/".to_owned(),
+    ];
+    // The paths above, before the classification's crates are added.
+    const FIXED: usize = 3;
     let classification = root.join("tools/common/data/certification-item.json");
     let text = std::fs::read_to_string(&classification)
         .map_err(|error| Error::new(format!("{}: {error}", classification.display())))?;
@@ -1088,10 +1098,10 @@ pub(crate) fn item_paths(root: &Path) -> Result<Vec<String>> {
     }
     // Fail closed: every item or core crate's path found, or no cache
     // (the consultant's C5, ledger 1494).
-    if item.len() != 2 + kept {
+    if item.len() != FIXED + kept {
         return Err(Error::new(format!(
             "certification-item.json names {kept} item or core crates, and {} paths were read for them",
-            item.len() - 2
+            item.len() - FIXED
         )));
     }
     let manifest = std::fs::read_to_string(root.join("Cargo.toml"))?;

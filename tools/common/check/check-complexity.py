@@ -227,7 +227,7 @@ def item_functions() -> list[dict]:
     for rel, ring in sorted(ring_of.items()):
         if ring == "load" or gate.is_test_file(rel, manifest):
             continue
-        for fn in measure(KERNEL_SRC / rel):
+        for fn in measure(gate.kernel_path(rel)):
             fn["file"] = rel
             fn["ring"] = ring
             out.append(fn)

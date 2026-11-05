@@ -27,6 +27,8 @@ import json
 import os
 import re
 import sys
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
+import kernel_roots  # noqa: E402  (docs/microkernel/CRATE-SPLIT.md S0)
 
 SOURCE = "src/kernel/src"
 AUDIT = "tools/common/data/kernel-alloc-audit.json"
@@ -108,25 +110,31 @@ def self_test(gate) -> int:
 
 
 def scan(root: str, gate) -> tuple[dict, list[str]]:
-    base = os.path.join(root, SOURCE)
     found = {}
     unread = []
-    for directory, _, names in os.walk(base):
-        for name in names:
-            if not name.endswith(".rs"):
-                continue
-            full = os.path.join(directory, name)
-            rel = os.path.relpath(full, base).replace(os.sep, "/")
-            if is_check(rel) or NOT_BUILT.match(rel):
-                continue
-            with open(full, encoding="utf-8", errors="replace") as handle:
-                count = sites_in(handle.read(), gate)
-            if not count:
-                continue
-            if rel.startswith(UNREAD):
-                unread.append(rel)
-            else:
-                found[rel] = count
+    # Every kernel source root (kernel_source_roots), SOURCE's files named
+    # relative to it and a part's by its repo path, as check-item-boundary does.
+    for source in kernel_roots.roots():
+        base = os.path.join(root, source)
+        for directory, _, names in os.walk(base):
+            for name in names:
+                if not name.endswith(".rs"):
+                    continue
+                full = os.path.join(directory, name)
+                kernel_roots.note_walked("check-kernel-alloc-audit", [os.path.abspath(full)])
+                rel = os.path.relpath(full, base).replace(os.sep, "/")
+                if source != SOURCE:
+                    rel = f"{source}/{rel}"
+                if is_check(rel) or NOT_BUILT.match(rel):
+                    continue
+                with open(full, encoding="utf-8", errors="replace") as handle:
+                    count = sites_in(handle.read(), gate)
+                if not count:
+                    continue
+                if rel.startswith(UNREAD):
+                    unread.append(rel)
+                else:
+                    found[rel] = count
     return found, sorted(unread)
 
 

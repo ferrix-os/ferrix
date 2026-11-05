@@ -386,7 +386,7 @@ VFS itself leaves. This plan does not build it:
 Where the load's source lives is a separate matter from where it runs:
 [`microkernel/CRATE-SPLIT.md`](microkernel/CRATE-SPLIT.md) (design, OK IF
 ledger 7346) moves each optional part out of `src/kernel/` into a crate of
-its own under `src/kernel-parts/`, each built into ring 0 for `desktop` and
+its own under `src/kernel/extensions/`, each built into ring 0 for `desktop` and
 `present` and into `linuxd` for `fast` and `max` from the same source, so that
 `src/kernel/` holds what ring 0 keeps under `fast` and `max`.
 

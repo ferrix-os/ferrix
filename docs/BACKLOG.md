@@ -773,7 +773,7 @@ taken.
 
 ## Waiting on the customer
 
-* **Where the optional kernel parts live, and how fine** (2026-11-05; `docs/microkernel/CRATE-SPLIT.md` §5 Q1, Q2): default `src/kernel-parts/<group>/<name>/` (not `src/lib/kernel/`, whose rule 2 says no kernel), one crate per part, display, render and chardev as one. Work proceeds on the defaults.
+* **How fine the optional kernel parts are** (2026-11-05; `docs/microkernel/CRATE-SPLIT.md` §5 Q2): default one crate per part, display, render and chardev as one. Work proceeds on the default. Where they live is decided: `src/kernel/extensions/` (customer, 2026-11-05; `docs/backlog/DECISIONS.md`).
 * **Slot 8 on the 3090's memory** (2026-11-04; `docs/TEST-TIME.md`, *GPU memory as a gate slot*): closed since the customer took the card back for ComfyUI. Reopening is the customer's word, and owes V2's kernel control, V10(h) with a control that fires, V7's neighbours and `mount-semantics.py` on the binary then installed (ledger 6697, 6858), before any of its rows count. Ways to share the card, and what it would add: `docs/microkernel/OPEN-QUESTIONS.md` §3.
 * **CI's `rustc` job, required or truly advisory** (2026-11-05; `docs/microkernel/OPEN-QUESTIONS.md` §2): `ci.yml` calls it advisory, Promote already holds on it. Recommended required. Beside it, and whatever is chosen: `main` cannot move while FX-0936 fires on CI's `Boot in QEMU (aarch64)` and `certification/verdict` is pending on develop's tip.
 * **`max`'s row: the window or the two-root path's 30 ns** (2026-11-05; `docs/microkernel/OPEN-QUESTIONS.md` §1): `max.toml` less `schedule=windows` reads 1,480 ns by hand, 670 with a fast path its level does not allow. No threshold moved.

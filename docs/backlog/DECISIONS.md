@@ -7,6 +7,14 @@ Moved out of [`docs/BACKLOG.md`](../BACKLOG.md) on 2026-10-16. A decision is rec
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-11-05 (customer)** **The optional kernel parts live in
+  `src/kernel/extensions/<group>/<name>/`**: "ok i like src/kernel/extensions".
+  Over the design's `src/kernel-parts/` and the first suggestion, `src/lib/kernel/`
+  (whose rule 2 says no kernel). The consultant's conditions for a place under
+  `src/kernel/`: ledger 7429 Q.1-Q.4, 7445 B.1-B.3. The name is written once, in
+  `certification-item.json`'s `kernel_source_roots.parts_place` (and xtask's
+  `KERNEL_PARTS_PLACE`, held equal by a test), so renaming it is a data change.
+  `docs/microkernel/CRATE-SPLIT.md` §2.2, §5 Q1.
 * **2026-10-27 (customer, recorded 2026-11-05 from PR #38's `SCHED-CLASSES.md` §7a, second hand, ledger 7011 S.1)** **C3:
   no fair tier in `max`**: "i would keep max to the absolute minimum, so: no". **C6: fixed priorities inside
   the windows**, as ARINC 653's APEX and PikeOS, VxWorks 653 and INTEGRITY-178, analysed by response-time analysis, not EDF.

@@ -37,6 +37,9 @@ import sys
 from datetime import date, timedelta
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "check"))
+import kernel_roots  # noqa: E402  (docs/microkernel/CRATE-SPLIT.md S0)
+
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
 CODE = (".rs", ".py", ".sh", ".c", ".h", ".S", ".s")
 FIX = re.compile(r"\b(fix|fixe[sd]|fixing|flake|flaky|race|hang|hung|stall|deadlock|"
@@ -221,7 +224,10 @@ def waits_on_time(top):
         n = len(SLEEP.findall(text))
         if n:
             per[f] = n
-    kernel = [f for f in files if f.startswith("src/kernel/") and f.endswith(".rs")]
+    # src/kernel/ and every kernel source root (CRATE-SPLIT.md S0), wherever
+    # kernel_source_roots puts the optional parts.
+    places = ("src/kernel/", *(r + "/" for r in kernel_roots.roots()))
+    kernel = [f for f in files if f.startswith(places) and f.endswith(".rs")]
     check = [f for f in kernel if "check" in os.path.basename(f)]
     k_lines = sum(lines_of(f) for f in kernel)
     c_lines = sum(lines_of(f) for f in check)

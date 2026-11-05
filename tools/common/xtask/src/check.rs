@@ -402,6 +402,12 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
         "certification item boundary",
         &[
             &["tools/common/check/check-item-boundary.py"],
+            // Every walker walks every kernel source root, the optional parts'
+            // included (docs/microkernel/CRATE-SPLIT.md S0, ledger 7346 (4), (5)).
+            &["tools/common/check/check-kernel-roots.py"],
+            &["tools/common/check/check-kernel-roots.py", "--self-test"],
+            // A part's file rustc read for ring 0 is a breach (ledger 7429 S.2).
+            &["tools/common/check/check-kernel-shape.py", "--self-test"],
             &["tools/common/check/check-first-rows.py"],
             &["tools/common/check/check-first-rows.py", "--self-test"],
             &["tools/common/check/check-boot-workers.py"],

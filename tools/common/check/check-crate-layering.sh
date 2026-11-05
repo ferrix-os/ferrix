@@ -96,7 +96,23 @@ forbid() {
 # beneath it (docs/KERNEL-CRATES.md). Every rule that keeps something away
 # from "the kernel" names all of them: an anchored `ferrix-kernel` does not
 # match `ferrix-kernel-core`.
-kernel_crates=$(find src/kernel -maxdepth 2 -name Cargo.toml -not -path '*/target/*' 2>/dev/null | sort \
+# The kernel's source roots but src/kernel/src (kernel_source_roots, read by
+# tools/common/check/kernel_roots.py; docs/microkernel/CRATE-SPLIT.md S0): each is
+# an optional part's src/, its package the directory above it and its lift twin
+# in that directory's lift/. Every root, not those outside src/kernel: the parts
+# live beneath it, deeper than the find below reaches (ledger 7429 Q.1).
+if ! kernel_part_roots_text=$(python3 -I tools/common/check/kernel_roots.py others); then
+    echo "crate-layering: kernel_roots.py could not read kernel_source_roots" >&2
+    exit 1
+fi
+mapfile -t kernel_part_roots < <(printf '%s' "$kernel_part_roots_text" | sed '/^$/d')
+kernel_part_manifests=()
+for part_root in "${kernel_part_roots[@]}"; do
+    for manifest in "${part_root%/src}/Cargo.toml" "${part_root%/src}/lift/Cargo.toml"; do
+        [[ -f "$manifest" ]] && kernel_part_manifests+=("$manifest")
+    done
+done
+kernel_crates=$( { find src/kernel -maxdepth 2 -name Cargo.toml -not -path '*/target/*' 2>/dev/null; printf '%s\n' "${kernel_part_manifests[@]}"; } | sed '/^$/d' | sort \
     | xargs -r sed -n '/^\[package\]/,/^\[/s/^name = "\(.*\)"$/\1/p' \
     | paste -sd '|' - || true)
 if [[ "|$kernel_crates|" != *"|ferrix-kernel|"* ]]; then
@@ -215,7 +231,7 @@ fi
 # A native program under `src/user/system/native/` follows the same rule: its crate's
 # `src/arch/` is the facade, as `src/kernel/src/arch/` is the kernel's.
 # ---------------------------------------------------------------------------
-offenders=$(grep -rnE 'cfg[^)]*target_arch' src/kernel/src src/boot/common/uefi/src src/lib src/user/system/native 2>/dev/null \
+offenders=$(grep -rnE 'cfg[^)]*target_arch' src/kernel/src "${kernel_part_roots[@]}" src/boot/common/uefi/src src/lib src/user/system/native 2>/dev/null \
     --include='*.rs' \
     | grep -vE '^(src/kernel/src/arch/|src/boot/common/uefi/src/arch/|src/lib/proto/native-abi/src/arch/|src/user/system/native/(drivers/[^/]+/)?[^/]+/src/arch/|src/kernel/src/lift_core\.rs|src/kernel/src/lift/core/)' || true)
 # The shim's composition root may hold one module per architecture and no more (ledger 7126 L1.1).

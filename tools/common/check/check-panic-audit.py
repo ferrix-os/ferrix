@@ -56,7 +56,12 @@ ATTRIBUTE = re.compile(r"#!?\[(expect|allow)\(")
 TEST_MODULE = re.compile(r"#\[cfg\(test\)\]\s*(?:pub\s+)?mod\s+\w+\s*\{")
 
 # The crates whose sources are production code.
-ROOTS = ("src/kernel", "src/boot/common/uefi", "src/lib", "src/user/system/native", "tools/common/xtask")
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import kernel_roots  # noqa: E402
+
+# The kernel's optional parts outside src/kernel come from kernel_source_roots
+# (docs/microkernel/CRATE-SPLIT.md S0), never from a literal here.
+ROOTS = ("src/kernel", *kernel_roots.outside("src/kernel"), "src/boot/common/uefi", "src/lib", "src/user/system/native", "tools/common/xtask")
 
 
 def balanced(source: str, opening: int, open_ch: str, close_ch: str) -> int:
@@ -135,6 +140,7 @@ def main() -> int:
 
     for name in ROOTS:
         for path in sorted((root / name).rglob("*.rs")):
+            kernel_roots.note_walked("check-panic-audit", [path])
             # Test code however clippy sees it: an integration test is its own
             # crate, so clippy's in-test exemptions do not reach it.
             if "tests" in path.parts or "target" in path.parts:

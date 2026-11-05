@@ -60,8 +60,11 @@ import rustlex  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
 FLAGS = ROOT / "tools" / "common" / "data" / "build-flags.toml"
-KERNEL = "src/kernel/"
-READERS = ("src/kernel", "src/boot")
+import kernel_roots  # noqa: E402  (docs/microkernel/CRATE-SPLIT.md S0)
+
+# src/kernel/ and every kernel source root outside it (kernel_source_roots).
+KERNEL = ("src/kernel/", *(r + "/" for r in kernel_roots.outside("src/kernel")))
+READERS = ("src/kernel", "src/boot", *kernel_roots.outside("src/kernel", "src/boot"))
 # Library files that read the command line on the loader's or the kernel's
 # behalf, through a function of their own the loader or kernel calls:
 # `ferrix_bootinfo::pstore::switch` reads `ferrix.pstore` for the loader, and

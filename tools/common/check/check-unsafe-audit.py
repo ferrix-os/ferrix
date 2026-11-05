@@ -95,7 +95,12 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent.parent
-ROOTS = ("src/kernel", "src/boot/common/uefi", "src/lib", "src/user/system/native", "tools/common/xtask")
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import kernel_roots  # noqa: E402
+
+# The kernel's optional parts outside src/kernel come from kernel_source_roots
+# (docs/microkernel/CRATE-SPLIT.md S0), never from a literal here.
+ROOTS = ("src/kernel", *kernel_roots.outside("src/kernel"), "src/boot/common/uefi", "src/lib", "src/user/system/native", "tools/common/xtask")
 REGISTER = ROOT / "tools" / "common" / "data" / "safety-requirements.json"
 BASELINE = ROOT / "tools" / "common" / "data" / "unsafe-trace-baseline.json"
 KERNEL_SRC = ROOT / "src" / "kernel" / "src"
@@ -461,6 +466,7 @@ def main() -> int:
             # `/` between the parts on every host, as the manifest and the
             # baseline name files.
             label = path.relative_to(ROOT).as_posix()
+            kernel_roots.note_walked("check-unsafe-audit", [label])
             found, sites, blocks = scan(path.read_text(encoding="utf-8"), label)
             problems.extend(found)
             if blocks:
@@ -470,7 +476,7 @@ def main() -> int:
                 for ident in site.ids:
                     if ident not in obligations:
                         unknown.append(f"{label}:{site.line}: ({ident}) is no obligation id")
-            rel = path.relative_to(KERNEL_SRC).as_posix() if path.is_relative_to(KERNEL_SRC) else None
+            rel = kernel_roots.kernel_name(label)
             if label in item_crate_files:
                 # An item crate's product file, named from the repository root.
                 rel = label

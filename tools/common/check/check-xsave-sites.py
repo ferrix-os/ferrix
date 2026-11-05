@@ -17,6 +17,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 TREE = ROOT / "src/kernel/src"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import kernel_roots  # noqa: E402  (every kernel source root, CRATE-SPLIT.md S0)
 HOME = "arch/x86_64/switch.rs"
 # Its own check, which runs with `CR0.TS` clear and is in no path of a program's.
 CHECK = "arch/x86_64/switch/check.rs"
@@ -48,8 +50,10 @@ def main() -> int:
     if "--self-test" in sys.argv:
         return self_test()
     bad = []
-    for path in sorted(TREE.rglob("*.rs")):
-        name = path.relative_to(TREE).as_posix()
+    paths = sorted(p for d in kernel_roots.root_dirs() for p in d.rglob("*.rs"))
+    kernel_roots.note_walked("check-xsave-sites", paths)
+    for path in paths:
+        name = path.relative_to(TREE if path.is_relative_to(TREE) else ROOT).as_posix()
         if name not in (HOME, CHECK) and sites_in(path.read_text()):
             bad.append(name)
     for name in bad:

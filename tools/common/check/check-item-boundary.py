@@ -158,6 +158,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import rustlex  # noqa: E402  (after the path insert)
+import kernel_roots  # noqa: E402  (after the path insert)
 
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
 MANIFEST = ROOT / "tools" / "common" / "data" / "certification-item.json"
@@ -206,16 +207,41 @@ def load_manifest() -> dict:
 
 
 def kernel_files() -> list[str]:
-    """Every kernel source file, as a path relative to src/kernel/src, with `/`
-    between its parts on every host: the manifest's patterns and the module
-    tree are written that way."""
-    return sorted(
-        rel
-        for rel in (path.relative_to(KERNEL_SRC).as_posix() for path in KERNEL_SRC.rglob("*.rs"))
-        # linuxd's shim is outside the TSF and in no ring (M5-LIFT.md §8):
-        # check-lift.py holds it apart from what the kernel builds.
-        if not rel.startswith("lift/") and rel not in ("lift_core.rs", "lift_item.rs")
-    )
+    """Every kernel source file, with `/` between its parts on every host: the
+    manifest's patterns and the module tree are written that way. A file under
+    src/kernel/src is named relative to it, as every record has it; a file under
+    another of `kernel_source_roots` (an optional part, docs/microkernel/
+    CRATE-SPLIT.md) by its repo-relative path, which a part's ring line
+    (`<parts_place>/<group>/<name>/**`, parts_place from kernel_source_roots) matches. The roots come from the
+    record, never from a literal here (ledger 7346 (4))."""
+    found, files = [], []
+    for directory in kernel_roots.root_dirs():
+        primary = directory == KERNEL_SRC
+        for path in directory.rglob("*.rs"):
+            found.append(path)
+            rel = path.relative_to(KERNEL_SRC if primary else ROOT).as_posix()
+            # linuxd's shim is outside the TSF and in no ring (M5-LIFT.md §8):
+            # check-lift.py holds it apart from what the kernel builds.
+            if primary and (rel.startswith("lift/") or rel in ("lift_core.rs", "lift_item.rs")):
+                continue
+            files.append(rel)
+    kernel_roots.note_walked("check-item-boundary", found)
+    return sorted(files)
+
+
+def kernel_path(rel: str) -> Path:
+    """The file a kernel file name (as `kernel_files` gives it) is read from."""
+    return ROOT / rel if rel.startswith("src/") else KERNEL_SRC / rel
+
+
+def module_rel(rel: str) -> str:
+    """A kernel file's path within its root: its module path, since a part's
+    files keep the module path they had in src/kernel/src."""
+    if rel.startswith("src/"):
+        for root in kernel_roots.roots():
+            if rel.startswith(root + "/"):
+                return rel[len(root) + 1:]
+    return rel
 
 
 def matches(pattern: str, rel: str) -> bool:
@@ -312,6 +338,7 @@ class Reference:
 
 def module_of_file(rel: str) -> ModPath:
     """`main.rs`/`lib.rs` -> (), `a/mod.rs` and `a.rs` -> (a,), `a/b.rs` -> (a, b)."""
+    rel = module_rel(rel)
     parts = rel[:-3].split("/")
     if parts[-1] == "mod" or (len(parts) == 1 and rel in ROOT_FILES):
         parts = parts[:-1]
@@ -692,7 +719,7 @@ def containment(ring_of: dict[str, str], modules) -> list[tuple[str, str, str]]:
 def measure(manifest: dict, ring_of: dict[str, str]):
     files = sorted(ring_of)
     modules, refs, problems = build(
-        files, lambda rel: (KERNEL_SRC / rel).read_text(encoding="utf-8", errors="replace")
+        files, lambda rel: kernel_path(rel).read_text(encoding="utf-8", errors="replace")
     )
     return modules, find_edges(manifest, ring_of, modules, refs), problems, refs
 
@@ -701,7 +728,7 @@ def line_counts(manifest: dict, ring_of: dict[str, str]) -> dict[str, dict[str, 
     counts: dict[str, dict[str, int]] = defaultdict(lambda: {"product": 0, "test": 0})
     for rel, ring in ring_of.items():
         lines = sum(
-            1 for _ in (KERNEL_SRC / rel).open(encoding="utf-8", errors="replace")
+            1 for _ in kernel_path(rel).open(encoding="utf-8", errors="replace")
         )
         kind = "test" if is_test_file(rel, manifest) else "product"
         counts[ring][kind] += lines
@@ -1020,7 +1047,7 @@ def check_crates(manifest: dict, ring_of: dict[str, str]) -> tuple[list[str], li
             problems.append(f"crates.infrastructure_allowlist: {package} has no reason")
         named = re.compile(rf"(?<![\w:]){lib_name(package)}\s*::")
         if not any(
-            named.search(rustlex.mask((KERNEL_SRC / rel).read_text(encoding="utf-8", errors="replace")))
+            named.search(rustlex.mask(kernel_path(rel).read_text(encoding="utf-8", errors="replace")))
             for rel in trusted
         ):
             problems.append(
@@ -1974,15 +2001,87 @@ def _build_script_self_test() -> list[str]:
     return failures
 
 
+# Where the kernel's packages are: src/kernel and what is beneath it, and the
+# optional parts' directory (docs/microkernel/CRATE-SPLIT.md S0, ledger 7346 (5d)),
+# read from kernel_source_roots.parts_place, never written here (ledger 7445 B.2):
+# a package there must be in `kernel_crates` as much as one under src/kernel.
+PARTS_PLACE = kernel_roots.parts_place()
+
+
+def kernel_places(parts_place: str) -> tuple[str, ...]:
+    """src/kernel and the parts' place. Beneath src/kernel today, the place is
+    listed all the same, so a place the record moves elsewhere stays a kernel
+    place (ledger 7445 Q-A (4))."""
+    return ("src/kernel", parts_place)
+
+
+KERNEL_PLACES = kernel_places(PARTS_PLACE)
+
+
+def is_kernel_member(member: str, places: tuple[str, ...] = KERNEL_PLACES) -> bool:
+    """Whether a workspace member is a kernel package, by whole path components."""
+    return any(member == place or member.startswith(place + "/") for place in places)
+
+
+def _kernel_place_self_test() -> list[str]:
+    failures = []
+    for parts in (PARTS_PLACE, "src/kernel-elsewhere"):
+        places = kernel_places(parts)
+        cases = {"src/kernel": True, "src/kernel/load": True, f"{parts}/device/logctl": True,
+                 f"{parts}/device/logctl/lift": True, "src/kernelx": False, "src/lib/kernel/sync": False}
+        failures += [f"kernel places: {m} taken as {not want} (parts' place {parts})"
+                     for m, want in cases.items() if is_kernel_member(m, places) != want]
+    return failures
+
+
+def unrooted_kernel_files(paths: list[str], roots: list[str], fixture: str) -> list[str]:
+    """Every .rs file under src/kernel/ that no kernel source root holds (ledger
+    7429 Q.3): a part whose src/ the record forgot would be walked by no kernel
+    check. A package's build.rs is no kernel source, and the guard's fixture part
+    is a root only in its own run."""
+    return [
+        f"{path}: a Rust file under src/kernel/ under no kernel source root "
+        "(kernel_source_roots in certification-item.json)"
+        for path in paths
+        if path.startswith("src/kernel/") and path.endswith(".rs")
+        and not any(path.startswith(r + "/") for r in roots)
+        and not path.startswith(fixture + "/")
+        and path.rsplit("/", 1)[-1] != "build.rs"
+    ]
+
+
+def _unrooted_self_test() -> list[str]:
+    roots = ["src/kernel/src", f"{PARTS_PLACE}/device/logctl/src"]
+    fixture = f"{PARTS_PLACE}/fixture/kernel-roots/src"
+    paths = ["src/kernel/src/mm.rs", "src/kernel/build.rs", f"{PARTS_PLACE}/device/logctl/src/lib.rs",
+             f"{fixture}/planted.rs", f"{PARTS_PLACE}/device/logctl/Cargo.toml"]
+    failures = []
+    if unrooted_kernel_files(paths, roots, fixture):
+        failures.append("unrooted: a tree whose files all sit under a root failed")
+    forgot = f"{PARTS_PLACE}/net/net_ring/src/lib.rs"
+    got = unrooted_kernel_files(paths + [forgot], roots, fixture)
+    if len(got) != 1 or forgot not in got[0]:
+        failures.append(f"unrooted: a part's file under no root passed: {got}")
+    return failures
+
+
+def tracked_kernel_tree() -> list[str]:
+    """Every file git lists under src/kernel (tracked or new, ignored ones aside)."""
+    out = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z", "--cached", "--others",
+                          "--exclude-standard", "--", "src/kernel"],
+                         check=True, capture_output=True, text=True).stdout
+    return sorted(p for p in out.split("\0") if p)
+
+
 def kernel_members() -> dict[str, str]:
-    """`{package: directory}` for the workspace's members at or under src/kernel."""
+    """`{package: directory}` for the workspace's kernel members (`KERNEL_PLACES`)."""
     import tomllib
 
     with (ROOT / "Cargo.toml").open("rb") as handle:
         members = tomllib.load(handle).get("workspace", {}).get("members", [])
     out = {}
     for member in members:
-        if member == "src/kernel" or member.startswith("src/kernel/"):
+        if is_kernel_member(member):
             with (ROOT / member / "Cargo.toml").open("rb") as handle:
                 out[tomllib.load(handle)["package"]["name"]] = member
     return out
@@ -2107,6 +2206,8 @@ def self_test() -> list[str]:
     failures += _crate_self_test()
     failures += _hook_self_test() + _policy_self_test() + _removable_self_test()
     failures += _kernel_self_test()
+    failures += _kernel_place_self_test()
+    failures += _unrooted_self_test()
     failures += _gpu_self_test()
     rings = {"rings": {"load": {"members": ["fs/**", "render/**", "net.rs"]}}}
     stale = stale_members(rings, ["fs/pipe.rs", "interfaces/render/mod.rs", "net.rs"])
@@ -2919,10 +3020,10 @@ def run_removable(manifest: dict, files: list[str], root: str | None) -> list[st
     removable = manifest.get("composition_root", {}).get("removable", {})
     if not removable:
         return []
-    read = lambda rel: (KERNEL_SRC / rel).read_text(encoding="utf-8", errors="replace") \
-        if (KERNEL_SRC / rel).is_file() else None
+    read = lambda rel: kernel_path(rel).read_text(encoding="utf-8", errors="replace") \
+        if kernel_path(rel).is_file() else None
     entries = {k: v for k, v in manifest.get("kernel_crates", {}).items() if not k.startswith("//")}
-    reached, _ = kernel_crate_files(entries, read, lambda rel: (KERNEL_SRC / rel).is_file(), files)
+    reached, _ = kernel_crate_files(entries, read, lambda rel: kernel_path(rel).is_file(), files)
     crate_files: dict[str, list[str]] = {"kernel": sorted(reached)}
     for rel, crates in reached.items():
         for crate in crates:
@@ -3134,10 +3235,12 @@ def main() -> int:
             print(f"    {problem}", file=sys.stderr)
         status = 1
 
-    kernel_read = lambda rel: (KERNEL_SRC / rel).read_text(encoding="utf-8", errors="replace")  # noqa: E731
+    kernel_read = lambda rel: kernel_path(rel).read_text(encoding="utf-8", errors="replace")  # noqa: E731
     kernel_problems = kernel_crate_problems(
-        manifest, files, ring_of, kernel_read, lambda rel: (KERNEL_SRC / rel).is_file(), kernel_members()
+        manifest, files, ring_of, kernel_read, lambda rel: kernel_path(rel).is_file(), kernel_members()
     )
+    kernel_problems += unrooted_kernel_files(tracked_kernel_tree(), kernel_roots.roots(),
+                                             kernel_roots.fixture_root())
     import tomllib
 
     with (ROOT / "Cargo.toml").open("rb") as handle:
@@ -3152,7 +3255,7 @@ def main() -> int:
             return tomllib.load(handle)
 
     kernel_problems += loader_problems(
-        manifest, {rel: (KERNEL_SRC / rel).read_text() for rel in files if not is_test_file(rel, manifest)}
+        manifest, {rel: kernel_path(rel).read_text() for rel in files if not is_test_file(rel, manifest)}
     )
     kernel_problems += build_script_problems(
         {package: entry.get("path", "") for package, entry in kernel_entries.items()},
@@ -3160,7 +3263,7 @@ def main() -> int:
     )
     kernel_problems += kernel_dependency_problems(
         manifest, kernel_cargo, workspace_deps,
-        kernel_crate_libraries(manifest, files, kernel_read, lambda rel: (KERNEL_SRC / rel).is_file()),
+        kernel_crate_libraries(manifest, files, kernel_read, lambda rel: kernel_path(rel).is_file()),
     )
     if kernel_problems:
         print(
@@ -3235,7 +3338,7 @@ def main() -> int:
 
     hook_found = hook_problems(
         ring_of,
-        lambda rel: (KERNEL_SRC / rel).read_text(encoding="utf-8", errors="replace"),
+        lambda rel: kernel_path(rel).read_text(encoding="utf-8", errors="replace"),
         root.get("hooks", []),
         root.get("file"),
     )
@@ -3253,8 +3356,8 @@ def main() -> int:
 
     policy_found = policy_problems(
         sorted(set(ring_of) | {root.get("file")}),
-        lambda rel: (KERNEL_SRC / rel).read_text(encoding="utf-8", errors="replace")
-        if (KERNEL_SRC / rel).is_file() else None,
+        lambda rel: kernel_path(rel).read_text(encoding="utf-8", errors="replace")
+        if kernel_path(rel).is_file() else None,
         root.get("policy", {}),
         root.get("file"),
     )

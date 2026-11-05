@@ -149,7 +149,7 @@ def main(argv: list[str]) -> int:
     manifest = g.load_manifest()
     files = g.kernel_files()
     ring_of, *_ = g.classify(manifest, files)
-    where = homes({rel: (g.KERNEL_SRC / rel).read_text() for rel in files})
+    where = homes({rel: g.kernel_path(rel).read_text() for rel in files})
     raised = {
         entry["file"]
         for entry in manifest.get("raised_checks", {}).get("entries", [])

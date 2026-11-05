@@ -26,6 +26,8 @@ import json
 import os
 import subprocess
 import sys
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
+import kernel_roots  # noqa: E402  (docs/microkernel/CRATE-SPLIT.md S0)
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
@@ -57,7 +59,11 @@ def tree_files(ref: str | None) -> dict[str, int]:
     """Every .rs file under src/, with its line count, at `ref` or in the tree."""
     counts: dict[str, int] = {}
     if ref is None:
-        for path in (ROOT / "src").rglob("*.rs"):
+        paths = list((ROOT / "src").rglob("*.rs"))
+        # Every root is under src/ (kernel_roots refuses one that is not), so
+        # this walk holds them all; the parity guard checks it (ledger 7429 S.4).
+        kernel_roots.note_walked("check-load-ring", paths)
+        for path in paths:
             rel = path.relative_to(ROOT).as_posix()
             try:
                 counts[rel] = path.read_bytes().count(b"\n")
@@ -94,8 +100,8 @@ def load_ring(manifest: dict, files: dict[str, int]) -> dict[str, tuple[int, str
     members = manifest.get("rings", {}).get("load", {}).get("members", [])
     ring: dict[str, tuple[int, str]] = {}
     for rel, lines in files.items():
-        if rel.startswith(KERNEL_SRC):
-            inner = rel[len(KERNEL_SRC):]
+        inner = kernel_roots.kernel_name(rel)
+        if inner is not None:
             if any(matches(pattern, inner) for pattern in members):
                 ring[rel] = (lines, "test" if is_test(inner, manifest) else "product")
     for crate in manifest.get("crates", {}).get("members", {}).values():

@@ -60,6 +60,8 @@ import json
 import pathlib
 import re
 import sys
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
+import kernel_roots  # noqa: E402  (docs/microkernel/CRATE-SPLIT.md S0)
 
 ROOT_DIR = "src/kernel"
 
@@ -262,7 +264,8 @@ ASM_WRMSR = re.compile(r'"wrmsr"')
 
 def checked_write_problems(root: pathlib.Path) -> list[str]:
     problems = []
-    for path in sorted((root / KERNEL).rglob("*.rs")):
+    for path in sorted(p for d in kernel_roots.roots() for p in (root / d).rglob("*.rs")):
+        kernel_roots.note_walked("check-device-access", [path])
         relative = path.relative_to(root).as_posix()
         function = None
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):

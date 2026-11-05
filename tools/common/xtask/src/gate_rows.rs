@@ -524,6 +524,17 @@ fn rows_for(path: &str, image_crates: &BTreeSet<String>, rows: &mut Rows) {
         ]);
         reason(rows, "the first processes' row");
     }
+    // The shape check and the roots it classes by: rustc's dep-info read under
+    // personality=user, and the ring-0 budget (ledger 7573 L4.2).
+    if path == "tools/common/check/check-kernel-shape.py"
+        || path == "tools/common/check/kernel_roots.py"
+    {
+        rows.add(&["test-kernel-shape --personality user", "test-ring0-budget"]);
+        reason(
+            rows,
+            "the kernel's shape and its ring-0 budget read rustc's lists by these",
+        );
+    }
     if path.ends_with("src/kernel/src/mm/seal.rs")
         || path.ends_with("src/kernel/src/mm/seal_check.rs")
     {
@@ -610,6 +621,7 @@ fn rows_for(path: &str, image_crates: &BTreeSet<String>, rows: &mut Rows) {
             "test-container's judge: the image row, then test-container",
         );
     } else if under("src/kernel/")
+        || under(&format!("{}/", crate::workspace::KERNEL_PARTS_PLACE))
         || under("src/boot/common/uefi/")
         || under("tools/common/xtask/")
         || image_crate
@@ -865,6 +877,7 @@ fn added_unsafe(since: &str) -> Result<Vec<String>> {
             &format!("{since}...HEAD"),
             "--",
             "src/kernel",
+            crate::workspace::KERNEL_PARTS_PLACE,
         ])
         .output()
         .map_err(|error| Error::new(format!("could not run git diff: {error}")))?;

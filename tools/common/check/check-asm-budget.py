@@ -43,7 +43,12 @@ import pathlib
 import re
 import sys
 
-ROOTS = ("src/kernel", "src/boot", "src/lib", "src/user/system/native", "tools/common/xtask")
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import kernel_roots  # noqa: E402
+
+# The kernel's optional parts outside src/kernel come from kernel_source_roots
+# (docs/microkernel/CRATE-SPLIT.md S0), never from a literal here.
+ROOTS = ("src/kernel", *kernel_roots.outside("src/kernel"), "src/boot", "src/lib", "src/user/system/native", "tools/common/xtask")
 
 # The macros that introduce assembly. `asm!` and `naked_asm!` may be reached
 # through a `core::arch::` path, so allow a qualified prefix.
@@ -168,6 +173,7 @@ def sources(root: pathlib.Path):
         for path in sorted(directory.rglob("*")):
             if "target" in path.parts or not path.is_file():
                 continue
+            kernel_roots.note_walked("check-asm-budget", [path])
             yield path.relative_to(root).as_posix(), path
 
 

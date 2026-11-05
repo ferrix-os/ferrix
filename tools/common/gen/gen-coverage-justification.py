@@ -73,9 +73,21 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "check"))
+import kernel_roots  # noqa: E402  (every kernel source root, CRATE-SPLIT.md S0)
+
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
 CERT = ROOT / "docs" / "certification"
-KERNEL = ROOT / "src" / "kernel" / "src"
+KERNEL = ROOT / kernel_roots.PRIMARY
+
+
+def kernel_source(file: str) -> Path:
+    """The file an evidence name stands for: relative to src/kernel/src, or a
+    part's repo path under another kernel source root (ledger 7429 S.3), as
+    carry-coverage.py keys them."""
+    if any(file.startswith(root + "/") for root in kernel_roots.others()):
+        return ROOT / file
+    return KERNEL / file
 OUTPUT = CERT / "COVERAGE-RESIDUAL.md"
 WORKLIST = CERT / "COVERAGE-WORKLIST.md"
 OWED = CERT / "coverage-owed.json"
@@ -135,7 +147,7 @@ def load_arguments(arch: str, residual: dict) -> tuple[dict, list[dict], list[st
                 f"{where}: {ranges(stale) or 'no lines'} not in the residual -- "
                 f"reached now, or moved; delete or re-aim the argument"
             )
-        source = KERNEL / file
+        source = kernel_source(file)
         text = source.read_text(encoding="utf-8").splitlines() if source.is_file() else []
         first = text[lines[0] - 1] if lines and 0 < lines[0] <= len(text) else ""
         if argument.get("match", "") not in first or not argument.get("match"):

@@ -400,6 +400,16 @@ fn the_item_paths_come_from_the_classification() {
             "{expected} in {item:?}"
         );
     }
+    // A part file's change invalidates the kernel's steps (CRATE-SPLIT.md S0,
+    // ledger 7346 (5c)), by the parts' own entry, which stays wherever the
+    // place is put (ledger 7445 Q-A (4)).
+    let parts = format!("{}/", crate::workspace::KERNEL_PARTS_PLACE);
+    assert!(item.contains(&parts), "{parts} in {item:?}");
+    let part_file = format!("{parts}device/logctl/src/lib.rs");
+    assert!(
+        item.iter().any(|path| part_file.starts_with(path.as_str())),
+        "{part_file} under {item:?}"
+    );
     // btrfs's VFS glue is load, not item.
     assert!(
         !item.iter().any(|path| path == "src/lib/fs/btrfs/vfs/"),

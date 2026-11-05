@@ -49,6 +49,9 @@ import tempfile
 import datetime
 import tomllib
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import kernel_roots  # noqa: E402  (the parts' place, docs/microkernel/CRATE-SPLIT.md S0)
+
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 ANCHORS = ROOT / "tools/common/data/signing-anchors.toml"
 FAMILIES = ROOT / "tools/common/data/hardware-families.toml"
@@ -300,7 +303,9 @@ def metadata_graph() -> tuple[dict[str, list[str]], list[str], dict[str, str]]:
     names = {p["id"]: p["name"] for p in meta["packages"]}
     kernel = [
         p["id"] for p in meta["packages"]
-        if pathlib.Path(p["manifest_path"]).resolve().is_relative_to(ROOT / "src/kernel")
+        # The kernel's packages, and its optional parts' (CRATE-SPLIT.md S0).
+        if any(pathlib.Path(p["manifest_path"]).resolve().is_relative_to(ROOT / place)
+               for place in ("src/kernel", kernel_roots.parts_place()))
     ]
     graph = {}
     for node in meta["resolve"]["nodes"]:

@@ -117,7 +117,8 @@ script and the linker scripts, the lift's shim of the core and the item
 (the core's and item's interface seen from user space, which belongs with
 what it mirrors), and one crate of raised checks (§2.6 item 5). The load
 leaves whole in S5, keeping its package name `ferrix-kernel-load`, and is
-then cut into parts inside `src/kernel-parts/` (P1 to P3).
+then cut into parts inside `src/kernel/extensions/` (P1 to P3), the
+customer's name for the parts' place (2026-11-05, §2.2).
 
 ```text
 src/kernel/                           ring 0 under fast/max, and the composition root
@@ -126,24 +127,25 @@ src/kernel/                           ring 0 under fast/max, and the composition
   checks/                             ferrix-kernel-raised-checks (S5): root in src/, files stay put
   lift/{core,item}/                   the shim's manifests (ferrix-lift-core, -item)
   src/                                core and item files, the shim, the crate roots
-src/kernel-parts/                     optional parts; each a crate, built into ring 0 or linuxd
-  settings/                 ferrix-kernel-settings         S1  (twin: none, `fixed` in fast/max)
-  board/stm32mp1/           ferrix-kernel-board-stm32mp1   S2
-  board/gs201-usb/          ferrix-kernel-board-gs201-usb  S2
-  device/logctl/            ferrix-kernel-logctl           S3  + lift/ twin
-  device/net-ring/          ferrix-kernel-net-ring         S4  + lift/ twin
-  personality/linux/        ferrix-kernel-load             S5  + lift/ twin (ferrix-lift-load)
-  fs/btrfs/                 ferrix-kernel-btrfs            P1
-  device/{input,audio}/     ferrix-kernel-input, -audio    P2
-  device/block-ring/        ferrix-kernel-block-ring       P2
-  device/gpu/               ferrix-kernel-gpu (display, render, chardev)  P3
-  fs/{procfs,sysfs,devfs,cgroupfs}/                        P3
-  net/stack/                ferrix-kernel-net              P3
+  extensions/                         optional parts; each a crate, built into ring 0 or linuxd
+    settings/                 ferrix-kernel-settings         S1  (twin: none, `fixed` in fast/max)
+    board/stm32mp1/           ferrix-kernel-board-stm32mp1   S2
+    board/gs201-usb/          ferrix-kernel-board-gs201-usb  S2
+    device/logctl/            ferrix-kernel-logctl           S3  + lift/ twin
+    device/net-ring/          ferrix-kernel-net-ring         S4  + lift/ twin
+    personality/linux/        ferrix-kernel-load             S5  + lift/ twin (ferrix-lift-load)
+    fs/btrfs/                 ferrix-kernel-btrfs            P1
+    device/{input,audio}/     ferrix-kernel-input, -audio    P2
+    device/block-ring/        ferrix-kernel-block-ring       P2
+    device/gpu/               ferrix-kernel-gpu (display, render, chardev)  P3
+    fs/{procfs,sysfs,devfs,cgroupfs}/                        P3
+    net/stack/                ferrix-kernel-net              P3
+    fixture/kernel-roots/     check-kernel-roots.py's planted part (S0): no package, never built
 ```
 
 Each part's directory is a package: `Cargo.toml`, `src/lib.rs`, and the
 moved files under `src/` **at the module path they have today**, so
-`fs/btrfs.rs` becomes `src/kernel-parts/fs/btrfs/src/fs/btrfs.rs` and
+`fs/btrfs.rs` becomes `src/kernel/extensions/fs/btrfs/src/fs/btrfs.rs` and
 `crate::fs::btrfs::x` still names it.
 
 **A part's `lib.rs`** (7346 (3)) re-exports the crate below with a glob and
@@ -171,11 +173,14 @@ twin **in its own directory**, `lift/Cargo.toml`, naming the same
 manifest names the one build script, `src/kernel/build.rs` (ledger 3282
 (K1)), and is a workspace member.
 
-### 2.2 Why `src/kernel-parts/` and not `src/lib/kernel/`
+### 2.2 Why `src/kernel/extensions/`, not `src/lib/kernel/`
 
-The customer suggested a subfolder of `src/lib/kernel/`. The recommendation
-is a sibling of `src/kernel/` instead, `src/kernel-parts/<group>/<name>/`,
-for three reasons, and Q1 (§5) asks the customer to choose:
+**The customer's decision, 2026-11-05:** "ok i like src/kernel/extensions"
+(Q1, §5; `docs/backlog/DECISIONS.md`). The customer first suggested a subfolder
+of `src/lib/kernel/`; this design recommended a sibling, `src/kernel/extensions/`;
+the customer then proposed a directory under `src/kernel/` (`parts`,
+`plugins`, `extensions`) and chose `extensions`. The consultant agreed to a
+place under `src/kernel/` (ledger 7429 Q.1-Q.4, 7445). The reasons:
 
 1. **`src/lib/` is a promise.** `check-crate-layering.sh` rule 2: `src/lib/*`
    is host-testable, architecture-neutral logic that uses neither the kernel
@@ -184,19 +189,29 @@ for three reasons, and Q1 (§5) asks the customer to choose:
    the kernel depends on them. A part depends on the kernel's crates
    (`ferrix-kernel-core`, `-item`, often `-load`) and runs in ring 0. Putting
    it under `src/lib/` either breaks rule 2 or adds an exception to it, and
-   the one tree where "no kernel" is checked stops meaning that.
-2. **Direction is visible from the path.** `src/lib/` is below the kernel,
-   `src/kernel-parts/` above it: a part names the kernel, the kernel names no
-   part (§2.3), and the layering check can say so by path.
-3. **The item's evidence keys on paths.** Rings, traceability anchors,
-   coverage and the panic catalog are keyed by file path (§3). A tree of its
-   own makes "every kernel source root" a list of two (`src/kernel/src` and
-   `src/kernel-parts`), which the tools read from one record; a subtree of
-   `src/lib/kernel` would make every `src/lib` scanner decide, per file,
-   whether it is kernel code.
+   the one tree where "no kernel" is checked stops meaning that. Under
+   `src/kernel/`, rule 2 keeps no exception.
+2. **Kernel code stays in the kernel's tree.** `desktop` links these parts into
+   ring 0, and the kernel's other packages (`core/`, `item/`, `load/`, `lift/`)
+   already nest in `src/kernel/`. Every tool that takes the `src/kernel/` prefix
+   for kernel code (the step cache, `gate-rows`, the signing anchors, the
+   asm, panic and unsafe audits) covers a part with no edit, which fails safe:
+   more invalidation, more scanning (7429 (1)). It also removes the trap of
+   7346 (4), where `src/kernel` as a string prefix matched `src/kernel-parts`.
+3. **The item's evidence keys on rings, not paths.** Rings, traceability
+   anchors, coverage and the panic catalog are keyed by file path (§3), and a
+   part's file is keyed by its repo path under its root. Every kernel source
+   root is in one record, `kernel_source_roots`, which also holds the place
+   (`parts_place`): the directory's name is written there and in xtask's one
+   constant, held equal by a unit test, so a rename is a data change (7445
+   B.1-B.3). A figure labelled item, core or ring 0 comes from the rings,
+   never from a path prefix (7429 (1)): `git ls-files src/kernel` now counts
+   part files, which are load-ring code `desktop` builds into ring 0.
 
-If the customer prefers `src/lib/kernel/parts/<group>/<name>/`, the plan is
-the same with that prefix, and rule 2 gains one named exception.
+What nesting costs, and S0 covers: `kernel_roots.outside("src/kernel")` holds no
+part, so the layering check and rule 4 take every root (7429 Q.1); a root may
+not nest in another nor sit under `src/kernel/src` (Q.2); a `.rs` under
+`src/kernel/` that no root holds fails `check-item-boundary.py` (Q.3).
 
 ### 2.3 The rules a part keeps
 
@@ -311,7 +326,7 @@ from one line per part. Every tool that walks kernel files reads
    crate because they need the load (`raised_checks`, §1). They are core and
    item files by path (`arch/**`, `object/**`, ...) and must not move with
    the load, or they would change ring by path; but the load's root, once in
-   `src/kernel-parts/`, cannot reach them without `#[path]`. *Unblock (S5):*
+   `src/kernel/extensions/`, cannot reach them without `#[path]`. *Unblock (S5):*
    a crate of their own, `ferrix-kernel-raised-checks`, root
    `src/kernel/src/kernel_raised.rs` (classed `load` as a crate root, as
    `kernel_load.rs` is), its package in `src/kernel/checks/`, depending on
@@ -411,7 +426,7 @@ each item below with its output.
   regenerated. Gate expectations, goldens and transcripts are grepped for
   every moved path, and each hit is rewritten in the same landing.
 * **Rings over parts** (7346 (10), the consultant's ruling on how parts are
-  recorded): one `members` line per part, `src/kernel-parts/<group>/<name>/**`,
+  recorded): one `members` line per part, `src/kernel/extensions/<group>/<name>/**`,
   in the `load` ring only. `check-item-boundary.py` fails a file under a part
   directory that no line covers, a part line in a ring other than `load`, and
   a `core` or `item` glob that matches a part path.
@@ -431,7 +446,8 @@ prints the files it walked, and the guard compares them with its own count
 literal (`src/kernel`, `src/kernel/`, `src/kernel/src`, `kernel/src`) across
 `tools/`, xtask, `.github/` and `scripts/`, each hit classed in S0's message,
 and each tool stating whether it means the `src/kernel` *prefix* (which also
-matches `src/kernel-parts`, by accident) or the directory `src/kernel/`. The
+matched `src/kernel-parts`, by accident, before the customer put the parts
+under `src/kernel/`) or the directory `src/kernel/`. The
 hand list below is the review's starting point, not the list of record:
 `check-item-boundary.py`, `check-crate-layering.sh` (its `find src/kernel
 -maxdepth 2` for kernel crates; rule 4's `cfg(target_arch)` grep at line
@@ -454,13 +470,18 @@ hand list below is the review's starting point, not the list of record:
 file's change, so a stale cache would pass a row).
 
 **S0's negative controls**, each through `gate.sh control --expect` and each
-to read FIRED (7346 (5)): (a) a planted part file with an unchecked `alloc`
-call, refused by `check-fallible-alloc.py`; (b) one root dropped from one
-scanner, caught by the parity guard; (c) a touched part file invalidates the
-kernel's step in the step cache; (d) a package under `src/kernel-parts`
-missing from `kernel_crates`, refused by `check-item-boundary.py`; (e) a
-`cfg(target_arch)` in a part file, refused by rule 4. S0 changes no kernel
-file.
+to read FIRED (7346 (5), 7429 S.6): (a) a part's planted unchecked `alloc`
+call goes unreported when `check-kernel-alloc-audit.py` walks `src/kernel/src`
+alone (the consultant accepted this audit for (a): `check-fallible-alloc.py`
+reads item-ring files, and a part is never item, 7429 S.6); (b) one scanner
+walking `src/kernel/src` alone, caught by the parity guard; (c) the step
+cache's parts entry dropped, caught by its unit test; (d) the parts' place
+dropped from `check-item-boundary.py`'s kernel places, caught by its
+self-test; (e) rule 4 grepping `src/kernel/src` alone, caught by the guard's
+fixture run; (f) a `.rs` under `src/kernel/` no root holds, refused by
+`check-item-boundary.py` (7429 Q.3). S0 changes no kernel file; its fixture
+part, `src/kernel/extensions/fixture/kernel-roots/src/planted.rs`, is in no
+package and never built.
 
 ## 4. The plan
 
@@ -489,7 +510,7 @@ their owners.
 
 | # | Landing | Points | Freeze (files the PO holds) | Depends on |
 |---|---|---:|---|---|
-| S0 | Tools: `kernel_source_roots`, every scanner reads it, file-set parity guard, `carry-coverage.py --rename`, `move-kernel-part.py` and its `rewrite-paths.sed`, `check-crate-layering.sh` and `check-item-boundary.py` read parts, the rodata/symbol comparison; the planted-part-file control | 5 | none: no kernel file | this design |
+| S0 | **Landed** (see *Where it stands*). Tools: `kernel_source_roots` with `parts_place`, every scanner reads it, file-set parity guard, `carry-coverage.py --rename`, `move-kernel-part.py`, `check-crate-layering.sh`, `check-item-boundary.py` and `check-kernel-shape.py` read every root, the planted part file and its controls. Owed to later landings: the mover's `lib.rs` and manifest writing, the rodata/symbol comparison run, the `lib.rs`-shape dry build (S2 or S3, 7429 S.7) | 5 | none: no kernel file | this design |
 | S1 | `ferrix-kernel-settings` to `src/kernel-parts/settings/`: a path move, it is already a removable crate | 1 | `settings/`, `kernel_settings.rs`, `src/kernel/settings/`; about 20 min | S0 |
 | S2 | Board glue to `board/{stm32mp1,gs201-usb}/`, two crates | 2 | `platform/st/`, `gs201/usb.rs`, `kernel_load.rs`'s `platform` block, `main.rs`'s `install` lines; about 30 min, DK1 boot under ARMv7-A `--smp 2` included | S0 |
 | S3 | `logctl` to `device/logctl/`, with its lift twin | 2 | `interfaces/logctl/`, `interfaces/mod.rs`, `main.rs`; about 30 min | S0 |
@@ -506,7 +527,7 @@ with its own diff check): their review is a diff check of §3's evidence on
 each landing hash (7346 (12)), and after S5 the customer's request holds for the
 tree (nothing optional sits in `src/kernel/`). P1 to P3 (33 points, the
 uncertain part) then cut the personality into parts inside
-`src/kernel-parts/` without touching `src/kernel/`, which is why the whole
+`src/kernel/extensions/` without touching `src/kernel/`, which is why the whole
 load moves first: each later cut is a move between two part directories and
 its freeze touches no core or item file. P5 is optional for this request
 (the screen is core ring today) and goes after `fast` and `max` have a
@@ -514,7 +535,7 @@ console server to hand it to.
 
 **Each move landing also updates** KERNEL-CRATES §1 and the SysML model's
 structure (`docs/sysml/`) wherever they name a moved path (7346 (11)), and
-LAYOUT.md's `src/kernel/` and a new `src/kernel-parts/` section.
+LAYOUT.md's `src/kernel/` and a new `src/kernel/extensions/` section.
 
 **Ordering against other work.** None of S1 to S5 starts before mk-flip3's
 `fast` lands (the coordinator, 2026-11-05): S5's freeze would hold every
@@ -532,11 +553,12 @@ share one freeze if they land as one stack.
 Each has a default the work proceeds on, and a line in
 `~/.local/share/ferrix/fleet/morning-questions.md` (7346 (11)).
 
-1. **Where the parts live.** `src/kernel-parts/<group>/<name>/` or, as the
-   customer suggested, `src/lib/kernel/parts/<group>/<name>/` (with one
-   named exception to rule 2's "src/lib never names the kernel").
-   *Default:* `src/kernel-parts/`, §2.2; the consultant agrees, since rule 2
-   then needs no exception.
+1. **Where the parts live. DECIDED, 2026-11-05, by the customer:**
+   `src/kernel/extensions/<group>/<name>/` ("ok i like src/kernel/extensions"),
+   over this design's `src/kernel/extensions/` and the first suggestion,
+   `src/lib/kernel/parts/`. §2.2 gives the reasons; the consultant's
+   conditions for a place under `src/kernel/` are ledger 7429 Q.1-Q.4 and
+   7445, met in S0. Recorded in `docs/backlog/DECISIONS.md`.
 2. **How fine the crates are.** One crate per device core and per
    filesystem (as §2.4), or one per group (`ferrix-kernel-devices`,
    `ferrix-kernel-fs`). No certification angle. *Default:* one per part,
@@ -554,8 +576,31 @@ has landed); how the rings record parts is the consultant's ruling, §3.3's
 
 ## Where it stands
 
-Design only; no file has moved. Reviewed **OK IF (1)-(12), ledger 7346**,
-the conditions folded in above; the verdict covers the design only, each of
-S0 to S5 comes back for a diff check with §3's evidence on its landing hash,
-and P1 to P3 and P5 each need a design review before code. Next: S0, which
-can land before `fast`; the moves wait for `fast` (mk-flip3).
+Design reviewed **OK IF (1)-(12), ledger 7346**, the conditions folded in
+above. The place is the customer's, `src/kernel/extensions/` (2026-11-05,
+§2.2, §5 Q1), agreed by the consultant (ledger 7429 Q.1-Q.4, 7445).
+
+**S0 landed** (tools only, no kernel file; diff check ledger 7429 S.1-S.8 and
+7445 B.1-B.3). `certification-item.json`'s `kernel_source_roots` lists the
+roots (`src/kernel/src` today) and the place; `tools/common/check/kernel_roots.py`
+reads both and refuses a nested root, one under `src/kernel/src`, one outside
+the place, and a place outside `src/kernel/` without a reason; xtask's one
+constant `KERNEL_PARTS_PLACE` is held to the record by a unit test.
+`check-kernel-roots.py`, in `cargo xtask check`, holds the census (every bare
+or segmented kernel path literal under `tools/`, `scripts/`, `.github/`
+classed in `kernel-path-literals.json`, no tool naming the place literally)
+and the parity guard (nine walkers, each run with and without the fixture
+part, against `git ls-files`; the walkers it does not run each say in
+`parity_by` how parity holds). `check-item-boundary.py` fails a `.rs` under
+`src/kernel/` no root holds; `check-kernel-shape.py` takes a part's file read
+for ring 0 as a breach; `check-crate-layering.sh` reads every root.
+`move-kernel-part.py` does the `git mv`s, the path rewrite and the R100 check
+and lists the records keyed relative to `src/kernel/src`.
+
+Not in S0, owed: the mover writes no `lib.rs` or manifest yet; the
+`lib.rs`-shape dry build on `logctl` and `net_ring` (7346 (3)) is evidence of
+the first landing that makes a part crate out of load files, S2 or S3, before
+its freeze (7429 S.7); rule A (dangling file literals) is not built. Each of
+S1 to S5 comes back for a diff check with §3's evidence on its landing hash;
+P1 to P3 and P5 each need a design review before code. Next: S1, which waits
+for mk-flip3's `fast`.

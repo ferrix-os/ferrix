@@ -11,6 +11,8 @@ Usage: check-boot-workers.py [--self-test]
 """
 import re
 import sys
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
+import kernel_roots  # noqa: E402  (docs/microkernel/CRATE-SPLIT.md S0)
 from pathlib import Path
 
 ROOT = Path("src/kernel/src")
@@ -85,7 +87,9 @@ def entries(text: str) -> list[str]:
 def check_files() -> dict[str, str]:
     """The kernel's check files."""
     out = {}
-    for path in ROOT.rglob("*.rs"):
+    paths = [p for d in kernel_roots.roots() for p in Path(d).rglob("*.rs")]
+    kernel_roots.note_walked("check-boot-workers", [p.resolve() for p in paths])
+    for path in paths:
         if "check" in path.name:
             out[str(path)] = path.read_text(encoding="utf-8")
     return out

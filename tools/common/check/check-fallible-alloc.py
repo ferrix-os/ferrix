@@ -141,7 +141,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import rustlex  # noqa: E402  (after the path insert)
 
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
-KERNEL_SRC = ROOT / "src" / "kernel" / "src"
 BASELINE = ROOT / "tools" / "common" / "data" / "fallible-alloc-baseline.json"
 
 # The toolkit itself: the one place the infallible APIs are called on
@@ -351,7 +350,7 @@ def item_sites() -> dict[str, list[dict]]:
     manifest = gate.load_manifest()
     ring_of, _, _ = gate.classify(manifest, gate.kernel_files())
     sources = {
-        rel: (KERNEL_SRC / rel).read_text(encoding="utf-8", errors="replace")
+        rel: gate.kernel_path(rel).read_text(encoding="utf-8", errors="replace")
         for rel in ring_of
         if not gate.is_test_file(rel, manifest)
     }

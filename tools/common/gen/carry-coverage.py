@@ -35,10 +35,31 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "check"))
+import kernel_roots  # noqa: E402  (the parts' place, docs/microkernel/CRATE-SPLIT.md S0)
+
 ROOT = Path(__file__).resolve().parents[3]
 CERT = ROOT / "docs" / "certification"
 ARCHES = ("x86_64", "aarch64", "armv7a")
 SRC = "src/kernel/src/"
+# The optional parts' directory (docs/microkernel/CRATE-SPLIT.md S0): a file moved
+# there out of SRC keeps its evidence under its repo path, which is how the
+# evidence names a part's file; a file in SRC is named relative to SRC, as before.
+PARTS = kernel_roots.parts_place() + "/"
+TREES = (SRC, PARTS)
+# Pairs given with --rename OLD=NEW (either name as the evidence has it), for a
+# move git's rename detection does not pair.
+EXPLICIT = {}
+
+
+def key_of(repo_path):
+    """The evidence's name for a repo path."""
+    return repo_path[len(SRC):] if repo_path.startswith(SRC) else repo_path
+
+
+def repo_path_of(key):
+    """The repo path the evidence's name stands for."""
+    return key if key.startswith(PARTS) else SRC + key
 
 
 def git(*args, check=True):
@@ -49,13 +70,15 @@ def git(*args, check=True):
 
 
 def renames(base):
-    """kernel/src-relative old path -> new path, for files the change renamed."""
+    """Old name -> new name, for files the change renamed, within SRC or out of
+    it into a part, as the evidence names them; then the --rename pairs."""
     out = {}
-    listing = git("diff", "-M", "--name-status", base, "--", SRC).stdout
+    listing = git("diff", "-M", "--name-status", base, "--", *TREES).stdout
     for row in listing.splitlines():
         fields = row.split("\t")
         if fields[0].startswith("R") and len(fields) == 3:
-            out[fields[1][len(SRC):]] = fields[2][len(SRC):]
+            out[key_of(fields[1])] = key_of(fields[2])
+    out.update(EXPLICIT)
     return out
 
 
@@ -105,13 +128,16 @@ class Carrier:
         if path in self.maps:
             return self.maps[path]
         new = self.moved.get(path, path)
-        old = git("show", f"{self.base}:{SRC}{path}", check=False)
-        here = ROOT / SRC / new
+        old = git("show", f"{self.base}:{repo_path_of(path)}", check=False)
+        here = ROOT / repo_path_of(new)
         if old.returncode or not here.is_file():
             result = (new, {})
         else:
             before, after = old.stdout, here.read_text()
             result = (new, None if before == after else line_map(before.splitlines(), after.splitlines()))
+        if path in EXPLICIT and result[1] is not None:
+            sys.exit(f"carry-coverage: --rename {path}={new}: the move changed the file's text; "
+                     f"a move carries only an unchanged file (CRATE-SPLIT.md §3.2)")
         self.maps[path] = result
         return result
 
@@ -289,7 +315,16 @@ def main():
                         "(default: for each file, the commit that last wrote it)")
     parser.add_argument("--check", action="store_true", help="fail if a carry from the commit that "
                         "last wrote each evidence file would change it; write nothing")
+    parser.add_argument("--rename", action="append", default=[], metavar="OLD=NEW",
+                        help="a move git's rename detection does not pair, either side named as the "
+                             "evidence names it (relative to src/kernel/src, or a path under the parts' place); "
+                             "the file's text must be unchanged by the move")
     options = parser.parse_args()
+    for pair in options.rename:
+        old, sep, new = pair.partition("=")
+        if not sep or not old or not new:
+            sys.exit(f"carry-coverage: --rename {pair}: OLD=NEW")
+        EXPLICIT[key_of(old)] = key_of(new)
     if options.check:
         found = stale()
         for name, base in found:
@@ -310,7 +345,7 @@ def main():
         for name, written in bases.items():
             if git("diff", "--quiet", options.base, "--", f"docs/certification/{name}", check=False).returncode:
                 sys.exit(f"carry-coverage: {name} changed since {options.base}; carry from the commit that last wrote it")
-            if written and git("diff", "--quiet", written, options.base, "--", SRC, check=False).returncode:
+            if written and git("diff", "--quiet", written, options.base, "--", *TREES, check=False).returncode:
                 sys.exit(f"carry-coverage: the kernel at {options.base[:12]} is not the one {name} was last "
                          f"written on ({written[:12]}); carry from {written[:12]}")
         carrier, report = carry_all(options.base, Files())

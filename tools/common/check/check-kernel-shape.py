@@ -10,9 +10,15 @@ LEFT, section 2 of the design. `nm` then looks for one symbol only each real
 file has, because a stub keeps the real file's paths: a stub cannot be told
 from the real file by a path, and rustc's list and the symbol together can.
 
+Files are classed by every kernel source root (kernel_source_roots,
+docs/microkernel/CRATE-SPLIT.md S0; ledger 7429 S.2): a file of an optional
+part is load by the record's rule (ledger 7346 (10)), so rustc reading one for
+ring 0 is a breach wherever the parts live.
+
 Usage:  check-kernel-shape.py TARGET_DIR/ARCH-TRIPLE/PROFILE [--report]
         check-kernel-shape.py TARGET_DIR/ARCH-TRIPLE/release --budget SET --arch ARCH
         check-kernel-shape.py --sets
+        check-kernel-shape.py --self-test
 Exit 1 names each breach. `--budget` is the size ratchet of docs/microkernel/TINY-KERNEL.md §7
 (Cut 0): ring 0's count against tools/common/data/ring0-budget.json, `cargo xtask test-ring0-budget`.
 """
@@ -25,6 +31,9 @@ import os
 import re
 import subprocess
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import kernel_roots  # noqa: E402  (every kernel source root, CRATE-SPLIT.md S0)
 
 ROOTS = {
     "ferrix_kernel_core": "kernel_core.rs",
@@ -157,6 +166,22 @@ FALL_SLACK = 0.01
 LINE_ENTRY = re.compile(r"^(\S+)\s+(\d+)\s+(0x[0-9a-f]+)")
 
 
+def budget_class(relative: str, roots: list[str]) -> tuple[str, str]:
+    """A tree-relative file's class for the budget, by every kernel source root
+    (kernel_source_roots; CRATE-SPLIT.md S0): ("kernel", its kernel file name, as
+    ring0-budget.json's check_files and the rings name it), ("library", path),
+    ("foreign", path) for code from elsewhere in src/, or ("other", path). A file
+    of an optional part, under the parts' place, is kernel code, not foreign."""
+    for root in roots:
+        if relative.startswith(root + "/"):
+            return "kernel", relative.removeprefix(root + "/") if root == kernel_roots.PRIMARY else relative
+    if relative.startswith("src/lib/"):
+        return "library", relative
+    if relative.startswith("src/"):
+        return "foreign", relative
+    return "other", relative
+
+
 def is_check_file(relative: str) -> bool:
     """The tool's one rule for a check, which is why the list of check files is reviewed."""
     return relative.endswith("check.rs") or "_check" in relative
@@ -285,7 +310,8 @@ def code_lines_reached(kernel: str, tree: str, table_lines: dict[str, set[int]])
     for address, name, number in entries:
         at = bisect.bisect_right(spans_start, address) - 1
         if at >= 0 and spans[at][0] <= address < spans[at][1]:
-            if name.startswith("src/lib/") or (name.startswith("src/kernel/src/") and not is_check_file(name)):
+            kind, inner = budget_class(name, kernel_roots.roots())
+            if kind == "library" or (kind == "kernel" and not is_check_file(inner)):
                 counted.add((name, number))
     return len(counted)
 
@@ -359,6 +385,7 @@ def budget(directory: str, name: str, arch: str, tree: str) -> int:
         return 1
     read = {tree_relative(path, tree) for path in read_files(directory, tree)}
     reviewed = set(plan.get("check_files", []))
+    roots = kernel_roots.roots()
     product, checks, outside = 0, 0, []
     for relative in sorted(read):
         if not relative.endswith(".rs"):
@@ -367,8 +394,8 @@ def budget(directory: str, name: str, arch: str, tree: str) -> int:
         if not os.path.exists(path):
             problems.append(f"{say}: {relative}: rustc read it and it is not there: the dep-info is stale")
             continue
-        if relative.startswith("src/kernel/src/"):
-            inner = relative.removeprefix("src/kernel/src/")
+        kind, inner = budget_class(relative, roots)
+        if kind == "kernel":
             if is_check_file(inner):
                 checks += code_lines(path)
                 if inner not in reviewed:
@@ -385,12 +412,13 @@ def budget(directory: str, name: str, arch: str, tree: str) -> int:
         return 1
     libraries, library_files = 0, 0
     for relative in sorted(table):
-        if relative.startswith("src/kernel/src/") and relative not in read:
+        kind, _ = budget_class(relative, roots)
+        if kind == "kernel" and relative not in read:
             problems.append(f"{say}: the dep-info is short: the image's line table names {relative}, rustc's list does not")
-        elif relative.startswith("src/lib/") and os.path.exists(os.path.join(tree, relative)):
+        elif kind == "library" and os.path.exists(os.path.join(tree, relative)):
             libraries += code_lines(os.path.join(tree, relative))
             library_files += 1
-        elif relative.startswith("src/") and not relative.startswith("src/kernel/src/"):
+        elif kind == "foreign":
             problems.append(f"{say}: {relative}: code in the image from outside the kernel's and the libraries' trees")
     count_a = product + libraries
     reach = code_lines_reached(kernel, tree, table) if arch == "x86_64" else None
@@ -398,7 +426,7 @@ def budget(directory: str, name: str, arch: str, tree: str) -> int:
     print(
         f"{say}: count A {count_a:,} = kernel crates {product:,} + {library_files} library files {libraries:,}; "
         f"checks {checks:,} beside, in the image; count C {count_c}; .text {text_bytes(kernel):,} bytes"
-        + (f"; read outside src/kernel/src, counted in B: {', '.join(outside)}" if outside else "")
+        + (f"; read outside the kernel's source roots, counted in B: {', '.join(outside)}" if outside else "")
     )
     base = plan["baseline"].get(name, {}).get(arch)
     if base is None:
@@ -440,7 +468,75 @@ def budget_sets(tree: str) -> int:
     return 0
 
 
+def kernel_file(path: str, manifest: dict) -> tuple[str, bool] | None:
+    """A path rustc read, as its kernel file name and whether it is a part's,
+    or None if it is under no kernel source root. Matched by the root's
+    components anywhere in the path, so the tree it was built in does not matter."""
+    for root in kernel_roots.roots(manifest):
+        marker = os.sep + root.replace("/", os.sep) + os.sep
+        if marker in path:
+            rest = path.split(marker, 1)[1].replace(os.sep, "/")
+            primary = root == kernel_roots.PRIMARY
+            return (rest if primary else f"{root}/{rest}"), not primary
+    return None
+
+
+def file_breaches(name: str, part: bool, manifest: dict) -> list[str]:
+    breaches = []
+    if name in LEFT:
+        breaches.append(f"{name}: on M6's list, and rustc read it for ring 0")
+    if part:
+        breaches.append(f"{name}: an optional part's file (load, ledger 7346 (10)) rustc read for ring 0")
+    elif ring_of(manifest, name) == "load":
+        breaches.append(f"{name}: a load-ring file rustc read for ring 0")
+    return breaches
+
+
+def self_test() -> list[str]:
+    place = kernel_roots.parts_place()
+    part_root = f"{place}/device/logctl/src"
+    manifest = {
+        "kernel_source_roots": {"parts_place": place, "roots": ["src/kernel/src", part_root]},
+        "rings": {"core": {"members": ["mm/**"]}, "item": {"members": []},
+                  "load": {"members": ["fs/**", f"{place}/device/logctl/**"]}},
+    }
+    failures = []
+    tree = os.sep + "t"
+    cases = (
+        (f"{tree}/src/kernel/src/mm/frame.rs", ("mm/frame.rs", False), False),
+        (f"{tree}/src/kernel/src/fs/pipe.rs", ("fs/pipe.rs", False), True),
+        (f"{tree}/{part_root}/lib.rs", (f"{part_root}/lib.rs", True), True),
+        (f"{tree}/src/lib/kernel/sync/src/lib.rs", None, False),
+    )
+    # The budget classes a part's file as kernel code, by its repo path (the coordinator's
+    # relay of 19d996767: it failed closed on a part's file).
+    roots = ["src/kernel/src", part_root]
+    for relative, want in ((f"{part_root}/lib.rs", ("kernel", f"{part_root}/lib.rs")),
+                           ("src/kernel/src/mm/frame.rs", ("kernel", "mm/frame.rs")),
+                           ("src/lib/kernel/sync/src/lib.rs", ("library", "src/lib/kernel/sync/src/lib.rs")),
+                           ("src/user/system/native/rt/src/lib.rs", ("foreign", "src/user/system/native/rt/src/lib.rs"))):
+        if budget_class(relative, roots) != want:
+            failures.append(f"budget: {relative} classed as {budget_class(relative, roots)}, not {want}")
+    for path, want, breach in cases:
+        path = path.replace("/", os.sep)
+        got = kernel_file(path, manifest)
+        if got != want:
+            failures.append(f"{path} classed as {got}, not {want}")
+        elif got is not None and bool(file_breaches(*got, manifest)) != breach:
+            failures.append(f"{path} taken as {'no ' if breach else ''}breach")
+    return failures
+
+
 def main() -> int:
+    if "--self-test" in sys.argv[1:]:
+        failures = self_test()
+        for failure in failures:
+            print(f"check-kernel-shape: self-test: {failure}")
+        if failures:
+            return 1
+        print("check-kernel-shape: self-test passed: a load file and a part's file read for ring 0 are breaches; "
+              "the budget counts a part's file as kernel code")
+        return 0
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("directory", nargs="?")
     parser.add_argument("--report", action="store_true")
@@ -463,14 +559,11 @@ def main() -> int:
     checks = 0
     by_top: collections.Counter[str] = collections.Counter()
     for path in sorted(files):
-        marker = os.sep + os.path.join("src", "kernel", "src") + os.sep
-        if marker not in path or not os.path.exists(path):
+        found = kernel_file(path, manifest)
+        if found is None or not os.path.exists(path):
             continue
-        relative = path.split(marker)[1]
-        if relative in LEFT:
-            breaches.append(f"{relative}: on M6's list, and rustc read it for ring 0")
-        if ring_of(manifest, relative) == "load":
-            breaches.append(f"{relative}: a load-ring file rustc read for ring 0")
+        relative, part = found
+        breaches += file_breaches(relative, part, manifest)
         lines = code_lines(path)
         if relative.endswith("check.rs") or "_check" in relative:
             checks += lines
