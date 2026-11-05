@@ -128,8 +128,6 @@ pub use x86_64::programs_check;
 #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
 mod arm_common;
 
-#[cfg(target_arch = "aarch64")]
-pub(crate) use aarch64::check_stack_entry;
 /// Arm's power-off is its `shutdown` (PSCI `SYSTEM_OFF`); only x86-64 tells a
 /// halt from a power-off.
 #[cfg(target_arch = "aarch64")]
@@ -157,6 +155,10 @@ pub(crate) use aarch64::{
     user_address_translates,
 };
 #[cfg(target_arch = "aarch64")]
+pub(crate) use aarch64::{
+    EMERGENCY_STACKS, KERNEL_STACK_LOWER_GUARD_PAGES, KERNEL_STACK_PAGES, check_stack_entry,
+};
+#[cfg(target_arch = "aarch64")]
 pub use aarch64::{
     FAST_WRITE_READ, UserRegs, counter_now, decode_compat_syscall, decode_syscall,
     disable_interrupts, enable_interrupts, hardware_random, msi_allocate, reset, shutdown,
@@ -167,8 +169,6 @@ pub use aarch64::{
     drop_identity_map, halt, identity_map_live, init_console, init_interrupts, init_traps,
     kernel_write_protected, wait_for_interrupt, wait_for_work,
 };
-#[cfg(target_arch = "arm")]
-pub(crate) use armv7a::check_stack_entry;
 /// As AArch64's.
 #[cfg(target_arch = "arm")]
 pub use armv7a::shutdown as power_off;
@@ -193,6 +193,10 @@ pub(crate) use armv7a::{
     send_ipi_to_others, service_interrupts, set_cpu_local, switch_to, system_call, timer_arm,
     timer_disarm, timer_disarm_fired, timer_irq, uninstall_user_root, unmask_interrupt,
     user_address_translates,
+};
+#[cfg(target_arch = "arm")]
+pub(crate) use armv7a::{
+    EMERGENCY_STACKS, KERNEL_STACK_LOWER_GUARD_PAGES, KERNEL_STACK_PAGES, check_stack_entry,
 };
 #[cfg(target_arch = "arm")]
 pub use armv7a::{
@@ -297,6 +301,10 @@ pub(crate) const fn hypervisor_seen(_view: &ferrix_bootinfo::BootView<'_>) -> bo
 // processor goes out of service there.
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::thread_core;
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::{
+    EMERGENCY_STACKS, KERNEL_STACK_LOWER_GUARD_PAGES, KERNEL_STACK_PAGES, check_stack_entry,
+};
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::{immovable_aimed_at, move_messages};
 

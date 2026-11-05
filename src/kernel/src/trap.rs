@@ -1060,7 +1060,10 @@ pub(crate) fn fatal(
 /// A kernel stack has overflowed: the entry found its stack pointer unmapped,
 /// and moved to this processor's emergency stack (`H.FAIL.15`). Nothing below
 /// the stack's guard was written. Stops the machine.
-#[cfg(not(target_arch = "x86_64"))]
+#[allow(
+    dead_code,
+    reason = "both Arm architectures' entries reach it, x86-64's `IST` does not"
+)]
 pub(crate) fn stack_overflow(frame: &arch::TrapFrame) -> ! {
     let at = crate::smp::this_cpu().map_or(0, |cpu| cpu.overflow_sp.load(Ordering::Relaxed));
     report(
@@ -1071,16 +1074,21 @@ pub(crate) fn stack_overflow(frame: &arch::TrapFrame) -> ! {
 }
 
 /// Size of [`STACK_STOP_STACK`].
-#[cfg(not(target_arch = "x86_64"))]
+#[allow(
+    dead_code,
+    reason = "both Arm architectures' entries reach it, x86-64's `IST` does not"
+)]
 pub(crate) const STACK_STOP_SIZE: usize = 4096;
 
 /// One processor's claim on [`STACK_STOP_STACK`]; see `ferrix_stack_stop`.
-#[cfg(not(target_arch = "x86_64"))]
+#[allow(
+    dead_code,
+    reason = "both Arm architectures' entries reach it, x86-64's `IST` does not"
+)]
 pub(crate) static STACK_STOP_CLAIM: core::sync::atomic::AtomicU32 =
     core::sync::atomic::AtomicU32::new(0);
 
 /// The stack [`stack_stop_report`] says its one line on.
-#[cfg(not(target_arch = "x86_64"))]
 #[repr(align(16))]
 pub(crate) struct StackStopStack(
     #[allow(
@@ -1092,17 +1100,22 @@ pub(crate) struct StackStopStack(
 
 // SAFETY: (ENTRY) only the one processor that won `STACK_STOP_CLAIM` runs on it, from
 // assembly, and nothing in Rust reads it.
-#[cfg(not(target_arch = "x86_64"))]
 unsafe impl Sync for StackStopStack {}
 
 /// See [`StackStopStack`].
-#[cfg(not(target_arch = "x86_64"))]
+#[allow(
+    dead_code,
+    reason = "both Arm architectures' entries reach it, x86-64's `IST` does not"
+)]
 pub(crate) static STACK_STOP_STACK: StackStopStack =
     StackStopStack(core::cell::UnsafeCell::new([0; STACK_STOP_SIZE]));
 
 /// A kernel stack overflowed with no emergency stack to report from: before
 /// this processor was given one, or on that one. A line, and it stops.
-#[cfg(not(target_arch = "x86_64"))]
+#[allow(
+    dead_code,
+    reason = "both Arm architectures' entries reach it, x86-64's `IST` does not"
+)]
 pub(crate) extern "C" fn stack_stop_report() -> ! {
     let _ = crate::panic::begin_report(ferrix_bootinfo::pstore::Stop::Panic);
     crate::console::println_unlogged!(

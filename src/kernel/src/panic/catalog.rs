@@ -4050,7 +4050,6 @@ pub(crate) static ILLEGAL_INSTRUCTION: Explanation = Explanation {
 };
 
 /// For `trap::stack_overflow`, on both Arm architectures.
-#[cfg(not(target_arch = "x86_64"))]
 pub(crate) static KERNEL_STACK_OVERFLOW: Explanation = Explanation {
     code: "FX-9007",
     title: "a kernel stack overflowed",
@@ -4411,6 +4410,5 @@ pub(crate) static ALL: &[&Explanation] = &[
     &UNEXPECTED_EXCEPTION,
     &MACHINE_CHECK,
     &NESTED_INTERRUPT_STACK,
-    #[cfg(not(target_arch = "x86_64"))]
     &KERNEL_STACK_OVERFLOW,
 ];

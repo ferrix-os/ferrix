@@ -10,6 +10,13 @@
 
 mod check;
 pub(crate) use check::check_stack_entry;
+/// Pages in a kernel stack, not counting the guards: `vmap::STACK_PAGES`.
+pub(crate) const KERNEL_STACK_PAGES: u64 = 4;
+/// Unmapped pages directly below a kernel stack: `vmap::STACK_LOWER_GUARD_PAGES`.
+pub(crate) const KERNEL_STACK_LOWER_GUARD_PAGES: u64 = 3;
+/// Whether each processor holds an emergency stack in its record (`H.FAIL.15`): x86-64's
+/// `IST` is the same idea in hardware.
+pub(crate) const EMERGENCY_STACKS: bool = true;
 pub mod console;
 pub mod cpu;
 pub(crate) mod rehome_check;

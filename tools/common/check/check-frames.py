@@ -143,8 +143,8 @@ def judge_probed(found):
 
 
 def lower_guard_pages():
-    source = Path("src/kernel/src/vmap.rs").read_text(encoding="utf-8")
-    return int(re.search(r'cfg\(target_arch = "arm"\)\]\npub\(crate\) const STACK_LOWER_GUARD_PAGES: u64 = (\d+);', source).group(1))
+    source = Path("src/kernel/src/arch/armv7a/mod.rs").read_text(encoding="utf-8")
+    return int(re.search(r"const KERNEL_STACK_LOWER_GUARD_PAGES: u64 = (\d+);", source).group(1))
 
 
 def judge_baseline(found, build, baseline, guard_bytes):

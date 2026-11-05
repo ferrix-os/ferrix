@@ -679,11 +679,7 @@ const fn vma_flags(flags: MapFlags) -> VmaFlags {
 /// MMU before the entry touches the stack pointer (`H.FAIL.15`). A guard alone
 /// is not enough: an exception pushes, and a push on a stack pointer in the
 /// guard faults again, lower.
-#[cfg(target_arch = "aarch64")]
-pub(crate) const STACK_PAGES: u64 = 6;
-/// See above.
-#[cfg(not(target_arch = "aarch64"))]
-pub(crate) const STACK_PAGES: u64 = 4;
+pub(crate) const STACK_PAGES: u64 = crate::arch::KERNEL_STACK_PAGES;
 
 /// Unmapped pages directly below a kernel stack, the guard included.
 ///
@@ -692,11 +688,7 @@ pub(crate) const STACK_PAGES: u64 = 4;
 /// guard there has to be larger than any frame on a task's stack, which
 /// `check-frames` holds it to (F-100). Three pages is 8 KiB of the 512 MiB
 /// arena more a task, address space and no memory.
-#[cfg(target_arch = "arm")]
-pub(crate) const STACK_LOWER_GUARD_PAGES: u64 = 3;
-/// See above.
-#[cfg(not(target_arch = "arm"))]
-pub(crate) const STACK_LOWER_GUARD_PAGES: u64 = 1;
+pub(crate) const STACK_LOWER_GUARD_PAGES: u64 = crate::arch::KERNEL_STACK_LOWER_GUARD_PAGES;
 
 /// A kernel stack, guard-paged at both ends.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

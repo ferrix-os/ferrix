@@ -242,11 +242,17 @@ pub const SYSCALLS_WORD_OFFSET: usize =
 /// `arch::this_cpu_add`, which raises and lowers it without first finding the
 /// record. `repr(C)` above keeps it fixed.
 /// Where [`PerCpu::emergency_stack`] is, for the assembly that reads it.
-#[cfg(not(target_arch = "x86_64"))]
+#[allow(
+    dead_code,
+    reason = "both Arm architectures' entries reach it, x86-64's `IST` does not"
+)]
 pub(crate) const EMERGENCY_STACK_OFFSET: usize = core::mem::offset_of!(PerCpu, emergency_stack);
 
 /// Where [`PerCpu::overflow_sp`] is, for the assembly that writes it.
-#[cfg(not(target_arch = "x86_64"))]
+#[allow(
+    dead_code,
+    reason = "both Arm architectures' entries reach it, x86-64's `IST` does not"
+)]
 pub(crate) const OVERFLOW_SP_OFFSET: usize = core::mem::offset_of!(PerCpu, overflow_sp);
 
 /// Give `cpu` its emergency stack, before anything on it may run on a stack
@@ -256,7 +262,6 @@ pub(crate) const OVERFLOW_SP_OFFSET: usize = core::mem::offset_of!(PerCpu, overf
 /// # Errors
 ///
 /// If there is no memory for it: bring-up stops by name.
-#[cfg(not(target_arch = "x86_64"))]
 fn give_emergency_stack(cpu: &PerCpu) -> Result<(), &'static str> {
     let stack = crate::vmap::allocate_stack()
         .map_err(|_| "no emergency stack for a kernel stack overflow on a processor")?;
@@ -532,9 +537,10 @@ pub fn start_secondaries(view: &BootView<'_>) -> Result<(), &'static str> {
     crate::irq::register(arch::ipi_irq(), on_ipi)
         .map_err(|_| "the inter-processor interrupt's line is already taken")?;
 
-    #[cfg(not(target_arch = "x86_64"))]
-    for cpu in topology.cpus.iter() {
-        give_emergency_stack(cpu)?;
+    if arch::EMERGENCY_STACKS {
+        for cpu in topology.cpus.iter() {
+            give_emergency_stack(cpu)?;
+        }
     }
 
     let mut starter = arch::CpuStarter::new(view)?;

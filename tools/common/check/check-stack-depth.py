@@ -8,7 +8,7 @@ process made, under it the deepest of what that calls, and on top of all a timer
 fails when a path passes the stack, or when a name it walks is gone: a path renamed must be walked
 again, not skipped.
 
-It reads `STACK_PAGES` as the architecture's `cfg` chooses, and on AArch64 wants 4,096 bytes left. Every
+It reads the architecture's own `KERNEL_STACK_PAGES`, and on AArch64 wants 4,096 bytes left. Every
 direct call below `sys_clone` counts as possible, a network namespace's first frames among them, but
 what cannot be reached from there, said at `CLONE_CANNOT`.
 
@@ -245,16 +245,9 @@ def judge(frames, calls, arch, stack_bytes):
 
 
 def stack_bytes(arch, source=None):
-    """`vmap::STACK_PAGES` for this architecture, as its `cfg` chooses."""
-    source = source or Path("src/kernel/src/vmap.rs").read_text(encoding="utf-8")
-    target = {"x86_64": "x86_64", "aarch64": "aarch64", "armv7a": "arm"}[arch]
-    found = re.findall(r'#\[cfg\((not\()?target_arch = "(\w+)"\)?\)\]\npub\(crate\) const STACK_PAGES: u64 = (\d+);', source)
-    if not found:
-        return int(re.search(r"const STACK_PAGES: u64 = (\d+);", source).group(1)) * PAGE
-    for negated, named_arch, pages in found:
-        if (named_arch == target) != bool(negated):
-            return int(pages) * PAGE
-    raise SystemExit(f"check-stack-depth: no STACK_PAGES for {arch}")
+    """`vmap::STACK_PAGES` for this architecture: its module's constant."""
+    source = source or Path(f"src/kernel/src/arch/{arch}/mod.rs").read_text(encoding="utf-8")
+    return int(re.search(r"const KERNEL_STACK_PAGES: u64 = (\d+);", source).group(1)) * PAGE
 
 
 def self_test():
@@ -271,12 +264,7 @@ def self_test():
     assert deepest("c", frames, calls, {}) == 60
     problems = []
     assert named(frames, "nothing", problems) is None and problems
-    both = (
-        '#[cfg(target_arch = "aarch64")]\npub(crate) const STACK_PAGES: u64 = 6;\n'
-        '#[cfg(not(target_arch = "aarch64"))]\npub(crate) const STACK_PAGES: u64 = 4;\n'
-    )
-    assert stack_bytes("aarch64", both) == 6 * PAGE and stack_bytes("x86_64", both) == 4 * PAGE, "cfg read"
-    assert stack_bytes("armv7a", "pub(crate) const STACK_PAGES: u64 = 4;") == 4 * PAGE
+    assert stack_bytes("aarch64", "pub(crate) const KERNEL_STACK_PAGES: u64 = 6;") == 6 * PAGE, "read"
 
 
 def main():

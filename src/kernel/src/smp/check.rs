@@ -66,8 +66,9 @@ pub fn run(topology: &Topology) -> Result<Report, &'static str> {
     arch::check_machine_check_enabled()?;
     parked_reported(topology)?;
     arch::check_smt()?;
-    #[cfg(not(target_arch = "x86_64"))]
-    emergency_stacks(topology)?;
+    if arch::EMERGENCY_STACKS {
+        emergency_stacks(topology)?;
+    }
     Ok(report)
 }
 
@@ -75,7 +76,6 @@ pub fn run(topology: &Topology) -> Result<Report, &'static str> {
 /// one's way to it is in the image.
 ///
 /// Verifies: L.aarch64.91, L.armv7a.30
-#[cfg(not(target_arch = "x86_64"))]
 fn emergency_stacks(topology: &Topology) -> Result<(), &'static str> {
     for cpu in topology.cpus.iter() {
         let top = cpu.emergency_stack.load(Ordering::Acquire);

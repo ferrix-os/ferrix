@@ -312,15 +312,10 @@ pub(crate) enum Machine {
     Crosvm,
 }
 
-/// Judge a boot that printed [`SUCCESS_MARKER`]: the build line, KASLR, and
-/// every line a stage must have printed on `machine`.
-///
-/// # Errors
-///
 /// A row may boot several images on one path. The first boot's serial would go as the
 /// next opens it, and a failure in that one had nothing to read (fl-094): each boot after
 /// this run's first moves the one before aside, `serial-boot<N>.log`, which `gate.sh` keeps.
-fn keep_earlier_serial(path: &std::path::Path) {
+fn keep_earlier_serial(path: &Path) {
     static BOOTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let boot = BOOTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     if boot > 0 {
@@ -328,6 +323,11 @@ fn keep_earlier_serial(path: &std::path::Path) {
     }
 }
 
+/// Judge a boot that printed [`SUCCESS_MARKER`]: the build line, KASLR, and
+/// every line a stage must have printed on `machine`.
+///
+/// # Errors
+///
 /// The first of those that does not hold, naming the serial log.
 pub(crate) fn judge(
     arch: Arch,

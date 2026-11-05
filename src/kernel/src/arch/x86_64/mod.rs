@@ -1,5 +1,18 @@
 //! The x86-64 end of the kernel.
 
+/// Pages in a kernel stack, not counting the guards: `vmap::STACK_PAGES`.
+pub(crate) const KERNEL_STACK_PAGES: u64 = 4;
+/// Unmapped pages directly below a kernel stack: `vmap::STACK_LOWER_GUARD_PAGES`.
+pub(crate) const KERNEL_STACK_LOWER_GUARD_PAGES: u64 = 1;
+/// Whether each processor holds an emergency stack in its record (`H.FAIL.15`): x86-64's
+/// `IST` is the same idea in hardware.
+pub(crate) const EMERGENCY_STACKS: bool = false;
+
+/// `H.FAIL.15` here is the `IST`'s (`L.x86_64.83`): no entry to look at.
+pub(crate) const fn check_stack_entry() -> Result<(), &'static str> {
+    Ok(())
+}
+
 pub mod apic;
 pub mod clock;
 pub mod console;
