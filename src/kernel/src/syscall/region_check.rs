@@ -21,9 +21,9 @@ use ferrix_native_abi::types::{MAP_EXECUTE, MAP_READ, MAP_WRITE};
 
 use crate::discovery;
 use crate::object::Object;
-use crate::syscall::native_side_check::NativeSide as Side;
 use crate::object::job::Job;
 use crate::object::quota::Resource;
+use crate::syscall::native_side_check::NativeSide as Side;
 use crate::user::space::AddressSpace;
 
 /// The program.
@@ -89,21 +89,21 @@ const ASK_WAIT_TO_BE_KILLED: u8 = 7;
 
 /// What the check measured, for the boot log.
 #[derive(Debug, Default)]
-pub struct Report {
+pub(crate) struct Report {
     /// Sweeps of a restricted root that found nothing of the region.
-    pub sweeps: u32,
+    pub(crate) sweeps: u32,
     /// The leaves the last one walked.
-    pub leaves: u64,
+    pub(crate) leaves: u64,
     /// Barriers counted at exits, against what the program's trips asked.
-    pub barriers: u64,
+    pub(crate) barriers: u64,
     /// The restricted row: a Linux number's round trip through restricted mode,
     /// the median of five p50s, in nanoseconds (`MICROKERNEL.md` §7).
-    pub row_ns: u64,
+    pub(crate) row_ns: u64,
     /// The exits the program counted across those barriers, whatever they decided.
-    pub exits: u64,
+    pub(crate) exits: u64,
     /// Whether those were issued, not only decided: a model without `IBPB`
     /// decides and issues none.
-    pub issued: bool,
+    pub(crate) issued: bool,
 }
 
 /// Stage 9's check of regions and restricted mode, said on its line. A kernel of any
@@ -111,6 +111,9 @@ pub struct Report {
 ///
 /// Halts rather than returning, as every other stage's check does.
 pub fn check() {
+    if !crate::checks::run() {
+        return;
+    }
     if !crate::arch::HAS_RESTRICTED {
         crate::println!("  regions  none on this architecture: K1's and K11's calls answer ENOSYS");
         return;
@@ -179,7 +182,7 @@ const fn reg(handle: Handle) -> u64 {
 /// # Errors
 ///
 /// The first thing that did not hold.
-pub fn run() -> Result<Report, &'static str> {
+fn run() -> Result<Report, &'static str> {
     let side = Side::new()?;
     let _ = side
         .space()

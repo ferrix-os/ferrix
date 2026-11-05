@@ -54,9 +54,7 @@ pub fn run(view: &ferrix_bootinfo::BootView<'_>) {
     read_certified_list();
     flag_nodes();
     // Before K16's seal and before any process but its own: what it reads is the kernel's.
-    if crate::boot_checks::run()
-        && let Some(check) = REGION_CHECK.get()
-    {
+    if let Some(check) = REGION_CHECK.get() {
         check();
     }
     let served = start_manager();

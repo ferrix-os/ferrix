@@ -11,11 +11,11 @@ use ferrix_native_abi::handle::Handle;
 use crate::object::bare::Bare;
 use crate::object::job::Job;
 use crate::object::process::Host;
-use crate::trap::SyscallArgs;
 use crate::syscall::native;
 use crate::syscall::uaccess;
-use ferrix_linux_abi::errno::Errno;
+use crate::trap::SyscallArgs;
 use crate::user::space::AddressSpace;
+use ferrix_linux_abi::errno::Errno;
 
 /// A process that makes native calls from the kernel's side.
 pub(crate) struct NativeSide {
