@@ -628,6 +628,12 @@ Done 2026-10-24 (kernel-flakes).
 |---|---|---|
 | **Open (2026-11-04, mk-merge).** Not a flake: `charge_kernel` refuses at `memory.max` without reclaiming. `test-container`'s walk, four pages under the limit, had its `open` of `memory.events` answered ENOMEM with 266,240 B of file cache charged to the cgroup and `pgscan` 0; Linux reclaims first. The walk now reads the count after unmapping. A program near its limit sees a refusal it could have been spared; no claim rests on it. | the PO's queue | 13 |
 
+### fl-097
+
+| Item | Owner | Stage |
+|---|---|---|
+| **Open (2026-11-05, mk-boot-land).** waybar's host test `a_click_runs_on_click_and_a_json_script_restyles_its_chip` (`tests/against_hyprix.rs:476`) failed `cargo xtask check` once under load: `mbl-g18-d-check` on bd246f7b7, the same commit passed as `mbl-g19-d-check`, and no waybar file moved. An earlier sighting is `av4-ctl-h1`. Cause not read; not called fixed. | waybar's owner | - |
+
 ## `test-flags --set smt=off` under TCG stops on stage 9's timing checks (2026-11-05, mk-ibpb)
 
 `test-flags --arch x86_64 --accel tcg --set smt=off --no-claim --smp 4 --smp-threads 2`, on a busy host,
