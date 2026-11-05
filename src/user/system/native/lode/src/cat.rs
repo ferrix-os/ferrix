@@ -46,6 +46,11 @@ struct Pending {
     lines: VecDeque<(u8, Vec<u8>)>,
     /// Their bytes.
     bytes: usize,
+    /// How many there are at each level, so that a full queue need not walk
+    /// itself to find its least severe for every line a flood brings: 20,000
+    /// lines a line was seconds of a flood on a slow processor, which held the
+    /// writer up as long as lode was stopped.
+    queued: [usize; 8],
     /// How much of the first line was sent.
     front_sent: usize,
     /// What was dropped since lode last took a line, by level.
@@ -64,7 +69,33 @@ impl Pending {
             return;
         }
         self.bytes += line.len();
+        self.note(level, true);
         self.lines.push_back((level, line));
+    }
+
+    /// One more or one fewer queued at `level`.
+    fn note(&mut self, level: u8, more: bool) {
+        if let Some(count) = self.queued.get_mut(usize::from(level.min(7))) {
+            *count = if more {
+                *count + 1
+            } else {
+                count.saturating_sub(1)
+            };
+        }
+    }
+
+    /// The least severe level queued, but for a first line partly sent.
+    fn least(&self) -> Option<u8> {
+        let front = self
+            .lines
+            .front()
+            .filter(|_| self.front_sent > 0)
+            .map(|(level, _)| usize::from((*level).min(7)));
+        (0..self.queued.len()).rev().find_map(|level| {
+            let here = self.queued.get(level).copied().unwrap_or(0);
+            let less = usize::from(front == Some(level));
+            (here > less).then_some(level as u8)
+        })
     }
 
     /// Count one line of `level` dropped at `now_us`.
@@ -81,19 +112,20 @@ impl Pending {
     /// partly sent: whether one went.
     fn evict(&mut self, now_us: u64) -> bool {
         let skip = usize::from(self.front_sent > 0);
-        let Some(least) = self.lines.iter().skip(skip).map(|(level, _)| *level).max() else {
+        let Some(least) = self.least() else {
             return false;
         };
         let Some(at) = self
             .lines
             .iter()
             .skip(skip)
-            .position(|(level, _)| *level == least)
+            .position(|(level, _)| (*level).min(7) == least)
         else {
             return false;
         };
         if let Some((level, line)) = self.lines.remove(at + skip) {
             self.bytes -= line.len();
+            self.note(level, false);
             self.count(level, now_us);
         }
         true
@@ -111,6 +143,7 @@ impl Pending {
             let _ = describe(&said, identifier, &mut text);
             let line = alloc::format!("<{}>lode cat: {text} while lode was behind\n", said.level());
             self.bytes += line.len();
+            self.note(said.level(), true);
             self.lines.push_front((said.level(), line.into_bytes()));
             self.dropped = [0; 8];
         }
@@ -122,8 +155,9 @@ impl Pending {
             }
             self.front_sent += sent;
             if self.front_sent >= line.len() {
-                if let Some((_, line)) = self.lines.pop_front() {
+                if let Some((level, line)) = self.lines.pop_front() {
                     self.bytes -= line.len();
+                    self.note(level, false);
                 }
                 self.front_sent = 0;
             }
