@@ -106,13 +106,6 @@
       "purpose": "schedule=edf and schedule=windows, ledger 7011 S.1-S.8: partitioned EDF with a hard CBS and its admission, THREAD_RESERVE; native 0x10E1-0x10E4 and panic FX-0970-0971 with them. K9's H.SCHED.26-27 and L.sched.153-170 pass from the finished mk-restricted to mk-flip for windows, with FX-0927."
     },
     {
-      "ids": ["H.FAIL.15", "L.aarch64.91-92", "L.armv7a.30-31", "L.sched.171-178"],
-      "owner": "mk-issues",
-      "branch": "feature/mk-issues",
-      "date": "2026-11-05",
-      "purpose": "F-103, ledger 7033 A7: an overflow of a kernel stack stops with a report and writes nothing below the guard (H.FAIL.15), each Arm architecture's entry. F-104, T7: a task's last reference where sleeping is forbidden. Released in the commits that write them"
-    },
-    {
       "ids": ["H.FAIL.14", "L.lockup.6-9"],
       "owner": "s4-lockup",
       "branch": "s4-lockup",

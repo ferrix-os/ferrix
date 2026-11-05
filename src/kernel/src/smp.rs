@@ -143,6 +143,14 @@ pub struct PerCpu {
     /// [`KIND_RESTRICTED`], [`KIND_BARE`]. Written by this processor alone, at
     /// every switch and flip.
     task_kind: AtomicU8,
+    /// Both Arm architectures: the top of this processor's emergency stack,
+    /// what `ferrix_stack_hit` moves to when a kernel stack has overflowed,
+    /// and which it zeroes as it takes it. x86-64's `IST` is the same idea in
+    /// hardware, and it leaves this zero. Read from assembly.
+    pub(crate) emergency_stack: AtomicU64,
+    /// Both Arm architectures: the stack pointer `ferrix_stack_hit` found
+    /// unmapped, for the report. Written from assembly, once.
+    pub(crate) overflow_sp: AtomicU64,
 }
 
 /// In [`PerCpu::task_kind`]: the running task is in restricted mode.
@@ -233,6 +241,29 @@ pub const SYSCALLS_WORD_OFFSET: usize =
 /// Where in a [`PerCpu`] record its preemption word is, for
 /// `arch::this_cpu_add`, which raises and lowers it without first finding the
 /// record. `repr(C)` above keeps it fixed.
+/// Where [`PerCpu::emergency_stack`] is, for the assembly that reads it.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const EMERGENCY_STACK_OFFSET: usize = core::mem::offset_of!(PerCpu, emergency_stack);
+
+/// Where [`PerCpu::overflow_sp`] is, for the assembly that writes it.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const OVERFLOW_SP_OFFSET: usize = core::mem::offset_of!(PerCpu, overflow_sp);
+
+/// Give `cpu` its emergency stack, before anything on it may run on a stack
+/// that can overflow for want of one (`L.aarch64`/`L.armv7a` of `H.FAIL.15`).
+/// Never freed: it is the processor's for the rest of its life.
+///
+/// # Errors
+///
+/// If there is no memory for it: bring-up stops by name.
+#[cfg(not(target_arch = "x86_64"))]
+fn give_emergency_stack(cpu: &PerCpu) -> Result<(), &'static str> {
+    let stack = crate::vmap::allocate_stack()
+        .map_err(|_| "no emergency stack for a kernel stack overflow on a processor")?;
+    cpu.emergency_stack.store(stack.top, Ordering::Release);
+    Ok(())
+}
+
 pub(crate) const PREEMPT_WORD_OFFSET: usize =
     core::mem::offset_of!(PerCpu, preempt) + crate::sched::PreemptState::WORD_OFFSET;
 
@@ -392,6 +423,8 @@ fn leak_records(numbered: impl Iterator<Item = (usize, u64)>) -> &'static [PerCp
             parked: AtomicU64::new(0),
             task_kind: AtomicU8::new(0),
             syscalls: OwnCount::new(),
+            emergency_stack: AtomicU64::new(0),
+            overflow_sp: AtomicU64::new(0),
         })
         // FATAL-ALLOC: boot only: stage 4 builds the processor table once, before the secondaries start.
         .collect();
@@ -498,6 +531,11 @@ pub fn start_secondaries(view: &BootView<'_>) -> Result<(), &'static str> {
     // with nothing registered is counted as unclaimed and otherwise lost.
     crate::irq::register(arch::ipi_irq(), on_ipi)
         .map_err(|_| "the inter-processor interrupt's line is already taken")?;
+
+    #[cfg(not(target_arch = "x86_64"))]
+    for cpu in topology.cpus.iter() {
+        give_emergency_stack(cpu)?;
+    }
 
     let mut starter = arch::CpuStarter::new(view)?;
 

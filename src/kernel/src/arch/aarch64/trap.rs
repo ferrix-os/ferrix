@@ -128,6 +128,30 @@ core::arch::global_asm!(
     b    ferrix_trap_save
 .endm
 
+// Current EL's synchronous entry, the one every fault in the kernel arrives at:
+// it asks the MMU whether the stack pointer is mapped before anything touches
+// it. Without this, `sub` then `stp` on a stack pointer in a guard faults back
+// to here, 304 bytes lower, again and again until the pointer has left the
+// unmapped pages and the save writes whatever allocation lies below (F-103).
+// Vectors 5 to 7 need no such thing: their `stp` faults here. No register is
+// free, so x0 waits in `TPIDRRO_EL0`, which no program can read while the
+// kernel runs and which is zero again before anything leaves this path.
+.macro FERRIX_VECTOR_STACK_CHECKED index
+.align 7
+    msr  tpidrro_el0, x0
+    mov  x0, sp
+    at   s1e1w, x0
+    isb
+    mrs  x0, par_el1
+    tbnz x0, #0, ferrix_stack_hit
+    mrs  x0, tpidrro_el0
+    msr  tpidrro_el0, xzr
+    sub  sp, sp, #304
+    stp  x0, x1, [sp, #0]
+    mov  x0, #\index
+    b    ferrix_trap_save
+.endm
+
 .globl ferrix_vectors
 .align 11
 ferrix_vectors:
@@ -135,7 +159,7 @@ ferrix_vectors:
     FERRIX_VECTOR 1    // current EL, SP_EL0: IRQ
     FERRIX_VECTOR 2    // current EL, SP_EL0: FIQ
     FERRIX_VECTOR 3    // current EL, SP_EL0: SError
-    FERRIX_VECTOR 4    // current EL, SP_ELx: synchronous
+    FERRIX_VECTOR_STACK_CHECKED 4    // current EL, SP_ELx: synchronous
     FERRIX_VECTOR 5    // current EL, SP_ELx: IRQ
     FERRIX_VECTOR 6    // current EL, SP_ELx: FIQ
     FERRIX_VECTOR 7    // current EL, SP_ELx: SError
@@ -147,6 +171,50 @@ ferrix_vectors:
     FERRIX_VECTOR_EL0 13   // lower EL, AArch32: IRQ
     FERRIX_VECTOR_EL0 14   // lower EL, AArch32: FIQ
     FERRIX_VECTOR_EL0 15   // lower EL, AArch32: SError
+
+// The stack pointer is in unmapped memory: a kernel stack has overflowed. This
+// never returns. x0 is in `TPIDRRO_EL0`, x1 goes to `TPIDR_EL0`, a program's
+// thread pointer, which nobody will run to miss. This processor's emergency
+// stack is taken once, so that an overflow of that one stops below.
+ferrix_stack_hit:
+    msr  tpidr_el0, x1
+    mrs  x1, tpidr_el1
+    cbz  x1, ferrix_stack_stop
+    ldr  x0, [x1, #{emergency_stack}]
+    cbz  x0, ferrix_stack_stop
+    str  xzr, [x1, #{emergency_stack}]
+    // Swap x0 and SP with no third register. Nothing touches memory through SP
+    // until it holds the emergency stack's top.
+    add  sp, sp, x0
+    sub  x0, sp, x0
+    sub  sp, sp, x0
+    str  x0, [x1, #{overflow_sp}]
+    mrs  x1, tpidr_el0
+    mrs  x0, tpidrro_el0
+    msr  tpidrro_el0, xzr
+    sub  sp, sp, #304
+    stp  x0, x1, [sp, #0]
+    mov  x0, #{kind_overflow}
+    b    ferrix_trap_save
+
+// No emergency stack to run on: not given yet, or this is the second hit. One
+// stack for the whole machine, for whichever processor gets here first, to say
+// so; any other waits. Registers are given up: this stops the processor.
+ferrix_stack_stop:
+    adrp x0, {stop_claim}
+    add  x0, x0, :lo12:{stop_claim}
+1:  ldaxr w1, [x0]
+    cbnz w1, 2f
+    mov  w1, #1
+    stlxr w2, w1, [x0]
+    cbnz w2, 1b
+    adrp x0, {stop_stack}
+    add  x0, x0, :lo12:{stop_stack}
+    add  x0, x0, #{stop_stack_size}
+    mov  sp, x0
+    bl   {stop_report}
+2:  wfe
+    b    2b
 
 ferrix_trap_save:
     stp  x2, x3, [sp, #16]
@@ -203,7 +271,18 @@ ferrix_trap_restore:
 "#,
     hardened = const super::speculation::ENTRY_HARDENING,
     bhb_loops = sym super::speculation::BHB_LOOPS,
+    emergency_stack = const crate::smp::EMERGENCY_STACK_OFFSET,
+    overflow_sp = const crate::smp::OVERFLOW_SP_OFFSET,
+    kind_overflow = const KIND_STACK_OVERFLOW,
+    stop_claim = sym crate::trap::STACK_STOP_CLAIM,
+    stop_stack = sym crate::trap::STACK_STOP_STACK,
+    stop_stack_size = const crate::trap::STACK_STOP_SIZE,
+    stop_report = sym crate::trap::stack_stop_report,
 );
+
+/// What the save records as the entry when [`ferrix_stack_hit`] ran: past the
+/// sixteen real ones.
+const KIND_STACK_OVERFLOW: u64 = 16;
 
 // Entering EL0.
 //
@@ -514,6 +593,9 @@ unsafe extern "C" {
 /// Not called from Rust — the `bl` in the assembly above is its only caller.
 #[unsafe(no_mangle)]
 extern "C" fn ferrix_trap_entry(frame: &mut TrapFrame) {
+    if frame.kind == KIND_STACK_OVERFLOW {
+        crate::trap::stack_overflow(frame);
+    }
     crate::trap::dispatch(frame);
 }
 
@@ -669,11 +751,44 @@ pub(crate) fn report_trap(frame: &TrapFrame) {
 /// and no per-core state.
 pub(crate) unsafe fn init() {
     let table = (&raw const ferrix_vectors) as u64;
+    // Before the table can be used: `ferrix_stack_hit` reads this to find the
+    // processor's record, and reset leaves it unknown. Zero says none yet;
+    // `set_cpu_local`, which runs later on every core, gives it its value.
+    cpu::write_tpidr_el1(0);
     // SAFETY: (ENTRY) `table` is the vector table in this image, 2048-byte aligned as
     // `VBAR_EL1` requires, and every entry branches to a real save sequence.
     unsafe { cpu::write_vbar(table) };
     // Here because this runs on every core, and `CPACR_EL1` is per core.
     cpu::enable_user_fpu();
+}
+
+/// The first words of the entry a fault in the kernel takes, for
+/// `L.aarch64.91`'s check.
+pub(super) fn stack_checked_entry() -> [u32; 6] {
+    let entry = (&raw const ferrix_vectors)
+        .cast::<u32>()
+        .wrapping_byte_add(4 * 128);
+    // SAFETY: (PROBE) the table is mapped executable and readable in this image, and
+    // entry 4 is 128 bytes long.
+    core::array::from_fn(|at| unsafe { entry.wrapping_add(at).read() })
+}
+
+/// Take a kernel breakpoint with `value` in x0: x0 afterwards, and what
+/// `TPIDRRO_EL0` then holds, for `L.aarch64.91`'s check.
+pub(super) fn breakpoint_with(mut value: u64) -> (u64, u64) {
+    let scratch: u64;
+    // SAFETY: (PROBE) `brk` raises a synchronous exception the vector table handles, which
+    // steps over it and restores every register.
+    unsafe {
+        core::arch::asm!(
+            "brk #0",
+            "mrs {scratch}, tpidrro_el0",
+            inout("x0") value,
+            scratch = out(reg) scratch,
+            options(nomem, nostack),
+        );
+    }
+    (value, scratch)
 }
 
 /// Raise a breakpoint, so the boot self-check can prove the trap path runs.

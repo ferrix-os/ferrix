@@ -2444,7 +2444,7 @@ package FerrixX8664Requirements {
                 overflow is taken as a double fault on its own stack.";
             attribute :>> criterion = "A deliberate kernel stack overflow ends in
                 the FX-9004 report.";
-            attribute :>> parent = "H.FAIL.2";
+            attribute :>> parent = ("H.FAIL.2", "H.FAIL.15");
             attribute :>> unit = "arch::x86_64::trap::init";
         }
         requirement <'L.x86_64.84'> kernelBreakpointsReturn : ItemLowLevel {

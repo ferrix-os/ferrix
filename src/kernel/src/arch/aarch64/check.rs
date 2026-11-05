@@ -561,3 +561,39 @@ fn check_restart_rewind() -> Result<(), &'static str> {
     }
     Ok(())
 }
+
+/// A fault in the kernel asks the MMU about the stack pointer before anything
+/// touches it, and a kernel exception gives x0 back and leaves `TPIDRRO_EL0` at
+/// zero, the scratch it was held in.
+///
+/// Verifies: L.aarch64.91, L.aarch64.72
+pub(crate) fn check_stack_entry() -> Result<(), &'static str> {
+    let words = super::trap::stack_checked_entry();
+    let asked = [
+        0xd51b_d060, // msr tpidrro_el0, x0
+        0x9100_03e0, // mov x0, sp
+        0xd508_7820, // at s1e1w, x0
+        0xd503_3fdf, // isb
+        0xd538_7400, // mrs x0, par_el1
+    ];
+    if words.get(..asked.len()) != Some(&asked[..]) {
+        return Err("a kernel fault's entry does not ask the MMU about its stack pointer first");
+    }
+    // tbnz x0, #0, anywhere.
+    if words
+        .get(asked.len())
+        .is_none_or(|word| word & 0xff_f8_00_1f != 0x3700_0000)
+    {
+        return Err(
+            "a kernel fault's entry does not act on what the MMU said of its stack pointer",
+        );
+    }
+    let (value, scratch) = super::trap::breakpoint_with(0x5AFE_0000_0000_5AFE);
+    if value != 0x5AFE_0000_0000_5AFE {
+        return Err("a kernel exception did not give x0 back");
+    }
+    if scratch != 0 {
+        return Err("a kernel exception left a value in TPIDRRO_EL0, where a program can read it");
+    }
+    Ok(())
+}

@@ -66,7 +66,27 @@ pub fn run(topology: &Topology) -> Result<Report, &'static str> {
     arch::check_machine_check_enabled()?;
     parked_reported(topology)?;
     arch::check_smt()?;
+    #[cfg(not(target_arch = "x86_64"))]
+    emergency_stacks(topology)?;
     Ok(report)
+}
+
+/// Every processor holds an emergency stack, mapped and guarded, and this
+/// one's way to it is in the image.
+///
+/// Verifies: L.aarch64.91, L.armv7a.30
+#[cfg(not(target_arch = "x86_64"))]
+fn emergency_stacks(topology: &Topology) -> Result<(), &'static str> {
+    for cpu in topology.cpus.iter() {
+        let top = cpu.emergency_stack.load(Ordering::Acquire);
+        if top == 0 {
+            return Err("a processor has no emergency stack for a kernel stack overflow");
+        }
+        if mm::translate(top - 8).is_none() || mm::translate(top).is_some() {
+            return Err("a processor's emergency stack is not mapped below a guard");
+        }
+    }
+    arch::check_stack_entry()
 }
 
 /// The contended counter, kept under a ticket lock.

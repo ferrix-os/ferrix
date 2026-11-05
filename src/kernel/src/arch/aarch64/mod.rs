@@ -2,6 +2,7 @@
 
 pub(crate) mod asid;
 mod check;
+pub(crate) use check::check_stack_entry;
 pub mod console;
 mod cpu;
 pub(crate) mod rehome_check;
@@ -98,7 +99,8 @@ pub(crate) use smp::{CpuStarter, describe_cpus, hardware_id};
 /// the rest of the system's life: `cpu_local` hands it back as a reference.
 pub(crate) unsafe fn set_cpu_local(address: u64) {
     cpu::write_tpidr_el1(address);
-    // Nothing writes it after this, so that no value crosses a switch and no
+    // Zero whenever a lower level runs: only the kernel fault entry holds a value
+    // here, for an instant, so that no value crosses a switch and no
     // firmware's reaches a program (`docs/microkernel/K1.md` §8).
     cpu::zero_tpidrro();
 }

@@ -350,5 +350,17 @@ package FerrixArmv7aRequirements {
             attribute :>> unit = ("arch::armv7a::signal::UserContext::with_supervisors",
                 "arch::armv7a::signal::UserContext::supervised");
         }
+        requirement <'L.armv7a.30'> aKernelAbortAsksAboutItsStackFirst : ItemLowLevel {
+            attribute :>> statement = "The data abort stub, for an abort taken from the kernel, shall
+                ask the MMU whether the SVC stack pointer translates before it stores on it, and if
+                not move to the processor's emergency stack, once, and stop with FX-9007; with no
+                emergency stack it shall say so in one line and stop. Every processor shall hold an
+                emergency stack before any secondary starts.";
+            attribute :>> criterion = "The stub's words are the question; every processor's emergency
+                stack is mapped under a guard. Controls by gate.sh at --smp 2, ledger 7033 V2.";
+            attribute :>> parent = "H.FAIL.15";
+            attribute :>> unit = ("arch::armv7a::trap::init", "smp::start_secondaries", "trap::stack_overflow",
+                "trap::stack_stop_report");
+        }
     }
 }

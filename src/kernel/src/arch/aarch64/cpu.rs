@@ -770,7 +770,7 @@ pub(crate) fn enable_user_fpu() {
 /// A scratch register with no architectural meaning, which is the point: the
 /// hardware never reads it, and EL0 cannot see it.
 pub(crate) fn zero_tpidrro() {
-    // SAFETY: (SYSREG) a register only EL0 reads and nothing in the kernel uses.
+    // SAFETY: (SYSREG) a register only EL0 reads; the fault entry zeroes it itself.
     unsafe {
         asm!(
             "msr tpidrro_el0, xzr",

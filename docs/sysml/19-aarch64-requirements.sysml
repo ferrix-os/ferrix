@@ -980,9 +980,11 @@ package FerrixAarch64Requirements {
             attribute :>> unit = "arch::aarch64::restricted::check_context";
         }
         requirement <'L.aarch64.72'> tpidrroIsNeverHandedIn : ItemLowLevel {
-            attribute :>> statement = "TPIDRRO_EL0 in a context shall be zero: no A32 code runs here, and
-                nothing writes the register, so that no value crosses a switch.";
-            attribute :>> criterion = "Forged case 13.";
+            attribute :>> statement = "TPIDRRO_EL0 shall be zero whenever a lower exception level runs
+                and in every context handed in: no A32 code runs here, so that no value crosses
+                a switch. The kernel fault entry holds x0 there and zeroes it before leaving.";
+            attribute :>> criterion = "Forged case 13; a kernel breakpoint with x0 non-zero leaves it
+                zero and gives x0 back.";
             attribute :>> parent = "H.TRAP.22";
             attribute :>> unit = ("arch::aarch64::restricted::check_context",
                 "arch::aarch64::cpu::zero_tpidrro");
@@ -1077,6 +1079,19 @@ package FerrixAarch64Requirements {
             attribute :>> criterion = "check_root_tags, which fails with the hit or the miss's path changed.";
             attribute :>> parent = "H.TRAP.21";
             attribute :>> unit = "arch::aarch64::check_root_tags";
+        }
+        requirement <'L.aarch64.91'> aKernelFaultAsksAboutItsStackFirst : ItemLowLevel {
+            attribute :>> statement = "The entry for a synchronous exception from the current
+                level shall ask the MMU whether the stack pointer translates before anything
+                touches it, and if not move to the processor's emergency stack, once, and stop
+                with FX-9007; with no emergency stack it shall say so in one line and stop. Every
+                processor shall hold an emergency stack before any secondary starts.";
+            attribute :>> criterion = "The entry's first words are the question and the branch;
+                every processor's emergency stack is mapped under a guard. Controls by gate.sh, ledger 7033 A6.";
+            attribute :>> parent = "H.FAIL.15";
+            attribute :>> unit = ("arch::aarch64::trap::init", "smp::start_secondaries", "trap::stack_overflow",
+                "trap::stack_stop_report", "smp::give_emergency_stack",
+                "arch::aarch64::trap::stack_checked_entry", "arch::aarch64::trap::breakpoint_with");
         }
     }
 }

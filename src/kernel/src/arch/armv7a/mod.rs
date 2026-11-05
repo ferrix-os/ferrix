@@ -9,6 +9,7 @@
 //! coprocessor 15 rather than a system register.
 
 mod check;
+pub(crate) use check::check_stack_entry;
 pub mod console;
 pub mod cpu;
 pub(crate) mod rehome_check;

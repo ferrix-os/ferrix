@@ -97,6 +97,11 @@ const KIND_DATA_ABORT: u32 = 4;
 const KIND_HYP_TRAP: u32 = 5;
 const KIND_IRQ: u32 = 6;
 const KIND_FIQ: u32 = 7;
+/// What the entry stores on the SVC stack before any function runs: `srsdb`'s two
+/// words, `push`'s fourteen, and the common path's four.
+const ENTRY_FRAME: usize = (2 + 14 + 4) * 4;
+/// Recorded when [`ferrix_stack_hit`] ran: past the eight real ones.
+const KIND_STACK_OVERFLOW: u32 = 8;
 
 core::arch::global_asm!(
     r#"
@@ -159,7 +164,30 @@ ferrix_stub_prefetch_abort:
     mrc   p15, 0, r2, c6, c0, 2
     b     ferrix_trap_common
 
+// Every other stub's `srsdb` faults here if the SVC stack pointer is unmapped,
+// and this one would then fault here for ever, silently (F-103). So it asks the
+// MMU first, for an abort taken from the kernel; a program's stack pointer is
+// not the SVC one and a program's abort leaves that alone. r0 waits in this
+// mode's banked stack pointer, which nothing else uses. It asks about the lowest
+// byte the entry below stores, not the stack pointer itself: an aborted `srsdb`
+// or `push` leaves the pointer where it was, so a pointer a few bytes above the
+// guard would pass the question and abort here again, for ever.
+.globl ferrix_stub_data_abort
 ferrix_stub_data_abort:
+    mov   sp, r0
+    mrs   r0, spsr
+    tst   r0, #0xf
+    beq   1f
+    cps   #0x13
+    mov   r0, sp
+    cps   #0x17
+    sub   r0, r0, #{entry_frame}
+    mcr   p15, 0, r0, c7, c8, 1
+    isb
+    mrc   p15, 0, r0, c7, c4, 0
+    tst   r0, #1
+    bne   ferrix_stack_hit
+1:  mov   r0, sp
     sub   lr, lr, #8
     srsdb sp!, #0x13
     cps   #0x13
@@ -198,6 +226,64 @@ ferrix_stub_fiq:
     mov   r2, #0
     b     ferrix_trap_common
 
+// The SVC stack pointer is in unmapped memory: a kernel stack has overflowed.
+// This never returns. r0 is in this mode's stack pointer; r1 and r2 go to the
+// two thread registers a program would read, and nobody will run to miss them.
+// This processor's emergency stack is taken once, so that an overflow of that
+// one stops below.
+ferrix_stack_hit:
+    mcr   p15, 0, r1, c13, c0, 3
+    mcr   p15, 0, r2, c13, c0, 2
+    mrc   p15, 0, r1, c13, c0, 4
+    cmp   r1, #0
+    beq   ferrix_stack_stop
+    ldr   r0, [r1, #{emergency_stack}]
+    cmp   r0, #0
+    beq   ferrix_stack_stop
+    mov   r2, #0
+    str   r2, [r1, #{emergency_stack}]
+    cps   #0x13
+    mov   r2, sp
+    mov   sp, r0
+    cps   #0x17
+    str   r2, [r1, #{overflow_sp}]
+    mrc   p15, 0, r2, c13, c0, 2
+    mrc   p15, 0, r1, c13, c0, 3
+    mov   r0, sp
+    sub   lr, lr, #8
+    srsdb sp!, #0x13
+    cps   #0x13
+    push  {{r0-r12, lr}}
+    mov   r0, #{kind_overflow}
+    mrc   p15, 0, r1, c5, c0, 0
+    mrc   p15, 0, r2, c6, c0, 0
+    b     ferrix_trap_common
+
+// No emergency stack to run on: not given yet, or this is the second hit. One
+// stack for the whole machine, for whichever processor gets here first, to say
+// so; any other waits. Registers are given up: this stops the processor.
+ferrix_stack_stop:
+    ldr   r0, 3f
+4:  add   r0, pc, r0
+5:  ldrex r1, [r0]
+    cmp   r1, #0
+    bne   6f
+    mov   r1, #1
+    strex r2, r1, [r0]
+    cmp   r2, #0
+    bne   5b
+    dmb
+    cps   #0x13
+    ldr   r0, 7f
+8:  add   r0, pc, r0
+    movw  r1, #{stop_stack_size}
+    add   sp, r0, r1
+    bl    {stop_report}
+6:  wfe
+    b     6b
+3:  .word {stop_claim} - (4b + 8)
+7:  .word {stop_stack} - (8b + 8)
+
 // The common path. The frame is complete once kind, status, address and a
 // padding word are pushed below the registers. The stack an exception
 // interrupted is only four-byte aligned in general, so it is aligned to eight
@@ -215,7 +301,15 @@ ferrix_trap_common:
     add   sp, sp, #16
     pop   {{r0-r12, lr}}
     rfeia sp!
-"#
+"#,
+    entry_frame = const ENTRY_FRAME,
+    emergency_stack = const crate::smp::EMERGENCY_STACK_OFFSET,
+    overflow_sp = const crate::smp::OVERFLOW_SP_OFFSET,
+    kind_overflow = const KIND_STACK_OVERFLOW,
+    stop_claim = sym crate::trap::STACK_STOP_CLAIM,
+    stop_stack = sym crate::trap::STACK_STOP_STACK,
+    stop_stack_size = const crate::trap::STACK_STOP_SIZE,
+    stop_report = sym crate::trap::stack_stop_report,
 );
 
 // Entering USR mode.
@@ -593,6 +687,9 @@ unsafe extern "C" {
 /// Not called from Rust — the `bl` in the assembly above is its only caller.
 #[unsafe(no_mangle)]
 extern "C" fn ferrix_trap_entry(frame: &mut TrapFrame) {
+    if frame.kind == KIND_STACK_OVERFLOW {
+        crate::trap::stack_overflow(frame);
+    }
     if frame.kind == KIND_UNDEFINED {
         point_at_undefined(frame);
         if frame.came_from_user() {
@@ -762,11 +859,25 @@ pub(crate) fn report_trap(frame: &TrapFrame) {
 pub(crate) unsafe fn init() {
     // The kernel is linked below 4 GiB, so the address fits the register.
     let table = (&raw const ferrix_vectors).addr() as u32;
+    // Before the table can be used: `ferrix_stack_hit` reads this to find the
+    // processor's record, and reset leaves it unknown. Zero says none yet;
+    // `set_cpu_local`, which runs later on every core, gives it its value.
+    cpu::write_tpidrprw(0);
     // SAFETY: (ENTRY) `table` is the vector table in this image, 32-byte aligned as
     // `VBAR` requires, and every entry branches to a real stub.
     unsafe { cpu::install_vectors(table) };
     // Here because this runs on every core, and both registers are per core.
     cpu::enable_user_fpu();
+}
+
+/// The first words of the data abort stub, for `L.armv7a.30`'s check.
+pub(super) fn stack_checked_entry() -> [u32; 9] {
+    unsafe extern "C" {
+        static ferrix_stub_data_abort: [u32; 9];
+    }
+    let entry = (&raw const ferrix_stub_data_abort).cast::<u32>();
+    // SAFETY: (PROBE) the stub is in this image, mapped readable, and longer than this.
+    core::array::from_fn(|at| unsafe { entry.wrapping_add(at).read() })
 }
 
 /// Raise a breakpoint, so the boot self-check can prove the trap path runs.

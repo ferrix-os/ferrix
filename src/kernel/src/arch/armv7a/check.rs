@@ -530,3 +530,18 @@ pub(crate) fn check_user_counter() -> Result<(), &'static str> {
     );
     Ok(())
 }
+
+/// A data abort taken from the kernel asks the MMU about the SVC stack pointer
+/// before the stub stores on it.
+///
+/// Verifies: L.armv7a.30
+pub(crate) fn check_stack_entry() -> Result<(), &'static str> {
+    let words = super::trap::stack_checked_entry();
+    // mov sp, r0, as its scratch, and ATS1CPW of what it then read.
+    if words.first() != Some(&0xe1a0_d000) || words.get(8) != Some(&0xee07_0f38) {
+        return Err(
+            "a kernel data abort's stub does not ask the MMU about its stack pointer first",
+        );
+    }
+    Ok(())
+}

@@ -2045,6 +2045,17 @@ package FerrixItemRequirements {
                 (`check-panic-audit.py`).";
             attribute :>> parent = ("O.FAILSAFE", "ASR-6");
         }
+        requirement <'H.FAIL.15'> anOverflowStopsWithAReport : ItemHighLevel {
+            doc /* F-103, ledger 7033 A7. H.FAIL.2 says what the allocator gives; this says
+                   what the entry does with it. */
+            attribute :>> statement = "An overflow of a kernel stack shall stop the
+                processor with a report, writing nothing below the stack's guard.";
+            attribute :>> criterion = "L.aarch64.91, L.armv7a.30 and L.x86_64.83 verified;
+                controls on each architecture: a stack overflowed with another allocation
+                directly below it, reached by a store and by an interrupt, reports from
+                its own stack and leaves that allocation unchanged.";
+            attribute :>> parent = ("O.FAILSAFE", "ASR-6");
+        }
         requirement <'H.FAIL.2'> stacksAreGuarded : ItemHighLevel {
             attribute :>> statement = "The allocator every kernel stack comes from
                 shall give each an unmapped guard page directly below and above
@@ -2137,7 +2148,7 @@ package FerrixItemRequirements {
                 stand-down without the gate's override; ARMv7-A's stand-down;
                 mm/check.rs's check_scrubber, run only where the scrubber
                 itself runs; L.mm.101-108, L.x86_64.243, L.aarch64.68,
-                L.armv7a.29, L.object.252 and L.syscall.24 each with its
+                L.armv7a.30, L.object.252 and L.syscall.24 each with its
                 check (L.object.253 released unwritten, ledger 5140 (3)). An
                 ECC machine whose firmware reports Other or Unknown is the
                 SAFETY-MANUAL's residual.";
