@@ -174,6 +174,16 @@ fn expected_summary(entries: &[Entry<'_>]) -> Summary {
     summary
 }
 
+/// What property 7 holds `file_named` to: a name without any run of leading `./` and `/`,
+/// and `.` itself as the empty name.
+fn normalised(name: &str) -> &str {
+    let mut name = name;
+    while let Some(rest) = name.strip_prefix("./").or_else(|| name.strip_prefix('/')) {
+        name = rest;
+    }
+    if name == "." { "" } else { name }
+}
+
 /// The entries of `bytes`, and the error the walk ended on, if any.
 fn walk(bytes: &[u8]) -> (Vec<Entry<'_>>, Option<CpioError>) {
     let archive = Archive::new(bytes);
@@ -204,18 +214,12 @@ fuzz_target!(|bytes: &[u8]| {
 
     // 7. For each name the walk saw, and for one it did not.
     for entry in &entries {
-        let name = entry.name.trim_start_matches("./").trim_start_matches('/');
+        let name = normalised(entry.name);
         let wanted = entries
             .iter()
-            .find(|other| {
-                other.is_safe_path()
-                    && other.is_file()
-                    && other.name.trim_start_matches("./").trim_start_matches('/') == name
-            })
+            .find(|other| other.is_safe_path() && other.is_file() && normalised(other.name) == name)
             .map(|found| found.data);
-        if !name.starts_with("./") && !name.starts_with('/') && name != "." {
-            assert_eq!(ferrix_cpio::file_named(bytes, name.as_bytes()), wanted);
-        }
+        assert_eq!(ferrix_cpio::file_named(bytes, name.as_bytes()), wanted);
     }
     assert_eq!(ferrix_cpio::file_named(bytes, b"\0not a name"), None);
 
