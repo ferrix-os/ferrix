@@ -288,7 +288,7 @@
    "stack": "task"
   },
   "ferrix_kernel::kmain": {
-   "frame": 11600,
+   "frame": 11608,
    "kind": "product",
    "stack": "boot"
   },
@@ -717,7 +717,7 @@
    "stack": "task"
   },
   "ferrix_kernel::kmain": {
-   "frame": 11600,
+   "frame": 11608,
    "kind": "product",
    "stack": "boot"
   },
