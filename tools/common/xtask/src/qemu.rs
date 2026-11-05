@@ -136,6 +136,115 @@ pub(crate) fn test_boot(arch: Arch, image: &Path, kernel: &Path, args: &Args) ->
     test_boot_lines(arch, image, kernel, args).map(|_| ())
 }
 
+thread_local! {
+    /// Seconds from QEMU's start to the line [`watch_hooked`] waited for, by
+    /// the host's clock, on this thread's last boot.
+    static REACHED_AFTER: core::cell::Cell<Option<f64>> = const { core::cell::Cell::new(None) };
+    /// Whether this thread's last boot ran under KVM, and on how many processors.
+    static BOOT_FORM: core::cell::Cell<Option<(bool, u32)>> = const { core::cell::Cell::new(None) };
+}
+
+/// The customer's limit on a boot, seconds (`docs/TEST-TIME.md`, boot time). The
+/// word is kept for this figure, which is never scaled.
+const BOOT_LIMIT_SECONDS: f64 = 10.0;
+
+/// The 1-minute load above which a boot's time says more of the host than of
+/// the boot, and is not judged.
+const BOOT_MOST_LOAD: f64 = 8.0;
+
+/// The ratchet on a plain `test-boot` of `arch`, under KVM or not, on `cpus`
+/// processors, while the limit is not met: the worst judged figure of 2026-11-05
+/// and 15% (ledger 7096). It holds what has been won and falls as a boot does;
+/// `None` for a form no row boots.
+fn boot_ratchet(arch: Arch, kvm: bool, cpus: u32) -> Option<f64> {
+    match (arch, kvm, cpus) {
+        (Arch::X86_64, true, 4) => Some(28.0),
+        (Arch::X86_64, false, 4) => Some(52.0),
+        (Arch::AArch64, false, 4) => Some(44.0),
+        (Arch::Armv7a, false, 4) => Some(44.0),
+        (Arch::Armv7a, false, 2) => Some(46.0),
+        _ => None,
+    }
+}
+
+/// What a boot's time says.
+#[derive(Debug, PartialEq, Eq)]
+enum BootTime {
+    /// Within the limit.
+    Limit,
+    /// Over the limit, within the ratchet.
+    LimitNotMet,
+    /// Past the ratchet on a host quiet enough for that to mean something.
+    PastRatchet,
+    /// Past the ratchet on a loaded host: neither passed nor failed, and said so.
+    NotJudged,
+}
+
+/// [`BootTime`] of `seconds` against `ratchet` at `load`. A load only decides
+/// whether a reading past the ratchet is judged; it scales nothing.
+fn boot_time(seconds: f64, ratchet: f64, load: f64) -> BootTime {
+    if seconds <= BOOT_LIMIT_SECONDS {
+        BootTime::Limit
+    } else if seconds <= ratchet {
+        BootTime::LimitNotMet
+    } else if load > BOOT_MOST_LOAD {
+        BootTime::NotJudged
+    } else {
+        BootTime::PastRatchet
+    }
+}
+
+/// Say how long the boot took by the host's clock from QEMU's start, and hold a
+/// plain `test-boot` to its ratchet (ledger 7021 T1 to T3, 7096).
+fn judge_boot_time(arch: Arch, args: &Args) -> Result<()> {
+    let Some(seconds) = REACHED_AFTER.with(core::cell::Cell::get) else {
+        return Ok(());
+    };
+    let load = std::fs::read_to_string("/proc/loadavg")
+        .ok()
+        .and_then(|text| text.split_whitespace().next()?.parse().ok())
+        .unwrap_or(0.0);
+    let plain = !args.release
+        && args.kernel_options.is_empty()
+        && args.kernel_profile.is_none()
+        && args.sets.is_empty()
+        && args.init.is_none()
+        && std::env::var_os("FERRIX_QEMU_PLUGIN").is_none();
+    let ratchet = BOOT_FORM
+        .with(core::cell::Cell::get)
+        .filter(|_| plain)
+        .and_then(|(kvm, cpus)| boot_ratchet(arch, kvm, cpus));
+    let Some(ratchet) = ratchet else {
+        println!("  {arch}: boot time {seconds:.2} s, load {load:.1}");
+        return Ok(());
+    };
+    match boot_time(seconds, ratchet, load) {
+        BootTime::Limit => {
+            println!("  {arch}: boot time {seconds:.2} s, limit {BOOT_LIMIT_SECONDS} s met");
+            Ok(())
+        }
+        BootTime::LimitNotMet => {
+            println!(
+                "  {arch}: limit {BOOT_LIMIT_SECONDS} s NOT MET: {seconds:.2} s at load \
+                 {load:.1}, within the ratchet of {ratchet} s"
+            );
+            Ok(())
+        }
+        BootTime::NotJudged => {
+            println!(
+                "  {arch}: limit {BOOT_LIMIT_SECONDS} s NOT MET: {seconds:.2} s, past the ratchet \
+                 of {ratchet} s at load {load:.1}: NOT JUDGED: the boot's time is not passed; \
+                 its checks are"
+            );
+            Ok(())
+        }
+        BootTime::PastRatchet => Err(Error::new(format!(
+            "{arch}: the boot took {seconds:.2} s, past the ratchet of {ratchet} s, at load \
+             {load:.1}"
+        ))),
+    }
+}
+
 /// [`test_boot`], returning what the guest printed.
 /// Verifies: `L.x86_64.97`
 pub(crate) fn test_boot_lines(
@@ -178,6 +287,7 @@ pub(crate) fn test_boot_lines(
                 println!("  {arch}: the machine reset, as ferrix.onexit=reset asked");
             }
             println!("  {arch}: boot ok");
+            judge_boot_time(arch, args)?;
             Ok(watched.lines)
         }
         Verdict::Panicked => Err(panicked(arch, &watched.log)),
@@ -2359,6 +2469,7 @@ fn watch_hooked(
     // way; only a stamp says whether it was slow getting there or hung, which
     // on a loaded host are two different problems with the same last line.
     let started = Instant::now();
+    REACHED_AFTER.with(|reached| reached.set(None));
     let deadline = started + Duration::from_secs(args.timeout);
     let mut lines = Vec::new();
     let mut verdict = Verdict::Silent;
@@ -2381,6 +2492,7 @@ fn watch_hooked(
                 writeln!(log, "{at:6.2} | {line}")?;
                 if verdict == Verdict::Silent && reached(&line, until) {
                     verdict = Verdict::Reached;
+                    REACHED_AFTER.with(|reached| reached.set(Some(at)));
                     // A kernel that has not said it will reset by its marker
                     // never will, and a power-off only pauses QEMU: waiting
                     // for the loader again would be waiting for the timeout.
@@ -3176,6 +3288,7 @@ fn qemu_command(
     // Every boot names its accelerator, so a log read later says whether
     // the guest was emulated without anybody having to guess.
     println!("  qemu: {arch} under {accelerator}, {processors} processors");
+    BOOT_FORM.with(|form| form.set(Some((accelerator == "kvm", processors))));
 
     let mut command = pinned(&binary, args.pin.as_deref(), args.cpu_quota, processors)?;
     let _ = command.current_dir(paths::workspace_root());
@@ -5158,6 +5271,16 @@ pub(crate) fn test_first_process_dies(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_boot_past_its_ratchet_is_judged_only_on_a_quiet_host_and_the_limit_never_scaled() {
+        use super::{BootTime, boot_time};
+        assert_eq!(boot_time(9.9, 28.0, 100.0), BootTime::Limit);
+        assert_eq!(boot_time(10.1, 28.0, 100.0), BootTime::LimitNotMet);
+        assert_eq!(boot_time(28.1, 28.0, 8.0), BootTime::PastRatchet);
+        assert_eq!(boot_time(28.1, 28.0, 8.1), BootTime::NotJudged);
+        assert_eq!(boot_time(500.0, 28.0, 0.0), BootTime::PastRatchet);
+    }
+
     #[test]
     fn a_quota_too_small_to_boot_is_refused() {
         use super::quota_refusal;
