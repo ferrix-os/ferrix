@@ -40,6 +40,7 @@ static BOOT: AtomicU64 = AtomicU64::new(0);
 /// argument register, the boot page.
 /// linuxd's dispatch by name: see `restricted`'s declarations.
 #[unsafe(no_mangle)]
+#[unsafe(link_section = ".text.ferrix_straight")]
 fn ferrix_lift_dispatch(
     args: &ferrix_kernel_core::trap::SyscallArgs,
     regs: Option<&ferrix_kernel_core::arch::UserRegs>,
@@ -49,6 +50,7 @@ fn ferrix_lift_dispatch(
 
 /// As above.
 #[unsafe(no_mangle)]
+#[unsafe(link_section = ".text.ferrix_straight")]
 fn ferrix_lift_attention() -> bool {
     syscall::deliver::needs_attention()
 }
@@ -73,6 +75,7 @@ extern "C" fn ferrix_rt_start(boot: usize) -> ! {
         sys::debug_write(b"\n");
     });
     sys::debug_write(b"  linuxd   up\n");
+    syscall::linux::plain_calls::note_the_plain_calls();
     if HEAP.init().is_err() {
         sys::debug_write(b"  linuxd   no heap\n");
         ferrix_rt::exit(3);

@@ -70,6 +70,22 @@ use crate::sched;
 pub(crate) use crate::trap::Abi;
 pub use crate::trap::{Outcome, SyscallArgs};
 
+/// What no usual call under `linuxd` is, out of its line: every taken branch there runs cold.
+#[cfg(ferrix_load_built = "lift")]
+macro_rules! unusual_under_linuxd {
+    () => {{
+        #[cold]
+        #[inline(always)]
+        const fn unusual() {}
+        unusual();
+    }};
+}
+/// See the other: nothing in the ring-0 load.
+#[cfg(not(ferrix_load_built = "lift"))]
+macro_rules! unusual_under_linuxd {
+    () => {};
+}
+
 /// Answer one system call, with `P` answering the Linux calls.
 ///
 /// `regs` is the caller's saved user registers, which a fork child resumes
@@ -91,21 +107,27 @@ pub fn dispatch_with<P: Personality>(args: &SyscallArgs, regs: Option<&arch::Use
     // entry: the native ABI is 64-bit words, and a 32-bit program's
     // `int $0x80` reaches the i386 table alone.
     if args.abi == Abi::Native && ferrix_native_abi::nr::is_native(args.number) {
+        unusual_under_linuxd!();
         return native_call(args);
     }
     // A thread of a process no personality holds makes no Linux call: in normal
     // mode the number answers `ENOSYS`, in every build, and from restricted
     // mode it never arrives here (`docs/microkernel/K11.md` §4).
     if sched::running_bare() {
+        unusual_under_linuxd!();
         return Outcome::Return(Errno::ENOSYS.as_return_value());
     }
     // The table is the entry's (`crate::trap::Abi`), each behind its own
     // clamp in the facade.
     let decoded = match args.abi {
         Abi::Native => arch::decode_syscall(args.number),
-        Abi::Compat => arch::decode_compat_syscall(args.number),
+        Abi::Compat => {
+            unusual_under_linuxd!();
+            arch::decode_compat_syscall(args.number)
+        }
     };
     let Some(call) = decoded else {
+        unusual_under_linuxd!();
         unanswered(None, args.number);
         return Outcome::Return(Errno::ENOSYS.as_return_value());
     };

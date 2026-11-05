@@ -265,6 +265,11 @@ two-root row through `gate.sh`; the ordinary path's next levers.
 check-lift's ceiling for `user/space.rs` went 6 to 15 for the window's nine cfgs, accepted as debt (ledger 7319 L.2):
 fold them into one window submodule and put it back to 6 before `on` goes anywhere.
 
+**The ordinary path** (`microkernel/RESTRICTED-EXIT.md`, ledger 7232): 830 ns is by hand at load 5; a row beside the
+window's on `max`'s flags is owed. 2 MiB pages for `linuxd`'s text and arena want a design review before any code.
+`test-threads --i686 --personality user` fails at `fault-ahead`, "a page past the end did not stop the program", on
+the base before this path's commit as well (`mko3-base-i686u`, 4c265e3a9): not traced.
+
 **The window** (`restricted_window`, dark, `on` in no profile; `microkernel/RESTRICTED-EXIT.md`, ledger 7224). Its
 cases and controls were read by hand on a tree with `mk-flip`'s unlanded host for `restricted-check`. Owed before `on`
 enters any profile or its `allows` widens, with a new diff check, and after 7216's V.1-V.9, which are

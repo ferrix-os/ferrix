@@ -484,6 +484,24 @@ pub(crate) fn dispatch(
 
 /// `getuid`, `geteuid`, `getgid` and `getegid` for `process`, or `None` for
 /// any other call. The lock is taken only for one of the four.
+#[cfg(ferrix_load_built = "lift")]
+pub(crate) fn identity(call: Syscall, process: &Process) -> Option<u32> {
+    if !matches!(
+        call,
+        Syscall::Getuid | Syscall::Geteuid | Syscall::Getgid | Syscall::Getegid
+    ) {
+        return None;
+    }
+    Some(process.with_credentials(|credentials| match call {
+        Syscall::Getuid => credentials.shown(Kind::User, credentials.user.real),
+        Syscall::Geteuid => credentials.shown(Kind::User, credentials.user.effective),
+        Syscall::Getgid => credentials.shown(Kind::Group, credentials.group.real),
+        _ => credentials.shown(Kind::Group, credentials.group.effective),
+    }))
+}
+
+/// See the other: by a function, as the ring-0 load's frame was measured with.
+#[cfg(not(ferrix_load_built = "lift"))]
 pub(crate) fn identity(call: Syscall, process: &Process) -> Option<u32> {
     let pick: fn(&Credentials) -> u32 = match call {
         Syscall::Getuid => |credentials| credentials.shown(Kind::User, credentials.user.real),

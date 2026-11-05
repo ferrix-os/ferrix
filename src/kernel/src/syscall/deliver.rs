@@ -184,12 +184,12 @@ pub fn install() {
 /// for the general path. Only `linuxd`'s restricted loop asks, on a program's thread.
 #[cfg(ferrix_personality = "user")]
 #[unsafe(no_mangle)]
+#[unsafe(link_section = ".text.ferrix_straight")]
 pub fn ferrix_lift_hot_answer(number: usize) -> u64 {
     #[cold]
     #[inline(always)]
     const fn unusual() {}
-    const GETPPID: usize = 110;
-    if number != GETPPID {
+    if number != arch::GETPPID_NUMBER {
         unusual();
         return u64::MAX;
     }

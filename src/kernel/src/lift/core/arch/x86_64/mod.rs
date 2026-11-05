@@ -186,23 +186,39 @@ unsafe impl ferrix_sync::IrqControl for Irq {
 }
 /// The kernel's TSC's frequency when its clock is the TSC; 0 when it is not, and
 /// the counter here is the clock itself through a call, in nanoseconds.
+#[inline(always)]
 pub(crate) fn tsc_hz() -> u64 {
     static HZ: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(u64::MAX);
     let known = HZ.load(core::sync::atomic::Ordering::Relaxed);
     if known != u64::MAX {
         return known;
     }
+    tsc_hz_asked(&HZ)
+}
+/// [`tsc_hz`] the first time.
+#[cold]
+#[inline(never)]
+fn tsc_hz_asked(kept: &core::sync::atomic::AtomicU64) -> u64 {
     let asked = crate::sys::clock(ferrix_native_abi::lift::CLOCK_COUNTER_HZ);
-    HZ.store(asked, core::sync::atomic::Ordering::Relaxed);
+    kept.store(asked, core::sync::atomic::Ordering::Relaxed);
     asked
 }
+#[inline(always)]
 pub fn counter_now() -> u64 {
     if tsc_hz() == 0 {
-        return crate::sys::clock(0);
+        return counter_by_call();
     }
     // SAFETY: RDTSC is open to ring 3 unless CR4.TSD, which the kernel leaves clear.
     unsafe { core::arch::x86_64::_rdtsc() }
 }
+/// The counter where the kernel's clock is not the TSC.
+#[cold]
+#[inline(never)]
+fn counter_by_call() -> u64 {
+    crate::sys::clock(0)
+}
+/// `getppid` on the table this architecture's programs call: what a straight answer is for.
+pub const GETPPID_NUMBER: usize = ferrix_linux_abi::nr::x86_64::GETPPID;
 pub fn counter_hz() -> u64 {
     match tsc_hz() {
         0 => 1_000_000_000,

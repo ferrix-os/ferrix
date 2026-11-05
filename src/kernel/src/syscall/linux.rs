@@ -67,6 +67,15 @@ impl Personality for Linux {
 /// has to end in a value.
 fn dispatch(call: Syscall, args: &SyscallArgs, regs: Option<&arch::UserRegs>) -> Outcome {
     crate::fs::seam::syscall();
+    // Under `linuxd` every taken branch runs cold after the exit's barrier, so a call none of
+    // `answer_as` is about goes straight to its table.
+    #[cfg(ferrix_load_built = "lift")]
+    if args.abi != Abi::Compat && plain_calls::plain(args.number) {
+        return sched::with_current(|task| {
+            plain_calls::answered(call, args, thread::of_task(task))
+        })
+        .unwrap_or_else(|| plain_calls::answered(call, args, None));
+    }
     // The caller's thread, and through it its process, lent for the call
     // rather than cloned: a clone and a drop of the task, the thread and the
     // process were six locked operations a call (po10-pipe P2). The lend is
@@ -88,6 +97,9 @@ fn dispatch(call: Syscall, args: &SyscallArgs, regs: Option<&arch::UserRegs>) ->
 /// nothing is left uncounted on a stack that is never unwound (the
 /// consultant's B2). Before the lend, `exit` and `execve` dropped the
 /// process they had cloned first, for that reason.
+///
+/// A call this asks for by name before its table belongs in `asked_apart` too: under `linuxd` a
+/// call not there comes here no more.
 fn answer_as(
     call: Syscall,
     args: &SyscallArgs,
@@ -224,6 +236,79 @@ fn answer_as(
     Outcome::Return(errno::encode(answer))
 }
 
+/// What goes round [`answer_as`] under `linuxd`.
+#[cfg(ferrix_load_built = "lift")]
+pub mod plain_calls {
+    use super::{
+        Errno, Outcome, Process, Syscall, SyscallArgs, arch, errno, handle, sched, signal, thread,
+        unanswered,
+    };
+
+    /// By a 64-bit call's number, whether [`answer_as`] has nothing of its own to do for it: a bit a
+    /// number, as a `matches!` of [`asked_apart`]'s calls compiles to a jump table, which a barrier
+    /// makes the dearest branch there is. [`note_the_plain_calls`] fills it; empty, every call takes
+    /// the long way, which answers the same.
+    static PLAIN: [core::sync::atomic::AtomicU64; 8] =
+        [const { core::sync::atomic::AtomicU64::new(0) }; 8];
+
+    /// What [`answer_as`] asks for by name ahead of its table.
+    const fn asked_apart(call: Syscall) -> bool {
+        matches!(
+            call,
+            Syscall::Socketcall
+                | Syscall::Exit
+                | Syscall::ExitGroup
+                | Syscall::Clone
+                | Syscall::Clone3
+                | Syscall::Fork
+                | Syscall::Vfork
+                | Syscall::Execve
+                | Syscall::Execveat
+        ) || signal::acts_on_a_thread(call)
+    }
+
+    /// Fill [`PLAIN`], before the first program, from the one list of [`asked_apart`].
+    pub fn note_the_plain_calls() {
+        for number in 0..(PLAIN.len() * 64) {
+            if arch::decode_syscall(number).is_some_and(|call| !asked_apart(call))
+                && let Some(word) = PLAIN.get(number / 64)
+            {
+                let _ = word.fetch_or(1 << (number % 64), core::sync::atomic::Ordering::Relaxed);
+            }
+        }
+    }
+
+    /// Whether [`PLAIN`] says so of this call's number.
+    #[inline(always)]
+    pub(super) fn plain(number: usize) -> bool {
+        PLAIN.get(number / 64).is_some_and(|word| {
+            word.load(core::sync::atomic::Ordering::Relaxed) & (1 << (number % 64)) != 0
+        })
+    }
+
+    /// [`answer_as`] for a call of no [`asked_apart`]: its table, and its tail, as there.
+    #[inline(always)]
+    pub(super) fn answered(
+        call: Syscall,
+        args: &SyscallArgs,
+        thread: Option<&thread::Thread>,
+    ) -> Outcome {
+        let caller: Option<&Process> = thread.map(|thread| &**thread.process());
+        let answer = handle(call, args, caller);
+        if answer == Err(Errno::ENOSYS) {
+            unanswered(Some(call), args.number);
+        }
+        if let (Err(error), Some(thread)) = (answer, thread)
+            && error.is_restart()
+        {
+            thread
+                .with_own_signals(|signals| signals.mark_restart(args.number as u64, args.args[0]));
+            sched::work::post_own(sched::work::SIGNAL);
+        }
+        Outcome::Return(errno::encode(answer))
+    }
+}
+
 /// The dispatch table proper.
 ///
 /// Split in two by what a call needs rather than by what it does: the first
@@ -231,6 +316,10 @@ fn answer_as(
 /// address space and is `ESRCH` without one. `ESRCH` rather than `EFAULT`
 /// because the honest failure is "there is no process here", which is true of
 /// every call today and will be true of none once stage 6's transition lands.
+#[cfg_attr(
+    ferrix_load_built = "lift",
+    unsafe(link_section = ".text.ferrix_straight")
+)]
 pub(crate) fn handle(
     call: Syscall,
     args: &SyscallArgs,

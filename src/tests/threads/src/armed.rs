@@ -388,9 +388,32 @@ fn cgroup(fail: fn(&str) -> !) {
     let _ = std::fs::remove_dir(AT);
 }
 
+/// The straight answer is `getppid`'s number on this table and no other's: `110` is `getppid` on
+/// x86-64 and `timer_settime` on AArch64, where a bad timer's `EINVAL` must not come back a pid.
+#[allow(unsafe_code, reason = "the raw call is the case")]
+fn only_its_own_number(fail: fn(&str) -> !) {
+    // Its parent's number kept first: there is no straight answer until a `getppid` has run.
+    let _ = call();
+    // SAFETY: a timer that does not exist, so the two pointers are never read.
+    let answer = unsafe {
+        libc::syscall(
+            libc::SYS_timer_settime,
+            -1 as libc::c_long,
+            0 as libc::c_long,
+            core::ptr::null::<u8>(),
+            core::ptr::null::<u8>(),
+        )
+    };
+    if answer != -1 {
+        fail("armed: timer_settime on no timer was answered as another call");
+    }
+    println!("threads: armed its-own-number ok");
+}
+
 /// Every case.
 pub(crate) fn check_armed(fail: fn(&str) -> !) {
     println!("threads: armed");
+    only_its_own_number(fail);
     reparent(false, fail);
     reparent(true, fail);
     stop_and_kill(fail);

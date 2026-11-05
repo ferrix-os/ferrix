@@ -141,6 +141,36 @@ slot is safe on one processor only; `feature/mk-ibpb` and
 
 **The row through `gate.sh`, 2026-11-05, nazuna idle, load under 2, sibling 0%, five boots**: `bench-rows --release --accel kvm --personality user --set restricted_fastpath=on --set partition_speculation=exit --no-claim`: 720 ns (710 to 890) before the cut (`mkm-row-2`, 70bad907e), 690 ns (690 to 700) after it (`mkm-row-3`): 30, not ea9d3e8a2's 60. **660 is not reached**, and of the 40 against the 650 above, 30 is develop's tree against the by-hand one (`OPEN-QUESTIONS.md` §1, by hand), not yet named. No delay control and no general-path row, flag on and `personality=user`, not `max`.
 
+## The ordinary path, 2026-11-05
+
+Diff check ledger 7232. The 830 below is by hand and is cited as nothing else.
+
+A general null call (`getuid`, through `linuxd`'s dispatch) read 1,020 ns against about 500 of bare crossing,
+with 83 taken branches, all cold after the IBPB, and about 35 TLB walks over the bare figure. Alternated boots,
+nazuna at load about 5, by hand, three a side, under `exit`, not gated:
+
+| | `null-general` | `null-getppid` | `mmap-munmap-4K` | `mmap-touch-munmap-4K` |
+|---|---:|---:|---:|---:|
+| Before | 1,000 (1,000-1,010) | 670 | 6,131 | 13,303 |
+| After | **830** (830-870) | 680 | 5,781 | 12,872 |
+
+What went, all of it in `linuxd`'s build: `straight_run` asked only for its own number; the usual way through
+`restricted::run` in one line, with faults, kicks, 32-bit calls and calls that read a register out of it, and no
+second ask of the filter; `answer_as` not entered by a call none of its prologue is about, by a table a bit a number, filled before the first program from the one list,
+since `matches!` of those names compiled to a jump table, the dearest branch there is after a barrier; `identity`
+without a call through a function pointer; the first namespace's map not locked and copied, 72 bytes by `rep movs`,
+for what it answers without one; the counter and `entering` in line; and the usual way's functions in one section, so
+three text pages of `linuxd`, not eight.
+
+What is left is the crossing's 500, and of the 340 above it most reads as TLB walks: each general call walked about
+17 for data and 21 for code before this, since every root write flushes them and this processor has no PCID. **The
+next lever is 2 MiB pages for `linuxd`'s text and arena**, a change to the paging crate, K2 and every walker, which
+wants its own design review.
+
+This also found a wrong answer: `ferrix_lift_hot_answer` took 110 for `getppid` on every architecture, and on AArch64
+that is `timer_settime`, so a program there got its parent's pid back from one. It takes the table's number now, and
+`test-threads` holds a bad timer's call to its own answer.
+
 ## The window under its exclusion, 2026-11-05
 
 Landed dark, `on` in no profile, diff check ledger 7224, with what that entry owes in BACKLOG.

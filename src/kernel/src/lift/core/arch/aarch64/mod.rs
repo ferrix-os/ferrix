@@ -203,6 +203,8 @@ fn read_cntfrq() -> u64 {
 pub fn counter_now() -> u64 {
     read_cntvct()
 }
+/// `getppid` on the table this architecture's programs call: what a straight answer is for.
+pub const GETPPID_NUMBER: usize = ferrix_linux_abi::nr::aarch64::GETPPID;
 pub fn counter_hz() -> u64 {
     read_cntfrq()
 }

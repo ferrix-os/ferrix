@@ -404,6 +404,12 @@ impl UserNamespace {
     /// Linux's `from_kuid` and `from_kgid`: this namespace's name for a
     /// kernel id, or `None` when it has none.
     pub(crate) fn name_of(&self, kind: Kind, kernel: u32) -> Option<u32> {
+        // The first namespace's map is [`IdMap::IDENTITY`], from its making to its end: no lock
+        // and no copy of a map for what a program asks of it on every `getuid`.
+        #[cfg(ferrix_load_built = "lift")]
+        if self.is_first() {
+            return (kernel != u32::MAX).then_some(kernel);
+        }
         self.map(kind).inside_id(kernel)
     }
 }

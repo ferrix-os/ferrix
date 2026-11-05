@@ -302,6 +302,10 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
         &[
             &["tools/common/release/cert-verdict.py", "--self-test"],
             &["tools/common/check/check-frames.py", "--self-test"],
+            &[
+                "tools/common/check/compare-kernel-symbols.py",
+                "--self-test",
+            ],
             &["tools/common/check/check-stack-depth.py", "--self-test"],
         ],
     ),

@@ -22,7 +22,7 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Product functions | Count |
 |---|---:|
 | Named by a low-level requirement | 3407 |
-| Accessors, covered by the requirement they serve | 1450 |
+| Accessors, covered by the requirement they serve | 1451 |
 | Check code in a product file | 125 |
 | Named by none | 1155 |
 

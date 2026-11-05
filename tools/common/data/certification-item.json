@@ -1168,6 +1168,9 @@
   },
   "lift_cfg_sites": {
     "//": "ferrix_load_built sites in a load file: a ceiling, lowered as they go (ledger 5714 (9)).",
+    "syscall/credentials.rs": 2,
+    "syscall/linux.rs": 3,
+    "syscall/userns.rs": 1,
     "fs/btrfs_write_check.rs": 7,
     "fs/cgroupfs.rs": 13,
     "fs/devfs.rs": 1,
@@ -1183,7 +1186,7 @@
     "interfaces/net_ring/mod.rs": 1,
     "net/mod.rs": 1,
     "net/netlink/mod.rs": 1,
-    "object/channel.rs": 1, "syscall/mod.rs": 1,
+    "object/channel.rs": 1, "syscall/mod.rs": 3,
     "syscall/deliver.rs": 4,
     "syscall/flock.rs": 1,
     "syscall/registry.rs": 1,

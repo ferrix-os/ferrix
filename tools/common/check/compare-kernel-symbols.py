@@ -69,11 +69,17 @@ def bodies(path: str) -> dict[str, str]:
             name = re.sub(r"::h[0-9a-f]{16}$", "", head.group(1))
             out.setdefault(name, [])
         elif name is not None and "\t" in line:
-            text = line.split("\t", 1)[1]
-            text = re.sub(r"-?0x[0-9a-f]+|\b[0-9a-f]{6,}\b", "#", text)
-            text = re.sub(r"<[^>]*>", "<>", text)
-            out[name].append(text)
+            out[name].append(masked(line.split("\t", 1)[1]))
     return {key: hashlib.sha256("\n".join(value).encode()).hexdigest() for key, value in out.items()}
+
+
+def masked(text: str) -> str:
+    """An instruction with its addresses, displacements and numbers masked. objdump's annotation
+    runs to the line's end, and a generic's name holds `>` of its own: the mask takes all of it
+    (ledger 7319 L.1). AArch64 prints a page offset in decimal, so every number goes (7184 Q.3)."""
+    text = re.sub(r"-?0x[0-9a-f]+|\b[0-9a-f]{6,}\b", "#", text)
+    text = re.sub(r"#-?[0-9]+", "#", text)
+    return re.sub(r"<.*>", "<>", text)
 
 
 def self_test() -> int:
@@ -84,6 +90,13 @@ def self_test() -> int:
     assert differences(base, table(["20 11 T a::b", "30 8 T c"])) == ["size: a::b: 16 -> 17"]
     assert differences(base, table(["0 10 T a::b"])) == ["gone: c"]
     assert differences(base, table(["0 10 T a::b", "10 8 T c", "20 1 T d"])) == ["new: d"]
+    # An adrp beside another generic is one instruction; a changed one is still a change (7319 L.1).
+    beside = "adrp\tx9, 0xffff8000 <<a::B<c::D> as e::F>::g+0x10>"
+    moved = "adrp\tx9, 0xffff9000 <<h::I<j::K> as e::F>::l+0x20>"
+    assert masked(beside) == masked(moved), "an address's neighbour read as changed code"
+    assert masked("add\tx0, x0, #1472") == masked("add\tx0, x0, #24")
+    assert masked("ldr\tx1, [x0]") != masked("ldr\tx2, [x0]"), "a changed register was not seen"
+    assert masked("add\tx0, x0, #8 <a<b>>") != masked("sub\tx0, x0, #8 <a<b>>"), "a changed opcode was not seen"
     print("compare-kernel-symbols: self-test passed")
     return 0
 

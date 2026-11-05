@@ -171,6 +171,13 @@ fn back(value: u64, not_a_call: bool) -> k1::Exit {
         };
     }
     unusual();
+    back_unusual(value, not_a_call, due)
+}
+
+/// [`back`] with something held or due.
+#[cold]
+#[inline(never)]
+fn back_unusual(value: u64, not_a_call: bool, due: bool) -> k1::Exit {
     let path = trap::return_path();
     let task = sched::current().expect("a program's thread has a task");
     let pending = if task.pending_up.swap(false, Ordering::Relaxed) {
@@ -282,7 +289,7 @@ fn again_continue() -> k1::Exit {
 }
 #[inline(always)]
 fn again_resume(value: u64) -> k1::Exit {
-    sched::account::entering();
+    let _ = sched::with_current(sched::account::entering_on);
     k1::resume(value)
 }
 fn again_enter(context: &Context) -> k1::Exit {
@@ -325,64 +332,121 @@ fn straight_run(mut exit: k1::Exit) -> k1::Exit {
     }
 }
 
+/// The number [`straight_run`] answers: every other call goes round it, as a call and a
+/// return run cold on every crossing cost more than a compare.
+const STRAIGHT: u64 = crate::arch::GETPPID_NUMBER as u64;
+
+#[unsafe(link_section = ".text.ferrix_straight")]
 fn run(mut exit: k1::Exit) -> ! {
     loop {
-        exit = straight_run(exit);
+        if exit.number == STRAIGHT {
+            exit = straight_run(exit);
+        }
         sched::account::left_program();
-        exit = match exit.reason() {
-            Ok(Reason::Syscall) | Ok(Reason::SyscallCompat) => {
-                let abi = if matches!(exit.reason(), Ok(Reason::SyscallCompat)) {
-                    Abi::Compat
-                } else {
-                    Abi::Native
-                };
-                let number = exit.number as usize;
-                let _ = sched::with_current(|task| task.note_call(exit.number, &exit.words));
-                let needs = needs_context(abi, number);
-                let context = needs.then(read_context);
-                let args = SyscallArgs {
-                    abi,
-                    number,
-                    args: exit.words,
-                    ip: context.as_ref().map_or(0, program_counter),
-                };
-                let regs = context.as_ref().map(|context| regs_of(to_trap(context)));
-                match context
-                    .as_ref()
-                    .and_then(|context| answer_early(&args, context))
-                {
-                    Some(next) => next,
-                    None => match (if ferrix_lift_quiet() {
-                        None
-                    } else {
-                        trap::filter_system_call(&args)
-                    })
-                    .unwrap_or_else(|| ferrix_lift_dispatch(&args, regs.as_ref()))
-                    {
-                        Outcome::Return(value) => back(value as u64, false),
-                        Outcome::ReturnWords { value, words } => {
-                            let mut context = context.unwrap_or_else(read_context);
-                            set_answer_words(&mut context, value as u64, words);
-                            again_enter(&context)
-                        }
-                        Outcome::Enter { entry, stack, abi } => {
-                            // A new program: nothing the old one's `pending` held goes on.
-                            if let Some(task) = sched::current() {
-                                let _ = task.pending.lock().take();
-                            }
-                            let context = fresh(entry, stack, 0, abi);
-                            again_enter(&context)
-                        }
-                    },
-                }
-            }
-            Ok(Reason::Fault) => fault(&exit),
-            Ok(Reason::Kick) => back(0, true),
-            Err(why) => {
-                crate::println!("linuxd: a restricted entry was refused: {why:?}");
-                crate::panic::end_thread();
-            }
+        exit = if exit.reason == Reason::Syscall as u64 {
+            call(&exit)
+        } else {
+            unusual();
+            other_exit(&exit)
         };
+    }
+}
+
+/// A 64-bit call that reads no register: every taken branch runs cold after the exit's barrier,
+/// so the usual way is one line, and what `dispatch` asks of no other call is apart.
+#[inline(always)]
+fn call(exit: &k1::Exit) -> k1::Exit {
+    let number = exit.number as usize;
+    let _ = sched::with_current(|task| task.note_call(exit.number, &exit.words));
+    // Its answer holds `ferrix_lift_quiet`'s: no filter for this one to ask, and none shown.
+    if needs_context(Abi::Native, number) {
+        unusual();
+        return call_with_context(exit, Abi::Native);
+    }
+    let args = SyscallArgs {
+        abi: Abi::Native,
+        number,
+        args: exit.words,
+        ip: 0,
+    };
+    match ferrix_lift_dispatch(&args, None) {
+        Outcome::Return(value) => back(value as u64, false),
+        outcome => {
+            unusual();
+            not_returned(outcome, None)
+        }
+    }
+}
+
+/// Any exit that is not a 64-bit call.
+#[cold]
+#[inline(never)]
+fn other_exit(exit: &k1::Exit) -> k1::Exit {
+    match exit.reason() {
+        Ok(Reason::Syscall) => call(exit),
+        Ok(Reason::SyscallCompat) => {
+            let _ = sched::with_current(|task| task.note_call(exit.number, &exit.words));
+            call_with_context(exit, Abi::Compat)
+        }
+        Ok(Reason::Fault) => fault(exit),
+        Ok(Reason::Kick) => back(0, true),
+        Err(why) => {
+            crate::println!("linuxd: a restricted entry was refused: {why:?}");
+            crate::panic::end_thread();
+        }
+    }
+}
+
+/// A call whose answer reads the program's registers, or which a filter is shown.
+#[cold]
+#[inline(never)]
+fn call_with_context(exit: &k1::Exit, abi: Abi) -> k1::Exit {
+    let number = exit.number as usize;
+    let context = needs_context(abi, number).then(read_context);
+    let args = SyscallArgs {
+        abi,
+        number,
+        args: exit.words,
+        ip: context.as_ref().map_or(0, program_counter),
+    };
+    let regs = context.as_ref().map(|context| regs_of(to_trap(context)));
+    match context
+        .as_ref()
+        .and_then(|context| answer_early(&args, context))
+    {
+        Some(next) => next,
+        None => match (if ferrix_lift_quiet() {
+            None
+        } else {
+            trap::filter_system_call(&args)
+        })
+        .unwrap_or_else(|| ferrix_lift_dispatch(&args, regs.as_ref()))
+        {
+            Outcome::Return(value) => back(value as u64, false),
+            outcome => not_returned(outcome, context),
+        },
+    }
+}
+
+/// A call's outcome other than a value to give back.
+#[cold]
+#[inline(never)]
+fn not_returned(outcome: Outcome, context: Option<Context>) -> k1::Exit {
+    match outcome {
+        Outcome::Return(value) => back(value as u64, false),
+        Outcome::ReturnWords { value, words } => {
+            let mut context = context.unwrap_or_else(read_context);
+            set_answer_words(&mut context, value as u64, words);
+            again_enter(&context)
+        }
+        Outcome::Enter { entry, stack, abi } => {
+            // A new program: nothing the old one's `pending` held goes on.
+            if let Some(task) = sched::current() {
+                let _ = task.pending.lock().take();
+            }
+            let context = fresh(entry, stack, 0, abi);
+            again_enter(&context)
+        }
     }
 }
 

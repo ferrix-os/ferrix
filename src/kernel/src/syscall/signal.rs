@@ -1285,7 +1285,7 @@ pub(crate) const fn bit(number: u32) -> u64 {
 /// waits under it: the blocked mask, the alternate stack, the pending set a
 /// thread sees, the waits that swap the mask, and the sleeps that leave a
 /// restart behind.
-const fn acts_on_a_thread(call: Syscall) -> bool {
+pub(super) const fn acts_on_a_thread(call: Syscall) -> bool {
     matches!(
         call,
         Syscall::RtSigprocmask

@@ -117,29 +117,32 @@ pub fn left_program() {
 
 /// The program is about to run again. Past its group's `cpu.max`, it waits for
 /// the period's end first, unless something asks the thread to attend.
-#[inline(always)]
 pub fn entering() {
-    let _ = super::with_current(|task| {
-        task.note_no_call();
-        let now = cycles();
-        let spent = now
-            .saturating_sub(task.time.left.load(Ordering::Relaxed))
-            .saturating_sub(task.time.parked.swap(0, Ordering::Relaxed));
-        let _ = task.time.in_linuxd.fetch_add(spent, Ordering::Relaxed);
-        let unsettled = task.time.in_program.load(Ordering::Relaxed)
-            + task.time.in_linuxd.load(Ordering::Relaxed);
-        let bandwidth = quota::bandwidth_in_use();
-        if bandwidth || unsettled > CHARGE_EVERY_CYCLES {
-            charge(task);
-        }
-        if bandwidth {
-            throttle(task);
-            task.time.entered.store(cycles(), Ordering::Relaxed);
-        } else {
-            // The clock just read: a charge here is smaller than the counter's cost.
-            task.time.entered.store(now, Ordering::Relaxed);
-        }
-    });
+    let _ = super::with_current(entering_on);
+}
+
+/// [`entering`], for the one call site every call's way back takes, in its line.
+#[inline(always)]
+pub fn entering_on(task: &Task) {
+    task.note_no_call();
+    let now = cycles();
+    let spent = now
+        .saturating_sub(task.time.left.load(Ordering::Relaxed))
+        .saturating_sub(task.time.parked.swap(0, Ordering::Relaxed));
+    let _ = task.time.in_linuxd.fetch_add(spent, Ordering::Relaxed);
+    let unsettled =
+        task.time.in_program.load(Ordering::Relaxed) + task.time.in_linuxd.load(Ordering::Relaxed);
+    let bandwidth = quota::bandwidth_in_use();
+    if bandwidth || unsettled > CHARGE_EVERY_CYCLES {
+        charge(task);
+    }
+    if bandwidth {
+        throttle(task);
+        task.time.entered.store(cycles(), Ordering::Relaxed);
+    } else {
+        // The clock just read: a charge here is smaller than the counter's cost.
+        task.time.entered.store(now, Ordering::Relaxed);
+    }
 }
 
 #[cold]
