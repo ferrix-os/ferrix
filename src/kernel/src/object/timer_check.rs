@@ -887,9 +887,14 @@ fn check_an_early_wake_takes_out_only_its_own_entry() -> Result<(), &'static str
     }
     // Read just around the wake, whose removal is synchronous: one entry,
     // the task's, leaves.
+    //
+    // Masked around the three, as this processor's interrupts come and go with
+    // other sleepers: the terminal's 20 ms poll ended in between (fl-090).
+    let saved = <crate::arch::Irq as ferrix_sync::IrqControl>::disable();
     let (before, _) = sched::sleepers_here();
     sched::wake(&task);
     let (after, _) = sched::sleepers_here();
+    <crate::arch::Irq as ferrix_sync::IrqControl>::restore(saved);
     let patience = crate::timer::now_nanos().saturating_add(500 * MS);
     while !WOKEN.load(Ordering::Acquire) {
         if crate::timer::now_nanos() >= patience {
