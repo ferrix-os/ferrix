@@ -1461,7 +1461,9 @@ pub(crate) fn settle_frozen(job: &Arc<Job>) {
         // look made before the other's park can write after it, and the last
         // thread of a frozen program leaves `frozen 0` for good. So each looks
         // again after its write, and writes again if that changed. The look only
-        // moves on a park, a leave or a move, so it settles in a pass or two.
+        // moves on a park, a leave or a move, so it settles in a pass or two; eight
+        // flips in one settle would end with the last look unwritten (F-105), stale
+        // until the next park, leave or move.
         let mut now = is_frozen(&current, &live);
         for _ in 0..FROZEN_LOOKS {
             let _ = current.note_frozen(now);
