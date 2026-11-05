@@ -279,6 +279,9 @@ pub struct Task {
         allow(dead_code, reason = "ARMv7-A has no restricted mode")
     )]
     restricted_state: UnsafeCell<Option<Box<arch::RestrictedState>>>,
+    /// The node its drop hands to the reaper where it may not sleep (F-104): made
+    /// with a task that has anything of the kind, because that drop may not allocate.
+    leftovers: Option<Box<super::leftovers::Leftovers>>,
     /// The record of the mode it is in where that is not its own: in restricted mode,
     /// on x86-64, the program's, inside `restricted_state`, which it outlives no more
     /// than the task does. Written by the running task alone.
@@ -619,7 +622,23 @@ fn pinned_program_cpu(affinity: &CpuSet, program: bool) -> Option<usize> {
 impl Drop for Task {
     /// Let go of the job it ran in. Its weight left the job's load when it
     /// died, so only the hold is left.
+    ///
+    /// Where sleeping is forbidden the fields that may sleep as they go, go to
+    /// the reaper in the node this task was made with (F-104). What is left runs here:
+    /// the two counts and the group's release below, which are atomics, and the
+    /// free of what remains of the task, whose allocator masks and spins.
     fn drop(&mut self) {
+        if !super::may_block()
+            && let Some(mut node) = self.leftovers.take()
+        {
+            node.address_space = self.address_space.take();
+            node.core = self.core.take();
+            node.thread = self.thread.take();
+            node.user = self.user.take();
+            node.restricted = self.restricted_state.get_mut().take();
+            *self.active_user.get_mut() = core::ptr::null_mut();
+            super::leftovers::hand_over(node);
+        }
         if *self.state.get_mut() != DEAD {
             self.uncount_pinned();
         }
@@ -765,6 +784,12 @@ impl Task {
         } = new;
         let (user, core) = user_parts(thread.as_ref(), user_state)?;
         let (run_slot, sleep_slot) = slots()?;
+        let leftovers =
+            if address_space.is_some() || thread.is_some() || user.is_some() || core.is_some() {
+                Some(fallible::try_box(super::leftovers::Leftovers::new())?)
+            } else {
+                None
+            };
         let spawn_pin = pinned_program_cpu(&affinity, thread.is_some());
         let bare_thread = thread.as_ref().is_some_and(|thread| thread.is_bare());
         if let Some(count) = spawn_pin.and_then(|cpu| PINNED_PROGRAMS.get(cpu)) {
@@ -790,6 +815,7 @@ impl Task {
             spawn_pin,
             restricted_mode: AtomicBool::new(false),
             restricted_state: UnsafeCell::new(None),
+            leftovers,
             active_user: AtomicPtr::new(core::ptr::null_mut()),
             bare_thread,
             address_space,
@@ -859,6 +885,7 @@ impl Task {
             spawn_pin: None,
             restricted_mode: AtomicBool::new(false),
             restricted_state: UnsafeCell::new(None),
+            leftovers: None,
             active_user: AtomicPtr::new(core::ptr::null_mut()),
             bare_thread: false,
             // The boot task and the idle tasks are the kernel's own and have

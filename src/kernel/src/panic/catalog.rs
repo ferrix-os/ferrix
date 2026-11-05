@@ -1397,6 +1397,20 @@ pub(crate) static ENDPOINT_CLOSED_MASKED: Explanation = Explanation {
           docs/certification/FINDINGS.md F-65; docs/OPAQUE-KERNEL.md §9.7 part 2",
 };
 
+/// For `sched::require_may_sleep`.
+pub(crate) static BLOCK_IN_AN_INTERRUPT: Explanation = Explanation {
+    code: "FX-0537",
+    title: "a task tried to block in an interrupt",
+    meaning: "An interrupt handler may not block: there is no task of its own to wait as, and the \
+              one it interrupted would never get back. A lock held across a block is FX-0503.",
+    causes: &[
+        "A drop that can reach a sleep ran in an interrupt: a task's last reference is handed \
+         to the reaper for that reason (`sched::leftovers`, F-104), and anything else that \
+         does as much needs the same.",
+    ],
+    see: "src/kernel/src/sched/mod.rs require_may_sleep; src/kernel/src/sched/leftovers.rs",
+};
+
 /// For `sched::schedule`, when asked to switch with the preemption count
 /// raised.
 pub(crate) static SCHEDULE_WITH_PREEMPTION_HELD: Explanation = Explanation {
@@ -4035,6 +4049,25 @@ pub(crate) static ILLEGAL_INSTRUCTION: Explanation = Explanation {
           src/kernel/src/arch/aarch64/trap.rs classify; src/kernel/src/arch/armv7a/trap.rs classify",
 };
 
+/// For `trap::stack_overflow`, on both Arm architectures.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) static KERNEL_STACK_OVERFLOW: Explanation = Explanation {
+    code: "FX-9007",
+    title: "a kernel stack overflowed",
+    meaning: "A fault in the kernel found its stack pointer in unmapped memory. The entry \
+              moved to this processor's emergency stack before writing anything, so nothing \
+              below the stack's guard was written. The `stack pointer` on the first line is \
+              the value it found; `elr` or `pc` is where the fault was, which may be another \
+              entry's save if an interrupt was what reached the guard.",
+    causes: &[
+        "A path deeper than `vmap::STACK_PAGES` allows, an interrupt's frames on top: \
+         `cargo xtask check-stack-depth` walks the known ones.",
+        "A very large local in a function, or a recursion.",
+    ],
+    see: "src/kernel/src/arch/aarch64/trap.rs ferrix_stack_hit; \
+          src/kernel/src/arch/armv7a/trap.rs ferrix_stack_hit; src/kernel/src/trap.rs stack_overflow",
+};
+
 /// For `dispatch` in `trap.rs`, the report naming any other exception.
 pub(crate) static UNEXPECTED_EXCEPTION: Explanation = Explanation {
     code: "FX-9004",
@@ -4218,6 +4251,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &ENDPOINT_CLOSED_MASKED,
     #[cfg(not(ferrix_shape = "micro"))]
     &STAGE5_TASK_VIEW,
+    &BLOCK_IN_AN_INTERRUPT,
     #[cfg(not(ferrix_shape = "micro"))]
     &STAGE6_USER_MEMORY,
     #[cfg(not(ferrix_shape = "micro"))]
@@ -4377,4 +4411,6 @@ pub(crate) static ALL: &[&Explanation] = &[
     &UNEXPECTED_EXCEPTION,
     &MACHINE_CHECK,
     &NESTED_INTERRUPT_STACK,
+    #[cfg(not(target_arch = "x86_64"))]
+    &KERNEL_STACK_OVERFLOW,
 ];

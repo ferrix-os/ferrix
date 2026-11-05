@@ -48,6 +48,7 @@ mod deadline_check;
 #[cfg(ferrix_fast_ipc)]
 pub mod direct;
 pub(crate) mod fast;
+pub(crate) mod leftovers;
 mod mark_check;
 mod preempt;
 mod preempt_check;
@@ -756,6 +757,21 @@ pub(crate) fn started() -> bool {
     STARTED.load(Ordering::Acquire)
 }
 
+/// Start the task that finishes a task's last drop made where sleeping is
+/// forbidden (`sched::leftovers`, F-104).
+///
+/// # Errors
+///
+/// If there is no room for it: the boot stops by name.
+pub fn start_reaper() -> Result<(), &'static str> {
+    spawn("reaper", leftovers::reaper, 0, NICE_0_WEIGHT).map(|_| ())
+}
+
+/// What a boot's last drops came to: for a line, with no criterion.
+pub fn last_drops() -> (u64, u64) {
+    leftovers::counts()
+}
+
 /// Whether the running context may block: a task, on a processor taking
 /// interrupts, with nothing holding preemption off.
 ///
@@ -1223,6 +1239,7 @@ fn idle_loop() -> ! {
         // Masked while looking, so that an interrupt arriving after the look
         // wakes the wait rather than being taken just before it.
         arch::disable_interrupts();
+        leftovers::nudge();
         if has_work() {
             set_idle(cpu, false);
             arch::enable_interrupts();
@@ -1941,6 +1958,7 @@ pub fn sleep_until(deadline: u64) {
     };
     task.set_sleep_deadline(deadline);
     task.set_state(task::BLOCKED);
+    require_may_sleep();
     schedule();
 }
 
@@ -1949,8 +1967,25 @@ pub fn sleep_for(nanos: u64) {
     sleep_until(crate::timer::now_nanos().saturating_add(nanos));
 }
 
+/// Stop the machine if the running context is an interrupt handler
+/// (`L.sched.173`). A lock held is FX-0503, at the switch. Interrupts masked alone are
+/// not this: a task may leave with them masked and come back to them masked, as
+/// `throttle_current` does at the very end of a trap, holding nothing.
+#[inline(always)]
+fn require_may_sleep() {
+    // An interrupt runs masked, so a context taking interrupts is none, and this one
+    // read is all a blocking call pays: `in_interrupt` masks to read its flag.
+    if !arch::interrupts_enabled() && crate::irq::in_interrupt() {
+        crate::panic::fatal!(
+            crate::panic::catalog::BLOCK_IN_AN_INTERRUPT,
+            "a task blocked in an interrupt"
+        );
+    }
+}
+
 /// Block the running task, which has already marked itself blocked.
 fn block() {
+    require_may_sleep();
     schedule();
 }
 
@@ -1972,6 +2007,7 @@ fn block() {
 /// decision at the lowering, made and found empty on every blocking wait of a
 /// round trip (`docs/roadmap/stage-05-tasks-scheduler.md`, the cheaper hold).
 fn block_ending_hold() {
+    require_may_sleep();
     switch_from(false, true);
 }
 
@@ -3190,12 +3226,12 @@ pub fn evacuate_with_fired_for_check() {
 }
 
 // CHECKS-ONLY: object/timer_check.rs
-/// How many entries, tasks and timer arms, this processor's sleeper set
+/// How many entries, tasks and timer arms, processor `cpu`'s sleeper set
 /// holds, and how many arms wait in its fired buffer: for the checks.
 #[doc(hidden)]
-pub fn sleepers_here() -> (usize, usize) {
+pub fn sleepers_on(cpu: usize) -> (usize, usize) {
     let saved = <arch::Irq as IrqControl>::disable();
-    let counts = this_cpu().and_then(queue_of).map_or((0, 0), |lock| {
+    let counts = queue_of(cpu).map_or((0, 0), |lock| {
         let queue = lock.lock();
         (queue.sleepers_len(), queue.fired_len())
     });
@@ -3343,6 +3379,7 @@ fn wait_for_reaper(patience_nanos: u64) -> Result<(), &'static str> {
         if !ZOMBIES.lock().is_empty() {
             let _ = reap();
         }
+        leftovers::nudge();
         // Leaving first: a task that stops leaving is counted as exited
         // before it is uncounted as leaving, so reading the two in this order
         // cannot miss it between them.
@@ -3350,6 +3387,7 @@ fn wait_for_reaper(patience_nanos: u64) -> Result<(), &'static str> {
             && EXITED_UNREAPED.load(Ordering::Acquire) == 0
             && ZOMBIES.lock().is_empty()
             && !reaping_anywhere()
+            && leftovers::settled()
         {
             return Ok(());
         }
@@ -3393,6 +3431,7 @@ fn switch_from(interrupted_user: bool, ending_hold: bool) {
         require_preemption_on(cpu);
     }
     pick_and_switch(interrupted_user);
+    leftovers::nudge();
     <arch::Irq as IrqControl>::restore(saved);
 }
 

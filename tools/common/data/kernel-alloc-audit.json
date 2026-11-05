@@ -279,7 +279,7 @@
     "sched/task.rs": {
       "bucket": "job",
       "what": "the thread's",
-      "sites": 1
+      "sites": 2
     },
     "sched/wait.rs": {
       "bucket": "job",
@@ -294,7 +294,7 @@
     "smp.rs": {
       "bucket": "boot",
       "what": "start_secondaries",
-      "sites": 10
+      "sites": 11
     },
     "sync.rs": {
       "bucket": "job",

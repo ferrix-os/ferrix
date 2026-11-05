@@ -1128,9 +1128,10 @@ impl CpuQueue {
     ///
     /// Keyed, not scanned: the task keeps the instant it was filed under
     /// ([`Task::filed_at`]), so this is a descent of the set, never a walk,
-    /// however many tasks and timer arms the set holds (`L.sched.84`). A
-    /// task filed on another processor's set is not found here, and stays
-    /// filed there under its key, as before.
+    /// however many tasks and timer arms the set holds (`L.sched.84`). Every
+    /// move of a blocked task passes `asleep_at_home` under its home's lock,
+    /// which unfiles it, so a task's entry is on its home's set; were one
+    /// elsewhere it would not be found here and would stay filed under its key.
     pub(crate) fn remove_sleeper(&mut self, task: &Task) -> bool {
         let at = task.filed_at();
         if at == 0 {

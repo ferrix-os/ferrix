@@ -139,6 +139,7 @@ pub(crate) fn dispatch(frame: &mut arch::TrapFrame) {
                 let _ = USER_INTERRUPTS.fetch_add(1, Ordering::Relaxed);
             }
             service_interrupts(frame);
+            crate::sched::leftovers::nudge();
             // And only now, with the controller told this interrupt is done,
             // may the processor go and run something else. Switching inside
             // the handler would leave an interrupt in service for as long as

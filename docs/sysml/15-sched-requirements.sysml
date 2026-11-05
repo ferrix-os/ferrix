@@ -1313,6 +1313,33 @@ package FerrixSchedRequirements {
             attribute :>> unit = ("sched::affinity::mask_for",
                 "sched::affinity::effective_mask", "sched::task::Task::new");
         }
+        requirement <'L.sched.171'> aLastDropWhereSleepIsForbiddenSleepsNowhere : ItemLowLevel {
+            attribute :>> statement = "A task's drop where sched::may_block does not hold shall move its
+                address space, process, thread, user state and restricted state to the reaper,
+                allocating nothing, in a node made with the task; what is left of the drop takes no
+                lock that sleeps.";
+            attribute :>> criterion = "A task's last reference dropped with interrupts masked: its
+                address space outlives the drop and the count of those handed over rises by one.
+                check-stack-depth prints the depth of what is left.";
+            attribute :>> parent = "H.SCHED.1";
+            attribute :>> unit = ("sched::task::Task::drop", "sched::leftovers::hand_over");
+        }
+        requirement <'L.sched.172'> theReaperFinishesAHandedOverDrop : ItemLowLevel {
+            attribute :>> statement = "The reaper, a task, shall finish what a drop handed over, woken with no
+                lock held at the end of any interrupt, of any switch, or at the idle loop's look before it
+                halts; no wake or timer shall be made from the drop.";
+            attribute :>> criterion = "The address space of the case above is gone, through the reaper,
+                within the case's bound.";
+            attribute :>> parent = "H.SCHED.1";
+            attribute :>> unit = ("sched::leftovers::reaper", "sched::leftovers::nudge");
+        }
+        requirement <'L.sched.173'> anInterruptMayNotBlock : ItemLowLevel {
+            attribute :>> statement = "A task blocking from an interrupt handler shall stop the machine as
+                FX-0537, on every profile. A lock that raises the count held across a block is FX-0503's.";
+            attribute :>> criterion = "A control: a sleep in the timer's interrupt reports FX-0537.";
+            attribute :>> parent = "H.SCHED.1";
+            attribute :>> unit = "sched::require_may_sleep";
+        }
         requirement <'L.sched.84'> aSleeperLeavesByItsKey : ItemLowLevel {
             doc /* Rationale: the sleeper set holds timer arms beside sleeping
                 tasks since K10 (docs/microkernel/K10.md §9, condition 2), so a

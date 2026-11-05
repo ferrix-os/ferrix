@@ -179,6 +179,7 @@ static FINISHED: WaitQueue = WaitQueue::new();
 /// The first check that fails, as a sentence.
 pub fn run(topology: &Topology) -> Result<Report, &'static str> {
     poison_record()?;
+    check_a_last_drop_where_sleeping_is_forbidden()?;
     let mut report = Report::default();
     // Taken before anything is started, so that what is counted is what these
     // checks' own thousand threads cost: see `Report::shootdowns`.
@@ -2514,3 +2515,59 @@ fn pull_sentence(how: Pull) -> &'static str {
 
 /// How long [`pulled_once`] lets the spinner run before it wakes its task.
 const PULL_SETTLE_NANOS: u64 = 100_000_000;
+
+/// A task's last reference dropped with interrupts masked, as under a run queue's lock
+/// or in an interrupt: its address space comes back through the reaper, not there, and soon.
+///
+/// Verifies: L.sched.171, L.sched.172
+fn check_a_last_drop_where_sleeping_is_forbidden() -> Result<(), &'static str> {
+    fn ends_at_once(_: usize) {}
+    let space = crate::user::space::AddressSpace::new()
+        .map_err(|_| "no address space for the last-drop case")?;
+    let held = Arc::downgrade(&space);
+    let here = super::this_cpu().ok_or("no processor")?;
+    let task = super::spawn_on_in(
+        "last-drop",
+        ends_at_once,
+        0,
+        NICE_0_WEIGHT,
+        here,
+        *super::domain_cpus().ok_or("no domain")?,
+        Some(space),
+    )?;
+    // Ended and reaped, so that this is the last reference.
+    let deadline = crate::timer::now_nanos().saturating_add(10_000_000_000);
+    while !task.is_dead() || Arc::strong_count(&task) > 1 {
+        if crate::timer::now_nanos() > deadline {
+            return Err("the last-drop case's task was not reaped");
+        }
+        let _ = super::reap();
+        super::yield_now();
+    }
+    let (before, finished_before) = super::leftovers::counts();
+    let saved = <crate::arch::Irq as IrqControl>::disable();
+    drop(task);
+    let (after, _) = super::leftovers::counts();
+    let stayed = held.strong_count() != 0;
+    <crate::arch::Irq as IrqControl>::restore(saved);
+    if after != before + 1 {
+        return Err("a task's last drop with interrupts masked did not go to the reaper");
+    }
+    if !stayed {
+        return Err(
+            "a task's last drop with interrupts masked gave back its address space where it ran",
+        );
+    }
+    let deadline = crate::timer::now_nanos().saturating_add(LAST_DROP_BOUND_NANOS);
+    while held.strong_count() != 0 || super::leftovers::counts().1 <= finished_before {
+        if crate::timer::now_nanos() > deadline {
+            return Err("the reaper did not finish a task's last drop in time");
+        }
+        super::yield_now();
+    }
+    Ok(())
+}
+
+/// How long the case above gives the reaper. A nudge is one timer interrupt
+/// and a switch; this is the row's bound under a loaded emulator, not a claim of speed.
+const LAST_DROP_BOUND_NANOS: u64 = 5_000_000_000;

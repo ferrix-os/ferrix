@@ -563,6 +563,10 @@ fn say_booted() {
         stages_check::check_audit_booted(dma_faults_read);
         #[cfg(ferrix_load_built = "none")]
         let _ = dma_faults_read;
+        let (handed_over, finished) = sched::last_drops();
+        println!(
+            "  reaper   {handed_over} tasks' last drops where sleeping is forbidden, {finished} finished"
+        );
         println!("{SUCCESS_MARKER} stages 1-12");
     } else {
         // The faults nothing else reads in a boot without checks: one line,
@@ -1286,6 +1290,12 @@ fn bring_up_processors(view: &BootView<'_>) -> &'static smp::Topology {
 
 fn start_scheduler(cpus: &'static smp::Topology) {
     if let Err(problem) = sched::init(cpus) {
+        fatal!(
+            catalog::SCHEDULER_BRING_UP,
+            "could not start the scheduler: {problem}"
+        );
+    }
+    if let Err(problem) = sched::start_reaper() {
         fatal!(
             catalog::SCHEDULER_BRING_UP,
             "could not start the scheduler: {problem}"
