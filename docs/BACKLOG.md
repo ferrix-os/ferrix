@@ -638,7 +638,6 @@ when you take P2 work, or before touching an area to see what is owed there
 
 ### P3 — hardware variants and later stages
 
-* **An early one-shot on an idle processor lost its next deadline (2026-11-05, mk-issues, ledger 7103 (5)).** F-104's first nudge armed the timer 1 us ahead from a drop: AArch64 `--smp 2` hung three boots in three, both vCPUs at `wait_for_work`, the reaper's counts level (`~/.local/share/ferrix/po-2026-11-03/mk-issues/hang0.dump`). The nudge no longer arms anything, but hardware does not promise away a spurious or early timer interrupt, so a machine hang may sit behind this and behind flakes. Owed: a case that arms early from an idle processor. Owner mk-issues.
 * **A block under an `IrqSpinLock` is caught by nothing (2026-11-05, ledger 7103 (8)).** It raises no count, so FX-0503 does not see it, and FX-0537 is for an interrupt; masked alone is legal (`throttle_current`). `may_block` is false under one, so a task's last drop is safe there. A count in dev builds is the way. Owner the PO's queue.
 * **`check-frames`' `boot` label covers two stacks (2026-11-05, ledger 7172 Z2).** The boot's checks run on 16-page workers since mk-boot-time; three frames over ARMv7-A's guard stand there, not on the boot stack. A `worker` label with a limit is owed. Owner mk-issues.
 * **`bench-rows` does not link for AArch64 on nazuna (2026-11-05, ledger 7172 Z3).** `linux-rows-test` for aarch64-unknown-linux-musl, cc as linker. AArch64's fork rows are owed against F-101's six pages, and ledger 7033 D5's 5% applies then. Owner the PO's queue.

@@ -13,6 +13,8 @@
 
 use core::sync::atomic::{AtomicU64, Ordering};
 
+use ferrix_sync::IrqControl;
+
 use crate::arch;
 use crate::irq::{self, IrqError};
 
@@ -181,7 +183,12 @@ fn armed_slot() -> Option<&'static AtomicU64> {
 /// Called with interrupts masked on the processor whose timer it arms, as the
 /// scheduler calls it.
 pub fn after(nanos: u64) {
+    // Masked from the clock's read to the record: a caller out of `after_from`'s contract, with
+    // a one-shot this short firing between the arm and the record, leaves a deadline on record
+    // with nothing armed, and every later ask goes without (`L.sched.174`).
+    let saved = <arch::Irq as IrqControl>::disable();
     after_from(nanos, now_nanos());
+    <arch::Irq as IrqControl>::restore(saved);
 }
 
 /// [`after`], for a caller that read the clock at `now` a moment ago: the
@@ -191,6 +198,10 @@ pub fn after(nanos: u64) {
 /// late that is); the bound kept after an arm is still read after the
 /// write.
 pub fn after_from(nanos: u64, now: u64) {
+    debug_assert!(
+        !arch::interrupts_enabled(),
+        "timer::after_from with interrupts open: an expiry before its record loses the next one"
+    );
     // A load first, and the swap only for a periodic timer: a one-shot asked
     // for at every switch makes no read-modify-write here.
     let periodic =

@@ -1333,6 +1333,17 @@ package FerrixSchedRequirements {
             attribute :>> parent = "H.SCHED.1";
             attribute :>> unit = ("sched::leftovers::reaper", "sched::leftovers::nudge");
         }
+        requirement <'L.sched.174'> anEarlyExpiryLosesNoDeadline : ItemLowLevel {
+            attribute :>> statement = "timer::after shall hold interrupts masked from its clock read to its
+                record, and timer::after_from's callers shall hold them, so that an expiry between the arm
+                and the record cannot leave a deadline on record with nothing armed; a sleeper on an idle
+                processor shall wake at its deadline.";
+            attribute :>> criterion = "A task asks an expiry 1 us away and sleeps 20 ms on an otherwise idle
+                processor, two processors or more, on one processor not run: each wakes within the case's
+                bound. An unmasked after_from in a dev boot stops on its assertion.";
+            attribute :>> parent = "H.SCHED.1";
+            attribute :>> unit = ("timer::after", "timer::after_from");
+        }
         requirement <'L.sched.173'> anInterruptMayNotBlock : ItemLowLevel {
             attribute :>> statement = "A task blocking from an interrupt handler shall stop the machine as
                 FX-0537, on every profile. A lock that raises the count held across a block is FX-0503's.";

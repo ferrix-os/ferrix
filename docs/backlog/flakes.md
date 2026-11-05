@@ -663,3 +663,9 @@ what would reach them is what reaches every image (RESTRICTED-EXIT.md). To be ru
 | Item | Owner | Stage |
 |---|---|---|
 | **Open (2026-11-05, mk-boot-time).** `test-boot --arch x86_64 --accel kvm --smp 2`, `logs/queue/mbt-b0-kvms2.log` on f3ea80a3f, load 4: stage 9's timer check, "arms case d: an arm in the fired buffer was not fired by evacuation", at 23.53 s. mk-ibpb saw the same sentence under `--set smt=off` on TCG (the section above). The case files an arm 1 ms on, spins 2 ms masked, and asks evacuation to have fired it. Again `mbt-w1-a32s2-33` on a6df1def3, ARMv7-A `--smp 2`, 1 of 32 boots at load 9. **Traced:** `take_due_timers` stops at a sleeping task, as the interrupt's pass must, so a task whose sleep ended inside the case's 2 ms masked wait, ahead of the arm (the terminal's 20 ms poll, on that processor), kept the arm out of the fired buffer. A sleeper planted there fails the case every boot (mbt-c5-plant-old). The product is right: evacuation carries the arm off as filed. The case now tries a fresh arm up to five times; a buffer evacuation does not fire fails them all. | mk-boot-time | 9 |
+
+### fl-100
+
+| Item | Owner | Stage |
+|---|---|---|
+| **Open (2026-11-05, mk-issues).** A local, ungated `test-boot --arch aarch64 --accel tcg --smp 2`, no dump, `po-2026-11-03/mk-issues/early2.log`: nothing after stage 9's `spawn` line at 18.18 s to the 120 s limit, no panic, no dump. The three boots after it under the dump catcher passed. One sighting; fl-092's silent AArch64 boot in shape, and no relation to it or to the early-expiry fix is claimed. Not traced. A next one gets a dump (`mk-issues/hang.py`). | mk-issues | 9 |

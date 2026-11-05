@@ -180,6 +180,7 @@ static FINISHED: WaitQueue = WaitQueue::new();
 pub fn run(topology: &Topology) -> Result<Report, &'static str> {
     poison_record()?;
     check_a_last_drop_where_sleeping_is_forbidden()?;
+    check_an_early_expiry_does_not_lose_the_next()?;
     let mut report = Report::default();
     // Taken before anything is started, so that what is counted is what these
     // checks' own thousand threads cost: see `Report::shootdowns`.
@@ -2571,3 +2572,48 @@ fn check_a_last_drop_where_sleeping_is_forbidden() -> Result<(), &'static str> {
 /// How long the case above gives the reaper. A nudge is one timer interrupt
 /// and a switch; this is the row's bound under a loaded emulator, not a claim of speed.
 const LAST_DROP_BOUND_NANOS: u64 = 5_000_000_000;
+
+/// Set by [`sleeps_past_an_early_expiry`] when its sleep is over.
+static EARLY_EXPIRY_WOKE: AtomicBool = AtomicBool::new(false);
+
+/// Ask for an expiry almost at once, then sleep past it on a processor with nothing else to run.
+fn sleeps_past_an_early_expiry(_: usize) {
+    crate::timer::after(1_000);
+    super::sleep_for(20_000_000);
+    EARLY_EXPIRY_WOKE.store(true, Ordering::Release);
+}
+
+/// A processor idle with a sleeper filed, whose one-shot fires ahead of the sleeper's deadline,
+/// still wakes it at that deadline: an expiry early or spurious does not lose the next one.
+///
+/// Verifies: L.sched.174
+fn check_an_early_expiry_does_not_lose_the_next() -> Result<(), &'static str> {
+    let processors = crate::smp::count();
+    let Some(here) = super::this_cpu() else {
+        return Err("no processor");
+    };
+    if processors < 2 {
+        return Ok(());
+    }
+    let other = (here + 1) % processors;
+    for round in 0..8 {
+        EARLY_EXPIRY_WOKE.store(false, Ordering::Release);
+        let _task = super::spawn_on(
+            "early-expiry",
+            sleeps_past_an_early_expiry,
+            0,
+            NICE_0_WEIGHT,
+            other,
+            CpuSet::of(other),
+        )?;
+        let deadline = crate::timer::now_nanos().saturating_add(5_000_000_000);
+        while !EARLY_EXPIRY_WOKE.load(Ordering::Acquire) {
+            if crate::timer::now_nanos() > deadline {
+                crate::console::println!("  tasks    lost to an early expiry in round {round}");
+                return Err("a sleeper on an idle processor was lost to an early expiry");
+            }
+            super::sleep_for(1_000_000);
+        }
+    }
+    Ok(())
+}
