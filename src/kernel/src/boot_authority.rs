@@ -34,6 +34,15 @@ use crate::user::space::AddressSpace;
 use crate::user::vmo::Vmo;
 use crate::vmap;
 
+/// The boot's check of regions and restricted mode, which `main.rs` hands in: product code
+/// names no check (ledger 7184 B4.1, B4.3).
+static REGION_CHECK: ferrix_sync::Once<fn()> = ferrix_sync::Once::new();
+
+/// Hand in [`REGION_CHECK`].
+pub fn set_region_check(check: fn()) {
+    let _ = REGION_CHECK.call_once(|| check);
+}
+
 /// Start the first processes, in `MICROKERNEL.md` §5's order, `linuxd` last:
 /// its first program is init, which expects its devices' drivers to be there.
 pub fn run(view: &ferrix_bootinfo::BootView<'_>) {
@@ -44,6 +53,12 @@ pub fn run(view: &ferrix_bootinfo::BootView<'_>) {
     devmgr::register_reader(read_file);
     read_certified_list();
     flag_nodes();
+    // Before K16's seal and before any process but its own: what it reads is the kernel's.
+    if crate::boot_checks::run()
+        && let Some(check) = REGION_CHECK.get()
+    {
+        check();
+    }
     let served = start_manager();
     let (block_cores, files, further, netd_ends) = match served {
         Some(ends) => (ends.block_cores, ends.files, ends.further, ends.netd_ends),

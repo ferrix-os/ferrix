@@ -2016,14 +2016,12 @@ pub static STAGE9_LEVELS: Explanation = Explanation {
 };
 
 // CHECKS-ONLY: stages_check.rs
-/// For `check_regions` in `stages_check.rs`, when `object::region_check::run`
-/// fails.
+/// For `syscall::region_check::check`, when its `run` fails.
 #[doc(hidden)]
-#[cfg(not(ferrix_shape = "micro"))]
 pub static STAGE9_REGIONS: Explanation = Explanation {
     code: "FX-0925",
     title: "a shared process or restricted mode did not do what K1 and K11 say",
-    meaning: "`object::region_check::run` makes a region and a process of it and runs \
+    meaning: "`syscall::region_check::run` makes a region and a process of it and runs \
               `restricted-check` in its normal mode: a program in restricted mode comes back on \
               a system call, an unresolved fault and a kick with the registers K1 §2.2 says; a \
               forged context is refused and changes nothing; nothing of the region is reachable \
@@ -2034,7 +2032,7 @@ pub static STAGE9_REGIONS: Explanation = Explanation {
          the line above the panic names the program's failing case.",
         "`/sbin/restricted-check` is missing from the initramfs, or its layout has moved.",
     ],
-    see: "src/kernel/src/object/region_check.rs; src/kernel/src/arch/x86_64/restricted.rs; \
+    see: "src/kernel/src/syscall/region_check.rs; src/kernel/src/arch/x86_64/restricted.rs; \
           src/user/system/native/restricted-check; docs/microkernel/K1.md; \
           docs/microkernel/K11.md",
 };

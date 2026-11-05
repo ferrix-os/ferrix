@@ -23,8 +23,8 @@ Its loader starts only a verifying slot, so each image built for it signs one le
 |---|---|---|---|---|
 | both | `personality=user` | `adhoc` | x86-64: rows B.3. AArch64: `ferrix-linuxd` does not compile (144 errors, most in `lift/core/restricted.rs`'s register frame; `lift/core/arch` has `x86_64` only) | Port lift-core and linuxd to AArch64; run B.3's rows |
 | both | `fs=server` | `yes` | AArch64 not shown | `built_on = ["x86_64"]` now. The refusal there was K14 flagging functions behind a translating SMMUv3 (`would_translate`, ledger 7166): fixed. Rows under `fast`'s values on the side commit: `mkf2g-init-a64`, `mkf2a-btrfs-a64`, `mkf2f-rst-a64`. Widen at the flip with B.3's rows on its hash |
-| `fast` | `partition_speculation=partition` | `adhoc` | no check has a user host | B.4: a host for restricted-check; none at an exit and one at a partition switch, with `test-netd`'s second partition; control swapping them |
-| `max` | `partition_speculation=exit` | `adhoc` | as above | B.4: barriers issued equal exits, on KVM; AArch64 reads "decided" on TCG, labelled |
+| `fast` | `partition_speculation=partition` | `adhoc` | the partition switch's row | Host: `syscall::region_check` on a Bare caller, every image (7184 B4.1). None at an exit: the regions line, held by `regions_problem`, `mkf2j-c-partition` FIRED. Owed: one at a partition switch, with a second partition |
+| `max` | `partition_speculation=exit` | `adhoc` | a row of the value | B.4: the host and `regions_problem` are in: barriers equal exits, on KVM; AArch64 reads "decided" on TCG, labelled, BACKLOG's real core |
 | `fast` | `restricted_fastpath=on` | `adhoc` | x86-64 only: no AArch64 fast path | B.5: Z2, Z3, Z4; the fast path's code review; 6093 (1)-(12); `test-linuxd`, `test-threads --smp 2`, `test-shell`, `test-rustc`; the flag's text says AArch64 holds none, nm shows it |
 | `max` | `restricted_fastpath=off` | `adhoc` | | B.5: general path, nm shows no fast function |
 | `fast` | `fault_ahead=on` | `adhoc` | E1, E3, E4, A6 | B.6: build E1 and E4, E3 on and off at the tip, A6's case |

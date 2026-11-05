@@ -164,8 +164,6 @@ pub mod object {
     #[cfg(ferrix_load_built = "ring0")]
     pub mod quota_check;
     #[cfg(ferrix_load_built = "ring0")]
-    pub mod region_check;
-    #[cfg(ferrix_load_built = "ring0")]
     pub mod sealing_check;
     #[cfg(ferrix_load_built = "ring0")]
     pub mod sender_check;

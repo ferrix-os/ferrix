@@ -21,7 +21,7 @@ use ferrix_native_abi::types::{MAP_EXECUTE, MAP_READ, MAP_WRITE};
 
 use crate::discovery;
 use crate::object::Object;
-use crate::object::check::Side;
+use crate::syscall::native_side_check::NativeSide as Side;
 use crate::object::job::Job;
 use crate::object::quota::Resource;
 use crate::user::space::AddressSpace;
@@ -99,9 +99,60 @@ pub struct Report {
     /// The restricted row: a Linux number's round trip through restricted mode,
     /// the median of five p50s, in nanoseconds (`MICROKERNEL.md` §7).
     pub row_ns: u64,
+    /// The exits the program counted across those barriers, whatever they decided.
+    pub exits: u64,
     /// Whether those were issued, not only decided: a model without `IBPB`
     /// decides and issues none.
     pub issued: bool,
+}
+
+/// Stage 9's check of regions and restricted mode, said on its line. A kernel of any
+/// shape runs it: under `personality=user` from the first processes' start.
+///
+/// Halts rather than returning, as every other stage's check does.
+pub fn check() {
+    if !crate::arch::HAS_RESTRICTED {
+        crate::println!("  regions  none on this architecture: K1's and K11's calls answer ENOSYS");
+        return;
+    }
+    let free = crate::mm::free_frames();
+    let ran = run();
+    if cfg!(ferrix_personality = "user") {
+        // What it leaves in a kernel about to seal: said in frames (ledger 7216 H.4).
+        let _ = crate::sched::wait_until_reaper_quiet(1_000_000_000);
+        crate::println!(
+            "  regions  the check left {} frames of {free} behind",
+            free.saturating_sub(crate::mm::free_frames())
+        );
+    }
+    match ran {
+        Ok(report) => crate::println!(
+            "  regions  restricted-check held every case: {} sweep of a restricted root over \
+             {} leaves found nothing of the region; {} barriers on {} exits under `{}`{}; \
+             restricted-getppid {} ns",
+            report.sweeps,
+            report.leaves,
+            report.barriers,
+            report.exits,
+            if cfg!(ferrix_partition_speculation = "partition") {
+                "partition"
+            } else {
+                "exit"
+            },
+            if cfg!(ferrix_partition_speculation = "partition") {
+                " (none at an exit, by `partition`)"
+            } else if report.issued {
+                ""
+            } else {
+                " (decided: this processor model has no barrier to issue)"
+            },
+            report.row_ns,
+        ),
+        Err(problem) => crate::panic::fatal!(
+            crate::panic::catalog::STAGE9_REGIONS,
+            "stage 9 region and restricted-mode check failed: {problem}"
+        ),
+    }
 }
 
 /// A handle as a register.
@@ -131,7 +182,6 @@ const fn reg(handle: Handle) -> u64 {
 pub fn run() -> Result<Report, &'static str> {
     let side = Side::new()?;
     let _ = side
-        .process
         .space()
         .map_anonymous(BUFFER_AT, BUFFER_BYTES, ferrix_vma::VmaFlags::READ_WRITE)
         .map_err(|_| "no room for the check's buffers")?;
@@ -139,7 +189,6 @@ pub fn run() -> Result<Report, &'static str> {
     // As the partition manager will: a job, a region, a process of it.
     let root = Job::new_root().map_err(|_| "no memory for the check's job")?;
     let root_handle = side
-        .process
         .with_handles(|table| table.insert(Object::Job(Arc::clone(&root)), Rights::JOB))
         .map_err(|_| "no room for the check's job")?;
     let job = side.handle(nr::JOB_CREATE, &[reg(root_handle), 0], "job_create failed")?;
@@ -191,7 +240,15 @@ pub fn run() -> Result<Report, &'static str> {
     given[8..12].copy_from_slice(&space.0.to_ne_bytes());
     given[12..].copy_from_slice(&space_given.0.to_ne_bytes());
     side.put(HANDLES_AT, &given)?;
-    side.put(MESSAGE_AT, &[0])?;
+    // Its one byte: whether this kernel compiled `PROCESS_START` out (K15 §2.2).
+    side.put(
+        MESSAGE_AT,
+        &[if cfg!(ferrix_personality = "user") {
+            0x52
+        } else {
+            0
+        }],
+    )?;
     let _ = side
         .call(
             nr::CHANNEL_WRITE,
@@ -293,7 +350,7 @@ fn fault_ends_the_region(side: &Side, root: Handle) -> Result<(), &'static str> 
     wait(side, waiting, Signals::TERMINATED)
         .map_err(|()| "a fault in normal mode left its region's other process running")?;
     // What they held goes back, once the last handles do.
-    let job_object = side.process.with_handles(|table| match table.get(job) {
+    let job_object = side.with_handles(|table| match table.get(job) {
         Ok((Object::Job(job), _)) => Some(Arc::clone(job)),
         _ => None,
     });
@@ -347,7 +404,7 @@ fn refusals(side: &Side, job: Handle) -> Result<(), &'static str> {
 
 /// The space a handle names.
 fn space_of(side: &Side, handle: Handle) -> Result<Arc<AddressSpace>, &'static str> {
-    side.process.with_handles(|table| {
+    side.with_handles(|table| {
         let Ok((Object::Space(space), _)) = table.get(handle) else {
             return Err("a space's handle does not name a space");
         };
@@ -454,7 +511,7 @@ fn wait(side: &Side, handle: Handle, signals: Signals) -> Result<(), ()> {
 /// `word`, modulo how many there are: its way out moves it there.
 fn pin(side: &Side, word: u64) -> Result<bool, &'static str> {
     let handle = Handle(side.get_u32(HANDLES_AT)?);
-    let task = side.process.with_handles(|table| match table.get(handle) {
+    let task = side.with_handles(|table| match table.get(handle) {
         Ok((Object::Thread(thread), _)) => thread.task(),
         _ => None,
     });
@@ -472,7 +529,7 @@ fn pin(side: &Side, word: u64) -> Result<bool, &'static str> {
         ferrix_sched::CpuSet::of(usize::try_from(word).unwrap_or(0) % crate::smp::count())
     };
     let _ = crate::sched::set_affinity(&task, &mask);
-    if let Ok((gone, _)) = side.process.with_handles(|table| table.remove(handle)) {
+    if let Ok((gone, _)) = side.with_handles(|table| table.remove(handle)) {
         crate::object::dispose([gone]);
     }
     Ok(true)
@@ -481,11 +538,11 @@ fn pin(side: &Side, word: u64) -> Result<bool, &'static str> {
 /// Whether the thread named by the message's handle is on processor `word`.
 fn on_processor(side: &Side, word: u64) -> Result<bool, &'static str> {
     let handle = Handle(side.get_u32(HANDLES_AT)?);
-    let task = side.process.with_handles(|table| match table.get(handle) {
+    let task = side.with_handles(|table| match table.get(handle) {
         Ok((Object::Thread(thread), _)) => thread.task(),
         _ => None,
     });
-    if let Ok((gone, _)) = side.process.with_handles(|table| table.remove(handle)) {
+    if let Ok((gone, _)) = side.with_handles(|table| table.remove(handle)) {
         crate::object::dispose([gone]);
     }
     Ok(task.is_some_and(|task| task.cpu() as u64 == word))
@@ -537,6 +594,7 @@ fn serve(
             ASK_COUNT_END => {
                 let (decided, issued) = crate::trap::restricted_barriers();
                 report.barriers = decided - started.0;
+                report.exits = word;
                 report.issued = issued - started.1 == word;
                 // What was issued against what the processor offers, not against the
                 // exit's own answer: a machine with no IBPB issues none.

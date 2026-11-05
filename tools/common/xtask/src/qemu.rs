@@ -828,14 +828,52 @@ const USER_BOOT_LINES: &[(Option<(&str, &str)>, &str)] = &[
     (None, "  sealed   "),
     (None, "  iommu    "),
     (Some(("fs", "server")), "its image's digest checked"),
+    (None, "  regions  restricted-check held every case"),
     (None, "  lift-calls 19 refusals held"),
     (None, LIFTED_BOOTED),
 ];
+
+/// `partition_speculation`'s rule on the regions line (ledger 7011 B.4, 7184 B4.2): under
+/// `exit`, one barrier on each exit; under `partition`, none at an exit, of a count above zero.
+fn regions_problem(lines: &[String], value: Option<&str>) -> Option<String> {
+    const LINE: &str = "  regions  restricted-check held every case";
+    let line = lines.iter().find(|line| line.contains(LINE))?;
+    let barriers = count_before(line, " barriers on ");
+    let exits = count_before(line, " exits under ");
+    if let Some(value) = value
+        && !line.contains(&format!("under `{value}`"))
+    {
+        return Some(format!(
+            "the regions line does not say this build's value: `{}`",
+            line.trim()
+        ));
+    }
+    let held = match value {
+        Some("exit") => barriers.is_some() && barriers == exits && exits > Some(0),
+        Some("partition") => {
+            barriers == Some(0)
+                && exits > Some(0)
+                && line.contains("(none at an exit, by `partition`)")
+        }
+        _ => true,
+    };
+    (!held).then(|| {
+        format!(
+            "the regions line breaks `{}`'s rule: `{}`",
+            value.unwrap_or("?"),
+            line.trim()
+        )
+    })
+}
 
 /// The first of [`USER_BOOT_LINES`] a boot lacks, or the reference's marker it printed.
 fn user_boot_problem(lines: &[String], flags: Option<&crate::flags::Resolved>) -> Option<String> {
     if lines.iter().any(|line| line.contains(SUCCESS_MARKER)) {
         return Some("a personality=user boot printed the reference's marker".to_owned());
+    }
+    let value = flags.and_then(|flags| flags.value("partition_speculation"));
+    if let Some(problem) = regions_problem(lines, value) {
+        return Some(problem);
     }
     USER_BOOT_LINES.iter().find_map(|(flag, text)| {
         let wanted = flag.is_none_or(|(name, value)| {
@@ -5925,6 +5963,24 @@ mod tests {
                 assert!(joined.contains(piece), "`{literal}` is stale at `{piece}`");
             }
         }
+    }
+
+    #[test]
+    fn the_regions_line_is_held_to_nothing_it_has_not_said() {
+        let said = |barriers: u32, exits: u32, value: &str| {
+            lines(&[&format!(
+                "  regions  restricted-check held every case: 1 sweep; {barriers} barriers on {exits} exits under `{value}` (none at an exit, by `partition`); x"
+            )])
+        };
+        let judge = |lines: &[String], value: &str| super::regions_problem(lines, Some(value));
+        assert_eq!(judge(&said(200, 200, "exit"), "exit"), None);
+        assert!(judge(&said(0, 200, "exit"), "exit").is_some());
+        assert!(judge(&said(0, 0, "exit"), "exit").is_some());
+        assert_eq!(judge(&said(0, 200, "partition"), "partition"), None);
+        assert!(judge(&said(200, 200, "partition"), "partition").is_some());
+        assert!(judge(&said(0, 0, "partition"), "partition").is_some());
+        assert!(judge(&said(0, 200, "exit"), "partition").is_some());
+        assert_eq!(super::regions_problem(&lines(&[]), None), None);
     }
 
     #[test]

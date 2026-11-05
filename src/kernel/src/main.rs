@@ -2234,5 +2234,6 @@ fn check_user_shape() {
 fn first_processes(view: &BootView<'_>) {
     #[cfg(ferrix_kernel_memory = "retyped")]
     boot_authority::set_seal_check(mm::seal_check::check);
+    boot_authority::set_region_check(syscall::region_check::check);
     boot_authority::run(view);
 }

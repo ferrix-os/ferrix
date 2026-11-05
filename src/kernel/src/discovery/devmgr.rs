@@ -135,7 +135,7 @@ pub fn register_reader(read: ReadFile) {
     let _ = READ_FILE.call_once(|| read);
 }
 
-// CHECKS-ONLY: object/region_check.rs
+// CHECKS-ONLY: syscall/region_check.rs
 /// Read a whole file as `devmgr`'s files are read: for a boot check's program.
 ///
 /// # Errors

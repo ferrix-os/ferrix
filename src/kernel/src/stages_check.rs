@@ -1482,39 +1482,8 @@ pub(super) fn check_levels() {
 }
 
 /// Stage 9: regions and restricted mode (K1, K11), through a native program.
-///
-/// Halts rather than returning, as every other stage's check does.
 pub(super) fn check_regions() {
-    if !arch::HAS_RESTRICTED {
-        println!("  regions  none on this architecture: K1's and K11's calls answer ENOSYS");
-        return;
-    }
-    match object::region_check::run() {
-        Ok(report) => println!(
-            "  regions  restricted-check held every case: {} sweep of a restricted root over \
-             {} leaves found nothing of the region; {} barriers on {} exits under `{}`{}; \
-             restricted-getppid {} ns",
-            report.sweeps,
-            report.leaves,
-            report.barriers,
-            report.barriers,
-            if cfg!(ferrix_partition_speculation = "partition") {
-                "partition"
-            } else {
-                "exit"
-            },
-            if report.issued {
-                ""
-            } else {
-                " (decided: this processor model has no barrier to issue)"
-            },
-            report.row_ns,
-        ),
-        Err(problem) => fatal!(
-            catalog::STAGE9_REGIONS,
-            "stage 9 region and restricted-mode check failed: {problem}"
-        ),
-    }
+    syscall::region_check::check();
 }
 
 /// Stage 9: the waits on a user address (K5), driven through the native

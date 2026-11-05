@@ -314,6 +314,8 @@
         "syscall/mod.rs",
         "syscall/native.rs",
         "syscall/bare_side_check.rs",
+        "syscall/native_side_check.rs",
+        "syscall/region_check.rs",
         "syscall/native/region.rs",
         "syscall/native_check.rs",
         "syscall/build_check.rs",
@@ -984,11 +986,6 @@
       },
       {
         "file": "object/level_check.rs",
-        "file_ring": "core",
-        "crate": "ferrix-kernel-load"
-      },
-      {
-        "file": "object/region_check.rs",
         "file_ring": "core",
         "crate": "ferrix-kernel-load"
       },

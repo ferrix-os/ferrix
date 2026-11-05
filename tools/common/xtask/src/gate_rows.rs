@@ -431,7 +431,7 @@ const TEST_MITIGATIONS_OFF: &[&str] =
 /// Whether a change to `path` reaches what `mitigations=off` turns off at a
 /// restricted exit: the region check, the speculation decisions, restricted mode.
 fn reaches_mitigations_off(path: &str) -> bool {
-    path == "src/kernel/src/object/region_check.rs"
+    path == "src/kernel/src/syscall/region_check.rs"
         || path.ends_with("/speculation.rs")
         || path.ends_with("/restricted.rs")
 }
@@ -972,7 +972,7 @@ mod tests {
 
     #[test]
     fn a_restricted_exits_barrier_owes_the_build_that_decides_none() {
-        let rows = rows_of(&["src/kernel/src/object/region_check.rs"]);
+        let rows = rows_of(&["src/kernel/src/syscall/region_check.rs"]);
         assert!(
             rows.commands
                 .iter()

@@ -48,7 +48,9 @@
 
 pub mod bare_side_check;
 pub mod native;
+pub mod native_side_check;
 pub mod program;
+pub mod region_check;
 #[cfg(not(ferrix_load_built = "lift"))]
 pub mod rehome_check;
 pub use ferrix_kernel_core::syscall::uaccess;

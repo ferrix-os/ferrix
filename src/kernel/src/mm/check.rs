@@ -123,7 +123,7 @@ pub fn sweep_user_root(space: &crate::user::space::AddressSpace) -> Result<WxRep
     }
 }
 
-// CHECKS-ONLY: object/region_check.rs
+// CHECKS-ONLY: syscall/region_check.rs
 /// Sweep a restricted root (`docs/microkernel/K1.md` §10): no entry at or above
 /// `SHARED_BASE`, and no leaf below it on a frame the region's own tables map.
 /// Answers the leaves walked. Neither the check's program nor any restricted

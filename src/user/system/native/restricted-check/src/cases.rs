@@ -106,6 +106,9 @@ struct Given {
     space: u64,
     /// The region's space.
     region_space: u64,
+    /// What `PROCESS_START` answers a process of a region: `BAD_STATE`, or `ENOSYS` where the
+    /// kernel compiled the call out (`docs/microkernel/K15.md` §2.2). The message's byte says.
+    start_answers: Errno,
 }
 
 /// Ask the check something, and wait for its yes.
@@ -198,6 +201,9 @@ pub(crate) fn run(bootstrap: ferrix_rt::Bootstrap) -> i32 {
     }
 }
 
+/// The check's first byte where this kernel compiled `PROCESS_START` out.
+const START_RETIRED: u8 = 0x52;
+
 /// Take the handles the check sent.
 fn receive(bootstrap: ferrix_rt::Bootstrap) -> Result<Given, i32> {
     let channel = bootstrap.ok_or(95)?;
@@ -229,6 +235,11 @@ fn receive(bootstrap: ferrix_rt::Bootstrap) -> Result<Given, i32> {
         job: u64::from(handles[1]),
         space: u64::from(handles[2]),
         region_space: u64::from(handles[3]),
+        start_answers: if byte[0] == START_RETIRED {
+            Errno::ENOSYS
+        } else {
+            status::BAD_STATE
+        },
     })
 }
 
@@ -596,7 +607,7 @@ fn shared_starts_shared(given: &Given) -> Result<(), i32> {
     // does not hold reads as this case and not as what an open handle leaves.
     let normal_start = refused(
         sys(nr::PROCESS_START, [shared, 0, 0, 0, 0, 0]),
-        status::BAD_STATE,
+        given.start_answers,
         153,
     );
     let normal_run = refused(
@@ -613,9 +624,16 @@ fn shared_starts_shared(given: &Given) -> Result<(), i32> {
         let _ = sys(nr::HANDLE_CLOSE, [shared, 0, 0, 0, 0, 0]);
         return Err(153);
     };
-    let restricted_start = refused_in_restricted(nr::PROCESS_START, [private, 0, 0, 0, 0, 0]);
-    let restricted_run =
-        refused_in_restricted(nr::PROCESS_RUN, [private, IMAGE_AT, STACK_TOP, 0, 0, 0]);
+    let restricted_start = refused_in_restricted(
+        nr::PROCESS_START,
+        [private, 0, 0, 0, 0, 0],
+        given.start_answers,
+    );
+    let restricted_run = refused_in_restricted(
+        nr::PROCESS_RUN,
+        [private, IMAGE_AT, STACK_TOP, 0, 0, 0],
+        status::BAD_STATE,
+    );
     let mut close = at(arch::sys());
     arch::set_call(
         &mut close,
@@ -630,13 +648,13 @@ fn shared_starts_shared(given: &Given) -> Result<(), i32> {
         .and(closed)
 }
 
-/// Case 153's call from restricted mode: `number`, refused `BAD_STATE`.
-fn refused_in_restricted(number: usize, args: [u64; 6]) -> Result<(), i32> {
+/// Case 153's call from restricted mode: `number`, refused `want`.
+fn refused_in_restricted(number: usize, args: [u64; 6], want: Errno) -> Result<(), i32> {
     let mut context = at(arch::sys());
     arch::set_call(&mut context, number as u64, args);
     fault_exit(&enter(&context), arch::VECTOR_BREAKPOINT, 153)?;
     hold(
-        arch::result_of(&read()?) as i64 == status::BAD_STATE.as_return_value() as i64,
+        arch::result_of(&read()?) as i64 == want.as_return_value() as i64,
         153,
     )
 }
