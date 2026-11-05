@@ -23,7 +23,11 @@ from user mode, and today's harness (`object/check.rs`'s `Side`, `syscall/check.
   is kept for M5), 11 or 13 on AArch64 and x86-64 (the two time cases where the boot counts kernel time), and the
   arguments case on x86-64 alone. So L.object.107 and 108 count on all three; L.x86_64.55, 68 on x86-64; the rest on
   AArch64 and x86-64. `attempted`'s time cases read a fraction of time: one run in three holding passes, so a charge
-  wrong two times in three would (6946 (2)). Dispatch's calls claim nothing about the entry; the
+  wrong two times in three would (6946 (2)). Calls read at half of one run; faults by difference at half, between the
+  program and the same program whose pages the host touched first, the job's fault count showing the difference
+  (ledger 7058, fl-098). Those two count only on a boot where the 13 run: x86-64 under TCG does not count kernel time, stops
+  at 11 and prints no share, and ARMv7-A answers its 2 with no shares, so this case shows nothing for L.sched.81 or .82 there. They show the calls and faults are counted, not how much of them is: a
+  stamp placed late stays inside half. Dispatch's calls claim nothing about the entry; the
   stubs are that evidence, and a charge or job case runs as a thread of the `Bare` (6110 (5)).
 * **Class B's ids on it**, each with a sabotage in product code: L.sched.30, 31, 33, 35, 80, 81, 82, 3, 4; L.trap.2;
   L.user.61, 87, 96; L.x86_64.55, 59, 68, 79; L.object.100, 107, 108; H.QUOTA.6, 10, 11, 12; H.SCHED.14; H.MEM.8; and the

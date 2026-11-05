@@ -13,6 +13,7 @@ use alloc::vec::Vec;
 use ferrix_bootinfo::PAGE_SIZE;
 use ferrix_vma::VmaFlags;
 
+use crate::console::println;
 use crate::object::bare::Bare;
 use crate::object::job::Job;
 use crate::object::quota::{Counter, Mark, Resource};
@@ -53,6 +54,8 @@ struct Work {
     pages: u32,
     spins: u32,
     status: u32,
+    /// Whether the host touches its pages before it starts, so that it takes no fault.
+    touched: bool,
 }
 
 /// One program in a job of its own.
@@ -140,6 +143,12 @@ fn put_text(space: &AddressSpace, program: &[u8], work: Work) -> Result<(), &'st
             VmaFlags::READ_WRITE,
         )?;
     }
+    if work.touched {
+        for page in 0..u64::from(work.pages) {
+            uaccess::copy_to_user(space, PAGES_AT + page * PAGE_SIZE, &[0])
+                .map_err(|_| "bare: no copy")?;
+        }
+    }
     map(
         STACK_TOP - 4 * PAGE_SIZE,
         4 * PAGE_SIZE,
@@ -154,6 +163,8 @@ struct Charged {
     runtime: u64,
     kernel: u64,
     preempted: u64,
+    /// Page faults its job counted.
+    faults: u64,
 }
 
 /// Run `works` together on `cpu`, and answer what each was charged, having ended
@@ -161,8 +172,11 @@ struct Charged {
 fn run_charged(works: &[Work], cpu: usize) -> Result<Vec<Charged>, &'static str> {
     let mut sides = Vec::new();
     let mut tasks = Vec::new();
+    let mut jobs = Vec::new();
     for work in works {
-        let side = BareSide::new(*work)?;
+        let job = Job::new_root().map_err(|_| "bare: no job")?;
+        let side = BareSide::in_job(*work, Arc::clone(&job))?;
+        crate::fallible::try_push(&mut jobs, job).map_err(|_| "bare: no memory")?;
         crate::fallible::try_push(&mut tasks, side.start(Some(cpu))?)
             .map_err(|_| "bare: no memory")?;
         crate::fallible::try_push(&mut sides, side).map_err(|_| "bare: no memory")?;
@@ -174,7 +188,7 @@ fn run_charged(works: &[Work], cpu: usize) -> Result<Vec<Charged>, &'static str>
         }
     }
     let mut charged = Vec::new();
-    for task in &tasks {
+    for (task, job) in tasks.iter().zip(&jobs) {
         crate::sched::wait_until_gone(task, PATIENCE_NANOS)?;
         crate::fallible::try_push(
             &mut charged,
@@ -182,6 +196,7 @@ fn run_charged(works: &[Work], cpu: usize) -> Result<Vec<Charged>, &'static str>
                 runtime: task.runtime(),
                 kernel: task.kernel_time(),
                 preempted: task.preemptions(),
+                faults: job.counted(Counter::Faults),
             },
         )
         .map_err(|_| "bare: no memory")?;
@@ -194,29 +209,57 @@ fn spun_as_user(one: Charged) -> bool {
     one.runtime != 0 && one.kernel.saturating_mul(4) < one.runtime
 }
 
-/// Whether it did nothing but enter the kernel and was charged over half of it.
+/// Whether what it did is at least half kernel time, L.sched.81's and L.sched.82's
+/// criterion. A share and not an amount: the entry and exit stubs' instructions are the
+/// program's by L.sched.81, so the share moves with the processor and the build (62% to
+/// 94% on the hosts in `docs/backlog/flakes.md`, FX-0936) and no higher line is the
+/// requirement's.
 fn mostly_kernel(one: Charged) -> bool {
-    // Three quarters, not half: the program's end is kernel time too, and without its
-    // faults counted it reaches near half alone (`bh-82`).
-    one.kernel.saturating_mul(4) >= one.runtime.saturating_mul(3)
+    one.kernel.saturating_mul(2) >= one.runtime
 }
 
-/// `work` alone on `cpu`, up to [`ATTEMPTS`] times, until `holds`. These cases read a
-/// fraction of time and not a charge, so scheduling is allowed for; it proves the rule
-/// held in one run of three, and a charge wrong two times in three passes (ledger 6946).
+/// What share of `one`'s runtime was kernel time, in percent.
+fn percent(one: Charged) -> u64 {
+    one.kernel
+        .saturating_mul(100)
+        .checked_div(one.runtime)
+        .unwrap_or(0)
+}
+
+/// Say what a failed attempt was charged: a failure on a host out of reach says nothing
+/// otherwise (ledger 6989).
+fn print_attempt(attempt: usize, one: Charged) {
+    println!(
+        "  bare     attempt {attempt} of {ATTEMPTS}: {} ns kernel time of {} ns runtime, cut {} times, {} faults",
+        one.kernel, one.runtime, one.preempted, one.faults,
+    );
+}
+
+/// `run` up to [`ATTEMPTS`] times, until what it answers `holds`, and answer that. These
+/// cases read a fraction of time and not a charge, so scheduling is allowed for; it proves
+/// the rule held in one run of three, and a charge wrong two times in three passes (ledger
+/// 6946).
 fn attempted(
-    work: Work,
-    cpu: usize,
+    mut run: impl FnMut() -> Result<Charged, &'static str>,
     holds: fn(Charged) -> bool,
     failure: &'static str,
-) -> Result<(), &'static str> {
-    for _ in 0..ATTEMPTS {
-        let charged = run_charged(core::slice::from_ref(&work), cpu)?;
-        if charged.first().is_some_and(|one| holds(*one)) {
-            return Ok(());
+) -> Result<Charged, &'static str> {
+    for attempt in 1..=ATTEMPTS {
+        let one = run()?;
+        if holds(one) {
+            return Ok(one);
         }
+        print_attempt(attempt, one);
     }
     Err(failure)
+}
+
+/// `work` alone on `cpu`, once, and what it was charged.
+fn alone(work: Work, cpu: usize) -> Result<Charged, &'static str> {
+    run_charged(core::slice::from_ref(&work), cpu)?
+        .first()
+        .copied()
+        .ok_or("bare: a program was charged nothing")
 }
 
 /// L.sched.80: a program's time in user mode is not kernel time, however it last
@@ -233,9 +276,11 @@ fn user_time_is_not_kernel_time(cpu: usize) -> Result<(), &'static str> {
         status: STATUS,
         ..Work::default()
     };
-    attempted(spin, cpu, spun_as_user, SPUN)?;
-    attempted(Work { calls: 1, ..spin }, cpu, spun_as_user, SPUN)?;
-    attempted(Work { pages: 1, ..spin }, cpu, spun_as_user, SPUN)?;
+    let _ = attempted(|| alone(spin, cpu), spun_as_user, SPUN)?;
+    let call = Work { calls: 1, ..spin };
+    let _ = attempted(|| alone(call, cpu), spun_as_user, SPUN)?;
+    let page = Work { pages: 1, ..spin };
+    let _ = attempted(|| alone(page, cpu), spun_as_user, SPUN)?;
     for _ in 0..ATTEMPTS {
         let charged = run_charged(&[spin, spin], cpu)?;
         if charged
@@ -248,32 +293,62 @@ fn user_time_is_not_kernel_time(cpu: usize) -> Result<(), &'static str> {
     Err("bare: two programs on one processor were not both cut in user mode, charged as user time")
 }
 
-/// L.sched.81, L.sched.82: a program's calls and faults are kernel time.
+/// Whether `faulted` took [`PAGES`] faults that `touched` did not, and they cost at least
+/// half kernel time. Any other count shows no difference of faults, whatever the times say.
+fn faults_were_kernel_time(faulted: Charged, touched: Charged) -> bool {
+    let runtime = faulted.runtime.saturating_sub(touched.runtime);
+    let kernel = faulted.kernel.saturating_sub(touched.kernel);
+    faulted.faults.saturating_sub(touched.faults) >= u64::from(PAGES)
+        && runtime != 0
+        && kernel.saturating_mul(2) >= runtime
+}
+
+/// L.sched.81, L.sched.82: a program's calls and faults are kernel time, each at least
+/// half of what it costs. This shows they are counted, not how much of them is: a stamp
+/// placed late stays inside half.
+///
+/// Faults by difference: the same program with its pages touched by the host before it
+/// starts has the same loop and the same end, and takes none of those faults, which its
+/// job's count shows. Unmapping what it touched is kernel time near half of a run with no
+/// fault charged at all, so a share of the one run could not tell them apart (`rbh-82`).
+/// Answers the two shares, in percent.
 ///
 /// Verifies: L.sched.81, L.sched.82, H.SCHED.14
-fn calls_and_faults_are_kernel_time(cpu: usize) -> Result<(), &'static str> {
+fn calls_and_faults_are_kernel_time(cpu: usize) -> Result<(u64, u64), &'static str> {
     let calls = Work {
         calls: CALLS,
         status: STATUS,
         ..Work::default()
     };
-    attempted(
-        calls,
-        cpu,
+    let charged_calls = attempted(
+        || alone(calls, cpu),
         mostly_kernel,
         "bare: a program's system calls were charged as user time",
     )?;
-    let pages = Work {
+    let faults = Work {
         pages: PAGES,
         status: STATUS,
         ..Work::default()
     };
-    attempted(
-        pages,
-        cpu,
-        mostly_kernel,
-        "bare: a program's page faults were charged as user time",
-    )
+    let touched = Work {
+        touched: true,
+        ..faults
+    };
+    for attempt in 1..=ATTEMPTS {
+        let one = alone(faults, cpu)?;
+        let other = alone(touched, cpu)?;
+        if faults_were_kernel_time(one, other) {
+            let difference = Charged {
+                runtime: one.runtime.saturating_sub(other.runtime),
+                kernel: one.kernel.saturating_sub(other.kernel),
+                ..one
+            };
+            return Ok((percent(charged_calls), percent(difference)));
+        }
+        print_attempt(attempt, one);
+        print_attempt(attempt, other);
+    }
+    Err("bare: a program's page faults were charged as user time")
 }
 
 /// L.trap.2: a fault in a mapped region makes the mapping true and the instruction is
@@ -387,12 +462,13 @@ fn a_quota_cuts_a_program_alone(cpu: usize) -> Result<(), &'static str> {
     if side.ended()? != STOPPED {
         return Err("bare: a program under cpu.max kept another status");
     }
+    // On every boot: a share used as a limit is read on hosts out of reach too (ledger 7058).
+    println!(
+        "  bare     under cpu.max 20000 100000 a program ran {} of {} us",
+        ran / 1000,
+        wall / 1000
+    );
     if ran.saturating_mul(12) < wall || ran.saturating_mul(3) > wall.saturating_mul(2) {
-        crate::console::println!(
-            "  bare     under cpu.max 20000 100000 a program ran {} of {} us",
-            ran / 1000,
-            wall / 1000
-        );
         return Err("bare: a program alone on its processor was not held to its cpu.max");
     }
     if job.counted(Counter::Throttled) < 3 {
@@ -697,18 +773,31 @@ fn a_job_says_who_is_frozen() -> Result<(), &'static str> {
     Ok(())
 }
 
+/// What [`run`] found.
+#[derive(Clone, Copy, Debug)]
+pub struct Report {
+    /// How many groups of cases ran.
+    pub cases: u32,
+    /// Kernel time's share of a program's calls and of its faults, in percent, on a
+    /// boot that counts kernel time.
+    pub shares: Option<(u64, u64)>,
+}
+
 // CHECKS-ONLY: stages_check.rs
 /// Every case: how many ran, none where the kernel does not count kernel time.
 ///
 /// # Errors
 ///
 /// The first that did not hold.
-pub fn run() -> Result<u32, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     over_its_mark_a_job_gives_back()?;
     a_job_says_who_is_frozen()?;
     // ARMv7-A has no K11: its native programs' end is the Linux one, until M5.
     if !crate::arch::HAS_RESTRICTED {
-        return Ok(2);
+        return Ok(Report {
+            cases: 2,
+            shares: None,
+        });
     }
     a_fault_is_resolved()?;
     a_store_copies_for_the_side_that_writes()?;
@@ -725,9 +814,15 @@ pub fn run() -> Result<u32, &'static str> {
         a_program_has_its_argument_and_its_calls_theirs(program)?;
     }
     if !crate::sched::vtime::counting() {
-        return Ok(11);
+        return Ok(Report {
+            cases: 11,
+            shares: None,
+        });
     }
     user_time_is_not_kernel_time(cpu)?;
-    calls_and_faults_are_kernel_time(cpu)?;
-    Ok(13)
+    let shares = calls_and_faults_are_kernel_time(cpu)?;
+    Ok(Report {
+        cases: 13,
+        shares: Some(shares),
+    })
 }

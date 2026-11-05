@@ -225,6 +225,9 @@ do not need it. The review checks the rules the evidence rests on:
   `TRACEABILITY.md` rows that turn reached or not reached are read and
   explained (finding F-62).
 
+A share of time used as a threshold in an item check states its figures, from a dev
+and a `--release` kernel on two hosts, before review (ledger 7058, FX-0936).
+
 The review is internal, not independent verification in the standards'
 sense (F-27, F-29).
 

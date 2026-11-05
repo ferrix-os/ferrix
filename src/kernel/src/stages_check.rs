@@ -1454,14 +1454,18 @@ pub(super) fn check_build() {
 }
 
 pub(super) fn check_bare() {
-    let cases = match syscall::bare_side_check::run() {
-        Ok(cases) => cases,
+    let report = match syscall::bare_side_check::run() {
+        Ok(report) => report,
         Err(problem) => fatal!(catalog::STAGE9_BARE, "{problem}"),
     };
     println!(
-        "  bare     {cases} groups of cases on programs no personality holds: a fault resolved, user \
-         time apart from a call's and a fault's, each its own way back"
+        "  bare     {} groups of cases on programs no personality holds: a fault resolved, user \
+         time apart from a call's and a fault's, each its own way back",
+        report.cases,
     );
+    if let Some((calls, faults)) = report.shares {
+        println!("  bare     kernel time: 50000 system calls {calls}%, 2048 page faults {faults}%");
+    }
 }
 
 pub(super) fn check_spaces() {

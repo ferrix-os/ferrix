@@ -535,6 +535,8 @@ log path and commit; a new sighting is added to its row the day it is seen.
 | Restricted-check's case 82 once under TCG on an on image, and K1's check owes both figures (2026-11-04, ledger 6869). [more](backlog/flakes.md#fl-093) | 9 |
 | test-ipc-equiv's on image panicked once, serial lost; `gate.sh` should keep a failed run's serial (2026-11-04, ledger 6869). [more](backlog/flakes.md#fl-094) | 9 |
 | `test-mce-restart-off`: the banks' page in the loader's hands (row fixed), and one machine that did not reset after its panic, not traced (2026-11-04, ledger 6766). [more](backlog/flakes.md#fl-092) | 8 |
+| `ferrix_cpio::file_named` reads `.` as the empty name, so asking `""` answers a regular file named `.`, which only a malformed archive holds (ledger 7081 D.2, not a finding: the archive is measured by the build). It refuses an empty ask or never matches `.`, in the item crate under its own diff check; the host test names it, cpio_parse's oracle states the rule instead of copying the reader, and L.object.335's statement is checked. | open | 9 |
+| FX-0936 on CI: bare's time case read a share of time fixed from a dev kernel on one host; not a flake, done 2026-11-05 (ledger 6990, 7058). [more](backlog/flakes.md#fl-098) | mk-flip | 9 |
 | `charge_kernel` at the limit refuses without reclaiming: an `open` near `memory.max` answered ENOMEM beside file cache a reclaim would have freed, `pgscan` 0 (2026-11-04, `test-container`'s walk, for the PO's queue). [more](backlog/flakes.md#fl-096) | 13 |
 | Stage 9's timer check: "an early wake took out more or less than its own entry", once, `test-init --arch aarch64 --smp 2` (2026-11-04, K10's check, not traced). [more](backlog/flakes.md#fl-090) | 9 |
 

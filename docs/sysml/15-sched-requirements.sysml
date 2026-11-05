@@ -806,7 +806,9 @@ package FerrixSchedRequirements {
                 loop is charged at least half its runtime as kernel time, in one of
                 three runs; with
                 x86-64's entry stamp taken out, or on AArch64 and ARMv7-A the
-                dispatcher's, the case fails with its sentence.";
+                dispatcher's, the case fails with its sentence. Stage 9's bare
+                case holds the same half on x86-64 and AArch64, on a program no
+                personality holds.";
             attribute :>> parent = "H.SCHED.14";
             attribute :>> unit = ("sched::vtime::entered", "sched::vtime::settle",
                 "sched::vtime::direct_switch",
@@ -825,7 +827,9 @@ package FerrixSchedRequirements {
                 once is charged at least half its runtime as kernel time, in one of
                 three runs; with the
                 dispatcher's entry stamp taken out on x86-64, where system calls do
-                not pass through it, the case fails with its sentence.";
+                not pass through it, the case fails with its sentence. Stage 9's bare
+                case holds half on x86-64 and AArch64 of what 2,048 faults cost, by
+                difference from the same program with its pages touched first.";
             attribute :>> parent = "H.SCHED.14";
             attribute :>> unit = ("sched::vtime::entered",
                 "sched::vtime::trap_entered", "trap::dispatch");
