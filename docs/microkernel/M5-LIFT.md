@@ -180,7 +180,7 @@ separation are not true of it**, and nothing here claims them:
 | a cgroup is a kernel job | a flat kernel job under `linux` stands for one when `job_for_cgroup` asks; it carries no limit, and a native service in it is not in `cgroup.procs` |
 
 So separation between Linux programs and cgroup limits **rest on linuxd**. This is
-accepted dark, at level `none`, with no claim. **No flip of `fast` or `max` until
+accepted dark but for `.route(at)` in `copy_to_user_through`'s present path, which `present` and `desktop` run too (ledger 6923, 6943), at level `none`, with no claim. **No flip of `fast` or `max` until
 the kernel's charging and visible separation are restored for this shape, or the
 ST is rewritten for it**; K3 stays on the table for that. Consultant's default is
 in `morning-questions.md`.
