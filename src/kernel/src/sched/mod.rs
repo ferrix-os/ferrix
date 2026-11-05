@@ -3226,12 +3226,12 @@ pub fn evacuate_with_fired_for_check() {
 }
 
 // CHECKS-ONLY: object/timer_check.rs
-/// How many entries, tasks and timer arms, processor `cpu`'s sleeper set
+/// How many entries, tasks and timer arms, this processor's sleeper set
 /// holds, and how many arms wait in its fired buffer: for the checks.
 #[doc(hidden)]
-pub fn sleepers_on(cpu: usize) -> (usize, usize) {
+pub fn sleepers_here() -> (usize, usize) {
     let saved = <arch::Irq as IrqControl>::disable();
-    let counts = queue_of(cpu).map_or((0, 0), |lock| {
+    let counts = this_cpu().and_then(queue_of).map_or((0, 0), |lock| {
         let queue = lock.lock();
         (queue.sleepers_len(), queue.fired_len())
     });
