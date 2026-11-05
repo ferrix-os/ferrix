@@ -15,16 +15,16 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 192 | 138 | 54 |
-| Low (`L.*`) | 1479 | 1209 | 270 |
+| Low (`L.*`) | 1482 | 1209 | 273 |
 
-3318 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+3320 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 3325 |
+| Named by a low-level requirement | 3327 |
 | Accessors, covered by the requirement they serve | 1402 |
 | Check code in a product file | 124 |
-| Named by none | 1097 |
+| Named by none | 1099 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `ferrix_boot_policy`, `ferrix_sha256`, `ferrix_sigverify`, `ferrix_slots`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -945,6 +945,9 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.object.328` | devmgr's end shall kill the drivers' job and quiesce every device not a safety partition's; a dead driver's pins stay quarantined. | test-first-processes: an image ending at once in devmgr's place, and the kernel's line. | H.DEV.13 | `discovery::devmgr::watch_detached` | `tools/common/xtask/src/qemu.rs::test_first_process_dies` | xtask gate | xtask gate | xtask gate |
 | `L.object.334` | A first process's pages shall be made by the kernel from the bytes of its sealed image, no other copy, and that image's digest recorded on its measured space: the one exception to executable only from sealed. | test-first-processes boots the manager and devmgr so measured; review of boot_authority::load_sealed, its one caller each. | H.DEV.13 | `boot_authority::load_sealed` | `tools/common/xtask/src/qemu.rs::test_first_processes` | xtask gate | xtask gate | xtask gate |
 | `L.object.335` | ferrix_cpio::file_named shall answer the regular file of a safe name, inside the archive's bounds, stop at the first malformed header, allocate nothing and write nothing: ring 0's one parser of the archive under personality=user. | ferrix-cpio's host tests of it, its fuzz target, and a refused archive's boot in test-first-processes. | H.DEV.13 | `ferrix_cpio::file_named` | `src/lib/fs/common/cpio/src/tests.rs::file_named_finds_a_regular_file_of_a_safe_name_and_nothing_else`, `src/lib/fs/common/cpio/src/tests.rs::file_named_sees_no_unsafe_name_and_nothing_past_a_malformed_header` | host test | host test | host test |
+| `L.object.327` | linuxd's end shall kill what remains of its partition's job. | test-partitions: a partition's linuxd dying, its line with the count. | H.DEV.13 | `linuxd_start::start`, `linuxd_start::start_further` | *baselined* | — | — | — |
+| `L.object.346` | A further Linux partition shall be started in a job and a region of its own with the FURTHER row alone: no console, no cores, no devmgr channel, and its end shall kill its job and nothing else. | test-partitions: a second partition runs programs and ends, and one that dies at once, the first going on; Rows::judge at its start; the first's end ends the machine, shown. | H.DEV.13 | `linuxd_start::start_further` | *baselined* | — | — | — |
+| `L.object.347` | With more than one Linux partition, each shall be a speculation domain of its own. | test-partitions reads two distinct non-zero domains from the kernel's lines; n10 FIRED. | H.DEV.13 | `linuxd_start::start` | *baselined* | — | — | — |
 
 ### Decisions
 

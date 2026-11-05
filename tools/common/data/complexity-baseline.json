@@ -60,8 +60,8 @@
       "recursive": false
     },
     "boot_authority.rs::try_start_manager": {
-      "complexity": 42,
-      "lines": 121,
+      "complexity": 47,
+      "lines": 136,
       "recursive": false
     },
     "device.rs::publish": {
@@ -72,6 +72,11 @@
     "discovery/devmgr.rs::request": {
       "complexity": 17,
       "lines": 44,
+      "recursive": false
+    },
+    "discovery/devmgr.rs::start_detached": {
+      "complexity": 17,
+      "lines": 43,
       "recursive": false
     },
     "discovery/devmgr.rs::write_devices": {
@@ -120,8 +125,13 @@
       "recursive": false
     },
     "linuxd_start.rs::start": {
-      "complexity": 34,
-      "lines": 123,
+      "complexity": 37,
+      "lines": 135,
+      "recursive": false
+    },
+    "linuxd_start.rs::start_further": {
+      "complexity": 20,
+      "lines": 103,
       "recursive": false
     },
     "main.rs::bring_up_processors": {
