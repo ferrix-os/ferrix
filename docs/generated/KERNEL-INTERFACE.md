@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2993 declarations in the core's files, 212 in the item's; 232 checks-only.
+2995 declarations in the core's files, 212 in the item's; 232 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2914,6 +2914,7 @@ checks above is `pub` for raised checks (F3).
 | `holds_arm_on` | fn | load (checks) | checks-only |
 | `in_call_here` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `init` | fn | bin |  |
+| `last_drops` | fn | bin |  |
 | `may_block` | fn | item, load |  |
 | `move_hold_max` | fn | load |  |
 | `pending_group_here` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -2940,6 +2941,7 @@ checks above is `pub` for raised checks (F3).
 | `spawn_on` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `spawn_on_in` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `spawn_user` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `start_reaper` | fn | bin |  |
 | `summary` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `take_out_without_asking` | fn | load (checks) | checks-only |
 | `tasks_made` | fn | load |  |

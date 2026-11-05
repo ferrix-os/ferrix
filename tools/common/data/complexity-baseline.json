@@ -59,9 +59,14 @@
       "lines": 22,
       "recursive": false
     },
+    "boot_authority.rs::manager_transfers": {
+      "complexity": 25,
+      "lines": 82,
+      "recursive": false
+    },
     "boot_authority.rs::try_start_manager": {
-      "complexity": 51,
-      "lines": 147,
+      "complexity": 25,
+      "lines": 58,
       "recursive": false
     },
     "device.rs::publish": {
@@ -80,8 +85,8 @@
       "recursive": false
     },
     "discovery/devmgr.rs::write_devices": {
-      "complexity": 27,
-      "lines": 113,
+      "complexity": 25,
+      "lines": 86,
       "recursive": false
     },
     "discovery/pci.rs::check_function": {
@@ -124,9 +129,14 @@
       "lines": 47,
       "recursive": false
     },
+    "linuxd_start.rs::boot_page": {
+      "complexity": 15,
+      "lines": 62,
+      "recursive": false
+    },
     "linuxd_start.rs::start": {
-      "complexity": 40,
-      "lines": 160,
+      "complexity": 23,
+      "lines": 78,
       "recursive": false
     },
     "linuxd_start.rs::start_further": {
@@ -150,8 +160,8 @@
       "recursive": false
     },
     "main.rs::start_scheduler": {
-      "complexity": 5,
-      "lines": 71,
+      "complexity": 6,
+      "lines": 76,
       "recursive": false
     },
     "object/mod.rs::signals": {
@@ -165,13 +175,18 @@
       "recursive": false
     },
     "sched/task.rs::new": {
-      "complexity": 4,
-      "lines": 69,
+      "complexity": 9,
+      "lines": 76,
       "recursive": false
     },
     "smp.rs::invalidate_pages": {
       "complexity": 20,
       "lines": 81,
+      "recursive": false
+    },
+    "smp.rs::start_secondaries": {
+      "complexity": 16,
+      "lines": 22,
       "recursive": false
     },
     "src/lib/fs/btrfs/format/src/chunk.rs::check_geometry": {
@@ -541,7 +556,7 @@
     },
     "trap.rs::dispatch": {
       "complexity": 16,
-      "lines": 45,
+      "lines": 46,
       "recursive": false
     },
     "trap.rs::handle_page_fault": {

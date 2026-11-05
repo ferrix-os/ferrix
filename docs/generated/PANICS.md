@@ -67,6 +67,7 @@ Causes are listed most likely first.
 | [FX-0534](#fx-0534) | a task's run or sleep slot was given back while it held one |
 | [FX-0535](#fx-0535) | a channel end was closed with interrupts masked |
 | [FX-0536](#fx-0536) | the view of a blocked task read it wrongly |
+| [FX-0537](#fx-0537) | a task tried to block in an interrupt |
 | [FX-0601](#fx-0601) | the memory a process is built from failed its self-check |
 | [FX-0602](#fx-0602) | a page taken from a mapped object stayed reachable, or was not taken as it should be |
 | [FX-0701](#fx-0701) | the system call dispatch path failed its self-check |
@@ -168,6 +169,7 @@ Causes are listed most likely first.
 | [FX-9004](#fx-9004) | a processor exception the kernel has no handler for |
 | [FX-9005](#fx-9005) | the processor reported a hardware error |
 | [FX-9006](#fx-9006) | an exception nested on its own interrupt stack |
+| [FX-9007](#fx-9007) | a kernel stack overflowed |
 
 <a id="fx-0001"></a>
 
@@ -1330,6 +1332,21 @@ the kernel from a /proc read.
 
 See: src/kernel/src/sched/inspect.rs; src/kernel/src/sched/inspect_check.rs;
 src/kernel/src/mm.rs; src/kernel/src/arch/inspect.rs; docs/DEBUG.md.
+
+<a id="fx-0537"></a>
+
+## FX-0537 — a task tried to block in an interrupt
+
+An interrupt handler may not block: there is no task of its own to wait as, and
+the one it interrupted would never get back. A lock held across a block is
+FX-0503.
+
+1. A drop that can reach a sleep ran in an interrupt: a task's last reference is
+   handed to the reaper for that reason (`sched::leftovers`, F-104), and
+   anything else that does as much needs the same.
+
+See: src/kernel/src/sched/mod.rs require_may_sleep;
+src/kernel/src/sched/leftovers.rs.
 
 <a id="fx-0601"></a>
 
@@ -4316,3 +4333,21 @@ registers in the report are the second exception's.
 
 See: src/kernel/src/arch/x86_64/paranoid.rs; src/kernel/src/arch/x86_64/trap.rs
 ferrix_paranoid_common; src/kernel/src/arch/x86_64/gdt.rs.
+
+<a id="fx-9007"></a>
+
+## FX-9007 — a kernel stack overflowed
+
+A fault in the kernel found its stack pointer in unmapped memory. The entry
+moved to this processor's emergency stack before writing anything, so nothing
+below the stack's guard was written. The `stack pointer` on the first line is
+the value it found; `elr` or `pc` is where the fault was, which may be another
+entry's save if an interrupt was what reached the guard.
+
+1. A path deeper than `vmap::STACK_PAGES` allows, an interrupt's frames on top:
+   `cargo xtask check-stack-depth` walks the known ones.
+2. A very large local in a function, or a recursion.
+
+See: src/kernel/src/arch/aarch64/trap.rs ferrix_stack_hit;
+src/kernel/src/arch/armv7a/trap.rs ferrix_stack_hit; src/kernel/src/trap.rs
+stack_overflow.
