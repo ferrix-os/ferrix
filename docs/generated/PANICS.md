@@ -116,6 +116,8 @@ Causes are listed most likely first.
 | [FX-0915](#fx-0915) | a pager-backed VMO's fault, wait or dirty tracking was not as K3 states |
 | [FX-0916](#fx-0916) | an address space reached by handle was not held to the handle's rights |
 | [FX-0917](#fx-0917) | an exception channel was attached where it must be refused, or refused where it must be attached |
+| [FX-0923](#fx-0923) | restricted code's mark up at a switch with no root write |
+| [FX-0924](#fx-0924) | a fast crossing flipped a space with no normal root |
 | [FX-0925](#fx-0925) | a shared process or restricted mode did not do what K1 and K11 say |
 | [FX-0926](#fx-0926) | a criticality level did not keep a lower job from a higher one |
 | [FX-0928](#fx-0928) | a vector instruction in the kernel with CR0.TS set |
@@ -2902,6 +2904,33 @@ without the right, twice, or past a limit.
 
 See: src/kernel/src/object/exception.rs;
 src/kernel/src/object/exception_check.rs; docs/microkernel/K4.md.
+
+<a id="fx-0923"></a>
+
+## FX-0923 — restricted code's mark up at a switch with no root write
+
+An exit's return-stack refill rests on a root write around it where ERAPS
+empties the predictor, and a mode changes only with a flip, so a switch between
+two normal-mode threads of one space cannot find the mark up.
+
+1. A path that changes a thread's mode without the flip, or a flip that does not
+   raise or lower the mark.
+
+See: docs/microkernel/K1.md section 7.1; src/kernel/src/sched/mod.rs
+swap_address_space.
+
+<a id="fx-0924"></a>
+
+## FX-0924 — a fast crossing flipped a space with no normal root
+
+A fast exit or re-entry runs only for a thread that a checked `RESTRICTED_ENTER`
+put in a region's process, whose space always has its two roots.
+
+1. A fast path condition that no longer implies the thread's process has a
+   region.
+
+See: docs/microkernel/K1.md section 7.1; src/kernel/src/user/space.rs
+flip_root_on.
 
 <a id="fx-0925"></a>
 

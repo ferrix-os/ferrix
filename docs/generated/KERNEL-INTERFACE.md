@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-3006 declarations in the core's files, 215 in the item's; 239 checks-only.
+3012 declarations in the core's files, 215 in the item's; 243 checks-only.
 
 ## ferrix-kernel-core
 
@@ -96,6 +96,8 @@ checks above is `pub` for raised checks (F3).
 | `write_combining_processors` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `aarch64` | mod | item, load, bin |  |
 | `armv7a` | mod | item, load, bin |  |
+| `fast_check` | mod | item (checks) | pub for raised checks |
+| `speculation_check` | mod | item, bin (checks) | pub for raised checks |
 | `x86_64` | mod | item, load, bin |  |
 | `ARCH` | re-export | item, load, bin |  |
 | `ARCH` | re-export | item, load, bin |  |
@@ -236,7 +238,7 @@ checks above is `pub` for raised checks (F3).
 | `audit_arch` | re-export | load |  |
 | `audit_arch` | re-export | load |  |
 | `audit_arch` | re-export | load |  |
-| `barrier_decisions_on` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `barrier_decisions_on` | re-export | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `breakpoint` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `breakpoint` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `breakpoint` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -351,8 +353,8 @@ checks above is `pub` for raised checks (F3).
 | `read_console_byte` | re-export | item, load |  |
 | `read_console_byte` | re-export | item, load |  |
 | `read_console_byte` | re-export | item, load |  |
-| `refill_wanted_in_domain` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
-| `refills_in_domain_on` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `refill_wanted_in_domain` | re-export | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `refills_in_domain_on` | re-export | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `render_machine_check` | re-export | load |  |
 | `report_speculation` | re-export | bin |  |
 | `reset` | re-export | item, load |  |
@@ -398,7 +400,7 @@ checks above is `pub` for raised checks (F3).
 | `start_watchdogs` | re-export | bin |  |
 | `start_watchdogs` | re-export | bin |  |
 | `switch_barriers` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
-| `switch_barriers_on` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `switch_barriers_on` | re-export | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `sync_instructions` | re-export | load |  |
 | `sync_instructions` | re-export | load |  |
 | `sync_instructions` | re-export | load |  |
@@ -863,6 +865,14 @@ checks above is `pub` for raised checks (F3).
 | `UserRegs::set_stack` | method | load |  |
 | `UserRegs::stack_pointer` | method | load |  |
 
+### `arch::fast_check`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `exit_refills` | fn | item (checks) | checks-only |
+| `restricted_fast_counts` | fn | item (checks) | checks-only |
+| `restricted_set_normal_bases_for_check` | fn | item (checks) | checks-only |
+
 ### `arch::no_restricted`
 
 | Item | Kind | Named by | Note |
@@ -885,7 +895,7 @@ checks above is `pub` for raised checks (F3).
 | `HARDENED` | const | load, bin |  |
 | `arm_forget_hook` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `arm_leave_hook` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
-| `barrier_decisions_on` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `barrier_decisions_on` | fn | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `disarm_forget_hook` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `disarm_leave_hook` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `forget_hook_armed_by` | fn | bin |  |
@@ -893,11 +903,11 @@ checks above is `pub` for raised checks (F3).
 | `last_domain_on` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `leave_hook_armed_by` | fn | bin |  |
 | `nospec_index` | fn | item |  |
-| `refill_wanted_in_domain` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
-| `refills_in_domain_on` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `refill_wanted_in_domain` | fn | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `refills_in_domain_on` | fn | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `report_exposure` | fn | bin |  |
 | `switch_barriers` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
-| `switch_barriers_on` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `switch_barriers_on` | fn | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `CheckHook` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Defences` | struct | - |  |
 | `CheckHook::armed_by` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -909,6 +919,7 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `check` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `switch_barrier_offered` | fn | item (checks) | checks-only |
 | `Report` | struct | item, load, bin |  |
 | `Report::barriers` | field | item, load, bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Report::boot` | field | item, load, bin |  |
