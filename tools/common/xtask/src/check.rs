@@ -150,9 +150,10 @@ pub(crate) const TASKS: &[Task] = &[
     },
     Task {
         name: "check-frames",
-        help_at: 1061,
+        help_at: 1062,
         help: &[
-            "check-frames  every kernel frame over a page, against probes or ARMv7-A's baseline, for --arch",
+            "check-frames",
+            "              every kernel frame over a page, against probes or ARMv7-A's baseline, for --arch",
         ],
         run: |_, args| {
             for arch in args.arches()? {
