@@ -627,3 +627,15 @@ Done 2026-10-24 (kernel-flakes).
 | Item | Owner | Stage |
 |---|---|---|
 | **Open (2026-11-04, mk-merge).** Not a flake: `charge_kernel` refuses at `memory.max` without reclaiming. `test-container`'s walk, four pages under the limit, had its `open` of `memory.events` answered ENOMEM with 266,240 B of file cache charged to the cgroup and `pgscan` 0; Linux reclaims first. The walk now reads the count after unmapping. A program near its limit sees a refusal it could have been spared; no claim rests on it. | the PO's queue | 13 |
+
+## `test-flags --set smt=off` under TCG stops on stage 9's timing checks (2026-11-05, mk-ibpb)
+
+`test-flags --arch x86_64 --accel tcg --set smt=off --no-claim --smp 4 --smp-threads 2`, on a busy host,
+stops the boot at a stage 9 check that needs another processor to move in time: `arms case d`, `no Sync
+write from another processor moved a reader`, `a section closed without using its large block`. Boots,
+all by `gate.sh`, same rows, alternated in the later lots: develop 10 pass, 1 stop; with K1's fast path
+alone 3 pass, 0 stop; with K1's fast path and restricted exit's cuts 10 pass, 6 stop (of which on the
+landed code 4 pass, 1 stop, develop beside it 5 pass, 0 stop). **No clearance is claimed.** The difference
+is not proven and not excluded: the three checks run before any restricted code and the flag is off, so
+what would reach them is what reaches every image (RESTRICTED-EXIT.md). To be run on an idle host.
+

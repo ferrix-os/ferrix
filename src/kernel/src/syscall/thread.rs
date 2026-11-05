@@ -28,9 +28,9 @@
 
 use alloc::sync::Arc;
 use core::any::Any;
-use core::sync::atomic::{
-    AtomicBool, AtomicI32, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering,
-};
+#[cfg(ferrix_personality = "user")]
+use core::sync::atomic::AtomicUsize;
+use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, AtomicU64, Ordering};
 
 use crate::fallible::AllocError;
 use crate::object::process::{self as pids, Host};
