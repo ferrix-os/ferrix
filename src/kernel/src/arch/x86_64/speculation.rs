@@ -1230,6 +1230,10 @@ pub(crate) fn exit_barrier(_cpu: usize) -> bool {
     if !cfg!(ferrix_restricted_fastpath = "on") || !ERAPS_EMPTIES.load(Ordering::Relaxed) {
         unusual();
         fill_return_stack();
+        #[cfg(all(ferrix_restricted_fastpath = "on", ferrix_checks = "on"))]
+        {
+            let _ = EXIT_REFILLS.fetch_add(1, Ordering::Relaxed);
+        }
     }
     issued
 }
@@ -1256,6 +1260,11 @@ pub(crate) fn window_barrier(_cpu: usize) -> bool {
 #[cfg(ferrix_restricted_window = "on")]
 static IBPB_CLEARS_RETURNS: AtomicBool = AtomicBool::new(false);
 
+/// Refills at restricted exits, for `region_check` (ledger 6747 (1d)): where ERAPS does not
+/// empty the predictor at the root write, every exit's barrier makes one.
+#[cfg(all(ferrix_restricted_fastpath = "on", ferrix_checks = "on"))]
+pub(in crate::arch) static EXIT_REFILLS: AtomicU64 = AtomicU64::new(0);
+
 /// Whether `CPUID` said `IA32_PRED_CMD` takes `IBPB`, which is what sets
 /// [`SWITCH_IBPB`], read here again for the check of what [`exit_barrier`] answers.
 pub(crate) fn exit_barrier_offered(_cpu: usize) -> bool {
@@ -1281,7 +1290,7 @@ pub(crate) fn switch_barrier_in_domain(_cpu: usize) -> bool {
 /// Whether a `CR3` write on this machine empties the return address
 /// predictor: decided at boot from the boot processor's `CPUID`, and read
 /// by every in-domain switch.
-static ERAPS_EMPTIES: AtomicBool = AtomicBool::new(false);
+pub(in crate::arch) static ERAPS_EMPTIES: AtomicBool = AtomicBool::new(false);
 
 /// Whether ERAPS stands in for the in-domain refill: a hardened build, a
 /// processor that offers ERAPS, and `CR4.PCIDE` clear, so that every `CR3`

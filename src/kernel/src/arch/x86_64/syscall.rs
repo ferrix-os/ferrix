@@ -933,6 +933,10 @@ fn answer_here(
     // `ARCH_GET_FS` and `ARCH_GET_GS` are not: they write through a pointer
     // of the program's, which wants its address space and interrupts open,
     // so those two go on to the dispatcher (`syscall::thread_area`).
+    // No such writer in a user kernel: K1 §7.1's fast path rests on normal mode's FS
+    // record not moving while the mark is up (ledger 6464 Z2, 6981), and no program there
+    // is a Linux one. `test-kernel-shape` reads the symbol's absence.
+    #[cfg(not(ferrix_personality = "user"))]
     if call == ferrix_linux_abi::nr::Syscall::ArchPrctl
         && let Some(answer) = arch_prctl(args.args[0], args.args[1])
     {
@@ -1020,8 +1024,10 @@ fn enter_compat_after_execve(entry: u64, stack: u64) -> ! {
 }
 
 /// `ARCH_SET_GS`: set the base a program's `GS` resolves against.
+#[cfg(not(ferrix_personality = "user"))]
 const ARCH_SET_GS: u64 = 0x1001;
 /// `ARCH_SET_FS`: set the base `FS` resolves against, the thread pointer.
+#[cfg(not(ferrix_personality = "user"))]
 const ARCH_SET_FS: u64 = 0x1002;
 /// `ARCH_GET_FS`: write the `FS` base to the address given.
 const ARCH_GET_FS: u64 = 0x1003;
@@ -1042,6 +1048,9 @@ const ARCH_GET_GS: u64 = 0x1004;
 /// Both writes go to the register and to the running task's record
 /// together, with interrupts masked: the entry answers this call before it
 /// opens them, so no switch comes between the two.
+#[cfg(not(ferrix_personality = "user"))]
+// If this ever builds in a user kernel, it has a symbol for `check-kernel-shape.py` to refuse.
+#[cfg_attr(ferrix_personality = "user", inline(never))]
 fn arch_prctl(code: u64, value: u64) -> Option<isize> {
     use ferrix_linux_abi::errno::Errno;
 

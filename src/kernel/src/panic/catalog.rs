@@ -2009,6 +2009,32 @@ pub(crate) static VECTOR_IN_THE_KERNEL: Explanation = Explanation {
     see: "docs/microkernel/K1.md section 7.1 (8); src/kernel/src/arch/x86_64/restricted.rs",
 };
 
+/// A fast crossing's flip of a space that has only the one root.
+#[cfg(ferrix_fast_restricted)]
+pub(crate) static FLIP_WITH_NO_NORMAL_ROOT: Explanation = Explanation {
+    code: "FX-0924",
+    title: "a fast crossing flipped a space with no normal root",
+    meaning: "A fast exit or re-entry runs only for a thread that a checked `RESTRICTED_ENTER` put \
+              in a region's process, whose space always has its two roots.",
+    causes: &["A fast path condition that no longer implies the thread's process has a region."],
+    see: "docs/microkernel/K1.md section 7.1; src/kernel/src/user/space.rs flip_root_on",
+};
+
+/// A switch between normal-mode threads with restricted code's mark up.
+#[cfg(ferrix_fast_restricted)]
+pub(crate) static MARK_WITH_NO_ROOT_WRITE: Explanation = Explanation {
+    code: "FX-0923",
+    title: "restricted code's mark up at a switch with no root write",
+    meaning: "An exit's return-stack refill rests on a root write around it where ERAPS empties \
+              the predictor, and a mode changes only with a flip, so a switch between two \
+              normal-mode threads of one space cannot find the mark up.",
+    causes: &[
+        "A path that changes a thread's mode without the flip, or a flip that does not raise or \
+         lower the mark.",
+    ],
+    see: "docs/microkernel/K1.md section 7.1; src/kernel/src/sched/mod.rs swap_address_space",
+};
+
 // CHECKS-ONLY: stages_check.rs
 /// For `check_levels` in `stages_check.rs`, when `object::level_check::run` fails.
 #[doc(hidden)]
@@ -4348,6 +4374,10 @@ pub(crate) static ALL: &[&Explanation] = &[
     &STAGE9_SPACES,
     #[cfg(not(ferrix_shape = "micro"))]
     &STAGE9_EXCEPTIONS,
+    #[cfg(ferrix_fast_restricted)]
+    &MARK_WITH_NO_ROOT_WRITE,
+    #[cfg(ferrix_fast_restricted)]
+    &FLIP_WITH_NO_NORMAL_ROOT,
     #[cfg(not(ferrix_shape = "micro"))]
     &STAGE9_REGIONS,
     &STAGE9_LEVELS,

@@ -75,6 +75,11 @@ def walk(text):
         more = re.search(r"\bsub\s+(x\d+), (x\d+), #(0x[0-9a-f]+|\d+)(, lsl #12)?", line)
         if more and more.group(1) == more.group(2) and more.group(1) in pending:
             pending[more.group(1)] += int(more.group(3), 0) << (12 if more.group(4) else 0)
+        # The loop form's end is its compare, or a move to the limit after it.
+        compared = re.search(r"\bcmp\s+sp, (x\d+)", line)
+        if compared and compared.group(1) in pending:
+            frame += pending.pop(compared.group(1)) - PAGE
+            gap = 0
         landed = re.search(r"\bmov\s+sp, (x\d+)", line)
         if landed and landed.group(1) in pending:
             # The end of the loop form: its steps were read one each, and each touches.

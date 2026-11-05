@@ -77,6 +77,9 @@ pub struct Task {
     pub(crate) voluntary: AtomicU64,
     pub(crate) wakes: AtomicU64,
     pub(crate) thread: Option<Arc<dyn UserThread>>,
+    /// What [`Task::thread`] was found to be by its own downcast, once it has been: the
+    /// personality's typed pointer to it, which that `Arc` keeps alive (ledger 6747 (4c)).
+    pub(crate) thread_kept: core::sync::atomic::AtomicPtr<()>,
     pub(crate) entry: fn(usize),
     pub(crate) argument: AtomicUsize,
     pub(crate) gone: crate::sched::wait::WaitQueue,
@@ -163,6 +166,15 @@ impl Task {
     }
     pub fn thread(&self) -> Option<&Arc<dyn UserThread>> {
         self.thread.as_ref()
+    }
+    /// [`Task::thread`] as the personality's own type found it: null before the first ask.
+    #[inline(always)]
+    pub fn thread_kept(&self) -> *const () {
+        self.thread_kept.load(Ordering::Acquire)
+    }
+    /// Keep what the personality's downcast of [`Task::thread`] found.
+    pub fn keep_thread(&self, thread: *const ()) {
+        self.thread_kept.store(thread.cast_mut(), Ordering::Release);
     }
     /// [`Task::core_process`], kept after the first ask: a thread's process does not change,
     /// and this is asked on every call, through two `dyn` calls otherwise.

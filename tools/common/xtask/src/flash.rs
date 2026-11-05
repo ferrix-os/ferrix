@@ -175,7 +175,7 @@ pub(crate) fn card_initramfs(arch: Arch, archive: &[u8]) -> Result<Vec<u8>> {
         before / 1024,
         after / 1024
     );
-    Ok(stripped)
+    crate::initramfs::digests_of_what_it_holds(&stripped)
 }
 
 /// The toolchain's `llvm-objcopy`: in `lib/rustlib/<host>/bin` of the

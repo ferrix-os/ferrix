@@ -194,7 +194,7 @@ pub fn ferrix_lift_hot_answer(number: usize) -> u64 {
         return u64::MAX;
     }
     let Some(answer) = crate::sched::with_current(|task| {
-        let Some(thread) = task.thread().and_then(thread::of_task_known) else {
+        let Some(thread) = thread::of_task_known(task) else {
             unusual();
             return u64::MAX;
         };

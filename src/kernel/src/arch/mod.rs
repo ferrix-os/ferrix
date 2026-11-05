@@ -22,8 +22,10 @@ pub(crate) use aarch64::rehome_check;
 pub(crate) use armv7a::rehome_check;
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::rehome_check;
+#[cfg(all(ferrix_fast_restricted, ferrix_checks = "on"))]
+pub mod fast_check;
 mod speculation;
-mod speculation_check;
+pub mod speculation_check;
 #[cfg(target_arch = "aarch64")]
 use aarch64::speculation as machine_speculation;
 #[cfg(target_arch = "arm")]
@@ -32,6 +34,8 @@ pub(crate) use speculation::exit_barrier_built;
 pub(crate) use speculation::exit_barrier_offered;
 pub use speculation::nospec_index;
 pub(crate) use speculation::restricted_barriers;
+#[cfg(ferrix_fast_restricted)]
+pub(crate) use speculation::restricted_ran_here;
 pub use speculation::{
     CheckHook, HARDENED, arm_forget_hook, arm_leave_hook, barrier_decisions_on, disarm_forget_hook,
     disarm_leave_hook, forget_root, last_domain_on, refill_wanted_in_domain, refills_in_domain_on,

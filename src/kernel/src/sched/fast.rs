@@ -70,6 +70,14 @@ pub(crate) fn quiet(task: &Task, cpu: usize) -> bool {
         & (!quota::bandwidth_in_use())
 }
 
+// CHECKS-ONLY: arch/x86_64/fast_check.rs
+/// The task's own record, for `region_check`'s setter of normal mode's bases.
+#[cfg(all(ferrix_restricted_fastpath = "on", ferrix_checks = "on"))]
+pub(crate) fn own_record_for_check(task: &Task) -> Option<*mut arch::UserState> {
+    // SAFETY: (SHARED) the pointer alone; the one caller says why it may write through it.
+    unsafe { task.own_record() }
+}
+
 /// Which record the task's state is read from, as `set_active_user_state`.
 #[inline(always)]
 pub(crate) fn set_active(task: &Task, record: *mut arch::UserState) {

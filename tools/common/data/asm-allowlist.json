@@ -14,8 +14,9 @@
     "'Convenient in assembly' is not a reason. 'Faster in assembly' is not a",
     "reason either -- measure it, then argue it in the entry."
   ],
-  "max_total_lines": 2181,
+  "max_total_lines": 2245,
   "//max_total_lines": [
+    "2245 since 2026-11-05, 2181 + 64 (K1's fast path's cases, ledger 7216 V.1-V.7, 7249): small images in restricted-check, the check program, that load FS and GS and keep vectors across calls, and its one direct channel call; nothing in ring 0.",
     "2135 since 2026-11-05, 2021 + 114 (F-103, H.FAIL.15, ledger 7033 A1-A8, V1-V3): a kernel fault's entry on AArch64 and the data abort stub on ARMv7-A ask the MMU whether the stack pointer translates, and move to an emergency stack: no stack and one or two registers at that point, no Rust spelling. aarch64/trap.rs +51, armv7a/trap.rs +63, of which the two entries' stop on a claimed stack is the larger part.",
     "1987 since 2026-11-04 (+2, one more `syscall` and `svc` in restricted-check's image, which case 145 needs to make a second native call past a RESUME, ledger 6674); 1985 before it (K1, K11, docs/microkernel/K1.md section 10; +14 for AArch64 ASIDs (section 8.1); +70 for AArch64's images, +40 for the row's image and rt's copy of a program's memory, whose every load and store may fault and land, K1 section 2.5): rt's trap for the three calls that go into restricted mode, whose exit answers in more registers than a call (+24), and restricted-check's images, the instructions a program in restricted mode runs so that a boot check can see each way out: a fault, a system call, int $0x80 from 32-bit code, no Rust spelling (+84).",
     "The cap that actually binds. Assembly is a fixed cost here: the list below",
@@ -230,7 +231,7 @@
     },
     {
       "file": "src/user/system/native/restricted-check/src/arch/x86_64.rs",
-      "max_lines": 139,
+      "max_lines": 203,
       "reason": "One more system call before the first image, for case 145's second native call past a RESUME (ledger 6674). K1's boot check: position-independent images a thread runs in restricted mode, each a way out the kernel must handle (`syscall`, `int3`, `ud2`, a divide by zero, a load, store and fetch through a register, `popf` with the trap flag, 32-bit code's `int $0x80`), and a copy in the copy window, whose landing is an address. An instruction that faults on purpose has no Rust spelling."
     },
     {

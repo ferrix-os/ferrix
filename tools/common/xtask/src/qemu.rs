@@ -829,7 +829,7 @@ const USER_BOOT_LINES: &[(Option<(&str, &str)>, &str)] = &[
     (None, "  iommu    "),
     (Some(("fs", "server")), "its image's digest checked"),
     (None, "  regions  restricted-check held every case"),
-    (None, "  lift-calls 19 refusals held"),
+    (None, "  lift-calls 20 refusals held"),
     (None, LIFTED_BOOTED),
 ];
 
@@ -1523,7 +1523,7 @@ pub(crate) fn test_linuxd(arch: Arch, image: &Path, kernel: &Path, args: &Args) 
     for want in [
         "personality=user",
         "linuxd   started",
-        "lift-calls 19 refusals held",
+        "lift-calls 20 refusals held",
         "hello from ring 3",
         "exited with 42",
     ] {

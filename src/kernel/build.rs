@@ -238,6 +238,14 @@ fn build_flags() -> Result<Vec<(String, String)>, Box<dyn Error>> {
         // The one predicate for the fast path's code (BF6, ledger 1001 (1)): the
         // flag on x86-64. Never retyped at a site.
         println!("cargo::rustc-check-cfg=cfg(ferrix_fast_ipc)");
+        // As it, for K1's fast path, whose code is x86-64's (ledger 1001 (1)).
+        println!("cargo::rustc-check-cfg=cfg(ferrix_fast_restricted)");
+        if name == "restricted_fastpath"
+            && value == "on"
+            && std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("x86_64")
+        {
+            println!("cargo::rustc-cfg=ferrix_fast_restricted");
+        }
         if name == "ipc_fastpath"
             && value == "on"
             && std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("x86_64")

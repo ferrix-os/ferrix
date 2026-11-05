@@ -1149,8 +1149,19 @@ impl AddressSpace {
     /// running processor has joined, and interrupts are masked.
     #[inline(always)]
     pub(crate) unsafe fn flip_root_on(&self, restricted: bool, cpu: usize) {
+        // Only a space with a normal root is flipped. Under K1's fast path, whose conditions
+        // are what keep that true, an image stops on another (ledger 6747 (3c)), at the cost of
+        // one branch: a fatal no case reaches, by what a fast crossing's conditions imply.
+        #[cfg(not(ferrix_fast_restricted))]
         // SAFETY: only a space with a normal root is flipped.
         let normal = unsafe { self.normal.get().unwrap_unchecked() };
+        #[cfg(ferrix_fast_restricted)]
+        let Some(normal) = self.normal.get() else {
+            crate::panic::fatal!(
+                crate::panic::catalog::FLIP_WITH_NO_NORMAL_ROOT,
+                "a fast crossing flipped a space with no normal root"
+            )
+        };
         let (root, id, begun) = self.root_for(normal, restricted);
         // SAFETY: (TRANSLATE) the caller's guarantee; both roots carry the
         // kernel's half, and live as long as this space.

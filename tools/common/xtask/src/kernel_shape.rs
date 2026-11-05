@@ -105,6 +105,22 @@ fn test_kernel_shape(args: &Args) -> Result<()> {
             "tools/common/check/check-kernel-alloc-audit.py",
             &["--built", directory.as_str()],
         )?;
+        // Z3 and 6093 (9)(d): what K1's fast path promises of normal mode's code.
+        if arch == paths::Arch::X86_64 {
+            let linuxd = native::LINUXD;
+            let path = cargo::build_native(
+                arch,
+                args.release,
+                linuxd.package,
+                linuxd.binary,
+                &paths::target_dir(),
+            )?;
+            let path = path.display().to_string();
+            python_with(
+                "tools/common/check/check-linuxd-binary.py",
+                &[path.as_str()],
+            )?;
+        }
     }
     Ok(())
 }
@@ -260,15 +276,22 @@ pub(crate) fn server_description(natives: &[native::Built]) -> Result<Option<cra
     if crate::flags::this_run()?.value("fs") != Some("server") {
         return Ok(None);
     }
-    let root = paths::target_dir().join("server-description");
-    let image_dir = root.join("sbin");
-    std::fs::create_dir_all(&image_dir).map_err(|e| Error::new(e.to_string()))?;
     let server = natives
         .iter()
         .find(|built| built.name == "btrfsd")
         .ok_or_else(|| Error::new("btrfsd was not built"))?;
-    std::fs::write(image_dir.join("btrfsd"), &server.bytes)
-        .map_err(|e| Error::new(e.to_string()))?;
+    server_description_of(&server.bytes)
+}
+
+/// [`server_description`] from `btrfsd`'s bytes as the image will hold them.
+pub(crate) fn server_description_of(server: &[u8]) -> Result<Option<crate::ports::File>> {
+    if crate::flags::this_run()?.value("fs") != Some("server") {
+        return Ok(None);
+    }
+    let root = paths::target_dir().join("server-description");
+    let image_dir = root.join("sbin");
+    std::fs::create_dir_all(&image_dir).map_err(|e| Error::new(e.to_string()))?;
+    std::fs::write(image_dir.join("btrfsd"), server).map_err(|e| Error::new(e.to_string()))?;
     described(&root, SERVER_ROW).map(Some)
 }
 

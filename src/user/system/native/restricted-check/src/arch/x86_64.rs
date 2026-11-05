@@ -176,6 +176,72 @@ image_armed_other:
     syscall
     int3
 
+// K1's fast path's cases (ledger 7216): getppid for ever.
+.globl image_trips
+image_trips:
+    movl $110, %eax
+    syscall
+    jmp image_trips
+
+// A load from RDI, then getppid, for ever.
+.globl image_load_trips
+image_load_trips:
+    movq (%rdi), %rax
+    movl $110, %eax
+    syscall
+    jmp image_load_trips
+
+// FS's word to RBX, a call, FS's word to R12.
+.globl image_fs_trip
+image_fs_trip:
+    movq %fs:0, %rbx
+    movl $110, %eax
+    syscall
+    movq %fs:0, %r12
+    int3
+
+// GS's, the same.
+.globl image_gs_trip
+image_gs_trip:
+    movq %gs:0, %rbx
+    movl $110, %eax
+    syscall
+    movq %gs:0, %r12
+    int3
+
+// A null GS load, then a call.
+.globl image_gs_null
+image_gs_null:
+    xorl %eax, %eax
+    movl %eax, %gs
+    movl $110, %eax
+    syscall
+    int3
+
+// A null FS load, a call; FS's word to RBX, a call, FS's word to R12.
+.globl image_fs_null
+image_fs_null:
+    xorl %eax, %eax
+    movl %eax, %fs
+    movl $110, %eax
+    syscall
+    movq %fs:0, %rbx
+    movl $110, %eax
+    syscall
+    movq %fs:0, %r12
+    int3
+
+// RDI in XMM5's low word; FS's word to RBX, a call, FS's word to R12, XMM5 to RAX.
+.globl image_fs_vectors
+image_fs_vectors:
+    movq %rdi, %xmm5
+    movq %fs:0, %rbx
+    movl $110, %eax
+    syscall
+    movq %fs:0, %r12
+    movq %xmm5, %rax
+    int3
+
 // 32-bit code: read through GS's descriptor and make an i386 system call.
 .code32
 .globl image_compat
@@ -218,6 +284,13 @@ unsafe extern "C" {
     static image_armed_loop: u8;
     static image_armed_vectors: u8;
     static image_armed_other: u8;
+    static image_trips: u8;
+    static image_load_trips: u8;
+    static image_fs_trip: u8;
+    static image_gs_trip: u8;
+    static image_gs_null: u8;
+    static image_fs_null: u8;
+    static image_fs_vectors: u8;
 }
 
 /// The images as bytes.
@@ -262,7 +335,56 @@ entries!(
     armed_loop: image_armed_loop,
     armed_vectors: image_armed_vectors,
     armed_other: image_armed_other,
+    trips: image_trips,
+    load_trips: image_load_trips,
+    fs_trip: image_fs_trip,
+    gs_trip: image_gs_trip,
+    gs_null: image_gs_null,
+    fs_null: image_fs_null,
+    fs_vectors: image_fs_vectors,
 );
+
+/// `CHANNEL_WRITE_READ`, one word each way.
+pub(crate) fn channel_write_read(end: u64, count: u64, word: u64) -> Result<(u64, u64), ()> {
+    let (mut number, mut first_word) = (ferrix_native_abi::nr::CHANNEL_WRITE_READ as u64, count);
+    // SAFETY: the call touches no memory of this program's; it destroys what the ABI says.
+    unsafe {
+        asm!(
+            "syscall",
+            inout("rax") number,
+            in("rdi") end,
+            inout("rsi") first_word,
+            inout("rdx") word => _,
+            lateout("r10") _,
+            lateout("r8") _,
+            lateout("r9") _,
+            lateout("rcx") _,
+            lateout("r11") _,
+            options(nostack),
+        );
+    }
+    if (number as i64) < 0 {
+        Err(())
+    } else {
+        Ok((number, first_word))
+    }
+}
+
+/// The word `FS` reads at zero, in normal mode.
+pub(crate) fn fs_word() -> u64 {
+    let value: u64;
+    // SAFETY: a load through a base the case set; the case holds that it maps.
+    unsafe { asm!("mov {value}, fs:[0]", value = out(reg) value, options(nostack, readonly)) };
+    value
+}
+
+/// The word `GS` reads at zero, in normal mode.
+pub(crate) fn gs_word() -> u64 {
+    let value: u64;
+    // SAFETY: as [`fs_word`].
+    unsafe { asm!("mov {value}, gs:[0]", value = out(reg) value, options(nostack, readonly)) };
+    value
+}
 
 /// The code selector of 64-bit user code.
 const USER_CS: u64 = 0x33;

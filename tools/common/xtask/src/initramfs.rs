@@ -750,6 +750,62 @@ fn certified_bytes(natives: &[native::Built]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
+/// Whether a card's copy may remake its digests: not at a claim, whose list is its evidence's.
+fn may_remake_digests(level: &str) -> bool {
+    level == "none"
+}
+
+/// `archive` with the digests it carries made again from the programs it holds, for an archive
+/// whose programs were changed after it was built, stripped for a card: K14's list and a
+/// partition's description name a program by its bytes, and an image that no longer
+/// matches them is refused at its start.
+pub(crate) fn digests_of_what_it_holds(archive: &[u8]) -> Result<Vec<u8>> {
+    let level = crate::flags::this_run()?.level.clone();
+    if !may_remake_digests(&level) {
+        return Err(Error::new(format!(
+            "an image at level {level} would have its list and description remade from what it \
+             holds: a claim's come from its evidence (ledger 7275 L3.4)"
+        )));
+    }
+    let mut programs: Vec<(String, Vec<u8>)> = Vec::new();
+    let _ = with_files_changed(archive, |name, data| {
+        if data.starts_with(b"\x7fELF") {
+            let last = name.rsplit('/').next().unwrap_or(name);
+            programs.push((last.to_owned(), data.to_vec()));
+        }
+        Ok(None)
+    })?;
+    let holds = |wanted: &[u8]| {
+        programs
+            .iter()
+            .find(|(name, _)| name.as_bytes() == wanted)
+            .map(|(_, bytes)| bytes.as_slice())
+    };
+    with_files_changed(archive, |name, data| match name {
+        "etc/ferrix/certified" => {
+            let mut list = data.to_vec();
+            for entry in list.get_mut(12..).unwrap_or_default().chunks_exact_mut(64) {
+                let (digest, named) = entry.split_at_mut(32);
+                let end = named.iter().position(|byte| *byte == 0).unwrap_or(32);
+                if let Some(bytes) = named.get(..end).and_then(holds) {
+                    digest.copy_from_slice(&certified_digest(bytes));
+                }
+            }
+            Ok(Some(list))
+        }
+        "etc/ferrix/partitions" => match holds(b"btrfsd") {
+            Some(server) => crate::kernel_shape::server_description_of(server)?
+                .map(|file| match file.content {
+                    ports::Content::Bytes(bytes) => Ok(Some(bytes)),
+                    _ => Err(Error::new("a description is bytes")),
+                })
+                .unwrap_or(Ok(None)),
+            None => Ok(None),
+        },
+        _ => Ok(None),
+    })
+}
+
 /// The list a `fast` or `max` image carries, and no other (ledger 7011 LV.3). **Development
 /// only**: it names every native image this build made, so that a driver of a held node can pass
 /// on these images. No review of any image stands behind it, and it implies no certification:
@@ -1169,6 +1225,13 @@ fn refuse_too_many_drivers(natives: &[native::Built]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_claim_keeps_its_digests() {
+        assert!(may_remake_digests("none"));
+        assert!(!may_remake_digests("sc2"));
+        assert!(!may_remake_digests("present"));
+    }
 
     /// K14.12: this framing is the kernel's. The kernel's own boot check names this digest of
     /// one zero page, so a change on either side fails here.

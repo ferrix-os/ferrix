@@ -177,7 +177,10 @@ fn check_proc() {
 /// only the leaves it took down (`docs/microkernel/M5-LIFT.md` §13, ledger 6421), so one
 /// left unnamed is a thread on another processor reading memory that is someone else's by
 /// now: the reader keeps reading, and the child ends by the timer rather than `SIGSEGV`.
-#[allow(unsafe_code, reason = "fork, mmap and a read of a page about to go are the case")]
+#[allow(
+    unsafe_code,
+    reason = "fork, mmap and a read of a page about to go are the case"
+)]
 fn check_unmap_stale() {
     /// The reader has read the page, in a page both ends map.
     static READING: std::sync::atomic::AtomicPtr<std::sync::atomic::AtomicU32> =
@@ -243,7 +246,6 @@ fn check_unmap_stale() {
     println!("threads: unmap-stale ok");
 }
 
-
 /// A file of `pages` pages holding its page number plus one at each page's start, and
 /// `tail` bytes more: the descriptor.
 #[allow(unsafe_code, reason = "the calls are libc's")]
@@ -260,9 +262,8 @@ fn pattern_file(pages: usize, tail: usize) -> i32 {
     for page in 0..pages {
         let word = (page as u32 + 1).to_le_bytes();
         // SAFETY: four bytes on this stack, in range of the file just sized.
-        let wrote = unsafe {
-            libc::pwrite(fd, word.as_ptr().cast(), 4, (page * PAGE) as libc::off_t)
-        };
+        let wrote =
+            unsafe { libc::pwrite(fd, word.as_ptr().cast(), 4, (page * PAGE) as libc::off_t) };
         if wrote != 4 {
             fail("fault-ahead: pwrite");
         }
@@ -275,7 +276,14 @@ fn pattern_file(pages: usize, tail: usize) -> i32 {
 fn map_file(fd: i32, pages: usize, protection: i32) -> *mut u8 {
     // SAFETY: a fresh address, and a descriptor this program holds.
     let at = unsafe {
-        libc::mmap(core::ptr::null_mut(), pages * PAGE, protection, libc::MAP_PRIVATE, fd, 0)
+        libc::mmap(
+            core::ptr::null_mut(),
+            pages * PAGE,
+            protection,
+            libc::MAP_PRIVATE,
+            fd,
+            0,
+        )
     };
     if at == libc::MAP_FAILED {
         fail("fault-ahead: mmap");
@@ -362,6 +370,71 @@ fn check_fault_ahead() {
     unsafe { core::ptr::write_volatile(mapping.add(4 * PAGE).cast::<u32>(), 0xabcd) };
     if word_at(mapping, 3) != 4 || word_at(mapping, 4) != 0xabcd {
         fail("fault-ahead: a neighbour's fault put back a page the program wrote");
+    }
+
+    // The same with the page's own translation gone, so that it is the neighbour's fault
+    // that looks: the private copy comes back, not the file's page (ledger 6597 E1).
+    let mapping = map_file(fd, 16, libc::PROT_READ | libc::PROT_WRITE);
+    // SAFETY: a page of the private, writable mapping above.
+    unsafe {
+        core::ptr::write_volatile(mapping.add(4 * PAGE).cast::<u32>(), 0xabce);
+        if libc::mprotect(mapping.add(4 * PAGE).cast(), PAGE, libc::PROT_NONE) != 0
+            || libc::mprotect(mapping.add(4 * PAGE).cast(), PAGE, libc::PROT_READ) != 0
+        {
+            fail("fault-ahead: mprotect of a written page");
+        }
+    }
+    if word_at(mapping, 3) != 4 || word_at(mapping, 4) != 0xabce {
+        fail("fault-ahead: a neighbour's fault read the file under a page the program wrote");
+    }
+
+    // A shared mapping's page past the file's end, as the private one's above.
+    // SAFETY: a fresh address, and a descriptor this program holds.
+    let shared = unsafe {
+        libc::mmap(
+            core::ptr::null_mut(),
+            8 * PAGE,
+            libc::PROT_READ,
+            libc::MAP_SHARED,
+            short,
+            0,
+        )
+    };
+    if shared == libc::MAP_FAILED {
+        fail("fault-ahead: mmap of a shared file");
+    }
+    let shared = shared.cast::<u8>();
+    let ended = ends_by(|| {
+        let _ = word_at(shared, 0);
+        let _ = word_at(shared, 3);
+    });
+    if ended != libc::SIGBUS {
+        fail("fault-ahead: a shared page past the end did not stop the program");
+    }
+
+    // W+X (6597 E4): a neighbour brought for a read is neither writable nor executable by
+    // being brought; each use takes its own fault, and the file's page does not change.
+    let mapping = map_file(fd, 16, libc::PROT_READ | libc::PROT_WRITE | libc::PROT_EXEC);
+    if word_at(mapping, 8) != 9 || word_at(mapping, 9) != 10 {
+        fail("fault-ahead: a W+X mapping read wrong");
+    }
+    // SAFETY: a page of the private, writable mapping above.
+    unsafe { core::ptr::write_volatile(mapping.add(9 * PAGE).cast::<u32>(), 0xabcf) };
+    let clean = map_file(fd, 16, libc::PROT_READ);
+    if word_at(mapping, 9) != 0xabcf || word_at(clean, 9) != 10 {
+        fail("fault-ahead: a write to a W+X neighbour reached the file");
+    }
+    // An executable page, the neighbour of one read: its fetch is its own fault. `ret`.
+    #[cfg(target_arch = "x86_64")]
+    {
+        // SAFETY: a page of the private, writable mapping above; then a call of the one
+        // instruction just written there, in a mapping that may execute.
+        unsafe {
+            core::ptr::write_volatile(mapping.add(10 * PAGE), 0xc3_u8);
+            let code = core::mem::transmute::<*mut u8, extern "C" fn()>(mapping.add(10 * PAGE));
+            let _ = word_at(mapping, 11);
+            code();
+        }
     }
 
     // A walk through fresh memory reads what it wrote, and stops at its region: the private

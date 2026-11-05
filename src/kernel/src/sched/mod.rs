@@ -3748,6 +3748,19 @@ fn swap_address_space(previous_task: &Task, next_task: &Task) {
         if restricted {
             arch::restricted_ran();
         } else {
+            // The exit's refill rests on a root write around it under ERAPS: no way here
+            // leaves the mark up with none, as a mode changes only with a flip (ledger 6747 (1a)).
+            #[cfg(ferrix_fast_restricted)]
+            if arch::restricted_ran_here()
+                && let (Some(before), Some(after)) = (previous, next)
+                && Arc::ptr_eq(before, after)
+                && !previous_task.is_restricted()
+            {
+                crate::panic::fatal!(
+                    crate::panic::catalog::MARK_WITH_NO_ROOT_WRITE,
+                    "a switch between normal-mode threads found restricted code's mark up"
+                );
+            }
             arch::restricted_left();
         }
     }

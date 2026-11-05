@@ -375,6 +375,14 @@ pub(crate) const fn exit_barrier_built() -> bool {
     HARDENED && EXIT_BARRIER
 }
 
+/// Whether this processor's mark says restricted code ran here last, with no barrier since.
+#[cfg(all(target_arch = "x86_64", ferrix_restricted_fastpath = "on"))]
+pub(crate) fn restricted_ran_here() -> bool {
+    RESTRICTED_RAN
+        .get(this_cpu())
+        .is_some_and(|ran| ran.load(Ordering::Relaxed))
+}
+
 /// [`restricted_ran`] on a known processor.
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]

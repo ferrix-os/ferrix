@@ -46,7 +46,7 @@ pub(crate) mod scrub;
 )]
 mod signal;
 mod smp;
-pub(super) mod speculation;
+pub(in crate::arch) mod speculation;
 pub mod switch;
 pub mod syscall;
 pub mod trap;

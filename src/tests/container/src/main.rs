@@ -411,6 +411,58 @@ fn container(outside: &[String], host: &str) -> ! {
     unsafe { libc::_exit(0) }
 }
 
+/// A child whose parent ends is told so by `getppid` in a loop of nothing else, whose
+/// answer on a user kernel is a kept word (ledger 6747 (4d)): its parent's number here, then
+/// this namespace's first process, and never a parent gone.
+fn reparented_in_the_namespace() {
+    // SAFETY: the child runs below and leaves by `_exit`.
+    let parent = unsafe { libc::fork() };
+    if parent < 0 {
+        fail("fork for a reparent");
+    }
+    if parent == 0 {
+        // SAFETY: as above.
+        let grandchild = unsafe { libc::fork() };
+        if grandchild < 0 {
+            fail("fork for a reparent's child");
+        }
+        if grandchild == 0 {
+            // SAFETY: takes nothing.
+            let first = unsafe { libc::getppid() };
+            let mut left = 2_000_000_000_u64;
+            loop {
+                // SAFETY: takes nothing.
+                let now = unsafe { libc::getppid() };
+                if now == 1 {
+                    // SAFETY: as above.
+                    unsafe { libc::_exit(0) };
+                }
+                if now != first || left == 0 {
+                    fail(&format!(
+                        "getppid after a parent's end read {now} (it was {first}), not the \
+                         namespace's first process"
+                    ));
+                }
+                left -= 1;
+            }
+        }
+        // SAFETY: as above.
+        unsafe { libc::_exit(0) };
+    }
+    // The first to end is the parent, and the other is this process's by then: both reaped.
+    for _ in 0..2 {
+        let mut status = 0;
+        // SAFETY: an out-parameter on this stack, any child of this process.
+        if unsafe { libc::wait(&raw mut status) } < 0 {
+            fail("wait for a reparent");
+        }
+        if !libc::WIFEXITED(status) || libc::WEXITSTATUS(status) != 0 {
+            fail("a reparented child did not read this namespace's first process");
+        }
+    }
+    step("pid reparent");
+}
+
 /// The first process of the pid namespace.
 fn pid_one(outside: &[String], host: &str) -> ! {
     // SAFETY: `getpid` and `getppid` take nothing.
@@ -422,6 +474,7 @@ fn pid_one(outside: &[String], host: &str) -> ! {
         ));
     }
     step("pid");
+    reparented_in_the_namespace();
     let inside = namespaces();
     for ((kind, before), after) in KINDS.iter().zip(outside).zip(&inside) {
         if before == after || after.is_empty() {
@@ -489,10 +542,16 @@ fn walk_to_the_limit() {
     /// `write_ahead`'s seven.
     const LEFT: usize = 4;
     let events = || {
-        let text = get(&format!("{CTN}/memory.events"), "memory.events could not be read");
+        let text = get(
+            &format!("{CTN}/memory.events"),
+            "memory.events could not be read",
+        );
         field(&text, "max")
     };
-    let used = get(&format!("{CTN}/memory.current"), "memory.current could not be read");
+    let used = get(
+        &format!("{CTN}/memory.current"),
+        "memory.current could not be read",
+    );
     let used: usize = used.trim().parse().unwrap_or(LIMIT);
     let pages = (LIMIT.saturating_sub(used) / PAGE).saturating_sub(LEFT);
     let before = events();
@@ -524,7 +583,10 @@ fn walk_to_the_limit() {
     // Read after the unmap: `memory.events` only counts up, so it still holds anything the walk was
     // refused, and opening a file at the limit is a charge of its own, which is not the walk's.
     let moved = events().saturating_sub(before);
-    let now = get(&format!("{CTN}/memory.current"), "memory.current could not be read");
+    let now = get(
+        &format!("{CTN}/memory.current"),
+        "memory.current could not be read",
+    );
     say(&format!(
         "a walk of {pages} pages from {used} bytes used, {} once unmapped: memory.events max moved {moved}",
         now.trim()

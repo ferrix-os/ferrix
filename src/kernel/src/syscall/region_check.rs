@@ -100,6 +100,21 @@ const ASK_WINDOW_LIVE: u8 = 18;
 const ASK_WINDOW_WENT: u8 = 19;
 /// Read the window's pages by software, from here, many times.
 const ASK_WINDOW_READERS: u8 = 20;
+/// Whether this build has K1's fast path: `restricted-check`'s cases of it (ledger 7216).
+#[cfg(all(ferrix_fast_restricted, ferrix_checks = "on"))]
+const ASK_FAST_BUILT: u8 = 40;
+/// Read the asking thread's counts of fast trips.
+#[cfg(all(ferrix_fast_restricted, ferrix_checks = "on"))]
+const ASK_FAST_START: u8 = 41;
+/// Whether count `word >> 56` of the asking thread moved by the rest of the word.
+#[cfg(all(ferrix_fast_restricted, ferrix_checks = "on"))]
+const ASK_FAST_MOVED: u8 = 42;
+/// Set the asking thread's normal mode's `FS` base in its record: the word.
+#[cfg(all(ferrix_fast_restricted, ferrix_checks = "on"))]
+const ASK_NORMAL_FS: u8 = 43;
+/// Set its `GS` base.
+#[cfg(all(ferrix_fast_restricted, ferrix_checks = "on"))]
+const ASK_NORMAL_GS: u8 = 44;
 
 /// What the check measured, for the boot log.
 #[derive(Debug, Default)]
@@ -662,6 +677,314 @@ const fn window_readers_refused(_restricted: &Arc<AddressSpace>) -> bool {
     true
 }
 
+/// Whether the image's rule is `partition`: the case of a switch between speculation
+/// domains (ledger 7216 T.1).
+#[cfg(ferrix_partition_speculation = "partition")]
+const ASK_DOMAIN_BUILT: u8 = 47;
+/// Keep this thread off processor 0, and read processor 0's counts.
+#[cfg(ferrix_partition_speculation = "partition")]
+const ASK_DOMAIN_START: u8 = 48;
+/// Whether processor 0's counts say the word's crossings between domains happened, each
+/// with its barrier. The word's top bit: inside one domain, none, and the refill.
+#[cfg(ferrix_partition_speculation = "partition")]
+const ASK_DOMAIN_END: u8 = 49;
+/// The top bit of [`ASK_DOMAIN_END`]'s word.
+#[cfg(ferrix_partition_speculation = "partition")]
+const DOMAIN_WITHIN: u64 = 1 << 63;
+/// Its next bit: the trips were to go direct.
+#[cfg(ferrix_partition_speculation = "partition")]
+const DOMAIN_DIRECT: u64 = 1 << 62;
+/// Whether the image has direct switches, for the same two cases.
+#[cfg(ferrix_partition_speculation = "partition")]
+const ASK_DOMAIN_DIRECT: u8 = 50;
+
+/// Processor 0's decisions, invalidations and refills, and the direct switches.
+#[cfg(ferrix_partition_speculation = "partition")]
+fn domain_counts() -> [u64; 4] {
+    #[cfg(ferrix_fast_ipc)]
+    let direct = crate::sched::direct::counts()[0];
+    #[cfg(not(ferrix_fast_ipc))]
+    let direct = 0;
+    [
+        crate::arch::barrier_decisions_on(0),
+        crate::arch::switch_barriers_on(0),
+        crate::arch::refills_in_domain_on(0),
+        direct,
+    ]
+}
+
+/// What [`ASK_DOMAIN_END`] asks, on the line whichever way it goes.
+#[cfg(ferrix_partition_speculation = "partition")]
+fn domain_end(started: [u64; 4], word: u64) -> bool {
+    let now = domain_counts();
+    let [decided, issued, refilled, direct] = {
+        let mut moved = now;
+        for (count, then) in moved.iter_mut().zip(started) {
+            *count -= then;
+        }
+        moved
+    };
+    let within = word & DOMAIN_WITHIN != 0;
+    let wanted = word & !(DOMAIN_WITHIN | DOMAIN_DIRECT);
+    let direct_held = word & DOMAIN_DIRECT == 0 || direct >= wanted / 4;
+    let held = if within {
+        decided == 0
+            && issued == 0
+            && (refilled >= wanted || !crate::arch::refill_wanted_in_domain())
+    } else {
+        // Each with its invalidation where this processor offers one, read from the same
+        // word the switch reads: none and "decided only" only where it does not.
+        decided >= wanted
+            && if crate::arch::speculation_check::switch_barrier_offered() {
+                issued == decided
+            } else {
+                issued == 0
+            }
+    };
+    crate::console::println!(
+        "  regions  {} {wanted} switches on a processor: {decided} barriers decided, {issued} issued{}, \
+         {refilled} in-domain refills, {direct} of the trips direct",
+        if within {
+            "within one domain,"
+        } else {
+            "across two domains,"
+        },
+        if !crate::arch::speculation_check::switch_barrier_offered() {
+            " (this processor offers none: decided only)"
+        } else {
+            ""
+        },
+    );
+    held && direct_held
+}
+
+/// Whether the image has reservations and direct switches: case 197 (ledger 7088, 7134 (d)).
+#[cfg(all(ferrix_schedule = "edf", ferrix_fast_ipc))]
+const ASK_EDF_BUILT: u8 = 51;
+/// Read the count of direct switches, and each way it declined at T12.
+#[cfg(all(ferrix_schedule = "edf", ferrix_fast_ipc))]
+const ASK_EDF_START: u8 = 52;
+/// Whether it moved by the word.
+#[cfg(all(ferrix_schedule = "edf", ferrix_fast_ipc))]
+const ASK_EDF_MOVED: u8 = 53;
+/// Whether it did not move, and T12 did by the word.
+#[cfg(all(ferrix_schedule = "edf", ferrix_fast_ipc))]
+const ASK_EDF_DECLINED: u8 = 54;
+
+/// Read the count of direct switches, where the image has them.
+#[cfg(all(ferrix_fast_restricted, ferrix_checks = "on"))]
+const ASK_DIRECT_START: u8 = 45;
+/// Whether it moved by the word; yes in an image without them, where the case's call
+/// goes the general way.
+#[cfg(all(ferrix_fast_restricted, ferrix_checks = "on"))]
+const ASK_DIRECT_MOVED: u8 = 46;
+
+/// `sched::direct`'s trips, as far as this image has them.
+#[cfg(all(ferrix_fast_restricted, ferrix_checks = "on"))]
+fn direct_trips() -> Option<u64> {
+    #[cfg(ferrix_fast_ipc)]
+    {
+        Some(crate::sched::direct::counts()[0])
+    }
+    #[cfg(not(ferrix_fast_ipc))]
+    {
+        None
+    }
+}
+
+/// The task of the thread whose handle came with the ask, the handle gone.
+#[cfg(all(ferrix_fast_restricted, ferrix_checks = "on"))]
+fn asking_task(side: &Side) -> Result<Option<Arc<crate::sched::Task>>, &'static str> {
+    let handle = Handle(side.get_u32(HANDLES_AT)?);
+    let task = side.with_handles(|table| match table.get(handle) {
+        Ok((Object::Thread(thread), _)) => thread.task(),
+        _ => None,
+    });
+    if let Ok((gone, _)) = side.with_handles(|table| table.remove(handle)) {
+        crate::object::dispose([gone]);
+    }
+    Ok(task)
+}
+
+/// [`ASK_COUNT_END`]: the barriers since [`ASK_COUNT_START`] against the word's exits.
+#[cfg_attr(
+    not(all(ferrix_fast_restricted, ferrix_checks = "on")),
+    allow(unused_variables, reason = "its use is under the same cfg")
+)]
+fn count_end(started: (u64, u64), refills_started: u64, word: u64, report: &mut Report) -> bool {
+    let (decided, issued) = crate::trap::restricted_barriers();
+    report.barriers = decided - started.0;
+    report.exits = word;
+    report.issued = issued - started.1 == word;
+    // What was issued against what the processor offers, not against the
+    // exit's own answer: a machine with no IBPB issues none.
+    let decided_here = if crate::trap::exit_barrier_built() {
+        word
+    } else {
+        0
+    };
+    let held =
+        report.barriers == decided_here && report.issued == crate::trap::exit_barrier_offered();
+    // Where the root write empties nothing, each of them refilled (6747 (1d)).
+    #[cfg(all(ferrix_fast_restricted, ferrix_checks = "on"))]
+    let held = held && {
+        let (refills, emptied) = crate::arch::fast_check::exit_refills();
+        let refills = refills - refills_started;
+        if decided_here > 0 {
+            crate::console::println!(
+                "  regions  {refills} refills at {decided_here} exits, the root \
+                 write {} the return predictor",
+                if emptied { "emptying" } else { "not emptying" }
+            );
+        }
+        emptied || refills == decided_here
+    };
+    if !held {
+        // A shortfall is a missed barrier; over is read as a preempted trip
+        // (`docs/backlog/flakes.md`, fl-093). Which it was must be on the line.
+        crate::console::println!(
+            "  restricted barrier count: {} decided, {} wanted, issued {}, offered {}",
+            report.barriers,
+            decided_here,
+            report.issued,
+            crate::trap::exit_barrier_offered()
+        );
+    }
+    held
+}
+
+/// What the asks of a build's own features read at their start.
+#[derive(Default)]
+struct FeatureCounts {
+    /// [`ASK_EDF_START`]'s.
+    #[cfg(all(ferrix_schedule = "edf", ferrix_fast_ipc))]
+    edf_started: [u64; 2],
+    /// [`ASK_DOMAIN_START`]'s.
+    #[cfg(ferrix_partition_speculation = "partition")]
+    domain_started: [u64; 4],
+    /// [`ASK_FAST_START`]'s.
+    #[cfg(all(ferrix_fast_restricted, ferrix_checks = "on"))]
+    fast_started: [u64; 3],
+    /// [`ASK_DIRECT_START`]'s.
+    #[cfg(all(ferrix_fast_restricted, ferrix_checks = "on"))]
+    direct_started: u64,
+}
+
+/// The asks only some builds answer: no on any other, as an unknown ask (ledger 7216, 7249).
+#[cfg_attr(
+    not(any(
+        ferrix_partition_speculation = "partition",
+        all(ferrix_schedule = "edf", ferrix_fast_ipc)
+    )),
+    allow(
+        unused_variables,
+        clippy::needless_pass_by_ref_mut,
+        clippy::unnecessary_wraps,
+        reason = "the arms that use them are this build's"
+    )
+)]
+fn feature_ask(
+    side: &Side,
+    what: u8,
+    word: u64,
+    counts_from: &mut FeatureCounts,
+) -> Result<bool, &'static str> {
+    Ok(match what {
+            #[cfg(all(ferrix_schedule = "edf", ferrix_fast_ipc))]
+            ASK_EDF_BUILT => true,
+            #[cfg(all(ferrix_schedule = "edf", ferrix_fast_ipc))]
+            ASK_EDF_START => {
+                let counts = crate::sched::direct::counts();
+                counts_from.edf_started = [counts[0], counts[13]];
+                true
+            }
+            #[cfg(all(ferrix_schedule = "edf", ferrix_fast_ipc))]
+            ASK_EDF_MOVED => crate::sched::direct::counts()[0] - counts_from.edf_started[0] >= word,
+            #[cfg(all(ferrix_schedule = "edf", ferrix_fast_ipc))]
+            ASK_EDF_DECLINED => {
+                let counts = crate::sched::direct::counts();
+                let (trips, declined) = (counts[0] - counts_from.edf_started[0], counts[13] - counts_from.edf_started[1]);
+                crate::console::println!(
+                    "  regions  a reserved thread's channel calls: {trips} of them direct, {declined} declined at T12"
+                );
+                trips == 0 && declined >= word
+            }
+            #[cfg(ferrix_partition_speculation = "partition")]
+            ASK_DOMAIN_BUILT => true,
+            #[cfg(ferrix_partition_speculation = "partition")]
+            ASK_DOMAIN_START => {
+                if let Some(me) = crate::sched::current() {
+                    let mut away = ferrix_sched::CpuSet::of(1 % crate::smp::count());
+                    let _ = away.insert(crate::smp::count() - 1);
+                    let _ = crate::sched::set_affinity(&me, &away);
+                    crate::sched::yield_now();
+                }
+                counts_from.domain_started = domain_counts();
+                true
+            }
+            #[cfg(ferrix_partition_speculation = "partition")]
+            ASK_DOMAIN_END => {
+                if let Some(me) = crate::sched::current() {
+                    let mut all = ferrix_sched::CpuSet::of(0);
+                    for cpu in 1..crate::smp::count() {
+                        let _ = all.insert(cpu);
+                    }
+                    let _ = crate::sched::set_affinity(&me, &all);
+                }
+                domain_end(counts_from.domain_started, word)
+            }
+            #[cfg(ferrix_partition_speculation = "partition")]
+            ASK_DOMAIN_DIRECT => cfg!(ferrix_fast_ipc),
+            #[cfg(all(ferrix_fast_restricted, ferrix_checks = "on"))]
+            ASK_FAST_BUILT => true,
+            #[cfg(all(ferrix_fast_restricted, ferrix_checks = "on"))]
+            ASK_FAST_START => match asking_task(side)? {
+                Some(task) => {
+                    counts_from.fast_started = crate::arch::fast_check::restricted_fast_counts(&task);
+                    // The fast path reads per-processor tables of this size by a logical
+                    // number with no bound check (ledger 6747 (3c)).
+                    crate::smp::count() <= ferrix_sched::MAX_CPUS
+                }
+                None => false,
+            },
+            #[cfg(all(ferrix_fast_restricted, ferrix_checks = "on"))]
+            ASK_FAST_MOVED => asking_task(side)?.is_some_and(|task| {
+                let counts = crate::arch::fast_check::restricted_fast_counts(&task);
+                let which = usize::from((word >> 56) as u8);
+                let want = word & 0x00FF_FFFF_FFFF_FFFF;
+                let held = counts
+                    .get(which)
+                    .zip(counts_from.fast_started.get(which))
+                    .is_some_and(|(now, then)| now - then >= want);
+                if !held {
+                    crate::console::println!(
+                        "  restricted fast trips: count {which} wanted to move by {want}: {counts:?} from {:?}",
+                        counts_from.fast_started
+                    );
+                }
+                held
+            }),
+            #[cfg(all(ferrix_fast_restricted, ferrix_checks = "on"))]
+            ASK_DIRECT_START => {
+                counts_from.direct_started = direct_trips().unwrap_or(0);
+                true
+            }
+            #[cfg(all(ferrix_fast_restricted, ferrix_checks = "on"))]
+            ASK_DIRECT_MOVED => direct_trips().is_none_or(|trips| trips - counts_from.direct_started >= word),
+            #[cfg(all(ferrix_fast_restricted, ferrix_checks = "on"))]
+            ASK_NORMAL_FS => asking_task(side)?.is_some_and(|task| {
+                crate::arch::fast_check::restricted_set_normal_bases_for_check(&task, Some(word), None);
+                true
+            }),
+            #[cfg(all(ferrix_fast_restricted, ferrix_checks = "on"))]
+            ASK_NORMAL_GS => asking_task(side)?.is_some_and(|task| {
+                crate::arch::fast_check::restricted_set_normal_bases_for_check(&task, None, Some(word));
+                true
+            }),
+        _ => false,
+    })
+}
+
 /// Answer what the program asks until it closes its end.
 fn serve(
     side: &Side,
@@ -674,6 +997,9 @@ fn serve(
     let mut row_started = 0;
     let mut row_scale = (0, 1);
     let mut window = WindowAsks::default();
+    let mut features = FeatureCounts::default();
+    #[cfg(all(ferrix_fast_restricted, ferrix_checks = "on"))]
+    let mut refills_started = 0_u64;
     loop {
         let readable = Signals(Signals::READABLE.0 | Signals::PEER_CLOSED.0);
         wait(side, channel, readable)
@@ -705,34 +1031,16 @@ fn serve(
             }
             ASK_COUNT_START => {
                 started = crate::trap::restricted_barriers();
+                #[cfg(all(ferrix_fast_restricted, ferrix_checks = "on"))]
+                {
+                    refills_started = crate::arch::fast_check::exit_refills().0;
+                }
                 true
             }
             ASK_COUNT_END => {
-                let (decided, issued) = crate::trap::restricted_barriers();
-                report.barriers = decided - started.0;
-                report.exits = word;
-                report.issued = issued - started.1 == word;
-                // What was issued against what the processor offers, not against the
-                // exit's own answer: a machine with no IBPB issues none.
-                let decided_here = if crate::trap::exit_barrier_built() {
-                    word
-                } else {
-                    0
-                };
-                let held = report.barriers == decided_here
-                    && report.issued == crate::trap::exit_barrier_offered();
-                if !held {
-                    // A shortfall is a missed barrier; over is read as a preempted trip
-                    // (`docs/backlog/flakes.md`, fl-093). Which it was must be on the line.
-                    crate::console::println!(
-                        "  restricted barrier count: {} decided, {} wanted, issued {}, offered {}",
-                        report.barriers,
-                        decided_here,
-                        report.issued,
-                        crate::trap::exit_barrier_offered()
-                    );
-                }
-                held
+                #[cfg(not(all(ferrix_fast_restricted, ferrix_checks = "on")))]
+                let refills_started = 0;
+                count_end(started, refills_started, word, report)
             }
             ASK_PIN => pin(side, word)?,
             ASK_ON_PROCESSOR => on_processor(side, word)?,
@@ -758,7 +1066,7 @@ fn serve(
                     .map_or(0, |ns| u64::try_from(ns).unwrap_or(u64::MAX));
                 true
             }
-            _ => false,
+            what => feature_ask(side, what, word, &mut features)?,
         };
         side.put(MESSAGE_AT, &[u8::from(yes)])?;
         let _ = side

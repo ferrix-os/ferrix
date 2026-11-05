@@ -41,6 +41,10 @@ LEFT = (
 # Crates no ring-0 crate of this shape may link.
 LEFT_CRATES = ("ferrix_kernel_load", "ferrix_kernel_settings", "ferrix_fbtext", "ferrix_qr")
 
+# Symbols that must not be in this shape's kernel: normal mode's FS record does not move while
+# K1's fast path has the mark up (ledger 6464 Z2, 6981).
+ABSENT_SYMBOLS = ("x86_64::syscall::arch_prctl",)
+
 # (a symbol's text, the file it proves is not built).
 REAL_SYMBOLS = (
     ("console::screen::Board::newline", "console/screen.rs"),
@@ -179,6 +183,9 @@ def main() -> int:
         for symbol, file in REAL_SYMBOLS:
             if symbol in plain:
                 breaches.append(f"{symbol}: only {file} has it, and it is in the kernel")
+        for symbol in ABSENT_SYMBOLS:
+            if symbol in plain:
+                breaches.append(f"{symbol}: a user kernel holds no such writer, and it is in the kernel")
     else:
         breaches.append(f"{kernel}: no kernel to read symbols from")
     if args.report:

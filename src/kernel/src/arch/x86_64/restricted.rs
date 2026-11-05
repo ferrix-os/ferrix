@@ -96,6 +96,10 @@ pub(crate) struct RestrictedState {
     /// Its window, where the build has one and frames were to be had.
     #[cfg(ferrix_restricted_window = "on")]
     window: Option<Window>,
+    /// This thread's fast exits, fast re-entries and `#NM`s taken with the mark up, for
+    /// `restricted-check`: a case says which way it ran (ledger 7216).
+    #[cfg(all(ferrix_restricted_fastpath = "on", ferrix_checks = "on"))]
+    pub(in crate::arch) fast: [u64; 3],
 }
 
 impl RestrictedState {
@@ -132,6 +136,8 @@ impl RestrictedState {
             clean: false,
             held: false,
             last: 0,
+            #[cfg(all(ferrix_restricted_fastpath = "on", ferrix_checks = "on"))]
+            fast: [0; 3],
         }
     }
 }
@@ -480,7 +486,9 @@ fn write_exit_bases(normal_fs: u64, normal_gs: u64, program_gs: u64) {
         // SAFETY: (SYSREG) normal mode's own record.
         unsafe { super::cpu::write_msr(super::syscall::IA32_FS_BASE, normal_fs) };
     }
-    if normal_gs != program_gs {
+    // Whenever it is non-zero, as FS's: a program's null GS load clears the base on some
+    // parts, so equal records say nothing of the register (ledger 7216 G.1).
+    if normal_gs != 0 || normal_gs != program_gs {
         // SAFETY: (SYSREG) as above.
         unsafe { super::cpu::write_msr(super::syscall::IA32_KERNEL_GS_BASE, normal_gs) };
     }
@@ -964,6 +972,10 @@ pub(super) fn fast_exit_here(frame: &mut SyscallFrame) -> bool {
         ],
     );
     state.last = Reason::Syscall as u64;
+    #[cfg(all(ferrix_restricted_fastpath = "on", ferrix_checks = "on"))]
+    {
+        state.fast[0] += 1;
+    }
     sched::fast::set_active(task, core::ptr::null_mut());
     let program_gs = state.other.gs_base();
     // SAFETY: (CONTEXT) interrupts are masked; the task's own record, active again.
@@ -1047,6 +1059,10 @@ fn fast_resume(frame: &mut SyscallFrame) -> bool {
             window.number = u64::MAX;
         }
     }
+    #[cfg(all(ferrix_restricted_fastpath = "on", ferrix_checks = "on"))]
+    {
+        state.fast[1] += 1;
+    }
     copy_kept(&mut state.normal, frame);
     // Up first, so that the next exit's barrier cannot be skipped (6093 (2)).
     speculation::restricted_ran();
@@ -1109,6 +1125,10 @@ pub(crate) fn lazy_vector_trap(frame: &TrapFrame) -> bool {
     };
     if !state.lazy {
         return false;
+    }
+    #[cfg(all(ferrix_restricted_fastpath = "on", ferrix_checks = "on"))]
+    {
+        state.fast[2] += 1;
     }
     materialise(state);
     true

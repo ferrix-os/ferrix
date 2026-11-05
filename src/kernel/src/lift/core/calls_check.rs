@@ -116,7 +116,26 @@ pub fn run(job: Handle, arena: Handle, executable: Handle) -> Result<u32, &'stat
     )?;
     reserve(job, arena)?;
     window(job, arena, executable)?;
-    Ok(19)
+    arch_prctl_answers_nosys()?;
+    Ok(20)
+}
+
+/// `arch_prctl`'s number from normal mode answers `ENOSYS`: a user kernel has no writer of
+/// a thread's own `FS` record for K1's fast path to find moved (ledger 6464 Z2, 6981).
+fn arch_prctl_answers_nosys() -> Result<(), &'static str> {
+    #[cfg(target_arch = "x86_64")]
+    {
+        const ARCH_PRCTL: usize = 158;
+        const ARCH_SET_FS: usize = 0x1002;
+        // SAFETY: a call that writes no memory of this program's, whatever it answers.
+        let answer =
+            unsafe { ferrix_rt::linux::call(ARCH_PRCTL, [ARCH_SET_FS, 0x1000, 0, 0, 0, 0]) };
+        if answer != Err(ferrix_linux_abi::errno::Errno::ENOSYS) {
+            crate::println!("  lift-calls arch_prctl from normal mode: {answer:?}, not ENOSYS");
+            return Err("arch_prctl from normal mode");
+        }
+    }
+    Ok(())
 }
 
 /// `THREAD_RESERVE`'s authority (ledger 7088 E.2): a job handle with `SET_LIMIT`, at or above

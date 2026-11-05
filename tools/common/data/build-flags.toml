@@ -119,7 +119,7 @@ values.off = { allows = ["sc4", "present", "sc2", "none"], lands = "today", buil
 values.on = { allows = ["sc2", "none"], lands = "M0", built = "yes" }
 
 [flags.restricted_fastpath]
-why = "K1's fast path for the restricted exit and re-entry; its levels are K1's review's to set, and until then `on` allows no certified level above sc2"
+why = "K1's fast path for the restricted exit and re-entry; `on` selects code on x86-64 only, so an AArch64 image built `on` holds none and goes the general way; its levels are K1's review's to set, and until then `on` allows no certified level above sc2"
 values.off = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built = "adhoc", requires = ["personality=user"] }
 values.on = { allows = ["sc2", "none"], lands = "M3", built = "adhoc", requires = ["personality=user"] }
 values.not_applicable = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes", conflicts = ["personality=user"] }

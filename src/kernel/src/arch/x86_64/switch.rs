@@ -471,7 +471,7 @@ impl UserState {
 
     /// Give the program `base` as its `GS` base in this record, beside the
     /// shadow MSR the caller writes: what `arch_prctl(ARCH_SET_GS)` does.
-    pub(super) const fn set_gs_base(&mut self, base: u64) {
+    pub(in crate::arch) const fn set_gs_base(&mut self, base: u64) {
         self.gs_base = base;
     }
 

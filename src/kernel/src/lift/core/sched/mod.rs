@@ -129,6 +129,7 @@ fn new_task(
         blocked: core::sync::atomic::AtomicBool::new(false),
         dead: core::sync::atomic::AtomicBool::new(false),
         in_restricted: core::sync::atomic::AtomicBool::new(false),
+        thread_kept: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),
         pending_up: core::sync::atomic::AtomicBool::new(false),
         #[cfg(ferrix_schedule = "edf")]
         reserved: core::sync::atomic::AtomicBool::new(false),

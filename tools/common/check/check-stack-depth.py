@@ -18,6 +18,7 @@ least of the three; x86-64's return addresses, 8 bytes a call, are not counted; 
 out below `with_context` (its first use is at boot). It catches a by-value copy back on a path it
 walks; it does not prove no other path is deeper.
 """
+import importlib.util
 import re
 import shutil
 import subprocess
@@ -43,6 +44,10 @@ NATIVE = COMMON + ["ferrix_kernel_load::syscall::launch::make_native"]
 SUBTREE = "ferrix_kernel_load::syscall::exec::make_native_in"
 LINUX = ["ferrix_kernel_item::syscall::dispatch_with", "syscall::linux::answer_as", "family::sys_clone"]
 LINUX_SUBTREE = "process::Process>::new"
+# A kernel with no load in it (`personality=user`, FLIP.md LV.5): no Linux call runs on a kernel
+# stack there, as `linuxd`'s are its own, so its deepest named call is a region's process made.
+USER_NATIVE = COMMON + ["syscall::native::region::process_create_shared"]
+USER_SUBTREE = "ferrix_kernel_core::object::process::Process>::new"
 # What this row asks to be left on AArch64's stack, whose figures are the real ones (ledger 7033 D2).
 FLOOR = {"aarch64": 4096}
 # ARMv7-A's calls through a long-branch thunk are not followed: its figures are not figures (D4).
@@ -81,34 +86,27 @@ def objdump():
     raise SystemExit("check-stack-depth: no llvm-objdump (rustup component llvm-tools)")
 
 
+def frame_reader():
+    """`check-frames`' walk: one reader of a frame, its probe loop's size among them (ledger 7275 L3.1)."""
+    path = Path(__file__).with_name("check-frames.py")
+    spec = importlib.util.spec_from_file_location("check_frames", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.walk
+
+
 def read_frames(text):
     """Each function's frame in bytes and what it calls directly, from a disassembly."""
-    frames, calls, current = {}, {}, None
+    frames = {name: frame for name, (frame, _) in frame_reader()(text).items()}
+    calls, current = {}, None
     for line in text.splitlines():
         head = re.match(r"^[0-9a-f]+ <(.*)>:", line)
         if head:
             current = head.group(1)
-            frames[current], calls[current] = 0, set()
+            calls[current] = set()
             continue
         if current is None:
             continue
-        sub = re.search(r"\bsub\s+sp, (?:sp, )?#(0x[0-9a-f]+|\d+)(, lsl #12)?", line)
-        if sub:
-            frames[current] += int(sub.group(1), 0) << (12 if sub.group(2) else 0)
-        pair = re.search(r"\b(?:stp|str)\s+\S+(?:, \S+)?, \[sp, #-(0x[0-9a-f]+|\d+)\]!", line)
-        if pair:
-            frames[current] += int(pair.group(1), 0)
-        rsp = re.search(r"\bsubq?\s+\$(0x[0-9a-f]+|\d+), %rsp", line)
-        if rsp:
-            frames[current] += int(rsp.group(1), 0)
-        if re.search(r"\bpushq?\s+%", line):
-            frames[current] += 8
-        push = re.search(r"\b(?:push|stmdb\s+sp!,)\s*\{([^}]*)\}", line)
-        if push:
-            frames[current] += 4 * (push.group(1).count(",") + 1)
-        vpush = re.search(r"\bvpush\s*\{([^}]*)\}", line)
-        if vpush:
-            frames[current] += 8 * (vpush.group(1).count(",") + 1)
         call = re.search(r"\b(?:callq?|jmpq?|bl|blx|b)\s+(?:0x)?[0-9a-f]+ <(.*?)(?:\+0x[0-9a-f]+)?>$", line)
         if call and call.group(1) != current:
             calls[current].add(call.group(1))
@@ -189,10 +187,18 @@ def judge(frames, calls, arch, stack_bytes):
     above = next((n for n in frames if TIMER_ABOVE in n), None)
     rest = drop_rest(frames, calls, problems)
     lines.append(f"stack-depth: {arch}: what a task's last drop leaves, under an interrupt: {rest}{remark}")
-    for label, chain, subtree in (
-        ("a process made", way_in + NATIVE, SUBTREE),
-        ("clone to Process::new", way_in + LINUX, LINUX_SUBTREE),
-    ):
+    user = not any("ferrix_kernel_load::" in name for name in frames)
+    paths = (
+        (("a region's process made", way_in + USER_NATIVE, USER_SUBTREE),)
+        if user
+        else (
+            ("a process made", way_in + NATIVE, SUBTREE),
+            ("clone to Process::new", way_in + LINUX, LINUX_SUBTREE),
+        )
+    )
+    if user:
+        lines.append(f"stack-depth: {arch}: a user kernel: no load, so a Linux call's paths are linuxd's")
+    for label, chain, subtree in paths:
         total = frame["entry"]
         for part in chain:
             name = named(frames, part, problems)
@@ -215,7 +221,7 @@ def judge(frames, calls, arch, stack_bytes):
                 f"{arch}: {label} under a timer's interrupt reaches {worst} of {stack_bytes} bytes, {floor} to be left"
             )
     # All of what direct calls reach below `sys_clone`, as possible, but what `CLONE_CANNOT` says.
-    clone = named(frames, "family::sys_clone", problems)
+    clone = None if user else named(frames, "family::sys_clone", problems)
     if clone:
         chain = sum(frames[named(frames, part, problems)] for part in way_in + LINUX[:-1])
         below = deepest(clone, frames, calls, {}, without=CLONE_CANNOT)
@@ -260,6 +266,14 @@ def self_test():
     )
     frames, calls = read_frames(text)
     assert frames == {"a": 16, "b": 32, "panic_x": 4096, "c": 32, "d": 28}, frames
+    loops = (
+        "0000 <x>:\n  movq %rsp, %r11\n  subq $0x8000, %r11\n  subq $0x1000, %rsp\n  movq $0x0, (%rsp)\n"
+        "  cmpq %r11, %rsp\n  jne 0x0 <x>\n"
+        "0040 <y>:\n  sub x9, sp, #0x8, lsl #12\n  sub sp, sp, #0x1, lsl #12\n  cmp sp, x9\n  str xzr, [sp]\n"
+        "  b.ne 0x40 <y>\n"
+    )
+    sized, _ = read_frames(loops)
+    assert sized["x"] == 0x8000 and sized["y"] == 0x8000, sized
     assert deepest("a", frames, calls, {}) == 48, "recursion and panics are left out"
     assert deepest("c", frames, calls, {}) == 60
     problems = []

@@ -25,6 +25,15 @@
 //! which vendor statement each defence rests on.
 
 use super::machine_speculation as machine;
+
+// CHECKS-ONLY: syscall/region_check.rs
+/// Whether this processor offers the invalidation a switch between programs issues, as read
+/// from the processor itself: the word the switch reads (ledger 7249 N.1).
+#[cfg(ferrix_partition_speculation = "partition")]
+pub fn switch_barrier_offered() -> bool {
+    HARDENED && machine::exit_barrier_offered(crate::smp::this_cpu().map_or(0, |cpu| cpu.logical))
+}
+
 use super::speculation::{
     Defences, HARDENED, applied_by, nospec_below, nospec_index, switch_barriers, switch_barriers_on,
 };
