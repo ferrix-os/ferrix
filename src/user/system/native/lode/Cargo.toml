@@ -25,5 +25,12 @@ ferrix-rt.workspace = true
 # init's control records, for an alert's `start` (docs/LOGGING.md §7.4).
 ferrix-svc-proto.workspace = true
 
+# `lode reload`, the settings writer's part in lode (ledger 3623 (R18)): an image whose
+# profile has settings_writer = "absent" builds lode without it, and xtask refuses one
+# whose lode still holds it.
+[features]
+default = ["reload"]
+reload = []
+
 [lints]
 workspace = true

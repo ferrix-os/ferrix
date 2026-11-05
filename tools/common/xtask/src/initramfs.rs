@@ -838,6 +838,14 @@ fn add_identity(
 /// docs/BUILD-FLAGS.md §3.1, `settings_writer`): settingsd and settingsctl
 /// by name wherever they are installed, and the `settings.*` authd policies.
 const SETTINGS_WRITER_PROGRAMS: [&str; 2] = ["settingsd", "settingsctl"];
+/// What lode says after a reload, and only then.
+const LODE_RELOADS: &[u8] = b"reloaded: ";
+/// Whether `haystack` holds `needle`.
+fn holds(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
+}
 /// Where authd's policies are, of which the writer's are `settings.*`.
 const SETTINGS_POLICIES: &str = "etc/ferrix/auth/services/settings.";
 
@@ -865,6 +873,13 @@ fn refuse_settings_writer(
             let name = path.rsplit('/').next().unwrap_or(path);
             SETTINGS_WRITER_PROGRAMS.contains(&name) || path.starts_with(SETTINGS_POLICIES)
         });
+    // The part no name shows: lode's own reload (ledger 3623 (R18)), by what only it says.
+    let carried = carried.or_else(|| {
+        natives
+            .iter()
+            .find(|built| built.name == "lode" && holds(&built.bytes, LODE_RELOADS))
+            .map(|_| "lode's reload")
+    });
     match carried {
         Some(path) => Err(Error::new(format!(
             "this image's profile has settings_writer = \"absent\", and it carries {path}, which is \
@@ -1188,6 +1203,17 @@ mod tests {
         assert!(refuse_settings_writer(&[], std::slice::from_ref(&policy), "absent").is_err());
         assert!(refuse_settings_writer(&[native("settingsd")], &[policy], "present").is_ok());
         assert!(refuse_settings_writer(&[native("devmgr")], &[], "absent").is_ok());
+        // Lode's reload, which no name shows (ledger 3623 (R18)).
+        let lode = |bytes: &[u8]| native::Built {
+            name: "lode",
+            directory: "sbin",
+            bytes: bytes.to_vec(),
+        };
+        let refused =
+            refuse_settings_writer(&[lode(b"xreloaded: y")], &[], "absent").expect_err("refused");
+        assert!(refused.to_string().contains("lode's reload"));
+        assert!(refuse_settings_writer(&[lode(b"nothing")], &[], "absent").is_ok());
+        assert!(refuse_settings_writer(&[lode(b"xreloaded: y")], &[], "present").is_ok());
     }
 
     /// An archive's manifest is read back from its own headers.

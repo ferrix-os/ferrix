@@ -114,6 +114,7 @@ impl Capture {
     /// Read `capture.conf` again (`lode reload`): the switch, the rules and
     /// `SameProgramEvery=`. The socket is made as root at start, so a
     /// capture turned on that was off then takes a restart; said so.
+    #[cfg(feature = "reload")]
     pub(crate) fn reload(&mut self) -> &'static str {
         let (on, rules, every_us) = read_config();
         let was = self.on;

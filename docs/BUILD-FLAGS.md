@@ -199,7 +199,7 @@ Not flags, and why:
   refusing: absent, (13)), `present` in `present` and `desktop`. A profile
   with `present` requires `runtime_settings=live`, and xtask refuses an
   image with `absent` that carries any of those programs, as it refuses
-  `drvupdated` (`native::refuse_updater`); lode reload's writer is part of `lode` today, which xtask cannot refuse by name, so it becomes a program of its own (or a lode build value) before an `absent` image is built (`docs/backlog/p2.md`, 3623 (R18)). `check-build-flags.py` refuses `present` without `runtime_settings=live` and any key a profile leaves unset (3623 (R17)). `lode-crashd` is not in it; it
+  `drvupdated` (`native::refuse_updater`); lode reload is a build value of `lode`, off in an `absent` image, and xtask refuses an image whose `lode` still holds it (3623 (R18), ledger 7011 LV.4). `check-build-flags.py` refuses `present` without `runtime_settings=live` and any key a profile leaves unset (3623 (R17)). `lode-crashd` is not in it; it
   is `crash_collector`'s (3595 (C3)). Each value allows: `absent` all,
   `present` `present` and `none`. `config_updates` (3564 (S11)) is a later
   key of the same kind, not built.

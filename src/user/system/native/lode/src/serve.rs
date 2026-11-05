@@ -515,7 +515,11 @@ impl Service {
                     Ok(String::new())
                 }
                 Request::Flush => self.store.flush().map(|()| String::new()),
+                #[cfg(feature = "reload")]
                 Request::Reload => Ok(self.reload(now)),
+                // An image with no settings writer: what lode was started with stands.
+                #[cfg(not(feature = "reload"))]
+                Request::Reload => Ok(String::from("refused: this image has no settings writer\n")),
             };
             control::answer(fd, result);
         }
@@ -841,6 +845,7 @@ impl Service {
         }
     }
 
+    #[cfg(feature = "reload")]
     /// `lode reload`: the rules, the alerts and the events read again; what
     /// the old rules held is said first. Retention classes take a restart,
     /// since segments are being written per class.
@@ -1669,6 +1674,7 @@ impl Store {
     /// being written.
     /// Take new retention classes: every segment being written is sealed
     /// first, so no segment holds records of two sets of classes.
+    #[cfg(feature = "reload")]
     fn replace_classes(&mut self, classes: Vec<Class>) {
         while !self.writers.is_empty() {
             self.seal(0);

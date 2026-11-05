@@ -455,6 +455,10 @@ pub(crate) fn build_native(
             build = build.env(key, value);
         }
     }
+    // The settings writer's part in lode (ledger 3623 (R18)).
+    if package == "ferrix-lode" && crate::flags::this_image()?.1 == "absent" {
+        build = build.args(["--no-default-features"]);
+    }
     build.output(&path).run()?;
     artifact(path)
 }
