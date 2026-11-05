@@ -904,6 +904,7 @@ fn check_btrfs_write() {
         Mode::Check => (None, ""),
         Mode::Churn => (Some(powerfail::churn(powerfail::seed())), "churned"),
         Mode::Replay => (Some(powerfail::replay()), "replayed"),
+        Mode::Keep => (Some(powerfail::keep()), "kept"),
     };
     if let Some(result) = result {
         match result {

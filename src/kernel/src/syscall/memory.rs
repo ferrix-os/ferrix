@@ -475,13 +475,15 @@ fn map_window(
 
 /// `msync`.
 ///
-/// Nothing is written back, because nothing needs to be: a shared file
-/// mapping's pages are the file's own pages, so a `read` already sees every
-/// write. tmpfs and a read-only btrfs have no disk to flush them to, and a
-/// writable btrfs writes a mapped file's pages at its next commit, which this
-/// does not bring forward. What is left is what Linux checks, in its order: unknown flags,
-/// `MS_ASYNC` with `MS_SYNC`, and an address off a page boundary are
-/// `EINVAL`; a range that wraps, or is not wholly mapped, is `ENOMEM`.
+/// With `MS_SYNC`, every shared file mapping in the range goes through its file's fsync
+/// before this answers (F-106), which writes what a mapping dirtied and no more:
+/// a program may count on it across a power cut. `MS_ASYNC` asks for nothing to be brought
+/// forward, as on Linux, and a writable btrfs writes those pages at its next commit.
+///
+/// What else is checked is what Linux checks, in its order: unknown flags, `MS_ASYNC` with
+/// `MS_SYNC`, and an address off a page boundary are `EINVAL`; a range that wraps, or is not
+/// wholly mapped, is `ENOMEM`. Linux syncs what comes before a gap and then answers; a gap seen
+/// by the first look here syncs nothing.
 pub(crate) fn sys_msync(
     process: &Process,
     addr: u64,
@@ -502,7 +504,76 @@ pub(crate) fn sys_msync(
     if mapped_from(process, addr, end) < end {
         return Err(Errno::ENOMEM);
     }
+    if flags & MS_SYNC != 0 {
+        sync_mappings(process, addr, end)?;
+    }
     Ok(0)
+}
+
+/// What [`next_region`] found: where it ends, and the id of its file if it is a shared one.
+#[derive(Clone, Copy, Debug)]
+struct NextRegion {
+    /// Its first address.
+    start: u64,
+    /// First address past it.
+    end: u64,
+    /// Its file's id, for a shared file mapping.
+    shared_file: Option<u64>,
+}
+
+/// The first region ending past `cursor`, looked at under the space's lock, which holds
+/// nothing else and allocates nothing.
+fn next_region(process: &Process, cursor: u64) -> Option<NextRegion> {
+    process.space().with_regions(|regions| {
+        for region in regions {
+            if region.end > cursor {
+                return Some(NextRegion {
+                    start: region.start,
+                    end: region.end,
+                    shared_file: region
+                        .file
+                        .filter(|_| region.flags.shared)
+                        .map(|(id, _)| id),
+                });
+            }
+        }
+        None
+    })
+}
+
+/// Every shared file mapping in `[addr, end)` through its file's fsync, one at a time with no
+/// lock held, as another thread may change the map meanwhile. A first error from an fsync answers
+/// at once. A hole found on the way, or a file gone, is `ENOMEM` once the rest are done: success
+/// is not said for a range not wholly synced.
+fn sync_mappings(process: &Process, addr: u64, end: u64) -> Result<(), Errno> {
+    let mut cursor = addr;
+    let mut gap = false;
+    while cursor < end {
+        let Some(region) = next_region(process, cursor) else {
+            gap = true;
+            break;
+        };
+        gap |= region.start > cursor;
+        if region.start >= end {
+            break;
+        }
+        if let Some(id) = region.shared_file {
+            match process.space().mapped_file(id) {
+                Some(file) => match file.downcast::<OpenFile>() {
+                    Ok(file) => super::fsctl::fsync_open_file(&file, false)?,
+                    // A System V segment has no disk to go to, as on Linux.
+                    Err(file) if file.is::<super::shm::Attachment>() => {}
+                    // Nothing else fills this for a shared region of a program's space: `map_file`
+                    // above and `shm` do, the loader's are private. A mapping nothing here can sync
+                    // is not a success.
+                    Err(_) => return Err(Errno::EIO),
+                },
+                None => gap = true,
+            }
+        }
+        cursor = region.end;
+    }
+    if gap { Err(Errno::ENOMEM) } else { Ok(()) }
 }
 
 /// How far from `addr` the mappings run without a gap, looking no further

@@ -357,15 +357,21 @@ fn sys_sync(process: &Process) -> Result<usize, Errno> {
 /// answers for a file with no `fsync` operation.
 pub(crate) fn sys_fsync(process: &Process, fd: i32, data_only: bool) -> Result<usize, Errno> {
     let file = usable(process, fd)?;
+    fsync_open_file(&file, data_only)?;
+    Ok(0)
+}
+
+/// Bring what `file` holds to its disk: `fsync`'s body, and each file `msync` finds mapped.
+pub(crate) fn fsync_open_file(file: &ferrix_vfs::OpenFile, data_only: bool) -> Result<(), Errno> {
     match file.kind() {
         FileType::Regular | FileType::Directory => {
             file.location().inode()?.fsync(data_only)?;
-            Ok(0)
+            Ok(())
         }
         // A disk's descriptor flushes the disk (`fs::disk_file`).
         FileType::BlockDevice if fs::disk_file::of(file.io()).is_some() => {
             file.io().fsync(data_only)?;
-            Ok(0)
+            Ok(())
         }
         _ => Err(Errno::EINVAL),
     }

@@ -271,6 +271,7 @@ fn served(_argument: usize) {
                 Mode::Check => (None, ""),
                 Mode::Churn => (Some(powerfail::churn(powerfail::seed())), "churned"),
                 Mode::Replay => (Some(powerfail::replay()), "replayed"),
+                Mode::Keep => (Some(powerfail::keep()), "kept"),
             };
             match result {
                 Some(Ok(report)) if report.skipped.is_some() => {

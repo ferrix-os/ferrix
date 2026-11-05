@@ -117,6 +117,8 @@ const IMAGE_ROW: &[&str] = &[
     "check-stack-depth --arch all",
     "check-stack-depth --arch x86_64 --kernel-profile desktop",
     "check-frames --arch all",
+    "test-msync --arch x86_64 --accel kvm",
+    "test-msync --arch aarch64",
     "check-frames --arch all --release",
     "check-frames --arch all --kernel-profile desktop",
     "check-frames --arch all --kernel-profile desktop --release",

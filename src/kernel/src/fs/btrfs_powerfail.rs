@@ -81,9 +81,11 @@ pub enum Mode {
     Churn,
     /// Mount what a crash left, and judge it.
     Replay,
+    /// Mount what a crash left, replaying its log, and leave it for a program to read.
+    Keep,
 }
 
-/// The mode, as [`init`] read it: 0 check, 1 churn, 2 replay.
+/// The mode, as [`init`] read it: 0 check, 1 churn, 2 replay, 3 keep.
 static MODE: AtomicU8 = AtomicU8::new(0);
 static SEED: AtomicU64 = AtomicU64::new(1);
 
@@ -94,6 +96,7 @@ pub fn init(view: &BootView<'_>) {
         None => {}
         Some("churn") => MODE.store(1, Ordering::Relaxed),
         Some("replay") => MODE.store(2, Ordering::Relaxed),
+        Some("keep") => MODE.store(3, Ordering::Relaxed),
         Some(other) => {
             println!("  btrfs-pf {MODE_OPTION}={other} is not understood; the ordinary check runs");
         }
@@ -108,6 +111,7 @@ pub fn mode() -> Mode {
     match MODE.load(Ordering::Relaxed) {
         1 => Mode::Churn,
         2 => Mode::Replay,
+        3 => Mode::Keep,
         _ => Mode::Check,
     }
 }
@@ -204,15 +208,20 @@ fn byte(seq: u64, offset: usize) -> u8 {
 /// Mounting is where a log left by a crash is replayed, so this is the whole
 /// of the recovery: everything after it reads a volume that is already whole.
 fn mount() -> Result<(), &'static str> {
+    mount_at(MOUNT_POINT)
+}
+
+/// [`mount`], at `point`.
+fn mount_at(point: &[u8]) -> Result<(), &'static str> {
     let rdev = makedev(VIRTIO_BLK_MAJOR, DISK_INDEX * 16);
     let ns = fs::namespace();
     let ctx = ns.context();
-    match ns.mkdir(&ctx, None, MOUNT_POINT, 0o755) {
+    match ns.mkdir(&ctx, None, point, 0o755) {
         Ok(()) | Err(Errno::EEXIST) => {}
         Err(_) => return Err("the mount point could not be made"),
     }
     let at = ns
-        .resolve(&ctx, None, MOUNT_POINT, true)
+        .resolve(&ctx, None, point, true)
         .map_err(|_| "the mount point could not be resolved")?;
     let volume = fs::btrfs::mount_rw(rdev).map_err(|_| "the disk would not mount writable")?;
     let _ = ns
@@ -400,12 +409,29 @@ pub fn churn(seed: u64) -> Result<Report, &'static str> {
     }
 }
 
-/// Mount what the crash left — which replays its log — and judge every file
-/// that ends in a trailer.
+/// Mount what the crash left, which replays its log, and leave it mounted for a program
+/// to read: `test-msync`'s second boot.
 ///
 /// # Errors
 ///
 /// A body that does not match the trailer over it: a promise rolled back.
+pub fn keep() -> Result<Report, &'static str> {
+    let mut report = Report {
+        files: 0,
+        checked: 0,
+        logged: false,
+        skipped: None,
+    };
+    if served() {
+        mount_at(b"/mnt-rw")?;
+    } else {
+        report.skipped = Some("no third disk is served");
+    }
+    Ok(report)
+}
+
+/// Mount what the crash left — which replays its log — and judge every file
+/// that ends in a trailer.
 pub fn replay() -> Result<Report, &'static str> {
     let mut report = Report {
         files: 0,

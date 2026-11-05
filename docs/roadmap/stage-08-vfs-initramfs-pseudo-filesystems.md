@@ -202,12 +202,10 @@ its path, offset, device and inode. A page wholly past the file's end is never
 committed. The filesystem tells the store the file's length, after an extend
 and before a cut, and a fault reads that bound under the VMO's lock. A touch
 past the end is `SIGBUS` from user mode and `EFAULT` from a system call.
-`msync` checks what Linux checks and writes nothing back, because the pages
-are the file's. On tmpfs that is all there is. On btrfs, writable since
-stage 12, the mount holds a file handed out for mapping while anything maps
-it, and once a mapping that may write has been made, the next writeback
-writes every page the file holds, since such writes mark none; `msync`
-does not bring that commit forward.
+`msync` checks what Linux checks; with `MS_SYNC` each shared file mapping in its
+range goes through its file's fsync (F-106), and on tmpfs that is all there is. On
+btrfs, writable since stage 12, the mount holds a file handed out for mapping while
+anything maps it, and what a mapping dirtied is in the set writeback writes (K3b).
 
 **Done — a file mapped privately.** A private mapping of a file shows the
 file's pages until it writes one, and that write copies the page into a shadow
