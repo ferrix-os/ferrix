@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "8f9fd1d6839690d819a4e6afda126344f5502d376f68d6dc0408bd6f89aa8f63",
+  "digest": "72cf31f4234b02b35cd4e9116fdce2adae6e8de2d2cc393551bd3f28e999121e",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -89185,10 +89185,10 @@
                   "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::theRecordsAreNotCopied",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"arch::x86_64::restricted::swap_user_state\", \"arch::x86_64::restricted::write_bases\", \"arch::x86_64::restricted::both_modes_clean\", \"arch::x86_64::cpu::set_task_switched\", \"arch::x86_64::cpu::clear_task_switched\")",
+                  "value": "(\"arch::x86_64::restricted::swap_user_state\", \"arch::x86_64::restricted::write_exit_bases\", \"arch::x86_64::restricted::write_entry_bases\", \"arch::x86_64::restricted::both_modes_clean\", \"arch::x86_64::cpu::set_task_switched\", \"arch::x86_64::cpu::clear_task_switched\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4162
+                    "line": 4163
                   }
                 }
               ]
@@ -89201,7 +89201,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
-                "line": 4164
+                "line": 4165
               },
               "children": [
                 {
@@ -89212,7 +89212,7 @@
                   "value": "\"A switch that brings a normal-mode thread in, where restricted code ran last on the processor, shall issue the barrier under the exit rule, a kernel thread between them changing nothing.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4167
+                    "line": 4168
                   }
                 },
                 {
@@ -89223,7 +89223,7 @@
                   "value": "\"Cases 124, 125.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4168
+                    "line": 4169
                   }
                 },
                 {
@@ -89234,7 +89234,7 @@
                   "value": "\"H.TRAP.24\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4169
+                    "line": 4170
                   }
                 },
                 {
@@ -89245,7 +89245,7 @@
                   "value": "(\"arch::speculation::restricted_left\", \"arch::speculation::restricted_ran\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4171
+                    "line": 4172
                   }
                 }
               ]
