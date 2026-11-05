@@ -123,6 +123,7 @@ Causes are listed most likely first.
 | [FX-0933](#fx-0933) | the page cache failed the check made of kernel objects alone |
 | [FX-0934](#fx-0934) | the native calls failed the check made of kernel objects alone |
 | [FX-0935](#fx-0935) | a pager with a keeper was not held to the rebind contract |
+| [FX-0936](#fx-0936) | a program no personality holds did not behave as the kernel promises |
 | [FX-0949](#fx-0949) | a window's unmap flushed the wrong thing |
 | [FX-0950](#fx-0950) | the device authority self-check failed |
 | [FX-0951](#fx-0951) | the sealing self-check failed |
@@ -3032,6 +3033,20 @@ paid. The message names the case.
 
 See: src/kernel/src/object/pager.rs; src/kernel/src/object/pager_check.rs;
 docs/microkernel/K13.md.
+
+<a id="fx-0936"></a>
+
+## FX-0936 — a program no personality holds did not behave as the kernel promises
+
+`syscall::bare_side_check::run` (docs/microkernel/B5-host.md) runs small native
+programs on `object::bare::Bare`, so that what it proves links in a kernel with
+no load: a fault resolved, kernel time charged and user time not. The message
+names the case.
+
+1. `trap::dispatch` or `sched::vtime` stopped opening or closing a stint.
+2. `AddressSpace::fault` stopped making a mapping true.
+
+See: src/kernel/src/syscall/bare_side_check.rs; docs/microkernel/B5-host.md.
 
 <a id="fx-0949"></a>
 
