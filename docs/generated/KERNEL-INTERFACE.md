@@ -2446,7 +2446,7 @@ checks above is `pub` for raised checks (F3).
 | `Keeper::level` | method | item, load |  |
 | `Keeper::take_up` | method | item, load |  |
 | `Pager::core` | method | item, load, bin |  |
-| `Pager::keep` | method | item, load |  |
+| `Pager::keep` | method | item, load, bin |  |
 | `Pager::level` | method | item, load |  |
 | `Pager::new` | method | item, load, bin |  |
 | `PagerCore::adoptable_ticket` | method | item, load |  |

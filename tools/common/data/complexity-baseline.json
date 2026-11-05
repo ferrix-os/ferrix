@@ -149,6 +149,11 @@
       "lines": 60,
       "recursive": false
     },
+    "main.rs::check_btrfs_write": {
+      "complexity": 15,
+      "lines": 51,
+      "recursive": false
+    },
     "main.rs::check_filesystems": {
       "complexity": 13,
       "lines": 88,
