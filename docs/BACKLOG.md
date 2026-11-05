@@ -722,6 +722,8 @@ when you take P2 work, or before touching an area to see what is owed there
 * **VT-d slice 2: honour RMRRs (vtd-n150, 2026-10-17)**: built as K2 on `intel-k2` (design `vtd-design.md` §3.9(b), consultant ledger 2388; `L.iommu.73`-`78`): an RMRR that is whole pages, in reach and over no RAM is identity-mapped in a kernel-held domain before TE, and dmar0 translates. Left open: the box run (P1 row above) and O2's QEMU patch giving QEMU's DMAR an RMRR, so a boot check can show identity-before-TE with device DMA (`vtd-design.md` §2; deferred, not unbuildable: Ferrix already carries a patched QEMU). [more](backlog/p3.md#p3-017)
 * **PCIDs' stale read on hardware (pcid, 2026-10-29)**: the switch-back check (`L.user.170`) and the ERAPS check's control (`L.x86_64.220`) can only be decisive where the processor has PCIDs, and no gated row has them (QEMU's TCG refuses `+pcid`). Owed: one N150 boot of the PCID landing with `ferrix.checks=run`, and the slot comparison taken out, reading FIRED. [more](backlog/p3.md#p3-019)
 * **The root disk's driver alive across a devmgr restart (ram-release-r1, 2026-10-30)**: a restart under `ferrix.devmgr=init` starts from the kept set, but `/` stops serving until the new devmgr restarts the block driver; keep that driver in a job of its own. [more](backlog/p3.md#p3-020)
+* **`fast` and `max` on the DK1 and the Pixel 7 run without board glue until M8 (2026-11-05, ledger 7346, `microkernel/CRATE-SPLIT.md` §5 Q3).** `platform/st/stm32mp1*` and `gs201/usb.rs` are built into neither ring 0 nor linuxd under `personality=user`; their home there is M8's board server. Owner mk-authority (M8).
+* **The crate split, S0 to S5 then P1 to P3 (2026-11-05, ledger 7346, `microkernel/CRATE-SPLIT.md` §4.2).** S0 (tools, no kernel file) may land any time; the moves wait for `fast`. Owner mk-crates.
 
 ---
 
@@ -758,6 +760,7 @@ taken.
 
 ## Waiting on the customer
 
+* **Where the optional kernel parts live, and how fine** (2026-11-05; `docs/microkernel/CRATE-SPLIT.md` §5 Q1, Q2): default `src/kernel-parts/<group>/<name>/` (not `src/lib/kernel/`, whose rule 2 says no kernel), one crate per part, display, render and chardev as one. Work proceeds on the defaults.
 * **Slot 8 on the 3090's memory** (2026-11-04; `docs/TEST-TIME.md`, *GPU memory as a gate slot*): closed since the customer took the card back for ComfyUI. Reopening is the customer's word, and owes V2's kernel control, V10(h) with a control that fires, V7's neighbours and `mount-semantics.py` on the binary then installed (ledger 6697, 6858), before any of its rows count. Ways to share the card, and what it would add: `docs/microkernel/OPEN-QUESTIONS.md` §3.
 * **CI's `rustc` job, required or truly advisory** (2026-11-05; `docs/microkernel/OPEN-QUESTIONS.md` §2): `ci.yml` calls it advisory, Promote already holds on it. Recommended required. Beside it, and whatever is chosen: `main` cannot move while FX-0936 fires on CI's `Boot in QEMU (aarch64)` and `certification/verdict` is pending on develop's tip.
 * **`max`'s row: the window or the two-root path's 30 ns** (2026-11-05; `docs/microkernel/OPEN-QUESTIONS.md` §1): `max.toml` less `schedule=windows` reads 1,480 ns by hand, 670 with a fast path its level does not allow. No threshold moved.

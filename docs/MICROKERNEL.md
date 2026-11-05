@@ -383,6 +383,13 @@ VFS itself leaves. This plan does not build it:
    `netd`, the device servers, the console server (M8). These change no kernel
    code, except where a split needs a new mechanism.
 
+Where the load's source lives is a separate matter from where it runs:
+[`microkernel/CRATE-SPLIT.md`](microkernel/CRATE-SPLIT.md) (design, OK IF
+ledger 7346) moves each optional part out of `src/kernel/` into a crate of
+its own under `src/kernel-parts/`, each built into ring 0 for `desktop` and
+`present` and into `linuxd` for `fast` and `max` from the same source, so that
+`src/kernel/` holds what ring 0 keeps under `fast` and `max`.
+
 ## 5. Boot and authority
 
 init is a Linux program (std on musl, `INIT.md`), so it cannot be the first
