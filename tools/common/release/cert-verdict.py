@@ -17,7 +17,7 @@ Without --verdict the verdict is worked out, never asked for:
                 (the consultant's item-hits.py, the same ring resolution as
                 check-item-boundary.py) must name its review in its message:
                 a ledger line ("ledger 2692", "ledger line 2122"), a standing
-                pattern's check-list ("SP-1:"), the consultant, or a line
+                pattern's check-list ("SP-1:"), or a line
                 "Certification: ..." saying why none was needed. Then success;
                 otherwise pending, listing the commits, until the consultant
                 answers with --verdict. Nothing outside the item: success.
@@ -47,8 +47,13 @@ CONTEXT = "certification/verdict"
 NAMED = re.compile(
     r"\bledger\b(?: line)?\s*\d{2,}"
     r"|\bSP-[123]\s*:"
-    r"|\bconsultant\b"
     r"|^Certification:\s*\S",
+    re.IGNORECASE | re.MULTILINE,
+)
+# A review not yet had names none, whatever else the message says (ledger 6846 C1).
+PENDING = re.compile(
+    r"^Certification:\s*(?:pending|awaiting|awaits|to be|to follow|tbd|review pending|under (?:consultant )?review"
+    r"|owed|not yet)\b",
     re.IGNORECASE | re.MULTILINE,
 )
 HIT = re.compile(r"^([0-9a-f]{10})\s{2}")
@@ -63,8 +68,23 @@ def item_hits(spec: str) -> list[str]:
     return [m.group(1) for line in out.splitlines() if (m := HIT.match(line))]
 
 
+def names_a_review(message: str) -> bool:
+    """A ledger line, a standing pattern, or a reason; not a review still to come."""
+    return not PENDING.search(message) and bool(NAMED.search(message))
+
+
 def unnamed(hits: list[str]) -> list[str]:
-    return [h for h in hits if not NAMED.search(git("log", "-1", "--format=%B", h))]
+    return [h for h in hits if not names_a_review(git("log", "-1", "--format=%B", h))]
+
+
+def self_test() -> None:
+    for message in ("x\n\nCertification: reviewed, ledger 6981.", "Reviewed, ledger line 700", "SP-1: all",
+                    "Certification: docs only"):
+        assert names_a_review(message), message
+    for message in ("x\n\nCertification: pending.", "Certification: pending, ledger 6981", "the consultant saw it",
+                    "Certification: under consultant review", "nothing", "ledger 7", "Certification: review pending",
+                    "Certification: TBD", "Certification: to follow"):
+        assert not names_a_review(message), message
 
 
 def gh(*args: str) -> str:
@@ -92,6 +112,10 @@ def post(repo: str, sha: str, state: str, description: str, url: str | None) -> 
 
 
 def main() -> int:
+    if "--self-test" in sys.argv:
+        self_test()
+        print("cert-verdict: self-test passed")
+        return 0
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("range")
     ap.add_argument("--lane", choices=("owner", "outside"), default="owner")
