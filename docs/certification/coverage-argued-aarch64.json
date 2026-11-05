@@ -1051,119 +1051,119 @@
     },
     {
       "file": "object/process.rs",
-      "lines": "1088",
+      "lines": "1091",
       "category": "defensive",
       "match": "debug_assert!(",
       "why": "The failure half of a debug assertion that interrupts are enabled when a process's watchers are reached: their lock is a plain one, which an interrupt handler may not take. Every caller is a system call or a task's exit, with interrupts on; reaching the row is the assertion firing."
     },
     {
       "file": "object/process.rs",
-      "lines": "1113",
+      "lines": "1116",
       "category": "defensive",
       "match": "debug_assert!(",
       "why": "As `Exit::observe`'s: the failure half of the assertion that interrupts are on when a process's watchers are closed."
     },
     {
       "file": "object/process.rs",
-      "lines": "1261",
+      "lines": "1264",
       "category": "defensive",
       "match": "debug_assert!(",
       "why": "The failure half of the assertion that an unstarted process's last handle is dropped with interrupts on, since the kill it causes may block. Handles close from system calls and exits, with interrupts on; the object check closes unstarted children's handles and reaches the kill."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "1545",
+      "lines": "1551",
       "category": "failure-path",
       "match": "debug_assert!(",
       "why": "The debug assertion's own row is its panic call: a prepared task dropped with interrupts masked, which would free its stack waiting on every processor with interrupts off. The condition is evaluated under line 1105's and 1113's rows, which are reached (an unstarted child's drop at stage 9)."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "1787",
+      "lines": "1793",
       "category": "defensive",
       "match": "arch::wait_for_interrupt();",
       "why": "After the switch away from a dead task, which never returns to it: a dead task is never picked again (stage 5's a_dead_task_is_not_filed_as_a_sleeper, and check_invariants' DEAD_STILL_QUEUED, hold that). If it ever were picked, halting here is the only answer that corrupts nothing."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3345-3347",
+      "lines": "3352-3354",
       "category": "failure-path",
       "match": "preempt_count(cpu),",
       "why": "FX-0503: a task blocked or yielded while holding a lock that disables preemption, which the preemption count cannot survive. The report names the lock's site and stops the machine; a kernel that never blocks under a spin lock never takes it."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4391-4392",
+      "lines": "4437-4438",
       "category": "failure-path",
       "match": "pub(crate) fn report_queues() {",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4396",
+      "lines": "4442",
       "category": "failure-path",
       "match": "for (cpu, lock) in queues.iter().enumerate() {",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4401-4402",
+      "lines": "4447-4448",
       "category": "failure-path",
       "match": "queue.len(),",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4405-4406",
+      "lines": "4451-4452",
       "category": "failure-path",
       "match": ".and_then(|flags| flags.get(cpu))",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4410",
+      "lines": "4456",
       "category": "failure-path",
       "match": "}",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4413-4414",
+      "lines": "4459-4460",
       "category": "failure-path",
       "match": "pub(crate) fn print_picks(cpu: usize) {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4419",
+      "lines": "4465",
       "category": "failure-path",
       "match": "let Ok(mut picks) = fallible::try_with_capacity::<queue::Pic",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4423",
+      "lines": "4469",
       "category": "failure-path",
       "match": "for pick in lock.lock().picks() {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4430",
+      "lines": "4476",
       "category": "failure-path",
       "match": "pick.at / 1000,",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4435",
+      "lines": "4481",
       "category": "failure-path",
       "match": "for seen in pick.seen.iter().take(pick.count) {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4445",
+      "lines": "4491",
       "category": "failure-path",
       "match": "}",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
@@ -1275,28 +1275,28 @@
     },
     {
       "file": "user/space.rs",
-      "lines": "1348",
+      "lines": "1370",
       "category": "defensive",
       "match": "Ok((vmo.page(index).unwrap_or(shared), None))",
       "why": "A page found held by a device between the fault reading its reference count and taking it. A pin makes a shared page the object's own first (`Vmo::hold` copies it), so a copy-on-write fault finds a held page only if a pin lands in those few instructions on another processor, which no check can place deterministically."
     },
     {
       "file": "user/space.rs",
-      "lines": "2148",
+      "lines": "2170",
       "category": "defensive",
       "match": "};",
       "why": "A private file mapping's region whose file object or shadow is missing from the tables. `map_file` records both under the region's id before the region can fault, and they leave together as the region's id leaves; a fault finding one missing would be the tables and the map disagreeing."
     },
     {
       "file": "user/space.rs",
-      "lines": "3625",
+      "lines": "3647",
       "category": "defensive",
       "match": "debug_assert!(",
       "why": "The failure half of the debug assertion that a user page fault is resolved with no preemption-disabling lock held (a fault may sleep for a page from a disk). Every fault path takes its locks inside the resolution, after this; reaching the row is the assertion firing."
     },
     {
       "file": "user/space.rs",
-      "lines": "3629-3630",
+      "lines": "3651-3652",
       "category": "defensive",
       "match": "site.map_or(\"?\", |site| site.file()),",
       "why": "The failure half of the debug assertion that a user page fault is resolved with no preemption-disabling lock held (a fault may sleep for a page from a disk). Every fault path takes its locks inside the resolution, after this; reaching the row is the assertion firing."
@@ -1359,56 +1359,56 @@
     },
     {
       "file": "trap.rs",
-      "lines": "150",
+      "lines": "155",
       "category": "failure-path",
       "match": "fatal(frame, why, &crate::panic::catalog::SYSTEM_CALL_TRAP);",
       "why": "The stop when the architecture refuses a system call trap. On this architecture `system_call` (arch/aarch64/trap.rs) refuses only an `svc` taken from EL1, and the kernel issues no `svc` of its own: every `svc` in the tree is in a program's bytes."
     },
     {
       "file": "trap.rs",
-      "lines": "153, 158-159",
+      "lines": "158, 163",
       "category": "failure-path",
       "match": "Trap::IllegalInstruction => fatal(",
       "why": "An undefined instruction or an unexpected exception taken in the kernel, which stops it. The same exceptions from a program are reached, by the trap check's programs (arch/aarch64/trap/check.rs), through the arm above these."
     },
     {
       "file": "trap.rs",
-      "lines": "503",
+      "lines": "513",
       "category": "defensive",
       "match": "None => Outcome::Return(Errno::ENOSYS.as_return_value()),",
       "why": "A system call with no dispatcher registered. `main.rs` registers the item's dispatcher before anything can enter user mode, and the first registration stands, so in this item every call finds one. The arm is what the core answers when built without a dispatcher above it, rather than a panic in a trap vector."
     },
     {
       "file": "trap.rs",
-      "lines": "794",
+      "lines": "804",
       "category": "failure-path",
       "match": "fatal(",
       "why": "A fault from user mode with no personality registered, which the kernel stops on; `main.rs` registers the Linux personality's return path before the first program."
     },
     {
       "file": "trap.rs",
-      "lines": "850",
+      "lines": "860",
       "category": "failure-path",
       "match": "FaultOutcome::NoProcess => fatal(",
       "why": "A fault from user mode that the personality finds no process for, which the kernel stops on: every task that enters ring 3 is a process's thread."
     },
     {
       "file": "trap.rs",
-      "lines": "887",
+      "lines": "897",
       "category": "defensive",
       "match": "return Err(None);",
       "why": "A fault from user mode on a task with no address space. `sched` gives a task made for a thread its process's space before it first runs, so this would be the kernel having entered ring 3 without recording who was running; it is reported as fatal rather than resolved."
     },
     {
       "file": "trap.rs",
-      "lines": "1019, 1021, 1024-1027",
+      "lines": "1029, 1031, 1034-1037",
       "category": "failure-path",
       "match": "report(",
       "why": "The report of a page fault the kernel could not resolve -- one in the kernel outside the demand window, or a user one with no program to blame -- printed as the kernel stops."
     },
     {
       "file": "trap.rs",
-      "lines": "1041, 1046, 1056, 1071-1073, 1075",
+      "lines": "1051, 1056, 1066, 1081-1083, 1085",
       "category": "failure-path",
       "match": "pub(crate) fn fatal(",
       "why": "`fatal` and `report`, the trap path's stop: the architecture's register dump, the abridged report for a second failure, and the panic's conclusion. Reached only when the kernel stops on a trap."
