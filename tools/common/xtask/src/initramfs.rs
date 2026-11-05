@@ -742,8 +742,9 @@ fn certified_bytes(natives: &[native::Built]) -> Result<Vec<u8>> {
     for image in natives {
         out.extend_from_slice(&certified_digest(&image.bytes));
         let mut name = [0_u8; 32];
-        let length = image.name.len().min(32);
-        name[..length].copy_from_slice(&image.name.as_bytes()[..length]);
+        for (to, from) in name.iter_mut().zip(image.name.as_bytes()) {
+            *to = *from;
+        }
         out.extend_from_slice(&name);
     }
     Ok(out)

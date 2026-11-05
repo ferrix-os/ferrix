@@ -329,6 +329,10 @@ fn keep_earlier_serial(path: &Path) {
 /// # Errors
 ///
 /// The first of those that does not hold, naming the serial log.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one list of the boot's problems, in the order each is reported"
+)]
 pub(crate) fn judge(
     arch: Arch,
     lines: &[String],
