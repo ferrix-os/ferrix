@@ -131,6 +131,7 @@ Causes are listed most likely first.
 | [FX-0952](#fx-0952) | a first process did not start |
 | [FX-0953](#fx-0953) | the partitions' description cannot be honoured |
 | [FX-0954](#fx-0954) | the partition manager ended |
+| [FX-0970](#fx-0970) | a time reservation did not behave as the scheduler promises |
 | [FX-1001](#fx-1001) | PCI enumeration failed its self-check |
 | [FX-1002](#fx-1002) | a device node handed out memory or an interrupt it does not have |
 | [FX-1003](#fx-1003) | an IOMMU domain gave a device the wrong addresses |
@@ -3154,6 +3155,23 @@ authority, so this is the machine's safe state, a clean exit included.
 
 See: src/user/system/native/partmgr/src/main.rs;
 docs/microkernel/BOOT-AUTHORITY.md.
+
+<a id="fx-0970"></a>
+
+## FX-0970 — a time reservation did not behave as the scheduler promises
+
+Under `schedule=edf` a thread may hold a budget in each period on one processor:
+admission refuses a set too wide for it, a thread out of budget waits for its
+next period, the earliest deadline with budget runs first, and the fair class
+has the rest.
+
+1. A change to the tier's pick, charge or refill, or to a door that moves a
+   reserved thread.
+2. A host that stalls the processor long enough to take the check past its
+   slack.
+
+See: src/kernel/src/sched/reserve.rs; src/lib/kernel/sched-edf;
+docs/microkernel/K9.md.
 
 <a id="fx-1001"></a>
 

@@ -145,8 +145,8 @@
       "recursive": false
     },
     "main.rs::kmain": {
-      "complexity": 13,
-      "lines": 91,
+      "complexity": 11,
+      "lines": 89,
       "recursive": false
     },
     "main.rs::start_scheduler": {
@@ -166,7 +166,7 @@
     },
     "sched/task.rs::new": {
       "complexity": 4,
-      "lines": 65,
+      "lines": 69,
       "recursive": false
     },
     "smp.rs::invalidate_pages": {
@@ -466,7 +466,7 @@
     },
     "syscall/native.rs::answer": {
       "complexity": 44,
-      "lines": 152,
+      "lines": 153,
       "recursive": false
     },
     "syscall/native.rs::channel_read": {
@@ -520,8 +520,8 @@
       "recursive": false
     },
     "syscall/native/lift.rs::call": {
-      "complexity": 74,
-      "lines": 166,
+      "complexity": 77,
+      "lines": 170,
       "recursive": false
     },
     "syscall/native/region.rs::answer": {

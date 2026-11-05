@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2982 declarations in the core's files, 212 in the item's; 230 checks-only.
+2991 declarations in the core's files, 212 in the item's; 230 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2773,6 +2773,7 @@ checks above is `pub` for raised checks (F3).
 | `RELEASE` | static | load (checks) | checks-only |
 | `ROOT_PID1` | static | load |  |
 | `SCHEDULER_BRING_UP` | static | bin |  |
+| `SCHEDULE_EDF` | static | bin |  |
 | `SECONDARY_START` | static | bin |  |
 | `SERVICES` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `SMBIOS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -2949,10 +2950,12 @@ checks above is `pub` for raised checks (F3).
 | `inspect` | mod | load |  |
 | `inspect_check` | mod | bin (checks) | pub for raised checks |
 | `rehome_check` | mod | item (checks) | pub for raised checks |
+| `reserve` | mod | item, load |  |
+| `reserve_check` | mod | bin |  |
 | `trip` | mod | item, load |  |
 | `vtime` | mod | item, load |  |
 | `work` | mod | item, load, bin |  |
-| `AffinityRefusal` | re-export | load |  |
+| `AffinityRefusal` | re-export | item, load |  |
 | `Due` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `FIRE_BATCH` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Fired` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -2988,7 +2991,7 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `AffinityRefusal` | enum | load |  |
+| `AffinityRefusal` | enum | item, load |  |
 | `effective_mask` | fn | load |  |
 | `set_affinity` | fn | item, load |  |
 
@@ -3081,6 +3084,22 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `run` | fn | item (checks) | checks-only |
+
+### `sched::reserve`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `give_back` | fn | item, load |  |
+| `holds_own` | fn | load |  |
+| `take` | fn | item, load |  |
+| `Refusal` | re-export | item, load |  |
+| `Reservation` | re-export | item, load |  |
+
+### `sched::reserve_check`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `run` | fn | bin |  |
 
 ### `sched::task`
 
