@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-3012 declarations in the core's files, 215 in the item's; 243 checks-only.
+3016 declarations in the core's files, 215 in the item's; 245 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2918,6 +2918,7 @@ checks above is `pub` for raised checks (F3).
 | `BASE_SLICE_NS` | const | load |  |
 | `REAPER_PATIENCE_NANOS` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `ServiceRefusal` | enum | item, load |  |
+| `SyncPlaced` | enum | load (checks) | checks-only |
 | `ask_for_a_decision_here` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `bandwidth_walks` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `begin_leaving` | fn | load |  |
@@ -2964,6 +2965,7 @@ checks above is `pub` for raised checks (F3).
 | `spawn_user` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `start_reaper` | fn | bin |  |
 | `summary` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `sync_placed` | fn | load (checks) | checks-only |
 | `take_out_without_asking` | fn | load (checks) | checks-only |
 | `tasks_made` | fn | load |  |
 | `throttle_current` | fn | item |  |
@@ -3011,6 +3013,8 @@ checks above is `pub` for raised checks (F3).
 | `CpuTime::switches` | field | load, bin |  |
 | `PreparedTask::launch` | method | load, bin |  |
 | `Summary::switches` | field | load, bin |  |
+| `SyncPlaced::COUNT` | associated const | load (checks) |  |
+| `SyncPlaced::NAMES` | associated const | load (checks) |  |
 
 ### `sched::affinity`
 
