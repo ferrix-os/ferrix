@@ -723,8 +723,10 @@ taken.
 
 ## Waiting on the customer
 
-* **Slot 8 on the 3090's memory** (2026-11-04; `docs/TEST-TIME.md`, *GPU memory as a gate slot*): closed since the customer took the card back for ComfyUI. Reopening is the customer's word, and owes V2's kernel control, V10(h) with a control that fires, V7's neighbours and `mount-semantics.py` on the binary then installed (ledger 6697, 6858), before any of its rows count.
-* **btrfs for a shared store of the slots' builds** (2026-11-04; `docs/TEST-TIME.md`, *A shared store of the slots' builds*): hard links are out, a stale build reproduced (ledger 6859). btrfs may meet the order with no GPU, needing root and a device; unmeasured. Put to the customer by the coordinator. The GPU store and GPU lexer wait for the 3090.
+* **Slot 8 on the 3090's memory** (2026-11-04; `docs/TEST-TIME.md`, *GPU memory as a gate slot*): closed since the customer took the card back for ComfyUI. Reopening is the customer's word, and owes V2's kernel control, V10(h) with a control that fires, V7's neighbours and `mount-semantics.py` on the binary then installed (ledger 6697, 6858), before any of its rows count. Ways to share the card, and what it would add: `docs/microkernel/OPEN-QUESTIONS.md` §3.
+* **CI's `rustc` job, required or truly advisory** (2026-11-05; `docs/microkernel/OPEN-QUESTIONS.md` §2): `ci.yml` calls it advisory, Promote already holds on it. Recommended required. Beside it, and whatever is chosen: `main` cannot move while FX-0936 fires on CI's `Boot in QEMU (aarch64)` and `certification/verdict` is pending on develop's tip.
+* **`max`'s row: the window or the two-root path's 30 ns** (2026-11-05; `docs/microkernel/OPEN-QUESTIONS.md` §1): `max.toml` less `schedule=windows` reads 1,480 ns by hand, 670 with a fast path its level does not allow. No threshold moved.
+* **btrfs for a shared store of the slots' builds** (2026-11-04; `docs/TEST-TIME.md`, *A shared store of the slots' builds*): hard links are out, a stale build reproduced (ledger 6859). btrfs may meet the order with no GPU, needing root and a device; estimate and device in `docs/microkernel/OPEN-QUESTIONS.md` §4 (`nvme1n1p6`'s contents are the customer's to say). Put to the customer by the coordinator. The GPU store and GPU lexer wait for the 3090.
 * **F-76, the core's and the item's unclassified libraries** (2026-10-23,
   filed with the kernel split, `docs/KERNEL-CRATES.md` §5.1; ledger 1585 Q1):
   the core links 21 first-party libraries and the item 16 that no ring

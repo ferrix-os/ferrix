@@ -1738,7 +1738,8 @@ The GPU store was not built: the 3090 is taken back, and neither `nvcomp` nor GP
 hashing was tried. It would have to keep per-name times to escape the above. btrfs
 deduplicates through `FIDEDUPERANGE` with per-inode times, checksums every read and
 compresses by mount option, with no GPU; it needs root and a device, and is
-unmeasured.
+unmeasured. A read-only estimate per 128 KiB block, and the device, are in
+`microkernel/OPEN-QUESTIONS.md` §4.
 
 ### A source scanner for the Python checkers (2026-11-04, customer's order)
 

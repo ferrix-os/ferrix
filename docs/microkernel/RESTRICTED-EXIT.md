@@ -139,7 +139,7 @@ test-threads at two processors, test-shell and test-rustc with the fast path on,
 slot is safe on one processor only; `feature/mk-ibpb` and
 `~/.local/share/ferrix/mk-ibpb/mk-ibpb-code.patch` on nazuna hold it.
 
-**The row through `gate.sh`, 2026-11-05, nazuna idle, load under 2, sibling 0%, five boots**: `bench-rows --release --accel kvm --personality user --set restricted_fastpath=on --set partition_speculation=exit --no-claim`: 720 ns (710 to 890) before the cut (`mkm-row-2`, 70bad907e), 690 ns (690 to 700) after it (`mkm-row-3`): 30, not ea9d3e8a2's 60. **660 is not reached**, and the 40 against the 650 above is not explained. No delay control and no general-path row, flag on and `personality=user`, not `max`.
+**The row through `gate.sh`, 2026-11-05, nazuna idle, load under 2, sibling 0%, five boots**: `bench-rows --release --accel kvm --personality user --set restricted_fastpath=on --set partition_speculation=exit --no-claim`: 720 ns (710 to 890) before the cut (`mkm-row-2`, 70bad907e), 690 ns (690 to 700) after it (`mkm-row-3`): 30, not ea9d3e8a2's 60. **660 is not reached**, and of the 40 against the 650 above, 30 is develop's tree against the by-hand one (`OPEN-QUESTIONS.md` §1, by hand), not yet named. No delay control and no general-path row, flag on and `personality=user`, not `max`.
 
 ## Owed, now that it has landed
 
