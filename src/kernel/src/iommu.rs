@@ -2310,14 +2310,16 @@ fn endpoints<'a>(unit: &dmar::Drhd<'a>) -> impl Iterator<Item = Address> + 'a {
 }
 
 /// Whether a function's DMA would be translated, with no domain made: what K14's
-/// `needs_certified` reads (`docs/microkernel/K14.md` §5).
+/// `needs_certified` reads (`docs/microkernel/K14.md` §5). As [`domain_placed`] decides: a
+/// unit an RMRR or IVMD holds to remapping only translates nothing, and `programmed.smmu`
+/// holds only units that opened. A function not its own requester on an `SMMUv3` reads false
+/// (`topology::claims`, as VT-d's placement), which over-approximates to flagged.
 pub fn would_translate(function: Address) -> bool {
     PROGRAMMED.get().is_some_and(|programmed| {
-        matches!(vtd_placed(programmed, function), topology::Placed::Unit(_))
-            || matches!(
-                amdvi_placed(programmed, function),
-                topology::Placed::Unit(_)
-            )
+        vtd_unit_for(programmed, function).is_some_and(vtd::Unit::translating)
+            || amdvi_unit_for(programmed, function).is_some_and(amdvi::Unit::translating)
+            || (smmu_stream_for(programmed, function).is_some()
+                && claims(false, function, function, &BRIDGES.lock()) == topology::Behind::Own)
     })
 }
 

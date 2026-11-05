@@ -249,8 +249,10 @@ fn node_of(described: &Described<'_>) -> Result<Arc<DeviceNode>, &'static str> {
         })
         .ok_or("a device matches no node")?;
     // DMA that nothing translates is in reach of everything, and a function behind an
-    // aliasing bridge shares its requester id: the kernel would make it no domain of its
-    // own (`ferrix_pci::topology::claims`), so an own domain is the proof of both.
+    // aliasing bridge shares its requester id: `iommu::would_translate` reads false for both
+    // (`ferrix_pci::topology::claims`). On an `SMMUv3` the stream is requester arithmetic and
+    // `domain_placed` asks no `claims`, so an own domain is no proof there; this test and the
+    // two below are what refuse an aliased function (ledger 7166 F.2).
     let Location::Pci(function) = node.location() else {
         return Err("a device-tree device: its closure is not read yet, so it is refused");
     };
