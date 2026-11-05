@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "475c28b7d82f2c3ad970974a35552472a6ea5db8d5ca1d582a7ee6f37cf20ae6",
+  "digest": "c6a3879c7d68543f529cb4132310a6633bf669af6b0ea13de17ad8bb2fa98732",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -44022,7 +44022,7 @@
                   "qualifiedName": "FerrixObjectRequirements::SpacesByHandle::theOldCallsAreCompiledOut",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"The case in syscall/build_check.rs under that flag; until that build boots, BACKLOG's row.\"",
+                  "value": "\"The case in syscall/region_check.rs under that flag, run by every personality=user boot (test-first-processes --personality user), and its control with the comparison inverted (ledger 7558).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 3565
