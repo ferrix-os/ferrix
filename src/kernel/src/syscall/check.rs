@@ -12833,13 +12833,24 @@ fn attempted(
         if holds(charged) {
             return Ok(charged);
         }
-        crate::console::println!(
-            "  vtime    attempt {attempt}, {case}: {} of {} us counted as kernel time",
-            charged.kernel / 1000,
-            charged.runtime / 1000,
-        );
+        print_attempt(attempt, case, charged);
     }
     Err(failure)
+}
+
+/// [`attempted`]'s line for a failed attempt, out of line and cold: it is
+/// printed only when a run failed, and inlined it would grow the frame of
+/// what the check is inlined into (`kmain` on ARMv7-A, F-100).
+#[cold]
+#[inline(never)]
+fn print_attempt(attempt: usize, case: &'static str, charged: Charged) {
+    crate::console::println!(
+        "  vtime    attempt {attempt}, {case}: {} of {} us counted as kernel time, \
+         preempted {} times in user mode",
+        charged.kernel / 1000,
+        charged.runtime / 1000,
+        charged.preempted,
+    );
 }
 
 /// A program's time in user mode is not kernel time, whichever way it last

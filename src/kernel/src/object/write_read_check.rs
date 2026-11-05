@@ -852,18 +852,64 @@ fn check_a_sync_wake_moves_the_reader() -> Result<u32, &'static str> {
         task,
     } = start_reader(SYNC_ROUNDS, None)?;
     let mut moved = 0;
-    for round in 0..SYNC_ROUNDS {
+    #[cfg(debug_assertions)]
+    let mut rounds = [([0_u32; crate::sched::SyncPlaced::COUNT], 0, 0); SYNC_ROUNDS];
+    #[cfg(not(debug_assertions))]
+    let mut rounds = [((), 0, 0); SYNC_ROUNDS];
+    for (round, seen) in rounds.iter_mut().enumerate() {
+        #[cfg(debug_assertions)]
+        let before = crate::sched::sync_placed();
         // Wherever it waits now, the writer runs on the next processor.
         let (writer, answered_on) = wake_from(&own, &task, round, |home| (home + 1) % processors)?;
         if answered_on == writer + 1 {
             moved += 1;
         }
+        #[cfg(debug_assertions)]
+        {
+            let after = crate::sched::sync_placed();
+            for (count, (after, before)) in seen.0.iter_mut().zip(after.iter().zip(before.iter())) {
+                *count = after.wrapping_sub(*before);
+            }
+        }
+        seen.1 = writer;
+        seen.2 = answered_on;
     }
     finish_reader(&task)?;
     if moved == 0 {
+        print_sync_rounds(&rounds);
         return Err("sync: no Sync write from another processor moved a reader free to move");
     }
     Ok(moved)
+}
+
+/// lr-6's diagnostic, printed only as the Sync case fails: each round's
+/// writer and where the reader answered, and in development builds the Sync
+/// wakes' exits counted during the round (`sched::sync_placed`), machine-wide,
+/// so another processor's Sync wakes in the window are among them.
+#[cfg(debug_assertions)]
+fn print_sync_rounds(rounds: &[([u32; crate::sched::SyncPlaced::COUNT], usize, usize)]) {
+    for (round, (exits, writer, answered_on)) in rounds.iter().enumerate() {
+        crate::console::println!(
+            "  sync     round {round}: writer {writer}, answered on {answered_on}; Sync exits machine-wide:"
+        );
+        for (name, count) in crate::sched::SyncPlaced::NAMES.iter().zip(exits) {
+            if *count != 0 {
+                crate::console::println!("  sync       {name} {count}");
+            }
+        }
+    }
+}
+
+/// lr-6's diagnostic in a release build: the rounds alone, the exits being
+/// counted only in development builds.
+#[cfg(not(debug_assertions))]
+fn print_sync_rounds(rounds: &[((), usize, usize)]) {
+    for (round, ((), writer, answered_on)) in rounds.iter().enumerate() {
+        crate::console::println!(
+            "  sync     round {round}: writer {writer}, answered on {answered_on}; \
+             Sync exits are counted only in development builds"
+        );
+    }
 }
 
 /// A reader pinned to processor 1, woken by a Sync writer on processor 0,

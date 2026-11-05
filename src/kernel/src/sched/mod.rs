@@ -2086,6 +2086,10 @@ pub(crate) fn wake_with(task: &Arc<Task>, how: Wake) {
     if how == Wake::Sync {
         let saved = <arch::Irq as IrqControl>::disable();
         let placed = this_cpu().map(|here| wake_onto(task, here, Onto::Sync));
+        #[cfg(debug_assertions)]
+        if placed.is_none() {
+            note_sync(Onto::Sync, SyncPlaced::NoQueue);
+        }
         <arch::Irq as IrqControl>::restore(saved);
         if matches!(placed, Some(Placed::Moved | Placed::NotBlocked)) {
             return;
@@ -2131,21 +2135,31 @@ enum Onto {
     Pull,
 }
 
+/// [`wake_onto`]'s exit: `placed`, with `why` counted first in development
+/// builds ([`note_sync`]); in a release build, `placed` alone.
+macro_rules! sync_exit {
+    ($how:expr, $why:ident, $placed:expr) => {{
+        #[cfg(debug_assertions)]
+        note_sync($how, SyncPlaced::$why);
+        $placed
+    }};
+}
+
 /// Move `task` onto `here`, this processor, if [`wake_with`]'s conditions
 /// hold, or [`wake`]'s with [`Onto::Pull`], and make it runnable there. With
 /// interrupts masked.
 fn wake_onto(task: &Arc<Task>, here: usize, how: Onto) -> Placed {
     // A pull's affinity and pinning were decided by `may_pull`.
     let Some(mine) = queue_of(here).filter(|_| how == Onto::Pull || may_place(task, here)) else {
-        return Placed::Declined;
+        return sync_exit!(how, NoQueue, Placed::Declined);
     };
     loop {
         let home = task.cpu();
         if home == here {
-            return Placed::Declined;
+            return sync_exit!(how, AtHome, Placed::Declined);
         }
         let Some(theirs) = queue_of(home) else {
-            return Placed::Declined;
+            return sync_exit!(how, NoHomeQueue, Placed::Declined);
         };
         // Lower processor first, as `steal_from` takes them.
         let (first, second) = if here < home {
@@ -2165,15 +2179,20 @@ fn wake_onto(task: &Arc<Task>, here: usize, how: Onto) -> Placed {
             (&mut *second_queue, &mut *first_queue)
         };
         if task.state() != task::BLOCKED {
-            return Placed::NotBlocked;
+            return sync_exit!(how, NotBlocked, Placed::NotBlocked);
         }
         // The mask read again under the home's lock, its writer's: the test
         // above was a hint (L.sched.97).
         if !allowed(task, here) {
-            return Placed::Declined;
+            return sync_exit!(how, NotAllowed, Placed::Declined);
         }
-        if refuses(how, here_queue, home_queue, task) || !asleep_at_home(task, home_queue) {
-            return Placed::Declined;
+        // In this order: `asleep_at_home` takes the task out of its sleeper
+        // set, so it is asked only once `refuses` has said no.
+        if refuses(how, here_queue, home_queue, task) {
+            return sync_exit!(how, Refused, Placed::Declined);
+        }
+        if !asleep_at_home(task, home_queue) {
+            return sync_exit!(how, NotAsleepAtHome, Placed::Declined);
         }
         // Whatever sleep it meant is over, as the wake at home ends it.
         let _ = task.take_sleep_deadline();
@@ -2204,8 +2223,78 @@ fn wake_onto(task: &Arc<Task>, here: usize, how: Onto) -> Placed {
         } else {
             here_queue.arm_timer(crate::timer::now_nanos());
         }
-        return Placed::Moved;
+        return sync_exit!(how, Moved, Placed::Moved);
     }
+}
+
+/// Development builds: why each [`Wake::Sync`] wake ended where it did, the
+/// exits of [`wake_onto`] under [`Onto::Sync`] by [`SyncPlaced`], counted
+/// machine-wide for stage 9's Sync case to print when it fails (lr-6). A
+/// diagnostic only: no decision reads it.
+#[cfg(debug_assertions)]
+static SYNC_PLACED: [AtomicU32; SyncPlaced::COUNT] =
+    [const { AtomicU32::new(0) }; SyncPlaced::COUNT];
+
+// CHECKS-ONLY: object/write_read_check.rs; home: sched
+/// Development builds: an exit of [`wake_onto`], or of `wake_with`'s Sync
+/// wake with no processor record.
+#[cfg(debug_assertions)]
+#[derive(Clone, Copy, Debug)]
+pub enum SyncPlaced {
+    /// No record or queue for this processor, or `may_place` said no.
+    NoQueue,
+    /// The task's home is this processor.
+    AtHome,
+    /// No queue for the task's home.
+    NoHomeQueue,
+    /// The task was no longer blocked.
+    NotBlocked,
+    /// Its affinity, read again under the home's lock, refuses this processor.
+    NotAllowed,
+    /// `refuses`: something waits on this processor.
+    Refused,
+    /// `asleep_at_home` said no: running, queued, or holding no slot.
+    NotAsleepAtHome,
+    /// Moved onto this processor.
+    Moved,
+}
+
+#[cfg(debug_assertions)]
+impl SyncPlaced {
+    /// How many exits there are.
+    pub const COUNT: usize = 8;
+    /// Each exit's name, in [`SYNC_PLACED`]'s order.
+    pub const NAMES: [&'static str; Self::COUNT] = [
+        "no queue or may_place",
+        "at home",
+        "no home queue",
+        "not blocked",
+        "not allowed",
+        "something waits here",
+        "not asleep at home",
+        "moved",
+    ];
+}
+
+/// Development builds: count one Sync exit; a pull counts nothing.
+#[cfg(debug_assertions)]
+fn note_sync(how: Onto, placed: SyncPlaced) {
+    if how == Onto::Sync
+        && let Some(count) = SYNC_PLACED.get(placed as usize)
+    {
+        let _ = count.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+// CHECKS-ONLY: object/write_read_check.rs; home: sched
+/// Development builds: the Sync exits counted so far, machine-wide.
+#[cfg(debug_assertions)]
+pub fn sync_placed() -> [u32; SyncPlaced::COUNT] {
+    core::array::from_fn(|exit| {
+        SYNC_PLACED
+            .get(exit)
+            .map_or(0, |count| count.load(Ordering::Relaxed))
+    })
 }
 
 /// Whether [`wake_onto`] declines to move `task`, `how` it moves it, with
