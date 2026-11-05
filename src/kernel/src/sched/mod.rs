@@ -1643,7 +1643,7 @@ pub fn spawn_check(
         name,
         entry,
         argument,
-        ferrix_sched::NICE_0_WEIGHT,
+        NICE_0_WEIGHT,
         cpu,
         anywhere,
         None,

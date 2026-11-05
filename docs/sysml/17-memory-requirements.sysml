@@ -1062,7 +1062,7 @@ package FerrixMemoryRequirements {
                 around the runs keeps 0 frames.";
             attribute :>> parent = "H.MEM.11";
             attribute :>> unit = ("vmap::allocate", "vmap::unwind", "vmap::release",
-                "vmap::release_span", "vmap::allocate_stack", "vmap::free_stacks",
+                "vmap::release_span", "vmap::allocate_stack", "vmap::allocate_stack_of", "vmap::free_stacks",
                 "mm::allocate_frames");
         }
         requirement <'L.mm.49'> deviceWindowsLandWhereAsked : ItemLowLevel {
@@ -1135,16 +1135,17 @@ package FerrixMemoryRequirements {
         }
         requirement <'L.mm.55'> kernelStacksAreGuarded : ItemLowLevel {
             attribute :>> statement = "allocate_stack shall make a kernel stack of
-                STACK_PAGES pages, its top 16-byte aligned and every byte of it
+                STACK_PAGES pages, and allocate_stack_of one of the pages asked, its top 16-byte aligned and every byte of it
                 writable, with an unmapped page directly below and above it, and
                 free_stack shall give all its frames back.";
-            attribute :>> criterion = "A stack from allocate_stack is 4 pages long with
+            attribute :>> criterion = "A stack from allocate_stack is 4 pages long, and one from
+                allocate_stack_of at the boot stack's 16 is 16, with
                 its top 16-byte aligned; a value written at its first word and at its
                 last is read back; the page below its base and the page at its top do
                 not translate; and free_stack returns the free frame count to where it
                 was.";
             attribute :>> parent = ("H.FAIL.2", "H.MEM.9");
-            attribute :>> unit = ("vmap::allocate_stack", "vmap::free_stack");
+            attribute :>> unit = ("vmap::allocate_stack", "vmap::allocate_stack_of", "vmap::free_stack");
         }
         requirement <'L.mm.56'> stacksAreFreedUnderOneShootdown : ItemLowLevel {
             attribute :>> statement = "free_stacks shall take every stack it is given

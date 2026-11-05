@@ -132,6 +132,7 @@ Causes are listed most likely first.
 | [FX-0953](#fx-0953) | the partitions' description cannot be honoured |
 | [FX-0954](#fx-0954) | the partition manager ended |
 | [FX-0970](#fx-0970) | a time reservation did not behave as the scheduler promises |
+| [FX-0972](#fx-0972) | a boot check on a worker did not run to its end |
 | [FX-1001](#fx-1001) | PCI enumeration failed its self-check |
 | [FX-1002](#fx-1002) | a device node handed out memory or an interrupt it does not have |
 | [FX-1003](#fx-1003) | an IOMMU domain gave a device the wrong addresses |
@@ -3172,6 +3173,21 @@ has the rest.
 
 See: src/kernel/src/sched/reserve.rs; src/lib/kernel/sched-edf;
 docs/microkernel/K9.md.
+
+<a id="fx-0972"></a>
+
+## FX-0972 — a boot check on a worker did not run to its end
+
+Most boot checks run on the boot task; a few run beside it, each on a worker
+with a stack the boot stack's size (`stages_check`'s table, docs/TEST-TIME.md,
+boot time). The boot joins each before going on and every check must have
+finished, reaped, before the success marker. The sentence names the check.
+
+1. No memory for the worker's task or stack.
+2. The check is stuck: read its own lines, and what the machine was doing, in
+   the log.
+
+See: src/kernel/src/stages_check.rs; docs/TEST-TIME.md.
 
 <a id="fx-1001"></a>
 

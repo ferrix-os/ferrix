@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2991 declarations in the core's files, 212 in the item's; 230 checks-only.
+2993 declarations in the core's files, 212 in the item's; 232 checks-only.
 
 ## ferrix-kernel-core
 
@@ -50,7 +50,7 @@ checks above is `pub` for raised checks (F3).
 | `sched` | mod | item, load, bin |  |
 | `signal_frame` | mod | load |  |
 | `smp` | mod | item, load, bin |  |
-| `sync` | mod | item, load |  |
+| `sync` | mod | item, load, bin |  |
 | `syscall` | mod | item, load, bin |  |
 | `timer` | mod | item, load, bin |  |
 | `trap` | mod | item, load, bin |  |
@@ -1386,7 +1386,7 @@ checks above is `pub` for raised checks (F3).
 | `Claims::wait_within` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Numbers::give_back` | method | item, load |  |
 | `Numbers::new` | method | item, load, bin |  |
-| `Numbers::take` | method | item, load |  |
+| `Numbers::take` | method | item, load, bin |  |
 
 ### `console`
 
@@ -2194,7 +2194,7 @@ checks above is `pub` for raised checks (F3).
 | `ThreadRef::has_ended` | method | item |  |
 | `ThreadRef::in_region` | method | item |  |
 | `ThreadRef::level` | method | item, load |  |
-| `ThreadRef::task` | method | item, load |  |
+| `ThreadRef::task` | method | item, load, bin |  |
 | `ThreadRef::waiters` | method | item, load |  |
 
 ### `object::channel`
@@ -2512,7 +2512,7 @@ checks above is `pub` for raised checks (F3).
 | `Port::put_back` | method | item, load |  |
 | `Port::queue_user` | method | item, load |  |
 | `Port::shared_waiters` | method | load |  |
-| `Port::take` | method | item, load |  |
+| `Port::take` | method | item, load, bin |  |
 | `Port::waiters` | method | item, load |  |
 
 ### `object::process`
@@ -2544,7 +2544,7 @@ checks above is `pub` for raised checks (F3).
 | `Bootstrap::give` | method | item, load |  |
 | `Bootstrap::put_back` | method | item, load |  |
 | `Bootstrap::refusal` | method | item, load |  |
-| `Bootstrap::take` | method | item, load |  |
+| `Bootstrap::take` | method | item, load, bin |  |
 | `Control::host` | method | item, load |  |
 | `Control::is_unstarted` | method | item |  |
 | `Control::process` | method | item, load |  |
@@ -2745,6 +2745,7 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `AUDIT_STORE` | static | bin |  |
+| `BOOT_CHECK_WORKER` | static | bin (checks) | checks-only |
 | `BOOT_OUT_OF_MEMORY` | static | bin |  |
 | `CHECK_HOOK_LEFT_ARMED` | static | bin |  |
 | `CONSOLE_DESCRIPTORS` | static | load |  |
@@ -2934,6 +2935,7 @@ checks above is `pub` for raised checks (F3).
 | `sleep_until` | fn | load |  |
 | `sleepers_here` | fn | load (checks) | checks-only |
 | `spawn` | fn | item, load |  |
+| `spawn_check` | fn | bin (checks) | checks-only |
 | `spawn_in_group` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `spawn_on` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `spawn_on_in` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -2942,7 +2944,7 @@ checks above is `pub` for raised checks (F3).
 | `take_out_without_asking` | fn | load (checks) | checks-only |
 | `tasks_made` | fn | load |  |
 | `throttle_current` | fn | item |  |
-| `wait_until_gone` | fn | item, load |  |
+| `wait_until_gone` | fn | item, load, bin |  |
 | `wait_until_reaper_quiet` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `wake` | fn | load |  |
 | `yield_now` | fn | item, load |  |
@@ -2962,7 +2964,7 @@ checks above is `pub` for raised checks (F3).
 | `LastLook` | re-export | item |  |
 | `Mark` | re-export | load |  |
 | `ReadyList` | re-export | load |  |
-| `Task` | re-export | item, load |  |
+| `Task` | re-export | item, load, bin |  |
 | `TaskId` | re-export | load |  |
 | `UserThread` | re-export | load |  |
 | `WaitQueue` | re-export | item, load |  |
@@ -3077,7 +3079,7 @@ checks above is `pub` for raised checks (F3).
 | `Fired::len` | field | item, load, bin | pub for raised checks; type unobtainable from product API |
 | `Fired::slots` | field | item, load | pub for raised checks; type unobtainable from product API |
 | `Fired::new` | method | item, load, bin |  |
-| `Fired::take` | method | item, load |  |
+| `Fired::take` | method | item, load, bin |  |
 
 ### `sched::rehome_check`
 
@@ -3105,7 +3107,7 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `Task` | struct | item, load |  |
+| `Task` | struct | item, load, bin |  |
 | `UserThread` | trait | load |  |
 | `TaskId` | type | load |  |
 | `Task::id` | field | item, load, bin |  |
@@ -3185,7 +3187,7 @@ checks above is `pub` for raised checks (F3).
 | `ReadyList::new` | method | item, load, bin |  |
 | `ReadyList::queue` | method | item, load |  |
 | `ReadyList::reserve` | method | item, load |  |
-| `ReadyList::take` | method | item, load |  |
+| `ReadyList::take` | method | item, load, bin |  |
 | `ReadyList::tells` | method | load |  |
 | `WaitQueue::hook` | method | load, bin |  |
 | `WaitQueue::listed` | method | load, bin |  |
@@ -3224,7 +3226,7 @@ checks above is `pub` for raised checks (F3).
 | `set_auditing` | fn | item (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `check` | mod | load (checks) | pub for raised checks |
 | `Posting` | struct | - |  |
-| `PreparedTask::task` | method | item, load |  |
+| `PreparedTask::task` | method | item, load, bin |  |
 
 ### `sched::work::check`
 
@@ -3328,7 +3330,7 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `SchedParker` | struct | load |  |
-| `SpinLock` | type | item, load |  |
+| `SpinLock` | type | item, load, bin |  |
 
 ### `syscall`
 
@@ -3462,7 +3464,7 @@ checks above is `pub` for raised checks (F3).
 | `Word::bitset` | field | item, load |  |
 | `Word::expected` | field | item, load, bin |  |
 | `Word::key` | field | item, load |  |
-| `Word::place` | field | item, load |  |
+| `Word::place` | field | item, load, bin |  |
 
 ### `user::address_wait::sabotage`
 
@@ -3610,7 +3612,7 @@ checks above is `pub` for raised checks (F3).
 | `AddressSpace::object` | method | item, load, bin |  |
 | `AddressSpace::open_window` | method | item |  |
 | `AddressSpace::passes` | method | item, load, bin |  |
-| `AddressSpace::place` | method | item, load |  |
+| `AddressSpace::place` | method | item, load, bin |  |
 | `AddressSpace::protect` | method | item, load |  |
 | `AddressSpace::protect_by_handle` | method | item, load |  |
 | `AddressSpace::raises_refused` | method | load |  |
