@@ -233,6 +233,32 @@ fn boot_page(
     })
 }
 
+/// Write the boot page and the command line after it, and map it read-only.
+fn map_boot_page(
+    region: &Region,
+    page: &Arc<Vmo>,
+    boot: &BootPage,
+    cmdline: &str,
+) -> Result<(), &'static str> {
+    page.commit_and_write(0, 0, &boot.to_bytes())
+        .map_err(|_| "the boot page")?;
+    let line = cmdline.as_bytes();
+    let line = line.get(..boot.command_line_bytes as usize).unwrap_or(line);
+    page.commit_and_write(0, COMMAND_LINE_AT, line)
+        .map_err(|_| "the boot page")?;
+    let _ = region
+        .space()
+        .map_object(
+            Some(BOOT_PAGE),
+            PAGE_SIZE,
+            Arc::clone(page),
+            0,
+            VmaFlags::READ,
+        )
+        .map_err(|_| "the boot page's mapping")?;
+    Ok(())
+}
+
 fn start(
     wall_clock: u64,
     cmdline: &str,
@@ -283,22 +309,7 @@ fn start(
         (memory_frames, wall_clock),
     )?;
     judge_table(&region, &LINUXD);
-    page.commit_and_write(0, 0, &boot.to_bytes())
-        .map_err(|_| "the boot page")?;
-    let line = cmdline.as_bytes();
-    let line = line.get(..boot.command_line_bytes as usize).unwrap_or(line);
-    page.commit_and_write(0, COMMAND_LINE_AT, line)
-        .map_err(|_| "the boot page")?;
-    let _ = region
-        .space()
-        .map_object(
-            Some(BOOT_PAGE),
-            PAGE_SIZE,
-            Arc::clone(&page),
-            0,
-            VmaFlags::READ,
-        )
-        .map_err(|_| "the boot page's mapping")?;
+    map_boot_page(&region, &page, &boot, cmdline)?;
 
     let restricted = AddressSpace::new().map_err(|_| "no memory for a space")?;
     restricted
