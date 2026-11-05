@@ -2183,7 +2183,8 @@ package FerrixMemoryRequirements {
                 "user::space::AddressSpace::give_back",
                 "user::space::AddressSpace::drop_unnamed", "user::space::still_named",
                 "user::space::naming", "user::space::Named::of",
-                "user::space::Named::contains", "user::space::drop_objects");
+                "user::space::Named::contains", "user::space::drop_objects",
+                "user::space::touched_ids", "user::space::all_still_named");
         }
         requirement <'L.user.68'> aDeviceMappingReachesTheDevicesOwnPages : ItemLowLevel {
             attribute :>> statement = "A page of a device region shall be faulted in to

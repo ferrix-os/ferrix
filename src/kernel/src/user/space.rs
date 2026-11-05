@@ -2517,11 +2517,11 @@ impl AddressSpace {
         // not hold a lock.
         let mut freeing: Vec<Freeing> = Vec::new();
         let mut pages = TlbPages::new();
-        let cpus = {
+        let (cpus, touched) = {
             let mut inner = self.inner.lock();
             let removed = inner.map.remove(range).map_err(map_error)?;
             self.take_down(&removed, &mut freeing, &mut pages);
-            self.begin_shootdown(&inner)
+            (self.begin_shootdown(&inner), touched_ids(&removed))
         };
 
         // Phase two. Nothing can reach these pages through this address space
@@ -2529,7 +2529,7 @@ impl AddressSpace {
         self.shoot(&cpus, &mut pages);
 
         // Phase three: give the pages back, not just the mapping.
-        self.give_back(freeing);
+        self.give_back(freeing, touched);
         Ok(())
     }
 
@@ -2577,7 +2577,13 @@ impl AddressSpace {
     /// they are given back after it, through [`Vmo::retire`], which skips this
     /// space — its translations are down and its shootdown has returned — and
     /// so, with no other holder, has nobody to ask and no shootdown to send.
-    fn give_back(&self, mut freeing: Vec<Freeing>) {
+    ///
+    /// `touched` is every id the regions this unmap removed named, `None` when
+    /// that is not known. An object leaves only when a region naming it went,
+    /// so when all of them are still named there is nothing to drop and the
+    /// tables are not walked: a `MAP_FIXED` into a reservation, Wine's way of
+    /// allocating, removes a piece of one region thousands of times.
+    fn give_back(&self, mut freeing: Vec<Freeing>, touched: Option<Vec<(u64, bool)>>) {
         // What each sole range's object gave up, in the order of `freeing`:
         // taken out under the lock, or -- with no memory to list the pages --
         // decommitted after it.
@@ -2604,7 +2610,12 @@ impl AddressSpace {
                     retiring.push((Arc::clone(vmo), taken, range));
                 }
             }
-            self.drop_unnamed(&mut inner)
+            let none_gone = touched.is_some_and(|ids| all_still_named(&inner.map, ids));
+            if none_gone {
+                Vec::new()
+            } else {
+                self.drop_unnamed(&mut inner)
+            }
         };
         drop(unkept);
         for (vmo, taken, range) in retiring {
@@ -2642,8 +2653,8 @@ impl AddressSpace {
         // Room to hand the files back first. Without it a file mapping no
         // region names stays in the table, with its object and its shadow and
         // its may-write count, all as they were: that keeps a file open a
-        // little longer and is otherwise harmless, and the next unmap, or the
-        // space going, takes them (finding F-23).
+        // little longer and is otherwise harmless, and the next unmap that
+        // walks the tables, or the space going, takes them (finding F-23).
         // Which ids the map still names, read in one pass rather than one
         // pass per id asked about: a space with thousands of regions and as
         // many objects made every unmap quadratic under this lock.
@@ -3386,7 +3397,7 @@ impl AddressSpace {
                 }),
             );
         }
-        self.give_back(freeing);
+        self.give_back(freeing, None);
         placed
     }
 
@@ -5257,6 +5268,49 @@ fn writable_in_place(inner: &Inner, region: &Vma, address: u64, frame: Frame) ->
 /// Whether any region still names object `id`.
 fn still_named(map: &ferrix_vma::AddressSpace, id: u64) -> bool {
     map.iter().any(|region| naming(region) == Some(id))
+}
+
+/// Every id the regions in `removed` named, none yet found, for
+/// [`all_still_named`]; `None` with no memory to list them, which only costs
+/// [`AddressSpace::give_back`] the walk of the tables.
+fn touched_ids(removed: &[Unmapping]) -> Option<Vec<(u64, bool)>> {
+    let mut ids = fallible::try_with_capacity(removed.len()).ok()?;
+    // NOALLOC: room for one id per removed region was had above.
+    ids.extend(
+        removed
+            .iter()
+            .filter_map(|unmapping| match unmapping.backing {
+                Backing::Anonymous { id, .. } | Backing::File { id, .. } => Some((id, false)),
+                Backing::Device { id, .. } => (id != 0).then_some((id, false)),
+            }),
+    );
+    Some(ids)
+}
+
+/// Whether every id in `ids` is still named by a region of `map`: one pass of
+/// the map with a binary search per region, so n log k for n regions and k ids,
+/// under the space's lock, stopping when each has been found. Not a pass per id,
+/// which is what [`Named`] was made to end.
+fn all_still_named(map: &ferrix_vma::AddressSpace, mut ids: Vec<(u64, bool)>) -> bool {
+    ids.sort_unstable();
+    ids.dedup();
+    let mut left = ids.len();
+    if left == 0 {
+        return true;
+    }
+    for id in map.iter().filter_map(naming) {
+        if let Ok(at) = ids.binary_search_by_key(&id, |&(listed, _)| listed)
+            && let Some((_, found)) = ids.get_mut(at)
+            && !*found
+        {
+            *found = true;
+            left -= 1;
+            if left == 0 {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// The object id `region` names, if it names one.
