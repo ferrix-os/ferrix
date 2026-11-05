@@ -1445,6 +1445,9 @@ fn is_frozen(job: &Arc<Job>, live: &[Arc<Process>]) -> bool {
         })
 }
 
+/// How many times [`settle_frozen`] writes what it saw of one cgroup.
+const FROZEN_LOOKS: usize = 8;
+
 /// Look again at whether `job`, and every cgroup above it, is frozen, and
 /// wake whatever polls the `cgroup.events` of each that changed. Called when
 /// a thread parks, leaves, or a process moves.
@@ -1454,7 +1457,20 @@ pub(crate) fn settle_frozen(job: &Arc<Job>) {
     };
     let mut at = Some(Arc::clone(job));
     while let Some(current) = at {
-        let _ = current.note_frozen(is_frozen(&current, &live));
+        // Two threads parking at once each look and then write what they saw: a
+        // look made before the other's park can write after it, and the last
+        // thread of a frozen program leaves `frozen 0` for good. So each looks
+        // again after its write, and writes again if that changed. The look only
+        // moves on a park, a leave or a move, so it settles in a pass or two.
+        let mut now = is_frozen(&current, &live);
+        for _ in 0..FROZEN_LOOKS {
+            let _ = current.note_frozen(now);
+            let again = is_frozen(&current, &live);
+            if again == now {
+                break;
+            }
+            now = again;
+        }
         at = current.parent().cloned();
     }
 }
