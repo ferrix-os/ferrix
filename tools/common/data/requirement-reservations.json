@@ -99,6 +99,13 @@
       "purpose": "POSTMORTEM.md section 6 (S4): a processor that takes no interrupt for 10 s ends in a failure report (the lockup detector, stop code 7); an armed TCO watchdog resets a machine the kernel stopped feeding, and the next loader says so"
     },
     {
+      "ids": ["H.FAIL.15", "L.aarch64.91-92", "L.armv7a.30-31", "L.sched.171-178"],
+      "owner": "mk-issues",
+      "branch": "feature/mk-issues",
+      "date": "2026-11-05",
+      "purpose": "F-103, ledger 7033 A7: an overflow of a kernel stack stops with a report and writes nothing below the guard (H.FAIL.15), each Arm architecture's entry. F-104, T7: a task's last reference where sleeping is forbidden. Released in the commits that write them"
+    },
+    {
       "ids": ["H.FAIL.14", "L.lockup.6-9"],
       "owner": "s4-lockup",
       "branch": "s4-lockup",
