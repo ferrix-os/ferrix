@@ -1196,6 +1196,14 @@ pub(crate) fn clear_task_switched() {
     unsafe { asm!("clts", options(nostack, preserves_flags)) };
 }
 
+/// Whether `CPUID` says an `IBPB` clears the return predictor: IBPB_RET,
+/// 0x8000_0008 EBX bit 30. Anything else, a hypervisor hiding it included, is no.
+#[cfg(ferrix_restricted_window = "on")]
+pub(crate) fn ibpb_clears_returns() -> bool {
+    let highest = core::arch::x86_64::__cpuid(0x8000_0000).eax;
+    highest >= 0x8000_0008 && core::arch::x86_64::__cpuid(0x8000_0008).ebx & (1 << 30) != 0
+}
+
 /// Control register 4: the paging and instruction-set extensions in force.
 pub fn read_cr4() -> u64 {
     let value: u64;

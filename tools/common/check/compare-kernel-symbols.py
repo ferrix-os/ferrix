@@ -13,6 +13,7 @@ Usage:  compare-kernel-symbols.py BASE_ELF HEAD_ELF [--self-test]
 """
 import hashlib
 import re
+import shutil
 import subprocess
 import sys
 
@@ -44,10 +45,18 @@ def symbols(path: str) -> dict[str, int]:
     return table(run.stdout.splitlines())
 
 
+def objdump_for(path: str) -> str:
+    """The objdump that reads this ELF: the host's does not read AArch64's (ledger 7232)."""
+    with open(path, "rb") as elf:
+        machine = int.from_bytes(elf.read(20)[18:20], "little")
+    wanted = {0xB7: "aarch64-linux-gnu-objdump"}.get(machine)
+    return wanted if wanted and shutil.which(wanted) else "objdump"
+
+
 def bodies(path: str) -> dict[str, str]:
     """Each text symbol's disassembly, its addresses and displacements masked: what is left
     is what a layout's shift cannot move (ledger 7132 ED.2)."""
-    run = subprocess.run(["objdump", "-d", "-C", "--no-show-raw-insn", path],
+    run = subprocess.run([objdump_for(path), "-d", "-C", "--no-show-raw-insn", path],
                          capture_output=True, text=True, check=False)
     if run.returncode != 0:
         print(f"compare-kernel-symbols: this objdump does not read {path}: bodies not compared")

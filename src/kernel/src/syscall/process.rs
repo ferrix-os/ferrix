@@ -1079,6 +1079,19 @@ fn round_up(at: u64) -> Option<u64> {
         .map(|at| at & !(PAGE_SIZE - 1))
 }
 
+/// What a change of `$process`'s parent owes a thread armed on the old answer (ledger 6998, X6).
+#[cfg(ferrix_restricted_window = "on")]
+macro_rules! drop_arms_of {
+    ($process:expr) => {
+        $process.drop_arms()
+    };
+}
+/// See the other: no window in the build, nothing owed.
+#[cfg(not(ferrix_restricted_window = "on"))]
+macro_rules! drop_arms_of {
+    ($process:expr) => {};
+}
+
 impl Process {
     /// Record where its first task enters user mode.
     pub(crate) fn set_startup(&self, startup: Startup) {
@@ -1529,6 +1542,7 @@ impl Process {
                     *parent = Weak::new();
                     orphan.parent_view.store(u32::MAX, Ordering::Release);
                 }
+                drop_arms_of!(orphan);
                 kill::send(&orphan, death_signal, Origin::Kernel);
                 continue;
             };
@@ -1542,6 +1556,7 @@ impl Process {
                 *parent = Arc::downgrade(reaper);
                 orphan.parent_view.store(u32::MAX, Ordering::Release);
             }
+            drop_arms_of!(orphan);
             kill::send(&orphan, death_signal, Origin::Kernel);
             if orphan.is_released() {
                 if reaper.with_signals(|signals| signals.reaps_children_automatically()) {
@@ -2163,6 +2178,12 @@ impl Process {
                 };
                 (stop != 0 || continued).then(|| (Arc::clone(child), stop))
             })
+    }
+
+    /// Bring every thread out of a run of stubs, its change already written (ledger 6998, X6).
+    #[cfg(ferrix_restricted_window = "on")]
+    pub(crate) fn drop_arms(&self) {
+        self.core().drop_arms();
     }
 
     /// The number `viewer` calls its parent by, or zero when it has none or

@@ -46,6 +46,11 @@ fn target(arch: Arch, i686: bool) -> Result<&'static str> {
 
 /// The lines a working run prints, in order.
 const STEPS: &[&str] = &[
+    "threads: armed reparent ok",
+    "threads: armed reparent-working ok",
+    "threads: armed stop-kill ok",
+    "threads: armed exit-group ok",
+    "threads: armed ok",
     "threads: spawn ok",
     "threads: proc ok",
     "threads: channel ok",

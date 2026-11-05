@@ -45,6 +45,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex, mpsc};
 use std::thread;
 
+mod armed;
 mod affinity;
 mod cpu_number;
 mod futex_signal;
@@ -440,6 +441,7 @@ fn main() {
     }
     check_unmap_stale();
     check_fault_ahead();
+    armed::check_armed(fail);
     println!("threads: spawn {THREADS}");
     let counter = Arc::new(Mutex::new(0_u64));
     let barrier = Arc::new(Barrier::new(

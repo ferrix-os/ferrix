@@ -89,6 +89,15 @@ pub fn resume(value: u64) -> Exit {
     unsafe { arch::restricted(nr::RESTRICTED_RESUME, value, 0) }
 }
 
+/// `resume`, asking that the same `number` be answered with `value` until any other exit, on
+/// a kernel that has a window (`docs/microkernel/RESTRICTED-EXIT.md`). Elsewhere, as `resume`.
+#[inline(always)]
+#[must_use]
+pub fn resume_armed(value: u64, number: u64) -> Exit {
+    // SAFETY: no pointer: `value` goes to the program's register.
+    unsafe { arch::restricted(nr::RESTRICTED_RESUME, value, number + 1) }
+}
+
 /// `restricted_continue`: go back in with nothing changed: the way back from a
 /// kick, or to retry a fault.
 #[must_use]

@@ -387,6 +387,26 @@ pub(crate) fn restricted_ran_on(cpu: usize) {
     unsafe { RESTRICTED_RAN.get_unchecked(cpu) }.store(true, Ordering::Relaxed);
 }
 
+/// [`restricted_left_here`] for a window's trip: no root write follows, so what empties the
+/// return predictor is the `IBPB` where the processor says so, or the refill (6787 W8).
+#[cfg(ferrix_restricted_window = "on")]
+#[inline(always)]
+pub(crate) fn restricted_left_window(cpu: usize) {
+    // SAFETY: (CONTEXT) `cpu` is this processor's logical number, below `MAX_CPUS`.
+    let ran = unsafe { RESTRICTED_RAN.get_unchecked(cpu) };
+    // SAFETY: (CONTEXT) as above.
+    let decided = unsafe { RESTRICTED_DECIDED.get_unchecked(cpu) };
+    // SAFETY: (CONTEXT) as above.
+    let issued = unsafe { RESTRICTED_ISSUED.get_unchecked(cpu) };
+    ran.store(false, Ordering::Relaxed);
+    if HARDENED && EXIT_BARRIER {
+        count_here(decided);
+        if machine::window_barrier(cpu) {
+            count_here(issued);
+        }
+    }
+}
+
 /// [`restricted_left`] for a fast exit, whose processor is known and whose restricted
 /// code did run: the same barrier and the same counts, nothing out of line.
 #[cfg(target_arch = "x86_64")]

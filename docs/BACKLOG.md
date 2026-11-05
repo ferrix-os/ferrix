@@ -260,8 +260,25 @@ Landed behind `restricted_fastpath`, on only in `fast`, which is refused until M
 builds has it. linuxd's straight path and general-path cuts run in any `personality=user` build, flag or
 not. Owed before the flag is on in any profile, as restricted-check has no host in a `personality=user` image and one has to exist or the cases go to a program there: ledger 6464's Z2 (every writer of the running thread's own FS record listed by a whole grep, `ARCH_SET_FS` absent from the user kernel by symbol with a planted control, a linuxd-side case that `arch_prctl`'s number from normal mode answers ENOSYS; a reachable writer lowers `clean`), Z3 (a row disassembling linuxd that refuses `%fs:`, a plant FIRED) and Z4 (6093 (4) re-run with normal mode's base zero and not, a program's null FS load across fast trips, blocked in the gap, `VECTORS_READ` in the gap then ENTER, and two controls); K1's fast path's own code review (6484 never gave it) and
 6093 (1)-(12) against the code; ledger 6747-6755's checks and controls; a typed pointer for `of_task_known`; L.x86_64.272 to .275's tags; `max`'s
-two-root row through `gate.sh`. Then the window behind
-`restricted_window` (6787, W2-W12; W1 and `TS` answered, 6826); the ordinary path's next levers.
+two-root row through `gate.sh`; the ordinary path's next levers.
+
+check-lift's ceiling for `user/space.rs` went 6 to 15 for the window's nine cfgs, accepted as debt (ledger 7319 L.2):
+fold them into one window submodule and put it back to 6 before `on` goes anywhere.
+
+**The window** (`restricted_window`, dark, `on` in no profile; `microkernel/RESTRICTED-EXIT.md`, ledger 7224). Its
+cases and controls were read by hand on a tree with `mk-flip`'s unlanded host for `restricted-check`. Owed before `on`
+enters any profile or its `allows` widens, with a new diff check, and after 7216's V.1-V.9, which are
+`restricted_fastpath`'s: every case through `gate.sh` on a user image once that host is on `develop`, with
+L.x86_64.277-281's tags back out of the baseline; every control by `--expect`, a hang not counting; X1's reader
+`find_frame` through `for_each_leaf_in`; X4's planted stub fault, and `trap::fatal`'s path to the release read; X5 and
+W5's one bound in MEMORY-AND-TIMING, a bad frame at `#MC` stopping the machine with no bank read, stated; X6's
+controls on what fires, a `TSYNC` on one processor first; X7's two-processor shootdown case and K11 §2.1 and §3
+rewritten; X9's gate and the figure on `max`'s row, the two-root figure and a general null beside it; W6 across
+programs; W7's manual section and bare metal, as NPT has no text and KVM's answer is all there is; W8 in TOOLS.md, that
+the host model hands the bit through; W11's refused half, a job at its limit; W12's K1 §7.1, FDP_IFC and vulnerability
+entry; 6826 (d), MICROKERNEL's four rules with the customer's words; L.x86_64.279's boot with PCIDs, printing it; no
+clippy of an `on` build, so dark code can stop compiling unseen. 370 ns is cited nowhere as met (6787 (e)). A pinned
+thread takes no fast path, by L.sched.99.
 `test-flags --set smt=off` under TCG stops on stage 9's timing checks one boot in three, on develop too.
 
 ## Owners
@@ -583,8 +600,8 @@ log path and commit; a new sighting is added to its row the day it is seen.
   cases ran on `feature/mk-perf` (`logs/queue/mkp7-*`), not here; a neighbour's refused
   charge moving nothing in memory.events is still to read.
 * A control for `Job::drop` forgetting its kernel job (6542, item 7).
-* `build_flag_word!`'s word: `FLAGS` is 18 under `personality=user`, so `audit_words`' 32
-  bits are exactly full; a const assert before the next flag (6590).
+* `build_flag_word!`'s word: `FLAGS` is 19 under `personality=user`, and `audit_words` puts what its first word
+  has no room for in the second's bits from 8 (ledger 7224); a const assert that those bits do not run out.
 * `test-rustc` hung in its warm loop once in about five runs on fault-around
   (mk-perf, 449c63ddc's message), and not in ten since. Not diagnosed (6537 (3)).
 * The window, each a flip precondition (6411, by 6542): a control per path of `replace` and

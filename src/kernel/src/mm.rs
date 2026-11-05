@@ -1926,6 +1926,32 @@ pub(crate) fn copy_root_slot(from: u64, to: u64, slot: usize) -> bool {
     entry != 0
 }
 
+/// The root slot of the window (`restricted_window`): the user half's last, which is
+/// no region's and no program's. Present only while one processor runs a stub in it.
+#[cfg(ferrix_restricted_window = "on")]
+pub(crate) const WINDOW_ROOT_SLOT: usize = 255;
+
+/// Where a root table's entry `slot` is, through the direct map.
+#[cfg(ferrix_restricted_window = "on")]
+pub(crate) fn root_slot_pointer(root: u64, slot: usize) -> *mut u64 {
+    (physmap(root) as *mut u64).wrapping_add(slot)
+}
+
+/// A frame's address through the direct map, zeroed, for the window's own tables.
+#[cfg(ferrix_restricted_window = "on")]
+pub(crate) fn window_frame() -> Option<(u64, *mut u64)> {
+    let frame = allocate_frames(0)?;
+    zero_frame(frame);
+    let at = frame * PAGE_SIZE;
+    Some((at, physmap(at) as *mut u64))
+}
+
+/// Give back a frame [`window_frame`] gave.
+#[cfg(ferrix_restricted_window = "on")]
+pub(crate) fn window_frame_free(at: u64) {
+    deallocate_frames(at / PAGE_SIZE, 0);
+}
+
 /// The table root slot `slot` of the tree at `root` names, as an address: zero
 /// for absent. The address alone, since a walker sets its accessed bit in
 /// whichever root it walked.

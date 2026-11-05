@@ -1168,7 +1168,13 @@ pub(crate) fn attach_sync(
         drop(mine);
         drop(looked);
         match answer {
-            Ok(Round::Done(answer)) => return answer,
+            Ok(Round::Done(answer)) => {
+                // Every thread's chain is written: now the arms that were read without it
+                // (ledger 6787 W4, 6998 X6).
+                #[cfg(ferrix_restricted_window = "on")]
+                process.drop_arms();
+                return answer;
+            }
             Ok(Round::Moved) => {}
             Ok(Round::Room) => room = room.saturating_mul(2),
             Err(listed) => room = listed.saturating_add(4),

@@ -760,6 +760,7 @@ impl Args {
                         ("partition_speculation", "partition"),
                         ("restricted_fastpath", "off"),
                         ("fault_ahead", "on"),
+                        ("restricted_window", "off"),
                     ] {
                         self.sets.push((flag.to_owned(), chosen.to_owned()));
                     }

@@ -66,8 +66,10 @@ that one event, and the design says so rather than claiming a record. Linux-pers
 `execve` of a set-id file -- are outside the TOE; the personality may submit
 them through the same interface (§4), marked as its own.
 
-The `BOOTED` record's build word has 32 bits, and under `personality=user` `FLAGS` is 18,
-so they are exactly full: the next flag overflows the shift. `fault_ahead` stands after
+The `BOOTED` record's build word has 32 bits, and under `personality=user` `FLAGS` is 19: the
+first sixteen flags fill it, and the one past them, `runtime_settings`, the file's last, takes bits 8
+and 9 of the second word, above the profile's four and the level's four; a later one would take the next
+two. `present`'s and `desktop`'s words do not move, as they have fewer flags (ledger 7224). `fault_ahead` stands after
 `ssbd`, in the flag file's order, past every flag `present` and `desktop` read, so their flag
 word does not move (ledger 6873; 6590 had read the word moved, in the earlier order).
 

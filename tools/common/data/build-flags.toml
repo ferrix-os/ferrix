@@ -156,6 +156,12 @@ values.off = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built =
 values.on = { allows = ["sc2", "none"], lands = "M3", built = "adhoc", requires = ["personality=user"] }
 values.not_applicable = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes", conflicts = ["personality=user"] }
 
+[flags.restricted_window]
+why = "an armed call answered by a kernel-written stub with no root write, while no other processor is in the space (docs/microkernel/RESTRICTED-EXIT.md, ledger 6787, 6998); requires K1's fast path"
+values.off = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built = "yes", requires = ["personality=user"] }
+values.on = { allows = ["none"], lands = "M3", built = "adhoc", built_on = ["x86_64"], requires = ["personality=user", "restricted_fastpath=on"] }
+values.not_applicable = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes", conflicts = ["personality=user"] }
+
 [flags.smt]
 why = "one hardware thread per core, parked by the kernel (`off`), or sibling threads running under STIBP or eIBRS/AutoIBRS (`stibp`)"
 values.off = { allows = ["sc4", "present", "sc2", "none"], lands = "M0", built = "yes" }

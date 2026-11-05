@@ -114,6 +114,8 @@ pub fn explain(entry: &'static Explanation) {
 /// and stops the processor it is running on.
 #[panic_handler]
 fn panic(info: &PanicInfo<'_>) -> ! {
+    #[cfg(ferrix_restricted_window = "on")]
+    arch::window_release_for_stop();
     let first = begin_report(ferrix_bootinfo::pstore::Stop::Panic);
     println!();
     println!("FERRIX-PANIC {}", info.message());

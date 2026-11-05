@@ -1189,7 +1189,7 @@
     "syscall/registry.rs": 1,
     "syscall/seccomp.rs": 1,
     "user/mod.rs": 5,
-    "user/space.rs": 6,
+    "user/space.rs": 15,
     "user/vmo.rs": 3,
     "object/mod.rs": 2,
     "syscall/uaccess.rs": 1,

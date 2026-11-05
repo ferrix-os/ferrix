@@ -119,6 +119,7 @@ Causes are listed most likely first.
 | [FX-0925](#fx-0925) | a shared process or restricted mode did not do what K1 and K11 say |
 | [FX-0926](#fx-0926) | a criticality level did not keep a lower job from a higher one |
 | [FX-0928](#fx-0928) | a vector instruction in the kernel with CR0.TS set |
+| [FX-0929](#fx-0929) | a restricted window was not given back |
 | [FX-0930](#fx-0930) | a process built by its creator was not held to the rules of its making |
 | [FX-0931](#fx-0931) | spaces and objects failed the check made of kernel objects alone |
 | [FX-0932](#fx-0932) | jobs, quotas, switch counts or the filter failed the check of kernel objects alone |
@@ -2952,6 +2953,19 @@ The kernel uses none, and the switch clears the bit first.
    `restricted::before_switch`.
 
 See: docs/microkernel/K1.md section 7.1 (8);
+src/kernel/src/arch/x86_64/restricted.rs.
+
+<a id="fx-0929"></a>
+
+## FX-0929 — a restricted window was not given back
+
+A processor runs a kernel-written stub with interrupts masked while it holds a
+space's window, a few instructions that wait on nobody. Another processor waited
+to join that space past any stub's run, or the stub itself took a trap.
+
+1. A stub that faulted, or a processor that stopped while it held the window.
+
+See: docs/microkernel/RESTRICTED-EXIT.md;
 src/kernel/src/arch/x86_64/restricted.rs.
 
 <a id="fx-0930"></a>

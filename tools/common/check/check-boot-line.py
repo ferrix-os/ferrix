@@ -105,7 +105,7 @@ def compare(want: dict[str, str], got: dict[str, str], claim_none: bool, no_clai
     for name, value in want.items():
         # A kernel with no linuxd does not print it: present's and desktop's lines stay
         # as they were (ledger 6537, A6).
-        if name == "fault_ahead" and value == "not_applicable" and name not in got:
+        if name in ("fault_ahead", "restricted_window") and value == "not_applicable" and name not in got:
             continue
         if got.get(name) != value:
             problems.append(f"{name}={got.get(name, '(absent)')} (expected {value})")

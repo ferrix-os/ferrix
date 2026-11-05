@@ -16,6 +16,9 @@ use ferrix_rt::restricted::{
 
 use crate::arch;
 
+#[path = "cases/window.rs"]
+mod window;
+
 /// Where the images are mapped in the restricted space: under 4 GiB, so that
 /// the 32-bit one can run too.
 const IMAGE_AT: u64 = 0x1000_0000;
@@ -322,6 +325,9 @@ fn cases(bootstrap: ferrix_rt::Bootstrap) -> Result<(), i32> {
     second_process(&given)?;
     kills(&given)?;
     row(&given)?;
+    if asked(&given, window::ASK_WINDOW_ON, 0, None)? {
+        window::all(&given)?;
+    }
     shared_starts_shared(&given)?;
     // Last, as it leaves this thread pinned, and case 132 reads nothing with the two
     // on one processor: its control passed with this case ahead of it.

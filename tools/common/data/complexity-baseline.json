@@ -171,7 +171,7 @@
     },
     "object/process.rs::move_charged": {
       "complexity": 16,
-      "lines": 46,
+      "lines": 48,
       "recursive": false
     },
     "sched/task.rs::new": {

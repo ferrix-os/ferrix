@@ -323,3 +323,28 @@ pub(crate) const I386_GETPID: u64 = 0;
 pub(crate) fn sys_twice() -> u64 {
     sys() - 4
 }
+
+// `restricted_window` is x86-64's alone: the kernel answers that this machine has none, so
+// these are never entered, and name an image that stops at once if one ever is.
+/// [`sys`], for the window's cases.
+pub(crate) fn armed() -> u64 {
+    sys()
+}
+/// See [`armed`].
+pub(crate) fn armed_load() -> u64 {
+    sys()
+}
+/// See [`armed`].
+pub(crate) fn armed_loop() -> u64 {
+    sys()
+}
+/// See [`armed`].
+pub(crate) fn armed_vectors() -> u64 {
+    sys()
+}
+/// See [`armed`].
+pub(crate) fn armed_other() -> u64 {
+    sys()
+}
+/// See [`armed`]: nothing to say.
+pub(crate) const fn set_armed_loop(_context: &mut Context, _count: u64, _answer: u64) {}

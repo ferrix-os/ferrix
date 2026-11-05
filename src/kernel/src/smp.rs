@@ -1386,6 +1386,22 @@ impl CpuMask {
         }
     }
 
+    /// Whether no processor but `cpu` is in the set, read in the order `join` writes.
+    #[cfg(ferrix_restricted_window = "on")]
+    #[inline(always)]
+    pub(crate) fn only(&self, cpu: usize) -> bool {
+        let mut alone = true;
+        for (at, word) in self.words.iter().enumerate() {
+            let mine = if at == cpu / 64 {
+                1_u64 << (cpu % 64)
+            } else {
+                0
+            };
+            alone &= word.load(Ordering::SeqCst) & !mine == 0;
+        }
+        alone
+    }
+
     /// Add processor `cpu`.
     ///
     /// A processor past [`MAX_CPUS`] cannot be named, and the scheduler refuses

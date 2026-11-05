@@ -848,6 +848,7 @@ mod tests {
                 ("fs", "lift"),
                 ("partition_speculation", "partition"),
                 ("restricted_fastpath", "off"),
+                ("restricted_window", "off"),
                 ("fault_ahead", "off"),
             ]),
         )
@@ -950,6 +951,7 @@ mod tests {
             ("fs", "lift"),
             ("partition_speculation", "partition"),
             ("restricted_fastpath", "off"),
+            ("restricted_window", "off"),
             ("fault_ahead", "on"),
         ])
     }

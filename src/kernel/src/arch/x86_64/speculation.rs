@@ -1038,6 +1038,13 @@ pub(crate) fn init() {
         Ordering::Relaxed,
     );
     ERAPS_EMPTIES.store(plan.defences.contains(Defences::ERAPS), Ordering::Relaxed);
+    #[cfg(ferrix_restricted_window = "on")]
+    {
+        IBPB_CLEARS_RETURNS.store(cpu::ibpb_clears_returns(), Ordering::Relaxed);
+        // Reviewed on AMD's 1Ah alone (ledger 6787 W2, W7).
+        let (family, _) = family_and_model(__cpuid(1).eax);
+        super::restricted::window_decide(offered.ibpb, vendor().1 && family == 0x1a);
+    }
     CLEAR_CPU_BUFFERS.store(
         u8::from(plan.defences.contains(Defences::BUFFERS_CLEARED)),
         Ordering::Relaxed,
@@ -1164,6 +1171,8 @@ fn apply_vector_cover() -> bool {
 
 /// Apply the boot processor's plan on a secondary, as it starts.
 pub(crate) fn apply_this_cpu() {
+    #[cfg(ferrix_restricted_window = "on")]
+    super::restricted::window_decide_here();
     if !HARDENED {
         // The vector covers are no speed trade and stay in every build
         // (`L.x86_64.123`): one that does not hold stops the boot here too.
@@ -1224,6 +1233,28 @@ pub(crate) fn exit_barrier(_cpu: usize) -> bool {
     }
     issued
 }
+
+/// The barrier at a window's trip: as [`exit_barrier`], with no root write after it, so the
+/// refill stands unless `CPUID` itself says an `IBPB` clears the return predictor, read here
+/// and failing closed (IBPB_RET, CPUID 0x8000_0008 EBX bit 30).
+#[cfg(ferrix_restricted_window = "on")]
+#[inline(always)]
+pub(crate) fn window_barrier(_cpu: usize) -> bool {
+    if !SWITCH_IBPB.load(Ordering::Relaxed) {
+        fill_return_stack();
+        return false;
+    }
+    // SAFETY: (PROTECT) as `switch_barrier`.
+    unsafe { cpu::write_msr(IA32_PRED_CMD, PRED_CMD_IBPB) };
+    if !IBPB_CLEARS_RETURNS.load(Ordering::Relaxed) {
+        fill_return_stack();
+    }
+    HARDENED
+}
+
+/// See [`window_barrier`]: set at boot from `CPUID`.
+#[cfg(ferrix_restricted_window = "on")]
+static IBPB_CLEARS_RETURNS: AtomicBool = AtomicBool::new(false);
 
 /// Whether `CPUID` said `IA32_PRED_CMD` takes `IBPB`, which is what sets
 /// [`SWITCH_IBPB`], read here again for the check of what [`exit_barrier`] answers.

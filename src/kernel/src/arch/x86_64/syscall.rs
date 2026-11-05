@@ -597,6 +597,10 @@ pub unsafe fn resume_user(regs: &UserRegs) -> ! {
 /// and lands in ring 3, where it looks.
 #[unsafe(no_mangle)]
 extern "C" fn ferrix_syscall_fast(frame: &mut SyscallFrame) -> u32 {
+    #[cfg(ferrix_restricted_window = "on")]
+    if super::restricted::window_close_if_open(frame) {
+        return 1;
+    }
     if super::restricted::fast_resume_here(frame) {
         return 1;
     }

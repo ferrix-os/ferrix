@@ -1184,6 +1184,8 @@ fn report_processors(cpus: &smp::Topology) {
         cpus.boot_id(),
     );
     arch::report_speculation();
+    #[cfg(ferrix_restricted_window = "on")]
+    arch::window_report();
 }
 
 #[cfg(ferrix_load_built = "ring0")]

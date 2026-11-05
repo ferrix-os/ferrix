@@ -817,11 +817,34 @@ impl Job {
     }
 
     /// Set its `cpu.max`. Whether it could be: the tree's root takes none.
+    #[cfg(not(ferrix_restricted_window = "on"))]
     pub fn set_bandwidth(&self, quota: u64, period: u64) -> bool {
         self.quota
             .as_ref()
             .map(|slot| slot.set_bandwidth(quota, period))
             .is_some()
+    }
+
+    /// Set its `cpu.max`, and bring its members out of a run of stubs. Listed first, as a change
+    /// that could not reach an armed thread may not be made; the state before the kick, as a
+    /// thread armed before it is charged at no exit until one comes (ledger 6787 W4, 6998 X6).
+    #[cfg(ferrix_restricted_window = "on")]
+    pub fn set_bandwidth(&self, quota: u64, period: u64) -> bool {
+        let Ok(members) = process::live() else {
+            return false;
+        };
+        let set = self
+            .quota
+            .as_ref()
+            .map(|slot| slot.set_bandwidth(quota, period))
+            .is_some();
+        for member in members
+            .iter()
+            .filter(|member| self.contains(&member.core().job()))
+        {
+            member.core().drop_arms();
+        }
+        set
     }
 
     /// Its `cpu.max.burst`, in nanoseconds.

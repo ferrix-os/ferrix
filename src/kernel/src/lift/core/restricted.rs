@@ -320,7 +320,8 @@ fn straight_run(mut exit: k1::Exit) -> k1::Exit {
         if (exit.reason != Reason::Syscall as u64) | (value == u64::MAX) | (plain != Some(true)) {
             return exit;
         }
-        exit = k1::resume(value);
+        // Armed: the window answers it from here, until any other exit drops the arm.
+        exit = k1::resume_armed(value, exit.number);
     }
 }
 

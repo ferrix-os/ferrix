@@ -103,7 +103,7 @@ instructions, 17.5 taken, 11 mispredicts, 1 dTLB walk, 1 iTLB walk. A general nu
 6787 (e)): seL4's 440 pays two roots and runs a server, with no barrier. The like-for-like figure
 without a barrier is the two-root `partition` path, 470 to 520.
 
-**The prototype is not safe to use**: its slot is in a root other processors' threads share, so it
+**The prototype was not safe to use (the window under its exclusion, below, replaces it)**: its slot is in a root other processors' threads share, so it
 holds on one processor only; a reparent leaves the kept answer stale until the next general call; the
 stub's bytes and the arming call are scratch. Design and conditions: ledger 6787, W1 to W12, with
 W1 for the customer. Nothing lands before W1. `TS` under the window is a separate trade (6787 (f)).
@@ -140,6 +140,66 @@ slot is safe on one processor only; `feature/mk-ibpb` and
 `~/.local/share/ferrix/mk-ibpb/mk-ibpb-code.patch` on nazuna hold it.
 
 **The row through `gate.sh`, 2026-11-05, nazuna idle, load under 2, sibling 0%, five boots**: `bench-rows --release --accel kvm --personality user --set restricted_fastpath=on --set partition_speculation=exit --no-claim`: 720 ns (710 to 890) before the cut (`mkm-row-2`, 70bad907e), 690 ns (690 to 700) after it (`mkm-row-3`): 30, not ea9d3e8a2's 60. **660 is not reached**, and of the 40 against the 650 above, 30 is develop's tree against the by-hand one (`OPEN-QUESTIONS.md` §1, by hand), not yet named. No delay control and no general-path row, flag on and `personality=user`, not `max`.
+
+## The window under its exclusion, 2026-11-05
+
+Landed dark, `on` in no profile, diff check ledger 7224, with what that entry owes in BACKLOG.
+The prototype's slot sat in a root every thread of the program shares. Rather than a shadow root per
+thread, the kernel now holds a rule on every trip (ledger 6998, X1 to X9): an opener raises a flag and
+then reads the space's set of processors, and declines to two roots if it is not alone; a processor
+joining the space waits until the flag is down, one masked stub's run at most, with a named stop past
+its limit. Overlapping threads stay correct and pay today's price.
+
+| Build, by hand, nazuna idle, alternated | `null-getppid` | General null |
+|---|---:|---:|
+| `develop` today, the flag off | 680 (670-710), five boots | 1,020 |
+| The window, `qemu64`: the boot fails closed to two roots | 690 (690-700), three | 1,030 |
+| The window, the family hidden no more, `IBPB_RET` hidden still | 480, five | 1,040 |
+| The window, `FERRIX_X86_CPU=host,migratable=off,-pcid,-invpcid,+invtsc` | **370** (370-520), three | 1,030 |
+
+The IBPB is issued on every trip in every row. `TS` is not set on the stub's path, the customer's trade
+(ledger 6826). None of it is gated evidence, no row of `max`, and it may not be called better than seL4:
+seL4's 440 pays two roots and runs a server, with no barrier (6787 (e)). 370 against 480 is W8: the
+`IBPB_RET` bit, CPUID 0x8000_0008 EBX bit 30, takes the 32-call refill away, and needs no QEMU patch, as
+`-cpu host,migratable=off` hands it through where KVM offers it.
+
+**The boot decides, and fails closed to two roots**, and says so on an `rwindow` line (W2): `CR4.PCIDE` and
+`EFER.TCE` clear on every processor, IBPB, `smt=off`, AMD's family 1Ah. `qemu64` names another family, so
+every row on the gates' default model reads two roots; the row of the window names the model above.
+
+**What holds, on x86-64 under KVM, on one, two and four processors, `test-linuxd` and `test-threads`, by
+hand**, on a tree with a host for `restricted-check` in a user image taken from `mk-flip`'s unlanded work
+(ledger 7184, B.4): `restricted-check` cases 160 to 178 in `cases/window.rs`, and `test-threads`'
+`armed` steps, loops of `getppid` and nothing else against a reparent, a signal, a stop, a kill, a sibling's
+`exit_group`, a `TSYNC`, a move, a `cpu.max` and a freeze. Overlapping threads on four processors: about
+7,300 trips by stub and 15,000 declines to two roots in the same run, both above zero as X9 asks.
+
+| Control, by hand, each a plant and a boot | Fired on |
+|---|---|
+| No wait at a join | "a processor joined a space whose window was open", FX-0929 |
+| The opener does not read the set | "a stub took trap 14", FX-0929 |
+| The flag never given back | "a processor joined a space whose window was held past any stub's run", FX-0929 |
+| No `INVLPG` at a close | case 164 |
+| No reader refuses | case 178 |
+| The arm never dropped, at any site | case 167 |
+| A reparent with no kick, four processors | `test-threads`: "getppid kept naming a parent that had ended", for 20 s |
+
+**Three kicks' controls do not fire**: a move, a `cpu.max` and a `TSYNC`, each with its `drop_arms` out, hold on
+four processors. A `TSYNC`'s caller is a sibling with its bit up, so the loop declines by itself; the other two
+are not traced. So these three kicks are written for W4, and nothing here shows them needed. On one processor a
+reparent's kick does not fire either.
+
+**`present` is unchanged**: `test-kernel-symbols` against `develop`, x86-64 release: 8,382 bodies, addresses
+masked, and one differs, `region_check::serve`, the check's own, for its new asks (X8). The reads of a
+master root are macros that are the old tokens with no window in the build.
+
+Three things found on the way. A window dropped with its task held its frames and its job's charge for as
+long as an idle processor kept that task as its previous, so it goes as the thread ends (case 177, on four
+processors and not on one). `audit_words`' shift overflowed at a nineteenth flag: a stop in a debug build, a
+wrong word in a release one; the second word now holds what the first has no room for. **A pinned thread
+takes no fast path at all**, two roots or window: `PLACE` stays posted while its mask is narrower than its
+domain, by L.sched.99's design, so no case here pins, and a `taskset` program reads the general path's
+figure.
 
 ## Owed, now that it has landed
 

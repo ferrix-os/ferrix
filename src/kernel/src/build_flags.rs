@@ -27,7 +27,7 @@ struct Flag {
 }
 
 /// The profile, then the level, then every flag in the flag file's order.
-const FLAGS: [Flag; 17 + cfg!(ferrix_personality = "user") as usize] = [
+const FLAGS: [Flag; 17 + 2 * cfg!(ferrix_personality = "user") as usize] = [
     Flag {
         name: "profile",
         values: &[
@@ -139,7 +139,6 @@ const FLAGS: [Flag; 17 + cfg!(ferrix_personality = "user") as usize] = [
             (cfg!(ferrix_ssbd = "on_request"), "on_request"),
         ],
     },
-    // `present`'s and `desktop`'s boot lines stay as they were.
     #[cfg(ferrix_personality = "user")]
     Flag {
         name: "fault_ahead",
@@ -148,6 +147,18 @@ const FLAGS: [Flag; 17 + cfg!(ferrix_personality = "user") as usize] = [
             (cfg!(ferrix_fault_ahead = "on"), "on"),
             (
                 cfg!(ferrix_fault_ahead = "not_applicable"),
+                "not_applicable",
+            ),
+        ],
+    },
+    #[cfg(ferrix_personality = "user")]
+    Flag {
+        name: "restricted_window",
+        values: &[
+            (cfg!(ferrix_restricted_window = "off"), "off"),
+            (cfg!(ferrix_restricted_window = "on"), "on"),
+            (
+                cfg!(ferrix_restricted_window = "not_applicable"),
                 "not_applicable",
             ),
         ],
@@ -261,13 +272,19 @@ impl core::fmt::Display for Words {
 /// The set packed for the boot's configuration audit record: in the first
 /// word each flag's place in its list, two bits a flag in the flag file's
 /// order from bit 0; in the second the profile's place in bits 0 to 3 and
-/// the level's in bits 4 to 7. `docs/certification/AUDIT.md` §1 gives the
-/// lists a reader decodes them with.
+/// the level's in bits 4 to 7, and from bit 8 the flags the first word has no
+/// room for. `docs/certification/AUDIT.md` §1 gives the lists a reader decodes
+/// them with.
 pub fn audit_words() -> (u32, u32) {
     let place = |index: usize| FLAGS.get(index).map_or(0, |flag| chosen(flag.values).1);
-    let mut flags = 0_u32;
+    let (mut flags, mut more) = (0_u32, 0_u32);
     for index in 2..FLAGS.len() {
-        flags |= (place(index) & 0b11) << ((index - 2) * 2);
+        let bit = (index - 2) * 2;
+        if bit < 32 {
+            flags |= (place(index) & 0b11) << bit;
+        } else {
+            more |= (place(index) & 0b11) << (bit - 32 + 8);
+        }
     }
-    (flags, (place(0) & 0xf) | ((place(1) & 0xf) << 4))
+    (flags, (place(0) & 0xf) | ((place(1) & 0xf) << 4) | more)
 }

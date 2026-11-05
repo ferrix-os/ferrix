@@ -2810,6 +2810,7 @@ fn kernel_clippy_every_build() -> Result<()> {
         ("fs", "lift"),
         ("partition_speculation", "partition"),
         ("restricted_fastpath", "off"),
+        ("restricted_window", "off"),
         ("fault_ahead", "on"),
     ]
     .iter()

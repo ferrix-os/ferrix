@@ -978,6 +978,8 @@ pub(crate) use no_restricted::{
 pub use no_restricted::{
     restricted_context_bytes, restricted_set_vector_bytes, restricted_vector_bytes,
 };
+#[cfg(ferrix_restricted_window = "on")]
+pub use x86_64::restricted::window_report;
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::restricted::{
     RestrictedState, before_switch as restricted_before_switch,
@@ -985,6 +987,50 @@ pub(crate) use x86_64::restricted::{
     kick_on_trap_frame as restricted_kick_on_trap, land_copy as restricted_land_copy,
     lazy_vector_trap as restricted_lazy_vector_trap, note_copy_miss,
 };
+// CHECKS-ONLY: syscall/region_check.rs
+/// Trips and declines on every processor.
+#[cfg(ferrix_restricted_window = "on")]
+#[doc(hidden)]
+pub fn window_counts() -> (u64, u64) {
+    x86_64::restricted::window_counts()
+}
+// CHECKS-ONLY: syscall/region_check.rs
+/// Whether the boot decided this machine has a window.
+#[cfg(ferrix_restricted_window = "on")]
+#[doc(hidden)]
+pub fn window_on() -> bool {
+    x86_64::restricted::window_on()
+}
+// CHECKS-ONLY: syscall/region_check.rs
+/// How many windows are alive.
+#[cfg(ferrix_restricted_window = "on")]
+#[doc(hidden)]
+pub fn windows_live() -> u64 {
+    x86_64::restricted::windows_live()
+}
+#[cfg(ferrix_restricted_window = "on")]
+pub(crate) use x86_64::restricted::{window_forget_own, window_release_for_stop};
+// CHECKS-ONLY: syscall/region_check.rs
+/// No window: the region check's asks answer as a machine without one.
+#[cfg(not(ferrix_restricted_window = "on"))]
+#[doc(hidden)]
+pub const fn window_counts() -> (u64, u64) {
+    (0, 0)
+}
+// CHECKS-ONLY: syscall/region_check.rs
+/// See [`window_counts`].
+#[cfg(not(ferrix_restricted_window = "on"))]
+#[doc(hidden)]
+pub const fn window_on() -> bool {
+    false
+}
+// CHECKS-ONLY: syscall/region_check.rs
+/// See [`window_counts`].
+#[cfg(not(ferrix_restricted_window = "on"))]
+#[doc(hidden)]
+pub const fn windows_live() -> u64 {
+    0
+}
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::restricted::{
     context_bytes as restricted_context_bytes, set_vector_bytes as restricted_set_vector_bytes,

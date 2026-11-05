@@ -1834,6 +1834,10 @@ pub(crate) fn exit() -> ! {
 
 /// [`exit`] and [`exit_leaving`]: `leaving` when [`begin_leaving`] counted it.
 fn exit_counted(leaving: bool) -> ! {
+    // Its frames and charge now: a processor keeps this task as its previous until it next
+    // switches, which an idle one may not for a long time (ledger 6787 W11).
+    #[cfg(ferrix_restricted_window = "on")]
+    arch::window_forget_own();
     // A ticket it adopted is let go of here, with interrupts still open: the
     // last reference frees memory (`docs/microkernel/K7.md`, 2525 (5)).
     crate::object::ticket::leave();

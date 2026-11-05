@@ -12,7 +12,13 @@
 //! a driver from faulting on a disk it serves (`docs/DEVMGR.md` §5). No page is
 //! both writable and executable, and a malformed image is refused, never a stop.
 
-use ferrix_bootinfo::{PAGE_SIZE, USER_VIRT_END};
+use ferrix_bootinfo::PAGE_SIZE;
+#[cfg(not(ferrix_restricted_window = "on"))]
+use ferrix_bootinfo::USER_VIRT_END;
+
+/// Below the window's root slot, which no image reaches (`restricted_window`, K11 §2.1).
+#[cfg(ferrix_restricted_window = "on")]
+const USER_VIRT_END: u64 = 255 << 39;
 use ferrix_elf::{Class, Elf, ElfError, PF_R, PF_W, PF_X, PT_INTERP, Segment};
 use ferrix_native_abi::types::{NATIVE_STACK_GUARD, NATIVE_STACK_SIZE};
 use ferrix_vma::VmaFlags;

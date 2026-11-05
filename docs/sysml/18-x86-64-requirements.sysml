@@ -4162,6 +4162,78 @@ package FerrixX8664Requirements {
                 "arch::x86_64::cpu::set_task_switched",
                 "arch::x86_64::cpu::clear_task_switched");
         }
+        requirement <'L.x86_64.277'> aWindowOpensAlone : ItemLowLevel {
+            attribute :>> statement = "Under restricted_window a stub shall run only on a processor alone in its
+                space's set, read after its flag is up, and a processor joining the space shall write no root until
+                that flag is down, or stop by name past its limit.";
+            attribute :>> criterion = "restricted-check's two threads: trips and declines both above zero, cases 171
+                to 173; a stop named FX-0929 with the wait taken out, the set's read taken out, and the flag never
+                given back.";
+            attribute :>> parent = "H.TRAP.24";
+            attribute :>> unit = ("arch::x86_64::restricted::window_open",
+                "arch::x86_64::restricted::window_shut",
+                "user::space::AddressSpace::window_take",
+                "user::space::AddressSpace::window_give",
+                "user::space::AddressSpace::wait_for_the_window",
+                "user::space::AddressSpace::window_entry",
+                "smp::CpuMask::only",
+                "arch::x86_64::restricted::window_close_if_open",
+                "arch::x86_64::restricted::window_trap_check",
+                "arch::x86_64::restricted::window_space",
+                "arch::x86_64::restricted::window_release_for_stop",
+                "arch::x86_64::restricted::window_counts");
+        }
+        requirement <'L.x86_64.278'> aWindowLeavesNothing : ItemLowLevel {
+            attribute :>> statement = "A stub's close shall clear the slot and invalidate its pages before the
+                program's next instruction, a program shall reach nothing under the slot once it has, and software
+                reading the restricted root at or above SHARED_BASE shall be refused before the walk.";
+            attribute :>> criterion = "Cases 164 to 166 and 178; case 164 fires with the invalidation out, case 178
+                with the refusal out. Under KVM's nested tables; bare metal is a BACKLOG row.";
+            attribute :>> parent = "H.TRAP.24";
+            attribute :>> unit = ("arch::x86_64::restricted::window_shut",
+                "user::space::AddressSpace::translate_master",
+                "user::space::AddressSpace::flags_master",
+                "user::space::AddressSpace::master_refuses",
+                "user::space::AddressSpace::window_readers_refuse");
+        }
+        requirement <'L.x86_64.279'> aWindowIsDecidedAtBoot : ItemLowLevel {
+            attribute :>> statement = "The boot shall make no window unless CR4.PCIDE and EFER.TCE are clear on every
+                processor, IBPB is offered, the image is smt=off and the family is AMD's 1Ah, and shall say which on a
+                line; a thread on any other machine takes two roots.";
+            attribute :>> criterion = "The rwindow line on qemu64: two roots, and the row reads as two roots do; on
+                the host's model: a stub.";
+            attribute :>> parent = "H.TRAP.24";
+            attribute :>> unit = ("arch::x86_64::restricted::window_decide",
+                "arch::x86_64::restricted::window_decide_here",
+                "arch::x86_64::restricted::window_barred_here",
+                "arch::x86_64::restricted::window_report",
+                "arch::x86_64::cpu::ibpb_clears_returns",
+                "arch::x86_64::speculation::window_barrier");
+        }
+        requirement <'L.x86_64.280'> anArmDropsAtAnythingElse : ItemLowLevel {
+            attribute :>> statement = "An armed number shall be answered by a stub only across consecutive trips: any
+                other number, any kick and any entry shall drop it, and a change another thread makes to what the answer
+                rests on shall be written before its kick.";
+            attribute :>> criterion = "Cases 167 and 176; test-threads' armed steps; the control is a reparent with no
+                kick on four processors: nothing else stands behind the kicks for a move, a cpu.max or a TSYNC.";
+            attribute :>> parent = "H.TRAP.24";
+            attribute :>> unit = ("arch::x86_64::restricted::fast_resume",
+                "arch::x86_64::restricted::leave_restricted",
+                "object::process::Process::drop_arms",
+                "object::job::Job::set_bandwidth");
+        }
+        requirement <'L.x86_64.281'> aWindowGoesWithItsThread : ItemLowLevel {
+            attribute :>> statement = "A thread's window shall be charged to its job, shall not be made where the charge
+                or a frame is refused, and shall go, with its charge, as the thread ends.";
+            attribute :>> criterion = "Case 177: the count of windows back to its figure before the thread, on four
+                processors. The refused half, a job at its limit, has no case yet.";
+            attribute :>> parent = "H.TRAP.24";
+            attribute :>> unit = ("arch::x86_64::restricted::window_make",
+                "arch::x86_64::restricted::window_forget_own",
+                "arch::x86_64::restricted::Window::drop",
+                "arch::x86_64::restricted::window_shared",
+                "mm::window_frame");
+        }
         requirement <'L.x86_64.276'> aSwitchFromRestrictedIsAnExit : ItemLowLevel {
             attribute :>> statement = "A switch that brings a normal-mode thread in, where restricted
                 code ran last on the processor, shall issue the barrier under the

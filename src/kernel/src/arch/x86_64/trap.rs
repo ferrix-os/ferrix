@@ -538,6 +538,10 @@ pub(crate) unsafe fn load_on_this_cpu() {
 /// Not called from Rust — the `callq` in the assembly above is its only caller.
 #[unsafe(no_mangle)]
 extern "C" fn ferrix_trap_entry(frame: &mut TrapFrame) {
+    #[cfg(ferrix_restricted_window = "on")]
+    if frame.came_from_user() && frame.vector != NMI as u64 {
+        super::restricted::window_trap_check(frame.vector);
+    }
     // A program's own `#DB`, moved here from its IST stack by the paranoid
     // entry. `DR6` is sticky, so it is cleared for the next one to read.
     if frame.vector == DEBUG as u64 {

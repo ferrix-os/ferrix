@@ -248,6 +248,13 @@ which is not built.
 
 ### Restricted mode (`docs/microkernel/K1.md` §6)
 
+**`restricted_window`, off in every profile, changes none of what follows on barriers:** a stub's trip
+issues the same barrier as any exit (`speculation::restricted_left_window`), counted per trip. Where
+`IA32_PRED_CMD`'s IBPB clears the return predictor by `CPUID`'s own bit (`IBPB_RET`, 0x8000_0008 EBX bit 30)
+the refill after it goes; a hidden bit means the refill stays, never an argument (ledger 6787 W8). `CR0.TS`
+is not set on this path, the customer's trade for an exact kernel-written stub of no vector instruction
+(ledger 6826); it is set before any `linuxd` instruction on every other way.
+
 A thread of a shared process runs a Linux program in restricted mode and
 `linuxd` in normal mode, in one kernel thread. Under
 `partition_speculation=exit`, and in every build where the flag is not

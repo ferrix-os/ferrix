@@ -1983,6 +1983,18 @@ pub static WINDOW_UNMAP: Explanation = Explanation {
     see: "docs/microkernel/M5-LIFT.md section 13; src/kernel/src/user/space/window_check.rs",
 };
 
+/// A window's holder never gave it back.
+#[cfg(ferrix_restricted_window = "on")]
+pub(crate) static WINDOW_HELD: Explanation = Explanation {
+    code: "FX-0929",
+    title: "a restricted window was not given back",
+    meaning: "A processor runs a kernel-written stub with interrupts masked while it holds a \
+              space's window, a few instructions that wait on nobody. Another processor waited \
+              to join that space past any stub's run, or the stub itself took a trap.",
+    causes: &["A stub that faulted, or a processor that stopped while it held the window."],
+    see: "docs/microkernel/RESTRICTED-EXIT.md; src/kernel/src/arch/x86_64/restricted.rs",
+};
+
 /// `#NM` in ring 0: `CR0.TS` up with the kernel using a vector register.
 pub(crate) static VECTOR_IN_THE_KERNEL: Explanation = Explanation {
     code: "FX-0928",
@@ -4340,6 +4352,8 @@ pub(crate) static ALL: &[&Explanation] = &[
     &STAGE9_REGIONS,
     &STAGE9_LEVELS,
     &VECTOR_IN_THE_KERNEL,
+    #[cfg(ferrix_restricted_window = "on")]
+    &WINDOW_HELD,
     &STAGE9_BUILD,
     &STAGE6_REHOMED_MEMORY,
     &STAGE6_REHOMED_OBJECTS,

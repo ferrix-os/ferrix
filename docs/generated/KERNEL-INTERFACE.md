@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2995 declarations in the core's files, 215 in the item's; 232 checks-only.
+3006 declarations in the core's files, 215 in the item's; 239 checks-only.
 
 ## ferrix-kernel-core
 
@@ -87,6 +87,12 @@ checks above is `pub` for raised checks (F3).
 | `thread_core` | fn | load |  |
 | `user_combining` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `user_extended_state` | fn | load |  |
+| `window_counts` | fn | item (checks) | checks-only |
+| `window_counts` | fn | item (checks) | checks-only |
+| `window_on` | fn | item (checks) | checks-only |
+| `window_on` | fn | item (checks) | checks-only |
+| `windows_live` | fn | item (checks) | checks-only |
+| `windows_live` | fn | item (checks) | checks-only |
 | `write_combining_processors` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `aarch64` | mod | item, load, bin |  |
 | `armv7a` | mod | item, load, bin |  |
@@ -430,6 +436,7 @@ checks above is `pub` for raised checks (F3).
 | `wait_for_work` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `wait_for_work` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `wait_for_work` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `window_report` | re-export | bin |  |
 | `write_combining_processors` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `DistributorCheck` | struct | bin |  |
 | `DistributorCheck::lines` | field | item, load, bin |  |
@@ -1161,6 +1168,7 @@ checks above is `pub` for raised checks (F3).
 | `context_bytes` | fn | item |  |
 | `set_vector_bytes` | fn | item |  |
 | `vector_bytes` | fn | item |  |
+| `window_report` | fn | bin |  |
 
 ### `arch::x86_64::signal`
 
@@ -2370,6 +2378,7 @@ checks above is `pub` for raised checks (F3).
 | `Job::reservation` | method | item, load |  |
 | `Job::sealed` | method | item, load, bin |  |
 | `Job::set_bandwidth` | method | item, load |  |
+| `Job::set_bandwidth` | method | item, load |  |
 | `Job::set_burst` | method | load |  |
 | `Job::set_cpu_idle` | method | load |  |
 | `Job::set_cpu_weight` | method | item, load |  |
@@ -2562,6 +2571,7 @@ checks above is `pub` for raised checks (F3).
 | `Process::charge_thread` | method | item, load |  |
 | `Process::close_bootstrap` | method | load |  |
 | `Process::debug_budget_takes` | method | item |  |
+| `Process::drop_arms` | method | load |  |
 | `Process::end_record` | method | load |  |
 | `Process::exit` | method | item, load |  |
 | `Process::exit_record` | method | item |  |
@@ -3638,6 +3648,7 @@ checks above is `pub` for raised checks (F3).
 | `AddressSpace::try_grant` | method | item, load |  |
 | `AddressSpace::uninstall` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `AddressSpace::unmap` | method | item, load |  |
+| `AddressSpace::window_readers_refuse` | method | item (checks) | checks-only |
 | `AddressSpace::with_page` | method | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `AddressSpace::with_present_page` | method | load |  |
 | `AddressSpace::with_regions` | method | item, load |  |

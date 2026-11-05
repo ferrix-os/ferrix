@@ -119,6 +119,63 @@ image_bench:
     jnz image_bench
     int3
 
+// The window (`restricted_window`): calls with nothing between, so an answer of the number's
+// own value leaves every register as it was. The first exits and arms; the rest take the stub.
+.globl image_armed
+image_armed:
+    syscall
+    syscall
+    syscall
+    syscall
+    int3
+
+// The same, then a load at RDI: what a program can reach once a stub has closed.
+.globl image_armed_load
+image_armed_load:
+    syscall
+    syscall
+    syscall
+    movq (%rdi), %rax
+    int3
+
+// R12 armed calls, each answer held to R15; `ud2` if one is not.
+.globl image_armed_loop
+image_armed_loop:
+    movl $110, %eax
+    syscall
+    cmpq %r15, %rax
+    jne image_armed_wrong
+    decq %r12
+    jnz image_armed_loop
+    int3
+image_armed_wrong:
+    ud2
+
+// XMM5 and YMM5 kept over two stubs, read back to RAX and RBX.
+.globl image_armed_vectors
+image_armed_vectors:
+    movq %rdi, %xmm5
+    vinserti128 $1, %xmm5, %ymm5, %ymm5
+    movl $110, %eax
+    syscall
+    syscall
+    syscall
+    vmovq %xmm5, %rax
+    vextracti128 $1, %ymm5, %xmm4
+    vmovq %xmm4, %rbx
+    int3
+
+// Armed, a stub, another number, then the armed number again.
+.globl image_armed_other
+image_armed_other:
+    syscall
+    syscall
+    movl $1000, %eax
+    syscall
+    movl $110, %eax
+    syscall
+    int3
+
 // 32-bit code: read through GS's descriptor and make an i386 system call.
 .code32
 .globl image_compat
@@ -156,6 +213,11 @@ unsafe extern "C" {
     static image_vectors: u8;
     static image_compat: u8;
     static image_bench: u8;
+    static image_armed: u8;
+    static image_armed_load: u8;
+    static image_armed_loop: u8;
+    static image_armed_vectors: u8;
+    static image_armed_other: u8;
 }
 
 /// The images as bytes.
@@ -195,6 +257,11 @@ entries!(
     vectors: image_vectors,
     compat: image_compat,
     bench: image_bench,
+    armed: image_armed,
+    armed_load: image_armed_load,
+    armed_loop: image_armed_loop,
+    armed_vectors: image_armed_vectors,
+    armed_other: image_armed_other,
 );
 
 /// The code selector of 64-bit user code.
@@ -391,6 +458,12 @@ pub(crate) const HAS_DIVIDE: bool = true;
 pub(crate) const fn set_bench(context: &mut Context, count: u64, at: u64) {
     context.r12 = count;
     context.r13 = at;
+}
+
+/// Say how many calls [`armed_loop`] makes and what each must answer.
+pub(crate) const fn set_armed_loop(context: &mut Context, count: u64, answer: u64) {
+    context.r12 = count;
+    context.r15 = answer;
 }
 
 /// The counter [`bench`] reads.

@@ -93,6 +93,9 @@ pub(crate) struct RestrictedState {
     held: bool,
     /// The last exit's reason, zero before the first.
     last: u64,
+    /// Its window, where the build has one and frames were to be had.
+    #[cfg(ferrix_restricted_window = "on")]
+    window: Option<Window>,
 }
 
 impl RestrictedState {
@@ -123,6 +126,8 @@ impl RestrictedState {
             },
             other: UserState::new(),
             all_calls_exit: false,
+            #[cfg(ferrix_restricted_window = "on")]
+            window: None,
             lazy: false,
             clean: false,
             held: false,
@@ -147,6 +152,10 @@ fn own_state() -> Result<&'static mut RestrictedState, Errno> {
     let slot = unsafe { sched::own_restricted_slot() }.ok_or(status::BAD_STATE)?;
     if slot.is_none() {
         *slot = Some(fallible::try_box(RestrictedState::new()).map_err(|_| status::NO_MEMORY)?);
+        #[cfg(ferrix_restricted_window = "on")]
+        if let Some(state) = slot.as_deref_mut() {
+            state.window = window_make();
+        }
     }
     slot.as_deref_mut().ok_or(status::BAD_STATE)
 }
@@ -494,6 +503,422 @@ fn write_entry_bases(normal_fs: u64, normal_gs: u64, program_fs: u64, program_gs
     }
 }
 
+/// The window's slot's first address, and the stub and answer pages in it.
+#[cfg(ferrix_restricted_window = "on")]
+const WINDOW_STUB: u64 = (crate::mm::WINDOW_ROOT_SLOT as u64) << 39;
+/// See [`WINDOW_STUB`].
+#[cfg(ferrix_restricted_window = "on")]
+const WINDOW_DATA: u64 = WINDOW_STUB + 0x1000;
+/// The stub, an exact pattern the kernel writes: `movabs $WINDOW_DATA, %rsi; mov (%rsi), %rdi;
+/// mov $RESTRICTED_RESUME, %eax; xor %esi, %esi; syscall; ud2`. No loop, no return, no indirect
+/// branch, no vector register (ledger 6787 W3, 6826).
+#[cfg(ferrix_restricted_window = "on")]
+const WINDOW_CODE: [u8; 24] = {
+    let a = WINDOW_DATA.to_le_bytes();
+    let n = (nr::RESTRICTED_RESUME as u32).to_le_bytes();
+    [
+        0x48, 0xbe, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], 0x48, 0x8b, 0x3e, 0xb8, n[0],
+        n[1], n[2], n[3], 0x31, 0xf6, 0x0f, 0x05, 0x0f, 0x0b,
+    ]
+};
+/// Where `SYSCALL` in the stub leaves `rcx`.
+#[cfg(ferrix_restricted_window = "on")]
+const WINDOW_RETURN: u64 = WINDOW_STUB + 22;
+
+/// The page under the window's tables that nothing touches and nothing invalidates: after a
+/// close a program's load there must fault, or the processor kept an upper level (ledger 6787 W6).
+#[cfg(ferrix_restricted_window = "on")]
+pub(crate) const WINDOW_CANARY: u64 = WINDOW_STUB + 0x2000;
+
+/// A thread's window: its private tables and answer, made at its first entry, charged to its
+/// job. They die with the state, and a thread that has a state to drop is not running a stub.
+#[cfg(ferrix_restricted_window = "on")]
+#[derive(Debug)]
+struct Window {
+    /// The value the restricted root's slot takes while open.
+    value: u64,
+    /// The number armed across consecutive trips, `u64::MAX` for none.
+    number: u64,
+    /// The answer word, through the direct map.
+    data: *mut u64,
+    /// The job they were charged to.
+    owner: u32,
+    /// Its frames' addresses: three tables and the answer.
+    frames: [u64; WINDOW_FRAMES],
+}
+
+/// A window's own frames.
+#[cfg(ferrix_restricted_window = "on")]
+const WINDOW_FRAMES: usize = 4;
+
+// SAFETY: (SHARED) its pointer is this thread's page, reached by the running task alone.
+#[cfg(ferrix_restricted_window = "on")]
+unsafe impl Send for Window {}
+// SAFETY: (SHARED) as above.
+#[cfg(ferrix_restricted_window = "on")]
+unsafe impl Sync for Window {}
+
+#[cfg(ferrix_restricted_window = "on")]
+impl Drop for Window {
+    fn drop(&mut self) {
+        let _ = WINDOWS_LIVE.fetch_sub(1, core::sync::atomic::Ordering::Relaxed);
+        for at in self.frames {
+            crate::mm::window_frame_free(at);
+        }
+        crate::object::quota::uncharge_kernel(self.owner, WINDOW_FRAMES as u64 * 4096);
+    }
+}
+
+/// How many windows there are, for the check that they go with their threads.
+#[cfg(ferrix_restricted_window = "on")]
+static WINDOWS_LIVE: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// The space whose window this processor holds, null for none: the mark every way in reads first.
+#[cfg(ferrix_restricted_window = "on")]
+static WINDOW_OPEN: [core::sync::atomic::AtomicPtr<AddressSpace>; ferrix_sched::MAX_CPUS] =
+    [const { core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()) }; ferrix_sched::MAX_CPUS];
+/// Trips and declines, this processor's, for the row and the check.
+#[cfg(ferrix_restricted_window = "on")]
+static WINDOW_TRIPS: [core::sync::atomic::AtomicU64; ferrix_sched::MAX_CPUS] =
+    [const { core::sync::atomic::AtomicU64::new(0) }; ferrix_sched::MAX_CPUS];
+/// See [`WINDOW_TRIPS`].
+#[cfg(ferrix_restricted_window = "on")]
+static WINDOW_DECLINES: [core::sync::atomic::AtomicU64; ferrix_sched::MAX_CPUS] =
+    [const { core::sync::atomic::AtomicU64::new(0) }; ferrix_sched::MAX_CPUS];
+/// The stub's page and the canary's, once each for the machine, zero until the first window.
+#[cfg(ferrix_restricted_window = "on")]
+static WINDOW_SHARED: [core::sync::atomic::AtomicU64; 2] =
+    [const { core::sync::atomic::AtomicU64::new(0) }; 2];
+
+/// Why this machine has no window, by the boot's decision (ledger 6787 W2): failing closed to
+/// two roots. An index into [`WINDOW_WHY`]: 0 is that it has one, and nothing was decided is 1.
+#[cfg(ferrix_restricted_window = "on")]
+static WINDOW_BARRED: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(1);
+/// What the boot line says of [`WINDOW_BARRED`].
+#[cfg(ferrix_restricted_window = "on")]
+const WINDOW_WHY: [&str; 6] = [
+    "",
+    "the defences are off",
+    "PCIDs are on, and INVLPG here is per PCID, unreviewed",
+    "EFER.TCE is set",
+    "no IBPB",
+    "not smt=off, or a family other than AMD's 1Ah",
+];
+
+/// What this processor adds to the decision: `CR4.PCIDE` and `EFER.TCE` clear, as the argument
+/// that a close leaves nothing cached rests on them (ledger 6998, X8).
+#[cfg(ferrix_restricted_window = "on")]
+fn window_barred_here() -> u8 {
+    /// `IA32_EFER`.
+    const EFER: u32 = 0xC000_0080;
+    /// `EFER.TCE`: translation cache extension, an INVLPG that keeps upper levels.
+    const TCE: u64 = 1 << 15;
+    if super::cpu::read_cr4() & super::pcid::CR4_PCIDE != 0 {
+        return 2;
+    }
+    // SAFETY: (SYSREG) `IA32_EFER` exists on every processor that has long mode.
+    if unsafe { super::cpu::read_msr(EFER) } & TCE != 0 {
+        return 3;
+    }
+    0
+}
+
+/// The boot processor's decision, once `ibpb` is known and before any secondary.
+#[cfg(ferrix_restricted_window = "on")]
+pub(super) fn window_decide(ibpb: bool, known_family: bool) {
+    let here = window_barred_here();
+    let barred = if here != 0 {
+        here
+    } else if !ibpb {
+        4
+    } else if !cfg!(ferrix_smt = "off") || !known_family {
+        5
+    } else {
+        0
+    };
+    WINDOW_BARRED.store(barred, core::sync::atomic::Ordering::Relaxed);
+}
+
+/// A secondary's part of it: it can only bar, before the first program.
+#[cfg(ferrix_restricted_window = "on")]
+pub(super) fn window_decide_here() {
+    let here = window_barred_here();
+    if here != 0 {
+        WINDOW_BARRED.store(here, core::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// The boot line of the decision.
+#[cfg(ferrix_restricted_window = "on")]
+pub fn window_report() {
+    let barred = WINDOW_BARRED.load(core::sync::atomic::Ordering::Relaxed);
+    if barred == 0 {
+        crate::console::println!(
+            "  rwindow  armed calls take a stub, no root write, while alone in a space"
+        );
+    } else {
+        let why = WINDOW_WHY.get(usize::from(barred)).copied().unwrap_or("");
+        crate::console::println!("  rwindow  two roots: {why}");
+    }
+}
+
+/// One of the machine's two shared pages, made on first asking.
+#[cfg(ferrix_restricted_window = "on")]
+fn window_shared(which: usize, bytes: &[u8]) -> Option<u64> {
+    use core::sync::atomic::Ordering;
+    let slot = WINDOW_SHARED.get(which)?;
+    let held = slot.load(Ordering::Acquire);
+    if held != 0 {
+        return Some(held);
+    }
+    let (at, page) = crate::mm::window_frame()?;
+    // SAFETY: (FRAME) a fresh frame of ours, through the direct map, that no root names yet.
+    unsafe { core::ptr::copy_nonoverlapping(bytes.as_ptr(), page.cast::<u8>(), bytes.len()) };
+    match slot.compare_exchange(0, at, Ordering::AcqRel, Ordering::Acquire) {
+        Ok(_) => Some(at),
+        Err(other) => {
+            crate::mm::window_frame_free(at);
+            Some(other)
+        }
+    }
+}
+
+/// Make a thread's window, at its first entry, with interrupts open. A machine barred, a job at
+/// its limit or no frame: no window, and the thread takes two roots (ledger 6787 W11).
+#[cfg(ferrix_restricted_window = "on")]
+fn window_make() -> Option<Window> {
+    const TABLE: u64 = 0x7 | 0x20;
+    const CODE: u64 = 0x5 | 0x20;
+    const DATA: u64 = 0x5 | 0x20 | (1 << 63);
+    if WINDOW_BARRED.load(core::sync::atomic::Ordering::Relaxed) != 0 {
+        return None;
+    }
+    let text = window_shared(0, &WINDOW_CODE)?;
+    let canary = window_shared(1, &[])?;
+    let owner = crate::object::quota::charge_target();
+    crate::object::quota::charge_kernel(owner, WINDOW_FRAMES as u64 * 4096).ok()?;
+    let mut frames = [0_u64; WINDOW_FRAMES];
+    let mut pointers = [core::ptr::null_mut::<u64>(); WINDOW_FRAMES];
+    for at in 0..WINDOW_FRAMES {
+        let Some((frame, pointer)) = crate::mm::window_frame() else {
+            for made in frames.iter().copied().filter(|made| *made != 0) {
+                crate::mm::window_frame_free(made);
+            }
+            crate::object::quota::uncharge_kernel(owner, WINDOW_FRAMES as u64 * 4096);
+            return None;
+        };
+        frames[at] = frame;
+        pointers[at] = pointer;
+    }
+    let _ = WINDOWS_LIVE.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+    let [pdpt_at, pd_at, pt_at, data_at] = frames;
+    let [pdpt, pd, pt, data] = pointers;
+    // SAFETY: (FRAME) fresh frames of ours, through the direct map, and no root names them yet.
+    unsafe {
+        pdpt.write(pd_at | TABLE);
+        pd.write(pt_at | TABLE);
+        pt.write(text | CODE);
+        pt.add(1).write(data_at | DATA);
+        pt.add(2).write(canary | DATA);
+    }
+    Some(Window {
+        value: pdpt_at | TABLE,
+        number: u64::MAX,
+        data,
+        owner,
+        frames,
+    })
+}
+
+/// Open the window for `frame`'s call, if armed for it and this processor is alone in the
+/// space. Takes the barrier as any exit does; `CR0.TS` is not set, on the customer's trade for
+/// this exact stub (ledger 6826). `true`: `frame` runs the stub, masked.
+#[cfg(ferrix_restricted_window = "on")]
+#[inline(always)]
+fn window_open(
+    frame: &mut SyscallFrame,
+    state: &RestrictedState,
+    task: &sched::Task,
+    cpu: usize,
+) -> bool {
+    let Some(window) = state.window.as_ref() else {
+        return false;
+    };
+    if window.number != frame.rax {
+        return false;
+    }
+    // SAFETY: (CONTEXT) a program's thread holds its space.
+    let space = unsafe { task.address_space().unwrap_unchecked() };
+    if !space.window_take(cpu) {
+        unusual();
+        // SAFETY: (CONTEXT) a processor's logical number is below `MAX_CPUS`.
+        let declines = unsafe { WINDOW_DECLINES.get_unchecked(cpu) };
+        declines.store(
+            declines.load(core::sync::atomic::Ordering::Relaxed) + 1,
+            core::sync::atomic::Ordering::Relaxed,
+        );
+        return false;
+    }
+    speculation::restricted_left_window(cpu);
+    space
+        .window_entry()
+        .store(window.value, core::sync::atomic::Ordering::Relaxed);
+    // SAFETY: (CONTEXT) a processor's logical number is below `MAX_CPUS`.
+    unsafe { WINDOW_OPEN.get_unchecked(cpu) }.store(
+        alloc::sync::Arc::as_ptr(space).cast_mut(),
+        core::sync::atomic::Ordering::Relaxed,
+    );
+    *frame = SyscallFrame {
+        r15: 0,
+        r14: 0,
+        r13: 0,
+        r12: 0,
+        rbp: 0,
+        rbx: 0,
+        r9: 0,
+        r8: 0,
+        r10: 0,
+        rdx: 0,
+        rsi: 0,
+        rdi: 0,
+        rax: 0,
+        r11: 2,
+        rcx: WINDOW_STUB,
+        user_rsp: 0,
+    };
+    true
+}
+
+/// Clear the slot and all the processor can hold of it, and give the window back.
+#[cfg(ferrix_restricted_window = "on")]
+#[inline(always)]
+fn window_shut(space: &AddressSpace, cpu: usize) {
+    space
+        .window_entry()
+        .store(0, core::sync::atomic::Ordering::Relaxed);
+    super::cpu::invalidate_page(WINDOW_STUB);
+    super::cpu::invalidate_page(WINDOW_DATA);
+    // SAFETY: (CONTEXT) a processor's logical number is below `MAX_CPUS`.
+    unsafe { WINDOW_OPEN.get_unchecked(cpu) }
+        .store(core::ptr::null_mut(), core::sync::atomic::Ordering::Relaxed);
+    space.window_give();
+}
+
+/// The space this processor's mark names.
+///
+/// # Safety
+///
+/// (CONTEXT) `at` is the mark's value, not null: the thread that opened it holds that space
+/// until it has closed, and is the one running here.
+#[cfg(ferrix_restricted_window = "on")]
+#[inline(always)]
+const unsafe fn window_space<'a>(at: *mut AddressSpace) -> &'a AddressSpace {
+    // SAFETY: (CONTEXT) as the function says.
+    unsafe { &*at }
+}
+
+/// A stop on this processor with its mark up, at the panic handler's first line: a joiner would
+/// otherwise wait on a dead holder (ledger 6998, X4). No lock, and it waits on nothing.
+#[cfg(ferrix_restricted_window = "on")]
+pub(crate) fn window_release_for_stop() {
+    let Some(cpu) = crate::smp::this_cpu() else {
+        return;
+    };
+    // SAFETY: (CONTEXT) a processor's logical number is below `MAX_CPUS`.
+    let at = unsafe { WINDOW_OPEN.get_unchecked(cpu.logical) }
+        .load(core::sync::atomic::Ordering::Relaxed);
+    if !at.is_null() {
+        // SAFETY: (CONTEXT) the mark is up, on the thread that raised it.
+        window_shut(unsafe { window_space(at) }, cpu.logical);
+    }
+}
+
+/// The stub's `SYSCALL`: close, count the trip and go straight back into the program.
+#[cfg(ferrix_restricted_window = "on")]
+#[inline(always)]
+pub(super) fn window_close_if_open(frame: &mut SyscallFrame) -> bool {
+    // SAFETY: (SHARED) a call from ring 3: a running thread, masked.
+    let (task, cpu) = unsafe { sched::fast::here() };
+    // SAFETY: (CONTEXT) a processor's logical number is below `MAX_CPUS`.
+    let at = unsafe { WINDOW_OPEN.get_unchecked(cpu.logical) }
+        .load(core::sync::atomic::Ordering::Relaxed);
+    if at.is_null() {
+        return false;
+    }
+    // SAFETY: (CONTEXT) the mark is up, on the thread that raised it.
+    window_shut(unsafe { window_space(at) }, cpu.logical);
+    if frame.rcx != WINDOW_RETURN || frame.rax != nr::RESTRICTED_RESUME as u64 {
+        crate::panic::fatal!(
+            crate::panic::catalog::WINDOW_HELD,
+            "a stub's call was not its own"
+        );
+    }
+    // SAFETY: (CONTEXT) it had one to open.
+    let state = unsafe { sched::fast::state(task) };
+    state.context.rax = frame.rdi;
+    // SAFETY: (CONTEXT) a processor's logical number is below `MAX_CPUS`.
+    let trips = unsafe { WINDOW_TRIPS.get_unchecked(cpu.logical) };
+    trips.store(
+        trips.load(core::sync::atomic::Ordering::Relaxed) + 1,
+        core::sync::atomic::Ordering::Relaxed,
+    );
+    speculation::restricted_ran_on(cpu.logical);
+    store_syscall(frame, &state.context);
+    true
+}
+
+/// A trap in ring 3 with the window open: the stub cannot take one. Shut, so that a joiner
+/// does not wait on a dead holder, and stop by name (ledger 6998, X4).
+#[cfg(ferrix_restricted_window = "on")]
+pub(super) fn window_trap_check(vector: u64) {
+    // SAFETY: (SHARED) a trap from ring 3: a running thread, masked.
+    let (_, cpu) = unsafe { sched::fast::here() };
+    // SAFETY: (CONTEXT) a processor's logical number is below `MAX_CPUS`.
+    let at = unsafe { WINDOW_OPEN.get_unchecked(cpu.logical) }
+        .load(core::sync::atomic::Ordering::Relaxed);
+    if !at.is_null() {
+        // SAFETY: (CONTEXT) the mark is up, on the thread that raised it.
+        window_shut(unsafe { window_space(at) }, cpu.logical);
+        crate::panic::fatal!(
+            crate::panic::catalog::WINDOW_HELD,
+            "a stub took trap {vector}"
+        );
+    }
+}
+
+/// Let go of the running thread's window, as it ends: running, so no stub is open.
+#[cfg(ferrix_restricted_window = "on")]
+pub(crate) fn window_forget_own() {
+    // SAFETY: (CONTEXT) the running task's own slot, not kept past this call.
+    if let Some(Some(state)) = unsafe { sched::own_restricted_slot() } {
+        state.window = None;
+    }
+}
+
+/// How many windows are alive.
+#[cfg(ferrix_restricted_window = "on")]
+pub(crate) fn windows_live() -> u64 {
+    WINDOWS_LIVE.load(core::sync::atomic::Ordering::Relaxed)
+}
+
+/// Whether the boot decided this machine has a window.
+#[cfg(ferrix_restricted_window = "on")]
+pub(crate) fn window_on() -> bool {
+    WINDOW_BARRED.load(core::sync::atomic::Ordering::Relaxed) == 0
+}
+
+/// Trips and declines on every processor.
+#[cfg(ferrix_restricted_window = "on")]
+pub(crate) fn window_counts() -> (u64, u64) {
+    let sum = |counters: &[core::sync::atomic::AtomicU64]| {
+        counters
+            .iter()
+            .map(|c| c.load(core::sync::atomic::Ordering::Relaxed))
+            .sum()
+    };
+    (sum(&WINDOW_TRIPS), sum(&WINDOW_DECLINES))
+}
+
 /// `SYSCALL`'s fast exit, ahead of the entry's kernel-time stamp, if every condition
 /// holds: as the native fast path's, its time counts as user time, and no reading is
 /// taken for it (`sched::vtime`). `false`: nothing has changed. Every condition is read
@@ -521,6 +946,17 @@ pub(super) fn fast_exit_here(frame: &mut SyscallFrame) -> bool {
         return false;
     }
     state.context = super::signal::UserContext::from_syscall(frame).into_frame();
+    #[cfg(ferrix_restricted_window = "on")]
+    {
+        if window_open(frame, state, task, cpu.logical) {
+            state.last = Reason::Syscall as u64;
+            return true;
+        }
+        // Any exit that is not a window's drops the arm (6787 W4).
+        if let Some(window) = state.window.as_mut() {
+            window.number = u64::MAX;
+        }
+    }
     let (rax, words) = (
         frame.rax,
         [
@@ -597,6 +1033,20 @@ fn fast_resume(frame: &mut SyscallFrame) -> bool {
         return false;
     }
     state.context.rax = frame.rdi;
+    // After the conditions, whose work word holds any `RESTRICTED_KICK` made so far (ledger
+    // 6998, X6), and a later one is read by the next trip: the arm the resume asks for, with its
+    // value, or none.
+    #[cfg(ferrix_restricted_window = "on")]
+    if let Some(window) = state.window.as_mut() {
+        if frame.rsi != 0 {
+            // SAFETY: (FRAME) the thread's own answer page, through the direct map.
+            unsafe { core::sync::atomic::AtomicU64::from_ptr(window.data) }
+                .store(frame.rdi, core::sync::atomic::Ordering::Relaxed);
+            window.number = frame.rsi - 1;
+        } else {
+            window.number = u64::MAX;
+        }
+    }
     copy_kept(&mut state.normal, frame);
     // Up first, so that the next exit's barrier cannot be skipped (6093 (2)).
     speculation::restricted_ran();
@@ -753,6 +1203,10 @@ fn prepare(number: usize, argument: u64, options: u64) -> Result<(), Errno> {
 /// Hold `context`, which has passed [`check_context`]. The only write of the
 /// held context apart from the processor's own.
 fn enter_prepared(state: &mut RestrictedState, context: &Context) {
+    #[cfg(ferrix_restricted_window = "on")]
+    if let Some(window) = state.window.as_mut() {
+        window.number = u64::MAX;
+    }
     state.context = frame_of(context);
     state.other.set_thread_pointer(context.fs_base);
     state.other.set_gs_base_record(context.gs_base);
@@ -937,6 +1391,10 @@ pub(super) fn kick_on_syscall_frame(frame: &mut SyscallFrame) {
 /// Leave restricted mode, with the program's registers already held: the user
 /// state, the barrier, the root. With interrupts masked.
 fn leave_restricted(state: &mut RestrictedState) {
+    #[cfg(ferrix_restricted_window = "on")]
+    if let Some(window) = state.window.as_mut() {
+        window.number = u64::MAX;
+    }
     swap_user_state(false, &mut state.other);
     speculation::restricted_left();
     flip(false);

@@ -446,6 +446,10 @@ pub struct AddressSpace {
     me: Weak<AddressSpace>,
     /// The processors whose TLB may still hold this space's translations.
     cpus: CpuMask,
+    /// Whether a processor holds this space's window (ledger 6998): written by its opener
+    /// and closer alone, under no lock.
+    #[cfg(all(ferrix_restricted_window = "on", not(ferrix_load_built = "lift")))]
+    window_held: AtomicBool,
     /// Its shootdowns: those not yet returned, and those ever begun.
     flushes: Flushes,
     /// Held by each system call that changes which ranges are mapped, from
@@ -509,8 +513,51 @@ pub const PROGRAM_TOP: u64 = USER_VIRT_END;
 #[cfg(ferrix_load_built = "lift")]
 pub const PROGRAM_TOP: u64 = SHARED_BASE;
 
-/// One past a region's last root slot: [`USER_VIRT_END`]'s.
+/// One past a region's last root slot: [`USER_VIRT_END`]'s, less the window's where the
+/// build has one (`restricted_window`, K11 §2.1).
+#[cfg(not(ferrix_restricted_window = "on"))]
 const END_SHARED_SLOT: usize = (USER_VIRT_END >> ROOT_SLOT_SHIFT) as usize;
+/// The same.
+#[cfg(ferrix_restricted_window = "on")]
+const END_SHARED_SLOT: usize = 255;
+/// A read of `$space`'s master root at `$at`: as it always was with no window in the build, the
+/// same tokens, so that such a kernel is unchanged; with one, by [`AddressSpace::translate_master`].
+#[cfg(not(ferrix_restricted_window = "on"))]
+macro_rules! master_translate {
+    ($space:expr, $root:expr, $at:expr) => {
+        mm::translate_in($root, $at)
+    };
+}
+/// See the macro of this name with no window in the build.
+#[cfg(ferrix_restricted_window = "on")]
+macro_rules! master_translate {
+    ($space:expr, $root:expr, $at:expr) => {{
+        let _ = $root;
+        $space.translate_master($at)
+    }};
+}
+/// [`master_translate`]'s for a leaf's flags.
+#[cfg(not(ferrix_restricted_window = "on"))]
+macro_rules! master_flags {
+    ($space:expr, $root:expr, $at:expr) => {
+        mm::flags_in($root, $at)
+    };
+}
+/// See the macro of this name with no window in the build.
+#[cfg(ferrix_restricted_window = "on")]
+macro_rules! master_flags {
+    ($space:expr, $root:expr, $at:expr) => {{
+        let _ = $root;
+        $space.flags_master($at)
+    }};
+}
+
+/// One past a region's last byte: as far as any user address goes without a window.
+#[cfg(not(ferrix_restricted_window = "on"))]
+const REGION_END: u64 = USER_VIRT_END;
+/// One past a region's last byte: below the window's slot.
+#[cfg(ferrix_restricted_window = "on")]
+const REGION_END: u64 = (END_SHARED_SLOT as u64) << ROOT_SLOT_SHIFT;
 /// The root slots of a region. Empty on ARMv7-A, which has none, whose user half ends
 /// below [`SHARED_BASE`].
 #[allow(
@@ -703,6 +750,19 @@ impl AddressSpace {
         let cpu = this_logical_cpu();
         // NOALLOC: a `CpuMask` is a fixed bitmap; joining sets a bit.
         self.cpus.join(cpu);
+        // No root write here while another processor has the window open (ledger 6998).
+        #[cfg(all(ferrix_restricted_window = "on", not(ferrix_load_built = "lift")))]
+        self.wait_for_the_window();
+        // This processor's bit is up, so no opener can pass from here on: an empty slot now, and
+        // until it leaves. The flag alone would not say so, as a decliner raises it for an instant.
+        // A stale read through a missing wait is too rare to catch by racing.
+        #[cfg(all(ferrix_restricted_window = "on", not(ferrix_load_built = "lift")))]
+        if self.normal.get().is_some() && self.window_entry().load(Ordering::SeqCst) != 0 {
+            crate::panic::fatal!(
+                crate::panic::catalog::WINDOW_HELD,
+                "a processor joined a space whose window was open"
+            );
+        }
         // After the join, for the order the module gives: a shootdown whose
         // set read missed the join is one whose count this read sees.
         let begun = self.flushes.begun.load(Ordering::SeqCst);
@@ -783,6 +843,8 @@ impl AddressSpace {
             id: next_id(),
             me: me.clone(),
             cpus: CpuMask::new(),
+            #[cfg(all(ferrix_restricted_window = "on", not(ferrix_load_built = "lift")))]
+            window_held: AtomicBool::new(false),
             flushes: Flushes::new(),
             layout: SleepLock::new((), &crate::sync::SchedParker),
             handles: AtomicU64::new(0),
@@ -814,7 +876,7 @@ impl AddressSpace {
         space.keep_top.store(true, Ordering::Release);
         {
             let mut inner = space.inner.lock();
-            inner.map = ferrix_vma::AddressSpace::new(SHARED_BASE, USER_VIRT_END)
+            inner.map = ferrix_vma::AddressSpace::new(SHARED_BASE, REGION_END)
                 .map_err(|_| SpaceError::BadRange)?;
         }
         for slot in shared_root_slots() {
@@ -857,13 +919,13 @@ impl AddressSpace {
     ) -> Result<Option<R>, SpaceError> {
         let _inner = self.inner.lock();
         let root = self.root * PAGE_SIZE;
-        let Some(flags) = mm::flags_in(root, address) else {
+        let Some(flags) = master_flags!(self, root, address) else {
             return Ok(None);
         };
         if access.write && !flags.write {
             return Ok(None);
         }
-        let Some(physical) = mm::translate_in(root, address) else {
+        let Some(physical) = master_translate!(self, root, address) else {
             return Ok(None);
         };
         let virt = mm::direct_map_ram(physical).ok_or(SpaceError::Refused(address))?;
@@ -927,7 +989,7 @@ impl AddressSpace {
                     refusal = Some(SpaceError::OutOfMemory);
                     break;
                 };
-                let present = mm::translate_in(root, virt).is_some();
+                let present = master_translate!(self, root, virt).is_some();
                 #[allow(clippy::excessive_nesting, reason = "one walk's page, in place")]
                 if present {
                     let Ok(range) = PageRange::from_len(virt, PAGE_SIZE) else {
@@ -1110,6 +1172,100 @@ impl AddressSpace {
         // SAFETY: (TRANSLATE) the caller's guarantee; both roots carry the
         // kernel's half, and live as long as this space.
         unsafe { arch::flip_user_root(root, id, begun, cpu) };
+    }
+
+    /// Take the window, if this processor is the only one in the space: the flag first,
+    /// then the set, as [`AddressSpace::wait_for_the_window`] joins and then reads. `false`
+    /// leaves the flag down and nothing written.
+    #[cfg(all(ferrix_restricted_window = "on", not(ferrix_load_built = "lift")))]
+    #[inline(always)]
+    pub(crate) fn window_take(&self, cpu: usize) -> bool {
+        self.window_held.store(true, Ordering::SeqCst);
+        if self.cpus.only(cpu) {
+            return true;
+        }
+        self.window_held.store(false, Ordering::SeqCst);
+        false
+    }
+
+    /// Give the window back, after its slot is clear and its pages invalidated.
+    #[cfg(all(ferrix_restricted_window = "on", not(ferrix_load_built = "lift")))]
+    #[inline(always)]
+    pub(crate) fn window_give(&self) {
+        self.window_held.store(false, Ordering::Release);
+    }
+
+    /// Wait out a window another processor holds on this space: one masked run of a
+    /// stub, which waits on nobody. Past the deadline the holder is dead, and that is named.
+    #[cfg(all(ferrix_restricted_window = "on", not(ferrix_load_built = "lift")))]
+    fn wait_for_the_window(&self) {
+        /// About two seconds at the guest's clock: a descheduled vCPU, and no more.
+        const PATIENCE: u64 = 10_000_000_000;
+        // SeqCst though Acquire is the ruling's, at no cost on x86-64: the set's `fetch_or`
+        // before it and the opener's two make the Dekker pair in the language's own model too.
+        if !self.window_held.load(Ordering::SeqCst) {
+            return;
+        }
+        let began = arch::cheap_counter();
+        while self.window_held.load(Ordering::Acquire) {
+            if arch::cheap_counter().wrapping_sub(began) > PATIENCE {
+                crate::panic::fatal!(
+                    crate::panic::catalog::WINDOW_HELD,
+                    "a processor joined a space whose window was held past any stub's run"
+                );
+            }
+            core::hint::spin_loop();
+        }
+    }
+
+    /// Its restricted root's top table's entry for the window.
+    #[cfg(all(ferrix_restricted_window = "on", not(ferrix_load_built = "lift")))]
+    pub(crate) fn window_entry(&self) -> &AtomicU64 {
+        let entry = mm::root_slot_pointer(self.root * PAGE_SIZE, mm::WINDOW_ROOT_SLOT);
+        // SAFETY: (FRAME) a word of this space's own root, which lives as long as it, aligned,
+        // that nothing but the opener and the closer writes: `END_SHARED_SLOT` keeps every map
+        // and every region out of it, and teardown runs with no thread left to open it.
+        unsafe { AtomicU64::from_ptr(entry) }
+    }
+
+    /// Whether a software read of the window's two pages is refused, as the check asks it many
+    /// times from a processor outside the set while another runs stubs (ledger 6998, X1).
+    #[cfg(all(ferrix_restricted_window = "on", not(ferrix_load_built = "lift")))]
+    #[doc(hidden)]
+    pub fn window_readers_refuse(&self, stub: u64, data: u64) -> bool {
+        self.translate_master(stub).is_none()
+            && self.flags_master(stub).is_none()
+            && self.translate_master(data).is_none()
+            && self.flags_master(data).is_none()
+    }
+
+    /// A read of this space's own master root by software, on any processor, whose set
+    /// bit nothing asks for: a restricted root holds nothing at or above [`SHARED_BASE`] but
+    /// a window, while it is open, so that much is refused before the walk (ledger 6998, X1).
+    #[cfg(ferrix_restricted_window = "on")]
+    #[inline(always)]
+    fn translate_master(&self, at: u64) -> Option<u64> {
+        if self.master_refuses(at) {
+            return None;
+        }
+        mm::translate_in(self.root * PAGE_SIZE, at)
+    }
+
+    /// See [`AddressSpace::translate_master`].
+    #[cfg(ferrix_restricted_window = "on")]
+    #[inline(always)]
+    fn flags_master(&self, at: u64) -> Option<MapFlags> {
+        if self.master_refuses(at) {
+            return None;
+        }
+        mm::flags_in(self.root * PAGE_SIZE, at)
+    }
+
+    /// See [`AddressSpace::translate_master`].
+    #[cfg(ferrix_restricted_window = "on")]
+    #[inline(always)]
+    fn master_refuses(&self, at: u64) -> bool {
+        at >= SHARED_BASE && self.normal.get().is_some()
     }
 
     /// What a root write for `restricted` names: its table, its PCID key and
@@ -1993,7 +2149,7 @@ impl AddressSpace {
         // already been taken: every page that reaches here carries its own
         // region's permissions, so a fault on a present one asked for nothing
         // the mapping does not already grant.
-        if mm::translate_in(self.root * PAGE_SIZE, page).is_some() {
+        if master_translate!(self, self.root * PAGE_SIZE, page).is_some() {
             return Ok(());
         }
 
@@ -2055,7 +2211,7 @@ impl AddressSpace {
         if !vmo.writable_page(index) {
             return Err(SpaceError::Evicted);
         }
-        if mm::flags_in(self.root * PAGE_SIZE, page).is_some_and(|flags| !flags.write) {
+        if master_flags!(self, self.root * PAGE_SIZE, page).is_some_and(|flags| !flags.write) {
             return commit_page(vmo, index, true, address).map(Some);
         }
         Ok(None)
@@ -2171,8 +2327,8 @@ impl AddressSpace {
         if file.past_file_end(index) {
             return Err(SpaceError::PastEnd(address));
         }
-        let present =
-            mm::translate_in(self.root * PAGE_SIZE, page).map(|physical| physical / PAGE_SIZE);
+        let present = master_translate!(self, self.root * PAGE_SIZE, page)
+            .map(|physical| physical / PAGE_SIZE);
         let execute = region.flags.execute;
         let placed = |frame| Placement {
             id,
@@ -2376,7 +2532,7 @@ impl AddressSpace {
                 if !permits(region.flags, access) || !copyable(&region) {
                     return Err(SpaceError::Refused(address));
                 }
-                if let Some(physical) = mm::translate_in(self.root * PAGE_SIZE, address)
+                if let Some(physical) = master_translate!(self, self.root * PAGE_SIZE, address)
                     && (!access.write
                         || writable_in_place(&inner, &region, address, physical / PAGE_SIZE))
                 {
@@ -2427,7 +2583,7 @@ impl AddressSpace {
         if !permits(region.flags, access) || !copyable(&region) {
             return Err(SpaceError::Refused(address));
         }
-        let Some(physical) = mm::translate_in(self.root * PAGE_SIZE, address) else {
+        let Some(physical) = master_translate!(self, self.root * PAGE_SIZE, address) else {
             return Ok(None);
         };
         if access.write && !writable_in_place(&inner, &region, address, physical / PAGE_SIZE) {
@@ -2448,7 +2604,7 @@ impl AddressSpace {
     /// store. Every other page is touched as it was. Under the space's lock,
     /// as `touch` is; the flush takes no lock and waits for nothing.
     fn coherent_touch<R>(&self, address: u64, virt: u64, touch: impl FnOnce(u64) -> R) -> R {
-        let combining = mm::flags_in(self.root * PAGE_SIZE, address)
+        let combining = master_flags!(self, self.root * PAGE_SIZE, address)
             .is_some_and(|flags| flags.write_combining && !flags.device);
         if !combining {
             return touch(virt);
@@ -3040,7 +3196,7 @@ impl AddressSpace {
             }
             let resident = {
                 let inner = self.inner.lock();
-                mm::translate_in(root, at).is_none()
+                master_translate!(self, root, at).is_none()
                     && inner.map.find(at).is_some_and(|region| {
                         let Backing::File { id, offset } = region.backing else {
                             return false;
@@ -3103,7 +3259,7 @@ impl AddressSpace {
             };
             let behind = page
                 .checked_sub(PAGE_SIZE)
-                .is_some_and(|before| mm::translate_in(root, before).is_some());
+                .is_some_and(|before| master_translate!(self, root, before).is_some());
             match inner.map.find(page) {
                 Some(region) if behind && plain(region) => region.range.end(),
                 _ => return (found, 0),
@@ -3112,7 +3268,7 @@ impl AddressSpace {
         for at in (1..=AHEAD_PAGES).map(|index| page + index * PAGE_SIZE) {
             let free = {
                 let _inner = self.inner.lock();
-                at < end && mm::translate_in(root, at).is_none()
+                at < end && master_translate!(self, root, at).is_none()
             };
             // Looked at first: a charge refused here would be counted and audited against
             // a program that asked for nothing (ledger 6537, A6). A page and its tables.
@@ -4030,7 +4186,7 @@ impl AddressSpace {
             return Err(SpaceError::BadRange);
         };
         let physical = physical.saturating_add(into_region);
-        if mm::translate_in(self.root * PAGE_SIZE, page).is_some() {
+        if master_translate!(self, self.root * PAGE_SIZE, page).is_some() {
             return Ok(());
         }
         mm::map_in(

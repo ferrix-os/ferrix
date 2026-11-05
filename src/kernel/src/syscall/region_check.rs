@@ -86,6 +86,20 @@ const ASK_ROW_TICKS: u8 = 9;
 const ASK_ROW_P50: u8 = 10;
 /// In the first message: spin until killed.
 const ASK_WAIT_TO_BE_KILLED: u8 = 7;
+/// Whether this machine answers armed calls by a stub.
+const ASK_WINDOW_ON: u8 = 14;
+/// Read the trip and decline counts.
+const ASK_WINDOW_START: u8 = 15;
+/// The trips since then must be the word.
+const ASK_WINDOW_TRIPS: u8 = 16;
+/// Trips and declines since then must both be above zero (ledger 6998, X9).
+const ASK_WINDOW_BOTH: u8 = 17;
+/// Read how many windows there are.
+const ASK_WINDOW_LIVE: u8 = 18;
+/// There must be as many as then, within the check's patience.
+const ASK_WINDOW_WENT: u8 = 19;
+/// Read the window's pages by software, from here, many times.
+const ASK_WINDOW_READERS: u8 = 20;
 
 /// What the check measured, for the boot log.
 #[derive(Debug, Default)]
@@ -157,6 +171,13 @@ pub fn check() {
         ),
     }
 }
+
+/// The window's slot's first address, as the case aims at it (`mm::WINDOW_ROOT_SLOT`).
+#[cfg(ferrix_restricted_window = "on")]
+const WINDOW_AT: u64 = 255 << 39;
+/// Reads of it a round, each short of a stub's run, so that some fall inside one.
+#[cfg(ferrix_restricted_window = "on")]
+const READS_A_ROUND: u32 = 2_000;
 
 /// A handle as a register.
 const fn reg(handle: Handle) -> u64 {
@@ -287,6 +308,24 @@ fn run() -> Result<Report, &'static str> {
     }
     fault_ends_the_region(&side, root_handle)?;
     Ok(report)
+}
+
+/// A thread's window went with it, and its frames and charge with that (ledger 6787 W11): back
+/// to the count before it was made, once its handle is gone.
+fn window_went(before: u64) -> bool {
+    let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    while crate::arch::windows_live() != before {
+        if crate::timer::now_nanos() > deadline {
+            crate::console::println!(
+                "  rwindow  {} windows where {before} were before the thread",
+                crate::arch::windows_live()
+            );
+            return false;
+        }
+        let _ = crate::sched::reap();
+        crate::sched::yield_now();
+    }
+    true
 }
 
 /// A fault of a process of a region in normal mode ends the region's job, not
@@ -551,6 +590,78 @@ fn on_processor(side: &Side, word: u64) -> Result<bool, &'static str> {
     Ok(task.is_some_and(|task| task.cpu() as u64 == word))
 }
 
+/// What the window's asks remember between them.
+#[derive(Default)]
+struct WindowAsks {
+    /// Trips and declines when last asked to read them.
+    counts: (u64, u64),
+    /// Windows when last asked to read them.
+    live: u64,
+}
+
+/// The program's asks about the window (`restricted_window`, ledger 6787, 6998).
+fn window_asked(
+    what: u8,
+    word: u64,
+    restricted: &Arc<AddressSpace>,
+    window: &mut WindowAsks,
+) -> bool {
+    match what {
+        ASK_WINDOW_ON => crate::arch::window_on(),
+        ASK_WINDOW_LIVE => {
+            window.live = crate::arch::windows_live();
+            true
+        }
+        ASK_WINDOW_WENT => window_went(window.live),
+        ASK_WINDOW_READERS => window_readers_refused(restricted),
+        ASK_WINDOW_START => {
+            window.counts = crate::arch::window_counts();
+            true
+        }
+        ASK_WINDOW_TRIPS => {
+            let (trips, declines) = crate::arch::window_counts();
+            let (trips, declines) = (trips - window.counts.0, declines - window.counts.1);
+            let held = if word == u64::MAX {
+                trips > 0
+            } else {
+                trips == word
+            };
+            if !held {
+                crate::console::println!(
+                    "  rwindow  {trips} trips, {declines} declines, where the case wanted {word}"
+                );
+            }
+            held
+        }
+        ASK_WINDOW_BOTH => {
+            let (trips, declines) = crate::arch::window_counts();
+            let (trips, declines) = (trips - window.counts.0, declines - window.counts.1);
+            crate::console::println!(
+                "  rwindow  overlapping threads: {trips} trips by stub, {declines} declined to \
+                 two roots"
+            );
+            trips > 0 && declines > 0
+        }
+        _ => false,
+    }
+}
+
+/// A reader of the slot with no bit up, many times: refused each time.
+#[cfg(ferrix_restricted_window = "on")]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "this check is what the method is for"
+)]
+fn window_readers_refused(restricted: &Arc<AddressSpace>) -> bool {
+    (0..READS_A_ROUND).all(|_| restricted.window_readers_refuse(WINDOW_AT, WINDOW_AT + PAGE_SIZE))
+}
+
+/// No window, nothing to read.
+#[cfg(not(ferrix_restricted_window = "on"))]
+const fn window_readers_refused(_restricted: &Arc<AddressSpace>) -> bool {
+    true
+}
+
 /// Answer what the program asks until it closes its end.
 fn serve(
     side: &Side,
@@ -562,6 +673,7 @@ fn serve(
     let mut started = (0, 0);
     let mut row_started = 0;
     let mut row_scale = (0, 1);
+    let mut window = WindowAsks::default();
     loop {
         let readable = Signals(Signals::READABLE.0 | Signals::PEER_CLOSED.0);
         wait(side, channel, readable)
@@ -578,7 +690,8 @@ fn serve(
             .get(1..9)
             .and_then(|word| <[u8; 8]>::try_from(word).ok())
             .map_or(0, u64::from_ne_bytes);
-        let yes = match message.first().copied().unwrap_or(0) {
+        let what = message.first().copied().unwrap_or(0);
+        let yes = match what {
             ASK_SWEEP => {
                 let leaves = crate::mm::check::sweep_restricted(restricted, shared)?;
                 #[allow(
@@ -629,6 +742,7 @@ fn serve(
                     || crate::trap::restricted_barriers().0 > started.0
             }
             ASK_NOTHING => true,
+            ASK_WINDOW_ON..=ASK_WINDOW_READERS => window_asked(what, word, restricted, &mut window),
             ASK_ROW_START => {
                 row_started = crate::timer::now_nanos();
                 true

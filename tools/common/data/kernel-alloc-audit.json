@@ -168,8 +168,8 @@
     },
     "mm.rs": {
       "bucket": "frames",
-      "what": "the buddy: allocate_frames, _below, _run, user frames (charged), program frames (owner), page tables (the space's owner), the per-processor caches",
-      "sites": 36
+      "what": "the buddy: allocate_frames, _below, _run, user frames (charged), program frames (owner), page tables (the space's owner), the per-processor caches, and a restricted window's frames, charged to its job by their one caller, in a build with the flag on",
+      "sites": 38
     },
     "mm/reserve.rs": {
       "bucket": "frames",

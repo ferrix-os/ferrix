@@ -704,6 +704,9 @@ impl Process {
         };
         // Outside the lock: it may be the last reference to that job.
         drop(left);
+        // Its slot is what a thread's straight answer compared.
+        #[cfg(ferrix_restricted_window = "on")]
+        self.drop_arms();
         // Its speculation domain (`docs/OPAQUE-KERNEL.md` §9.2): a process
         // being made is born in the job it was made for, its space with it;
         // a running one that moves leaves its domain for good, wherever it
@@ -787,6 +790,17 @@ impl Process {
     /// address space, which no lock may be held across.
     pub fn with_tasks<R>(&self, look: impl FnOnce(&[Weak<Task>]) -> R) -> R {
         look(&self.task_list.lock().tasks)
+    }
+
+    /// Bring every thread of it out of a run of stubs, with the change it rests on already
+    /// written (ledger 6787 W4, 6998 X6). What this means is `linuxd`'s copy, whose [`work::post`]
+    /// calls `RESTRICTED_KICK` on a thread in restricted mode: that raises the kernel's `KICK`,
+    /// which ends a program at its next interrupt or, as `fast::quiet` reads the word, its next
+    /// trip before any stub opens. No bit of `linuxd`'s own word is set, as its way out then has
+    /// nothing else to do.
+    #[cfg(ferrix_restricted_window = "on")]
+    pub fn drop_arms(&self) {
+        self.post_to_tasks(0, None);
     }
 
     /// Post `bits` to every task listed but `except`, waking each and
