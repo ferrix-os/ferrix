@@ -1979,6 +1979,25 @@ The worker's cost, measured once on ARMv7-A `--smp 2` (S5, not a gate): 16 frame
 beside what the hold holds, the least free over the overlap 92,985 frames against 93,275 as
 it began, of 127,158 managed.
 
+**Before and after**, the seconds of 2026-11-05: base f3ea80a3f, median of 2 or 3 paired
+boots run side by side, load 5 to 18; after, 16 boots a form of the same day's tip, load
+3 to 8, least / median / most, all passing, and the tip's spread is a second or two where the base's
+was tens. Release KVM with the checks on: 29.52 to 20.42. Checks skipped, for information,
+1.43 / 2.19 / 1.47 / 1.72 s: no certified profile permits it.
+
+| form | base | now | limit 10 s |
+|---|---|---|---|
+| x86-64 KVM | 35.0 | 23.0 / 23.2 / 24.0 | NOT MET |
+| x86-64 TCG | 55.5 | 40.5 / 41.7 / 42.8 | NOT MET |
+| AArch64 TCG | 48-58 | 32.7 / 33.5 / 36.0 | NOT MET |
+| ARMv7-A TCG | 48-50 | 32.6 / 33.3 / 34.6 | NOT MET |
+| ARMv7-A `--smp 2` | 55-58 | 32.2 / 33.0 / 33.9 | NOT MET |
+| ARMv7-A `--smp 1`, AArch64 `nosmp` | | 31.2, 33.1 once each | not limited |
+
+`test-boot` prints the time and holds a plain boot to a ratchet (`boot_ratchet`). What is left
+to the limit is the customer's choice, in `fleet/morning-questions.md`: the remaining time
+is real checks in series, each with its window or its count.
+
 ## Next
 
 Phase 2 in the order the numbers give: (3) stop rather than wait for a
