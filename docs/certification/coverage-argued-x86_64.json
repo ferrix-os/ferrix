@@ -271,35 +271,35 @@
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "649",
+      "lines": "652",
       "category": "absent-hardware",
       "match": "return Ok(None);",
       "why": "An image with no /sbin/devmgr: every image xtask builds carries it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "1427",
+      "lines": "1438",
       "category": "failure-path",
       "match": "_ => return Err(\"devmgr said something other than REPORT fir",
       "why": "A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "1431",
+      "lines": "1442",
       "category": "failure-path",
       "match": "Err(_) => return Err(\"devmgr closed its channel before repor",
       "why": "A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "1442",
+      "lines": "1453",
       "category": "failure-path",
       "match": "return Err(\"devmgr reported nothing within the patience\");",
       "why": "A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "1498",
+      "lines": "1509",
       "category": "defensive",
       "match": "}",
       "why": "The listener's end when devmgr's channel closes: devmgr does not exit in a running system, so the loop never meets a closed channel."
@@ -1104,42 +1104,42 @@
     },
     {
       "file": "syscall/native.rs",
-      "lines": "686-687",
+      "lines": "687-688",
       "category": "credited-elsewhere",
       "match": "TableError::Full => status::NO_HANDLES,",
       "why": "Run by the native refusal check: a duplicate into a full table answers NO_HANDLES and a message naming one handle twice answers INVALID_ARGS, both required. Those callers inline table_error; the arms' rows are only in its out-of-line copy, whose callers never meet these two errors."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "1746-1747",
+      "lines": "1747-1748",
       "category": "defensive",
       "match": "object::dispose(message.handles.into_iter().map(|(object, _)",
       "why": "The queue refusing to take back at its head a message it gave up a moment earlier: its capacity still holds the slot, so putting it back needs no memory."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "3236",
+      "lines": "3239",
       "category": "defensive",
       "match": "return Err(status::BAD_STATE);",
       "why": "A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "3239",
+      "lines": "3242",
       "category": "defensive",
       "match": "return Err(status::NO_HANDLES);",
       "why": "A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "3255-3256",
+      "lines": "3258-3259",
       "category": "defensive",
       "match": "Err(Err(object)) => {",
       "why": "An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "4189",
+      "lines": "4192",
       "category": "absent-hardware",
       "match": "return Err(status::INVALID_ARGS);",
       "why": "A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine."
@@ -1265,7 +1265,7 @@
     },
     {
       "file": "user/vmo.rs",
-      "lines": "2927",
+      "lines": "2956",
       "category": "defensive",
       "match": "return Err(VmoError::OutOfMemory);",
       "why": "A page already held four billion times, whose count would wrap. Each hold is a pin a driver made and keeps a handle to, and a process may hold at most HANDLE_LIMIT (4,096) handles, so the count cannot approach the limit; the refusal is what keeps a wrapped count from freeing a page a device still reaches."

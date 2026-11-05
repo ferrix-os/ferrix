@@ -141,7 +141,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `discovery/devmgr.rs` | `item` | 24 | 72 | 76 | 12 | 458, 910, 948, 955, 1140, 1170, 1234, 1238-1239, 1262, 1267, 1488 |
+| `discovery/devmgr.rs` | `item` | 24 | 72 | 76 | 12 | 458, 921, 959, 966, 1151, 1181, 1245, 1249-1250, 1273, 1278, 1499 |
 | `discovery/pci/virtio.rs` | `item` | 40 | 33 | 49 | 30 | 332-333, 379, 382, 388, 435, 437-438, 471, 480, 486, 495, 498-499, 506, 514, 529, 550, 558, 560, 569, 617, 622, 627, 655, 681, 686, 699, 706, 797 |
 | `discovery/firmware.rs` | `item` | 46 | - | - | 46 | 96, 104-107, 110-112, 123, 126, 128-129, 142, 151, 153, 160, 165-166, 170, 200-201, 204, 206, 214-215, 217-220, 224-227, 230-232, 237, 242-243, 245, 250-251, 253, 256, 258, 269 |
 | `discovery/board.rs` | `core` | 26 | - | - | 26 | 104, 106, 108, 119-123, 128-131, 134, 140-141, 150, 173, 185, 187, 193-196, 265-266, 268 |
@@ -174,7 +174,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `syscall/native.rs` | `item` | 109 | 6 | 8 | 2 | 3337, 4074 |
+| `syscall/native.rs` | `item` | 109 | 6 | 8 | 2 | 3340, 4077 |
 | `syscall/program.rs` | `item` | 6 | 4 | 2 | 2 | 89, 133 |
 | `syscall/mod.rs` | `item` | 1 | 0 | 0 | 0 | - |
 

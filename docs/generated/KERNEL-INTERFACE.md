@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2971 declarations in the core's files, 205 in the item's; 226 checks-only.
+2973 declarations in the core's files, 205 in the item's; 226 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1607,6 +1607,7 @@ checks above is `pub` for raised checks (F3).
 | `DeviceNode::reads_log` | method | load |  |
 | `DeviceNode::refuse_for_check` | method | load (checks) | checks-only |
 | `DeviceNode::require_certified` | method | item, load |  |
+| `DeviceNode::served` | method | item, load |  |
 | `DeviceNode::take_domain_for_check` | method | load (checks) | checks-only |
 | `DeviceNode::tree_binding` | method | item |  |
 | `DeviceNode::vector` | method | item, load |  |
@@ -2452,7 +2453,6 @@ checks above is `pub` for raised checks (F3).
 | `give_intel_gpu_budget` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `intel_gpu_budget` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `intel_gpu_budget_for` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
-| `quarantine_release` | fn | item |  |
 | `release` | fn | load (checks) | checks-only |
 | `retire_for_check` | fn | load (checks) | checks-only |
 | `retire_for_check` | fn | load (checks) | checks-only |
@@ -3646,6 +3646,7 @@ checks above is `pub` for raised checks (F3).
 | `inject_read_poison` | fn | load (checks) | checks-only |
 | `inject_read_poison` | fn | load (checks) | checks-only |
 | `reclaim_hook_armed_by` | fn | bin |  |
+| `server_held_pages` | fn | item |  |
 | `SEAL_PREEMPT_COUNT` | static | load (checks) | checks-only |
 | `BlockHook` | struct | load (checks) | checks-only |
 | `Held` | struct | item, load |  |
@@ -3679,6 +3680,7 @@ checks above is `pub` for raised checks (F3).
 | `Vmo::highest_mapper` | method | item |  |
 | `Vmo::hold` | method | item, load |  |
 | `Vmo::hold_read` | method | item, load |  |
+| `Vmo::hold_whole_on_payer` | method | item |  |
 | `Vmo::holds_any` | method | load |  |
 | `Vmo::insert_absent` | method | load |  |
 | `Vmo::is_anonymous` | method | item, load |  |

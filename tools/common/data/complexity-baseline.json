@@ -60,8 +60,8 @@
       "recursive": false
     },
     "boot_authority.rs::try_start_manager": {
-      "complexity": 36,
-      "lines": 100,
+      "complexity": 42,
+      "lines": 121,
       "recursive": false
     },
     "device.rs::publish": {
@@ -75,8 +75,8 @@
       "recursive": false
     },
     "discovery/devmgr.rs::write_devices": {
-      "complexity": 23,
-      "lines": 101,
+      "complexity": 25,
+      "lines": 107,
       "recursive": false
     },
     "discovery/pci.rs::check_function": {
@@ -120,8 +120,8 @@
       "recursive": false
     },
     "linuxd_start.rs::start": {
-      "complexity": 30,
-      "lines": 108,
+      "complexity": 33,
+      "lines": 117,
       "recursive": false
     },
     "main.rs::bring_up_processors": {
@@ -142,6 +142,11 @@
     "main.rs::start_scheduler": {
       "complexity": 5,
       "lines": 71,
+      "recursive": false
+    },
+    "object/mod.rs::signals": {
+      "complexity": 15,
+      "lines": 29,
       "recursive": false
     },
     "object/process.rs::move_charged": {
@@ -451,7 +456,7 @@
     },
     "syscall/native.rs::answer": {
       "complexity": 43,
-      "lines": 148,
+      "lines": 149,
       "recursive": false
     },
     "syscall/native.rs::channel_read": {
@@ -470,8 +475,8 @@
       "recursive": false
     },
     "syscall/native.rs::device_call": {
-      "complexity": 16,
-      "lines": 20,
+      "complexity": 17,
+      "lines": 22,
       "recursive": false
     },
     "syscall/native.rs::exception_channel_create": {

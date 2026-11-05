@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "0771bd231fe5781a0306ab8127feb1238da567cc278409d0c902f297c8a6d734",
+  "digest": "657acd0e6ee657347430f5e339590d21637db97dc8f368b65427d9a70464a5ca",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -113,7 +113,7 @@
   ],
   "summary": {
     "packages": 167,
-    "elements": 10032,
+    "elements": 10047,
     "maturity": {
       "implemented": 295,
       "inProgress": 23,
@@ -97595,6 +97595,177 @@
               ]
             },
             {
+              "name": "servedIsCalledOnAServersWord",
+              "qualifiedName": "FerrixDeviceRequirements::GenericNodes::servedIsCalledOnAServersWord",
+              "kind": "requirement",
+              "shortName": "L.device.81",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/20-device-requirements.sysml",
+                "line": 1448
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::servedIsCalledOnAServersWord",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"device_served, under personality=user alone and needing MANAGE, shall read the device's configuration back and release a dead driver's pins from quarantine, refusing BAD_STATE when the read-back refuses.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1451
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::servedIsCalledOnAServersWord",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"test-btrfsd-restart: the release comes after the next driver's acceptance, and not at its death.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1453
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::servedIsCalledOnAServersWord",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DEV.11\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1454
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::servedIsCalledOnAServersWord",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"syscall::native::device_served\", \"device::DeviceNode::served\")",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1455
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aHoldHasKindsABoundAndAPayer",
+              "qualifiedName": "FerrixDeviceRequirements::GenericNodes::aHoldHasKindsABoundAndAPayer",
+              "kind": "requirement",
+              "shortName": "L.device.82",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/20-device-requirements.sysml",
+                "line": 1457
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::aHoldHasKindsABoundAndAPayer",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"vmo_hold, under personality=user alone, shall refuse a handle without READ and MAP, a VMO past its bound, a pager's, a sealed or a write- combining one, and commit on the charge of the job the VMO is charged to.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1461
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::aHoldHasKindsABoundAndAPayer",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"test-btrfsd-restart: the driver's probes by the real call, and the server's own figure not growing with a driver's sparse megabytes.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1463
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::aHoldHasKindsABoundAndAPayer",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DEV.11\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1464
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::aHoldHasKindsABoundAndAPayer",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"syscall::native::vmo_hold\", \"user::vmo::Vmo::hold_whole_on_payer\")",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1465
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aHoldSurvivesItsDriver",
+              "qualifiedName": "FerrixDeviceRequirements::GenericNodes::aHoldSurvivesItsDriver",
+              "kind": "requirement",
+              "shortName": "L.device.83",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/20-device-requirements.sysml",
+                "line": 1467
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::aHoldSurvivesItsDriver",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"Pages held shall stay backed across the death of the driver that made them, until the hold is closed.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1469
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::aHoldSurvivesItsDriver",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"test-btrfsd-restart: requests over three restarts read the right bytes, and what the drivers' job holds does not grow.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1471
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::aHoldSurvivesItsDriver",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DEV.11\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1472
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::aHoldSurvivesItsDriver",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"user::vmo::Vmo::hold_whole_on_payer\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1473
+                  }
+                }
+              ]
+            },
+            {
               "name": "theDebugLogTakesAHandle",
               "qualifiedName": "FerrixDeviceRequirements::GenericNodes::theDebugLogTakesAHandle",
               "kind": "requirement",
@@ -97602,7 +97773,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1448
+                "line": 1475
               },
               "children": [
                 {
@@ -97613,7 +97784,7 @@
                   "value": "\"DEBUG_WRITE shall need a handle of the debug log with WRITE, shall take at most one line's bound a call, and a measured process's line shall carry a prefix from the kernel's own record of the writer.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1451
+                    "line": 1478
                   }
                 },
                 {
@@ -97624,7 +97795,7 @@
                   "value": "\"test-first-processes reads each first process's line with its prefix; a call with no such handle is refused by native_check; a QM process's line reads as anything, stated.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1453
+                    "line": 1480
                   }
                 },
                 {
@@ -97635,7 +97806,7 @@
                   "value": "\"H.DEV.13\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1454
+                    "line": 1481
                   }
                 },
                 {
@@ -97646,7 +97817,7 @@
                   "value": "\"syscall::native::lift::call\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1455
+                    "line": 1482
                   }
                 }
               ]
@@ -97659,7 +97830,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1457
+                "line": 1484
               },
               "children": [
                 {
@@ -97670,7 +97841,7 @@
                   "value": "\"A process shall write at most its budget of bytes a second to the debug log, past which DEBUG_WRITE answers SHOULD_WAIT, so that a QM process cannot starve a safety partition's lines.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1459
+                    "line": 1486
                   }
                 },
                 {
@@ -97681,7 +97852,7 @@
                   "value": "\"test-first-processes; the console lock's hold bound is in MEMORY-AND-TIMING.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1460
+                    "line": 1487
                   }
                 },
                 {
@@ -97692,7 +97863,7 @@
                   "value": "\"H.DEV.13\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1461
+                    "line": 1488
                   }
                 },
                 {
@@ -97703,7 +97874,7 @@
                   "value": "\"object::process::Process::debug_budget_takes\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1462
+                    "line": 1489
                   }
                 }
               ]
@@ -97716,7 +97887,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1464
+                "line": 1491
               },
               "children": [
                 {
@@ -97727,7 +97898,7 @@
                   "value": "\"A node flagged needs_certified shall give its vector, I/O mapping and pin only to a process that passes K14's test.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1466
+                    "line": 1493
                   }
                 },
                 {
@@ -97738,7 +97909,7 @@
                   "value": "\"object::grant_check on a made-up node.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1467
+                    "line": 1494
                   }
                 },
                 {
@@ -97749,7 +97920,7 @@
                   "value": "\"H.DEV.11\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1468
+                    "line": 1495
                   }
                 },
                 {
@@ -97760,7 +97931,7 @@
                   "value": "(\"syscall::native::certified_grant\", \"syscall::native::takes_grant\", \"iommu::would_translate\", \"device::DeviceNode::wants_certified\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1469
+                    "line": 1496
                   }
                 }
               ]
@@ -97773,7 +97944,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1471
+                "line": 1498
               },
               "children": [
                 {
@@ -97784,7 +97955,7 @@
                   "value": "\"What a needs_certified node's vector, I/O mapping and pin give shall carry no TRANSFER.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1473
+                    "line": 1500
                   }
                 },
                 {
@@ -97795,7 +97966,7 @@
                   "value": "\"object::grant_check.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1474
+                    "line": 1501
                   }
                 },
                 {
@@ -97806,7 +97977,7 @@
                   "value": "\"H.DEV.11\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1475
+                    "line": 1502
                   }
                 },
                 {
@@ -97817,7 +97988,7 @@
                   "value": "\"device::DeviceNode::derived_rights\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1476
+                    "line": 1503
                   }
                 }
               ]
