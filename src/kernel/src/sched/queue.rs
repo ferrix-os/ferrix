@@ -27,7 +27,7 @@
 
 use alloc::sync::Arc;
 
-use ferrix_sched::{Config, CpuLoad, EntityState, Load, RunQueue, Timeline, slice_for};
+use ferrix_sched::{Config, CpuLoad, EntityState, Load, Timeline, slice_for};
 #[cfg(ferrix_fast_ipc)]
 use ferrix_sched::{JobPlan, settle_job_fold};
 
@@ -284,13 +284,21 @@ const fn before(a: u64, b: u64) -> bool {
     (a.wrapping_sub(b) as i64) < 0
 }
 
+/// What a processor's queue holds, the one seam between the schedules (ledger 7088): the
+/// fair class alone, which is `present`'s and `desktop`'s, or reservations above it.
+#[cfg(not(ferrix_schedule = "edf"))]
+pub(crate) type Tier<T> = ferrix_sched::RunQueue<T>;
+/// See above.
+#[cfg(ferrix_schedule = "edf")]
+pub(crate) type Tier<T> = ferrix_sched_edf::OverFair<T>;
+
 /// One CPU's queue.
 #[derive(Debug)]
 pub(crate) struct CpuQueue {
     /// The fair class. The idle task is not in it: it is what runs when this
     /// is empty, which is what makes it the bottom of the class stack rather
     /// than a task with a very small weight.
-    pub(crate) fair: RunQueue<Arc<Task>>,
+    pub(crate) fair: Tier<Arc<Task>>,
     /// What is running, which is the idle task when the fair class is empty.
     pub(crate) current: Option<Arc<Task>>,
     /// This CPU's idle task.
@@ -331,7 +339,7 @@ pub(crate) struct CpuQueue {
 impl CpuQueue {
     /// An empty queue.
     pub(crate) fn new() -> Result<CpuQueue, &'static str> {
-        let fair = RunQueue::new(Config {
+        let fair = Tier::new(Config {
             slice_ns: TARGET_LATENCY_NS,
         })
         .map_err(|_| "the scheduler's slice is not a slice")?;
@@ -447,6 +455,8 @@ impl CpuQueue {
         user: bool,
         extra: Option<(u32, i64)>,
     ) -> Option<(u32, u32)> {
+        #[cfg(ferrix_schedule = "edf")]
+        self.fair.note_time(now);
         self.account_load(now);
         let delta = now.saturating_sub(self.exec_start);
         self.exec_start = now;
@@ -842,6 +852,8 @@ impl CpuQueue {
 
     /// What should run now: the fair class's choice, or the idle task.
     pub(crate) fn pick_next(&mut self) -> Option<Arc<Task>> {
+        #[cfg(ferrix_schedule = "edf")]
+        self.fair.note_time(crate::timer::now_nanos());
         if let Some(task) = self.fair.pick_next() {
             return Some(Arc::clone(task));
         }

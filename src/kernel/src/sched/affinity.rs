@@ -66,6 +66,9 @@ pub enum AffinityRefusal {
     /// The mask names no processor of the domain in service (ledger 5156
     /// (A1), Linux's `cpu_active_mask`).
     Empty,
+    /// A reservation holds its processor (ledger 7088 E.3).
+    #[cfg(ferrix_schedule = "edf")]
+    Reserved,
 }
 
 /// The processors in service, as a set: `ACTIVE`'s words.
@@ -116,6 +119,11 @@ pub fn effective_mask(task: &Task) -> CpuSet {
 /// [`AffinityRefusal::KernelThread`] for a task with no thread, fail closed
 /// (L.sched.96); [`AffinityRefusal::Empty`] when nothing is left.
 pub fn set_affinity(task: &Arc<Task>, asked: &CpuSet) -> Result<CpuSet, AffinityRefusal> {
+    // A reservation holds its processor (ledger 7088 E.3).
+    #[cfg(ferrix_schedule = "edf")]
+    if super::reserve::holds(task) {
+        return Err(AffinityRefusal::Reserved);
+    }
     if task.thread().is_none() {
         return Err(AffinityRefusal::KernelThread);
     }

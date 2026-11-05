@@ -594,6 +594,7 @@ dependencies = [
  "ferrix-pci",
  "ferrix-qr",
  "ferrix-sched",
+ "ferrix-sched-edf",
  "ferrix-sha256",
  "ferrix-sync",
  "ferrix-vdso",
@@ -1168,6 +1169,13 @@ name = "ferrix-sched"
 version = "0.1.0"
 dependencies = [
  "ferrix-fallible",
+]
+
+[[package]]
+name = "ferrix-sched-edf"
+version = "0.1.0"
+dependencies = [
+ "ferrix-sched",
 ]
 
 [[package]]

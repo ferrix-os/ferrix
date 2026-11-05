@@ -58,6 +58,9 @@ pub struct Task {
     /// This thread's own: the locks it holds and the wakes they hold back
     /// (`sched::lock_taken`). Only the thread itself reaches these.
     pub(crate) pending_up: AtomicBool,
+    /// Whether it holds a reservation.
+    #[cfg(ferrix_schedule = "edf")]
+    pub(crate) reserved: AtomicBool,
     /// In a sigreturn, whose capture wants only the processor's mask.
     pub(crate) sigreturning: AtomicBool,
     pub(crate) locks_held: core::cell::Cell<u32>,

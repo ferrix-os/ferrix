@@ -55,6 +55,7 @@ fn test_kernel_symbols(args: &Args) -> Result<()> {
         let built = std::process::Command::new("cargo")
             .args(["xtask", "build", "--arch", arch.name()])
             .args(["--kernel-profile", &crate::flags::asked_profile()])
+            .args(args.release.then_some("--release"))
             .args(
                 args.sets
                     .iter()

@@ -61,6 +61,11 @@
       "count": 0,
       "by_file": {}
     },
+    "ferrix-sched-edf": {
+      "//": "Held at 0 from the start: no allocation after construction, ledger 7088.",
+      "count": 0,
+      "by_file": {}
+    },
     "ferrix-sigverify": {
       "//": "Target zero. Nobody is named as converting it yet.",
       "count": 0,

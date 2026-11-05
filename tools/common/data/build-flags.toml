@@ -130,9 +130,9 @@ values.retyped = { allows = ["sc4", "present", "sc2", "none"], lands = "M6", bui
 values.heap = { allows = ["present", "sc2", "none"], lands = "today", built = "yes" }
 
 [flags.schedule]
-why = "K9's static windows with EDF inside them, stage 14's HardRt (partitioned EDF with CBS), or today's fair scheduler"
+why = "K9's static windows with fixed priorities inside them and no fair class (C3, C6), partitioned EDF with a hard CBS above the fair class (ferrix-sched-edf), or today's fair scheduler"
 values.windows = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built = "no" }
-values.edf = { allows = ["present", "sc2", "none"], lands = "M3", built = "no" }
+values.edf = { allows = ["present", "sc2", "none"], lands = "M3", built = "adhoc", requires = ["personality=user"] }
 values.fair = { allows = ["present", "none"], lands = "today", built = "yes" }
 
 [flags.checks]

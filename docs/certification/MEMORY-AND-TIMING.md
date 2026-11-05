@@ -2930,6 +2930,14 @@ gate and a boot check say so: no allocation in the item's product code is
 fatal except at bring-up. What it did not describe, a bound, stays unclaimed,
 and says so in §1.5.
 
+### 2.2ai A processor's reservations (`schedule=edf`, 2026-11-05)
+
+`ferrix-sched-edf`, under the queue's lock, with interrupts masked: a pick, a refill's look and each of the
+fair-beside-it answers scan **at most 32 entries**, a bound of the array, with no allocation after construction.
+A reservation's `Task` holds its slot as any task does; the table is in `CpuQueue`, about 4 KiB a processor. Refills
+are at most one per millisecond per reservation (`LEAST_PERIOD_NS`), so at most 32 timer events a millisecond on one processor.
+No timing figure is claimed; `K9.md` §2a names what a hard throttle holds up.
+
 ### 2.2aa Parked hardware threads (`smt=off`, 2026-10-21)
 
 A thread `smt=off` parks (`arch::x86_64::smp::park`, `L.x86_64.184`) does

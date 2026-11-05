@@ -1246,6 +1246,7 @@ fn every_call_in_the_native_table_has_a_wrapper() {
     let _ = crate::lift_calls::bootstrap_move(&sys, Handle(1), Handle(2), false);
     let _ = crate::lift_calls::space_window(&sys, Handle(1));
     let _ = crate::lift_calls::space_place(&sys, Handle(1), Handle(2), &[0; 16]);
+    let _ = crate::lift_calls::thread_reserve(&sys, Handle(1), 1, 2, 2);
     let _ = crate::lift_calls::random_fill(&sys, &mut [0; 8]);
     let _ = crate::lift_calls::console_read(&sys, Handle(1), &mut [0; 8]);
     let _ = crate::lift_calls::object_kind(&sys, Handle(1));

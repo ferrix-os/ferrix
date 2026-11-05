@@ -360,6 +360,13 @@ pub struct Task {
     /// so that queueing, which a wake-up does from an interrupt handler,
     /// allocates nothing (finding F-23). Allocated with the task.
     run_slot: SlotCell<Arc<Task>>,
+    /// The processor holding its reservation, past the last one for none, and the mask it
+    /// had before (ledger 7088 E.3).
+    #[cfg(ferrix_schedule = "edf")]
+    pub(crate) reserved_on: core::sync::atomic::AtomicUsize,
+    /// See `reserved_on`.
+    #[cfg(ferrix_schedule = "edf")]
+    pub(crate) mask_before: crate::sync::SpinLock<Option<CpuSet>>,
     /// The node a processor's sleeper set, or the reaper's list, holds it
     /// in, while neither does. As `run_slot`, for sleeping and for dying.
     /// A sleeper set's node carries a [`Due`], since timer objects are filed
@@ -764,6 +771,10 @@ impl Task {
             let _ = count.fetch_add(1, Ordering::AcqRel);
         }
         Ok(Task {
+            #[cfg(ferrix_schedule = "edf")]
+            reserved_on: core::sync::atomic::AtomicUsize::new(usize::MAX),
+            #[cfg(ferrix_schedule = "edf")]
+            mask_before: crate::sync::SpinLock::new(None),
             id,
             name,
             entry: Some((entry, argument)),
@@ -825,6 +836,10 @@ impl Task {
     ) -> Result<Task, AllocError> {
         let (run_slot, sleep_slot) = slots()?;
         Ok(Task {
+            #[cfg(ferrix_schedule = "edf")]
+            reserved_on: core::sync::atomic::AtomicUsize::new(usize::MAX),
+            #[cfg(ferrix_schedule = "edf")]
+            mask_before: crate::sync::SpinLock::new(None),
             id,
             name,
             entry: None,

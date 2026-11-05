@@ -36,6 +36,7 @@ ferrix-paging.workspace = true
 ferrix-pci.workspace = true
 ferrix-qr.workspace = true
 ferrix-sched.workspace = true
+ferrix-sched-edf.workspace = true
 ferrix-sync.workspace = true
 ferrix-vdso.workspace = true
 ferrix-vfs.workspace = true

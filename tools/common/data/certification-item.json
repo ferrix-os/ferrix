@@ -510,6 +510,15 @@
         "below": "ferrix-sha256, and byte slices its caller lends: the 4 KiB manifest block, the anchors and the revoked trees; no trait, no allocation",
         "above": "manifest::verify, Verified::check_payload and Verified::revoked, and lms::hss_verify: verify-only LMS/HSS (RFC 8554, RFC 9858, SP 800-208) and the signed manifest of docs/SIGNING.md, for the UEFI loader, init's configuration verifier and devmgr; no profile links it into ring 0 (SIGNING.md section 5.2)"
       },
+      "ferrix-sched-edf": {
+        "ring": "core",
+        "path": "src/lib/kernel/sched-edf",
+        "in_ring0_when": [
+          "schedule=edf"
+        ],
+        "below": "ferrix-sched's run queue, its fair class beneath the reservations.",
+        "above": "sched/queue.rs's Tier and sched/reserve.rs: partitioned EDF, a hard CBS and per-processor admission, ledger 7011 S.4, 7088. No kernel but schedule=edf's links it."
+      },
       "ferrix-slots": {
         "ring": "item",
         "path": "src/lib/proto/slots",
@@ -567,6 +576,7 @@
         "(docs/certification/ITEM.md section 2)."
       ],
       "ferrix-fallible": "Fallible Box/Vec/VecDeque/String construction on stable Rust (F-23). The core's own allocation toolkit, src/kernel/src/fallible.rs, is built on it, so an item crate converting to fallible allocation uses the same code the core does rather than a second copy. It also dispatches an item crate's map inserts to the reserved section the kernel installs at boot (set_section, in_section; src/kernel/src/fallible.rs library_section, L.mm.63): ferrix-btrfs-write's every BTreeMap and BTreeSet insert relies on that dispatch to be fallible.",
+      "ferrix-sched": "The fair class and the sleepers' timeline, as the kernel's core has always named them; ferrix-sched-edf's beneath it (ledger 7088 G.3).",
       "ferrix-sync": "The spin and sleep locks src/kernel/src/sync.rs wraps for the whole core, and ferrix-fallible's one dependency (its injector's `Once`)."
     }
   },
@@ -834,7 +844,6 @@
         "ferrix-paging": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-pci": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-qr": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
-        "ferrix-sched": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-vdso": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-vfs": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-vma": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement"
@@ -858,7 +867,6 @@
         "ferrix-objects": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-paging": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-pci": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
-        "ferrix-sched": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-vfs": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-virtio": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-vma": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement"

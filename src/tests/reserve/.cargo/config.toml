@@ -1,0 +1,17 @@
+# A static program for Ferrix's initramfs, linkable from any host: the musl
+# targets carry their own C runtime and `libc.a`, so rust-lld is the whole
+# toolchain and Windows needs no Linux C compiler.
+# Linked as the static PIE rustc makes for musl by default, which is what
+# `rustc` itself is on Ferrix: the loader places one, and this test is what
+# runs one end to end.
+[target.x86_64-unknown-linux-musl]
+linker = "rust-lld"
+rustflags = ["-C", "link-self-contained=yes", "-C", "target-feature=+crt-static"]
+
+[target.aarch64-unknown-linux-musl]
+linker = "rust-lld"
+rustflags = ["-C", "link-self-contained=yes", "-C", "target-feature=+crt-static"]
+
+# ARMv7-A is not here: Ferrix's own config uses that triple for the loader, and
+# cargo would merge its linker script into this program's link. `cargo xtask
+# test-sem` sets the flags for it in the environment instead.

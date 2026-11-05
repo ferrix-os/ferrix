@@ -1334,5 +1334,54 @@ package FerrixSchedRequirements {
                 "sched::queue::CpuQueue::file_sleeper",
                 "sched::task::Task::set_filed_at", "sched::task::Task::filed_at");
         }
+        requirement <'L.sched.179'> admissionRefusesAnUnschedulableSet : ItemLowLevel {
+            attribute :>> statement = "Under schedule=edf a reservation shall be admitted only with
+                a deadline equal to its period, a budget of 0.1 ms up to the period, a period of 1 ms
+                to 10 s, and, on the processor it names, reservations' shares summing to at most
+                95% in at most 32 entries; anything else shall be refused by name, changing nothing.";
+            attribute :>> criterion = "ferrix-sched-edf's host tests; the `edf` boot line's refused set
+                on kernel threads; test-reserve's `malformed` and `unschedulable`. Control: the sum
+                not tested fails the boot check and the row.";
+            attribute :>> parent = "H.SCHED.28";
+            attribute :>> unit = ("sched::reserve::take");
+        }
+        requirement <'L.sched.180'> aBudgetIsHardAndComesBack : ItemLowLevel {
+            attribute :>> statement = "A running reservation shall be charged its budget; at zero it
+                shall run no more until its period's end, when the budget comes back and the deadline
+                moves on a period, including on an idle processor; a thread that wakes with more
+                budget left than the time to its deadline allows shall start a fresh period.";
+            attribute :>> criterion = "ferrix-sched-edf's host tests; the `edf` line's throttles and
+                refills; test-reserve's `budget`, across linuxd's time. Control: no throttle fails the line.";
+            attribute :>> parent = "H.SCHED.28";
+            attribute :>> unit = ("sched::queue::CpuQueue::account_with", "sched::queue::CpuQueue::arm_timer");
+        }
+        requirement <'L.sched.181'> theEarliestDeadlineRunsFirst : ItemLowLevel {
+            attribute :>> statement = "The pick shall be the earliest deadline among reservations with
+                budget, then the fair class, whose tasks shall run whenever no reservation has budget;
+                no steal, balance, push or direct switch shall pass over or move a reservation.";
+            attribute :>> criterion = "ferrix-sched-edf's host tests; the `edf` line's shares; test-reserve's
+                `child`. Controls: the pick not by deadline, and the direct switch's decline removed.";
+            attribute :>> parent = "H.SCHED.28";
+            attribute :>> unit = ("sched::queue::CpuQueue::pick_next", "sched::direct::begin");
+        }
+        requirement <'L.sched.182'> reservingTakesAJobsAuthority : ItemLowLevel {
+            attribute :>> statement = "THREAD_RESERVE shall act on the calling thread alone, on a job
+                handle with SET_LIMIT at or above its own job, and shall answer NOT_SUPPORTED in a kernel
+                without schedule=edf; three zeros shall give the reservation back.";
+            attribute :>> criterion = "test-reserve's `admitted`, `other`, `back`. Control: the walk up the
+                jobs removed lets a job's handle from beside it through.";
+            attribute :>> parent = "H.SCHED.28";
+            attribute :>> unit = ("syscall::native::lift::thread_reserve");
+        }
+        requirement <'L.sched.183'> aReservationEndsWithItsThread : ItemLowLevel {
+            attribute :>> statement = "A reserved thread's mask shall not change; its share shall come
+                back when it is freed, wherever it stands, and when it gives it back, and until its
+                next way off the processor it shall not enter the fair class's queue; a child shall not
+                inherit it.";
+            attribute :>> criterion = "The `edf` line's `used` and its child; test-reserve's `affinity`, `child`,
+                `back`.";
+            attribute :>> parent = "H.SCHED.28";
+            attribute :>> unit = ("sched::reserve::forget", "sched::reserve::give_back", "sched::affinity::set_affinity");
+        }
     }
 }

@@ -417,6 +417,8 @@ pub(crate) fn sys_sched_setaffinity(
         // A Linux thread always runs on a task with a thread; a task with
         // none is the kernel's, and refused (L.sched.96).
         Err(sched::AffinityRefusal::KernelThread) => Err(Errno::EINVAL),
+        #[cfg(ferrix_schedule = "edf")]
+        Err(sched::AffinityRefusal::Reserved) => Err(Errno::EBUSY),
     }
 }
 
@@ -471,6 +473,55 @@ const SCHED_FLAG_KEEP_PARAMS: u64 = 0x10;
 /// than its own slice (`ferrix_sched::effective_request`).
 const MAX_REQUEST_NS: u64 = 100_000_000;
 
+/// `SCHED_DEADLINE`'s two doors under `schedule=edf`: the calling thread alone takes a
+/// reservation, deadline equal to period, or falls back to `SCHED_OTHER`; `CAP_SYS_NICE` here,
+/// and the kernel's own authority below it (ledger 7088 E.2). `None` for what is not its.
+#[cfg(ferrix_schedule = "edf")]
+fn deadline_setattr(process: &Process, pid: i32, attr: &SchedAttr) -> Option<Result<usize, Errno>> {
+    const SCHED_DEADLINE: u32 = 6;
+    let held = sched::reserve::holds_own();
+    if attr.policy != SCHED_DEADLINE && !held {
+        return None;
+    }
+    let mine = pid == 0
+        || attributes::thread_named(process, pid).is_some_and(|thread| {
+            attributes::task_of(&thread).is_some_and(|task| {
+                sched::current().is_some_and(|own| alloc::sync::Arc::ptr_eq(&task, &own))
+            })
+        });
+    if !mine {
+        return Some(Err(Errno::EPERM));
+    }
+    if attr.flags != 0 || attr.priority != 0 {
+        return Some(Err(Errno::EINVAL));
+    }
+    if let Err(why) = credentials::require_privilege(process) {
+        return Some(Err(why));
+    }
+    if attr.policy != SCHED_DEADLINE {
+        let _ = sched::reserve::give_back();
+        return None;
+    }
+    use sched::reserve::{Refusal, Reservation};
+    Some(
+        match sched::reserve::take(Reservation {
+            runtime_ns: attr.runtime,
+            deadline_ns: attr.deadline,
+            period_ns: if attr.period == 0 {
+                attr.deadline
+            } else {
+                attr.period
+            },
+        }) {
+            Ok(()) => Ok(0),
+            Err(Refusal::Malformed) => Err(Errno::EINVAL),
+            // As Linux's admission answers.
+            Err(Refusal::Unschedulable | Refusal::Full | Refusal::Already) => Err(Errno::EBUSY),
+            Err(Refusal::Denied) => Err(Errno::EPERM),
+        },
+    )
+}
+
 /// `sched_setattr`: the nice value and the slice request of a fair thread
 /// (`docs/GAME-MODE-SCHED.md` §2.2, F7; L.sched.109).
 ///
@@ -494,6 +545,10 @@ pub(crate) fn sys_sched_setattr(
         return Err(Errno::EINVAL);
     }
     let attr = read_sched_attr(process, at)?;
+    #[cfg(ferrix_schedule = "edf")]
+    if let Some(answer) = deadline_setattr(process, pid, &attr) {
+        return answer;
+    }
     let keep_policy = attr.flags & SCHED_FLAG_KEEP_POLICY != 0;
     let keep_params = attr.flags & SCHED_FLAG_KEEP_PARAMS != 0;
     if attr.flags & !(SCHED_FLAG_KEEP_POLICY | SCHED_FLAG_KEEP_PARAMS) != 0
@@ -586,6 +641,12 @@ struct SchedAttr {
     priority: u32,
     /// `sched_runtime`, in nanoseconds.
     runtime: u64,
+    /// `sched_deadline`.
+    #[cfg(ferrix_schedule = "edf")]
+    deadline: u64,
+    /// `sched_period`.
+    #[cfg(ferrix_schedule = "edf")]
+    period: u64,
 }
 
 /// Read a `struct sched_attr` from `at` as Linux's `sched_copy_attr` does.
@@ -630,6 +691,10 @@ fn read_sched_attr(process: &Process, at: u64) -> Result<SchedAttr, Errno> {
         nice: i32::from_ne_bytes(word(16)),
         priority: u32::from_ne_bytes(word(20)),
         runtime: u64::from_ne_bytes(long(24)),
+        #[cfg(ferrix_schedule = "edf")]
+        deadline: u64::from_ne_bytes(long(32)),
+        #[cfg(ferrix_schedule = "edf")]
+        period: u64::from_ne_bytes(long(40)),
     })
 }
 

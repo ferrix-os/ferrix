@@ -7,6 +7,10 @@ Moved out of [`docs/BACKLOG.md`](../BACKLOG.md) on 2026-10-16. A decision is rec
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-10-27 (customer, recorded 2026-11-05 from PR #38's `SCHED-CLASSES.md` §7a, second hand, ledger 7011 S.1)** **C3:
+  no fair tier in `max`**: "i would keep max to the absolute minimum, so: no". **C6: fixed priorities inside
+  the windows**, as ARINC 653's APEX and PikeOS, VxWorks 653 and INTEGRITY-178, analysed by response-time analysis, not EDF.
+  **C7: the `max_plus` board is the AMD Kria KV260.** Provenance: only #38 holds the words; morning question filed for what C3 leaves linked.
 * **2026-11-04 (customer, 22:12 CET)** **The 3090 is freed for ComfyUI: no VRAM
   store until the customer says so.** Through the coordinator: "free the GPU now, for
   ComfyUI". vtier is stopped and slot 8 is closed by `logs/queue/vram-closed` and

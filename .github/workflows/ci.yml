@@ -660,6 +660,11 @@ jobs:
         if: matrix.part == 1
         run: cargo +nightly miri test -p ferrix-elf --lib
 
+      # Reservations: a pure crate over the fair class, its tree's nodes moving through it.
+      - name: Miri (reservations)
+        if: matrix.part == 1
+        run: cargo +nightly miri test -p ferrix-sched-edf --lib
+
       - name: Miri (handoff ABI)
         if: matrix.part == 1
         run: cargo +nightly miri test -p ferrix-bootinfo --lib

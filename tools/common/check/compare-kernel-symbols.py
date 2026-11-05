@@ -7,6 +7,7 @@ says where to look. Exit 1 on any difference of name or size, ignoring symbols' 
 
 Usage:  compare-kernel-symbols.py BASE_ELF HEAD_ELF [--self-test]
 """
+import hashlib
 import re
 import subprocess
 import sys
@@ -39,6 +40,29 @@ def symbols(path: str) -> dict[str, int]:
     return table(run.stdout.splitlines())
 
 
+def bodies(path: str) -> dict[str, str]:
+    """Each text symbol's disassembly, its addresses and displacements masked: what is left
+    is what a layout's shift cannot move (ledger 7132 ED.2)."""
+    run = subprocess.run(["objdump", "-d", "-C", "--no-show-raw-insn", path],
+                         capture_output=True, text=True, check=False)
+    if run.returncode != 0:
+        print(f"compare-kernel-symbols: this objdump does not read {path}: bodies not compared")
+        return {}
+    out: dict[str, list[str]] = {}
+    name = None
+    for line in run.stdout.splitlines():
+        head = re.match(r"^[0-9a-f]+ <(.+)>:$", line)
+        if head:
+            name = re.sub(r"::h[0-9a-f]{16}$", "", head.group(1))
+            out.setdefault(name, [])
+        elif name is not None and "\t" in line:
+            text = line.split("\t", 1)[1]
+            text = re.sub(r"0x[0-9a-f]+|\b[0-9a-f]{6,}\b", "#", text)
+            text = re.sub(r"<[^>]*>", "<>", text)
+            out[name].append(text)
+    return {key: hashlib.sha256("\n".join(value).encode()).hexdigest() for key, value in out.items()}
+
+
 def self_test() -> int:
     base = table(["0 10 T a::b::h0123456789abcdef", "10 8 T c", "x"])
     assert base == {"a::b": 16, "c": 8}
@@ -62,6 +86,12 @@ def main() -> int:
     for line in found:
         print(line)
     print(f"compare-kernel-symbols: {len(base)} and {len(head)} symbols, {len(found)} differences")
+    # A report beside it, failing nothing: bodies that moved though their size did not.
+    was, now = bodies(sys.argv[1]), bodies(sys.argv[2])
+    moved = sorted(name for name in set(was) & set(now) if was[name] != now[name])
+    for name in moved:
+        print(f"body: {name}")
+    print(f"compare-kernel-symbols: {len(was)} and {len(now)} bodies, {len(moved)} differ with addresses masked")
     return 1 if found else 0
 
 

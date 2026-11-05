@@ -193,6 +193,7 @@ mod qemu;
 mod quarantine;
 mod remote;
 mod rename_crash;
+mod reserve;
 mod restart;
 mod rows_bench;
 mod rustc;
@@ -635,6 +636,7 @@ const TASKS: &[&[Task]] = &[
     rustc::TASKS,
     seam::TASKS,
     seat::TASKS,
+    reserve::TASKS,
     sem::TASKS,
     serial::TASKS,
     settingsd::TASKS,

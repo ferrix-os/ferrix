@@ -194,6 +194,16 @@ pub(crate) fn begin(caller: &Task, peer: &Task) -> Result<Direct, Count> {
     if queue.waiting() != 0 || queue.sleeper_due(now) {
         return Err(Count::T12);
     }
+    // Reservations take the long way: this one way in never passes over one, and neither
+    // end's budget is charged on a path that does not charge it (ledger 7088 E.5).
+    #[cfg(ferrix_schedule = "edf")]
+    if queue.fair.runs_reserved()
+        || queue.fair.any_ready()
+        || queue.fair.is_reserved(caller.id)
+        || queue.fair.is_reserved(peer.id)
+    {
+        return Err(Count::T12);
+    }
     // T13, the last look, under the lock every poster's wake takes before it
     // reads the state (`sched::work`'s wake row): an end posted before this
     // is seen here, and one after finds the caller parked and wakes it.

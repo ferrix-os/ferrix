@@ -66,6 +66,52 @@ mod served {
         Ok(alloc::sync::Arc::clone(thread))
     }
 
+    /// `THREAD_RESERVE`: the kernel's own authority, a job handle with `SET_LIMIT`, ahead of
+    /// anything linuxd asks of a program (ledger 7088 E.2).
+    #[cfg(ferrix_schedule = "edf")]
+    fn thread_reserve(process: &Process, a: &[u64; 6]) -> Result<usize, Errno> {
+        use crate::sched::reserve::{self, Refusal, Reservation};
+        let job = super::super::job_in(
+            process,
+            Handle(u32::try_from(a[0]).map_err(|_| status::BAD_HANDLE)?),
+            Rights::SET_LIMIT,
+        )?;
+        let mut at = process.job();
+        while !alloc::sync::Arc::ptr_eq(&at, &job) {
+            let up = at.parent().cloned().ok_or(status::ACCESS_DENIED)?;
+            at = up;
+        }
+        // On the job the handle names; the budget's words are in the kernel's own log of it.
+        crate::audit::limit_set(
+            crate::audit::LIMIT_SET,
+            crate::audit::Subject::of(process),
+            job.id(),
+            ferrix_native_abi::nr::THREAD_RESERVE as u64,
+            a[1],
+        );
+        let answer = if a[1] == 0 && a[2] == 0 && a[3] == 0 {
+            reserve::give_back()
+        } else {
+            reserve::take(Reservation {
+                runtime_ns: a[1],
+                deadline_ns: a[2],
+                period_ns: a[3],
+            })
+        };
+        match answer {
+            Ok(()) => Ok(0),
+            Err(Refusal::Malformed) => Err(status::INVALID_ARGS),
+            Err(Refusal::Unschedulable | Refusal::Full) => Err(status::LIMIT_REACHED),
+            Err(Refusal::Already) => Err(status::BAD_STATE),
+        }
+    }
+
+    /// Without `schedule=edf`, the call has no body.
+    #[cfg(not(ferrix_schedule = "edf"))]
+    fn thread_reserve(_: &Process, _: &[u64; 6]) -> Result<usize, Errno> {
+        Err(status::NOT_SUPPORTED)
+    }
+
     #[cfg_attr(
         ferrix_personality = "user",
         expect(
@@ -135,8 +181,11 @@ mod served {
                     thread.task().ok_or(status::BAD_STATE)?
                 };
                 let set = ferrix_sched::CpuSet::from_words(words);
-                let _ =
-                    crate::sched::set_affinity(&task, &set).map_err(|_| status::INVALID_ARGS)?;
+                let _ = crate::sched::set_affinity(&task, &set).map_err(|why| match why {
+                    #[cfg(ferrix_schedule = "edf")]
+                    crate::sched::AffinityRefusal::Reserved => status::ALREADY_BOUND,
+                    _ => status::INVALID_ARGS,
+                })?;
                 Ok(0)
             }
             NativeCall::BootstrapMove => {
@@ -239,6 +288,7 @@ mod served {
                     .ok_or(status::BAD_STATE),
                 _ => Err(status::INVALID_ARGS),
             },
+            NativeCall::ThreadReserve => thread_reserve(process, a),
             NativeCall::RandomFill => {
                 if a[1] > MOST {
                     return Err(status::INVALID_ARGS);

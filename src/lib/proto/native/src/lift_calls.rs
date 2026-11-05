@@ -71,6 +71,23 @@ pub fn space_place<S: Syscall>(
             .make(sys),
     )
 }
+/// `THREAD_RESERVE`.
+pub fn thread_reserve<S: Syscall>(
+    sys: S,
+    job: Handle,
+    runtime: u64,
+    deadline: u64,
+    period: u64,
+) -> Result<(), Error> {
+    decode_unit(
+        Call::new(nr::THREAD_RESERVE)
+            .value(register(job))
+            .value(runtime as usize)
+            .value(deadline as usize)
+            .value(period as usize)
+            .make(sys),
+    )
+}
 /// `RANDOM_FILL`.
 pub fn random_fill<S: Syscall>(sys: S, out: &mut [u8]) -> Result<(), Error> {
     let length = out.len();

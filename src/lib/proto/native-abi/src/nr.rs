@@ -328,6 +328,10 @@ pub const BOOTSTRAP_MOVE: usize = 0x10BB;
 pub const SPACE_WINDOW: usize = 0x10BC;
 /// `(space, vmo, ptr, count)`: place pages of `vmo` in a window space.
 pub const SPACE_PLACE: usize = 0x10BD;
+/// `(job, runtime, deadline, period)`: the calling thread takes a time reservation, or gives
+/// its reservation back when all three are zero. On a job handle with `SET_LIMIT` at or above
+/// the caller's job. `NOT_SUPPORTED` in a kernel without `schedule=edf`.
+pub const THREAD_RESERVE: usize = 0x10E1;
 /// The most records one [`NativeCall::AuditRead`] copies.
 pub const AUDIT_READ_MAX: u64 = 64;
 /// The largest name [`NativeCall::ProcessCreate`] takes, in bytes.
@@ -1033,6 +1037,8 @@ pub enum NativeCall {
     SpaceWindow,
     /// `(space, vmo, ptr, count)` → how many. Pages of a VMO placed in a window space.
     SpacePlace,
+    /// `(job, runtime, deadline, period)` → 0. The calling thread's time reservation.
+    ThreadReserve,
     /// `(thread)` → 0. Exit that thread from restricted mode, now or at its next entry. Needs `SIGNAL`.
     RestrictedKick,
     /// `(out: *mut Context)` → 0. The held context, its flags normalised so that an entry accepts them.
@@ -1118,7 +1124,7 @@ pub enum NativeCall {
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 134] = [
+pub const ALL: [NativeCall; 135] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,
@@ -1253,6 +1259,7 @@ pub const ALL: [NativeCall; 134] = [
     NativeCall::DeviceServed,
     NativeCall::VmoHold,
     NativeCall::JobDeclareBuffer,
+    NativeCall::ThreadReserve,
 ];
 
 /// Whether `number` is in the native range at all.
@@ -1388,6 +1395,7 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         BOOTSTRAP_MOVE => NativeCall::BootstrapMove,
         SPACE_WINDOW => NativeCall::SpaceWindow,
         SPACE_PLACE => NativeCall::SpacePlace,
+        THREAD_RESERVE => NativeCall::ThreadReserve,
         REGION_CREATE => NativeCall::RegionCreate,
         PROCESS_CREATE_SHARED => NativeCall::ProcessCreateShared,
         THREAD_CREATE => NativeCall::ThreadCreate,
@@ -1532,6 +1540,7 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::BootstrapMove => BOOTSTRAP_MOVE,
         NativeCall::SpaceWindow => SPACE_WINDOW,
         NativeCall::SpacePlace => SPACE_PLACE,
+        NativeCall::ThreadReserve => THREAD_RESERVE,
         NativeCall::RegionCreate => REGION_CREATE,
         NativeCall::ProcessCreateShared => PROCESS_CREATE_SHARED,
         NativeCall::ThreadCreate => THREAD_CREATE,
@@ -1693,6 +1702,7 @@ pub const fn from_restricted(call: NativeCall) -> FromRestricted {
         NativeCall::BootstrapMove => FromRestricted::NormalOnly,
         NativeCall::SpaceWindow => FromRestricted::NormalOnly,
         NativeCall::SpacePlace => FromRestricted::NormalOnly,
+        NativeCall::ThreadReserve => FromRestricted::NormalOnly,
         NativeCall::RegionCreate => FromRestricted::NormalOnly,
         NativeCall::ProcessCreateShared => FromRestricted::NormalOnly,
         NativeCall::ThreadCreate => FromRestricted::NormalOnly,
@@ -1770,6 +1780,7 @@ pub const fn copy_miss(call: NativeCall) -> CopyMiss {
         | NativeCall::BootstrapMove
         | NativeCall::SpaceWindow
         | NativeCall::SpacePlace
+        | NativeCall::ThreadReserve
         | NativeCall::PortFd
         | NativeCall::VmoMap
         | NativeCall::VmoPin

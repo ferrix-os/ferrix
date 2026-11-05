@@ -899,7 +899,7 @@ impl<T> RunQueue<T> {
     }
 
     /// Return the running entity to the tree, still counted.
-    fn put_curr_back(&mut self) {
+    pub fn put_curr_back(&mut self) {
         if let Some(node) = self.curr.take() {
             self.tree.insert(node);
         }

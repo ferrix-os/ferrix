@@ -29,7 +29,7 @@ Its loader starts only a verifying slot, so each image built for it signs one le
 | `max` | `restricted_fastpath=off` | `adhoc` | | B.5: general path, nm shows no fast function |
 | `fast` | `fault_ahead=on` | `adhoc` | E1, E3, E4, A6 | B.6: build E1 and E4, E3 on and off at the tip, A6's case |
 | `max` | `fault_ahead=off` | `adhoc` | | B.6: `test-threads`, `test-container`, the walk's control silent |
-| `fast` | `schedule=edf` | `no` | no code | S.4, S.5, S.6: `ferrix-sched-edf`; a new native call for linuxd, ids from the PO |
+| `fast` | `schedule=edf` | `adhoc` | code landed dark | At the flip: `test-flags` and AArch64's `test-shell`, `test-threads --smp 2` under it; a program row of the fast path's decline on a channel, with its control (decline removed); `test-kernel-symbols` re-read. `G.1`'s generic set over all three tiers with `windows` |
 | `max` | `schedule=windows` | `no` | no code | S.1, S.2, S.3, S.6: `ferrix-sched-windows`, fixed priorities inside windows (C6), no task on a fair run queue (C3) |
 | `max` | `kernel_memory=retyped` | `adhoc` | `Load(Copy(Fault))` unexplained; K16.5, K16.7, K16.9, F.8 | R.1 to R.5 |
 
@@ -76,6 +76,10 @@ M5's flip and M7 keep all of theirs: nothing here is dropped by being moved off 
 Not owed for `built` (B.8) but each is a row in the sweep, by name, with cause: test-sud, test-wine's 32-bit half,
 test-compositor, test-clipboard, test-usb-serial, test-quarantine, test-log-budget, test-log-pstore,
 test-log-remote, test-removable, test-mce-driver, test-postmortem, test-selfhost, test-gnome-apps, test-powerfail.
+
+## Complexity owed
+
+`restricted::run`, +3 from AArch64's per-architecture helpers, joins 6923 (6)'s row of the worst three (ledger 7126 L1.8).
 
 ## Where it stands
 

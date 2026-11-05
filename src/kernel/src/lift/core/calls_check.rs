@@ -114,8 +114,44 @@ pub fn run(job: Handle, arena: Handle, executable: Handle) -> Result<u32, &'stat
         lift_calls::clock_read(Kernel, 1_000),
         Error::InvalidArgs,
     )?;
+    reserve(job, arena)?;
     window(job, arena, executable)?;
     Ok(19)
+}
+
+/// `THREAD_RESERVE`'s authority (ledger 7088 E.2): a job handle with `SET_LIMIT`, at or above
+/// the caller's own job; in a kernel without `schedule=edf`, no such call.
+///
+/// Verifies: L.sched.182
+fn reserve(job: Handle, arena: Handle) -> Result<(), &'static str> {
+    let asked =
+        |handle| lift_calls::thread_reserve(Kernel, handle, 1_000_000, 10_000_000, 10_000_000);
+    if cfg!(not(ferrix_schedule = "edf")) {
+        return expect("THREAD_RESERVE, no edf", asked(job), Error::Unsupported);
+    }
+    expect("THREAD_RESERVE on a VMO", asked(arena), Error::WrongType)?;
+    let child = ferrix_native::job::Job::from_owned(ferrix_native::handle::OwnedHandle::from_raw(
+        Kernel, job,
+    ));
+    let held = core::mem::ManuallyDrop::new(child);
+    let below = held
+        .create_child()
+        .map_err(|_| "no child job for THREAD_RESERVE's case")?
+        .into_owned();
+    expect(
+        "THREAD_RESERVE on a job beneath the caller's",
+        asked(below.raw()),
+        Error::AccessDenied,
+    )?;
+    let weak = held
+        .duplicate(Requested::Exactly(ferrix_native_abi::rights::Rights::WAIT))
+        .map_err(|_| "no duplicate for THREAD_RESERVE's case")?
+        .into_owned();
+    expect(
+        "THREAD_RESERVE without SET_LIMIT",
+        asked(weak.raw()),
+        Error::AccessDenied,
+    )
 }
 
 /// `SPACE_WINDOW` and `SPACE_PLACE`'s refusals (ledger 6411, W5, W6), on a process

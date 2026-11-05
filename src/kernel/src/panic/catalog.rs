@@ -4085,6 +4085,20 @@ pub(crate) static NESTED_INTERRUPT_STACK: Explanation = Explanation {
           ferrix_paranoid_common; src/kernel/src/arch/x86_64/gdt.rs",
 };
 
+/// `docs/microkernel/K9.md`: `schedule=edf`'s boot check.
+pub static SCHEDULE_EDF: Explanation = Explanation {
+    code: "FX-0970",
+    title: "a time reservation did not behave as the scheduler promises",
+    meaning: "Under `schedule=edf` a thread may hold a budget in each period on one processor: \
+              admission refuses a set too wide for it, a thread out of budget waits for its next \
+              period, the earliest deadline with budget runs first, and the fair class has the rest.",
+    causes: &[
+        "A change to the tier's pick, charge or refill, or to a door that moves a reserved thread.",
+        "A host that stalls the processor long enough to take the check past its slack.",
+    ],
+    see: "src/kernel/src/sched/reserve.rs; src/lib/kernel/sched-edf; docs/microkernel/K9.md",
+};
+
 /// `docs/microkernel/BOOT-AUTHORITY.md` §1: a first process did not start.
 pub static FIRST_PROCESSES: Explanation = Explanation {
     code: "FX-0952",
@@ -4292,6 +4306,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &FIRST_PROCESSES,
     &PARTITION_DESCRIPTION,
     &PARTITION_MANAGER_ENDED,
+    &SCHEDULE_EDF,
     &STAGE10_PCI,
     &STAGE10_DEVICES,
     &STAGE10_IOMMU,

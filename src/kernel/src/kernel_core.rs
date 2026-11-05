@@ -111,6 +111,9 @@ pub const fn flag_word(chosen: &[bool]) -> u64 {
 /// The build flags the core was compiled with ([`build_flag_word!`]).
 pub const CORE_FLAG_WORD: u64 = flag_word(&build_flag_word!());
 
+// Only `schedule=edf` names it (sched/queue.rs).
+#[cfg(not(ferrix_schedule = "edf"))]
+use ferrix_sched_edf as _;
 pub mod arch;
 pub mod audit;
 pub mod backtrace;

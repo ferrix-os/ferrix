@@ -157,6 +157,30 @@ pub mod arena {
     }
 }
 
+/// `THREAD_RESERVE` on the partition's job.
+#[cfg(ferrix_schedule = "edf")]
+pub fn thread_reserve(
+    runtime: u64,
+    deadline: u64,
+    period: u64,
+) -> Result<(), crate::sched::reserve::Refusal> {
+    use crate::sched::reserve::Refusal;
+    use ferrix_native::Error;
+    lift_calls::thread_reserve(
+        Kernel,
+        Handle(JOB.load(Ordering::Acquire)),
+        runtime,
+        deadline,
+        period,
+    )
+    .map_err(|why| match why {
+        Error::InvalidArgs => Refusal::Malformed,
+        Error::BadState => Refusal::Already,
+        Error::AccessDenied | Error::BadHandle | Error::WrongType => Refusal::Denied,
+        _ => Refusal::Unschedulable,
+    })
+}
+
 /// The clock (`CLOCK_READ`): 0 is monotonic, 1 realtime.
 pub fn clock(which: usize) -> u64 {
     lift_calls::clock_read(Kernel, which).unwrap_or(0)

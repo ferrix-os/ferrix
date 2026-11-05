@@ -348,10 +348,7 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
         #[cfg(ferrix_load_built = "ring0")]
         stages_check::check_dirty();
         #[cfg(ferrix_personality = "user")]
-        match user::space::window_check::run() {
-            Ok(cases) => println!("  window   an unmap's {cases} decisions held"),
-            Err(why) => fatal!(catalog::WINDOW_UNMAP, "window self-check failed: {why}"),
-        }
+        check_user_shape();
     }
 
     // Stage 8's root filesystem. Before stage 7's checks, which open files,
@@ -2205,6 +2202,20 @@ fn map_boot_framebuffer(view: &BootView<'_>, memory: &mut EarlyMemory) -> Result
         panic::screen::install(&framebuffer, at, len);
         console::screen::start(view);
         Ok(())
+    }
+}
+
+/// A user kernel's own boot checks, which no program runs.
+#[cfg(ferrix_personality = "user")]
+fn check_user_shape() {
+    match user::space::window_check::run() {
+        Ok(cases) => println!("  window   an unmap's {cases} decisions held"),
+        Err(why) => fatal!(catalog::WINDOW_UNMAP, "window self-check failed: {why}"),
+    }
+    #[cfg(ferrix_schedule = "edf")]
+    match sched::reserve_check::run() {
+        Ok(()) => println!("  edf      a budget's rules held, an unschedulable set refused"),
+        Err(why) => fatal!(catalog::SCHEDULE_EDF, "edf self-check failed: {why}"),
     }
 }
 

@@ -53,6 +53,12 @@ mod preempt;
 mod preempt_check;
 mod queue;
 pub mod rehome_check;
+/// `schedule=edf`'s reservations (ledger 7088).
+#[cfg(ferrix_schedule = "edf")]
+pub mod reserve;
+/// Its boot check.
+#[cfg(all(ferrix_schedule = "edf", ferrix_checks = "on"))]
+pub mod reserve_check;
 mod slice_check;
 mod task;
 pub mod trip;
@@ -4225,6 +4231,8 @@ fn reap_up_to(most: usize) -> usize {
         let mut zombies = ZOMBIES.lock();
         while taken.len() < most {
             let Some(task) = zombies.pop() else { break };
+            #[cfg(ferrix_schedule = "edf")]
+            reserve::forget(&task);
             if let Some(stack) = task.stack() {
                 let _ = fallible::push_within(&mut stacks, stack);
             }
@@ -4252,6 +4260,8 @@ fn reap_one_at_a_time(most: usize) -> usize {
         let Some(task) = ZOMBIES.lock().pop() else {
             break;
         };
+        #[cfg(ferrix_schedule = "edf")]
+        reserve::forget(&task);
         if let Some(stack) = task.stack() {
             // SAFETY: (KMEM) as in `reap_up_to`.
             let _ = unsafe { crate::vmap::free_stack(stack) };

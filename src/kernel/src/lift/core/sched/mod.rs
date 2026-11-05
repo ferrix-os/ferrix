@@ -130,6 +130,8 @@ fn new_task(
         dead: core::sync::atomic::AtomicBool::new(false),
         in_restricted: core::sync::atomic::AtomicBool::new(false),
         pending_up: core::sync::atomic::AtomicBool::new(false),
+        #[cfg(ferrix_schedule = "edf")]
+        reserved: core::sync::atomic::AtomicBool::new(false),
         sigreturning: core::sync::atomic::AtomicBool::new(false),
         locks_held: core::cell::Cell::new(0),
         core_kept: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),
@@ -466,6 +468,56 @@ pub fn current_runtime() -> u64 {
 }
 pub fn yield_now() {
     crate::sys::thread_yield();
+}
+/// The reservations, by the kernel's `THREAD_RESERVE` (`docs/microkernel/K9.md`).
+#[cfg(ferrix_schedule = "edf")]
+pub mod reserve {
+    use core::sync::atomic::Ordering;
+    /// What a thread asks for: the kernel's words.
+    #[derive(Clone, Copy, Debug)]
+    pub struct Reservation {
+        pub runtime_ns: u64,
+        pub deadline_ns: u64,
+        pub period_ns: u64,
+    }
+    /// Why the kernel said no.
+    #[derive(Clone, Copy, Debug)]
+    pub enum Refusal {
+        Malformed,
+        Unschedulable,
+        Full,
+        Already,
+        /// The partition's job, which linuxd holds, does not give it: never EBUSY.
+        Denied,
+    }
+    /// Whether the running thread holds one, in the task's own record.
+    #[must_use]
+    pub fn holds_own() -> bool {
+        super::with_current(|task| task.reserved.load(Ordering::Relaxed)) == Some(true)
+    }
+    fn asked(reservation: Reservation) -> Result<(), Refusal> {
+        crate::sys::thread_reserve(
+            reservation.runtime_ns,
+            reservation.deadline_ns,
+            reservation.period_ns,
+        )
+    }
+    /// The running thread takes `reservation`.
+    pub fn take(reservation: Reservation) -> Result<(), Refusal> {
+        asked(reservation)?;
+        let _ = super::with_current(|task| task.reserved.store(true, Ordering::Relaxed));
+        Ok(())
+    }
+    /// The running thread gives it back.
+    pub fn give_back() -> Result<(), Refusal> {
+        asked(Reservation {
+            runtime_ns: 0,
+            deadline_ns: 0,
+            period_ns: 0,
+        })?;
+        let _ = super::with_current(|task| task.reserved.store(false, Ordering::Relaxed));
+        Ok(())
+    }
 }
 pub fn sleep_until(deadline: u64) {
     let Some(me) = current() else {

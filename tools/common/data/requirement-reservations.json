@@ -99,7 +99,7 @@
       "purpose": "POSTMORTEM.md section 6 (S4): a processor that takes no interrupt for 10 s ends in a failure report (the lockup detector, stop code 7); an armed TCO watchdog resets a machine the kernel stopped feeding, and the next loader says so"
     },
     {
-      "ids": ["H.SCHED.28-31", "L.sched.179-199"],
+      "ids": ["H.SCHED.29-31", "L.sched.184-199"],
       "owner": "mk-flip",
       "branch": "feature/mk-flip",
       "date": "2026-11-05",

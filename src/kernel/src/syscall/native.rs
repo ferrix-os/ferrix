@@ -635,7 +635,8 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         | NativeCall::ThreadAffinity
         | NativeCall::BootstrapMove
         | NativeCall::SpaceWindow
-        | NativeCall::SpacePlace => lift::call(call, process, &a),
+        | NativeCall::SpacePlace
+        | NativeCall::ThreadReserve => lift::call(call, process, &a),
         NativeCall::JobDeclareBuffer => job_declare_buffer(process, handle(a[0]), handle(a[1])),
         NativeCall::RegionCreate
         | NativeCall::ProcessCreateShared

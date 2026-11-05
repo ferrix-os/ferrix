@@ -1003,7 +1003,13 @@ mod tests {
                     assert_eq!(named, refused, "{why}");
                 }
             }
-            assert!(resolve(Some(profile), &lifted()).is_err(), "{profile}");
+            // An ad-hoc build from `max`'s values waits on `windows` still; from `fast`'s it
+            // builds, at no claim, as it says.
+            assert_eq!(
+                resolve(Some(profile), &lifted()).is_err(),
+                profile == "max",
+                "{profile}"
+            );
         }
     }
 
