@@ -39,6 +39,8 @@ pub(crate) const FLOOR: Params = Params {
 const CEILING_KIB: u32 = 64 * 1024;
 #[cfg(not(target_pointer_width = "32"))]
 const CEILING_KIB: u32 = 256 * 1024;
+/// A check takes at most this share of what the machine has available.
+const AVAILABLE_SHARE: u64 = 4;
 
 /// How long one check should take.
 #[cfg(target_pointer_width = "32")]
@@ -185,23 +187,51 @@ fn calibrate(say: &mut dyn FnMut(String)) -> Params {
         return FLOOR;
     }
     let took = start.elapsed();
-    let params = scaled(took);
+    let available = available_kib();
+    let params = scaled(took, available);
     say(format!(
-        "authd: argon2id at the floor (m={} t={}) took {} ms; new hashes use m={} t={} p=1",
+        "authd: argon2id at the floor (m={} t={}) took {} ms; {} KiB available; new hashes use m={} t={} p=1",
         FLOOR.memory_kib,
         FLOOR.passes,
         took.as_millis(),
+        available.map_or_else(|| "unknown".to_owned(), |kib| kib.to_string()),
         params.memory_kib,
         params.passes
     ));
     params
 }
 
-/// The costs for a machine on which the floor took `took`.
-fn scaled(took: Duration) -> Params {
+/// What `/proc/meminfo` says a new workload could have, in KiB, if it says.
+fn available_kib() -> Option<u64> {
+    let text = std::fs::read_to_string("/proc/meminfo").ok()?;
+    available_in(&text)
+}
+
+/// `MemAvailable`'s figure in `/proc/meminfo`'s text.
+fn available_in(meminfo: &str) -> Option<u64> {
+    meminfo
+        .lines()
+        .find_map(|line| line.strip_prefix("MemAvailable:"))?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()
+}
+
+/// The costs for a machine on which the floor took `took` and `available` KiB are free
+/// for a new workload. A check takes at most a quarter of that, never below the floor: a
+/// fast processor in a small machine is otherwise told to take what the machine has not
+/// got, and the fault's victim is whoever holds most (ledger 7166 P.3).
+fn scaled(took: Duration, available: Option<u64>) -> Params {
     let took_us = took.as_micros().max(1);
     let wanted = u128::from(FLOOR.memory_kib) * TARGET.as_micros() / took_us;
-    let mut memory_kib = u32::try_from(wanted).unwrap_or(u32::MAX).min(CEILING_KIB);
+    let affordable = available.map_or(u32::MAX, |kib| {
+        u32::try_from(kib / AVAILABLE_SHARE).unwrap_or(u32::MAX)
+    });
+    let mut memory_kib = u32::try_from(wanted)
+        .unwrap_or(u32::MAX)
+        .min(CEILING_KIB)
+        .min(affordable);
     memory_kib -= memory_kib % 1024;
     let memory_kib = memory_kib.max(FLOOR.memory_kib);
     Params {
@@ -233,20 +263,38 @@ pub(crate) fn random(out: &mut [u8]) -> std::io::Result<()> {
 mod tests {
     use super::*;
 
+    /// A fast processor in a small machine: at most a quarter of what is available, and
+    /// a machine with less than four floors still pays the floor.
+    #[test]
+    fn a_check_takes_a_share_of_what_is_available() {
+        let fast = Duration::from_micros(1);
+        assert_eq!(scaled(fast, Some(100 * 1024)).memory_kib, 25 * 1024);
+        assert_eq!(scaled(fast, Some(1024)), FLOOR);
+        assert_eq!(scaled(fast, Some(u64::MAX)).memory_kib, CEILING_KIB);
+        assert_eq!(
+            available_in("MemTotal: 9 kB\nMemAvailable:    1234 kB\n"),
+            Some(1234)
+        );
+        assert_eq!(available_in("MemTotal: 9 kB\n"), None);
+    }
+
     #[test]
     fn the_cost_scales_between_floor_and_ceiling() {
         // A machine on which the floor takes the whole target stays there.
-        assert_eq!(scaled(TARGET), FLOOR);
+        assert_eq!(scaled(TARGET, None), FLOOR);
         // A slow one does too.
-        assert_eq!(scaled(TARGET * 10), FLOOR);
+        assert_eq!(scaled(TARGET * 10, None), FLOOR);
         // A fast one gets more memory, rounded to a MiB, and three passes
         // once it reaches 64 MiB.
-        let fast = scaled(TARGET / 4);
+        let fast = scaled(TARGET / 4, None);
         assert_eq!(fast.memory_kib % 1024, 0);
         assert!(fast.memory_kib > FLOOR.memory_kib);
         assert_eq!(fast.passes, if fast.memory_kib >= 65_536 { 3 } else { 2 });
         // A very fast one stops at the ceiling.
-        assert_eq!(scaled(Duration::from_micros(1)).memory_kib, CEILING_KIB);
+        assert_eq!(
+            scaled(Duration::from_micros(1), None).memory_kib,
+            CEILING_KIB
+        );
     }
 
     #[test]
