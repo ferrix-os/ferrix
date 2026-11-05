@@ -23,12 +23,13 @@
     {
       "ids": [
         "H.SCHED.26-27",
-        "L.sched.153-170"
+        "L.sched.153-170",
+        "L.sched.201"
       ],
-      "owner": "mk-flip",
-      "branch": "feature/mk-flip",
+      "owner": "mk-max",
+      "branch": "feature/mk-max",
       "date": "2026-11-04",
-      "purpose": "K17's one high-level requirement, past the block allotted (consultant 6222 refused folding K11's to free one); K9's charge and windows, whose ids are the scheduler's and not L.user or L.trap (consultant 6208 (10))."
+      "purpose": "K17's one high-level requirement, past the block allotted (consultant 6222 refused folding K11's to free one); K9's charge and windows, whose ids are the scheduler's and not L.user or L.trap (consultant 6208 (10)). Passed from mk-flip to mk-max for windows (ledger 7460 WN.13); L.sched.201, windows' timer asked for each window's end (ledger 7549 WY.4; 171 was taken)."
     },
     {
       "ids": [
