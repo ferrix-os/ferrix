@@ -526,14 +526,14 @@
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "652",
+      "lines": "667",
       "category": "absent-hardware",
       "match": "return Ok(None);",
       "why": "An image with no /sbin/devmgr: every image xtask builds carries it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "1509",
+      "lines": "1532",
       "category": "defensive",
       "match": "}",
       "why": "The listener's end when devmgr's channel closes: devmgr does not exit in a running system, so the loop never meets a closed channel."

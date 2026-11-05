@@ -75,8 +75,8 @@
       "recursive": false
     },
     "discovery/devmgr.rs::write_devices": {
-      "complexity": 25,
-      "lines": 107,
+      "complexity": 27,
+      "lines": 113,
       "recursive": false
     },
     "discovery/pci.rs::check_function": {
@@ -120,8 +120,8 @@
       "recursive": false
     },
     "linuxd_start.rs::start": {
-      "complexity": 33,
-      "lines": 117,
+      "complexity": 34,
+      "lines": 123,
       "recursive": false
     },
     "main.rs::bring_up_processors": {
