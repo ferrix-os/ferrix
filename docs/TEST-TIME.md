@@ -1953,6 +1953,32 @@ reached it: it is now listed, the end's post wakes it by name, and over 250 ms f
 `munmap` no longer walks every object when each object it touched is still
 named: the many-regions case, the way Wine allocates, was n log n per map.
 
+**Parallel checks, the customer's line** (2026-11-05, ledger 7021 P5, 7044, 7064). A boot
+gets 4 processors but one by one is about all it uses, so the checks could overlap.
+Two things bound how far, on function-level checks, and the first is the evidence:
+
+* `mm::FrameWindow`, in about 20 check files, holds the machine's free frames
+  constant across a check's measured run: H.MEM.9's "0 frames leaked, per check".
+  A window overlapped by anything else reads that other thing. Reviewed and refused:
+  a stage-wide window (a sum nets +1 against -1, and it spans the warm runs) and a
+  job's count (it misses uncharged frames). Allowed and not yet done, for little:
+  the warm first run of the checks that run twice may overlap, about 0.5 s.
+* Figures: `regions`, `seam` and other lines `bench-rows` reads stay alone, and checks
+  reading a share or a placement need the machine as they found it.
+
+So a check is on the boot task unless `stages_check.rs`'s `WORKER_CHECKS` holds it, with
+the argument, and `check-boot-workers.py` refuses an entry reaching a machine-wide count
+or wait. A worker's stack is the boot stack's size; a `fatal!` there stops the machine with
+the same sentence, a worker that does not start or end has FX-0970, and a join means
+reaped. Lines come out whole; each check's own order holds, `crashes` moves. One processor
+and two (`--smp 1`, ARMv7-A `--smp 2`) use the same table: a waiting check overlaps there
+too, which is why the crash hold's 2 s helps all forms. The first entry is the crash
+hold, beside cgroupfs's freezer, cpu and io cases, whose programs end by SIGKILL.
+What would go further is per-check frame accounting, new core work: the customer's call.
+The worker's cost, measured once on ARMv7-A `--smp 2` (S5, not a gate): 16 frames of stack
+beside what the hold holds, the least free over the overlap 92,985 frames against 93,275 as
+it began, of 127,158 managed.
+
 ## Next
 
 Phase 2 in the order the numbers give: (3) stop rather than wait for a

@@ -366,6 +366,8 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
             &["tools/common/check/check-item-boundary.py"],
             &["tools/common/check/check-first-rows.py"],
             &["tools/common/check/check-first-rows.py", "--self-test"],
+            &["tools/common/check/check-boot-workers.py"],
+            &["tools/common/check/check-boot-workers.py", "--self-test"],
             &["tools/common/check/check-lift.py"],
             &["tools/common/check/check-vmo-seal-tags.py"],
             &["tools/common/check/check-vmo-seal-tags.py", "--self-test"],

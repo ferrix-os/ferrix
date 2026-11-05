@@ -3680,6 +3680,24 @@ pub static STAGE8_TIMERFD: Explanation = Explanation {
           src/kernel/src/sched/wait.rs",
 };
 
+/// For `start_worker` and `join_worker` in `stages_check.rs`, when a check on a
+/// worker could not start or did not end.
+// CHECKS-ONLY: for `WORKER_CHECKS` in `stages_check.rs`.
+#[cfg(not(ferrix_shape = "micro"))]
+pub static BOOT_CHECK_WORKER: Explanation = Explanation {
+    code: "FX-0972",
+    title: "a boot check on a worker did not run to its end",
+    meaning: "Most boot checks run on the boot task; a few run beside it, each on a worker with \
+              a stack the boot stack's size (`stages_check`'s table, docs/TEST-TIME.md, boot \
+              time). The boot joins each before going on and every check must have finished, \
+              reaped, before the success marker. The sentence names the check.",
+    causes: &[
+        "No memory for the worker's task or stack.",
+        "The check is stuck: read its own lines, and what the machine was doing, in the log.",
+    ],
+    see: "src/kernel/src/stages_check.rs; docs/TEST-TIME.md",
+};
+
 /// For `check_crash_hold` in `stages_check.rs`, when the crash hold's check
 /// fails.
 // CHECKS-ONLY: for `check_crash_hold` in `stages_check.rs`.
@@ -4307,6 +4325,8 @@ pub(crate) static ALL: &[&Explanation] = &[
     &PARTITION_DESCRIPTION,
     &PARTITION_MANAGER_ENDED,
     &SCHEDULE_EDF,
+    #[cfg(not(ferrix_shape = "micro"))]
+    &BOOT_CHECK_WORKER,
     &STAGE10_PCI,
     &STAGE10_DEVICES,
     &STAGE10_IOMMU,

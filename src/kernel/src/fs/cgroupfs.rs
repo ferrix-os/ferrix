@@ -1678,7 +1678,7 @@ impl Harness {
 /// # Errors
 ///
 /// The first thing that was not as Linux has it, by name.
-pub fn check() -> Checked<Report> {
+pub fn check(from_here: fn()) -> Checked<Report> {
     let ns = fs::namespace();
     let mut harness = Harness {
         ns,
@@ -1713,6 +1713,10 @@ pub fn check() -> Checked<Report> {
     harness.report.created_as = creator_check::run(&mut harness)?;
     harness.report.limits_refused = limits_check::run(&mut harness)?;
     harness.report.reclaimed = reclaim_check::run(&mut harness)?;
+    // From here on the check makes no fatal fault of a program's and opens no
+    // frame window, and most of it is waiting: what the caller starts here runs
+    // beside it (`stages_check`'s table says why).
+    from_here();
     harness.report.frozen = freeze_check::run(&mut harness)?;
     harness.report.throttled = cpu_check::run(&mut harness)?;
     harness.report.disk_requests = io_check::run(&mut harness)?;

@@ -49,6 +49,13 @@ use crate::syscall::signal::{self, Origin};
 use crate::syscall::thread::{self, Thread};
 use crate::syscall::{kill, registry};
 
+// The check's (f) follows the constant, so a changed deadline would pass it:
+// this ties it to the 2 s MEMORY-AND-TIMING and `docs/LOGGING.md` §21 state.
+const _: () = assert!(
+    HOLD_NANOS == 2_000_000_000,
+    "the crash hold's deadline is 2 s in MEMORY-AND-TIMING"
+);
+
 /// How late past its deadline a hold may end, and how soon a release must
 /// take effect.
 const MARGIN_NANOS: u64 = 1_000_000_000;

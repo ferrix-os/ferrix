@@ -34,6 +34,8 @@ These add to `docs/CONVENTIONS.md`, which still governs commits.
 
 **What a landing runs.** Rebase onto `main`, then:
 
+A `test-boot` row whose log says NOT JUDGED passed its checks and not its time: the landing re-runs that form at load 8 or under, or names it in its ready-to-land line.
+
 | The change touches | Gate |
 |---|---|
 | Only documentation: `docs/`, top-level Markdown, the skills and agent definitions under `.claude/` (Markdown nothing compiles), and the generators that write documents alone (`tools/common/gen/gen-roadmap-charts.py`, `gen-ipc-chart.py`, `gen-arch-doc.py`, `split-roadmap.py`, `build-roadmap-book.sh`) | `cargo xtask check-docs` only: the commit hooks, the audits and the generated-document checks, no cargo step (customer, 2026-10-04); it runs on any host, the Windows PC included. A generator that writes code or test data (`gen-xkb-tables.py`, `gen-wayland-protocol.py`, `gen-font.py`, `gen-btrfs-fixtures.py`, the fuzz-corpus seeds) keeps the row of what it writes |
@@ -542,6 +544,8 @@ log path and commit; a new sighting is added to its row the day it is seen.
 | FX-0936 on CI: bare's time case read a share of time fixed from a dev kernel on one host; not a flake, done 2026-11-05 (ledger 6990, 7058). [more](backlog/flakes.md#fl-098) | mk-flip | 9 |
 | `charge_kernel` at the limit refuses without reclaiming: an `open` near `memory.max` answered ENOMEM beside file cache a reclaim would have freed, `pgscan` 0 (2026-11-04, `test-container`'s walk, for the PO's queue). [more](backlog/flakes.md#fl-096) | 13 |
 | Stage 9's timer check: "an early wake took out more or less than its own entry", once, `test-init --arch aarch64 --smp 2` (2026-11-04, K10's check, not traced). [more](backlog/flakes.md#fl-090) | 9 |
+| `check-stack-depth` takes `WORKER_CHECKS` as roots against `BOOT_STACK_SIZE`, with a control FIRED, before a second entry in that table (ledger 7139 (8)). | 9 |
+| `cargo xtask coverage` on all three architectures owed by the boot-time series (ledger 7021 E1, 7072): plugin test-boots passed on its hashes; bare's 5000 25000 goes to 10000 50000 for 500 ms if it fails there. | 9 |
 | Stage 9's timer check: "arms case d", once, `test-boot --arch x86_64 --accel kvm --smp 2` at load 4 and ARMv7-A `--smp 2` (2026-11-05, traced to the case, fixed). [more](backlog/flakes.md#fl-099) | 9 |
 
 ### P1: M5, the lift's debts (`docs/microkernel/M5-LIFT.md`, ledger 5714, 6012, 6268, 6326)

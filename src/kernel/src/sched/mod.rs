@@ -1424,6 +1424,7 @@ pub fn spawn_in_group(
 ) -> Result<Arc<Task>, &'static str> {
     let queue = queue_of(cpu).ok_or("no such processor")?;
     let task = make_task(
+        crate::vmap::STACK_PAGES,
         name,
         entry,
         argument,
@@ -1501,6 +1502,7 @@ pub fn prepare_user(
     // gives the count back here, and one never launched when it is dropped.
     thread.process().thread_starting();
     let task = make_task(
+        crate::vmap::STACK_PAGES,
         name,
         entry,
         0,
@@ -1603,6 +1605,7 @@ fn spawn_task(
     // exist would take a stack with it that nothing frees.
     let queue = queue_of(cpu).ok_or("no such processor")?;
     let task = make_task(
+        crate::vmap::STACK_PAGES,
         name,
         entry,
         argument,
@@ -1617,12 +1620,47 @@ fn spawn_task(
     Ok(task)
 }
 
+// CHECKS-ONLY: stages_check.rs; home: sched
+/// Start a kernel thread on a stack of `stack_pages`, placed as [`spawn`] places
+/// one but not counted as a placement, for a boot check run beside the others:
+/// those were written for the boot stack (ledger 7044, D-f).
+///
+/// # Errors
+///
+/// If there is no stack for it.
+pub fn spawn_check(
+    name: &'static str,
+    entry: fn(usize),
+    argument: usize,
+    stack_pages: u64,
+) -> Result<Arc<Task>, &'static str> {
+    let here = this_cpu().ok_or("no processor to start a task on")?;
+    let anywhere = *domain_cpus().ok_or("the scheduler has no domain")?;
+    let cpu = choose_cpu(&anywhere, here).unwrap_or(here);
+    let queue = queue_of(cpu).ok_or("no such processor")?;
+    let task = make_task(
+        stack_pages,
+        name,
+        entry,
+        argument,
+        ferrix_sched::NICE_0_WEIGHT,
+        cpu,
+        anywhere,
+        None,
+        None,
+        None,
+    )?;
+    enqueue(&task, cpu, queue);
+    Ok(task)
+}
+
 /// Make a task, with a stack laid out to begin at [`task_start`], on no queue.
 #[expect(
     clippy::too_many_arguments,
     reason = "private, with two callers that name every argument; a struct would be `NewTask` again"
 )]
 fn make_task(
+    stack_pages: u64,
     name: &'static str,
     entry: fn(usize),
     argument: usize,
@@ -1633,7 +1671,7 @@ fn make_task(
     thread: Option<Arc<dyn UserThread>>,
     user_state: Option<arch::UserState>,
 ) -> Result<Arc<Task>, &'static str> {
-    let stack = crate::vmap::allocate_stack().map_err(|problem| {
+    let stack = crate::vmap::allocate_stack_of(stack_pages).map_err(|problem| {
         // The arena's own reason, because "no stack" has four of them and they
         // want four different fixes: no address space, no frames, the page
         // tables refusing, or the arena not being up at all.

@@ -784,8 +784,17 @@ fn check_vmap_protection(mapping: vmap::Mapping) -> Result<(), &'static str> {
 fn check_stacks() -> Result<(), &'static str> {
     let free_before = mm::free_frames();
     let stack = vmap::allocate_stack().map_err(|_| "no kernel stack could be allocated")?;
+    check_one_stack(stack, vmap::STACK_PAGES, free_before)?;
+    // A boot check's worker's, the boot stack's size (`stages_check::WORKER_CHECKS`).
+    let pages = ferrix_bootinfo::BOOT_STACK_SIZE / PAGE_SIZE;
+    let stack = vmap::allocate_stack_of(pages).map_err(|_| "no kernel stack could be allocated")?;
+    check_one_stack(stack, pages, free_before)
+}
 
-    if stack.len() != vmap::STACK_PAGES * PAGE_SIZE {
+/// [`check_stacks`] of one stack, asked for at `pages` pages: and the frames back
+/// to `free_before` when it has gone.
+fn check_one_stack(stack: vmap::Stack, pages: u64, free_before: u64) -> Result<(), &'static str> {
+    if stack.len() != pages * PAGE_SIZE {
         return Err("a kernel stack is not the size it was asked for");
     }
     if !stack.top.is_multiple_of(16) {

@@ -682,7 +682,15 @@ impl Stack {
 
 /// Allocate a guard-paged kernel stack.
 pub fn allocate_stack() -> Result<Stack, VmapError> {
-    let mapping = allocate(STACK_PAGES, MapFlags::KERNEL_DATA)?;
+    allocate_stack_of(STACK_PAGES)
+}
+
+/// [`allocate_stack`] of `pages` pages: [`STACK_PAGES`] for a task, more for the
+/// boot's checks on workers, which were written for the boot stack, a frame of
+/// theirs near a whole [`STACK_PAGES`] (ledger 7044, D-f). Given back as any
+/// other: the arena keeps each allocation's size.
+pub fn allocate_stack_of(pages: u64) -> Result<Stack, VmapError> {
+    let mapping = allocate(pages, MapFlags::KERNEL_DATA)?;
     Ok(Stack {
         base: mapping.base,
         top: mapping.end(),

@@ -720,7 +720,108 @@ pub(super) fn check_madvise() {
 /// Stage 8's signal checks: signalfd's, then the crash hold's.
 pub(super) fn check_signals() {
     check_signalfd();
-    check_crash_hold();
+}
+
+// The boot's checks run on the boot task, one after another, except those in
+// this table, which run at once beside it (`docs/TEST-TIME.md`, boot time;
+// ledger 7021 P5, 7044). A check is here only with the argument for it: it
+// reads no machine-wide count or wait (`FrameWindow`, `free_frames`, `live_slots`,
+// audit readers, `wait_until_reaper_quiet`, `bandwidth_walks`, `sleepers_here`,
+// `PLACED_ELSEWHERE`, log readers), assumes nothing of the boot task or its
+// processor, and has a wall-clock bound only well over what it measures.
+// A failure panics the machine as on the boot task, with the same sentence. A
+// worker's stack is the boot stack's size. `join` means reaped, so a window opened
+// after it counts no worker. `check-stack-depth` does not judge a worker (its entry
+// is called through `run`, and it measures against `STACK_PAGES`): for the one entry
+// here, the same size as the boot stack and less beneath it than serial is the
+// argument; BACKLOG holds that tool's roots before a second entry.
+
+/// A check run on a worker.
+struct WorkerCheck {
+    /// Its name, for the task and for a join's sentence.
+    name: &'static str,
+    /// The check.
+    run: fn(),
+}
+
+/// How long a worker is given to end after the checks beside it have: under
+/// `test-boot`'s 120 s, so the sentence comes before the wait gives up.
+const WORKER_PATIENCE_NANOS: u64 = 60_000_000_000;
+
+/// Pages of a worker's stack: the boot stack's.
+const WORKER_STACK_PAGES: u64 = ferrix_bootinfo::BOOT_STACK_SIZE / PAGE_SIZE;
+
+/// The checks workers run.
+static WORKER_CHECKS: [WorkerCheck; 1] = [
+    // Beside `cgroupfs`'s freezer, cpu and io cases, which it reaches through
+    // `from_here`. Almost all of it is waiting out the hold's real deadline. Its
+    // ARMED is one global: those cases make no fatal fault (their programs end by
+    // SIGKILL); `oom_check`, which does, has ended by then. Its processes are of no
+    // cgroup those cases look at, its bounds are half a second and more over
+    // releases of microseconds, and it opens no frame window.
+    WorkerCheck {
+        name: "crash hold",
+        run: check_crash_hold,
+    },
+];
+
+/// [`WORKER_CHECKS`]' index of the crash hold.
+const CRASH_HOLD: usize = 0;
+
+/// The tasks running [`WORKER_CHECKS`], by index.
+static WORKERS: sync::SpinLock<[Option<alloc::sync::Arc<sched::Task>>; 1]> =
+    sync::SpinLock::new([const { None }; 1]);
+
+/// A worker: run its check.
+fn worker(index: usize) {
+    if let Some(check) = WORKER_CHECKS.get(index) {
+        (check.run)();
+    }
+}
+
+/// Start worker `index`. A check that cannot start stops the boot: it would be a
+/// check that did not run.
+fn start_worker(index: usize) {
+    let name = WORKER_CHECKS.get(index).map_or("?", |check| check.name);
+    match sched::spawn_check(name, worker, index, WORKER_STACK_PAGES) {
+        Ok(task) => {
+            if let Some(place) = WORKERS.lock().get_mut(index) {
+                *place = Some(task);
+            }
+        }
+        Err(problem) => fatal!(
+            catalog::BOOT_CHECK_WORKER,
+            "a boot check's worker did not start: {name}: {problem}"
+        ),
+    }
+}
+
+/// Wait until worker `index` has ended and been reaped.
+fn join_worker(index: usize) {
+    let name = WORKER_CHECKS.get(index).map_or("?", |check| check.name);
+    let task = WORKERS.lock().get_mut(index).and_then(Option::take);
+    let Some(task) = task else {
+        fatal!(
+            catalog::BOOT_CHECK_WORKER,
+            "a boot check's worker was never started: {name}"
+        );
+    };
+    if sched::wait_until_gone(&task, WORKER_PATIENCE_NANOS).is_err() {
+        fatal!(
+            catalog::BOOT_CHECK_WORKER,
+            "a boot check's worker did not end: {name}"
+        );
+    }
+}
+
+/// [`CRASH_HOLD`]'s start, for `cgroupfs`'s check to call.
+fn start_crash_hold() {
+    start_worker(CRASH_HOLD);
+}
+
+/// [`CRASH_HOLD`]'s end, once `cgroupfs`'s check is over.
+fn end_crash_hold() {
+    join_worker(CRASH_HOLD);
 }
 
 /// The crash hold's check (`fs::crashes`, `docs/LOGGING.md` §21): a fault
@@ -810,13 +911,14 @@ pub(super) fn check_init_inputs() {
 }
 
 pub(super) fn check_cgroupfs() {
-    let checked = match fs::cgroupfs::check() {
+    let checked = match fs::cgroupfs::check(start_crash_hold) {
         Ok(checked) => checked,
         Err(problem) => fatal!(
             catalog::STAGE13_CGROUPFS,
             "stage 13 cgroupfs self-check failed: {problem}"
         ),
     };
+    end_crash_hold();
     println!(
         "  cgroups  {} cgroups made and removed through cgroup2, a process moved in by its pid \
          and ended by cgroup.kill, {} writes and names refused as Linux refuses them, {} epoll \
