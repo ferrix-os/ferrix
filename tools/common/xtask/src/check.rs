@@ -1266,7 +1266,7 @@ fn ferrocene_rust() -> Result<()> {
     let mut checked = 0_usize;
     for profile in crate::flags::profile_names()? {
         let resolved = match crate::flags::resolve(Some(&profile), &[]) {
-            Ok(resolved) if resolved.level != "none" => resolved,
+            Ok(resolved) if resolved.judged != "none" => resolved,
             _ => continue,
         };
         println!("   -- profile {profile}: {}", resolved.cfg_words());

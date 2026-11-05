@@ -153,6 +153,86 @@ fn label(arch: Arch) -> String {
     format!("ferrix {} {commit}", arch.name()).trim().to_owned()
 }
 
+/// The soft signer's slot key and its anchor (`docs/SIGNING.md` §6.4).
+const DEV_SLOT_KEY: &str = "dev-slot";
+/// See [`DEV_SLOT_KEY`].
+const DEV_SLOT_ANCHOR: &str = "32768";
+
+/// A version-2 image of these blobs, signed for `arch`'s generic family by the soft signer:
+/// what a profile with `slot_signing = "required"` boots at level none, as the ESP's
+/// `FERRIX/RESCUE.SLT` (ledger 7011 LV.2). One leaf of the development key an image; a host
+/// without the key's state refuses by name, and no option goes round it.
+///
+/// # Errors
+///
+/// A write, or the signer, which is refused or absent.
+pub(crate) fn signed_for_profile(
+    arch: Arch,
+    profile_byte: u8,
+    kernel: &[u8],
+    initramfs: &[u8],
+    words: &[u8],
+) -> Result<Vec<u8>> {
+    let (arch_byte, family) = match arch {
+        Arch::X86_64 => ("1", "257"),
+        Arch::AArch64 => ("2", "513"),
+        other => {
+            return Err(Error::new(format!(
+                "{other}: no generic family a signed slot may name"
+            )));
+        }
+    };
+    let dir = paths::build_dir(arch);
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join("ferrix-profile-slot.img");
+    let header = write(&path, VERSION_2, &label(arch), kernel, initramfs, words)?;
+    let payload = dir.join("ferrix-profile-slot.payload");
+    let encoded = header.encode();
+    std::fs::write(&payload, encoded.get(..HEADER_LEN - 32).unwrap_or_default())?;
+    let manifest = dir.join("ferrix-profile-slot.manifest");
+    let status = std::process::Command::new(crate::cargo::cargo())
+        .current_dir(paths::workspace_root())
+        .args([
+            "run",
+            "-q",
+            "--release",
+            "-p",
+            "ferrix-softsign",
+            "--",
+            "sign",
+            DEV_SLOT_KEY,
+        ])
+        .args(["--kind", "slot", "--anchor-id", DEV_SLOT_ANCHOR])
+        .args(["--profile", &profile_byte.to_string(), "--arch", arch_byte])
+        .args([
+            "--family",
+            family,
+            "--security-version",
+            "1",
+            "--label",
+            "profile-at-level-none",
+        ])
+        .arg("--payload")
+        .arg(&payload)
+        .arg("--out")
+        .arg(&manifest)
+        .status()
+        .map_err(|error| Error::new(format!("running the soft signer: {error}")))?;
+    if !status.success() {
+        return Err(Error::new(
+            "the soft signer refused to sign a slot of a profile with slot_signing=required \
+             (is the development key's state on this host?)",
+        ));
+    }
+    let mut image = std::fs::read(&path)?;
+    let signed = std::fs::read(&manifest)?;
+    image
+        .get_mut(HEADER_LEN..HEADER_LEN * 2)
+        .ok_or_else(|| Error::new("a slot image shorter than its manifest block"))?
+        .copy_from_slice(&signed);
+    Ok(image)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -83,6 +83,22 @@ These come from `MICROKERNEL.md` §12 and the consultant's conditions on it
    per architecture. A requirement that holds only under some flags says so,
    and its check runs in those profiles.
 
+### 2.1 `built`, the profile builds, and M5's flip (ledger 7011)
+
+Three words, kept apart (`docs/microkernel/FLIP.md`):
+
+* **`built`**, per value and, by `built_on`, per architecture: this value's code is real and its
+  rows pass on QEMU, accelerator named, no timing claim. A profile's build is refused by name on
+  an architecture its value does not list.
+* **The profile builds**: every value `built` there, and the image rules met. It carries no
+  claim. As today's rules let it: `level = "none"` with `target_level = "sc2"` or `"sc4"` in
+  the profile file. Its values, requirements, stand-ins and boot options are judged against the
+  target, so a stand-in or `mitigations=off` refuses as at the level; components below it
+  print a note; its line reads `profile=fast level=none ... ; no claim`. A slot-signing
+  profile's loader carries `development-required` and its image a slot signed by the soft signer.
+* **M5's flip, with M7's evidence**: M7 writes `level` as the target and takes `target_level` out,
+  two lines, and rule 3 applies unchanged. Every "before the flip" means this one unless `FLIP.md` moves it.
+
 ## 3. The flags
 
 `cfg` names take the form `ferrix_<flag>="<value>"`. "Today" says where the
@@ -325,7 +341,8 @@ set every flag (rule 4), the level, the architectures the claim covers, the
 image content and the boot options the certified configuration permits:
 
 ```toml
-level = "sc2"
+level = "none"        # until M7, which writes "sc2" here and takes target_level out
+target_level = "sc2"
 claim_architectures = ["aarch64"]
 image = { driver_updates = "absent" }
 boot_options = { "ferrix.checks" = ["run"], "ferrix.root" = ["*"], "ferrix.onexit" = ["*"] }
@@ -358,7 +375,7 @@ profile.
 **The boot line**, printed early by every kernel:
 
 ```
-build profile=fast level=sc2 personality=user fs=server mitigations=on partition_speculation=partition ipc_fastpath=on restricted_fastpath=on kernel_memory=heap schedule=edf checks=on
+build profile=fast level=none personality=user fs=server mitigations=on partition_speculation=partition ipc_fastpath=on restricted_fastpath=on kernel_memory=heap schedule=edf checks=on
 ```
 
 The kernel computes every word of it from `cfg!` (rule 6). An ad-hoc build

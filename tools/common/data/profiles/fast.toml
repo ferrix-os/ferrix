@@ -1,16 +1,19 @@
 # `fast`: the microkernel for safety products that want speed (docs/
 # BUILD-FLAGS.md §1): IEC 61508-3 SC 2 / ISO 26262 ASIL B, no timing claim,
-# carried from M7. Its true values from M0 (BF8): the gate validates this
-# file statically, and xtask refuses to build it by `lands` until M5.
+# carried from M7. Its true values from M0 (BF8): xtask refuses to build it, naming
+# each value `built` does not say yet (docs/microkernel/FLIP.md).
 
 profile = "fast"
-level = "sc2"
+# No claim until M7, which writes `level = "sc2"` and takes `target_level` out, and rule 3
+# then applies in full; until then its values are held to the target (ledger 7011 LV.1).
+level = "none"
+target_level = "sc2"
 claim = "IEC 61508-3 SC 2 / ISO 26262 ASIL B, from M7"
 claim_architectures = ["aarch64"]
 buildable_from = "M5"
 image = { driver_updates = "absent", settings_writer = "absent", slot_signing = "required", bad_frames = "persist" }
 # The families its loader accepts a slot manifest for (docs/SIGNING.md §1.4, §10.6).
-slot_families = ["aarch64-uefi-virt"]
+slot_families = ["aarch64-uefi-virt", "x86_64-uefi-pc"]
 exceptions = []
 
 [flags]

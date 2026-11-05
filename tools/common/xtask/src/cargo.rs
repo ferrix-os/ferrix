@@ -177,6 +177,7 @@ fn kernel(arch: Arch, release: bool) -> Result<(Build, PathBuf)> {
     let target = arch.kernel_target();
     let profile = kernel_profile(release);
     let flags = crate::flags::this_run()?;
+    crate::flags::built_for(flags, arch.name())?;
     let mut build = match profile {
         "iterate" => {
             println!("  with --iterate: thin LTO, not the release kernel a gate builds");

@@ -597,6 +597,22 @@ pub(crate) fn write_image_carrying(
     let directory = paths::build_dir(arch);
     std::fs::create_dir_all(&directory)?;
     let _ = crate::slot_image::write_if_wanted(arch, &kernel_bytes, initramfs, cmdline, defaults)?;
+    // A profile whose loader starts only a verifying slot (ledger 7011 LV.2).
+    if let Some(byte) = crate::signing::required_slot_of_this_run()? {
+        let words: Vec<&str> = [cmdline, defaults]
+            .into_iter()
+            .flatten()
+            .flat_map(str::split_whitespace)
+            .collect();
+        let slot = crate::slot_image::signed_for_profile(
+            arch,
+            byte,
+            &kernel_bytes,
+            initramfs,
+            words.join(" ").as_bytes(),
+        )?;
+        fs.add_file("FERRIX/RESCUE.SLT", &slot)?;
+    }
     let image = directory.join("ferrix.img");
     // Only the blocks that differ from the image already there: kilobytes
     // after an edit, where the whole 512 MiB took 22-65 s to write on a busy

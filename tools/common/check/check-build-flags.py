@@ -405,7 +405,7 @@ def image_key_problems(flag_file: dict, profiles: dict[str, dict]) -> list[str]:
     problems = []
     for name, profile in sorted(profiles.items()):
         image = profile.get("image", {})
-        level = profile.get("level")
+        level = profile.get("target_level") or profile.get("level")
         flags = profile.get("flags", {})
         for key in sorted(set(keys) - set(image)):
             problems.append(f"profiles/{name}.toml: image key {key} is not set (rule 4)")

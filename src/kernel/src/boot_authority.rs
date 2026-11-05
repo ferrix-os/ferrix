@@ -586,10 +586,16 @@ fn read_certified_list() {
 
 /// Hold to K14's grant every node of a certified profile whose DMA nothing would
 /// translate, before any handle exists (K14.4, G.5). An over-approximation of
-/// "DMA-capable": every node but the two the kernel synthesises. A profile with no
-/// certified level flags none, whatever `ferrix.unisolated` says.
+/// "DMA-capable": every node but the two the kernel synthesises. `fast` and `max` flag them
+/// from now, at level none until M7 too; another profile flags none, whatever
+/// `ferrix.unisolated` says.
 fn flag_nodes() {
-    if !cfg!(any(ferrix_level = "sc2", ferrix_level = "sc4")) {
+    if !cfg!(any(
+        ferrix_level = "sc2",
+        ferrix_level = "sc4",
+        ferrix_profile = "fast",
+        ferrix_profile = "max",
+    )) {
         return;
     }
     let mut flagged = 0_usize;

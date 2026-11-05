@@ -2653,6 +2653,12 @@ def flag_file_problems(flags: dict) -> list[str]:
     return problems
 
 
+def judged_level(profile: dict) -> str | None:
+    """The level a profile's values are held to: its `target_level` while it
+    carries `level = "none"`, else its `level` (ledger 7011 LV.1)."""
+    return profile.get("target_level") or profile.get("level")
+
+
 def profile_problems(name: str, profile: dict, flags: dict) -> tuple[list[str], list[str]]:
     """A profile file against the flag file: (problems, the reasons it does not
     build yet). Every flag set (rule 4), each value declared and allowed at
@@ -2662,7 +2668,20 @@ def profile_problems(name: str, profile: dict, flags: dict) -> tuple[list[str], 
     problems, waiting = [], []
     standards, levels = flags.get("standards", {}), flags.get("levels", {})
     declared = flags.get("flags", {})
-    level = profile.get("level")
+    level = judged_level(profile)
+    if profile.get("target_level") is not None:
+        if profile.get("level") != "none":
+            problems.append("only a profile at level none names a target_level (ledger 7011 LV.1)")
+        if profile.get("target_level") == "none":
+            problems.append("its target_level is none")
+    # A claim's image starts only a slot for the claim's own architectures (ledger 7011 LV.2).
+    # Not `present`: its ARMv7-A family predates this rule, ARMv7-A being its dated exception
+    # from the claim (the customer's G4, ledger 3906), and it leaves at M5's flip.
+    if profile.get("level") != "none":
+        families = tomllib.loads((ROOT / "tools/common/data/hardware-families.toml").read_text()).get("family", {})
+        for family in profile.get("slot_families", []):
+            if families.get(family, {}).get("arch") not in profile.get("claim_architectures", []):
+                problems.append(f"slot family {family} is outside its claim_architectures")
     if profile.get("profile") != name:
         problems.append(f"its profile is {profile.get('profile')!r}, not its file's name")
     if level not in levels:
@@ -2764,7 +2783,7 @@ def component_problems(name: str, profile: dict, flags: dict, manifest: dict) ->
     ring, and never if it is in the core or the item. A crate's own `level`
     and `in_ring0_when` override its ring's."""
     standards, levels = flags.get("standards", {}), flags.get("levels", {})
-    level = profile.get("level")
+    level = judged_level(profile)
     values = profile.get("flags", {})
     exceptions = {f"{e.get('flag')}={e.get('value')}" for e in profile.get("exceptions", [])}
     problems = []
@@ -2821,6 +2840,11 @@ def judge_profile(name: str, profile: dict, flags: dict, manifest: dict) -> tupl
     if waiting:
         return found, [f"profile {name}: valid statically, not yet buildable ({'; '.join(waiting)})"] + \
             [f"profile {name}: once buildable, {p}" for p in components]
+    if profile.get("target_level"):
+        # Level none claims nothing, so a component below the target fails nothing; it is
+        # still printed, and M7's one-line change to `level` makes it a failure (7011 LV.1).
+        return found, [f"profile {name}: level none, held to {profile['target_level']}, buildable"] + \
+            [f"profile {name}: at its target, {p}" for p in components]
     return found + components, [f"profile {name}: level {profile.get('level')}, buildable"]
 
 
@@ -3007,6 +3031,19 @@ def _profile_self_test() -> list[str]:
     problems, notes = judge_profile("p", profile("sc2", "a"), waiting, below)
     if problems or not any("once buildable, ring item" in n for n in notes):
         failures.append(f"a profile refused by lands was failed, not noted: {problems}, {notes}")
+    # Held to a target at level none (ledger 7011 LV.1): the same components are a note and
+    # no problem, a stand-in is still refused, and a level beside a target is a problem.
+    held = profile("none", "a") | {"target_level": "sc2"}
+    problems, notes = judge_profile("p", held, flags, below)
+    if problems or not any("at its target, ring item" in n for n in notes):
+        failures.append(f"a held profile over components below its target was judged wrong: {problems}, {notes}")
+    both = profile("sc2", "a") | {"target_level": "sc2"}
+    if not any("target_level" in p for p in profile_problems("p", both, flags)[0]):
+        failures.append("a level beside a target_level passed")
+    stand_in = json.loads(json.dumps(flags))
+    stand_in["flags"]["f"]["values"]["a"]["built"] = "stand-in"
+    if not profile_problems("p", held, stand_in)[1]:
+        failures.append("a held profile's stand-in did not wait, as at its target")
     return failures
 
 

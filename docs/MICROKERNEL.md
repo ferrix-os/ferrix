@@ -1302,6 +1302,9 @@ hybrid kernel has the glue (Z7).
 
 ### 12.2 The profiles
 
+`max` and `fast` build as `level = "none"` with a `target_level`, carrying no claim until M7:
+[`microkernel/FLIP.md`](microkernel/FLIP.md) has what still refuses each, and `BUILD-FLAGS.md` §2.1 the three words.
+
 | Profile | Claim | Options |
 |---|---|---|
 | **`max`** | IEC 61508-3 SC 4 / ISO 26262 ASIL D, the first assessment (§6.5) | `personality=user`, `fs=server`, `partition_speculation` per Q16, `mitigations=on`, `ipc_fastpath=off` until its rule is met, `kernel_memory=retyped`, `schedule=windows`, `checks=on` (`BUILD-FLAGS.md` §3) |

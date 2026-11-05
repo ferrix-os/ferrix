@@ -99,7 +99,7 @@ def found(lines: list[str]) -> tuple[dict[str, str], bool] | None:
     return None
 
 
-def compare(want: dict[str, str], got: dict[str, str], claim_none: bool, no_claim: bool) -> list[str]:
+def compare(want: dict[str, str], got: dict[str, str], claim_none: bool, no_claim: bool, held: bool = False) -> list[str]:
     """What differs, as `name=got (profile: want)`; empty when the line matches."""
     problems = []
     for name, value in want.items():
@@ -117,8 +117,9 @@ def compare(want: dict[str, str], got: dict[str, str], claim_none: bool, no_clai
             "an ad-hoc build, which carries no claim: the gate refuses it as its profile's run "
             "(docs/BUILD-FLAGS.md rule 5, BF3 c; --no-claim boots it as an ad-hoc run)"
         )
-    if claim_none != (want.get("profile") == "none"):
-        problems.append("`no claim` is said exactly when profile=none")
+    # `held`: a profile at level none that names a target_level says it too (ledger 7011 LV.1).
+    if claim_none != (want.get("profile") == "none" or held):
+        problems.append("`no claim` is said exactly when profile=none, or of a profile held to a target_level")
     if got.get("profile") == "desktop" or want.get("profile") == "desktop":
         for name, value in DESKTOP_LIGHT.items():
             if got.get(name) != value:
@@ -156,6 +157,14 @@ def manifest_problems(want: str, got: str | None) -> list[str]:
 
 def self_test() -> list[str]:
     failures = []
+    # A profile held to a target_level says `no claim`, though its profile is not none.
+    held_want = {"profile": "fast", "level": "none", "a": "x"}
+    if compare(held_want, dict(held_want), True, False, True):
+        failures.append("a held profile's line with `no claim` was refused")
+    if not compare(held_want, dict(held_want), False, False, True):
+        failures.append("a held profile's line without `no claim` passed")
+    if not compare(held_want, dict(held_want), True, False, False):
+        failures.append("`no claim` on a profile not held passed")
     prof_image = {"profile": "p", "level": "l", "flags": {"runtime_settings": "live"},
                   "image": {"driver_updates": "absent", "settings_writer": "present"}}
     manifest = expected_manifest({"profile": "p", "level": "l", "runtime_settings": "live"}, prof_image)
@@ -236,7 +245,8 @@ def main() -> int:
         print(f"boot-line: REFUSED: {args.arch}: the kernel printed no `build` line ({args.log})", file=sys.stderr)
         return 1
     got, claim_none = result
-    problems = compare(want, got, claim_none, args.no_claim)
+    held = want["profile"] != "none" and profile_file.get("target_level") is not None
+    problems = compare(want, got, claim_none, args.no_claim, held)
     if problems:
         print(
             f"boot-line: REFUSED: {args.arch}: the kernel's build line differs from profile "

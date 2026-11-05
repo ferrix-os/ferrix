@@ -158,6 +158,24 @@ pub(crate) fn loader_env() -> Result<Vec<(&'static str, String)>> {
     Ok(env)
 }
 
+/// The manifest profile byte of this run's profile, when it boots from a signed slot at
+/// level none (ledger 7011 LV.2); `None` when its loader does not ask for one.
+pub(crate) fn required_slot_of_this_run() -> Result<Option<u8>> {
+    let run = crate::flags::this_run()?;
+    if run.profile == "none" || run.level != "none" {
+        return Ok(None);
+    }
+    let required = crate::flags::Profile::load(&run.base)?
+        .image
+        .iter()
+        .any(|(key, value)| key == "slot_signing" && value == "required");
+    Ok(match (required, run.profile.as_str()) {
+        (true, "max") => Some(1),
+        (true, "fast") => Some(2),
+        _ => None,
+    })
+}
+
 /// The image key `bad_frames` of the profile called `base`.
 pub(crate) fn bad_frames_of(base: &str) -> Result<String> {
     crate::flags::Profile::load(base)?
@@ -228,7 +246,15 @@ fn loader_env_for(name: &str, level: &str) -> Result<Vec<(&'static str, String)>
             "desktop" => 4,
             other => return Err(Error::new(format!("no manifest profile byte for {other}"))),
         };
-        (format!("release-{mode}"), byte, names)
+        // A profile held to a target before M7 (ledger 7011 LV.1, LV.2) is a development
+        // image of that profile: its loader still starts only a verifying slot, and the
+        // slot is signed by the soft signer's key. `claimed` and the refusal of development
+        // anchors below turn it back when `level` names the target.
+        if level == "none" && mode == "required" {
+            ("development-required".to_owned(), byte, names)
+        } else {
+            (format!("release-{mode}"), byte, names)
+        }
     };
     let ids = names
         .iter()
@@ -746,7 +772,7 @@ mod tests {
                 ("FERRIX_ANCHORS", "release-required".to_owned()),
                 (
                     "FERRIX_SLOT_BUILD",
-                    "profile=2 claimed=1 families=513".to_owned()
+                    "profile=2 claimed=1 families=513,257".to_owned()
                 ),
             ]
         );
@@ -784,6 +810,18 @@ mod tests {
         );
         // The same profile at level none is not claimed.
         assert!(env("present", "none")[1].1.contains("claimed=0"));
+        // Held to a target at level none (ledger 7011 LV.2): development anchors, no claim.
+        let held = loader_env_for("fast", "none").unwrap();
+        assert_eq!(
+            held,
+            vec![
+                ("FERRIX_ANCHORS", "development-required".to_owned()),
+                (
+                    "FERRIX_SLOT_BUILD",
+                    "profile=2 claimed=0 families=513,257".to_owned()
+                ),
+            ]
+        );
     }
 
     /// A PE32+ image of one section holding a debug directory of one

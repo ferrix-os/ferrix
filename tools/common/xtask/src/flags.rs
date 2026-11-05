@@ -93,6 +93,9 @@ pub(crate) struct FlagValue {
     pub(crate) lands: String,
     /// Whether it builds.
     pub(crate) built: Built,
+    /// The architectures it is built on, when not all of them (ledger 7011 B.1). A
+    /// profile's build names the value and the architecture when refused.
+    pub(crate) built_on: Option<Vec<String>>,
     /// For a stand-in, the value whose code it builds.
     pub(crate) stands_in: Option<String>,
     /// `flag=value`s it requires.
@@ -197,6 +200,7 @@ fn flag(name: &str, table: &Value, levels: &[String]) -> Result<Flag> {
                 .ok_or_else(|| what(&format!("{value} names no `lands`")))?
                 .to_owned(),
             built,
+            built_on: entry.get("built_on").and_then(Value::strings),
             stands_in: entry
                 .get("stands_in")
                 .and_then(Value::as_str)
@@ -269,6 +273,9 @@ pub(crate) struct Profile {
     pub(crate) name: String,
     /// Its level.
     pub(crate) level: String,
+    /// The level it is judged at while it carries `level = "none"` (ledger 7011 LV.1):
+    /// its values are held to this, and M7 changes `level` to it.
+    pub(crate) target_level: Option<String>,
     /// Its flags' values, as the file lists them.
     pub(crate) values: Vec<(String, String)>,
     /// The `flag=value`s it uses below its level by a dated exception.
@@ -299,6 +306,13 @@ impl Profile {
             .and_then(Value::as_str)
             .ok_or_else(|| what("it names no level"))?
             .to_owned();
+        let target_level = root
+            .get("target_level")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        if target_level.is_some() && level != "none" {
+            return Err(what("only a profile at level `none` names a `target_level`"));
+        }
         let mut values = Vec::new();
         for (flag, value) in root.get("flags").map(Value::entries).unwrap_or_default() {
             let value = value
@@ -326,6 +340,7 @@ impl Profile {
         Ok(Profile {
             name: name.to_owned(),
             level,
+            target_level,
             values,
             exceptions,
             image,
@@ -343,6 +358,9 @@ pub(crate) struct Resolved {
     pub(crate) profile: String,
     /// `level=` on the boot line.
     pub(crate) level: String,
+    /// The level its values are held to: `level`, or a profile's `target_level`. `none`
+    /// for an ad-hoc build.
+    pub(crate) judged: String,
     /// Every flag's value, in the flag file's order.
     pub(crate) values: Vec<(String, String)>,
     /// The `--set`s that changed a value.
@@ -437,6 +455,14 @@ pub(crate) fn resolve_unbuilt(
             profile.name, profile.level
         )));
     }
+    if let Some(target) = &profile.target_level
+        && (target == "none" || !levels.contains(target))
+    {
+        return Err(Error::new(format!(
+            "profile {}: `target_level` `{target}` is not a declared level above none",
+            profile.name
+        )));
+    }
     let mut values = Vec::new();
     for flag in &file.flags {
         let value = profile
@@ -485,6 +511,14 @@ pub(crate) fn resolve_unbuilt(
             "none".to_owned()
         } else {
             profile.level.clone()
+        },
+        judged: if ad_hoc {
+            "none".to_owned()
+        } else {
+            profile
+                .target_level
+                .clone()
+                .unwrap_or_else(|| profile.level.clone())
         },
         values,
         changed,
@@ -543,11 +577,11 @@ fn consistent(file: &FlagFile, profile: &Profile, resolved: &Resolved) -> Result
                 .exceptions
                 .iter()
                 .any(|(name, excepted)| name == flag && excepted == value);
-        if !declared.allows.contains(&resolved.level) && !excepted {
+        if !declared.allows.contains(&resolved.judged) && !excepted {
             return Err(Error::new(format!(
                 "{flag}={value} does not allow level {} (it allows {}): profile {} \
                  is refused (BUILD-FLAGS.md rule 3)",
-                resolved.level,
+                resolved.judged,
                 declared.allows.join(", "),
                 resolved.base
             )));
@@ -567,14 +601,14 @@ fn buildable(resolved: &Resolved) -> Result<()> {
         };
         match declared.built {
             Built::Yes => {}
-            Built::StandIn | Built::AdHoc if resolved.level == "none" => {}
+            Built::StandIn | Built::AdHoc if resolved.judged == "none" => {}
             Built::AdHoc => waiting.push(format!(
                 "{flag}={value} (ad-hoc builds only until its flip's review; lands at {})",
                 declared.lands
             )),
             Built::StandIn => waiting.push(format!(
                 "{flag}={value} (a stand-in, which a profile at level {} may not carry; lands at {})",
-                resolved.level, declared.lands
+                resolved.judged, declared.lands
             )),
             Built::No => waiting.push(format!("{flag}={value} (lands at {})", declared.lands)),
         }
@@ -590,6 +624,36 @@ fn buildable(resolved: &Resolved) -> Result<()> {
             format!("profile {}", resolved.profile)
         },
         waiting.join(", ")
+    )))
+}
+
+/// Whether `resolved` builds for `arch`: a value judged above `none` builds only on the
+/// architectures its `built_on` names (ledger 7011 B.1).
+///
+/// # Errors
+///
+/// Names each value and the architecture.
+pub(crate) fn built_for(resolved: &Resolved, arch: &str) -> Result<()> {
+    if resolved.judged == "none" {
+        return Ok(());
+    }
+    let file = FlagFile::load()?;
+    let mut refused = Vec::new();
+    for (flag, value) in &resolved.values {
+        let declared = file.flag(flag).and_then(|declared| declared.value(value));
+        if let Some(on) = declared.and_then(|declared| declared.built_on.as_ref())
+            && !on.iter().any(|built| built == arch)
+        {
+            refused.push(format!("{flag}={value} (built on {})", on.join(", ")));
+        }
+    }
+    if refused.is_empty() {
+        return Ok(());
+    }
+    Err(Error::new(format!(
+        "profile {} is not built for {arch}: {}",
+        resolved.profile,
+        refused.join(", ")
     )))
 }
 
@@ -647,9 +711,14 @@ pub(crate) fn command() -> Result<()> {
     let resolved = resolve_unbuilt(Some(&asked_profile()), &asked_sets())?;
     let file = FlagFile::load()?;
     println!(
-        "profile {} at level {}{}",
+        "profile {} at level {}{}{}",
         resolved.base,
         resolved.level,
+        if resolved.judged == resolved.level {
+            String::new()
+        } else {
+            format!(", held to {}", resolved.judged)
+        },
         if resolved.profile == "none" {
             " (changed by --set: an ad-hoc build, no claim)"
         } else {
@@ -754,7 +823,7 @@ pub(crate) fn this_image() -> Result<(String, String)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Built, FlagFile, resolve, resolve_unbuilt};
+    use super::{Built, FlagFile, Profile, buildable, built_for, consistent, resolve, resolve_unbuilt};
 
     fn set(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
         pairs
@@ -881,18 +950,91 @@ mod tests {
         ])
     }
 
-    /// Ledger 5714 (18): the lift builds ad hoc alone, and no profile that names
-    /// it builds until its own review changes `built`.
+    /// What still refuses each profile: `flag=value`s, a list that only shrinks, the
+    /// resolver naming each and nothing else (ledger 7011 B.7, for 5714 (18)). When a list
+    /// is empty the profile builds, at level none, held to its target.
+    const REFUSED: [(&str, &str, &[&str]); 2] = [
+        (
+            "fast",
+            "sc2",
+            &[
+                "personality=user",
+                "partition_speculation=partition",
+                "restricted_fastpath=on",
+                "schedule=edf",
+                "fault_ahead=on",
+            ],
+        ),
+        (
+            "max",
+            "sc4",
+            &[
+                "personality=user",
+                "partition_speculation=exit",
+                "restricted_fastpath=off",
+                "kernel_memory=retyped",
+                "schedule=windows",
+                "fault_ahead=off",
+            ],
+        ),
+    ];
+
     #[test]
-    fn fast_and_max_stay_not_buildable_with_the_lift_in() {
-        for profile in ["max", "fast"] {
-            let why = resolve(Some(profile), &[]).unwrap_err().to_string();
-            assert!(
-                why.contains("not yet buildable") && why.contains("personality=user"),
-                "{why}"
-            );
+    fn a_profile_is_refused_for_exactly_what_it_waits_on() {
+        for (profile, target, refused) in REFUSED {
+            let resolved = resolve_unbuilt(Some(profile), &[]).unwrap();
+            assert_eq!(resolved.level, "none", "{profile}");
+            assert_eq!(resolved.judged, target, "{profile}");
+            match resolve(Some(profile), &[]) {
+                Ok(_) => assert!(refused.is_empty(), "{profile} builds: shrink REFUSED"),
+                Err(why) => {
+                    let why = why.to_string();
+                    let named: Vec<&str> = why
+                        .split_once(": ")
+                        .map_or("", |(_, rest)| rest)
+                        .split(", ")
+                        .filter_map(|one| one.split(' ').next())
+                        .filter(|word| word.contains('='))
+                        .collect();
+                    assert_eq!(named, refused, "{why}");
+                }
+            }
             assert!(resolve(Some(profile), &lifted()).is_err(), "{profile}");
         }
+    }
+
+    /// Held to a target, a value still answers to it: a stand-in, or one the target does
+    /// not allow, is refused though the profile's `level` is none (ledger 7011 LV.1).
+    #[test]
+    fn a_profile_held_to_a_target_is_judged_at_the_target() {
+        let file = FlagFile::load().unwrap();
+        for (profile, target, _) in REFUSED {
+            let resolved = resolve_unbuilt(Some(profile), &[]).unwrap();
+            assert_eq!(resolved.judged, target);
+            let mut held = resolved.clone();
+            for (flag, value) in [("program_barrier", "session"), ("mitigations", "off")] {
+                held.values
+                    .iter_mut()
+                    .find(|(name, _)| name == flag)
+                    .unwrap()
+                    .1 = value.to_owned();
+                let loaded = Profile::load(profile).unwrap();
+                assert!(consistent(&file, &loaded, &held).is_err(), "{flag}={value}");
+                assert!(buildable(&held).is_err(), "{flag}={value}");
+            }
+        }
+    }
+
+    /// `built_on` refuses a profile's build on other architectures, by name, and leaves
+    /// an ad-hoc one alone (ledger 7011 B.1).
+    #[test]
+    fn built_on_refuses_by_architecture_and_only_above_none() {
+        let resolved = resolve_unbuilt(Some("fast"), &[]).unwrap();
+        let why = built_for(&resolved, "armv7a").unwrap_err().to_string();
+        assert!(why.contains("not built for armv7a") && why.contains("fs=server"), "{why}");
+        assert!(built_for(&resolved, "x86_64").is_ok());
+        let ad_hoc = resolve_unbuilt(None, &lifted()).unwrap();
+        assert!(built_for(&ad_hoc, "armv7a").is_ok());
     }
 
     /// Ledger 5714 (10): `fs=lift` with `personality=user` and no claim; not without.

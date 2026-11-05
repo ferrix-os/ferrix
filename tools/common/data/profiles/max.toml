@@ -1,7 +1,7 @@
 # `max`: the microkernel at the top level (docs/BUILD-FLAGS.md §1): IEC
 # 61508-3 SC 4 / ISO 26262 ASIL D, carried from M7. Its true values from M0
-# (BF8): the gate validates this file statically, and xtask refuses to build
-# it by `lands` until M5.
+# (BF8): xtask refuses to build it, naming each value `built` does not say yet
+# (docs/microkernel/FLIP.md).
 #
 # ipc_fastpath is `off` until one coverage run has measured the fast path and
 # its vulnerability-analysis entry exists (the customer's rule of 2026-10-02,
@@ -9,7 +9,10 @@
 # restricted_fastpath is `off` until K1's review decides it.
 
 profile = "max"
-level = "sc4"
+# No claim until M7, which writes `level = "sc4"` and takes `target_level` out, and rule 3
+# then applies in full; until then its values are held to the target (ledger 7011 LV.1).
+level = "none"
+target_level = "sc4"
 claim = "IEC 61508-3 SC 4 / ISO 26262 ASIL D, from M7"
 claim_architectures = ["aarch64"]
 buildable_from = "M5"

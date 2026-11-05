@@ -82,6 +82,8 @@ why = "`max`: IEC 61508-3 SC 4 / ISO 26262 ASIL D (MICROKERNEL.md §6.5); DAL A'
 #           ever carries one; its kernel still names the value it was built
 #           with, which overstates what it relaxes and never understates it;
 #           `no`: xtask refuses to build it, naming `lands`;
+#   built_on  the architectures it is built on, when `built` is `yes` for some of them;
+#           absent means all. A profile's build is refused by name elsewhere (ledger 7011 B.1);
 #   requires / conflicts  other flags' values, as `flag=value`.
 #
 # A value's code is selected only in the kernel crate, by
@@ -95,7 +97,7 @@ values.none = { allows = ["none"], lands = "LINUX-ABI-SEPARATION.md §11.11", bu
 
 [flags.fs]
 why = "btrfs as btrfsd, the btrfs crates in ring 0 with today's glue, or no filesystem in a kernel without the Linux ABI, whose VFS it is"
-values.server = { allows = ["sc4", "present", "sc2", "none"], lands = "M5", built = "yes", requires = ["personality=user"] }
+values.server = { allows = ["sc4", "present", "sc2", "none"], lands = "M5", built = "yes", built_on = ["x86_64"], requires = ["personality=user"] }
 values.kernel = { allows = ["none"], lands = "today", built = "yes", requires = ["personality=kernel"] }
 values.none = { allows = ["none"], lands = "LINUX-ABI-SEPARATION.md §11.11", built = "yes", requires = ["personality=none"] }
 values.lift = { allows = ["none"], lands = "M5, until btrfsd passes its rows (docs/microkernel/M5-LIFT.md §1)", built = "yes", requires = ["personality=user"] }
