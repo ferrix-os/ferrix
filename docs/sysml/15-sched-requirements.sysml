@@ -1351,6 +1351,24 @@ package FerrixSchedRequirements {
             attribute :>> parent = "H.SCHED.1";
             attribute :>> unit = "sched::require_may_sleep";
         }
+        requirement <'L.sched.200'> aBlockUnderAnIrqLockStops : ItemLowLevel {
+            doc /* Rationale: an IrqSpinLock raises no preemption count, so FX-0503
+                does not see a block under one, and FX-0537 is for an interrupt
+                (ledger 7103 (8), 7415 (D)). Development builds only: release
+                builds keep no count, and a block there is caught by nothing. */
+            attribute :>> statement = "In a development build, a task blocking while its
+                processor holds an IrqSpinLock guard shall stop the machine as FX-0974. The
+                count shall be kept per processor by the guard's own hook (lock, a try_lock
+                that takes the lock, drop), inside the lock's interrupt mask; release builds
+                shall carry neither the count nor the stop.";
+            attribute :>> criterion = "A control: a ZOMBIES guard held across stage 6's
+                core switch-count check's sleep reports FX-0974 (mki3d-c1, FIRED). Every
+                row gate-rows lists PASSED on a development build with the stop in. The
+                sync crate's host test counts a lock, a taking try_lock and a drop inside
+                the mask, and none for a refused try_lock.";
+            attribute :>> parent = "H.SCHED.1";
+            attribute :>> unit = ("sched::require_may_sleep", "sched::irq_guard_made", "sched::irq_guard_dropped");
+        }
         requirement <'L.sched.84'> aSleeperLeavesByItsKey : ItemLowLevel {
             doc /* Rationale: the sleeper set holds timer arms beside sleeping
                 tasks since K10 (docs/microkernel/K10.md §9, condition 2), so a

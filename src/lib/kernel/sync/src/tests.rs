@@ -521,6 +521,83 @@ unsafe impl IrqControl for RecordingIrq {
     }
 }
 
+/// Counts the guards an [`IrqSpinLock`] reports through `guard_made` and
+/// `guard_dropped`, and whether each came with interrupts masked, which no
+/// other test shares.
+struct GuardCountingIrq;
+
+static GUARDS_HELD: AtomicUsize = AtomicUsize::new(0);
+static GUARD_MASKED: AtomicUsize = AtomicUsize::new(0);
+static GUARD_UNMASKED: AtomicUsize = AtomicUsize::new(0);
+
+// SAFETY: a test double, as `RecordingIrq`: `restore` puts back the depth its
+// own `disable` reported.
+unsafe impl IrqControl for GuardCountingIrq {
+    fn disable() -> usize {
+        GUARD_MASKED.fetch_add(1, Ordering::SeqCst)
+    }
+
+    fn restore(state: usize) {
+        let previous = GUARD_MASKED.fetch_sub(1, Ordering::SeqCst);
+        assert_eq!(
+            previous - 1,
+            state,
+            "restore returns to its own disable's depth"
+        );
+    }
+
+    fn guard_made() {
+        if GUARD_MASKED.load(Ordering::SeqCst) == 0 {
+            let _ = GUARD_UNMASKED.fetch_add(1, Ordering::SeqCst);
+        }
+        let _ = GUARDS_HELD.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn guard_dropped() {
+        if GUARD_MASKED.load(Ordering::SeqCst) == 0 {
+            let _ = GUARD_UNMASKED.fetch_add(1, Ordering::SeqCst);
+        }
+        let previous = GUARDS_HELD.fetch_sub(1, Ordering::SeqCst);
+        assert!(previous > 0, "a guard dropped that was never made");
+    }
+}
+
+#[test]
+fn an_irq_lock_reports_each_guard_made_and_dropped_inside_its_mask() {
+    static LOCK: IrqSpinLock<u32, GuardCountingIrq> = IrqSpinLock::new(0);
+    static OTHER: IrqSpinLock<u32, GuardCountingIrq> = IrqSpinLock::new(0);
+    {
+        let mut guard = LOCK.lock();
+        *guard += 1;
+        assert_eq!(GUARDS_HELD.load(Ordering::SeqCst), 1, "lock makes one");
+        let nested = OTHER.try_lock().expect("free");
+        assert_eq!(
+            GUARDS_HELD.load(Ordering::SeqCst),
+            2,
+            "a try_lock that takes it makes one"
+        );
+        assert!(LOCK.try_lock().is_none(), "refused while held");
+        assert_eq!(
+            GUARDS_HELD.load(Ordering::SeqCst),
+            2,
+            "a refused try_lock makes none"
+        );
+        drop(nested);
+        assert_eq!(GUARDS_HELD.load(Ordering::SeqCst), 1, "drop lets one go");
+    }
+    assert_eq!(GUARDS_HELD.load(Ordering::SeqCst), 0, "balanced");
+    assert_eq!(
+        GUARD_UNMASKED.load(Ordering::SeqCst),
+        0,
+        "every report inside the mask"
+    );
+    assert_eq!(
+        GUARD_MASKED.load(Ordering::SeqCst),
+        0,
+        "and the mask restored"
+    );
+}
+
 /// A preemption count that records every change, so a test can see that the
 /// lock raised it before spinning and lowered it after releasing.
 struct RecordingPreempt;

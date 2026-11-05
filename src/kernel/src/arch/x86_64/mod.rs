@@ -2302,6 +2302,18 @@ unsafe impl ferrix_sync::IrqControl for Irq {
             cpu::enable_interrupts();
         }
     }
+
+    #[cfg(debug_assertions)]
+    #[inline(always)]
+    fn guard_made() {
+        crate::sched::irq_guard_made();
+    }
+
+    #[cfg(debug_assertions)]
+    #[inline(always)]
+    fn guard_dropped() {
+        crate::sched::irq_guard_dropped();
+    }
 }
 
 /// Wait until an interrupt arrives.

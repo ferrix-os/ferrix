@@ -1462,6 +1462,18 @@ unsafe impl ferrix_sync::IrqControl for Irq {
         // moment ago, which is exactly `write_daif`'s contract.
         unsafe { cpu::write_daif(state as u64) };
     }
+
+    #[cfg(debug_assertions)]
+    #[inline(always)]
+    fn guard_made() {
+        crate::sched::irq_guard_made();
+    }
+
+    #[cfg(debug_assertions)]
+    #[inline(always)]
+    fn guard_dropped() {
+        crate::sched::irq_guard_dropped();
+    }
 }
 
 /// Wait until an interrupt arrives.

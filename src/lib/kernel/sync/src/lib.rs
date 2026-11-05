@@ -755,6 +755,21 @@ pub unsafe trait IrqControl {
     fn disable() -> usize;
     /// Restore the state a previous `disable` returned.
     fn restore(state: usize);
+
+    /// An [`IrqSpinLock`] guard was just made on this CPU, by `lock` or by a
+    /// `try_lock` that took the lock, with interrupts masked by `disable`.
+    ///
+    /// Does nothing by default. The kernel's implementation counts the
+    /// guards each processor holds in its development builds, so that a
+    /// task blocking with one held stops the machine (`L.sched.200`).
+    #[inline(always)]
+    fn guard_made() {}
+
+    /// An [`IrqSpinLock`] guard was let go on this CPU: called after the
+    /// lock is released and before `restore`, so still masked and on the
+    /// processor `guard_made` counted. Does nothing by default.
+    #[inline(always)]
+    fn guard_dropped() {}
 }
 
 /// A [`SpinLock`] that masks interrupts on the holding CPU for the duration.
@@ -768,6 +783,13 @@ pub unsafe trait IrqControl {
 /// Masking is per-CPU, so a handler on *another* CPU can still contend for the
 /// lock. That is fine — it waits, and the holder is not blocked on it — which
 /// is why the critical section still has to be short.
+///
+/// A holder must never block. The kernel's development builds count the
+/// guards each processor holds through [`IrqControl::guard_made`] and
+/// [`IrqControl::guard_dropped`] and stop a block made with one held
+/// (FX-0974, `L.sched.200`). Release builds keep no count: there a block
+/// under an `IrqSpinLock` is caught by nothing, and the development gate's
+/// rows are what stand for it.
 pub struct IrqSpinLock<T: ?Sized, C: IrqControl> {
     /// Names the interrupt-control implementation without storing anything.
     ///
@@ -805,6 +827,7 @@ impl<T: ?Sized, C: IrqControl> IrqSpinLock<T, C> {
     pub fn lock(&self) -> IrqSpinLockGuard<'_, T, C> {
         let irq_state = C::disable();
         self.inner.acquire();
+        C::guard_made();
         IrqSpinLockGuard {
             lock: self,
             irq_state,
@@ -821,6 +844,7 @@ impl<T: ?Sized, C: IrqControl> IrqSpinLock<T, C> {
     pub fn try_lock(&self) -> Option<IrqSpinLockGuard<'_, T, C>> {
         let irq_state = C::disable();
         if self.inner.try_acquire() {
+            C::guard_made();
             Some(IrqSpinLockGuard {
                 lock: self,
                 irq_state,
@@ -923,6 +947,8 @@ impl<T: ?Sized, C: IrqControl> Drop for IrqSpinLockGuard<'_, T, C> {
         // consumed here so no further access can happen through it, and a guard
         // is dropped exactly once.
         unsafe { self.lock.inner.release() };
+        // Still masked, so on the processor that counted the guard.
+        C::guard_dropped();
         // Only now, with the lock free, is it safe to let interrupts in again.
         C::restore(self.irq_state);
     }

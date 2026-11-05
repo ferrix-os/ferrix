@@ -242,6 +242,25 @@ pub(crate) static RECLAIM_IN_RECLAIM: Explanation = Explanation {
     see: "src/kernel/src/user/cache.rs; src/kernel/src/object/quota.rs; src/kernel/src/object/oom.rs",
 };
 
+/// For `sched::require_may_sleep`, in development builds only.
+pub(crate) static BLOCK_HOLDING_AN_IRQ_LOCK: Explanation = Explanation {
+    code: "FX-0974",
+    title: "a task tried to block holding an IrqSpinLock",
+    meaning: "An `IrqSpinLock` masks interrupts on its processor for as long as it is held, and \
+              raises no preemption count, so FX-0503 does not see a block under one: the task \
+              would leave its processor with the lock taken and interrupts' delivery to it \
+              decided by whatever runs next. Development builds count the guards each processor \
+              holds (`L.sched.200`) and a block with one held stops the machine. Release builds \
+              keep no count and do not stop, a gap `sched::require_may_sleep` states.",
+    causes: &[
+        "A call that can sleep (an allocation that waits, a wait queue, a sleep lock) was made \
+         inside an `IrqSpinLock`'s critical section.",
+        "An `IrqSpinLock` guard was forgotten (`mem::forget`, `ManuallyDrop`), which leaves the \
+         count raised on its processor.",
+    ],
+    see: "src/kernel/src/sched/mod.rs require_may_sleep; src/lib/kernel/sync/src/lib.rs IrqControl",
+};
+
 /// For the panic the standard library's allocation error handler raises,
 /// recognised by `panic.rs`.
 pub(crate) static ALLOCATION_ABORTED: Explanation = Explanation {
@@ -4419,6 +4438,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     #[cfg(not(ferrix_shape = "micro"))]
     &BOOT_CHECK_WORKER,
     &RECLAIM_IN_RECLAIM,
+    &BLOCK_HOLDING_AN_IRQ_LOCK,
     &STAGE10_PCI,
     &STAGE10_DEVICES,
     &STAGE10_IOMMU,

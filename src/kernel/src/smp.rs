@@ -151,6 +151,12 @@ pub struct PerCpu {
     /// Both Arm architectures: the stack pointer `ferrix_stack_hit` found
     /// unmapped, for the report. Written from assembly, once.
     pub(crate) overflow_sp: AtomicU64,
+    /// Development builds: the `IrqSpinLock` guards this processor holds,
+    /// `sched::irq_guard_made`'s and `irq_guard_dropped`'s, which alone write
+    /// it, always with interrupts masked on this processor (`L.sched.200`).
+    /// Last, so no offset read from assembly moves.
+    #[cfg(debug_assertions)]
+    pub(crate) irq_guards: core::sync::atomic::AtomicU32,
 }
 
 /// In [`PerCpu::task_kind`]: the running task is in restricted mode.
@@ -430,6 +436,8 @@ fn leak_records(numbered: impl Iterator<Item = (usize, u64)>) -> &'static [PerCp
             syscalls: OwnCount::new(),
             emergency_stack: AtomicU64::new(0),
             overflow_sp: AtomicU64::new(0),
+            #[cfg(debug_assertions)]
+            irq_guards: core::sync::atomic::AtomicU32::new(0),
         })
         // FATAL-ALLOC: boot only: stage 4 builds the processor table once, before the secondaries start.
         .collect();

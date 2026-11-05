@@ -1982,9 +1982,11 @@ pub fn sleep_for(nanos: u64) {
 }
 
 /// Stop the machine if the running context is an interrupt handler
-/// (`L.sched.173`). A lock held is FX-0503, at the switch. Interrupts masked alone are
-/// not this: a task may leave with them masked and come back to them masked, as
-/// `throttle_current` does at the very end of a trap, holding nothing.
+/// (`L.sched.173`), or, in development builds, holds an `IrqSpinLock`
+/// (`L.sched.200`). A lock that raises the preemption count is FX-0503, at the
+/// switch. Interrupts masked alone are neither: a task may leave with them
+/// masked and come back to them masked, as `throttle_current` does at the very
+/// end of a trap, holding nothing.
 #[inline(always)]
 fn require_may_sleep() {
     // An interrupt runs masked, so a context taking interrupts is none, and this one
@@ -1993,6 +1995,59 @@ fn require_may_sleep() {
         crate::panic::fatal!(
             crate::panic::catalog::BLOCK_IN_AN_INTERRUPT,
             "a task blocked in an interrupt"
+        );
+    }
+    #[cfg(debug_assertions)]
+    require_no_irq_guard();
+}
+
+/// Development builds: one more `IrqSpinLock` guard held on this processor
+/// (`L.sched.200`). Called by `arch::Irq`'s `guard_made`, inside the lock's
+/// interrupt mask, so the processor cannot change between finding the record
+/// and writing it, and no handler can come between the load and the store:
+/// the count is written only by its own processor, masked.
+///
+/// Per processor, not per task (ledger 7415 (D2)): a guard is `!Send` and its
+/// drop restores the mask on the processor that took it, so a guard made by one
+/// task and dropped by the next across a switch still balances here. Before the
+/// boot processor's record is installed nothing is counted; a guard made then
+/// and dropped after would find zero, and is floored there, so the count can
+/// only miss a guard, never invent one.
+#[cfg(debug_assertions)]
+pub(crate) fn irq_guard_made() {
+    if let Some(me) = crate::smp::this_cpu() {
+        me.irq_guards
+            .store(me.irq_guards.load(Ordering::Relaxed) + 1, Ordering::Relaxed);
+    }
+}
+
+/// Development builds: an `IrqSpinLock` guard let go on this processor, after
+/// its release and before its mask is restored ([`irq_guard_made`]).
+#[cfg(debug_assertions)]
+pub(crate) fn irq_guard_dropped() {
+    if let Some(me) = crate::smp::this_cpu() {
+        let held = me.irq_guards.load(Ordering::Relaxed);
+        me.irq_guards
+            .store(held.saturating_sub(1), Ordering::Relaxed);
+    }
+}
+
+/// Development builds: stop the machine if this processor holds an
+/// `IrqSpinLock` guard as its task blocks (FX-0974, `L.sched.200`). Read
+/// masked, so the record read is this processor's: unmasked, the task could
+/// move between finding it and reading it, and see another processor's holder.
+/// Release builds keep no count, so a block under an `IrqSpinLock` there is
+/// caught by nothing; the development gate's rows are what stand for it.
+#[cfg(debug_assertions)]
+fn require_no_irq_guard() {
+    let state = arch::Irq::disable();
+    let held = crate::smp::this_cpu().map_or(0, |me| me.irq_guards.load(Ordering::Relaxed));
+    arch::Irq::restore(state);
+    if held != 0 {
+        crate::panic::fatal!(
+            crate::panic::catalog::BLOCK_HOLDING_AN_IRQ_LOCK,
+            "a task blocked holding {} IrqSpinLock guard(s)",
+            held
         );
     }
 }

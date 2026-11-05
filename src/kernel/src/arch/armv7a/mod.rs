@@ -1498,6 +1498,18 @@ unsafe impl ferrix_sync::IrqControl for Irq {
         // which is exactly `restore_interrupt_mask`'s contract.
         unsafe { cpu::restore_interrupt_mask(state as u32) };
     }
+
+    #[cfg(debug_assertions)]
+    #[inline(always)]
+    fn guard_made() {
+        crate::sched::irq_guard_made();
+    }
+
+    #[cfg(debug_assertions)]
+    #[inline(always)]
+    fn guard_dropped() {
+        crate::sched::irq_guard_dropped();
+    }
 }
 
 /// Wait until an interrupt arrives.
