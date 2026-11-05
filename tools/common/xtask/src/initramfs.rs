@@ -713,6 +713,61 @@ pub(crate) fn build_with_utilities(
     build_with_shell(program.as_deref(), natives, zinc, uutils, ports)
 }
 
+/// K14's digest of an image (`docs/microkernel/K14.md` §2, K14.12): SHA-256 of its length in
+/// whole pages as 8 little-endian bytes, then its pages, the last zero-padded, as a sealed
+/// object's `Vmo::seal` hashes. An empty image is one page of zeros.
+fn certified_digest(image: &[u8]) -> [u8; 32] {
+    let pages = image.len().next_multiple_of(4096).max(4096);
+    let mut framed = Vec::with_capacity(pages + 8);
+    framed.extend_from_slice(&(pages as u64).to_le_bytes());
+    framed.extend_from_slice(image);
+    framed.resize(pages + 8, 0);
+    crate::sha256::digest(&framed)
+}
+
+/// `etc/ferrix/certified` (`docs/microkernel/K14.md` §5) from `natives`: magic, version, count,
+/// then digest and name. Each name is cut to 32 bytes, zero-padded.
+fn certified_bytes(natives: &[native::Built]) -> Result<Vec<u8>> {
+    const MOST: usize = 256;
+    if natives.len() > MOST {
+        return Err(Error::new(format!(
+            "{} images will not fit K14's list of {MOST}",
+            natives.len()
+        )));
+    }
+    let mut out = Vec::with_capacity(12 + natives.len() * 64);
+    out.extend_from_slice(b"FXCL");
+    out.extend_from_slice(&1_u32.to_le_bytes());
+    out.extend_from_slice(&(natives.len() as u32).to_le_bytes());
+    for image in natives {
+        out.extend_from_slice(&certified_digest(&image.bytes));
+        let mut name = [0_u8; 32];
+        let length = image.name.len().min(32);
+        name[..length].copy_from_slice(&image.name.as_bytes()[..length]);
+        out.extend_from_slice(&name);
+    }
+    Ok(out)
+}
+
+/// The list a `fast` or `max` image carries, and no other (ledger 7011 LV.3). **Development
+/// only**: it names every native image this build made, so that a driver of a held node can pass
+/// on these images. No review of any image stands behind it, and it implies no certification:
+/// a certified item's list comes from that item's evidence, M7's.
+fn certified_list(natives: &[native::Built]) -> Result<Option<ports::File>> {
+    if !matches!(crate::flags::asked_profile().as_str(), "fast" | "max") {
+        return Ok(None);
+    }
+    println!(
+        "  certified list: {} native images, development-only, no certification implied",
+        natives.len()
+    );
+    Ok(Some(ports::File {
+        path: "etc/ferrix/certified".to_owned(),
+        mode: 0o644,
+        content: ports::Content::Bytes(certified_bytes(natives)?),
+    }))
+}
+
 /// Whether busybox gets the name `applet` in `/bin`. A name there can only be
 /// one program: zinc owns `sh` when it is carried, uutils owns every name it
 /// implements, and a carried program owns its own -- the desktop's `reboot`,
@@ -913,13 +968,13 @@ fn build_with_shell(
             .iter()
             .any(|file| file.path == "etc/ferrix/partitions")
     });
+    let listed = certified_list(natives)?;
     let with_server: Vec<ports::File>;
-    let ports = match served {
-        Some(description) => {
-            with_server = ports.iter().cloned().chain([description]).collect();
-            with_server.as_slice()
-        }
-        None => ports,
+    let ports = if served.is_some() || listed.is_some() {
+        with_server = ports.iter().cloned().chain(served).chain(listed).collect();
+        with_server.as_slice()
+    } else {
+        ports
     };
     // A sabotaged authd goes into test-auth's control images and no other.
     crate::auth::refuse_sabotaged(ports)?;
@@ -1104,6 +1159,36 @@ fn refuse_too_many_drivers(natives: &[native::Built]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// K14.12: this framing is the kernel's. The kernel's own boot check names this digest of
+    /// one zero page, so a change on either side fails here.
+    #[test]
+    fn the_lists_framing_is_the_kernels() {
+        let kernel = include_str!("../../../../src/kernel/src/object/sealing_check.rs");
+        let hex = |d: [u8; 32]| d.iter().map(|b| format!("{b:02x}")).collect::<String>();
+        let zero = hex(certified_digest(&[0; 4096]));
+        assert!(kernel.contains(&format!("\"{zero}\"")), "{zero}");
+        assert_eq!(hex(certified_digest(&[])), zero);
+        assert_eq!(hex(certified_digest(&[0; 17])), zero);
+        assert_ne!(hex(certified_digest(&[1])), zero);
+    }
+
+    /// The form `ferrix_partition_desc::certified::parse` reads: header and entries, exactly.
+    #[test]
+    fn the_list_has_its_header_and_one_entry_per_image() {
+        let natives = [native::Built {
+            name: "a-name-longer-than-the-thirty-two-bytes-it-has",
+            directory: "x",
+            bytes: vec![1, 2, 3],
+        }];
+        let list = certified_bytes(&natives).unwrap();
+        assert_eq!(&list[..4], b"FXCL");
+        assert_eq!(list[4..8], 1_u32.to_le_bytes());
+        assert_eq!(list[8..12], 1_u32.to_le_bytes());
+        assert_eq!(list.len(), 12 + 64);
+        assert_eq!(list[12..44], certified_digest(&[1, 2, 3]));
+        assert_eq!(&list[44..76], &natives[0].name.as_bytes()[..32]);
+    }
 
     /// [`entries`] reads back every name, which are links, and their data,
     /// up to the trailer, from an archive [`Newc`] wrote; bytes that are not
