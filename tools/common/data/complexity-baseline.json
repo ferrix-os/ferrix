@@ -60,8 +60,8 @@
       "recursive": false
     },
     "boot_authority.rs::try_start_manager": {
-      "complexity": 47,
-      "lines": 136,
+      "complexity": 51,
+      "lines": 147,
       "recursive": false
     },
     "device.rs::publish": {
@@ -125,13 +125,13 @@
       "recursive": false
     },
     "linuxd_start.rs::start": {
-      "complexity": 37,
-      "lines": 135,
+      "complexity": 40,
+      "lines": 160,
       "recursive": false
     },
     "linuxd_start.rs::start_further": {
-      "complexity": 20,
-      "lines": 103,
+      "complexity": 21,
+      "lines": 110,
       "recursive": false
     },
     "main.rs::bring_up_processors": {

@@ -14,17 +14,17 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
-| High (`H.*`) | 192 | 138 | 54 |
-| Low (`L.*`) | 1486 | 1209 | 277 |
+| High (`H.*`) | 193 | 139 | 54 |
+| Low (`L.*`) | 1490 | 1213 | 277 |
 
-3341 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+3347 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 3348 |
-| Accessors, covered by the requirement they serve | 1415 |
+| Named by a low-level requirement | 3354 |
+| Accessors, covered by the requirement they serve | 1416 |
 | Check code in a product file | 124 |
-| Named by none | 1112 |
+| Named by none | 1117 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `ferrix_boot_policy`, `ferrix_sha256`, `ferrix_sigverify`, `ferrix_slots`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -164,7 +164,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 |---|---|
 | ASR-1 | `H.MEM.1`, `H.MEM.2`, `H.MEM.3`, `H.MEM.7`, `H.MEM.8`, `H.MEM.12`, `H.MEM.14`, `H.MEM.15`, `H.MEM.16`, `H.MEM.17`, `H.MEM.19`, `H.MEM.25`, `H.MEM.23`, `H.SCHED.6`, `H.TRAP.4` |
 | ASR-2 | `H.MEM.4`, `H.MEM.5`, `H.MEM.13`, `H.MEM.27`, `H.MEM.24`, `H.MEM.30` |
-| ASR-3 | `H.MEM.24`, `H.MEM.29`, `H.OBJ.1`, `H.OBJ.2`, `H.OBJ.3`, `H.OBJ.4`, `H.OBJ.5`, `H.OBJ.6`, `H.OBJ.14`, `H.OBJ.15`, `H.IRQ.1`, `H.DEV.1`, `H.DEV.5`, `H.DEV.9`, `H.DEV.10`, `H.DEV.11`, `H.DEV.7`, `H.DEV.8`, `H.DEV.12`, `H.DEV.13` |
+| ASR-3 | `H.MEM.24`, `H.MEM.29`, `H.OBJ.1`, `H.OBJ.2`, `H.OBJ.3`, `H.OBJ.4`, `H.OBJ.5`, `H.OBJ.6`, `H.OBJ.14`, `H.OBJ.15`, `H.IRQ.1`, `H.DEV.1`, `H.DEV.5`, `H.DEV.9`, `H.DEV.10`, `H.DEV.11`, `H.DEV.7`, `H.DEV.8`, `H.DEV.12`, `H.DEV.13`, `H.MEM.32` |
 | ASR-4 | `H.DMA.1`, `H.DMA.2`, `H.DMA.6`, `H.DMA.7`, `H.DMA.3`, `H.DMA.8`, `H.DMA.9`, `H.DMA.5`, `H.DMA.10`, `H.DEV.2`, `H.DEV.4` |
 | ASR-5 | `H.MEM.6` |
 | ASR-6 | `H.DEV.6`, `H.BOOT.1`, `H.BOOT.2`, `H.BOOT.4`, `H.BOOT.5`, `H.BOOT.16`, `H.FAIL.1`, `H.FAIL.2`, `H.FAIL.3`, `H.FAIL.4`, `H.FAIL.5`, `H.FAIL.8`, `H.FAIL.9`, `H.FAIL.10`, `H.FAIL.12`, `H.FAIL.13`, `H.FAIL.11` |
@@ -178,7 +178,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | G.7 | `H.OBJ.11`, `H.OBJ.17`, `H.OBJ.18`, `H.OBJ.19`, `H.OBJ.21`, `H.OBJ.20` |
 | G.8 | `H.OBJ.12`, `H.OBJ.22`, `H.QUOTA.6`, `H.QUOTA.12`, `H.QUOTA.13`, `H.QUOTA.22`, `H.QUOTA.15`, `H.QUOTA.16`, `H.QUOTA.17` |
 | O.AUDIT | `H.AUD.1`, `H.AUD.2`, `H.AUD.3`, `H.AUD.4`, `H.AUD.5`, `H.AUD.6`, `H.AUD.7`, `H.AUD.8`, `H.AUD.9`, `H.AUD.10`, `H.AUD.11`, `H.AUD.12`, `H.AUD.13` |
-| O.CAPABILITY | `H.MEM.24`, `H.MEM.29`, `H.MEM.30`, `H.OBJ.1`, `H.OBJ.2`, `H.OBJ.3`, `H.OBJ.4`, `H.OBJ.5`, `H.OBJ.6`, `H.OBJ.7`, `H.OBJ.8`, `H.OBJ.9`, `H.OBJ.11`, `H.OBJ.14`, `H.OBJ.15`, `H.OBJ.16`, `H.OBJ.17`, `H.OBJ.18`, `H.OBJ.22`, `H.OBJ.19`, `H.OBJ.21`, `H.OBJ.23`, `H.OBJ.24`, `H.IRQ.1`, `H.IRQ.2`, `H.DMA.5`, `H.DEV.1`, `H.DEV.5`, `H.DEV.9`, `H.DEV.10`, `H.DEV.11`, `H.DEV.7`, `H.DEV.8`, `H.TRAP.20`, `H.DEV.12`, `H.DEV.13` |
+| O.CAPABILITY | `H.MEM.24`, `H.MEM.29`, `H.MEM.30`, `H.OBJ.1`, `H.OBJ.2`, `H.OBJ.3`, `H.OBJ.4`, `H.OBJ.5`, `H.OBJ.6`, `H.OBJ.7`, `H.OBJ.8`, `H.OBJ.9`, `H.OBJ.11`, `H.OBJ.14`, `H.OBJ.15`, `H.OBJ.16`, `H.OBJ.17`, `H.OBJ.18`, `H.OBJ.22`, `H.OBJ.19`, `H.OBJ.21`, `H.OBJ.23`, `H.OBJ.24`, `H.IRQ.1`, `H.IRQ.2`, `H.DMA.5`, `H.DEV.1`, `H.DEV.5`, `H.DEV.9`, `H.DEV.10`, `H.DEV.11`, `H.DEV.7`, `H.DEV.8`, `H.TRAP.20`, `H.DEV.12`, `H.DEV.13`, `H.MEM.32` |
 | O.DMA | `H.DMA.1`, `H.DMA.2`, `H.DMA.6`, `H.DMA.7`, `H.DMA.3`, `H.DMA.8`, `H.DMA.9`, `H.DMA.4`, `H.DMA.5`, `H.DMA.10`, `H.DEV.2`, `H.DEV.4` |
 | O.FAILSAFE | `H.MEM.22`, `H.DEV.6`, `H.TRAP.6`, `H.BOOT.1`, `H.BOOT.2`, `H.BOOT.4`, `H.BOOT.5`, `H.BOOT.6`, `H.BOOT.7`, `H.BOOT.8`, `H.BOOT.15`, `H.BOOT.16`, `H.FAIL.1`, `H.FAIL.2`, `H.FAIL.3`, `H.FAIL.4`, `H.FAIL.5`, `H.FAIL.8`, `H.FAIL.9`, `H.FAIL.10`, `H.FAIL.12`, `H.FAIL.13`, `H.FAIL.11` |
 | O.ISOLATE | `H.MEM.1`, `H.MEM.2`, `H.MEM.3`, `H.MEM.7`, `H.MEM.8`, `H.MEM.10`, `H.MEM.12`, `H.MEM.14`, `H.MEM.15`, `H.MEM.16`, `H.MEM.17`, `H.MEM.18`, `H.MEM.19`, `H.OBJ.28`, `H.OBJ.27`, `H.MEM.28`, `H.MEM.24`, `H.MEM.25`, `H.MEM.22`, `H.MEM.23`, `H.OBJ.13`, `H.OBJ.25`, `H.OBJ.26`, `H.OBJ.30`, `H.OBJ.34`, `H.SCHED.6`, `H.SCHED.7`, `H.SCHED.8`, `H.SCHED.12`, `H.TRAP.3`, `H.TRAP.4`, `H.TRAP.5`, `H.TRAP.6`, `H.TRAP.7`, `H.TRAP.8`, `H.TRAP.13`, `H.TRAP.16`, `H.TRAP.17`, `H.TRAP.19`, `H.TRAP.20`, `H.TRAP.21`, `H.TRAP.22`, `H.TRAP.23`, `H.TRAP.24`, `H.BOOT.3`, `H.BOOT.9` |
@@ -451,6 +451,12 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `H.STORE.8` | An operation that fails after it changed something shall abort its transaction, so that none of it is committed, and the volume reloaded at its last commit shall take no further change. | Through a mount, a commit whose device write fails answers EIO; the mount then reads the last commit, has no trace of the aborted transaction, answers EROFS to a write, a truncation and a create, and the disk holds the last commit. | ASR-9 | `src/lib/fs/btrfs/vfs/src/tests/rw.rs::an_aborted_transaction_leaves_the_mount_read_only_at_its_last_commit` | host test | host test | host test |
 | `H.DEV.12` | Under personality=user, device authority and a safety partition's authority shall pass from the kernel to their holders directly, and a safety partition's device shall reach no other holder. | test-first-processes: a described device goes to the manager and is kept from devmgr; a description naming no node, or malformed, stops the boot; L.object.322, 323. | O.CAPABILITY, ASR-3 | `tools/common/xtask/src/qemu.rs::test_first_processes` | xtask gate | xtask gate | xtask gate |
 | `H.DEV.13` | Each first process's death shall leave nothing running on its authority: the manager's is the machine's safe state, devmgr's kills its drivers and quiesces their devices, linuxd's kills its programs. This family stands in H.DEV because the block holds no H.OBJ. | test-first-processes' deaths; L.object.326, 327, 328. | O.CAPABILITY, ASR-3 | `tools/common/xtask/src/qemu.rs::test_first_process_dies` | xtask gate | xtask gate | xtask gate |
+
+### PagerBackedObjects (`H.MEM`)
+
+| Id | Statement | Criterion | Parent | Verified by | x86-64 | AArch64 | ARMv7-A |
+|---|---|---|---|---|---|---|---|
+| `H.MEM.32` | *Under `kernel_memory=retyped`:* After the seal the kernel's global allocator shall serve a job only from the retyped pages of its own promise, a task with no job only from the named kernel pool, and refuse every other request. | A personality=user kernel_memory=retyped boot's mm::seal::check, and test-rustc, test-btrfsd-restart, test-partitions under it reporting zero refused. | O.CAPABILITY, ASR-3 | `src/kernel/src/mm/seal_check.rs::check` | not built | not built | not built |
 
 ### Signing (`H.SIGN`)
 
@@ -946,6 +952,10 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.object.334` | A first process's pages shall be made by the kernel from the bytes of its sealed image, no other copy, and that image's digest recorded on its measured space: the one exception to executable only from sealed. | test-first-processes boots the manager and devmgr so measured; review of boot_authority::load_sealed, its one caller each. | H.DEV.13 | `boot_authority::load_sealed` | `tools/common/xtask/src/qemu.rs::test_first_processes` | xtask gate | xtask gate | xtask gate |
 | `L.object.335` | ferrix_cpio::file_named shall answer the regular file of a safe name, inside the archive's bounds, stop at the first malformed header, allocate nothing and write nothing: ring 0's one parser of the archive under personality=user. | ferrix-cpio's host tests of it, its fuzz target, and a refused archive's boot in test-first-processes. | H.DEV.13 | `ferrix_cpio::file_named` | `src/lib/fs/common/cpio/src/tests.rs::file_named_finds_a_regular_file_of_a_safe_name_and_nothing_else`, `src/lib/fs/common/cpio/src/tests.rs::file_named_sees_no_unsafe_name_and_nothing_past_a_malformed_header` | host test | host test | host test |
 | `L.object.327` | linuxd's end shall kill what remains of its partition's job. | test-partitions: a partition's linuxd dying, its line with the count. | H.DEV.13 | `linuxd_start::start`, `linuxd_start::start_further` | *baselined* | — | — | — |
+| `L.object.336` | *Under `kernel_memory=retyped`:* After the seal a request charged to a job with no promise shall be refused. | mm::seal::check's plant, on a job of its own; its control FIRED. | H.MEM.32 | `mm::seal::route`, `mm::seal::note_shared` | `src/kernel/src/mm/seal_check.rs::check` | not built | not built | not built |
+| `L.object.337` | *Under `kernel_memory=retyped`:* An object shall be on a page of the promise of the job it is charged to. | mm::seal::check, against the job's draws_from; its control FIRED. | H.MEM.32 | `mm::heap_drawn_from` | `src/kernel/src/mm/seal_check.rs::check` | not built | not built | not built |
+| `L.object.338` | *Under `kernel_memory=retyped`:* A task with no job and no ticket shall draw on the pool, whichever job the processor last ran, and nothing shall be served in an interrupt. | mm::seal::check with the processor's group forced to another job's; its control FIRED. | H.MEM.32 | `mm::seal::charged`, `mm::seal::note_payer`, `mm::seal::seal_after_boot`, `mm::seal::report` | `src/kernel/src/mm/seal_check.rs::check` | not built | not built | not built |
+| `L.object.340` | *Under `kernel_memory=retyped`:* A frame a job's heap gives back shall hold none of that job's bytes. | mm::seal::check's large allocation; its control FIRED. | H.MEM.32 | `mm::ReservedPages::deallocate_pages` | `src/kernel/src/mm/seal_check.rs::check` | not built | not built | not built |
 | `L.object.346` | A further Linux partition shall be started in a job and a region of its own with the FURTHER row alone: no console, no cores, no devmgr channel, and its end shall kill its job and nothing else. | test-partitions: a second partition runs programs and ends, and one that dies at once, the first going on; Rows::judge at its start; the first's end ends the machine, shown. | H.DEV.13 | `linuxd_start::start_further` | *baselined* | — | — | — |
 | `L.object.347` | With more than one Linux partition, each shall be a speculation domain of its own. | test-partitions reads two distinct non-zero domains from the kernel's lines; n10 FIRED. | H.DEV.13 | `linuxd_start::start` | *baselined* | — | — | — |
 
@@ -2833,6 +2843,11 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/mm/check.rs::refusal_drains_every_cache` | kernel | L.mm.95, L.mm.97 |
 | `src/kernel/src/mm/check.rs::reserve_refusals_drain_every_cache` | kernel | L.mm.95 |
 | `src/kernel/src/mm/check.rs::sweep_w_xor_x` | kernel | H.MEM.4, L.mm.32 |
+| `src/kernel/src/mm/seal_check.rs::check` | kernel | H.MEM.32 |
+| `src/kernel/src/mm/seal_check.rs::check` | kernel | L.object.336 |
+| `src/kernel/src/mm/seal_check.rs::check` | kernel | L.object.337 |
+| `src/kernel/src/mm/seal_check.rs::check` | kernel | L.object.338 |
+| `src/kernel/src/mm/seal_check.rs::check` | kernel | L.object.340 |
 | `src/kernel/src/object/alloc_check.rs::check_a_close_without_queue_room_drops_in_place` | kernel | L.object.105 |
 | `src/kernel/src/object/alloc_check.rs::check_a_library_insert_runs_in_a_section` | kernel | L.mm.63, L.mm.64 |
 | `src/kernel/src/object/alloc_check.rs::check_a_section_completes_on_the_reserve` | kernel | L.mm.35 |

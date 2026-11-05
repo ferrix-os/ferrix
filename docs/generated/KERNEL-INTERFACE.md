@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2976 declarations in the core's files, 207 in the item's; 230 checks-only.
+2982 declarations in the core's files, 209 in the item's; 230 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2031,6 +2031,8 @@ checks above is `pub` for raised checks (F3).
 | `zero_frame` | fn | item, load |  |
 | `check` | mod | item, load, bin |  |
 | `scrub` | mod | item, load, bin |  |
+| `seal` | mod | item |  |
+| `seal_check` | mod | bin |  |
 | `bypass_heap_in_sections` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `fill_reserve` | re-export | bin |  |
 | `refuse_reserve_fills` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -2107,6 +2109,20 @@ checks above is `pub` for raised checks (F3).
 | `Batch::tested` | field | item, load |  |
 | `Standing::reason` | method | item, load, bin |  |
 | `Standing::runs` | method | item, load, bin |  |
+
+### `mm::seal`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `note_payer` | fn | item |  |
+| `report` | fn | item |  |
+| `seal_after_boot` | fn | item |  |
+
+### `mm::seal_check`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `check` | fn | bin |  |
 
 ### `mmio`
 
@@ -2309,7 +2325,7 @@ checks above is `pub` for raised checks (F3).
 | `Job::descendants` | method | load |  |
 | `Job::display_name` | method | load |  |
 | `Job::domain` | method | item, load |  |
-| `Job::draws_from` | method | load |  |
+| `Job::draws_from` | method | item, load |  |
 | `Job::events` | method | load, bin |  |
 | `Job::freeze_requested` | method | load |  |
 | `Job::freezing` | method | load |  |
@@ -3800,6 +3816,8 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `run` | fn | bin |  |
+| `set_seal_check` | fn | bin |  |
+| `SealCheck` | type | - |  |
 
 ### `build_flags`
 
