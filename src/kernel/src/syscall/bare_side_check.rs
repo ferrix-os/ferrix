@@ -443,12 +443,14 @@ fn a_limit_ends_its_own(cpu: usize) -> Result<(), &'static str> {
 ///
 /// Verifies: L.sched.4, H.QUOTA.10, L.object.106
 fn a_quota_cuts_a_program_alone(cpu: usize) -> Result<(), &'static str> {
-    const WATCHED_NANOS: u64 = 1_000_000_000;
+    // A fifth, in a quarter of the reference's period, for ten periods
+    // (ledger 7021 W3 and W6): `cpu_check` keeps H.QUOTA.10's own numbers.
+    const WATCHED_NANOS: u64 = 250_000_000;
     const STOPPED: i32 = 97;
     let tree = Job::new_root().map_err(|_| "bare: no job")?;
     let above = tree.new_child().map_err(|_| "bare: no job")?;
     let job = above.new_child().map_err(|_| "bare: no job")?;
-    if !job.set_bandwidth(20_000_000, 100_000_000) {
+    if !job.set_bandwidth(5_000_000, 25_000_000) {
         return Err("bare: a job's cpu.max could not be set");
     }
     let side = BareSide::spinning(Arc::clone(&job))?;
@@ -464,7 +466,7 @@ fn a_quota_cuts_a_program_alone(cpu: usize) -> Result<(), &'static str> {
     }
     // On every boot: a share used as a limit is read on hosts out of reach too (ledger 7058).
     println!(
-        "  bare     under cpu.max 20000 100000 a program ran {} of {} us",
+        "  bare     under cpu.max 5000 25000 a program ran {} of {} us",
         ran / 1000,
         wall / 1000
     );

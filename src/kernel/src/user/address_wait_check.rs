@@ -76,6 +76,9 @@ const SHARED_OFFSET: u64 = 0x40;
 const PATIENCE_NANOS: u64 = 10_000_000_000;
 /// How long the check gives a waiter to be listed.
 const LISTED_NANOS: u64 = 5_000_000_000;
+/// How soon a waiter whose process ended must have left: far under the second
+/// the wait's own look would take, which is what a lost wake would show as.
+const ENDED_NANOS: u64 = 250_000_000;
 /// The deadline of the timed case.
 const SHORT_NANOS: u64 = 5_000_000;
 /// How late past its deadline the timed case may come back: under the
@@ -129,6 +132,16 @@ fn waiter(slot: usize) {
 
 /// Start a waiter in `slot` making `number` with `args` for `side`.
 fn start(slot: usize, side: &Side, number: usize, args: [u64; 6]) -> Result<(), &'static str> {
+    start_task(slot, side, number, args).map(drop)
+}
+
+/// [`start`], and the waiter's task.
+fn start_task(
+    slot: usize,
+    side: &Side,
+    number: usize,
+    args: [u64; 6],
+) -> Result<Arc<sched::Task>, &'static str> {
     if let Some(place) = ANSWERS.lock().get_mut(slot) {
         *place = None;
     }
@@ -140,7 +153,6 @@ fn start(slot: usize, side: &Side, number: usize, args: [u64; 6]) -> Result<(), 
         });
     }
     sched::spawn("addrwait waiter", waiter, slot, ferrix_sched::NICE_0_WEIGHT)
-        .map(drop)
         .map_err(|_| "addrwait: could not start a waiter")
 }
 
@@ -714,7 +726,10 @@ fn a_deadline_ends_a_wait_and_never_early(
 }
 
 /// Case 9: a waiter whose process ends leaves its wait with `EINTR`, and
-/// nothing of it stays on the table.
+/// nothing of it stays on the table. Its task is listed as the process's, as a
+/// thread's is, so that the end's own post is what wakes it by name: the wait's
+/// second-long look of its own is not the way out, and within a quarter of it
+/// it must have left.
 ///
 /// Verifies: L.user.142
 fn an_ending_process_ends_its_wait(report: &mut Report) -> Result<(), &'static str> {
@@ -722,17 +737,25 @@ fn an_ending_process_ends_its_wait(report: &mut Report) -> Result<(), &'static s
     report.processes += 1;
     set(&d, WORD, 4)?;
     let deadline = deadline_in(&d, 3, PATIENCE_NANOS)?;
-    start(
+    let task = start_task(
         3,
         &d,
         nr::ADDRESS_WAIT,
         [WORD, 4, u64::from(u32::MAX), 0, deadline, 0],
     )?;
+    object::process::Host::core(&*d.process)
+        .list_task(&task)
+        .map_err(|_| "addrwait: no room to list a waiter as its process's task")?;
+    drop(task);
     let key = private(&d, WORD);
     until_listed(core::slice::from_ref(&key), 1)?;
+    let asked = crate::timer::now_nanos();
     process::kill(&d.process, KILLED_STATUS);
     if answer(3, PATIENCE_NANOS) != Some(Err(Errno::EINTR)) {
         return Err("addrwait: a waiter whose process ended did not leave with EINTR");
+    }
+    if crate::timer::now_nanos().saturating_sub(asked) > ENDED_NANOS {
+        return Err("addrwait: a waiter whose process ended was not woken by the end");
     }
     if address_wait::waiters_on(core::slice::from_ref(&key)) != 0 {
         return Err("addrwait: an ended waiter was left on the table");

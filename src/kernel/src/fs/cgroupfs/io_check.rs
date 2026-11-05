@@ -12,7 +12,7 @@
 //!   as `tg_set_limit` answers, and the root has none;
 //! * with `rbps=16384`, four reads of 4 KiB take the better part of a
 //!   second, and with the limit lifted they take a blink;
-//! * a limit on a parent holds for its child's reads (`riops=4`), and the
+//! * a limit on a parent holds for its child's reads (`riops=40`), and the
 //!   parent's `io.stat` counts them;
 //! * `io.weight` reads `default 100`, takes a default and a disk's own
 //!   weight as `ioc_weight_write` does (`EINVAL` out of 1 to 10,000,
@@ -241,8 +241,13 @@ fn shape_files(harness: &mut Harness, job: &Group) -> Checked<()> {
 const SLOW_MINOR: u32 = 1;
 /// How long the slow disk takes a read.
 const SLOW_NANOS: u64 = 2_000_000;
-/// How long the two readers read for.
-const SHARE_WINDOW: u64 = 600_000_000;
+/// How many reads the two readers make between them before they are told to
+/// stop: enough for the ratios below to be counts rather than noise, and a
+/// count rather than a time so that a slower host reads as many (ledger 7021
+/// W2 and W6). The read keeps its [`SLOW_NANOS`], and `blkio`'s hold with it.
+const SHARE_READS: u64 = 120;
+/// How long the two readers may take over [`SHARE_READS`].
+const SHARE_PATIENCE: u64 = 10_000_000_000;
 
 /// A disk in memory that takes [`SLOW_NANOS`] a read, as a disk with one
 /// request in flight at a time would.
@@ -294,8 +299,8 @@ fn reader(which: usize) {
     }
 }
 
-/// Two readers of the slow disk, one in each of `a` and `b`, for
-/// [`SHARE_WINDOW`]: what each read.
+/// Two readers of the slow disk, one in each of `a` and `b`, until they have
+/// read [`SHARE_READS`] times between them: what each read.
 fn race(a: &Group, b: &Group) -> Checked<(u64, u64)> {
     STOP.store(false, Ordering::Release);
     for count in &READ {
@@ -303,14 +308,25 @@ fn race(a: &Group, b: &Group) -> Checked<(u64, u64)> {
     }
     let first = crate::sched::spawn_in_group("io-share-a", reader, 0, 0, a.slot())?;
     let second = crate::sched::spawn_in_group("io-share-b", reader, 1, 0, b.slot());
+    let started = crate::timer::now_nanos();
+    let mut late = false;
     if second.is_ok() {
-        crate::sched::sleep_for(SHARE_WINDOW);
+        while READ[0].load(Ordering::Relaxed) + READ[1].load(Ordering::Relaxed) < SHARE_READS {
+            if crate::timer::now_nanos().saturating_sub(started) > SHARE_PATIENCE {
+                late = true;
+                break;
+            }
+            crate::sched::sleep_for(SLOW_NANOS);
+        }
     }
     STOP.store(true, Ordering::Release);
     let first_gone = crate::sched::wait_until_gone(&first, 5_000_000_000);
     let second_gone = second.and_then(|task| crate::sched::wait_until_gone(&task, 5_000_000_000));
     first_gone?;
     second_gone?;
+    if late {
+        return Err("the io check's two readers did not make their reads of the slow disk");
+    }
     Ok((
         READ[0].load(Ordering::Relaxed),
         READ[1].load(Ordering::Relaxed),
@@ -497,14 +513,17 @@ fn hierarchy(harness: &mut Harness, disk: &Arc<dyn BlockDevice>) -> Checked<u32>
     let parent = Group::bare(harness, b"/check-ip")?;
     parent.set(harness, "cgroup.subtree_control", b"+io\n")?;
     let child = Group::make(harness, b"/check-ip/c")?;
-    parent.set(harness, "io.max", b"251:0 riops=4\n")?;
-    // Three reads at four a second: 0, 0.25 and 0.5 seconds in.
+    parent.set(harness, "io.max", b"251:0 riops=40\n")?;
+    // Three reads at forty a second: 0, 25 and 50 ms in. `riops` and `rbps` are
+    // the one `Rate` (`fs::blkio::set_limits`), and rbps's 650..2000 ms above is
+    // that rate's reference, its upper bound 2.7 times what it should take; this
+    // case asks where a limit holds, on a parent, and keeps a host's margin.
     let held = reads(&child, disk, 3)?;
     let counted = line(harness, &parent.file("io.stat"))?;
     let _ = child.end(harness);
     let _ = parent.end(harness);
-    if !(400..=1500).contains(&held) {
-        crate::console::println!("  io       three reads under a parent's riops=4 took {held} ms");
+    if !(40..=1500).contains(&held) {
+        crate::console::println!("  io       three reads under a parent's riops=40 took {held} ms");
         return Err("a parent's io.max did not hold for its child's reads");
     }
     if counted != b"251:0 rbytes=12288 wbytes=0 rios=3 wios=0 dbytes=0 dios=0" {

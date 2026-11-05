@@ -151,6 +151,10 @@ Three paths were rebuilt so that they need no memory at all:
   when the task is made. `src/lib/kernel/sched/tests/no_allocation.rs` counts the
   allocations of a queue and a timeline at work under a counting global
   allocator, and requires none.
+* **An unmap's look at the objects it may have let go.** It holds the space's
+  lock for a sort of the k ids its removed regions named and one pass of the n
+  regions with a binary search per region, n log k. It replaces no bound, and with
+  no memory for the list the unmap walks the tables as before, n log n.
 * **Taking pages out of an object** (munmap, madvise, truncation, mremap,
   copy-on-write). The frames go into a list whose room is had before the
   first frame leaves the object, so a frame is never out of one list and not

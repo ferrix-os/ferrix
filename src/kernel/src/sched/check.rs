@@ -1544,6 +1544,17 @@ const IDLE_SWITCHES: u64 = 10_000;
 /// Every how many turns each of its tasks sleeps instead of yielding.
 const IDLE_SLEEP_EVERY: u64 = 16;
 
+/// How long each of those sleeps is: long enough that a processor whose tasks
+/// both sleep halts, and no longer, since the case is about the way out of the
+/// halt and its count of them rather than how long the halt lasted.
+const IDLE_SWITCH_SLEEP_NANOS: u64 = 200_000;
+
+/// The fewest of [`IDLE_SWITCHES`] resumptions that may have followed a sleep:
+/// fewer, and the case did not ask what it is about. At 200 us, 1,721 was the
+/// least of 40 boots on the plain forms and 909 under the coverage plugin,
+/// whose slow processors make more of the resumptions a yield's, 2026-11-05.
+const IDLE_SLEPT_LEAST: u64 = 100;
+
 /// Its resumptions so far.
 static IDLE_RESUMED: AtomicU64 = AtomicU64::new(0);
 
@@ -1598,6 +1609,9 @@ fn a_running_processor_is_not_idle_across_switches(
     if READ_AS_IDLE.load(Ordering::Acquire) {
         return Err("a processor running a task read as idle after a switch");
     }
+    if IDLE_SLEPT.load(Ordering::Relaxed) < IDLE_SLEPT_LEAST {
+        return Err("too few of the idle-bit check's resumptions followed a sleep");
+    }
     Ok(())
 }
 
@@ -1613,7 +1627,7 @@ fn switch_and_look(_index: usize) {
         let before = me.switches();
         let sleeps = turn.is_multiple_of(IDLE_SLEEP_EVERY);
         if sleeps {
-            super::sleep_for(IDLE_LOOK_SLEEP_NANOS);
+            super::sleep_for(IDLE_SWITCH_SLEEP_NANOS);
         } else {
             super::yield_now();
         }

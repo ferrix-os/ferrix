@@ -539,6 +539,7 @@ log path and commit; a new sighting is added to its row the day it is seen.
 | FX-0936 on CI: bare's time case read a share of time fixed from a dev kernel on one host; not a flake, done 2026-11-05 (ledger 6990, 7058). [more](backlog/flakes.md#fl-098) | mk-flip | 9 |
 | `charge_kernel` at the limit refuses without reclaiming: an `open` near `memory.max` answered ENOMEM beside file cache a reclaim would have freed, `pgscan` 0 (2026-11-04, `test-container`'s walk, for the PO's queue). [more](backlog/flakes.md#fl-096) | 13 |
 | Stage 9's timer check: "an early wake took out more or less than its own entry", once, `test-init --arch aarch64 --smp 2` (2026-11-04, K10's check, not traced). [more](backlog/flakes.md#fl-090) | 9 |
+| Stage 9's timer check: "arms case d", once, `test-boot --arch x86_64 --accel kvm --smp 2` at load 4 and ARMv7-A `--smp 2` (2026-11-05, traced to the case, fixed). [more](backlog/flakes.md#fl-099) | 9 |
 
 ### P1: M5, the lift's debts (`docs/microkernel/M5-LIFT.md`, ledger 5714, 6012, 6268, 6326)
 

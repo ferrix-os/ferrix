@@ -1890,6 +1890,69 @@ stretch.
 Local full `check`s were the largest cost: four running cold at once held load at
 70-100, and gates fell to about 3 per 10 minutes with 49 queued.
 
+## Boot time, 2026-11-05 (mk-boot-time)
+
+The customer's order: find out why boots are getting slower, and *"the max boot
+time should be 10s"*. "Boot" here is QEMU's start to `FERRIX-BOOT-OK` under
+`test-boot`: the debug profile with the in-kernel checks on (ledger 7021 T1; the
+limit's meaning is in `fleet/morning-questions.md`, default every `IMAGE_ROW` form).
+The figures below are the guest's serial stamps. A boot with `ferrix.checks=skip`
+reaches its end in 1.43 s under KVM and 2.19, 1.47, 1.72 s on x86-64, AArch64 and
+ARMv7-A under TCG: 95 to 98% of a boot is checks. `test-boot --arch x86_64` means
+KVM here since 2026-10-01; TCG needs `--accel tcg`. Readings of the old form under
+TCG in the history are KVM's, sorted by `qemu: <arch> under <accel>` in the log.
+
+From `logs/queue`, every `test-boot` with no other option that reached the marker:
+least / median / most seconds, boots, median load at the start.
+
+| from | x86-64 KVM | x86-64 TCG | AArch64 TCG | ARMv7-A TCG | ARMv7-A `--smp 2` |
+|---|---|---|---|---|---|
+| 10-01 | 6.9 / 8.2 / 21.7 (9277, 3) | 9.9 / 13.6 / 34.0 (58, 11) | 8.7 / 13.2 / 56.0 (66, 12) | 9.6 / 12.8 / 29.6 (45, 11) | 9.2 / 13.3 / 28.6 (67, 12) |
+| 10-07 | 9.4 / 20.2 / 38.8 (109, 20) | 13.9 / 27.6 / 58.9 (74, 18) | 11.1 / 22.0 / 57.3 (89, 19) | 11.4 / 25.8 / 60.4 (88, 18) | 11.9 / 25.8 / 46.7 (100, 19) |
+| 10-13 | 17.6 / 19.4 / 62.5 (240, 9) | 26.7 / 30.3 / 89.4 (251, 2) | 19.8 / 25.3 / 78.2 (139, 9) | 22.4 / 32.6 / 107.5 (209, 19) | 22.0 / 26.1 / 72.1 (425, 2) |
+| 10-19 | 18.5 / 20.6 / 84.6 (189, 10) | 29.3 / 30.1 / 103.2 (1509, 0) | 21.3 / 27.9 / 81.1 (110, 12) | 25.6 / 31.0 / 95.8 (74, 12) | 25.9 / 31.8 / 102.9 (106, 12) |
+| 10-25 | 23.6 / 33.9 / 86.9 (82, 13) | 39.1 / 51.1 / 117.6 (57, 13) | 28.1 / 48.0 / 103.6 (68, 15) | 33.2 / 53.7 / 114.0 (49, 16) | 32.3 / 50.2 / 117.1 (60, 16) |
+| 10-31 | 28.1 / 37.8 / 62.2 (21, 9) | 45.7 / 59.9 / 108.6 (19, 10) | 37.9 / 45.5 / 67.4 (19, 17) | 43.7 / 50.2 / 77.2 (15, 15) | 43.9 / 62.3 / 97.9 (19, 10) |
+| 11-04 | 28.4 / 37.1 / 70.7 (92, 21) | 50.1 / 62.1 / 105.5 (59, 21) | 40.8 / 53.0 / 110.4 (68, 20) | 42.1 / 61.2 / 110.4 (41, 18) | 41.3 / 61.5 / 110.2 (74, 19) |
+
+The steps, by the time between serial lines in the day's quickest boot under KVM
+and AArch64 TCG, seconds:
+
+| when | what | KVM | AArch64 | what it is |
+|---|---|---|---|---|
+| 10-08 | `cgroups` (stage 13's controllers) | +5.6 | +5.7 | fixed waits, cpu.max windows |
+| 10-12 | `chardev` | +1.4 | +1.5 | six negative looks of 200 ms for a dmabuf's release |
+| 10-23 | `sched` placement, `idle` | +2.0 | +1.3 | spins and 10,000 resumptions |
+| 10-25 | `crashes` | +2.0 | +2.0 | the crash hold's 2 s deadline |
+| 10-26 | `io`, `timens` | +7.5 | +7.7 | io.max's spaced reads and two 600 ms races |
+| 10-27 | `mmap`'s many regions | +2.0 | +5.7 | a real quadratic in `munmap`, below |
+| 11-04, 05 | `addrwait`, timers' arms, `bare`, `pager` | +4.5 | +7 | K5, K10, K3, Bare's harness |
+
+**Load.** A paired look at one boot, idle against load 8: `btrfs-rw` 0.70 against
+8.64 s, its `reclaim` 0.51 against 2.90 s, because every flush of stage 12's disk
+was a host `fsync`. Most of the spread on the Arm rows (fl-097's 41 to 105 s) and
+of the load effect was that one wait: the disk now has `cache=unsafe`, for the
+reason at `attach_btrfs_write_disk`. Everything else in the growth is real: a boot
+at load 1 today reads what the table's last row reads at its least.
+
+**Where a boot goes.** A sampler on every vCPU's program counter over QMP (2026-11-05,
+`info registers -a` at about 50 Hz, kernel symbols with the KASLR slide): under KVM
+18.8 s of 33 s has every vCPU idle, and AArch64 TCG shows 75% of its vCPU samples
+in the idle wait. So on average about one processor is busy: most of a boot is
+waiting, and much of the rest is one processor spinning out a timing check. x86-64
+and the Arm TCGs run multi-threaded (7 host threads to 4 vCPUs on AArch64).
+
+**The first cuts**, ledger 7021 P1 to P3: `cpu_check` keeps its reference 20000 of
+100000 for 600 ms, and asks the other cases on 10000 of 50000 for 300 ms; `io_check`
+keeps rbps=16384, gives the parent's limit forty a second, and races until 120
+reads, a count; `bare`'s quota as `cpu_check`'s short form; `idle`'s sleeps 200 us;
+a dmabuf's negative look 20 ms, against 1.1 ms for a due one on AArch64 TCG; timers'
+arms 200 and 400 ms with the wait ending on the fires. `address_wait_check`'s case 9 spent a second
+in the wait's own look, since its waiter's task was on no process's list, so no end
+reached it: it is now listed, the end's post wakes it by name, and over 250 ms fails.
+`munmap` no longer walks every object when each object it touched is still
+named: the many-regions case, the way Wine allocates, was n log n per map.
+
 ## Next
 
 Phase 2 in the order the numbers give: (3) stop rather than wait for a

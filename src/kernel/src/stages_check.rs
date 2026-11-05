@@ -1291,8 +1291,8 @@ pub(super) fn check_timers() {
     if report.moved != 0 {
         println!(
             "  timers   {} arms moved off a processor leaving service, each as set; \
-             the longest move's hold {} ns",
-            report.moved, report.move_hold_ns,
+             the longest move's hold {} ns; a fired arm fired by evacuation in {} tries",
+            report.moved, report.move_hold_ns, report.case_d_tries,
         );
     }
 }

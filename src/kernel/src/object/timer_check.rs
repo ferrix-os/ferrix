@@ -84,6 +84,8 @@ pub struct Report {
     /// The longest hold of two run queues' locks since boot, in nanoseconds,
     /// after those moves: MEMORY-AND-TIMING 2.2e2's figure at that count.
     pub move_hold_ns: u64,
+    /// The tries arms case d took: more than one is fl-099's sleeper.
+    pub case_d_tries: u64,
 }
 
 /// Run every case.
@@ -158,6 +160,8 @@ struct ToMove {
     far: Vec<Arc<Timer>>,
     /// Whether the fired-buffer case held, and what went wrong if not.
     outcome: Option<Result<(), &'static str>>,
+    /// The tries the fired-buffer case took.
+    case_d_tries: u64,
 }
 
 /// What the pinned task hands the case.
@@ -179,17 +183,37 @@ fn set_on_the_processor_going_out(_argument: usize) {
     let outcome = (|| {
         let due = timer_here()?;
         let core = due.core();
-        let saved = <crate::arch::Irq as ferrix_sync::IrqControl>::disable();
-        // An arm whose deadline has passed fires in the call: this one is
-        // filed one millisecond on and waited out, masked.
-        core.set(crate::timer::now_nanos().saturating_add(MS), 0, false);
-        let until = crate::timer::now_nanos().saturating_add(2 * MS);
-        while crate::timer::now_nanos() < until {
-            core::hint::spin_loop();
+        // A pass stops at a sleeping task, as the interrupt's does: a task of
+        // this processor's whose sleep ended inside the wait below, ahead of the
+        // arm, keeps the arm behind it, evacuation carries it off as a filed arm,
+        // and nothing about the fired buffer is learned (fl-099, shown by a
+        // sleeper planted there). Then the arm is filed elsewhere, and a cancel
+        // brings its slot home; again, a few times, each from a fresh arm. An arm
+        // neither fired nor filed was lost from the buffer, and fails at once.
+        let mut fired = 0;
+        for _ in 0..CASE_D_TRIES {
+            set.case_d_tries += 1;
+            let before = core.report().fires;
+            let saved = <crate::arch::Irq as ferrix_sync::IrqControl>::disable();
+            // An arm whose deadline has passed fires in the call: this one is
+            // filed one millisecond on and waited out, masked.
+            core.set(crate::timer::now_nanos().saturating_add(MS), 0, false);
+            let until = crate::timer::now_nanos().saturating_add(2 * MS);
+            while crate::timer::now_nanos() < until {
+                core::hint::spin_loop();
+            }
+            evacuate_with_fired_for_check();
+            fired = core.report().fires.wrapping_sub(before);
+            <crate::arch::Irq as ferrix_sync::IrqControl>::restore(saved);
+            if fired != 0 {
+                break;
+            }
+            core.cancel();
+            if !core.report().home {
+                return Err("arms case d: an arm in the fired buffer was not fired by evacuation");
+            }
+            sched::sleep_for(MS);
         }
-        evacuate_with_fired_for_check();
-        let fired = core.report().fires;
-        <crate::arch::Irq as ferrix_sync::IrqControl>::restore(saved);
         if fired != 1 {
             return Err("arms case d: an arm in the fired buffer was not fired by evacuation");
         }
@@ -197,11 +221,11 @@ fn set_on_the_processor_going_out(_argument: usize) {
         let (busy, cancelled, again) = (timer_here()?, timer_here()?, timer_here()?);
         for _ in 0..IDLE_ARMS {
             let idle = timer_here()?;
-            idle.core().set(at(300 * MS), 0, false);
+            idle.core().set(at(200 * MS), 0, false);
             crate::fallible::try_push(&mut set.idle, idle)
                 .map_err(|_| "no memory for the idle arms' list")?;
         }
-        busy.core().set(at(1500 * MS), 0, false);
+        busy.core().set(at(400 * MS), 0, false);
         cancelled.core().set(at(120_000 * MS), 0, false);
         again.core().set(at(120_000 * MS), 0, false);
         for _ in 0..FAR_ARMS {
@@ -219,6 +243,9 @@ fn set_on_the_processor_going_out(_argument: usize) {
     *TO_MOVE.lock() = Some(set);
     SET.wake_all();
 }
+
+/// Tries of arms case d: see its loop.
+const CASE_D_TRIES: usize = 5;
 
 /// A processor leaving service takes its timers' arms to others (L.sched.104):
 /// (a) an arm fires there, at its time, with the receiver idle and with it
@@ -291,8 +318,17 @@ fn arms_leave_a_processor_going_out_of_service(report: &mut Report) -> Result<()
         // the kick the move sends it, or some other interrupt it happens to take,
         // brings its first decision and the arm's timer; `kick` is what the case
         // shows, with sixteen arms for one receiver it could miss.
+        //
+        // Until they have fired, or a second for them to: nothing is measured
+        // here but that they do, and a poll is how the case tells, as no port
+        // watches these.
         let quiet = crate::timer::now_nanos().saturating_add(1000 * MS);
-        let _ = SET.wait_until_deadline(|| false, quiet);
+        while crate::timer::now_nanos() < quiet
+            && !(again_core.report().fires != 0
+                && set.idle.iter().all(|idle| idle.core().report().fires != 0))
+        {
+            sched::sleep_for(MS);
+        }
         if set.idle.iter().any(|idle| idle.core().report().fires != 1) {
             return Err("arms case a: a moved arm did not fire with its receiver idle");
         }
@@ -314,6 +350,7 @@ fn arms_leave_a_processor_going_out_of_service(report: &mut Report) -> Result<()
         Ok(())
     })();
     report.moved = (FAR_ARMS + IDLE_ARMS + 3) as u64;
+    report.case_d_tries = set.case_d_tries;
     report.move_hold_ns = sched::move_hold_max();
     for far in &set.far {
         far.core().cancel();

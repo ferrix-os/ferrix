@@ -177,6 +177,11 @@ const IOCTL: Ask = Ask {
 const PATIENCE_NANOS: u64 = 10_000_000_000;
 /// How long a call that must still be waiting is given to return wrongly.
 const STILL_NANOS: u64 = 50_000_000;
+/// How long a dmabuf's release is given to come where none is due: ten times
+/// the longest a due one took (1.1 ms of poll on AArch64 under TCG, 2026-11-05;
+/// figures in `docs/TEST-TIME.md`), and more than any period that could deliver
+/// one: it is posted from the last close, on the closing task.
+const RELEASE_QUIET_NANOS: u64 = 20_000_000;
 /// Rounds of taking requests in until `EBUSY` and abandoning them (F-63).
 const ROUNDS: usize = 3;
 
@@ -3018,7 +3023,7 @@ fn close_fd(process: &Process, fd: i32) -> Result<(), &'static str> {
 /// The cookie of the next `DmabufRelease` on `control`, if one comes within
 /// a short while; any other message is an error.
 fn released(side: &Side, control: Handle) -> Result<Option<u64>, &'static str> {
-    let deadline = timer::now_nanos().saturating_add(STILL_NANOS * 4);
+    let deadline = timer::now_nanos().saturating_add(RELEASE_QUIET_NANOS);
     loop {
         if let Some(bytes) = read(side, control) {
             return match Message::decode(&bytes) {
