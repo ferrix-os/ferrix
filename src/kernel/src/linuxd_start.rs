@@ -295,6 +295,15 @@ fn start(
         .ok_or("no initramfs")??;
     let _ = crate::mm::give_back_initrd();
     let page = Vmo::new_anonymous(1).map_err(|_| "no memory for the boot page")?;
+    // The arena's size: under `retyped` seven eighths of the reservation, so 49/64 of what
+    // could be promised, by design (ledger 7145 (f)). The promise's own eighth, taken in
+    // `promise_for_partition`, is the pool's and the kernel's; this eighth stays inside the
+    // partition's reservation for what the kernel makes at its expense there -- the arena's
+    // page tables (a frame for each 512 mapped, and the levels above), the region and the
+    // boot page, the kernel heap of its objects (K12b) -- so that the arena, given whole,
+    // leaves room in the reservation for them. Not measured: an eighth is the conservative
+    // side of what they take. Without `retyped` there is no reservation, and the one
+    // eighth of the free count is all.
     #[cfg(ferrix_kernel_memory = "retyped")]
     let memory_frames = promised / 8 * 7;
     #[cfg(not(ferrix_kernel_memory = "retyped"))]
