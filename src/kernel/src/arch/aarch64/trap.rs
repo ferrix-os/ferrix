@@ -766,7 +766,7 @@ pub(crate) unsafe fn init() {
 /// `L.aarch64.91`'s check.
 pub(super) fn stack_checked_entry() -> [u32; 6] {
     // SAFETY: (PROBE) the table is in this image, mapped readable, and nothing writes it.
-    let table: &[u8; 16 * 128] = unsafe { &*(&raw const ferrix_vectors) };
+    let table: &[u8; 16 * 128] = unsafe { &ferrix_vectors };
     core::array::from_fn(|at| {
         let word = table.get(4 * 128 + at * 4..).unwrap_or_default();
         match word {
