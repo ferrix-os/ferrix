@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "88b05f3476d43c08ee675f774ca72d648746586070d9fed84811e438d99c8957",
+  "digest": "082298ec7a880dfc12bb7b9ce575ae7c9d01776200c56bd735a17b9eb14549e1",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -51081,7 +51081,7 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::AppliedAffinity::anEarlyExpiryLosesNoDeadline",
                       "kind": "attribute",
                       "redefines": "criterion",
-                      "value": "\"A task asks an expiry 1 us away and sleeps 20 ms on an otherwise idle processor, two processors or more, on one processor not run: each wakes within the case's bound. An unmasked after_from in a dev boot stops on its assertion.\"",
+                      "value": "\"A task asks an expiry 1 us away and sleeps 20 ms on an otherwise idle processor, two rounds, two processors or more, on one processor not run: each wakes within the case's bound. An unmasked after_from in a dev boot stops on its assertion.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 1343
