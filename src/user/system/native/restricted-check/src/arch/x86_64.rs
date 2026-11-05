@@ -364,6 +364,16 @@ pub(crate) fn clobber_vectors(value: u64) {
     }
 }
 
+/// What [`clobber_vectors`] left, if this mode's registers are its own again.
+pub(crate) fn read_vectors() -> u64 {
+    let value: u64;
+    // SAFETY: AVX where `has_vectors` says so, as for `clobber_vectors`.
+    unsafe {
+        core::arch::asm!("vmovq {value}, xmm5", value = out(reg) value, options(nostack, nomem));
+    }
+    value
+}
+
 /// Whether the processor has what [`vectors`] runs.
 pub(crate) fn has_vectors() -> bool {
     let leaf1 = core::arch::x86_64::__cpuid(1);

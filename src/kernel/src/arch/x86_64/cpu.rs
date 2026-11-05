@@ -1179,6 +1179,23 @@ unsafe fn write_cr0(value: u64) {
     }
 }
 
+/// Set `CR0.TS`: the next vector instruction is `#NM` (K1 §7.1).
+#[cfg_attr(
+    not(ferrix_restricted_fastpath = "on"),
+    allow(dead_code, reason = "K1's fast crossings alone ask it")
+)]
+pub(crate) fn set_task_switched() {
+    // SAFETY: (SYSREG) `TS` alone changes, with `PE` and `PG` as they stand; no kernel
+    // code uses a vector register, and the switch clears it.
+    unsafe { write_cr0(read_cr0() | CR0_TS) };
+}
+
+/// Clear `CR0.TS`.
+pub(crate) fn clear_task_switched() {
+    // SAFETY: (SYSREG) `CLTS` changes that bit alone.
+    unsafe { asm!("clts", options(nostack, preserves_flags)) };
+}
+
 /// Control register 4: the paging and instruction-set extensions in force.
 pub fn read_cr4() -> u64 {
     let value: u64;

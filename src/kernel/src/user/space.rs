@@ -1071,6 +1071,10 @@ impl AddressSpace {
         }
     }
 
+    #[cfg_attr(
+        not(ferrix_restricted_fastpath = "on"),
+        allow(dead_code, reason = "K1's fast crossings alone ask it")
+    )]
     /// Put this space's root for `restricted` on the running processor: a
     /// flip, or a switch between two of its threads in different modes. The
     /// processor is in its sets already (`docs/microkernel/K11.md` §3), so
@@ -1081,6 +1085,22 @@ impl AddressSpace {
     ///
     /// (TRANSLATE) As [`AddressSpace::install`]: this space is the one the
     /// running processor has joined, and interrupts are masked.
+    #[inline(always)]
+    pub(crate) unsafe fn flip_root_on(&self, restricted: bool, cpu: usize) {
+        // SAFETY: only a space with a normal root is flipped.
+        let normal = unsafe { self.normal.get().unwrap_unchecked() };
+        let (root, id, begun) = self.root_for(normal, restricted);
+        // SAFETY: (TRANSLATE) the caller's guarantee; both roots carry the
+        // kernel's half, and live as long as this space.
+        unsafe { arch::flip_user_root(root, id, begun, cpu) };
+    }
+
+    /// [`AddressSpace::flip_root_on`] on this processor.
+    ///
+    /// # Safety
+    ///
+    /// As it.
+    #[inline(always)]
     pub(crate) unsafe fn flip_root(&self, restricted: bool) {
         let Some(normal) = self.normal.get() else {
             return;
@@ -1094,6 +1114,7 @@ impl AddressSpace {
 
     /// What a root write for `restricted` names: its table, its PCID key and
     /// the shootdown count it answers to, both spaces' for the normal root.
+    #[inline(always)]
     fn root_for(&self, normal: &NormalRoot, restricted: bool) -> (u64, u64, u64) {
         let own = self.flushes.begun.load(Ordering::SeqCst);
         if restricted {
@@ -1240,6 +1261,7 @@ impl AddressSpace {
 /// long after every processor has its record, so a missing one is a kernel
 /// bug; and a default -- zero, say -- would put the wrong processor in the set
 /// and leave the right one out, which no later check would see.
+#[inline(always)]
 fn this_logical_cpu() -> usize {
     match smp::this_cpu() {
         Some(cpu) => cpu.logical,

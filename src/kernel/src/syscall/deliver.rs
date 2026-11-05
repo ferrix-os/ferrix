@@ -179,14 +179,65 @@ pub fn install() {
 ///
 /// Cheap, and asked on every way back, so that the registers are only copied
 /// out into an [`arch::UserContext`] when something will use them.
-pub(crate) fn needs_attention() -> bool {
+/// `getppid`, straight through, when nothing about the caller is unusual: nothing a
+/// filter or a probe would ask, nothing [`needs_attention`] would find. `u64::MAX`
+/// for the general path. Only `linuxd`'s restricted loop asks, on a program's thread.
+#[cfg(ferrix_personality = "user")]
+#[unsafe(no_mangle)]
+pub fn ferrix_lift_hot_answer(number: usize) -> u64 {
+    #[cold]
+    #[inline(always)]
+    const fn unusual() {}
+    const GETPPID: usize = 110;
+    if number != GETPPID {
+        unusual();
+        return u64::MAX;
+    }
+    let Some(answer) = crate::sched::with_current(|task| {
+        let Some(thread) = task.thread().and_then(thread::of_task_known) else {
+            unusual();
+            return u64::MAX;
+        };
+        let process = thread.process();
+        let view = process.parent_view();
+        // What `left_program` and `entering` would act on: a move to another group, a
+        // `cpu.max` in force. Any of these is the general path's.
+        if (!crate::syscall::seccomp::quiet_here())
+            | (!process.quiet_for(thread))
+            | (view == u32::MAX)
+            | (process.core().quota_slot() != task.quota_group_now())
+            | crate::object::quota::bandwidth_in_use()
+            | thread.with_signals(|shared, own| signal::needs_attention(shared, own))
+        {
+            unusual();
+            return u64::MAX;
+        }
+        u64::from(view)
+    }) else {
+        unusual();
+        return u64::MAX;
+    };
+    answer
+}
+
+#[inline(always)]
+/// Whether the way back to the program has anything to do for the running thread.
+pub fn needs_attention() -> bool {
     // Lent, not cloned: asked on every way back, and a clone of the task and
     // the thread is four locked operations (po10-pipe P2, B1).
     thread::with_current(|thread| {
         let process = thread.process();
-        process.must_leave(thread)
-            || process.must_park()
-            || thread.with_signals(|shared, own| signal::needs_attention(shared, own))
+        #[cfg(ferrix_personality = "user")]
+        {
+            (!process.quiet_for(thread))
+                | thread.with_signals(|shared, own| signal::needs_attention(shared, own))
+        }
+        #[cfg(not(ferrix_personality = "user"))]
+        {
+            process.must_leave(thread)
+                || process.must_park()
+                || thread.with_signals(|shared, own| signal::needs_attention(shared, own))
+        }
     })
     .unwrap_or(false)
 }

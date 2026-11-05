@@ -115,13 +115,13 @@ fn with_pending<R>(change: impl FnOnce(&mut Context) -> R) -> R {
 
 /// Round to where a program's thread goes next: back with `value`, or by `enter`
 /// if anything changed.
+#[inline(always)]
 fn back(value: u64, not_a_call: bool) -> k1::Exit {
     // The usual way, every call's: nothing held and nothing due, with the task lent. A
     // clone of it is two locked operations a call; only this thread raises the flag.
-    let path = trap::return_path();
-    let due = path.is_some_and(trap::attention_due);
-    let plain =
-        !due && sched::with_current(|task| !task.pending_up.load(Ordering::Relaxed)) == Some(true);
+    let due = ferrix_lift_attention();
+    let plain = (!due)
+        & (sched::with_current(|task| !task.pending_up.load(Ordering::Relaxed)) == Some(true));
     if plain {
         // `RESTRICTED_RESUME` answers a system call exit alone (K1 §2.1).
         return if not_a_call {
@@ -130,6 +130,8 @@ fn back(value: u64, not_a_call: bool) -> k1::Exit {
             again_resume(value)
         };
     }
+    unusual();
+    let path = trap::return_path();
     let task = sched::current().expect("a program's thread has a task");
     let pending = if task.pending_up.swap(false, Ordering::Relaxed) {
         task.pending.lock().take()
@@ -188,36 +190,29 @@ fn fresh(entry: u64, stack: u64, argument: u64, abi: Abi) -> Context {
 /// them, `sigreturn` and `arch_prctl` change them, a filter is shown the
 /// instruction pointer, and `sigaltstack` asks the stack pointer. Every other
 /// call goes without the kernel entry a read costs (MICROKERNEL.md §7).
+#[inline(always)]
 fn needs_context(abi: Abi, number: usize) -> bool {
-    use ferrix_linux_abi::nr::Syscall;
-    let quiet = QUIET.load(Ordering::Acquire);
-    if !quiet.is_null() {
-        // SAFETY: only `set_quiet` writes it, with a `fn() -> bool`.
-        let quiet: fn() -> bool = unsafe { core::mem::transmute(quiet) };
-        if !quiet() {
-            return true;
+    /// What reads a register, in `dispatch_with`'s callees: a fork's child resumes from
+    /// them, `sigaltstack` asks the stack pointer, and the two `answer_early` takes, by
+    /// x86-64 number: clone, clone3, fork, vfork, sigaltstack, arch_prctl, rt_sigreturn.
+    const READS: [u64; 8] = {
+        let mut bits = [0_u64; 8];
+        let numbers = [56_usize, 435, 57, 58, 131, 158, 15];
+        let mut at = 0;
+        while at < numbers.len() {
+            bits[numbers[at] / 64] |= 1 << (numbers[at] % 64);
+            at += 1;
         }
+        bits
+    };
+    // A 32-bit program's table has sigreturns and segments of its own: on no row, so every
+    // call of one reads them first rather than a list being kept here. A filter is shown the
+    // instruction pointer. A number past the table is nobody's.
+    if (!matches!(abi, Abi::Native)) | (number >= 512) | (!ferrix_lift_quiet()) {
+        unusual();
+        return true;
     }
-    match abi {
-        // What reads a register, in `dispatch_with`'s callees: a fork's child resumes
-        // from them, `sigaltstack` asks the stack pointer, and the two `answer_early`
-        // takes. Every other call goes without.
-        Abi::Native => matches!(
-            crate::arch::decode_syscall(number),
-            Some(
-                Syscall::Clone
-                    | Syscall::Clone3
-                    | Syscall::Fork
-                    | Syscall::Vfork
-                    | Syscall::Sigaltstack
-                    | Syscall::ArchPrctl
-                    | Syscall::RtSigreturn
-            ) | None
-        ),
-        // A 32-bit program's table has sigreturns and segments of its own: on no row,
-        // so every call of one reads them first rather than a list being kept here.
-        Abi::Compat => true,
-    }
+    READS[number / 64] & (1 << (number % 64)) != 0
 }
 
 /// Whether no program has installed a filter: the load's own word, told here.
@@ -231,6 +226,7 @@ fn again_continue() -> k1::Exit {
     sched::account::entering();
     k1::continue_()
 }
+#[inline(always)]
 fn again_resume(value: u64) -> k1::Exit {
     sched::account::entering();
     k1::resume(value)
@@ -240,8 +236,43 @@ fn again_enter(context: &Context) -> k1::Exit {
     k1::enter_with(context, ferrix_native::region::ENTER_COPY_MISS_EXITS)
 }
 
+#[cold]
+#[inline(always)]
+const fn unusual() {}
+
+// SAFETY: (LINK) linuxd's composition root defines each with these signatures, and they
+// take nothing the caller has not checked.
+unsafe extern "Rust" {
+    /// linuxd's dispatch, by name, for LTO: no indirect call on a program's every call.
+    safe fn ferrix_lift_dispatch(args: &SyscallArgs, regs: Option<&UserRegs>) -> Outcome;
+    /// Whether the way back has anything to do for the running thread.
+    safe fn ferrix_lift_attention() -> bool;
+    /// Whether no filter or probe asks about the running thread.
+    safe fn ferrix_lift_quiet() -> bool;
+    /// A call `linuxd` answers straight through (`docs/microkernel/PERFORMANCE.md`), by
+    /// name so that LTO can take it in line: `u64::MAX` for the general path.
+    safe fn ferrix_lift_hot_answer(number: usize) -> u64;
+}
+
+/// Every taken branch here runs cold after the exit's barrier: one straight run, back into
+/// the program for as long as the answer is this simple, and on anything unusual out to
+/// the general path. Its time counts as the program's, as the kernel's fast crossing's does.
+#[unsafe(link_section = ".text.ferrix_straight")]
+#[inline(never)]
+fn straight_run(mut exit: k1::Exit) -> k1::Exit {
+    loop {
+        let value = ferrix_lift_hot_answer(exit.number as usize);
+        let plain = sched::with_current(|task| !task.pending_up.load(Ordering::Relaxed));
+        if (exit.reason != Reason::Syscall as u64) | (value == u64::MAX) | (plain != Some(true)) {
+            return exit;
+        }
+        exit = k1::resume(value);
+    }
+}
+
 fn run(mut exit: k1::Exit) -> ! {
     loop {
+        exit = straight_run(exit);
         sched::account::left_program();
         exit = match exit.reason() {
             Ok(Reason::Syscall) | Ok(Reason::SyscallCompat) => {
@@ -268,8 +299,12 @@ fn run(mut exit: k1::Exit) -> ! {
                     .and_then(|context| answer_early(&args, context))
                 {
                     Some(next) => next,
-                    None => match trap::filter_system_call(&args)
-                        .unwrap_or_else(|| dispatch(&args, regs.as_ref()))
+                    None => match (if ferrix_lift_quiet() {
+                        None
+                    } else {
+                        trap::filter_system_call(&args)
+                    })
+                    .unwrap_or_else(|| ferrix_lift_dispatch(&args, regs.as_ref()))
                     {
                         Outcome::Return(value) => back(value as u64, false),
                         Outcome::ReturnWords { value, words } => {

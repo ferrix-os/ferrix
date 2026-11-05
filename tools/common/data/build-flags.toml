@@ -107,7 +107,7 @@ values.off = { allows = ["none"], lands = "M0", built = "yes" }
 
 [flags.partition_speculation]
 why = "the barriers at a restricted exit (`exit`) or only at partition switches (`partition`); not applicable to a hybrid kernel"
-values.exit = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built = "no", requires = ["personality=user"] }
+values.exit = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built = "adhoc", requires = ["personality=user"] }
 values.partition = { allows = ["sc2", "none"], lands = "M3", built = "adhoc", requires = ["personality=user"] }
 values.not_applicable = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes", conflicts = ["personality=user"] }
 
@@ -119,7 +119,7 @@ values.on = { allows = ["sc2", "none"], lands = "M0", built = "yes" }
 [flags.restricted_fastpath]
 why = "K1's fast path for the restricted exit and re-entry; its levels are K1's review's to set, and until then `on` allows no certified level above sc2"
 values.off = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built = "adhoc", requires = ["personality=user"] }
-values.on = { allows = ["sc2", "none"], lands = "M3", built = "no", requires = ["personality=user"] }
+values.on = { allows = ["sc2", "none"], lands = "M3", built = "adhoc", requires = ["personality=user"] }
 values.not_applicable = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes", conflicts = ["personality=user"] }
 
 [flags.kernel_memory]

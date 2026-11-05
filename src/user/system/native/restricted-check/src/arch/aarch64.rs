@@ -258,6 +258,21 @@ pub(crate) fn forged(good: &Context, case: usize) -> Option<Context> {
     Some(bad)
 }
 
+/// What [`clobber_vectors`] left, if this mode's registers are its own again.
+pub(crate) fn read_vectors() -> u64 {
+    let value: u64;
+    // SAFETY: a read of this mode's own `v5`, as `clobber_vectors` wrote it.
+    unsafe {
+        core::arch::asm!(
+            ".arch_extension fp",
+            "fmov {value}, d5",
+            value = out(reg) value,
+            options(nostack, nomem),
+        );
+    }
+    value
+}
+
 /// Set this thread's own V5 to `value`.
 pub(crate) fn clobber_vectors(value: u64) {
     // SAFETY: only the register named, which the program's soft-float code never

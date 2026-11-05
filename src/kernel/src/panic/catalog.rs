@@ -1969,6 +1969,20 @@ pub static WINDOW_UNMAP: Explanation = Explanation {
     see: "docs/microkernel/M5-LIFT.md section 13; src/kernel/src/user/space/window_check.rs",
 };
 
+/// `#NM` in ring 0: `CR0.TS` up with the kernel using a vector register.
+pub(crate) static VECTOR_IN_THE_KERNEL: Explanation = Explanation {
+    code: "FX-0928",
+    title: "a vector instruction in the kernel with CR0.TS set",
+    meaning: "K1's fast exit leaves the program's vector registers up and `CR0.TS` set while \
+              normal mode runs, and only ring 3's first vector instruction may take the `#NM`. The \
+              kernel uses none, and the switch clears the bit first.",
+    causes: &[
+        "A new XSAVE-class site outside src/kernel/src/arch/x86_64/switch.rs, or a path that \
+         restores a record without going through `restricted::before_switch`.",
+    ],
+    see: "docs/microkernel/K1.md section 7.1 (8); src/kernel/src/arch/x86_64/restricted.rs",
+};
+
 // CHECKS-ONLY: stages_check.rs
 /// For `check_levels` in `stages_check.rs`, when `object::level_check::run` fails.
 #[doc(hidden)]
@@ -4262,6 +4276,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     #[cfg(not(ferrix_shape = "micro"))]
     &STAGE9_REGIONS,
     &STAGE9_LEVELS,
+    &VECTOR_IN_THE_KERNEL,
     &STAGE9_BUILD,
     &STAGE6_REHOMED_MEMORY,
     &STAGE6_REHOMED_OBJECTS,

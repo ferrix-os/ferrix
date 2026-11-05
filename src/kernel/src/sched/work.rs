@@ -228,7 +228,8 @@ pub(crate) fn look() -> u32 {
 /// look (`docs/OPAQUE-KERNEL.md` §9.7, part 2), which takes the general way
 /// out, where [`look`] clears and reads, whenever any bit is set. Zero where
 /// nothing runs. With interrupts masked.
-#[cfg(ferrix_fast_ipc)]
+#[allow(dead_code, reason = "K1's fast crossings alone ask it, on x86-64")]
+#[inline(always)]
 pub(crate) fn peek() -> u32 {
     super::with_current(|task| task.work().load(Ordering::Acquire)).unwrap_or(0)
 }
@@ -252,7 +253,8 @@ pub(crate) const fn wants_attention(word: u32) -> bool {
 
 /// Whether a word asks anything of the way out: [`wants_attention`], or
 /// [`PLACE`]. What the frame tail's quiet exit must find clear.
-#[cfg(ferrix_fast_ipc)]
+#[allow(dead_code, reason = "K1's fast crossings alone ask it, on x86-64")]
+#[inline(always)]
 pub(crate) const fn anything_due(word: u32) -> bool {
     word & (ATTENTION | PLACE) != 0
 }

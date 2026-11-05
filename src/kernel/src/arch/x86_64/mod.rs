@@ -1851,6 +1851,7 @@ pub(crate) unsafe fn install_user_root(root: u64, space: u64, begun: u64, cpu: u
 /// # Safety
 ///
 /// (TRANSLATE) As [`install_user_root`].
+#[inline(always)]
 pub(crate) unsafe fn flip_user_root(root: u64, space: u64, begun: u64, cpu: usize) {
     // SAFETY: (TRANSLATE) the caller's guarantee.
     let _ = unsafe { pcid::install(root, space, begun, cpu) };

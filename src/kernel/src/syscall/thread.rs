@@ -28,7 +28,9 @@
 
 use alloc::sync::Arc;
 use core::any::Any;
-use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{
+    AtomicBool, AtomicI32, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering,
+};
 
 use crate::fallible::AllocError;
 use crate::object::process::{self as pids, Host};
@@ -497,6 +499,7 @@ impl Thread {
 
     /// Read or change its process's signal state and its own together: the
     /// process's lock first, then its own.
+    #[inline(always)]
     pub(crate) fn with_signals<R>(
         &self,
         change: impl FnOnce(&mut Signals, &mut ThreadSignals) -> R,
@@ -576,6 +579,7 @@ pub(crate) fn current() -> Option<Arc<Thread>> {
 /// leave it (`sched::borrow`'s argument; the consultant's B1): nothing lent
 /// here is stored, sent, or put on a list, a timer or a link. A caller that
 /// keeps the thread clones it inside the closure.
+#[inline(always)]
 pub(crate) fn with_current<R>(lend: impl FnOnce(&Thread) -> R) -> Option<R> {
     sched::with_current(|task| of_task(task).map(lend)).flatten()
 }
@@ -584,9 +588,58 @@ pub(crate) fn with_current<R>(lend: impl FnOnce(&Thread) -> R) -> Option<R> {
 ///
 /// The scheduler holds a task's thread as its own [`UserThread`], which knows
 /// nothing of signals or thread ids; this is the way back to the rest.
+#[inline(always)]
 pub(crate) fn of_task(task: &Task) -> Option<&Thread> {
-    let thread: &dyn Any = &**task.thread()?;
-    thread.downcast_ref()
+    let held = task.thread()?;
+    #[cfg(ferrix_personality = "user")]
+    if let Some(thread) = of_task_known(held) {
+        return Some(thread);
+    }
+    of_task_asked(held)
+}
+
+/// [`of_task`] by the `dyn Any`'s own answer, the table not known yet.
+#[cold]
+#[inline(never)]
+fn of_task_asked(held: &Arc<dyn UserThread>) -> Option<&Thread> {
+    let thread: &dyn Any = &**held;
+    let found = thread.downcast_ref();
+    #[cfg(ferrix_personality = "user")]
+    if found.is_some() {
+        THREAD_VTABLE.store(vtable_of(held), Ordering::Relaxed);
+    }
+    found
+}
+
+/// The address of the table a `dyn UserThread` that is a [`Thread`] holds, once the general
+/// path's downcast has found one: what the straight path compares, as no indirect call.
+#[cfg(ferrix_personality = "user")]
+static THREAD_VTABLE: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(ferrix_personality = "user")]
+#[inline(always)]
+fn vtable_of(held: &Arc<dyn UserThread>) -> usize {
+    let pointer: *const dyn UserThread = Arc::as_ptr(held);
+    // SAFETY: a wide pointer is two words, the data's and its table's.
+    let (_, table): (usize, usize) = unsafe { core::mem::transmute(pointer) };
+    table
+}
+
+/// [`of_task`] by comparing that table: `None` sends a straight call to the general path,
+/// which sets it. A table is a type's; two types never share one that says `Thread`.
+#[cfg(ferrix_personality = "user")]
+#[inline(always)]
+pub(crate) fn of_task_known(held: &Arc<dyn UserThread>) -> Option<&Thread> {
+    if vtable_of(held) != THREAD_VTABLE.load(Ordering::Relaxed) {
+        return None;
+    }
+    #[expect(
+        clippy::cast_ptr_alignment,
+        reason = "the table says it is a `Thread`, so aligned as one"
+    )]
+    let thread = Arc::as_ptr(held).cast::<Thread>();
+    // SAFETY: the table is `Thread`'s, as above.
+    Some(unsafe { &*thread })
 }
 
 /// The running task's thread, if it is one of `process`'s.

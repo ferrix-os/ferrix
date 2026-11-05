@@ -254,9 +254,13 @@ weaker form is written down as such in the stage's section.
 
 ## Restricted exit's speed (`microkernel/RESTRICTED-EXIT.md`)
 
-Owed: `max`'s two-root row through `gate.sh` first, with the consultant's conditions (ledger 6747-6755);
-then the window behind `restricted_window` (6787, W2 to W12); the ordinary path's next levers. Code:
-local `feature/mk-ibpb`, not on develop; it waits for K1's fast path.
+Landed behind `restricted_fastpath`, on only in `fast`, which is refused until M5, so no image that
+builds has it. linuxd's straight path and general-path cuts run in any `personality=user` build, flag or
+not. Owed before the flag is on in any profile: K1's fast path's own code review (6484 never gave it) and
+6093 (1)-(12) against the code; ledger 6747-6755's checks and controls; a typed pointer for `of_task_known`; L.x86_64.272 to .275's tags, six coverage anchors; `max`'s
+two-root row through `gate.sh`; K1's `FS` cut under Z1-Z4 (6464). Then the window behind
+`restricted_window` (6787, W2-W12; W1 and `TS` answered, 6826); the ordinary path's next levers.
+`test-flags --set smt=off` under TCG stops on stage 9's timing checks one boot in three, on develop too.
 
 ## Owners
 

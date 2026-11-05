@@ -563,6 +563,10 @@ fn main() {
     // what the boot left cached (it cached nothing of these files).
     bench_pagecache(&mut samples);
     bench("null-getppid", &mut samples, WARMUP, SAMPLES, getppid);
+    bench("null-general", &mut samples, WARMUP, SAMPLES, || {
+        // SAFETY: `getuid` has no arguments and always succeeds.
+        let _ = unsafe { libc::syscall(libc::SYS_getuid) };
+    });
     bench_getppid_mean();
     bench("mmap-munmap-4K", &mut samples, WARMUP, SAMPLES, || {
         mmap_churn(false)

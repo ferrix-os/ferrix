@@ -454,6 +454,7 @@ impl Process {
 
     /// Whether its job, or one above, is frozen: the answer is read on every
     /// way back to user mode, and is a load.
+    #[inline(always)]
     pub fn is_frozen(&self) -> bool {
         self.frozen.load(Ordering::Acquire)
     }
@@ -876,6 +877,7 @@ impl Process {
     }
 
     /// Whether it has terminated, by exiting or by being killed.
+    #[inline(always)]
     pub fn is_terminated(&self) -> bool {
         self.exit.is_terminated()
     }
@@ -1044,6 +1046,7 @@ impl Exit {
 
     /// Whether it has terminated, by exiting or by being killed. True from the
     /// moment it starts to end, before it has let go of anything.
+    #[inline(always)]
     pub fn is_terminated(&self) -> bool {
         self.terminated.load(Ordering::Acquire)
     }

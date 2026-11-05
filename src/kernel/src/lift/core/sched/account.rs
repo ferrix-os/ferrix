@@ -53,6 +53,7 @@ impl Time {
     }
 }
 
+#[inline(always)]
 fn cycles() -> u64 {
     crate::arch::counter_now()
 }
@@ -61,6 +62,8 @@ fn nanos_of(amount: u64) -> u64 {
     ferrix_vdso::counter_nanos(amount, crate::arch::counter_hz())
 }
 
+#[cold]
+#[inline(never)]
 fn charge(task: &Task) {
     let in_program = task.time.in_program.swap(0, Ordering::Relaxed);
     let in_linuxd = task.time.in_linuxd.swap(0, Ordering::Relaxed);
@@ -91,6 +94,7 @@ pub fn starts_program(task: &Arc<Task>) {
 
 /// The program stopped running: its time so far is known, and so is its group,
 /// which a write to `cgroup.procs` may have changed since its last call.
+#[inline(always)]
 pub fn left_program() {
     let _ = super::with_current(|task| {
         let now = cycles();
@@ -101,8 +105,8 @@ pub fn left_program() {
             .in_program
             .fetch_add(now.saturating_sub(since), Ordering::Relaxed);
         task.time.left.store(now, Ordering::Relaxed);
-        if let Some(thread) = task.thread() {
-            let slot = thread.process().core().quota_slot();
+        if let Some(core) = task.core_kept() {
+            let slot = core.quota_slot();
             if slot != task.group.load(Ordering::Relaxed) {
                 charge(task);
                 task.set_group(slot);
@@ -113,6 +117,7 @@ pub fn left_program() {
 
 /// The program is about to run again. Past its group's `cpu.max`, it waits for
 /// the period's end first, unless something asks the thread to attend.
+#[inline(always)]
 pub fn entering() {
     let _ = super::with_current(|task| {
         task.note_no_call();
@@ -137,6 +142,8 @@ pub fn entering() {
     });
 }
 
+#[cold]
+#[inline(never)]
 fn throttle(task: &Task) {
     let group = task.group.load(Ordering::Relaxed);
     if group == quota::NONE {

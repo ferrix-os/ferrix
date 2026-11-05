@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "b86c2f2bb22b12cf872060f77c2851fc7deab5e58cb069c8a8ab63b45eb80e3b",
+  "digest": "f45d37de7a420b63425d3c1f40546651502906433391b310726da8408f4e8780",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -113,7 +113,7 @@
   ],
   "summary": {
     "packages": 167,
-    "elements": 10062,
+    "elements": 10082,
     "maturity": {
       "implemented": 295,
       "inProgress": 23,
@@ -71082,10 +71082,10 @@
                   "qualifiedName": "FerrixMemoryRequirements::SpacesByHandle::aRestrictedSpaceEndsAtTheRegion",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"user::space::AddressSpace::bind_region\", \"user::space::AddressSpace::flip_root\", \"user::space::AddressSpace::root_for\", \"arch::x86_64::flip_user_root\", \"arch::aarch64::flip_user_root\")",
+                  "value": "(\"user::space::AddressSpace::bind_region\", \"user::space::AddressSpace::flip_root\", \"user::space::AddressSpace::flip_root_on\", \"user::space::AddressSpace::root_for\", \"arch::x86_64::flip_user_root\", \"arch::aarch64::flip_user_root\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3441
+                    "line": 3442
                   }
                 }
               ]
@@ -71098,7 +71098,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3443
+                "line": 3444
               },
               "children": [
                 {
@@ -71109,7 +71109,7 @@
                   "value": "\"A pointer at or above SHARED_BASE shall mean the region only from normal mode and only for the running task's own space.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3445
+                    "line": 3446
                   }
                 },
                 {
@@ -71120,7 +71120,7 @@
                   "value": "\"Cases 120 to 122.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3446
+                    "line": 3447
                   }
                 },
                 {
@@ -71131,7 +71131,7 @@
                   "value": "\"H.OBJ.26\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3447
+                    "line": 3448
                   }
                 },
                 {
@@ -71142,7 +71142,7 @@
                   "value": "(\"user::space::AddressSpace::route\", \"user::space::AddressSpace::routed\", \"object::process::Process::caller_space\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3450
+                    "line": 3451
                   }
                 }
               ]
@@ -71155,7 +71155,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3452
+                "line": 3453
               },
               "children": [
                 {
@@ -71166,7 +71166,7 @@
                   "value": "\"A change of a region's mappings shall reach every processor running a process of its partition in either mode.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3454
+                    "line": 3455
                   }
                 },
                 {
@@ -71177,7 +71177,7 @@
                   "value": "\"Case 89 with --smp 2 and up: the second process sees the new page.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3455
+                    "line": 3456
                   }
                 },
                 {
@@ -71188,7 +71188,7 @@
                   "value": "\"H.OBJ.26\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3456
+                    "line": 3457
                   }
                 },
                 {
@@ -71199,7 +71199,7 @@
                   "value": "\"user::space::AddressSpace::install_as\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3457
+                    "line": 3458
                   }
                 }
               ]
@@ -71212,7 +71212,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3459
+                "line": 3460
               },
               "children": [
                 {
@@ -71223,7 +71223,7 @@
                   "value": "\"PROCESS_START and PROCESS_RUN shall refuse a process of a region, BAD_STATE, from either mode: PROCESS_START_SHARED starts those.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3461
+                    "line": 3462
                   }
                 },
                 {
@@ -71234,7 +71234,7 @@
                   "value": "\"Case 153.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3462
+                    "line": 3463
                   }
                 },
                 {
@@ -71245,7 +71245,7 @@
                   "value": "\"H.TRAP.21\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3463
+                    "line": 3464
                   }
                 },
                 {
@@ -71256,7 +71256,7 @@
                   "value": "\"syscall::native::start_with\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3464
+                    "line": 3465
                   }
                 }
               ]
@@ -71269,7 +71269,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3466
+                "line": 3467
               },
               "children": [
                 {
@@ -71280,7 +71280,7 @@
                   "value": "\"A region made for a measured job shall be measured, and K14's tests of a caller shall read the space its call means, the region's in normal mode, with the process's restricted space unmeasured by design.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3469
+                    "line": 3470
                   }
                 },
                 {
@@ -71291,7 +71291,7 @@
                   "value": "\"The sealing check's region_of_a_measured_job.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3470
+                    "line": 3471
                   }
                 },
                 {
@@ -71302,7 +71302,7 @@
                   "value": "\"H.OBJ.26\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3471
+                    "line": 3472
                   }
                 },
                 {
@@ -71313,7 +71313,7 @@
                   "value": "\"syscall::native::region::region_create\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3472
+                    "line": 3473
                   }
                 }
               ]
@@ -71326,7 +71326,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3474
+                "line": 3475
               },
               "children": [
                 {
@@ -71337,7 +71337,7 @@
                   "value": "\"SPACE_CLONE of a region's space shall be refused.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3475
+                    "line": 3476
                   }
                 },
                 {
@@ -71348,7 +71348,7 @@
                   "value": "\"The check.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3476
+                    "line": 3477
                   }
                 },
                 {
@@ -71359,7 +71359,7 @@
                   "value": "\"H.OBJ.26\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3477
+                    "line": 3478
                   }
                 },
                 {
@@ -71370,7 +71370,7 @@
                   "value": "\"user::space::AddressSpace::fork\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3478
+                    "line": 3479
                   }
                 }
               ]
@@ -71383,7 +71383,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3480
+                "line": 3481
               },
               "children": [
                 {
@@ -71394,7 +71394,7 @@
                   "value": "\"A write right to a VMO a higher level maps shall not land at a lower level, but for the level declared.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3482
+                    "line": 3483
                   }
                 },
                 {
@@ -71405,7 +71405,7 @@
                   "value": "\"The `levels` line on every boot: the row's negative control.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3483
+                    "line": 3484
                   }
                 },
                 {
@@ -71416,7 +71416,7 @@
                   "value": "\"H.OBJ.34\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3484
+                    "line": 3485
                   }
                 },
                 {
@@ -71427,7 +71427,7 @@
                   "value": "(\"user::vmo::Vmo::may_write_from\", \"user::vmo::Vmo::highest_mapper\", \"user::vmo::Vmo::set_creator_level\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3487
+                    "line": 3488
                   }
                 }
               ]
@@ -71440,7 +71440,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3489
+                "line": 3490
               },
               "children": [
                 {
@@ -71451,7 +71451,7 @@
                   "value": "\"A VMO a lower level has held a write right to shall not be mapped at a higher level, the target space's level, but for the level declared; a clone or a bind across levels is refused.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3492
+                    "line": 3493
                   }
                 },
                 {
@@ -71462,7 +71462,7 @@
                   "value": "\"The `levels` line on every boot.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3493
+                    "line": 3494
                   }
                 },
                 {
@@ -71473,7 +71473,7 @@
                   "value": "\"H.OBJ.34\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3494
+                    "line": 3495
                   }
                 },
                 {
@@ -71484,7 +71484,7 @@
                   "value": "\"user::vmo::Vmo::may_map_at\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3495
+                    "line": 3496
                   }
                 }
               ]
@@ -71497,7 +71497,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3497
+                "line": 3498
               },
               "children": [
                 {
@@ -71508,7 +71508,7 @@
                   "value": "\"A pager-backed VMO shall not be mapped above its pager's level, whatever is declared.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3499
+                    "line": 3500
                   }
                 },
                 {
@@ -71519,7 +71519,7 @@
                   "value": "\"By the same test as L.user.186; the pager is its creator, so its creator-level writer refuses first.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3501
+                    "line": 3502
                   }
                 },
                 {
@@ -71530,7 +71530,7 @@
                   "value": "\"H.OBJ.34\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3502
+                    "line": 3503
                   }
                 },
                 {
@@ -71541,7 +71541,7 @@
                   "value": "\"user::vmo::Vmo::set_pager_level\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3503
+                    "line": 3504
                   }
                 }
               ]
@@ -71554,7 +71554,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3505
+                "line": 3506
               },
               "children": [
                 {
@@ -71565,7 +71565,7 @@
                   "value": "\"JOB_DECLARE_BUFFER shall need SET_LIMIT on the job and MAP on the VMO, be refused for a VMO declared, with a pager or mapped above, and lift the rule for its one level, audited.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3508
+                    "line": 3509
                   }
                 },
                 {
@@ -71576,7 +71576,7 @@
                   "value": "\"The `levels` line on every boot.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3509
+                    "line": 3510
                   }
                 },
                 {
@@ -71587,7 +71587,7 @@
                   "value": "\"H.OBJ.34\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3510
+                    "line": 3511
                   }
                 },
                 {
@@ -71598,7 +71598,7 @@
                   "value": "(\"user::vmo::Vmo::declare_for\", \"syscall::native::job_declare_buffer\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3512
+                    "line": 3513
                   }
                 }
               ]
@@ -71612,7 +71612,7 @@
           "doc": "src/kernel/src/object/pager.rs and the pager-backed half of src/kernel/src/user/vmo.rs and user/space.rs: K3, pager-backed VMOs (docs/microkernel/K3.md; MICROKERNEL.md section 3; the consultant's OK IF, ledger 2858). An absent page of such an object is its pager's: a fault on it, or a kernel copy into it, sends the pager one page request over its port and waits, bounded by the pager. Dirty tracking keeps a Clean page read-only so that its first write is seen. The one fault-forwarding mechanism NVIDIA.md section 11.4's windows are built on.",
           "source": {
             "file": "docs/sysml/17-memory-requirements.sysml",
-            "line": 3516
+            "line": 3517
           },
           "children": [
             {
@@ -71623,7 +71623,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3528
+                "line": 3529
               },
               "children": [
                 {
@@ -71634,7 +71634,7 @@
                   "value": "\"An absent page of a pager-backed VMO shall never be committed as zeros; a fault on it, or a kernel copy that may wait, shall open one request for the run of absent pages from it, at most 32, or join the open request of the same VMO, the same job and the same command that covers it, and a fault from another job shall open a request of its own.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3534
+                    "line": 3535
                   }
                 },
                 {
@@ -71645,7 +71645,7 @@
                   "value": "\"Stage 9's pager check: a read fault on page 2 of 8 sends one packet for pages 2 to 7; two faults of one job on one page send one packet and both are resumed by its supply; two jobs' faults on one page send two packets.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3538
+                    "line": 3539
                   }
                 },
                 {
@@ -71656,7 +71656,7 @@
                   "value": "\"H.MEM.22\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3539
+                    "line": 3540
                   }
                 },
                 {
@@ -71667,7 +71667,7 @@
                   "value": "(\"object::pager::PagerLink::request\", \"object::pager::PagerCore::list_or_join\", \"user::vmo::Vmo::absent_run\", \"user::vmo::Vmo::sourced\", \"user::space::AddressSpace::ask_pager\", \"user::space::AddressSpace::fault_with\", \"user::space::commit_page\", \"object::pager::Request::covers\", \"user::vmo::Vmo::pager\", \"user::vmo::Vmo::filler\", \"user::space::AddressSpace::paged_object_at\", \"user::space::ask\", \"user::space::permitted\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3546
+                    "line": 3547
                   }
                 }
               ]
@@ -71680,7 +71680,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3548
+                "line": 3549
               },
               "children": [
                 {
@@ -71691,7 +71691,7 @@
                   "value": "\"A request shall be opened with no address space, VMO or pager lock held; its record and its packet's room on the pager's port shall be had before the registry's lock is taken, listing it under that lock shall allocate nothing, and its packet shall be queued on the room promised once the lock is let go; a refusal of the record or the room shall be the fault's out-of-memory.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3555
+                    "line": 3556
                   }
                 },
                 {
@@ -71702,7 +71702,7 @@
                   "value": "\"Stage 9's pager check: every forwarded fault's packet arrives on the pager's port and the port loses none.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3557
+                    "line": 3558
                   }
                 },
                 {
@@ -71713,7 +71713,7 @@
                   "value": "\"H.MEM.22\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3558
+                    "line": 3559
                   }
                 },
                 {
@@ -71724,7 +71724,7 @@
                   "value": "(\"object::port::Port::queue_promised\", \"object::pager::PagerCore::list_or_join\", \"object::pager::PagerLink::request\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3560
+                    "line": 3561
                   }
                 }
               ]
@@ -71737,7 +71737,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3562
+                "line": 3563
               },
               "children": [
                 {
@@ -71748,7 +71748,7 @@
                   "value": "\"A request shall end supplied when a supply makes its first page present, and its waiting threads shall retry the access, which then sees the bytes supplied.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3565
+                    "line": 3566
                   }
                 },
                 {
@@ -71759,7 +71759,7 @@
                   "value": "\"Stage 9's pager check: a fault resumed by a supply of page 2 reads the byte the pager wrote there, and its request is no longer outstanding.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3568
+                    "line": 3569
                   }
                 },
                 {
@@ -71770,7 +71770,7 @@
                   "value": "\"H.MEM.22\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3569
+                    "line": 3570
                   }
                 },
                 {
@@ -71781,7 +71781,7 @@
                   "value": "(\"object::pager::PagerLink::supplied\", \"object::pager::PagerCore::end_where\", \"object::pager::take_ended\", \"object::pager::PagerLink::wait\", \"object::pager::PagerCore::leave\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3572
+                    "line": 3573
                   }
                 }
               ]
@@ -71794,7 +71794,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3574
+                "line": 3575
               },
               "children": [
                 {
@@ -71805,7 +71805,7 @@
                   "value": "\"A request its pager fails shall end its waiting threads' faults as unreadable, a SIGBUS to a program and an error to a copy, and shall be audited PAGER; a failure naming one request by its id shall end that request alone.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3578
+                    "line": 3579
                   }
                 },
                 {
@@ -71816,7 +71816,7 @@
                   "value": "\"Stage 9's pager check: a fault its pager fails is SIGBUS; with two jobs' requests on one page, failing one job's by its id ends that fault alone and the other job's is supplied after.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3582
+                    "line": 3583
                   }
                 },
                 {
@@ -71827,7 +71827,7 @@
                   "value": "\"H.MEM.22\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3583
+                    "line": 3584
                   }
                 },
                 {
@@ -71838,7 +71838,7 @@
                   "value": "(\"object::pager::PagerLink::fail\", \"object::pager::record\", \"object::pager::Request::meets\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3585
+                    "line": 3586
                   }
                 }
               ]
@@ -71851,7 +71851,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3587
+                "line": 3588
               },
               "children": [
                 {
@@ -71862,7 +71862,7 @@
                   "value": "\"A thread shall wait for its pager no longer than the pager's bound, and no wait shall end for the bound before it has passed; a wait that ends at the bound shall be a SIGBUS or an error, audited PAGER once for its request, and the last waiter to leave an open request shall end it.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3592
+                    "line": 3593
                   }
                 },
                 {
@@ -71873,7 +71873,7 @@
                   "value": "\"Stage 9's pager check: with a 5 ms bound and no answer, the fault is SIGBUS no sooner than 5 ms and within 5 s, and no request is left outstanding.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3595
+                    "line": 3596
                   }
                 },
                 {
@@ -71884,7 +71884,7 @@
                   "value": "\"H.MEM.22\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3596
+                    "line": 3597
                   }
                 },
                 {
@@ -71895,7 +71895,7 @@
                   "value": "(\"object::pager::PagerLink::wait\", \"object::pager::PagerCore::leave\", \"object::pager::clamp_wait\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3598
+                    "line": 3599
                   }
                 }
               ]
@@ -71908,7 +71908,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3600
+                "line": 3601
               },
               "children": [
                 {
@@ -71919,7 +71919,7 @@
                   "value": "\"A thread waiting for its pager whose process is ending shall leave the wait at once, a program's fault returning with nothing installed; signals that do not end the process shall not end the wait.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3604
+                    "line": 3605
                   }
                 },
                 {
@@ -71930,7 +71930,7 @@
                   "value": "\"Stage 9's pager check: a client killed while its fault waits on a pager that never answers ends within 5 s, and its request is no longer outstanding.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3607
+                    "line": 3608
                   }
                 },
                 {
@@ -71941,7 +71941,7 @@
                   "value": "\"H.MEM.22\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3608
+                    "line": 3609
                   }
                 },
                 {
@@ -71952,7 +71952,7 @@
                   "value": "(\"sched::work::own_word\", \"object::pager::PagerLink::wait\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3609
+                    "line": 3610
                   }
                 }
               ]
@@ -71965,7 +71965,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3611
+                "line": 3612
               },
               "children": [
                 {
@@ -71976,7 +71976,7 @@
                   "value": "\"A kernel copy shall wait for a pager as a fault does, except into a VMO made with NO_COPY_WAIT or from a context that cannot block, where an absent page shall fail the copy at once and send nothing.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3615
+                    "line": 3616
                   }
                 },
                 {
@@ -71987,7 +71987,7 @@
                   "value": "\"Stage 9's pager check: a copy from an absent page waits for its supply and reads it; one from a NO_COPY_WAIT VMO's absent page fails at once with no packet.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3618
+                    "line": 3619
                   }
                 },
                 {
@@ -71998,7 +71998,7 @@
                   "value": "\"H.MEM.22\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3619
+                    "line": 3620
                   }
                 },
                 {
@@ -72009,7 +72009,7 @@
                   "value": "(\"object::oom::user_fault\", \"syscall::native::copy_paged\", \"syscall::native::read_paged\", \"syscall::native::write_paged\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3621
+                    "line": 3622
                   }
                 }
               ]
@@ -72022,7 +72022,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3623
+                "line": 3624
               },
               "children": [
                 {
@@ -72033,7 +72033,7 @@
                   "value": "\"pager_supply shall move only committed pages of an anonymous VMO that no device holds and no other object shares into the absent pages of the range, skipping present ones, which stay in the aux VMO; the moved pages shall leave every mapping of the aux VMO, with its shootdown, before they are the pager VMO's; and any refusal shall move nothing.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3629
+                    "line": 3630
                   }
                 },
                 {
@@ -72044,7 +72044,7 @@
                   "value": "\"Stage 9's pager check: a supply over a range whose second page is present leaves that page and its aux page as they were; a supply of a page another supply filled moves nothing; a supplied fault reads the aux bytes.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3633
+                    "line": 3634
                   }
                 },
                 {
@@ -72055,7 +72055,7 @@
                   "value": "\"H.MEM.22\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3634
+                    "line": 3635
                   }
                 },
                 {
@@ -72066,7 +72066,7 @@
                   "value": "(\"user::vmo::Vmo::supply_from\", \"user::vmo::Vmo::absent_in\", \"user::vmo::Vmo::take_for_supply\", \"user::vmo::Vmo::put_supplied\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3636
+                    "line": 3637
                   }
                 }
               ]
@@ -72079,7 +72079,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3638
+                "line": 3639
               },
               "children": [
                 {
@@ -72090,7 +72090,7 @@
                   "value": "\"A Clean page of a pager-backed VMO shall never be mapped writable nor written in place by a kernel copy; its first write shall mark it Dirty, or, in a trap-dirty VMO, send a dirty request that PAGER_OP DIRTY lets through and FAIL refuses, the page then staying Clean; a kernel write into it shall mark it Dirty.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3644
+                    "line": 3645
                   }
                 },
                 {
@@ -72101,7 +72101,7 @@
                   "value": "\"Stage 9's pager check: a write to a Clean trap-dirty page asks the pager, lands once DIRTY answers, and the query shows it alone Dirty; a refused one is SIGBUS and its page stays Clean; a read leaves a page mapped read-only, and a write of an untrapped page marks it Dirty with no packet and maps it writable.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3650
+                    "line": 3651
                   }
                 },
                 {
@@ -72112,7 +72112,7 @@
                   "value": "\"H.MEM.23\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3651
+                    "line": 3652
                   }
                 },
                 {
@@ -72123,7 +72123,7 @@
                   "value": "(\"user::vmo::Vmo::writable_page\", \"user::vmo::Vmo::mark_dirty\", \"user::vmo::Vmo::write_paged\", \"user::vmo::Vmo::page_state\", \"user::vmo::state_of\", \"user::space::AddressSpace::read_only_paged\", \"user::space::writable_in_place\", \"user::space::writable_flags\", \"user::space::writable_in\", \"user::vmo::Vmo::dirty_range\", \"object::pager::PagerLink::dirtied\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3657
+                    "line": 3658
                   }
                 }
               ]
@@ -72136,7 +72136,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3659
+                "line": 3660
               },
               "children": [
                 {
@@ -72147,7 +72147,7 @@
                   "value": "\"PAGER_OP WRITEBACK_BEGIN shall make the range's Dirty pages awaiting-clean and return only once no processor holds a writable translation of the range; WRITEBACK_END shall clean only awaiting-clean pages; a write between them shall make its page Dirty again; and DECOMMIT shall take Clean pages only.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3665
+                    "line": 3666
                   }
                 },
                 {
@@ -72158,7 +72158,7 @@
                   "value": "\"Stage 9's pager check: after BEGIN the page is no longer mapped writable; a page written after BEGIN is still Dirty after END while the other is Clean; DECOMMIT takes the Clean page and leaves the Dirty one.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3669
+                    "line": 3670
                   }
                 },
                 {
@@ -72169,7 +72169,7 @@
                   "value": "\"H.MEM.23\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3670
+                    "line": 3671
                   }
                 },
                 {
@@ -72180,7 +72180,7 @@
                   "value": "(\"user::vmo::Vmo::writeback_begin\", \"user::vmo::Vmo::writeback_end\", \"user::vmo::Vmo::decommit_clean\", \"user::vmo::Vmo::dirty_runs\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3673
+                    "line": 3674
                   }
                 }
               ]
@@ -72193,7 +72193,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3675
+                "line": 3676
               },
               "children": [
                 {
@@ -72204,7 +72204,7 @@
                   "value": "\"Each page request shall carry a ticket the kernel issued for the opening thread's process and job, adoptable only through its pager's handle with PAGER and only while the request is outstanding; pages the adopted pager commits and supplies shall stay charged to that job, on its reservation where it has one. At the job's object limit the fault shall end SIGBUS or FAULT with no pager asked; a pager may spend the job's limit and reservation while a request is open, a request a keeper keeps across its pager's close included: the ticket stays live and adoptable through the next instance, and a thread of the closed instance that adopted it goes on charging that job until the request ends.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3686
+                    "line": 3687
                   }
                 },
                 {
@@ -72215,7 +72215,7 @@
                   "value": "\"Stage 9's pager check, case o: the page is the faulting job's alone and drawn from its reservation, the pager's job paying nothing; another pager's handle, a handle without PAGER and a request ended all adopt nothing. The rebind check's second cycle: an instance adopts a request's ticket and closes unanswered, and the next adopts the same ticket by the id sent again.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3692
+                    "line": 3693
                   }
                 },
                 {
@@ -72226,7 +72226,7 @@
                   "value": "\"H.MEM.22\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3693
+                    "line": 3694
                   }
                 },
                 {
@@ -72237,7 +72237,7 @@
                   "value": "(\"object::pager::PagerCore::adoptable_ticket\", \"object::ticket::issue_for\", \"syscall::native::adopt_ticket\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3695
+                    "line": 3696
                   }
                 }
               ]
@@ -72250,7 +72250,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3697
+                "line": 3698
               },
               "children": [
                 {
@@ -72261,7 +72261,7 @@
                   "value": "\"The close of a pager's handle, or DETACH, run where it may block, shall end every outstanding request of its VMOs at once, audited, refuse every later request, and leave the present pages mapped and usable.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3701
+                    "line": 3702
                   }
                 },
                 {
@@ -72272,7 +72272,7 @@
                   "value": "\"Stage 9's pager check: a fault waiting on a pager whose handle closes is SIGBUS well within its bound; a later fault on an absent page is SIGBUS with no packet; a present page still reads.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3705
+                    "line": 3706
                   }
                 },
                 {
@@ -72283,7 +72283,7 @@
                   "value": "\"H.MEM.22\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3706
+                    "line": 3707
                   }
                 },
                 {
@@ -72294,7 +72294,7 @@
                   "value": "(\"object::pager::Pager::drop\", \"object::pager::PagerCore::close\", \"object::pager::PagerLink::detach\", \"object::pager::PagerLink::is_gone\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3708
+                    "line": 3709
                   }
                 }
               ]
@@ -72307,7 +72307,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3710
+                "line": 3711
               },
               "children": [
                 {
@@ -72318,7 +72318,7 @@
                   "value": "\"A seal shall need READ, MAP and WRITE on the handle and shall refuse a VMO that is pager-backed, a file's, physical, coherent, combining or holding a kernel view.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3713
+                    "line": 3714
                   }
                 },
                 {
@@ -72329,7 +72329,7 @@
                   "value": "\"object::sealing_check: a coherent VMO, a kernel view and a read-only handle refused; with the kind's test removed it fails.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3716
+                    "line": 3717
                   }
                 },
                 {
@@ -72340,7 +72340,7 @@
                   "value": "\"H.MEM.29\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3717
+                    "line": 3718
                   }
                 },
                 {
@@ -72351,7 +72351,7 @@
                   "value": "\"user::vmo::Vmo::seal\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3718
+                    "line": 3719
                   }
                 }
               ]
@@ -72364,7 +72364,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3720
+                "line": 3721
               },
               "children": [
                 {
@@ -72375,7 +72375,7 @@
                   "value": "\"A seal shall refuse a VMO with a region by handle whose ceiling holds WRITE, a file mapping that may write, a live hold, or a frame with a second reference; the count of such regions shall fall only after that unmap's shootdown.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3724
+                    "line": 3725
                   }
                 },
                 {
@@ -72386,7 +72386,7 @@
                   "value": "\"object::sealing_check: each case refused and, once unmapped, sealed; with the count's test removed it fails.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3726
+                    "line": 3727
                   }
                 },
                 {
@@ -72397,7 +72397,7 @@
                   "value": "\"H.MEM.29\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3727
+                    "line": 3728
                   }
                 },
                 {
@@ -72408,7 +72408,7 @@
                   "value": "(\"user::vmo::Vmo::seal\", \"user::vmo::Vmo::raise_writable_region\", \"user::vmo::Vmo::lower_writable_region\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3730
+                    "line": 3731
                   }
                 }
               ]
@@ -72421,7 +72421,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3732
+                "line": 3733
               },
               "children": [
                 {
@@ -72432,7 +72432,7 @@
                   "value": "\"After a seal every path that changes a page or the page set shall refuse, and each lock of a VMO's pages shall say what it is to a seal.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3735
+                    "line": 3736
                   }
                 },
                 {
@@ -72443,7 +72443,7 @@
                   "value": "\"object::sealing_check drives vmo_write and a writable map through a kept handle and each path by name, and reads the bytes back; check-vmo-seal-tags.py fails on an untagged lock, with a planted control.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3739
+                    "line": 3740
                   }
                 },
                 {
@@ -72454,7 +72454,7 @@
                   "value": "\"H.MEM.29\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3740
+                    "line": 3741
                   }
                 },
                 {
@@ -72465,7 +72465,7 @@
                   "value": "(\"user::vmo::Vmo::write_page\", \"user::vmo::Vmo::commit_and_write\", \"user::vmo::Vmo::zero_from\", \"user::vmo::Vmo::hold\", \"user::vmo::Vmo::hold_read\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3745
+                    "line": 3746
                   }
                 }
               ]
@@ -72478,7 +72478,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3747
+                "line": 3748
               },
               "children": [
                 {
@@ -72489,7 +72489,7 @@
                   "value": "\"A seal's digest shall be SHA-256 of the object's length in bytes, little-endian, and its frames in page order.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3749
+                    "line": 3750
                   }
                 },
                 {
@@ -72500,7 +72500,7 @@
                   "value": "\"object::sealing_check against a vector computed on the host, and a byte's difference; with the length left out it fails.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3751
+                    "line": 3752
                   }
                 },
                 {
@@ -72511,7 +72511,7 @@
                   "value": "\"H.MEM.29\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3752
+                    "line": 3753
                   }
                 },
                 {
@@ -72522,7 +72522,7 @@
                   "value": "\"user::vmo::Vmo::seal\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3753
+                    "line": 3754
                   }
                 }
               ]
@@ -72535,7 +72535,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3755
+                "line": 3756
               },
               "children": [
                 {
@@ -72546,7 +72546,7 @@
                   "value": "\"Between the freeze and the digest's store vmo_digest shall answer SHOULD_WAIT and an executable map BAD_STATE.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3757
+                    "line": 3758
                   }
                 },
                 {
@@ -72557,7 +72557,7 @@
                   "value": "\"object::sealing_check on an object frozen for the check; with the test removed it fails.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3759
+                    "line": 3760
                   }
                 },
                 {
@@ -72568,7 +72568,7 @@
                   "value": "\"H.MEM.30\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3760
+                    "line": 3761
                   }
                 },
                 {
@@ -72579,7 +72579,7 @@
                   "value": "(\"syscall::native::vmo_digest\", \"user::vmo::Vmo::freeze_for_check\", \"user::space::AddressSpace::map_by_handle\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3763
+                    "line": 3764
                   }
                 }
               ]
@@ -72592,7 +72592,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3765
+                "line": 3766
               },
               "children": [
                 {
@@ -72603,7 +72603,7 @@
                   "value": "\"A job made with JOB_MEASURED, and every job made inside it, shall be measured, and no call shall clear it.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3767
+                    "line": 3768
                   }
                 },
                 {
@@ -72614,7 +72614,7 @@
                   "value": "\"object::sealing_check; with the inheritance removed it fails.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3768
+                    "line": 3769
                   }
                 },
                 {
@@ -72625,7 +72625,7 @@
                   "value": "\"H.MEM.30\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3769
+                    "line": 3770
                   }
                 },
                 {
@@ -72636,7 +72636,7 @@
                   "value": "(\"object::job::Job::make_measured\", \"object::job::Job::measured\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3771
+                    "line": 3772
                   }
                 }
               ]
@@ -72649,7 +72649,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3773
+                "line": 3774
               },
               "children": [
                 {
@@ -72660,7 +72660,7 @@
                   "value": "\"In a measured space space_map with MAP_EXECUTE, or through a handle carrying EXECUTE, shall take only a sealed VMO whose digest is stored, and answer BAD_STATE otherwise with an UNMEASURED record.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3777
+                    "line": 3778
                   }
                 },
                 {
@@ -72671,7 +72671,7 @@
                   "value": "\"object::sealing_check; with the test removed it fails, and the refusal's record read from the ring.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3778
+                    "line": 3779
                   }
                 },
                 {
@@ -72682,7 +72682,7 @@
                   "value": "\"H.MEM.30\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3779
+                    "line": 3780
                   }
                 },
                 {
@@ -72693,7 +72693,7 @@
                   "value": "(\"user::space::AddressSpace::map_by_handle\", \"syscall::native::space_map\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3780
+                    "line": 3781
                   }
                 }
               ]
@@ -72706,7 +72706,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3782
+                "line": 3783
               },
               "children": [
                 {
@@ -72717,7 +72717,7 @@
                   "value": "\"In a measured space space_allocate with MAP_EXECUTE shall answer BAD_STATE, and its regions' ceiling shall hold no EXECUTE.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3785
+                    "line": 3786
                   }
                 },
                 {
@@ -72728,7 +72728,7 @@
                   "value": "\"object::sealing_check; with the test removed it fails.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3786
+                    "line": 3787
                   }
                 },
                 {
@@ -72739,7 +72739,7 @@
                   "value": "\"H.MEM.30\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3787
+                    "line": 3788
                   }
                 },
                 {
@@ -72750,7 +72750,7 @@
                   "value": "\"user::space::AddressSpace::allocate_by_handle\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3788
+                    "line": 3789
                   }
                 }
               ]
@@ -72763,7 +72763,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3790
+                "line": 3791
               },
               "children": [
                 {
@@ -72774,7 +72774,7 @@
                   "value": "\"In a measured space space_protect to MAP_EXECUTE shall pass only a region whose ceiling holds EXECUTE, which only a sealed map has.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3793
+                    "line": 3794
                   }
                 },
                 {
@@ -72785,7 +72785,7 @@
                   "value": "\"object::sealing_check on anonymous memory; with the ceiling widened it fails.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3795
+                    "line": 3796
                   }
                 },
                 {
@@ -72796,7 +72796,7 @@
                   "value": "\"H.MEM.30\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3796
+                    "line": 3797
                   }
                 },
                 {
@@ -72807,7 +72807,7 @@
                   "value": "\"syscall::native::space_protect\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3797
+                    "line": 3798
                   }
                 }
               ]
@@ -72820,7 +72820,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3799
+                "line": 3800
               },
               "children": [
                 {
@@ -72831,7 +72831,7 @@
                   "value": "\"A measured caller's plain vmo_executable shall answer BAD_STATE.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3801
+                    "line": 3802
                   }
                 },
                 {
@@ -72842,7 +72842,7 @@
                   "value": "\"object::sealing_check; with the test removed it fails.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3802
+                    "line": 3803
                   }
                 },
                 {
@@ -72853,7 +72853,7 @@
                   "value": "\"H.MEM.30\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3803
+                    "line": 3804
                   }
                 },
                 {
@@ -72864,7 +72864,7 @@
                   "value": "\"syscall::native::vmo_executable\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3804
+                    "line": 3805
                   }
                 }
               ]
@@ -72877,7 +72877,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3806
+                "line": 3807
               },
               "children": [
                 {
@@ -72888,7 +72888,7 @@
                   "value": "\"process_create into a measured job shall take only a sealed image, measure the new process's space and record the image's digest.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3809
+                    "line": 3810
                   }
                 },
                 {
@@ -72899,7 +72899,7 @@
                   "value": "\"object::sealing_check's refusal of an unsealed image; with the test removed it fails.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3811
+                    "line": 3812
                   }
                 },
                 {
@@ -72910,7 +72910,7 @@
                   "value": "\"H.MEM.30\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3812
+                    "line": 3813
                   }
                 },
                 {
@@ -72921,7 +72921,7 @@
                   "value": "(\"syscall::native::process_create\", \"user::space::AddressSpace::note_image\", \"user::space::Inner::note_image\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3815
+                    "line": 3816
                   }
                 }
               ]
@@ -72934,7 +72934,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3817
+                "line": 3818
               },
               "children": [
                 {
@@ -72945,7 +72945,7 @@
                   "value": "\"A measured caller's space_clone of an unmeasured space shall answer BAD_STATE, and a clone shall keep its source's measured state and record.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3820
+                    "line": 3821
                   }
                 },
                 {
@@ -72956,7 +72956,7 @@
                   "value": "\"object::sealing_check; with the test removed it fails.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3821
+                    "line": 3822
                   }
                 },
                 {
@@ -72967,7 +72967,7 @@
                   "value": "\"H.MEM.30\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3822
+                    "line": 3823
                   }
                 },
                 {
@@ -72978,7 +72978,7 @@
                   "value": "(\"syscall::native::space_clone\", \"user::space::AddressSpace::fork\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3824
+                    "line": 3825
                   }
                 }
               ]
@@ -72991,7 +72991,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3826
+                "line": 3827
               },
               "children": [
                 {
@@ -73002,7 +73002,7 @@
                   "value": "\"A space shall record the digest of each sealed VMO it maps executable, once, up to MAX_IMAGES, keep it across an unmap and copy it across a clone.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3829
+                    "line": 3830
                   }
                 },
                 {
@@ -73013,7 +73013,7 @@
                   "value": "\"object::sealing_check; with an unmap removing it the check fails.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3831
+                    "line": 3832
                   }
                 },
                 {
@@ -73024,7 +73024,7 @@
                   "value": "\"H.MEM.30\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3832
+                    "line": 3833
                   }
                 },
                 {
@@ -73035,7 +73035,7 @@
                   "value": "(\"user::space::Images::note\", \"user::space::AddressSpace::images_into\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3834
+                    "line": 3835
                   }
                 }
               ]
@@ -73048,7 +73048,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3836
+                "line": 3837
               },
               "children": [
                 {
@@ -73059,7 +73059,7 @@
                   "value": "\"process_images shall answer the digests' count with IMAGES_UNMEASURED set when the space is not measured.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3838
+                    "line": 3839
                   }
                 },
                 {
@@ -73070,7 +73070,7 @@
                   "value": "\"object::sealing_check; with the bit removed it fails.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3839
+                    "line": 3840
                   }
                 },
                 {
@@ -73081,7 +73081,7 @@
                   "value": "\"H.MEM.30\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3840
+                    "line": 3841
                   }
                 },
                 {
@@ -73092,7 +73092,7 @@
                   "value": "\"syscall::native::process_images\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3841
+                    "line": 3842
                   }
                 }
               ]
@@ -73105,7 +73105,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3843
+                "line": 3844
               },
               "children": [
                 {
@@ -73116,7 +73116,7 @@
                   "value": "\"A process shall cross between a measured and an unmeasured job by no move, either way; process_create's placement of a new process excepted.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3846
+                    "line": 3847
                   }
                 },
                 {
@@ -73127,7 +73127,7 @@
                   "value": "\"object::sealing_check; with the test removed it fails.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3847
+                    "line": 3848
                   }
                 },
                 {
@@ -73138,7 +73138,7 @@
                   "value": "\"H.MEM.30\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3848
+                    "line": 3849
                   }
                 },
                 {
@@ -73149,7 +73149,7 @@
                   "value": "\"object::job::Job::measure_refuses\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3849
+                    "line": 3850
                   }
                 }
               ]
@@ -73162,7 +73162,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3851
+                "line": 3852
               },
               "children": [
                 {
@@ -73173,7 +73173,7 @@
                   "value": "\"A process shall pass K14's test only if its space is measured, untainted, and every digest on its record is on the certified list.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3853
+                    "line": 3854
                   }
                 },
                 {
@@ -73184,7 +73184,7 @@
                   "value": "\"object::grant_check: a space with an unlisted digest does not pass.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3854
+                    "line": 3855
                   }
                 },
                 {
@@ -73195,7 +73195,7 @@
                   "value": "\"H.MEM.30\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3855
+                    "line": 3856
                   }
                 },
                 {
@@ -73206,7 +73206,7 @@
                   "value": "(\"user::space::AddressSpace::passes\", \"user::space::set\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3856
+                    "line": 3857
                   }
                 }
               ]
@@ -73219,7 +73219,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3858
+                "line": 3859
               },
               "children": [
                 {
@@ -73230,7 +73230,7 @@
                   "value": "\"A change to a space by a caller that does not pass, before or after the start, shall taint it for good.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3860
+                    "line": 3861
                   }
                 },
                 {
@@ -73241,7 +73241,7 @@
                   "value": "\"object::grant_check.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3861
+                    "line": 3862
                   }
                 },
                 {
@@ -73252,7 +73252,7 @@
                   "value": "\"H.MEM.30\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3862
+                    "line": 3863
                   }
                 },
                 {
@@ -73263,7 +73263,7 @@
                   "value": "(\"syscall::native::reach_into\", \"user::space::AddressSpace::reached\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3863
+                    "line": 3864
                   }
                 }
               ]
@@ -73276,7 +73276,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3865
+                "line": 3866
               },
               "children": [
                 {
@@ -73287,7 +73287,7 @@
                   "value": "\"A passing process shall have no supervisor that does not pass, on itself, its job or an ancestor.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3867
+                    "line": 3868
                   }
                 },
                 {
@@ -73298,7 +73298,7 @@
                   "value": "\"object::grant_check.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3868
+                    "line": 3869
                   }
                 },
                 {
@@ -73309,7 +73309,7 @@
                   "value": "\"H.MEM.30\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3869
+                    "line": 3870
                   }
                 },
                 {
@@ -73320,7 +73320,7 @@
                   "value": "(\"object::job::Job::note_grant\", \"object::job::Job::supervised_from_outside\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3870
+                    "line": 3871
                   }
                 }
               ]
@@ -73333,7 +73333,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 3872
+                "line": 3873
               },
               "children": [
                 {
@@ -73344,7 +73344,7 @@
                   "value": "\"After a grant the node's holder shall not lose the test by a later act of anyone but itself without its grant ending.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3874
+                    "line": 3875
                   }
                 },
                 {
@@ -73355,7 +73355,7 @@
                   "value": "\"object::grant_check.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3875
+                    "line": 3876
                   }
                 },
                 {
@@ -73366,7 +73366,7 @@
                   "value": "\"H.MEM.30\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3876
+                    "line": 3877
                   }
                 },
                 {
@@ -73377,7 +73377,7 @@
                   "value": "\"object::job::Job::note_grant\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 3877
+                    "line": 3878
                   }
                 }
               ]
@@ -88405,10 +88405,10 @@
               ]
             },
             {
-              "name": "aSwitchFromRestrictedIsAnExit",
-              "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aSwitchFromRestrictedIsAnExit",
+              "name": "aFastExitLeavesTheVectorsUp",
+              "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aFastExitLeavesTheVectorsUp",
               "kind": "requirement",
-              "shortName": "L.x86_64.276",
+              "shortName": "L.x86_64.272",
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/18-x86-64-requirements.sysml",
@@ -88417,10 +88417,10 @@
               "children": [
                 {
                   "name": "",
-                  "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aSwitchFromRestrictedIsAnExit",
+                  "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aFastExitLeavesTheVectorsUp",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"A switch that brings a normal-mode thread in, where restricted code ran last on the processor, shall issue the barrier under the exit rule, a kernel thread between them changing nothing.\"",
+                  "value": "\"Under restricted_fastpath=on a SYSCALL exit with no work due and null selectors shall set CR0.TS and leave the vector registers as they are, and normal mode's first vector instruction shall take them down.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
                     "line": 4108
@@ -88428,10 +88428,10 @@
                 },
                 {
                   "name": "",
-                  "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aSwitchFromRestrictedIsAnExit",
+                  "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aFastExitLeavesTheVectorsUp",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Cases 124, 125.\"",
+                  "value": "\"Cases 74-76, 142.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
                     "line": 4109
@@ -88439,7 +88439,7 @@
                 },
                 {
                   "name": "",
-                  "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aSwitchFromRestrictedIsAnExit",
+                  "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aFastExitLeavesTheVectorsUp",
                   "kind": "attribute",
                   "redefines": "parent",
                   "value": "\"H.TRAP.24\"",
@@ -88450,13 +88450,241 @@
                 },
                 {
                   "name": "",
+                  "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aFastExitLeavesTheVectorsUp",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"arch::x86_64::restricted::materialise\", \"arch::x86_64::restricted::lazy_vector_trap\")",
+                  "source": {
+                    "file": "docs/sysml/18-x86-64-requirements.sysml",
+                    "line": 4112
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aSwitchTakesTheVectorsDown",
+              "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aSwitchTakesTheVectorsDown",
+              "kind": "requirement",
+              "shortName": "L.x86_64.273",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/18-x86-64-requirements.sysml",
+                "line": 4114
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aSwitchTakesTheVectorsDown",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"Every switch shall clear CR0.TS first, a dead task's too, and a task that lives on shall have the registers saved as the program's.\"",
+                  "source": {
+                    "file": "docs/sysml/18-x86-64-requirements.sysml",
+                    "line": 4116
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aSwitchTakesTheVectorsDown",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Cases 143, 134.\"",
+                  "source": {
+                    "file": "docs/sysml/18-x86-64-requirements.sysml",
+                    "line": 4117
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aSwitchTakesTheVectorsDown",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.TRAP.24\"",
+                  "source": {
+                    "file": "docs/sysml/18-x86-64-requirements.sysml",
+                    "line": 4118
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aSwitchTakesTheVectorsDown",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"arch::x86_64::restricted::before_switch\", \"arch::x86_64::restricted::is_vector_in_kernel\", \"arch::x86_64::restricted::with_vectors_down\", \"arch::x86_64::switch::UserState::save_vectors_only\", \"arch::x86_64::switch::UserState::restore_vectors_only\")",
+                  "source": {
+                    "file": "docs/sysml/18-x86-64-requirements.sysml",
+                    "line": 4123
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aFastResumeKeepsEveryRule",
+              "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aFastResumeKeepsEveryRule",
+              "kind": "requirement",
+              "shortName": "L.x86_64.274",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/18-x86-64-requirements.sysml",
+                "line": 4125
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aFastResumeKeepsEveryRule",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"RESTRICTED_RESUME shall go back in by the fast path only after a SYSCALL exit with the mark up, raising the barrier's mark first.\"",
+                  "source": {
+                    "file": "docs/sysml/18-x86-64-requirements.sysml",
+                    "line": 4127
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aFastResumeKeepsEveryRule",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Case 144: 51 barriers on 51 exits, 50 of them after a fast entry.\"",
+                  "source": {
+                    "file": "docs/sysml/18-x86-64-requirements.sysml",
+                    "line": 4128
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aFastResumeKeepsEveryRule",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.TRAP.24\"",
+                  "source": {
+                    "file": "docs/sysml/18-x86-64-requirements.sysml",
+                    "line": 4129
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aFastResumeKeepsEveryRule",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"arch::x86_64::restricted::fast_resume\", \"arch::x86_64::restricted::fast_resume_here\", \"arch::x86_64::restricted::fast_exit_here\", \"arch::x86_64::restricted::flip_to\", \"arch::x86_64::restricted::copy_kept\", \"arch::x86_64::syscall::ferrix_syscall_fast\", \"arch::x86_64::pcid::tagged_install\")",
+                  "source": {
+                    "file": "docs/sysml/18-x86-64-requirements.sysml",
+                    "line": 4136
+                  }
+                }
+              ]
+            },
+            {
+              "name": "theRecordsAreNotCopied",
+              "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::theRecordsAreNotCopied",
+              "kind": "requirement",
+              "shortName": "L.x86_64.275",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/18-x86-64-requirements.sysml",
+                "line": 4138
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::theRecordsAreNotCopied",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A thread's record of the mode it is in shall be chosen by a pointer, so neither path copies a record; the two bases shall be written as the mode asks, FS whenever normal mode's is not zero.\"",
+                  "source": {
+                    "file": "docs/sysml/18-x86-64-requirements.sysml",
+                    "line": 4141
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::theRecordsAreNotCopied",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"The regions line under both settings of restricted_fastpath.\"",
+                  "source": {
+                    "file": "docs/sysml/18-x86-64-requirements.sysml",
+                    "line": 4142
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::theRecordsAreNotCopied",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.TRAP.22\"",
+                  "source": {
+                    "file": "docs/sysml/18-x86-64-requirements.sysml",
+                    "line": 4143
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::theRecordsAreNotCopied",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"arch::x86_64::restricted::swap_user_state\", \"arch::x86_64::restricted::write_bases\", \"arch::x86_64::restricted::both_modes_clean\", \"arch::x86_64::cpu::set_task_switched\", \"arch::x86_64::cpu::clear_task_switched\")",
+                  "source": {
+                    "file": "docs/sysml/18-x86-64-requirements.sysml",
+                    "line": 4148
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aSwitchFromRestrictedIsAnExit",
+              "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aSwitchFromRestrictedIsAnExit",
+              "kind": "requirement",
+              "shortName": "L.x86_64.276",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/18-x86-64-requirements.sysml",
+                "line": 4150
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aSwitchFromRestrictedIsAnExit",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A switch that brings a normal-mode thread in, where restricted code ran last on the processor, shall issue the barrier under the exit rule, a kernel thread between them changing nothing.\"",
+                  "source": {
+                    "file": "docs/sysml/18-x86-64-requirements.sysml",
+                    "line": 4153
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aSwitchFromRestrictedIsAnExit",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Cases 124, 125.\"",
+                  "source": {
+                    "file": "docs/sysml/18-x86-64-requirements.sysml",
+                    "line": 4154
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aSwitchFromRestrictedIsAnExit",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.TRAP.24\"",
+                  "source": {
+                    "file": "docs/sysml/18-x86-64-requirements.sysml",
+                    "line": 4155
+                  }
+                },
+                {
+                  "name": "",
                   "qualifiedName": "FerrixX8664Requirements::ExceptionContexts::aSwitchFromRestrictedIsAnExit",
                   "kind": "attribute",
                   "redefines": "unit",
                   "value": "(\"arch::speculation::restricted_left\", \"arch::speculation::restricted_ran\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
-                    "line": 4112
+                    "line": 4157
                   }
                 }
               ]

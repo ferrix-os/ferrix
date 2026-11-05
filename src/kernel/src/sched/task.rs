@@ -276,9 +276,13 @@ pub struct Task {
     /// What it holds once it has entered restricted mode; only it reaches it.
     #[cfg_attr(
         target_arch = "arm",
-        expect(dead_code, reason = "ARMv7-A has no restricted mode")
+        allow(dead_code, reason = "ARMv7-A has no restricted mode")
     )]
     restricted_state: UnsafeCell<Option<Box<arch::RestrictedState>>>,
+    /// The record of the mode it is in where that is not its own: in restricted mode,
+    /// on x86-64, the program's, inside `restricted_state`, which it outlives no more
+    /// than the task does. Written by the running task alone.
+    active_user: AtomicPtr<arch::UserState>,
     /// Whether it is a thread of a process no personality holds.
     bare_thread: bool,
     /// Its share of a CPU, as the run queue has it: [`Task::base_weight`]
@@ -713,7 +717,7 @@ impl Task {
 
     #[cfg_attr(
         target_arch = "arm",
-        expect(dead_code, reason = "ARMv7-A has no restricted mode")
+        allow(dead_code, reason = "ARMv7-A has no restricted mode")
     )]
     /// Its restricted-mode record.
     ///
@@ -775,6 +779,7 @@ impl Task {
             spawn_pin,
             restricted_mode: AtomicBool::new(false),
             restricted_state: UnsafeCell::new(None),
+            active_user: AtomicPtr::new(core::ptr::null_mut()),
             bare_thread,
             address_space,
             thread,
@@ -839,6 +844,7 @@ impl Task {
             spawn_pin: None,
             restricted_mode: AtomicBool::new(false),
             restricted_state: UnsafeCell::new(None),
+            active_user: AtomicPtr::new(core::ptr::null_mut()),
             bare_thread: false,
             // The boot task and the idle tasks are the kernel's own and have
             // no user half to translate.
@@ -1571,7 +1577,25 @@ impl Task {
     /// (SHARED) As [`Task::stack_pointer_slot`]: the caller must hold the lock of the
     /// run queue that owns this task, which is what orders every access.
     pub unsafe fn user_state(&self) -> Option<*mut arch::UserState> {
+        let active = self.active_user.load(Ordering::Relaxed);
+        if !active.is_null() {
+            return Some(active);
+        }
         self.user.as_ref().map(|cell| cell.get())
+    }
+
+    /// Its own record, whichever is active.
+    ///
+    /// # Safety
+    ///
+    /// As [`Task::user_state`].
+    pub(super) unsafe fn own_record(&self) -> Option<*mut arch::UserState> {
+        self.user.as_ref().map(|cell| cell.get())
+    }
+
+    /// Which record [`Task::user_state`] answers with: null for its own.
+    pub(super) fn set_active_user(&self, record: *mut arch::UserState) {
+        self.active_user.store(record, Ordering::Relaxed);
     }
 
     /// The top of this task's own kernel stack, if it has one.

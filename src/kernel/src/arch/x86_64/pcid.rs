@@ -153,6 +153,7 @@ pub(crate) enum RootWrite {
 /// (TRANSLATE) As [`cpu::write_cr3`]: `root` maps the kernel's half. And
 /// interrupts masked, with `logical` the processor running this: the slots
 /// are this processor's alone.
+#[inline(always)]
 pub(crate) unsafe fn install(root: u64, space: u64, begun: u64, logical: usize) -> RootWrite {
     let Some(slots) = TABLE.get(logical) else {
         // No record to keep for a processor past the table, which the
@@ -171,6 +172,17 @@ pub(crate) unsafe fn install(root: u64, space: u64, begun: u64, logical: usize) 
         slots.last.store(root, Ordering::Relaxed);
         return RootWrite::Untagged;
     }
+    // SAFETY: (TRANSLATE) the caller's guarantee.
+    unsafe { tagged_install(root, space, begun, slots) }
+}
+
+/// [`install`] where the machine tags.
+///
+/// # Safety
+///
+/// As [`install`].
+#[cold]
+unsafe fn tagged_install(root: u64, space: u64, begun: u64, slots: &Slots) -> RootWrite {
     let (slot, keep) = slots.choose(space, begun);
     let value = tagged_root(root, slot, keep);
     // SAFETY: (TRANSLATE) the caller's guarantee; `PCIDE` is set on every

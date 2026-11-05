@@ -293,6 +293,14 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
         "assembly allow-list",
         &[&["tools/common/check/check-asm-budget.py"]],
     ),
+    // K1's lazy vector state: no XSAVE-class site in ring 0 but the switch's.
+    (
+        "x86-64 vector state sites",
+        &[
+            &["tools/common/check/check-xsave-sites.py"],
+            &["tools/common/check/check-xsave-sites.py", "--self-test"],
+        ],
+    ),
     // K1's ASIDs: a hit is safe only while every shootdown reaches every tag.
     (
         "AArch64 TLB invalidations",

@@ -216,6 +216,7 @@ pub const ELF_MACHINE: u16 = 62;
 ///
 /// As [`linux`], for `argument`: an entry's context pointer, which the kernel
 /// only reads.
+#[inline(always)]
 pub(crate) unsafe fn restricted(
     number: usize,
     argument: u64,

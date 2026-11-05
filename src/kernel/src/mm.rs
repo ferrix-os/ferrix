@@ -197,7 +197,7 @@ static RAM_RUNS: [(AtomicU64, AtomicU64); MOST_RAM_RUNS] =
 static RAM_RUN_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 /// The virtual address at which physical address `phys` is readable.
-fn physmap(phys: u64) -> u64 {
+pub(crate) fn physmap(phys: u64) -> u64 {
     PHYSMAP.load(Ordering::Relaxed) + (phys - PHYSMAP_PHYS.load(Ordering::Relaxed))
 }
 

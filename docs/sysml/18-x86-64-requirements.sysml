@@ -4102,6 +4102,51 @@ package FerrixX8664Requirements {
             attribute :>> parent = "H.TRAP.24";
             attribute :>> unit = "arch::speculation::restricted_left";
         }
+        requirement <'L.x86_64.272'> aFastExitLeavesTheVectorsUp : ItemLowLevel {
+            attribute :>> statement = "Under restricted_fastpath=on a SYSCALL exit with no work due and null
+                selectors shall set CR0.TS and leave the vector registers as they are,
+                and normal mode's first vector instruction shall take them down.";
+            attribute :>> criterion = "Cases 74-76, 142.";
+            attribute :>> parent = "H.TRAP.24";
+            attribute :>> unit = ("arch::x86_64::restricted::materialise",
+                "arch::x86_64::restricted::lazy_vector_trap");
+        }
+        requirement <'L.x86_64.273'> aSwitchTakesTheVectorsDown : ItemLowLevel {
+            attribute :>> statement = "Every switch shall clear CR0.TS first, a dead task's too, and a task
+                that lives on shall have the registers saved as the program's.";
+            attribute :>> criterion = "Cases 143, 134.";
+            attribute :>> parent = "H.TRAP.24";
+            attribute :>> unit = ("arch::x86_64::restricted::before_switch",
+                "arch::x86_64::restricted::is_vector_in_kernel",
+                "arch::x86_64::restricted::with_vectors_down",
+                "arch::x86_64::switch::UserState::save_vectors_only",
+                "arch::x86_64::switch::UserState::restore_vectors_only");
+        }
+        requirement <'L.x86_64.274'> aFastResumeKeepsEveryRule : ItemLowLevel {
+            attribute :>> statement = "RESTRICTED_RESUME shall go back in by the fast path only after a SYSCALL
+                exit with the mark up, raising the barrier's mark first.";
+            attribute :>> criterion = "Case 144: 51 barriers on 51 exits, 50 of them after a fast entry.";
+            attribute :>> parent = "H.TRAP.24";
+            attribute :>> unit = ("arch::x86_64::restricted::fast_resume",
+                "arch::x86_64::restricted::fast_resume_here",
+                "arch::x86_64::restricted::fast_exit_here",
+                "arch::x86_64::restricted::flip_to",
+                "arch::x86_64::restricted::copy_kept",
+                "arch::x86_64::syscall::ferrix_syscall_fast",
+                "arch::x86_64::pcid::tagged_install");
+        }
+        requirement <'L.x86_64.275'> theRecordsAreNotCopied : ItemLowLevel {
+            attribute :>> statement = "A thread's record of the mode it is in shall be chosen by a pointer, so
+                neither path copies a record; the two bases shall be written as the mode
+                asks, FS whenever normal mode's is not zero.";
+            attribute :>> criterion = "The regions line under both settings of restricted_fastpath.";
+            attribute :>> parent = "H.TRAP.22";
+            attribute :>> unit = ("arch::x86_64::restricted::swap_user_state",
+                "arch::x86_64::restricted::write_bases",
+                "arch::x86_64::restricted::both_modes_clean",
+                "arch::x86_64::cpu::set_task_switched",
+                "arch::x86_64::cpu::clear_task_switched");
+        }
         requirement <'L.x86_64.276'> aSwitchFromRestrictedIsAnExit : ItemLowLevel {
             attribute :>> statement = "A switch that brings a normal-mode thread in, where restricted
                 code ran last on the processor, shall issue the barrier under the

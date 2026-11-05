@@ -197,6 +197,8 @@ pub struct UserState {
     /// `XSTATE_BV`: the next switch to the task resets the registers, and
     /// every reader sees the initial state ([`UserState::vectors`]).
     unsaved: bool,
+    /// The next save is not to touch the area: the registers have gone elsewhere.
+    vectors_elsewhere: bool,
     /// The x87, SSE and AVX registers, as `XSAVE` or `FXSAVE` wrote them.
     fpu: FpuArea,
 }
@@ -239,6 +241,31 @@ const _: () = assert!(
 );
 
 impl UserState {
+    /// Save the vector registers alone here.
+    ///
+    /// # Safety
+    ///
+    /// (CONTEXT) The registers are this record's, with interrupts masked and `CR0.TS` clear.
+    pub(super) unsafe fn save_vectors_only(&mut self) {
+        // SAFETY: (CONTEXT) a whole area, and the processor's enabled components.
+        unsafe { ferrix_fpu_save(&raw mut self.fpu, cpu::extended_state_components()) };
+    }
+
+    /// Load the vector registers alone from here.
+    ///
+    /// # Safety
+    ///
+    /// (CONTEXT) As [`UserState::save_vectors_only`], the area written by the processor.
+    pub(super) unsafe fn restore_vectors_only(&mut self) {
+        // SAFETY: (CONTEXT) the caller's guarantee.
+        unsafe { ferrix_fpu_restore(&raw const self.fpu, cpu::extended_state_components()) };
+    }
+
+    /// The next save leaves the area alone.
+    pub(super) const fn skip_next_vector_save(&mut self) {
+        self.vectors_elsewhere = true;
+    }
+
     /// A copy of the user state this processor holds right now: what a fork
     /// child inherits.
     ///
@@ -474,6 +501,7 @@ impl UserState {
             selectors: [0; 4],
             vectors_dead: false,
             unsaved: false,
+            vectors_elsewhere: false,
             fpu: FpuArea::initial(INITIAL_MXCSR, INITIAL_X87_CONTROL),
         }
     }
@@ -660,6 +688,13 @@ unsafe fn ferrix_fpu_restore(area: *const FpuArea, components: u64) {
 /// task is switched out blocked rather than runnable.
 pub(crate) unsafe fn save_user_state(state: &mut UserState, blocked: bool) {
     state.selectors = cpu::read_data_selectors();
+    // The registers went to the program's record as this switch began: they are not
+    // this record's (`restricted::before_switch`).
+    if core::mem::take(&mut state.vectors_elsewhere) {
+        // SAFETY: (CONTEXT) as below.
+        state.tls = unsafe { gdt::read_tls() };
+        return;
+    }
     // SAFETY: (CONTEXT) the caller switches tasks with interrupts masked, so these are
     // this processor's slots and the outgoing thread's.
     state.tls = unsafe { gdt::read_tls() };

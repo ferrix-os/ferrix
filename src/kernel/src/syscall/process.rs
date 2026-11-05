@@ -193,6 +193,9 @@ pub struct Process {
     /// ended, if that process still exists. Weak, because a parent keeps its
     /// children (until it waits for them) and not the other way round.
     parent: SpinLock<Weak<Process>>,
+    /// What it calls its parent, for `linuxd`'s straight path: `u32::MAX` until a general
+    /// `getppid` has asked, and again whenever `parent` changes, both under its lock.
+    parent_view: AtomicU32,
     /// Its process group, which job control and `kill(0, …)` address.
     pgid: AtomicU32,
     /// Its session.
@@ -485,6 +488,7 @@ impl Process {
             keep_space: AtomicBool::new(false),
             threads: SpinLock::new(Vec::new()),
             parent: SpinLock::new(Weak::new()),
+            parent_view: AtomicU32::new(u32::MAX),
             // A process the kernel starts leads its own group and session.
             // A fork child inherits its parent's instead, below.
             pgid: AtomicU32::new(pid),
@@ -843,6 +847,7 @@ impl Process {
     /// A closure rather than a guard, so that nothing a handler does with user
     /// memory can happen while the lock is held: every copy to or from the
     /// program is outside it.
+    #[inline(always)]
     pub(crate) fn with_signals<R>(&self, change: impl FnOnce(&mut Signals) -> R) -> R {
         change(&mut self.state.lock().signals)
     }
@@ -1145,6 +1150,7 @@ impl Process {
 
     /// Whether `thread` is to leave rather than run on: its process is ending,
     /// or another of its threads is replacing the program.
+    #[inline(always)]
     pub(crate) fn must_leave(&self, thread: &Thread) -> bool {
         if self.is_terminated() {
             return true;
@@ -1518,7 +1524,11 @@ impl Process {
         for orphan in orphans {
             let death_signal = attributes::get(&orphan).parent_death_signal;
             let Some(reaper) = &reaper else {
-                *orphan.parent.lock() = Weak::new();
+                {
+                    let mut parent = orphan.parent.lock();
+                    *parent = Weak::new();
+                    orphan.parent_view.store(u32::MAX, Ordering::Release);
+                }
                 kill::send(&orphan, death_signal, Origin::Kernel);
                 continue;
             };
@@ -1527,7 +1537,11 @@ impl Process {
             // `SIGCHLD`, which the new parent expects.
             orphan.exit_signal.store(SIGCHLD, Ordering::Release);
             reaper.adopt(Arc::clone(&orphan));
-            *orphan.parent.lock() = Arc::downgrade(reaper);
+            {
+                let mut parent = orphan.parent.lock();
+                *parent = Arc::downgrade(reaper);
+                orphan.parent_view.store(u32::MAX, Ordering::Release);
+            }
             kill::send(&orphan, death_signal, Origin::Kernel);
             if orphan.is_released() {
                 if reaper.with_signals(|signals| signals.reaps_children_automatically()) {
@@ -1968,6 +1982,7 @@ impl Process {
     }
 
     /// Whether it is stopped.
+    #[inline(always)]
     pub(crate) fn is_stopped(&self) -> bool {
         self.stopped.load(Ordering::Acquire) != 0
     }
@@ -1976,6 +1991,7 @@ impl Process {
     /// stopped, or its cgroup is frozen. A freeze is a stop that `SIGCONT`
     /// does not undo, that no parent is told of, and that a `SIGKILL` ends
     /// as it ends a stop.
+    #[inline(always)]
     pub(crate) fn must_park(&self) -> bool {
         self.is_stopped() || self.core().is_frozen() || self.is_held()
     }
@@ -1983,6 +1999,7 @@ impl Process {
     /// Whether a fault of it is held for `/dev/ferrix-crashes`: a park
     /// `SIGCONT` and a thaw do not undo, no parent is told of, and every
     /// end releases (`fs::crashes`).
+    #[inline(always)]
     pub(crate) fn is_held(&self) -> bool {
         self.held.load(Ordering::Acquire) != 0
     }
@@ -2151,6 +2168,36 @@ impl Process {
     /// The number `viewer` calls its parent by, or zero when it has none or
     /// the viewer cannot see it: a process the kernel started, one whose
     /// parent has ended, and a namespace's init.
+    #[inline(always)]
+    /// `getppid`'s answer, kept for the straight path.
+    pub(crate) fn parent_pid_kept(&self) -> u32 {
+        let parent = self.parent.lock();
+        let number = parent
+            .upgrade()
+            .map_or(0, |parent| pidns::to_user(self, &parent));
+        self.parent_view.store(number, Ordering::Release);
+        number
+    }
+
+    /// What [`Process::parent_pid_kept`] kept, `u32::MAX` for none.
+    #[cfg(ferrix_personality = "user")]
+    #[inline(always)]
+    pub(crate) fn parent_view(&self) -> u32 {
+        self.parent_view.load(Ordering::Acquire)
+    }
+
+    /// Nothing about it asks a thread to stop on its way back, without a branch.
+    #[cfg(ferrix_personality = "user")]
+    #[inline(always)]
+    pub(crate) fn quiet_for(&self, thread: &Thread) -> bool {
+        let replacing = self.exec_thread.load(Ordering::Acquire);
+        (!self.is_terminated())
+            & ((replacing == 0) | (replacing == thread.tid()))
+            & (self.stopped.load(Ordering::Acquire) == 0)
+            & (!self.core().is_frozen())
+            & (self.held.load(Ordering::Acquire) == 0)
+    }
+
     pub(crate) fn parent_pid_in(&self, viewer: &Process) -> u32 {
         self.parent
             .lock()
@@ -2212,6 +2259,7 @@ impl Process {
 
     /// Its numbers in the namespaces below the first it is in; `None` in
     /// the first.
+    #[inline(always)]
     pub fn numbers(&self) -> Option<&Arc<Numbers>> {
         self.pids.as_ref()
     }

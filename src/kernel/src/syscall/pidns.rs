@@ -361,11 +361,13 @@ pub(crate) fn assign(ns: &Arc<PidNamespace>, kernel: u32) -> Result<Arc<Numbers>
 /// The number `viewer` calls `target` by: its kernel number for a viewer in
 /// the first namespace, which sees everything; its number in the viewer's
 /// namespace for a viewer below it; zero when the viewer cannot see it.
+#[inline(always)]
 pub(crate) fn to_user(viewer: &Process, target: &Process) -> u32 {
     number_for(viewer.numbers(), target.numbers(), target.pid())
 }
 
 /// [`to_user`] for a task named by its numbers and kernel number.
+#[inline(always)]
 pub(crate) fn number_for(
     viewer: Option<&Arc<Numbers>>,
     target: Option<&Arc<Numbers>>,

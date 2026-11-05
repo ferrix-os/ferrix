@@ -242,7 +242,7 @@ pub(crate) fn handle(
         return Ok(own_number(call, process));
     }
     if let (Syscall::Getppid, Some(process)) = (call, process) {
-        return Ok(process.parent_pid_in(process) as usize);
+        return Ok(process.parent_pid_kept() as usize);
     }
     if let Some(id) = process.and_then(|process| credentials::identity(call, process)) {
         return Ok(id as usize);

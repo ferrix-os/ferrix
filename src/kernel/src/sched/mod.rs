@@ -47,6 +47,7 @@ mod check;
 mod deadline_check;
 #[cfg(ferrix_fast_ipc)]
 pub mod direct;
+pub(crate) mod fast;
 mod mark_check;
 mod preempt;
 mod preempt_check;
@@ -283,7 +284,8 @@ pub fn regroup_current() {
 /// asked of this processor, and no move between jobs since it last looked.
 /// When any is there, the tail takes the general way out instead, which
 /// reads each again and acts on it.
-#[cfg(ferrix_fast_ipc)]
+#[allow(dead_code, reason = "K1's fast crossings alone ask it, on x86-64")]
+#[inline(always)]
 pub(crate) fn nothing_due_here() -> bool {
     let Some(cpu) = this_cpu() else {
         return false;
@@ -303,7 +305,11 @@ pub(crate) fn nothing_due_here() -> bool {
 /// quota: what the frame tail asks so that a task making only fast-path calls
 /// is held to its quota as the general way out ([`throttle_current`]) holds
 /// it. A machine with no `cpu.max` set pays one load. With interrupts masked.
-#[cfg(ferrix_fast_ipc)]
+#[inline(always)]
+#[cfg_attr(
+    not(ferrix_restricted_fastpath = "on"),
+    allow(dead_code, reason = "K1's fast crossings alone ask it")
+)]
 fn throttled_here(cpu: usize) -> bool {
     if !quota::bandwidth_in_use() {
         return false;
@@ -3176,6 +3182,7 @@ pub(crate) fn preempt_on_irq_exit(from_user: bool) {
 
 /// Whether an interrupt asked `cpu` to reschedule, without clearing the
 /// request: a load, for a caller that swaps only when it is set.
+#[inline(always)]
 fn resched_asked(cpu: usize) -> bool {
     NEED_RESCHED
         .get()
@@ -3646,7 +3653,7 @@ fn swap_address_space(previous_task: &Task, next_task: &Task) {
 
 /// Whether the running task is in restricted mode: one byte of the processor's
 /// record, which every switch and flip writes, so right after any migration.
-#[inline]
+#[inline(always)]
 pub fn running_restricted() -> bool {
     crate::smp::this_cpu().is_some_and(crate::smp::PerCpu::runs_restricted)
 }
@@ -3662,6 +3669,7 @@ pub fn running_bare() -> bool {
     target_arch = "arm",
     expect(dead_code, reason = "ARMv7-A has no restricted mode")
 )]
+#[inline(always)]
 pub(crate) fn running_in_region() -> bool {
     with_current(|task| {
         task.core_process()
@@ -3675,6 +3683,7 @@ pub(crate) fn running_in_region() -> bool {
     target_arch = "arm",
     expect(dead_code, reason = "ARMv7-A has no restricted mode")
 )]
+#[inline(always)]
 pub(crate) fn set_running_restricted(restricted: bool) {
     let _ = with_current(|task| {
         task.set_restricted(restricted);
@@ -3694,6 +3703,7 @@ pub(crate) fn set_running_restricted(restricted: bool) {
 ///
 /// (CONTEXT) The running task's own, and only it reaches it; the reference is
 /// not kept past its own call.
+#[inline(always)]
 pub(crate) unsafe fn own_restricted_slot()
 -> Option<&'static mut Option<alloc::boxed::Box<arch::RestrictedState>>> {
     with_current(|task| {
@@ -3728,6 +3738,9 @@ pub(crate) unsafe fn own_restricted_slot()
 /// is told whether `previous` leaves blocked, which is what decides on x86-64
 /// whether a blocking native call's vector registers are kept.
 fn switch_user_state(previous: &Arc<Task>, next: &Arc<Task>) {
+    // First of all, for a dead task too (K1 §7.1, 6093 (1)).
+    // SAFETY: (CONTEXT) this processor holds the queue lock, and `previous` is what it ran.
+    arch::restricted_before_switch(previous.is_dead(), unsafe { previous.restricted_slot() });
     if !previous.is_dead() {
         // SAFETY: (SHARED) this processor holds the run queue lock that owns `previous`.
         if let Some(state) = unsafe { previous.user_state() } {
@@ -3764,6 +3777,7 @@ fn switch_user_state(previous: &Arc<Task>, next: &Arc<Task>) {
 /// a switch elsewhere saves only the task it ran and restores only the one it
 /// chose, and the running task is neither. That is the same exclusion the
 /// run queue lock gives [`switch_user_state`], from the other side.
+#[inline(always)]
 pub(crate) unsafe fn with_own_user_state<R>(
     change: impl FnOnce(&mut arch::UserState) -> R,
 ) -> Option<R> {
@@ -3774,6 +3788,38 @@ pub(crate) unsafe fn with_own_user_state<R>(
         let state = unsafe { task.user_state() }?;
         // SAFETY: (SHARED) as above; the borrow does not outlive `change`.
         Some(change(unsafe { &mut *state }))
+    })
+    .flatten()
+}
+
+/// Which of the running task's records its state is read from: null for its own
+/// (`docs/microkernel/K1.md` §7.1 (3)). With interrupts masked.
+#[inline(always)]
+#[cfg_attr(
+    not(ferrix_restricted_fastpath = "on"),
+    allow(dead_code, reason = "K1's fast crossings alone ask it")
+)]
+pub(crate) fn set_active_user_state(record: *mut arch::UserState) {
+    let _ = with_current(|task| task.set_active_user(record));
+}
+
+#[cfg_attr(
+    not(ferrix_restricted_fastpath = "on"),
+    allow(dead_code, reason = "K1's fast crossings alone ask it")
+)]
+/// Read the running task's own record, whichever is active.
+///
+/// # Safety
+///
+/// As [`with_own_user_state`].
+pub(crate) unsafe fn with_own_task_record<R>(
+    read: impl FnOnce(&arch::UserState) -> R,
+) -> Option<R> {
+    with_current(|task| {
+        // SAFETY: (SHARED) the caller's guarantee, as `with_own_user_state`'s.
+        let state = unsafe { task.own_record() }?;
+        // SAFETY: (SHARED) as above; the borrow does not outlive `read`.
+        Some(read(unsafe { &*state }))
     })
     .flatten()
 }

@@ -946,9 +946,10 @@ pub(crate) use x86_64::inspect::{SWITCH_FRAME, entry_frame};
 // has none (§8).
 #[cfg(target_arch = "aarch64")]
 pub(crate) use aarch64::restricted::{
-    RestrictedState, fault_exit as restricted_fault_exit, forget_copy_miss,
+    RestrictedState, before_switch as restricted_before_switch,
+    fault_exit as restricted_fault_exit, forget_copy_miss, is_vector_in_kernel,
     kick_on_trap_frame as restricted_kick_on_trap, land_copy as restricted_land_copy,
-    note_copy_miss,
+    lazy_vector_trap as restricted_lazy_vector_trap, note_copy_miss,
 };
 #[cfg(target_arch = "aarch64")]
 pub use aarch64::restricted::{
@@ -957,8 +958,9 @@ pub use aarch64::restricted::{
 };
 #[cfg(target_arch = "arm")]
 pub(crate) use no_restricted::{
-    RestrictedState, forget_copy_miss, note_copy_miss, restricted_fault_exit,
-    restricted_kick_on_trap, restricted_land_copy,
+    RestrictedState, forget_copy_miss, is_vector_in_kernel, note_copy_miss,
+    restricted_before_switch, restricted_fault_exit, restricted_kick_on_trap, restricted_land_copy,
+    restricted_lazy_vector_trap,
 };
 #[cfg(target_arch = "arm")]
 pub use no_restricted::{
@@ -966,9 +968,10 @@ pub use no_restricted::{
 };
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::restricted::{
-    RestrictedState, fault_exit as restricted_fault_exit, forget_copy_miss,
+    RestrictedState, before_switch as restricted_before_switch,
+    fault_exit as restricted_fault_exit, forget_copy_miss, is_vector_in_kernel,
     kick_on_trap_frame as restricted_kick_on_trap, land_copy as restricted_land_copy,
-    note_copy_miss,
+    lazy_vector_trap as restricted_lazy_vector_trap, note_copy_miss,
 };
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::restricted::{
@@ -994,6 +997,17 @@ mod no_restricted {
     pub(crate) fn restricted_fault_exit(_: &mut super::TrapFrame, _: FaultKind, _: u64) {}
     pub(crate) fn note_copy_miss(_: &crate::user::space::AddressSpace, _: u64, _: bool) {}
     pub(crate) fn forget_copy_miss() {}
+    pub(crate) const fn restricted_lazy_vector_trap(_: &super::TrapFrame) -> bool {
+        false
+    }
+    pub(crate) const fn is_vector_in_kernel(_: &super::TrapFrame) -> bool {
+        false
+    }
+    pub(crate) const fn restricted_before_switch(
+        _: bool,
+        _: *mut Option<alloc::boxed::Box<RestrictedState>>,
+    ) {
+    }
     pub(crate) fn restricted_kick_on_trap(_: &mut super::TrapFrame) {}
     pub(crate) fn restricted_land_copy(_: &mut super::TrapFrame, _: u64, _: FaultKind) {}
     /// Refused: see the module.

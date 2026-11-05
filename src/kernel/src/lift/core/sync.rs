@@ -35,6 +35,7 @@ impl<T> SpinLock<T> {
 
 impl<T: ?Sized> SpinLock<T> {
     #[track_caller]
+    #[inline(always)]
     pub fn lock(&self) -> SpinLockGuard<'_, T> {
         let mut spins = 0_u32;
         loop {
@@ -42,6 +43,10 @@ impl<T: ?Sized> SpinLock<T> {
                 crate::sched::lock_taken();
                 return SpinLockGuard { lock: self };
             }
+            #[cold]
+            #[inline(always)]
+            const fn unusual() {}
+            unusual();
             while self.held.load(Ordering::Relaxed) {
                 spins = spins.wrapping_add(1);
                 if spins % SPINS == 0 {

@@ -384,6 +384,7 @@ pub(crate) fn note_unfiltered() {
 /// Whether any thread holds seccomp state now, so that a call must look for
 /// its own thread: what [`check`] and [`quiet`] both read first after the
 /// probe word, from this one function.
+#[inline(always)]
 pub(crate) fn any_filtered() -> bool {
     FILTERED_THREADS.load(Ordering::Acquire) != 0
 }
@@ -462,6 +463,16 @@ fn dispatch_first(thread: &Thread, args: &SyscallArgs) -> Option<Verdict> {
 /// which orders the call before the sync, as a call in flight is
 /// ([`FILTERED_THREADS`]).
 /// With interrupts masked; takes no lock and no reference.
+/// [`quiet`] where no thread is filtered, without a branch: anything else is the
+/// general path's.
+#[cfg(ferrix_personality = "user")]
+#[inline(always)]
+pub(crate) fn quiet_here() -> bool {
+    (PROBE_TASK.load(Ordering::Acquire) == 0) & (!any_filtered())
+}
+
+/// Whether a call of the running thread needs no judging: the question `linuxd` asks first.
+#[inline(always)]
 pub fn quiet() -> bool {
     if PROBE_TASK.load(Ordering::Acquire) != 0 {
         return false;

@@ -1007,6 +1007,7 @@ fn vectors() -> Result<(), i32> {
     let exit = resume(0);
     fault_exit(&exit, arch::VECTOR_BREAKPOINT, 75)?;
     let back = read()?;
+    hold(arch::read_vectors() == 0xDEAD_BEEF, 142)?;
     hold(arch::result_of(&back) == 0x1234_5678, 75)?;
     hold(arch::second_result_of(&back) == 0x1234_5678, 76)?;
     let mut image = [0_u8; ferrix_native_abi::restricted::VECTORS_BYTES];
@@ -1015,6 +1016,30 @@ fn vectors() -> Result<(), i32> {
     hold(read_bytes == image.len(), 77)?;
     let good = ferrix_rt::native::region::vectors_write(ferrix_rt::Kernel, &image);
     hold(good.is_ok(), 77)?;
+    // A block with the program's registers up: they go to its record as the switch
+    // leaves, no other thread reads them, and it finds them on its way back (K1 §7.1 (b)).
+    let mut context = at(arch::vectors());
+    arch::set_first(&mut context, 0x0BAD_F00D);
+    arch::set_second(&mut context, arch::GETPPID);
+    syscall_exit(&enter(&context), arch::GETPPID, 143)?;
+    let mut observed = 0_u32;
+    let deadline = 0_u64;
+    let port = sys(nr::PORT_CREATE, [0; 6]).map_err(|_| 143)?;
+    let _ = sys(
+        nr::OBJECT_WAIT_ONE,
+        [
+            port,
+            u64::from(ferrix_native_abi::signals::Signals::READABLE.0),
+            (&raw const deadline).addr() as u64,
+            (&raw mut observed).addr() as u64,
+            0,
+            0,
+        ],
+    );
+    sys(nr::HANDLE_CLOSE, [port, 0, 0, 0, 0, 0]).map_err(|_| 143)?;
+    fault_exit(&resume(0), arch::VECTOR_BREAKPOINT, 143)?;
+    let back = read()?;
+    hold(arch::result_of(&back) == 0x0BAD_F00D, 143)?;
     // `MXCSR` with its reserved bits set is refused, not masked.
     image[arch::VECTOR_BAD_AT + 2] = 0xFF;
     let bad = ferrix_rt::native::region::vectors_write(ferrix_rt::Kernel, &image);
@@ -1926,8 +1951,19 @@ fn row(given: &Given) -> Result<(), i32> {
     }
     ask(given, ASK_ROW_TICKS, arch::ticks() - started, None)?;
     p50s.sort_unstable();
-    let median = p50s.get(ROW_REPEATS / 2).copied().unwrap_or(0);
-    ask(given, ASK_ROW_P50, median, None)
+    ask(given, ASK_ROW_P50, p50s[ROW_REPEATS / 2], None)?;
+    // A run of re-entries by `RESUME` alone, which the fast path takes: a barrier each
+    // all the same (K1 §7.1 (2)). The program's last exit is its breakpoint.
+    const TRIPS: u64 = 50;
+    ask(given, ASK_COUNT_START, 0, None)?;
+    let mut context = at(arch::bench());
+    arch::set_bench(&mut context, TRIPS, SAMPLES_AT);
+    let mut exit = enter(&context);
+    while exit.reason == Reason::Syscall as u64 {
+        exit = resume(1);
+    }
+    fault_exit(&exit, arch::VECTOR_BREAKPOINT, 144)?;
+    ask(given, ASK_COUNT_END, TRIPS + 1, None).map_err(|_| 144)
 }
 
 /// A process body that spins in restricted mode.
@@ -1938,8 +1974,13 @@ extern "C" fn spin_restricted(_argument: usize) -> ! {
     }
 }
 
-/// A process body that spins in normal mode.
+/// A process body that spins in normal mode, having come out of restricted mode by a
+/// system call: under the fast path its registers are the program's, with `CR0.TS` set
+/// on the processor, when the kill comes (6093 (1)).
 extern "C" fn spin_normal(_argument: usize) -> ! {
+    let mut context = at(arch::sys());
+    arch::set_call(&mut context, arch::GETPPID, [0; 6]);
+    let _ = enter(&context);
     loop {
         core::hint::spin_loop();
     }

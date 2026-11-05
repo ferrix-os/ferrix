@@ -1200,12 +1200,29 @@ pub(crate) fn switch_barrier(_cpu: usize) -> bool {
     HARDENED
 }
 
-/// [`switch_barrier`] for a restricted exit, answering whether an `IBPB` was
-/// written: a machine with none decides and issues nothing
-/// (`docs/microkernel/K1.md` §6, the consultant's N11).
-pub(crate) fn exit_barrier(cpu: usize) -> bool {
-    let _ = switch_barrier(cpu);
-    HARDENED && SWITCH_IBPB.load(Ordering::Relaxed)
+/// The barrier at a restricted exit (ledger 941, HR1): the `IBPB`, and "the refill
+/// or ERAPS": the root write that follows on this path empties the return predictor
+/// where ERAPS says so, so the thirty-two calls, each cold just after the `IBPB`, are
+/// not made there.
+#[inline(always)]
+pub(crate) fn exit_barrier(_cpu: usize) -> bool {
+    #[cold]
+    #[inline(always)]
+    const fn unusual() {}
+    let mut issued = false;
+    if !SWITCH_IBPB.load(Ordering::Relaxed) {
+        unusual();
+    } else {
+        // SAFETY: (PROTECT) as `switch_barrier`.
+        unsafe { cpu::write_msr(IA32_PRED_CMD, PRED_CMD_IBPB) };
+        issued = HARDENED;
+    }
+    // Only K1's fast crossings go without the refill, on the evidence ledger 6747 asks.
+    if !cfg!(ferrix_restricted_fastpath = "on") || !ERAPS_EMPTIES.load(Ordering::Relaxed) {
+        unusual();
+        fill_return_stack();
+    }
+    issued
 }
 
 /// Whether `CPUID` said `IA32_PRED_CMD` takes `IBPB`, which is what sets

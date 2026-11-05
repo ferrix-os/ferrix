@@ -193,6 +193,7 @@ static SWITCH_BARRIERS: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MA
 
 /// The running processor's logical number, or zero for the boot processor
 /// before it has a per-CPU record -- which it is, being processor zero.
+#[inline(always)]
 pub(crate) fn this_cpu() -> usize {
     crate::smp::this_cpu().map_or(0, |cpu| cpu.logical)
 }
@@ -329,6 +330,7 @@ static RESTRICTED_DECIDED: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) };
 static RESTRICTED_ISSUED: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS];
 
 /// This processor is about to run restricted code. With interrupts masked.
+#[inline(always)]
 pub(crate) fn restricted_ran() {
     if let Some(ran) = RESTRICTED_RAN.get(this_cpu()) {
         ran.store(true, Ordering::Relaxed);
@@ -338,6 +340,7 @@ pub(crate) fn restricted_ran() {
 /// This processor is about to run `linuxd`'s code, or a normal-mode thread: if
 /// restricted code ran here last, the barrier the build's rule asks (K1 §6).
 /// None on entry. With interrupts masked.
+#[inline(always)]
 pub(crate) fn restricted_left() {
     let cpu = this_cpu();
     let Some(ran) = RESTRICTED_RAN.get(cpu) else {
@@ -372,6 +375,42 @@ pub(crate) const fn exit_barrier_built() -> bool {
     HARDENED && EXIT_BARRIER
 }
 
+/// [`restricted_ran`] on a known processor.
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+#[cfg_attr(
+    not(ferrix_restricted_fastpath = "on"),
+    allow(dead_code, reason = "K1's fast crossings alone ask it")
+)]
+pub(crate) fn restricted_ran_on(cpu: usize) {
+    // SAFETY: `cpu` is this processor's logical number, below `MAX_CPUS`.
+    unsafe { RESTRICTED_RAN.get_unchecked(cpu) }.store(true, Ordering::Relaxed);
+}
+
+/// [`restricted_left`] for a fast exit, whose processor is known and whose restricted
+/// code did run: the same barrier and the same counts, nothing out of line.
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+#[cfg_attr(
+    not(ferrix_restricted_fastpath = "on"),
+    allow(dead_code, reason = "K1's fast crossings alone ask it")
+)]
+pub(crate) fn restricted_left_here(cpu: usize) {
+    // SAFETY: `cpu` is this processor's logical number, below `MAX_CPUS`.
+    let ran = unsafe { RESTRICTED_RAN.get_unchecked(cpu) };
+    // SAFETY: as above.
+    let decided = unsafe { RESTRICTED_DECIDED.get_unchecked(cpu) };
+    // SAFETY: as above.
+    let issued = unsafe { RESTRICTED_ISSUED.get_unchecked(cpu) };
+    ran.store(false, Ordering::Relaxed);
+    if HARDENED && EXIT_BARRIER {
+        count_here(decided);
+        if machine::exit_barrier(cpu) {
+            count_here(issued);
+        }
+    }
+}
+
 /// Barriers decided and issued at restricted exits, on every processor: for
 /// the check's count (K1 §6, §10).
 pub(crate) fn restricted_barriers() -> (u64, u64) {
@@ -389,6 +428,7 @@ pub(crate) fn restricted_barriers() -> (u64, u64) {
 /// answer, the barrier interrupt): a load and a store, not a locked add
 /// (2f). Another processor reads it whole, as a report or the domain check
 /// does after the switches it counts.
+#[inline(always)]
 fn count_here(counter: &AtomicU64) {
     counter.store(
         counter.load(Ordering::Relaxed).wrapping_add(1),

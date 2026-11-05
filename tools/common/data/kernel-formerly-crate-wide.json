@@ -1666,10 +1666,6 @@
       "before": "pub(crate)"
     },
     {
-      "item": "object/quota.rs: bandwidth_in_use (fn)",
-      "before": "pub(crate)"
-    },
-    {
       "item": "object/quota.rs: charge (fn)",
       "before": "pub(crate)"
     },

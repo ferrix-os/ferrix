@@ -478,3 +478,16 @@ pub(super) fn decoded_unless_bare(number: usize) -> Option<ferrix_linux_abi::nr:
     }
     super::decode_syscall(number)
 }
+
+/// No lazy vector state here: its review comes after the ASIDs (K1 §7.1 (12)).
+pub(crate) const fn lazy_vector_trap(_: &TrapFrame) -> bool {
+    false
+}
+
+/// See [`lazy_vector_trap`].
+pub(crate) const fn before_switch(_: bool, _: *mut Option<alloc::boxed::Box<RestrictedState>>) {}
+
+/// See [`lazy_vector_trap`].
+pub(crate) const fn is_vector_in_kernel(_: &TrapFrame) -> bool {
+    false
+}

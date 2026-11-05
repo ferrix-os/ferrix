@@ -3436,6 +3436,7 @@ package FerrixMemoryRequirements {
             attribute :>> parent = "H.TRAP.23";
             attribute :>> unit = ("user::space::AddressSpace::bind_region",
                 "user::space::AddressSpace::flip_root",
+                "user::space::AddressSpace::flip_root_on",
                 "user::space::AddressSpace::root_for",
                 "arch::x86_64::flip_user_root",
                 "arch::aarch64::flip_user_root");

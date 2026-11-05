@@ -83,6 +83,7 @@ pub fn enter_all_calls_exit(context: &Context) -> Exit {
 /// `restricted_resume`: put `value` in the program's result register and go
 /// back in: the way back from a system call exit, with nothing else changed.
 #[must_use]
+#[inline(always)]
 pub fn resume(value: u64) -> Exit {
     // SAFETY: no pointer: `value` goes to the program's register.
     unsafe { arch::restricted(nr::RESTRICTED_RESUME, value, 0) }

@@ -117,6 +117,7 @@ Causes are listed most likely first.
 | [FX-0917](#fx-0917) | an exception channel was attached where it must be refused, or refused where it must be attached |
 | [FX-0925](#fx-0925) | a shared process or restricted mode did not do what K1 and K11 say |
 | [FX-0926](#fx-0926) | a criticality level did not keep a lower job from a higher one |
+| [FX-0928](#fx-0928) | a vector instruction in the kernel with CR0.TS set |
 | [FX-0930](#fx-0930) | a process built by its creator was not held to the rules of its making |
 | [FX-0931](#fx-0931) | spaces and objects failed the check made of kernel objects alone |
 | [FX-0932](#fx-0932) | jobs, quotas, switch counts or the filter failed the check of kernel objects alone |
@@ -2918,6 +2919,21 @@ child above it, or a refusal went unaudited, or jammed a channel.
 
 See: src/kernel/src/object/level.rs; src/kernel/src/object/level_check.rs;
 docs/microkernel/K17.md.
+
+<a id="fx-0928"></a>
+
+## FX-0928 — a vector instruction in the kernel with CR0.TS set
+
+K1's fast exit leaves the program's vector registers up and `CR0.TS` set while
+normal mode runs, and only ring 3's first vector instruction may take the `#NM`.
+The kernel uses none, and the switch clears the bit first.
+
+1. A new XSAVE-class site outside src/kernel/src/arch/x86_64/switch.rs, or a
+   path that restores a record without going through
+   `restricted::before_switch`.
+
+See: docs/microkernel/K1.md section 7.1 (8);
+src/kernel/src/arch/x86_64/restricted.rs.
 
 <a id="fx-0930"></a>
 

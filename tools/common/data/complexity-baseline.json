@@ -166,7 +166,7 @@
     },
     "sched/task.rs::new": {
       "complexity": 4,
-      "lines": 64,
+      "lines": 65,
       "recursive": false
     },
     "smp.rs::invalidate_pages": {
@@ -537,6 +537,11 @@
     "syscall/uaccess.rs::copy_from_user_through": {
       "complexity": 16,
       "lines": 23,
+      "recursive": false
+    },
+    "trap.rs::dispatch": {
+      "complexity": 16,
+      "lines": 45,
       "recursive": false
     },
     "trap.rs::handle_page_fault": {

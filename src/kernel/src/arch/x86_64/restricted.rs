@@ -75,12 +75,20 @@ pub(crate) struct RestrictedState {
     copy_miss_exits: bool,
     /// Where an answered call's copy last missed, and whether it wrote.
     copy_miss: Option<(u64, bool)>,
-    /// The user state of the mode that is not running: `linuxd`'s while the
-    /// program runs, the program's while `linuxd` does.
+    /// The program's user state. `linuxd`'s is the task's own record, and
+    /// `Task::user_state` answers with this one while the task is in restricted mode
+    /// (`set_active_user_state`), so that neither path copies a record (K1 §7.1 (3)).
     other: UserState,
     /// Whether a native number exits too, as `RESTRICTED_ENTER` asked: tested only for
     /// a native number, so a Linux number's path does not read it.
     all_calls_exit: bool,
+    /// Whether the vector registers hold the program's while normal mode runs, with
+    /// `CR0.TS` set, so that its first vector instruction takes `#NM` (K1 §7.1).
+    lazy: bool,
+    /// Whether both modes' selectors are null and their descriptors alike, so that an
+    /// exit and a re-entry need not touch them: set where the general path has just
+    /// saved both, and read with the selectors the processor holds (K1 §7.1 (4)).
+    clean: bool,
     /// Whether a context is held: from the first entry on.
     held: bool,
     /// The last exit's reason, zero before the first.
@@ -115,6 +123,8 @@ impl RestrictedState {
             },
             other: UserState::new(),
             all_calls_exit: false,
+            lazy: false,
+            clean: false,
             held: false,
             last: 0,
         }
@@ -275,30 +285,78 @@ const fn normalised_flags(flags: u64) -> u64 {
 
 /// Swap the running task's user state with `other`: saved from the processor,
 /// and the other mode's loaded.
-fn swap_user_state(other: &mut UserState) {
+fn swap_user_state(to_program: bool, program: &mut UserState) {
     let top = sched::with_current(sched::Task::stack_top)
         .flatten()
         .unwrap_or(0);
-    let swap = |state: &mut UserState| {
-        // SAFETY: (CONTEXT) this task's registers, and it is not blocked.
-        unsafe { super::switch::save_user_state(state, false) };
-        core::mem::swap(state, other);
-        // SAFETY: (CONTEXT) the running task's own record and kernel stack.
-        unsafe { super::switch::restore_user_state(state, top) };
+    let target: *mut UserState = if to_program {
+        program
+    } else {
+        core::ptr::null_mut()
     };
-    // SAFETY: (CONTEXT) interrupts are masked by every caller, for the whole
-    // of the swap, and these registers are the running task's.
-    let _ = unsafe { sched::with_own_user_state(swap) };
+    // SAFETY: (CONTEXT) interrupts are masked by every caller for the length of the
+    // change, and these registers are the running task's: its record of the mode it leaves.
+    let save = |state: &mut UserState| unsafe { super::switch::save_user_state(state, false) };
+    // SAFETY: (CONTEXT) as above.
+    let _ = unsafe { sched::with_own_user_state(save) };
+    sched::set_active_user_state(target);
+    // SAFETY: (CONTEXT) as above; the running task's own record of the mode it enters.
+    let restore = |state: &mut UserState| unsafe { super::switch::restore_user_state(state, top) };
+    // SAFETY: (CONTEXT) as above.
+    let _ = unsafe { sched::with_own_user_state(restore) };
 }
 
 /// Change the running task's mode, and the root under it.
+#[inline(always)]
 fn flip(restricted: bool) {
-    sched::set_running_restricted(restricted);
-    if let Some(space) = sched::with_current(|task| task.address_space().cloned()).flatten() {
-        // SAFETY: (TRANSLATE) interrupts are masked by every caller; the task
-        // holds the space, whose sets this processor joined at the switch.
-        unsafe { space.flip_root(restricted) };
+    if restricted {
+        flip_to::<true>();
+    } else {
+        flip_to::<false>();
     }
+}
+
+/// [`flip`], one copy a direction: each closure has one call site, and goes inline.
+#[inline(always)]
+fn flip_to<const RESTRICTED: bool>() {
+    sched::set_running_restricted(RESTRICTED);
+    let _ = sched::with_current(|task| {
+        if let Some(space) = task.address_space() {
+            // SAFETY: (TRANSLATE) interrupts are masked by every caller; the task
+            // holds the space, whose sets this processor joined at the switch.
+            unsafe { space.flip_root(RESTRICTED) };
+        }
+    });
+}
+
+/// Marks the way it is called on as the unusual one, so the usual way falls through:
+/// after the barrier a taken branch costs about 3 ns, one not taken nothing.
+#[cold]
+#[inline(always)]
+#[cfg_attr(
+    not(ferrix_restricted_fastpath = "on"),
+    allow(dead_code, reason = "K1's fast crossings alone ask it")
+)]
+const fn unusual() {}
+
+/// The registers `RESTRICTED_RESUME`'s caller keeps across the call, the ones not declared
+/// clobbered by `ferrix_rt`, with `SYSRET`'s two and its stack pointer. Every other word of
+/// a frame is written by the fast exit, so nothing else goes across and nothing of the
+/// program's stays.
+#[inline(always)]
+#[cfg_attr(
+    not(ferrix_restricted_fastpath = "on"),
+    allow(dead_code, reason = "K1's fast crossings alone ask it")
+)]
+fn copy_kept(to: &mut SyscallFrame, from: &SyscallFrame) {
+    to.r15 = from.r15;
+    to.r14 = from.r14;
+    to.r13 = from.r13;
+    to.rbp = from.rbp;
+    to.rbx = from.rbx;
+    to.r11 = from.r11;
+    to.rcx = from.rcx;
+    to.user_rsp = from.user_rsp;
 }
 
 /// Answer `RESTRICTED_ENTER`, `RESTRICTED_RESUME` or `RESTRICTED_CONTINUE`.
@@ -336,7 +394,9 @@ pub(super) fn answer_going_in(frame: &mut SyscallFrame, number: usize) {
         write_exit(frame, state, Reason::Kick as u64, 0, [0; 3]);
         return;
     }
-    swap_user_state(&mut state.other);
+    materialise(state);
+    swap_user_state(true, &mut state.other);
+    state.clean = both_modes_clean(state);
     flip(true);
     speculation::restricted_ran();
     let context = state.context;
@@ -363,6 +423,265 @@ fn all_calls_exit() -> bool {
     unsafe { sched::own_restricted_slot() }
         .and_then(|slot| slot.as_deref())
         .is_some_and(|state| state.all_calls_exit)
+}
+
+/// Whether this build has the fast paths (`restricted_fastpath`, BUILD-FLAGS).
+#[cfg_attr(
+    not(ferrix_restricted_fastpath = "on"),
+    allow(dead_code, reason = "K1's fast crossings alone ask it")
+)]
+const FAST: bool = cfg!(ferrix_restricted_fastpath = "on");
+
+/// `CR0.TS` is set on this processor by [`fast_exit`]. Read at every switch: one byte.
+static TS_SET: [core::sync::atomic::AtomicBool; ferrix_sched::MAX_CPUS] =
+    [const { core::sync::atomic::AtomicBool::new(false) }; ferrix_sched::MAX_CPUS];
+
+#[inline(always)]
+fn ts_set_here() -> Option<&'static core::sync::atomic::AtomicBool> {
+    crate::smp::this_cpu().and_then(|cpu| TS_SET.get(cpu.logical))
+}
+
+/// Whether the program's and normal mode's records need nothing written for their
+/// selectors or descriptors. With interrupts masked.
+fn both_modes_clean(state: &mut RestrictedState) -> bool {
+    let (program_selectors, program_tls) = (state.other.selectors(), state.other.tls());
+    // SAFETY: (CONTEXT) the caller masks interrupts; a read of the task's own record,
+    // which the switch path just left.
+    unsafe {
+        sched::with_own_task_record(|normal| {
+            program_selectors == [0; 4]
+                && normal.selectors() == [0; 4]
+                && normal.tls() == program_tls
+        })
+    }
+    .unwrap_or(false)
+}
+
+/// The two bases, for the mode about to run. `FS` is written whenever normal mode's
+/// is not zero, as a program's null load can clear the hardware's with the record
+/// unchanged (K1 §7.1 (4)); `GS` is the shadow, under `swapgs`.
+#[inline(always)]
+#[cfg_attr(
+    not(ferrix_restricted_fastpath = "on"),
+    allow(dead_code, reason = "K1's fast crossings alone ask it")
+)]
+fn write_bases(fs: u64, gs: u64, other_gs: u64, normal_fs: u64, other_fs: u64) {
+    if normal_fs != 0 || fs != other_fs {
+        // SAFETY: (SYSREG) a canonical base: checked as `RESTRICTED_ENTER` took the
+        // program's, and normal mode's is its own record's.
+        unsafe { super::cpu::write_msr(super::syscall::IA32_FS_BASE, fs) };
+    }
+    if gs != other_gs {
+        // SAFETY: (SYSREG) as above.
+        unsafe { super::cpu::write_msr(super::syscall::IA32_KERNEL_GS_BASE, gs) };
+    }
+}
+
+/// `SYSCALL`'s fast exit, ahead of the entry's kernel-time stamp, if every condition
+/// holds: as the native fast path's, its time counts as user time, and no reading is
+/// taken for it (`sched::vtime`). `false`: nothing has changed. Every condition is read
+/// and one branch taken on all of them, so the usual way runs straight down.
+#[inline(always)]
+#[cfg_attr(
+    not(ferrix_restricted_fastpath = "on"),
+    allow(dead_code, reason = "K1's fast crossings alone ask it")
+)]
+pub(super) fn fast_exit_here(frame: &mut SyscallFrame) -> bool {
+    // SAFETY: (CONTEXT) the entry's caller saw restricted mode: a running thread with a
+    // record, masked.
+    let (task, cpu) = unsafe { sched::fast::here() };
+    // SAFETY: (CONTEXT) as above.
+    let state = unsafe { sched::fast::state(task) };
+    let selectors = super::cpu::read_data_selectors();
+    if !FAST
+        || nr::is_native(frame.rax as usize)
+            | (!state.clean)
+            | state.lazy
+            | (!sched::fast::quiet(task, cpu.logical))
+            | ((selectors[0] | selectors[1] | selectors[2] | selectors[3]) != 0)
+    {
+        unusual();
+        return false;
+    }
+    state.context = super::signal::UserContext::from_syscall(frame).into_frame();
+    let (rax, words) = (
+        frame.rax,
+        [
+            frame.rdi, frame.rsi, frame.rdx, frame.r10, frame.r8, frame.r9,
+        ],
+    );
+    state.last = Reason::Syscall as u64;
+    sched::fast::set_active(task, core::ptr::null_mut());
+    let (program_fs, program_gs) = (state.other.thread_pointer(), state.other.gs_base());
+    // SAFETY: (CONTEXT) interrupts are masked; the task's own record, active again.
+    let normal = unsafe { sched::fast::own_record(task) };
+    let (normal_fs, normal_gs) = (normal.thread_pointer(), normal.gs_base());
+    write_bases(normal_fs, normal_gs, program_gs, normal_fs, program_fs);
+    speculation::restricted_left_here(cpu.logical);
+    super::cpu::set_task_switched();
+    // SAFETY: a processor's logical number is below `MAX_CPUS`.
+    unsafe { TS_SET.get_unchecked(cpu.logical) }.store(true, core::sync::atomic::Ordering::Relaxed);
+    state.lazy = true;
+    sched::fast::set_mode(task, cpu, false);
+    // SAFETY: a program's thread holds its space.
+    let space = unsafe { task.address_space().unwrap_unchecked() };
+    // SAFETY: (TRANSLATE) interrupts are masked; a program's thread holds its space,
+    // whose sets this processor joined at the switch.
+    unsafe { space.flip_root_on(false, cpu.logical) };
+    copy_kept(frame, &state.normal);
+    frame.rax = rax;
+    [
+        frame.rdi, frame.rsi, frame.rdx, frame.r10, frame.r8, frame.r9,
+    ] = words;
+    frame.r12 = Reason::Syscall as u64;
+    true
+}
+
+/// [`fast_resume`] for the entry, by number.
+#[inline(always)]
+#[cfg_attr(
+    not(ferrix_restricted_fastpath = "on"),
+    allow(dead_code, reason = "K1's fast crossings alone ask it")
+)]
+pub(super) fn fast_resume_here(frame: &mut SyscallFrame) -> bool {
+    FAST && frame.rax as usize == nr::RESTRICTED_RESUME && fast_resume(frame)
+}
+
+/// `RESTRICTED_RESUME` after [`fast_exit`], with the vector registers still the
+/// program's, nothing else to do, and the last exit `SYSCALL`'s exactly: `rcx` and `r11`
+/// are the processor's, so `SYSRET` is safe, and the context has no check to pass since
+/// its only writes are the processor's and a checked entry's. `false` for the general
+/// path, with nothing changed.
+#[inline(always)]
+#[cfg_attr(
+    not(ferrix_restricted_fastpath = "on"),
+    allow(dead_code, reason = "K1's fast crossings alone ask it")
+)]
+fn fast_resume(frame: &mut SyscallFrame) -> bool {
+    // SAFETY: (SHARED) a call from ring 3: a running thread, masked.
+    let (task, cpu) = unsafe { sched::fast::here() };
+    let Some(state) = sched::fast::state_of(task) else {
+        unusual();
+        return false;
+    };
+    let selectors = super::cpu::read_data_selectors();
+    // SAFETY: a `SYSCALL` comes from a user thread, whose task holds its core process.
+    let core = unsafe { task.core_process().unwrap_unchecked() };
+    if cpu.runs_restricted()
+        | core.region().is_none()
+        | (!state.lazy)
+        | (!state.held)
+        | (!state.clean)
+        | (state.last != Reason::Syscall as u64)
+        | (!sched::fast::quiet(task, cpu.logical))
+        | ((selectors[0] | selectors[1] | selectors[2] | selectors[3]) != 0)
+    {
+        unusual();
+        return false;
+    }
+    sched::vtime::entered();
+    state.context.rax = frame.rdi;
+    copy_kept(&mut state.normal, frame);
+    // Up first, so that the next exit's barrier cannot be skipped (6093 (2)).
+    speculation::restricted_ran();
+    super::cpu::clear_task_switched();
+    // SAFETY: a processor's logical number is below `MAX_CPUS`.
+    unsafe { TS_SET.get_unchecked(cpu.logical) }
+        .store(false, core::sync::atomic::Ordering::Relaxed);
+    state.lazy = false;
+    // SAFETY: (CONTEXT) interrupts are masked; the task's own record, active still.
+    let normal = unsafe { sched::fast::own_record(task) };
+    let (normal_fs, normal_gs) = (normal.thread_pointer(), normal.gs_base());
+    let (program_fs, program_gs) = (state.other.thread_pointer(), state.other.gs_base());
+    write_bases(program_fs, program_gs, normal_gs, normal_fs, normal_fs);
+    sched::fast::set_active(task, &raw mut state.other);
+    sched::fast::set_mode(task, cpu, true);
+    // SAFETY: a program's thread holds its space.
+    let space = unsafe { task.address_space().unwrap_unchecked() };
+    // SAFETY: (TRANSLATE) as at the exit.
+    unsafe { space.flip_root_on(true, cpu.logical) };
+    store_syscall(frame, &state.context);
+    sched::vtime::leaving();
+    true
+}
+
+/// Take the vector registers down, where [`fast_exit`] left them up: the program's into
+/// its record, normal mode's back, `CR0.TS` clear. Every way that reads vector state goes
+/// through here first. With interrupts masked.
+fn materialise(state: &mut RestrictedState) {
+    if !state.lazy {
+        return;
+    }
+    state.lazy = false;
+    super::cpu::clear_task_switched();
+    if let Some(flag) = ts_set_here() {
+        flag.store(false, core::sync::atomic::Ordering::Relaxed);
+    }
+    // SAFETY: (CONTEXT) the registers are the program's, by the mark, and the record the
+    // processor wrote or `UserState::new` built.
+    unsafe { state.other.save_vectors_only() };
+    // SAFETY: (CONTEXT) as above; its own record.
+    let restore = |normal: &mut UserState| unsafe { normal.restore_vectors_only() };
+    // SAFETY: (CONTEXT) as above.
+    let _ = unsafe { sched::with_own_user_state(restore) };
+}
+
+/// `#NM` in normal mode with the mark up: materialise and go on. `false` for any other
+/// `#NM`, which is whatever it was before (K1 §7.1 (8)). With interrupts masked.
+pub(crate) fn lazy_vector_trap(frame: &TrapFrame) -> bool {
+    const DEVICE_NOT_AVAILABLE: u64 = 7;
+    if frame.vector != DEVICE_NOT_AVAILABLE
+        || !frame.came_from_user()
+        || sched::running_restricted()
+    {
+        return false;
+    }
+    // SAFETY: (CONTEXT) only the running task reaches its own record, for this call.
+    let Some(state) =
+        (unsafe { sched::own_restricted_slot() }).and_then(|slot| slot.as_deref_mut())
+    else {
+        return false;
+    };
+    if !state.lazy {
+        return false;
+    }
+    materialise(state);
+    true
+}
+
+/// Whether `frame` is `#NM` in ring 0, which its own panic code explains.
+pub(crate) fn is_vector_in_kernel(frame: &TrapFrame) -> bool {
+    frame.vector == 7 && !frame.came_from_user()
+}
+
+/// Ahead of any switch, dead task or not (6093 (1)): `CR0.TS` clear for whoever comes
+/// next, and, for a task that lives on, the registers saved as the program's, its own
+/// record told that the switch has nothing to save. So no other task reads the program's
+/// values, and `XRSTOR` does not fault in ring 0 (K1 §7.1 (b)). One byte unless it is up.
+pub(crate) fn before_switch(dead: bool, slot: *mut Option<alloc::boxed::Box<RestrictedState>>) {
+    if !FAST {
+        return;
+    }
+    let Some(flag) = ts_set_here() else {
+        return;
+    };
+    if !flag.swap(false, core::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    super::cpu::clear_task_switched();
+    if dead {
+        return;
+    }
+    // SAFETY: (CONTEXT) the outgoing task's own slot, this processor still running it,
+    // and no other reaches it.
+    let Some(state) = (unsafe { &mut *slot }).as_deref_mut() else {
+        return;
+    };
+    state.lazy = false;
+    // SAFETY: (CONTEXT) the registers are the program's, as the flag being up says.
+    unsafe { state.other.save_vectors_only() };
+    // SAFETY: (CONTEXT) the outgoing task's record, active being null in normal mode.
+    let _ = unsafe { sched::with_own_user_state(UserState::skip_next_vector_save) };
 }
 
 /// `RESTRICTED_ENTER`'s context: copied once and checked, and held.
@@ -434,6 +753,7 @@ fn enter_prepared(state: &mut RestrictedState, context: &Context) {
 }
 
 /// Put `context` where the `SYSRET` way out restores it from.
+#[inline(always)]
 const fn store_syscall(frame: &mut SyscallFrame, context: &TrapFrame) {
     frame.r15 = context.r15;
     frame.r14 = context.r14;
@@ -602,7 +922,7 @@ pub(super) fn kick_on_syscall_frame(frame: &mut SyscallFrame) {
 /// Leave restricted mode, with the program's registers already held: the user
 /// state, the barrier, the root. With interrupts masked.
 fn leave_restricted(state: &mut RestrictedState) {
-    swap_user_state(&mut state.other);
+    swap_user_state(false, &mut state.other);
     speculation::restricted_left();
     flip(false);
 }
@@ -731,7 +1051,15 @@ pub fn vector_bytes() -> Result<[u8; ferrix_native_abi::restricted::VECTORS_BYTE
     if !state.held {
         return Err(status::BAD_STATE);
     }
+    with_vectors_down(state);
     Ok(state.other.vector_image())
+}
+
+/// [`materialise`], masked for its length, from a call with interrupts open.
+fn with_vectors_down(state: &mut RestrictedState) {
+    let saved = <super::Irq as ferrix_sync::IrqControl>::disable();
+    materialise(state);
+    <super::Irq as ferrix_sync::IrqControl>::restore(saved);
 }
 
 /// `RESTRICTED_VECTORS_WRITE`: `image`, held to `restore_fpu`'s rules, refused
@@ -744,6 +1072,7 @@ pub fn set_vector_bytes(
     image: &[u8; ferrix_native_abi::restricted::VECTORS_BYTES],
 ) -> Result<(), Errno> {
     let state = own_state()?;
+    with_vectors_down(state);
     state
         .other
         .set_vector_image(image)

@@ -2602,7 +2602,7 @@ checks above is `pub` for raised checks (F3).
 | `ReserveError` | enum | item |  |
 | `Resource` | enum | item, load |  |
 | `at_limit` | fn | load |  |
-| `bandwidth_in_use` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `bandwidth_in_use` | fn | load |  |
 | `charge` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `charging_nobody` | fn | load |  |
 | `check_burst_carry` | fn | load (checks) | checks-only |

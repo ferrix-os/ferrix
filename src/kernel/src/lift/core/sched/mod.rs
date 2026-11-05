@@ -84,10 +84,12 @@ pub const BASE_SLICE_NS: u64 = SLICE_NS;
 /// into the unmapped guard or the heap, not through the task (5714's C1).
 pub const STACK_BYTES: usize = 256 * 1024;
 
+#[inline(always)]
 fn task_slot(sp: usize) -> *mut *const Task {
     ((sp & !(STACK_BYTES - 1)) + STACK_BYTES - 16) as *mut *const Task
 }
 
+#[inline(always)]
 fn sp_now() -> usize {
     let at = 0_u8;
     core::ptr::from_ref(&at) as usize
@@ -131,6 +133,7 @@ fn new_task(
         pending_up: core::sync::atomic::AtomicBool::new(false),
         sigreturning: core::sync::atomic::AtomicBool::new(false),
         locks_held: core::cell::Cell::new(0),
+        core_kept: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),
         wakes_held: core::cell::Cell::new(0),
         wakes_later: core::cell::UnsafeCell::new([const { None }; task::WAKES_HELD]),
         thread_handle: AtomicU32::new(0),
@@ -437,11 +440,16 @@ pub fn current() -> Option<Arc<Task>> {
     }
 }
 /// The running task, lent.
+#[inline(always)]
 pub fn with_current<R>(lend: impl FnOnce(&Task) -> R) -> Option<R> {
+    #[cold]
+    #[inline(always)]
+    const fn unusual() {}
     let slot = task_slot(sp_now());
     // SAFETY: as `current`.
     let raw = unsafe { *slot };
     if raw.is_null() {
+        unusual();
         return None;
     }
     // SAFETY: as `current`; the borrow ends before the thread can.

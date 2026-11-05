@@ -36,6 +36,27 @@ static BOOT: AtomicU64 = AtomicU64::new(0);
 
 /// The first thread's first Rust frame: `rt`'s `_start` calls it with the first
 /// argument register, the boot page.
+/// linuxd's dispatch by name: see `restricted`'s declarations.
+#[unsafe(no_mangle)]
+fn ferrix_lift_dispatch(
+    args: &ferrix_kernel_core::trap::SyscallArgs,
+    regs: Option<&ferrix_kernel_core::arch::UserRegs>,
+) -> ferrix_kernel_core::trap::Outcome {
+    syscall::dispatch_with::<syscall::linux::Linux>(args, regs)
+}
+
+/// As above.
+#[unsafe(no_mangle)]
+fn ferrix_lift_attention() -> bool {
+    syscall::deliver::needs_attention()
+}
+
+/// As above.
+#[unsafe(no_mangle)]
+fn ferrix_lift_quiet() -> bool {
+    syscall::seccomp::quiet()
+}
+
 #[unsafe(no_mangle)]
 extern "C" fn ferrix_rt_start(boot: usize) -> ! {
     BOOT.store(boot as u64, Ordering::Release);

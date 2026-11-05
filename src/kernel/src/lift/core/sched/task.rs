@@ -61,6 +61,8 @@ pub struct Task {
     /// In a sigreturn, whose capture wants only the processor's mask.
     pub(crate) sigreturning: AtomicBool,
     pub(crate) locks_held: core::cell::Cell<u32>,
+    /// What [`Task::core_kept`] keeps.
+    pub(crate) core_kept: core::sync::atomic::AtomicPtr<crate::object::process::Process>,
     pub(crate) wakes_held: core::cell::Cell<u32>,
     pub(crate) wakes_later: core::cell::UnsafeCell<[Option<Arc<Task>>; WAKES_HELD]>,
     /// The kernel thread's handle in the shared table, 0 before it starts.
@@ -151,8 +153,27 @@ impl Task {
     pub fn switches(&self) -> u64 {
         self.voluntary_switches()
     }
+    /// The quota group its time is charged to now.
+    #[inline(always)]
+    pub fn quota_group_now(&self) -> u32 {
+        self.group.load(Ordering::Relaxed)
+    }
     pub fn thread(&self) -> Option<&Arc<dyn UserThread>> {
         self.thread.as_ref()
+    }
+    /// [`Task::core_process`], kept after the first ask: a thread's process does not change,
+    /// and this is asked on every call, through two `dyn` calls otherwise.
+    #[inline(always)]
+    pub fn core_kept(&self) -> Option<&crate::object::process::Process> {
+        let kept = self.core_kept.load(Ordering::Relaxed);
+        if kept.is_null() {
+            let core = self.core_process()?;
+            self.core_kept
+                .store(core::ptr::from_ref(core).cast_mut(), Ordering::Relaxed);
+            return Some(core);
+        }
+        // SAFETY: the thread this task holds owns the process, as long as the task.
+        Some(unsafe { &*kept })
     }
     pub fn core_process(&self) -> Option<&crate::object::process::Process> {
         self.thread.as_ref().map(|thread| thread.process().core())
@@ -170,6 +191,7 @@ impl Task {
         let old = self.group.swap(index, Ordering::AcqRel);
         crate::object::quota::release_group(old);
     }
+    #[inline(always)]
     pub(crate) fn note_call(&self, number: u64, args: &[u64; 6]) {
         self.call[0].store(number + 1, Ordering::Relaxed);
         for (slot, arg) in self.call[1..7].iter().zip(args) {
@@ -177,6 +199,7 @@ impl Task {
         }
         self.call[8].store(0, Ordering::Relaxed);
     }
+    #[inline(always)]
     pub(crate) fn note_no_call(&self) {
         self.call[0].store(0, Ordering::Relaxed);
     }

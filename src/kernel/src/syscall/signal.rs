@@ -1077,6 +1077,7 @@ pub(crate) fn change_blocked<R>(
 
 /// Pending signals a thread does not block, its own and its process's: what
 /// delivery has to act on.
+#[inline(always)]
 pub(crate) const fn deliverable(process: &Signals, thread: &ThreadSignals) -> u64 {
     (process.shared.pending | thread.private.pending) & !thread.blocked
 }
@@ -1090,8 +1091,9 @@ pub(crate) const fn deliverable(process: &Signals, thread: &ThreadSignals) -> u6
 /// the program -- glibc's `pthread_join` under a 1 ms timer saw `-512` and
 /// aborted with "The futex facility returned an unexpected error code"
 /// (ferrix-ea, ARMv7-A, 2026-09-27).
+#[inline(always)]
 pub(crate) const fn needs_attention(process: &Signals, thread: &ThreadSignals) -> bool {
-    deliverable(process, thread) != 0 || thread.saved_mask.is_some() || thread.restart.is_some()
+    (deliverable(process, thread) != 0) | thread.saved_mask.is_some() | thread.restart.is_some()
 }
 
 /// Raise `signal` on `thread` for a fault it cannot be allowed to ignore: a

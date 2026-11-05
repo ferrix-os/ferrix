@@ -107,6 +107,11 @@ pub(crate) fn dispatch(frame: &mut arch::TrapFrame) {
     // Arm architectures every system call. Interrupts are masked at both ends.
     let from_user = frame.came_from_user();
     crate::sched::vtime::trap_entered(from_user);
+    // K1's lazy vector state, ahead of every fault path (§7.1 (8)).
+    if arch::restricted_lazy_vector_trap(frame) {
+        crate::sched::vtime::leaving();
+        return;
+    }
     let trap = arch::classify(frame);
     match trap {
         // A program's own breakpoint, undefined instruction or other fault is
@@ -156,7 +161,12 @@ pub(crate) fn dispatch(frame: &mut arch::TrapFrame) {
             &crate::panic::catalog::ILLEGAL_INSTRUCTION,
         ),
         Trap::Fault { name, .. } => {
-            fatal(frame, name, &crate::panic::catalog::UNEXPECTED_EXCEPTION)
+            let about = if arch::is_vector_in_kernel(frame) {
+                &crate::panic::catalog::VECTOR_IN_THE_KERNEL
+            } else {
+                &crate::panic::catalog::UNEXPECTED_EXCEPTION
+            };
+            fatal(frame, name, about)
         }
     }
 

@@ -1861,6 +1861,7 @@ pub fn count() -> usize {
 
 /// The record of the processor this is running on, or `None` before the
 /// boot processor has installed its own.
+#[inline(always)]
 pub fn this_cpu() -> Option<&'static PerCpu> {
     if !LOCAL_READY.load(Ordering::Acquire) {
         return None;

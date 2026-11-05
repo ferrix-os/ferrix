@@ -61,12 +61,12 @@ const IA32_SYSENTER_CS: u32 = 0x174;
 /// `IA32_FMASK`. Flags cleared on entry.
 const IA32_FMASK: u32 = 0xC000_0084;
 /// `IA32_KERNEL_GS_BASE`. What `swapgs` exchanges `GS_BASE` with.
-const IA32_KERNEL_GS_BASE: u32 = 0xC000_0102;
+pub(super) const IA32_KERNEL_GS_BASE: u32 = 0xC000_0102;
 /// `IA32_TSC_AUX`, what `RDTSCP` leaves in `ECX` and `RDPID` reads.
 const IA32_TSC_AUX: u32 = 0xC000_0103;
 /// `IA32_FS_BASE`, which `arch_prctl(ARCH_SET_FS)` writes: a program's thread
 /// pointer, and the first thing a libc sets up.
-const IA32_FS_BASE: u32 = 0xC000_0100;
+pub(super) const IA32_FS_BASE: u32 = 0xC000_0100;
 
 /// `EFER.SCE`: system call extensions.
 const EFER_SCE: u64 = 1;
@@ -181,9 +181,12 @@ core::arch::global_asm!(
 .macro FERRIX_CLEAR_BUFFERS
 .if {hardened}
     testb $1, {clear}(%rip)
-    jz 3f
-    verw {selector}(%rip)
-3:
+    jnz 3f
+4:
+.pushsection .text.ferrix_unusual,"ax"
+3:  verw {selector}(%rip)
+    jmp 4b
+.popsection
 .endif
 .endm
 
@@ -281,8 +284,14 @@ ferrix_syscall_stub:
 ferrix_syscall_common:
     cld
     movq %rsp, %rdi
+.if {fast_crossings}
+    callq ferrix_syscall_fast
+    testl %eax, %eax
+    jz 5f
+.else
     callq ferrix_syscall_entry
-
+.endif
+6:
     popq %r15
     popq %r14
     popq %r13
@@ -307,6 +316,14 @@ ferrix_syscall_common:
 .globl ferrix_syscall_sysret
 ferrix_syscall_sysret:
     sysretq
+
+.if {fast_crossings}
+.pushsection .text.ferrix_unusual,"ax"
+5:  movq %rsp, %rdi
+    callq ferrix_syscall_entry
+    jmp 6b
+.popsection
+.endif
 
 // The entry `LSTAR` names on a processor that needs the branch-history loop
 // (`super::speculation`'s BHI plan): the same frame, the loop, and the same
@@ -415,6 +432,7 @@ ferrix_resume_user:
     swapgs
     sysretq
 "#,
+    fast_crossings = const if cfg!(ferrix_restricted_fastpath = "on") { 1 } else { 0 },
     hardened = const super::speculation::ENTRY_HARDENING,
     clear = sym super::speculation::CLEAR_CPU_BUFFERS,
     selector = sym super::speculation::VERW_SELECTOR,
@@ -572,11 +590,29 @@ pub unsafe fn resume_user(regs: &UserRegs) -> ! {
 ///
 /// Called only from `ferrix_syscall_stub`, with `frame` pointing at the frame
 /// it just built on this processor's kernel stack.
+#[cfg(ferrix_restricted_fastpath = "on")]
+/// K1's two fast crossings, ahead of everything else, and small so that each runs straight
+/// down: `true` when one has answered, with `frame` ready for `SYSRET`. Masked since the
+/// entry, and neither takes the general way's look: a kick sent since waits for `SYSRET`
+/// and lands in ring 3, where it looks.
+#[unsafe(no_mangle)]
+extern "C" fn ferrix_syscall_fast(frame: &mut SyscallFrame) -> u32 {
+    if super::restricted::fast_resume_here(frame) {
+        return 1;
+    }
+    if crate::sched::running_restricted() && super::restricted::fast_exit_here(frame) {
+        return 1;
+    }
+    0
+}
+
 #[unsafe(no_mangle)]
 extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
     // Restricted mode first, before the fast path and the filter: a restricted
     // thread's call reaches neither (`docs/microkernel/K1.md` §3). One byte of
     // the processor's record, and a branch not taken.
+    // K1's fast re-entry, as soon as a number says it may be: nothing of what follows
+    // applies to it (§7.1). One compare where the build has it.
     if crate::sched::running_restricted() {
         crate::sched::vtime::entered();
         if let Some(outcome) = super::restricted::from_restricted(frame) {

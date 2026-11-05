@@ -8,5 +8,13 @@
     "new file appears, or when one has fallen without being",
     "re-recorded. The target is an empty map."
   ],
-  "files": {}
+  "files": {
+    "arch/speculation.rs": 4,
+    "arch/x86_64/pcid.rs": 1,
+    "arch/x86_64/restricted.rs": 5,
+    "sched/fast.rs": 5,
+    "sched/mod.rs": 1,
+    "sched/task.rs": 1,
+    "user/space.rs": 2
+  }
 }

@@ -117,7 +117,7 @@ pub fn counting() -> bool {
 
 /// This processor's slot, or `None` before its per-CPU record is installed
 /// or where kernel time is not counted.
-#[inline]
+#[inline(always)]
 fn slot() -> Option<&'static Slot> {
     if !counting() {
         return None;
@@ -199,7 +199,7 @@ pub(crate) fn trap_entered(from_user: bool) {
 /// fast path's quiet exit, and a store more when a decision opened it, whose
 /// span to here counts as user time, with no reading. With interrupts
 /// masked, after the last thing on the way out that could open them.
-#[inline]
+#[inline(always)]
 pub fn leaving() {
     let Some(slot) = slot() else {
         return;
@@ -208,6 +208,12 @@ pub fn leaving() {
     if since == 0 {
         return;
     }
+    leaving_stamped(slot, since);
+}
+
+/// [`leaving`] with a stamp up.
+#[cold]
+fn leaving_stamped(slot: &Slot, since: u64) {
     slot.since.store(0, Ordering::Relaxed);
     if since & 1 == 0 {
         return;
