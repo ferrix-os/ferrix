@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2982 declarations in the core's files, 209 in the item's; 230 checks-only.
+2982 declarations in the core's files, 212 in the item's; 230 checks-only.
 
 ## ferrix-kernel-core
 
@@ -4056,6 +4056,9 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `run` | fn | bin (checks) | checks-only |
+| `Report` | struct | load, bin |  |
+| `Report::cases` | field | load, bin |  |
+| `Report::shares` | field | load, bin |  |
 
 ### `syscall::native`
 

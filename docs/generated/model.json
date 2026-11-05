@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "72cf31f4234b02b35cd4e9116fdce2adae6e8de2d2cc393551bd3f28e999121e",
+  "digest": "7db5d796170f2245459be161514464e7977c77a38afd5a56742f5679ad8a03a3",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -49312,10 +49312,10 @@
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aSystemCallIsKernelTime",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Stage 7's system-call case, on every boot that counts kernel time: a program making 50,000 getppid calls in a loop is charged at least half its runtime as kernel time, in one of three runs; with x86-64's entry stamp taken out, or on AArch64 and ARMv7-A the dispatcher's, the case fails with its sentence.\"",
+                  "value": "\"Stage 7's system-call case, on every boot that counts kernel time: a program making 50,000 getppid calls in a loop is charged at least half its runtime as kernel time, in one of three runs; with x86-64's entry stamp taken out, or on AArch64 and ARMv7-A the dispatcher's, the case fails with its sentence. Stage 9's bare case holds the same half on x86-64 and AArch64, on a program no personality holds.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 809
+                    "line": 811
                   }
                 },
                 {
@@ -49326,7 +49326,7 @@
                   "value": "\"H.SCHED.14\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 810
+                    "line": 812
                   }
                 },
                 {
@@ -49337,7 +49337,7 @@
                   "value": "(\"sched::vtime::entered\", \"sched::vtime::settle\", \"sched::vtime::direct_switch\", \"arch::x86_64::syscall::ferrix_syscall_entry\", \"arch::x86_64::syscall::general_entry\", \"arch::x86_64::syscall::frame_tail\", \"trap::dispatch\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 815
+                    "line": 817
                   }
                 }
               ]
@@ -49350,7 +49350,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 817
+                "line": 819
               },
               "children": [
                 {
@@ -49361,7 +49361,7 @@
                   "value": "\"On a boot that counts kernel time, an exception taken in user mode shall be counted as kernel time from the trap dispatcher's entry to its return to user mode, with the exclusions of L.sched.81. An interrupt taken in user mode takes the same dispatcher stamp, unchecked.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 822
+                    "line": 824
                   }
                 },
                 {
@@ -49369,10 +49369,10 @@
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::anExceptionIsKernelTime",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Stage 7's page-fault case, on every boot that counts kernel time: a program that maps 2,048 pages and touches each once is charged at least half its runtime as kernel time, in one of three runs; with the dispatcher's entry stamp taken out on x86-64, where system calls do not pass through it, the case fails with its sentence.\"",
+                  "value": "\"Stage 7's page-fault case, on every boot that counts kernel time: a program that maps 2,048 pages and touches each once is charged at least half its runtime as kernel time, in one of three runs; with the dispatcher's entry stamp taken out on x86-64, where system calls do not pass through it, the case fails with its sentence. Stage 9's bare case holds half on x86-64 and AArch64 of what 2,048 faults cost, by difference from the same program with its pages touched first.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 828
+                    "line": 832
                   }
                 },
                 {
@@ -49383,7 +49383,7 @@
                   "value": "\"H.SCHED.14\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 829
+                    "line": 833
                   }
                 },
                 {
@@ -49394,7 +49394,7 @@
                   "value": "(\"sched::vtime::entered\", \"sched::vtime::trap_entered\", \"trap::dispatch\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 831
+                    "line": 835
                   }
                 }
               ]
@@ -49407,7 +49407,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 833
+                "line": 837
               },
               "children": [
                 {
@@ -49418,7 +49418,7 @@
                   "value": "\"Every switch away from a task shall count one involuntary switch for it when it is still runnable -- preempted, yielding, or a sleep that could not be filed -- and one voluntary switch otherwise; a decision that keeps the running task shall count none.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 838
+                    "line": 842
                   }
                 },
                 {
@@ -49429,7 +49429,7 @@
                   "value": "\"Stage 7's switch case: two kernel tasks on one processor yielding to each other 20 times each, never blocking, count one voluntary switch, at their end, and every other switch away from them as involuntary, at least one, the two adding to how often each was switched to; a task that sleeps 10 times counts at least 10 voluntary and fewer than 10 involuntary; with the classification inverted, the case fails with its sentence. And with kernel objects alone, on every profile, the `core sch` line (sched/rehome_check.rs::check_switches_are_counted).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 845
+                    "line": 849
                   }
                 },
                 {
@@ -49440,7 +49440,7 @@
                   "value": "\"H.SCHED.14\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 846
+                    "line": 850
                   }
                 },
                 {
@@ -49451,7 +49451,7 @@
                   "value": "(\"sched::switch_chosen\", \"sched::task::Task::note_switched_out\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 848
+                    "line": 852
                   }
                 }
               ]
@@ -49465,7 +49465,7 @@
               "doc": "x86-64 only: on AArch64 and ARMv7-A the exception frame is pushed where the task last returned to user mode, no fixed place, and the view reads no call there (docs/DEBUG.md 1.1; BACKLOG p2-140). The fault case's -1 sp pc and a 32-bit program's int 0x80 frame are read the same way and are not claimed: no check drives them.",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 850
+                "line": 854
               },
               "children": [
                 {
@@ -49476,7 +49476,7 @@
                   "value": "\"On x86-64, the view of a thread blocked in a system call made through the 64-bit entry shall report the call's number and six arguments, the program's stack pointer and its instruction pointer, as the entry saved them in the system call frame at the top of the task's kernel stack, read while the task is blocked and switched away under its run queue's lock; and the view of the reading thread itself shall report it running. On AArch64 and ARMv7-A the view shall read no call, so that /proc answers EOPNOTSUPP rather than a call it did not read.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 865
+                    "line": 869
                   }
                 },
                 {
@@ -49487,7 +49487,7 @@
                   "value": "\"test-procfs's debug step on x86_64: a thread blocked in read of a pipe reads back read's number, the descriptor, the buffer's address and the length, a stack pointer and a nonzero instruction pointer, and the reader's own file reads running; with the frame's first argument read from the second's place, the step fails with its sentence; on aarch64 and armv7a the step reads syscall as EOPNOTSUPP.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 872
+                    "line": 876
                   }
                 },
                 {
@@ -49498,7 +49498,7 @@
                   "value": "\"H.SCHED.15\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 873
+                    "line": 877
                   }
                 },
                 {
@@ -49509,7 +49509,7 @@
                   "value": "(\"sched::inspect::call_of\", \"sched::inspect::sample\", \"sched::inspect::still\", \"sched::inspect::calls_are_visible\", \"sched::inspect::read_call\", \"sched::inspect::field\", \"arch::x86_64::inspect::entry_frame\", \"arch::aarch64::inspect::entry_frame\", \"arch::aarch64::inspect::x\", \"arch::armv7a::inspect::entry_frame\", \"arch::armv7a::inspect::r\", \"sched::task::Task::in_call\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 880
+                    "line": 884
                   }
                 }
               ]
@@ -49522,7 +49522,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 882
+                "line": 886
               },
               "children": [
                 {
@@ -49533,7 +49533,7 @@
                   "value": "\"The view of a task that is blocked and switched away shall report its kernel call chain from the frame pointer and return address its switch frame holds, innermost first, following only records inside the task's own stack, each above the last and aligned, and only return addresses inside the kernel image, at most backtrace::MAX_FRAMES, each with the image's slide taken off.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 888
+                    "line": 892
                   }
                 },
                 {
@@ -49544,7 +49544,7 @@
                   "value": "\"The task view case at boot on every architecture: a kernel task records its own chain and blocks; the view's chain of it ends in that chain, each address inside the image as it was linked; with the switch frame's frame pointer slot moved by a word, or the slide not taken off on a boot whose slide is not zero, the case fails with its sentence.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 894
+                    "line": 898
                   }
                 },
                 {
@@ -49555,7 +49555,7 @@
                   "value": "\"H.SCHED.15\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 895
+                    "line": 899
                   }
                 },
                 {
@@ -49566,7 +49566,7 @@
                   "value": "(\"sched::inspect::chain_of\", \"sched::inspect::sample\", \"sched::inspect::still\", \"sched::inspect::walk\", \"sched::inspect::first_link\", \"sched::inspect::link_at\", \"backtrace::in_image\", \"backtrace::slide\", \"backtrace::image_len\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 899
+                    "line": 903
                   }
                 }
               ]
@@ -49579,7 +49579,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 901
+                "line": 905
               },
               "children": [
                 {
@@ -49590,7 +49590,7 @@
                   "value": "\"A word of kernel memory read for the view shall be translated through the kernel's page tables under their lock and read through the direct map, so that a word of a stack that has been freed answers nothing and the read does not fault.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 905
+                    "line": 909
                   }
                 },
                 {
@@ -49601,7 +49601,7 @@
                   "value": "\"The task view case at boot: a stack from vmap, read while mapped, then freed and read again, answers nothing; with the read made through the address itself, the boot stops on a kernel page fault.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 909
+                    "line": 913
                   }
                 },
                 {
@@ -49612,7 +49612,7 @@
                   "value": "\"H.SCHED.15\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 910
+                    "line": 914
                   }
                 },
                 {
@@ -49623,7 +49623,7 @@
                   "value": "(\"mm::read_kernel_word\", \"sched::inspect::word_at\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 911
+                    "line": 915
                   }
                 }
               ]
@@ -49636,7 +49636,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 913
+                "line": 917
               },
               "children": [
                 {
@@ -49647,7 +49647,7 @@
                   "value": "\"A word of kernel memory read for the view whose translation names a frame that is not RAM shall answer nothing, without the read being made.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 916
+                    "line": 920
                   }
                 },
                 {
@@ -49658,7 +49658,7 @@
                   "value": "\"The task view case at boot: a page of vmap mapped onto a physical address that is no RAM answers nothing; with the RAM test taken out, the boot stops on a kernel page fault on x86_64, where the direct map has no such address.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 920
+                    "line": 924
                   }
                 },
                 {
@@ -49669,7 +49669,7 @@
                   "value": "\"H.SCHED.15\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 921
+                    "line": 925
                   }
                 },
                 {
@@ -49680,7 +49680,7 @@
                   "value": "\"mm::read_kernel_word\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 922
+                    "line": 926
                   }
                 },
                 {
@@ -49691,7 +49691,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 923
+                    "line": 927
                   },
                   "children": [
                     {
@@ -49702,7 +49702,7 @@
                       "value": "\"A task made runnable on a processor that runs a task -- woken from another processor, or a sleeper whose time came on that processor -- shall be queued on an idle processor of the same work-stealing domain that it may run on, whose queue, under its own lock, runs its idle task with nothing waiting, and that processor shall be told to decide, the running task keeping its processor; where no such queue's lock can be had without waiting, the task shall be queued on the first processor as before. A pinned task, or one in a domain that does not steal work, is never so placed.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 933
+                        "line": 937
                       }
                     },
                     {
@@ -49713,7 +49713,7 @@
                       "value": "\"Stage 5's placement case, with three processors or more and a stealing domain: a task homed on a processor that runs a pinned spinner, allowed there and on an idle one, woken from a third processor and, in a second case, at its sleep's end, runs on the idle processor within a second and the spinner counts no involuntary switch (three attempts each); with no candidate taken, with the target not told, with the sleeper path placing nothing, or with affinity ignored, the boot fails with the case's own sentence or stage 5's affinity check's.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 942
+                        "line": 946
                       }
                     },
                     {
@@ -49724,7 +49724,7 @@
                       "value": "\"H.SCHED.1\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 943
+                        "line": 947
                       }
                     },
                     {
@@ -49735,7 +49735,7 @@
                       "value": "(\"sched::place_on_idle\", \"sched::move_onto\", \"sched::placed_on_wake\", \"sched::wake_sleepers_placing\", \"sched::queue::CpuQueue::wake_sleepers\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 946
+                        "line": 950
                       }
                     }
                   ]
@@ -49748,7 +49748,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 948
+                    "line": 952
                   },
                   "children": [
                     {
@@ -49759,7 +49759,7 @@
                       "value": "\"A task made runnable by a wake (not a synchronous one) that a task running inside a system call makes, with interrupts enabled, on a processor of a work-stealing domain, shall be moved onto that processor and queued there only when: the task is not pinned and may run there; its home is another processor of the domain; the wake is not wide (L.sched.91); no processor it may run on but its home is idle; and, under both queues' locks taken lower processor first, its home runs a task, it is asleep at home, its busy share (its runtime over a window of at least 32 ms between two such looks, the first opened when it was made) has been measured, and the waker's processor's load average with the task's load (that share times its weight) added, times 100, is below its home's with that load taken away, times 108. Otherwise it shall be made runnable at home as before, an idle processor then taken by L.sched.85. A task moved shall be decided for at once, as a wake at home made on its own processor is. A wake by a sleep's end, an interrupt or a task outside a system call never moves a task so.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 966
+                        "line": 970
                       }
                     },
                     {
@@ -49770,7 +49770,7 @@
                       "value": "\"Stage 5's wake-affine case, with three processors or more and a stealing domain: a task homed on a processor that runs a pinned spinner, allowed there and on the checking processor, woken from a call made there, runs there; the same task pinned at home, with its home idle, woken by its sleep's end, or busy for 40 ms of its life before it blocked, runs at home (three attempts each); ferrix-sched's host tests hold the load comparison; with the pull removed from the wake, with the pinned and affinity tests dropped, or with the task's load left out, the boot fails with the case's own sentence.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 976
+                        "line": 980
                       }
                     },
                     {
@@ -49781,7 +49781,7 @@
                       "value": "(\"H.SCHED.4\", \"H.SCHED.1\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 977
+                        "line": 981
                       }
                     },
                     {
@@ -49792,7 +49792,7 @@
                       "value": "(\"sched::wake\", \"sched::pull_onto_waker\", \"sched::pull_target\", \"sched::idle_allowed\", \"sched::wake_onto\", \"sched::count_pulled\", \"sched::may_pull\", \"sched::refuses\", \"sched::task::Task::busy_share\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 981
+                        "line": 985
                       }
                     }
                   ]
@@ -49805,7 +49805,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 983
+                    "line": 987
                   },
                   "children": [
                     {
@@ -49816,7 +49816,7 @@
                       "value": "\"Each task that wakes another from a system call with interrupts enabled shall record it as its last wakee, its flip count halved first when more than a second has passed since it was last halved and raised by one when the wakee is not the last one; and a wake shall move nothing under L.sched.90 when the smaller of the waker's and the wakee's flip counts is at least the domain's processor count and the larger is at least that count times the smaller.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 991
+                        "line": 995
                       }
                     },
                     {
@@ -49827,7 +49827,7 @@
                       "value": "\"Stage 5's wake-affine case: with the waker's flips set wide and the wakee's at the domain's processor count, the wake that is pulled otherwise runs the task at home (three attempts); ferrix-sched's host tests hold the bound and the halving; with the refusal ignored, the boot fails with the case's own sentence.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 997
+                        "line": 1001
                       }
                     },
                     {
@@ -49838,7 +49838,7 @@
                       "value": "\"H.SCHED.1\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 998
+                        "line": 1002
                       }
                     },
                     {
@@ -49849,7 +49849,7 @@
                       "value": "(\"sched::task::Task::record_wakee\", \"sched::task::Task::wakee_flips\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1000
+                        "line": 1004
                       }
                     }
                   ]
@@ -49862,7 +49862,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1002
+                    "line": 1006
                   },
                   "children": [
                     {
@@ -49873,7 +49873,7 @@
                       "value": "\"wait_until_deadline shall return false once the monotonic clock passes deadline while ready stays false, and true as soon as a wake finds ready true.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1005
+                        "line": 1009
                       }
                     },
                     {
@@ -49884,7 +49884,7 @@
                       "value": "\"Stage 5's deadline case: a wait 20 ms out whose condition stays false returns false after its deadline and within a second of it, and a wait 10 s out whose condition a waker makes true and wakes returns true within a second; with the deadline's test skipped for the check's own waiting task the first case fails with its sentence, found by the checker's own sleep (removed for every wait, the boot hangs at stage 3; the crash hold's 2 s rests on it, docs/LOGGING.md section 21.7, ledger 3537 and 3545).\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1014
+                        "line": 1018
                       }
                     },
                     {
@@ -49895,7 +49895,7 @@
                       "value": "\"H.OBJ.11\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1015
+                        "line": 1019
                       }
                     },
                     {
@@ -49906,7 +49906,7 @@
                       "value": "(\"sched::wait::WaitQueue::wait_until_deadline\", \"sched::wait::WaitQueue::wait_sliced\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1017
+                        "line": 1021
                       }
                     }
                   ]
@@ -49919,7 +49919,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1019
+                    "line": 1023
                   },
                   "children": [
                     {
@@ -49930,7 +49930,7 @@
                       "value": "\"No placer -- choose_cpu, may_place, place_on_idle, idle_allowed, a steal or a balance -- shall place a task on a processor whose ACTIVE bit is clear, and a processor out of service shall neither steal nor balance.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1023
+                        "line": 1027
                       }
                     },
                     {
@@ -49941,7 +49941,7 @@
                       "value": "\"test-quarantine: with four CPU-bound loops running, no task's /proc/<pid>/stat names the target once it is out, and its drained count stays 0. Controls: every placer's test removed at once (sched::placeable answering true) -- tasks land on the target and are drained, and it fires; the ACTIVE bit never cleared -- the native boot check stops the boot.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1030
+                        "line": 1034
                       }
                     },
                     {
@@ -49952,7 +49952,7 @@
                       "value": "\"H.SCHED.18\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1031
+                        "line": 1035
                       }
                     },
                     {
@@ -49963,7 +49963,7 @@
                       "value": "(\"sched::in_service\", \"sched::placeable\", \"sched::set_active\", \"sched::choose_cpu\", \"sched::may_place\", \"sched::place_on_idle\", \"sched::idle_allowed\", \"sched::steal_work\", \"sched::balance\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1034
+                        "line": 1038
                       }
                     }
                   ]
@@ -49976,7 +49976,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1036
+                    "line": 1040
                   },
                   "children": [
                     {
@@ -49987,7 +49987,7 @@
                       "value": "\"A blocked task whose home is out of service when it is woken shall be moved, under both queues' locks taken lower first, to a processor in service before it is queued.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1039
+                        "line": 1043
                       }
                     },
                     {
@@ -49998,7 +49998,7 @@
                       "value": "\"test-quarantine: readers blocked on empty pipes (WaitQueue::wait_trusting, on no list) are ended by a signal while the target is out; its re-homed count is at least 1 and its drained count 0. Control: the re-home removed -- the woken readers are queued on the target and drained, and it fires.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1045
+                        "line": 1049
                       }
                     },
                     {
@@ -50009,7 +50009,7 @@
                       "value": "\"H.SCHED.18\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1046
+                        "line": 1050
                       }
                     },
                     {
@@ -50020,7 +50020,7 @@
                       "value": "(\"sched::wake_at_home\", \"sched::rehome_blocked\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1047
+                        "line": 1051
                       }
                     }
                   ]
@@ -50033,7 +50033,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1049
+                    "line": 1053
                   },
                   "children": [
                     {
@@ -50044,7 +50044,7 @@
                       "value": "\"A processor parking shall move every queued task, every sleeper of its own and every timer object's arm off to processors in service, under the two queues' locks, keeping each sleeper's and arm's due time; a task found there while parked shall be drained and counted.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1054
+                        "line": 1058
                       }
                     },
                     {
@@ -50055,7 +50055,7 @@
                       "value": "\"test-quarantine: /proc/ferrix-service says service out drained 0 for the target after the CPU-bound loops and the readers; the loops go on on the others; fifty times out and back with the loops running, none lost, the longest move's hold printed (MEMORY-AND-TIMING 2.2e2).\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1059
+                        "line": 1063
                       }
                     },
                     {
@@ -50066,7 +50066,7 @@
                       "value": "\"H.SCHED.18\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1060
+                        "line": 1064
                       }
                     },
                     {
@@ -50077,7 +50077,7 @@
                       "value": "(\"sched::evacuate\", \"sched::move_one_off\", \"sched::queue::CpuQueue::take_movable_sleeper\", \"sched::queue::CpuQueue::take_timer_arm\", \"sched::park\", \"sched::drained\", \"sched::pick_or_park\", \"sched::steal_from\", \"sched::move_hold_max\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1065
+                        "line": 1069
                       }
                     }
                   ]
@@ -50090,7 +50090,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1067
+                    "line": 1071
                   },
                   "children": [
                     {
@@ -50101,7 +50101,7 @@
                       "value": "\"Taking a processor out shall check every refusal before any state changes -- among them a task pinned to it alone at its spawn, never a mask a user set (L.sched.123, ledger 5156 (A3)) -- clear its ACTIVE bit and wait a grace period before asking the park, and move its park state Active to Parking to Parked by compare-exchange; a park not made by the deadline shall be cancelled by compare-exchange Parking to Cancelled and the processor put back.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1075
+                        "line": 1079
                       }
                     },
                     {
@@ -50112,7 +50112,7 @@
                       "value": "\"The native boot check a_processor_leaves_service_through_its_token_alone: a park whose deadline has passed, asked of nobody, is cancelled and the processor left in service, and one with a program task counted as pinned at its spawn is refused; test-quarantine's fifty cycles each park and return, a spinner pinned to the target by sched_setaffinity not refusing them. Control: the park loop with interrupts left masked -- a shootdown is never answered and the kernel stops, which fires.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1084
+                        "line": 1088
                       }
                     },
                     {
@@ -50123,7 +50123,7 @@
                       "value": "\"H.SCHED.18\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1085
+                        "line": 1089
                       }
                     },
                     {
@@ -50134,7 +50134,7 @@
                       "value": "(\"sched::take_out_of_service\", \"sched::service_refusal\", \"sched::park_transition\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1087
+                        "line": 1091
                       }
                     }
                   ]
@@ -50147,7 +50147,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1089
+                    "line": 1093
                   },
                   "children": [
                     {
@@ -50158,7 +50158,7 @@
                       "value": "\"A processor brought back shall flush its whole TLB, global entries and every PCID included, and re-arm its timer before its ACTIVE bit is set, last.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1092
+                        "line": 1096
                       }
                     },
                     {
@@ -50169,7 +50169,7 @@
                       "value": "\"test-quarantine: root's echo 1 brings the target back and online names it again; fifty times out and back under load. The flush is CR4.PGE's toggle (SDM vol. 3A 4.10.4.1), argued.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1096
+                        "line": 1100
                       }
                     },
                     {
@@ -50180,7 +50180,7 @@
                       "value": "\"H.SCHED.18\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1097
+                        "line": 1101
                       }
                     },
                     {
@@ -50191,7 +50191,7 @@
                       "value": "(\"sched::put_back_in_service\", \"sched::park\", \"arch::x86_64::flush_tlb\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1099
+                        "line": 1103
                       }
                     }
                   ]
@@ -50205,7 +50205,7 @@
               "doc": "src/lib/kernel/sched, sched/queue.rs, sched/mod.rs and syscall/thread.rs: a slice a task asks for (F7, docs/GAME-MODE-SCHED.md section 2.2; the consultant's design review, ledger 5156).",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 1103
+                "line": 1107
               },
               "children": [
                 {
@@ -50216,7 +50216,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1109
+                    "line": 1113
                   },
                   "children": [
                     {
@@ -50227,7 +50227,7 @@
                       "value": "\"At each new request of a fair entity -- its enqueue, the renewal of a spent request, a yield, a change of weight, a levelling and the direct switch's arrival -- the scheduler shall set its virtual deadline to its virtual runtime plus effective_request(its requested slice, the queue's slice) at its weight, the queue's slice standing for a request of zero; a changed request shall take effect at the entity's next new request.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1117
+                        "line": 1121
                       }
                     },
                     {
@@ -50238,7 +50238,7 @@
                       "value": "\"Host tests every_new_request_is_measured_with_the_entitys_own, a_request_is_carried_and_a_change_waits_for_the_next, a_shorter_request_is_picked_first and hand_over_is_the_general_sequence; stage 5's slice check: three spinners pinned to one processor are each seen waiting exactly one effective request from their deadline. Control: the renewal measured with the queue's slice -- the check fails with 'a renewed request ignored the task's slice'.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1126
+                        "line": 1130
                       }
                     },
                     {
@@ -50249,7 +50249,7 @@
                       "value": "\"H.SCHED.2\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1127
+                        "line": 1131
                       }
                     },
                     {
@@ -50260,7 +50260,7 @@
                       "value": "(\"sched::set_request\", \"sched::queue::CpuQueue::set_request\", \"sched::task::Task::set_request\", \"sched::task::Task::entity_state\", \"sched::task::Task::store_entity_state\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1130
+                        "line": 1134
                       }
                     }
                   ]
@@ -50273,7 +50273,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1132
+                    "line": 1136
                   },
                   "children": [
                     {
@@ -50284,7 +50284,7 @@
                       "value": "\"No entity shall be given a request longer than its queue's slice, whatever it asks for; the lag limit, the placement of an arriving entity and the interval to the next decision shall be measured with the queue's slice alone.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1136
+                        "line": 1140
                       }
                     },
                     {
@@ -50295,7 +50295,7 @@
                       "value": "\"Host tests the_effective_request_is_the_ask_capped_at_the_slice and no_request_moves_a_bound (placement, the lag left with and the decision interval identical for every request); stage 5's slice check: a spinner asking for twice the largest slice is never seen further from its deadline than that slice. Control: the cap removed -- 'a request longer than the queue's slice was granted'.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1144
+                        "line": 1148
                       }
                     },
                     {
@@ -50306,7 +50306,7 @@
                       "value": "\"H.SCHED.2\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1145
+                        "line": 1149
                       }
                     },
                     {
@@ -50317,7 +50317,7 @@
                       "value": "\"sched::queue::CpuQueue::request_sample\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1146
+                        "line": 1150
                       }
                     }
                   ]
@@ -50330,7 +50330,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1148
+                    "line": 1152
                   },
                   "children": [
                     {
@@ -50341,7 +50341,7 @@
                       "value": "\"prepare_user shall give a user task its thread's slice request before any queue can see it, so that a thread made by clone or fork, which starts with its creator's request, and a thread after execve, which keeps its own, run with it from their first pick.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1153
+                        "line": 1157
                       }
                     },
                     {
@@ -50352,7 +50352,7 @@
                       "value": "\"test-threads' slice step: sched_setattr and sched_getattr round trip, 99 us read back as 100 us and 101 ms as 100 ms, RESET_ON_FORK refused, a forked child and a new thread read their creator's request, as uid 1000 pid 1's thread EPERM and SCHED_FIFO refused; sched_getattr reads the task's request. The exec half is argued by construction and not yet run: sys_execve keeps the caller's Thread and Task (end_other_threads) and Thread::reset_for_exec clears only dispatch and name; the run from a file on the N150 box's disk is a BACKLOG row (ledger 5232 (4)). Control: prepare_user making the task with no request -- the step fails with 'a child did not start with its creator's slice request'.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1165
+                        "line": 1169
                       }
                     },
                     {
@@ -50363,7 +50363,7 @@
                       "value": "\"H.SCHED.1\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1166
+                        "line": 1170
                       }
                     },
                     {
@@ -50374,7 +50374,7 @@
                       "value": "\"sched::prepare_user\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1167
+                        "line": 1171
                       }
                     }
                   ]
@@ -50388,7 +50388,7 @@
               "doc": "sched/affinity.rs, sched/mod.rs, sched/queue.rs, sched/task.rs, sched/work.rs and the way out of every architecture: sched_setaffinity that pins (F3, docs/GAME-MODE-SCHED.md section 2.1; the consultant's design reviews, ledger 4446 (D1)-(D12) and 5156 (A1)-(A12)). The mask a task's placement asks is mask_for: its stored mask, or the domain while that names no processor in service (L.sched.123); the effective mask is that and in service. The system call's EINVAL, EPERM, ESRCH and read-back are load statements in the design note (limits.rs, no L id).",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 1171
+                "line": 1175
               },
               "children": [
                 {
@@ -50399,7 +50399,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1183
+                    "line": 1187
                   },
                   "children": [
                     {
@@ -50410,7 +50410,7 @@
                       "value": "\"set_affinity shall refuse every task that runs no program, before anything changes, so that a kernel thread's mask is the one it was spawned with for its whole life.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1187
+                        "line": 1191
                       }
                     },
                     {
@@ -50421,7 +50421,7 @@
                       "value": "\"Stage 5's affinity check: a kernel thread asked a mask through set_affinity is refused with KernelThread and keeps its spawn mask. Control: the refusal removed -- 'a kernel thread's mask was changed by sched_setaffinity's door'.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1192
+                        "line": 1196
                       }
                     },
                     {
@@ -50432,7 +50432,7 @@
                       "value": "\"H.SCHED.4\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1193
+                        "line": 1197
                       }
                     },
                     {
@@ -50443,7 +50443,7 @@
                       "value": "\"sched::affinity::set_affinity\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1194
+                        "line": 1198
                       }
                     }
                   ]
@@ -50456,7 +50456,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1196
+                    "line": 1200
                   },
                   "children": [
                     {
@@ -50467,7 +50467,7 @@
                       "value": "\"Every placer -- may_place (the Sync wake, the pull and rehome_blocked's choice), idle_allowed, place_on_idle, a steal, a balance, the evacuation of a park, and a user task's making -- shall ask allowed(task, cpu) over mask_for beside placeable(cpu); a task woken at a home its mask does not allow shall be moved, under both queues' locks taken lower first, to a processor it allows before it is queued; a mask shall be stored only under the lock of the queue that owns the task, and read whole.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1205
+                        "line": 1209
                       }
                     },
                     {
@@ -50478,7 +50478,7 @@
                       "value": "\"Stage 5's affinity check: a task asleep at home on processor 0 is given the last processor alone and woken from processor 0 with preemption held; as the wake returns its home is the last processor, and it runs there. Controls: wake_at_home's mask test skipped -- 'a task woken with a mask that excludes its home was queued there'; the store skipped -- the same line.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1212
+                        "line": 1216
                       }
                     },
                     {
@@ -50489,7 +50489,7 @@
                       "value": "\"H.SCHED.4\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1213
+                        "line": 1217
                       }
                     },
                     {
@@ -50500,7 +50500,7 @@
                       "value": "(\"sched::affinity::allowed\", \"sched::affinity::mask_for\", \"sched::affinity::pinned\", \"sched::affinity::set_mask\", \"sched::task::Task::store_affinity\", \"sched::task::Task::affinity\", \"sched::may_place\", \"sched::idle_allowed\", \"sched::place_on_idle\", \"sched::wake_at_home\", \"sched::wake_onto\", \"sched::rehome_blocked\", \"sched::may_pull\", \"sched::queue::CpuQueue::steal_candidate\", \"sched::queue::CpuQueue::take_movable_sleeper\", \"sched::prepare_user\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1220
+                        "line": 1224
                       }
                     }
                   ]
@@ -50513,7 +50513,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1222
+                    "line": 1226
                   },
                   "children": [
                     {
@@ -50524,7 +50524,7 @@
                       "value": "\"A queued task picked on a processor its mask does not allow shall be taken off that queue and queued on one it allows before it is switched to, and the pick made again, the destination's lock waited for when it is above the picking processor and only tried when below.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1227
+                        "line": 1231
                       }
                     },
                     {
@@ -50535,7 +50535,7 @@
                       "value": "\"Stage 5's affinity check: a task woken on processor 0 behind its waker, then given the last processor alone, runs on the last processor, and the push count rose. Control: the push skipped -- 'a task picked on a processor its mask excludes ran there'.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1232
+                        "line": 1236
                       }
                     },
                     {
@@ -50546,7 +50546,7 @@
                       "value": "\"H.SCHED.4\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1233
+                        "line": 1237
                       }
                     },
                     {
@@ -50557,7 +50557,7 @@
                       "value": "(\"sched::pick_inside\", \"sched::affinity::push_picked\", \"sched::affinity::pushed\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1235
+                        "line": 1239
                       }
                     }
                   ]
@@ -50570,7 +50570,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1237
+                    "line": 1241
                   },
                   "children": [
                     {
@@ -50581,7 +50581,7 @@
                       "value": "\"A task given a mask shall carry PLACE while its mask is narrower than the domain, and every way back to user mode on every architecture -- a call's, an interrupt's, a fault's, before a signal frame is built, a restarted call, and a program's or a clone or fork child's first entry -- shall, before any user instruction, switch it away from a processor mask_for does not name and queue it, after the switch has saved its registers, under both queues' locks on one it names; with no lock held and the preemption count zero at the switch, and again until it is inside.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1247
+                        "line": 1251
                       }
                     },
                     {
@@ -50592,7 +50592,7 @@
                       "value": "\"test-threads' affinity step on x86-64, AArch64 and ARMv7-A: pinned to each processor in turn, getcpu (and RDTSCP on x86-64) on the instruction after the call names it; a pinned spinner is never seen elsewhere over a second. Control: the bit not posted -- 'a thread that pinned itself ran its next instruction elsewhere'.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1253
+                        "line": 1257
                       }
                     },
                     {
@@ -50603,7 +50603,7 @@
                       "value": "\"H.SCHED.4\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1254
+                        "line": 1258
                       }
                     },
                     {
@@ -50614,7 +50614,7 @@
                       "value": "(\"sched::affinity::keep_inside\", \"sched::affinity::leaves_with_switch\", \"sched::affinity::take_pushing\", \"sched::affinity::push_off\", \"sched::affinity::unmasked\", \"sched::work::look_placed\", \"sched::work::place_before_entry\", \"sched::work::anything_due\", \"sched::choose_next\", \"sched::depart\", \"sched::finish_switch\", \"sched::nothing_due_here\", \"trap::attention_due\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1261
+                        "line": 1265
                       }
                     }
                   ]
@@ -50627,7 +50627,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1263
+                    "line": 1267
                   },
                   "children": [
                     {
@@ -50638,7 +50638,7 @@
                       "value": "\"A set_affinity whose target runs on another processor its new mask does not allow shall interrupt that processor and return only once the target is off it, it has died, or 100 ms have passed.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1267
+                        "line": 1271
                       }
                     },
                     {
@@ -50649,7 +50649,7 @@
                       "value": "\"test-threads' affinity step: another thread's mask is set while it spins on another processor; its first getcpu begun after the call returned names the new processor. Control: the wait removed -- 'another thread's next getcpu after its mask was set named a processor outside it'.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1273
+                        "line": 1277
                       }
                     },
                     {
@@ -50660,7 +50660,7 @@
                       "value": "\"H.SCHED.4\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1274
+                        "line": 1278
                       }
                     },
                     {
@@ -50671,7 +50671,7 @@
                       "value": "(\"sched::affinity::wait_until_off\", \"sched::affinity::running_outside\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1276
+                        "line": 1280
                       }
                     }
                   ]
@@ -50684,7 +50684,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1278
+                    "line": 1282
                   },
                   "children": [
                     {
@@ -50695,7 +50695,7 @@
                       "value": "\"A thread made by clone, fork or vfork shall be made with the mask its creator's task had at that moment, read whole, and execve shall keep it; any other user task shall start with the whole domain.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1282
+                        "line": 1286
                       }
                     },
                     {
@@ -50706,7 +50706,7 @@
                       "value": "\"test-threads' affinity step: a new thread and a fork child read their creator's one-processor mask back and run on it; an exec keeps it where the program is a file. Control: the creator's mask not copied at clone -- 'a new thread did not start with its creator's mask'.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1287
+                        "line": 1291
                       }
                     },
                     {
@@ -50717,7 +50717,7 @@
                       "value": "\"H.SCHED.4\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1288
+                        "line": 1292
                       }
                     },
                     {
@@ -50728,7 +50728,7 @@
                       "value": "\"sched::prepare_user\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1289
+                        "line": 1293
                       }
                     }
                   ]
@@ -50741,7 +50741,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1291
+                    "line": 1295
                   },
                   "children": [
                     {
@@ -50752,7 +50752,7 @@
                       "value": "\"A task that runs a program and whose stored mask names no processor in service shall be placed as if its mask were the whole domain, its stored mask kept, and sched_getaffinity shall answer the effective mask; a user's mask shall never count among the pins that refuse a park.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1296
+                        "line": 1300
                       }
                     },
                     {
@@ -50763,7 +50763,7 @@
                       "value": "\"test-quarantine: a spinner the probe pinned to the target with sched_setaffinity does not refuse the park, and by its own getcpu runs elsewhere while the target is out; its sched_getaffinity reads every processor in service during the park and the target alone after, and it runs on the target again after its return; fifty cycles out and back with it running all succeed. Control: the fallback removed -- the step fails with 'a task pinned to processor 2 did not read every processor in service while it was out': getaffinity's look during the park, made before the probe's getcpu, catches the removed fallback first (ledger 5269 (4)).\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1307
+                        "line": 1311
                       }
                     },
                     {
@@ -50774,7 +50774,7 @@
                       "value": "\"H.SCHED.18\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1308
+                        "line": 1312
                       }
                     },
                     {
@@ -50785,7 +50785,7 @@
                       "value": "(\"sched::affinity::mask_for\", \"sched::affinity::effective_mask\", \"sched::task::Task::new\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1310
+                        "line": 1314
                       }
                     }
                   ]
@@ -50799,7 +50799,7 @@
                   "doc": "Rationale: the sleeper set holds timer arms beside sleeping tasks since K10 (docs/microkernel/K10.md §9, condition 2), so a walk of it on every early wake would let one job's timers lengthen every other job's wakes; a removal by key is a descent of the AVL tree.",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1312
+                    "line": 1316
                   },
                   "children": [
                     {
@@ -50810,7 +50810,7 @@
                       "value": "\"A task filed in its processor's sleeper set shall keep the instant it was filed under, and an early wake shall take it out by that instant and its id, never by a walk of the set; a removal under any other key shall take nothing out.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1321
+                        "line": 1325
                       }
                     },
                     {
@@ -50821,7 +50821,7 @@
                       "value": "\"Stage 9's early-wake case: a task asleep among three armed timers on its processor, woken early, takes the set from n to n - 1 entries with every timer's arm still filed; with the removal's key made wrong, the case fails with its sentence. The sched crate's host test removes by key and refuses a wrong instant and a wrong id.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1327
+                        "line": 1331
                       }
                     },
                     {
@@ -50832,7 +50832,7 @@
                       "value": "\"H.SCHED.5\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1328
+                        "line": 1332
                       }
                     },
                     {
@@ -50843,7 +50843,7 @@
                       "value": "(\"sched::queue::CpuQueue::remove_sleeper\", \"sched::queue::CpuQueue::file_sleeper\", \"sched::task::Task::set_filed_at\", \"sched::task::Task::filed_at\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1331
+                        "line": 1335
                       }
                     }
                   ]
