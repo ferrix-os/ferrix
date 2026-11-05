@@ -149,6 +149,28 @@ pub(crate) const TASKS: &[Task] = &[
         },
     },
     Task {
+        name: "check-frames",
+        help_at: 1061,
+        help: &[
+            "check-frames  every kernel frame over a page, against probes or ARMv7-A's baseline, for --arch",
+        ],
+        run: |_, args| {
+            for arch in args.arches()? {
+                let kernel = cargo::build_kernel(arch, args.release)?;
+                let mut command = Command::new("python3");
+                let _ = command
+                    .current_dir(paths::workspace_root())
+                    .arg("tools/common/check/check-frames.py")
+                    .arg(&kernel.elf)
+                    .arg(arch.to_string())
+                    .arg(args.kernel_profile.as_deref().unwrap_or("present"))
+                    .arg(if args.release { "release" } else { "dev" });
+                cargo::run(command, "tools/common/check/check-frames.py")?;
+            }
+            Ok(())
+        },
+    },
+    Task {
         name: "native-clippy",
         help_at: 1060,
         help: &["native-clippy check's clippy of the native programs for --arch, as CI runs it"],
@@ -269,6 +291,17 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
         &[
             &["tools/common/check/check-no-dev-keys.py"],
             &["tools/common/check/check-no-dev-keys.py", "--self-test"],
+        ],
+    ),
+    // What a commit must say to name a review, and that a review still to
+    // come names none (ledger 6846 C1); the frame check's and the depth row's
+    // own readers, which run on images, proved without one.
+    (
+        "the certification verdict and the frame readers",
+        &[
+            &["tools/common/release/cert-verdict.py", "--self-test"],
+            &["tools/common/check/check-frames.py", "--self-test"],
+            &["tools/common/check/check-stack-depth.py", "--self-test"],
         ],
     ),
     // Product signing's verifier is proved by host tests: their statement

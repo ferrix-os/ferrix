@@ -292,11 +292,19 @@ impl Drop for Buffer {
 
 /// Reserve `len` usable bytes with a guard page on each side.
 fn reserve(len: u64, flags: VmaFlags, kind: Kind) -> Result<Mapping, VmapError> {
-    if len == 0 || !len.is_multiple_of(PAGE_SIZE) || len > ARENA_END - ARENA_BASE - 2 * GUARD_BYTES
+    reserve_below(len, 0, flags, kind)
+}
+
+/// [`reserve`], with `extra` more unmapped bytes below the allocation than the
+/// guard every allocation has.
+fn reserve_below(len: u64, extra: u64, flags: VmaFlags, kind: Kind) -> Result<Mapping, VmapError> {
+    if len == 0
+        || !len.is_multiple_of(PAGE_SIZE)
+        || len > ARENA_END - ARENA_BASE - 2 * GUARD_BYTES - extra
     {
         return Err(VmapError::BadLength(len));
     }
-    let span_bytes = len + 2 * GUARD_BYTES;
+    let span_bytes = len + 2 * GUARD_BYTES + extra;
 
     let mut locked = ARENA.lock();
     let arena = locked.as_mut().ok_or(VmapError::NotReady)?;
@@ -324,7 +332,7 @@ fn reserve(len: u64, flags: VmaFlags, kind: Kind) -> Result<Mapping, VmapError> 
             _ => VmapError::NoAddressSpace(span_bytes),
         })?;
 
-    let base = at + GUARD_BYTES;
+    let base = at + GUARD_BYTES + extra;
     let _ = fallible::insert_held(&held, &mut arena.live, base, Allocation { span, len, kind });
     Ok(Mapping { base, len })
 }
@@ -400,10 +408,15 @@ fn release_span(span: PageRange) -> Result<(), VmapError> {
 /// whole difference between this and the direct map, and the reason a large
 /// buffer can be allocated on a fragmented machine at all.
 pub(crate) fn allocate(pages: u64, flags: MapFlags) -> Result<Mapping, VmapError> {
+    allocate_below(pages, 0, flags)
+}
+
+/// [`allocate`], with `extra` more unmapped bytes below it than its guard.
+fn allocate_below(pages: u64, extra: u64, flags: MapFlags) -> Result<Mapping, VmapError> {
     let len = pages
         .checked_mul(PAGE_SIZE)
         .ok_or(VmapError::BadLength(pages))?;
-    let mapping = reserve(len, vma_flags(flags), Kind::Anonymous)?;
+    let mapping = reserve_below(len, extra, vma_flags(flags), Kind::Anonymous)?;
 
     for page in 0..pages {
         let at = mapping.base + page * PAGE_SIZE;
@@ -655,12 +668,35 @@ const fn vma_flags(flags: MapFlags) -> VmaFlags {
 
 /// Pages in a kernel stack, not counting the guards.
 ///
-/// Sixteen kibibytes, which is what Linux uses on both of these architectures.
-/// It is not generous: the trap path saves a frame, a nested interrupt saves
+/// Sixteen kibibytes on two architectures. Linux uses that, and takes interrupts on
+/// a stack of their own; here an interrupt stands on the task's stack, and on AArch64
+/// that and its vector state are about 4 KiB, so 24 there (F-101): `check-stack-depth`
+/// wants 4 KiB left on what it walks. It is not generous: the trap path saves a frame, a nested interrupt saves
 /// another, and formatting a line for the console is surprisingly deep. The
 /// guard page below is what turns "not generous" from a corruption into a
-/// fault.
+/// fault, and only because each architecture's entry takes that fault somewhere
+/// else: x86-64's double fault on its own stack, both Arm's a question to the
+/// MMU before the entry touches the stack pointer (`H.FAIL.15`). A guard alone
+/// is not enough: an exception pushes, and a push on a stack pointer in the
+/// guard faults again, lower.
+#[cfg(target_arch = "aarch64")]
+pub(crate) const STACK_PAGES: u64 = 6;
+/// See above.
+#[cfg(not(target_arch = "aarch64"))]
 pub(crate) const STACK_PAGES: u64 = 4;
+
+/// Unmapped pages directly below a kernel stack, the guard included.
+///
+/// One on the architectures whose compiler touches every page a frame moves
+/// over: a frame cannot step past it. ARMv7-A's has no stack probes, so the
+/// guard there has to be larger than any frame on a task's stack, which
+/// `check-frames` holds it to (F-100). Three pages is 8 KiB of the 512 MiB
+/// arena more a task, address space and no memory.
+#[cfg(target_arch = "arm")]
+pub(crate) const STACK_LOWER_GUARD_PAGES: u64 = 3;
+/// See above.
+#[cfg(not(target_arch = "arm"))]
+pub(crate) const STACK_LOWER_GUARD_PAGES: u64 = 1;
 
 /// A kernel stack, guard-paged at both ends.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -690,7 +726,11 @@ pub fn allocate_stack() -> Result<Stack, VmapError> {
 /// theirs near a whole [`STACK_PAGES`] (ledger 7044, D-f). Given back as any
 /// other: the arena keeps each allocation's size.
 pub(crate) fn allocate_stack_of(pages: u64) -> Result<Stack, VmapError> {
-    let mapping = allocate(pages, MapFlags::KERNEL_DATA)?;
+    let mapping = allocate_below(
+        pages,
+        (STACK_LOWER_GUARD_PAGES - GUARD_PAGES) * PAGE_SIZE,
+        MapFlags::KERNEL_DATA,
+    )?;
     Ok(Stack {
         base: mapping.base,
         top: mapping.end(),

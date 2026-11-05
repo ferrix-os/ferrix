@@ -816,8 +816,12 @@ fn check_one_stack(stack: vmap::Stack, pages: u64, free_before: u64) -> Result<(
         }
     }
 
-    if mm::translate(stack.base - PAGE_SIZE).is_some() {
-        return Err("a kernel stack has no guard page below it, so an overflow would be silent");
+    for page in 1..=vmap::STACK_LOWER_GUARD_PAGES {
+        if mm::translate(stack.base - page * PAGE_SIZE).is_some() {
+            return Err(
+                "a kernel stack has no guard page below it, so an overflow would be silent",
+            );
+        }
     }
     if mm::translate(stack.top).is_some() {
         return Err("a kernel stack has no guard page above it");

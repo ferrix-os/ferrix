@@ -1,0 +1,860 @@
+{
+ "desktop/dev": {
+  "<ferrix_btrfs::volume::Volume<alloc::boxed::Box<[ferrix_btrfs::chunk::ChunkMapEntry]>>>::open::<ferrix_btrfs_vfs::cache::Cached<ferrix_kernel_load::fs::btrfs::Disk>>": {
+   "frame": 4616,
+   "kind": "product",
+   "stack": "task"
+  },
+  "<ferrix_displayctl::message::Message>::decode": {
+   "frame": 4208,
+   "kind": "product",
+   "stack": "task"
+  },
+  "<ferrix_fdt::Fdt>::for_each_lineage::<ferrix_kernel_core::discovery::tree::find_generic::{closure#1}>": {
+   "frame": 6176,
+   "kind": "product",
+   "stack": "task"
+  },
+  "<ferrix_inputctl::message::Message>::decode": {
+   "frame": 6744,
+   "kind": "product",
+   "stack": "task"
+  },
+  "<ferrix_kernel_core::discovery::tree::VirtioMmio as ferrix_kernel_core::discovery::finder::Finder>::find": {
+   "frame": 4896,
+   "kind": "product",
+   "stack": "task"
+  },
+  "<ferrix_kernel_core::sched::queue::CpuQueue>::new": {
+   "frame": 4960,
+   "kind": "product",
+   "stack": "task"
+  },
+  "<ferrix_kernel_item::discovery::pci::Enumeration as ferrix_kernel_core::discovery::finder::Finder>::find": {
+   "frame": 4136,
+   "kind": "product",
+   "stack": "task"
+  },
+  "<ferrix_kernel_load::fs::cgroupfs::reclaim_check::Group>::as_task::<core::result::Result<(), ferrix_linux_abi::errno::Errno>, ferrix_kernel_load::fs::cgroupfs::io_check::accounting::{closure#0}>": {
+   "frame": 4144,
+   "kind": "check",
+   "stack": "task"
+  },
+  "<ferrix_kernel_load::fs::cgroupfs::reclaim_check::Group>::as_task::<core::result::Result<(), ferrix_linux_abi::errno::Errno>, ferrix_kernel_load::fs::cgroupfs::io_check::reads::{closure#0}>": {
+   "frame": 4152,
+   "kind": "check",
+   "stack": "task"
+  },
+  "<ferrix_kernel_load::fs::cgroupfs::reclaim_check::Group>::as_task::<core::result::Result<bool, &str>, ferrix_kernel_load::fs::cgroupfs::reclaim_check::tmpfs_read_throttled::{closure#0}>": {
+   "frame": 4208,
+   "kind": "check",
+   "stack": "task"
+  },
+  "<ferrix_kernel_load::fs::netns_check::Nl>::ask": {
+   "frame": 5280,
+   "kind": "check",
+   "stack": "task"
+  },
+  "<ferrix_kernel_load::fs::netns_check::Nl>::links": {
+   "frame": 4480,
+   "kind": "check",
+   "stack": "task"
+  },
+  "<ferrix_kernel_load::net::netlink::check::Netlink>::talk": {
+   "frame": 4632,
+   "kind": "check",
+   "stack": "task"
+  },
+  "<ferrix_kernel_load::object::pager_check::Served>::supply": {
+   "frame": 4248,
+   "kind": "check",
+   "stack": "task"
+  },
+  "core::slice::sort::stable::driftsort_main::<&ferrix_vfs::tmpfs::Node, <[&ferrix_vfs::tmpfs::Node]>::sort_by_key<u64, <ferrix_vfs::tmpfs::Locked>::new::{closure#0}>::{closure#0}, alloc::vec::Vec<&ferrix_vfs::tmpfs::Node>>": {
+   "frame": 4136,
+   "kind": "product",
+   "stack": "task"
+  },
+  "core::slice::sort::stable::driftsort_main::<(u32, alloc::sync::Arc<ferrix_kernel_load::syscall::process::Process>), <[(u32, alloc::sync::Arc<ferrix_kernel_load::syscall::process::Process>)]>::sort_by_key<u32, ferrix_kernel_load::fs::procfs::list_root::{closure#3}>::{closure#0}, alloc::vec::Vec<(u32, alloc::sync::Arc<ferrix_kernel_load::syscall::process::Process>)>>": {
+   "frame": 4136,
+   "kind": "product",
+   "stack": "task"
+  },
+  "core::slice::sort::stable::driftsort_main::<ferrix_kernel_load::syscall::load::FileRun, <[ferrix_kernel_load::syscall::load::FileRun]>::sort_by_key<u64, ferrix_kernel_load::syscall::load::file_runs::{closure#4}>::{closure#0}, alloc::vec::Vec<ferrix_kernel_load::syscall::load::FileRun>>": {
+   "frame": 4136,
+   "kind": "product",
+   "stack": "task"
+  },
+  "core::slice::sort::stable::driftsort_main::<u16, <u16 as core::cmp::PartialOrd>::lt, alloc::vec::Vec<u16>>": {
+   "frame": 4136,
+   "kind": "product",
+   "stack": "task"
+  },
+  "ferrix_kernel_core::device::check::check_input_functions": {
+   "frame": 17280,
+   "kind": "check",
+   "stack": "boot"
+  },
+  "ferrix_kernel_core::device::check::check_intel_gpu_yield": {
+   "frame": 15656,
+   "kind": "check",
+   "stack": "boot"
+  },
+  "ferrix_kernel_core::device::check::check_lending": {
+   "frame": 6440,
+   "kind": "check",
+   "stack": "boot"
+  },
+  "ferrix_kernel_core::device::check::check_lending_exact": {
+   "frame": 6496,
+   "kind": "check",
+   "stack": "boot"
+  },
+  "ferrix_kernel_core::device::check::check_lending_intel": {
+   "frame": 14096,
+   "kind": "check",
+   "stack": "boot"
+  },
+  "ferrix_kernel_core::device::check::check_widening": {
+   "frame": 6496,
+   "kind": "check",
+   "stack": "boot"
+  },
+  "ferrix_kernel_core::mm::check::frames_hammer": {
+   "frame": 4184,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_core::sched::init": {
+   "frame": 12816,
+   "kind": "product",
+   "stack": "boot"
+  },
+  "ferrix_kernel_core::user::rehome_check::check_commit_and_write": {
+   "frame": 4184,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_core::user::rehome_check::check_decommit_from": {
+   "frame": 8320,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_core::user::rehome_check::file_holds": {
+   "frame": 4168,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_core::user::rehome_check::memory_file": {
+   "frame": 4208,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::cgroupfs::io_check::reader": {
+   "frame": 4152,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::check::run": {
+   "frame": 4320,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::netns_check::route_for_fill": {
+   "frame": 5272,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::pipe_check::fill": {
+   "frame": 4144,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::procfs::debug::environ": {
+   "frame": 4168,
+   "kind": "product",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::pty_check::check_a_full_canonical_line_does_not_block_the_master": {
+   "frame": 4200,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::pty_check::check_a_master_write_takes_only_what_fits": {
+   "frame": 4496,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::pty_check::check_flow_control_acts_on_a_pty": {
+   "frame": 4728,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::block_ring::driver_check::read_back": {
+   "frame": 9272,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::block_ring::hop_check::reader_task": {
+   "frame": 4352,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::block_ring::hop_check::run": {
+   "frame": 6144,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::display::check::modes": {
+   "frame": 6936,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::display::run": {
+   "frame": 8416,
+   "kind": "product",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::input::session_of": {
+   "frame": 4288,
+   "kind": "product",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::render::run": {
+   "frame": 9544,
+   "kind": "product",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::syscall::check::check_a_signal_is_judged_against_its_takers_mask": {
+   "frame": 4232,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::syscall::check::check_process_create_reads_an_image_past_a_heap_block": {
+   "frame": 4264,
+   "kind": "check",
+   "stack": "task"
+  }
+ },
+ "desktop/release": {
+  "<ferrix_kernel_core::discovery::tree::VirtioMmio as ferrix_kernel_core::discovery::finder::Finder>::find": {
+   "frame": 4208,
+   "kind": "product",
+   "stack": "task"
+  },
+  "<ferrix_kernel_item::discovery::pci::Enumeration as ferrix_kernel_core::discovery::finder::Finder>::find": {
+   "frame": 4200,
+   "kind": "product",
+   "stack": "task"
+  },
+  "<ferrix_kernel_load::fs::cgroupfs::reclaim_check::Group>::as_task::<core::result::Result<(), ferrix_linux_abi::errno::Errno>, ferrix_kernel_load::fs::cgroupfs::io_check::accounting::{closure#0}>": {
+   "frame": 4144,
+   "kind": "check",
+   "stack": "task"
+  },
+  "<ferrix_kernel_load::fs::netns_check::Nl>::ask": {
+   "frame": 5280,
+   "kind": "check",
+   "stack": "task"
+  },
+  "<ferrix_kernel_load::fs::netns_check::Nl>::links": {
+   "frame": 4264,
+   "kind": "check",
+   "stack": "task"
+  },
+  "<ferrix_kernel_load::net::netlink::check::Netlink>::talk": {
+   "frame": 4520,
+   "kind": "check",
+   "stack": "task"
+  },
+  "<ferrix_kernel_load::object::pager_check::Served>::supply": {
+   "frame": 4208,
+   "kind": "check",
+   "stack": "task"
+  },
+  "core::slice::sort::stable::driftsort_main::<(u32, alloc::sync::Arc<ferrix_kernel_load::syscall::process::Process>), <[(u32, alloc::sync::Arc<ferrix_kernel_load::syscall::process::Process>)]>::sort_by_key<u32, ferrix_kernel_load::fs::procfs::list_root::{closure#3}>::{closure#0}, alloc::vec::Vec<(u32, alloc::sync::Arc<ferrix_kernel_load::syscall::process::Process>)>>": {
+   "frame": 4136,
+   "kind": "product",
+   "stack": "task"
+  },
+  "core::slice::sort::stable::driftsort_main::<ferrix_kernel_load::syscall::load::FileRun, <[ferrix_kernel_load::syscall::load::FileRun]>::sort_by_key<u64, ferrix_kernel_load::syscall::load::file_runs::{closure#4}>::{closure#0}, alloc::vec::Vec<ferrix_kernel_load::syscall::load::FileRun>>": {
+   "frame": 4136,
+   "kind": "product",
+   "stack": "task"
+  },
+  "core::slice::sort::stable::driftsort_main::<u16, <u16 as core::cmp::PartialOrd>::lt, alloc::vec::Vec<u16>>": {
+   "frame": 4136,
+   "kind": "product",
+   "stack": "task"
+  },
+  "ferrix_kernel::kmain": {
+   "frame": 11600,
+   "kind": "product",
+   "stack": "boot"
+  },
+  "ferrix_kernel_core::device::check::check_input_functions": {
+   "frame": 10160,
+   "kind": "check",
+   "stack": "boot"
+  },
+  "ferrix_kernel_core::device::check::check_intel_gpu_yield": {
+   "frame": 6152,
+   "kind": "check",
+   "stack": "boot"
+  },
+  "ferrix_kernel_core::device::check::check_lending_exact": {
+   "frame": 5000,
+   "kind": "check",
+   "stack": "boot"
+  },
+  "ferrix_kernel_core::device::check::check_lending_intel": {
+   "frame": 12912,
+   "kind": "check",
+   "stack": "boot"
+  },
+  "ferrix_kernel_core::device::check::check_lent_framebuffer::<ferrix_kernel::Discovery>": {
+   "frame": 5008,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_core::discovery::tree::find_generic": {
+   "frame": 5712,
+   "kind": "product",
+   "stack": "task"
+  },
+  "ferrix_kernel_core::mm::check::frames_hammer": {
+   "frame": 4176,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_core::user::rehome_check::check_commit_and_write": {
+   "frame": 4200,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_core::user::rehome_check::check_decommit_from": {
+   "frame": 8304,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_core::user::rehome_check::file_holds": {
+   "frame": 4168,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_core::user::rehome_check::memory_file": {
+   "frame": 4200,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::btrfs::mount": {
+   "frame": 4976,
+   "kind": "product",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::cgroupfs::io_check::reader": {
+   "frame": 4152,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::cgroupfs::io_check::reads": {
+   "frame": 4168,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::cgroupfs::reclaim_check::tmpfs_read_throttled": {
+   "frame": 4240,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::kmem_check::routes::{closure#0}": {
+   "frame": 5280,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::pipe_check::fill": {
+   "frame": 4144,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::procfs::debug::environ": {
+   "frame": 4176,
+   "kind": "product",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::block_ring::driver_check::read_back": {
+   "frame": 9800,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::block_ring::hop_check::depth_one": {
+   "frame": 5200,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::block_ring::hop_check::reader_task": {
+   "frame": 4368,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::display::check::pages": {
+   "frame": 6568,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::display::run": {
+   "frame": 8200,
+   "kind": "product",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::input::serve": {
+   "frame": 5208,
+   "kind": "product",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::render::run": {
+   "frame": 9248,
+   "kind": "product",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::syscall::check::check_a_pty_as_a_serial_port": {
+   "frame": 4872,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::syscall::check::check_process_create_reads_an_image_past_a_heap_block": {
+   "frame": 4216,
+   "kind": "check",
+   "stack": "task"
+  }
+ },
+ "present/dev": {
+  "<ferrix_btrfs::volume::Volume<alloc::boxed::Box<[ferrix_btrfs::chunk::ChunkMapEntry]>>>::open::<ferrix_btrfs_vfs::cache::Cached<ferrix_kernel_load::fs::btrfs::Disk>>": {
+   "frame": 4616,
+   "kind": "product",
+   "stack": "task"
+  },
+  "<ferrix_displayctl::message::Message>::decode": {
+   "frame": 4208,
+   "kind": "product",
+   "stack": "task"
+  },
+  "<ferrix_fdt::Fdt>::for_each_lineage::<ferrix_kernel_core::discovery::tree::find_generic::{closure#1}>": {
+   "frame": 6176,
+   "kind": "product",
+   "stack": "task"
+  },
+  "<ferrix_inputctl::message::Message>::decode": {
+   "frame": 6744,
+   "kind": "product",
+   "stack": "task"
+  },
+  "<ferrix_kernel_core::discovery::tree::VirtioMmio as ferrix_kernel_core::discovery::finder::Finder>::find": {
+   "frame": 4896,
+   "kind": "product",
+   "stack": "task"
+  },
+  "<ferrix_kernel_core::sched::queue::CpuQueue>::new": {
+   "frame": 4960,
+   "kind": "product",
+   "stack": "task"
+  },
+  "<ferrix_kernel_item::discovery::pci::Enumeration as ferrix_kernel_core::discovery::finder::Finder>::find": {
+   "frame": 4136,
+   "kind": "product",
+   "stack": "task"
+  },
+  "<ferrix_kernel_load::fs::cgroupfs::reclaim_check::Group>::as_task::<core::result::Result<(), ferrix_linux_abi::errno::Errno>, ferrix_kernel_load::fs::cgroupfs::io_check::accounting::{closure#0}>": {
+   "frame": 4144,
+   "kind": "check",
+   "stack": "task"
+  },
+  "<ferrix_kernel_load::fs::cgroupfs::reclaim_check::Group>::as_task::<core::result::Result<(), ferrix_linux_abi::errno::Errno>, ferrix_kernel_load::fs::cgroupfs::io_check::reads::{closure#0}>": {
+   "frame": 4152,
+   "kind": "check",
+   "stack": "task"
+  },
+  "<ferrix_kernel_load::fs::cgroupfs::reclaim_check::Group>::as_task::<core::result::Result<bool, &str>, ferrix_kernel_load::fs::cgroupfs::reclaim_check::tmpfs_read_throttled::{closure#0}>": {
+   "frame": 4208,
+   "kind": "check",
+   "stack": "task"
+  },
+  "<ferrix_kernel_load::fs::netns_check::Nl>::ask": {
+   "frame": 5280,
+   "kind": "check",
+   "stack": "task"
+  },
+  "<ferrix_kernel_load::fs::netns_check::Nl>::links": {
+   "frame": 4480,
+   "kind": "check",
+   "stack": "task"
+  },
+  "<ferrix_kernel_load::net::netlink::check::Netlink>::talk": {
+   "frame": 4632,
+   "kind": "check",
+   "stack": "task"
+  },
+  "<ferrix_kernel_load::object::pager_check::Served>::supply": {
+   "frame": 4248,
+   "kind": "check",
+   "stack": "task"
+  },
+  "core::slice::sort::stable::driftsort_main::<&ferrix_vfs::tmpfs::Node, <[&ferrix_vfs::tmpfs::Node]>::sort_by_key<u64, <ferrix_vfs::tmpfs::Locked>::new::{closure#0}>::{closure#0}, alloc::vec::Vec<&ferrix_vfs::tmpfs::Node>>": {
+   "frame": 4136,
+   "kind": "product",
+   "stack": "task"
+  },
+  "core::slice::sort::stable::driftsort_main::<(u32, alloc::sync::Arc<ferrix_kernel_load::syscall::process::Process>), <[(u32, alloc::sync::Arc<ferrix_kernel_load::syscall::process::Process>)]>::sort_by_key<u32, ferrix_kernel_load::fs::procfs::list_root::{closure#3}>::{closure#0}, alloc::vec::Vec<(u32, alloc::sync::Arc<ferrix_kernel_load::syscall::process::Process>)>>": {
+   "frame": 4136,
+   "kind": "product",
+   "stack": "task"
+  },
+  "core::slice::sort::stable::driftsort_main::<ferrix_kernel_load::syscall::load::FileRun, <[ferrix_kernel_load::syscall::load::FileRun]>::sort_by_key<u64, ferrix_kernel_load::syscall::load::file_runs::{closure#4}>::{closure#0}, alloc::vec::Vec<ferrix_kernel_load::syscall::load::FileRun>>": {
+   "frame": 4136,
+   "kind": "product",
+   "stack": "task"
+  },
+  "core::slice::sort::stable::driftsort_main::<u16, <u16 as core::cmp::PartialOrd>::lt, alloc::vec::Vec<u16>>": {
+   "frame": 4136,
+   "kind": "product",
+   "stack": "task"
+  },
+  "ferrix_kernel_core::device::check::check_input_functions": {
+   "frame": 17280,
+   "kind": "check",
+   "stack": "boot"
+  },
+  "ferrix_kernel_core::device::check::check_intel_gpu_yield": {
+   "frame": 15656,
+   "kind": "check",
+   "stack": "boot"
+  },
+  "ferrix_kernel_core::device::check::check_lending": {
+   "frame": 6440,
+   "kind": "check",
+   "stack": "boot"
+  },
+  "ferrix_kernel_core::device::check::check_lending_exact": {
+   "frame": 6496,
+   "kind": "check",
+   "stack": "boot"
+  },
+  "ferrix_kernel_core::device::check::check_lending_intel": {
+   "frame": 14096,
+   "kind": "check",
+   "stack": "boot"
+  },
+  "ferrix_kernel_core::device::check::check_widening": {
+   "frame": 6496,
+   "kind": "check",
+   "stack": "boot"
+  },
+  "ferrix_kernel_core::mm::check::frames_hammer": {
+   "frame": 4184,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_core::sched::init": {
+   "frame": 12816,
+   "kind": "product",
+   "stack": "boot"
+  },
+  "ferrix_kernel_core::user::rehome_check::check_commit_and_write": {
+   "frame": 4184,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_core::user::rehome_check::check_decommit_from": {
+   "frame": 8320,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_core::user::rehome_check::file_holds": {
+   "frame": 4168,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_core::user::rehome_check::memory_file": {
+   "frame": 4208,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::cgroupfs::io_check::reader": {
+   "frame": 4152,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::check::run": {
+   "frame": 4320,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::netns_check::route_for_fill": {
+   "frame": 5272,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::pipe_check::fill": {
+   "frame": 4144,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::procfs::debug::environ": {
+   "frame": 4168,
+   "kind": "product",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::pty_check::check_a_full_canonical_line_does_not_block_the_master": {
+   "frame": 4200,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::pty_check::check_a_master_write_takes_only_what_fits": {
+   "frame": 4496,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::pty_check::check_flow_control_acts_on_a_pty": {
+   "frame": 4728,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::block_ring::driver_check::read_back": {
+   "frame": 9272,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::block_ring::hop_check::reader_task": {
+   "frame": 4352,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::block_ring::hop_check::run": {
+   "frame": 6144,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::display::check::modes": {
+   "frame": 6936,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::display::run": {
+   "frame": 8416,
+   "kind": "product",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::input::session_of": {
+   "frame": 4288,
+   "kind": "product",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::render::run": {
+   "frame": 9544,
+   "kind": "product",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::syscall::check::check_a_signal_is_judged_against_its_takers_mask": {
+   "frame": 4232,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::syscall::check::check_process_create_reads_an_image_past_a_heap_block": {
+   "frame": 4264,
+   "kind": "check",
+   "stack": "task"
+  }
+ },
+ "present/release": {
+  "<ferrix_kernel_core::discovery::tree::VirtioMmio as ferrix_kernel_core::discovery::finder::Finder>::find": {
+   "frame": 4208,
+   "kind": "product",
+   "stack": "task"
+  },
+  "<ferrix_kernel_item::discovery::pci::Enumeration as ferrix_kernel_core::discovery::finder::Finder>::find": {
+   "frame": 4200,
+   "kind": "product",
+   "stack": "task"
+  },
+  "<ferrix_kernel_load::fs::cgroupfs::reclaim_check::Group>::as_task::<core::result::Result<(), ferrix_linux_abi::errno::Errno>, ferrix_kernel_load::fs::cgroupfs::io_check::accounting::{closure#0}>": {
+   "frame": 4144,
+   "kind": "check",
+   "stack": "task"
+  },
+  "<ferrix_kernel_load::fs::netns_check::Nl>::ask": {
+   "frame": 5280,
+   "kind": "check",
+   "stack": "task"
+  },
+  "<ferrix_kernel_load::fs::netns_check::Nl>::links": {
+   "frame": 4264,
+   "kind": "check",
+   "stack": "task"
+  },
+  "<ferrix_kernel_load::net::netlink::check::Netlink>::talk": {
+   "frame": 4520,
+   "kind": "check",
+   "stack": "task"
+  },
+  "<ferrix_kernel_load::object::pager_check::Served>::supply": {
+   "frame": 4208,
+   "kind": "check",
+   "stack": "task"
+  },
+  "core::slice::sort::stable::driftsort_main::<(u32, alloc::sync::Arc<ferrix_kernel_load::syscall::process::Process>), <[(u32, alloc::sync::Arc<ferrix_kernel_load::syscall::process::Process>)]>::sort_by_key<u32, ferrix_kernel_load::fs::procfs::list_root::{closure#3}>::{closure#0}, alloc::vec::Vec<(u32, alloc::sync::Arc<ferrix_kernel_load::syscall::process::Process>)>>": {
+   "frame": 4136,
+   "kind": "product",
+   "stack": "task"
+  },
+  "core::slice::sort::stable::driftsort_main::<ferrix_kernel_load::syscall::load::FileRun, <[ferrix_kernel_load::syscall::load::FileRun]>::sort_by_key<u64, ferrix_kernel_load::syscall::load::file_runs::{closure#4}>::{closure#0}, alloc::vec::Vec<ferrix_kernel_load::syscall::load::FileRun>>": {
+   "frame": 4136,
+   "kind": "product",
+   "stack": "task"
+  },
+  "core::slice::sort::stable::driftsort_main::<u16, <u16 as core::cmp::PartialOrd>::lt, alloc::vec::Vec<u16>>": {
+   "frame": 4136,
+   "kind": "product",
+   "stack": "task"
+  },
+  "ferrix_kernel::kmain": {
+   "frame": 11600,
+   "kind": "product",
+   "stack": "boot"
+  },
+  "ferrix_kernel_core::device::check::check_input_functions": {
+   "frame": 10160,
+   "kind": "check",
+   "stack": "boot"
+  },
+  "ferrix_kernel_core::device::check::check_intel_gpu_yield": {
+   "frame": 6152,
+   "kind": "check",
+   "stack": "boot"
+  },
+  "ferrix_kernel_core::device::check::check_lending_exact": {
+   "frame": 5000,
+   "kind": "check",
+   "stack": "boot"
+  },
+  "ferrix_kernel_core::device::check::check_lending_intel": {
+   "frame": 12912,
+   "kind": "check",
+   "stack": "boot"
+  },
+  "ferrix_kernel_core::device::check::check_lent_framebuffer::<ferrix_kernel::Discovery>": {
+   "frame": 5008,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_core::discovery::tree::find_generic": {
+   "frame": 5712,
+   "kind": "product",
+   "stack": "task"
+  },
+  "ferrix_kernel_core::mm::check::frames_hammer": {
+   "frame": 4176,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_core::user::rehome_check::check_commit_and_write": {
+   "frame": 4200,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_core::user::rehome_check::check_decommit_from": {
+   "frame": 8304,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_core::user::rehome_check::file_holds": {
+   "frame": 4168,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_core::user::rehome_check::memory_file": {
+   "frame": 4200,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::btrfs::mount": {
+   "frame": 4976,
+   "kind": "product",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::cgroupfs::io_check::reader": {
+   "frame": 4152,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::cgroupfs::io_check::reads": {
+   "frame": 4168,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::cgroupfs::reclaim_check::tmpfs_read_throttled": {
+   "frame": 4240,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::kmem_check::routes::{closure#0}": {
+   "frame": 5280,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::pipe_check::fill": {
+   "frame": 4144,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::fs::procfs::debug::environ": {
+   "frame": 4176,
+   "kind": "product",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::block_ring::driver_check::read_back": {
+   "frame": 9800,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::block_ring::hop_check::depth_one": {
+   "frame": 5200,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::block_ring::hop_check::reader_task": {
+   "frame": 4368,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::display::check::pages": {
+   "frame": 6568,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::display::run": {
+   "frame": 8200,
+   "kind": "product",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::input::serve": {
+   "frame": 5208,
+   "kind": "product",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::interfaces::render::run": {
+   "frame": 9248,
+   "kind": "product",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::syscall::check::check_a_pty_as_a_serial_port": {
+   "frame": 4872,
+   "kind": "check",
+   "stack": "task"
+  },
+  "ferrix_kernel_load::syscall::check::check_process_create_reads_an_image_past_a_heap_block": {
+   "frame": 4216,
+   "kind": "check",
+   "stack": "task"
+  }
+ }
+}

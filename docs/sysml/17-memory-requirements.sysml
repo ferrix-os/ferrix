@@ -1011,7 +1011,7 @@ package FerrixMemoryRequirements {
             attribute :>> criterion = "The page below an 8-page allocation and the page
                 at its end do not translate.";
             attribute :>> parent = "H.FAIL.2";
-            attribute :>> unit = ("vmap::allocate", "vmap::reserve");
+            attribute :>> unit = ("vmap::allocate", "vmap::reserve", "vmap::allocate_below", "vmap::reserve_below");
         }
         requirement <'L.mm.44'> arenaPagesAreTheirOwnFrames : ItemLowLevel {
             attribute :>> statement = "vmap::allocate shall back each page of an
@@ -1138,11 +1138,11 @@ package FerrixMemoryRequirements {
                 STACK_PAGES pages, and allocate_stack_of one of the pages asked, its top 16-byte aligned and every byte of it
                 writable, with an unmapped page directly below and above it, and
                 free_stack shall give all its frames back.";
-            attribute :>> criterion = "A stack from allocate_stack is 4 pages long, and one from
+            attribute :>> criterion = "A stack from allocate_stack is STACK_PAGES pages long, and one from
                 allocate_stack_of at the boot stack's 16 is 16, with
                 its top 16-byte aligned; a value written at its first word and at its
-                last is read back; the page below its base and the page at its top do
-                not translate; and free_stack returns the free frame count to where it
+                last is read back; the STACK_LOWER_GUARD_PAGES pages below its base and
+                the page at its top do not translate; and free_stack returns the free frame count to where it
                 was.";
             attribute :>> parent = ("H.FAIL.2", "H.MEM.9");
             attribute :>> unit = ("vmap::allocate_stack", "vmap::allocate_stack_of", "vmap::free_stack");

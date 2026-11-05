@@ -743,11 +743,8 @@ fn clone_thread(
 ) -> Result<usize, Errno> {
     let CloneRequest {
         flags,
-        stack,
         parent_tid,
         child_tid,
-        tls,
-        thread_area,
         ..
     } = *request;
     if flags & (CLONE_FILES | CLONE_FS) != CLONE_FILES | CLONE_FS
@@ -760,13 +757,7 @@ fn clone_thread(
     // Its number in the caller's namespace, which is its own: a thread is
     // never made in another.
     let seen = numbers.as_ref().map_or(tid, |numbers| numbers.own());
-    let thread = Thread::sibling_numbered(parent, tid, numbers, &caller).map_err(|_| {
-        // Never a thread, so nothing gives its id back but this.
-        registry::release_thread(tid, parent);
-        Errno::ENOMEM
-    })?;
-    // A thread made and not shared gives its id back as it is dropped.
-    let thread = crate::fallible::try_arc(thread).map_err(|_| Errno::ENOMEM)?;
+    let thread = sibling_on_the_heap(parent, tid, numbers, &caller)?;
 
     // Ignored if they fail, as for a process; see `clone_with`.
     let id = seen.to_le_bytes();
@@ -779,20 +770,53 @@ fn clone_thread(
     if flags & CLONE_CHILD_CLEARTID != 0 {
         let _ = thread.set_clear_child_tid(child_tid);
     }
+    start_cloned_thread(thread, &caller, request, regs)?;
+    Ok(seen as usize)
+}
 
+/// A new thread of `parent`, on the heap by the time this returns: a `Thread` by value
+/// is most of `clone_thread`'s frame otherwise, over the ids it writes (F-101).
+#[inline(never)]
+fn sibling_on_the_heap(
+    parent: &Arc<Process>,
+    tid: u32,
+    numbers: Option<Arc<pidns::Numbers>>,
+    caller: &Arc<Thread>,
+) -> Result<Arc<Thread>, Errno> {
+    let thread = Thread::sibling_numbered(parent, tid, numbers, caller).map_err(|_| {
+        // Never a thread, so nothing gives its id back but this.
+        registry::release_thread(tid, parent);
+        Errno::ENOMEM
+    })?;
+    // A thread made and not shared gives its id back as it is dropped.
+    crate::fallible::try_arc(thread).map_err(|_| Errno::ENOMEM)
+}
+
+/// Capture the caller's registers for its new thread and start it.
+///
+/// A function of its own for what it holds: the user state and the registers
+/// are about 3 KiB on AArch64, and with them in [`clone_thread`]'s frame every
+/// write of an id above, which can fault and copy a page (F-101), stood under them.
+#[inline(never)]
+fn start_cloned_thread(
+    thread: Arc<Thread>,
+    caller: &Arc<Thread>,
+    request: &CloneRequest,
+    regs: &arch::UserRegs,
+) -> Result<(), Errno> {
     // SAFETY: inside the caller's own system call, so the live user registers
     // are the caller's.
     let mut state = unsafe { arch::UserState::capture() };
-    if flags & CLONE_SETTLS != 0 {
-        give_thread_pointer(&mut state, tls, thread_area);
+    if request.flags & CLONE_SETTLS != 0 {
+        give_thread_pointer(&mut state, request.tls, request.thread_area);
     }
     let mut thread_regs = regs.for_child();
-    if stack != 0 {
-        thread_regs.set_stack(&mut state, stack);
+    if request.stack != 0 {
+        thread_regs.set_stack(&mut state, request.stack);
     }
     thread.set_resume(thread_regs);
-    let _task = process::start_thread(thread, &caller, state).map_err(|_| Errno::EAGAIN)?;
-    Ok(seen as usize)
+    let _task = process::start_thread(thread, caller, state).map_err(|_| Errno::EAGAIN)?;
+    Ok(())
 }
 
 /// Which children a wait is for, decoded from `wait4`'s `pid`, which is a
