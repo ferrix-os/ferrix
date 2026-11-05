@@ -2906,7 +2906,7 @@ src/kernel/src/object/exception_check.rs; docs/microkernel/K4.md.
 
 ## FX-0925 — a shared process or restricted mode did not do what K1 and K11 say
 
-`object::region_check::run` makes a region and a process of it and runs
+`syscall::region_check::run` makes a region and a process of it and runs
 `restricted-check` in its normal mode: a program in restricted mode comes back
 on a system call, an unresolved fault and a kick with the registers K1 §2.2
 says; a forged context is refused and changes nothing; nothing of the region is
@@ -2919,7 +2919,7 @@ not hold.
 2. `/sbin/restricted-check` is missing from the initramfs, or its layout has
    moved.
 
-See: src/kernel/src/object/region_check.rs;
+See: src/kernel/src/syscall/region_check.rs;
 src/kernel/src/arch/x86_64/restricted.rs;
 src/user/system/native/restricted-check; docs/microkernel/K1.md;
 docs/microkernel/K11.md.

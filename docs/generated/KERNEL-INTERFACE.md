@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2995 declarations in the core's files, 212 in the item's; 232 checks-only.
+2995 declarations in the core's files, 215 in the item's; 232 checks-only.
 
 ## ferrix-kernel-core
 
@@ -62,7 +62,7 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `CAN_MOVE_INTERRUPTS` | const | load |  |
-| `HAS_RESTRICTED` | const | item, load, bin |  |
+| `HAS_RESTRICTED` | const | item, load |  |
 | `StatLayout` | enum | load |  |
 | `bare_programs` | fn | item (checks) | checks-only |
 | `check_boot_options` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -903,7 +903,7 @@ checks above is `pub` for raised checks (F3).
 |---|---|---|---|
 | `check` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Report` | struct | item, load, bin |  |
-| `Report::barriers` | field | load, bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Report::barriers` | field | item, load, bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Report::boot` | field | item, load, bin |  |
 | `Report::differing` | field | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Report::hardened` | field | load, bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -2070,7 +2070,7 @@ checks above is `pub` for raised checks (F3).
 | `hole_in_ram` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `memory_check` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `past_ram` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
-| `sweep_restricted` | fn | load (checks) | checks-only |
+| `sweep_restricted` | fn | item (checks) | checks-only |
 | `sweep_user_root` | fn | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `sweep_w_xor_x` | fn | bin |  |
 | `WriteExecute` | struct | item, load |  |
@@ -2105,7 +2105,7 @@ checks above is `pub` for raised checks (F3).
 | `Batch::retired` | field | item, load |  |
 | `Batch::stopped` | field | item, load |  |
 | `Batch::suspects` | field | item, load |  |
-| `Batch::sweeps` | field | item, load, bin |  |
+| `Batch::sweeps` | field | item |  |
 | `Batch::tested` | field | item, load |  |
 | `Standing::reason` | method | item, load, bin |  |
 | `Standing::runs` | method | item, load, bin |  |
@@ -2445,7 +2445,7 @@ checks above is `pub` for raised checks (F3).
 | `PagerCore::outstanding` | method | item, load |  |
 | `PagerCore::serves` | method | item |  |
 | `PagerCore::wait_ns` | method | item, load |  |
-| `PagerCore::waiting` | method | load |  |
+| `PagerCore::waiting` | method | item, load |  |
 | `PagerLink::detach` | method | item, load |  |
 | `PagerLink::dirtied` | method | item |  |
 | `PagerLink::fail` | method | item |  |
@@ -2850,7 +2850,7 @@ checks above is `pub` for raised checks (F3).
 | `STAGE9_QUOTAS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE9_REBIND` | static | bin (checks) | checks-only |
 | `STAGE9_REFUSALS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
-| `STAGE9_REGIONS` | static | bin (checks) | checks-only |
+| `STAGE9_REGIONS` | static | item (checks) | checks-only |
 | `STAGE9_RESERVE` | static | bin (checks) | checks-only; formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE9_SEALING` | static | bin (checks) | checks-only |
 | `STAGE9_SPACES` | static | bin (checks) | checks-only |
@@ -2920,7 +2920,7 @@ checks above is `pub` for raised checks (F3).
 | `pending_group_here` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `preemption_held` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `prepare_user` | fn | load |  |
-| `reap` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `reap` | fn | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `rearm_timers` | fn | load |  |
 | `refusal_while_pinned` | fn | load (checks) | checks-only |
 | `regroup_current` | fn | item |  |
@@ -2947,7 +2947,7 @@ checks above is `pub` for raised checks (F3).
 | `tasks_made` | fn | load |  |
 | `throttle_current` | fn | item |  |
 | `wait_until_gone` | fn | item, load, bin |  |
-| `wait_until_reaper_quiet` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `wait_until_reaper_quiet` | fn | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `wake` | fn | load |  |
 | `yield_now` | fn | item, load |  |
 | `direct` | mod | item, load |  |
@@ -3252,13 +3252,13 @@ checks above is `pub` for raised checks (F3).
 | `FrameRequest::flags` | field | item, load |  |
 | `FrameRequest::handler` | field | item, load |  |
 | `FrameRequest::info` | field | item, load, bin |  |
-| `FrameRequest::mask` | field | load |  |
+| `FrameRequest::mask` | field | item, load |  |
 | `FrameRequest::restorer` | field | load |  |
 | `FrameRequest::signal` | field | item, load |  |
 | `FrameRequest::sigpage` | field | load |  |
 | `FrameRequest::stack` | field | item, load |  |
 | `Restored::altstack` | field | load |  |
-| `Restored::mask` | field | load |  |
+| `Restored::mask` | field | item, load |  |
 | `StackRecord::flags` | field | item, load |  |
 | `StackRecord::size` | field | item, load, bin |  |
 | `StackRecord::sp` | field | load |  |
@@ -3387,14 +3387,14 @@ checks above is `pub` for raised checks (F3).
 | `ask` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `attention_due` | fn | load |  |
 | `breakpoint_count` | fn | bin |  |
-| `exit_barrier_built` | fn | load (checks) | checks-only |
-| `exit_barrier_offered` | fn | load (checks) | checks-only |
+| `exit_barrier_built` | fn | item (checks) | checks-only |
+| `exit_barrier_offered` | fn | item (checks) | checks-only |
 | `filter_quiet` | fn | item |  |
 | `filter_system_call` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `handled_fault_count` | fn | load, bin |  |
 | `must_attend` | fn | item |  |
 | `register` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
-| `restricted_barriers` | fn | load (checks) | checks-only |
+| `restricted_barriers` | fn | item (checks) | checks-only |
 | `set_quiet_syscall_filter` | fn | bin |  |
 | `set_return_path` | fn | load |  |
 | `set_syscall_entry` | fn | bin |  |
@@ -3584,7 +3584,7 @@ checks above is `pub` for raised checks (F3).
 | `AddressSpace::allocate_by_handle` | method | item |  |
 | `AddressSpace::bind_region` | method | item |  |
 | `AddressSpace::ceiling` | method | item, load |  |
-| `AddressSpace::check_normal_slots` | method | load (checks) | checks-only |
+| `AddressSpace::check_normal_slots` | method | item (checks) | checks-only |
 | `AddressSpace::domain` | method | item, load |  |
 | `AddressSpace::fault` | method | item, load |  |
 | `AddressSpace::fill_file_page_alone` | method | load |  |
@@ -3839,6 +3839,7 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `run` | fn | bin |  |
+| `set_region_check` | fn | bin |  |
 | `set_seal_check` | fn | bin |  |
 | `SealCheck` | type | - |  |
 
@@ -4068,6 +4069,7 @@ checks above is `pub` for raised checks (F3).
 | `bare_side_check` | mod | bin (checks) | pub for raised checks |
 | `native` | mod | load, bin |  |
 | `program` | mod | load |  |
+| `region_check` | mod | bin |  |
 | `rehome_check` | mod | bin |  |
 | `Outcome` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `SyscallArgs` | re-export | load |  |
@@ -4133,6 +4135,12 @@ checks above is `pub` for raised checks (F3).
 | `ProgramFile::object` | method | load, bin |  |
 | `ProgramFile::open` | method | load, bin |  |
 | `ProgramFile::read_exact_at` | method | load |  |
+
+### `syscall::region_check`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `check` | fn | bin |  |
 
 ### `syscall::rehome_check`
 
