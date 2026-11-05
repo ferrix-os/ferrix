@@ -127,13 +127,35 @@ fn write_devices(page: &Arc<Vmo>) -> Result<u32, &'static str> {
     Ok(written)
 }
 
-#[cfg_attr(
-    ferrix_personality = "user",
-    expect(
-        clippy::too_many_lines,
-        reason = "linuxd's start is one order of handles given and judged (L.object.321)"
-    )
-)]
+/// K16 §4: the partition's memory is a promise, its kernel objects and its arena alike.
+/// What is left over is the pool's, the watermark's and the kernel's own; a further
+/// partition's is its own row's, and is taken out first. Answers the frames promised.
+#[cfg(ferrix_kernel_memory = "retyped")]
+fn promise_for_partition(partition: &job::Job) -> Result<u64, &'static str> {
+    // What can be promised at all, which the allocator knows and says: an eighth stays
+    // for the pool and what the kernel asks at a job's expense, and further partition
+    // rows have been promised by their own starts, above.
+    let mut promised = crate::mm::free_frames();
+    while let Err(quota::ReserveError::Short(short)) =
+        partition.set_reservation(promised * PAGE_SIZE)
+    {
+        // `Short` names a shortfall of at least a frame, or this would not end: a zero
+        // is refused here rather than spun on at boot.
+        if short == 0 {
+            return Err("a reservation short by nothing");
+        }
+        promised = promised.saturating_sub(short);
+    }
+    promised = promised / 8 * 7;
+    partition
+        .set_reservation(promised * PAGE_SIZE)
+        .map_err(|why| {
+            println!("  linuxd   no reservation of {promised} frames: {why:?}");
+            "no reservation for the partition"
+        })?;
+    Ok(promised)
+}
+
 fn start(
     wall_clock: u64,
     cmdline: &str,
@@ -157,34 +179,8 @@ fn start(
             println!("  linuxd {} did not start: {why}", index + 1);
         }
     }
-    // K16 §4: the partition's memory is a promise, its kernel objects and its arena alike.
-    // What is left over is the pool's, the watermark's and the kernel's own; a further
-    // partition's is its own row's, and is taken out first.
     #[cfg(ferrix_kernel_memory = "retyped")]
-    let promised = {
-        // What can be promised at all, which the allocator knows and says: an eighth stays
-        // for the pool and what the kernel asks at a job's expense, and further partitions'
-        // rows have been promised by their own starts, above.
-        let mut promised = crate::mm::free_frames();
-        while let Err(quota::ReserveError::Short(short)) =
-            partition.set_reservation(promised * PAGE_SIZE)
-        {
-            // `Short` names a shortfall of at least a frame, or this would not end: a zero
-            // is refused here rather than spun on at boot.
-            if short == 0 {
-                return Err("a reservation short by nothing");
-            }
-            promised = promised.saturating_sub(short);
-        }
-        promised = (promised / 8 * 7);
-        partition
-            .set_reservation(promised * PAGE_SIZE)
-            .map_err(|why| {
-                println!("  linuxd   no reservation of {promised} frames: {why:?}");
-                "no reservation for the partition"
-            })?;
-        promised
-    };
+    let promised = promise_for_partition(&partition)?;
     if !further.is_empty() {
         println!(
             "  linuxd   the first partition's speculation domain: {}",

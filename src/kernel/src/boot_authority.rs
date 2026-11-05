@@ -296,13 +296,24 @@ struct Served {
     netd_ends: Vec<Arc<Endpoint>>,
 }
 
-#[cfg_attr(
-    ferrix_personality = "user",
-    expect(
-        clippy::too_many_lines,
-        reason = "the manager's start is one order of steps, BOOT-AUTHORITY.md BA.2 to BA.6"
-    )
-)]
+/// The manager's and its partitions' promise, one entry (K12's one level), each partition's
+/// job drawing on it by inheritance; a file server keeps its heap there too (§1, K16 §4).
+#[cfg(ferrix_kernel_memory = "retyped")]
+fn promise_for_partitions(job: &job::Job, parsed: &Description<'_>) -> Result<(), &'static str> {
+    const MANAGER_OWN: u64 = 16 << 20;
+    const FILE_SERVER: u64 = 128 << 20;
+    let mut bytes = MANAGER_OWN;
+    for partition in parsed.partitions() {
+        if partition.role() == ROLE_FILES {
+            bytes += FILE_SERVER;
+        } else if partition.role() != ROLE_LINUX {
+            bytes += partition.reserve_pages().saturating_mul(PAGE_SIZE);
+        }
+    }
+    job.set_reservation(bytes)
+        .map_err(|_| "no promise for the partitions")
+}
+
 fn try_start_manager() -> Result<Option<Served>, &'static str> {
     let Some((description, _)) = sealed_file(DESCRIPTION)? else {
         println!("  partmgr  no description in the image: no safety partition, no manager");
@@ -323,23 +334,8 @@ fn try_start_manager() -> Result<Option<Served>, &'static str> {
         .map_err(|_| "no job for the partitions")?;
     job.make_measured();
     must_be_measured(&job);
-    // The manager's and its partitions' promise, one entry (K12's one level), each partition's
-    // job drawing on it by inheritance; a file server keeps its heap there too (§1, K16 §4).
     #[cfg(ferrix_kernel_memory = "retyped")]
-    {
-        const MANAGER_OWN: u64 = 16 << 20;
-        const FILE_SERVER: u64 = 128 << 20;
-        let mut bytes = MANAGER_OWN;
-        for partition in parsed.partitions() {
-            if partition.role() == ROLE_FILES {
-                bytes += FILE_SERVER;
-            } else if partition.role() != ROLE_LINUX {
-                bytes += partition.reserve_pages().saturating_mul(PAGE_SIZE);
-            }
-        }
-        job.set_reservation(bytes)
-            .map_err(|_| "no promise for the partitions")?;
-    }
+    promise_for_partitions(&job, &parsed)?;
     fallible::push_within(
         &mut transfers,
         (

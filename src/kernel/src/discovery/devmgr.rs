@@ -765,13 +765,29 @@ fn pages_of(bytes: &[u8]) -> u64 {
     (bytes.len() as u64).div_ceil(PAGE_SIZE).max(1)
 }
 
+/// A safety partition's devices never reach devmgr: the filter is the
+/// kernel's (`docs/microkernel/BOOT-AUTHORITY.md` §2).
+#[cfg(ferrix_personality = "user")]
+fn devices_given() -> Result<Vec<Arc<device::DeviceNode>>, &'static str> {
+    let mut kept = fallible::try_with_capacity(device::devices().len())
+        .map_err(|_| "no memory for the devices' list")?;
+    for node in device::devices()
+        .iter()
+        .filter(|node| !crate::boot_authority::held_by_manager(node))
+    {
+        let _ = fallible::push_within(&mut kept, Arc::clone(node));
+    }
+    crate::console::println!(
+        "  devmgr   given {} devices, {} of a safety partition's kept back",
+        kept.len(),
+        device::devices().len() - kept.len(),
+    );
+    Ok(kept)
+}
+
 /// Write the DEVICES messages on `kernel_end`: `job` for the drivers, every
 /// device node twice, and `images` by the names [`read_files`] noted.
 /// Answers how many device nodes went.
-#[expect(
-    clippy::too_many_lines,
-    reason = "one message, written in its order, and what each arch adds to it"
-)]
 fn write_devices(
     kernel_end: &Endpoint,
     images: Vec<Arc<Vmo>>,
@@ -784,25 +800,8 @@ fn write_devices(
         let bindings = BINDINGS.lock();
         fallible::try_to_vec(&bindings.names).map_err(|_| "no memory for the drivers' names")?
     };
-    // A safety partition's devices never reach devmgr: the filter is the
-    // kernel's (`docs/microkernel/BOOT-AUTHORITY.md` §2).
     #[cfg(ferrix_personality = "user")]
-    let kept: Vec<Arc<device::DeviceNode>> = {
-        let mut kept = fallible::try_with_capacity(device::devices().len())
-            .map_err(|_| "no memory for the devices' list")?;
-        for node in device::devices()
-            .iter()
-            .filter(|node| !crate::boot_authority::held_by_manager(node))
-        {
-            let _ = fallible::push_within(&mut kept, Arc::clone(node));
-        }
-        crate::console::println!(
-            "  devmgr   given {} devices, {} of a safety partition's kept back",
-            kept.len(),
-            device::devices().len() - kept.len(),
-        );
-        kept
-    };
+    let kept = devices_given()?;
     #[cfg(ferrix_personality = "user")]
     let nodes = kept.as_slice();
     #[cfg(not(ferrix_personality = "user"))]
