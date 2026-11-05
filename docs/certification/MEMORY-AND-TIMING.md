@@ -67,6 +67,8 @@ entries is a three-slot array on the stack and a pass over an iterator, so
 an archive with any number of entries under `.ferrix/` costs time in
 proportion to them and no memory; each refusal is one console line.
 
+**A kernel stack's address space and the emergency stacks (2026-11-05, F-100, F-103).** Each processor holds one emergency stack, four pages on x86-64's pattern of `IST`, from bring-up for good, on both Arm architectures. On ARMv7-A a kernel stack takes three pages of the 512 MiB `vmap` arena below it rather than one, 8 KiB of address space a task and no memory: the arena's room for tasks falls from 512 MiB / 24 KiB to 512 MiB / 32 KiB, about 21,800 to about 16,400, before anything else it holds.
+
 **A native call's process make on the kernel stack (2026-11-04, F-101, ledger 6623).** PROCESS_MAKE stands at 10,016 bytes on AArch64's dev profile when it enters `Process::with_context`, by frame sizes measured from the binary, on a 16 KiB stack; its callees add 1,392 and a timer's interrupt from entry 3,680, with no last reference dropped in it, 15,088 together, indirect calls not followed. Measured, not a check; the check is owed in BACKLOG.
 
 **devmgr's DEVICES buffer is on the kernel stack (2026-10-17, F-82).**
