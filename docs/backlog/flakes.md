@@ -608,7 +608,7 @@ Done 2026-10-24 (kernel-flakes).
 
 | Item | Owner | Stage |
 |---|---|---|
-| **Open (2026-11-04, mk-merge, ledger 6869).** Restricted-check's case 82, the barrier count, stopped `test-boot --arch x86_64 --accel tcg --set ipc_fastpath=on` once, `logs/queue/mkm-b6r-4.log`; two passes after. A reading, not shown: `restricted_left` also runs at a switch, so a preempted trip adds a barrier and the check's `==` fails upward. The line prints neither figure. K1's check prints both numbers since 2026-11-05 (`restricted barrier count:`). A next sighting with a shortfall is a missed barrier, a defect, for the consultant. | open |
+| **Open (2026-11-04, mk-merge, ledger 6869).** Restricted-check's case 82, the barrier count, stopped `test-boot --arch x86_64 --accel tcg --set ipc_fastpath=on` once, `logs/queue/mkm-b6r-4.log`; two passes after. A reading, not shown: `restricted_left` also runs at a switch, so a preempted trip adds a barrier and the check's `==` fails upward. The line prints neither figure. K1's check prints both numbers since 2026-11-05 (`restricted barrier count:`). A next sighting with a shortfall is a missed barrier, a defect, for the consultant. Sighted again 2026-11-05, `logs/queue/mkf3k-boot-tcg.log` on b6515b9a9 (mk-flip3), plain `test-boot --arch x86_64 --accel tcg`, load 22: `201 decided, 200 wanted`, over by one, this row's form, no shortfall; three earlier boots of the branch passed. The line: `restricted barrier count: 201 decided, 200 wanted, issued false, offered false`. The pass that follows it, `mkf3l-boot-tcg`, clears nothing (ledger 6990 (d), 7306); a short count, or a second over at this rate, goes to the consultant. | open |
 
 ### fl-094
 
@@ -675,3 +675,9 @@ what would reach them is what reaches every image (RESTRICTED-EXIT.md). To be ru
 | Item | Owner | Stage |
 |---|---|---|
 | **Closed on the row (2026-11-05, mk-issues, ledger 7145 (a)).** `test-log`'s behind on ARMv7-A: 5 to 7 s, the writer held up by `lode cat`'s evict, which walked its whole queue for every line; fixed, baa30507a. Then 13 0 1 once, `mkiq-x-4`, load 16 to 18: nothing was shed, as lode came back after the row's 4 s with the queue short of full. Why the writer took 13 s is not shown: the figures below do not support a lode catching up. A limit on what `lode cat` flushes between reads was tried: the writer's last 20,000 lines against its first 10,000 read 2.06 and 2.00 with it, 2.30 and 2.17 without (`mkio2-*`, `mkio3-c7`, `c8`), which no honest limit tells apart, so it is not in. The row now keeps lode stopped until the writer ends, or 60 s: under 4 s, one or more said, the error kept, as they were. The row's scenario can no longer shed nothing. A lode that has returned and is slow is not in this row. A writer's figure over 4 s under a stopped lode is a new sighting, for the consultant. | closed | 7 |
+
+### fl-102
+
+| Item | Owner | Stage |
+|---|---|---|
+| **Open (2026-11-05, mk-flip3, ledger 7275 L3.7).** `hyprix-gpu`'s unit tests ended by SIGSEGV once in `cargo xtask check`, `logs/queue/mkf3e-check.log`, slot 7, on a kernel-only branch: `tests::a_desktop_frame_at_1080p` ignored, and no test named at the fault. `mkf3f-check`, one tree later, ran past it. Not read further. Compare BACKLOG's tole SIGSEGV row, of no matching Vulkan device. | open | check |

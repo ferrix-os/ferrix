@@ -233,9 +233,14 @@ figure.
 
 ## Owed, now that it has landed
 
-For the two-root path, ledger 6747-6755, briefly: fatal on a mark up with no root write; refill-count boot without ERAPS
-(row read 770 to 780 by hand); two-processor kill, stop and kick against a `getppid`-only loop, with
-a control; 6093 (2)'s fast-only count check on this tree; a table-bound check for the removed guards;
-SAFETY categories and coverage; no `Weak` expiring without a clear of the kept word; the row's text
+For the two-root path, ledger 6747-6755, what stands (7249): built, FX-0923 on a mark up with no root write; refills
+counted at exits with the root write's answer, read under TCG, where it empties nothing (row read 770 to 780 by hand);
+two-processor kill and kick against a `getppid`-only loop, with a control (cases 179, 180; stop has no ring-0 poster here);
+fast-only counts in `fast.rs`; FX-0924 on a flip with no normal root, and a boot bound of processors on the tables; a
+child's `getppid` across its parent's end in a pid namespace, `test-container`. `parent_view` is written and cleared under
+the child's parent lock, a parent's last thread alone clears its orphans, and a fork cannot run beside it, so no `Weak`
+expires with the word kept. 6747 (4a), (4b): met as landed, 6966: the signal look holds its locks, the group and bandwidth
+compare in the branch. The rows these readings came from ran with their threads' masks wide: a pinned thread takes the
+general path (`PERFORMANCE.md`). 6747 (1c), by hand, not gated: `~/.local/share/ferrix/po-2026-11-03/mk-flip3-kvmb/ret-case.out`, returns mispredicted 2 of 2 after a root write, 0 of 2 with none, KVM. Still owed: SAFETY categories and coverage; the row's text
 (ledger 6755) and a general-path null call beside it; five quiet boots through `gate.sh` and the
 delay control. Base: K1 here is feature/mk-perf's; it must be carried onto mk-restricted's stack.

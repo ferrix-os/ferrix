@@ -189,3 +189,9 @@ decision on these figures, after a run on a quiet host.
   Not this work's.
 * K1's cuts are for mk-restricted's stack. Their evidence cannot come from this tree, whose
   K1 is older than the check program expects (restricted-check case 125).
+
+## A pinned thread
+
+A thread with a narrow mask has `work::PLACE` up for good, so `sched::fast::quiet` is false on each of its crossings, and it
+takes the general path both ways (found in ledger 7249's cases; safe). Any row, edf's pinned thread among them, reads the general
+path's figure and says so. Whether `PLACE` should clear once the thread is inside its mask is a BACKLOG row, not this page's.

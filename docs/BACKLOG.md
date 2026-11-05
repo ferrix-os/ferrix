@@ -258,9 +258,7 @@ weaker form is written down as such in the stage's section.
 
 Landed behind `restricted_fastpath`, on only in `fast`, which is refused until M5, so no image that
 builds has it. linuxd's straight path and general-path cuts run in any `personality=user` build, flag or
-not. Owed before the flag is on in any profile, as restricted-check has no host in a `personality=user` image and one has to exist or the cases go to a program there: ledger 6464's Z2 (every writer of the running thread's own FS record listed by a whole grep, `ARCH_SET_FS` absent from the user kernel by symbol with a planted control, a linuxd-side case that `arch_prctl`'s number from normal mode answers ENOSYS; a reachable writer lowers `clean`), Z3 (a row disassembling linuxd that refuses `%fs:`, a plant FIRED) and Z4 (6093 (4) re-run with normal mode's base zero and not, a program's null FS load across fast trips, blocked in the gap, `VECTORS_READ` in the gap then ENTER, and two controls); K1's fast path's own code review (6484 never gave it) and
-6093 (1)-(12) against the code; ledger 6747-6755's checks and controls; a typed pointer for `of_task_known`; L.x86_64.272 to .275's tags; `max`'s
-two-root row through `gate.sh`; the ordinary path's next levers.
+not. Owed before the flag is on in any profile, K1 §7.1's cases table has what is built (ledger 7216 V.1-V.7, Z2-Z4, 7249): the tags of L.x86_64.272 to .275 with baseline removal, six anchors, coverage and the vulnerability entry, in the commit that flips `on`; `kvmb`'s case (6747 (1c)) ran once by hand, outside `gate.sh`, `~/.local/share/ferrix/po-2026-11-03/mk-flip3-kvmb/ret-case.out`: two returns, two mispredicted after a root write, none without one, under the gate's model; on bare metal, ERAPS's emptying the predictor at a root write with a `RET` read each way, owed by the first board or box row; `max`'s two-root row through `gate.sh`, which is not `on`'s and stays M5's. Whether a thread with a narrow mask should go on having `PLACE` up for good, so never the fast way: a thread pinned reads the general path, edf's too (`PERFORMANCE.md`). The ordinary path's next levers.
 
 check-lift's ceiling for `user/space.rs` went 6 to 15 for the window's nine cfgs, accepted as debt (ledger 7319 L.2):
 fold them into one window submodule and put it back to 6 before `on` goes anywhere.
@@ -285,6 +283,8 @@ entry; 6826 (d), MICROKERNEL's four rules with the customer's words; L.x86_64.27
 clippy of an `on` build, so dark code can stop compiling unseen. 370 ns is cited nowhere as met (6787 (e)). A pinned
 thread takes no fast path, by L.sched.99.
 `test-flags --set smt=off` under TCG stops on stage 9's timing checks one boot in three, on develop too.
+
+**`check-stack-depth` read a probe loop's frame as one page (ledger 7275 L3.1), fixed 2026-11-05 (mk-flip3).** A frame large enough for LLVM's probe loop read about 4 KiB; the tool now shares `check-frames`' reader. `present` and `desktop`, x86-64 and AArch64, read the same figures before and after: none of F-101's walked paths holds a loop. For whoever holds F-100 and F-101.
 
 ## Owners
 
@@ -974,11 +974,11 @@ above, and the page links here.
 
 | Row | State |
 |---|---|
-| E1, one control per hold, seen by a neighbour alone: rights, the file's end (shared and private), a private copy | Not built. A control dropped from the look did not fire because `resolve` holds each, which shows redundancy and not that the cases reach the holds |
+| E1, one control per hold, seen by a neighbour alone: rights, the file's end (shared and private), a private copy | Built, `test-threads`, each FIRED by a plant around `fault_around`'s resolve, `mkf3e-rights`, `-end-private`, `-end-shared`, `-copy` |
 | E2, `end` and `room` through `gate.sh` on these patches | Both FIRED: `room` `mkm-o-walk`, `end` `mkm-q-end1` ("a walk copied the mapping after its region"), under `--personality user` |
 | E3, `test-threads` and `test-container` with `fault_ahead` on and off, through `gate.sh` at the tip | Both ran on the lift's stack (`mkm-lr-18`, `mkm-o-contu` on; `mkm-lr-13`, `mkm-m-cont` off). The walk does nothing with it off: its control fires only under `--personality user` (`mkm-o-walk`). `LEFT = 4` rests on its table count: a flake there is a row here, not a retry |
-| A6 restored, no case: `room` reads `quota::charge_target()`, what a ticket's charge would be charged to, and not the running group's | A fault under a ticket whose target is at its limit and whose runner is not has no case: the walk's cgroup is both. `mkm-o-walk` shows the read matters, not whose it is. Read from the source, ledger 6873 L6 |
-| E4, W+X and foreign neighbours | No case and no control. A read neighbour is mapped read-only and a walk's is not executable, so W+X should not arise; foreign pages need a driver's VMO, which no row here maps. Neither is shown |
+| A6 restored, no case: `room` reads `quota::charge_target()`, what a ticket's charge would be charged to, and not the running group's | Not owed as written (ledger 7275): lift's `Task::has_adoption` is a constant false, so no fault in linuxd runs under a ticket and `room`'s two readings are one. A case at the first adoption linuxd has |
+| E4, W+X and foreign neighbours | W+X shown in `test-threads`, read, write and fetch each its own fault. Foreign: by argument, `fill_with` never takes a driver's page ahead (7275), and a row when a row maps a driver's VMO |
 | A `test-rustc` hang in the warm loop | One run in about ten on the first fault-around build, not diagnosed, and its log not kept. Two ways to it are fixed. 52 runs at the lift's tip on 2026-11-05, `--personality user` with `restricted_fastpath=off`, none hung (logs in mk-lift/rustc-loop), which does not prove it |
 
 Until these are met, L.object.314 stays baselined unverified (ledger 6590).
