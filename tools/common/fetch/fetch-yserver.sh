@@ -33,8 +33,8 @@
 # Writes $FERRIX_YSERVER_VOLUME/yserver.img (default
 # ~/.local/share/ferrix/yserver/yserver.img), and yserver.commit beside it,
 # the commit it was built from. Needs git, curl, sha256sum, dpkg-deb,
-# readelf, strip, mkfs.btrfs and rustup's cargo with the toolchain Ferrix
-# pins; no root.
+# readelf, strip, mkfs.btrfs and rustup's cargo with the toolchain set below
+# (yserver's own, not Ferrix's); no root.
 #
 # Usage: tools/common/fetch/fetch-yserver.sh
 
@@ -57,8 +57,10 @@ pool=${FERRIX_YSERVER_POOL:-$out/pool}
 # clone, for a commit not yet pushed.
 repo=${YSERVER_REPO:-https://github.com/ferrix-os/yserver.git}
 YSERVER_COMMIT=9984af8a69f744f985538c423cf5fb9eeb1697bc
-# The toolchain Ferrix pins in rust-toolchain.toml.
-toolchain=${YSERVER_TOOLCHAIN:-1.97.1}
+# The toolchain yserver is built with: pinned apart from the one Ferrix pins
+# in rust-toolchain.toml, because upstream yserver tracks the current stable
+# Rust, while the kernel's pin is a decision of its own.
+toolchain=${YSERVER_TOOLCHAIN:-1.99.1}
 
 # Pool path and SHA-256 of each package of the sysroot and the volume, from
 # the main archive and trixie-updates. The -dev packages are what the build
