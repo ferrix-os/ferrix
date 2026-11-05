@@ -75,6 +75,10 @@ M5's flip and M7 keep all of theirs: nothing here is dropped by being moved off 
 
 `flag_nodes` runs first, so a later `attach` failure gives `Domain::untranslated` with no flag, on all three units: K14 fails open at no memory. M5's flip: under `fast` and `max`, no domain rather than untranslated.
 
+## `test-boot` is `test-flags` here
+
+`gate.sh`'s verdict of `test-boot` requires `FERRIX-BOOT-OK`, which a user kernel never prints, by design (5714 (20)), so B.3's test-boot row is `test-flags`, per accelerator and architecture: it runs `test_boot` whole, and its static checks. Ledger 7184. The sweep's test-boot row names this.
+
 ## §12's failing rows
 
 Not owed for `built` (B.8) but each is a row in the sweep, by name, with cause: test-sud, test-wine's 32-bit half,

@@ -757,6 +757,15 @@ fn certified_list(natives: &[native::Built]) -> Result<Option<ports::File>> {
     if !matches!(crate::flags::asked_profile().as_str(), "fast" | "max") {
         return Ok(None);
     }
+    // At a claim this list would be false: M7's comes from that item's evidence (ledger 7184 Q.2).
+    let level = crate::flags::this_run()?.level.clone();
+    if level != "none" {
+        return Err(Error::new(format!(
+            "a {} image at level {level} would carry the development-only certified list, which \
+             names every native image: a certified item's list comes from its evidence",
+            crate::flags::asked_profile()
+        )));
+    }
     println!(
         "  certified list: {} native images, development-only, no certification implied",
         natives.len()

@@ -405,7 +405,12 @@ pub(crate) fn judge(
             .iter()
             .filter(|entry| entry.0.starts_with(REMAP_CHECK))
             .filter(|entry| gate(entry.0, Some(String::new())).is_none())
-            .map(|entry| entry.2)
+            .filter_map(|entry| {
+                REMAP_LINES
+                    .iter()
+                    .map(|(line, _)| *line)
+                    .find(|line| line.contains(entry.2))
+            })
             .collect()
     } else {
         Vec::new()
@@ -724,7 +729,7 @@ const USER_NOT_BUILT: &[(&str, &[Arch], &str, &str)] = &[
     (
         "remap: stray vectors",
         &[Arch::X86_64],
-        "  0 deliveries of the check vector 0xfc outside its window, 0 on the console's retired vector",
+        " outside its window, ",
         "iommu::domain_check, as above",
     ),
     (
@@ -900,7 +905,7 @@ const REMAP_LINES: [(&str, &str); 9] = [
         "check R5 never saw the console's line delivered through its entry",
     ),
     (
-        "  0 deliveries of the check vector 0xfc outside its window, 0 on the console's retired vector",
+        " outside its window, ",
         "the check vector or the console's retired vector was delivered, or never counted",
     ),
     (
@@ -5857,6 +5862,63 @@ mod tests {
                 "FERRIX-BOOT-OK stages 1-12",
             ]);
             assert_eq!(entropy_problem(&boot, true, false), None, "{count} bytes");
+        }
+    }
+
+    /// Every Rust file under `directory`.
+    fn sources(directory: &std::path::Path, out: &mut String) {
+        let Ok(entries) = std::fs::read_dir(directory) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                sources(&path, out);
+            } else if path.extension().is_some_and(|extension| extension == "rs")
+                && let Ok(text) = std::fs::read_to_string(&path)
+            {
+                out.push_str(&text);
+            }
+        }
+    }
+
+    /// Ledger 7184 Q.1: a line reworded in the source leaves a table's literal stale, and a
+    /// built check would then read NOT RUN. Each literal is found in a program's source, its
+    /// continuations joined; one that is not fails here, named.
+    #[test]
+    fn every_literal_of_the_user_tables_is_in_the_source_that_prints_it() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../src");
+        let mut text = String::new();
+        for under in ["kernel/src", "user/system/native", "lib"] {
+            sources(&root.join(under), &mut text);
+        }
+        // A string's line continuation: `\`, its newline and the next line's indent.
+        let mut joined = String::with_capacity(text.len());
+        for line in text.lines() {
+            match line.strip_suffix('\\') {
+                Some(head) => joined.push_str(head),
+                None => {
+                    joined.push_str(line);
+                    joined.push('\n');
+                }
+            }
+        }
+        let joined: String = joined
+            .split("  ")
+            .filter(|piece| !piece.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        for (name, _, literal, _) in super::USER_NOT_BUILT {
+            assert!(
+                joined.contains(literal.trim()),
+                "{name}: `{literal}` is stale"
+            );
+        }
+        for (_, literal) in super::USER_BOOT_LINES {
+            assert!(
+                joined.contains(literal.trim().split("  ").last().unwrap_or(literal)),
+                "`{literal}` is stale"
+            );
         }
     }
 

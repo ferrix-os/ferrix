@@ -5,6 +5,10 @@ per architecture. A report, read by a person with the four boots beside it: a ge
 hash or an inlining moved is not a change of behaviour, and a name gone or a size moved
 says where to look. Exit 1 on any difference of name or size, ignoring symbols' hashes.
 
+The bodies' comparison masks every number, a displacement's sign with it: it sees a changed
+instruction or register, and never a changed constant (ledger 7184 Q.3). Constants unseen by it
+are BACKLOG's row, with M7.
+
 Usage:  compare-kernel-symbols.py BASE_ELF HEAD_ELF [--self-test]
 """
 import hashlib
