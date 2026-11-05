@@ -128,6 +128,7 @@ const IMAGE_ROW: &[&str] = &[
     "test-boot --arch aarch64",
     "test-boot --arch armv7a",
     "test-boot --arch armv7a --smp 2",
+    "test-ring0-budget",
 ];
 
 /// The core quarantine row (`docs/CORE-QUARANTINE.md` §7, ledger 4932):

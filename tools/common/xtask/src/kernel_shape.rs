@@ -19,6 +19,15 @@ pub(crate) const TASKS: &[Task] = &[
         run: |_, args| test_kernel_shape(args),
     },
     Task {
+        name: "test-ring0-budget",
+        help_at: 967,
+        help: &[
+            "test-ring0-budget  Ring 0's size against tools/common/data/ring0-budget.json: six release kernels, three flag sets on",
+            "              x86_64 and aarch64; a rise fails, a fall past 1% with no edit fails (docs/microkernel/TINY-KERNEL.md §7)",
+        ],
+        run: |_, _| test_ring0_budget(),
+    },
+    Task {
         name: "test-kernel-symbols",
         help_at: 966,
         help: &[
@@ -121,8 +130,87 @@ fn test_kernel_shape(args: &Args) -> Result<()> {
                 &[path.as_str()],
             )?;
         }
+        if let Ok(set) = std::env::var(BUDGET_SET) {
+            if !args.release {
+                return Err(Error::new("the ring-0 budget reads release images (M.7)"));
+            }
+            python_with(
+                "tools/common/check/check-kernel-shape.py",
+                &[directory.as_str(), "--budget", &set, "--arch", arch.name()],
+            )?;
+        }
     }
     Ok(())
+}
+
+/// The environment variable by which [`test_ring0_budget`] tells each child build its set.
+const BUDGET_SET: &str = "FERRIX_RING0_BUDGET_SET";
+
+/// `test-ring0-budget`: every build `ring0-budget.json` lists, each a child `test-kernel-shape
+/// --release` with its `--set` values, so that each resolves its flags afresh; then that
+/// build held to its baseline. Every build runs, and the row fails if any did.
+fn test_ring0_budget() -> Result<()> {
+    let interpreter = crate::check::python_interpreter().ok_or_else(|| {
+        Error::new("no working Python interpreter on PATH (tried python3, python)")
+    })?;
+    let listed = std::process::Command::new(interpreter)
+        .current_dir(paths::workspace_root())
+        .args(["tools/common/check/check-kernel-shape.py", "--sets"])
+        .output()
+        .map_err(|error| Error::new(format!("check-kernel-shape.py --sets: {error}")))?;
+    if !listed.status.success() {
+        return Err(Error::new("check-kernel-shape.py --sets failed"));
+    }
+    let program = std::env::current_exe().map_err(|error| Error::new(error.to_string()))?;
+    let started = std::time::Instant::now();
+    let mut failed = Vec::new();
+    let mut built = 0_usize;
+    let text = String::from_utf8_lossy(&listed.stdout).into_owned();
+    for line in text.lines().filter(|line| !line.trim().is_empty()) {
+        let mut words = line.split_whitespace();
+        let (Some(set), Some(arch)) = (words.next(), words.next()) else {
+            return Err(Error::new(format!("check-kernel-shape.py --sets: {line}")));
+        };
+        let mut command = std::process::Command::new(&program);
+        let _ = command
+            .current_dir(paths::workspace_root())
+            .env(BUDGET_SET, set)
+            .args([
+                "test-kernel-shape",
+                "--arch",
+                arch,
+                "--personality",
+                "user",
+                "--release",
+            ]);
+        for value in words {
+            let _ = command.args(["--set", value]);
+        }
+        built += 1;
+        let begun = std::time::Instant::now();
+        println!("== ring 0's budget: {line}");
+        let status = command
+            .status()
+            .map_err(|error| Error::new(format!("{line}: {error}")))?;
+        println!("== {set} {arch}: {} s", begun.elapsed().as_secs());
+        if !status.success() {
+            failed.push(format!("{set} {arch}"));
+        }
+    }
+    if built == 0 {
+        return Err(Error::new(
+            "ring0-budget: check-kernel-shape.py --sets listed no build",
+        ));
+    }
+    println!("ring0-budget: {} s in all", started.elapsed().as_secs());
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(Error::new(format!(
+            "ring0-budget: failed: {}",
+            failed.join(", ")
+        )))
+    }
 }
 
 /// `test-first-processes`: the manager, its partition, devmgr and `linuxd`

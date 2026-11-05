@@ -1,0 +1,117 @@
+{
+  "why": "ring 0's size, held down: docs/microkernel/TINY-KERNEL.md §1 (count A, count B, checks beside) and §7 (Cut 0), ledger 7256 TK.3 and TK.4. The customer's target, 36k by count A on AArch64 max (2026-11-05), is not this file: this holds today's measured figures, and only falls. The target is read at opt-level 1, the figures it was accepted on; these are release figures, about 11,500 lower on AArch64 max, mostly library files LTO drops, and 'target met' on them is refused (ledger 7383 TR.21 (d), 7448 CZ.5). A rise, a new check file, a removed set, architecture or baseline entry, or a changed set or profile is an edit with a new `rise.ledger` (7448 CZ.3); a fall past 1% fails until `baseline` is lowered. `check_files` is the reviewed list of files read as checks, because the tool's own rule is a file name. Sets are the profiles' values that build ad hoc, no claim: `fast` and `max` do not build, and `schedule=windows` has no code.",
+  "profile": "release",
+  "architectures": [
+    "x86_64",
+    "aarch64"
+  ],
+  "sets": {
+    "user": {},
+    "fast": {
+      "all": [
+        "fs=server",
+        "partition_speculation=partition",
+        "ipc_fastpath=on",
+        "fault_ahead=on",
+        "schedule=edf"
+      ],
+      "x86_64": [
+        "restricted_fastpath=on"
+      ]
+    },
+    "max": {
+      "all": [
+        "fs=server",
+        "partition_speculation=exit",
+        "kernel_memory=retyped",
+        "fault_ahead=off",
+        "smt=off",
+        "runtime_settings=fixed"
+      ]
+    }
+  },
+  "rise": {
+    "ledger": 7256,
+    "why": "the first baseline: measured on develop b50e88907 with Cut 0 on it (ledger 7448 CZ.1, CZ.2), Cut 0 of TINY-KERNEL.md; 3ff0b533b read 667 and 278 kernel lines fewer, the window and the ordinary path then landing, and b50e88907 86 and 59 more"
+  },
+  "baseline": {
+    "user": {
+      "x86_64": {"a": 92047, "b": 64918},
+      "aarch64": {"a": 86170, "b": 58936}
+    },
+    "fast": {
+      "x86_64": {"a": 92846, "b": 65230},
+      "aarch64": {"a": 86760, "b": 59039}
+    },
+    "max": {
+      "x86_64": {"a": 92086, "b": 64987},
+      "aarch64": {"a": 86209, "b": 59005}
+    }
+  },
+  "check_files": [
+      "arch/aarch64/asid/check.rs",
+      "arch/aarch64/check.rs",
+      "arch/aarch64/exception_check.rs",
+      "arch/aarch64/programs_check.rs",
+      "arch/aarch64/rehome_check.rs",
+      "arch/aarch64/speculation/check.rs",
+      "arch/arm_common/gicv2/check.rs",
+      "arch/arm_common/smt/check.rs",
+      "arch/fast_check.rs",
+      "arch/speculation_check.rs",
+      "arch/x86_64/apic/check.rs",
+      "arch/x86_64/clock/check.rs",
+      "arch/x86_64/cpu/check.rs",
+      "arch/x86_64/cpu/stage4_check.rs",
+      "arch/x86_64/exception_check.rs",
+      "arch/x86_64/gdt/check.rs",
+      "arch/x86_64/mce/check.rs",
+      "arch/x86_64/msrlog/check.rs",
+      "arch/x86_64/pcid/check.rs",
+      "arch/x86_64/programs_check.rs",
+      "arch/x86_64/rehome_check.rs",
+      "arch/x86_64/smp/check.rs",
+      "arch/x86_64/speculation/check.rs",
+      "arch/x86_64/syscall/check.rs",
+      "arch/x86_64/trap/gate_check.rs",
+      "audit/check.rs",
+      "boot_checks.rs",
+      "console/log_check.rs",
+      "device/check.rs",
+      "device/generic_check.rs",
+      "discovery/first_image_check.rs",
+      "discovery/pci/held_off_check.rs",
+      "discovery/smbios_check.rs",
+      "iommu/amdvi_check.rs",
+      "iommu/check.rs",
+      "mm/check.rs",
+      "mm/seal_check.rs",
+      "object/channel/check.rs",
+      "object/rehome_check.rs",
+      "object/reserve_check.rs",
+      "sched/affinity_check.rs",
+      "sched/borrow_check.rs",
+      "sched/check.rs",
+      "sched/deadline_check.rs",
+      "sched/inspect_check.rs",
+      "sched/mark_check.rs",
+      "sched/preempt_check.rs",
+      "sched/rehome_check.rs",
+      "sched/reserve_check.rs",
+      "sched/slice_check.rs",
+      "sched/work/check.rs",
+      "smp/check.rs",
+      "syscall/bare_side_check.rs",
+      "syscall/native_side_check.rs",
+      "syscall/region_check.rs",
+      "syscall/rehome_check.rs",
+      "trap/check.rs",
+      "trap/rehome_check.rs",
+      "user/check.rs",
+      "user/dirty_check.rs",
+      "user/edge_check.rs",
+      "user/rehome_cache_check.rs",
+      "user/rehome_check.rs",
+      "user/space/window_check.rs"
+  ]
+}

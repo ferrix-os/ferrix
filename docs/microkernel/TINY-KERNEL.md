@@ -592,7 +592,7 @@ About 200 lines of Python, one JSON, one gate row. No kernel code, no id, no fla
 
 | # | Decision | Recommendation |
 |---|---|---|
-| D1 | **What "20k" counts**: count A, ring 0's product lines, AArch64 `max` as the headline, checks in the same row, B, C and bytes beside. The target is under 36k by A, under 33k with D2, under 25k by B. **By A that is a little over a third of today; by lines with code and by bytes about half; about a third of A's fall removes no executed product code.** ±15% is optimistic: 31k to 41k | **Yes**, and 20k is not the target |
+| D1 | **Answered, 2026-11-05. The customer: "ok then 36kLoc seems reasonable".** The target is **36k by count A on AArch64 `max`**. 25k by count B and 33k with a static board are figures beside it, not further decisions: D2 to D11 stay open. The question as put: **what "20k" counts**: count A, ring 0's product lines, AArch64 `max` as the headline, checks in the same row, B, C and bytes beside. The target is under 36k by A, under 33k with D2, under 25k by B. **By A that is a little over a third of today; by lines with code and by bytes about half; about a third of A's fall removes no executed product code.** ±15% is optimistic: 31k to 41k | **Yes**, and 20k is not the target |
 | D2 | `max` on a static board description, seL4's way: no FDT or ACPI parser in ring 0, a board is a build. -3,384. **The platform is not chosen**, so "33k" rests on this | **Yes, once the Lock-mode platform is chosen.** Ask then whether `max` needs a run-time bus at all. `fast` keeps tables |
 | D3 | Is about 20,200 by count B worth a one-processor `max`, with static devices? | **Not now.** Decide after Cut 4 on real figures. Nothing here prevents `smp=one` later |
 | D4 | The panic catalog's prose leaves ring 0 for a host tool (`OPEN-QUESTIONS.md` asks this too). A serial panic prints the code and the numbers. Data, not risk | **Yes** for `fast` and `max`. `desktop` keeps it |
@@ -638,4 +638,7 @@ About 200 lines of Python, one JSON, one gate row. No kernel code, no id, no fla
 
 ## Where it stands
 
-2026-11-05: design on `feature/mk-tiny-design`, unlanded. No flag, id, code or row exists. The customer's D1 to D11 are open; D7 is held back until its design returns.
+2026-11-05: design on `feature/mk-tiny-design`, unlanded. No flag, id or kernel code exists.
+
+* **D1 answered, 2026-11-05**: "ok then 36kLoc seems reasonable" (the customer, relayed by the coordinator). 36k by count A on AArch64 `max` is the target. D2 to D11 are open; D7 is held back until its design returns. Nothing past Cut 0 is started.
+* **Cut 0 built**, `cargo xtask test-ring0-budget`, §7: it holds today's measured figures and claims nothing about the target.

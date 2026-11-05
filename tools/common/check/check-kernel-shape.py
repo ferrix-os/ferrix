@@ -11,13 +11,18 @@ file has, because a stub keeps the real file's paths: a stub cannot be told
 from the real file by a path, and rustc's list and the symbol together can.
 
 Usage:  check-kernel-shape.py TARGET_DIR/ARCH-TRIPLE/PROFILE [--report]
-Exit 1 names each breach.
+        check-kernel-shape.py TARGET_DIR/ARCH-TRIPLE/release --budget SET --arch ARCH
+        check-kernel-shape.py --sets
+Exit 1 names each breach. `--budget` is the size ratchet of docs/microkernel/TINY-KERNEL.md §7
+(Cut 0): ring 0's count against tools/common/data/ring0-budget.json, `cargo xtask test-ring0-budget`.
 """
 import argparse
+import bisect
 import collections
 import glob
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -139,13 +144,316 @@ def code_lines(path: str) -> int:
     return count
 
 
+# ---------------------------------------------------------------------------
+# The size ratchet (docs/microkernel/TINY-KERNEL.md §1 and §7, Cut 0; ledger 7256
+# TK.3, TK.4). Count A, ring 0's product lines: every file rustc's dep-info lists for
+# the three ring-0 crates, less the check files, plus every library file the image's
+# own .debug_line names, whole files, no comments. Count B: the crates' files alone.
+# Checks are printed beside, never capped. A rise fails, a fall past 1% with no edit of
+# the baseline fails, and the baseline itself may rise only with a new ledger line.
+
+BUDGET = "tools/common/data/ring0-budget.json"
+FALL_SLACK = 0.01
+LINE_ENTRY = re.compile(r"^(\S+)\s+(\d+)\s+(0x[0-9a-f]+)")
+
+
+def is_check_file(relative: str) -> bool:
+    """The tool's one rule for a check, which is why the list of check files is reviewed."""
+    return relative.endswith("check.rs") or "_check" in relative
+
+
+def tree_relative(path: str, tree: str) -> str:
+    """`path` relative to the tree when it is inside it, else as it is, normalised."""
+    full = os.path.normpath(path if os.path.isabs(path) else os.path.join(tree, path))
+    return os.path.relpath(full, tree) if full.startswith(tree + os.sep) else full
+
+
+def line_table(kernel: str, tree: str) -> dict[str, set[int]] | None:
+    """Each source file the image's .debug_line names, with its lines that carry code.
+
+    `readelf -W` gives every block's file with its directory: without it a unit's own
+    file is printed by its base name, and is lost."""
+    result = subprocess.run(
+        ["readelf", "-W", "--debug-dump=decodedline", kernel],
+        capture_output=True, text=True, errors="replace", check=False,
+    )
+    if result.returncode != 0 or "Contents of the .debug_line section" not in result.stdout:
+        return None
+    table: dict[str, set[int]] = collections.defaultdict(set)
+    current = None
+    for line in result.stdout.split("\n"):
+        if line.endswith(":") and not line.startswith("Contents of"):
+            name = line[:-1].removeprefix("CU: ")
+            current = tree_relative(name, tree) if name.endswith(".rs") else None
+            continue
+        match = LINE_ENTRY.match(line)
+        if match and current and int(match.group(2)):
+            table[current].add(int(match.group(2)))
+    return dict(table) if any(name.startswith("src/") for name in table) else None
+
+
+def text_bytes(kernel: str) -> int:
+    sections = subprocess.run(["readelf", "-SW", kernel], capture_output=True, text=True, check=False).stdout
+    for line in sections.split("\n"):
+        fields = line.replace("[", " ").replace("]", " ").split()
+        if len(fields) > 5 and fields[1] == ".text":
+            return int(fields[5], 16)
+    return 0
+
+
+CHECK_SYMBOL = re.compile(r"_check(::|$)|::check::|::checks::|[a-z_]*_check\b|check_[a-z_]+\b")
+
+
+def code_lines_reached(kernel: str, tree: str, table_lines: dict[str, set[int]]) -> int | None:
+    """Count C on x86-64: lines with code in the image's product and library files, over the
+    functions reachable from the image's roots with every check function taken out of the call
+    graph. Roots: symbols with no Rust mangling, and every function an address in data names.
+    AArch64's `adrp` pairs are not seen by this method, so there it answers None."""
+    names = subprocess.run(["nm", "-n", "--defined-only", kernel], capture_output=True, text=True, check=False).stdout
+    demangled = subprocess.run(
+        ["nm", "-n", "--defined-only", "--demangle=rust", kernel], capture_output=True, text=True, check=False
+    ).stdout
+    symbols, readable = [], {}
+    for raw, plain in zip(names.splitlines(), demangled.splitlines()):
+        fields, plain_fields = raw.split(), plain.split(None, 2)
+        if len(fields) == 3 and fields[1] in "tTwW" and len(plain_fields) == 3:
+            symbols.append((int(fields[0], 16), fields[2]))
+            readable[fields[2]] = plain_fields[2]
+    if not symbols:
+        return None
+    starts = [address for address, _ in symbols]
+    by_address = dict(symbols)
+    dump = subprocess.run(
+        ["objdump", "-d", "--no-show-raw-insn", "-M", "intel", kernel],
+        capture_output=True, text=True, errors="replace", check=False,
+    ).stdout
+    edges: dict[str, set[str]] = collections.defaultdict(set)
+    current = None
+    target = re.compile(r"<([^>+]+)(\+0x[0-9a-f]+)?>")
+    for line in dump.split("\n"):
+        if line.endswith(">:"):
+            head = re.match(r"[0-9a-f]+ <(.+)>:", line)
+            current = head.group(1) if head else None
+        elif current and "\t" in line:
+            for found in target.finditer(line.split("\t", 1)[1]):
+                if found.group(1) != current:
+                    edges[current].add(found.group(1))
+    roots = {name for _, name in symbols if not name.startswith(("_ZN", "_R"))}
+    with open(kernel, "rb") as handle:
+        image = handle.read()
+    sections = subprocess.run(["readelf", "-SW", kernel], capture_output=True, text=True, check=False).stdout
+    for line in sections.split("\n"):
+        fields = line.replace("[", " ").replace("]", " ").split()
+        if len(fields) < 8 or fields[2] in ("NOBITS",) or not fields[0].isdigit():
+            continue
+        flags = fields[7] if not fields[7].isdigit() else ""
+        if "A" not in flags or "X" in flags:
+            continue
+        offset, size = int(fields[4], 16), int(fields[5], 16)
+        for at in range(offset, offset + size - 7, 8):
+            value = int.from_bytes(image[at:at + 8], "little")
+            if value in by_address:
+                roots.add(by_address[value])
+    dropped = lambda name: bool(CHECK_SYMBOL.search(readable.get(name, name)))
+    seen: set[str] = set()
+    stack = [name for name in roots if not dropped(name)]
+    while stack:
+        name = stack.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        stack.extend(edge for edge in edges.get(name, ()) if edge in readable and edge not in seen and not dropped(edge))
+    result = subprocess.run(
+        ["readelf", "-W", "--debug-dump=decodedline", kernel],
+        capture_output=True, text=True, errors="replace", check=False,
+    ).stdout
+    entries = []
+    current_file = None
+    for line in result.split("\n"):
+        if line.endswith(":") and not line.startswith("Contents of"):
+            name = line[:-1].removeprefix("CU: ")
+            current_file = tree_relative(name, tree) if name.endswith(".rs") else None
+            continue
+        match = LINE_ENTRY.match(line)
+        if match and current_file and int(match.group(2)):
+            entries.append((int(match.group(3), 16), current_file, int(match.group(2))))
+    reached = {address for address, name in symbols if name in seen}
+    ends = {address: (starts[index + 1] if index + 1 < len(starts) else address) for index, address in enumerate(starts)}
+    spans = sorted((address, ends[address]) for address in reached)
+    spans_start = [start for start, _ in spans]
+    counted: set[tuple[str, int]] = set()
+    for address, name, number in entries:
+        at = bisect.bisect_right(spans_start, address) - 1
+        if at >= 0 and spans[at][0] <= address < spans[at][1]:
+            if name.startswith("src/lib/") or (name.startswith("src/kernel/src/") and not is_check_file(name)):
+                counted.add((name, number))
+    return len(counted)
+
+
+def previous_budget(tree: str) -> tuple[dict | None, bool]:
+    """The baseline file as it last differed in history, and whether history could be read."""
+    path = os.path.join(tree, BUDGET)
+    with open(path, encoding="utf-8") as handle:
+        now = handle.read()
+    log = subprocess.run(
+        ["git", "-C", tree, "log", "--format=%H", "-n", "50", "--", BUDGET],
+        capture_output=True, text=True, check=False,
+    )
+    if log.returncode != 0:
+        return None, False
+    for commit in log.stdout.split():
+        shown = subprocess.run(
+            ["git", "-C", tree, "show", f"{commit}:{BUDGET}"], capture_output=True, text=True, check=False
+        )
+        if shown.returncode == 0 and shown.stdout != now:
+            return json.loads(shown.stdout), True
+    return None, True
+
+
+def budget_problems(budget: dict, tree: str) -> list[str]:
+    """The baseline's own rules: a rise names a new ledger line; every check file listed exists."""
+    out = []
+    rise = budget.get("rise") or {}
+    if not isinstance(rise.get("ledger"), int) or not rise.get("why"):
+        out.append(f"{BUDGET}: `rise` names no ledger line and why (M.7)")
+    for listed in budget.get("check_files", []):
+        if not os.path.exists(os.path.join(tree, "src/kernel/src", listed)):
+            out.append(f"{BUDGET}: lists {listed} as a check file, and it is gone: drop it")
+    earlier, readable = previous_budget(tree)
+    if not readable:
+        out.append(f"{BUDGET}: its history could not be read, so a rise of the baseline cannot be judged")
+    elif earlier is not None:
+        # A rise, or a measure that shrank (ledger 7448 CZ.3): each needs a new ledger line.
+        rose = []
+        for name, by_arch in budget["baseline"].items():
+            for arch, counts in by_arch.items():
+                before = earlier.get("baseline", {}).get(name, {}).get(arch, {})
+                for count, value in counts.items():
+                    if value > before.get(count, -1):
+                        rose.append(f"{name} {arch} {count} {before.get(count, 'none')} to {value}")
+        for name, by_arch in earlier.get("baseline", {}).items():
+            for arch in by_arch:
+                if arch not in budget["baseline"].get(name, {}):
+                    rose.append(f"the baseline's {name} {arch} removed")
+        for added in sorted(set(budget.get("check_files", [])) - set(earlier.get("check_files", []))):
+            rose.append(f"check_files gained {added}")
+        for key in ("sets", "architectures", "profile"):
+            if budget.get(key) != earlier.get(key):
+                rose.append(f"`{key}` changed")
+        if rose and rise.get("ledger") == (earlier.get("rise") or {}).get("ledger"):
+            out.append(
+                f"{BUDGET}: the baseline rose ({'; '.join(rose)}) and names no new ledger line: "
+                "a rise is an explicit edit naming one (M.7)"
+            )
+    return out
+
+
+def budget(directory: str, name: str, arch: str, tree: str) -> int:
+    with open(os.path.join(tree, BUDGET), encoding="utf-8") as handle:
+        plan = json.load(handle)
+    say = f"ring0-budget: {name} {arch} {plan['profile']}"
+    problems = [f"{say}: {problem}" for problem in budget_problems(plan, tree)]
+    kernel = os.path.join(directory, "ferrix-kernel")
+    if not os.path.exists(kernel):
+        print(f"{say}: no kernel at {kernel}: the budget fails closed")
+        return 1
+    read = {tree_relative(path, tree) for path in read_files(directory, tree)}
+    reviewed = set(plan.get("check_files", []))
+    product, checks, outside = 0, 0, []
+    for relative in sorted(read):
+        if not relative.endswith(".rs"):
+            continue
+        path = os.path.join(tree, relative) if not os.path.isabs(relative) else relative
+        if not os.path.exists(path):
+            problems.append(f"{say}: {relative}: rustc read it and it is not there: the dep-info is stale")
+            continue
+        if relative.startswith("src/kernel/src/"):
+            inner = relative.removeprefix("src/kernel/src/")
+            if is_check_file(inner):
+                checks += code_lines(path)
+                if inner not in reviewed:
+                    problems.append(
+                        f"{say}: {inner}: read as a check, and {BUDGET}'s list of check files does not name it"
+                    )
+                continue
+        else:
+            outside.append(relative)
+        product += code_lines(path)
+    table = line_table(kernel, tree)
+    if table is None:
+        print(f"{say}: no .debug_line in {kernel}: the budget fails closed")
+        return 1
+    libraries, library_files = 0, 0
+    for relative in sorted(table):
+        if relative.startswith("src/kernel/src/") and relative not in read:
+            problems.append(f"{say}: the dep-info is short: the image's line table names {relative}, rustc's list does not")
+        elif relative.startswith("src/lib/") and os.path.exists(os.path.join(tree, relative)):
+            libraries += code_lines(os.path.join(tree, relative))
+            library_files += 1
+        elif relative.startswith("src/") and not relative.startswith("src/kernel/src/"):
+            problems.append(f"{say}: {relative}: code in the image from outside the kernel's and the libraries' trees")
+    count_a = product + libraries
+    reach = code_lines_reached(kernel, tree, table) if arch == "x86_64" else None
+    count_c = f"{reach:,}" if reach is not None else "not computed (this method does not see adrp)"
+    print(
+        f"{say}: count A {count_a:,} = kernel crates {product:,} + {library_files} library files {libraries:,}; "
+        f"checks {checks:,} beside, in the image; count C {count_c}; .text {text_bytes(kernel):,} bytes"
+        + (f"; read outside src/kernel/src, counted in B: {', '.join(outside)}" if outside else "")
+    )
+    base = plan["baseline"].get(name, {}).get(arch)
+    if base is None:
+        problems.append(f"{say}: {BUDGET} has no baseline for this set")
+    else:
+        for label, value, held in (
+            ("count A", count_a, base["a"]),
+            ("count B", product, base["b"]),
+            ("library files", libraries, base["a"] - base["b"]),
+        ):
+            if value > held:
+                problems.append(f"{say}: {label} rose to {value:,} against {held:,} (+{value - held:,})")
+            elif value < held * (1 - FALL_SLACK) and label != "library files":
+                problems.append(
+                    f"{say}: {label} fell to {value:,} against {held:,} "
+                    f"(-{100 * (held - value) / held:.1f}%), past 1% with no edit of {BUDGET}: lower the baseline"
+                )
+    for problem in problems:
+        print(problem)
+    if problems:
+        return 1
+    print(f"{say}: within {BUDGET}")
+    return 0
+
+
+def budget_sets(tree: str) -> int:
+    """One line a build: set, architecture, then its `--set` values, for xtask. Every baseline
+    entry must have its build, and every build its baseline, or no build is listed at all."""
+    with open(os.path.join(tree, BUDGET), encoding="utf-8") as handle:
+        plan = json.load(handle)
+    builds = {(name, arch) for name in plan["sets"] for arch in plan["architectures"]}
+    held = {(name, arch) for name, by_arch in plan["baseline"].items() for arch in by_arch}
+    if not builds or builds != held:
+        print(f"ring0-budget: {BUDGET}: builds {sorted(builds)} and baseline {sorted(held)} differ", file=sys.stderr)
+        return 1
+    for name, sets in plan["sets"].items():
+        for arch in plan["architectures"]:
+            print(" ".join([name, arch, *sets.get("all", []), *sets.get(arch, [])]))
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("directory")
+    parser.add_argument("directory", nargs="?")
     parser.add_argument("--report", action="store_true")
     parser.add_argument("--tree", default=".")
+    parser.add_argument("--budget", metavar="SET", help="hold this build to ring0-budget.json's baseline for SET")
+    parser.add_argument("--arch", help="with --budget: the build's architecture")
+    parser.add_argument("--sets", action="store_true", help="print ring0-budget.json's builds, one a line")
     args = parser.parse_args()
     tree = os.path.abspath(args.tree)
+    if args.sets:
+        return budget_sets(tree)
+    if args.budget:
+        return budget(args.directory, args.budget, args.arch, tree)
     with open(os.path.join(tree, "tools/common/data/certification-item.json"), encoding="utf-8") as handle:
         manifest = json.load(handle)
     files = read_files(args.directory, tree)
