@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "43a33e2a0fbc066f2a1b57090cfb3139a7a08ffc67bfafb46cf6bc080be4a330",
+  "digest": "0771bd231fe5781a0306ab8127feb1238da567cc278409d0c902f297c8a6d734",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -113,7 +113,7 @@
   ],
   "summary": {
     "packages": 167,
-    "elements": 10002,
+    "elements": 10032,
     "maturity": {
       "implemented": 295,
       "inProgress": 23,
@@ -72982,6 +72982,234 @@
                   }
                 }
               ]
+            },
+            {
+              "name": "thePassIsOfSpaceAndList",
+              "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::thePassIsOfSpaceAndList",
+              "kind": "requirement",
+              "shortName": "L.mm.127",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/17-memory-requirements.sysml",
+                "line": 3851
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::thePassIsOfSpaceAndList",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A process shall pass K14's test only if its space is measured, untainted, and every digest on its record is on the certified list.\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 3853
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::thePassIsOfSpaceAndList",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"object::grant_check: a space with an unlisted digest does not pass.\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 3854
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::thePassIsOfSpaceAndList",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.MEM.30\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 3855
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::thePassIsOfSpaceAndList",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"user::space::AddressSpace::passes\", \"user::space::set\")",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 3856
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aChangeByAnotherTaints",
+              "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::aChangeByAnotherTaints",
+              "kind": "requirement",
+              "shortName": "L.mm.128",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/17-memory-requirements.sysml",
+                "line": 3858
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::aChangeByAnotherTaints",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A change to a space by a caller that does not pass, before or after the start, shall taint it for good.\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 3860
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::aChangeByAnotherTaints",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"object::grant_check.\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 3861
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::aChangeByAnotherTaints",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.MEM.30\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 3862
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::aChangeByAnotherTaints",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"syscall::native::reach_into\", \"user::space::AddressSpace::reached\")",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 3863
+                  }
+                }
+              ]
+            },
+            {
+              "name": "noSupervisorOutside",
+              "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::noSupervisorOutside",
+              "kind": "requirement",
+              "shortName": "L.mm.129",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/17-memory-requirements.sysml",
+                "line": 3865
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::noSupervisorOutside",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A passing process shall have no supervisor that does not pass, on itself, its job or an ancestor.\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 3867
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::noSupervisorOutside",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"object::grant_check.\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 3868
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::noSupervisorOutside",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.MEM.30\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 3869
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::noSupervisorOutside",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"object::job::Job::note_grant\", \"object::job::Job::supervised_from_outside\")",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 3870
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aGrantHoldsAfterIt",
+              "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::aGrantHoldsAfterIt",
+              "kind": "requirement",
+              "shortName": "L.mm.130",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/17-memory-requirements.sysml",
+                "line": 3872
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::aGrantHoldsAfterIt",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"After a grant the node's holder shall not lose the test by a later act of anyone but itself without its grant ending.\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 3874
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::aGrantHoldsAfterIt",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"object::grant_check.\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 3875
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::aGrantHoldsAfterIt",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.MEM.30\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 3876
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::aGrantHoldsAfterIt",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"object::job::Job::note_grant\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 3877
+                  }
+                }
+              ]
             }
           ]
         }
@@ -97476,6 +97704,120 @@
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
                     "line": 1462
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aDriverOfANeedyNodePasses",
+              "qualifiedName": "FerrixDeviceRequirements::GenericNodes::aDriverOfANeedyNodePasses",
+              "kind": "requirement",
+              "shortName": "L.device.79",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/20-device-requirements.sysml",
+                "line": 1464
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::aDriverOfANeedyNodePasses",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A node flagged needs_certified shall give its vector, I/O mapping and pin only to a process that passes K14's test.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1466
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::aDriverOfANeedyNodePasses",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"object::grant_check on a made-up node.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1467
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::aDriverOfANeedyNodePasses",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DEV.11\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1468
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::aDriverOfANeedyNodePasses",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"syscall::native::certified_grant\", \"syscall::native::takes_grant\", \"iommu::would_translate\", \"device::DeviceNode::wants_certified\")",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1469
+                  }
+                }
+              ]
+            },
+            {
+              "name": "derivedObjectsDoNotTravel",
+              "qualifiedName": "FerrixDeviceRequirements::GenericNodes::derivedObjectsDoNotTravel",
+              "kind": "requirement",
+              "shortName": "L.device.80",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/20-device-requirements.sysml",
+                "line": 1471
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::derivedObjectsDoNotTravel",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"What a needs_certified node's vector, I/O mapping and pin give shall carry no TRANSFER.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1473
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::derivedObjectsDoNotTravel",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"object::grant_check.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1474
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::derivedObjectsDoNotTravel",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DEV.11\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1475
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::derivedObjectsDoNotTravel",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"device::DeviceNode::derived_rights\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1476
                   }
                 }
               ]

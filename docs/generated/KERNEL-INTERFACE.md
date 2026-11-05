@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2951 declarations in the core's files, 205 in the item's; 226 checks-only.
+2971 declarations in the core's files, 205 in the item's; 226 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1567,6 +1567,7 @@ checks above is `pub` for raised checks (F3).
 | `DeviceNode::config_read` | method | item |  |
 | `DeviceNode::config_write` | method | item |  |
 | `DeviceNode::config_writes` | method | load (checks) | checks-only |
+| `DeviceNode::derived_rights` | method | item, load |  |
 | `DeviceNode::describe` | method | item, load |  |
 | `DeviceNode::disable_dma` | method | item, load |  |
 | `DeviceNode::dma_shape` | method | item, load |  |
@@ -1598,17 +1599,20 @@ checks above is `pub` for raised checks (F3).
 | `DeviceNode::may_drive` | method | item |  |
 | `DeviceNode::may_have_client_nodes` | method | load |  |
 | `DeviceNode::may_take_vectors_and_pins` | method | item, load |  |
+| `DeviceNode::needs_certified` | method | item |  |
 | `DeviceNode::pci` | method | item, load, bin |  |
 | `DeviceNode::pci_function` | method | item, load |  |
 | `DeviceNode::power` | method | item, load, bin |  |
 | `DeviceNode::reaches_memory` | method | item, load |  |
 | `DeviceNode::reads_log` | method | load |  |
 | `DeviceNode::refuse_for_check` | method | load (checks) | checks-only |
+| `DeviceNode::require_certified` | method | item, load |  |
 | `DeviceNode::take_domain_for_check` | method | load (checks) | checks-only |
 | `DeviceNode::tree_binding` | method | item |  |
 | `DeviceNode::vector` | method | item, load |  |
 | `DeviceNode::vector_count` | method | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `DeviceNode::verify_config` | method | item, load |  |
+| `DeviceNode::wants_certified` | method | item, load |  |
 | `DeviceNode::yielded` | method | item, load, bin |  |
 | `DmaShape::coherent` | field | item, load |  |
 | `DmaShape::contiguous` | field | load |  |
@@ -2307,6 +2311,7 @@ checks above is `pub` for raised checks (F3).
 | `Job::freeze_requested` | method | load |  |
 | `Job::freezing` | method | load |  |
 | `Job::frozen_seen` | method | load |  |
+| `Job::granted_below` | method | item, load |  |
 | `Job::id` | method | item, load, bin |  |
 | `Job::is_dying` | method | load |  |
 | `Job::is_killed` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -2335,6 +2340,8 @@ checks above is `pub` for raised checks (F3).
 | `Job::new_root_as` | method | item |  |
 | `Job::node` | method | item, load |  |
 | `Job::note_frozen` | method | load |  |
+| `Job::note_grant` | method | item |  |
+| `Job::note_outside_supervisor` | method | item |  |
 | `Job::observe` | method | item, load |  |
 | `Job::oom_counts` | method | load |  |
 | `Job::parent` | method | item, load |  |
@@ -2357,6 +2364,7 @@ checks above is `pub` for raised checks (F3).
 | `Job::signals` | method | item, load, bin |  |
 | `Job::subtree` | method | load |  |
 | `Job::subtree_control` | method | load |  |
+| `Job::supervised_from_outside` | method | item |  |
 | `Job::supervisor` | method | item, load |  |
 | `Job::usage` | method | item, load, bin |  |
 | `NodeAttributes::gid` | field | load |  |
@@ -3518,6 +3526,7 @@ checks above is `pub` for raised checks (F3).
 | `ProtectRefused` | enum | item, load |  |
 | `SpaceError` | enum | item, load |  |
 | `coherent_touches` | fn | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `certified` | mod | item, load |  |
 | `window_check` | mod | bin |  |
 | `Access` | struct | item, load |  |
 | `AddressSpace` | struct | item, load |  |
@@ -3538,6 +3547,7 @@ checks above is `pub` for raised checks (F3).
 | `AddressSpace::fault` | method | item, load |  |
 | `AddressSpace::fill_file_page_alone` | method | load |  |
 | `AddressSpace::fork` | method | load |  |
+| `AddressSpace::granted` | method | item, load, bin |  |
 | `AddressSpace::highest_mapped` | method | load |  |
 | `AddressSpace::images_into` | method | item, load |  |
 | `AddressSpace::install` | method | load, bin |  |
@@ -3555,15 +3565,18 @@ checks above is `pub` for raised checks (F3).
 | `AddressSpace::map_window` | method | load |  |
 | `AddressSpace::map_window_typed` | method | load |  |
 | `AddressSpace::mapped_file` | method | load |  |
+| `AddressSpace::mark_started` | method | item |  |
 | `AddressSpace::measure` | method | item, load |  |
 | `AddressSpace::new` | method | item, load, bin |  |
 | `AddressSpace::note_image` | method | item |  |
 | `AddressSpace::object` | method | item, load, bin |  |
 | `AddressSpace::open_window` | method | item |  |
+| `AddressSpace::passes` | method | item, load, bin |  |
 | `AddressSpace::place` | method | item, load |  |
 | `AddressSpace::protect` | method | item, load |  |
 | `AddressSpace::protect_by_handle` | method | item, load |  |
 | `AddressSpace::raises_refused` | method | load |  |
+| `AddressSpace::reached` | method | item, load |  |
 | `AddressSpace::region_count` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `AddressSpace::regions` | method | item, load, bin |  |
 | `AddressSpace::remap` | method | load |  |
@@ -3576,6 +3589,11 @@ checks above is `pub` for raised checks (F3).
 | `AddressSpace::set_ceiling` | method | load |  |
 | `AddressSpace::shared_code_at` | method | load |  |
 | `AddressSpace::shootdowns_begun` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `AddressSpace::started` | method | item, load, bin |  |
+| `AddressSpace::taint` | method | item |  |
+| `AddressSpace::taint_unless_granted` | method | item |  |
+| `AddressSpace::tainted` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `AddressSpace::try_grant` | method | item, load |  |
 | `AddressSpace::uninstall` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `AddressSpace::unmap` | method | item, load |  |
 | `AddressSpace::with_page` | method | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -3595,6 +3613,13 @@ checks above is `pub` for raised checks (F3).
 | `WindowPages::whole` | field | item, load, bin |  |
 | `WindowPages::whole_len` | field | load |  |
 | `WindowPages::all` | method | item, load, bin |  |
+
+### `user::space::certified`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `listed` | fn | load |  |
+| `set` | fn | item, load |  |
 
 ### `user::space::window_check`
 

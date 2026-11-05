@@ -60,8 +60,8 @@
       "recursive": false
     },
     "boot_authority.rs::try_start_manager": {
-      "complexity": 35,
-      "lines": 97,
+      "complexity": 36,
+      "lines": 100,
       "recursive": false
     },
     "device.rs::publish": {
@@ -474,14 +474,24 @@
       "lines": 20,
       "recursive": false
     },
+    "syscall/native.rs::exception_channel_create": {
+      "complexity": 17,
+      "lines": 41,
+      "recursive": false
+    },
     "syscall/native.rs::job_set_limit": {
       "complexity": 15,
       "lines": 39,
       "recursive": false
     },
-    "syscall/native.rs::space_map": {
+    "syscall/native.rs::process_space": {
       "complexity": 15,
-      "lines": 41,
+      "lines": 26,
+      "recursive": false
+    },
+    "syscall/native.rs::space_map": {
+      "complexity": 16,
+      "lines": 43,
       "recursive": false
     },
     "syscall/native.rs::vmo_executable": {
@@ -490,8 +500,8 @@
       "recursive": false
     },
     "syscall/native.rs::vmo_pin": {
-      "complexity": 20,
-      "lines": 28,
+      "complexity": 21,
+      "lines": 29,
       "recursive": false
     },
     "syscall/native/lift.rs::call": {
@@ -541,12 +551,12 @@
     },
     "user/space.rs::fork": {
       "complexity": 19,
-      "lines": 70,
+      "lines": 72,
       "recursive": false
     },
     "user/space.rs::map_by_handle": {
-      "complexity": 26,
-      "lines": 68,
+      "complexity": 28,
+      "lines": 72,
       "recursive": false
     },
     "user/space.rs::place": {

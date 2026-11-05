@@ -15,16 +15,16 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 192 | 138 | 54 |
-| Low (`L.*`) | 1470 | 1200 | 270 |
+| Low (`L.*`) | 1476 | 1206 | 270 |
 
-3304 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+3314 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 3311 |
-| Accessors, covered by the requirement they serve | 1387 |
+| Named by a low-level requirement | 3321 |
+| Accessors, covered by the requirement they serve | 1400 |
 | Check code in a product file | 124 |
-| Named by none | 1094 |
+| Named by none | 1098 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `ferrix_boot_policy`, `ferrix_sha256`, `ferrix_sigverify`, `ferrix_slots`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -1493,6 +1493,10 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.mm.124` | A space shall record the digest of each sealed VMO it maps executable, once, up to MAX_IMAGES, keep it across an unmap and copy it across a clone. | object::sealing_check; with an unmap removing it the check fails. | H.MEM.30 | `user::space::Images::note`, `user::space::AddressSpace::images_into` | `src/kernel/src/object/sealing_check.rs::run` | not built | not built | not built |
 | `L.mm.125` | process_images shall answer the digests' count with IMAGES_UNMEASURED set when the space is not measured. | object::sealing_check; with the bit removed it fails. | H.MEM.30 | `syscall::native::process_images` | `src/kernel/src/object/sealing_check.rs::run` | not built | not built | not built |
 | `L.mm.126` | A process shall cross between a measured and an unmeasured job by no move, either way; process_create's placement of a new process excepted. | object::sealing_check; with the test removed it fails. | H.MEM.30 | `object::job::Job::measure_refuses` | `src/kernel/src/object/sealing_check.rs::run` | not built | not built | not built |
+| `L.mm.127` | A process shall pass K14's test only if its space is measured, untainted, and every digest on its record is on the certified list. | object::grant_check: a space with an unlisted digest does not pass. | H.MEM.30 | `user::space::AddressSpace::passes`, `user::space::set` | `src/kernel/src/object/grant_check.rs::run` | not built | not built | not built |
+| `L.mm.128` | A change to a space by a caller that does not pass, before or after the start, shall taint it for good. | object::grant_check. | H.MEM.30 | `syscall::native::reach_into`, `user::space::AddressSpace::reached` | `src/kernel/src/object/grant_check.rs::run` | not built | not built | not built |
+| `L.mm.129` | A passing process shall have no supervisor that does not pass, on itself, its job or an ancestor. | object::grant_check. | H.MEM.30 | `object::job::Job::note_grant`, `object::job::Job::supervised_from_outside` | `src/kernel/src/object/grant_check.rs::run` | not built | not built | not built |
+| `L.mm.130` | After a grant the node's holder shall not lose the test by a later act of anyone but itself without its grant ending. | object::grant_check. | H.MEM.30 | `object::job::Job::note_grant` | `src/kernel/src/object/grant_check.rs::run` | not built | not built | not built |
 
 ### Descriptors
 
@@ -2044,6 +2048,8 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.device.65` | Generic publication shall leave alone every node whose registers an earlier finder's node holds -- a binding the kernel knows, or a virtio-mmio transport -- and every virtio,mmio node, so that no tree node is published twice. Only personality=user publishes real nodes: present and desktop publish none, and every profile's check holds this on made-up trees. | Stage 10's check: a made-up node a binding holds is not published again, and no tree node's record is published twice; with the hold not tested the boot panics naming a node a binding holds published again. | H.DEV.7 | `discovery::board::Boards::find` | `src/kernel/src/device/generic_check.rs::check_made_up`, `src/kernel/src/device/generic_check.rs::check_published` | not built | not built | not built |
 | `L.device.84` | DEBUG_WRITE shall need a handle of the debug log with WRITE, shall take at most one line's bound a call, and a measured process's line shall carry a prefix from the kernel's own record of the writer. | test-first-processes reads each first process's line with its prefix; a call with no such handle is refused by native_check; a QM process's line reads as anything, stated. | H.DEV.13 | `syscall::native::lift::call` | `tools/common/xtask/src/qemu.rs::test_first_processes` | xtask gate | xtask gate | xtask gate |
 | `L.device.85` | A process shall write at most its budget of bytes a second to the debug log, past which DEBUG_WRITE answers SHOULD_WAIT, so that a QM process cannot starve a safety partition's lines. | test-first-processes; the console lock's hold bound is in MEMORY-AND-TIMING. | H.DEV.13 | `object::process::Process::debug_budget_takes` | `tools/common/xtask/src/qemu.rs::test_first_processes` | xtask gate | xtask gate | xtask gate |
+| `L.device.79` | A node flagged needs_certified shall give its vector, I/O mapping and pin only to a process that passes K14's test. | object::grant_check on a made-up node. | H.DEV.11 | `syscall::native::certified_grant`, `syscall::native::takes_grant`, `iommu::would_translate`, `device::DeviceNode::wants_certified` | `src/kernel/src/object/grant_check.rs::run`, `tools/common/xtask/src/qemu.rs::test_first_processes_needs` | xtask gate | xtask gate | xtask gate |
+| `L.device.80` | What a needs_certified node's vector, I/O mapping and pin give shall carry no TRANSFER. | object::grant_check. | H.DEV.11 | `device::DeviceNode::derived_rights` | `src/kernel/src/object/grant_check.rs::run` | not built | not built | not built |
 
 ### Switch
 
@@ -2889,6 +2895,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/object/fast_path_check.rs::check_the_task_names_its_core` | kernel | L.object.169 |
 | `src/kernel/src/object/fast_path_check.rs::check_two_readers_of_one_end` | kernel | L.object.164, L.object.165, L.object.166 |
 | `src/kernel/src/object/fast_path_check.rs::run` | kernel | H.SCHED.13, H.OBJ.18, L.sched.57, L.sched.58 |
+| `src/kernel/src/object/grant_check.rs::run` | kernel | L.mm.127, L.mm.128, L.mm.129, L.mm.130, L.device.79, L.device.80 |
 | `src/kernel/src/object/level_check.rs::run` | kernel | H.OBJ.34, L.object.283, L.object.284, L.object.286, L.object.287 |
 | `src/kernel/src/object/level_check.rs::run` | kernel | L.object.288, L.object.289, L.user.185, L.user.186, L.user.187 |
 | `src/kernel/src/object/level_check.rs::run` | kernel | L.user.188, L.object.285 |
@@ -3782,6 +3789,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `tools/common/xtask/src/qemu.rs::test_first_processes` | gate | L.object.321 |
 | `tools/common/xtask/src/qemu.rs::test_first_processes` | gate | L.object.334 |
 | `tools/common/xtask/src/qemu.rs::test_first_processes_held` | gate | L.object.322 |
+| `tools/common/xtask/src/qemu.rs::test_first_processes_needs` | gate | L.device.79 |
 | `tools/common/xtask/src/qemu.rs::unisolated_lines_are_required_on_armv7a_and_refused_elsewhere` | gate | L.device.58, L.device.59 |
 | `tools/common/xtask/src/qemu.rs::unisolated_problem` | gate | L.device.58, L.device.59 |
 | `tools/common/xtask/src/qemu.rs::walk_problem` | gate | L.iommu.60 |
