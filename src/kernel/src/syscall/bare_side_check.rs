@@ -33,8 +33,9 @@ const STACK_TOP: u64 = 0x7000_0000;
 
 /// How long a thread started on another processor is given to be running.
 const SETTLE_NANOS: u64 = 100_000_000;
-/// How long a program may take.
-const PATIENCE_NANOS: u64 = 120_000_000_000;
+/// How long a program may take. Well inside `test-boot`'s 120 s from the start, so a
+/// program that does not end gets its sentence and not a hang's (ledger 6946 (3), 7103 (12)).
+const PATIENCE_NANOS: u64 = 60_000_000_000;
 /// Its loops, as stage 7's kernel-time case has them.
 const SPINS: u32 = 60_000_000;
 /// Its calls.

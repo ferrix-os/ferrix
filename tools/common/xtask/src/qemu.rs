@@ -317,6 +317,17 @@ pub(crate) enum Machine {
 ///
 /// # Errors
 ///
+/// A row may boot several images on one path. The first boot's serial would go as the
+/// next opens it, and a failure in that one had nothing to read (fl-094): each boot after
+/// this run's first moves the one before aside, `serial-boot<N>.log`, which `gate.sh` keeps.
+fn keep_earlier_serial(path: &std::path::Path) {
+    static BOOTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let boot = BOOTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if boot > 0 {
+        let _ = std::fs::rename(path, path.with_file_name(format!("serial-boot{boot}.log")));
+    }
+}
+
 /// The first of those that does not hold, naming the serial log.
 pub(crate) fn judge(
     arch: Arch,
@@ -2463,6 +2474,7 @@ fn watch_hooked(
     let (receiver, unfinished, reader) = read_lines(stdout);
 
     let log_path = paths::build_dir(arch).join("serial.log");
+    keep_earlier_serial(&log_path);
     let mut log = std::fs::File::create(&log_path)?;
     // Every line is stamped with the seconds since QEMU was started, on the
     // screen and in the log. A boot that stops says *where* it stopped either
