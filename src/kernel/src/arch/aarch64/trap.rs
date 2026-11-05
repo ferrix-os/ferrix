@@ -765,12 +765,15 @@ pub(crate) unsafe fn init() {
 /// The first words of the entry a fault in the kernel takes, for
 /// `L.aarch64.91`'s check.
 pub(super) fn stack_checked_entry() -> [u32; 6] {
-    let entry = (&raw const ferrix_vectors)
-        .cast::<u32>()
-        .wrapping_byte_add(4 * 128);
-    // SAFETY: (PROBE) the table is mapped executable and readable in this image, and
-    // entry 4 is 128 bytes long.
-    core::array::from_fn(|at| unsafe { entry.wrapping_add(at).read() })
+    // SAFETY: (PROBE) the table is in this image, mapped readable, and nothing writes it.
+    let table: &[u8; 16 * 128] = unsafe { &*(&raw const ferrix_vectors) };
+    core::array::from_fn(|at| {
+        let word = table.get(4 * 128 + at * 4..).unwrap_or_default();
+        match word {
+            [a, b, c, d, ..] => u32::from_le_bytes([*a, *b, *c, *d]),
+            _ => 0,
+        }
+    })
 }
 
 /// Take a kernel breakpoint with `value` in x0: x0 afterwards, and what
