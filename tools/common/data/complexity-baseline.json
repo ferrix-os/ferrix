@@ -86,7 +86,7 @@
     },
     "discovery/pci.rs::check_function": {
       "complexity": 31,
-      "lines": 67,
+      "lines": 68,
       "recursive": false
     },
     "discovery/pci/virtio.rs::drive": {
