@@ -258,7 +258,7 @@ weaker form is written down as such in the stage's section.
 
 Landed behind `restricted_fastpath`, on only in `fast`, which is refused until M5, so no image that
 builds has it. linuxd's straight path and general-path cuts run in any `personality=user` build, flag or
-not. Owed before the flag is on in any profile, K1 §7.1's cases table has what is built (ledger 7216 V.1-V.7, Z2-Z4, 7249): the tags of L.x86_64.272 to .275 with baseline removal, six anchors, coverage and the vulnerability entry, in the commit that flips `on`; `kvmb`'s case (6747 (1c)) ran once by hand, outside `gate.sh`, `~/.local/share/ferrix/po-2026-11-03/mk-flip3-kvmb/ret-case.out`: two returns, two mispredicted after a root write, none without one, under the gate's model; on bare metal, ERAPS's emptying the predictor at a root write with a `RET` read each way, owed by the first board or box row; `max`'s two-root row through `gate.sh`, which is not `on`'s and stays M5's. Whether a thread with a narrow mask should go on having `PLACE` up for good, so never the fast way: a thread pinned reads the general path, edf's too (`PERFORMANCE.md`). The ordinary path's next levers.
+not. Owed before the flag is on in any profile, K1 §7.1's cases table has what is built (ledger 7216 V.1-V.7, Z2-Z4, 7249): the tags of L.x86_64.272 to .275 with baseline removal, the anchors (the 20 units of ledger 7363; 7008's "six" was never counted), coverage and the vulnerability entry are in the commit that flips `on`, 9ebe69358, with .275's pointer half split to L.x86_64.282; `kvmb`'s case (6747 (1c)) ran once by hand, outside `gate.sh`, `~/.local/share/ferrix/po-2026-11-03/mk-flip3-kvmb/ret-case.out`: two returns, two mispredicted after a root write, none without one, under the gate's model; on bare metal, ERAPS's emptying the predictor at a root write with a `RET` read each way, owed by the first board or box row; `max`'s two-root row through `gate.sh`, which is not `on`'s and stays M5's. Whether a thread with a narrow mask should go on having `PLACE` up for good, so never the fast way: a thread pinned reads the general path, edf's too (`PERFORMANCE.md`). The ordinary path's next levers.
 
 check-lift's ceiling for `user/space.rs` went 6 to 15 for the window's nine cfgs, accepted as debt (ledger 7319 L.2):
 fold them into one window submodule and put it back to 6 before `on` goes anywhere.
@@ -600,6 +600,14 @@ log path and commit; a new sighting is added to its row the day it is seen.
 * K7's landing restores `quota::charging_own` around `write_ahead` and `fault_around`
   in `fill::resolve`: no ticket can be adopted before it, so the running group is right
   until then (6537, A3; 6590, item 1).
+* **`test-net`'s paced fetch under a user kernel, 1 run in 4 on `fast`'s flip (9ebe69358, ledger 7363, 7485 D.1): `fast` is refused on x86-64 until it is traced.**
+  `mkf3b-net2-x86`: `paced-fetch 143`, the restart program's `wget` got no byte in 60 s and `/tmp/paced`
+  was never made; `mkf3b-net3-x86` to `-net5-x86` and `present`'s `mkf3b-net-present` PASSED. Seen before
+  under `--personality user` (`mkf-s3-net`, `mkf2a-net-x86`, `mbl-g5e-net`), never traced. A next sighting
+  keeps the guest's serial log and the gateway's TCP counts; a flake here is a row, not a retry. Out:
+  a cause outside the user kernel (the gateway stub, the test's deadline) with a fix or a control, then
+  `test-net` PASSED on x86-64 under `fast`, and `x86_64` joins `personality=user`'s `built_on`; a cause
+  inside it is a code change with its own review. Log of the fourth: `mkf3b-net2-x86`'s serial.
 * `fault_ahead`'s five controls of 6537, A7, on this tree, with L.object.314's tag: its
   cases ran on `feature/mk-perf` (`logs/queue/mkp7-*`), not here; a neighbour's refused
   charge moving nothing in memory.events is still to read.
