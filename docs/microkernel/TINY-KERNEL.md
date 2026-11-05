@@ -5,7 +5,7 @@ ran as a boot or a row. The customer asked whether the microkernel is around 20k
 one design agent. Every figure says **measured** or **estimate**. Builds were by hand at `nice -n 19`,
 debug-optimised unless a row says release; no gate, no evidence. Scripts, per-file data and the budget's
 generator: `~/.local/share/ferrix/mk-tiny/` (`budget.py`, `lines.py`, `scen.py`, `cc.py`).
-**Reviewed: OK IF TK.1-TK.14, ledger 7256**, folded in here; §10 says what is still NOT YET.*
+**Reviewed: OK IF TK.1-TK.14, ledger 7256, and after the customer's D2-D11, OK IF TR.1-TR.22, ledger 7383**, both folded in here; §10 says what is still owed.*
 
 **Two names.** A **placed space** is a space with no regions: `SPACE_WINDOW`, `feature/mk-ibpb`'s window and
 `schedule=windows` are three other things already. **Cut 0 to Cut 8** are this design's steps; ledger 7256
@@ -15,35 +15,36 @@ calls them T0 to T8, which collide with DEVMGR's T0, stream T1 and the tool clas
 
 **No: not today, and not at 20k all-in.** Measured today, x86-64 is 64,158 lines of the kernel's own
 crates and AArch64 58,592, with about 40,000 more in library files that are linked, and 16,000 to 18,000
-of checks that run in ring 0 on top. The target I can support is about 36k, or 33k on a static board.
+of checks that run in ring 0 on top. The customer set the target at 36k by count A on AArch64 `max` (D1). After D5 to D9 the budget reads about 38k, 34.6k on a static board, and 36k is assured by neither.
 
 | Count, `--personality user` | x86-64 today | AArch64 today | seL4 (x86-64, nearest, this machine's build) | Budget, x86-64 `fast` | Budget, AArch64 `max` |
 |---|---:|---:|---:|---:|---:|
-| **A. Ring 0's product lines**: kernel crates + library files with linked code, **+ checks, printed beside and run in the image**. **Proposed definition** | **105,089** + 17,726 | **97,631** + 16,334 | 18,627 + 0 | **43,600** + about 8,000 | **36,300** + about 7,000; **32,900** + 7,000 with a static board |
-| B. Kernel crates alone: the customer's figure, `test-kernel-shape` | 64,158 | 58,592 | same | 31,700 | 25,000 |
+| **A. Ring 0's product lines**: kernel crates + library files with linked code, **+ checks, printed beside and run in the image**. **Proposed definition** | **105,089** + 17,726 | **97,631** + 16,334 | 18,627 + 0 | **45,500** + about 8,000 | **38,000** + about 7,000; **34,600** + 7,000 with a static board |
+| B. Kernel crates alone: the customer's figure, `test-kernel-shape` | 64,158 | 58,592 | same | 31,500 | 25,800 |
 | C. Lines that carry machine code, check functions out of the call graph, opt-level 1 | 21,991 | not computed | 8,326 | | 9,000 to 11,000 |
 | Text, opt-level 1: own code, then `core` and `alloc` | 0.74 MB, 0.76 MB | | 0.08 MB | | perhaps 0.6 to 0.8 MB in all |
 
 Today's columns are measured. **The two budget columns are estimates**: ±30% a file, ±15% a total, and that ±15%
 assumes independent errors, which one author in one direction does not give. Expect the high side: 31k to 41k by A.
 
-* **Recommended target: count A under 36k on AArch64 `max`**, the only architecture either certified profile
-  claims; under 33k if D2's static board is chosen, on a platform not chosen yet; count B under 25k. By A that is
-  about 37%, a little over a third of today. **By lines with code and by bytes it is about half**, and those are
+* **Target, the customer's (D1, 2026-11-05): 36k by count A on AArch64 `max`, read at opt-level 1** (§4.4), the only architecture either certified profile
+  claims. **The revised budget, 37,952, is over it by about 1,700; with D2's static board, 34,568.** Neither is assured: on the
+  estimate's high side both are over. If the N150 becomes `max`'s platform, x86-64's figure, about 42,100 and not computed with a static
+  board, is the one that counts, and the claim changes with it. By A the budget is about 39% of today, a little over a third.
+  **By lines with code and by bytes it is about half**, and those are
   closer to what coverage and object-code work pay for. Count C would land at 1.1 to 1.3 times seL4 and text
   at about 8 times: estimated, on another architecture, against measured.
 * **20k by count A is the wrong target.** seL4 itself reads 18,627 here, one processor, no restricted mode, no audit,
-  no job quotas, no boot checks. §4.4 prices every further cut I can find and stops at about 23,600, having removed
-  SMP, Linux on `max` and every dynamic device. I found no honest way to the last 3,600.
-* **20k by count B exists**: static board, one processor, static devices give about 20,200. It leaves libraries
-  uncounted and makes `max` a one-processor kernel. A customer decision, §8 D3; not recommended yet.
+  no job quotas, no boot checks. §4.4 prices every further cut I can find and stops at about 22,700, having removed
+  SMP, Linux on `max` and every dynamic device. I found no honest way to the last 2,700.
+* **20k by count B nearly exists**: static board, one processor, static devices give about 21,000. It leaves libraries
+  uncounted and makes `max` a one-processor kernel. The customer said no (D3).
 * **Speed: no §7 row rises, by estimate.** Every fault of a Linux program already crosses to linuxd, whose shadow
   already runs `user/space.rs` in ring 3, so the crossing is in today's figures. §5 says what is not priced: linuxd's
   own arena, native eager maps, job paths. No step is built. **Every limit row in §5 misses today and still misses.**
 * **What it does not do.** A third of A's fall removes no executed product code (§4.4), and the TSF shrinks partly
   because the claim shrinks (§6). Moving a line changes the count more than the risk.
-* **First step:** Cut 0, the ratchet, tools only: the review allows it on ledger 7256. Then Cut 1's `cfg` of IOMMU
-  units by architecture, under its own review. §7.
+* **First step:** Cut 0, the ratchet, built (§7). Then Cut 1's `cfg` of IOMMU units by architecture, under its own review; not started.
 
 ## 1. How to count
 
@@ -150,23 +151,62 @@ Six things the earlier list did not have.
 
 ## 3. The smaller mechanism
 
-### 3.1 New small files, chosen by flag
+### 3.0 The rule D11 adds: `desktop` keeps its speed
 
-Every replacement is a **new, small file beside the old one**, selected by `#[path]` under a compile-time flag,
-so `present`, `desktop` and linuxd's by-position copies compile today's text untouched: the same symbols with the
-same sizes, `test-kernel-symbols` (M.8). No `cfg` through `space.rs`. **The price: two implementations in one
-tree, for good**, since `desktop` stays hybrid. Count B falls by about 33,600 lines; the tree grows by about 15,000 (estimate),
-and a fix in shared logic can be owed twice.
+**The customer, 2026-11-05: "D11: yes, but try to keep the performance on the desktop build the same as it is now, i still want to play endfield with decent performance".** So every cut is bound by this, and a cut that cannot meet it does not land:
+
+1. **`desktop`, the hybrid, keeps today's performance, and its kernel keeps its own per-process separation and charging as they are.** D11's rewrite of the ST, ASR-1 and §2.3 applies to `fast` and `max` alone.
+2. **§3.1's shared implementation costs `desktop` nothing at run time**: generics monomorphised, no `dyn`, no extra branch on a hot path. A seam that would add one is refused for that path.
+3. **Each cut shows `present` and `desktop` unchanged by `test-kernel-symbols`** where it can, to §3.1's standard. **Where a body does move** (a crate extraction, a seam), the landing carries a by-hand A/B of the rows that reach it on `desktop`: alternated boots, five a side, the same tree with and without the cut, `bench-rows`' own figures beside, the median and the spread. A row that moves past its noise stops the landing for the customer's word.
+4. **The rows that stand for the customer's game** are the desktop paths Proton runs through. On `--kernel-profile desktop`: `bench-rows`' `null-getppid`, `getppid-mean`, `futex-thread-pingpong`, `signal-self`, `mmap-munmap-4K`, `mmap-touch-munmap-4K`, `fork-exec-wait`, `pagecache-miss-4K`; `bench-ipc`; the scheduler's switch, as `futex-thread-pingpong` and `test-game-rig` load it; and the graphics rows that exist, `test-compositor`, `test-frames`, `test-unity`, `test-wine-sync`, `test-endfield-proton`. **Each cut's gate rows include whichever of these it reaches**, named in §7's table.
+
+### 3.1 One implementation, split by file along the shape (D9)
+
+**The customer, 2026-11-05, on the first form's two implementations: "not great  find alternatives like compile time traits or something which keeps duplicated code to the absolute minimum".** So the rule is now: **one implementation wherever the behaviour is the same; the shape chosen at compile time; a second body only where the behaviour truly differs, each listed below.**
+
+Two facts constrain how. Count A counts whole files (§1), so code a shape does not run must sit in a file that shape does not read: a `cfg` inside a shared file still counts. And `present` and `desktop` must keep their behaviour, which `test-kernel-symbols` checks by name and size, with hashes ignored and bodies compared with numbers masked (`compare-kernel-symbols.py`).
+
+| Mechanism | Where it is used | What it keeps single |
+|---|---|---|
+| **Split by file, not by copy.** A type's methods only one shape runs move, unchanged, into an `impl` block in a child file behind a `#[cfg]`'d `mod`: `user/space/regions.rs` beside `user/space/placed.rs`, `object/job/tree.rs`, `object/quota/slots.rs`. The shared methods stay where they are | VM, jobs, quotas, the native handlers by family | Every shared method. A move is `CONVENTIONS.md`'s SP-2 pattern: bodies byte-identical by script, the same boot lines on four boots |
+| **Fields by shape.** A struct's shape-only fields under `#[cfg]`, so the type keeps one name | `AddressSpace`'s `map`, `objects`; `Job`'s cgroup link | The type, its name and every method that does not touch them |
+| **Static-dispatch traits at the composition root** (the customer's rule of 2026-10-24: proper traits, chosen per profile, not structs of function pointers) | The scheduler's class (§3.7), memory charging (`Charge`: slots or reservation), first-process start (`Starter`), panic text (`Explainer`: prose or code alone) | The caller. Each trait has one composition per image and no `dyn`, so no run-time cost; it does rename a symbol in `present` (below) |
+| **Shared crates for code that moves to ring 3 in one shape only** | PCI's walk stays in ring 0 (§3.6), but DEVICES' composition and matching go into `ferrix-devmgr-proto`, linked by the hybrid's kernel and by the micro shape's devmgr; the panic catalog's text, generated from one data file into a ring-0 table of codes and a host table of prose; `mce/decode.rs` and `console/pstore.rs` as crates the hybrid's kernel and `lode` both link | One body, two linkers. In ring 0 of the micro shape it is simply not linked |
+
+**What still has two bodies, by estimate, with why no seam serves:**
+
+| Place | Lines duplicated | Why |
+|---|---:|---|
+| A page fault's entry: regions' anonymous fault and a demand range's | about 40 | Two different questions (which region; which range). The commit and the map below them are one `place` |
+| `VMO_MAP` and `SPACE_MAP` handlers' back halves | about 20 | Argument decoding is shared; the tail calls a region map or `place` |
+| Memory charging: the slot table's and the reservation's `Charge` | about 30 | The reservation is K12's already; only the hybrid's slot bookkeeping has no twin |
+| A job's kill walk: tree and flat | about 50 | A flat job has one level; the tree's walk is the hybrid's cgroups |
+| The scheduler's switch path calling a class | 0 | One core, classes are crates (§3.7) |
+| First-process start, `one` against `three` | 0, if `three` goes | Both are `personality=user`'s only. If no profile keeps `three` after Cut 8's rows, it is deleted, not kept |
+| Device publication, panic prose, pstore, machine-check decode | 0 | Shared crates, above |
+| Unknown, from files not read to the line (§9) | up to about 500 | |
+| **Total** | **about 140 known; under about 700 with the unknown** | |
+
+**What this costs.** Ring 0 of the micro shape gains the seams: trait declarations, `impl` headers of split files, `cfg`'d `mod` lines: about 300 lines (estimate), in the budget as its own row. The tree gains no second VM, job or scheduler: the split moves code, it does not copy it.
+
+**What `test-kernel-symbols` can show, and what it cannot (TR.1-TR.5, ledger 7383).**
+
+* **Names.** An inherent method moved into an `impl` block of a child file keeps its demangled `<Type>::method` name **on the pinned toolchain's v0 mangling**: the consultant's trial shows it on rustc 1.97.1, and the same move under legacy mangling (1.94.1) prints `lib::space::regions::<impl lib::space::Space>::regions`. So the kernel's flags pin `-C symbol-mangling-version=v0`, and a toolchain bump repeats the first split's proof. `compare-kernel-symbols.py` strips legacy's `::h…`; what v0 leaves in a name is to be stated with the pin.
+* **Renames.** A moved free function, static or const changes its path, and a seam turns an inherent name into `<Slots as Charge>::charge`: **a seam does add a new symbol in `present`.** So every landing that moves a name carries a rename list in its commit, old to new, applied to names, sizes and bodies; the tool fails an entry unused, or one whose sizes differ.
+* **Bodies.** Today the tool fails on names and sizes, and its body comparison is a report that fails nothing. For every §3.1 landing (as 7345 (6)): release, `present` and `desktop`, x86-64 and AArch64, **zero bodies differ after the renames, or each is named and explained**, else the landing stops. A crate extraction moves a MIR-inlining boundary, so there differences are expected, each explained.
+* **What that proves.** The same instructions with constants and call targets masked, the same names after the declared renames, the same boot lines on four boots. **Not "byte for byte"**: constants and callees are masked, and a moved line moves its panic `Location` (`panic.rs` prints `at <location>`; the preempt-count message names a file and line). Moved panic locations are listed, and gate expectations, goldens and recorded transcripts grepped for them (7345 (8)). Rule 3 of §3.0's A/B covers the rest.
+* **Coverage.** A split file is `carry-coverage --rename`; a crate extraction owes 7345 (7)'s coverage-profile boot and per-file line sets compared.
+
+### 3.1a New flags
 
 | New flag | Values | `max`, `fast` | `desktop`, `present` | Requires |
 |---|---|---|---|---|
 | `kernel_vm` | `placed`, `regions` | `placed` | `regions` | `placed` needs `personality=user` |
-| `device_bus` | `devmgr`, `kernel` | `devmgr`, once its design returns (§3.6) | `kernel` | `devmgr` needs `kernel_vm=placed`; the kernel refuses an untranslated node under it |
+| `device_bus` | `devmgr`, `kernel` | `devmgr`, once §3.6's second form is reviewed | `kernel` | `devmgr` needs `kernel_vm=placed`; the kernel refuses an untranslated node under it |
 | `first_process` | `one`, `three` | `one` | not applicable | K14's measured start |
 | `firmware` | `static`, `tables` | `static` on `max`'s board (D2), `tables` on `fast` | `tables` | a board's generated description |
 
-Each has `built`, levels and rows as `BUILD-FLAGS.md` asks, and each joins FLIP's refusals when it enters a profile. None is a boot option. Cuts 1 and 2 need no new flag:
-`ferrix_personality="user"` and `target_arch` are enough.
+Each has `built`, levels and rows as `BUILD-FLAGS.md` asks, and each joins FLIP's refusals when it enters a profile. None is a boot option. Cuts 1 and 2 need no new flag. `schedule` gains values and `edf_over` is new: §3.7.
 
 ### 3.2 Objects and calls that remain
 
@@ -182,7 +222,7 @@ Each has `built`, levels and rows as `BUILD-FLAGS.md` asks, and each joins FLIP'
 | Channel | message, sender's job | create, write, read, write-read, **attested read (K6 stays: §2.5's masquerade)** | `channel.rs`, 766 | tickets, if K7 goes (below) |
 | Port | | create, queue, wait | 334 | |
 | Address wait | | wait, wake, wait any | `address_wait.rs`, 666 | keys by VMO |
-| Interrupt, IoMapping, device grant, domain, pin | K8 | interrupt, map, info, aperture, quiesce, clock, limit, isolation, bind, served; config read, **filtered** write | `device.rs`, `iommu.rs`, `pin.rs` | traversal, matching: §3.6 |
+| Interrupt, IoMapping, device grant, domain, pin | K8 | interrupt, map, info, aperture, quiesce, clock, limit, isolation, bind, served; config read, **filtered** write | `device.rs`, `iommu.rs`, `pin.rs` | matching, naming, DEVICES: §3.6 |
 | Misc | | clock, random, debug write, console read, audit read | | |
 
 **About 75 numbers of today's 135** (estimate). seL4's non-MCS `syscall.xml` has 8 system calls, and this build's
@@ -197,8 +237,8 @@ generated headers about 70 invocation labels.
 | K10 | Out | §2.5's "no higher part blocks without a timeout" is shown by a wait's deadline in the kept set |
 | K13 | Out | `BOOT-AUTHORITY.md` §4 and BA.8's "until K13" read "never in `fast` and `max`": devmgr's death is a line and linuxd's EIO. AoU-43 scoped |
 | K6, K17's declare | **Stay**, though no caller | A claim rests on each |
-| **K4** | **NOT YET, one named choice, D8** | §5 and ledger 886, accepted by the customer, say `partmgr` supervises through K4; its source uses `notify_on_exit` alone. Whole; or report and kill; or out, with §5 and 886's wording rewritten to supervision by end notice and a fault meaning death. The budget assumes report and kill, 180 lines; whole adds about 500 |
-| **K7** | **NOT YET, a named replacement** | §2.3's "server-held memory charged by K7" and T.EXHAUST are the issue: no caller means `btrfsd` and `netd` have that hole today, not that it is closed. Out only with a per-client bound in the server (`btrfsd`'s item, a requirement, a control) or a checked rule that no shared server spans levels. §2.5's "charged to the sender, K7" is a loose citation: per-message charge is F-37's on the running job, unaffected. The budget assumes out; if not, add about 230 |
+| **K4** | **Out, by D8** (the customer, 2026-11-05: "go with the recommendation") | Supervision becomes **end notice**: `partmgr` learns a partition ended by `notify_on_exit`, which its source already uses (main.rs:87, :265), and **a fault in a native process means its death**, its job then the manager's to restart or not. Owed before code: `MICROKERNEL.md` §5's "supervises them through K4's exception channels", ledger 886's wording, and `BOOT-AUTHORITY.md` §4 rewritten so; K4.md's requirements scoped *under `personality=kernel`* (rule 7); a check that a native fault ends the process and its end notice reaches the holder, with a control. **And (TR.19):** (a) the restart rule named, `BOOT-AUTHORITY.md` §8's "restart up to n, or leave down", with the partition's job killed before it starts again, so no sibling of the dead process runs on; (b) the end status says a fault and its kind, and the kernel audits it, since K4's exception record goes; (c) fault to end notice bounded, for stream T1; (d) `partmgr`'s "an end or an exception at a time" (main.rs:265) and `BOOT-AUTHORITY.md`'s K4 lines rewritten in the landing that rewrites §4; (e) ledger 886's "partmgr supervises through K4" reads, for `fast` and `max`, supervision by end notice with a fault meaning death, by ledger 7383, in force once `MICROKERNEL.md` §5 and `BOOT-AUTHORITY.md` §4 land so; it stands for `personality=kernel`. The budget's 180 lines for a trimmed K4 go |
+| **K7** | **Out only with its replacement, by D8** | §2.3's "server-held memory charged by K7" and T.EXHAUST are the issue: no caller means `btrfsd` and `netd` have that hole today. **The replacement: a per-client bound in the server**, in `btrfsd`'s item first: each client's requests and the memory held for them bounded, refused past it by name, with a requirement and a control (a client past its bound refused, the others served). `netd` the same before it carries a safety partition's traffic. Tickets leave ring 0 only when that lands. **And (TR.20):** (a) a client is whom the kernel attests (K6's read: the sender's job and level), never a self-declared id; (b) **a per-client bound alone does not stop T.EXHAUST**: many QM clients each under it can fill `btrfsd` while a higher level's waits, so a share is reserved per level, or the sum of bounds kept under capacity, stated, with a second control: QM clients at their bounds fill the server and a higher-level client is still served, FIRED; (c) in-flight work per client bounded too, since no ticket charges its time (§3.7); (d) `netd`'s by a BACKLOG row binding it before a safety partition's traffic; (e) tickets compiled out only in a landing after `btrfsd`'s bound has landed. §2.5's "charged to the sender, K7" is a loose citation: per-message charge is F-37's on the running job, unaffected |
 
 Each is proved by compiling it out: M6's `ENOSYS` check extended to each number, stage 9's lines leaving a user boot said, `level_check`, `sealing_check`, `grant_check` and `check-level-doors.py` scoped, requirements *under `personality=kernel`*.
 
@@ -242,7 +282,7 @@ gain**, a rewrite of every `Arc` in the object layer, and `max` keeps per-job he
 | A Linux program, any page | K1 exit, linuxd's `fill::resolve`, `SPACE_PLACE`, resume | **The same** |
 | linuxd touching its arena or a stack | Region fault in ring 0, lazy commit | NOT YET, above. Candidate: ring 0, by a range |
 | A native QM process, first touch | Region fault in ring 0, lazy commit: **the common case** | Native programs are changed to map before use, or a range for stacks. **A change to every native program, not a fact**: `devmgr`, `rt`, `netd`, `btrfsd`, drivers to be read, footprint stated |
-| A native process, anywhere else | Region says no: K4 or death | By D8's K4 choice; else death |
+| A native process, anywhere else | Region says no: K4 or death | **Death**, and the holder's end notice (D8) |
 | A safety partition | Region fault in ring 0 | **No range is allowed**: mapped by READY, so any fault is an error. Good for stream T1's bounds |
 | A pager | K3, in ring 0, no client | Compiled out, §3.2 |
 
@@ -257,35 +297,73 @@ already one number, since the slab is on the reservation's pages. `FRU_RSA.1`'s 
 by the reservation; processor by the window or budget. `quota.rs` is 1,304 lines of slots, periods and bursts, most of it
 `cpu.max`'s, which is linuxd's sum by §3a. Depends on `retyped` being `built`: R.1 to R.5. K16.6's nearest-ancestor rule survives: children still draw on a parent's entry.
 
-### 3.6 Devices
+### 3.6 Devices: the second form (D7), reviewed OK IF TR.14-TR.18
 
-**The first draft of this section claimed a hardware-fed parser leaves the TCB. The review refused it (TK.11) and it was wrong.** What is true: **traversal, matching, DEVICES and REPORT can leave; a smaller parser stays.** This is NOT YET, and returns as Cut 7's own design before D7 is asked.
+**The customer said yes to D7 on 2026-11-05. The first form was refused (TK.11, ledger 7256) and was wrong. This is the second form, reviewed OK IF TR.14-TR.18 (ledger 7383): it meets TK.11 (a)-(g) in substance, and Cut 7's code may start once they are folded, which they are below, each landing back for its diff check. Before that review it was: no code before its OK.**
 
-| Why it stays in ring 0 | |
+**The line it draws: the kernel keeps every read and write of configuration space, the parser and every check; devmgr gets matching, naming and choice, from a table the kernel built.** No ring-3 process reads configuration space to discover anything.
+
+| Stays in ring 0 | Why (TK.11's point) |
 |---|---|
-| The kept set reads BARs (`bar::size`, which writes and drops decoding), mints MSI and MSI-X, filters writes, keeps ATS off | `device.rs` imports `ferrix_pci`'s `bar`, `capability`, `header`, `msi`, `msix`; `iommu.rs` its `Address` and `topology` |
-| The ECAM base | The kernel's mediated read needs it, and ledger 818 (B6) forbids ring-3 ECAM. A base from ring 3 is authority. MCFG's reader stays |
-| Requester IDs | `learn_bridges` feeds `iommu`'s `BRIDGES` and `topology::agrees`. A lie there decides what a domain translates, so K8.3 cannot rest on it: the kernel reads the path itself |
-| "Every function" | AoU-12's ATS off, K8.6's `silence_found_masters`, MSI-X held off, `decoding_refusal`, BA §2's stop all say every function. In ring 3 that becomes "every function asked about". A function devmgr omits keeps firmware's mastering and ATS. So a bounded read-only walk stays for these, or each gets a per-unit argument by default-deny |
-| Not per architecture | K8.2's Tree and VirtioMmio nodes get `Domain::untranslated()`, and §6.4 names a refused unit: `device_bus=devmgr` refuses such a node or the boot, by the kernel, with a control |
-| BA.3, ledger 6343 | The filter is the kernel's "whatever devmgr does". A bus handle reads every BDF unless the kernel refuses the description's and their closure. A parent-is-a-root-port read stays, ACS with it. K14's `flag_nodes` (7166) at mint |
-| New exposure | A QM server now chooses when ring 0 touches hardware: an absent BDF on a host with no clean ECAM may abort; re-sizing a function a driver runs is refused. `widen` and `withhold` decide what an aperture holds: not policy |
+| Finding the ECAM windows (MCFG, the device tree's hosts) | (b): a base from ring 3 is authority; B6 forbids ring-3 ECAM |
+| **A bounded boot walk of every function on every host**: the existing walk in `discovery/pci.rs`. **It reads, and makes the kernel's own safety writes to every function**: `bar::size` (which writes and drops decoding), `silence_found_masters`, `keep_ats_off`, holding MSI-X off, before any ring-3 process exists. After it, ring 0 writes to a function only to mint, quiesce or restart a node its holder has, as today. Depth, count and time bounded in MEMORY-AND-TIMING (TR.14) | (d): AoU-12's ATS off, K8.6's `silence_found_masters`, MSI-X held off, `decoding_refusal` and BA §2's stop each say "every function". A function devmgr never asks about must still be silenced, so the walk cannot be devmgr's |
+| Bridges and requester IDs: `learn_bridges`, `BRIDGES`, `topology::agrees` | (c): they decide what a domain translates |
+| BAR sizing and placement checks, `widen_lone_partial_bars`, `withhold_shared_pages`, `Reserved` | (a), (g): they decide what an aperture holds (L.device.61, D7, BA.3) |
+| MSI and MSI-X mint, the configuration write filter, bus mastering only with a domain, ATS off | K8, B6, AoU-21 to 23 |
+| The refusal of the description's safety functions **and their closure**: a parent-is-a-root-port read, ACS, alias, peer to peer | (f): BA.3, ledger 6343, AoU-45. K14's `flag_nodes` at mint (7166) |
+| An untranslated node under `device_bus=devmgr` refused, or the boot, by the kernel, per node | (e): K8.2's Tree and VirtioMmio nodes, a refused unit; G4 |
+| `ferrix-pci`'s `bar`, `capability`, `header`, `msi`, `msix`, `topology` and the walk | (a): the parser stays |
 
-**So the budget now keeps** about 450 of `discovery/pci.rs`, about 1,500 of `ferrix-pci` and `device.rs`'s 800 (the review's estimate: 1,000 to 1,900 and 400 to 500). What goes to devmgr: `hosts` as policy, traversal, matching, `discovery/devmgr.rs` and `ferrix-devmgr-proto`. K8's closing sentence, `ITEM.md`'s "device enumeration is inside" and §2.1 stand until that design is reviewed. **With `firmware=static`, ask first whether `max` needs a run-time bus at all**: §4.4.
+**After the walk (TR.15).** No hot-plug. SR-IOV is not in `discovery/pci.rs`, by grep: the write filter refuses a VF enable, so no function appears that the walk did not see. A bridge firmware left unnumbered: the walk reads firmware's numbers alone, so a function behind it is not found, and the host is reported, not guessed at.
 
-**IOMMU.** Units by architecture: AArch64 `smmuv3.rs` alone, x86-64 VT-d, AMD-Vi, IVRS, remapping. `iommu.rs`'s 1,864 is half policy and
-report: `plan_rmrrs`, `announce_intel_gpu`, `say_unit`, `report`. About 900 remains: domains, pin, `map_all`, fault record. K8's rule stands.
+**The table (TR.16).** One row per node the walk found, written once at the walk's end, bounded, read-only. **The description's safety functions and their closure are absent from it**, and `DEVICE_INFO` on a bus handle refuses them besides. The bus handle is granted by `partmgr`'s start (K14's `grant_starter`, TK.12) to devmgr alone. `DEVICE_INFO`'s new right gets its requirement, the id reserved first.
 
-### 3.7 The scheduler
+| Leaves for devmgr, QM | How it reaches it |
+|---|---|
+| Which driver for which function: matching by vendor, device, class | A read-only table the kernel published at the walk's end: one row per node, its identity words and apertures as the kernel measured them, by `DEVICE_INFO` on a bus handle. devmgr reads that, never ECAM |
+| DEVICES' composition, driver images by name, REPORT and its handling | `discovery/devmgr.rs`'s policy half, into `ferrix-devmgr-proto` (§3.1: one crate the hybrid's kernel and devmgr both link; an extraction, so TR.2-TR.5 apply) |
+| The names a node is published under; the order drivers start; restarts | devmgr's, as today for drivers |
 
-`schedule=windows`, as FLIP and ledger 7011 S.1-S.6 require and the customer's C3 and C6 say: a static major frame, fixed
-priorities per processor inside a window, a bitmap, **no fair class**. So `max` drops `vtime`, EEVDF, `ferrix-sched`'s tree, `steal_from`,
-`balance`, `pull`, `leftovers`, `borrow`; keeps switch, wake, block, sleepers, preemption, reaper, `direct` if `ipc_fastpath` comes on. Budget: about
-3,100 with K9's `windows` file at 350 and no code exists, so **this row is the softest in the budget**.
+**What a lying or dead devmgr can do, then.** Start the wrong driver on a node it was given, or none: a driver is confined by its node's apertures, vectors and domain, which the kernel made. It cannot name a function the kernel did not publish, read configuration space beyond `DEVICE_CONFIG_READ` on a node it holds, change a BAR, aim a function's DMA or MSI, or reach a safety function. It no longer decides when ring 0 touches hardware (TK.11 (g)): the walk runs once, at boot, on the kernel's own schedule. **What leaves the TCB is the policy, not a parser.** That is smaller than the first form claimed, and true.
 
-`schedule=edf` keeps the fair class under `OverFair`, as K9 §2a has it: about 4,400 plus 2,000 of crates. **Policy stays in ring 0.** A ring-3
-scheduler would add a round trip per block and wake; `futex-thread-pingpong` is 4 crossings already, so it doubles. Rejected. D5 asks whether
-`fast` needs EEVDF or a plain round-robin under its CBS: about 1,500 lines (estimate), and a row of its own.
+**Re-priced, estimate.** Ring 0 keeps about 700 of `discovery/pci.rs`, about 2,200 of `ferrix-pci`, about 1,300 of `device.rs`. Against the budget before this revision, AArch64 `max` count A rises by about 1,450, and Cut 7's fall is about 8,400 rather than 9,800.
+
+**Controls owed before code (TR.17), each `gate.sh control --expect`, FIRED:** an untranslated node under `device_bus=devmgr` refused by the kernel; `DEVICE_INFO` on a node the walk did not find refused; a safety function's row absent, or its mint refused; a configuration read beyond a held node refused; a function devmgr never asks about found with mastering and ATS off.
+
+**Also owed before code, for the consultant:** K8's closing sentence, `ITEM.md`'s "device enumeration is inside" and §2.1's bullet, re-read against this line: enumeration stays in ring 0, matching leaves; the walk's bound in MEMORY-AND-TIMING; `DEVICE_INFO` on a bus handle as a new right, its requirement and control (a devmgr asking for a node the walk did not find is refused); BA.8's devmgr death, now that it composes DEVICES. **With `firmware=static`, whether `max` needs a run-time bus at all** stays the question to ask once D2's platform is known.
+
+**IOMMU.** Units by architecture: AArch64 `smmuv3.rs` alone, x86-64 VT-d, AMD-Vi, IVRS, remapping. `iommu.rs`'s 1,864 is half policy and report: `plan_rmrrs`, `announce_intel_gpu`, `say_unit`, `report`. About 900 remains: domains, pin, `map_all`, fault record. K8's rule stands.
+
+### 3.7 The scheduler: crates behind one class, chosen at build time (D5)
+
+**The customer, 2026-11-05: "make it a fixed build time configurable and the scheduler become crates".** Today `schedule=fair|edf|windows` exists, EEVDF lives in `ferrix-sched` (1,603 lines linked today, host-tested), `ferrix-sched-edf` wraps it (`OverFair<T>`, 866), and ring 0's `sched::Tier<Arc<Task>>` alias picks one; `sched/mod.rs` still holds fair-class helpers (`vtime.rs`, `borrow.rs`, `leftovers.rs`, the steal and balance walk).
+
+**The interface.** A crate `ferrix-sched-class`, about 200 lines: the `Class<T>` trait K9 §2a's table already names (`enqueue`, `pick_next`, `hand_over`, `update_curr`, `yield_curr`, `decision_in_ns`, `should_preempt`, `remaining_ns`, `remove_curr`, `current`, `remove`, `len`, plus `steal_candidate` for balancing), and the types they share. Pure: no `unsafe`, no `ferrix_` `cfg`, no allocation after construction, as `sched-edf` is held today.
+
+| Crate | What | Today |
+|---|---|---|
+| `ferrix-sched-fair` | EEVDF, and what ring 0 holds of it now: `vtime`, `borrow`, `leftovers`, the steal and balance choice | `ferrix-sched` renamed, plus about 700 lines from `sched/` |
+| `ferrix-sched-rr` | Fixed priorities, round-robin within one: a bitmap and lists | New, about 300 (estimate) |
+| `ferrix-sched-edf` | Partitioned EDF with a hard CBS **over any `Class`**: `Edf<Inner: Class>` | `OverFair<T>`, made generic over its inner class |
+| `ferrix-sched-windows` | K9's static major frame, **composed over `sched-rr`** (`Windows<Inner: Class>`), so C6's fixed priorities inside a window are `rr`'s one body, not a second (TR.10); no fair class (C3); S.2's quantum among equals and idle-never-another's stand | New, K9, no code yet (FLIP, ledger 7011 S.1-S.6) |
+
+**What stays in ring 0's core** (`sched/`, about 2,500 to 2,800): `Task` and its states; the per-processor run queue's lock and the switch it is held across; wait queues and the sleeper sets; preemption on interrupt exit; the IPI kick; the reaper; `direct`, when `ipc_fastpath` is on; the call into the class and the move a class asks for. **Policy is the class's; the mechanism that runs a choice is the core's**, so no class can touch a register or a lock.
+
+| Flag | Values | `max` | `fast` | `desktop` | `present` |
+|---|---|---|---|---|---|
+| `schedule` | `windows`, `edf`, `fair` | `windows` (over `rr`) | `edf` | `fair` | `fair` |
+| `edf_over`, new, needs `schedule=edf` | `fair`, `rr` | not applicable | `fair` until a `rr` row decides | not applicable | not applicable |
+
+**Owed before any of it is code (TR.7-TR.13, ledger 7383).**
+
+* **The method table (7088 G.1).** About 25 methods reach `RunQueue` from `sched/`, not the trait's 13. One row a method, one column a class (fair, rr, edf over each inner, windows over rr): which the trait takes, which the core drops, and that none is a stub read by balancing or `direct`'s fold unsaid. One generic host-test set runs over every class.
+* **A lock bound, not only a type bound.** The core calls a class under the run queue's lock with interrupts masked, so 6208 (3), (7) and 5695 B1 bind every crate: no allocation after construction, no parent walk, no membership lock, no queue scan in `pick`. Each class's bound goes in MEMORY-AND-TIMING. "No class can touch a register or a lock" is true of what it can name, not of how long it holds one.
+* **The sleepers' timeline.** `certification-item.json` names `ferrix-sched` "the fair class and the sleepers' timeline": `Timeline` and `Entity` go to a crate of their own, linked by every image, or are named as C3's residue linked into `max`, and `max`'s 500 library lines are re-priced with them. 7088's C3 plant (`RunQueue`'s pick, weights, `carried_weight`, `plan_job_fold`, `avg_vruntime` absent from `max`) is unchanged.
+* **`Edf<Inner>`'s doors** (E.1-E.5, S.4's balance, steal, push, wake placement, `move_onto`, yield, `direct::hand_over`, `ipc_fastpath`) answered for each inner class. `edf_over=rr` and `rr` are `built = "no"` until their rows; every value is type-checked by `check` on each architecture it builds on (G.2). **`schedule=rr` as a top-level value is dropped**: no profile or row uses it, and `windows` reaches `rr` as its inner.
+* **G.3 for each new crate**: core in `certification-item.json` with `in_ring0_when`; pure as `sched-edf`, host tests and Miri; a requirement table before code, ids from the PO. `ferrix-sched`'s rename and the 700 lines from `sched/` are an extraction in `present` and `desktop`, so §3.1's rename list, bodies and coverage apply, and §3.0's A/B on `futex-thread-pingpong` and `test-game-rig`.
+* **K9 §1's charging is K7's.** A server's time for a client is charged by tickets; with K7 out of `fast` and `max` (D8), it is charged to the server's job there. Said here and owed in K9: TK.6's "temporal twin".
+
+One composition per image: `windows` links two classes (itself and `rr`), `edf` two (itself and its inner), so "one class" means one composition. **Count:** `max` links `class`, `windows` and `rr`, about 500 library lines before TR.9's timeline is placed, against ring 0's 6,276 of `sched/` today going to about 2,500: the budget's AArch64 `max` falls by about 220 against the first form. `fast` links `class`, `edf` and `fair`, about 3,400: its kernel falls by about 1,500 and its libraries rise by about 1,400, a wash in count A, but the policy is now a host-tested crate's and the core is what remains to argue. Rows: each class is held by today's scheduler checks run under each `schedule` value, and `desktop`'s `fair` by §3.0's A/B.
 
 ### 3.8 How much of `arch/` can leave
 
@@ -322,7 +400,7 @@ shallow on 2026-11-05 to `~/.local/share/ferrix/mk-tiny/ref/`.
 | Zircon | fuchsia 62795b11 | 295,226 `zircon/kernel` all architectures: `object` 34,317, `vm` 49,593, `arch` 44,178 (x86 21,655), `kernel` 31,157, `lib` 74,652, `dev` 26,187. **Now mostly Rust** | VMOs, VMARs, page faults, pager, evictor and compression in ring 0: `vm/`'s listing. K1's restricted mode is `kernel/restricted.rs` |
 | Hubris | 59c9a07 | 3,248 Rust, `sys/kern/src`, Arm M only | Static task table, no dynamic memory, 14 calls, read from `syscalls.rs`: no MMU, no SMP. Shows Rust does not force bulk; not the same job |
 | Redox | b030c6f | 34,827 Rust, all architectures | Schemes, including memory and processes, and `context` in ring 0, listing only |
-| Ferrix target | | 36,300 count A, 25,000 B | Zircon's object names, seL4's lack of VM policy, K1's restricted mode |
+| Ferrix target | | 37,952 count A, 25,765 B | Zircon's object names, seL4's lack of VM policy, K1's restricted mode |
 
 Nearest in spirit is seL4. Ferrix differs by: restricted mode (K1, K11) so a Linux call involves no IPC, SMP as the default, the barrier rules, audit,
 jobs and windows. Those are why 18,627 is a floor.
@@ -336,22 +414,22 @@ has a row per file, `budget.py`, and refuses a total that does not add up. Each 
 * **Compiled out**: in this shape, kept for `present`, `desktop` or another architecture. Since count A counts whole files, this needs a `#[path]` or a split, not a `cfg` inside a file (§1). It includes 2,325 lines (AArch64) and 2,456 (x86-64) already under a `cfg` today, most of it `panic/catalog.rs`: they fall only when the file is split.
 * **Deleted**: no profile uses it. Almost nothing qualifies: nearly every line is used by the hybrid, which stays.
 
-K4 and K7 are NOT YET, and the tables assume §3.2's assumptions. The whole of Cut 7 is NOT YET, and is re-priced as §3.6 says.
+K4 is out and K7 out with its replacement (D8). Cut 7 is §3.6's second form, reviewed OK IF TR.14-TR.18, and priced as it says. The scheduler is §3.7's crates. The seams of §3.1 are their own row.
 
 ### 4.1 AArch64 `max`, kernel crates
 
 | Module | Today | Target | Moved | Replaced | Compiled out | Deleted | New |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| `object` | 7,726 | 2,948 | 0 | 3,193 | 1,585 | 0 | 0 |
+| `object` | 7,726 | 2,768 | 0 | 2,818 | 2,140 | 0 | 0 |
 | `user` | 6,893 | 1,932 | 2,679 | 1,263 | 1,019 | 0 | 0 |
-| `sched` | 6,276 | 3,104 | 0 | 2,886 | 636 | 0 | 350 |
+| `sched` | 6,276 | 2,474 | 2,730 | 914 | 158 | 0 | 0 |
 | `arch` | 6,213 | 4,484 | 0 | 920 | 809 | 0 | 0 |
-| `syscall` | 5,634 | 2,650 | 892 | 1,485 | 607 | 0 | 0 |
+| `syscall` | 5,634 | 2,600 | 910 | 1,507 | 617 | 0 | 0 |
 | `iommu` | 4,745 | 1,374 | 0 | 675 | 2,696 | 0 | 0 |
 | `panic` | 4,226 | 599 | 1,959 | 0 | 1,668 | 0 | 0 |
-| `discovery` | 3,187 | 1,091 | 1,846 | 148 | 102 | 0 | 0 |
+| `discovery` | 3,187 | 1,341 | 1,596 | 148 | 102 | 0 | 0 |
 | `mm` | 2,571 | 1,331 | 0 | 865 | 375 | 0 | 0 |
-| `device` | 2,298 | 800 | 1,198 | 300 | 0 | 0 | 0 |
+| `device` | 2,298 | 1,900 | 398 | 0 | 0 | 0 | 0 |
 | `main` | 1,596 | 700 | 0 | 403 | 493 | 0 | 0 |
 | `console` | 1,404 | 570 | 209 | 625 | 0 | 0 | 0 |
 | `smp` | 1,177 | 730 | 0 | 447 | 0 | 0 | 0 |
@@ -360,23 +438,24 @@ K4 and K7 are NOT YET, and the tables assume §3.2's assumptions. The whole of C
 | `boot_authority` | 512 | 250 | 0 | 262 | 0 | 0 | 0 |
 | `linuxd_start` | 483 | 100 | 383 | 0 | 0 | 0 | 0 |
 | `vmap` | 400 | 200 | 0 | 200 | 0 | 0 | 0 |
+| `(seams, D9)` | 0 | 300 | 0 | 0 | 0 | 0 | 300 |
 | 19 small files: first_rows, build_flags, irq, fallible, early, kernel_core, claim, timer, signal_frame, power, platform, random, backtrace, fastpath, mmio, kernel_item, hooks, checks, sync | 2,028 | 1,462 | 0 | 308 | 150 | 108 | 0 |
-| **Total** | **58,592** | **24,975** | 9,166 | 14,553 | 10,140 | 108 | 350 |
+| **Total** | **58,592** | **25,765** | 10,864 | 11,928 | 10,227 | 108 | 300 |
 
 ### 4.2 x86-64 `fast`, kernel crates
 
 | Module | Today | Target | Moved | Replaced | Compiled out | Deleted | New |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | `arch` | 11,779 | 7,680 | 1,020 | 1,486 | 1,593 | 0 | 0 |
-| `object` | 7,726 | 2,968 | 0 | 3,181 | 1,577 | 0 | 0 |
+| `object` | 7,726 | 2,788 | 0 | 2,806 | 2,132 | 0 | 0 |
 | `user` | 6,893 | 1,932 | 2,679 | 1,263 | 1,019 | 0 | 0 |
-| `sched` | 6,276 | 4,364 | 0 | 1,836 | 226 | 0 | 150 |
-| `syscall` | 5,634 | 2,850 | 822 | 1,395 | 567 | 0 | 0 |
+| `sched` | 6,276 | 2,754 | 2,500 | 864 | 158 | 0 | 0 |
+| `syscall` | 5,634 | 2,800 | 840 | 1,417 | 577 | 0 | 0 |
 | `iommu` | 4,745 | 3,258 | 0 | 605 | 882 | 0 | 0 |
 | `panic` | 4,226 | 599 | 1,959 | 0 | 1,668 | 0 | 0 |
-| `discovery` | 3,187 | 892 | 2,026 | 148 | 121 | 0 | 0 |
+| `discovery` | 3,187 | 1,142 | 1,776 | 148 | 121 | 0 | 0 |
 | `mm` | 2,571 | 1,706 | 0 | 865 | 0 | 0 | 0 |
-| `device` | 2,298 | 800 | 1,198 | 300 | 0 | 0 | 0 |
+| `device` | 2,298 | 1,900 | 398 | 0 | 0 | 0 | 0 |
 | `main` | 1,596 | 700 | 0 | 403 | 493 | 0 | 0 |
 | `console` | 1,404 | 570 | 209 | 625 | 0 | 0 | 0 |
 | `smp` | 1,177 | 730 | 0 | 447 | 0 | 0 | 0 |
@@ -385,17 +464,18 @@ K4 and K7 are NOT YET, and the tables assume §3.2's assumptions. The whole of C
 | `boot_authority` | 512 | 250 | 0 | 262 | 0 | 0 | 0 |
 | `linuxd_start` | 483 | 100 | 383 | 0 | 0 | 0 | 0 |
 | `vmap` | 400 | 200 | 0 | 200 | 0 | 0 | 0 |
+| `(seams, D9)` | 0 | 300 | 0 | 0 | 0 | 0 | 300 |
 | 19 small files: first_rows, build_flags, irq, fallible, early, kernel_core, claim, timer, signal_frame, power, platform, random, backtrace, fastpath, mmio, kernel_item, hooks, checks, sync | 2,028 | 1,462 | 0 | 308 | 150 | 108 | 0 |
-| **Total** | **64,158** | **31,711** | 10,296 | 13,897 | 8,296 | 108 | 150 |
+| **Total** | **64,158** | **31,521** | 11,764 | 12,272 | 8,793 | 108 | 300 |
 
-AArch64 `fast` is the first table plus `edf`'s scheduler and the two fast paths: about 26,500.
+AArch64 `fast` is the first table plus `edf`'s core and the two fast paths: about 26,200.
 
 **Where the moved lines go, and who gains an authority.** devmgr gains a bus handle, `partmgr` the start of two more processes, `lode` a ring and perhaps a grant. Nothing else does.
 
 | From | Lines | To | Under what authority | Is it in the certified item? |
 |---|---:|---|---|---|
 | `user/space.rs`'s regions, fork, remap, file, advise | 2,679 | **linuxd's existing by-position copy.** Native layout: `rt`, process builder | Its own Memory and space handles | **linuxd: no, and the claim went with it at R3**: a smaller claim, not a free gain, §6, D11. **`rt` and the builder: yes**, ledger 886's set |
-| `device.rs`, part of `discovery/pci.rs`, `discovery/tree.rs`'s bus half, native handlers | about 2,800, and `ferrix-pci`'s 1,200 | devmgr | A bus handle: mediated read, ask for a node; the kernel checks | No. NOT YET, §3.6 |
+| `device.rs`'s policy, by function: `describe` 62, `publish`'s matching half (about 40), the Intel GPU's `intel_gpu`, `allow_intel_gpu`, `is_intel_gpu`, `yield_intel_gpu` (38), G8's predicates `input_functions`, `reads_log`, `may_have_client_nodes` (27), `set_identity`, `identity_flags`, `flag_identity` (18), the framebuffer's lending group (`lendable`, `lend_framebuffer_here`, `_held`, `holds_lent_framebuffer`, `firmware_framebuffer`, `yield_framebuffer_holder`, `lend_target`: 122, if the display server takes it), the report impls and `occupants` (about 76); **none of `widen_lone_partial_bars`, `withhold_shared_pages`, `silence_found_masters`, the breach checks or their callers**; and `discovery/pci.rs`'s matching, native handlers | about 400 of `device.rs`, about 150 of `pci.rs`; **about 500 of `ferrix-pci`** | devmgr | A bus handle: the kernel's published table and `DEVICE_INFO`; **devmgr never reads ECAM** | No. §3.6, OK IF TR.14-TR.18 |
 | `discovery/devmgr.rs`, `linuxd_start.rs` | 1,493 | `partmgr` | Its boot table | **Yes**: about 800 lines into a certified item |
 | `panic/catalog.rs`'s prose | 1,959, with 1,668 already under a `cfg` | A host tool, by code | None | **Data, no logic. It flatters this table more than anything in it and takes no risk out** |
 | `mce/decode.rs`, CMCI's policy, x86-64 | 1,020 | `lode` | `CPU_SERVICE`'s ring, read-only | No claim on x86-64 at all |
@@ -409,14 +489,14 @@ Linked whole files, today, measured; "without checks" is x86-64's image with the
 |---|---:|---:|---:|---:|---:|---|---|
 | `fs/common/vfs` | 6,044 | 6,044 | 0 | 0 | 0 | Cut 1 | Compiled out: `Errno` from the status crate; a check that needs it moves or goes |
 | `proto/linux-abi` | 5,387 | 5,387 | 2,705 | 120 | 120 | Cut 1 | Split the crate: ring 0 wants statuses |
-| `platform/pci` | 2,700 | 2,700 | 2,700 | 1,500 | 1,500 | Cut 7 | §3.6: the review's estimate. Traversal to devmgr |
+| `platform/pci` | 2,700 | 2,700 | 2,700 | 2,200 | 2,200 | Cut 7 | §3.6's second form: the parser and the walk stay; matching leaves |
 | `platform/acpi` | 2,582 | 2,582 | 2,436 | 1,000 | 1,400 | Cut 7 | Tables a kernel needs, MCFG's reader kept. With a static board, 0 |
 | `platform/fdt` | 2,571 | 2,571 | 2,571 | 1,500 | 0 | Cuts 1, 7 | Out of x86-64; why `iommu.rs` and `device.rs` reach it there is to be read. With a static board, 0 |
 | `proto/bootinfo` | 2,568 | 2,568 | 2,568 | 700 | 700 | Cut 1 | `pstore.rs` 762 and `kaslr.rs` 350 with their users; layouts per width |
 | `proto/native-abi` | 2,238 | 2,238 | 2,063 | 1,100 | 1,100 | Cuts 2, 3, 4, 7 | Fewer calls |
 | `kernel/paging` | 2,176 | 2,176 | 1,887 | 1,300 | 1,300 | Cut 1 | Formats of one architecture |
 | `proto/blkring` | 2,038 | 146 | 146 | 0 | 0 | Cut 1 | Compiled out |
-| `kernel/sched`, `sched-edf` | 1,603 | 1,603 | 1,603 | 300 | 2,000 | Cut 5 | `windows` is its own crate; `edf` adds `sched-edf`'s 866 |
+| `kernel/sched` (to be `sched-fair`), `sched-edf`, new `sched-class`, `sched-rr`, `sched-windows` | 1,603 | 1,603 | 1,603 | 500 | 3,366 | Cut 5 | §3.7: `max` links `class` and `windows`; `fast` `class`, `edf` and `fair` with about 700 lines from `sched/`; `rr` in neither until a row |
 | `drivers/virtio` | 1,504 | 1,504 | 594 | 0 | 0 | Cut 1 | Compiled out |
 | `platform/elf` | 1,087 | 1,087 | 604 | 350 | 350 | Cut 8 | `partmgr`'s image alone |
 | `proto/devmgr-proto` | 1,028 | 1,028 | 565 | 0 | 0 | Cut 7 | devmgr |
@@ -430,34 +510,42 @@ Linked whole files, today, measured; "without checks" is x86-64's image with the
 | `kernel/heap`, `objects`, `kmem`, `fallible` | 1,617 | 1,617 | 1,395 | 1,150 | 1,150 | Cuts 4, 6 | |
 | `proto/partition-desc`, `audit`, `description` | 659 | 659 | 659 | 472 | 472 | Cuts 6, 8 | |
 | `crypto/sha256`, `kernel/crng` | 395 | 395 | 395 | 395 | 395 | | K14's digest, entropy |
-| **Total** | **40,931** | **39,039** | **27,140** | **11,287** | **11,887** | | |
+| **Total** | **40,931** | **39,039** | **27,140** | **12,187** | **13,953** | | |
 
 ### 4.4 The totals, the split, and the last 10k
 
 | | x86-64 `fast` | AArch64 `fast` | AArch64 `max` |
 |---|---:|---:|---:|
 | Today, count A + checks | 105,089 + 17,726 | 97,631 + 16,334 | 97,631 + 16,334 |
-| **Budget, count A + checks** | **43,598** + about 8,000 | **about 39,400** + 7,500 | **36,262** + about 7,000 |
-| Budget, count B, kernel crates | 31,711 | about 26,500 | 24,975 |
-| With `firmware=static` (D2): -3,384, FDT, ACPI, `tree.rs`, ITS, `discovery`'s rest | not applicable | not applicable | **32,878** |
-| Count C, a conservative formula, 0.30 × crates + 0.20 × libraries | | | 9,000 to 11,000. It gives 27,434 for today against 21,991 measured, so it is not a measured ratio |
+| **Budget, count A + checks** | **45,474** + about 8,000 | **about 41,300** + 7,500 | **37,952** + about 7,000 |
+| Budget, count B, kernel crates | 31,521 | about 26,200 | 25,765 |
+| With `firmware=static` (D2): -3,384, FDT, ACPI, `tree.rs`, ITS, `discovery`'s rest | not applicable | not applicable | **34,568** |
+| Count C, a conservative formula, 0.30 × crates + 0.20 × libraries | | | 9,500 to 11,500. It gives 27,434 for today against 21,991 measured, so it is not a measured ratio |
 
-**So the honest figure is about 33k to 36k, not 20k.**
+**Revised 2026-11-05, after D5, D7, D8 and D9**, the components adding to the tables' movement (TR.21 (b)): seams +300 (D9); the second form of Cut 7 about +2,050 (D7: `device.rs` keeps about 1,900, since only about 400 of it can be named as moving, `pci.rs` +250, `ferrix-pci` +700); K4 out about -230 (D8); `max`'s scheduler as crates about -430 (D5: `sched/` -630, libraries +200; the first form's 350 new lines are gone). **+1,690 in all: 37,952 against the 36,262 the customer accepted at "36kLoc".**
 
-**How much of the fall is real.** A falls by 61,369 on AArch64 `max`. Of that, on x86-64's reach figures: library files no product code reaches, 13,791; panic prose, 3,627; already under a `cfg`, 2,325. **So about 19,700, between a quarter and a third of the fall, removes no executed product code.** Only 4,389 library lines carry product code today. The kernel's budget fall is the part that changes what runs and what must be argued. Cut 1's "best value" is by count.
+**36k is assured by none of these readings.** The ±15% is the estimate's, not the target's, and §1's "expect the high side" puts AArch64 `max` at about 38k to 44k and the static board at about 35k to 40k. The central figure is over 36k by about 1,700; with D2's static board it is under, at 34,568, and still at risk on the high side.
 
-**What the last 10k would cost**, from 33k, AArch64 `max`, each by estimate:
+**Which reading the target is (TR.21 (d)).** The customer accepted 36k on this document's opt-level 1 figures. The ratchet reads release, about 11,400 lower on AArch64 `max` (86,209 on develop b50e88907 against 97,631 on the older tree), most of it library files LTO drops. **The target is read at opt-level 1**: the ratchet prints that reading beside its own, and "36k met" on the release reading alone is refused. The customer may restate the target in release terms instead. `ring0-budget.json`'s `why` says so, from Cut 0 (7448 CZ.5).
+
+**If D2 makes the N150 `max`'s platform**, the headline moves to x86-64: `max`'s values there, by this budget, about 42,100 (`fast`'s 45,474 less `edf` and `fair`'s 2,866 and the two fast paths). **Not computed: a static x86-64 board**, which would take ACPI's parser and, on an Intel board, AMD-Vi; so the figure may be high by perhaps 2,000 to 3,000. 36k on x86-64 `max` is then out of reach by roughly 3,000 to 6,000. **The count matters less than the claim (TR.22):** the N150 as `max`'s platform brings VT-d into the claim, reopening ledger 3906's G4 ("translation alone (c)", for AArch64), and x86-64's machine checks (AoU-36, H.FAIL.8, H.FAIL.11), speculation and `claim_architectures` with it. That is the customer's choice (`CLAIM.md`), and D2's question says so.
+
+**So the honest figure is about 35k to 38k on AArch64 `max` by its centre, higher on its high side; not 20k.**
+
+**How much of the fall is real.** A falls by 59,679 on AArch64 `max`. Of that, on x86-64's reach figures: library files no product code reaches, 13,791; panic prose, 3,627; already under a `cfg`, 2,325. **So about 19,700, between a quarter and a third of the fall, removes no executed product code.** Only 4,389 library lines carry product code today. The kernel's budget fall is the part that changes what runs and what must be argued. Cut 1's "best value" is by count.
+
+**What the last 10k would cost**, from 35k (with the static board), AArch64 `max`, each by estimate:
 
 | Cut | Lines, A | What it costs |
 |---|---:|---|
 | One processor per kernel image (`smp=one`). seL4's verified configurations are this | -2,000 | No SMP inside `max`: `smp.rs`, shootdown, wake placement, locks. Simpler, and `linuxd` on one core. Reverses nothing ruled, but a product decision |
-| Static devices only: no run-time bus, no devmgr, no dynamic node, no driver restart | -3,350 | `max` has a fixed device list, and the kept PCI parser (§3.6) goes. DEVMGR's T0 restart rows leave `max` |
+| Static devices only: no run-time bus, no devmgr, no dynamic node, no driver restart | -6,000 | `max` has a fixed device list, and the kept PCI parser (§3.6) goes. DEVMGR's T0 restart rows leave `max` |
 | `kernel_memory=none`, no allocator after boot | -900 | `max_plus`'s, not `max`'s by the customer's order; a rewrite of every `Vec` |
 | Native ABI under 40 calls: ports to notification words | -1,000 | Every driver's event loop rewritten; no row reason |
 | **No restricted mode in `max`: no Linux beside a safety partition** | -2,000 | §2's whole plan. A Linux partition would need a hypervisor or a second machine. I do not recommend it; it is listed because it is the honest size |
-| **All of those** | **-9,250** | **23,628**, and `max` is seL4's shape with audit and windows |
+| **All of those** | **-11,900** | **22,668**, and `max` is seL4's shape with audit and windows |
 
-I cannot name the last 3,600. IOMMU out (1,400) breaks G4's translation claim; audit out (500) breaks FAU. **20k by count A, for this kernel's job, is not a cost I can quote: it means not doing some of the job.** By count B, the static board, one processor and static devices alone reach about 20,200 (24,975, less 884, 2,000 and 1,850), since libraries do not count there: that is D3.
+I cannot name the last 2,700. IOMMU out (1,400) breaks G4's translation claim; audit out (500) breaks FAU. **20k by count A, for this kernel's job, is not a cost I can quote: it means not doing some of the job.** By count B, the static board, one processor and static devices alone reach about 21,000 (25,765, less 884, 2,000 and about 2,000), since libraries do not count there: that was D3, which the customer answered no.
 
 ## 5. The price: section 7's rows
 
@@ -518,7 +606,7 @@ I cannot name the last 3,600. IOMMU out (1,400) breaks G4's translation claim; a
 * **Moved into the certified set**: `partmgr` about 800 lines, `rt` and the process builder take native layout (both in ledger 886's set), with their MC/DC and FMEA. A fair "certified lines" figure adds about 1,000 to 2,000 (estimate) to the target. `btrfsd` is untouched.
 * **Panic prose is data** (§4.2). Taking it out changes the count by about 3,600 and the risk by nothing.
 * **Compiled-out lines still exist** for `desktop` and `present`; their evidence is theirs. Only `fast` and `max` benefit.
-* **The two-file rule (§3.1) means a defect in shared reasoning may be fixed twice**, a standing review cost.
+* **§3.1's 140 known duplicated lines, and up to 500 unknown**, are pairs: each pair is reviewed together whenever either changes.
 * **`core` and `alloc`** are half the text. Ferrocene covers `core`, not `alloc`, as `MICROKERNEL.md` §6.3 notes of `rt`. Under K16 ring 0 still uses `alloc` everywhere. This design does not address it.
 * **A favourable shape is not a certifiable kernel.** T3, in the review's words, "is a favourable shape for sc4, not a certifiable kernel by this line": sc4 stays refused, the review is internal (F-27), and the rewrite's evidence is all owed.
 
@@ -541,10 +629,10 @@ I cannot name the last 3,600. IOMMU out (1,400) breaks G4's translation claim; a
 | 6343, 5896 BA.3, AoU-45 | The kernel's filter; a parent-is-a-root-port read | Stand, §3.6 |
 | 7166 | `would_translate`, `flag_nodes` | At mint |
 | 3906 | G4, translation alone until ITS rows | Stands; why IOMMU cannot go |
-| 886 | The certified set; devmgr not in it; **`partmgr` supervises through K4** | The set stands, `rt` and the builder taking more. **The K4 wording is D8's** |
+| 886 | The certified set; devmgr not in it; **`partmgr` supervises through K4** | The set stands, `rt` and the builder taking more. **The K4 wording is rewritten to supervision by end notice, D8** |
 | 2858, 5856, 5968, 2538, 2773 | K3 (1)-(9), K13, K10 (design 2538, code 2773) | Scoped to `personality=kernel` by Cut 2, under §3.2's rule. K3's "one fault-forwarding mechanism" with `NVIDIA.md` §11.4 is `desktop`'s |
-| 2525, 6510 | K7 (design, landing) | **NOT YET**, §3.2 |
-| 2871 | K4, `SUPERVISE`, resume checked as sigreturn's | **NOT YET**, §3.2, D8 |
+| 2525, 6510 | K7 (design, landing) | Out of this shape only with the per-client bound, D8, §3.2 |
+| 2871 | K4, `SUPERVISE`, resume checked as sigreturn's | Out of this shape, D8: scoped *under `personality=kernel`* |
 | 2845, K14.6 (5745) | K2's clone, the F-41 lesson | `SPACE_CLONE` out; the lesson's check is in linuxd, and by R6 no requirement gains from that run |
 | 2550, 2461 M3, 5942 K16.1-K16.11 | K12, K16 | Stand and apply to ranges: §3.3. Slot chunks go; K16.9 gets simpler |
 | 5942 M.1, 5057 (2), 5140 (1) | SMBIOS type 16, L.mm.106, AoU-38 | The loader answers, or `max`'s board states ECC: scrubber compiled out, a new AoU |
@@ -565,16 +653,18 @@ down in the same commit. Sizes are estimates, AArch64 `max` / x86-64 `fast`. Poi
 |---|---|---:|---:|---:|---:|---|---|
 | **Cut 0** | The ratchet, below. No kernel line | 0 | 0 | 97,631 / 105,089 | 3 | **Yes**: holds the rest, whoever stops where | **May be built** |
 | **Cut 1** | What needs only a `cfg` or a split: IOMMU units by architecture (**the first kernel commit: 1,934 lines on AArch64**), `msrlog`, `inspect`, `framebuffer`, SMBIOS, `oom`, signal frames, vDSO, board glue; no-client crates, errno split | -7,027 / -5,591, of which about 2,400 already under a `cfg` | -17,745 / -22,208 | 72,859 / 77,290 | 10 | **Yes**, by count the most | No objection; each its own |
-| **Cut 2** | K2's clone, K3, K10, K13 and their handlers, `claim`, `hooks`, and by D8 K4 and K7 | -3,064 / -3,016 | -400 | 69,395 / 73,874 | 8 | **Yes**; the check lines (about 3,000) go too | OK IF TK.2, TK.5. K4, K7 NOT YET |
-| **Cut 3** | `kernel_vm=placed`: placed spaces, Memory, demand ranges, retirement path, `rt` and process builder map first. **The mechanism** | -6,606 / -6,700 | -975 | 61,814 / 66,199 | 30, low | **Yes**: no fault resolution in a safety partition is worth having at any count | OK IF TK.7, TK.8, TK.10. Region's half NOT YET |
-| **Cut 4** | Jobs and quotas by reservation; `Host` and `Bare` become one process. Needs `retyped` `built`: R.1-R.5 | -3,271 / -3,219 | -526 | 58,017 / 62,454 | 15 | Yes | Its own |
-| **Cut 5** | `windows`, `edf`: FLIP's own work, this only budgets it | -3,014 / -1,754 | -1,303 / +397 | 53,700 / 61,097 | FLIP's | Yes, it is owed anyway | 7011 |
-| **Cut 6** | Prose out (D4), `arch/` trims of §3.8, console, audit, smp, main's hand-off | -4,782 / -6,274 | -542 | 48,376 / 54,281 | 15 | Yes; **the softest, and partly data** | Its own |
-| **Cut 7** | `device_bus=devmgr`: traversal and matching leave. D7 | -4,611 / -4,651 | -5,219 / -3,748 | 38,546 / 45,882 | 25 | Yes, if its design holds | **NOT YET**, TK.11 |
-| **Cut 8** | `first_process=one`. D6 | -1,242 | -1,042 | **36,262 / 43,598** | 10 | Small; do last | OK IF TK.12 |
-| | **Total** | **-33,617 / -32,447** | | | **about 115, my guess** | M6's guess was 70, "re-sized after K16" | |
+| **Cut 2** | K2's clone, K3, K10, K13 and, by D8, K4 with their handlers; `claim`, `hooks`. K7 only once the per-client bound lands | -3,254 / -3,206 | -400 | 69,205 / 73,684 | 8 | **Yes**; the check lines (about 3,000) go too | OK IF TK.2, TK.5; K4's rewrite of §5 and 886 owed |
+| **Cut 3** | `kernel_vm=placed`: placed spaces, Memory, demand ranges, retirement path, `rt` and process builder map first, split by file (§3.1). **The mechanism** | -6,618 / -6,712 | -975 | 61,612 / 65,997 | 30, low | **Yes**: no fault resolution in a safety partition is worth having at any count | OK IF TK.7, TK.8, TK.10. Region's half NOT YET |
+| **Cut 4** | Jobs and quotas by reservation, behind `Charge`; `Host` and `Bare` become one process. Needs `retyped` `built`: R.1-R.5 | -3,281 / -3,229 | -526 | 57,805 / 62,242 | 15 | Yes | Its own |
+| **Cut 5** | The scheduler as crates behind one class (D5, §3.7): `sched-class`, `sched-fair`, `sched-edf` generic, `sched-windows`, `sched-rr`. `windows` itself is FLIP's work | -3,644 / -3,364 | -1,103 / +1,763 | 53,058 / 60,641 | 15, plus FLIP's | Yes, and it is owed anyway | 7011; its own |
+| **Cut 6** | Prose out (D4), `arch/` trims of §3.8, console, audit, smp, main's hand-off; §3.1's seams, +300 | -4,182 / -5,674 | -542 | 48,334 / 54,425 | 15 | Yes; **the softest, and partly data** | Its own |
+| **Cut 7** | `device_bus=devmgr`, §3.6's second form: matching, naming and DEVICES leave; the walk, the parser and the checks stay. D7 yes, and it covers this form: about 8,100 by A | -3,579 / -3,619 | -4,519 / -3,048 | 40,236 / 47,758 | 25 | Yes, if its design holds | OK IF TR.14-TR.18 (7383): its code may start once they are folded |
+| **Cut 8** | `first_process=one`. D6 yes | -1,242 | -1,042 | **37,952 / 45,474** | 10 | Small; do last | OK IF TK.12 |
+| | **Total** | **-32,827 / -32,637** | | | **about 130, my guess** | M6's guess was 70, "re-sized after K16" | |
 
-**The points are probably too low.** 250 to 350 new ids with checks and controls and 3,000 to 4,000 lines of checks are in that 115. K7 was 12 points for 7 ids: at that rate the ids alone are 400 to 600. I cannot say which is right; plan on several hundred, and Cut 3's 30 does not look it.
+**Each cut's rows that stand for the game (§3.0)**, on `--kernel-profile desktop`, beside its own: Cut 1 none, unless a split moves a body; Cut 2 `bench-ipc`; Cut 3 `mmap-munmap-4K`, `mmap-touch-munmap-4K`, `fork-exec-wait`, `pagecache-miss-4K`, `test-wine-sync`; Cut 4 `fork-exec-wait`, `futex-thread-pingpong`; **Cut 5 `futex-thread-pingpong`, `signal-self`, `test-game-rig`, `test-frames`, `test-unity`, `test-endfield-proton`**, since the switch is every frame's; Cut 6 `null-getppid`, `getppid-mean`, `signal-self`; Cut 7 `test-compositor`, `test-frames`, `test-unity`; Cut 8 none on `desktop`. Each with §3.0's A/B where a body moves.
+
+**The points are probably too low.** 250 to 350 new ids with checks and controls and 3,000 to 4,000 lines of checks are in that 130. K7 was 12 points for 7 ids: at that rate the ids alone are 400 to 600. I cannot say which is right; plan on several hundred, and Cut 3's 30 does not look it. Cut 5 gained 15 for the scheduler's crates (D5).
 
 **Where it sits: M6, re-sized.** Cuts 0 to 2 now, beside FLIP: they change nothing a row sees, though K4's and K7's parts wait. FLIP's three words: `fast` and `max` are refused until each value is `built`, and four new values join those refusals when they enter a profile. M5's flip comes with M7's evidence, so Cut 3 onward must enter the profiles **before M7's evidence is written**, and that will delay M7. Build each dark under `--set` meanwhile, since FLIP's B.3 rows should not chase a moving kernel. BACKLOG owes the window's W2 to W8 at the flip, so W7 gets built once before Cut 3 and again in it. If the customer stops after Cut 2: AArch64 count A 69k, count B 48.5k, a usable result. After Cut 4: 58k and 38.6k, with the mechanism. Cut 7 is most of what is left and the least sure.
 
@@ -618,17 +708,17 @@ About 300 lines of Python, one JSON, one gate row, 80 lines of xtask. No kernel 
 
 | # | Decision | Recommendation |
 |---|---|---|
-| D1 | **Answered, 2026-11-05. The customer: "ok then 36kLoc seems reasonable".** The target is **36k by count A on AArch64 `max`**. 25k by count B and 33k with a static board are figures beside it, not further decisions: D2 to D11 stay open. The question as put: **what "20k" counts**: count A, ring 0's product lines, AArch64 `max` as the headline, checks in the same row, B, C and bytes beside. The target is under 36k by A, under 33k with D2, under 25k by B. **By A that is a little over a third of today; by lines with code and by bytes about half; about a third of A's fall removes no executed product code.** ±15% is optimistic: 31k to 41k | **Yes**, and 20k is not the target |
-| D2 | `max` on a static board description, seL4's way: no FDT or ACPI parser in ring 0, a board is a build. -3,384. **The platform is not chosen**, so "33k" rests on this | **Yes, once the Lock-mode platform is chosen.** Ask then whether `max` needs a run-time bus at all. `fast` keeps tables |
-| D3 | Is about 20,200 by count B worth a one-processor `max`, with static devices? | **Not now.** Decide after Cut 4 on real figures. Nothing here prevents `smp=one` later |
-| D4 | The panic catalog's prose leaves ring 0 for a host tool (`OPEN-QUESTIONS.md` asks this too). A serial panic prints the code and the numbers. Data, not risk | **Yes** for `fast` and `max`. `desktop` keeps it |
-| D5 | Does `fast` keep EEVDF, or a plain round-robin under its CBS? About -1,500 lines. A real change for Linux workloads on `fast` | **Keep for now**; a row after Cut 5 decides |
-| D6 | The kernel starts `partmgr` alone, against `MICROKERNEL.md` §5's three. About -840 in ring 0, +800 in a certified item, so the gain is structure, not lines. `partmgr`'s death stops even a Linux-only `fast` machine | **Yes, last.** The first to drop if time is short |
-| D7 | PCI traversal and matching leave §2.1's list, into QM devmgr, a smaller parser and every check staying in ring 0. **Not asked until Cut 7's design returns: the review refused the first form** (TK.11) | Withheld. It is worth about 8,000 to 10,000 by count A |
-| D8 | K3, K10, K13 are compiled out of `fast` and `max`, though §3 lists them. **And K4, one of: whole; report and kill; or out, with §5 and ledger 886's wording rewritten to supervision by end notice and a fault meaning death.** **And K7: out only with a named replacement** (a per-client bound in `btrfsd`, or a checked rule that no shared server spans levels). No caller today means `btrfsd` and `netd` have that hole now | K3, K10, K13 **yes**. K4: **out, for a safety partition**, the consultant's view too. K7: **the bound in the server**, since the hole exists anyway. They stay in the hybrid |
-| D9 | §3.1's two implementations in one tree, for good, with fixes sometimes owed twice | **Accept**: it follows from `desktop` staying hybrid and one source |
-| D10 | This becomes M6: its points are probably several hundred against the old 70, §7. It delays M7. F1 and F2 start on what is left | **Yes**, if the customer wants the count: doing it after M7 would discard the evidence |
-| **D11** | **Restoration is given up.** Ledger 5714 (18) offered two ways before the flip: restore the kernel's charging and visible separation of Linux processes, or rewrite ST, ASR-1 and §2.3 and re-home F-35, F-37 and F-40. Cuts 2 and 3 take the rewrite, for `fast` and `max`, and K3 does not come back. The customer's "linuxd arena yes" of 2026-11-04 took the shape, not this | **Yes**: it is the shape already running, and the larger part of what makes ring 0 small. But it is a smaller promise, and it should be said as one |
+| D1 | **Answered, 2026-11-05. The customer: "ok then 36kLoc seems reasonable".** The target is **36k by count A on AArch64 `max`, read at opt-level 1**, as the figures it was accepted on (TR.21 (d)); the ratchet's release reading is printed beside and never shown as "met". 25k by count B and 33k with a static board are figures beside it, not further decisions: D2 to D11 stay open. The question as put: **what "20k" counts**: count A, ring 0's product lines, AArch64 `max` as the headline, checks in the same row, B, C and bytes beside. The target is under 36k by A, under 33k with D2, under 25k by B. **By A that is a little over a third of today; by lines with code and by bytes about half; about a third of A's fall removes no executed product code.** ±15% is optimistic: 31k to 41k | **Yes**, and 20k is not the target |
+| D2 | **Open: the customer, 2026-11-05, "will do at the weekend on the n150".** The N150 is x86-64 while `max` claims AArch64: whether it is a test bench, so D2 stays AArch64's, or `max`'s platform, which changes the claimed architecture and moves §4.4's headline to about 41,500, is the coordinator's to ask then, with what it brings: VT-d into the claim, ledger 3906's G4 reopened, x86-64's machine checks and speculation (TR.22). The question as put: `max` on a static board description, seL4's way: no FDT or ACPI parser in ring 0, a board is a build. -3,384. **The platform is not chosen**, so "33k" rests on this | **Yes, once the Lock-mode platform is chosen.** Ask then whether `max` needs a run-time bus at all. `fast` keeps tables |
+| D3 | **Answered, 2026-11-05: "no we said 36kLoc is fine".** No one-processor `max`. The question as put: Is about 20,200 (now about 21,000) by count B worth a one-processor `max`, with static devices? | **Not now.** Decide after Cut 4 on real figures. Nothing here prevents `smp=one` later |
+| D4 | **Answered, 2026-11-05: "yes".** The question as put: The panic catalog's prose leaves ring 0 for a host tool (`OPEN-QUESTIONS.md` asks this too). A serial panic prints the code and the numbers. Data, not risk | **Yes** for `fast` and `max`. `desktop` keeps it |
+| D5 | **Answered, 2026-11-05: "make it a fixed build time configurable and the scheduler become crates".** §3.7. The question as put: Does `fast` keep EEVDF, or a plain round-robin under its CBS? About -1,500 lines. A real change for Linux workloads on `fast` | **Keep for now**; a row after Cut 5 decides |
+| D6 | **Answered, 2026-11-05: "yes".** The question as put: The kernel starts `partmgr` alone, against `MICROKERNEL.md` §5's three. About -840 in ring 0, +800 in a certified item, so the gain is structure, not lines. `partmgr`'s death stops even a Linux-only `fast` machine | **Yes, last.** The first to drop if time is short |
+| D7 | **Answered, 2026-11-05: "yes".** The first form was refused (TK.11); the yes covers §3.6's second form, reviewed OK IF TR.14-TR.18 (7383): **traversal stays in ring 0**, matching, naming and DEVICES leave, about 8,100 by A. The hybrid's `devmgr.rs` into `ferrix-devmgr-proto` is an extraction under §3.1's rules | Done |
+| D8 | **Answered, 2026-11-05: "go with the recommendation"**: K3, K10, K13 out; K4 out, §5 and ledger 886 rewritten to supervision by end notice and a fault meaning death; K7 out only with a per-client bound in the server. §3.2. The question as put: K3, K10, K13 are compiled out of `fast` and `max`, though §3 lists them. **And K4, one of: whole; report and kill; or out, with §5 and ledger 886's wording rewritten to supervision by end notice and a fault meaning death.** **And K7: out only with a named replacement** (a per-client bound in `btrfsd`, or a checked rule that no shared server spans levels). No caller today means `btrfsd` and `netd` have that hole now | K3, K10, K13 **yes**. K4: **out, for a safety partition**, the consultant's view too. K7: **the bound in the server**, since the hole exists anyway. They stay in the hybrid |
+| D9 | **Answered, 2026-11-05: "not great  find alternatives like compile time traits or something which keeps duplicated code to the absolute minimum".** §3.1 is redone: one implementation split by file, traits at the seams, about 140 lines known duplicated, under 700. The question as put: §3.1's two implementations in one tree, for good, with fixes sometimes owed twice | **Accept**: it follows from `desktop` staying hybrid and one source |
+| D10 | **Answered, 2026-11-05: "D10: yes".** The cuts follow, in this document's order, once its revised design is reviewed and Cut 0 has landed. The question as put: This becomes M6: its points are probably several hundred against the old 70, §7. It delays M7. F1 and F2 start on what is left | **Yes**, if the customer wants the count: doing it after M7 would discard the evidence |
+| **D11** | **Answered, 2026-11-05: "D11: yes, but try to keep the performance on the desktop build the same as it is now, i still want to play endfield with decent performance".** The rewrite applies to `fast` and `max` alone; `desktop` keeps the kernel's own per-process separation and charging and today's speed, by §3.0's rule over every cut. The question as put: **Restoration is given up.** Ledger 5714 (18) offered two ways before the flip: restore the kernel's charging and visible separation of Linux processes, or rewrite ST, ASR-1 and §2.3 and re-home F-35, F-37 and F-40. Cuts 2 and 3 take the rewrite, for `fast` and `max`, and K3 does not come back. The customer's "linuxd arena yes" of 2026-11-04 took the shape, not this | **Yes**: it is the shape already running, and the larger part of what makes ring 0 small. But it is a smaller promise, and it should be said as one |
 
 ## 9. What I did not verify
 
@@ -664,9 +754,23 @@ About 300 lines of Python, one JSON, one gate row, 80 lines of xtask. No kernel 
 
 **Cut 0's diff check, 2026-11-05: OK IF CZ.1-CZ.6 (ledger 7448)**, internal review, not independent verification (F-27): one JSON version (CZ.1), the rebase onto b50e88907 with its conflict kept both ways and `arch/fast_check.rs` listed (CZ.2), a shrunk measure counted as a rise (CZ.3), the landing hash's rows and three controls (CZ.4), the target's reading in the JSON and BACKLOG (CZ.5), these records (CZ.6).
 
+**Second review, 2026-11-05: OK IF TR.1-TR.22 (ledger 7383), as a design; nothing past Cut 0 may start on that line.** Internal review, not independent verification (F-27).
+
+| Part | Verdict | Status here |
+|---|---|---|
+| §3.1 (D9) | OK IF TR.1-TR.6: the shape right, its check not sound as first stated | Folded: mangling pinned, rename list, bodies decide, no "byte for byte", panic locations, coverage |
+| §3.7 (D5) | OK IF TR.7-TR.13 | Folded as owed before code: the G.1 table, the lock bound, the timeline, `windows` over `rr`, `Edf<Inner>`'s doors, G.3, K9 §1 |
+| §3.6 (D7) | OK IF TR.14-TR.18; meets TK.11 in substance; Cut 7's code may start once folded | Folded: the walk's writes, after the walk, the table, five controls owed, first-form text rewritten, `device.rs` named by function and re-priced |
+| D8 | TK.6 discharged as design; OK IF TR.19, TR.20 | Folded in §3.2 |
+| §4, §7 | OK IF TR.21, TR.22 | Folded: no band wording, components add, stale figures fixed, the target read at opt-level 1, the N150's claim consequences |
+| D10, D11 | Answered after the review | §3.0's rule over every cut is new since 7383 and is in the third review |
+
 ## Where it stands
 
 2026-11-05: design on `feature/mk-tiny-design`, unlanded. No flag, id or kernel code exists.
 
 * **D1 answered, 2026-11-05**: "ok then 36kLoc seems reasonable" (the customer, relayed by the coordinator). 36k by count A on AArch64 `max` is the target. D2 to D11 are open; D7 is held back until its design returns. Nothing past Cut 0 is started.
-* **Cut 0 built and diff-checked, OK IF CZ.1-CZ.6 (ledger 7448), folded**: `cargo xtask test-ring0-budget`, §7, on 020c78f96 with this section after it. It holds the landing base's measured figures and claims nothing about the target.
+* **Cut 0 built and diff-checked, OK IF CZ.1-CZ.6 (ledger 7448), folded and confirmed met on 3eb530dba (ledger 7500)**: `cargo xtask test-ring0-budget`, §7, on 020c78f96 with this section after it. It holds the landing base's measured figures and claims nothing about the target.
+* **D2 to D9 answered or put off, 2026-11-05** (the customer, relayed by the coordinator), in §8 word for word: D2 at the weekend on the N150; D3 no; D4 yes; D5 the scheduler as build-time crates; D6 yes; D7 yes, with §3.6's second form for review; D8 the recommendation; D9 one implementation with compile-time seams. Nothing past Cut 0 is started.
+* **D10 and D11 answered, 2026-11-05**: "D10: yes"; "D11: yes, but try to keep the performance on the desktop build the same as it is now, i still want to play endfield with decent performance". §3.0 makes the second a rule over every cut.
+* **Revised for D5, D7, D8, D9 and D11** (§3.0, §3.1, §3.2, §3.6, §3.7, §4, §7), reviewed OK IF TR.1-TR.22 (ledger 7383) and folded: AArch64 `max` by the budget **37,952**, over the accepted 36k by about 1,700, **34,568 with D2's static board**, and 36k assured by neither. On x86-64, if the N150 becomes `max`'s, about 42,100, not computed with a static board.
