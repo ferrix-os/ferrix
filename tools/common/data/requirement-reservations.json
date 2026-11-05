@@ -25,8 +25,8 @@
         "H.SCHED.26-27",
         "L.sched.153-170"
       ],
-      "owner": "mk-restricted",
-      "branch": "feature/mk-restricted",
+      "owner": "mk-flip",
+      "branch": "feature/mk-flip",
       "date": "2026-11-04",
       "purpose": "K17's one high-level requirement, past the block allotted (consultant 6222 refused folding K11's to free one); K9's charge and windows, whose ids are the scheduler's and not L.user or L.trap (consultant 6208 (10))."
     },
@@ -97,6 +97,13 @@
       "branch": "lockup",
       "date": "2026-10-21",
       "purpose": "POSTMORTEM.md section 6 (S4): a processor that takes no interrupt for 10 s ends in a failure report (the lockup detector, stop code 7); an armed TCO watchdog resets a machine the kernel stopped feeding, and the next loader says so"
+    },
+    {
+      "ids": ["H.SCHED.28-31", "L.sched.179-199"],
+      "owner": "mk-flip",
+      "branch": "feature/mk-flip",
+      "date": "2026-11-05",
+      "purpose": "schedule=edf and schedule=windows, ledger 7011 S.1-S.8: partitioned EDF with a hard CBS and its admission, THREAD_RESERVE; native 0x10E1-0x10E4 and panic FX-0970-0971 with them. K9's H.SCHED.26-27 and L.sched.153-170 pass from the finished mk-restricted to mk-flip for windows, with FX-0927."
     },
     {
       "ids": ["H.FAIL.15", "L.aarch64.91-92", "L.armv7a.30-31", "L.sched.171-178"],
