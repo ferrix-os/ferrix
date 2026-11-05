@@ -38,7 +38,8 @@ const STEPS: &[&str] = &[
 pub(crate) fn run(args: &Args) -> Result<()> {
     for arch in args.arches()? {
         let log = paths::build_dir(arch).join("serial.log");
-        let program = build_test("container", arch, None, false)?;
+        let fixed = crate::flags::this_run()?.value("runtime_settings") == Some("fixed");
+        let program = build_test("container", arch, fixed.then_some("fixed-settings"), false)?;
         let lines = boot(arch, &program, args)?;
         let mut remaining = lines.iter();
         for want in STEPS {

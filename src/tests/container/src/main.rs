@@ -435,7 +435,14 @@ fn pid_one(outside: &[String], host: &str) -> ! {
     }
     let name = b"container";
     // SAFETY: `name` is valid for its length.
-    if unsafe { libc::sethostname(name.as_ptr().cast(), name.len()) } != 0 || hostname() == host {
+    let set = unsafe { libc::sethostname(name.as_ptr().cast(), name.len()) };
+    // A build with no setters refuses every namespace's too (`runtime_settings=fixed`,
+    // docs/BUILD-FLAGS.md), and the row holds the refusal.
+    if cfg!(feature = "fixed-settings") {
+        if set == 0 || hostname() != host {
+            fail("a build with no setters let root in its UTS namespace set its host name");
+        }
+    } else if set != 0 || hostname() == host {
         fail("root in its own UTS namespace could not set its host name");
     }
     step("ids");

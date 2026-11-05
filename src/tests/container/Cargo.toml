@@ -17,6 +17,10 @@ publish = false
 name = "container-test"
 path = "src/main.rs"
 
+[features]
+# `runtime_settings=fixed`: sethostname is refused, by the build.
+fixed-settings = []
+
 [dependencies]
 libc = "0.2"
 

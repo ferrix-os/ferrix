@@ -490,6 +490,42 @@ dmesg -C
 exit 6
 "#;
 
+/// [`DMESG_SCRIPT`] in a build with no setter: `-C` is refused and the log kept.
+const DMESG_FIXED_SCRIPT: &str = r#"[ "$(readlink /bin/dmesg)" = "" ] || exit 1
+echo "<13>dmesg row: from kmsg" > /dev/kmsg || exit 2
+head -n1 /dev/kmsg | grep -qE "^[0-9]+,[0-9]+,[0-9]+,-;" && echo "kmsg: record format"
+dmesg | grep -qE "^\[ *[0-9]+\.[0-9]{6}\] dmesg row: from kmsg$" && echo "dmesg: stamped"
+dmesg -x | grep "dmesg row: from kmsg" | grep -q "^user  :notice: \[" && echo "dmesg -x: user notice"
+dmesg -r | grep -qE "^<13>\[ *[0-9]+\.[0-9]{6}\] dmesg row: from kmsg$" && echo "dmesg -r: raw"
+dmesg -k | grep -q "dmesg row" || echo "dmesg -k: kernel only"
+dmesg -l notice | grep -q "dmesg row: from kmsg" && echo "dmesg -l: level"
+dmesg -T | grep "dmesg row" | grep -qE "^\[[A-Z][a-z]{2} [A-Z][a-z]{2} [ 0-9][0-9] [0-9:]{8} [0-9]{4}\] " && echo "dmesg -T: wall clock"
+dmesg -S | grep -q "dmesg row: from kmsg" && echo "dmesg -S: through syslog"
+/bin/busybox dmesg | grep -qE "^\[ *[0-9]+\.[0-9]+\] dmesg row: from kmsg" && echo "busybox dmesg: stamped"
+timeout 10 dmesg -w > /tmp/follow &
+i=0
+until grep -q "dmesg row: from kmsg" /tmp/follow; do
+  i=$((i+1)); [ $i -gt 100 ] && exit 3; usleep 50000
+done
+echo "<14>dmesg row: followed" > /dev/kmsg || exit 4
+i=0
+until grep -q "dmesg row: followed" /tmp/follow; do
+  i=$((i+1)); [ $i -gt 100 ] && exit 5; usleep 50000
+done
+echo "dmesg -w: followed"
+dmesg -C 2>/dev/null || { dmesg | grep -q "dmesg row" && echo "dmesg -C: refused"; }
+i=0
+while [ $i -lt 1600 ]; do
+  echo "<6>dmesg flood $i: a chatty driver's line, long enough that 1600 of them overrun the log" > /dev/kmsg
+  i=$((i+1))
+done
+dmesg | head -n1 | grep -qE "^\[ *[0-9]+\.[0-9]{6}\] \*\* [0-9]+ printk messages dropped \*\*$" && echo "dmesg: drops said"
+/bin/busybox dmesg | head -n1 | grep -qE "\*\* [0-9]+ printk messages dropped \*\*$" && echo "busybox dmesg: drops said"
+dmesg | grep -q "dmesg flood 1599:" && echo "dmesg: the flood's last line kept"
+dmesg -C 2>/dev/null
+exit 6
+"#;
+
 /// A copy of busybox runs `sleep` from `/tmp`; while it runs, a shell's
 /// `>` and busybox's `truncate` are refused with `ETXTBSY` and leave it
 /// whole, and once it has been killed and reaped the same `>` works. Then a
@@ -1400,6 +1436,8 @@ impl Utilities {
 /// utilities the image carries. [`APPLETS`] itself holds uutils' words, what
 /// an `x86_64` image prints.
 pub(crate) fn applets(utilities: Utilities) -> Vec<Command> {
+    let fixed = crate::flags::this_run()
+        .is_ok_and(|flags| flags.value("runtime_settings") == Some("fixed"));
     APPLETS
         .iter()
         .map(|command| match utilities {
@@ -1407,9 +1445,53 @@ pub(crate) fn applets(utilities: Utilities) -> Vec<Command> {
                 expect: PERMISSIONS_UNDER_BUSYBOX,
                 ..*command
             },
+            _ if fixed => fixed_settings(*command),
             _ => *command,
         })
         .collect()
+}
+
+/// [`HOSTNAME_SCRIPT`] in a build with no setter (`runtime_settings=fixed`, BUILD-FLAGS):
+/// the write is refused and the name stays, both required.
+const HOSTNAME_FIXED_SCRIPT: &str = r#"old=$(uname -n) || exit 1
+sysctl -w kernel.hostname=applets 2>/dev/null || echo "hostname: refused"
+[ "$(uname -n)" = "$old" ] && echo "hostname: unchanged"
+exit 4
+"#;
+
+/// The rows a fixed build answers otherwise (ledger 7011 LV.5): a setter is refused there, and
+/// the row holds the refusal.
+fn fixed_settings(command: Command) -> Command {
+    if command.argv.get(2) == Some(&HOSTNAME_SCRIPT) {
+        return Command {
+            argv: &["sh", "-c", HOSTNAME_FIXED_SCRIPT],
+            expect: Expect::Lines(&["hostname: refused", "hostname: unchanged"]),
+            ..command
+        };
+    }
+    if command.argv.get(2) == Some(&DMESG_SCRIPT) {
+        return Command {
+            argv: &["sh", "-c", DMESG_FIXED_SCRIPT],
+            expect: Expect::Lines(&[
+                "kmsg: record format",
+                "dmesg: stamped",
+                "dmesg -x: user notice",
+                "dmesg -r: raw",
+                "dmesg -k: kernel only",
+                "dmesg -l: level",
+                "dmesg -T: wall clock",
+                "dmesg -S: through syslog",
+                "busybox dmesg: stamped",
+                "dmesg -w: followed",
+                "dmesg -C: refused",
+                "dmesg: drops said",
+                "busybox dmesg: drops said",
+                "dmesg: the flood's last line kept",
+            ]),
+            ..command
+        };
+    }
+    command
 }
 
 /// The uutils family's rows, for an image that carries it, and none for one
