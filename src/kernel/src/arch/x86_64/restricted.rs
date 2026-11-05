@@ -457,23 +457,40 @@ fn both_modes_clean(state: &mut RestrictedState) -> bool {
     .unwrap_or(false)
 }
 
-/// The two bases, for the mode about to run. `FS` is written whenever normal mode's
-/// is not zero, as a program's null load can clear the hardware's with the record
-/// unchanged (K1 §7.1 (4)); `GS` is the shadow, under `swapgs`.
+/// The two bases at a fast exit. `FS` stays the program's while normal mode's is zero: a
+/// normal mode whose base is zero keeps nothing in `FS`, and it holds the program's
+/// registers anyway; a switch or a kick takes the mark down and goes general, whose
+/// restore writes the record (K1 §7.1 (4), ledger 6464). `GS` is the shadow, under `swapgs`.
 #[inline(always)]
 #[cfg_attr(
     not(ferrix_restricted_fastpath = "on"),
     allow(dead_code, reason = "K1's fast crossings alone ask it")
 )]
-fn write_bases(fs: u64, gs: u64, other_gs: u64, normal_fs: u64, other_fs: u64) {
-    if normal_fs != 0 || fs != other_fs {
-        // SAFETY: (SYSREG) a canonical base: checked as `RESTRICTED_ENTER` took the
-        // program's, and normal mode's is its own record's.
-        unsafe { super::cpu::write_msr(super::syscall::IA32_FS_BASE, fs) };
+fn write_exit_bases(normal_fs: u64, normal_gs: u64, program_gs: u64) {
+    if normal_fs != 0 {
+        // SAFETY: (SYSREG) normal mode's own record.
+        unsafe { super::cpu::write_msr(super::syscall::IA32_FS_BASE, normal_fs) };
     }
-    if gs != other_gs {
+    if normal_gs != program_gs {
         // SAFETY: (SYSREG) as above.
-        unsafe { super::cpu::write_msr(super::syscall::IA32_KERNEL_GS_BASE, gs) };
+        unsafe { super::cpu::write_msr(super::syscall::IA32_KERNEL_GS_BASE, normal_gs) };
+    }
+}
+
+/// The two bases at a fast re-entry, undoing [`write_exit_bases`].
+#[inline(always)]
+#[cfg_attr(
+    not(ferrix_restricted_fastpath = "on"),
+    allow(dead_code, reason = "K1's fast crossings alone ask it")
+)]
+fn write_entry_bases(normal_fs: u64, normal_gs: u64, program_fs: u64, program_gs: u64) {
+    if normal_fs != 0 {
+        // SAFETY: (SYSREG) a canonical base: checked as `RESTRICTED_ENTER` took it.
+        unsafe { super::cpu::write_msr(super::syscall::IA32_FS_BASE, program_fs) };
+    }
+    if program_gs != normal_gs {
+        // SAFETY: (SYSREG) as above.
+        unsafe { super::cpu::write_msr(super::syscall::IA32_KERNEL_GS_BASE, program_gs) };
     }
 }
 
@@ -512,11 +529,11 @@ pub(super) fn fast_exit_here(frame: &mut SyscallFrame) -> bool {
     );
     state.last = Reason::Syscall as u64;
     sched::fast::set_active(task, core::ptr::null_mut());
-    let (program_fs, program_gs) = (state.other.thread_pointer(), state.other.gs_base());
+    let program_gs = state.other.gs_base();
     // SAFETY: (CONTEXT) interrupts are masked; the task's own record, active again.
     let normal = unsafe { sched::fast::own_record(task) };
     let (normal_fs, normal_gs) = (normal.thread_pointer(), normal.gs_base());
-    write_bases(normal_fs, normal_gs, program_gs, normal_fs, program_fs);
+    write_exit_bases(normal_fs, normal_gs, program_gs);
     speculation::restricted_left_here(cpu.logical);
     super::cpu::set_task_switched();
     // SAFETY: a processor's logical number is below `MAX_CPUS`.
@@ -579,7 +596,6 @@ fn fast_resume(frame: &mut SyscallFrame) -> bool {
         unusual();
         return false;
     }
-    sched::vtime::entered();
     state.context.rax = frame.rdi;
     copy_kept(&mut state.normal, frame);
     // Up first, so that the next exit's barrier cannot be skipped (6093 (2)).
@@ -593,7 +609,7 @@ fn fast_resume(frame: &mut SyscallFrame) -> bool {
     let normal = unsafe { sched::fast::own_record(task) };
     let (normal_fs, normal_gs) = (normal.thread_pointer(), normal.gs_base());
     let (program_fs, program_gs) = (state.other.thread_pointer(), state.other.gs_base());
-    write_bases(program_fs, program_gs, normal_gs, normal_fs, normal_fs);
+    write_entry_bases(normal_fs, normal_gs, program_fs, program_gs);
     sched::fast::set_active(task, &raw mut state.other);
     sched::fast::set_mode(task, cpu, true);
     // SAFETY: a program's thread holds its space.
@@ -601,7 +617,6 @@ fn fast_resume(frame: &mut SyscallFrame) -> bool {
     // SAFETY: (TRANSLATE) as at the exit.
     unsafe { space.flip_root_on(true, cpu.logical) };
     store_syscall(frame, &state.context);
-    sched::vtime::leaving();
     true
 }
 

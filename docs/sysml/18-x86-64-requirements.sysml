@@ -4156,7 +4156,8 @@ package FerrixX8664Requirements {
             attribute :>> criterion = "The regions line under both settings of restricted_fastpath.";
             attribute :>> parent = "H.TRAP.22";
             attribute :>> unit = ("arch::x86_64::restricted::swap_user_state",
-                "arch::x86_64::restricted::write_bases",
+                "arch::x86_64::restricted::write_exit_bases",
+                "arch::x86_64::restricted::write_entry_bases",
                 "arch::x86_64::restricted::both_modes_clean",
                 "arch::x86_64::cpu::set_task_switched",
                 "arch::x86_64::cpu::clear_task_switched");
