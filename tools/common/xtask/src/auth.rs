@@ -750,7 +750,10 @@ fn change(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
         &format!("printf '%s\\n%s\\n' '{CHANGED}' '{CHANGED}' | passwd ferrix"),
         "pw",
     )?;
-    if answer(&changed, "passwd: ") != Some("passwd: the password for ferrix is changed") {
+    // The start of its line: init's journal may share the console line after it (fl-067).
+    if !answer(&changed, "passwd: ")
+        .is_some_and(|line| line.starts_with("passwd: the password for ferrix is changed"))
+    {
         failures.push(format!(
             "passwd ferrix did not change the password: {changed:?}"
         ));
