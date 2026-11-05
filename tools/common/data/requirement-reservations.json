@@ -106,6 +106,13 @@
       "purpose": "schedule=edf and schedule=windows, ledger 7011 S.1-S.8: partitioned EDF with a hard CBS and its admission, THREAD_RESERVE; native 0x10E1-0x10E4 and panic FX-0970-0971 with them. K9's H.SCHED.26-27 and L.sched.153-170 pass from the finished mk-restricted to mk-flip for windows, with FX-0927."
     },
     {
+      "ids": ["L.object.370-372"],
+      "owner": "mk-issues2",
+      "branch": "feature/mk-issues-5",
+      "date": "2026-11-05",
+      "purpose": "fl-096, ledger 7326: a kernel-heap charge refused at memory.max reclaims the full job's clean cache and tries once more; panic FX-0973 (a reclaim inside a reclaim) with it. Released in the commit that writes them"
+    },
+    {
       "ids": ["H.FAIL.14", "L.lockup.6-9"],
       "owner": "s4-lockup",
       "branch": "s4-lockup",
