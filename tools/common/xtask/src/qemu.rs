@@ -382,31 +382,64 @@ pub(crate) fn judge(
     }
     let own_model = std::env::var_os("FERRIX_X86_CPU").is_none();
     let qemu = machine == Machine::QemuVirt;
+    let user_kernel = crate::flags::this_run()?.value("personality") == Some("user");
+    let built = if user_kernel {
+        std::fs::read(kernel).map_err(|why| {
+            failed(format!(
+                "could not read {} for its texts: {why}",
+                kernel.display()
+            ))
+        })?
+    } else {
+        Vec::new()
+    };
+    let gate = |name: &str, problem: Option<String>| {
+        if user_kernel {
+            user_gate(arch, lines, &built, name, problem)
+        } else {
+            problem
+        }
+    };
+    let not_built: Vec<&str> = if user_kernel {
+        USER_NOT_BUILT
+            .iter()
+            .filter(|entry| entry.0.starts_with(REMAP_CHECK))
+            .filter(|entry| gate(entry.0, Some(String::new())).is_none())
+            .map(|entry| entry.2)
+            .collect()
+    } else {
+        Vec::new()
+    };
     // In the order each is reported: the first that fails is said.
     let problems = [
         fallback_problem(lines),
-        entropy_problem(lines, qemu),
+        user_kernel
+            .then(|| user_boot_problem(lines, crate::flags::this_run().ok()))
+            .flatten(),
+        entropy_problem(lines, qemu, user_kernel),
         devmgr_problem(lines),
         unisolated_problem(arch, lines),
         msi_problem(arch, lines),
         held_off_problem(arch, lines),
         (!args.amd_vi)
-            .then(|| cleaning_problem(arch, lines))
+            .then(|| gate("cleaning", cleaning_problem(arch, lines)))
             .flatten(),
         (!args.amd_vi)
-            .then(|| remap_problem(arch, own_model, lines))
+            .then(|| remap_problem(arch, own_model, lines, &not_built))
             .flatten(),
-        (!args.amd_vi).then(|| queue_problem(arch, lines)).flatten(),
+        (!args.amd_vi)
+            .then(|| gate("queue", queue_problem(arch, lines)))
+            .flatten(),
         args.amd_vi.then(|| amdvi_problem(lines)).flatten(),
-        config_problem(arch, lines),
+        gate("config", config_problem(arch, lines)),
         qemu.then(|| iommu_problem(lines)).flatten(),
         walk_problem(arch, args, lines),
         (qemu && !args.amd_vi)
-            .then(|| runs_problem(arch, lines))
+            .then(|| gate("runs", runs_problem(arch, lines)))
             .flatten(),
-        namespace_problem(lines),
-        xstate_problem(arch, own_model, lines),
-        fault_problem(arch, lines),
+        gate("namespace", namespace_problem(lines)),
+        gate("xstate", xstate_problem(arch, own_model, lines)),
+        fault_problem(arch, lines, user_kernel),
         qemu.then(|| crate::smbios::problem(arch, lines)).flatten(),
     ];
     if let Some(problem) = problems.into_iter().flatten().next() {
@@ -543,11 +576,24 @@ fn fallback_problem(lines: &[String]) -> Option<String> {
 /// tool boots has one it configured itself, so here a boot that read no
 /// entropy has lost DMA. A device may legitimately write fewer bytes than it
 /// was asked for, so any positive count passes.
+///
+/// A user kernel carries no virtio-rng probe (`docs/microkernel/M6.md`'s cut, ledger 6956 SH.2):
+/// its line must read zero, so that the probe coming back is a change someone sees. Its DMA
+/// is the disk's, in a driver in user space, which the rows that read a disk hold, and a device's
+/// write outside its domain on that shape is BACKLOG's SH.2 row.
 /// Verifies: `L.x86_64.113`
-fn entropy_problem(lines: &[String], by_msix: bool) -> Option<String> {
+fn entropy_problem(lines: &[String], by_msix: bool, user_kernel: bool) -> Option<String> {
     let Some(line) = lines.iter().find(|line| line.contains(ENTROPY_READ)) else {
         return Some("the kernel never reported reading entropy by DMA".to_owned());
     };
+    if user_kernel {
+        return (!count_before(line, ENTROPY_READ).is_some_and(|count| count == 0)).then(|| {
+            format!(
+                "a user kernel read entropy by DMA, a probe M6 took out of it: `{}`",
+                line.trim()
+            )
+        });
+    }
     if !count_before(line, ENTROPY_READ).is_some_and(|count| count > 0) {
         return Some(format!(
             "the kernel read no entropy by DMA: `{}`",
@@ -640,6 +686,155 @@ fn cleaning_problem(arch: Arch, lines: &[String]) -> Option<String> {
         return None;
     }
     Some("the kernel never said it cleaned its VT-d table writes to memory".to_owned())
+}
+
+/// How the checks [`REMAP_LINES`] holds are named in [`USER_NOT_BUILT`].
+const REMAP_CHECK: &str = "remap: ";
+
+/// The checks a `personality=user` kernel does not build, closed, per architecture: name,
+/// the text only that check prints, and why (ledger 7166 J.1). A check is NOT RUN only while its
+/// text is absent from the kernel's ELF: a text in the ELF and not on the serial is a check that
+/// stopped printing, and fails. A line that is there is judged as ever, so M7 building one needs
+/// no edit here.
+const USER_NOT_BUILT: &[(&str, &[Arch], &str, &str)] = &[
+    (
+        "cleaning",
+        &[Arch::X86_64],
+        CLEANED,
+        "iommu::domain_check needs the load's object::check::Side; M7",
+    ),
+    (
+        "remap: no route",
+        &[Arch::X86_64],
+        "is given no message route, so no vector",
+        "iommu::domain_check, as above",
+    ),
+    (
+        "remap: R10's mark",
+        &[Arch::X86_64],
+        "the isolated-interrupts mark set on",
+        "iommu::domain_check, as above",
+    ),
+    (
+        "remap: R5's byte",
+        &[Arch::X86_64],
+        "delivered a looped-back byte on vector",
+        "iommu::domain_check, as above",
+    ),
+    (
+        "remap: stray vectors",
+        &[Arch::X86_64],
+        "  0 deliveries of the check vector 0xfc outside its window, 0 on the console's retired vector",
+        "iommu::domain_check, as above",
+    ),
+    (
+        "remap: the masked byte",
+        &[Arch::X86_64],
+        "byte received while it was masked read by the service after its conversion",
+        "iommu::domain_check, as above",
+    ),
+    (
+        "remap: device_isolation",
+        &[Arch::X86_64],
+        "device_isolation asked of pci ",
+        "iommu::domain_check, as above",
+    ),
+    (
+        "queue",
+        &[Arch::X86_64],
+        QUEUED,
+        "iommu::domain_check, as above",
+    ),
+    (
+        "runs",
+        &[Arch::X86_64],
+        RUNS,
+        "iommu::blocks_check, in the load",
+    ),
+    (
+        "config",
+        &[Arch::X86_64, Arch::AArch64],
+        "reported whole by device_aperture",
+        "device::config_check, in the load",
+    ),
+    (
+        "namespace",
+        &[Arch::X86_64, Arch::AArch64],
+        "  mntns   ",
+        "stages_check runs a Linux program in the kernel",
+    ),
+    (
+        "xstate",
+        &[Arch::X86_64],
+        "  xstate   ",
+        "syscall::check, a signal frame of a Linux program in the kernel",
+    ),
+];
+
+/// Whether `haystack` holds `needle`.
+fn holds_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
+}
+
+/// Whether check `name`, of a user kernel, is NOT RUN, and otherwise what `problem` says.
+fn user_gate(
+    arch: Arch,
+    lines: &[String],
+    built: &[u8],
+    name: &str,
+    problem: Option<String>,
+) -> Option<String> {
+    let problem = problem?;
+    let Some((_, arches, text, why)) = USER_NOT_BUILT.iter().find(|entry| entry.0 == name) else {
+        return Some(problem);
+    };
+    if !arches.contains(&arch) || lines.iter().any(|line| line.contains(text)) {
+        return Some(problem);
+    }
+    if holds_bytes(built, text.as_bytes()) {
+        return Some(format!(
+            "the {name} check is built in this kernel and printed nothing: `{text}`"
+        ));
+    }
+    println!("  {arch}: test-boot: NOT RUN under personality=user: {name}: not built: {why}");
+    None
+}
+
+/// What a user kernel's boot must print (5714 (20)): the third text, its checks that are built,
+/// and its first processes. A flag names the value the line needs, or none for every boot.
+const USER_BOOT_LINES: &[(Option<(&str, &str)>, &str)] = &[
+    (None, "FERRIX-BOOT-UNCHECKED"),
+    (None, "  build    profile="),
+    (None, "  stage 5  "),
+    (None, "  window   an unmap's "),
+    (
+        Some(("schedule", "edf")),
+        "  edf      a budget's rules held",
+    ),
+    (None, "  generic  "),
+    (None, "  devices  "),
+    (None, "  reserved "),
+    (None, "  sealed   "),
+    (None, "  iommu    "),
+    (Some(("fs", "server")), "partmgr  btrfsd started"),
+    (None, "  lift-calls 19 refusals held"),
+    (None, LIFTED_BOOTED),
+];
+
+/// The first of [`USER_BOOT_LINES`] a boot lacks, or the reference's marker it printed.
+fn user_boot_problem(lines: &[String], flags: Option<&crate::flags::Resolved>) -> Option<String> {
+    if lines.iter().any(|line| line.contains(SUCCESS_MARKER)) {
+        return Some("a personality=user boot printed the reference's marker".to_owned());
+    }
+    USER_BOOT_LINES.iter().find_map(|(flag, text)| {
+        let wanted = flag.is_none_or(|(name, value)| {
+            flags.is_some_and(|flags| flags.value(name) == Some(value))
+        });
+        (wanted && !lines.iter().any(|line| line.contains(text)))
+            .then(|| format!("a user kernel's boot never printed `{text}`"))
+    })
 }
 
 /// What stage 10's IOMMU check prints when every VT-d invalidation of the
@@ -767,7 +962,12 @@ const PROVOKED_INTERRUPT: &str = " is made to send an interrupt its unit refuses
 /// exactly R1's and R2's 0x25 and R3's 0x26: any other reason fails by name.
 ///
 /// Verifies: L.iommu.50, L.iommu.54, `L.x86_64.129`, `L.x86_64.130`, `L.x86_64.131`
-fn remap_problem(arch: Arch, own_model: bool, lines: &[String]) -> Option<String> {
+fn remap_problem(
+    arch: Arch,
+    own_model: bool,
+    lines: &[String],
+    not_built: &[&str],
+) -> Option<String> {
     if arch != Arch::X86_64 {
         return None;
     }
@@ -785,6 +985,9 @@ fn remap_problem(arch: Arch, own_model: bool, lines: &[String]) -> Option<String
     // processor must say it runs in x2APIC mode instead.
     let x2apic = lines.iter().any(|line| line.contains(X2APIC_ALL));
     for (text, problem) in REMAP_LINES {
+        if not_built.contains(&text) {
+            continue;
+        }
         if !lines.iter().any(|line| line.contains(text)) {
             return Some(problem.to_owned());
         }
@@ -1104,11 +1307,14 @@ const DEVMGR_FAILED: &str = " failed";
 /// without `devmgr` prints that it was not started, which is not a failure.
 fn devmgr_problem(lines: &[String]) -> Option<String> {
     // The kernel's report, not its line for `ferrix.unisolated`, which
-    // comes first on a boot with the word.
-    let Some(line) = lines
-        .iter()
-        .find(|line| line.contains("  devmgr   ") && !line.contains("ferrix.unisolated"))
-    else {
+    // comes first on a boot with the word, nor a user kernel's two lines
+    // on starting it (`boot_authority::run`), which come before the count.
+    let Some(line) = lines.iter().find(|line| {
+        line.contains("  devmgr   ")
+            && !line.contains("ferrix.unisolated")
+            && !line.contains("kept back")
+            && !line.contains("started: its channels")
+    }) else {
         return Some("the kernel never reported on devmgr".to_owned());
     };
     if line.contains("not started") {
@@ -1198,9 +1404,25 @@ fn unisolated_problem(arch: Arch, lines: &[String]) -> Option<String> {
 /// coverage suite boots it for the Pixel 7's path, which has no ACPI.
 ///
 /// Verifies: L.iommu.7, L.iommu.10, L.iommu.35, L.iommu.36, L.iommu.46, L.iommu.58, H.DMA.2
-fn fault_problem(arch: Arch, lines: &[String]) -> Option<String> {
+fn fault_problem(arch: Arch, lines: &[String], user_kernel: bool) -> Option<String> {
     if arch == Arch::Armv7a {
         return None;
+    }
+    // The planted write of the virtio-rng probe, which M6 took out of a user kernel: its
+    // count reads zero, or the probe is back. A stray fault is `iommu_problem`'s, held as ever.
+    if user_kernel {
+        let line = lines.iter().find(|line| line.contains(FAULTED))?;
+        if count_before(line, FAULTED) == Some(0) {
+            println!(
+                "  {arch}: test-boot: NOT RUN under personality=user: the out-of-domain write: \
+                 the probe is M6's cut, BACKLOG's SH.2"
+            );
+            return None;
+        }
+        return Some(format!(
+            "a user kernel planted an out-of-domain write, a probe M6 took out of it: `{}`",
+            line.trim()
+        ));
     }
     if let Some(line) = lines.iter().find(|line| line.contains(DEVICE_TREE_HOSTS)) {
         println!(
@@ -5311,7 +5533,8 @@ mod tests {
         cleaning_problem, config_problem, devmgr_problem, entropy_problem, fallback_problem,
         fault_problem, held_off_problem, iommu_problem, msi_problem, namespace_problem,
         parse_qemu_version, power_off_problem, queue_problem, remap_problem, runs_problem,
-        send_lines, unisolated_problem, version_translates, walk_problem, xstate_problem,
+        send_lines, unisolated_problem, user_gate, version_translates, walk_problem,
+        xstate_problem,
     };
 
     /// A reference boot that fell back to polling its console, or took one
@@ -5633,25 +5856,99 @@ mod tests {
                 ),
                 "FERRIX-BOOT-OK stages 1-12",
             ]);
-            assert_eq!(entropy_problem(&boot, true), None, "{count} bytes");
+            assert_eq!(entropy_problem(&boot, true, false), None, "{count} bytes");
         }
+    }
+
+    #[test]
+    fn a_user_kernels_devmgr_is_judged_on_its_count_not_its_first_lines() {
+        let boot = lines(&[
+            "  devmgr   given 15 devices, 0 of a safety partition's kept back",
+            "  devmgr   started: its channels go to linuxd",
+            "  devmgr   4 started, 1 failed",
+        ]);
+        assert!(devmgr_problem(&boot).is_some());
+        let boot = lines(&[
+            "  devmgr   given 15 devices, 0 of a safety partition's kept back",
+            "  devmgr   started: its channels go to linuxd",
+            "  devmgr   4 started, 0 failed",
+        ]);
+        assert_eq!(devmgr_problem(&boot), None);
+    }
+
+    #[test]
+    fn a_user_kernel_reads_no_entropy_and_plants_no_write() {
+        let none = lines(&[
+            "  pci      0 entropy bytes read by DMA, 0 completions by MSI-X, 0 out-of-domain writes faulted",
+        ]);
+        assert_eq!(entropy_problem(&none, true, true), None);
+        assert_eq!(fault_problem(Arch::X86_64, &none, true), None);
+        let back = lines(&[
+            "  pci      64 entropy bytes read by DMA, 1 completions by MSI-X, 2 out-of-domain writes faulted",
+        ]);
+        assert!(entropy_problem(&back, true, true).is_some());
+        assert!(fault_problem(Arch::X86_64, &back, true).is_some());
+        assert!(entropy_problem(&lines(&[]), true, true).is_some());
+    }
+
+    #[test]
+    fn a_check_of_a_user_kernel_is_not_run_only_while_its_text_is_not_built() {
+        let wrong = || Some("wrong".to_owned());
+        let at = Arch::X86_64;
+        // Not built, no line: NOT RUN.
+        assert_eq!(user_gate(at, &lines(&[]), b"other", "queue", wrong()), None);
+        // Built and silent: fails, on its own words.
+        let built = format!("x{}y", super::QUEUED);
+        let said = user_gate(at, &lines(&[]), built.as_bytes(), "queue", wrong()).unwrap();
+        assert!(said.contains("printed nothing"), "{said}");
+        // Its line is there: judged as ever.
+        assert_eq!(
+            user_gate(at, &lines(&[super::QUEUED]), b"", "queue", wrong()),
+            wrong()
+        );
+        // On no list: fails.
+        assert_eq!(user_gate(at, &lines(&[]), b"", "another", wrong()), wrong());
+        // Another architecture's entry: fails.
+        assert_eq!(
+            user_gate(Arch::AArch64, &lines(&[]), b"", "queue", wrong()),
+            wrong()
+        );
+        // Nothing to excuse.
+        assert_eq!(user_gate(at, &lines(&[]), b"", "queue", None), None);
+    }
+
+    #[test]
+    fn a_user_kernels_boot_prints_its_lines_and_not_the_references() {
+        let all: Vec<&str> = super::USER_BOOT_LINES
+            .iter()
+            .map(|(_, text)| *text)
+            .collect();
+        assert_eq!(super::user_boot_problem(&lines(&all), None), None);
+        let short = &all[1..];
+        assert!(super::user_boot_problem(&lines(short), None).is_some());
+        let mut marked = all.clone();
+        marked.push(SUCCESS_MARKER);
+        assert!(super::user_boot_problem(&lines(&marked), None).is_some());
     }
 
     #[test]
     fn a_boot_that_read_none_or_never_said_fails() {
         let none = lines(&["  pci      1 virtio transports, 0 entropy bytes read by DMA"]);
-        assert!(entropy_problem(&none, true).is_some(), "zero bytes");
+        assert!(entropy_problem(&none, true, false).is_some(), "zero bytes");
         let silent = lines(&["FERRIX-BOOT-OK stages 1-12"]);
-        assert!(entropy_problem(&silent, true).is_some(), "no line at all");
+        assert!(
+            entropy_problem(&silent, true, false).is_some(),
+            "no line at all"
+        );
     }
 
     #[test]
     fn a_boot_whose_completion_was_polled_fails() {
         let polled = lines(&["  pci      64 entropy bytes read by DMA, 0 completions by MSI-X"]);
-        assert!(entropy_problem(&polled, true).is_some(), "no MSI-X");
+        assert!(entropy_problem(&polled, true, false).is_some(), "no MSI-X");
         let old = lines(&["  pci      64 entropy bytes read by DMA"]);
         assert!(
-            entropy_problem(&old, true).is_some(),
+            entropy_problem(&old, true, false).is_some(),
             "a kernel that does not say"
         );
     }
@@ -5659,9 +5956,16 @@ mod tests {
     #[test]
     fn a_polled_completion_passes_on_a_machine_without_msi() {
         let polled = lines(&["  pci      64 entropy bytes read by DMA, 0 completions by MSI-X"]);
-        assert_eq!(entropy_problem(&polled, false), None, "crosvm's INTx");
+        assert_eq!(
+            entropy_problem(&polled, false, false),
+            None,
+            "crosvm's INTx"
+        );
         let none = lines(&["  pci      0 entropy bytes read by DMA, 0 completions by MSI-X"]);
-        assert!(entropy_problem(&none, false).is_some(), "still no bytes");
+        assert!(
+            entropy_problem(&none, false, false).is_some(),
+            "still no bytes"
+        );
     }
 
     #[test]
@@ -5710,22 +6014,26 @@ mod tests {
                 "  iommu    stream 0x200 is made to send an interrupt its unit refuses with reason {reason}, on purpose"
             ));
         }
-        assert_eq!(remap_problem(Arch::X86_64, true, &whole), None);
-        assert_eq!(remap_problem(Arch::AArch64, true, &[]), None, "no VT-d");
+        assert_eq!(remap_problem(Arch::X86_64, true, &whole, &[]), None);
+        assert_eq!(
+            remap_problem(Arch::AArch64, true, &[], &[]),
+            None,
+            "no VT-d"
+        );
         // In x2APIC mode the x2APIC line stands in for R8's, and only then.
         let mut x2apic: Vec<String> = whole
             .iter()
             .filter(|line| !line.contains(R8_LINE))
             .cloned()
             .collect();
-        assert!(remap_problem(Arch::X86_64, true, &x2apic).is_some());
+        assert!(remap_problem(Arch::X86_64, true, &x2apic, &[]).is_some());
         x2apic.push(format!("    1.1 |   apic     4 {X2APIC_ALL}"));
-        assert_eq!(remap_problem(Arch::X86_64, true, &x2apic), None);
+        assert_eq!(remap_problem(Arch::X86_64, true, &x2apic, &[]), None);
         for missing in 0..whole.len() {
             let mut cut = whole.clone();
             let _ = cut.remove(missing);
             assert!(
-                remap_problem(Arch::X86_64, true, &cut).is_some(),
+                remap_problem(Arch::X86_64, true, &cut, &[]).is_some(),
                 "line {missing} missing"
             );
         }
@@ -5735,12 +6043,12 @@ mod tests {
                 .to_owned(),
         );
         assert!(
-            remap_problem(Arch::X86_64, true, &stray).is_some(),
+            remap_problem(Arch::X86_64, true, &stray, &[]).is_some(),
             "another reason"
         );
         let mut off = whole.clone();
         off.push("  iommu    vt-d unit 0xfed90000: remapping not enabled: x".to_owned());
-        assert!(remap_problem(Arch::X86_64, true, &off).is_some());
+        assert!(remap_problem(Arch::X86_64, true, &off, &[]).is_some());
 
         let fresh = |lines: &[String]| {
             lines
@@ -5760,7 +6068,7 @@ mod tests {
             let mut lines = fresh(&whole);
             lines.push(r8_line(processors, put));
             assert_eq!(
-                remap_problem(Arch::X86_64, own, &lines).is_some(),
+                remap_problem(Arch::X86_64, own, &lines, &[]).is_some(),
                 fails,
                 "{processors} processors, {put} put, own model {own}"
             );
@@ -5930,21 +6238,21 @@ mod tests {
         let faulted = lines(&[
             "  pci      2 functions, 64 entropy bytes read by DMA, 1 completions by MSI-X, 1 out-of-domain writes faulted",
         ]);
-        assert_eq!(fault_problem(Arch::X86_64, &faulted), None);
+        assert_eq!(fault_problem(Arch::X86_64, &faulted, false), None);
         let none = lines(&[
             "  pci      2 functions, 64 entropy bytes read by DMA, 1 completions by MSI-X, 0 out-of-domain writes faulted",
         ]);
         assert!(
-            fault_problem(Arch::AArch64, &none).is_some(),
+            fault_problem(Arch::AArch64, &none, false).is_some(),
             "nothing faulted"
         );
         let silent = lines(&["FERRIX-BOOT-OK stages 1-12"]);
         assert!(
-            fault_problem(Arch::X86_64, &silent).is_some(),
+            fault_problem(Arch::X86_64, &silent, false).is_some(),
             "no line at all"
         );
         assert_eq!(
-            fault_problem(Arch::Armv7a, &none),
+            fault_problem(Arch::Armv7a, &none, false),
             None,
             "ARMv7-A is not asked"
         );
@@ -5952,7 +6260,7 @@ mod tests {
             "  pci      5 functions from 1 device-tree hosts (0 descriptions refused), 1 completions by MSI-X, 0 out-of-domain writes faulted",
         ]);
         assert_eq!(
-            fault_problem(Arch::AArch64, &tree),
+            fault_problem(Arch::AArch64, &tree, false),
             None,
             "nor is AArch64's device-tree path"
         );
