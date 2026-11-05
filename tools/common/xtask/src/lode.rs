@@ -676,7 +676,10 @@ fn test_arch(arch: Arch, args: &Args) -> Result<()> {
     let kernel = cargo::build_kernel(arch, args.release)?;
     let natives = native::build(arch, args.release)?;
     let archive = initramfs::build(None, &natives, None, &files)?;
-    let options = format!("{} log_buf_len=1M\n", init::command_line().trim_end());
+    let options = format!(
+        "{} log_buf_len=1M\n",
+        init::command_line_of(arch).trim_end()
+    );
     let image = fat::write_image_with(arch, &loader, &kernel, &archive, Some(&options))?;
     println!("  {arch}: flooding the kernel log and killing lode in the middle");
     let lines = qemu::watch_lines(arch, &image, &kernel, args, DONE)?;

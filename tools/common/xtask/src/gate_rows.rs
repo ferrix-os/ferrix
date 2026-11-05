@@ -114,6 +114,8 @@ const GPU_RESTARTED: &[&str] = &[
 /// every host (`docs/BACKLOG.md`, *Name the accelerator*).
 const IMAGE_ROW: &[&str] = &[
     "check",
+    "check-stack-depth --arch all",
+    "check-stack-depth --arch x86_64 --kernel-profile desktop",
     "build --arch all --release",
     "test-boot --arch x86_64 --accel tcg",
     "test-boot --arch x86_64 --accel kvm",

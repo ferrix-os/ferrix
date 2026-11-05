@@ -205,7 +205,7 @@ fn test_arch(arch: Arch, args: &Args, receiver: &Path) -> Result<()> {
         &loader,
         &kernel,
         &archive,
-        Some(&init::command_line()),
+        Some(&init::command_line_of(arch)),
     )?;
     let mut booted = args.clone();
     booted.net = true;

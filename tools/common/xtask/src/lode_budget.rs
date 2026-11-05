@@ -204,7 +204,10 @@ fn test_arch(arch: Arch, args: &Args) -> Result<()> {
     let archive = initramfs::build(None, &natives, None, &files)?;
     // A kernel log of 1 MiB, as test-log's, so the fast load's bursts wait
     // in it for lode rather than overwrite one another.
-    let options = format!("{} log_buf_len=1M\n", init::command_line().trim_end());
+    let options = format!(
+        "{} log_buf_len=1M\n",
+        init::command_line_of(arch).trim_end()
+    );
     let image = fat::write_image_with(arch, &loader, &kernel, &archive, Some(&options))?;
     let mut booted = args.clone();
     let port = crate::display::free_port()?;

@@ -545,8 +545,20 @@ fn serve(
                 } else {
                     0
                 };
-                report.barriers == decided_here
-                    && report.issued == crate::trap::exit_barrier_offered()
+                let held = report.barriers == decided_here
+                    && report.issued == crate::trap::exit_barrier_offered();
+                if !held {
+                    // A shortfall is a missed barrier; over is read as a preempted trip
+                    // (`docs/backlog/flakes.md`, fl-093). Which it was must be on the line.
+                    crate::console::println!(
+                        "  restricted barrier count: {} decided, {} wanted, issued {}, offered {}",
+                        report.barriers,
+                        decided_here,
+                        report.issued,
+                        crate::trap::exit_barrier_offered()
+                    );
+                }
+                held
             }
             ASK_PIN => pin(side, word)?,
             ASK_ON_PROCESSOR => on_processor(side, word)?,

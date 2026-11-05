@@ -128,6 +128,27 @@ pub(crate) const TASKS: &[Task] = &[
         run: command,
     },
     Task {
+        name: "check-stack-depth",
+        help_at: 1061,
+        help: &[
+            "check-stack-depth",
+            "              a kernel stack's worst named paths against its pages, for --arch",
+        ],
+        run: |_, args| {
+            for arch in args.arches()? {
+                let kernel = cargo::build_kernel(arch, args.release)?;
+                let mut command = Command::new("python3");
+                let _ = command
+                    .current_dir(paths::workspace_root())
+                    .arg("tools/common/check/check-stack-depth.py")
+                    .arg(&kernel.elf)
+                    .arg(arch.to_string());
+                cargo::run(command, "tools/common/check/check-stack-depth.py")?;
+            }
+            Ok(())
+        },
+    },
+    Task {
         name: "native-clippy",
         help_at: 1060,
         help: &["native-clippy check's clippy of the native programs for --arch, as CI runs it"],

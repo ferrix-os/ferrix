@@ -587,7 +587,7 @@ pub(crate) fn command_line() -> String {
 /// [`command_line`] for an image of `arch`: on ARMv7-A with the word every image of
 /// it carries, or since the DMA gate devmgr starts no driver there and the root's disk
 /// never comes up (`crate::ARMV7A_DEVELOPMENT_WORD`, `docs/DMA-GATE.md`).
-fn command_line_of(arch: Arch) -> String {
+pub(crate) fn command_line_of(arch: Arch) -> String {
     if arch == Arch::Armv7a {
         format!(
             "{} {}\n",

@@ -84,6 +84,7 @@ output is used to *satisfy* an objective rather than to find defects.
 | `check-item-boundary.py`'s loader rule | K15: `Elf::parse` and `ferrix_elf::Elf` in kernel product files only where `loader_callers.elf_parse` names, `first_image::load` only where `first_image_load` does; `--self-test` plants one of each | T2 |
 | `check-complexity.py` | complexity, length and recursion in the item | T2 |
 | `kernel-interface.py` | the kernel crates' interface: every `pub` of a core or item file listed in `docs/generated/KERNEL-INTERFACE.md`, a `pub` no crate above names and a checks-only type reachable from product API refused, and the checks-only methods written into `.clippy.toml`'s `disallowed-methods` (ledger lines 1531 D5, D6, 1630 F2.2); self-tested on every run | T2 |
+| `check-stack-depth.py` | a kernel stack's named worst paths, frames from the disassembly, against `vmap::STACK_PAGES`; self-tested on every run; a lower bound (F-100, F-101). Control `mkm-s-big` | T2 |
 | `check-partitions.py` | the partitions' description as an image will carry it: parses the file itself, and refuses a digest that is not its image's (`BOOT-AUTHORITY.md`, BA.2); the kernel's boot refuses a bad one again. Control `bd12` (a wrong digest) | T2 |
 | `check-first-rows.py` | `first_rows.rs`'s const tables against `BOOT-AUTHORITY.md`'s table; self-tested on every run. Control `bd14` | T2 |
 | `check-traceability.py` | the item's requirements against their parents, units and checks; writes TRACEABILITY.md; self-tested on every run | **T2, and load-bearing** |

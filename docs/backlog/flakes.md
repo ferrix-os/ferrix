@@ -608,13 +608,13 @@ Done 2026-10-24 (kernel-flakes).
 
 | Item | Owner | Stage |
 |---|---|---|
-| **Open (2026-11-04, mk-merge, ledger 6869).** Restricted-check's case 82, the barrier count, stopped `test-boot --arch x86_64 --accel tcg --set ipc_fastpath=on` once, `logs/queue/mkm-b6r-4.log`; two passes after. A reading, not shown: `restricted_left` also runs at a switch, so a preempted trip adds a barrier and the check's `==` fails upward. The line prints neither figure. Owed, the PO's queue: K1's check prints both numbers. A next sighting with a shortfall is a missed barrier, a defect, for the consultant. | open |
+| **Open (2026-11-04, mk-merge, ledger 6869).** Restricted-check's case 82, the barrier count, stopped `test-boot --arch x86_64 --accel tcg --set ipc_fastpath=on` once, `logs/queue/mkm-b6r-4.log`; two passes after. A reading, not shown: `restricted_left` also runs at a switch, so a preempted trip adds a barrier and the check's `==` fails upward. The line prints neither figure. K1's check prints both numbers since 2026-11-05 (`restricted barrier count:`). A next sighting with a shortfall is a missed barrier, a defect, for the consultant. | open |
 
 ### fl-094
 
 | Item | Owner | Stage |
 |---|---|---|
-| **Open (2026-11-04, mk-merge, ledger 6869).** `test-ipc-equiv --arch x86_64 --accel tcg` on 42ea4a06c, BF6 before K12's stack fix and fire_timers' cut: the on image's boot panicked, `logs/queue/mkj-w5b.log`, its serial lost to the slot. Cause unknown; not seen on BF6's tree since. A next sighting goes to the consultant. Owed, the PO's queue: `gate.sh` keeps a FAILED run's serial. | open |
+| **Open (2026-11-04, mk-merge, ledger 6869).** `test-ipc-equiv --arch x86_64 --accel tcg` on 42ea4a06c, BF6 before K12's stack fix and fire_timers' cut: the on image's boot panicked, `logs/queue/mkj-w5b.log`, its serial lost to the slot. Cause unknown; not seen on BF6's tree since. A next sighting goes to the consultant. `gate.sh` keeps a FAILED run's last serial since 2026-11-05 (`logs/queue/<tag>.serial-<arch>.log`), not one per image: a row booting two images on one path keeps the last, so this case is not shown closed. | open |
 
 ### fl-095
 
@@ -645,3 +645,8 @@ landed code 4 pass, 1 stop, develop beside it 5 pass, 0 stop). **No clearance is
 is not proven and not excluded: the three checks run before any restricted code and the flag is off, so
 what would reach them is what reaches every image (RESTRICTED-EXIT.md). To be run on an idle host.
 
+### fl-097
+
+| Item | Owner | Stage |
+|---|---|---|
+| **Open (2026-11-05, mk-merge).** `test-boot --arch x86_64 --accel tcg`, `logs/queue/mkm-l-tcg.log` on f9268580f (Bare's harness), load 32: "never printed FERRIX-BOOT-OK within 120s", its last line stage 12's btrfs-rw at 119.91 s. Passed on rerun, `mkm-m2-tcg`, and the row before it, `mkm-i-tcg`, reached the harness at 42 s. Also `test-boot --arch aarch64`, `mkm-o-a64` on fbb645389, load 31: its serial's last line stage 12 at 115.22 s (`logs/queue/mkm-o-a64.serial-aarch64.log`); `mkm-o-a64b` passed. Boots' ends on AArch64 TCG, gate logs: before Bare's harness 41 to 56 s most often, 79 to 105 s on some, at load 8 to 36; with it 57, 87, 90 and 90 s at load 12 to 35; inside a boot the `bare` line itself took 2.5 s at load 12 (45.74 to 48.21), so the harness's own cases do not account for the rise and it is not read as the cause. Read as the wait outrun under load, not a hang. A next sighting below load 20 goes to the consultant. The wait is not raised without the PO. | mk-merge | 12 |
