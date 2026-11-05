@@ -1204,7 +1204,7 @@
     "timer.rs": {
       "ring": "core",
       "lines": [
-        329
+        340
       ]
     },
     "arch/speculation.rs": {
