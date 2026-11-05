@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "8089aa72d53d2671c5b470dd4191cf9770049c453fc20d87f72578e156944a5c",
+  "digest": "5cee8c8107c0b2a0934d250bb3a74a73a149fc8d456250af86109c89b3a57fb5",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -113,7 +113,7 @@
   ],
   "summary": {
     "packages": 167,
-    "elements": 10132,
+    "elements": 10137,
     "maturity": {
       "implemented": 295,
       "inProgress": 23,
@@ -45214,6 +45214,63 @@
               ]
             },
             {
+              "name": "aClockReadAnswersWhatEl0CannotAsk",
+              "qualifiedName": "FerrixObjectRequirements::SpacesByHandle::aClockReadAnswersWhatEl0CannotAsk",
+              "kind": "requirement",
+              "shortName": "L.object.315",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/14-object-requirements.sysml",
+                "line": 3801
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::SpacesByHandle::aClockReadAnswersWhatEl0CannotAsk",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"CLOCK_READ, under personality=user alone, shall answer 3 and 4 with the kernel's hwcaps for a program and 5 with the processor the caller was on, a stale hint by its return, and a question it does not know with INVALID_ARGS.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 3805
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::SpacesByHandle::aClockReadAnswersWhatEl0CannotAsk",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"lift/core/calls_check.rs: each question answered and the processor below the count, an unknown one refused, the hwcaps nonzero on AArch64, on x86-64 and AArch64. Controls: an unknown question answered, 5 past the last. In the baseline: its unit is the item's, its check the lift crate's, which the tag scan does not read (ledger 7126).\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 3810
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::SpacesByHandle::aClockReadAnswersWhatEl0CannotAsk",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.OBJ.30\")",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 3811
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::SpacesByHandle::aClockReadAnswersWhatEl0CannotAsk",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"syscall::native::lift::call\")",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 3812
+                  }
+                }
+              ]
+            },
+            {
               "name": "aFaultsNeighboursAreOnlyWhatIsResident",
               "qualifiedName": "FerrixObjectRequirements::SpacesByHandle::aFaultsNeighboursAreOnlyWhatIsResident",
               "kind": "requirement",
@@ -45221,7 +45278,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 3801
+                "line": 3814
               },
               "children": [
                 {
@@ -45232,7 +45289,7 @@
                   "value": "\"Under fault_ahead=on a fault shall bring in only pages the region's object already holds, or a run of fresh memory, each with no more than its own rights, under the space's lock; a neighbour's refusal shall not be the program's.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3804
+                    "line": 3817
                   }
                 },
                 {
@@ -45243,7 +45300,7 @@
                   "value": "\"test-threads' `fault-ahead` under personality=user (ledger 6537, A1-A7).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3806
+                    "line": 3819
                   }
                 },
                 {
@@ -45254,7 +45311,7 @@
                   "value": "(\"H.OBJ.30\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3807
+                    "line": 3820
                   }
                 },
                 {
@@ -45265,7 +45322,7 @@
                   "value": "(\"user::space::AddressSpace::fault_around\", \"user::space::AddressSpace::write_ahead\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3809
+                    "line": 3822
                   }
                 }
               ]
@@ -45278,7 +45335,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 3811
+                "line": 3824
               },
               "children": [
                 {
@@ -45289,7 +45346,7 @@
                   "value": "\"While a space handle names a process's space, raises_refused shall say so, and execve shall give it no ids for any set-id file; the count shall fall as handles close, and nothing but a process not yet started shall raise it.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3815
+                    "line": 3828
                   }
                 },
                 {
@@ -45300,7 +45357,7 @@
                   "value": "\"Stage 9's space line: a process with a handle kept is not raised and with it closed is; a fork made while one lived is raised, its space its own; a native child with a handle taken before its start is not, until the handle closes. Control: the test removed from ids_it_may_raise.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3820
+                    "line": 3833
                   }
                 },
                 {
@@ -45311,7 +45368,7 @@
                   "value": "(\"H.MEM.24\", \"H.MEM.25\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3821
+                    "line": 3834
                   }
                 },
                 {
@@ -45322,7 +45379,7 @@
                   "value": "(\"user::space::AddressSpace::raises_refused\", \"user::space::AddressSpace::handle_made\", \"user::space::AddressSpace::handle_gone\", \"object::space::SpaceRef::of\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3825
+                    "line": 3838
                   }
                 }
               ]
@@ -45335,7 +45392,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 3827
+                "line": 3840
               },
               "children": [
                 {
@@ -45346,7 +45403,7 @@
                   "value": "\"vmo_executable shall replace a VMO handle that carries MAP and READ with one that carries EXECUTE and not WRITE, closing the one it took, and change nothing when it refuses; vmo_create shall give no EXECUTE, and no duplicate shall add it.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3831
+                    "line": 3844
                   }
                 },
                 {
@@ -45357,7 +45414,7 @@
                   "value": "\"The replaced handle is BAD_HANDLE, the new one is refused vmo_write with ACCESS_DENIED and maps executable; a duplicate asking EXECUTE of a plain VMO handle is ACCESS_DENIED.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3834
+                    "line": 3847
                   }
                 },
                 {
@@ -45368,7 +45425,7 @@
                   "value": "\"H.MEM.24\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3835
+                    "line": 3848
                   }
                 },
                 {
@@ -45379,7 +45436,7 @@
                   "value": "\"syscall::native::vmo_executable\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3836
+                    "line": 3849
                   }
                 }
               ]
@@ -45393,7 +45450,7 @@
           "doc": "src/kernel/src/syscall/native.rs's pager calls, 0x1074 to 0x1078, and the page-request packet (docs/microkernel/K3.md section 4; the consultant's OK IF, ledger 2858).",
           "source": {
             "file": "docs/sysml/14-object-requirements.sysml",
-            "line": 3840
+            "line": 3853
           },
           "children": [
             {
@@ -45404,7 +45461,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 3845
+                "line": 3858
               },
               "children": [
                 {
@@ -45415,7 +45472,7 @@
                   "value": "\"pager_create shall take a port with WRITE and a bound read whole through a pointer, clamped to 1 ms and 30 s with 0 the maximum, refuse any option, charge one object and its heap to the caller's job, and give one handle with TRANSFER and PAGER and no DUPLICATE.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3850
+                    "line": 3863
                   }
                 },
                 {
@@ -45426,7 +45483,7 @@
                   "value": "\"Stage 9's pager check: an option and a VMO as the port are refused; a duplicate of the pager's handle is ACCESS_DENIED; a bound of 0 is 30 s, of 1 ns is 1 ms, of 5 ms is 5 ms.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3854
+                    "line": 3867
                   }
                 },
                 {
@@ -45437,7 +45494,7 @@
                   "value": "\"H.MEM.22\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3855
+                    "line": 3868
                   }
                 },
                 {
@@ -45448,7 +45505,7 @@
                   "value": "(\"syscall::native::pager_create\", \"object::pager::Pager::new\", \"syscall::native::read_words\", \"syscall::native::pager_in\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3857
+                    "line": 3870
                   }
                 }
               ]
@@ -45461,7 +45518,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 3859
+                "line": 3872
               },
               "children": [
                 {
@@ -45472,7 +45529,7 @@
                   "value": "\"pager_create_vmo shall need PAGER, read its key, size and options whole, refuse an unknown option or no pages, and make a VMO that is pager-backed and not anonymous for life, which is never pinned and never grows.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3863
+                    "line": 3876
                   }
                 },
                 {
@@ -45483,7 +45540,7 @@
                   "value": "\"Stage 9's pager check: an unknown option is refused; a supply naming another pager's VMO is refused, and the pager VMO is refused as an aux VMO.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3866
+                    "line": 3879
                   }
                 },
                 {
@@ -45494,7 +45551,7 @@
                   "value": "\"H.MEM.22\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3867
+                    "line": 3880
                   }
                 },
                 {
@@ -45505,7 +45562,7 @@
                   "value": "(\"syscall::native::pager_create_vmo\", \"object::pager::PagerCore::link\", \"user::vmo::Vmo::new_paged\", \"user::vmo::Vmo::grow_to\", \"syscall::native::unpaged_vmo_in\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3870
+                    "line": 3883
                   }
                 }
               ]
@@ -45518,7 +45575,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 3872
+                "line": 3885
               },
               "children": [
                 {
@@ -45529,7 +45586,7 @@
                   "value": "\"pager_supply shall need PAGER on the pager and READ and WRITE on the aux VMO, refuse with BAD_STATE a VMO not this pager's, an aux VMO that is not anonymous, an uncommitted or held aux page and a detached VMO, with INVALID_ARGS an unaligned or out-of-range range or an option, and change nothing when it refuses.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3878
+                    "line": 3891
                   }
                 },
                 {
@@ -45540,7 +45597,7 @@
                   "value": "\"Stage 9's pager check: nine refusals, each with its status, the pager VMO's page still absent and the aux page still in the aux VMO.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3881
+                    "line": 3894
                   }
                 },
                 {
@@ -45551,7 +45608,7 @@
                   "value": "\"H.MEM.22\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3882
+                    "line": 3895
                   }
                 },
                 {
@@ -45562,7 +45619,7 @@
                   "value": "(\"syscall::native::pager_supply\", \"syscall::native::pager_and_vmo\", \"syscall::native::page_range\", \"object::pager::PagerCore::serves\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3885
+                    "line": 3898
                   }
                 }
               ]
@@ -45575,7 +45632,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 3887
+                "line": 3900
               },
               "children": [
                 {
@@ -45586,7 +45643,7 @@
                   "value": "\"pager_op shall need PAGER and the VMO to be the pager's, refuse an unknown operation, a FAIL errno other than EIO or ENOSPC, a value or request id given to any other operation, and DIRTY over an absent page; pager_query_dirty shall report exactly the Dirty and awaiting-clean runs of its range, lowest first.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3893
+                    "line": 3906
                   }
                 },
                 {
@@ -45597,7 +45654,7 @@
                   "value": "\"Stage 9's pager check: an unknown operation, errno 7 and DIRTY of an absent page are refused; the query after a trap-dirty write shows that page alone as Dirty.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3896
+                    "line": 3909
                   }
                 },
                 {
@@ -45608,7 +45665,7 @@
                   "value": "\"H.MEM.23\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3897
+                    "line": 3910
                   }
                 },
                 {
@@ -45619,7 +45676,7 @@
                   "value": "(\"syscall::native::pager_op\", \"syscall::native::pager_query_dirty\", \"syscall::native::pager_call\", \"syscall::native::pager_fail\", \"syscall::native::pager_page_op\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3900
+                    "line": 3913
                   }
                 }
               ]
@@ -45632,7 +45689,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 3902
+                "line": 3915
               },
               "children": [
                 {
@@ -45643,7 +45700,7 @@
                   "value": "\"A page request's packet shall carry the VMO's key, kind PACKET_PAGE_REQUEST, its command in the low byte of its signals word and the run's length in pages above it, the run's first byte offset, and the request's id, never 0 and never reused.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3906
+                    "line": 3919
                   }
                 },
                 {
@@ -45654,7 +45711,7 @@
                   "value": "\"Stage 9's pager check: the read packet for a fault on page 2 of 8 says READ, 6 pages, offset 8192 and a nonzero id; a trap-dirty write's says DIRTY, 1 page.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3909
+                    "line": 3922
                   }
                 },
                 {
@@ -45665,7 +45722,7 @@
                   "value": "\"H.MEM.22\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3910
+                    "line": 3923
                   }
                 },
                 {
@@ -45676,7 +45733,7 @@
                   "value": "(\"object::pager::PagerLink::request\", \"object::pager::Command::number\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3912
+                    "line": 3925
                   }
                 }
               ]
@@ -45689,7 +45746,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 3914
+                "line": 3927
               },
               "children": [
                 {
@@ -45700,7 +45757,7 @@
                   "value": "\"vmo_map and space_map with MAP_NO_PAGER shall refuse a pager-backed VMO with WRONG_TYPE, and map any other VMO as without it.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3917
+                    "line": 3930
                   }
                 },
                 {
@@ -45711,7 +45768,7 @@
                   "value": "\"Stage 9's pager check: a pager VMO is refused WRONG_TYPE and an anonymous one mapped, both with MAP_NO_PAGER, by either call.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3920
+                    "line": 3933
                   }
                 },
                 {
@@ -45722,7 +45779,7 @@
                   "value": "\"H.MEM.22\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3921
+                    "line": 3934
                   }
                 },
                 {
@@ -45733,7 +45790,7 @@
                   "value": "(\"syscall::native::vmo_map\", \"syscall::native::space_map\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3922
+                    "line": 3935
                   }
                 }
               ]
@@ -45746,7 +45803,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 3924
+                "line": 3937
               },
               "children": [
                 {
@@ -45757,7 +45814,7 @@
                   "value": "\"The manager and each partition it starts shall start measured, in a sealed job, from a sealed image whose digest is on its record, before devmgr and linuxd.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3927
+                    "line": 3940
                   }
                 },
                 {
@@ -45768,7 +45825,7 @@
                   "value": "\"test-first-processes: its lines, in that order, and the manager's comparison of the record with the description.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3929
+                    "line": 3942
                   }
                 },
                 {
@@ -45779,7 +45836,7 @@
                   "value": "\"H.DEV.12\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3930
+                    "line": 3943
                   }
                 },
                 {
@@ -45790,7 +45847,7 @@
                   "value": "(\"boot_authority::run\", \"boot_authority::try_start_manager\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3931
+                    "line": 3944
                   }
                 }
               ]
@@ -45803,7 +45860,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 3933
+                "line": 3946
               },
               "children": [
                 {
@@ -45814,7 +45871,7 @@
                   "value": "\"Before each first process runs, the kernel shall hold what that process is about to hold against its role's const table, by kind, rights and number, from the objects themselves, none being the root job, and shall stop the boot on a miss.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3936
+                    "line": 3949
                   }
                 },
                 {
@@ -45825,7 +45882,7 @@
                   "value": "\"Every personality=user boot runs it; test-first-processes, and a control giving one handle more, which stops the boot; check-first-rows.py holds the tables to the design.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3938
+                    "line": 3951
                   }
                 },
                 {
@@ -45836,7 +45893,7 @@
                   "value": "\"H.DEV.13\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3939
+                    "line": 3952
                   }
                 },
                 {
@@ -45847,7 +45904,7 @@
                   "value": "(\"first_rows::Rows::judge\", \"first_rows::Rows::of\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3940
+                    "line": 3953
                   }
                 }
               ]
@@ -45860,7 +45917,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 3942
+                "line": 3955
               },
               "children": [
                 {
@@ -45871,7 +45928,7 @@
                   "value": "\"A device a description names shall not be in devmgr's DEVICES.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3943
+                    "line": 3956
                   }
                 },
                 {
@@ -45882,7 +45939,7 @@
                   "value": "\"test-first-processes: 1 kept back, with the filter removed it fails.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3944
+                    "line": 3957
                   }
                 },
                 {
@@ -45893,7 +45950,7 @@
                   "value": "\"H.DEV.12\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3945
+                    "line": 3958
                   }
                 },
                 {
@@ -45904,7 +45961,7 @@
                   "value": "(\"boot_authority::held_by_manager\", \"iommu::would_translate\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3946
+                    "line": 3959
                   }
                 }
               ]
@@ -45917,7 +45974,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 3948
+                "line": 3961
               },
               "children": [
                 {
@@ -45928,7 +45985,7 @@
                   "value": "\"A description naming no real device, or malformed, shall stop the boot.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3950
+                    "line": 3963
                   }
                 },
                 {
@@ -45939,7 +45996,7 @@
                   "value": "\"test-first-processes: a made-up location and a truncated file, each stopping it with its reason.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3952
+                    "line": 3965
                   }
                 },
                 {
@@ -45950,7 +46007,7 @@
                   "value": "\"H.DEV.12\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3953
+                    "line": 3966
                   }
                 },
                 {
@@ -45961,7 +46018,7 @@
                   "value": "(\"boot_authority::node_of\", \"boot_authority::start_manager\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3954
+                    "line": 3967
                   }
                 }
               ]
@@ -45974,7 +46031,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 3956
+                "line": 3969
               },
               "children": [
                 {
@@ -45985,7 +46042,7 @@
                   "value": "\"The manager's end, a clean exit included, shall stop the machine with FX-0954.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3958
+                    "line": 3971
                   }
                 },
                 {
@@ -45996,7 +46053,7 @@
                   "value": "\"test-first-processes: an image ending at once in its place.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3959
+                    "line": 3972
                   }
                 },
                 {
@@ -46007,7 +46064,7 @@
                   "value": "\"H.DEV.13\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3960
+                    "line": 3973
                   }
                 },
                 {
@@ -46018,7 +46075,7 @@
                   "value": "\"boot_authority::watch_manager\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3961
+                    "line": 3974
                   }
                 }
               ]
@@ -46031,7 +46088,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 3963
+                "line": 3976
               },
               "children": [
                 {
@@ -46042,7 +46099,7 @@
                   "value": "\"devmgr's end shall kill the drivers' job and quiesce every device not a safety partition's; a dead driver's pins stay quarantined.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3965
+                    "line": 3978
                   }
                 },
                 {
@@ -46053,7 +46110,7 @@
                   "value": "\"test-first-processes: an image ending at once in devmgr's place, and the kernel's line.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3967
+                    "line": 3980
                   }
                 },
                 {
@@ -46064,7 +46121,7 @@
                   "value": "\"H.DEV.13\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3968
+                    "line": 3981
                   }
                 },
                 {
@@ -46075,7 +46132,7 @@
                   "value": "\"discovery::devmgr::watch_detached\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3969
+                    "line": 3982
                   }
                 }
               ]
@@ -46088,7 +46145,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 3971
+                "line": 3984
               },
               "children": [
                 {
@@ -46099,7 +46156,7 @@
                   "value": "\"A first process's pages shall be made by the kernel from the bytes of its sealed image, no other copy, and that image's digest recorded on its measured space: the one exception to executable only from sealed.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3974
+                    "line": 3987
                   }
                 },
                 {
@@ -46110,7 +46167,7 @@
                   "value": "\"test-first-processes boots the manager and devmgr so measured; review of boot_authority::load_sealed, its one caller each.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3976
+                    "line": 3989
                   }
                 },
                 {
@@ -46121,7 +46178,7 @@
                   "value": "\"H.DEV.13\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3977
+                    "line": 3990
                   }
                 },
                 {
@@ -46132,7 +46189,7 @@
                   "value": "\"boot_authority::load_sealed\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3978
+                    "line": 3991
                   }
                 }
               ]
@@ -46145,7 +46202,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 3980
+                "line": 3993
               },
               "children": [
                 {
@@ -46156,7 +46213,7 @@
                   "value": "\"ferrix_cpio::file_named shall answer the regular file of a safe name, inside the archive's bounds, stop at the first malformed header, allocate nothing and write nothing: ring 0's one parser of the archive under personality=user.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3983
+                    "line": 3996
                   }
                 },
                 {
@@ -46167,7 +46224,7 @@
                   "value": "\"ferrix-cpio's host tests of it, its fuzz target, and a refused archive's boot in test-first-processes.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3985
+                    "line": 3998
                   }
                 },
                 {
@@ -46178,7 +46235,7 @@
                   "value": "\"H.DEV.13\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3986
+                    "line": 3999
                   }
                 },
                 {
@@ -46189,7 +46246,7 @@
                   "value": "\"ferrix_cpio::file_named\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3987
+                    "line": 4000
                   }
                 }
               ]
@@ -46202,7 +46259,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 3989
+                "line": 4002
               },
               "children": [
                 {
@@ -46213,7 +46270,7 @@
                   "value": "\"linuxd's end shall kill what remains of its partition's job.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3990
+                    "line": 4003
                   }
                 },
                 {
@@ -46224,7 +46281,7 @@
                   "value": "\"test-partitions: a partition's linuxd dying, its line with the count.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3991
+                    "line": 4004
                   }
                 },
                 {
@@ -46235,7 +46292,7 @@
                   "value": "\"H.DEV.13\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3992
+                    "line": 4005
                   }
                 },
                 {
@@ -46246,7 +46303,7 @@
                   "value": "(\"linuxd_start::start\", \"linuxd_start::start_further\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3993
+                    "line": 4006
                   }
                 }
               ]
@@ -46259,7 +46316,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 3995
+                "line": 4008
               },
               "children": [
                 {
@@ -46270,7 +46327,7 @@
                   "value": "\"After the seal a request charged to a job with no promise shall be refused.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3996
+                    "line": 4009
                   }
                 },
                 {
@@ -46281,7 +46338,7 @@
                   "value": "\"mm::seal::check's plant, on a job of its own; its control FIRED.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3997
+                    "line": 4010
                   }
                 },
                 {
@@ -46292,7 +46349,7 @@
                   "value": "\"H.MEM.32\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3998
+                    "line": 4011
                   }
                 },
                 {
@@ -46303,7 +46360,7 @@
                   "value": "(\"mm::seal::route\", \"mm::seal::note_shared\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 3999
+                    "line": 4012
                   }
                 },
                 {
@@ -46314,7 +46371,7 @@
                   "value": "\"kernel_memory=retyped\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4000
+                    "line": 4013
                   }
                 }
               ]
@@ -46327,7 +46384,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 4002
+                "line": 4015
               },
               "children": [
                 {
@@ -46338,7 +46395,7 @@
                   "value": "\"An object shall be on a page of the promise of the job it is charged to.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4003
+                    "line": 4016
                   }
                 },
                 {
@@ -46349,7 +46406,7 @@
                   "value": "\"mm::seal::check, against the job's draws_from; its control FIRED.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4004
+                    "line": 4017
                   }
                 },
                 {
@@ -46360,7 +46417,7 @@
                   "value": "\"H.MEM.32\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4005
+                    "line": 4018
                   }
                 },
                 {
@@ -46371,7 +46428,7 @@
                   "value": "\"mm::heap_drawn_from\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4006
+                    "line": 4019
                   }
                 },
                 {
@@ -46382,7 +46439,7 @@
                   "value": "\"kernel_memory=retyped\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4007
+                    "line": 4020
                   }
                 }
               ]
@@ -46395,7 +46452,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 4009
+                "line": 4022
               },
               "children": [
                 {
@@ -46406,7 +46463,7 @@
                   "value": "\"A task with no job and no ticket shall draw on the pool, whichever job the processor last ran, and nothing shall be served in an interrupt.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4011
+                    "line": 4024
                   }
                 },
                 {
@@ -46417,7 +46474,7 @@
                   "value": "\"mm::seal::check with the processor's group forced to another job's; its control FIRED.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4012
+                    "line": 4025
                   }
                 },
                 {
@@ -46428,7 +46485,7 @@
                   "value": "\"H.MEM.32\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4013
+                    "line": 4026
                   }
                 },
                 {
@@ -46439,7 +46496,7 @@
                   "value": "(\"mm::seal::charged\", \"mm::seal::note_payer\", \"mm::seal::seal_after_boot\", \"mm::seal::report\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4014
+                    "line": 4027
                   }
                 },
                 {
@@ -46450,7 +46507,7 @@
                   "value": "\"kernel_memory=retyped\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4015
+                    "line": 4028
                   }
                 }
               ]
@@ -46463,7 +46520,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 4017
+                "line": 4030
               },
               "children": [
                 {
@@ -46474,7 +46531,7 @@
                   "value": "\"A frame a job's heap gives back shall hold none of that job's bytes.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4018
+                    "line": 4031
                   }
                 },
                 {
@@ -46485,7 +46542,7 @@
                   "value": "\"mm::seal::check's large allocation; its control FIRED.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4019
+                    "line": 4032
                   }
                 },
                 {
@@ -46496,7 +46553,7 @@
                   "value": "\"H.MEM.32\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4020
+                    "line": 4033
                   }
                 },
                 {
@@ -46507,7 +46564,7 @@
                   "value": "\"mm::ReservedPages::deallocate_pages\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4021
+                    "line": 4034
                   }
                 },
                 {
@@ -46518,7 +46575,7 @@
                   "value": "\"kernel_memory=retyped\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4022
+                    "line": 4035
                   }
                 }
               ]
@@ -46531,7 +46588,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 4024
+                "line": 4037
               },
               "children": [
                 {
@@ -46542,7 +46599,7 @@
                   "value": "\"A further Linux partition shall be started in a job and a region of its own with the FURTHER row alone: no console, no cores, no devmgr channel, and its end shall kill its job and nothing else.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4026
+                    "line": 4039
                   }
                 },
                 {
@@ -46553,7 +46610,7 @@
                   "value": "\"test-partitions: a second partition runs programs and ends, and one that dies at once, the first going on; Rows::judge at its start; the first's end ends the machine, shown.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4028
+                    "line": 4041
                   }
                 },
                 {
@@ -46564,7 +46621,7 @@
                   "value": "\"H.DEV.13\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4029
+                    "line": 4042
                   }
                 },
                 {
@@ -46575,7 +46632,7 @@
                   "value": "\"linuxd_start::start_further\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4030
+                    "line": 4043
                   }
                 }
               ]
@@ -46588,7 +46645,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 4032
+                "line": 4045
               },
               "children": [
                 {
@@ -46599,7 +46656,7 @@
                   "value": "\"With more than one Linux partition, each shall be a speculation domain of its own.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4033
+                    "line": 4046
                   }
                 },
                 {
@@ -46610,7 +46667,7 @@
                   "value": "\"test-partitions reads two distinct non-zero domains from the kernel's lines; n10 FIRED.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4034
+                    "line": 4047
                   }
                 },
                 {
@@ -46621,7 +46678,7 @@
                   "value": "\"H.DEV.13\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4035
+                    "line": 4048
                   }
                 },
                 {
@@ -46632,7 +46689,7 @@
                   "value": "\"linuxd_start::start\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4036
+                    "line": 4049
                   }
                 }
               ]

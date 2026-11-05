@@ -520,8 +520,8 @@
       "recursive": false
     },
     "syscall/native/lift.rs::call": {
-      "complexity": 71,
-      "lines": 161,
+      "complexity": 74,
+      "lines": 166,
       "recursive": false
     },
     "syscall/native/region.rs::answer": {

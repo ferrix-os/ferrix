@@ -412,9 +412,9 @@ checks above is `pub` for raised checks (F3).
 | `user_base` | re-export | load |  |
 | `user_combining` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `user_extended_state` | re-export | load |  |
-| `user_hwcaps` | re-export | load |  |
-| `user_hwcaps` | re-export | load |  |
-| `user_hwcaps` | re-export | load |  |
+| `user_hwcaps` | re-export | item, load |  |
+| `user_hwcaps` | re-export | item, load |  |
+| `user_hwcaps` | re-export | item, load |  |
 | `user_platform` | re-export | load |  |
 | `user_platform` | re-export | load |  |
 | `user_platform` | re-export | load |  |
@@ -511,7 +511,7 @@ checks above is `pub` for raised checks (F3).
 | `take_console_byte` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `thread_area` | fn | load |  |
 | `user_base` | fn | load |  |
-| `user_hwcaps` | fn | load |  |
+| `user_hwcaps` | fn | item, load |  |
 | `user_platform` | fn | load |  |
 | `vdso_can_read_counter` | fn | item, load |  |
 | `vdso_spec` | fn | load |  |
@@ -716,7 +716,7 @@ checks above is `pub` for raised checks (F3).
 | `take_console_byte` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `thread_area` | fn | load |  |
 | `user_base` | fn | load |  |
-| `user_hwcaps` | fn | load |  |
+| `user_hwcaps` | fn | item, load |  |
 | `user_platform` | fn | load |  |
 | `vdso_can_read_counter` | fn | item, load |  |
 | `vdso_spec` | fn | load |  |
@@ -996,7 +996,7 @@ checks above is `pub` for raised checks (F3).
 | `take_console_byte` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `thread_core` | fn | load |  |
 | `user_extended_state` | fn | load |  |
-| `user_hwcaps` | fn | load |  |
+| `user_hwcaps` | fn | item, load |  |
 | `user_platform` | fn | load |  |
 | `wait_for_interrupt` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `wait_for_work` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
