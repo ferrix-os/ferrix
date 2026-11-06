@@ -18,7 +18,7 @@ shared libraries mapped from btrfs, and the program they make is a sixth.
 From the shell's first line to `hello` is under two seconds:
 
 ```
-rustc 1.97.1 (8bab26f4f 2026-07-14)
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
 ...
 rustc-gate: hello from rustc on Ferrix
   init     the shell exited with 16
