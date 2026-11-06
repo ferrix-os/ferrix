@@ -429,6 +429,7 @@
         "syscall/sem_check.rs",
         "syscall/shm.rs",
         "syscall/shm_check.rs",
+        "syscall/side_check.rs",
         "syscall/seccomp.rs",
         "syscall/seccomp_check.rs",
         "syscall/seccomp_filters_check.rs",
@@ -450,6 +451,7 @@
         "syscall/vdso.rs",
         "syscall/vdso_check.rs",
         "kernel_load.rs",
+        "kernel_raised.rs",
         "seam.rs",
         "setters.rs",
         "src/kernel/extensions/settings/**"
@@ -943,6 +945,14 @@
         "load"
       ]
     },
+    "ferrix-kernel-raised-checks": {
+      "path": "src/kernel/checks",
+      "root": "kernel_raised.rs",
+      "checks_only": true,
+      "rings": [
+        "load"
+      ]
+    },
     "ferrix-kernel-settings": {
       "path": "src/kernel/extensions/settings",
       "root": "src/kernel/extensions/settings/src/lib.rs",
@@ -986,38 +996,41 @@
       "test_file_patterns and the crate that reaches it. A ratchet like",
       "known_violations: it may shrink freely; an entry whose file is back in its",
       "ring's crate, or is no kernel file, fails as stale; a product file is never",
-      "listed. Filled by the split (step S3): 26 files, each needing the load to run what it checks (stages_check.rs: the binary). `file_ring` is the file's own ring (not `ring`, which names a classified crate's ring to the step cache's reader)."
+      "listed. Filled by the split (step S3): 43 files, each needing the load to run what it checks: 41 built by",
+      "ferrix-kernel-raised-checks (kernel_raised.rs, since S5 of the crate split, docs/microkernel/CRATE-SPLIT.md",
+      "section 2.6 item 5; before it by ferrix-kernel-load), one by the item and stages_check.rs by the binary.",
+      "`file_ring` is the file's own ring (not `ring`, which names a classified crate's ring to the step cache's reader)."
     ],
     "entries": [
       {
         "file": "arch/aarch64/trap/check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "arch/armv7a/switch/check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "arch/armv7a/trap/check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "arch/stage_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "arch/x86_64/paranoid/check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "arch/x86_64/switch/check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "arch/x86_64/framebuffer/check.rs",
@@ -1027,132 +1040,132 @@
       {
         "file": "arch/x86_64/trap/check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "device/config_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "iommu/blocks_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "iommu/domain_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "object/alloc_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "object/blocks_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "object/check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "object/device_copy_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "object/domain_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "object/edge_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "object/level_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "object/exception_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "object/fast_path_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "object/format_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "object/pager_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "object/pin/check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "object/quota_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "object/sender_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "object/space_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "object/authority_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "object/sealing_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "object/grant_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "object/ticket_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "object/timer_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "object/write_read_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "service_check.rs",
         "file_ring": "item",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "stages_check.rs",
@@ -1162,47 +1175,47 @@
       {
         "file": "syscall/build_check.rs",
         "file_ring": "item",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "syscall/native_check.rs",
         "file_ring": "item",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "syscall/program_check.rs",
         "file_ring": "item",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "syscall/unmap_check.rs",
         "file_ring": "item",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "user/address_wait_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "user/alloc_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "user/madvise_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "user/rmap_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       },
       {
         "file": "user/rss_kept_check.rs",
         "file_ring": "core",
-        "crate": "ferrix-kernel-load"
+        "crate": "ferrix-kernel-raised-checks"
       }
     ]
   },
@@ -1293,7 +1306,10 @@
     "object/mod.rs": 2,
     "syscall/uaccess.rs": 1,
     "object/job.rs": 3,
-    "syscall/memory.rs": 1
+    "syscall/memory.rs": 1,
+    "arch/mod.rs": 3,
+    "arch/aarch64/trap.rs": 1,
+    "arch/armv7a/trap.rs": 1
   },
   "lift_check_exceptions": {
     "//": "A ratchet: one entry, to a userland test (BACKLOG, ledger 6268 E).",

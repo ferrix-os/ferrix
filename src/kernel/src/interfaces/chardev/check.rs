@@ -134,10 +134,10 @@ use super::{
     abandon, admit, await_answer, copy_done, published,
 };
 use crate::device::{self, DeviceNode};
-use crate::object::check::{SCRATCH, Side, device_handle, reg};
 use crate::sched;
 use crate::sync::SpinLock;
 use crate::syscall::process::{self as process_calls, Process};
+use crate::syscall::side_check::{SCRATCH, Side, device_handle, reg};
 use crate::syscall::signal::Origin;
 use crate::timer;
 

@@ -510,13 +510,13 @@ static PROBE_RULE: SpinLock<Option<Rule>> = SpinLock::new(None);
 /// its own and reads what the filter was shown, which a filter program cannot
 /// say: a call made by any other task is unaffected. Only one probe can be
 /// armed at a time.
-pub(crate) fn arm_probe(rule: Rule) {
+pub fn arm_probe(rule: Rule) {
     *PROBE_RULE.lock() = Some(rule);
     PROBE_TASK.store(task_key(), Ordering::Release);
 }
 
 /// Stop judging by the probe.
-pub(crate) fn disarm_probe() {
+pub fn disarm_probe() {
     PROBE_TASK.store(0, Ordering::Release);
     *PROBE_RULE.lock() = None;
 }

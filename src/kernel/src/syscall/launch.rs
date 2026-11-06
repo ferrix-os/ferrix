@@ -114,7 +114,7 @@ fn process_give(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno>
 /// table -- so without the flag a child of a process that gave up new
 /// privileges could `execve` a set-user-id file and take them back. One with
 /// no creator starts from the defaults.
-pub(crate) fn load_native(
+pub fn load_native(
     creator: Option<&dyn Host>,
     image: &[u8],
     name: &[u8],

@@ -1,0 +1,44 @@
+[package]
+name = "ferrix-kernel-raised-checks"
+description = "The Ferrix kernel's check files raised above their ring: core and item checks that need the load to run what they check"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+# The one build script of the kernel's crates: the build flags as cfgs
+# (docs/BUILD-FLAGS.md rule 6 b, docs/KERNEL-CRATES.md).
+build = "../build.rs"
+
+# The raised checks (docs/microkernel/CRATE-SPLIT.md §2.6 item 5, S5): core
+# and item check files that need the load. Its root sits beside main.rs, as
+# the load's did, so each file is found where it is and stays in its ring by
+# path; only the binary names this crate (check-crate-layering.sh).
+[lib]
+path = "../src/kernel_raised.rs"
+
+[dependencies]
+ferrix-kernel-core.workspace = true
+# Named by x86-64's `arch/stage_check.rs` alone (its framebuffer check).
+ferrix-kernel-item.workspace = true
+ferrix-kernel-load.workspace = true
+ferrix-audit.workspace = true
+ferrix-bootinfo.workspace = true
+ferrix-cgroupfs.workspace = true
+ferrix-elf.workspace = true
+ferrix-fallible.workspace = true
+ferrix-frame.workspace = true
+ferrix-kmem.workspace = true
+ferrix-linux-abi.workspace = true
+ferrix-native-abi.workspace = true
+ferrix-paging.workspace = true
+ferrix-pci.workspace = true
+ferrix-sched.workspace = true
+ferrix-seccomp.workspace = true
+ferrix-sync.workspace = true
+ferrix-ustack.workspace = true
+ferrix-vfs.workspace = true
+ferrix-vma.workspace = true
+
+[lints]
+workspace = true

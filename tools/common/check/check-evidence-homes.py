@@ -153,7 +153,7 @@ def main(argv: list[str]) -> int:
     raised = {
         entry["file"]
         for entry in manifest.get("raised_checks", {}).get("entries", [])
-        if entry.get("crate") in ("ferrix-kernel-load", "ferrix-kernel")
+        if entry.get("crate") in ("ferrix-kernel-raised-checks", "ferrix-kernel")
     }
     found = orphans(where, ring_of)
     leaning = raised_only(where, ring_of, raised)

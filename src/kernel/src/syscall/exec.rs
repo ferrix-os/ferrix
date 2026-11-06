@@ -136,7 +136,7 @@ const VDSO_GAP: u64 = 128 * 1024 * 1024;
 /// harmless under Wine, whose preloader reserves its range before it maps
 /// anything, so its later mappings go below; hints and `MAP_FIXED` may use
 /// the gap as they may on Linux.
-pub(crate) const VDSO_END: u64 = stack_top(Abi::Native) - VDSO_GAP;
+pub const VDSO_END: u64 = stack_top(Abi::Native) - VDSO_GAP;
 
 /// The range Wine's x86-64 preloader reserves at the top of the user half.
 const WINE_PRELOADER_TOP: core::ops::Range<u64> = 0x7FFF_FE00_0000..0x7FFF_FFFF_0000;
@@ -184,7 +184,7 @@ fn width(abi: Abi) -> Width {
 /// control a program running with ids a file gave it, as Linux refuses the
 /// raise under `ptrace` (`LSM_UNSAFE_PTRACE`). So must a space handle's holder,
 /// who may write into it (`L.object.309`).
-pub(crate) fn ids_it_may_raise(process: &Process, set_ids: SetIds) -> SetIds {
+pub fn ids_it_may_raise(process: &Process, set_ids: SetIds) -> SetIds {
     if crate::syscall::attributes::get(process).no_new_privs
         || object::exception::supervised(process)
         || process.space().raises_refused()
@@ -204,19 +204,19 @@ pub(crate) fn ids_it_may_raise(process: &Process, set_ids: SetIds) -> SetIds {
 /// by, exactly as given, which `AT_EXECFN` points at. For a `#!` script the
 /// first is the interpreter and the second the script.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Executable<'a> {
+pub struct Executable<'a> {
     /// The ELF image: bytes in memory, or a file whose headers have been read.
-    pub(crate) image: Source<'a>,
+    pub image: Source<'a>,
     /// The absolute path of the file the image was read from.
-    pub(crate) exe: &'a [u8],
+    pub exe: &'a [u8],
     /// The filename it was asked for by.
-    pub(crate) exec_fn: &'a [u8],
+    pub exec_fn: &'a [u8],
     /// The ids the file's set-user-id and set-group-id bits give it.
-    pub(crate) set_ids: SetIds,
+    pub set_ids: SetIds,
     /// The dynamic linker's image, when the program named one. Opened from
     /// the path its `PT_INTERP` holds, before anything is unmapped, because
     /// after the point of no return there is no program left to fail back to.
-    pub(crate) interpreter: Option<Source<'a>>,
+    pub interpreter: Option<Source<'a>>,
 }
 
 /// Load `image`, which came from no file, into a new process, ready to run
@@ -228,7 +228,7 @@ pub(crate) struct Executable<'a> {
 /// # Errors
 ///
 /// [`ExecError`].
-pub(crate) fn load(
+pub fn load(
     image: &[u8],
     args: &[&[u8]],
     env: &[&[u8]],
@@ -366,7 +366,7 @@ fn set_up_native(
 /// # Errors
 ///
 /// [`ExecError`].
-pub(crate) fn load_executable(
+pub fn load_executable(
     program: Executable<'_>,
     args: &[&[u8]],
     env: &[&[u8]],

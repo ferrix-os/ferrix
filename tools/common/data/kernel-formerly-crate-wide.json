@@ -178,18 +178,6 @@
       "before": "pub(crate)"
     },
     {
-      "item": "arch/aarch64/trap.rs: TrapFrame::elr (field)",
-      "before": "pub(crate)"
-    },
-    {
-      "item": "arch/aarch64/trap.rs: TrapFrame::esr (field)",
-      "before": "pub(crate)"
-    },
-    {
-      "item": "arch/aarch64/trap.rs: TrapFrame::spsr (field)",
-      "before": "pub(crate)"
-    },
-    {
       "item": "arch/aarch64/trap.rs: breakpoint (fn)",
       "before": "pub(crate)"
     },
@@ -360,18 +348,6 @@
     },
     {
       "item": "arch/armv7a/trap.rs: TrapFrame (struct)",
-      "before": "pub(crate)"
-    },
-    {
-      "item": "arch/armv7a/trap.rs: TrapFrame::cpsr (field)",
-      "before": "pub(crate)"
-    },
-    {
-      "item": "arch/armv7a/trap.rs: TrapFrame::fsr (field)",
-      "before": "pub(crate)"
-    },
-    {
-      "item": "arch/armv7a/trap.rs: TrapFrame::lr (field)",
       "before": "pub(crate)"
     },
     {
@@ -554,6 +530,16 @@
     {
       "item": "arch/mod.rs: disarm_leave_hook (re-export)",
       "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: drive_native_words (re-export)",
+      "born": "S5",
+      "ledger": 7721
+    },
+    {
+      "item": "arch/mod.rs: drive_system_call (re-export)",
+      "born": "S5",
+      "ledger": 7721
     },
     {
       "item": "arch/mod.rs: exception_check (re-export)",

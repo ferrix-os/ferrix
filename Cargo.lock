@@ -566,6 +566,7 @@ dependencies = [
  "ferrix-kernel-load",
  "ferrix-kernel-logctl",
  "ferrix-kernel-net-ring",
+ "ferrix-kernel-raised-checks",
  "ferrix-kernel-settings",
  "ferrix-linux-abi",
  "ferrix-paging",
@@ -683,7 +684,6 @@ dependencies = [
  "ferrix-netlink",
  "ferrix-nettcp",
  "ferrix-netwire",
- "ferrix-paging",
  "ferrix-partition",
  "ferrix-pci",
  "ferrix-procfs",
@@ -727,6 +727,32 @@ dependencies = [
  "ferrix-netring",
  "ferrix-netwire",
  "ferrix-sched",
+]
+
+[[package]]
+name = "ferrix-kernel-raised-checks"
+version = "0.3.0"
+dependencies = [
+ "ferrix-audit",
+ "ferrix-bootinfo",
+ "ferrix-cgroupfs",
+ "ferrix-elf",
+ "ferrix-fallible",
+ "ferrix-frame",
+ "ferrix-kernel-core",
+ "ferrix-kernel-item",
+ "ferrix-kernel-load",
+ "ferrix-kmem",
+ "ferrix-linux-abi",
+ "ferrix-native-abi",
+ "ferrix-paging",
+ "ferrix-pci",
+ "ferrix-sched",
+ "ferrix-seccomp",
+ "ferrix-sync",
+ "ferrix-ustack",
+ "ferrix-vfs",
+ "ferrix-vma",
 ]
 
 [[package]]

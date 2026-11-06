@@ -325,7 +325,7 @@ from one line per part. Every tool that walks kernel files reads
    (S4a):* the device-key-to-node map and `node_of` move into the load's
    `net::device`, which already keeps the net devices; `net_ring` writes it
    there. A reviewed step of its own, with a diff check, before S4.
-5. **Raised checks.** 40 core and item check files are built by the load
+5. **Raised checks.** 40 core and item check files (41 at S5a's landing) are built by the load
    crate because they need the load (`raised_checks`, §1). They are core and
    item files by path (`arch/**`, `object/**`, ...) and must not move with
    the load, or they would change ring by path; but the load's root, once in
@@ -343,6 +343,19 @@ from one line per part. Every tool that walks kernel files reads
    must read FIRED (7346 (9)). Under `"lift"` it is not built, as the raised modules are
    not today. If a load *product* file calls a raised check, S5's resolver
    run lists it and that call moves to the binary first.
+   *Found in S5a (design ledger 7721):* no load product file calls one, but
+   load-ring *check* files did, at three edges, each fixed in S5a. **E1:** ten
+   load checks used `object/check.rs`'s `Side` (it needs the load's
+   `Process`), `SCRATCH`, `reg` and `device_handle`: cut, bodies unchanged,
+   into the load-ring check file `syscall/side_check.rs`, which
+   `object::check` re-exports for its own users. **E2:** the load's
+   `syscall::check::run` called the item's raised `unmap_check`: the binary
+   (`stages_check.rs`) hands it in as a `fn` argument, run where it ran.
+   **E3:** the load's seccomp checks call `arch::drive_system_call`, on the
+   Arm pair in the raised `trap/check.rs`: those two functions are the core's
+   `arch/<isa>/trap/drive_check.rs` (as x86-64's are its `syscall/check.rs`),
+   under `ferrix_load_built = "ring0"`, re-exported by the core's `arch/mod.rs`
+   (R.3: no `target_arch` and no `arch::<isa>::` path outside `arch/`).
 6. **The console's screen and input are core ring files.** Under
    `fast`/`max` they leave ring 0 (MICROKERNEL §2.1), but `console.rs`,
    `device/check.rs`, `discovery/firmware.rs`, the three `arch/*/mod.rs` and
@@ -530,7 +543,7 @@ their owners.
 | S3 | **Landed** (see *Where it stands*). `logctl` to `device/logctl/`, with its lift twin | 2 | `interfaces/logctl/`, `interfaces/mod.rs`, `main.rs`; about 30 min | S0 |
 | S4a | **Landed** (see *Where it stands*). `PLACED` and `node_of` from `net_ring` into the load's `net::device` (§2.6 item 4a); a code change, reviewed, no move | 2 | none | S0 |
 | S4 | **Landed** (see *Where it stands*). `net_ring` to `device/net-ring/`, with its lift twin | 2 | as S3, plus `stages_check.rs`'s one call and `sysfs.rs`'s five | S3, S4a |
-| S5 | The raised-checks crate (§2.6 item 5; the record's "26" comment fixed), then the whole load to `personality/linux/`, name kept, its lift twin moved with it. After S5, `src/kernel/src` holds only core, item, the shim and crate roots | 5 | every load file: the longest, about 60 min; announced a day ahead | S0, S4 |
+| S5 | S5a: the raised-checks crate (§2.6 item 5; the record's "26" comment fixed), with the fixes for the three edges it found (E1-E3, §2.6 item 5); then S5b: the whole load to `personality/linux/`, name kept, its lift twin moved with it. After S5, `src/kernel/src` holds only core, item, the shim and crate roots | 5 | every load file: the longest, about 60 min; announced a day ahead | S0, S4 |
 | P1 | `fs::DiskFilesystem` seam (no freeze), then btrfs as a part | 5 | `fs/btrfs*` and their callers' lines | S5; seam design review |
 | P2 | `block_ring`'s shared helpers down (no freeze); `fd::DeviceFiles` and `devfs::DeviceNodes` seams (no freeze); then input, audio, block ring as parts | 8 | per part | P1; seam design review |
 | P3 | `procfs::Kernel` down; then the GPU group, the pseudo-filesystems, the net stack, one seam and one part per landing | 20 (a guess, like M5's) | per part | P2; seam design reviews |
@@ -697,4 +710,30 @@ consultant's C1), so neither moved file changes a line. The load and its lift tw
 `ferrix-netring`. The load→`net_ring` edge is gone: the load declares no `net_ring` and its
 manifest names no part; `check-item-boundary.py --report` lists only `main.rs`'s composition
 edge to it (line 1662, the `install`). Under `fast` and `max` `LEFT` and `LEFT_CRATES` hold
-it out of ring 0. Next: S5.
+it out of ring 0.
+
+**S5a landed** (written 2026-11-06, mk-crates6; rebased and gated 2026-11-12, mk-crates7;
+design ledger 7721, OK IF R.1-R.8; diff check ledger 9066, OK IF U.1-U.8, met as the
+landing's message says). The 41 check files
+the load built for the core and the item are `ferrix-kernel-raised-checks`'s:
+its root `src/kernel/src/kernel_raised.rs` declares each where the load's root
+did, under `ferrix_load_built = "ring0"`, in wrapper modules that re-export the
+load's module of the same name (7721 R.5), over `pub use ferrix_kernel_load::*`;
+its manifest is `src/kernel/checks/`. The files stay where they are and in
+their ring; `raised_checks` names the new crate for the 41 (`file_ring`
+unchanged; 40 when it was written, and `user/rss_kept_check.rs`, which develop's
+4120b4def gave the load's root on the way, raised with them), and `kernel_crates` lists it, `checks_only`. The binary names it in
+place of the load (`main.rs`'s glob), and only the binary may:
+check-crate-layering.sh refuses any other package linking it, and
+check-item-boundary.py any product file a `checks_only` crate reaches. The
+load's root declares no raised check now, and the three edges from the load's
+own checks into them are cut (§2.6 item 5, E1-E3). The load's items the raised
+checks name from outside its crate are `pub` where they were `pub(crate)`
+(visibility only, load ring). What the diff check ruled (9066): the ring-0 budget's
+count rises by the re-exports' nine source lines on x86-64 and ten on AArch64, which a
+`personality=user` build compiles out and the textual count still reads, accepted as a
+`rise` entry (U.1); `kmain` holds the stages' checks inlined, 108,455 instructions on
+x86-64, so the product bodies are shown by a second build with `checks=off` in place of
+`kmain` instruction by instruction (U.2); after a conflict in the evidence files a commit
+is given develop's evidence files before `carry-coverage.py` runs (U.8). `side_check.rs`
+is unmeasured until the next coverage run (BACKLOG). Next: S5b.

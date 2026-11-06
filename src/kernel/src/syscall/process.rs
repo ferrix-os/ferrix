@@ -278,11 +278,11 @@ struct Groups {
 /// Where a program starts: the two numbers `exec::load` computes and the task
 /// that runs it needs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Startup {
+pub struct Startup {
     /// Its first instruction.
     pub(crate) entry: u64,
     /// Its initial stack pointer, with the startup image above it.
-    pub(crate) stack: u64,
+    pub stack: u64,
     /// What its first argument register holds on entry: zero for a Linux
     /// program, whose startup image is on its stack, and a native process's
     /// bootstrap handle.
@@ -388,7 +388,7 @@ impl Process {
     /// # Errors
     ///
     /// [`AllocError`] when the core's part of it could not be allocated.
-    pub(crate) fn new(space: Arc<AddressSpace>) -> Result<Process, AllocError> {
+    pub fn new(space: Arc<AddressSpace>) -> Result<Process, AllocError> {
         Process::reading(space, Reading::Never)
     }
 
@@ -537,7 +537,7 @@ impl Process {
     /// parent after that leaves the child where it started, which the fork's
     /// caller settles: `clone_with` ends a child whose job is being killed
     /// once the child is findable.
-    pub(crate) fn forked(
+    pub fn forked(
         parent: &Arc<Process>,
         space: Arc<AddressSpace>,
         share_files: bool,
@@ -1099,7 +1099,7 @@ impl Process {
     }
 
     /// Where its first task enters user mode, once a program is loaded.
-    pub(crate) fn startup(&self) -> Option<Startup> {
+    pub fn startup(&self) -> Option<Startup> {
         *self.startup.lock()
     }
 
@@ -1108,7 +1108,7 @@ impl Process {
     ///
     /// Never for a process of the caller's own: its release waits for the
     /// caller's thread to leave, which a caller waiting here never does.
-    pub(crate) fn wait_for_exit(&self, deadline: u64) -> Option<i32> {
+    pub fn wait_for_exit(&self, deadline: u64) -> Option<i32> {
         let _ = self
             .exited()
             .wait_until_deadline(|| self.is_released(), deadline);
@@ -1234,7 +1234,7 @@ impl Process {
 
     /// Count a thread about to start. Before its task is spawned, because the
     /// task can reach its exit on another processor before the spawn returns.
-    pub(crate) fn thread_starting(&self) {
+    pub fn thread_starting(&self) {
         let _ = self.live_threads.fetch_add(1, Ordering::AcqRel);
     }
 
@@ -1256,7 +1256,7 @@ impl Process {
     /// ([`Process::arm_exit_meet`]), which holds two leaving threads there
     /// until both have read: the window where a decision taken from the read
     /// alone would see the other thread still live, each of them.
-    pub(crate) fn thread_gone(&self, ended: bool) {
+    pub fn thread_gone(&self, ended: bool) {
         use Ordering::{AcqRel, Acquire};
         let count = &self.live_threads;
         let mut met = false;
@@ -1298,7 +1298,7 @@ impl Process {
     /// (`object::oom::kill_within`, `L.object.103`), which every release that
     /// unmaps leaves nothing to do. Before the process ends; a process never
     /// marked gives its memory back at release.
-    pub(crate) fn keep_space_at_release(&self) {
+    pub fn keep_space_at_release(&self) {
         self.keep_space.store(true, Ordering::Release);
     }
 
@@ -2441,7 +2441,7 @@ impl Process {
     }
 
     /// The signal that ended it, if a signal did.
-    pub(crate) fn ended_by_signal(&self) -> Option<u32> {
+    pub fn ended_by_signal(&self) -> Option<u32> {
         self.exit().signal()
     }
 
@@ -2535,7 +2535,7 @@ pub(crate) fn current() -> Option<Arc<Process>> {
 }
 
 /// Load a program into a new process, without running it.
-pub(crate) use super::exec::load;
+pub use super::exec::load;
 
 /// Run `process`'s program as a task of its own.
 ///
@@ -2546,7 +2546,7 @@ pub(crate) use super::exec::load;
 ///
 /// If no program was loaded into it, if it has already been started, or if the
 /// scheduler has no stack for its task.
-pub(crate) fn start(process: &Arc<Process>) -> Result<Arc<Task>, &'static str> {
+pub fn start(process: &Arc<Process>) -> Result<Arc<Task>, &'static str> {
     start_on(process, None)
 }
 
@@ -2555,10 +2555,7 @@ pub(crate) fn start(process: &Arc<Process>) -> Result<Arc<Task>, &'static str> {
 /// # Errors
 ///
 /// As [`start`].
-pub(crate) fn start_on(
-    process: &Arc<Process>,
-    cpu: Option<usize>,
-) -> Result<Arc<Task>, &'static str> {
+pub fn start_on(process: &Arc<Process>, cpu: Option<usize>) -> Result<Arc<Task>, &'static str> {
     let claim = claim_start(process)?;
     let thread = Thread::leader(process)
         .and_then(fallible::try_arc)
@@ -2825,7 +2822,7 @@ fn tell_a_new_task(process: &Process, task: &Arc<Task>) {
 /// interrupted to, one blocked in a call is woken to, and one that has not yet
 /// entered user mode never does. Nothing here waits for that; a caller
 /// that needs the tasks gone waits for them.
-pub(crate) fn kill(process: &Process, status: i32) {
+pub fn kill(process: &Process, status: i32) {
     // A status of 128 plus a signal number is how a shell spells death by that
     // signal, and it is how a waiting parent is told: as the signal.
     let signal = if (129..=192).contains(&status) {
@@ -2838,14 +2835,14 @@ pub(crate) fn kill(process: &Process, status: i32) {
 
 /// End the running task's process with `status`, and the task's thread with
 /// it: what `exit_group` does.
-pub(crate) fn exit_current(status: i32) -> ! {
+pub fn exit_current(status: i32) -> ! {
     end_thread(Some(status), true)
 }
 
 /// End the running task's thread with `status`: what `exit` does. Its process
 /// ends with it only when no other thread of it is live, with the status its
 /// first thread left with.
-pub(crate) fn exit_thread_current(status: i32) -> ! {
+pub fn exit_thread_current(status: i32) -> ! {
     end_thread(Some(status), false)
 }
 
@@ -2972,7 +2969,7 @@ pub(crate) fn run_program(_argument: usize) {
 ///
 /// Its console descriptors read as an open of the console made now does: the
 /// checks ask the console's terminal questions through them.
-pub(crate) fn new_for_check() -> Result<Arc<Process>, SpaceError> {
+pub fn new_for_check() -> Result<Arc<Process>, SpaceError> {
     let reading = Reading::Since(fs::terminal::hangups());
     let process =
         Process::reading(AddressSpace::new()?, reading).map_err(|_| SpaceError::OutOfMemory)?;
@@ -2986,7 +2983,7 @@ pub(crate) fn new_for_check() -> Result<Arc<Process>, SpaceError> {
 /// # Errors
 ///
 /// As [`AddressSpace::fork`].
-pub(crate) fn fork_for_check(parent: &Arc<Process>) -> Result<Arc<Process>, SpaceError> {
+pub fn fork_for_check(parent: &Arc<Process>) -> Result<Arc<Process>, SpaceError> {
     fork_for_check_in(parent, None)
 }
 

@@ -1692,6 +1692,15 @@ def kernel_crate_problems(manifest: dict, files: list[str], ring_of: dict[str, s
         if not crates:
             problems.append(f"{rel}: reached by no crate's module tree, so built by none")
             continue
+        # A crate of checks alone (`checks_only`: the raised checks' crate,
+        # CRATE-SPLIT.md S5, ledger 7346 (9), 7721 R.6 (a)) reaches no product
+        # file but its root, of any ring, its own included, whatever else
+        # reaches it too.
+        checks_alone = [c for c in crates if entries.get(c, {}).get("checks_only")
+                        and entries.get(c, {}).get("root") != rel]
+        if checks_alone and not is_test_file(rel, manifest):
+            problems.append(f"{rel}: product code, reached by {checks_alone[0]}, a crate of checks alone")
+            continue
         if len(crates) > 1:
             problems.append(f"{rel}: reached by {len(crates)} crates ({', '.join(crates)}): "
                             f"each would build its own copy, statics and locks included")

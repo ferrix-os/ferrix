@@ -1226,12 +1226,16 @@ pub(super) fn check_exception_entry() {
     }
 }
 
+// The item's raised unmap check, handed to the load's stage 7 run, which may
+// not name it (CRATE-SPLIT.md S5a, E2).
+use syscall::unmap_check::check_an_unmap_waits_for_a_copy_holding_its_page as unmap_waits_for_a_copy;
+
 /// Stage 7: the system call dispatch path, before there is anything to call
 /// it.
 ///
 /// Halts rather than returning, as every other stage's check does.
 pub(super) fn check_syscalls() {
-    let report = match syscall::check::run() {
+    let report = match syscall::check::run(unmap_waits_for_a_copy) {
         Ok(report) => report,
         Err(problem) => fatal!(
             catalog::STAGE7_SYSCALLS,

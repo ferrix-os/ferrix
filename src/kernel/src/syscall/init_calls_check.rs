@@ -66,13 +66,13 @@ use ferrix_vfs::OpenFlags;
 use crate::arch;
 use crate::init;
 use crate::object::channel::Endpoint;
-use crate::object::check::{SCRATCH, Side};
 use crate::object::port::Port;
 use crate::object::process::ProcessRef;
 use crate::object::{self, Object};
 use crate::sync::SpinLock;
 use crate::syscall::epoll::{self as epoll_calls, EVENT_BYTES};
 use crate::syscall::process::{self, Process};
+use crate::syscall::side_check::{SCRATCH, Side};
 use crate::syscall::{check as syscall_check, exec, fd, file, image, native};
 use crate::trap::SyscallArgs;
 

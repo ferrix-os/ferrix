@@ -53,7 +53,9 @@ The kernel, as four crates along the certified item's rings
 `ferrix-kernel-load`, whose manifests are in `core/`, `item/` and `load/` and
 whose roots are `src/kernel_core.rs`, `src/kernel_item.rs` and
 `src/kernel_load.rs`, beside the binary's `src/main.rs`; every file is in
-`src/` whichever crate builds it. Its source paths are load-bearing: the certification
+`src/` whichever crate builds it. `checks/` is `ferrix-kernel-raised-checks`'s
+manifest, root `src/kernel_raised.rs`: the core and item check files that need
+the load, which only the binary links (`docs/microkernel/CRATE-SPLIT.md` S5). Its source paths are load-bearing: the certification
 evidence (`docs/certification/coverage-*.json`) and the baselines in
 `tools/common/data/` anchor to `src/kernel/src/**` by file and line, so a file moved
 inside `src/kernel/src` means regenerating that evidence, and every file has a

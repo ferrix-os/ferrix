@@ -56,7 +56,7 @@ use ferrix_vfs::initramfs::makedev;
 use super::{VIRTIO_BLK_MAJOR, forget_parked, is_parked, location_of, start_for};
 use crate::device::{self, DeviceNode};
 use crate::fs::devfs;
-use crate::object::check::{SCRATCH, Side, device_handle, reg};
+use crate::syscall::side_check::{SCRATCH, Side, device_handle, reg};
 use crate::{mm, object, sched, timer};
 
 /// Where this check keeps its buffers: the second page of [`SCRATCH`], which

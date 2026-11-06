@@ -51,23 +51,19 @@ use crate::user::space::{Access, Destination, FileMapping, FilePlace, SpaceError
 use crate::user::vmo::Vmo;
 use ferrix_elf::Class;
 
-/// Where each check process keeps its buffers. Stage 10's ring check borrows
-/// the second page of it.
-pub(crate) const SCRATCH: u64 = 0x4000_0000;
-/// Two pages of it.
-const SCRATCH_LEN: u64 = 2 * PAGE_SIZE;
+// The two processes the checks run, and their scratch region: the load's
+// `syscall/side_check.rs` since S5 of the crate split, so that the load's
+// checks reach them without naming this raised file.
+pub(crate) use crate::syscall::side_check::{
+    HANDLES, OFFSET, PAIR, SCRATCH, Side, device_handle, reg,
+};
+
 /// Bytes being sent, and bytes being written into a VMO.
 const PAYLOAD: u64 = SCRATCH;
 /// Bytes received.
 const INBOX: u64 = SCRATCH + 0x100;
-/// Handle values, in either direction.
-const HANDLES: u64 = SCRATCH + 0x200;
-/// `channel_create`'s two handles.
-const PAIR: u64 = SCRATCH + 0x300;
 /// A `ReadActual`.
 const ACTUAL: u64 = SCRATCH + 0x308;
-/// A VMO offset.
-const OFFSET: u64 = SCRATCH + 0x310;
 /// A VMO size.
 const SIZE: u64 = SCRATCH + 0x318;
 /// A wait's deadline.
@@ -1289,168 +1285,6 @@ fn check_what_vmo_map_refuses(
     Ok([end, other_end])
 }
 
-/// One of the two processes.
-pub(crate) struct Side {
-    /// The process, over its own address space.
-    pub(crate) process: Arc<Process>,
-    /// Where the last child [`Side::built`] made enters.
-    last_built: SpinLock<Option<native::EntryPoint>>,
-}
-
-impl Side {
-    /// A fresh process with a scratch region mapped.
-    pub(crate) fn new() -> Result<Side, &'static str> {
-        let process = process::new_for_check().map_err(|_| "could not make a process")?;
-        let _ = process
-            .space()
-            .map_anonymous(SCRATCH, SCRATCH_LEN, VmaFlags::READ_WRITE)
-            .map_err(|_| "could not map a scratch region")?;
-        Ok(Side {
-            process,
-            last_built: SpinLock::new(None),
-        })
-    }
-
-    /// A side over a process that already exists.
-    pub(crate) fn of(process: Arc<Process>) -> Side {
-        Side {
-            process,
-            last_built: SpinLock::new(None),
-        }
-    }
-
-    /// A fresh process, as [`Side::new`], placed in `job` as a new one is.
-    pub(crate) fn new_in(job: &Arc<Job>) -> Result<Side, &'static str> {
-        let side = Side::new()?;
-        side.process
-            .move_new_to(job)
-            .map_err(|_| "could not place a process in its job")?;
-        Ok(side)
-    }
-
-    /// Make a native call with these registers.
-    pub(crate) fn call(&self, number: usize, args: &[u64]) -> Result<usize, Errno> {
-        let mut registers = [0_u64; 6];
-        for (slot, value) in registers.iter_mut().zip(args) {
-            *slot = *value;
-        }
-        let args = SyscallArgs {
-            abi: crate::trap::Abi::Native,
-            number,
-            args: registers,
-            ip: 0,
-        };
-        native::dispatch(&args, Some(&*self.process))
-    }
-
-    /// A child made in `job` by `process_make`, with the name staged at `name_at`
-    /// and the image in VMO `image` loaded, not started: what a starter does with
-    /// the library, here by the kernel's own loader, since these checks are about
-    /// what the child does and not how its pages got there
-    /// (`docs/microkernel/K15.md`).
-    pub(crate) fn built(
-        &self,
-        job: Handle,
-        image: Handle,
-        name_at: u64,
-        name_len: u64,
-        what: &'static str,
-    ) -> Result<Handle, &'static str> {
-        let child = self.handle(nr::PROCESS_MAKE, &[reg(job), name_at, name_len], what)?;
-        let (vmo, host) = self
-            .process
-            .with_handles(|table| {
-                let vmo = match table.get(image) {
-                    Ok((Object::Vmo(vmo), _)) => Some(Arc::clone(vmo)),
-                    _ => None,
-                };
-                let host = match table.get(child) {
-                    Ok((Object::Process(made), _)) => made.control().and_then(|held| held.host()),
-                    _ => None,
-                };
-                vmo.zip(host)
-            })
-            .ok_or(what)?;
-        let bytes = native::image_bytes(&vmo).map_err(|_| what)?;
-        let at =
-            crate::discovery::first_image_check::load_for_check(host.core().own_space(), &bytes)
-                .map_err(|_| what)?;
-        *self.last_built.lock() = Some(at);
-        Ok(child)
-    }
-
-    /// `process_run` on `child`, at the entry the last [`Side::built`] loaded.
-    pub(crate) fn run(&self, child: Handle, bootstrap: u64) -> Result<usize, Errno> {
-        let at = (*self.last_built.lock()).ok_or(status::BAD_STATE)?;
-        self.call(
-            nr::PROCESS_RUN,
-            &[reg(child), at.entry, at.stack, bootstrap],
-        )
-    }
-
-    /// Make a call that returns a handle.
-    pub(crate) fn handle(
-        &self,
-        number: usize,
-        args: &[u64],
-        what: &'static str,
-    ) -> Result<Handle, &'static str> {
-        let value = self.call(number, args).map_err(|_| what)?;
-        u32::try_from(value).map(Handle).map_err(|_| what)
-    }
-
-    /// Put bytes in this process's memory.
-    pub(crate) fn put(&self, at: u64, bytes: &[u8]) -> Result<(), &'static str> {
-        uaccess::copy_to_user(self.process.space(), at, bytes)
-            .map_err(|_| "could not stage user memory")
-    }
-
-    /// Read bytes back out of it.
-    pub(crate) fn get(&self, at: u64, len: usize) -> Result<Vec<u8>, &'static str> {
-        let mut out = vec![0_u8; len];
-        uaccess::copy_from_user(self.process.space(), at, &mut out)
-            .map_err(|_| "could not read user memory back")?;
-        Ok(out)
-    }
-
-    /// A `u32` out of it.
-    pub(crate) fn get_u32(&self, at: u64) -> Result<u32, &'static str> {
-        let bytes = self.get(at, 4)?;
-        <[u8; 4]>::try_from(bytes.as_slice())
-            .map(u32::from_ne_bytes)
-            .map_err(|_| "a short read")
-    }
-
-    /// Put handle values at [`HANDLES`].
-    fn put_handles(&self, handles: &[Handle]) -> Result<(), &'static str> {
-        let words: Vec<u8> = handles.iter().flat_map(|h| h.0.to_ne_bytes()).collect();
-        self.put(HANDLES, &words)
-    }
-
-    /// Put a VMO offset at [`OFFSET`].
-    fn put_offset(&self, offset: u64) -> Result<(), &'static str> {
-        self.put(OFFSET, &offset.to_ne_bytes())
-    }
-
-    /// Make a channel inside this process, returning both ends.
-    fn channel(&self) -> Result<(Handle, Handle), &'static str> {
-        let _ = self
-            .call(nr::CHANNEL_CREATE, &[PAIR])
-            .map_err(|_| "channel_create failed")?;
-        Ok((Handle(self.get_u32(PAIR)?), Handle(self.get_u32(PAIR + 4)?)))
-    }
-
-    /// Close whatever is left, as a process's exit will.
-    pub(crate) fn close_everything(&self) {
-        object::dispose(self.process.with_handles(object::HandleTable::clear));
-    }
-}
-
-/// A handle as a register.
-pub(crate) fn reg(handle: Handle) -> u64 {
-    u64::from(handle.0)
-}
-
 /// The channel end `handle` names in `side`.
 fn endpoint(side: &Side, handle: Handle) -> Result<Arc<Endpoint>, &'static str> {
     side.process
@@ -2545,13 +2379,6 @@ fn check_a_coherent_pin_of_a_snooping_device_changes_nothing(
             .map_err(|_| "closing a coherent pin's handles failed")?;
     }
     Ok(())
-}
-
-/// Give `side` a handle to `node`, as `devmgr` will give one to a driver.
-pub(crate) fn device_handle(side: &Side, node: &Arc<DeviceNode>) -> Result<Handle, &'static str> {
-    side.process
-        .with_handles(|table| table.insert(Object::Device(Arc::clone(node)), Rights::DEVICE))
-        .map_err(|_| "no room for a device handle")
 }
 
 /// Stage a spec for `len` bytes at `phys` at [`SPEC`].

@@ -25,10 +25,10 @@ use ferrix_native_abi::types::PROCESS_EXITED;
 use super::{Checked, Harness, delegation_check, native_check};
 use crate::arch;
 use crate::object::Object;
-use crate::object::check::{SCRATCH, Side, reg};
 use crate::syscall::credentials::{Credentials, Ids};
 use crate::syscall::image::{self, Shape};
 use crate::syscall::process::Process;
+use crate::syscall::side_check::{SCRATCH, Side, reg};
 
 /// The user the service runs as.
 const SERVICE: u32 = 1000;

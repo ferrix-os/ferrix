@@ -92,7 +92,7 @@ pub(crate) fn dispatch(
 /// `SIGCONT` continues a stopped process as it is sent, whatever the process
 /// does with the signal itself: that is what makes it the one signal a stopped
 /// process can act on.
-pub(crate) fn send(target: &Process, signal: u32, origin: Origin) {
+pub fn send(target: &Process, signal: u32, origin: Origin) {
     if signal == 0 || signal > NSIG || target.is_terminated() {
         return;
     }

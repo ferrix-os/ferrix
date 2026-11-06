@@ -24,6 +24,12 @@
 
 use super::cpu;
 
+// The entry driven from a built frame, for the load's checks (S5 of the
+// crate split): check code, as x86-64's `syscall/check.rs`, read for ring 0
+// only where the load's checks are built.
+#[cfg(ferrix_load_built = "ring0")]
+pub mod drive_check;
+
 /// Bytes in a saved frame. Must match [`TrapFrame`] exactly, and must be a
 /// multiple of sixteen because `AArch64` faults on a misaligned stack pointer.
 const FRAME_SIZE: usize = 304;
@@ -39,11 +45,11 @@ pub struct TrapFrame {
     /// `SP_EL0`: the user stack pointer when the exception came from EL0.
     pub sp: u64,
     /// Exception link register — where to return to.
-    pub elr: u64,
+    pub(crate) elr: u64,
     /// Saved program status.
-    pub spsr: u64,
+    pub(crate) spsr: u64,
     /// Exception syndrome: what happened, and why.
-    pub esr: u64,
+    pub(crate) esr: u64,
     /// Fault address, for an abort.
     pub far: u64,
     /// Which of the sixteen vector entries was taken.
@@ -361,7 +367,6 @@ ferrix_enter_user:
     user_spsr = const USER_SPSR,
 );
 
-// CHECKS-ONLY: arch/aarch64/trap/check.rs; home: super
 /// `SPSR_EL1` for a program: `EL0t`, with debug, asynchronous aborts and FIQs
 /// masked and IRQs open.
 ///
@@ -371,8 +376,7 @@ ferrix_enter_user:
 /// program's root. A program is a task of its own now, carrying its space, so
 /// a tick in EL0 is an ordinary preemption and the scheduler puts the right
 /// root back when it returns.
-#[doc(hidden)]
-pub const USER_SPSR: u64 = (1 << 9) | (1 << 8) | (1 << 6);
+pub(super) const USER_SPSR: u64 = (1 << 9) | (1 << 8) | (1 << 6);
 
 unsafe extern "C" {
     /// Enter EL0 at `entry` on `stack`.

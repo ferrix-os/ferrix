@@ -48,7 +48,7 @@ fn build() -> Option<Sigpage> {
 /// A space it cannot be mapped into goes on without it, as a space the vDSO
 /// cannot be mapped into does: its handlers without `SA_RESTORER` then
 /// return where they did before.
-pub(crate) fn map_into(space: &AddressSpace) -> Option<u64> {
+pub fn map_into(space: &AddressSpace) -> Option<u64> {
     let page = SIGPAGE.call_once(build).as_ref()?;
     space.map_code_page(Arc::clone(&page.vmo)).ok()
 }

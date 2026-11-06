@@ -39,7 +39,6 @@ ferrix-net.workspace = true
 ferrix-netlink.workspace = true
 ferrix-nettcp.workspace = true
 ferrix-netwire.workspace = true
-ferrix-paging.workspace = true
 ferrix-partition.workspace = true
 ferrix-pci.workspace = true
 ferrix-procfs.workspace = true

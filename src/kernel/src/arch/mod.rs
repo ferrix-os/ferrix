@@ -127,6 +127,20 @@ pub use x86_64::exception_check;
 #[cfg(target_arch = "x86_64")]
 #[doc(hidden)]
 pub use x86_64::programs_check;
+// The core's own system call entry, driven from a built frame, for the
+// checks that need a call they chose run through it (`syscall::seccomp_check`,
+// `object::write_read_check`): check code in each architecture's entry
+// module (`docs/microkernel/CRATE-SPLIT.md` S5; ledger 7721 R.3). Until S5
+// raised `arch/stage_check.rs` named them, out of the load's reach.
+#[cfg(all(ferrix_load_built = "ring0", target_arch = "aarch64"))]
+#[doc(hidden)]
+pub use aarch64::trap::drive_check::{drive_native_words, drive_system_call};
+#[cfg(all(ferrix_load_built = "ring0", target_arch = "arm"))]
+#[doc(hidden)]
+pub use armv7a::trap::drive_check::{drive_native_words, drive_system_call};
+#[cfg(all(ferrix_load_built = "ring0", target_arch = "x86_64"))]
+#[doc(hidden)]
+pub use x86_64::syscall::check::{drive_native_words, drive_system_call};
 // Drivers for the Arm peripherals both Arm architectures can have: the GICv2,
 // the PL011, and the STM32MP1's USART, which is ARMv7-A's.
 #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]

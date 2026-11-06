@@ -244,7 +244,7 @@ const NANOS: u64 = 1_000_000_000;
 /// checks use. A walk may go through it whatever namespace its context is
 /// in, since crossing a mount point looks in the mount's own table; a change
 /// to the tree goes through [`namespace_of`].
-pub(crate) fn namespace() -> &'static Namespace {
+pub fn namespace() -> &'static Namespace {
     first_namespace()
 }
 
@@ -545,7 +545,7 @@ pub(crate) fn read_file_beneath(ctx: &Context, dir: &[u8], name: &[u8]) -> Resul
 /// What the path walk refuses; `EISDIR` for a directory and `EACCES` for any
 /// other file that is not a regular one, and for a regular file the context
 /// may not execute; and whatever opening it or reading its headers refuses.
-pub(crate) fn open_program(
+pub fn open_program(
     ctx: &Context,
     start: Option<&Location>,
     path: &[u8],
@@ -577,16 +577,16 @@ pub(crate) fn open_program(
 /// The ids a program takes on when it runs: its owner where the file is
 /// set-user-id, its group where it is set-group-id.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct SetIds {
+pub struct SetIds {
     /// The effective user id the program starts with, if any.
-    pub(crate) uid: Option<u32>,
+    pub uid: Option<u32>,
     /// The effective group id, if any.
-    pub(crate) gid: Option<u32>,
+    pub gid: Option<u32>,
 }
 
 impl SetIds {
     /// What an image from no file carries: nothing.
-    pub(crate) const NONE: SetIds = SetIds {
+    pub const NONE: SetIds = SetIds {
         uid: None,
         gid: None,
     };

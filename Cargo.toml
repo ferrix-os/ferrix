@@ -129,6 +129,7 @@ members = [
     "src/kernel/core",
     "src/kernel/item",
     "src/kernel/load",
+    "src/kernel/checks",
     "src/kernel/lift/core",
     "src/kernel/lift/item",
     "src/kernel/lift/load",
@@ -295,6 +296,7 @@ ferrix-sync = { path = "src/lib/kernel/sync" }
 ferrix-kernel-core = { path = "src/kernel/core" }
 ferrix-kernel-item = { path = "src/kernel/item" }
 ferrix-kernel-load = { path = "src/kernel/load" }
+ferrix-kernel-raised-checks = { path = "src/kernel/checks" }
 ferrix-kernel-settings = { path = "src/kernel/extensions/settings" }
 ferrix-kernel-board-stm32mp1 = { path = "src/kernel/extensions/board/stm32mp1" }
 ferrix-kernel-board-gs201-usb = { path = "src/kernel/extensions/board/gs201-usb" }

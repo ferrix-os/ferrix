@@ -132,7 +132,11 @@ pub struct Report {
 }
 
 /// Run them. `Err` names the first thing that was not true.
-pub fn run() -> Result<Report, &'static str> {
+///
+/// `unmap` is the item's `syscall::unmap_check`, a raised check the load
+/// cannot name (`docs/microkernel/CRATE-SPLIT.md` S5): the binary hands it in,
+/// and it runs where it ran before.
+pub fn run(unmap: fn() -> Result<bool, &'static str>) -> Result<Report, &'static str> {
     let mut counter = Counter::default();
     // Guest milliseconds per group, printed at the end as stage 5 prints its
     // own: these checks are the boot's largest single stretch, two seconds of
@@ -226,8 +230,7 @@ pub fn run() -> Result<Report, &'static str> {
     let shared = check_a_shared_mapping_is_shared_across_fork()?;
     let narrowed = check_a_write_after_mprotect_read_only_faults()?;
     check_an_ended_process_closes_its_descriptors()?;
-    let unmap_waited =
-        crate::syscall::unmap_check::check_an_unmap_waits_for_a_copy_holding_its_page()?;
+    let unmap_waited = unmap()?;
     let execed = check_execve_replaces_the_program()?;
     let vdso = crate::syscall::vdso_check::check_the_vdso()?;
     mark!(7);
@@ -723,7 +726,7 @@ fn number_for(call: ferrix_linux_abi::nr::Syscall) -> Option<usize> {
 /// For the self-checks outside this module that want a call to go in the way
 /// a program's does, so that a number missing from one architecture's table,
 /// or a routing line that sends the call elsewhere, fails on that architecture.
-pub(crate) fn call_by_number(
+pub fn call_by_number(
     process: &Process,
     call: ferrix_linux_abi::nr::Syscall,
     args: [u64; 6],
@@ -5134,7 +5137,7 @@ const KILL_STATUS: i32 = 137;
 
 /// Build a spinning program tagged `tag` that loops `rounds` times and exits
 /// with `status`, and load it into a process of its own.
-pub(crate) fn spinner(tag: u8, rounds: u32, status: u32) -> Result<Arc<Process>, &'static str> {
+pub fn spinner(tag: u8, rounds: u32, status: u32) -> Result<Arc<Process>, &'static str> {
     let mut program = arch::USER_SPIN_PROGRAM.to_vec();
     let at = program
         .len()
@@ -5192,7 +5195,7 @@ pub(crate) fn spinner(tag: u8, rounds: u32, status: u32) -> Result<Arc<Process>,
 /// # Errors
 ///
 /// No memory for the thread, or no processor or stack for its task.
-pub(crate) fn spawn_in(
+pub fn spawn_in(
     process: &Arc<Process>,
     name: &'static str,
     entry: fn(usize),

@@ -100,7 +100,7 @@ use crate::user::space::{AddressSpace, FileMapping, FilePlace, SpaceError};
 
 /// Where an image's bytes are.
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum Source<'a> {
+pub enum Source<'a> {
     /// All of them, in kernel memory: a program built into the kernel, or one
     /// a check assembled. Copied in.
     Bytes(&'a [u8]),

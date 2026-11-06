@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-3085 declarations in the core's files, 215 in the item's; 263 checks-only.
+3089 declarations in the core's files, 215 in the item's; 267 checks-only.
 
 ## ferrix-kernel-core
 
@@ -279,6 +279,12 @@ checks above is `pub` for raised checks (F3).
 | `dma_barrier` | re-export | item |  |
 | `dma_barrier` | re-export | item |  |
 | `dma_barrier` | re-export | item |  |
+| `drive_native_words` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `drive_native_words` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `drive_native_words` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `drive_system_call` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `drive_system_call` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `drive_system_call` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `drop_identity_map` | re-export | bin |  |
 | `drop_identity_map` | re-export | bin |  |
 | `drop_identity_map` | re-export | bin |  |
@@ -632,24 +638,28 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `USER_SPSR` | const | load (checks) | checks-only |
 | `breakpoint` | fn | load, bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `enter_user` | fn | load |  |
 | `resume_user` | fn | load |  |
 | `system_call` | fn | item, load |  |
+| `drive_check` | mod | load (checks) | pub for raised checks |
 | `TrapFrame` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `UserRegs` | struct | item, load, bin |  |
-| `TrapFrame::elr` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
-| `TrapFrame::esr` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `TrapFrame::far` | field | load |  |
 | `TrapFrame::kind` | field | item, load, bin |  |
 | `TrapFrame::reserved` | field | item, load, bin |  |
 | `TrapFrame::sp` | field | load |  |
-| `TrapFrame::spsr` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `TrapFrame::x` | field | load |  |
 | `UserRegs::for_child` | method | load |  |
 | `UserRegs::set_stack` | method | load |  |
 | `UserRegs::stack_pointer` | method | load |  |
+
+### `arch::aarch64::trap::drive_check`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `drive_native_words` | fn | load (checks) | checks-only |
+| `drive_system_call` | fn | load (checks) | checks-only |
 
 ### `arch::armv7a`
 
@@ -847,25 +857,29 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `USER_CPSR` | const | load (checks) | checks-only |
 | `breakpoint` | fn | load, bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `enter_user` | fn | load |  |
 | `resume_user` | fn | load |  |
 | `system_call` | fn | item, load |  |
 | `vectors_die_in` | fn | load (checks) | checks-only |
+| `drive_check` | mod | load (checks) | pub for raised checks |
 | `TrapFrame` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `UserRegs` | struct | item, load, bin |  |
-| `TrapFrame::cpsr` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `TrapFrame::far` | field | load |  |
-| `TrapFrame::fsr` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `TrapFrame::kind` | field | item, load, bin |  |
-| `TrapFrame::lr` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `TrapFrame::pc` | field | load |  |
 | `TrapFrame::r` | field | load |  |
 | `TrapFrame::reserved` | field | item, load, bin |  |
 | `UserRegs::for_child` | method | load |  |
 | `UserRegs::set_stack` | method | load |  |
 | `UserRegs::stack_pointer` | method | load |  |
+
+### `arch::armv7a::trap::drive_check`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `drive_native_words` | fn | load (checks) | checks-only |
+| `drive_system_call` | fn | load (checks) | checks-only |
 
 ### `arch::fast_check`
 
@@ -1248,8 +1262,8 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `drive_native_words` | fn | load |  |
-| `drive_system_call` | fn | load |  |
+| `drive_native_words` | fn | load (checks) | checks-only |
+| `drive_system_call` | fn | load (checks) | checks-only |
 | `run` | fn | item, load, bin |  |
 | `run_decode` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 

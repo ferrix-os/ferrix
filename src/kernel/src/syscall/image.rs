@@ -27,10 +27,10 @@ use ferrix_elf::{Class, PF_R, PF_W, PF_X, PT_INTERP, PT_LOAD};
 pub(crate) const BASE: u64 = 0x0040_0000;
 
 /// The entry point the image declares: a little way into the text segment.
-pub(crate) const ENTRY: u64 = BASE + 0x100;
+pub const ENTRY: u64 = BASE + 0x100;
 
 /// Where the writable segment is linked.
-pub(crate) const DATA_VADDR: u64 = BASE + 0x0001_0000;
+pub const DATA_VADDR: u64 = BASE + 0x0001_0000;
 
 /// Bytes of the data segment that come from the file; the rest is `.bss`.
 pub(crate) const DATA_FILESZ: usize = 16;
@@ -74,7 +74,7 @@ pub enum Shape {
 }
 
 /// Build one.
-pub(crate) fn build(class: Class, machine: u16, shape: Shape) -> Vec<u8> {
+pub fn build(class: Class, machine: u16, shape: Shape) -> Vec<u8> {
     build_with(class, machine, shape, &[])
 }
 

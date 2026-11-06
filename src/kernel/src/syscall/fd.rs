@@ -59,7 +59,7 @@ pub(crate) fn arg(value: u64) -> i32 {
 }
 
 /// The description `fd` names, with the table lock already released.
-pub(crate) fn file(process: &Process, fd: i32) -> Result<Arc<OpenFile>, Errno> {
+pub fn file(process: &Process, fd: i32) -> Result<Arc<OpenFile>, Errno> {
     process.files().lock().get(fd).map(Arc::clone)
 }
 
@@ -429,7 +429,7 @@ pub(crate) fn closed(process: &Process, file: &Arc<OpenFile>) {
 }
 
 /// `close`.
-pub(crate) fn sys_close(process: &Process, fd: i32) -> Result<usize, Errno> {
+pub fn sys_close(process: &Process, fd: i32) -> Result<usize, Errno> {
     // The guard is a temporary of this statement, so the description is
     // dropped below with the lock already released.
     let file = process.files().lock().remove(fd)?;

@@ -49,7 +49,7 @@ use crate::user::vmo::Vmo;
 /// of a file, and silently: every address is valid, just not the one asked
 /// for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum OffsetUnit {
+pub enum OffsetUnit {
     /// `mmap`: bytes.
     Bytes,
     /// `mmap2`, ARMv7-A only: 4096-byte units, because a 32-bit register
@@ -113,21 +113,21 @@ fn pages_for(len: u64) -> Result<u64, Errno> {
 /// which three are integers is a call nobody can read, and because the trap
 /// path hands them over as a block anyway.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct MmapRequest {
+pub struct MmapRequest {
     /// Where the program wants it; a hint unless `MAP_FIXED` is set.
-    pub(crate) addr: u64,
+    pub addr: u64,
     /// How many bytes, before rounding.
-    pub(crate) len: u64,
+    pub len: u64,
     /// `PROT_*`.
-    pub(crate) prot: u32,
+    pub prot: u32,
     /// `MAP_*`.
-    pub(crate) flags: u32,
+    pub flags: u32,
     /// The file to map. Ignored for anonymous memory, as Linux ignores it.
-    pub(crate) fd: i64,
+    pub fd: i64,
     /// The offset into that file, in `unit`s.
-    pub(crate) offset: u64,
+    pub offset: u64,
     /// What `offset` is counted in.
-    pub(crate) unit: OffsetUnit,
+    pub unit: OffsetUnit,
 }
 
 /// `mmap` and `mmap2`.
@@ -137,7 +137,7 @@ pub(crate) struct MmapRequest {
 /// through the other. A private one shows the same pages until it writes one,
 /// and the write copies that page into an object of the mapping's own, so the
 /// file never sees it.
-pub(crate) fn sys_mmap(process: &Process, request: &MmapRequest) -> Result<usize, Errno> {
+pub fn sys_mmap(process: &Process, request: &MmapRequest) -> Result<usize, Errno> {
     let &MmapRequest {
         addr,
         len,
@@ -807,7 +807,7 @@ pub(crate) fn cacheflush_pages(
 ///
 /// Unmapping a range that is only partly mapped is not an error: Linux removes
 /// what is there and succeeds, and a libc freeing an arena relies on it.
-pub(crate) fn sys_munmap(process: &Process, addr: u64, len: u64) -> Result<usize, Errno> {
+pub fn sys_munmap(process: &Process, addr: u64, len: u64) -> Result<usize, Errno> {
     if !addr.is_multiple_of(PAGE_SIZE) {
         return Err(Errno::EINVAL);
     }

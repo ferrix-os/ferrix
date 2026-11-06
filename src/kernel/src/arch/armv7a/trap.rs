@@ -32,6 +32,12 @@
 
 use super::cpu;
 
+// The entry driven from a built frame, for the load's checks (S5 of the
+// crate split): check code, as x86-64's `syscall/check.rs`, read for ring 0
+// only where the load's checks are built.
+#[cfg(ferrix_load_built = "ring0")]
+pub mod drive_check;
+
 /// Bytes in a saved frame. Must match [`TrapFrame`] exactly, and a multiple of
 /// eight, which is what the AAPCS requires of the stack at a call.
 const FRAME_SIZE: usize = 80;
@@ -44,7 +50,7 @@ pub struct TrapFrame {
     /// Which of the eight vector entries was taken.
     pub kind: u32,
     /// The fault status register, for an abort: `DFSR` or `IFSR`.
-    pub fsr: u32,
+    pub(crate) fsr: u32,
     /// The fault address register, for an abort: `DFAR` or `IFAR`.
     pub far: u32,
     /// Padding, so the frame keeps the stack eight-byte aligned.
@@ -52,12 +58,12 @@ pub struct TrapFrame {
     /// `r0` through `r12`.
     pub r: [u32; 13],
     /// The interrupted code's link register — its SVC-mode one.
-    pub lr: u32,
+    pub(crate) lr: u32,
     /// Where to return to: the interrupted instruction, or for a system call
     /// the one after it.
     pub pc: u32,
     /// The interrupted code's program status.
-    pub cpsr: u32,
+    pub(crate) cpsr: u32,
 }
 
 impl TrapFrame {
@@ -379,7 +385,6 @@ ferrix_enter_user:
 "#
 );
 
-// CHECKS-ONLY: arch/armv7a/trap/check.rs; home: super
 /// `CPSR` for a program: USR mode, little-endian, with asynchronous aborts and
 /// FIQs masked and IRQs open. ARM state, unless the entry point says Thumb --
 /// see [`CPSR_THUMB`].
@@ -388,8 +393,7 @@ ferrix_enter_user:
 /// AArch64's reason: a tick in USR mode could switch to a task with an address
 /// space and back, and the switch back uninstalled the program's root. A
 /// program is a task of its own now, so a tick is an ordinary preemption.
-#[doc(hidden)]
-pub const USER_CPSR: u32 = MODE_USR | (1 << 8) | (1 << 6);
+pub(super) const USER_CPSR: u32 = MODE_USR | (1 << 8) | (1 << 6);
 
 /// `CPSR.T`: execute Thumb instructions.
 ///

@@ -106,11 +106,11 @@ pub(crate) struct Limit {
 
 /// Everything this module keeps for one process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Attributes {
+pub struct Attributes {
     /// `PR_SET_PDEATHSIG`: the signal asked for when the parent dies.
     pub(crate) parent_death_signal: u32,
     /// `PR_SET_DUMPABLE`. On by default, as it is on Linux.
-    pub(crate) dumpable: bool,
+    pub dumpable: bool,
     /// `PR_SET_NO_NEW_PRIVS`, which can be set and never cleared.
     pub(crate) no_new_privs: bool,
     /// `PR_SET_CHILD_SUBREAPER`.
@@ -149,7 +149,7 @@ pub(crate) fn get(process: &Process) -> Attributes {
 }
 
 /// Change what is kept for `process`, and hand back what `change` returns.
-pub(crate) fn update<R>(process: &Process, change: impl FnOnce(&mut Attributes) -> R) -> R {
+pub fn update<R>(process: &Process, change: impl FnOnce(&mut Attributes) -> R) -> R {
     let (pid, started) = (process.pid(), process.started());
     let known = matches!(TABLE.lock().get(&pid), Some((at, _)) if *at == started);
     if !known {
@@ -269,7 +269,7 @@ pub(crate) fn ids_before_exec(process: &Process) -> IdsBeforeExec {
 /// A change of capability counts on Linux too, but only a widening; here a
 /// capability is an effective uid of 0, so gaining one is a change of the
 /// effective uid and is already caught.
-pub(crate) fn credentials_changed(process: &Process) {
+pub fn credentials_changed(process: &Process) {
     update(process, |a| {
         a.dumpable = false;
         a.parent_death_signal = 0;

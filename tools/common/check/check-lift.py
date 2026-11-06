@@ -41,6 +41,7 @@ ROOTS = {
     "kernel_core.rs",
     "kernel_item.rs",
     "kernel_load.rs",
+    "kernel_raised.rs",
     "lift_core.rs",
     "lift_item.rs",
 }
@@ -180,7 +181,7 @@ def main() -> int:
             problems.append(f"{rel}: lift_reuse gives no reason")
 
     raised = manifest.get("raised_checks", {})
-    raised_files = set(raised) if isinstance(raised, dict) else set()
+    raised_files = {entry["file"] for entry in raised.get("entries", [])} if isinstance(raised, dict) else set()
     for rel in sorted(reuse):
         source = (SRC / rel).read_text(encoding="utf-8")
         text = "\n".join(strip_comment(line) for line in source.splitlines())

@@ -85,7 +85,15 @@ ROOT = Path(__file__).resolve().parent.parent.parent.parent
 BASELINE = ROOT / "tools" / "common" / "data" / "ring0-alloc-baseline.json"
 
 # The kernel's packages: what they link is what ring 0 runs.
-KERNEL_PACKAGES = ("ferrix-kernel", "ferrix-kernel-core", "ferrix-kernel-item", "ferrix-kernel-load")
+# The raised checks' crate (CRATE-SPLIT.md, S5a) is one of them: its files are
+# the kernel's check files, read below by ring, and it has no `src/` of its own.
+KERNEL_PACKAGES = (
+    "ferrix-kernel",
+    "ferrix-kernel-core",
+    "ferrix-kernel-item",
+    "ferrix-kernel-load",
+    "ferrix-kernel-raised-checks",
+)
 # The toolkit the conversions are made with; its infallible calls are its job.
 TOOLKIT_CRATES = {"ferrix-fallible"}
 # Only what ships into the image: build scripts run on the host.

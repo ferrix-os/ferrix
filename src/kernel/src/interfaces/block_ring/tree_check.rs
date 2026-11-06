@@ -40,7 +40,7 @@ use super::{TREE_LOCATION, VIRTIO_BLK_MAJOR, forget_parked, is_parked};
 use crate::console::println;
 use crate::device::{self, DeviceNode, DmaShape};
 use crate::fs::devfs;
-use crate::object::check::{Side, device_handle, reg};
+use crate::syscall::side_check::{Side, device_handle, reg};
 
 /// The two nodes' register addresses: no board's tree has a device there, so
 /// the audit record of their quiesce names no real one. Nothing maps them.

@@ -75,7 +75,7 @@ const MAX_RW_COUNT: u64 = 0x7FFF_F000;
 /// each write apart (`ferrix_vfs::pipe`): the Steam client's controller code
 /// asserts without one. Linux's `O_NOTIFICATION_PIPE` is `EINVAL` here, with
 /// every other bit.
-pub(crate) fn sys_pipe2(process: &Process, fds: u64, raw: u32) -> Result<usize, Errno> {
+pub fn sys_pipe2(process: &Process, fds: u64, raw: u32) -> Result<usize, Errno> {
     // `O_DIRECT` is this architecture's bit, which is not the same on Arm.
     let direct = crate::arch::OPEN_FLAGS.direct;
     if raw & !(O_CLOEXEC | O_NONBLOCK | direct) != 0 {

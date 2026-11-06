@@ -43,7 +43,7 @@
 
 extern crate alloc;
 
-use ferrix_kernel_load::*;
+use ferrix_kernel_raised_checks::*;
 // Named, not only reached through the glob above, so that each crate's word
 // is named by the binary (`kernel-interface.py`).
 use ferrix_kernel_load::{CORE_FLAG_WORD, ITEM_FLAG_WORD, LOAD_FLAG_WORD};

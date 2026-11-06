@@ -32,9 +32,9 @@ use ferrix_vfs::OpenFlags;
 
 use super::native_check::{descriptor, held};
 use super::{Checked, Harness};
-use crate::object::check::{SCRATCH, Side, reg};
 use crate::object::job::{Job, KILLED_STATUS};
 use crate::syscall::process;
+use crate::syscall::side_check::{SCRATCH, Side, reg};
 
 /// Where the second check process keeps a name for `process_create`.
 const NAME_AT: u64 = SCRATCH + 0x600;

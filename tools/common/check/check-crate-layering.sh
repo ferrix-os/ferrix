@@ -149,6 +149,33 @@ kernel_rule() {
 kernel_rule ferrix-kernel-core "the kernel's core ring" "ferrix-kernel|ferrix-kernel-item|ferrix-kernel-load|ferrix-boot"
 kernel_rule ferrix-kernel-item "the kernel's item ring" "ferrix-kernel|ferrix-kernel-load|ferrix-boot"
 kernel_rule ferrix-kernel-load "the kernel's load ring" "ferrix-kernel|ferrix-boot"
+kernel_rule ferrix-kernel-raised-checks "the kernel's raised checks" "ferrix-kernel|ferrix-boot"
+# The raised checks' crate (docs/microkernel/CRATE-SPLIT.md §2.6 item 5, S5;
+# ledger 7721 R.6 (b)): verification code that names the load, so the one
+# crate in src/kernel that may reach above a part's ring, and only the binary
+# may link it. Inverted: every package of the workspace that links it, the
+# binary alone allowed.
+raised_users() {
+    cargo tree -i ferrix-kernel-raised-checks --workspace --edges normal --prefix none
+}
+if [[ " $listed " == *" ferrix-kernel-raised-checks "* ]]; then
+    if ! raised_by=$(raised_users 2>/tmp/cargo-tree-err.$$); then
+        echo "ERROR: could not resolve who links ferrix-kernel-raised-checks; the rule was NOT checked." >&2
+        sed 's/^/    /' /tmp/cargo-tree-err.$$ >&2
+        status=1
+    else
+        raised_offenders=$(echo "$raised_by" | awk '{print $1}' | sort -u \
+            | grep -vxE 'ferrix-kernel|ferrix-kernel-raised-checks' || true)
+        if [[ -n "$raised_offenders" ]]; then
+            echo "LAYERING VIOLATION: ferrix-kernel-raised-checks (the kernel's raised checks) is linked by a crate other than the binary:" >&2
+            echo "$raised_offenders" | sed 's/^/    /' >&2
+            status=1
+        else
+            echo "ok:   ferrix-kernel-raised-checks (the kernel's raised checks) is linked by the binary alone"
+        fi
+    fi
+    rm -f /tmp/cargo-tree-err.$$
+fi
 
 # ---------------------------------------------------------------------------
 # 2. The host-testable libraries sit below both.

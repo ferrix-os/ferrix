@@ -13,6 +13,9 @@ path = "src/main.rs"
 
 [dependencies]
 ferrix-kernel-load.workspace = true
+# The raised checks (docs/microkernel/CRATE-SPLIT.md S5): only the binary
+# names them.
+ferrix-kernel-raised-checks.workspace = true
 # The removable run-time setting entries: always compiled, linked only when
 # the composition root names them, under runtime_settings=live
 # (docs/KERNEL-CRATES.md §6; ledger 3558 (10), 3623 (R1)).

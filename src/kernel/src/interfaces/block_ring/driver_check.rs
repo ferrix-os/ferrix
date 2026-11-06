@@ -50,9 +50,9 @@ use crate::device;
 use crate::fs;
 use crate::fs::block::BlockDevice;
 use crate::object::Object;
-use crate::object::check::{Side, device_handle, reg};
 use crate::object::job::Job;
 use crate::sched;
+use crate::syscall::side_check::{Side, device_handle, reg};
 use crate::timer;
 
 /// virtio's PCI vendor, and virtio-blk's modern and transitional device ids.

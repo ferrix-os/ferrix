@@ -86,7 +86,7 @@ pub(crate) fn sys_read(process: &Process, fd: i32, buf: u64, len: u64) -> Result
 ///
 /// A zero-length write is not a no-op: it still validates the descriptor,
 /// which is why the lookup comes first.
-pub(crate) fn sys_write(process: &Process, fd: i32, buf: u64, len: u64) -> Result<usize, Errno> {
+pub fn sys_write(process: &Process, fd: i32, buf: u64, len: u64) -> Result<usize, Errno> {
     let file = fd::file(process, fd)?;
     count(write_from(process, &file, buf, len, Position::Current)?)
 }
@@ -130,12 +130,7 @@ pub(crate) fn sys_pwrite64(
 /// filled, since a short read means there was no more to read. A stream goes
 /// on into the next segment as one read of it goes on from one page to the
 /// next: only one that fills reads, and without waiting (`read_into`).
-pub(crate) fn sys_readv(
-    process: &Process,
-    fd: i32,
-    iov: u64,
-    entries: u64,
-) -> Result<usize, Errno> {
+pub fn sys_readv(process: &Process, fd: i32, iov: u64, entries: u64) -> Result<usize, Errno> {
     sys_readv_at_width(process, fd, iov, entries, size_of::<usize>())
 }
 
@@ -180,12 +175,7 @@ pub(crate) fn sys_readv_at_width(
 /// The whole array is read and the lengths summed *before* anything is
 /// written, because the ABI says `EINVAL` for a total that overflows and a
 /// program must not see half its output before being told no.
-pub(crate) fn sys_writev(
-    process: &Process,
-    fd: i32,
-    iov: u64,
-    entries: u64,
-) -> Result<usize, Errno> {
+pub fn sys_writev(process: &Process, fd: i32, iov: u64, entries: u64) -> Result<usize, Errno> {
     sys_writev_at_width(process, fd, iov, entries, size_of::<usize>())
 }
 

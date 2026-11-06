@@ -79,6 +79,7 @@ pub fn run() -> Result<(), &'static str> {
     Ok(())
 }
 
+// CHECKS-ONLY: syscall/check.rs, syscall/seccomp_check.rs, syscall/seccomp_filters_check.rs, syscall/seccomp/user_dispatch_check.rs, object/fast_path_check.rs, object/sender_check.rs, object/space_check.rs, object/write_read_check.rs, through `arch`; home: in crate::arch
 /// Take the entry a system call of `abi` arrives through, with a frame built
 /// from these registers as the processor leaves them, and answer what the
 /// entry left in `RAX`.
@@ -160,6 +161,7 @@ pub fn drive_system_call(
     result
 }
 
+// CHECKS-ONLY: syscall/check.rs, syscall/seccomp_check.rs, syscall/seccomp_filters_check.rs, syscall/seccomp/user_dispatch_check.rs, object/fast_path_check.rs, object/sender_check.rs, object/space_check.rs, object/write_read_check.rs, through `arch`; home: in crate::arch
 /// Take `SYSCALL`'s entry with a native call of `number` and these argument
 /// registers, and answer what the entry left in `RAX` and in the second,
 /// third and fourth argument registers (`RSI`, `RDX`, `R10`): where

@@ -21,8 +21,9 @@ the plan for (5) to (12).
 |---|---|---|---|
 | `ferrix-kernel-core` | `src/kernel/src/kernel_core.rs` | the core ring's files (104k lines) | the libraries it uses today |
 | `ferrix-kernel-item` | `src/kernel/src/kernel_item.rs` | the item ring's files but `main.rs` (14k lines) | core |
-| `ferrix-kernel-load` | `src/kernel/src/kernel_load.rs` | the load ring's files (122k lines), and the check files of §3 (3) | core, item |
-| `ferrix-kernel` (the binary) | `src/kernel/src/main.rs` | the composition root, as today, and `stages_check.rs` | core, item, load |
+| `ferrix-kernel-load` | `src/kernel/src/kernel_load.rs` | the load ring's files (122k lines) | core, item |
+| `ferrix-kernel-raised-checks` | `src/kernel/src/kernel_raised.rs` | the check files of §3 (3), raised above their ring (since S5 of the crate split, `microkernel/CRATE-SPLIT.md` §2.6 item 5; before it the load's) | core, item, load |
+| `ferrix-kernel` (the binary) | `src/kernel/src/main.rs` | the composition root, as today, and `stages_check.rs` | core, item, load, raised checks |
 
 **Every source file stays where it is.** The rings are keyed by path, so are
 the traceability anchors (`path::function` under `src/kernel/src`), the
@@ -403,7 +404,13 @@ re-exported per architecture by `arch/stage_check.rs` (a raised check under
 `arch/`), and the load's root names them once, without a `cfg`: `pub use
 stage_check::{drive_native_words, drive_system_call};` (ledger line 1585,
 Q2). The core's `arch/mod.rs`, `aarch64/mod.rs`, `armv7a/mod.rs` and
-`x86_64/mod.rs` no longer re-export them.
+`x86_64/mod.rs` no longer re-export them. *Since S5 of the crate split*
+(`microkernel/CRATE-SPLIT.md` §2.6 item 5, ledger 7721 R.3) the load's own
+checks call them while the raised checks are a crate above the load: the Arm
+pair's bodies are the core's `arch/<isa>/trap/drive_check.rs` (x86-64's are
+its `syscall/check.rs`), declared under `ferrix_load_built = "ring0"`, and the
+core's `arch/mod.rs` re-exports them again, per architecture and under the
+same `cfg`, checks-only (`formerly_crate_wide`, born S5).
 
 **Visibility, by the compiler's errors.** Nothing in the kernel was `pub`;
 2,609 declarations are now, 2,362 of them `pub(crate)` before and 37

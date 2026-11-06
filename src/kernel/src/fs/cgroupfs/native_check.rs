@@ -31,9 +31,9 @@ use ferrix_vfs::OpenFlags;
 
 use super::{Checked, Harness};
 use crate::object::Object;
-use crate::object::check::{SCRATCH, Side, reg};
 use crate::object::job::{Job, KILLED_STATUS};
 use crate::syscall::process::{self, Process};
+use crate::syscall::side_check::{SCRATCH, Side, reg};
 
 /// A wait's deadline, in the check process's scratch region; clear of what
 /// the stage 9 checks keep there, since each has a process of its own.

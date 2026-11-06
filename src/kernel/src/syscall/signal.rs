@@ -153,7 +153,7 @@ pub(crate) const fn default_action(signal: u32) -> DefaultAction {
 
 /// Who or what raised a pending signal: the `siginfo` a handler is given.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum Origin {
+pub enum Origin {
     /// The kernel, for its own reasons: an interval timer, a broken pipe.
     #[default]
     Kernel,

@@ -42,7 +42,7 @@ use crate::syscall::signal::{self, Inherited, Signals, ThreadSignals};
 
 /// One line of execution through a process.
 #[derive(Debug)]
-pub(crate) struct Thread {
+pub struct Thread {
     /// Its thread id. A leader's is its process's pid, and zero with it. It
     /// changes once at most: a thread that replaces its process's program
     /// while not the leader takes the pid, as the leader it becomes.
@@ -491,7 +491,7 @@ impl Thread {
     }
 
     /// The process it runs.
-    pub(crate) fn process(&self) -> &Arc<Process> {
+    pub fn process(&self) -> &Arc<Process> {
         &self.process
     }
 
@@ -599,7 +599,7 @@ impl Drop for Thread {
 }
 
 /// The thread the running task runs, or `None` for a kernel thread.
-pub(crate) fn current() -> Option<Arc<Thread>> {
+pub fn current() -> Option<Arc<Thread>> {
     // The task lent, not cloned; the thread the caller keeps is (B1).
     sched::with_current(|task| {
         let thread: Arc<dyn UserThread> = Arc::clone(task.thread()?);

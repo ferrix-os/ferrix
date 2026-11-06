@@ -70,7 +70,7 @@ static READ: AtomicU8 = AtomicU8::new(0);
 /// for a check that could not be set up or whose tasks never finished.
 ///
 /// Verifies: L.user.63
-pub(crate) fn check_an_unmap_waits_for_a_copy_holding_its_page() -> Result<bool, &'static str> {
+pub fn check_an_unmap_waits_for_a_copy_holding_its_page() -> Result<bool, &'static str> {
     let online = crate::smp::topology().map_or(1, crate::smp::Topology::online);
     if online < 2 {
         return Ok(false);

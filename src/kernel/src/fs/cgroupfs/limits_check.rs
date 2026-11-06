@@ -33,8 +33,8 @@ use ferrix_vfs::{Access, OpenFlags};
 
 use super::{Checked, Harness, delegation_check, native_check};
 use crate::object::Object;
-use crate::object::check::{SCRATCH, Side, reg};
 use crate::syscall::credentials::{Credentials, Ids};
+use crate::syscall::side_check::{SCRATCH, Side, reg};
 
 /// The user the cgroup is delegated to.
 const DELEGATE: u32 = 1000;

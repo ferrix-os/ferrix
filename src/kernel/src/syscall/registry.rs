@@ -35,7 +35,7 @@ pub(crate) use crate::object::process::{INIT_PID, PID_MAX, allocate_init, is_fre
 /// Every path that makes a process calls this where it would otherwise have
 /// called `Arc::new`: a process that is shared but not registered is one
 /// `kill` and `/proc` cannot see.
-pub(crate) fn register(process: Process) -> Arc<Process> {
+pub fn register(process: Process) -> Arc<Process> {
     register_shared(Arc::new(process))
 }
 
