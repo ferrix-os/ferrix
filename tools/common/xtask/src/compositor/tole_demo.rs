@@ -350,8 +350,10 @@ fn run_demo(
     let count = |wanted: [u8; 3]| {
         screen
             .pixels
-            .chunks_exact(3)
-            .filter(|pixel| *pixel == wanted)
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .filter(|pixel| **pixel == wanted)
             .count()
     };
     let (ground, accent) = (count(GROUND), count(ACCENT));

@@ -131,7 +131,7 @@ pub fn fill_topology_info(sseu: &SseuInfo) -> [u8; TOPOLOGY_LEN] {
         eu_stride as u16,                        // eu_stride
     ];
     let mut out = [0_u8; TOPOLOGY_LEN];
-    for (slot, word) in out.chunks_exact_mut(2).zip(header) {
+    for (slot, word) in out.as_chunks_mut::<2>().0.iter_mut().zip(header) {
         slot.copy_from_slice(&word.to_le_bytes());
     }
     if let Some(byte) = out.get_mut(16) {

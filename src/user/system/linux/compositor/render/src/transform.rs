@@ -271,8 +271,14 @@ pub fn copy(
             if right.0 > 0 {
                 into.copy_from_slice(pixels);
             } else {
-                for (into, pixel) in into.chunks_exact_mut(4).rev().zip(pixels.chunks_exact(4)) {
-                    into.copy_from_slice(pixel);
+                for (into, pixel) in into
+                    .as_chunks_mut::<4>()
+                    .0
+                    .iter_mut()
+                    .rev()
+                    .zip(pixels.as_chunks::<4>().0)
+                {
+                    *into = *pixel;
                 }
             }
         }
@@ -312,11 +318,11 @@ pub fn copy(
                 .chunks(stride.max(1))
                 .filter_map(|line| line.get(..4));
             if start <= end {
-                for (into, pixel) in into.chunks_exact_mut(4).zip(read) {
+                for (into, pixel) in into.as_chunks_mut::<4>().0.iter_mut().zip(read) {
                     into.copy_from_slice(pixel);
                 }
             } else {
-                for (into, pixel) in into.chunks_exact_mut(4).rev().zip(read) {
+                for (into, pixel) in into.as_chunks_mut::<4>().0.iter_mut().rev().zip(read) {
                     into.copy_from_slice(pixel);
                 }
             }

@@ -1089,9 +1089,10 @@ fn control(
                 descriptors.extend(
                     entry
                         .data
-                        .chunks_exact(size_of::<i32>())
-                        .filter_map(|bytes| <[u8; 4]>::try_from(bytes).ok())
-                        .map(i32::from_le_bytes),
+                        .as_chunks::<{ size_of::<i32>() }>()
+                        .0
+                        .iter()
+                        .map(|bytes| i32::from_le_bytes(*bytes)),
                 );
             }
             SCM_CREDENTIALS if matches!(socket, Any::Unix(_)) => {

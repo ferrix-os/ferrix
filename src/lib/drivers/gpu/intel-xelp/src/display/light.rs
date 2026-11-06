@@ -939,7 +939,7 @@ pub fn take<M: Mmio + ?Sized, C: crate::io::Clock + ?Sized>(
 /// `drm_detect_hdmi_monitor` looks.
 #[must_use]
 pub fn is_hdmi(edid: &[u8]) -> bool {
-    edid.chunks_exact(128).skip(1).any(|block| {
+    edid.as_chunks::<128>().0.iter().skip(1).any(|block| {
         if block.first() != Some(&0x02) {
             return false;
         }

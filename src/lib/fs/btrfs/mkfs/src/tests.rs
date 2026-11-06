@@ -66,7 +66,7 @@ impl MemDevice {
     /// A device holding a packed fixture: records of an offset and a block.
     fn packed(packed: &[u8], size: u64) -> Self {
         let mut device = MemDevice::new(size);
-        for record in packed.chunks_exact(8 + BLOCK) {
+        for record in packed.as_chunks::<{ 8 + BLOCK }>().0 {
             let at = u64::from_le_bytes(record[..8].try_into().unwrap());
             device.store(at, &record[8..]);
         }

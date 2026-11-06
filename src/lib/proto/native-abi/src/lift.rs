@@ -199,7 +199,7 @@ impl BootPage {
             self.devices,
             self.wall_clock,
         ];
-        for (slot, word) in out.chunks_exact_mut(8).zip(words) {
+        for (slot, word) in out.as_chunks_mut::<8>().0.iter_mut().zip(words) {
             slot.copy_from_slice(&word.to_le_bytes());
         }
         out

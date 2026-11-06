@@ -226,21 +226,25 @@ fn every_screen_has_its_section_in_order() {
 fn text_is_spleen_at_one_size_or_two() {
     let (pixels, width, height) = text("A", GOOD, Size::Normal, 1);
     assert_eq!((width, height), (8, 16));
-    let lit: Vec<&[u8]> = pixels
-        .chunks_exact(4)
-        .filter(|pixel| pixel.get(3) == Some(&0xff))
+    let lit: Vec<&[u8; 4]> = pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|pixel| pixel[3] == 0xff)
         .collect();
     assert!(!lit.is_empty(), "an A covers something");
     assert!(
-        lit.iter().all(|pixel| *pixel == [0x33, 0xff, 0x33, 0xff]),
+        lit.iter().all(|pixel| **pixel == [0x33, 0xff, 0x33, 0xff]),
         "every lit pixel is the colour, as B G R A"
     );
     let (large, width, height) = text("A", GOOD, Size::Large, 1);
     assert_eq!((width, height), (16, 32));
     let count = |bytes: &[u8]| {
         bytes
-            .chunks_exact(4)
-            .filter(|pixel| pixel.get(3) == Some(&0xff))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|pixel| pixel[3] == 0xff)
             .count()
     };
     assert_eq!(

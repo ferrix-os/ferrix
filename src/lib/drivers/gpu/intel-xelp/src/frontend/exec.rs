@@ -432,7 +432,10 @@ fn read_objects<M, H: Host<M>>(
         bytes,
     )
     .map_err(|_| Errno::EFAULT)?;
-    for (entry, source) in out.iter_mut().zip(bytes.chunks_exact(ExecObject2::SIZE)) {
+    for (entry, source) in out
+        .iter_mut()
+        .zip(bytes.as_chunks::<{ ExecObject2::SIZE }>().0)
+    {
         *entry = ExecObject2::from_bytes(source).ok_or(Errno::EFAULT)?;
     }
     Ok(())

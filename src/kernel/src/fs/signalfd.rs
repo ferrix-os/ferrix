@@ -247,7 +247,7 @@ impl Inode for SignalFd {
         // task holding one whose maker has gone reads nothing.
         let reader = self.reader().ok_or(Errno::EAGAIN)?;
         let mut filled = 0;
-        for slot in buf.chunks_exact_mut(SIGNALFD_SIGINFO_BYTES) {
+        for slot in buf.as_chunks_mut::<SIGNALFD_SIGINFO_BYTES>().0 {
             // Only the first may wait: `signalfd_read` takes the rest
             // non-blocking, and answers what it has.
             match self.dequeue(&reader, nonblock || filled > 0) {

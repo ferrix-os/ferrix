@@ -539,7 +539,9 @@ fn prepared_signal(samples: &[f64]) -> Vec<f64> {
     samples
         .get(start..)
         .unwrap_or(&[])
-        .chunks_exact(DECIMATE)
+        .as_chunks::<DECIMATE>()
+        .0
+        .iter()
         .map(|block| block.iter().sum::<f64>() / DECIMATE as f64)
         .collect()
 }

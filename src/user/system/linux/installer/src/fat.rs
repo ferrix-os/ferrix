@@ -98,7 +98,7 @@ impl Fat {
         for _ in 0..Self::LONGEST {
             disk.seek(SeekFrom::Start(self.cluster_offset(cluster)?))?;
             disk.read_exact(&mut bytes)?;
-            for entry in bytes.chunks_exact(32) {
+            for entry in bytes.as_chunks::<32>().0 {
                 match entry[0] {
                     0x00 => return Ok(None),
                     0xE5 => continue,

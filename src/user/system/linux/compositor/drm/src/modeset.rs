@@ -45,8 +45,8 @@ pub fn fill(
 ) {
     let bytes = color.to_le_bytes();
     for row in pixels.chunks_exact_mut(stride).take(height) {
-        for pixel in row.chunks_exact_mut(4).take(width) {
-            pixel.copy_from_slice(&bytes);
+        for pixel in row.as_chunks_mut::<4>().0.iter_mut().take(width) {
+            *pixel = bytes;
         }
     }
     if negative && let Some(first) = pixels.get_mut(..4) {

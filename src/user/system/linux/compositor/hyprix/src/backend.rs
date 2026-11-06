@@ -1751,11 +1751,9 @@ pub fn write_ppm(backend: &dyn Backend, path: &Path) -> io::Result<()> {
         let row = bytes
             .get(y * stride..y * stride + width as usize * 4)
             .unwrap_or(&[]);
-        for pixel in row.chunks_exact(4) {
-            // The buffer is XRGB8888 little-endian: blue, green, red, unused.
-            if let [blue, green, red, _] = pixel {
-                out.extend_from_slice(&[*red, *green, *blue]);
-            }
+        // The buffer is XRGB8888 little-endian: blue, green, red, unused.
+        for &[blue, green, red, _] in row.as_chunks::<4>().0 {
+            out.extend_from_slice(&[red, green, blue]);
         }
     }
     std::fs::write(path, out)

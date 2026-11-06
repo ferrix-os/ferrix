@@ -60,8 +60,7 @@ pub fn encode(width: u32, height: u32, stride: usize, xrgb: &[u8]) -> Option<Vec
     let mut run: u8 = 0;
     for row in 0..h {
         let line = xrgb.get(row * stride..row * stride + w * 4)?;
-        for quad in line.chunks_exact(4) {
-            let [b, g, r, _] = <[u8; 4]>::try_from(quad).ok()?;
+        for &[b, g, r, _] in line.as_chunks::<4>().0 {
             let pixel = Pixel { r, g, b, a: 255 };
             if pixel == previous {
                 run += 1;

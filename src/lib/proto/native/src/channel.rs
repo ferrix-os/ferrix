@@ -94,7 +94,12 @@ impl Words {
     #[inline]
     pub fn bytes(&self) -> [u8; WRITE_READ_BYTES] {
         let mut bytes = [0_u8; WRITE_READ_BYTES];
-        for (chunk, word) in bytes.chunks_exact_mut(size_of::<usize>()).zip(self.words) {
+        for (chunk, word) in bytes
+            .as_chunks_mut::<{ size_of::<usize>() }>()
+            .0
+            .iter_mut()
+            .zip(self.words)
+        {
             chunk.copy_from_slice(&word.to_ne_bytes());
         }
         bytes
@@ -164,10 +169,8 @@ impl<S: Syscall> Channel<S> {
             .make(self.syscall());
         decode_unit(value)?;
         let mut words = [0_u64; POWER_READ_WORDS];
-        for (word, chunk) in words.iter_mut().zip(bytes.chunks_exact(8)) {
-            let mut raw = [0_u8; 8];
-            raw.copy_from_slice(chunk);
-            *word = u64::from_ne_bytes(raw);
+        for (word, chunk) in words.iter_mut().zip(bytes.as_chunks::<8>().0) {
+            *word = u64::from_ne_bytes(*chunk);
         }
         Ok(words)
     }
@@ -351,7 +354,12 @@ impl<S: Syscall> Channel<S> {
         else {
             return Err((Error::TooBig, handles));
         };
-        for (slot, handle) in values.chunks_exact_mut(HANDLE_BYTES).zip(&handles) {
+        for (slot, handle) in values
+            .as_chunks_mut::<HANDLE_BYTES>()
+            .0
+            .iter_mut()
+            .zip(&handles)
+        {
             slot.copy_from_slice(&handle.raw().0.to_ne_bytes());
         }
         let value = Call::new(nr::CHANNEL_WRITE)
@@ -454,12 +462,10 @@ impl<S: Syscall> Channel<S> {
         let received = message_handles.min(capacity);
         for (slot, word) in handles
             .iter_mut()
-            .zip(values.chunks_exact(HANDLE_BYTES))
+            .zip(values.as_chunks::<HANDLE_BYTES>().0)
             .take(received)
         {
-            if let Ok(word) = <[u8; HANDLE_BYTES]>::try_from(word) {
-                *slot = Handle(u32::from_ne_bytes(word));
-            }
+            *slot = Handle(u32::from_ne_bytes(*word));
         }
         Ok(Received {
             bytes: message_bytes,
@@ -517,12 +523,10 @@ impl<S: Syscall> Channel<S> {
         let received = message_handles.min(capacity);
         for (slot, word) in handles
             .iter_mut()
-            .zip(values.chunks_exact(HANDLE_BYTES))
+            .zip(values.as_chunks::<HANDLE_BYTES>().0)
             .take(received)
         {
-            if let Ok(word) = <[u8; HANDLE_BYTES]>::try_from(word) {
-                *slot = Handle(u32::from_ne_bytes(word));
-            }
+            *slot = Handle(u32::from_ne_bytes(*word));
         }
         Ok((
             Received {

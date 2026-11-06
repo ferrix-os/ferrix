@@ -511,9 +511,10 @@ impl Session {
 /// The 32-bit values an `array` argument holds.
 fn states(bytes: &[u8]) -> Vec<u32> {
     bytes
-        .chunks_exact(4)
-        .filter_map(|chunk| <[u8; 4]>::try_from(chunk).ok())
-        .map(u32::from_ne_bytes)
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|chunk| u32::from_ne_bytes(*chunk))
         .collect()
 }
 

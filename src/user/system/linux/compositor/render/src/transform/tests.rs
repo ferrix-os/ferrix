@@ -27,8 +27,10 @@ fn frame() -> Vec<u8> {
 /// `bytes` as the pixel values they hold.
 fn values(bytes: &[u8]) -> Vec<u32> {
     bytes
-        .chunks_exact(4)
-        .map(|pixel| u32::from_le_bytes([pixel[0], pixel[1], pixel[2], pixel[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|pixel| u32::from_le_bytes(*pixel))
         .collect()
 }
 

@@ -437,8 +437,13 @@ fn pager_rules(
         "pager_create failed",
     )?;
     let mut spec = [0_u8; 24];
-    for (place, word) in spec.chunks_exact_mut(8).zip([0x4b17_u64, 1, 0]) {
-        place.copy_from_slice(&word.to_ne_bytes());
+    for (place, word) in spec
+        .as_chunks_mut::<8>()
+        .0
+        .iter_mut()
+        .zip([0x4b17_u64, 1, 0])
+    {
+        *place = word.to_ne_bytes();
     }
     zero.put(OFFSET_AT, &spec)?;
     // Level 2 holds level 0's pager, so makes the VMO itself: the writer's mark says

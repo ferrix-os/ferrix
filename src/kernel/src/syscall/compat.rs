@@ -133,10 +133,8 @@ pub(crate) fn socketcall(process: &Process, a: [u64; 6]) -> Result<(Syscall, [u6
     uaccess::copy_from_user(process.space(), a[1] & 0xFFFF_FFFF, block)
         .map_err(|_| Errno::EFAULT)?;
     let mut w = [0_u64; 6];
-    for (slot, word) in w.iter_mut().zip(bytes.chunks_exact(4)) {
-        let mut four = [0_u8; 4];
-        four.copy_from_slice(word);
-        *slot = u64::from(u32::from_le_bytes(four));
+    for (slot, word) in w.iter_mut().zip(bytes.as_chunks::<4>().0) {
+        *slot = u64::from(u32::from_le_bytes(*word));
     }
     let call = match number {
         1 => Syscall::Socket,

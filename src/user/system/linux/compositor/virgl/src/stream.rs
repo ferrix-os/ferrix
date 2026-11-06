@@ -285,16 +285,12 @@ impl Stream {
         };
         // No stream output, which is the fifth word's zero.
         let mut payload = vec![handle, stage, len, tokens, 0];
-        let mut chunks = bytes.chunks_exact(4);
-        for chunk in &mut chunks {
-            let mut word = [0_u8; 4];
-            word.copy_from_slice(chunk);
-            payload.push(u32::from_le_bytes(word));
-        }
+        let (words, rest) = bytes.as_chunks::<4>();
+        payload.extend(words.iter().map(|word| u32::from_le_bytes(*word)));
         // The remainder and the zero: always at least the zero, so text
         // that fills its last word gets a word of zeros.
         let mut last = [0_u8; 4];
-        for (into, from) in last.iter_mut().zip(chunks.remainder()) {
+        for (into, from) in last.iter_mut().zip(rest) {
             *into = *from;
         }
         payload.push(u32::from_le_bytes(last));
@@ -458,13 +454,8 @@ impl Stream {
             1,
             1,
         ];
-        let mut chunks = data.chunks_exact(4);
-        for chunk in &mut chunks {
-            let mut word = [0_u8; 4];
-            word.copy_from_slice(chunk);
-            payload.push(u32::from_le_bytes(word));
-        }
-        let rest = chunks.remainder();
+        let (words, rest) = data.as_chunks::<4>();
+        payload.extend(words.iter().map(|word| u32::from_le_bytes(*word)));
         if !rest.is_empty() {
             let mut last = [0_u8; 4];
             for (into, from) in last.iter_mut().zip(rest) {

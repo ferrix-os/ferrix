@@ -429,10 +429,8 @@ fn put_words(side: &Side, at: u64, words: &[u64]) -> Result<(), &'static str> {
 fn get_words<const N: usize>(side: &Side, at: u64) -> Result<[u64; N], &'static str> {
     let bytes = side.get(at, 8 * N)?;
     let mut words = [0_u64; N];
-    for (word, chunk) in words.iter_mut().zip(bytes.chunks_exact(8)) {
-        let mut eight = [0_u8; 8];
-        eight.copy_from_slice(chunk);
-        *word = u64::from_ne_bytes(eight);
+    for (word, chunk) in words.iter_mut().zip(bytes.as_chunks::<8>().0) {
+        *word = u64::from_ne_bytes(*chunk);
     }
     Ok(words)
 }

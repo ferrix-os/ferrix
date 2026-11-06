@@ -222,7 +222,7 @@ fn a_buffer_the_device_refuses_draws_nothing_and_fails_nothing() {
     let drawn = gpu
         .read(Rect::new(0, 0, wide.into(), 1))
         .expect("read back");
-    for found in drawn.chunks_exact(4) {
+    for found in drawn.as_chunks::<4>().0 {
         assert_eq!(found.get(..3), Some(&[0x60, 0x40, 0x20][..]), "the clear");
     }
     // A buffer it does take is still taken afterwards, and drawn.

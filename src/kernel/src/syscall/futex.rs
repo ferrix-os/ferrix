@@ -237,7 +237,7 @@ pub(crate) fn sys_futex_waitv(
     uaccess::copy_from_user(process.core().own_space(), waiters, &mut vector)
         .map_err(|_| Errno::EFAULT)?;
     let mut words: Vec<Word> = fallible::try_with_capacity(count).map_err(|_| Errno::ENOMEM)?;
-    for element in vector.chunks_exact(FUTEX_WAITV_SIZE) {
+    for element in vector.as_chunks::<FUTEX_WAITV_SIZE>().0 {
         let field = |at: usize| -> u64 {
             let mut bytes = [0_u8; 8];
             if let Some(source) = element.get(at..at + 8) {

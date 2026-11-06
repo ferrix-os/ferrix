@@ -457,13 +457,10 @@ pub fn string_ascii(descriptor: &[u8], out: &mut [u8]) -> usize {
         .first()
         .map_or(0, |&length| usize::from(length))
         .min(descriptor.len());
-    let units = descriptor.get(2..length).unwrap_or(&[]).chunks_exact(2);
+    let units = descriptor.get(2..length).unwrap_or(&[]).as_chunks::<2>().0;
     let mut written = 0_usize;
     for (slot, unit) in out.iter_mut().zip(units) {
-        let code = u16::from_le_bytes([
-            unit.first().copied().unwrap_or(0),
-            unit.get(1).copied().unwrap_or(0),
-        ]);
+        let code = u16::from_le_bytes(*unit);
         *slot = match u8::try_from(code) {
             Ok(byte) if (0x20..0x7F).contains(&byte) => byte,
             _ => b'?',

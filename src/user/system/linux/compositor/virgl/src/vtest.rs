@@ -683,10 +683,8 @@ impl Vtest {
         let mut bytes = [0_u8; 12];
         self.stream.read_exact(&mut bytes)?;
         let mut words = [0_u32; 3];
-        for (word, chunk) in words.iter_mut().zip(bytes.chunks_exact(4)) {
-            let mut le = [0_u8; 4];
-            le.copy_from_slice(chunk);
-            *word = u32::from_le_bytes(le);
+        for (word, chunk) in words.iter_mut().zip(bytes.as_chunks::<4>().0) {
+            *word = u32::from_le_bytes(*chunk);
         }
         Ok(words)
     }

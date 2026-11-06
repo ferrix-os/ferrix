@@ -296,9 +296,10 @@ impl Reply {
                 .get(&code)
                 .map(|value| {
                     value
-                        .chunks_exact(4)
-                        .filter_map(|four| <[u8; 4]>::try_from(four).ok())
-                        .map(Ipv4Addr::from)
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .map(|four| Ipv4Addr::from(*four))
                         .collect()
                 })
                 .unwrap_or_default()

@@ -718,11 +718,10 @@ fn read_groups(process: &Process, size: u32, list: u64) -> Result<Vec<u32>, Errn
     let mut bytes = alloc::vec![0_u8; count * 4];
     uaccess::copy_from_user(process.space(), list, &mut bytes).map_err(|_| Errno::EFAULT)?;
     let groups: Vec<u32> = bytes
-        .chunks_exact(4)
-        .filter_map(|word| match *word {
-            [a, b, c, d] => Some(u32::from_le_bytes([a, b, c, d])),
-            _ => None,
-        })
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|word| u32::from_le_bytes(*word))
         .collect();
     if groups.contains(&UNCHANGED) {
         return Err(Errno::EINVAL);

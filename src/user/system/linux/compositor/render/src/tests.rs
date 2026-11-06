@@ -364,8 +364,10 @@ fn the_second_monitor_draws_the_window_moved_to_it() {
     let background = shown(plain_style().background.0 & 0x00FF_FFFF);
     for (what, frame) in [("left", &left), ("right", &right)] {
         let pixels: Vec<u32> = frame
-            .chunks_exact(4)
-            .filter_map(|pixel| pixel.try_into().ok().map(u32::from_le_bytes))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|pixel| u32::from_le_bytes(*pixel))
             .collect();
         assert!(
             pixels.iter().any(|pixel| *pixel != background),
@@ -1324,10 +1326,8 @@ fn one_client_left_after_the_other_closed_matches_the_expected_image() {
 #[test]
 fn a_fullscreen_checkerboard_matches_the_expected_image() {
     let mut pixels = Pattern::Checkerboard.draw(WIDTH, HEIGHT);
-    for pixel in pixels.chunks_exact_mut(4) {
-        if let Some(alpha) = pixel.get_mut(3) {
-            *alpha = 0xff;
-        }
+    for [_, _, _, alpha] in pixels.as_chunks_mut::<4>().0 {
+        *alpha = 0xff;
     }
     golden::check("fullscreen-checkerboard", WIDTH, HEIGHT, &pixels);
 }

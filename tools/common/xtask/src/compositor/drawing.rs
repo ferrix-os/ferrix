@@ -224,7 +224,9 @@ fn both_frames(qmp: &mut Qmp, dump: &Path) -> Result<usize> {
         let pixels = screen.width.saturating_mul(screen.height);
         let varied = screen
             .pixels
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .any(|pixel| pixel != screen.pixels.get(..3).unwrap_or(&[]));
         last = format!(
             "{}x{}, {pixels} pixels, {}",

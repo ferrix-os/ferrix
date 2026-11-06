@@ -70,10 +70,8 @@ fn mix(v: &mut [u64; 16], a: usize, b: usize, c: usize, d: usize, x: u64, y: u64
 )]
 fn compress(h: &mut [u64; 8], block: &[u8; BLOCK], counter: u128, last: bool) {
     let mut m = [0_u64; 16];
-    for (word, bytes) in m.iter_mut().zip(block.chunks_exact(8)) {
-        let mut eight = [0_u8; 8];
-        eight.copy_from_slice(bytes);
-        *word = u64::from_le_bytes(eight);
+    for (word, bytes) in m.iter_mut().zip(block.as_chunks::<8>().0) {
+        *word = u64::from_le_bytes(*bytes);
     }
     let mut v = [0_u64; 16];
     v[..8].copy_from_slice(h);
@@ -167,8 +165,8 @@ impl Blake2b {
         }
         compress(&mut self.h, &self.buffer, self.counter, true);
         let mut bytes = [0_u8; MAX_OUT];
-        for (chunk, word) in bytes.chunks_exact_mut(8).zip(self.h) {
-            chunk.copy_from_slice(&word.to_le_bytes());
+        for (chunk, word) in bytes.as_chunks_mut::<8>().0.iter_mut().zip(self.h) {
+            *chunk = word.to_le_bytes();
         }
         let n = out.len().min(self.out_len);
         if let (Some(to), Some(from)) = (out.get_mut(..n), bytes.get(..n)) {

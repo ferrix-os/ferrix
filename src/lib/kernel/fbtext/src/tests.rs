@@ -205,7 +205,7 @@ fn fill_leaves_the_stride_padding_alone() {
 fn fill_covers_a_full_hd_screen() {
     let mut fb = Fb::new(1920, 1080, 1920);
     fb.surface(PixelOrder::Rgbx).fill(ORANGE);
-    for pixel in fb.bytes.chunks_exact(4) {
+    for pixel in fb.bytes.as_chunks::<4>().0 {
         assert_eq!(pixel, &[0x11, 0x22, 0x33, 0]);
     }
 }

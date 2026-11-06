@@ -5763,7 +5763,7 @@ fn fill_black(into: &mut [u8], (offset, stride): (usize, usize), dark: Rect) {
         let Some(row) = into.get_mut(start..start + len) else {
             continue;
         };
-        for pixel in row.chunks_exact_mut(4) {
+        for pixel in row.as_chunks_mut::<4>().0 {
             pixel.copy_from_slice(&0xFF00_0000_u32.to_le_bytes());
         }
     }

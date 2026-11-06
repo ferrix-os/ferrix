@@ -67,14 +67,14 @@ impl<'a> Reader<'a> {
         let mut current = Some(cluster);
         while let Some(this) = current {
             let data = self.cluster_at(this);
-            for slot in data.chunks_exact(32) {
+            for slot in data.as_chunks::<32>().0 {
                 if slot[0] == 0x00 {
                     return out;
                 }
                 if slot[0] == 0xE5 {
                     continue;
                 }
-                out.push(slot.try_into().unwrap());
+                out.push(*slot);
             }
             current = self.next(this);
         }

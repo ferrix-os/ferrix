@@ -183,7 +183,9 @@ fn unhex(hex: &str) -> Result<Vec<u8>, &'static str> {
         return Err("a manifest path is odd hex");
     }
     hex.as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             core::str::from_utf8(pair)
                 .ok()

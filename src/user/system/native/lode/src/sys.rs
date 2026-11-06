@@ -636,8 +636,8 @@ fn receive_flags(fd: usize, buf: &mut [u8], flags: usize) -> Option<Received> {
             };
             received.sender = Some((field(0), field(1), field(2)));
         } else if level == SOL_SOCKET as i32 && kind == SCM_RIGHTS {
-            for chunk in data.chunks_exact(4) {
-                let passed = usize::try_from(i32::from_ne_bytes(chunk.try_into().ok()?)).ok()?;
+            for chunk in data.as_chunks::<4>().0 {
+                let passed = usize::try_from(i32::from_ne_bytes(*chunk)).ok()?;
                 if received.passed.is_none() {
                     received.passed = Some(passed);
                 } else {

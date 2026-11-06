@@ -376,7 +376,7 @@ fn scale_row(target: &mut [u8], source: &[u8], columns: &[usize]) {
         }
         return;
     }
-    for (pixel, &column) in target.chunks_exact_mut(4).zip(columns) {
+    for (pixel, &column) in target.as_chunks_mut::<4>().0.iter_mut().zip(columns) {
         let taken = column
             .checked_add(4)
             .and_then(|end| source.get(column..end))
@@ -2519,7 +2519,9 @@ mod tests {
     /// The column and row each pixel of a buffer came from.
     fn places(buffer: &[u8]) -> Vec<(u8, u8)> {
         buffer
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|pixel| (pixel[0], pixel[1]))
             .collect()
     }

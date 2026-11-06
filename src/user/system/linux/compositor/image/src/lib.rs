@@ -204,13 +204,13 @@ pub fn to_argb8888(pixmap: &tiny_skia::PixmapRef<'_>, out: &mut [u8], stride: us
         .chunks_exact(row)
         .zip(out.chunks_mut(stride.max(1)))
     {
-        for (source, target) in from.chunks_exact(4).zip(to.chunks_exact_mut(4)) {
-            if let ([r, g, b, a], [tb, tg, tr, ta]) = (source, target) {
-                *tb = *b;
-                *tg = *g;
-                *tr = *r;
-                *ta = *a;
-            }
+        for (&[r, g, b, a], target) in from
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(to.as_chunks_mut::<4>().0)
+        {
+            *target = [b, g, r, a];
         }
     }
 }

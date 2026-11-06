@@ -45,7 +45,7 @@ pub(crate) struct PackedDevice {
 impl PackedDevice {
     pub(crate) fn new(packed: &[u8]) -> PackedDevice {
         let mut blocks = BTreeMap::new();
-        for record in packed.chunks_exact(8 + BLOCK) {
+        for record in packed.as_chunks::<{ 8 + BLOCK }>().0 {
             let offset = u64::from_le_bytes(record[..8].try_into().unwrap());
             let previous = blocks.insert(offset, record[8..].try_into().unwrap());
             assert!(previous.is_none(), "the generator packs each block once");

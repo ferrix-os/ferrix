@@ -183,7 +183,7 @@ fn fill_cells(weights: &[u8], ranks: &[u32], bits: u8, storage: &mut [u8]) -> Op
             u8::try_from(symbol).ok()?,
             bits.checked_add(1)?.checked_sub(weight)?,
         ];
-        for to in run.chunks_exact_mut(CELL_BYTES) {
+        for to in run.as_chunks_mut::<CELL_BYTES>().0 {
             to.copy_from_slice(&cell);
         }
     }

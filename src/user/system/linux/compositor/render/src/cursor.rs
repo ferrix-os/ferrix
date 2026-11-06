@@ -119,9 +119,9 @@ mod tests {
         let pixels = arrow();
         assert_eq!(pixels.len(), (SIDE * SIDE * 4) as usize);
         let mut white = 0;
-        for pixel in pixels.chunks_exact(4) {
+        for pixel in pixels.as_chunks::<4>().0 {
             assert!(pixel[3] == 0 || pixel[3] == 0xFF, "{pixel:?}");
-            if pixel == [0xFF, 0xFF, 0xFF, 0xFF] {
+            if *pixel == [0xFF, 0xFF, 0xFF, 0xFF] {
                 white += 1;
             }
         }

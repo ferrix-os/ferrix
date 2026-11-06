@@ -865,13 +865,14 @@ pub(crate) fn blur(pixels: &mut [u8], block: &Block, settings: &Blur) {
     bands(&mut plane.pixels, width, |first, band| {
         let from = first.saturating_mul(width).saturating_mul(4);
         let bytes = source.get(from..).unwrap_or(&[]);
-        for (slot, bytes) in band.iter_mut().zip(bytes.chunks_exact(4)) {
-            let colour = |at: usize| {
-                let byte = bytes.get(at).copied().unwrap_or(0);
-                graded.get(usize::from(byte)).copied().unwrap_or(0.0)
-            };
-            let alpha = f32::from(bytes.get(3).copied().unwrap_or(0)) / 255.0;
-            *slot = [colour(0), colour(1), colour(2), alpha];
+        for (slot, &[blue, green, red, alpha]) in band.iter_mut().zip(bytes.as_chunks::<4>().0) {
+            let colour = |byte: u8| graded.get(usize::from(byte)).copied().unwrap_or(0.0);
+            *slot = [
+                colour(blue),
+                colour(green),
+                colour(red),
+                f32::from(alpha) / 255.0,
+            ];
         }
     });
 
@@ -902,7 +903,7 @@ pub(crate) fn blur(pixels: &mut [u8], block: &Block, settings: &Blur) {
     let blurred = &plane.pixels;
     bands(pixels, width.saturating_mul(4), |first, band| {
         let values = blurred.get(first.saturating_mul(width)..).unwrap_or(&[]);
-        for (value, bytes) in values.iter().zip(band.chunks_exact_mut(4)) {
+        for (value, bytes) in values.iter().zip(band.as_chunks_mut::<4>().0) {
             written(*value, bytes);
         }
     });

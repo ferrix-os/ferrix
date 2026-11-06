@@ -64,15 +64,11 @@ fn quarter_round(s: &mut [u32; 16], a: usize, b: usize, c: usize, d: usize) {
 /// and 14 and 15 the nonce. RFC 8439's 32-bit counter and 96-bit nonce are the
 /// same twelve words split differently.
 #[must_use]
-#[expect(
-    clippy::indexing_slicing,
-    reason = "AUDIT: every index is a constant below 16 into a [u32; 16], which the compiler checks"
-)]
 pub fn block(key: &[u8; KEY_BYTES], counter: u64, nonce: u64) -> [u8; BLOCK_BYTES] {
     let mut state = [0_u32; 16];
     state[..4].copy_from_slice(&SIGMA);
-    for (word, bytes) in state[4..12].iter_mut().zip(key.chunks_exact(4)) {
-        *word = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+    for (word, bytes) in state[4..12].iter_mut().zip(key.as_chunks::<4>().0) {
+        *word = u32::from_le_bytes(*bytes);
     }
     state[12] = counter as u32;
     state[13] = (counter >> 32) as u32;
@@ -92,7 +88,13 @@ pub fn block(key: &[u8; KEY_BYTES], counter: u64, nonce: u64) -> [u8; BLOCK_BYTE
     }
 
     let mut out = [0_u8; BLOCK_BYTES];
-    for ((bytes, word), initial) in out.chunks_exact_mut(4).zip(working).zip(state) {
+    for ((bytes, word), initial) in out
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(working)
+        .zip(state)
+    {
         bytes.copy_from_slice(&word.wrapping_add(initial).to_le_bytes());
     }
     out

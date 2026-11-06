@@ -269,11 +269,10 @@ fn settle(
 /// How much of `screen` is `colour`, give or take two steps a channel.
 fn share(screen: &Image, colour: (u8, u8, u8)) -> f64 {
     let near = |a: u8, b: u8| a.abs_diff(b) <= 2;
-    let pixels = screen.pixels.chunks_exact(3);
+    let pixels = screen.pixels.as_chunks::<3>().0;
     let total = pixels.len().max(1);
-    let matching = screen
-        .pixels
-        .chunks_exact(3)
+    let matching = pixels
+        .iter()
         .filter(|pixel| {
             matches!(pixel, [r, g, b] if near(*r, colour.0) && near(*g, colour.1) && near(*b, colour.2))
         })

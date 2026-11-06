@@ -1365,8 +1365,10 @@ fn described(work: Option<&Vmo<Kernel>>, make: &ferrix_renderctl::message::MakeO
         return plain;
     }
     let mut words = bytes
-        .chunks_exact(4)
-        .map(|word| u32::from_le_bytes(word.try_into().unwrap_or_default()));
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|word| u32::from_le_bytes(*word));
     let mut next = || words.next().unwrap_or(0);
     Shape {
         target: next(),

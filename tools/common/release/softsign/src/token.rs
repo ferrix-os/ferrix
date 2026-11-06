@@ -316,10 +316,7 @@ impl SoftToken {
     fn tree(dir: &Path, key: &Key) -> Result<Vec<[u8; N]>, Error> {
         let bytes =
             fs::read(dir.join("tree")).map_err(|e| Error::State(format!("no tree: {e}")))?;
-        let nodes: Vec<[u8; N]> = bytes
-            .chunks_exact(N)
-            .filter_map(|c| <[u8; N]>::try_from(c).ok())
-            .collect();
+        let nodes: Vec<[u8; N]> = bytes.as_chunks::<N>().0.to_vec();
         let expect = usize::try_from(2 * key.leaves()).unwrap_or(0);
         if nodes.len() != expect {
             return Err(Error::State("the tree is not the key's size".to_owned()));

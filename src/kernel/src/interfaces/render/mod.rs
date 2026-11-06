@@ -1202,8 +1202,8 @@ impl Renderer {
         backing: Option<&Arc<Vmo>>,
     ) -> Result<u32, RenderError> {
         let mut description = [0_u8; DESCRIBE_BYTES as usize];
-        for (word, into) in words.iter().zip(description.chunks_exact_mut(4)) {
-            into.copy_from_slice(&word.to_le_bytes());
+        for (word, into) in words.iter().zip(description.as_chunks_mut::<4>().0) {
+            *into = word.to_le_bytes();
         }
         self.work
             .write_page(at / PAGE_SIZE, (at % PAGE_SIZE) as usize, &description)

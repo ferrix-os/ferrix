@@ -2397,9 +2397,10 @@ fn check_a_pin_gives_a_device_exactly_its_pages(counter: &mut Counter) -> Result
     }
     let bytes = side.get(PINNED_AT, 16)?;
     let addresses: Vec<u64> = bytes
-        .chunks_exact(8)
-        .filter_map(|word| <[u8; 8]>::try_from(word).ok())
-        .map(u64::from_ne_bytes)
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|word| u64::from_ne_bytes(*word))
         .collect();
     let domain = node
         .domain()

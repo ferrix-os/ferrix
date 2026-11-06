@@ -128,10 +128,12 @@ pub(crate) fn left_bank_pages(out: &mut [u32]) -> usize {
     let vendor = core::arch::x86_64::__cpuid(0);
     let mut name = [0_u8; 12];
     for (chunk, word) in name
-        .chunks_exact_mut(4)
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
         .zip([vendor.ebx, vendor.edx, vendor.ecx])
     {
-        chunk.copy_from_slice(&word.to_le_bytes());
+        *chunk = word.to_le_bytes();
     }
     let rules = match &name {
         b"GenuineIntel" => BankRules::Intel,

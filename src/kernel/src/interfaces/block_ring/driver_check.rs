@@ -312,8 +312,8 @@ fn read_back(disk: &dyn BlockDevice) -> Result<u32, &'static str> {
     let mut run = [0_u8; SECTOR_SIZE * RUN_SECTORS];
     disk.read(RUN_START, &mut run)
         .map_err(|_| "a sixteen-sector read through the ring failed")?;
-    for (i, chunk) in run.chunks_exact(SECTOR_SIZE).enumerate() {
-        if chunk != expected(RUN_START + i as u64) {
+    for (i, chunk) in run.as_chunks::<SECTOR_SIZE>().0.iter().enumerate() {
+        if *chunk != expected(RUN_START + i as u64) {
             return Err("a sector of a sixteen-sector read came back wrong");
         }
         read += 1;

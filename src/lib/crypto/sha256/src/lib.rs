@@ -163,7 +163,7 @@ impl Sha256 {
         }
         self.update(&bits.to_be_bytes());
         let mut out = [0u8; 32];
-        for (chunk, word) in out.chunks_exact_mut(4).zip(self.state) {
+        for (chunk, word) in out.as_chunks_mut::<4>().0.iter_mut().zip(self.state) {
             chunk.copy_from_slice(&word.to_be_bytes());
         }
         out
@@ -317,7 +317,7 @@ fn rounds_32_to_63(v: &mut [u32; 8], w: &mut [u32; 16]) {
 /// MEMORY-AND-TIMING.md` §2.2z).
 fn compress(state: &mut [u32; 8], block: &[u8; 64]) {
     let mut w = [0u32; 16];
-    for (word, bytes) in w.iter_mut().zip(block.chunks_exact(4)) {
+    for (word, bytes) in w.iter_mut().zip(block.as_chunks::<4>().0) {
         *word = bytes.iter().fold(0u32, |acc, &b| (acc << 8) | u32::from(b));
     }
     let mut v = *state;

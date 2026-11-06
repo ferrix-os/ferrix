@@ -87,7 +87,7 @@ fn scan_face(file: &mut File, offset: u64, index: u32) -> Option<Scanned> {
     let tables = u32::from(be_u16(&header, 4)?);
     let directory = read_at(file, offset + 12, tables * 16)?;
     let mut read: Vec<(&[u8; 4], Vec<u8>)> = Vec::new();
-    for record in directory.chunks_exact(16) {
+    for record in directory.as_chunks::<16>().0 {
         let Some(tag) = WANTED
             .iter()
             .find(|wanted| record.get(0..4) == Some(wanted.as_slice()))

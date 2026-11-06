@@ -43,13 +43,13 @@ pub(crate) const XRGB8888: u32 = 1;
 /// Copy premultiplied RGBA (tiny-skia's order) into premultiplied `ARGB8888`
 /// as `wl_shm` lays it out on a little-endian machine: B, G, R, A.
 pub(crate) fn swizzle_into(rgba: &[u8], argb: &mut [u8]) {
-    for (from, to) in rgba.chunks_exact(4).zip(argb.chunks_exact_mut(4)) {
-        if let ([r, g, b, a], [tb, tg, tr, ta]) = (from, to) {
-            *tb = *b;
-            *tg = *g;
-            *tr = *r;
-            *ta = *a;
-        }
+    for (&[r, g, b, a], to) in rgba
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(argb.as_chunks_mut::<4>().0)
+    {
+        *to = [b, g, r, a];
     }
 }
 

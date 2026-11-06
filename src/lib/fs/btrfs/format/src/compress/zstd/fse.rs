@@ -259,10 +259,8 @@ fn advance(mut position: usize, step: usize, mask: usize, free: usize) -> Option
 fn assign_states(table: &mut [u8], next: &[u16; MAX_SYMBOLS], log: u8) -> Option<()> {
     let mut next = *next;
     let size = 1u32 << log.min(15);
-    for entry in table.chunks_exact_mut(ENTRY_BYTES) {
-        let [symbol, bits, low, high] = entry else {
-            return None;
-        };
+    for entry in table.as_chunks_mut::<ENTRY_BYTES>().0 {
+        let [symbol, bits, low, high] = entry;
         let counter = next.get_mut(usize::from(*symbol))?;
         let state = u32::from(*counter);
         *counter = counter.checked_add(1)?;

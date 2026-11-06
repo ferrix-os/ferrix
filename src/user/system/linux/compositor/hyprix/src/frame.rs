@@ -202,7 +202,7 @@ impl Gamma {
 
     /// One run of pixels through the ramps.
     fn rows(&self, span: &mut [u8]) {
-        for pixel in span.chunks_exact_mut(4) {
+        for pixel in span.as_chunks_mut::<4>().0 {
             for (at, channel) in [(2usize, 0usize), (1, 1), (0, 2)] {
                 let Some(ramp) = self.ramps.get(channel) else {
                     continue;

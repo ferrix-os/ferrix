@@ -318,7 +318,7 @@ fn read_option(options: &mut Options, kind: u8, data: &[u8]) -> Result<(), Error
 /// Keep the SACK blocks in `data`, eight bytes each.
 fn read_sack(options: &mut Options, data: &[u8]) {
     options.sack_blocks = 0;
-    for (slot, chunk) in options.sack.iter_mut().zip(data.chunks_exact(8)) {
+    for (slot, chunk) in options.sack.iter_mut().zip(data.as_chunks::<8>().0) {
         *slot = SackBlock {
             left: wire::be32(chunk, 0).unwrap_or(0),
             right: wire::be32(chunk, 4).unwrap_or(0),
