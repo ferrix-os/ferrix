@@ -67,7 +67,9 @@ fn ivhd(kind: u8, unit: u16, base: u64, attributes: u32, efr: u64, entries: &[u8
     block[6..8].copy_from_slice(&0x40u16.to_le_bytes());
     block[8..16].copy_from_slice(&base.to_le_bytes());
     if kind == IVHD_10 {
-        block[20..24].copy_from_slice(&((48u32 << 30) | (1 << 2) | (1 << 6)).to_le_bytes());
+        // Bits 2 and 6. A `48 << 30` term stood beside them, which a u32
+        // shifts out to nothing (clippy's `identity_op`, 1.99).
+        block[20..24].copy_from_slice(&((1u32 << 2) | (1 << 6)).to_le_bytes());
     } else {
         block[20..24].copy_from_slice(&attributes.to_le_bytes());
         block[24..32].copy_from_slice(&efr.to_le_bytes());

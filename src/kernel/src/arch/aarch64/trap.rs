@@ -562,14 +562,12 @@ pub fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
             if let Some(result) = frame.x.first_mut() {
                 *result = value as u64;
             }
-            Ok(())
         }
         // The value in X0, the words in X1 to X3.
         Outcome::ReturnWords { value, words } => {
             if let Some(registers) = frame.x.get_mut(..4) {
                 registers.copy_from_slice(&[value as u64, words[0], words[1], words[2]]);
             }
-            Ok(())
         }
         // `execve`: the registers belong to a program that no longer exists, so
         // they are replaced rather than returned into.
@@ -578,9 +576,9 @@ pub fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
             frame.sp = stack;
             frame.elr = entry;
             frame.spsr = USER_SPSR;
-            Ok(())
         }
     }
+    Ok(())
 }
 
 unsafe extern "C" {
