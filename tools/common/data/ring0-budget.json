@@ -31,21 +31,21 @@
     }
   },
   "rise": {
-    "ledger": 7256,
-    "why": "the first baseline: measured on develop b50e88907 with Cut 0 on it (ledger 7448 CZ.1, CZ.2), Cut 0 of TINY-KERNEL.md; 3ff0b533b read 667 and 278 kernel lines fewer, the window and the ordinary path then landing, and b50e88907 86 and 59 more"
+    "ledger": 7667,
+    "why": "Rust 1.99.1 (chore/rust-1.99.1, ledger 7667 R.2): source lines only, no code added. clippy 1.99's chunks_exact_to_as_chunks rewrites (210319ee0), which rustfmt splits over more lines, less the short-chunk fallbacks removed: count B +22 on x86-64 (clock.rs and mce.rs among them) and +10 on AArch64, library files +11 to +13 (ferrix-sha256, the btrfs crates); the same 79 to 82 library files per build as before, so 1.99.1 links no new file into ring 0. Measured by gate r199-ring0 on 258df8ae9 against r199-base-ring0 on 3ef2e61c7 (1.97.1), whose figures were the baseline 7256 set"
   },
   "baseline": {
     "user": {
-      "x86_64": {"a": 92047, "b": 64918},
-      "aarch64": {"a": 86170, "b": 58936}
+      "x86_64": {"a": 92082, "b": 64940},
+      "aarch64": {"a": 86193, "b": 58946}
     },
     "fast": {
-      "x86_64": {"a": 92846, "b": 65230},
-      "aarch64": {"a": 86760, "b": 59039}
+      "x86_64": {"a": 92881, "b": 65252},
+      "aarch64": {"a": 86783, "b": 59049}
     },
     "max": {
-      "x86_64": {"a": 92086, "b": 64987},
-      "aarch64": {"a": 86209, "b": 59005}
+      "x86_64": {"a": 92119, "b": 65009},
+      "aarch64": {"a": 86230, "b": 59015}
     }
   },
   "check_files": [
