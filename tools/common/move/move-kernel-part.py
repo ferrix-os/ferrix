@@ -21,6 +21,7 @@ shape). Nothing is committed.
 
 Usage:
   move-kernel-part.py --part device/logctl FILE_OR_DIR... [--rewrite] [--dry-run]
+  move-kernel-part.py --part settings FILE_OR_DIR...  (a part that is its own group)
     FILE_OR_DIR: relative to src/kernel/src (`interfaces/logctl/`)
 """
 
@@ -48,8 +49,11 @@ def git(*args: str, check: bool = True) -> str:
 
 def plan(part: str, items: list[str]) -> list[tuple[str, str]]:
     """(old, new) repo paths for every tracked file the items name."""
-    if part.startswith("/") or ".." in part.split("/") or part.count("/") != 1:
-        sys.exit(f"move-kernel-part: --part {part}: <group>/<name>")
+    # `<group>/<name>`, or a lone `<name>` for a part that is a group of its
+    # own (CRATE-SPLIT.md §2.1: `settings/`).
+    names = part.split("/")
+    if part.startswith("/") or len(names) > 2 or any(n in ("", ".", "..") for n in names):
+        sys.exit(f"move-kernel-part: --part {part}: <group>/<name> or <name>")
     tracked = set(git("ls-files", "-z", "--", SRC).split("\0")) - {""}
     out = []
     for item in items:
@@ -108,7 +112,7 @@ def not_r100(moves: list[tuple[str, str]]) -> list[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--part", required=True, help="<group>/<name> under the parts' place (kernel_source_roots.parts_place)")
+    parser.add_argument("--part", required=True, help="<group>/<name> (or <name>) under the parts' place (kernel_source_roots.parts_place)")
     parser.add_argument("items", nargs="+", help="files or directories (with /) relative to src/kernel/src")
     parser.add_argument("--rewrite", action="store_true", help="run the sed over the files naming a moved path")
     parser.add_argument("--dry-run", action="store_true", help="print the plan, move nothing")

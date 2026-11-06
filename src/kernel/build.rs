@@ -66,19 +66,23 @@ fn main() -> Result<(), Box<dyn Error>> {
     // binary links. Any other package naming this script is refused.
     match std::env::var("CARGO_PKG_NAME")?.as_str() {
         "ferrix-kernel" => {}
-        "ferrix-kernel-core"
-        | "ferrix-kernel-item"
-        | "ferrix-kernel-load"
-        | "ferrix-kernel-settings" => {
+        "ferrix-kernel-core" | "ferrix-kernel-item" | "ferrix-kernel-load" => {
             let _ = build_flags()?;
             println!("cargo::rerun-if-changed=../build.rs");
             return Ok(());
         }
         // The load's root built for linuxd, and the shim under it
-        // (docs/microkernel/M5-LIFT.md §1).
-        "ferrix-lift-core" | "ferrix-lift-item" | "ferrix-lift-load" | "ferrix-lift-settings" => {
+        // (docs/microkernel/M5-LIFT.md §1); an optional part under
+        // src/kernel/extensions/<name>/ (docs/microkernel/CRATE-SPLIT.md §2.1).
+        "ferrix-lift-core" | "ferrix-lift-item" | "ferrix-lift-load" | "ferrix-kernel-settings" => {
             let _ = build_flags()?;
             println!("cargo::rerun-if-changed=../../build.rs");
+            return Ok(());
+        }
+        // An optional part's lift twin, in the part's own lift/ directory.
+        "ferrix-lift-settings" => {
+            let _ = build_flags()?;
+            println!("cargo::rerun-if-changed=../../../build.rs");
             return Ok(());
         }
         other => {

@@ -33,7 +33,7 @@ def gate():
 
 
 def surface(g, manifest, files, ring_of, listing):
-    modules, refs, _ = g.build(files, lambda rel: (g.KERNEL_SRC / rel).read_text())
+    modules, refs, _ = g.build(files, lambda rel: g.kernel_path(rel).read_text())
     resolver = g.Resolver(modules)
     targets, items, users = set(), set(), set()
     sites = 0
@@ -67,7 +67,7 @@ def orphans(g, files, ring_of, listing):
     rings = collections.defaultdict(set)
     homes = collections.defaultdict(set)
     for rel in files:
-        for line in (g.KERNEL_SRC / rel).read_text().splitlines():
+        for line in g.kernel_path(rel).read_text().splitlines():
             tag = line.split("Verifies:", 1)
             if len(tag) == 2:
                 for ident in ID.findall(tag[1]):

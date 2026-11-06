@@ -28,6 +28,9 @@ import sys
 import tomllib
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import kernel_roots  # noqa: E402  (the optional parts' roots, docs/microkernel/CRATE-SPLIT.md S1)
+
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
 SRC = ROOT / "src" / "kernel" / "src"
 LIFT = ROOT / "src" / "kernel" / "lift"
@@ -38,7 +41,6 @@ ROOTS = {
     "kernel_core.rs",
     "kernel_item.rs",
     "kernel_load.rs",
-    "kernel_settings.rs",
     "lift_core.rs",
     "lift_item.rs",
 }
@@ -107,10 +109,26 @@ def computed_reuse() -> set[str]:
     return {rel for rel in out if not rel.startswith(SHIM_DIR)}
 
 
+def part_dirs() -> list[Path]:
+    """Each optional part's package directory: its root's parent
+    (`<parts_place>/<group>/<name>/src`, docs/microkernel/CRATE-SPLIT.md §2.1)."""
+    return [(ROOT / root).parent for root in kernel_roots.others()]
+
+
+def load_sources() -> list[tuple[str, Path]]:
+    """(name, path) of every load-side source a cfg site may sit in: the files
+    under src/kernel/src by their name there, a part's by its repo path, its
+    `src/lib.rs` a crate root as the roots beside main.rs are."""
+    out = [(path.relative_to(SRC).as_posix(), path) for path in sorted(SRC.rglob("*.rs"))]
+    for part in part_dirs():
+        out += [(path.relative_to(ROOT).as_posix(), path) for path in sorted((part / "src").rglob("*.rs"))
+                if path != part / "src" / "lib.rs"]
+    return out
+
+
 def cfg_sites() -> dict[str, int]:
     counts: dict[str, int] = {}
-    for path in sorted(SRC.rglob("*.rs")):
-        rel = path.relative_to(SRC).as_posix()
+    for rel, path in load_sources():
         if rel in ROOTS or rel.startswith(SHIM_DIR):
             continue
         count = sum(
@@ -119,6 +137,11 @@ def cfg_sites() -> dict[str, int]:
         if count:
             counts[rel] = count
     return counts
+
+
+def package_name(path: Path) -> str:
+    with path.open("rb") as handle:
+        return tomllib.load(handle)["package"]["name"]
 
 
 def dependencies(path: Path) -> set[str]:
@@ -187,21 +210,32 @@ def main() -> int:
     if "ferrix_load_built" in flags:
         problems.append("build-flags.toml names ferrix_load_built: it is derived in build.rs, not a flag")
 
+    # The shim's packages under src/kernel/lift/, and each part's twin in its
+    # own lift/ directory (CRATE-SPLIT.md §2.1), by their package names.
     lift_packages = {
-        path.parent.name: path for path in LIFT.glob("*/Cargo.toml")
+        package_name(path): path
+        for path in sorted(LIFT.glob("*/Cargo.toml")) + [p / "lift" / "Cargo.toml" for p in part_dirs()]
+        if path.is_file()
     }
-    names = {"ferrix-lift-" + name for name in lift_packages}
+    names = set(lift_packages)
     kernel_cargos = [ROOT / "src" / "kernel" / "Cargo.toml"] + [
-        ROOT / "src" / "kernel" / ring / "Cargo.toml" for ring in ("core", "item", "load", "settings")
-    ]
+        ROOT / "src" / "kernel" / ring / "Cargo.toml" for ring in ("core", "item", "load")
+    ] + [part / "Cargo.toml" for part in part_dirs()]
     for cargo in kernel_cargos:
-        if cargo.is_file():
+        if not cargo.is_file():
+            # A kernel manifest this check would silently skip (S1: a moved
+            # part's old place) is a problem, not an absence.
+            problems.append(f"{cargo.relative_to(ROOT)}: no such kernel manifest")
+        else:
             planted = {"ferrix-lift-core"} if args.plant == "dep" and cargo == kernel_cargos[0] else set()
             for name in sorted((dependencies(cargo) | planted) & names):
                 problems.append(f"{cargo.relative_to(ROOT)}: a kernel crate names {name}")
     for name, cargo in lift_packages.items():
         for dep in sorted(dependencies(cargo)):
-            if dep in {"ferrix-kernel-core", "ferrix-kernel-item", "ferrix-kernel-load", "ferrix-kernel"}:
+            # Any kernel package, a part's included: a twin names its
+            # ferrix-kernel-* dependencies only as `package = "ferrix-lift-*"`
+            # (CRATE-SPLIT.md §2.3, ledger 7608 S1.6).
+            if dep == "ferrix-kernel" or dep.startswith("ferrix-kernel-"):
                 problems.append(f"{cargo.relative_to(ROOT)}: the lift names the kernel crate {dep}")
 
     # The shim's map is true of the tree (5714 (1)): an item no rule places, or a stale map.

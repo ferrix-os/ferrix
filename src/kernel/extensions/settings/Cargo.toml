@@ -8,12 +8,13 @@ license.workspace = true
 publish.workspace = true
 # The one build script of the kernel's crates: the build flags as cfgs
 # (docs/BUILD-FLAGS.md rule 6 b, docs/KERNEL-CRATES.md §6).
-build = "../build.rs"
+build = "../../build.rs"
 
-# The crate root sits beside the binary's main.rs, so that its modules are
-# found under src/kernel/src/settings/ (docs/KERNEL-CRATES.md §6).
+# An optional part (docs/microkernel/CRATE-SPLIT.md §2.1, S1): its root is
+# src/lib.rs, its modules under src/ at the module path they had in
+# src/kernel/src, so `crate::settings::uts` names what it named before.
 [lib]
-path = "../src/kernel_settings.rs"
+path = "src/lib.rs"
 
 [dependencies]
 ferrix-audit.workspace = true

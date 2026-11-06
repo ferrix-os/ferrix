@@ -53,10 +53,17 @@ def place_problems(place, why) -> list[str]:
     return []
 
 
-def root_problems(listed, place: str) -> list[str]:
+def _packaged(root: str) -> bool:
+    return (ROOT / root).parent.joinpath("Cargo.toml").is_file()
+
+
+def root_problems(listed, place: str, has_package=_packaged, unpackaged=()) -> list[str]:
     """What is wrong with a roots list (ledger 7429 Q.2, 7445 B.1): src/kernel/src
     first, every other root under `place`, none nested in another or under
-    src/kernel/src, none ending in /."""
+    src/kernel/src, none ending in /. A part's root is `<place>/<name>/src` or
+    `<place>/<group>/<name>/src` with its package's Cargo.toml directly above
+    it (ledger 7608 S1.5); `unpackaged` names roots exempt from the package
+    (the guard's fixture part, which is never built)."""
     if not listed or any(not isinstance(r, str) or not r or r.endswith("/") for r in listed):
         return ["kernel_source_roots.roots: a non-empty list of directories without a trailing /"]
     problems = []
@@ -67,6 +74,13 @@ def root_problems(listed, place: str) -> list[str]:
             problems.append(f"kernel_source_roots.roots: {r} is under {PRIMARY}")
         elif r != PRIMARY and not r.startswith(place + "/"):
             problems.append(f"kernel_source_roots.roots: {r} is not under parts_place {place}")
+        elif r != PRIMARY:
+            segments = r[len(place) + 1:].split("/")
+            if segments[-1] != "src" or len(segments) not in (2, 3) or "" in segments:
+                problems.append(f"kernel_source_roots.roots: {r} is not {place}/<name>/src "
+                                f"or {place}/<group>/<name>/src")
+            elif r not in unpackaged and not has_package(r):
+                problems.append(f"kernel_source_roots.roots: {r} has no Cargo.toml directly above it")
         for other in listed:
             if other != r and r.startswith(other + "/"):
                 problems.append(f"kernel_source_roots.roots: {r} is nested in {other}")
@@ -103,7 +117,7 @@ def roots(manifest: dict | None = None) -> list[str]:
     # exists. It only adds: a check never walks less for it.
     extra = [r for r in os.environ.get(EXTRA_ENV, "").split(":") if r]
     every = list(listed) + [r for r in extra if r not in listed]
-    problems = root_problems(every, parts_place(manifest))
+    problems = root_problems(every, parts_place(manifest), unpackaged=[r for r in extra if r not in listed])
     if problems:
         raise ValueError("; ".join(problems))
     return every

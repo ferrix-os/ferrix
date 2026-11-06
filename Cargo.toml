@@ -132,12 +132,14 @@ members = [
     "src/kernel/lift/core",
     "src/kernel/lift/item",
     "src/kernel/lift/load",
-    "src/kernel/lift/settings",
+    # The optional parts (docs/microkernel/CRATE-SPLIT.md §2.1), each with its
+    # lift twin in its own directory.
+    "src/kernel/extensions/settings",
+    "src/kernel/extensions/settings/lift",
     "src/user/system/native/linuxd",
     "src/lib/proto/partition-desc",
     "src/user/system/native/partmgr",
     "src/user/system/native/partition-hello",
-    "src/kernel/settings",
 
     # Native user-space programs, built for the kernel's own targets and put
     # in the initramfs. Like the kernel they cannot be built or tested for the
@@ -286,7 +288,7 @@ ferrix-sync = { path = "src/lib/kernel/sync" }
 ferrix-kernel-core = { path = "src/kernel/core" }
 ferrix-kernel-item = { path = "src/kernel/item" }
 ferrix-kernel-load = { path = "src/kernel/load" }
-ferrix-kernel-settings = { path = "src/kernel/settings" }
+ferrix-kernel-settings = { path = "src/kernel/extensions/settings" }
 ferrix-ustack = { path = "src/lib/kernel/ustack" }
 ferrix-vdso = { path = "src/lib/kernel/vdso" }
 ferrix-virtio = { path = "src/lib/drivers/virtio" }

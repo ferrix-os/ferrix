@@ -497,8 +497,10 @@ class Units:
     def source(self, rel: str) -> str:
         text = self.files().get(rel, "")
         if not text:
-            base = ROOT if rel in set(self.crates().values()) else KERNEL_SRC
-            text = (base / rel).read_text(encoding="utf-8", errors="replace")
+            # A kernel file by check-item-boundary's name for it: a part's
+            # file is repo-relative (docs/microkernel/CRATE-SPLIT.md S1).
+            path = ROOT / rel if rel in set(self.crates().values()) else boundary.kernel_path(rel)
+            text = path.read_text(encoding="utf-8", errors="replace")
             self.files()[rel] = text
         return text
 
@@ -723,7 +725,7 @@ def all_verifiers() -> tuple[list[Verifier], list[str]]:
     sources: list[tuple[Path, str]] = []
     for rel in boundary.kernel_files():
         kind = "kernel" if boundary.is_test_file(rel, manifest) else "none"
-        sources.append((KERNEL_SRC / rel, kind))
+        sources.append((boundary.kernel_path(rel), kind))
     for path in sorted(LIBS.rglob("*.rs")):
         if "target" not in path.relative_to(LIBS).parts:
             sources.append((path, "host"))
@@ -1659,7 +1661,7 @@ def main() -> int:
 
     evidence = coverage_evidence()
     kernel_spans = lambda rel: functions_in(  # noqa: E731
-        (KERNEL_SRC / rel).read_text(encoding="utf-8", errors="replace")
+        boundary.kernel_path(rel).read_text(encoding="utf-8", errors="replace")
     )
     cache: dict[str, list] = {}
 

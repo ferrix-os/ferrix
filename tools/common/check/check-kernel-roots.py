@@ -212,8 +212,19 @@ def self_test() -> list[str]:
                          (["src/kernel/src", "src/lib/ring/src"], False),
                          (["src/kernel/src", "src/kernel/load/src"], False),
                          ([f"{place}/a/src"], False), (["src/kernel/src", "src/kernel/src"], False)):
-        if (not kernel_roots.root_problems(listed, place)) != want:
+        if (not kernel_roots.root_problems(listed, place, has_package=lambda r: True)) != want:
             failures.append(f"roots: {listed} taken as {'refused' if want else 'accepted'}")
+    # A part root's shape and its package (ledger 7608 S1.5).
+    for listed, packaged, unpackaged, want in (
+            (["src/kernel/src", f"{place}/settings/src"], True, (), True),
+            (["src/kernel/src", f"{place}/a/b/c/src"], True, (), False),
+            (["src/kernel/src", f"{place}/a/b/lib"], True, (), False),
+            (["src/kernel/src", f"{place}/src"], True, (), False),
+            (["src/kernel/src", f"{place}/a/b/src"], False, (), False),
+            (["src/kernel/src", f"{place}/a/b/src"], False, (f"{place}/a/b/src",), True)):
+        got = kernel_roots.root_problems(listed, place, has_package=lambda r, p=packaged: p, unpackaged=unpackaged)
+        if (not got) != want:
+            failures.append(f"roots: {listed} (package {packaged}) taken as {'refused' if want else 'accepted'}")
     for at, why, want in ((place, None, True), ("src/kernel/src/someplace", None, False),
                           ("src/kernel-parts", None, False), ("src/kernel-parts", "a reason", True),
                           ("parts", "a reason", False), (place + "/", None, False)):

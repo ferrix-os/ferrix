@@ -418,8 +418,7 @@
         "kernel_load.rs",
         "seam.rs",
         "setters.rs",
-        "settings/**",
-        "kernel_settings.rs"
+        "src/kernel/extensions/settings/**"
       ]
     }
   },
@@ -811,7 +810,8 @@
     ],
     "parts_place": "src/kernel/extensions",
     "roots": [
-      "src/kernel/src"
+      "src/kernel/src",
+      "src/kernel/extensions/settings/src"
     ]
   },
   "kernel_crates": {
@@ -906,8 +906,8 @@
       ]
     },
     "ferrix-kernel-settings": {
-      "path": "src/kernel/settings",
-      "root": "kernel_settings.rs",
+      "path": "src/kernel/extensions/settings",
+      "root": "src/kernel/extensions/settings/src/lib.rs",
       "rings": [
         "load"
       ]

@@ -747,10 +747,10 @@ def main() -> int:
         return 0
     manifest = gate.load_manifest()
     files = gate.kernel_files()
-    read = lambda rel: (gate.KERNEL_SRC / rel).read_text(encoding="utf-8")  # noqa: E731
+    read = lambda rel: gate.kernel_path(rel).read_text(encoding="utf-8")  # noqa: E731
     register = json.loads(REGISTER.read_text(encoding="utf-8")) if REGISTER.is_file() else {}
     entries, crate, problems, types_marked = analyse(manifest, files, read,
-                                                     lambda rel: (gate.KERNEL_SRC / rel).is_file(), register)
+                                                     lambda rel: gate.kernel_path(rel).is_file(), register)
     text = render(entries, crate, types_marked)
     block = clippy_block(entries, crate)
     status = 0

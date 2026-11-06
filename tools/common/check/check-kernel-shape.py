@@ -494,11 +494,13 @@ def file_breaches(name: str, part: bool, manifest: dict) -> list[str]:
 
 def self_test() -> list[str]:
     place = kernel_roots.parts_place()
-    part_root = f"{place}/device/logctl/src"
+    # A part that exists, since kernel_roots refuses a root with no package
+    # above it (ledger 7608 S1.5).
+    part_root = f"{place}/settings/src"
     manifest = {
         "kernel_source_roots": {"parts_place": place, "roots": ["src/kernel/src", part_root]},
         "rings": {"core": {"members": ["mm/**"]}, "item": {"members": []},
-                  "load": {"members": ["fs/**", f"{place}/device/logctl/**"]}},
+                  "load": {"members": ["fs/**", f"{place}/settings/**"]}},
     }
     failures = []
     tree = os.sep + "t"

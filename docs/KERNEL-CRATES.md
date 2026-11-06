@@ -979,6 +979,10 @@ test-init; the controls (a)-(j) of §6.1 re-run, (i) as the link); then
 
 ### 6.2 `ferrix-kernel-settings`: what moved
 
+Its files live since 2026-11-06 in `src/kernel/extensions/settings/`
+(`src/lib.rs`, `src/settings/`; `microkernel/CRATE-SPLIT.md` S1), its lift
+twin in that directory's `lift/`; the paths below are within its `src/`.
+
 The rule: **the entry by which a program changes a system setting,
 whole** -- the system call's handler or the file's write function, from
 its first argument check to its last effect -- so that in a `fixed` build

@@ -413,7 +413,13 @@ def parse_file(rel: str, source: str, modules: dict[ModPath, Module], refs: list
         return modules[path]
 
     file_module = module_of_file(rel)
-    module(file_module).file = rel
+    # A part's root (`<part>/src/lib.rs`) is a crate root, so its module is the
+    # one tree's `crate` too; that module's file stays the primary tree's
+    # (`main.rs`, whose ring `crate` resolves to), never a part's, whichever
+    # file is read last (docs/microkernel/CRATE-SPLIT.md S1).
+    own = module(file_module)
+    if not (file_module == () and rel.startswith("src/") and not own.file.startswith("src/")):
+        own.file = rel
     # (module, the brace depth at which its scope closes); a module's own
     # items sit one deeper than that.
     stack: list[tuple[ModPath, int]] = [(file_module, -1)]
@@ -641,7 +647,9 @@ def build(files: list[str], read) -> tuple[dict[ModPath, Module], list[Reference
             parse_file(rel, source, modules, refs)
         except (ParseError, rustlex.LexError) as error:
             problems.append(f"{rel}: {error}")
-    known = set(files)
+    # A `mod` declaration names a module path; a part's file is listed by its
+    # repo path, and found by its module path within its root (module_rel).
+    known = set(files) | {module_rel(rel) for rel in files}
     for mod in modules.values():
         for child in mod.file_children:
             base = "/".join(mod.path + (child,))

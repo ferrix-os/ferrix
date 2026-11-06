@@ -157,7 +157,6 @@ fn reaches_quarantine(path: &str) -> bool {
         "src/kernel/src/iommu/remapping.rs",
         "src/kernel/src/iommu/vtd.rs",
         "src/kernel/src/iommu/amdvi.rs",
-        "src/kernel/src/settings/cpu_online.rs",
         "src/kernel/src/fs/sysfs.rs",
         "src/kernel/src/init.rs",
         "src/lib/log/lode/src/quarantine.rs",
@@ -165,6 +164,11 @@ fn reaches_quarantine(path: &str) -> bool {
         "tools/common/xtask/src/quarantine.rs",
     ]
     .contains(&path)
+        // The run-time cpu online/offline entry, in the settings part
+        // (docs/microkernel/CRATE-SPLIT.md S1), its place read from the one
+        // constant.
+        || path.strip_prefix(crate::workspace::KERNEL_PARTS_PLACE)
+            == Some("/settings/src/settings/cpu_online.rs")
         || path.starts_with("src/tests/quarantine/")
 }
 
@@ -1005,6 +1009,17 @@ mod tests {
                 .collect::<Vec<_>>(),
             &crates,
         )
+    }
+
+    #[test]
+    fn the_moved_cpu_online_entry_still_reaches_quarantine() {
+        // CRATE-SPLIT.md S1: the settings part's file keeps its row.
+        let moved = format!(
+            "{}/settings/src/settings/cpu_online.rs",
+            crate::workspace::KERNEL_PARTS_PLACE
+        );
+        assert!(reaches_quarantine(&moved));
+        assert!(!reaches_quarantine("src/kernel/src/settings/cpu_online.rs"));
     }
 
     #[test]

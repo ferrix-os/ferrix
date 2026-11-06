@@ -98,9 +98,12 @@ forbid() {
 # match `ferrix-kernel-core`.
 # The kernel's source roots but src/kernel/src (kernel_source_roots, read by
 # tools/common/check/kernel_roots.py; docs/microkernel/CRATE-SPLIT.md S0): each is
-# an optional part's src/, its package the directory above it and its lift twin
-# in that directory's lift/. Every root, not those outside src/kernel: the parts
-# live beneath it, deeper than the find below reaches (ledger 7429 Q.1).
+# an optional part's src/, its package the directory above it. Its lift twin in
+# that directory's lift/ is linuxd's, not the kernel's, as src/kernel/lift/*'s
+# packages are (the find below stops above them; M5-LIFT.md §8): linuxd links
+# it, and a kernel crate it would be forbidden there (CRATE-SPLIT.md S1). Every
+# root, not those outside src/kernel: the parts live beneath it, deeper than
+# the find below reaches (ledger 7429 Q.1).
 if ! kernel_part_roots_text=$(python3 -I tools/common/check/kernel_roots.py others); then
     echo "crate-layering: kernel_roots.py could not read kernel_source_roots" >&2
     exit 1
@@ -108,9 +111,10 @@ fi
 mapfile -t kernel_part_roots < <(printf '%s' "$kernel_part_roots_text" | sed '/^$/d')
 kernel_part_manifests=()
 for part_root in "${kernel_part_roots[@]}"; do
-    for manifest in "${part_root%/src}/Cargo.toml" "${part_root%/src}/lift/Cargo.toml"; do
-        [[ -f "$manifest" ]] && kernel_part_manifests+=("$manifest")
-    done
+    # The guard's fixture part has no package; a real part's is held to
+    # kernel_crates by check-item-boundary.py.
+    manifest="${part_root%/src}/Cargo.toml"
+    [[ -f "$manifest" ]] && kernel_part_manifests+=("$manifest")
 done
 kernel_crates=$( { find src/kernel -maxdepth 2 -name Cargo.toml -not -path '*/target/*' 2>/dev/null; printf '%s\n' "${kernel_part_manifests[@]}"; } | sed '/^$/d' | sort \
     | xargs -r sed -n '/^\[package\]/,/^\[/s/^name = "\(.*\)"$/\1/p' \

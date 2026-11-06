@@ -128,7 +128,7 @@ src/kernel/                           ring 0 under fast/max, and the composition
   lift/{core,item}/                   the shim's manifests (ferrix-lift-core, -item)
   src/                                core and item files, the shim, the crate roots
   extensions/                         optional parts; each a crate, built into ring 0 or linuxd
-    settings/                 ferrix-kernel-settings         S1  (twin: none, `fixed` in fast/max)
+    settings/                 ferrix-kernel-settings         S1  + lift/ twin (ferrix-lift-settings, linuxd's `live`)
     board/stm32mp1/           ferrix-kernel-board-stm32mp1   S2
     board/gs201-usb/          ferrix-kernel-board-gs201-usb  S2
     device/logctl/            ferrix-kernel-logctl           S3  + lift/ twin
@@ -250,7 +250,7 @@ not nest in another nor sit under `src/kernel/src` (Q.2); a `.rs` under
 
 | Crate | Files today | Product / check lines | Depends on | Who names it today | Seam needed | Ring 0 in | linuxd in | Split |
 |---|---|---:|---|---|---|---|---|---|
-| `ferrix-kernel-settings` | `settings/`, `kernel_settings.rs` | 532 / 0 | core, load | `main.rs` (binding) | `setters::Setters`, built | pr, de (`live`) | no (`fixed`) | **S1: path move only** |
+| `ferrix-kernel-settings` | `settings/`, `kernel_settings.rs` | 532 / 0 | core, load | `main.rs` (binding) | `setters::Setters`, built | pr, de (`live`) | yes (twin `ferrix-lift-settings`, linuxd binds `Live`) | **S1: path move only** |
 | `ferrix-kernel-board-stm32mp1` | `platform/st/stm32mp1.rs`, `stm32mp1/` | 1,620 / 0 | core, item | `kernel_load.rs` (mod), `main.rs` (`install`) | none (main's call) | pr, de | not built (Q3) | **S2** |
 | `ferrix-kernel-board-gs201-usb` | `platform/google/gs201/usb.rs` | 142 / 0 | core, item | `kernel_load.rs` (mod), `main.rs` | none | pr, de | not built (Q3) | **S2** |
 | `ferrix-kernel-logctl` | `interfaces/logctl/` | 281 / 190 | core, item | `interfaces/mod.rs` (mod), `main.rs` | none | pr, de | yes (twin) | **S3** |
@@ -407,7 +407,10 @@ each item below with its output.
   the new crate; `known_violations` stays empty.
 * **Boot lines identical on four boots**: `present` and `desktop` on x86-64
   and AArch64 (and ARMv7-A `--smp 2` for the DK1's glue in S2), boot lines
-  compared with `check-boot-line.py` against the base's, byte for byte.
+  compared with the base's, numbers masked (two boots of one kernel never
+  agree byte for byte: addresses under KASLR, clock rates, timings), and
+  every line still differing named in the landing with the code that prints
+  it and why it depends on timing (ledger 7656 L1.2).
 * **Symbols on `present` and `desktop`** (7346 (6)): function **bodies**,
   not section sizes. The release kernels of base and tip, `present` and
   `desktop`, x86-64 and AArch64, compared with the compare tool landed under
@@ -511,7 +514,7 @@ their owners.
 | # | Landing | Points | Freeze (files the PO holds) | Depends on |
 |---|---|---:|---|---|
 | S0 | **Landed** (see *Where it stands*). Tools: `kernel_source_roots` with `parts_place`, every scanner reads it, file-set parity guard, `carry-coverage.py --rename`, `move-kernel-part.py`, `check-crate-layering.sh`, `check-item-boundary.py` and `check-kernel-shape.py` read every root, the planted part file and its controls. Owed to later landings: the mover's `lib.rs` and manifest writing, the rodata/symbol comparison run, the `lib.rs`-shape dry build (S2 or S3, 7429 S.7) | 5 | none: no kernel file | this design |
-| S1 | `ferrix-kernel-settings` to `src/kernel-parts/settings/`: a path move, it is already a removable crate | 1 | `settings/`, `kernel_settings.rs`, `src/kernel/settings/`; about 20 min | S0 |
+| S1 | **Landed** (see *Where it stands*). `ferrix-kernel-settings` to `src/kernel/extensions/settings/`, its lift twin to its `lift/`: a path move, it is already a removable crate | 1 | `settings/`, `kernel_settings.rs`, `src/kernel/settings/`; about 20 min | S0 |
 | S2 | Board glue to `board/{stm32mp1,gs201-usb}/`, two crates | 2 | `platform/st/`, `gs201/usb.rs`, `kernel_load.rs`'s `platform` block, `main.rs`'s `install` lines; about 30 min, DK1 boot under ARMv7-A `--smp 2` included | S0 |
 | S3 | `logctl` to `device/logctl/`, with its lift twin | 2 | `interfaces/logctl/`, `interfaces/mod.rs`, `main.rs`; about 30 min | S0 |
 | S4a | `PLACED` and `node_of` from `net_ring` into the load's `net::device` (§2.6 item 4a); a code change, reviewed, no move | 2 | none | S0 |
@@ -602,5 +605,26 @@ Not in S0, owed: the mover writes no `lib.rs` or manifest yet; the
 the first landing that makes a part crate out of load files, S2 or S3, before
 its freeze (7429 S.7); rule A (dangling file literals) is not built. Each of
 S1 to S5 comes back for a diff check with §3's evidence on its landing hash;
-P1 to P3 and P5 each need a design review before code. Next: S1, which waits
-for mk-flip3's `fast`.
+P1 to P3 and P5 each need a design review before code.
+
+**S1 landed** (2026-11-06, mk-crates3). `ferrix-kernel-settings` is the first
+part: `src/kernel/extensions/settings/` holds its manifest, `src/lib.rs` (was
+`src/kernel/src/kernel_settings.rs`) and `src/settings/*.rs`, all ten files
+`R100`, and its lift twin `ferrix-lift-settings` in `lift/`, naming the same
+`src/lib.rs`. A part that is a group of its own sits at `<parts_place>/<name>/`
+(the mover takes `--part settings`). The record has the root
+`src/kernel/extensions/settings/src`, the `load` line
+`src/kernel/extensions/settings/**`, and the crate's `path` and repo-relative
+`root`. What the move found in the tools, each fixed in S1: four readers joined
+a kernel file's name onto `src/kernel/src` (`kernel-interface.py`,
+`microkernel-surface.py`, `check-traceability.py` twice) and now read through
+`check-item-boundary.py`'s `kernel_path`; `check-item-boundary.py` let a
+part's `lib.rs`, read after `main.rs`, take the tree's `crate` module (which
+read `kernel_item.rs`'s `crate::` paths as load) and looked for a part's
+`mod` files by repo path, not module path; `check-lift.py` walked
+`src/kernel/src` alone for cfg sites, found lift packages only in
+`src/kernel/lift/`, and skipped a kernel manifest that was not there (the
+moved `settings/`) silently, now a problem; `check-crate-layering.sh` took a
+part's lift twin for a kernel crate (linuxd links it); `gate_rows.rs`'s
+quarantine list named the moved file, now through `KERNEL_PARTS_PLACE`, with
+a unit test. Next: S2.

@@ -19,7 +19,7 @@ ferrix-kernel-core = { package = "ferrix-lift-core", path = "../../../../kernel/
 ferrix-kernel-item = { package = "ferrix-lift-item", path = "../../../../kernel/lift/item" }
 ferrix-kernel-load = { package = "ferrix-lift-load", path = "../../../../kernel/lift/load" }
 ferrix-native-abi.workspace = true
-ferrix-kernel-settings = { package = "ferrix-lift-settings", path = "../../../../kernel/lift/settings" }
+ferrix-kernel-settings = { package = "ferrix-lift-settings", path = "../../../../kernel/extensions/settings/lift" }
 ferrix-rt.workspace = true
 ferrix-native.workspace = true
 ferrix-bootinfo.workspace = true

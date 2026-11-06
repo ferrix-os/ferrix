@@ -681,3 +681,9 @@ what would reach them is what reaches every image (RESTRICTED-EXIT.md). To be ru
 | Item | Owner | Stage |
 |---|---|---|
 | **Open (2026-11-05, mk-flip3, ledger 7275 L3.7).** `hyprix-gpu`'s unit tests ended by SIGSEGV once in `cargo xtask check`, `logs/queue/mkf3e-check.log`, slot 7, on a kernel-only branch: `tests::a_desktop_frame_at_1080p` ignored, and no test named at the fault. `mkf3f-check`, one tree later, ran past it. Not read further. Compare BACKLOG's tole SIGSEGV row, of no matching Vulkan device. | open | check |
+
+### fl-103
+
+| Item | Owner | Stage |
+|---|---|---|
+| **Open (2026-11-06, mk-crates2, ledger 7590).** The compositor toolkit's host tests `a_window_of_a_fixed_size_floats_at_it` (`toolkit/tests/against_hyprix.rs:720`, "a fixed-size window floats at its own size", got `None`, wanted `Some((150, 90))`) and `a_zero_timeout_dispatch_reads_what_arrived_behind_queued_events` (`:840`, "the configure waiting on the socket was not read") failed together in one `cargo xtask check`, `logs/queue/mkc2e-check.log` on 3a0c4194d, gate slot 3, load 25 to 29; the branch (S0 of the crate split) changed tools only, no compositor file. The same tree passed as `mkc2e-check2`, and as `mkc2b-check` and `mkc2c-check` before it. Both wait on hyprix's answer within a bound, as waybar's fl-097 test does; read as the bound outrun under load, not proven. Cause not known; not called fixed. | the compositor's owner | 17 |

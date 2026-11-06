@@ -6,15 +6,15 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
-build = "../../build.rs"
+build = "../../../build.rs"
 
 [lib]
 name = "ferrix_kernel_settings"
-path = "../../src/kernel_settings.rs"
+path = "../src/lib.rs"
 
 [dependencies]
-ferrix-kernel-core = { package = "ferrix-lift-core", path = "../core" }
-ferrix-kernel-load = { package = "ferrix-lift-load", path = "../load" }
+ferrix-kernel-core = { package = "ferrix-lift-core", path = "../../../lift/core" }
+ferrix-kernel-load = { package = "ferrix-lift-load", path = "../../../lift/load" }
 ferrix-audit.workspace = true
 ferrix-bootinfo.workspace = true
 ferrix-linux-abi.workspace = true
