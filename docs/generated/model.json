@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "44c3a6cfd49635fb8438a53b1d778f102be53e1bc68f7b2dcbcec324bd22eb8a",
+  "digest": "f3ac5787237d4204388853aa7b3bff66a37d065eb35bebf1f421af1c7174f868",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -113,7 +113,7 @@
   ],
   "summary": {
     "packages": 167,
-    "elements": 10230,
+    "elements": 10245,
     "maturity": {
       "implemented": 295,
       "inProgress": 23,
@@ -46786,6 +46786,120 @@
                   }
                 }
               ]
+            },
+            {
+              "name": "aHeapChargeReclaimsFirst",
+              "qualifiedName": "FerrixObjectRequirements::Pagers::aHeapChargeReclaimsFirst",
+              "kind": "requirement",
+              "shortName": "L.object.370",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/14-object-requirements.sysml",
+                "line": 4051
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aHeapChargeReclaimsFirst",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A kernel-heap charge refused at a job's memory limit, made for the running task's own job where it may block and not inside a reclaim, shall first reclaim clean cache charged to the job whose limit is full or beneath it and then be tried once more. In linuxd (the lift) such a charge shall be refused without a reclaim, as before: the lift's may_block answers yes whatever is held, so the charge could not tell a context holding a spin lock from one holding none.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4058
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aHeapChargeReclaimsFirst",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"test-container's heap-reclaim step: at memory.max beside the cgroup's file cache, 128 opens of memory.events held and a read given, pgscan moving, and the file's own mapping reading as before once its pages were taken down and filled again; with the reclaim taken out the step fails on its refusal sentence (mki3f-c1, FIRED).\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4063
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aHeapChargeReclaimsFirst",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.QUOTA.7\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4064
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aHeapChargeReclaimsFirst",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"object::quota::KernelHeap::charge\", \"object::oom::reclaim_within\", \"sched::heap_charge_may_reclaim\")",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4066
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aReclaimNeverNests",
+              "qualifiedName": "FerrixObjectRequirements::Pagers::aReclaimNeverNests",
+              "kind": "requirement",
+              "shortName": "L.object.371",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/14-object-requirements.sysml",
+                "line": 4068
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aReclaimNeverNests",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A reclaim begun inside a reclaim of the same task shall stop the machine (FX-0973).\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4070
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aReclaimNeverNests",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"With KernelHeap's guard taken out and a refused charge planted at the head of the reclaim, test-container stops as FX-0973, 'a reclaim began inside a reclaim' (mki3f-c2, FIRED).\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4073
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aReclaimNeverNests",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.QUOTA.7\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4074
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aReclaimNeverNests",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"user::cache::reclaim\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4075
+                  }
+                }
+              ]
             }
           ]
         }
@@ -51169,6 +51283,64 @@
                   ]
                 },
                 {
+                  "name": "aBlockUnderAnIrqLockStops",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::AppliedAffinity::aBlockUnderAnIrqLockStops",
+                  "kind": "requirement",
+                  "shortName": "L.sched.200",
+                  "type": "ItemLowLevel",
+                  "doc": "Rationale: an IrqSpinLock raises no preemption count, so FX-0503 does not see a block under one, and FX-0537 is for an interrupt (ledger 7103 (8), 7415 (D)). Development builds only: release builds keep no count, and a block there is caught by nothing.",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 1354
+                  },
+                  "children": [
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::AppliedAffinity::aBlockUnderAnIrqLockStops",
+                      "kind": "attribute",
+                      "redefines": "statement",
+                      "value": "\"In a development build, a task blocking while its processor holds an IrqSpinLock guard shall stop the machine as FX-0974. The count shall be kept per processor by the guard's own hook (lock, a try_lock that takes the lock, drop), inside the lock's interrupt mask; release builds shall carry neither the count nor the stop.\"",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 1363
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::AppliedAffinity::aBlockUnderAnIrqLockStops",
+                      "kind": "attribute",
+                      "redefines": "criterion",
+                      "value": "\"A control: a ZOMBIES guard held across stage 6's core switch-count check's sleep reports FX-0974 (mki3d-c1, FIRED). Every row gate-rows lists PASSED on a development build with the stop in. The sync crate's host test counts a lock, a taking try_lock and a drop inside the mask, and none for a refused try_lock.\"",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 1368
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::AppliedAffinity::aBlockUnderAnIrqLockStops",
+                      "kind": "attribute",
+                      "redefines": "parent",
+                      "value": "\"H.SCHED.1\"",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 1369
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::AppliedAffinity::aBlockUnderAnIrqLockStops",
+                      "kind": "attribute",
+                      "redefines": "unit",
+                      "value": "(\"sched::require_may_sleep\", \"sched::irq_guard_made\", \"sched::irq_guard_dropped\")",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 1370
+                      }
+                    }
+                  ]
+                },
+                {
                   "name": "aSleeperLeavesByItsKey",
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::AppliedAffinity::aSleeperLeavesByItsKey",
                   "kind": "requirement",
@@ -51177,7 +51349,7 @@
                   "doc": "Rationale: the sleeper set holds timer arms beside sleeping tasks since K10 (docs/microkernel/K10.md §9, condition 2), so a walk of it on every early wake would let one job's timers lengthen every other job's wakes; a removal by key is a descent of the AVL tree.",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1354
+                    "line": 1372
                   },
                   "children": [
                     {
@@ -51188,7 +51360,7 @@
                       "value": "\"A task filed in its processor's sleeper set shall keep the instant it was filed under, and an early wake shall take it out by that instant and its id, never by a walk of the set; a removal under any other key shall take nothing out.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1363
+                        "line": 1381
                       }
                     },
                     {
@@ -51199,7 +51371,7 @@
                       "value": "\"Stage 9's early-wake case: a task asleep among three armed timers on its processor, woken early, takes the set from n to n - 1 entries with every timer's arm still filed; with the removal's key made wrong, the case fails with its sentence. The sched crate's host test removes by key and refuses a wrong instant and a wrong id.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1369
+                        "line": 1387
                       }
                     },
                     {
@@ -51210,7 +51382,7 @@
                       "value": "\"H.SCHED.5\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1370
+                        "line": 1388
                       }
                     },
                     {
@@ -51221,7 +51393,7 @@
                       "value": "(\"sched::queue::CpuQueue::remove_sleeper\", \"sched::queue::CpuQueue::file_sleeper\", \"sched::task::Task::set_filed_at\", \"sched::task::Task::filed_at\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1373
+                        "line": 1391
                       }
                     }
                   ]
@@ -51234,7 +51406,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1375
+                    "line": 1393
                   },
                   "children": [
                     {
@@ -51245,7 +51417,7 @@
                       "value": "\"Under schedule=edf a reservation shall be admitted only with a deadline equal to its period, a budget of 0.1 ms up to the period, a period of 1 ms to 10 s, and, on the processor it names, reservations' shares summing to at most 95% in at most 32 entries; anything else shall be refused by name, changing nothing.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1379
+                        "line": 1397
                       }
                     },
                     {
@@ -51256,7 +51428,7 @@
                       "value": "\"ferrix-sched-edf's host tests; the `edf` boot line's refused set on kernel threads; test-reserve's `malformed` and `unschedulable`. Control: the sum not tested fails the boot check and the row.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1382
+                        "line": 1400
                       }
                     },
                     {
@@ -51267,7 +51439,7 @@
                       "value": "\"H.SCHED.28\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1383
+                        "line": 1401
                       }
                     },
                     {
@@ -51278,7 +51450,7 @@
                       "value": "(\"sched::reserve::take\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1384
+                        "line": 1402
                       }
                     }
                   ]
@@ -51291,7 +51463,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1386
+                    "line": 1404
                   },
                   "children": [
                     {
@@ -51302,7 +51474,7 @@
                       "value": "\"A running reservation shall be charged its budget; at zero it shall run no more until its period's end, when the budget comes back and the deadline moves on a period, including on an idle processor; a thread that wakes with more budget left than the time to its deadline allows shall start a fresh period.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1390
+                        "line": 1408
                       }
                     },
                     {
@@ -51313,7 +51485,7 @@
                       "value": "\"ferrix-sched-edf's host tests; the `edf` line's throttles and refills; test-reserve's `budget`, across linuxd's time. Control: no throttle fails the line.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1392
+                        "line": 1410
                       }
                     },
                     {
@@ -51324,7 +51496,7 @@
                       "value": "\"H.SCHED.28\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1393
+                        "line": 1411
                       }
                     },
                     {
@@ -51335,7 +51507,7 @@
                       "value": "(\"sched::queue::CpuQueue::account_with\", \"sched::queue::CpuQueue::arm_timer\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1394
+                        "line": 1412
                       }
                     }
                   ]
@@ -51348,7 +51520,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1396
+                    "line": 1414
                   },
                   "children": [
                     {
@@ -51359,7 +51531,7 @@
                       "value": "\"The pick shall be the earliest deadline among reservations with budget, then the fair class, whose tasks shall run whenever no reservation has budget; no steal, balance, push or direct switch shall pass over or move a reservation.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1399
+                        "line": 1417
                       }
                     },
                     {
@@ -51370,7 +51542,7 @@
                       "value": "\"ferrix-sched-edf's host tests; the `edf` line's shares; test-reserve's `child`. Controls: the pick not by deadline, and the direct switch's decline removed.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1401
+                        "line": 1419
                       }
                     },
                     {
@@ -51381,7 +51553,7 @@
                       "value": "\"H.SCHED.28\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1402
+                        "line": 1420
                       }
                     },
                     {
@@ -51392,7 +51564,7 @@
                       "value": "(\"sched::queue::CpuQueue::pick_next\", \"sched::direct::begin\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1403
+                        "line": 1421
                       }
                     }
                   ]
@@ -51405,7 +51577,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1405
+                    "line": 1423
                   },
                   "children": [
                     {
@@ -51416,7 +51588,7 @@
                       "value": "\"THREAD_RESERVE shall act on the calling thread alone, on a job handle with SET_LIMIT at or above its own job, and shall answer NOT_SUPPORTED in a kernel without schedule=edf; three zeros shall give the reservation back.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1408
+                        "line": 1426
                       }
                     },
                     {
@@ -51427,7 +51599,7 @@
                       "value": "\"test-reserve's `admitted`, `other`, `back`. Control: the walk up the jobs removed lets a job's handle from beside it through.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1410
+                        "line": 1428
                       }
                     },
                     {
@@ -51438,7 +51610,7 @@
                       "value": "\"H.SCHED.28\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1411
+                        "line": 1429
                       }
                     },
                     {
@@ -51449,7 +51621,7 @@
                       "value": "(\"syscall::native::lift::thread_reserve\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1412
+                        "line": 1430
                       }
                     }
                   ]
@@ -51462,7 +51634,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1414
+                    "line": 1432
                   },
                   "children": [
                     {
@@ -51473,7 +51645,7 @@
                       "value": "\"A reserved thread's mask shall not change; its share shall come back when it is freed, wherever it stands, and when it gives it back, and until its next way off the processor it shall not enter the fair class's queue; a child shall not inherit it.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1418
+                        "line": 1436
                       }
                     },
                     {
@@ -51484,7 +51656,7 @@
                       "value": "\"The `edf` line's `used` and its child; test-reserve's `affinity`, `child`, `back`.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1420
+                        "line": 1438
                       }
                     },
                     {
@@ -51495,7 +51667,7 @@
                       "value": "\"H.SCHED.28\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1421
+                        "line": 1439
                       }
                     },
                     {
@@ -51506,7 +51678,7 @@
                       "value": "(\"sched::reserve::forget\", \"sched::reserve::give_back\", \"sched::affinity::set_affinity\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1422
+                        "line": 1440
                       }
                     }
                   ]

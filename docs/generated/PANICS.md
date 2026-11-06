@@ -137,6 +137,8 @@ Causes are listed most likely first.
 | [FX-0954](#fx-0954) | the partition manager ended |
 | [FX-0970](#fx-0970) | a time reservation did not behave as the scheduler promises |
 | [FX-0972](#fx-0972) | a boot check on a worker did not run to its end |
+| [FX-0973](#fx-0973) | a reclaim began inside a reclaim |
+| [FX-0974](#fx-0974) | a task tried to block holding an IrqSpinLock |
 | [FX-1001](#fx-1001) | PCI enumeration failed its self-check |
 | [FX-1002](#fx-1002) | a device node handed out memory or an interrupt it does not have |
 | [FX-1003](#fx-1003) | an IOMMU domain gave a device the wrong addresses |
@@ -3248,6 +3250,42 @@ finished, reaped, before the success marker. The sentence names the check.
    the log.
 
 See: src/kernel/src/stages_check.rs; docs/TEST-TIME.md.
+
+<a id="fx-0973"></a>
+
+## FX-0973 — a reclaim began inside a reclaim
+
+A reclaim gives back clean file cache and dentry heap for a charge refused at a
+memory limit or a machine out of frames. A kernel-heap charge refused on its way
+is not answered by a reclaim of its own (`quota::KernelHeap`, fl-096), so a
+reclaim never nests; one that would, re-entering the cache's walk from inside it
+with no bound but the stack, stops the machine instead.
+
+1. A path that reclaims was reached from inside a reclaim: a fault or a
+   `vmo_pin` refusal on the way, or the kernel-heap charge's guard taken out.
+
+See: src/kernel/src/user/cache.rs; src/kernel/src/object/quota.rs;
+src/kernel/src/object/oom.rs.
+
+<a id="fx-0974"></a>
+
+## FX-0974 — a task tried to block holding an IrqSpinLock
+
+An `IrqSpinLock` masks interrupts on its processor for as long as it is held,
+and raises no preemption count, so FX-0503 does not see a block under one: the
+task would leave its processor with the lock taken and interrupts' delivery to
+it decided by whatever runs next. Development builds count the guards each
+processor holds (`L.sched.200`) and a block with one held stops the machine.
+Release builds keep no count and do not stop, a gap `sched::require_may_sleep`
+states.
+
+1. A call that can sleep (an allocation that waits, a wait queue, a sleep lock)
+   was made inside an `IrqSpinLock`'s critical section.
+2. An `IrqSpinLock` guard was forgotten (`mem::forget`, `ManuallyDrop`), which
+   leaves the count raised on its processor.
+
+See: src/kernel/src/sched/mod.rs require_may_sleep;
+src/lib/kernel/sync/src/lib.rs IrqControl.
 
 <a id="fx-1001"></a>
 
