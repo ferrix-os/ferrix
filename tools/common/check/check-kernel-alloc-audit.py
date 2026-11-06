@@ -122,16 +122,18 @@ def scan(root: str, gate) -> tuple[dict, list[str]]:
                     continue
                 full = os.path.join(directory, name)
                 kernel_roots.note_walked("check-kernel-alloc-audit", [os.path.abspath(full)])
-                rel = os.path.relpath(full, base).replace(os.sep, "/")
-                if source != SOURCE:
-                    rel = f"{source}/{rel}"
-                if is_check(rel) or NOT_BUILT.match(rel):
+                # A part's file keeps its module path within its root, and the
+                # classes below (NOT_BUILT, UNREAD) are module paths, so they are
+                # matched on that; it is reported by its repo path (S2).
+                module = os.path.relpath(full, base).replace(os.sep, "/")
+                rel = module if source == SOURCE else f"{source}/{module}"
+                if is_check(rel) or NOT_BUILT.match(module):
                     continue
                 with open(full, encoding="utf-8", errors="replace") as handle:
                     count = sites_in(handle.read(), gate)
                 if not count:
                     continue
-                if rel.startswith(UNREAD):
+                if module.startswith(UNREAD):
                     unread.append(rel)
                 else:
                     found[rel] = count

@@ -1370,7 +1370,7 @@ compiles its GLSL with Mesa's virgl driver (§3.8).
 
 | # | what | points |
 |---|---|---|
-| G1 | **The kernel's part**: the GPU's clocks and reset in `src/kernel/src/platform/st/stm32mp1.rs`, and a device node with its registers and interrupt, as the LTDC has | 3 |
+| G1 | **The kernel's part**: the GPU's clocks and reset in `src/kernel/extensions/board/stm32mp1/src/platform/st/stm32mp1.rs`, and a device node with its registers and interrupt, as the LTDC has | 3 |
 | G2 | **`src/user/system/native/drivers/gpu/gc400`, a ring-3 driver**: identify the core (model, revision, features), power it, run a command buffer through the front end, take its completion by interrupt. Proved on the board by a `WAIT`/`LINK` loop and an event | 8 |
 | G3 | **Pixels**: a render target cleared and resolved by the GPU into a buffer the LTDC shows | 8 |
 | G4 | **Drawing**: vertex streams, a depth buffer, the host-compiled shaders, and draws | 8 |
@@ -1391,7 +1391,7 @@ devmgr now counts 8 drivers.
 
 **What was built.**
 
-* `src/kernel/src/platform/st/stm32mp1/gpu.rs` (G1), a sibling of `platform/st/stm32mp1/usb.rs` rather
+* `src/kernel/extensions/board/stm32mp1/src/platform/st/stm32mp1/gpu.rs` (G1), a sibling of `platform/st/stm32mp1/usb.rs` rather
   than a part of `platform/st/stm32mp1.rs`, which the display's session is changing. It
   finds the enabled `vivante,gc` node at `0x5900_0000`, reads its interrupt
   through `ferrix_fdt`, checks that PLL2 is on and locked and that its Q

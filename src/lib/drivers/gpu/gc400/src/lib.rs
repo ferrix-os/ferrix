@@ -45,7 +45,7 @@
 //! The RCC is not a driver's: it clocks every peripheral on the chip. The
 //! kernel turns on the GPU's bus and core clocks, pulses its reset line,
 //! and checks that PLL2's Q output, the core clock, runs, before it
-//! publishes the device (`src/kernel/src/platform/st/stm32mp1/gpu.rs`). What reaches this
+//! publishes the device (`src/kernel/extensions/board/stm32mp1/src/platform/st/stm32mp1/gpu.rs`). What reaches this
 //! crate is a register window of a core fresh out of reset.
 
 #![no_std]

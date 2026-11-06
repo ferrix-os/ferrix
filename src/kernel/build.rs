@@ -79,8 +79,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             println!("cargo::rerun-if-changed=../../build.rs");
             return Ok(());
         }
-        // An optional part's lift twin, in the part's own lift/ directory.
-        "ferrix-lift-settings" => {
+        // An optional part's lift twin, in the part's own lift/ directory, and
+        // a part one group deeper (`board/<name>/`).
+        "ferrix-lift-settings"
+        | "ferrix-kernel-board-stm32mp1"
+        | "ferrix-kernel-board-gs201-usb" => {
             let _ = build_flags()?;
             println!("cargo::rerun-if-changed=../../../build.rs");
             return Ok(());

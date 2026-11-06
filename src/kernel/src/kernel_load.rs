@@ -182,21 +182,6 @@ pub mod object {
         pub mod check;
     }
 }
-/// What belongs to one system on chip rather than to an architecture: the kernel's part in a board's devices.
-#[cfg(not(ferrix_load_built = "lift"))]
-pub mod platform {
-    /// Google's systems on chip.
-    pub mod google {
-        /// The Pixel 7's Tensor G2: the load's part of it.
-        pub mod gs201 {
-            pub mod usb;
-        }
-    }
-    /// ST's systems on chip, by their vendor prefix `st`.
-    pub mod st {
-        pub mod stm32mp1;
-    }
-}
 /// The system call layer: the item's `syscall/mod.rs`, with the Linux personality's calls and the checks raised to this crate.
 pub mod syscall {
     pub use ferrix_kernel_item::syscall::*;

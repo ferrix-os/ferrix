@@ -759,7 +759,7 @@ to the input core as §3.2's protocol says. It ran on an STM32MP157D-DK1 on
 ### 7.1 What the kernel does, and what it gives
 
 As for the LTDC (`docs/DISPLAY.md` §6), the kernel does what is shared with
-the rest of the chip and nothing more (`src/kernel/src/platform/st/stm32mp1/usb.rs`): it
+the rest of the chip and nothing more (`src/kernel/extensions/board/stm32mp1/src/platform/st/stm32mp1/usb.rs`): it
 turns on the USBH and USBPHY clocks, releases both resets, brings up the PWR
 block's 1.8 V and 1.1 V regulators, and starts the USB PHY's PLL from the
 HSE. Each value is what U-Boot's `usb start` writes on this board, read back

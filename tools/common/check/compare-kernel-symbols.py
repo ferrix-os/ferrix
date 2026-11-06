@@ -10,8 +10,15 @@ instruction or register, and never a changed constant (ledger 7184 Q.3). Constan
 are BACKLOG's row, with M7.
 
 Usage:  compare-kernel-symbols.py BASE_ELF HEAD_ELF [--self-test]
+
+FERRIX_SYMBOLS_RENAME=OLD=NEW[,OLD=NEW...]: a move of a module into a crate of its own
+(docs/microkernel/CRATE-SPLIT.md §3.3, the recorded crate-name rewrite) renames every path
+under it; each OLD path prefix in the base's names (wherever it stands in a name, a
+generic's argument included) is read as NEW before the comparison. Only whole `::`-ended
+paths are taken, so a rename cannot hide anything but a path's own crate.
 """
 import hashlib
+import os
 import re
 import shutil
 import subprocess
@@ -36,6 +43,25 @@ def differences(base: dict[str, int], head: dict[str, int]) -> list[str]:
         if base[name] != head[name]:
             found.append(f"size: {name}: {base[name]} -> {head[name]}")
     return found
+
+
+def renames(text: str) -> list[tuple[str, str]]:
+    pairs = []
+    for pair in filter(None, text.split(",")):
+        old, sep, new = pair.partition("=")
+        if not sep or not old.endswith("::") or not new.endswith("::"):
+            raise SystemExit(f"compare-kernel-symbols: FERRIX_SYMBOLS_RENAME {pair}: OLD::=NEW::")
+        pairs.append((old, new))
+    return pairs
+
+
+def renamed(names: dict[str, object], pairs: list[tuple[str, str]]) -> dict[str, object]:
+    out = {}
+    for name, value in names.items():
+        for old, new in pairs:
+            name = re.sub(r"(?<![A-Za-z0-9_])" + re.escape(old), new, name)
+        out[name] = value
+    return out
 
 
 def symbols(path: str) -> dict[str, int]:
@@ -97,6 +123,12 @@ def self_test() -> int:
     assert masked("add\tx0, x0, #1472") == masked("add\tx0, x0, #24")
     assert masked("ldr\tx1, [x0]") != masked("ldr\tx2, [x0]"), "a changed register was not seen"
     assert masked("add\tx0, x0, #8 <a<b>>") != masked("sub\tx0, x0, #8 <a<b>>"), "a changed opcode was not seen"
+    pairs = renames("a::m::=b::m::")
+    moved_out = renamed({"a::m::f": 1, "<a::m::T>::g": 2, "xa::m::h": 3, "a::n::f": 4}, pairs)
+    assert moved_out == {"b::m::f": 1, "<b::m::T>::g": 2, "xa::m::h": 3, "a::n::f": 4}, moved_out
+    assert not differences(renamed(table(["0 10 T a::m::f"]), pairs), table(["0 10 T b::m::f"])), \
+        "a recorded rename was read as a difference"
+    assert differences(table(["0 10 T a::m::f"]), table(["0 10 T b::m::f"])), "a rename unrecorded passed"
     print("compare-kernel-symbols: self-test passed")
     return 0
 
@@ -107,13 +139,16 @@ def main() -> int:
     if len(sys.argv) != 3:
         print(__doc__)
         return 2
-    base, head = symbols(sys.argv[1]), symbols(sys.argv[2])
+    pairs = renames(os.environ.get("FERRIX_SYMBOLS_RENAME", ""))
+    for old, new in pairs:
+        print(f"compare-kernel-symbols: the base's {old} read as {new} (a recorded move)")
+    base, head = renamed(symbols(sys.argv[1]), pairs), symbols(sys.argv[2])
     found = differences(base, head)
     for line in found:
         print(line)
     print(f"compare-kernel-symbols: {len(base)} and {len(head)} symbols, {len(found)} differences")
     # A report beside it, failing nothing: bodies that moved though their size did not.
-    was, now = bodies(sys.argv[1]), bodies(sys.argv[2])
+    was, now = renamed(bodies(sys.argv[1]), pairs), bodies(sys.argv[2])
     moved = sorted(name for name in set(was) & set(now) if was[name] != now[name])
     for name in moved:
         print(f"body: {name}")

@@ -6,7 +6,7 @@
 //! busybox's `reboot` has no way to pass the word, which is the only way a
 //! program has to say where the machine should come back up. On an STM32MP15
 //! DK board the kernel turns it into the forced boot mode U-Boot reads at its
-//! next start (`src/kernel/src/platform/st/stm32mp1.rs`): `firmware` stops at U-Boot's
+//! next start (`src/kernel/extensions/board/stm32mp1/src/platform/st/stm32mp1.rs`): `firmware` stops at U-Boot's
 //! prompt, `ums` puts the card on USB for flashing, `fastboot` starts
 //! fastboot. Elsewhere the word is printed and the machine restarts as it
 //! would without it, which is what Linux does with a word nothing reads.

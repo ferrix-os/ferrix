@@ -1,0 +1,28 @@
+[package]
+name = "ferrix-kernel-board-stm32mp1"
+description = "The Ferrix kernel's STM32MP1 board glue (the DK1): a load-ring part the composition root installs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+# The one build script of the kernel's crates: the build flags as cfgs
+# (docs/BUILD-FLAGS.md rule 6 b, docs/KERNEL-CRATES.md).
+build = "../../../build.rs"
+
+# An optional part (docs/microkernel/CRATE-SPLIT.md §2.1, S2): its modules
+# under src/ at the module path they had in src/kernel/src. Not built into
+# linuxd (§2.6 item 7, §5 Q3).
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+ferrix-kernel-core.workspace = true
+ferrix-kernel-item.workspace = true
+ferrix-bootinfo.workspace = true
+ferrix-fdt.workspace = true
+ferrix-native-abi.workspace = true
+ferrix-sync.workspace = true
+
+[lints]
+workspace = true

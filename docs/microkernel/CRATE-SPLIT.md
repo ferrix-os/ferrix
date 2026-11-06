@@ -228,7 +228,10 @@ not nest in another nor sit under `src/kernel/src` (Q.2); a `.rs` under
   run-time registration, no boot option. Where only `main.rs` calls a part
   (`install()`), the call is the composition, under the profile's `cfg`, and
   no seam is needed.
-* **Each part is a removable crate** in the sense of KERNEL-CRATES §6.1: a
+* **Each flag-selected part is a removable crate** (ledger 7611, Q-S2a: a
+  part `main.rs` composes under a profile's `cfg` alone, as the board glue,
+  shows presence by `nm` on `present` and `desktop`, and absence by
+  `check-kernel-shape.py`'s `LEFT_CRATES` under `fast` and `max`), in the sense of KERNEL-CRATES §6.1: a
   `composition_root.removable` entry with its flag, `present_when`, binding,
   `symbol` and `absent_symbols`, checked by `removable_problems`,
   `seam_scan_problems` and `check-removable-symbols.py` on the linked ELF.
@@ -392,7 +395,15 @@ each item below with its output.
   P landing each run one coverage-profile boot on the arches that run the
   moved files and compare the line sets per file with the base's.
   `carry-coverage --rename` and `gen-coverage-justification --check` run
-  last, on the compared result.
+  last, on the compared result. **Equal line sets are not guaranteed across
+  a new crate boundary** (ledger 7656): S2's four board files each lost the
+  `fn drop` line and closing brace of their `impl Drop for Window` on all
+  three architectures, the new crate's code partitioned and inlined
+  otherwise. So every landing that adds a crate builds the coverage-profile
+  kernels of base and tip on each architecture, compares each moved file's
+  DWARF line set (in place of the boots, 7611 Q-S2b), and lists every
+  difference in its message; a line gone comes out of the evidence wherever
+  it is listed by line.
 
 ### 3.3 Traceability, item boundary, boot, symbols
 
@@ -515,7 +526,7 @@ their owners.
 |---|---|---:|---|---|
 | S0 | **Landed** (see *Where it stands*). Tools: `kernel_source_roots` with `parts_place`, every scanner reads it, file-set parity guard, `carry-coverage.py --rename`, `move-kernel-part.py`, `check-crate-layering.sh`, `check-item-boundary.py` and `check-kernel-shape.py` read every root, the planted part file and its controls. Owed to later landings: the mover's `lib.rs` and manifest writing, the rodata/symbol comparison run, the `lib.rs`-shape dry build (S2 or S3, 7429 S.7) | 5 | none: no kernel file | this design |
 | S1 | **Landed** (see *Where it stands*). `ferrix-kernel-settings` to `src/kernel/extensions/settings/`, its lift twin to its `lift/`: a path move, it is already a removable crate | 1 | `settings/`, `kernel_settings.rs`, `src/kernel/settings/`; about 20 min | S0 |
-| S2 | Board glue to `board/{stm32mp1,gs201-usb}/`, two crates | 2 | `platform/st/`, `gs201/usb.rs`, `kernel_load.rs`'s `platform` block, `main.rs`'s `install` lines; about 30 min, DK1 boot under ARMv7-A `--smp 2` included | S0 |
+| S2 | **Landed** (see *Where it stands*). Board glue to `board/{stm32mp1,gs201-usb}/`, two crates | 2 | `platform/st/`, `gs201/usb.rs`, `kernel_load.rs`'s `platform` block, `main.rs`'s `install` lines; about 30 min, DK1 boot under ARMv7-A `--smp 2` included | S0 |
 | S3 | `logctl` to `device/logctl/`, with its lift twin | 2 | `interfaces/logctl/`, `interfaces/mod.rs`, `main.rs`; about 30 min | S0 |
 | S4a | `PLACED` and `node_of` from `net_ring` into the load's `net::device` (§2.6 item 4a); a code change, reviewed, no move | 2 | none | S0 |
 | S4 | `net_ring` to `device/net-ring/`, with its lift twin | 2 | as S3, plus `stages_check.rs`'s one call and `sysfs.rs`'s five | S3, S4a |
@@ -627,4 +638,25 @@ read `kernel_item.rs`'s `crate::` paths as load) and looked for a part's
 moved `settings/`) silently, now a problem; `check-crate-layering.sh` took a
 part's lift twin for a kernel crate (linuxd links it); `gate_rows.rs`'s
 quarantine list named the moved file, now through `KERNEL_PARTS_PLACE`, with
-a unit test. Next: S2.
+a unit test. Then (consultant ledger 7608 S1.5, S1.6) kernel_roots refuses a part root not
+`<place>/<name>/src` or `<place>/<group>/<name>/src` or without a `Cargo.toml` above it, and
+check-lift refuses any `ferrix-kernel-*` dependency of a lift package, a part's twin's included.
+
+**S2 landed** (2026-11-06, mk-crates3). The board glue is two parts:
+`board/stm32mp1/` (`ferrix-kernel-board-stm32mp1`: `platform/st/stm32mp1.rs` and
+`stm32mp1/{gpu,sdmmc,usb}.rs`) and `board/gs201-usb/` (`ferrix-kernel-board-gs201-usb`:
+`platform/google/gs201/usb.rs`), five files `R100`, each crate depending on the core and the
+item only, no lift twin (§2.6 item 7). The load's root lost its `platform` block (and its
+`ferrix-fdt` dependency, which only the glue used); `main.rs` calls each part's `install` by
+its crate's path, under the same `cfg`s, and holds each part's flag word to its own. The
+`lib.rs` shape (7346 (3), 7429 S.7) was built here: no glob of the item's `platform` or
+`google`, since below them is only the core's `pub(crate)` watchdog, and a glob re-exports
+nothing (rustc's `unused_imports`) while adding a use of the core's `platform` to
+KERNEL-INTERFACE.md; no item needed its visibility widened. What the move found: the
+kernel-memory audit matched its classes (`platform/`, the load's trees) on the repo path, so a
+part's file was read as audited code; it now matches the module path. check-kernel-shape's M6
+list names the parts' files by repo path and their crates in `LEFT_CRATES`, so `nm` holds
+them out of a `personality=user` kernel. check-item-boundary fails two kernel files at one
+module path, crate roots excepted (7608 S1.7), with a self-test and a control. The coverage
+evidence was carried (`carry-coverage.py`, git's renames, nothing dropped), and the release
+and decision-coverage files' five keys renamed with it. Next: S3.

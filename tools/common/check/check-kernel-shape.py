@@ -48,12 +48,15 @@ LEFT = (
     "discovery/powerctl.rs",
     "arch/x86_64/powerctl.rs",
     "discovery/firmware.rs",
-    "platform/st/stm32mp1.rs",
-    "platform/google/gs201/usb.rs",
+    # The board glue, parts since S2 (docs/microkernel/CRATE-SPLIT.md): their
+    # files by their repo paths, and their crates in LEFT_CRATES below.
+    f"{kernel_roots.parts_place()}/board/stm32mp1/src/platform/st/stm32mp1.rs",
+    f"{kernel_roots.parts_place()}/board/gs201-usb/src/platform/google/gs201/usb.rs",
 )
 
 # Crates no ring-0 crate of this shape may link.
-LEFT_CRATES = ("ferrix_kernel_load", "ferrix_kernel_settings", "ferrix_fbtext", "ferrix_qr")
+LEFT_CRATES = ("ferrix_kernel_load", "ferrix_kernel_settings", "ferrix_kernel_board_stm32mp1",
+               "ferrix_kernel_board_gs201_usb", "ferrix_fbtext", "ferrix_qr")
 
 # Symbols that must not be in this shape's kernel: normal mode's FS record does not move while
 # K1's fast path has the mark up (ledger 6464 Z2, 6981).

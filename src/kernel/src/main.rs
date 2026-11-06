@@ -1656,8 +1656,8 @@ fn register_load(view: &BootView<'_>) {
     init::root_can_return();
     let registered = syscall::launch::install()
         .and_then(|()| fs::install())
-        .and_then(|()| platform::st::stm32mp1::install(view))
-        .and_then(|()| platform::google::gs201::usb::install())
+        .and_then(|()| ferrix_kernel_board_stm32mp1::platform::st::stm32mp1::install(view))
+        .and_then(|()| ferrix_kernel_board_gs201_usb::platform::google::gs201::usb::install())
         .and_then(|()| block_ring::install())
         .and_then(|()| net_ring::install())
         .and_then(|()| display::install())
@@ -1721,8 +1721,8 @@ fn register_load(view: &BootView<'_>) {
 /// served stay unserved (LINUX-ABI-SEPARATION.md §7 rows 2 and 5, §11.11).
 #[cfg(all(ferrix_load_built = "none", not(ferrix_personality = "user")))]
 fn register_load(view: &BootView<'_>) {
-    let registered = platform::st::stm32mp1::install(view)
-        .and_then(|()| platform::google::gs201::usb::install());
+    let registered = ferrix_kernel_board_stm32mp1::platform::st::stm32mp1::install(view)
+        .and_then(|()| ferrix_kernel_board_gs201_usb::platform::google::gs201::usb::install());
     if let Err(hooks::Full) = registered {
         fatal!(
             catalog::LOAD_REGISTRATION,

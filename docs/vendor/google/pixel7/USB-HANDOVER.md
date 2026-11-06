@@ -55,7 +55,7 @@ survives a reset", is the full text.
 * Architecture: the kernel enumerates devices and drives none of them
   (`docs/ARCHITECTURE.md` §1 and §7; `tools/common/data/device-access-allowlist.json` is
   the gate). The controller is driven by a ring-3 driver. The kernel does only
-  what the chip shares, as `src/kernel/src/platform/st/stm32mp1/usb.rs` does for the DK1.
+  what the chip shares, as `src/kernel/extensions/board/stm32mp1/src/platform/st/stm32mp1/usb.rs` does for the DK1.
 
 The phone is shared with other sessions (`phone-link-9f`'s PhoneLink app,
 `dev.phonelink`, stays installed, with its data). `adb devices` listing it
@@ -110,7 +110,7 @@ What the tree cannot tell, and phase 1 has to find:
   `src/lib/proto/native-abi/src/types.rs`: `TREE_STM32_HDMI = 1`, `_USBH = 2`,
   `_GPU = 3`. A new one takes 4.
 * **The precedent to copy.** The DK1's USB host:
-  * `src/kernel/src/platform/st/stm32mp1/usb.rs` turns on clocks, resets, regulators and the
+  * `src/kernel/extensions/board/stm32mp1/src/platform/st/stm32mp1/usb.rs` turns on clocks, resets, regulators and the
     PHY's PLL, with values read back from U-Boot, and publishes the node.
   * `src/user/system/native/drivers/usb/usbhid` drives the EHCI controller.
   * `src/lib/drivers/usb/usb-host` is the host-testable logic, with a register model under
@@ -285,7 +285,7 @@ other users asked first; any other offset or block needs a new OK.
 What each part is, now on `main`:
 
 * `src/boot/vendor/google/pixel7/src/usb.rs`: the read-only survey, in every record.
-* `src/kernel/src/platform/google/gs201/usb.rs`: `TREE_GS201_DWC3 = 4`, published only when
+* `src/kernel/extensions/board/gs201-usb/src/platform/google/gs201/usb.rs`: `TREE_GS201_DWC3 = 4`, published only when
   `pd-hsi0` reads on and `GSNPSID` names a DWC3; nothing written.
 * `src/lib/drivers/usb/usb-device`: chapter 9 and the CDC-ACM function.
 * `src/lib/drivers/usb/dwc3`: the controller, tested against a register model
@@ -368,7 +368,7 @@ and every worktree, branch and target directory of its own removed.
   installs the udev rule above, ModemManager takes the log's first
   seconds.
 * **Where the parts are:** `src/boot/vendor/google/pixel7/src/usb.rs` (survey),
-  `src/kernel/src/platform/google/gs201/usb.rs` (binding), `src/lib/drivers/usb/dwc3` and
+  `src/kernel/extensions/board/gs201-usb/src/platform/google/gs201/usb.rs` (binding), `src/lib/drivers/usb/dwc3` and
   `src/lib/drivers/usb/usb-device` (host-tested, `cargo test -p ferrix-dwc3
   -p ferrix-usb-device`), `src/user/system/native/drivers/usb/usbdev` (driver),
   `src/kernel/src/console/log.rs` and `src/kernel/src/interfaces/logctl` (the log and its

@@ -384,7 +384,7 @@
       "total": 83,
       "hit": 70
     },
-    "platform/st/stm32mp1.rs": {
+    "src/kernel/extensions/board/stm32mp1/src/platform/st/stm32mp1.rs": {
       "ring": "load",
       "total": 220,
       "hit": 12
@@ -404,7 +404,7 @@
       "total": 131,
       "hit": 87
     },
-    "platform/st/stm32mp1/usb.rs": {
+    "src/kernel/extensions/board/stm32mp1/src/platform/st/stm32mp1/usb.rs": {
       "ring": "load",
       "total": 85,
       "hit": 0
@@ -534,7 +534,7 @@
       "total": 183,
       "hit": 155
     },
-    "platform/st/stm32mp1/sdmmc.rs": {
+    "src/kernel/extensions/board/stm32mp1/src/platform/st/stm32mp1/sdmmc.rs": {
       "ring": "load",
       "total": 40,
       "hit": 0
@@ -589,7 +589,7 @@
       "total": 277,
       "hit": 221
     },
-    "platform/google/gs201/usb.rs": {
+    "src/kernel/extensions/board/gs201-usb/src/platform/google/gs201/usb.rs": {
       "ring": "load",
       "total": 26,
       "hit": 2
@@ -599,7 +599,7 @@
       "total": 316,
       "hit": 281
     },
-    "platform/st/stm32mp1/gpu.rs": {
+    "src/kernel/extensions/board/stm32mp1/src/platform/st/stm32mp1/gpu.rs": {
       "ring": "load",
       "total": 58,
       "hit": 0

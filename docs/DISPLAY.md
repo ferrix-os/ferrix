@@ -766,7 +766,7 @@ divider and nothing else of PLL4.
 
 **Who does what.**
 
-* **The kernel, once, at boot** (`src/kernel/src/platform/st/stm32mp1.rs`): the parts every
+* **The kernel, once, at boot** (`src/kernel/extensions/board/stm32mp1/src/platform/st/stm32mp1.rs`): the parts every
   peripheral on the chip shares, which no driver may hold. It checks PLL4's Q
   output is 74.25 MHz within half a percent and the HSI is running undivided;
   turns on the LTDC's clock and I2C1's, and puts I2C1's kernel clock on the

@@ -30,7 +30,6 @@ ferrix-chardevctl.workspace = true
 ferrix-displayctl.workspace = true
 ferrix-elf.workspace = true
 ferrix-fallible.workspace = true
-ferrix-fdt.workspace = true
 ferrix-frame.workspace = true
 ferrix-inputctl.workspace = true
 ferrix-kmem.workspace = true

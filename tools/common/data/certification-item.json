@@ -355,9 +355,8 @@
         "fs/**",
         "interfaces/**",
         "net/**",
-        "platform/google/gs201/usb.rs",
-        "platform/st/stm32mp1.rs",
-        "platform/st/stm32mp1/**",
+        "src/kernel/extensions/board/gs201-usb/**",
+        "src/kernel/extensions/board/stm32mp1/**",
         "syscall/attributes.rs",
         "syscall/check.rs",
         "syscall/compat.rs",
@@ -811,7 +810,9 @@
     "parts_place": "src/kernel/extensions",
     "roots": [
       "src/kernel/src",
-      "src/kernel/extensions/settings/src"
+      "src/kernel/extensions/settings/src",
+      "src/kernel/extensions/board/stm32mp1/src",
+      "src/kernel/extensions/board/gs201-usb/src"
     ]
   },
   "kernel_crates": {
@@ -908,6 +909,20 @@
     "ferrix-kernel-settings": {
       "path": "src/kernel/extensions/settings",
       "root": "src/kernel/extensions/settings/src/lib.rs",
+      "rings": [
+        "load"
+      ]
+    },
+    "ferrix-kernel-board-stm32mp1": {
+      "path": "src/kernel/extensions/board/stm32mp1",
+      "root": "src/kernel/extensions/board/stm32mp1/src/lib.rs",
+      "rings": [
+        "load"
+      ]
+    },
+    "ferrix-kernel-board-gs201-usb": {
+      "path": "src/kernel/extensions/board/gs201-usb",
+      "root": "src/kernel/extensions/board/gs201-usb/src/lib.rs",
       "rings": [
         "load"
       ]

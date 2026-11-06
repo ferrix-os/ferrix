@@ -13,7 +13,7 @@
 //!
 //! U-Boot left SDMMC1 clocked, its pins muxed and the card powered; the
 //! kernel published the node without writing a register
-//! (`src/kernel/src/platform/st/stm32mp1/sdmmc.rs`). This driver writes only
+//! (`src/kernel/extensions/board/stm32mp1/src/platform/st/stm32mp1/sdmmc.rs`). This driver writes only
 //! inside the controller's own window, and moves every word through the
 //! FIFO: it never turns the controller's internal DMA on, and pins no
 //! memory. That is this driver's property, not the kernel's: nothing in

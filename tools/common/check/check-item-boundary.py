@@ -650,12 +650,30 @@ def build(files: list[str], read) -> tuple[dict[ModPath, Module], list[Reference
     # A `mod` declaration names a module path; a part's file is listed by its
     # repo path, and found by its module path within its root (module_rel).
     known = set(files) | {module_rel(rel) for rel in files}
+    problems += shared_module_paths(files)
     for mod in modules.values():
         for child in mod.file_children:
             base = "/".join(mod.path + (child,))
             if not ({f"{base}.rs", f"{base}/mod.rs"} & known):
                 problems.append(f"{mod.file}: `mod {child};` has no file this gate can find")
     return modules, refs, problems
+
+
+def shared_module_paths(files: list[str]) -> list[str]:
+    """Two kernel files, crate roots excepted, at one module path (ledger 7608
+    S1.7). The tree here is the crates' one tree by position, so a part's file
+    is found by its module path; a part's own `interfaces/mod.rs` and the
+    load's would be one module with two files, and every edge of one would be
+    read as the other's. Such a part must say so in a tree keyed per crate,
+    which this gate does not have: it fails instead."""
+    by_module: dict[ModPath, list[str]] = {}
+    for rel in files:
+        if rel in ROOT_FILES:
+            continue
+        by_module.setdefault(module_of_file(rel), []).append(rel)
+    return [f"{', '.join(sorted(rels))}: {len(rels)} kernel files at one module path, {key_of(path)}; "
+            "this gate reads the crates as one tree of modules"
+            for path, rels in sorted(by_module.items()) if len(rels) > 1]
 
 
 class Edge:
@@ -2217,6 +2235,15 @@ def self_test() -> list[str]:
     failures += _kernel_place_self_test()
     failures += _unrooted_self_test()
     failures += _gpu_self_test()
+    # S1.7: a part's file at a module path a file of src/kernel/src holds.
+    settings = next((r for r in kernel_roots.roots() if r.endswith("/settings/src")), None)
+    if settings is not None:
+        shared = shared_module_paths(["settings/uts.rs", f"{settings}/settings/uts.rs", "mm.rs",
+                                      f"{settings}/lib.rs"])
+        if len(shared) != 1 or "settings::uts" not in shared[0]:
+            failures.append(f"shared module paths: got {shared}, wanted settings::uts's two files")
+    else:
+        failures.append("shared module paths: no settings part root to test with")
     rings = {"rings": {"load": {"members": ["fs/**", "render/**", "net.rs"]}}}
     stale = stale_members(rings, ["fs/pipe.rs", "interfaces/render/mod.rs", "net.rs"])
     if stale != [("load", "render/**")]:

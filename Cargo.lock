@@ -561,6 +561,8 @@ dependencies = [
  "ferrix-bootinfo",
  "ferrix-crng",
  "ferrix-elf",
+ "ferrix-kernel-board-gs201-usb",
+ "ferrix-kernel-board-stm32mp1",
  "ferrix-kernel-load",
  "ferrix-kernel-settings",
  "ferrix-linux-abi",
@@ -569,6 +571,29 @@ dependencies = [
  "ferrix-smbios",
  "ferrix-sync",
  "ferrix-ustack",
+]
+
+[[package]]
+name = "ferrix-kernel-board-gs201-usb"
+version = "0.1.0"
+dependencies = [
+ "ferrix-bootinfo",
+ "ferrix-fdt",
+ "ferrix-kernel-core",
+ "ferrix-kernel-item",
+ "ferrix-native-abi",
+]
+
+[[package]]
+name = "ferrix-kernel-board-stm32mp1"
+version = "0.1.0"
+dependencies = [
+ "ferrix-bootinfo",
+ "ferrix-fdt",
+ "ferrix-kernel-core",
+ "ferrix-kernel-item",
+ "ferrix-native-abi",
+ "ferrix-sync",
 ]
 
 [[package]]
@@ -645,7 +670,6 @@ dependencies = [
  "ferrix-displayctl",
  "ferrix-elf",
  "ferrix-fallible",
- "ferrix-fdt",
  "ferrix-frame",
  "ferrix-inputctl",
  "ferrix-kernel-core",
