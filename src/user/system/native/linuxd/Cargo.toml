@@ -21,6 +21,7 @@ ferrix-kernel-load = { package = "ferrix-lift-load", path = "../../../../kernel/
 ferrix-native-abi.workspace = true
 ferrix-kernel-settings = { package = "ferrix-lift-settings", path = "../../../../kernel/extensions/settings/lift" }
 ferrix-kernel-logctl = { package = "ferrix-lift-logctl", path = "../../../../kernel/extensions/device/logctl/lift" }
+ferrix-kernel-net-ring = { package = "ferrix-lift-net-ring", path = "../../../../kernel/extensions/device/net-ring/lift" }
 ferrix-rt.workspace = true
 ferrix-native.workspace = true
 ferrix-bootinfo.workspace = true

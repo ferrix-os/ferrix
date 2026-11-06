@@ -2207,7 +2207,7 @@ pub static NET_RING: Explanation = Explanation {
         "The ring's task did not stop when the control channel closed, which a frame count \
          taken after the check would then see as a leak.",
     ],
-    see: "src/kernel/src/interfaces/net_ring/check.rs; src/kernel/src/interfaces/net_ring/mod.rs; src/lib/proto/netring; \
+    see: "src/kernel/extensions/device/net-ring/src/interfaces/net_ring/check.rs; src/kernel/extensions/device/net-ring/src/interfaces/net_ring/mod.rs; src/lib/proto/netring; \
           docs/NET-RING.md",
 };
 

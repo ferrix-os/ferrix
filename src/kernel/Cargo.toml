@@ -22,6 +22,7 @@ ferrix-kernel-settings.workspace = true
 ferrix-kernel-board-gs201-usb.workspace = true
 ferrix-kernel-board-stm32mp1.workspace = true
 ferrix-kernel-logctl.workspace = true
+ferrix-kernel-net-ring.workspace = true
 ferrix-linux-abi.workspace = true
 ferrix-bootinfo.workspace = true
 ferrix-crng.workspace = true

@@ -528,8 +528,8 @@ their owners.
 | S1 | **Landed** (see *Where it stands*). `ferrix-kernel-settings` to `src/kernel/extensions/settings/`, its lift twin to its `lift/`: a path move, it is already a removable crate | 1 | `settings/`, `kernel_settings.rs`, `src/kernel/settings/`; about 20 min | S0 |
 | S2 | **Landed** (see *Where it stands*). Board glue to `board/{stm32mp1,gs201-usb}/`, two crates | 2 | `platform/st/`, `gs201/usb.rs`, `kernel_load.rs`'s `platform` block, `main.rs`'s `install` lines; about 30 min, DK1 boot under ARMv7-A `--smp 2` included | S0 |
 | S3 | **Landed** (see *Where it stands*). `logctl` to `device/logctl/`, with its lift twin | 2 | `interfaces/logctl/`, `interfaces/mod.rs`, `main.rs`; about 30 min | S0 |
-| S4a | `PLACED` and `node_of` from `net_ring` into the load's `net::device` (§2.6 item 4a); a code change, reviewed, no move | 2 | none | S0 |
-| S4 | `net_ring` to `device/net-ring/`, with its lift twin | 2 | as S3, plus `stages_check.rs`'s one call and `sysfs.rs`'s five | S3, S4a |
+| S4a | **Landed** (see *Where it stands*). `PLACED` and `node_of` from `net_ring` into the load's `net::device` (§2.6 item 4a); a code change, reviewed, no move | 2 | none | S0 |
+| S4 | **Landed** (see *Where it stands*). `net_ring` to `device/net-ring/`, with its lift twin | 2 | as S3, plus `stages_check.rs`'s one call and `sysfs.rs`'s five | S3, S4a |
 | S5 | The raised-checks crate (§2.6 item 5; the record's "26" comment fixed), then the whole load to `personality/linux/`, name kept, its lift twin moved with it. After S5, `src/kernel/src` holds only core, item, the shim and crate roots | 5 | every load file: the longest, about 60 min; announced a day ahead | S0, S4 |
 | P1 | `fs::DiskFilesystem` seam (no freeze), then btrfs as a part | 5 | `fs/btrfs*` and their callers' lines | S5; seam design review |
 | P2 | `block_ring`'s shared helpers down (no freeze); `fd::DeviceFiles` and `devfs::DeviceNodes` seams (no freeze); then input, audio, block ring as parts | 8 | per part | P1; seam design review |
@@ -672,4 +672,29 @@ root allowed it. The load, ring-0 and lift, drops its `ferrix-logctl` dependency
 `interfaces/mod.rs` loses its `mod logctl` line (its table names the part). `main.rs` (its
 `install`, and stage 9's check through `stages_check.rs`'s glob) names the part by crate path.
 The panic catalog's `see:` strings (`panic/catalog.rs`, a core file, strings only) and
-`PANICS.md` name the moved paths. Under `fast` and `max` check-kernel-shape's `LEFT` and `LEFT_CRATES` hold the part out of ring 0 by `nm` (ledger 7630 S3.1). Next: S4a.
+`PANICS.md` name the moved paths. Under `fast` and `max` check-kernel-shape's `LEFT` and `LEFT_CRATES` hold the part out of ring 0 by `nm` (ledger 7630 S3.1).
+
+**S4a landed** (2026-11-06, mk-crates4, f69c9069a; ledger 7681, 7703). `net_ring`'s
+device-node map (`PLACED`, `node_of`, `placed_on`) is the load's `net::device` (`NODES`,
+`node_of`, `key_on`, `serve_from`, `unplace`), and `fs/sysfs.rs` names no `net_ring`: the
+load's last edge into the ring's core went with it.
+
+**S4 landed** (2026-11-06, mk-crates5). `interfaces/net_ring/` (`mod.rs`, `check.rs`) is the
+part `device/net-ring/` (`ferrix-kernel-net-ring`, both files `R100`), the first part that
+depends on the load (§2.3's one allowed edge: `crate::net`, `block_ring::location_of`,
+`net::packet` in its check). Its `lib.rs` re-exports the load's tree (`pub use
+ferrix_kernel_load::*`, which carries the item's and the core's), and its own `interfaces`
+re-exports the load's beside `pub mod net_ring`, since a local module shadows the glob's;
+so every `crate::` path in the moved files names what it named before. The load's items the
+ring calls from outside its crate now are `pub` where they were `pub(crate)` (in `net/mod.rs`
+`core`, `first`, `NetCore` and four of its methods, the `device` and `packet` modules; twelve
+functions of `net::device`; `PacketSocket` and four of its methods, `packet::of`;
+`NetNamespace`; `socket::Received` and its `bytes`; `block_ring`'s `location_of` re-export):
+visibility only, no body changed, all in the load ring. The twin `ferrix-lift-net-ring`
+depends on `ferrix-lift-load`; under `lift` the module's two check-only helpers are allowed
+dead on the module declaration (logctl's crate-wide allow narrowed the same way, the
+consultant's C1), so neither moved file changes a line. The load and its lift twin drop
+`ferrix-netring`. The load→`net_ring` edge is gone: the load declares no `net_ring` and its
+manifest names no part; `check-item-boundary.py --report` lists only `main.rs`'s composition
+edge to it (line 1662, the `install`). Under `fast` and `max` `LEFT` and `LEFT_CRATES` hold
+it out of ring 0. Next: S5.

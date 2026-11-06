@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "c6a3879c7d68543f529cb4132310a6633bf669af6b0ea13de17ad8bb2fa98732",
+  "digest": "44c3a6cfd49635fb8438a53b1d778f102be53e1bc68f7b2dcbcec324bd22eb8a",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -15529,7 +15529,7 @@
           "definition": true,
           "maturity": "implemented",
           "stage": 10,
-          "doc": "The data path is not per-request IPC: driver and kernel share a descriptor ring in a VMO and ring a doorbell; requests batch. The same shape virtio and NVMe already use. src/lib/drivers/virtio's split virtqueue (driver and device halves, over abstract shared memory) is the first of these. Between kernel and driver: src/lib/proto/blkring (docs/BLOCK-RING.md) and src/lib/proto/netring (docs/NET-RING.md), with src/kernel/src/interfaces/block_ring and src/kernel/src/interfaces/net_ring as the kernel's ends and doorbells as port packets. The display and input drivers need none: frames do not move, and their control channels carry the rest.",
+          "doc": "The data path is not per-request IPC: driver and kernel share a descriptor ring in a VMO and ring a doorbell; requests batch. The same shape virtio and NVMe already use. src/lib/drivers/virtio's split virtqueue (driver and device halves, over abstract shared memory) is the first of these. Between kernel and driver: src/lib/proto/blkring (docs/BLOCK-RING.md) and src/lib/proto/netring (docs/NET-RING.md), with src/kernel/src/interfaces/block_ring and src/kernel/extensions/device/net-ring/src/interfaces/net_ring as the kernel's ends and doorbells as port packets. The display and input drivers need none: frames do not move, and their control channels carry the rest.",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
             "line": 162

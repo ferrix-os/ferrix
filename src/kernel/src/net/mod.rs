@@ -38,16 +38,17 @@
 
 #[cfg(not(ferrix_load_built = "lift"))]
 pub mod check;
-pub(crate) mod device;
+pub mod device;
 pub(crate) mod ifreq;
 pub(crate) mod namespace;
 pub mod netlink;
 pub(crate) mod netns_file;
-pub(crate) mod packet;
+pub mod packet;
 pub(crate) mod socket;
 pub(crate) mod veth;
 
-pub(crate) use namespace::{NetNamespace, acting, first};
+pub use namespace::first;
+pub(crate) use namespace::{NetNamespace, acting};
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -87,7 +88,7 @@ struct Pending {
 
 /// The kernel's half of the net core.
 #[derive(Debug)]
-pub(crate) struct NetCore {
+pub struct NetCore {
     /// The stack itself.
     stack: SpinLock<Stack>,
     /// Frames on their way out.
@@ -111,7 +112,7 @@ pub(crate) struct NetCore {
 /// The first network namespace's net core: the one the ring-3 drivers, the
 /// boot checks and every call made with no process attach to. A process's own
 /// is [`NetNamespace::core`] of the namespace it is in (`docs/NETNS.md`).
-pub(crate) fn core() -> &'static NetCore {
+pub fn core() -> &'static NetCore {
     first().core()
 }
 
@@ -146,7 +147,7 @@ impl NetCore {
     ///
     /// Nothing inside `body` may sleep: the lock disables preemption. Copy out
     /// of the stack and act on it afterwards.
-    pub(crate) fn with<T>(&self, body: impl FnOnce(&mut Stack, Millis) -> T) -> T {
+    pub fn with<T>(&self, body: impl FnOnce(&mut Stack, Millis) -> T) -> T {
         let (answer, crossing) = self.with_crossing(body);
         veth::forward(crossing);
         answer
@@ -178,7 +179,7 @@ impl NetCore {
     /// the stack, which is right after a change and wrong for a look: a wait
     /// that asks whether its socket is ready from inside its own wait would
     /// wake itself, and two such waits would wake each other forever.
-    pub(crate) fn look<T>(&self, body: impl FnOnce(&Stack) -> T) -> T {
+    pub fn look<T>(&self, body: impl FnOnce(&Stack) -> T) -> T {
         body(&self.stack.lock())
     }
 
@@ -310,14 +311,14 @@ impl NetCore {
     }
 
     /// Add an interface, and answer the index it was given.
-    pub(crate) fn add_interface(&self, interface: Interface) -> u32 {
+    pub fn add_interface(&self, interface: Interface) -> u32 {
         self.with(|stack, _| stack.add_interface(interface))
     }
 
     /// Keep an interface whose driver has gone for the next one: its carrier
     /// down, no ring told of its frames and none left waiting for it, but its
-    /// index, addresses and routes as they were (`crate::interfaces::net_ring`).
-    pub(crate) fn park_interface(&self, index: u32) {
+    /// index, addresses and routes as they were (`ferrix_kernel_net_ring::interfaces::net_ring`).
+    pub fn park_interface(&self, index: u32) {
         self.set_carrier(index, false);
         self.transmit_wakers
             .lock()

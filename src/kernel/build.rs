@@ -84,13 +84,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         "ferrix-lift-settings"
         | "ferrix-kernel-board-stm32mp1"
         | "ferrix-kernel-board-gs201-usb"
-        | "ferrix-kernel-logctl" => {
+        | "ferrix-kernel-logctl"
+        | "ferrix-kernel-net-ring" => {
             let _ = build_flags()?;
             println!("cargo::rerun-if-changed=../../../build.rs");
             return Ok(());
         }
         // A twin one group deeper (`device/<name>/lift/`).
-        "ferrix-lift-logctl" => {
+        "ferrix-lift-logctl" | "ferrix-lift-net-ring" => {
             let _ = build_flags()?;
             println!("cargo::rerun-if-changed=../../../../build.rs");
             return Ok(());

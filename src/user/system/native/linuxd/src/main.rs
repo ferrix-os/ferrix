@@ -243,7 +243,7 @@ fn served(_argument: usize) {
     // The disks, once devmgr's drivers have come up. The cores are its by the
     // channel the kernel gave both (M5-LIFT.md §11).
     let cored = fs::start_block_side(page.files)
-        .and_then(|()| interfaces::net_ring::install())
+        .and_then(|()| ferrix_kernel_net_ring::interfaces::net_ring::install())
         .and_then(|()| interfaces::display::install())
         .and_then(|()| interfaces::render::install())
         .and_then(|()| interfaces::input::install())

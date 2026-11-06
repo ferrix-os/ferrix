@@ -103,7 +103,7 @@ use discovery::finder::Finder;
 use discovery::{board, devmgr, fdt, firmware, pci, tree};
 use early::EarlyMemory;
 #[cfg(ferrix_load_built = "ring0")]
-use interfaces::{audio, block_ring, chardev, display, input, net_ring, render};
+use interfaces::{audio, block_ring, chardev, display, input, render};
 use panic::{catalog, fatal};
 
 /// What the boot test waits for. Changing it means changing
@@ -1659,7 +1659,7 @@ fn register_load(view: &BootView<'_>) {
         .and_then(|()| ferrix_kernel_board_stm32mp1::platform::st::stm32mp1::install(view))
         .and_then(|()| ferrix_kernel_board_gs201_usb::platform::google::gs201::usb::install())
         .and_then(|()| block_ring::install())
-        .and_then(|()| net_ring::install())
+        .and_then(|()| ferrix_kernel_net_ring::interfaces::net_ring::install())
         .and_then(|()| display::install())
         .and_then(|()| render::install())
         .and_then(|()| input::install())

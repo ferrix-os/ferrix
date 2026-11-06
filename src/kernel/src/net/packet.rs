@@ -49,7 +49,7 @@ struct Options {
 }
 
 /// An `AF_PACKET` socket.
-pub(crate) struct PacketSocket {
+pub struct PacketSocket {
     /// The network namespace it was made in, for life.
     ns: Arc<NetNamespace>,
     /// Which socket in the stack.
@@ -87,7 +87,7 @@ impl PacketSocket {
     /// # Errors
     ///
     /// Whatever [`OpenFile::new`] refuses, which for a socket is nothing.
-    pub(crate) fn open(
+    pub fn open(
         ns: &Arc<NetNamespace>,
         kind: PacketKind,
         protocol: u16,
@@ -130,7 +130,7 @@ impl PacketSocket {
     /// `packet_bind` reads one -- the whole structure, of family `AF_PACKET`.
     /// A protocol of zero keeps the socket's, and an interface of zero is
     /// every interface.
-    pub(crate) fn bind(&self, raw: &[u8]) -> Result<(), Errno> {
+    pub fn bind(&self, raw: &[u8]) -> Result<(), Errno> {
         if raw.len() < SOCKADDR_LL_SIZE || family_of(raw) != Some(AF_PACKET) {
             return Err(Errno::EINVAL);
         }
@@ -150,7 +150,7 @@ impl PacketSocket {
     /// `packet_snd`'s checks on the address: long enough for its own
     /// `sll_halen`, and on a `SOCK_DGRAM` socket long enough for an Ethernet
     /// address, and of family `AF_PACKET`.
-    pub(crate) fn send(&self, data: &[u8], to: Option<&[u8]>) -> Result<usize, Errno> {
+    pub fn send(&self, data: &[u8], to: Option<&[u8]>) -> Result<usize, Errno> {
         let address = match to {
             None => None,
             Some(raw) => Some(self.link_address(raw)?),
@@ -186,7 +186,7 @@ impl PacketSocket {
     }
 
     /// Take the next frame, and the `sockaddr_ll` it came from.
-    pub(crate) fn recv(
+    pub fn recv(
         &self,
         out: &mut [u8],
         flags: u32,
@@ -409,7 +409,7 @@ impl Inode for PacketSocket {
 }
 
 /// The socket an open file reads and writes through, if it is a packet one.
-pub(crate) fn of(file: &OpenFile) -> Option<Arc<PacketSocket>> {
+pub fn of(file: &OpenFile) -> Option<Arc<PacketSocket>> {
     Arc::clone(file.io())
         .into_any()
         .downcast::<PacketSocket>()

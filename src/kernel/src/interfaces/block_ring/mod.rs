@@ -543,7 +543,7 @@ fn control_create(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errn
 
 /// The PCI location HELLO must name for `node`, if it is a PCI function:
 /// `devmgr`'s, since its messages name devices the same way.
-pub(crate) use crate::discovery::devmgr::location_of;
+pub use crate::discovery::devmgr::location_of;
 
 /// Take ring `id`'s start off the list.
 fn take_start(id: usize) -> Option<Start> {

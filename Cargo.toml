@@ -140,6 +140,8 @@ members = [
     "src/kernel/extensions/board/gs201-usb",
     "src/kernel/extensions/device/logctl",
     "src/kernel/extensions/device/logctl/lift",
+    "src/kernel/extensions/device/net-ring",
+    "src/kernel/extensions/device/net-ring/lift",
     "src/user/system/native/linuxd",
     "src/lib/proto/partition-desc",
     "src/user/system/native/partmgr",
@@ -296,6 +298,7 @@ ferrix-kernel-settings = { path = "src/kernel/extensions/settings" }
 ferrix-kernel-board-stm32mp1 = { path = "src/kernel/extensions/board/stm32mp1" }
 ferrix-kernel-board-gs201-usb = { path = "src/kernel/extensions/board/gs201-usb" }
 ferrix-kernel-logctl = { path = "src/kernel/extensions/device/logctl" }
+ferrix-kernel-net-ring = { path = "src/kernel/extensions/device/net-ring" }
 ferrix-ustack = { path = "src/lib/kernel/ustack" }
 ferrix-vdso = { path = "src/lib/kernel/vdso" }
 ferrix-virtio = { path = "src/lib/drivers/virtio" }

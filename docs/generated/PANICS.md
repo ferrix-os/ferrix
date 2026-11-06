@@ -3814,9 +3814,9 @@ driver does.
 5. The ring's task did not stop when the control channel closed, which a frame
    count taken after the check would then see as a leak.
 
-See: src/kernel/src/interfaces/net_ring/check.rs;
-src/kernel/src/interfaces/net_ring/mod.rs; src/lib/proto/netring;
-docs/NET-RING.md.
+See: src/kernel/extensions/device/net-ring/src/interfaces/net_ring/check.rs;
+src/kernel/extensions/device/net-ring/src/interfaces/net_ring/mod.rs;
+src/lib/proto/netring; docs/NET-RING.md.
 
 <a id="fx-1152"></a>
 

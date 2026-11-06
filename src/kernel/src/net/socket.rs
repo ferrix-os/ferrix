@@ -193,9 +193,9 @@ impl Drop for InetSocket {
 
 /// What a receive answered.
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct Received {
+pub struct Received {
     /// Bytes copied into the caller's buffer.
-    pub(crate) bytes: usize,
+    pub bytes: usize,
     /// What the whole record held, which `MSG_TRUNC` answers with.
     pub(crate) full: usize,
     /// The hop limit a datagram arrived with.

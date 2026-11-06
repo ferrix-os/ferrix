@@ -77,17 +77,17 @@ pub(crate) fn node_of(interface: u32) -> Option<usize> {
 
 /// Record that the device `key` a ring added is served from device node
 /// `node`.
-pub(crate) fn serve_from(key: u32, node: usize) {
+pub fn serve_from(key: u32, node: usize) {
     NODES.lock().push((key, node));
 }
 
 /// Forget which device node the device `key` was served from.
-pub(crate) fn unplace(key: u32) {
+pub fn unplace(key: u32) {
     NODES.lock().retain(|(placed, _)| *placed != key);
 }
 
 /// The device a ring for device `node` added before, parked or not.
-pub(crate) fn key_on(node: usize) -> Option<u32> {
+pub fn key_on(node: usize) -> Option<u32> {
     NODES
         .lock()
         .iter()
@@ -98,12 +98,12 @@ pub(crate) fn key_on(node: usize) -> Option<u32> {
 /// Register the interface `index` of `namespace` as a device, and answer its
 /// key. The caller puts `Backing::Device(key)` on the interface before it
 /// adds it, by asking [`new_key`] first.
-pub(crate) fn new_key() -> u32 {
+pub fn new_key() -> u32 {
     NEXT_KEY.fetch_add(1, Ordering::Relaxed)
 }
 
 /// Record where the device `key` is.
-pub(crate) fn place(key: u32, namespace: &Arc<NetNamespace>, index: u32) {
+pub fn place(key: u32, namespace: &Arc<NetNamespace>, index: u32) {
     let mut devices = DEVICES.lock();
     if let Some(device) = devices.iter_mut().find(|device| device.key == key) {
         device.namespace = Arc::downgrade(namespace);
@@ -131,41 +131,41 @@ pub(crate) fn forget(key: u32) {
 
 /// Run `body` on the stack the device `key` is in, with its index there;
 /// `None` if the device is nowhere (its namespace is ending).
-pub(crate) fn look<T>(key: u32, body: impl FnOnce(&Stack, u32) -> T) -> Option<T> {
+pub fn look<T>(key: u32, body: impl FnOnce(&Stack, u32) -> T) -> Option<T> {
     let (namespace, index) = find(key)?;
     Some(namespace.core().look(|stack| body(stack, index)))
 }
 
 /// Take the frames waiting for the device's driver.
-pub(crate) fn take_outgoing(key: u32, want: usize) -> Vec<Vec<u8>> {
+pub fn take_outgoing(key: u32, want: usize) -> Vec<Vec<u8>> {
     find(key).map_or_else(Vec::new, |(namespace, index)| {
         namespace.core().take_outgoing(index, want)
     })
 }
 
 /// Hand the stack a frame the device received.
-pub(crate) fn receive(key: u32, frame: &[u8]) {
+pub fn receive(key: u32, frame: &[u8]) {
     if let Some((namespace, index)) = find(key) {
         namespace.core().receive(index, frame);
     }
 }
 
 /// Say whether the device's link is up.
-pub(crate) fn set_carrier(key: u32, up: bool) {
+pub fn set_carrier(key: u32, up: bool) {
     if let Some((namespace, index)) = find(key) {
         namespace.core().set_carrier(index, up);
     }
 }
 
 /// Keep the device's interface for the next driver (`NetCore::park_interface`).
-pub(crate) fn park(key: u32) {
+pub fn park(key: u32) {
     if let Some((namespace, index)) = find(key) {
         namespace.core().park_interface(index);
     }
 }
 
 /// Take the device's interface out of its stack and forget the device.
-pub(crate) fn remove(key: u32) {
+pub fn remove(key: u32) {
     if let Some((namespace, index)) = find(key) {
         namespace.core().forget_interface(index);
     }
@@ -173,7 +173,7 @@ pub(crate) fn remove(key: u32) {
 }
 
 /// Have `port` told when frames are queued for the device.
-pub(crate) fn wake_on_transmit(key: u32, port: &Arc<Port>) {
+pub fn wake_on_transmit(key: u32, port: &Arc<Port>) {
     if let Some((namespace, index)) = find(key) {
         namespace.core().wake_on_transmit(index, port);
     }

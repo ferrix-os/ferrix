@@ -10,7 +10,7 @@
 //! | Core | Protocol | Design |
 //! |---|---|---|
 //! | [`block_ring`] | `ferrix-blkring` | `docs/BLOCK-RING.md` |
-//! | [`net_ring`] | `ferrix-netring` | `docs/NET-RING.md` |
+//! | `net_ring`, the part `ferrix-kernel-net-ring` (CRATE-SPLIT.md S4) | `ferrix-netring` | `docs/NET-RING.md` |
 //! | [`display`] | `ferrix-displayctl` | `docs/DISPLAY.md` |
 //! | [`render`] | `ferrix-renderctl` | `docs/GPU.md` |
 //! | [`input`] | `ferrix-inputctl` | `docs/INPUT.md` |
@@ -26,5 +26,4 @@ pub mod block_ring;
 pub mod chardev;
 pub mod display;
 pub mod input;
-pub mod net_ring;
 pub mod render;

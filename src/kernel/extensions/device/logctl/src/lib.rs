@@ -19,16 +19,6 @@
         reason = "linux_abi=off is build-only until the checks that run a Linux program are re-homed"
     )
 )]
-// Built for linuxd by the twin, where the ring-0 check is cfg'd out: the
-// one item only that check uses (`claimed`) is then dead, as it was in
-// ferrix-lift-load, whose root allows it the same way. In no kernel image.
-#![cfg_attr(
-    ferrix_load_built = "lift",
-    allow(
-        dead_code,
-        reason = "claimed() serves only the ring-0 check, which linuxd's build leaves out"
-    )
-)]
 
 extern crate alloc;
 
@@ -58,5 +48,17 @@ pub use ferrix_kernel_item::*;
 /// `personality=user` kernel (`ferrix_load_built = "none"`).
 #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
 pub mod interfaces {
+    // Built for linuxd by the twin, where the ring-0 check is cfg'd out: the
+    // one item only that check uses (`claimed`) is then dead. The allow sits
+    // on this module, not crate-wide (consultant's C1, ledger 7635), and not
+    // on `claimed` itself, so that the moved file keeps its lines and its one
+    // `ferrix_load_built` site (lift_cfg_sites). In no kernel image.
+    #[cfg_attr(
+        ferrix_load_built = "lift",
+        allow(
+            dead_code,
+            reason = "claimed() serves only the ring-0 check, which linuxd's build leaves out"
+        )
+    )]
     pub mod logctl;
 }

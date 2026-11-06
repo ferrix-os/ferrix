@@ -168,8 +168,8 @@ package FerrixDrivers {
              * memory) is the first of these. Between kernel and driver:
              * src/lib/proto/blkring (docs/BLOCK-RING.md) and src/lib/proto/netring
              * (docs/NET-RING.md), with src/kernel/src/interfaces/block_ring and
-             * src/kernel/src/interfaces/net_ring as the kernel's ends and doorbells as port
-             * packets. The display and input drivers need none: frames do
+             * src/kernel/extensions/device/net-ring/src/interfaces/net_ring as the kernel's
+             * ends and doorbells as port packets. The display and input drivers need none: frames do
              * not move, and their control channels carry the rest. */
         ref part memory : Vmo;
         action addChain;

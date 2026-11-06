@@ -1,0 +1,27 @@
+[package]
+name = "ferrix-lift-net-ring"
+description = "A network driver's ring's one source built for linuxd"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+build = "../../../../build.rs"
+
+[lib]
+name = "ferrix_kernel_net_ring"
+path = "../src/lib.rs"
+
+[dependencies]
+ferrix-kernel-core = { package = "ferrix-lift-core", path = "../../../../lift/core" }
+ferrix-kernel-load = { package = "ferrix-lift-load", path = "../../../../lift/load" }
+ferrix-blkring.workspace = true
+ferrix-bootinfo.workspace = true
+ferrix-linux-abi.workspace = true
+ferrix-native-abi.workspace = true
+ferrix-net.workspace = true
+ferrix-netring.workspace = true
+ferrix-sched.workspace = true
+
+[lints]
+workspace = true

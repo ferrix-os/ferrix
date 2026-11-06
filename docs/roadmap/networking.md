@@ -244,7 +244,7 @@ into somebody else's packet. The index discipline is `src/lib/proto/blkring`'s, 
 second time rather than shared, which `docs/BACKLOG.md` carries as a debt with
 its reason.
 
-**Done — the kernel's end of the ring.** `src/kernel/src/interfaces/net_ring` is one task per
+**Done — the kernel's end of the ring.** `src/kernel/extensions/device/net-ring/src/interfaces/net_ring` (`src/kernel/src/interfaces/net_ring` until the crate split's S4) is one task per
 ring: it waits for the driver's HELLO, checks the rights every handle carries
 exactly rather than at least, holds the two VMOs, adds the interface to the net
 core, and answers READY with its completion port. Then it posts half the ring

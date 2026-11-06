@@ -37,7 +37,6 @@ ferrix-linux-abi.workspace = true
 ferrix-native-abi.workspace = true
 ferrix-net.workspace = true
 ferrix-netlink.workspace = true
-ferrix-netring.workspace = true
 ferrix-nettcp.workspace = true
 ferrix-netwire.workspace = true
 ferrix-paging.workspace = true

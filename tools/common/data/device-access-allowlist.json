@@ -44,7 +44,7 @@
     "src/kernel/src/discovery/pci/",
     "src/kernel/src/mmio.rs",
     "src/kernel/src/interfaces/block_ring/",
-    "src/kernel/src/interfaces/net_ring/",
+    "src/kernel/extensions/device/net-ring/src/interfaces/net_ring/",
     "src/kernel/src/early.rs",
     "src/kernel/src/panic/screen.rs"
   ],
@@ -154,7 +154,7 @@
       "reason": "The block ring's pages, which the ring-3 driver maps too. The protocol gives each byte one writer; volatile says the other side's writes are real. This is the seam working as designed, not a breach of it."
     },
     {
-      "file": "src/kernel/src/interfaces/net_ring/mod.rs",
+      "file": "src/kernel/extensions/device/net-ring/src/interfaces/net_ring/mod.rs",
       "kind": "shared",
       "max_sites": 5,
       "reason": "The net ring's pages. As block_ring."

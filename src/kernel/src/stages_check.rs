@@ -2033,7 +2033,7 @@ pub(super) fn check_chardev() {
 ///
 /// Halts rather than returning, as every other stage's check does.
 pub(super) fn check_net_ring() {
-    let report = match net_ring::check::run() {
+    let report = match ferrix_kernel_net_ring::interfaces::net_ring::check::run() {
         Ok(report) => report,
         Err(problem) => fatal!(catalog::NET_RING, "net ring self-check failed: {problem}"),
     };

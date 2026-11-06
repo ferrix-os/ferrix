@@ -68,7 +68,7 @@ const HEADROOM: usize = 1024;
 
 /// A network namespace.
 #[derive(Debug)]
-pub(crate) struct NetNamespace {
+pub struct NetNamespace {
     /// What `/proc/<pid>/ns/net` names.
     id: u64,
     /// The user namespace that was current when it was made: a process with a
@@ -88,7 +88,7 @@ pub(crate) struct NetNamespace {
 static LIVE: SpinLock<Vec<Weak<NetNamespace>>> = SpinLock::new(Vec::new());
 
 /// The first namespace, made on first use.
-pub(crate) fn first() -> &'static Arc<NetNamespace> {
+pub fn first() -> &'static Arc<NetNamespace> {
     static FIRST: Once<Arc<NetNamespace>> = Once::new();
     FIRST.call_once(|| {
         Arc::new(NetNamespace {

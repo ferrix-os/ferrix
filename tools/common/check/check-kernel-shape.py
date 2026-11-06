@@ -56,11 +56,15 @@ LEFT = (
     # ferrix_load_built is ring0 or lift (ledger 7630 S3.1).
     f"{kernel_roots.parts_place()}/device/logctl/src/interfaces/logctl/mod.rs",
     f"{kernel_roots.parts_place()}/device/logctl/src/interfaces/logctl/check.rs",
+    # A network driver's ring, a part since S4, built where logctl is.
+    f"{kernel_roots.parts_place()}/device/net-ring/src/interfaces/net_ring/mod.rs",
+    f"{kernel_roots.parts_place()}/device/net-ring/src/interfaces/net_ring/check.rs",
 )
 
 # Crates no ring-0 crate of this shape may link.
 LEFT_CRATES = ("ferrix_kernel_load", "ferrix_kernel_settings", "ferrix_kernel_board_stm32mp1",
-               "ferrix_kernel_board_gs201_usb", "ferrix_kernel_logctl", "ferrix_fbtext", "ferrix_qr")
+               "ferrix_kernel_board_gs201_usb", "ferrix_kernel_logctl",
+               "ferrix_kernel_net_ring", "ferrix_fbtext", "ferrix_qr")
 
 # Symbols that must not be in this shape's kernel: normal mode's FS record does not move while
 # K1's fast path has the mark up (ledger 6464 Z2, 6981).

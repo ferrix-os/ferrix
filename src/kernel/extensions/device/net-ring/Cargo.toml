@@ -1,0 +1,34 @@
+[package]
+name = "ferrix-kernel-net-ring"
+description = "The Ferrix kernel's end of a network driver's ring (ferrix-netring): a load-ring part"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+# The one build script of the kernel's crates: the build flags as cfgs
+# (docs/BUILD-FLAGS.md rule 6 b, docs/KERNEL-CRATES.md).
+build = "../../../build.rs"
+
+# An optional part (docs/microkernel/CRATE-SPLIT.md §2.1, S4): its modules
+# under src/ at the module path they had in src/kernel/src
+# (interfaces::net_ring). Its lift twin, lift/, builds the same root for
+# linuxd. It names the load (net, block_ring::location_of, the devmgr's
+# publication), the one edge §2.3 allows a part.
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+ferrix-kernel-core.workspace = true
+ferrix-kernel-load.workspace = true
+ferrix-blkring.workspace = true
+ferrix-bootinfo.workspace = true
+ferrix-linux-abi.workspace = true
+ferrix-native-abi.workspace = true
+ferrix-net.workspace = true
+ferrix-netring.workspace = true
+ferrix-netwire.workspace = true
+ferrix-sched.workspace = true
+
+[lints]
+workspace = true

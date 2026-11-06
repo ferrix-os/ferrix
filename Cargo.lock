@@ -565,6 +565,7 @@ dependencies = [
  "ferrix-kernel-board-stm32mp1",
  "ferrix-kernel-load",
  "ferrix-kernel-logctl",
+ "ferrix-kernel-net-ring",
  "ferrix-kernel-settings",
  "ferrix-linux-abi",
  "ferrix-paging",
@@ -680,7 +681,6 @@ dependencies = [
  "ferrix-native-abi",
  "ferrix-net",
  "ferrix-netlink",
- "ferrix-netring",
  "ferrix-nettcp",
  "ferrix-netwire",
  "ferrix-paging",
@@ -710,6 +710,22 @@ dependencies = [
  "ferrix-linux-abi",
  "ferrix-logctl",
  "ferrix-native-abi",
+ "ferrix-sched",
+]
+
+[[package]]
+name = "ferrix-kernel-net-ring"
+version = "0.1.0"
+dependencies = [
+ "ferrix-blkring",
+ "ferrix-bootinfo",
+ "ferrix-kernel-core",
+ "ferrix-kernel-load",
+ "ferrix-linux-abi",
+ "ferrix-native-abi",
+ "ferrix-net",
+ "ferrix-netring",
+ "ferrix-netwire",
  "ferrix-sched",
 ]
 
@@ -822,7 +838,6 @@ dependencies = [
  "ferrix-native-abi",
  "ferrix-net",
  "ferrix-netlink",
- "ferrix-netring",
  "ferrix-nettcp",
  "ferrix-netwire",
  "ferrix-paging",
@@ -857,6 +872,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrix-lift-net-ring"
+version = "0.1.0"
+dependencies = [
+ "ferrix-blkring",
+ "ferrix-bootinfo",
+ "ferrix-lift-core",
+ "ferrix-lift-load",
+ "ferrix-linux-abi",
+ "ferrix-native-abi",
+ "ferrix-net",
+ "ferrix-netring",
+ "ferrix-sched",
+]
+
+[[package]]
 name = "ferrix-lift-settings"
 version = "0.1.0"
 dependencies = [
@@ -883,6 +913,7 @@ dependencies = [
  "ferrix-lift-item",
  "ferrix-lift-load",
  "ferrix-lift-logctl",
+ "ferrix-lift-net-ring",
  "ferrix-lift-settings",
  "ferrix-native",
  "ferrix-native-abi",
