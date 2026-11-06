@@ -273,6 +273,10 @@ pub fn size<C: ConfigSpace + ?Sized>(
     // bit the device decodes, which is often well below it — and adding the
     // size to a single run carries it all the way out, leaving a power of
     // two or, for a run reaching bit 63, zero.
+    #[expect(
+        clippy::manual_isolate_lowest_one,
+        reason = "`isolate_lowest_one` is newer than Ferrocene's Rust 1.95, which builds the kernel"
+    )]
     let size = mask & mask.wrapping_neg();
     let carried = mask.wrapping_add(size);
     if carried & carried.wrapping_sub(1) != 0 {

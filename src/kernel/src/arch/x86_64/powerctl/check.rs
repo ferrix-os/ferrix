@@ -437,6 +437,10 @@ fn interleaved() -> Result<(), &'static str> {
             if vr(&fake) != 0xc8 || fake.in_force() {
                 return Err("an interleaving of a power write and a restore left a raised value");
             }
+            #[expect(
+                clippy::manual_isolate_lowest_one,
+                reason = "`isolate_lowest_one` is newer than Ferrocene's Rust 1.95, which builds the kernel"
+            )]
             let lowest = positions & positions.wrapping_neg();
             let ripple = positions + lowest;
             positions = ripple | (((positions ^ ripple) >> 2) / lowest);
@@ -468,6 +472,10 @@ fn restores_interleaved() -> Result<(), &'static str> {
         if vr(&fake) != 0xc8 || fake.in_force() {
             return Err("an interleaving of two power restores left a raised value");
         }
+        #[expect(
+            clippy::manual_isolate_lowest_one,
+            reason = "`isolate_lowest_one` is newer than Ferrocene's Rust 1.95, which builds the kernel"
+        )]
         let lowest = positions & positions.wrapping_neg();
         let ripple = positions + lowest;
         positions = ripple | (((positions ^ ripple) >> 2) / lowest);
