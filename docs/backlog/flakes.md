@@ -646,6 +646,8 @@ landed code 4 pass, 1 stop, develop beside it 5 pass, 0 stop). **No clearance is
 is not proven and not excluded: the three checks run before any restricted code and the flag is off, so
 what would reach them is what reaches every image (RESTRICTED-EXIT.md). To be run on an idle host.
 
+A timeout of the same row, not a stop (2026-11-06, mk-issues; ledger 7602): `mki3r-18` on c92f10db2 (fl-096's stack, feature/mk-issues-7), load 25 to 41, no panic and no FERRIX-BOOT-OK within 120 s, the serial still moving (stage 12's userns at 119.97 s); log `logs/queue/mki3r-18.log`. Its rerun `mki5-r18` on f6e6b29a6 (the same sources) PASSED, FERRIX-BOOT-OK at 47.57 s at load 25.2, against 51.4 to 70.6 s for the row's five boots on develop c9e8900d9 at load 18 to 30 (`mki-y1` to `mki-y5`, 60.3 s at 24.6). Read as the wait outrun under load, as the mk-merge row below.
+
 ### fl-097
 
 | Item | Owner | Stage |
