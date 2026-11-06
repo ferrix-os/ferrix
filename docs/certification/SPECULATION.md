@@ -840,6 +840,21 @@ branch, which only eIBRS or AutoIBRS covers here (§3, no retpolines), through
 a slot in `.data` that stays writable after the loader's fixups;
 `docs/BACKLOG.md` has the row to map those slots read-only and to remove the
 calls with a toolchain change.
+Counted again for the move to rustc 1.99.1 (2026-11-06, ledger 7667 R.9;
+`objdump -d` of the `present` release kernel, `cargo xtask check-frames
+--arch x86_64 --release`'s build, each `call *(%rip)` whose slot
+`.rela.dyn` relocates): 6,028 calls through a GOT slot on
+chore/rust-1.99.1 6a1249cc1 under 1.99.1 against 5,818 on 3ef2e61c7 under
+1.97.1, of 6,674 and 6,463 `call *(%rip)` in all, the rest through
+function-pointer statics. By target, 1.99.1 against 1.97.1: `memcpy` 1,993
+against 2,035, `__udivti3` 1,660 against 1,655, `memmove` 1,092 against
+1,097, `memcmp` 664 against 417, `memset` 594 against 589, `__divti3` 16
+both, `ferrix_copy_mc` 6 and `ferrix_enter_user` 1 both. The rise is
+`memcmp`'s, not traced call by call: the compiler's, the series'
+`as_chunks` rewrites (which compare fixed-size arrays) or both; the tip
+also carries develop's 5399b6e8e and d34d7a278 (S0 and S1 of the crate
+split). Every one is still an indirect branch that only eIBRS or
+AutoIBRS covers (§3). `.text` 7.79 MB against 7.80.
 `off` is therefore the static fixed link. It is faster in the profile people
 debug in, it equals the other in the reference, and it is the kernel the
 tree built before KASLR. The rows also show that the side-channel defences no

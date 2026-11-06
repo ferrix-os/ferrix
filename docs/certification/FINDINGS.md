@@ -837,6 +837,16 @@ it means pinning a Ferrocene-released rustc and checking the qualified target
 list; `armv7a-none-eabi` and the three UEFI targets are the ones expected to
 fall outside it.
 
+**The gap widened on 2026-11-06** (ledger 7667 R.8). The product is now
+built by rustc 1.99.1, while Ferrocene's newest release, 26.05, is Rust
+1.95: four minor versions behind the pin, where it was two under 1.97.1.
+`cargo xtask check-ferrocene` builds the kernel and the item's crates with
+upstream 1.95.0 and so shows only that the source compiles there, not that
+the object code Ferrocene would make is the product's. The gap's present
+cost in the source is three `#[expect(clippy::manual_isolate_lowest_one)]`
+(ferrix-pci's BAR sizing and two in `arch/x86_64/powerctl/check.rs`), kept
+because `isolate_lowest_one` is newer than 1.95. F-17 stays open.
+
 ### F-18 — six code generators produce product code and are unqualified
 **Moderate.** `gen-wayland-protocol.py`, `gen-xkb-tables.py`, `gen-font.py`,
 `gen-term-font.py`, `gen-panic-catalog.py` and `gen-btrfs-fixtures.py` emit

@@ -129,6 +129,15 @@ figures, which two more defects inflated and deflated (§3.4). Raw per-file
 data in `coverage-*.json`; the ratchet in `coverage-floor.json`. Decision
 coverage, from the same traces, is §3.6 and `decision-coverage-*.json`.
 
+**Measured under rustc 1.97.1, carried** (2026-11-06, ledger 7667 R.6).
+Every kernel coverage figure here, in `coverage-*.json` and in the
+generated COVERAGE-RESIDUAL.md and COVERAGE-WORKLIST.md was taken from
+1.97.1 builds; since the move to 1.99.1 the anchors are carried by
+`carry-coverage.py`, not re-measured, and one, x86-64's residual
+`syscall/native.rs` 3944, was dropped as edited. `docs/BACKLOG.md`'s P1
+row owes `cargo xtask coverage` on 1.99.1; until it runs, no finding or
+argued entry closes on these figures.
+
 ### 3.1 The suite, every architecture
 
 The union of every boot gate that exercises the item and passes under the

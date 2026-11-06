@@ -4,6 +4,8 @@
 
 The *needs a test* category of [COVERAGE-RESIDUAL.md](COVERAGE-RESIDUAL.md), grouped by module so that each module can be taken as one piece of work. The argued categories -- another architecture's code, the failure path, hardware the machine does not present -- are not here; their argument is in COVERAGE-RESIDUAL.md.
 
+**Measured under rustc 1.97.1, carried** (VERIFICATION.md §3).
+
 Counts are statements unreached by the whole suite on that architecture. A dash is a file the architecture does not compile, or one whose residual there is argued rather than a gap; a zero is one it reached in full. *Everywhere* is the statements unreached on every architecture that counts the file a gap -- the ones a single generic test would close on all of them at once -- and its lines are listed, so a test can be aimed without re-running anything. The per-architecture lines are in `coverage-residual-<arch>.json`.
 
 **Taking a module.** Write the test on the architecture with the largest count first, re-run `cargo xtask coverage --arch <arch>`, regenerate the evidence (VERIFICATION.md §3.3) and raise the floor in `coverage-floor.json`. A line that turns out to be unreachable defensive code needs its argument written, not a test.

@@ -689,3 +689,9 @@ A timeout of the same row, not a stop (2026-11-06, mk-issues; ledger 7602): `mki
 | Item | Owner | Stage |
 |---|---|---|
 | **Open (2026-11-06, mk-crates2, ledger 7590).** The compositor toolkit's host tests `a_window_of_a_fixed_size_floats_at_it` (`toolkit/tests/against_hyprix.rs:720`, "a fixed-size window floats at its own size", got `None`, wanted `Some((150, 90))`) and `a_zero_timeout_dispatch_reads_what_arrived_behind_queued_events` (`:840`, "the configure waiting on the socket was not read") failed together in one `cargo xtask check`, `logs/queue/mkc2e-check.log` on 3a0c4194d, gate slot 3, load 25 to 29; the branch (S0 of the crate split) changed tools only, no compositor file. The same tree passed as `mkc2e-check2`, and as `mkc2b-check` and `mkc2c-check` before it. Both wait on hyprix's answer within a bound, as waybar's fl-097 test does; read as the bound outrun under load, not proven. Cause not known; not called fixed. | the compositor's owner | 17 |
+
+### fl-103
+
+| Item | Owner | Stage |
+|---|---|---|
+| **Open (2026-11-06, rustc 1.99.1, ledger 7667 R.4).** `cargo xtask check`'s compositor unit failed in `hyprix/tests/flips.rs`: `input_is_carried_out_while_a_slow_card_shows_a_frame` (a move waited for the flip out: median 22.5 ms), `an_idle_loop_carries_out_input_at_once` (median 15.3 ms) and `input_is_carried_out_while_a_stuck_card_hangs_a_flip` (median 26.2 ms, longest 210 ms). A local run, not a gate: worktree `.claude/worktrees/rust-1.99.1`, the tree that became chore/rust-1.99.1's 210319ee0..258df8ae9 on 3ef2e61c7 with rustc 1.99.1, the whole check's units running at once, host load 47 (1-minute, 2026-11-06 00:25 UTC); log `check-side/compositor.log` of that target dir, since deleted. `cargo test -p hyprix --test flips` then passed twice in a row alone at load ~42. Not compared with 1.97.1 under the same load. A second failure at normal load is a row failure, not this flake (ledger 7667 R.4). | open | check |

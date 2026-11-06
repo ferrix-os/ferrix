@@ -4,6 +4,8 @@
 
 The statements in the certified item that the measured suite did not reach, on each architecture, sorted into the categories DO-178C table A-7 asks about. The suite is every boot gate `cargo xtask coverage` runs on that architecture; see VERIFICATION.md §3.
 
+**Measured under rustc 1.97.1, carried** to the 1.99.1 tree by `carry-coverage.py`, not re-measured (VERIFICATION.md §3).
+
 | Architecture | Profile | Unreached | Argued | Hardware absent | Needs a test |
 |---|---|---:|---:|---:|---:|
 | x86_64 | coverage | 1914 | 399 | 271 | **1244** |
