@@ -400,7 +400,7 @@ impl Slot {
     /// Make what it adds to its parent's load its entity weight now, if it
     /// adds anything: a busy job's parent is told of a new weight at once,
     /// and an idle job's next turn busy reads it. Every change is a swap or a
-    /// `fetch_update` that moves the parent's load by the exact difference,
+    /// `try_update` that moves the parent's load by the exact difference,
     /// so the load stays the sum of what the children add in every
     /// interleaving. One window is stale, and was `set_weight`'s before
     /// `cpu.idle` shared this: a reweigh between [`adjust`]'s read of the
@@ -411,7 +411,7 @@ impl Slot {
         let fresh = self.entity_weight();
         let swapped = self
             .contributed
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |old| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |old| {
                 (old != 0).then_some(fresh)
             });
         if let Ok(old) = swapped {
@@ -622,7 +622,7 @@ pub fn charge(index: u32, resource: Resource, amount: u64) -> Result<(), Exceede
             break;
         };
         let limit = limit.load(Ordering::Acquire);
-        let fits = used.fetch_update(Ordering::AcqRel, Ordering::Acquire, |now| {
+        let fits = used.try_update(Ordering::AcqRel, Ordering::Acquire, |now| {
             now.checked_add(amount).filter(|&then| then <= limit)
         });
         if fits.is_err() {
@@ -1005,7 +1005,7 @@ fn uncharge_below(index: u32, stop: u32, resource: Resource, amount: u64) {
             return;
         };
         if let Some(used) = slot.used(resource) {
-            let _ = used.fetch_update(Ordering::AcqRel, Ordering::Acquire, |now| {
+            let _ = used.try_update(Ordering::AcqRel, Ordering::Acquire, |now| {
                 Some(now.saturating_sub(amount))
             });
         }

@@ -1151,7 +1151,7 @@ impl Task {
         quota::hold_group(index);
         let swapped = self
             .group
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |word| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |word| {
                 Some(pack(index, counted_of(word)))
             });
         let Ok(was) = swapped else {
@@ -1187,7 +1187,7 @@ impl Task {
         let base = self.base_weight.load(Ordering::Relaxed);
         let joined = self
             .group
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |word| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |word| {
                 (counted_of(word) == 0 && group_of(word) != quota::NONE)
                     .then(|| pack(group_of(word), base))
             });
@@ -1207,7 +1207,7 @@ impl Task {
     pub(crate) fn leave_word(&self) -> Option<(u32, u32)> {
         let left = self
             .group
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |word| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |word| {
                 (counted_of(word) != 0).then(|| pack(group_of(word), 0))
             });
         left.ok().map(|word| (group_of(word), counted_of(word)))

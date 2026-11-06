@@ -1340,7 +1340,7 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 /// A new space's id, never given before: the counter only moves up, and the
 /// kernel stops rather than wrap it to an id already given or to zero.
 fn next_id() -> u64 {
-    match NEXT_ID.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1)) {
+    match NEXT_ID.try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1)) {
         Ok(id) if id != 0 => id,
         _ => crate::panic::fatal!(
             crate::panic::catalog::SPACE_IDS_EXHAUSTED,
@@ -1395,7 +1395,7 @@ impl AddressSpace {
     pub(crate) fn claim_domain(&self, domain: u64) {
         let _ = self
             .domain
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |held| match held {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |held| match held {
                 UNCLAIMED => Some(domain),
                 held if held == domain || held == OUT => None,
                 _ => Some(OUT),
@@ -1410,7 +1410,7 @@ impl AddressSpace {
     pub(crate) fn set_birth_domain(&self, domain: u64) {
         let _ = self
             .domain
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |held| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |held| {
                 (held != OUT).then_some(domain)
             });
     }
@@ -4323,7 +4323,7 @@ impl AddressSpace {
     /// from now on, rather than tainting (§5). Answers whether it was granted.
     pub fn try_grant(&self) -> bool {
         self.reach
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |state| {
                 (state & (REACH_TAINTED | REACH_UNLISTED) == 0).then_some(state | REACH_GRANTED)
             })
             .is_ok()
@@ -4332,7 +4332,7 @@ impl AddressSpace {
     /// Set `mark`, unless granted, in one step with the grant. False when granted.
     pub(crate) fn mark_unless_granted(&self, mark: u8) -> bool {
         self.reach
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |state| {
                 (state & REACH_GRANTED == 0).then_some(state | mark)
             })
             .is_ok()
@@ -4349,7 +4349,7 @@ impl AddressSpace {
     /// False when refused.
     pub fn reached(&self, caller_passes: bool) -> bool {
         self.reach
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |state| {
                 if state & REACH_GRANTED != 0 {
                     None
                 } else if state & REACH_STARTED != 0 || !caller_passes {

@@ -60,7 +60,7 @@ pub fn get_write_access(inode: &Arc<dyn Inode>) -> Result<Option<WriteAccess>> {
     };
     // Linux's `atomic_inc_unless_negative`.
     let _ = count
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |now| {
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |now| {
             (now >= 0).then(|| now.saturating_add(1))
         })
         .map_err(|_| Errno::ETXTBSY)?;
@@ -79,7 +79,7 @@ pub fn deny_write_access(inode: &Arc<dyn Inode>) -> Result<Option<DenyWrite>> {
     };
     // Linux's `atomic_dec_unless_positive`.
     let _ = count
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |now| {
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |now| {
             (now <= 0).then(|| now.saturating_sub(1))
         })
         .map_err(|_| Errno::ETXTBSY)?;

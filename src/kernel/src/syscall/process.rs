@@ -2040,7 +2040,7 @@ impl Process {
         } else {
             let _ = self
                 .held_parked
-                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1));
+                .try_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1));
         }
     }
 
@@ -2090,7 +2090,7 @@ impl Process {
     pub(crate) fn thread_unparked(&self) {
         let _ = self
             .parked
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |parked| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |parked| {
                 parked.checked_sub(1)
             });
     }
