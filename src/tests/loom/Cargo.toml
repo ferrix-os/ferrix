@@ -4,7 +4,7 @@ description = "Models, checked with loom, of the orderings the kernel's wait and
 version = "0.0.0"
 edition = "2024"
 # Matches Ferrix's rust-toolchain.toml, which rustup finds from here.
-rust-version = "1.97"
+rust-version = "1.99"
 license = "MIT"
 publish = false
 

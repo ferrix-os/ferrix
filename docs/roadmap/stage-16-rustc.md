@@ -8,7 +8,7 @@ The remaining syscall surface, the memory scale, the process spawn path for
 **Met on 2026-09-22,** on example under KVM, with `cargo xtask test-rustc`;
 the CI job `rustc` runs the same command on every push, and has passed on
 GitHub since its first run there on 2026-09-22. The compiler is not one
-built here. It is the rust-lang.org release of 1.97.1: a glibc
+built here. It is the rust-lang.org release of 1.99.1 (1.97.1 until 2026-11-06): a glibc
 position-independent executable whose LLVM is a 190 MiB shared library of
 its own, run by Debian 13's `ld-linux`. It links as it does on any Linux
 machine, through `cc` (Debian's gcc 14 driver), which runs `collect2`, which

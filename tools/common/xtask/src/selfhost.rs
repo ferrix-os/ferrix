@@ -811,7 +811,7 @@ mod tests {
     fn a_build_that_wrote_its_image_passes() {
         let lines = transcript(&[
             qemu::SUCCESS_MARKER,
-            "cargo 1.97.1 (5ee8cd0dd 2026-07-09)",
+            "cargo 1.99.1 (5f94df478 2026-08-27)",
             BUILT,
             "  init     the shell exited with 20",
         ]);

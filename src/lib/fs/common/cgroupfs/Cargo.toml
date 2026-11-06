@@ -3,7 +3,7 @@ name = "ferrix-cgroupfs"
 description = "The text of cgroupfs: what each cgroup v2 interface file prints and what a write to one means, byte for byte as Linux has it"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 license.workspace = true
 publish = false
 

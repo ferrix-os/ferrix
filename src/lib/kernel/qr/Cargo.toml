@@ -3,7 +3,7 @@ name = "ferrix-qr"
 description = "QR code encoder for the panic screen, ported from Linux's drm_panic_qr.rs"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 # The code is a port of an MIT-licensed file from Linux; see LICENSE-MIT for
 # the notice it carries, which is the upstream author's rather than this tree's.
 license = "MIT"

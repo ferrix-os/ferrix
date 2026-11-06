@@ -4,8 +4,8 @@
 The compiler that will build the certified kernel is Ferrocene's
 (docs/MICROKERNEL.md section 6.5, *The toolchain*), and Ferrocene trails
 upstream Rust: its newest release, 26.05.0, is Rust 1.95.0, while the tree
-pins 1.97.1 (rust-toolchain.toml). A language feature or a `core` API that
-was stabilised in 1.96 or 1.97 compiles under the pin and not under
+pins 1.99.1 (rust-toolchain.toml). A language feature or a `core` API that
+was stabilised in 1.96 to 1.99 compiles under the pin and not under
 Ferrocene, and it would be found the day the evidence build is made, by
 which time it is in every ring. This gate finds it the day it is written:
 it type-checks the kernel crate and the item's library crates for every

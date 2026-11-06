@@ -1591,6 +1591,6 @@ package FerrixStructure {
         // Build targets.
         attribute kernelTargets : String[3] = ("x86_64-unknown-none", "aarch64-unknown-none-softfloat", "armv7a-none-eabi");
         attribute loaderTargets : String[3] = ("x86_64-unknown-uefi", "aarch64-unknown-uefi", "armv7-unknown-linux-musleabi");
-        attribute toolchain : String = "1.97.1";
+        attribute toolchain : String = "1.99.1";
     }
 }

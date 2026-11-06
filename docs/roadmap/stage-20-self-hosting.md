@@ -111,7 +111,7 @@ the next step, below.
 **On Arm hardware (2026-10-03): Ferrix builds its own AArch64 image on the
 Pixel 7.** `FERRIX_SYSROOT_ARCH=arm64 tools/common/fetch/fetch-rustc-sysroot.sh`
 makes the same toolchain for an AArch64 host (the same Debian packages from the
-same snapshots, and rustc and Cargo 1.97.1 for `aarch64-unknown-linux-gnu`),
+same snapshots, and rustc and Cargo for `aarch64-unknown-linux-gnu`, 1.97.1 at the time and 1.99.1 since 2026-11-06),
 and `tools/vendor/google/pixel7/selfhost.sh` puts it on a volume with the
 checkout and its vendored crates, sends it to the phone, and boots the phone's
 own `desktop.Image` in crosvm, unchanged, with the volume as `vdd` and

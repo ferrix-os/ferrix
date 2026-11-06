@@ -232,7 +232,8 @@ processor record the domain between the scan and the grace period, through
 a hook only stage 9 arms (FX-0908 if it is still armed after stage 9), and
 fails if that processor decided no barrier before the leave returned.
 
-**No retpolines.** rustc 1.97.1 accepts
+**No retpolines.** rustc 1.99.1 accepts, as 1.97.1 did (re-measured
+2026-11-06),
 `-C target-feature=+retpoline-indirect-calls` only with *"this was previously
 accepted by the compiler but is being phased out; it will become a hard error
 in a future release"* (rust-lang #116344); the supported spelling,

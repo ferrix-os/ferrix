@@ -3,7 +3,7 @@ name = "ferrix-gc400"
 description = "The Vivante GC400T in an STM32MP157 as logic over registers and command memory: its identity, its bring-up, and the front end's command stream"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 license.workspace = true
 publish = false
 

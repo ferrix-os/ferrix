@@ -3,7 +3,7 @@ name = "ferrix-argon2"
 description = "Argon2id and BLAKE2b: the password hash authd keeps credentials under (docs/AUTH.md §5.1)"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 license.workspace = true
 publish = false
 

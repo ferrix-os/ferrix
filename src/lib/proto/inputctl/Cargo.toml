@@ -3,7 +3,7 @@ name = "ferrix-inputctl"
 description = "The input control protocol between the kernel's input core and a ring-3 input driver, and evdev's per-open queues"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 license.workspace = true
 publish = false
 

@@ -3,7 +3,7 @@ name = "ferrix-net"
 description = "The net core: interfaces, routes, neighbours, IP, ICMP, UDP and TCP sockets over the wire formats"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 license.workspace = true
 publish = false
 

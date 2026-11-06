@@ -150,10 +150,10 @@ const HELLO: &str = "rustc-gate: hello from rustc on Ferrix";
 const C_HELLO: &str = "rustc-gate: hello from gcc on Ferrix";
 
 /// What `rustc -vV` prints first, which says the compiler ran.
-const VERSION: &str = "rustc 1.97.1";
+const VERSION: &str = "rustc 1.99.1";
 
 /// The matching Cargo release must start on the same glibc sysroot.
-const CARGO_VERSION: &str = "cargo 1.97.1";
+const CARGO_VERSION: &str = "cargo 1.99.1";
 
 /// The status the script exits with when every step succeeded.
 const STATUS: i32 = 16;
@@ -567,8 +567,8 @@ mod tests {
     fn a_compile_that_ran_passes() {
         let lines = transcript(&[
             qemu::SUCCESS_MARKER,
-            "rustc 1.97.1 (8bab26f4f 2026-07-14)",
-            "cargo 1.97.1 (test build)",
+            "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+            "cargo 1.99.1 (test build)",
             HELLO,
             C_HELLO,
             "  init     the shell exited with 16",
@@ -581,8 +581,8 @@ mod tests {
     fn a_c_compile_is_needed_too() {
         let lines = transcript(&[
             qemu::SUCCESS_MARKER,
-            "rustc 1.97.1 (8bab26f4f 2026-07-14)",
-            "cargo 1.97.1 (test build)",
+            "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+            "cargo 1.99.1 (test build)",
             HELLO,
             "  init     the shell exited with 16",
         ]);
@@ -594,8 +594,8 @@ mod tests {
         let lines = transcript(&[
             HELLO,
             qemu::SUCCESS_MARKER,
-            "rustc 1.97.1 (8bab26f4f 2026-07-14)",
-            "cargo 1.97.1 (test build)",
+            "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+            "cargo 1.99.1 (test build)",
             "  init     the shell exited with 16",
         ]);
         assert!(judge(Arch::X86_64, &lines).is_err());

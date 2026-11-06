@@ -3,7 +3,7 @@ name = "ferrix-ahci"
 description = "An AHCI (SATA) host bus adapter as logic over registers and memory: enabling the HBA, finding the drive, IDENTIFY DEVICE, polled reads, writes and flushes, error recovery and the clean shutdown"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 license.workspace = true
 publish = false
 
