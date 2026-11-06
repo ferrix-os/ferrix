@@ -2100,7 +2100,7 @@ pub static SYSFS: Explanation = Explanation {
         "A link's target is spelt wrongly: `path_of` and the directories disagree about where \
          something is, or src/lib/fs/common/sysfs's `path::relative` climbs to the wrong ancestor.",
         "A core stopped recording the device node its driver serves (`Origin` in devfs, \
-         `net_ring::node_of`, `Card::node`), so a device is shown in the wrong directory.",
+         `net::device::node_of`, `Card::node`), so a device is shown in the wrong directory.",
         "A format in src/lib/fs/common/sysfs changed; its host tests pin each against Linux's.",
     ],
     see: "src/kernel/src/fs/sysfs.rs; src/kernel/src/fs/sysfs/check.rs; src/lib/fs/common/sysfs; docs/SYSFS.md",

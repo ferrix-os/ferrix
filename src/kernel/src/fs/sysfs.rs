@@ -75,7 +75,7 @@ use crate::discovery::devmgr::{self, Bus};
 use crate::discovery::smbios;
 use crate::fs::devfs::{self, DiskInfo};
 use crate::fs::{self, procfs};
-use crate::interfaces::{display, input, net_ring, render};
+use crate::interfaces::{display, input, render};
 use crate::{arch, net, smp};
 
 /// `SYSFS_MAGIC`, from `include/uapi/linux/magic.h`: how a program tells a
@@ -891,7 +891,7 @@ fn path_of(dir: Dir) -> Option<Vec<Vec<u8>>> {
         Dir::Net(index) => {
             let interface = interface(index)?;
             beneath(
-                class_dir_path(net_ring::node_of(index), Class::Net)?,
+                class_dir_path(net::device::node_of(index), Class::Net)?,
                 &interface.name,
             )
         }
@@ -961,7 +961,7 @@ fn has_class(node: usize, class: Class) -> bool {
             .any(|disk| disk.origin.node == Some(node)),
         Class::Net => interfaces()
             .iter()
-            .any(|each| net_ring::node_of(each.index) == Some(node)),
+            .any(|each| net::device::node_of(each.index) == Some(node)),
         Class::Input => input::device_indices()
             .into_iter()
             .any(|index| input::device(index).is_some_and(|device| device.node == node)),
@@ -1264,7 +1264,7 @@ fn other_class_entries(list: &mut Listing, dir: Dir) -> Result<()> {
             );
             list.dir(b"statistics", Dir::NetStats(index));
             list.link_to(b"subsystem", Dir::ClassOf(Class::Net));
-            if let Some(node) = net_ring::node_of(index) {
+            if let Some(node) = net::device::node_of(index) {
                 list.link_to(b"device", Dir::Device(node));
             }
         }
@@ -1447,7 +1447,7 @@ fn device_class_entries(list: &mut Listing, index: usize, class: Class) {
         }
         Class::Net => {
             for each in interfaces() {
-                if net_ring::node_of(each.index) == Some(index) {
+                if net::device::node_of(each.index) == Some(index) {
                     list.dir(&each.name, Dir::Net(each.index));
                 }
             }
@@ -1477,7 +1477,7 @@ fn virtual_entries(list: &mut Listing, class: Class) {
         }
         Class::Net => {
             for each in interfaces() {
-                if net_ring::node_of(each.index).is_none() {
+                if net::device::node_of(each.index).is_none() {
                     list.dir(&each.name, Dir::Net(each.index));
                 }
             }

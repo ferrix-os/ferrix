@@ -33,7 +33,7 @@ a **single global**:
 | `CORE: Once<NetCore>`, reached by `net::core()` | `net/mod.rs` | the `Stack` behind one `SpinLock`, `pending` (frames waiting for a driver), `progress` (the one wait queue every socket sleeps on), `transmit_wakers` (interface index to the port of the ring serving it) |
 | `FILES: SpinLock<BTreeMap<SocketId, FileOf>>` | `net/socket.rs` | socket id to sockfs inode and owner, for `/proc/net/tcp` |
 | `NEXT_PORT` | `net/netlink/mod.rs` | netlink port numbers; only ever compared for difference |
-| `PLACED: Vec<(index, device node)>` | `interfaces/net_ring/mod.rs` | which device node serves which interface index |
+| `NODES: Vec<(key, device node)>` | `net/device.rs` (written by `interfaces/net_ring/mod.rs`) | which device node serves which device, by its key |
 | `ABSTRACT: BTreeMap<name, Weak<Socket>>` | `fs/sockname.rs` | abstract `AF_UNIX` names; one table for the whole kernel |
 
 Everything else that touches the network reaches the stack through
@@ -77,7 +77,7 @@ taken with `core().take_outgoing(index, room)`, frames the driver received go
 in with `core().receive(index, frame)`, link changes with `set_carrier`. A
 driver that dies leaves its interface *parked* (`park_interface`): index,
 addresses and routes kept, carrier down, for the next ring made for the same
-device. `PLACED` remembers which device node an index came from.
+device. `net::device`'s `NODES` remembers which device node a device key came from.
 
 ---
 
@@ -241,7 +241,7 @@ places it; `take_outgoing`, `receive`, `set_carrier`, `park`, `remove` and
 `wake_on_transmit` are `device::...(key, ...)`, which look the namespace and
 index up and do what `net::core()` did. The ring's `Serving` holds the key.
 **With the NIC in the first namespace the cost of a call is one look in a
-vector of one or two elements.** `PLACED` is keyed by key, and `node_of(index)`
+vector of one or two elements.** `NODES` (in `net::device`, CRATE-SPLIT §2.6 item 4a) is keyed by key, and `node_of(index)`
 finds the key through the reader's namespace, so sysfs shows a moved NIC in the
 namespace it moved to.
 

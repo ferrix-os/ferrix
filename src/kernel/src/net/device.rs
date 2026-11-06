@@ -11,10 +11,15 @@
 //! driver adds starts and where it returns to, each call is one look in a
 //! vector of the devices there are (one or two).
 //!
+//! The map from a device to the device node it is served from (`NODES`) is
+//! here too, and not in the ring that writes it: sysfs reads it, and the load
+//! must not name a part (`docs/microkernel/CRATE-SPLIT.md` §2.6 item 4a).
+//!
 //! # Locking
 //!
 //! The registry is a leaf: a call looks the device up, releases the registry,
-//! and only then enters the namespace's stack.
+//! and only then enters the namespace's stack. `NODES` is a leaf as well, never
+//! held with the registry or a stack.
 
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
@@ -43,6 +48,52 @@ static DEVICES: SpinLock<Vec<Device>> = SpinLock::new(Vec::new());
 
 /// The next key. Never reused.
 static NEXT_KEY: AtomicU32 = AtomicU32::new(1);
+
+/// Which device node each device a ring added is served from, by the device's
+/// key (this module): what sysfs shows the interface inside, and which
+/// parked interface a ring made for that device again takes up. The net core
+/// knows interfaces and not devices, and this is where the two meet. The key,
+/// and not the interface's index, because the interface may have moved to
+/// another network namespace, where it has another index
+/// (`docs/NETNS.md` section 3.2).
+static NODES: SpinLock<Vec<(u32, usize)>> = SpinLock::new(Vec::new());
+
+/// The device node the interface with index `interface` in the reader's
+/// network namespace is served from, by its index in `device::devices()`;
+/// `None` for one no ring added, the loopback interface among them.
+pub(crate) fn node_of(interface: u32) -> Option<usize> {
+    let key = super::acting()
+        .core()
+        .look(|stack| match stack.interface(interface)?.backing {
+            Backing::Device(key) => Some(key),
+            _ => None,
+        })?;
+    NODES
+        .lock()
+        .iter()
+        .find(|(placed, _)| *placed == key)
+        .map(|(_, node)| *node)
+}
+
+/// Record that the device `key` a ring added is served from device node
+/// `node`.
+pub(crate) fn serve_from(key: u32, node: usize) {
+    NODES.lock().push((key, node));
+}
+
+/// Forget which device node the device `key` was served from.
+pub(crate) fn unplace(key: u32) {
+    NODES.lock().retain(|(placed, _)| *placed != key);
+}
+
+/// The device a ring for device `node` added before, parked or not.
+pub(crate) fn key_on(node: usize) -> Option<u32> {
+    NODES
+        .lock()
+        .iter()
+        .find(|(_, placed)| *placed == node)
+        .map(|(key, _)| *key)
+}
 
 /// Register the interface `index` of `namespace` as a device, and answer its
 /// key. The caller puts `Backing::Device(key)` on the interface before it

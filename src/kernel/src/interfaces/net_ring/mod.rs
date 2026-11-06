@@ -117,52 +117,17 @@ static STARTING: SpinLock<Vec<Start>> = SpinLock::new(Vec::new());
 /// which a quiesce waits out.
 static CLAIMS: Claims = Claims::new();
 
-/// Which device node each device a ring added is served from, by the device's
-/// key (`net::device`): what sysfs shows the interface inside, and which
-/// parked interface a ring made for that device again takes up. The net core
-/// knows interfaces and not devices, and this is where the two meet. The key,
-/// and not the interface's index, because the interface may have moved to
-/// another network namespace, where it has another index
-/// (`docs/NETNS.md` section 3.2).
-static PLACED: SpinLock<Vec<(u32, usize)>> = SpinLock::new(Vec::new());
-
-/// The device node the interface with index `interface` in the reader's
-/// network namespace is served from, by its index in `device::devices()`;
-/// `None` for one no ring added, the loopback interface among them.
-pub(crate) fn node_of(interface: u32) -> Option<usize> {
-    let key = net::acting()
-        .core()
-        .look(|stack| match stack.interface(interface)?.backing {
-            ferrix_net::iface::Backing::Device(key) => Some(key),
-            _ => None,
-        })?;
-    PLACED
-        .lock()
-        .iter()
-        .find(|(placed, _)| *placed == key)
-        .map(|(_, node)| *node)
-}
-
 /// Take the device `key`'s interface out of the net core, wherever it is, and
 /// forget where it was.
 fn forget(key: u32) {
-    PLACED.lock().retain(|(placed, _)| *placed != key);
+    net::device::unplace(key);
     net::device::remove(key);
-}
-
-/// The device a ring for device `node` added before, parked or not.
-fn placed_on(node: usize) -> Option<u32> {
-    PLACED
-        .lock()
-        .iter()
-        .find(|(_, placed)| *placed == node)
-        .map(|(key, _)| *key)
 }
 
 /// Take the interface a dead ring left on `node` out of the net core: for a
 /// check that made a ring on a device nobody will serve again.
 pub(crate) fn forget_device(node: &Arc<DeviceNode>) {
-    if let Some(key) = placed_on(node.index()) {
+    if let Some(key) = net::device::key_on(node.index()) {
         forget(key);
     }
 }
@@ -514,7 +479,7 @@ fn add_or_take_up(start: &Start, hello: &Hello) -> Result<u32, Refusal> {
     let core = net::core();
     let name = hello.interface.name();
     let mac = hello.interface.mac;
-    if let Some(parked) = placed_on(start.device.index()) {
+    if let Some(parked) = net::device::key_on(start.device.index()) {
         let same = net::device::look(parked, |stack, index| {
             stack
                 .interface(index)
@@ -537,7 +502,7 @@ fn add_or_take_up(start: &Start, hello: &Hello) -> Result<u32, Refusal> {
     interface.backing = ferrix_net::iface::Backing::Device(key);
     let index = core.add_interface(interface);
     net::device::place(key, net::first(), index);
-    PLACED.lock().push((key, start.device.index()));
+    net::device::serve_from(key, start.device.index());
     Ok(key)
 }
 

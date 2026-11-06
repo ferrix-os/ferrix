@@ -2198,8 +2198,8 @@ says SYSFS_MAGIC, and cgroup2 mounts on fs/cgroup.
    about where something is, or src/lib/fs/common/sysfs's `path::relative`
    climbs to the wrong ancestor.
 3. A core stopped recording the device node its driver serves (`Origin` in
-   devfs, `net_ring::node_of`, `Card::node`), so a device is shown in the wrong
-   directory.
+   devfs, `net::device::node_of`, `Card::node`), so a device is shown in the
+   wrong directory.
 4. A format in src/lib/fs/common/sysfs changed; its host tests pin each against
    Linux's.
 

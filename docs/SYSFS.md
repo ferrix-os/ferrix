@@ -35,7 +35,7 @@ kernel over the channels they already have; readers never wait on a service.
 |---|---|---|
 | Device nodes, their bus, parent bridge, vendor, device, class, revision, subsystem ids | the kernel's enumeration | `device::devices()`, read once at boot; enumeration now keeps the revision, the subsystem ids and each bridge's secondary bus |
 | Disks: name, number, size, sector size, `ro`, serial | the `blk` driver, through the block ring | the devfs registry; each registration now records its device node and the serial HELLO carried (`devfs::Origin`) |
-| Interfaces: name, index, address, MTU, flags, counters | the `net` driver and the net core | the net core's stack, copied out; `net_ring::node_of` records the node each ring's interface came from |
+| Interfaces: name, index, address, MTU, flags, counters | the `net` driver and the net core | the net core's stack, copied out; `net::device::node_of` reads the node each ring's interface came from (the ring records it there) |
 | Cards, connectors, modes; render nodes | the `gpu` or `ltdc` driver, through the display and render cores | `display::card`, `display::drm::connectors` (the same function the connector ioctl uses), `render::renderer`; each records its node |
 | Input devices: name, ids, capability bitmaps, serial | the `input` or `usbhid` driver, through the input core | the input session HELLO declared; each device records its node |
 | Which drivers exist, and which drives which device | `devmgr` | DRIVER, BOUND and UNBOUND on its bootstrap channel (§5); `src/kernel/src/discovery/devmgr.rs` keeps what it was told |

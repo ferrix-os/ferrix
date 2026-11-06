@@ -3038,7 +3038,7 @@ checks above is `pub` for raised checks (F3).
 | `Report::load_high` | field | bin |  |
 | `Report::load_low` | field | bin |  |
 | `Report::placed_elsewhere` | field | bin |  |
-| `Report::placed_on` | field | load, bin |  |
+| `Report::placed_on` | field | bin |  |
 | `Report::processor_mask` | field | bin |  |
 | `Report::processors` | field | item, load, bin |  |
 | `Report::shootdowns` | field | load, bin |  |
