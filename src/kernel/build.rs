@@ -83,9 +83,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         // a part one group deeper (`board/<name>/`).
         "ferrix-lift-settings"
         | "ferrix-kernel-board-stm32mp1"
-        | "ferrix-kernel-board-gs201-usb" => {
+        | "ferrix-kernel-board-gs201-usb"
+        | "ferrix-kernel-logctl" => {
             let _ = build_flags()?;
             println!("cargo::rerun-if-changed=../../../build.rs");
+            return Ok(());
+        }
+        // A twin one group deeper (`device/<name>/lift/`).
+        "ferrix-lift-logctl" => {
+            let _ = build_flags()?;
+            println!("cargo::rerun-if-changed=../../../../build.rs");
             return Ok(());
         }
         other => {

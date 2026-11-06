@@ -2079,7 +2079,7 @@ pub(super) fn check_netlink() {
 /// oldest bytes and then the next, a second reader refused, a driver that
 /// breaks the protocol refused, and a claim ended by its channel.
 pub(super) fn check_log_control() {
-    match logctl::check::run() {
+    match ferrix_kernel_logctl::interfaces::logctl::check::run() {
         Ok(report) => println!(
             "  logctl   {} bytes from the log's oldest in two DATA ({} lost before them), a \
              second reader refused, a driver that lied lost its claim, a closed claim ended in {} ms",

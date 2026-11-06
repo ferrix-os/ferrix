@@ -527,7 +527,7 @@ their owners.
 | S0 | **Landed** (see *Where it stands*). Tools: `kernel_source_roots` with `parts_place`, every scanner reads it, file-set parity guard, `carry-coverage.py --rename`, `move-kernel-part.py`, `check-crate-layering.sh`, `check-item-boundary.py` and `check-kernel-shape.py` read every root, the planted part file and its controls. Owed to later landings: the mover's `lib.rs` and manifest writing, the rodata/symbol comparison run, the `lib.rs`-shape dry build (S2 or S3, 7429 S.7) | 5 | none: no kernel file | this design |
 | S1 | **Landed** (see *Where it stands*). `ferrix-kernel-settings` to `src/kernel/extensions/settings/`, its lift twin to its `lift/`: a path move, it is already a removable crate | 1 | `settings/`, `kernel_settings.rs`, `src/kernel/settings/`; about 20 min | S0 |
 | S2 | **Landed** (see *Where it stands*). Board glue to `board/{stm32mp1,gs201-usb}/`, two crates | 2 | `platform/st/`, `gs201/usb.rs`, `kernel_load.rs`'s `platform` block, `main.rs`'s `install` lines; about 30 min, DK1 boot under ARMv7-A `--smp 2` included | S0 |
-| S3 | `logctl` to `device/logctl/`, with its lift twin | 2 | `interfaces/logctl/`, `interfaces/mod.rs`, `main.rs`; about 30 min | S0 |
+| S3 | **Landed** (see *Where it stands*). `logctl` to `device/logctl/`, with its lift twin | 2 | `interfaces/logctl/`, `interfaces/mod.rs`, `main.rs`; about 30 min | S0 |
 | S4a | `PLACED` and `node_of` from `net_ring` into the load's `net::device` (§2.6 item 4a); a code change, reviewed, no move | 2 | none | S0 |
 | S4 | `net_ring` to `device/net-ring/`, with its lift twin | 2 | as S3, plus `stages_check.rs`'s one call and `sysfs.rs`'s five | S3, S4a |
 | S5 | The raised-checks crate (§2.6 item 5; the record's "26" comment fixed), then the whole load to `personality/linux/`, name kept, its lift twin moved with it. After S5, `src/kernel/src` holds only core, item, the shim and crate roots | 5 | every load file: the longest, about 60 min; announced a day ahead | S0, S4 |
@@ -659,4 +659,17 @@ list names the parts' files by repo path and their crates in `LEFT_CRATES`, so `
 them out of a `personality=user` kernel. check-item-boundary fails two kernel files at one
 module path, crate roots excepted (7608 S1.7), with a self-test and a control. The coverage
 evidence was carried (`carry-coverage.py`, git's renames, nothing dropped), and the release
-and decision-coverage files' five keys renamed with it. Next: S3.
+and decision-coverage files' five keys renamed with it.
+
+**S3 landed** (2026-11-06, mk-crates3). `interfaces/logctl/` (`mod.rs`, `check.rs`) is the part
+`device/logctl/` (`ferrix-kernel-logctl`, both files `R100`), depending on the core and the
+item (it never named the load), with its twin `ferrix-lift-logctl` in `lift/` (its
+`ferrix-kernel-*` dependencies as `package = "ferrix-lift-*"`), which linuxd now names in
+place of the load's module. The part's `interfaces` is built where the load's is
+(`ring0`, `lift`), so a `personality=user` kernel compiles none of it; under `lift` the
+ring-0 check is out and its one helper, `claimed`, is allowed dead as `ferrix-lift-load`'s
+root allowed it. The load, ring-0 and lift, drops its `ferrix-logctl` dependency;
+`interfaces/mod.rs` loses its `mod logctl` line (its table names the part). `main.rs` (its
+`install`, and stage 9's check through `stages_check.rs`'s glob) names the part by crate path.
+The panic catalog's `see:` strings (`panic/catalog.rs`, a core file, strings only) and
+`PANICS.md` name the moved paths. Under `fast` and `max` check-kernel-shape's `LEFT` and `LEFT_CRATES` hold the part out of ring 0 by `nm` (ledger 7630 S3.1). Next: S4a.

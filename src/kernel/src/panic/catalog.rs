@@ -871,7 +871,7 @@ pub static LOG_CONTROL: Explanation = Explanation {
         "The claim is not let go when the task ends, so `CLAIMED` stays set and every later \
          `log_control_create` answers `ALREADY_BOUND`.",
     ],
-    see: "src/kernel/src/interfaces/logctl/check.rs; src/kernel/src/interfaces/logctl/mod.rs; src/lib/proto/logctl",
+    see: "src/kernel/extensions/device/logctl/src/interfaces/logctl/check.rs; src/kernel/extensions/device/logctl/src/interfaces/logctl/mod.rs; src/lib/proto/logctl",
 };
 
 /// For `kmain` in `main.rs`, when `console::log_check::run` fails.

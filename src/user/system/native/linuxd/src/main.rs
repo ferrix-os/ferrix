@@ -249,7 +249,7 @@ fn served(_argument: usize) {
         .and_then(|()| interfaces::input::install())
         .and_then(|()| interfaces::audio::install())
         .and_then(|()| interfaces::chardev::install())
-        .and_then(|()| interfaces::logctl::install());
+        .and_then(|()| ferrix_kernel_logctl::interfaces::logctl::install());
     if cored.is_err() {
         console::write_bytes(b"  linuxd   a core's registration failed\n");
         return;

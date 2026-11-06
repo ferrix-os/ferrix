@@ -319,7 +319,7 @@
       "total": 224,
       "hit": 181
     },
-    "interfaces/logctl/mod.rs": {
+    "src/kernel/extensions/device/logctl/src/interfaces/logctl/mod.rs": {
       "ring": "load",
       "total": 32,
       "hit": 27
@@ -1373,7 +1373,7 @@
       "ring": "load",
       "reached": "45, 50, 53, 59, 146, 157, 162, 177, 183, 202, 214, 220, 224, 235, 237-240, 258, 262-263"
     },
-    "interfaces/logctl/check.rs": {
+    "src/kernel/extensions/device/logctl/src/interfaces/logctl/check.rs": {
       "ring": "load",
       "reached": "53, 56-57, 60-61, 71, 78-79, 88-89, 92-94, 100, 105, 107-108, 114, 122-124, 127, 131, 134, 143, 146-148, 152, 155, 158-159, 166, 175, 178, 181-182, 187-188"
     },

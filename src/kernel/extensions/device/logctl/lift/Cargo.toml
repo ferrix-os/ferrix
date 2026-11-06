@@ -1,0 +1,25 @@
+[package]
+name = "ferrix-lift-logctl"
+description = "The kernel log's control channel's one source built for linuxd"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+build = "../../../../build.rs"
+
+[lib]
+name = "ferrix_kernel_logctl"
+path = "../src/lib.rs"
+
+[dependencies]
+ferrix-kernel-core = { package = "ferrix-lift-core", path = "../../../../lift/core" }
+ferrix-kernel-item = { package = "ferrix-lift-item", path = "../../../../lift/item" }
+ferrix-blkring.workspace = true
+ferrix-linux-abi.workspace = true
+ferrix-logctl.workspace = true
+ferrix-native-abi.workspace = true
+ferrix-sched.workspace = true
+
+[lints]
+workspace = true

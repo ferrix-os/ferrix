@@ -103,7 +103,7 @@ use discovery::finder::Finder;
 use discovery::{board, devmgr, fdt, firmware, pci, tree};
 use early::EarlyMemory;
 #[cfg(ferrix_load_built = "ring0")]
-use interfaces::{audio, block_ring, chardev, display, input, logctl, net_ring, render};
+use interfaces::{audio, block_ring, chardev, display, input, net_ring, render};
 use panic::{catalog, fatal};
 
 /// What the boot test waits for. Changing it means changing
@@ -1665,7 +1665,7 @@ fn register_load(view: &BootView<'_>) {
         .and_then(|()| input::install())
         .and_then(|()| audio::install())
         .and_then(|()| chardev::install())
-        .and_then(|()| logctl::install());
+        .and_then(|()| ferrix_kernel_logctl::interfaces::logctl::install());
     if let Err(hooks::Full) = registered {
         fatal!(
             catalog::LOAD_REGISTRATION,

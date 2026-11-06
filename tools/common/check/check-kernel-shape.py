@@ -52,11 +52,15 @@ LEFT = (
     # files by their repo paths, and their crates in LEFT_CRATES below.
     f"{kernel_roots.parts_place()}/board/stm32mp1/src/platform/st/stm32mp1.rs",
     f"{kernel_roots.parts_place()}/board/gs201-usb/src/platform/google/gs201/usb.rs",
+    # The log's control channel, a part since S3, built only where
+    # ferrix_load_built is ring0 or lift (ledger 7630 S3.1).
+    f"{kernel_roots.parts_place()}/device/logctl/src/interfaces/logctl/mod.rs",
+    f"{kernel_roots.parts_place()}/device/logctl/src/interfaces/logctl/check.rs",
 )
 
 # Crates no ring-0 crate of this shape may link.
 LEFT_CRATES = ("ferrix_kernel_load", "ferrix_kernel_settings", "ferrix_kernel_board_stm32mp1",
-               "ferrix_kernel_board_gs201_usb", "ferrix_fbtext", "ferrix_qr")
+               "ferrix_kernel_board_gs201_usb", "ferrix_kernel_logctl", "ferrix_fbtext", "ferrix_qr")
 
 # Symbols that must not be in this shape's kernel: normal mode's FS record does not move while
 # K1's fast path has the mark up (ledger 6464 Z2, 6981).

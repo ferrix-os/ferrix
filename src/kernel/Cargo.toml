@@ -21,6 +21,7 @@ ferrix-kernel-settings.workspace = true
 # CRATE-SPLIT.md S2).
 ferrix-kernel-board-gs201-usb.workspace = true
 ferrix-kernel-board-stm32mp1.workspace = true
+ferrix-kernel-logctl.workspace = true
 ferrix-linux-abi.workspace = true
 ferrix-bootinfo.workspace = true
 ferrix-crng.workspace = true

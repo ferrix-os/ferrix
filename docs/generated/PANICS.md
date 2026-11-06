@@ -3538,8 +3538,9 @@ driver after it went.
 3. The claim is not let go when the task ends, so `CLAIMED` stays set and every
    later `log_control_create` answers `ALREADY_BOUND`.
 
-See: src/kernel/src/interfaces/logctl/check.rs;
-src/kernel/src/interfaces/logctl/mod.rs; src/lib/proto/logctl.
+See: src/kernel/extensions/device/logctl/src/interfaces/logctl/check.rs;
+src/kernel/extensions/device/logctl/src/interfaces/logctl/mod.rs;
+src/lib/proto/logctl.
 
 <a id="fx-1009"></a>
 

@@ -564,6 +564,7 @@ dependencies = [
  "ferrix-kernel-board-gs201-usb",
  "ferrix-kernel-board-stm32mp1",
  "ferrix-kernel-load",
+ "ferrix-kernel-logctl",
  "ferrix-kernel-settings",
  "ferrix-linux-abi",
  "ferrix-paging",
@@ -676,7 +677,6 @@ dependencies = [
  "ferrix-kernel-item",
  "ferrix-kmem",
  "ferrix-linux-abi",
- "ferrix-logctl",
  "ferrix-native-abi",
  "ferrix-net",
  "ferrix-netlink",
@@ -698,6 +698,19 @@ dependencies = [
  "ferrix-vdso",
  "ferrix-vfs",
  "ferrix-vma",
+]
+
+[[package]]
+name = "ferrix-kernel-logctl"
+version = "0.1.0"
+dependencies = [
+ "ferrix-blkring",
+ "ferrix-kernel-core",
+ "ferrix-kernel-item",
+ "ferrix-linux-abi",
+ "ferrix-logctl",
+ "ferrix-native-abi",
+ "ferrix-sched",
 ]
 
 [[package]]
@@ -805,7 +818,6 @@ dependencies = [
  "ferrix-lift-core",
  "ferrix-lift-item",
  "ferrix-linux-abi",
- "ferrix-logctl",
  "ferrix-native",
  "ferrix-native-abi",
  "ferrix-net",
@@ -829,6 +841,19 @@ dependencies = [
  "ferrix-vdso",
  "ferrix-vfs",
  "ferrix-vma",
+]
+
+[[package]]
+name = "ferrix-lift-logctl"
+version = "0.1.0"
+dependencies = [
+ "ferrix-blkring",
+ "ferrix-lift-core",
+ "ferrix-lift-item",
+ "ferrix-linux-abi",
+ "ferrix-logctl",
+ "ferrix-native-abi",
+ "ferrix-sched",
 ]
 
 [[package]]
@@ -857,6 +882,7 @@ dependencies = [
  "ferrix-lift-core",
  "ferrix-lift-item",
  "ferrix-lift-load",
+ "ferrix-lift-logctl",
  "ferrix-lift-settings",
  "ferrix-native",
  "ferrix-native-abi",

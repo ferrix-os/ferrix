@@ -15,7 +15,7 @@
 //! | [`render`] | `ferrix-renderctl` | `docs/GPU.md` |
 //! | [`input`] | `ferrix-inputctl` | `docs/INPUT.md` |
 //! | [`audio`] | `ferrix-sndctl` | `docs/AUDIO.md` |
-//! | [`logctl`] | `ferrix-logctl` | the kernel log |
+//! | `logctl`, the part `ferrix-kernel-logctl` (CRATE-SPLIT.md S3) | `ferrix-logctl` | the kernel log |
 //!
 //! The certification item puts every core in the load ring
 //! (`tools/common/data/certification-item.json`): a defect in one is bounded
@@ -26,6 +26,5 @@ pub mod block_ring;
 pub mod chardev;
 pub mod display;
 pub mod input;
-pub mod logctl;
 pub mod net_ring;
 pub mod render;

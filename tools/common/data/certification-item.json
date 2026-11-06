@@ -357,6 +357,7 @@
         "net/**",
         "src/kernel/extensions/board/gs201-usb/**",
         "src/kernel/extensions/board/stm32mp1/**",
+        "src/kernel/extensions/device/logctl/**",
         "syscall/attributes.rs",
         "syscall/check.rs",
         "syscall/compat.rs",
@@ -812,7 +813,8 @@
       "src/kernel/src",
       "src/kernel/extensions/settings/src",
       "src/kernel/extensions/board/stm32mp1/src",
-      "src/kernel/extensions/board/gs201-usb/src"
+      "src/kernel/extensions/board/gs201-usb/src",
+      "src/kernel/extensions/device/logctl/src"
     ]
   },
   "kernel_crates": {
@@ -923,6 +925,13 @@
     "ferrix-kernel-board-gs201-usb": {
       "path": "src/kernel/extensions/board/gs201-usb",
       "root": "src/kernel/extensions/board/gs201-usb/src/lib.rs",
+      "rings": [
+        "load"
+      ]
+    },
+    "ferrix-kernel-logctl": {
+      "path": "src/kernel/extensions/device/logctl",
+      "root": "src/kernel/extensions/device/logctl/src/lib.rs",
       "rings": [
         "load"
       ]
@@ -1221,7 +1230,7 @@
     "interfaces/block_ring/mod.rs": 8,
     "interfaces/chardev/mod.rs": 1,
     "interfaces/display/mod.rs": 1,
-    "interfaces/logctl/mod.rs": 1,
+    "src/kernel/extensions/device/logctl/src/interfaces/logctl/mod.rs": 1,
     "interfaces/net_ring/mod.rs": 1,
     "net/mod.rs": 1,
     "net/netlink/mod.rs": 1,
@@ -1246,7 +1255,8 @@
     "ferrix-lift-core",
     "ferrix-lift-item",
     "ferrix-lift-load",
-    "ferrix-lift-settings"
+    "ferrix-lift-settings",
+    "ferrix-lift-logctl"
   ],
   "lift_asm_exceptions": {
     "//": "Reused files that hold asm, with why it never runs in linuxd.",

@@ -35,7 +35,6 @@ ferrix-frame.workspace = true
 ferrix-inputctl.workspace = true
 ferrix-kmem.workspace = true
 ferrix-linux-abi.workspace = true
-ferrix-logctl.workspace = true
 ferrix-native-abi.workspace = true
 ferrix-net.workspace = true
 ferrix-netlink.workspace = true
