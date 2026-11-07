@@ -81,6 +81,12 @@ pub(crate) fn filled(pages: u64, disk: bool) {
     }
 }
 
+/// File pages filled from a disk since boot: for test-btrfs's majflt step,
+/// which shows its page was not in memory.
+pub(crate) fn from_disk() -> u64 {
+    FROM_DISK.load(Ordering::Relaxed)
+}
+
 /// One command put on a block ring.
 pub(crate) fn submitted() {
     let _ = SUBMITTED.fetch_add(1, Ordering::Relaxed);

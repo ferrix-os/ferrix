@@ -4087,7 +4087,9 @@ package FerrixObjectRequirements {
                 pages written raise minflt in /proc/self/stat, /proc/self/task/<tid>/stat
                 and getrusage's RUSAGE_SELF and RUSAGE_THREAD by 64 to 128, and majflt
                 never goes back; with the count taken out of oom::user_fault_own the step
-                fails on its minflt sentence.";
+                fails on its minflt sentence. test-btrfs's majflt step: a read fault on a
+                file of the volume nothing read since its mount reads its page from the
+                disk and counts one major fault on the task.";
             attribute :>> parent = "H.QUOTA.10";
             attribute :>> unit = ("sched::task::Task::note_fault", "sched::task::Task::minor_faults",
                 "sched::task::Task::major_faults", "sched::task::Task::begin_fault",
