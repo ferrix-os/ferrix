@@ -1617,8 +1617,17 @@ impl Task {
 
     /// Whether it was so taken, clearing the mark: under the lock of the
     /// queue it was taken off, in the switch away from it.
+    ///
+    /// A load, and a store only when the mark was set: both writers hold that
+    /// lock, so no read-modify-write is needed, and every switch's tail reads
+    /// a clear mark without the locked exchange a swap costs (ledger 5684 B4,
+    /// the round trip on `present`).
     pub(crate) fn take_evicted(&self) -> bool {
-        self.evicted.swap(false, Ordering::Relaxed)
+        let evicted = self.evicted.load(Ordering::Relaxed);
+        if evicted {
+            self.evicted.store(false, Ordering::Relaxed);
+        }
+        evicted
     }
 
     /// Store a new mask. Only `crate::sched::set_affinity`, under the lock
