@@ -3638,6 +3638,26 @@ pub(crate) static REALTIME_NODE_MISSING: Explanation = Explanation {
     see: "src/kernel/src/sched/task.rs Task::entity_with; docs/SCHED-CLASSES.md §9e",
 };
 
+/// When a task is queued as the deadline tier's on a processor that holds no
+/// admission for it (`sched::queue::CpuQueue::insert_at`).
+pub(crate) static ADMITTED_NOT_HERE: Explanation = Explanation {
+    code: "FX-0541",
+    title: "a task was queued as admitted where it holds no admission",
+    meaning: "A task is queued in the deadline tier only on the processor whose admission it \
+              holds: `Task::entity_with` reads the task's reservation cell under the queue's \
+              lock and builds the tier's entity only when the cell names that processor. The \
+              tier refusing the entity for want of an entry means that rule broke, and the \
+              task would run on no budget at all, so the machine is stopped \
+              (docs/SCHED-CLASSES.md §9g, L.sched.184).",
+    causes: &[
+        "The reservation cell was set before the processor's admission was made, or after it \
+         was taken away (`sched::reserve`).",
+        "A processor taken out of service moved an admitted task, and its cell was read \
+         against the processor it left.",
+    ],
+    see: "src/kernel/src/sched/task.rs Task::entity_with; src/kernel/src/sched/queue.rs CpuQueue::insert_at",
+};
+
 /// For `check_proc_access` in `stages_check.rs`, when
 /// `fs::procaccess_check::run` fails.
 #[cfg(not(ferrix_shape = "micro"))]
@@ -4283,7 +4303,7 @@ pub(crate) static NESTED_INTERRUPT_STACK: Explanation = Explanation {
 pub static SCHEDULE_EDF: Explanation = Explanation {
     code: "FX-0970",
     title: "a time reservation did not behave as the scheduler promises",
-    meaning: "Under `schedule=edf` a thread may hold a budget in each period on one processor: \
+    meaning: "Under `sched_deadline=edf_cbs` a thread may hold a budget in each period on one processor: \
               admission refuses a set too wide for it, a thread out of budget waits for its next \
               period, the earliest deadline with budget runs first, and the fair class has the rest.",
     causes: &[
@@ -4398,6 +4418,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &TASK_OUTSIDE_DOMAIN,
     &REALTIME_NODE_MISSING,
     &RUNNING_TASK_QUEUED,
+    &ADMITTED_NOT_HERE,
     #[cfg(not(ferrix_shape = "micro"))]
     &STAGE6_USER_MEMORY,
     #[cfg(not(ferrix_shape = "micro"))]

@@ -56,15 +56,17 @@ mod preempt;
 mod preempt_check;
 mod queue;
 pub mod rehome_check;
-/// `schedule=edf`'s reservations (ledger 7088).
-#[cfg(ferrix_sched_deadline = "edf_cbs")]
+/// The deadline tier's reservations (ledger 7088, 7763; docs/SCHED-CLASSES.md §9g).
 pub mod reserve;
-/// Its boot check.
-#[cfg(all(ferrix_sched_deadline = "edf_cbs", ferrix_checks = "on"))]
+/// Its boot check, which runs where the stack has the tier.
+#[cfg(ferrix_checks = "on")]
 pub mod reserve_check;
 mod rt_check;
 mod slice_check;
 mod stack;
+/// Whether the stack has a deadline tier: whether a thread may hold a
+/// reservation (docs/SCHED-CLASSES.md §9g).
+pub const DEADLINE_TIER: bool = stack::DEADLINE;
 mod task;
 pub mod trip;
 pub mod vtime;
@@ -75,8 +77,15 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
-use ferrix_sched_class::{Balance, CpuSet, Domain, Mode, Placement, check_partition};
-use ferrix_sched_fair::NICE_0_WEIGHT;
+use ferrix_sched_class::MAX_CPUS;
+use ferrix_sched_class::{Balance, Domain, Mode, Placement, check_partition};
+/// A set of processors, as every caller of the scheduler names one.
+pub use ferrix_sched_class::{CpuSet, WORDS as CPU_SET_WORDS};
+
+// CHECKS-ONLY: syscall/region_check.rs; home: sched
+/// The most processors the scheduler's tables hold, for the item's checks.
+pub const MOST_CPUS: usize = MAX_CPUS;
+pub use ferrix_sched_fair::NICE_0_WEIGHT;
 use ferrix_sync::{IrqControl, IrqSpinLock, Once, SpinLock};
 
 use crate::arch;
@@ -517,8 +526,7 @@ static IDLE: AtomicU64 = AtomicU64::new(0);
 /// [`init`] and cleared only by [`take_out_of_service`]. Every placement --
 /// [`choose_cpu`], [`may_place`], [`place_on_idle`], the pull, the steal and
 /// the balance -- and every wake at a task's home asks it.
-static ACTIVE: [AtomicU64; ferrix_sched_class::MAX_CPUS / 64] =
-    [const { AtomicU64::new(0) }; ferrix_sched_class::MAX_CPUS / 64];
+static ACTIVE: [AtomicU64; MAX_CPUS / 64] = [const { AtomicU64::new(0) }; MAX_CPUS / 64];
 
 /// Whether a placer may put a task on processor `cpu`, or `cpu` take one
 /// from another: whether it is in service (L.sched.102). Every placer asks
@@ -2510,17 +2518,19 @@ macro_rules! sync_exit {
     }};
 }
 
+/// Whether [`wake_onto`] may consider moving `task` onto `here` at all: a
+/// real-time task is woken where it is, never moved (R5, L.sched.132), as
+/// `place_on_idle` declines it; a pull's affinity and pinning were decided by
+/// `may_pull`.
+fn movable_onto(task: &Task, here: usize, how: Onto) -> bool {
+    task.is_fair() && (how == Onto::Pull || may_place(task, here))
+}
+
 /// Move `task` onto `here`, this processor, if [`wake_with`]'s conditions
 /// hold, or [`wake`]'s with [`Onto::Pull`], and make it runnable there. With
 /// interrupts masked.
 fn wake_onto(task: &Arc<Task>, here: usize, how: Onto) -> Placed {
-    // A real-time task is woken where it is, never moved (R5, L.sched.132),
-    // as `place_on_idle` declines it.
-    if !task.is_fair() {
-        return Placed::Declined;
-    }
-    // A pull's affinity and pinning were decided by `may_pull`.
-    let Some(mine) = queue_of(here).filter(|_| how == Onto::Pull || may_place(task, here)) else {
+    let Some(mine) = queue_of(here).filter(|_| movable_onto(task, here, how)) else {
         return sync_exit!(how, NoQueue, Placed::Declined);
     };
     loop {
@@ -2611,7 +2621,8 @@ static SYNC_PLACED: [AtomicU32; SyncPlaced::COUNT] =
 #[cfg(debug_assertions)]
 #[derive(Clone, Copy, Debug)]
 pub enum SyncPlaced {
-    /// No record or queue for this processor, or `may_place` said no.
+    /// No record or queue for this processor, `may_place` said no, or a
+    /// real-time task, which is never moved.
     NoQueue,
     /// The task's home is this processor.
     AtHome,
@@ -4902,7 +4913,6 @@ fn reap_up_to(most: usize) -> usize {
         let mut zombies = ZOMBIES.lock();
         while taken.len() < most {
             let Some(task) = zombies.pop() else { break };
-            #[cfg(ferrix_sched_deadline = "edf_cbs")]
             reserve::forget(&task);
             if let Some(stack) = task.stack() {
                 let _ = fallible::push_within(&mut stacks, stack);
@@ -4931,7 +4941,6 @@ fn reap_one_at_a_time(most: usize) -> usize {
         let Some(task) = ZOMBIES.lock().pop() else {
             break;
         };
-        #[cfg(ferrix_sched_deadline = "edf_cbs")]
         reserve::forget(&task);
         if let Some(stack) = task.stack() {
             // SAFETY: (KMEM) as in `reap_up_to`.

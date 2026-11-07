@@ -21,8 +21,6 @@ ferrix-linux-abi.workspace = true
 ferrix-native-abi.workspace = true
 ferrix-net.workspace = true
 ferrix-netring.workspace = true
-ferrix-sched-class.workspace = true
-ferrix-sched-fair.workspace = true
 
 [lints]
 workspace = true

@@ -1622,44 +1622,40 @@ path allocates (NOALLOC, as R1 is for FIFO):
 * A task's fair parts stay where 4b keeps them: the record's atomics and
   its run slot, in `Task`. A reserved task's weight therefore applies when
   it returns to fair (L.sched.130's rule, unchanged).
-* The stack's entity nests one level deeper:
-  `Tier<Admitted, Tier<FifoEntity, FairEntity>>` with every tier, and
-  `Tier<Admitted, FairEntity>` for `fast`.
+* The stack's entity, as built (DG.3): `Tier<Admitted, FairEntity>` on
+  `fast`; a stack has at most one tier above fair.
 * `ferrix_sched_fair::Split` gains a third arm, `Deadline`.
   `Task::entity_with` builds it when the task holds an admission on this
-  queue's processor (`reserved_on == cpu`). It builds the FIFO arm for a
+  queue's processor (`Task::deadline_here`, the cell against the task's
+  home). It builds the FIFO arm for a
   real-time policy, and the fair arm otherwise.
 * An enqueue of `Admitted` whose id has no entry here is refused by
   `Back`. `entity_with` never builds one: its test reads the same word
-  under the same lock. Such a refusal stops the machine with a new panic
-  code, the FX-0539 shape for this tier.
+  under the same lock. Such a refusal stops the machine with FX-0541, the
+  FX-0539 shape for this tier.
 
 **Where the task keeps its reservation.** Develop has two `Task` fields
 under `cfg(ferrix_schedule = "edf")`: `reserved_on`, and `mask_before`, the
 mask a reservation's pin replaced. The core may not select code by a
 `sched_*` flag (rule 6e, D6). So both move into one cell type from the
-stack, `<Stack as StackTiers>::ReserveCell`, as 4b's `UpperCellOf` did. It
+stack, `<Stack as StackTiers>::Reserve` (`sched::stack::ReserveOf`), as 4b's
+`UpperCellOf` did: `NoReserve` without the tier, `HeldReserve` with it. It
 is zero-sized when the stack has no deadline tier, so `present` and
 `desktop` keep `Task`'s size. A const assertion holds that, beside 4b's
 fair-only one.
 
-**`StackTiers`.** 4a/4b wrote it for at most one tier above fair. It
-gains:
-
-* `const DEADLINE: bool`;
-* `type ReserveCell`;
-* `fn deadline_entity()`;
-* the arm in `split`;
-* `remove_in(queue, id, tier)`, which takes a tier enum (Deadline,
-  Realtime, Fair) instead of `upper: bool`, so that no other tier's queue
-  is walked (B3, kept).
-
-Its impls become:
-
-* `Eevdf` alone;
-* `Over<FifoRr, Eevdf>`, today's two;
-* `Over<Edf, Eevdf>`, for `fast`;
-* `Over<Edf, Over<FifoRr, Eevdf>>`, the full order (Q3).
+**`StackTiers`, as built (DG.3, DG.6).** It keeps one tier above fair, so
+`remove_in` keeps its `upper: bool` (B3 kept) and no tier enum is needed. It
+gains `const DEADLINE`, `type Reserve`, `deadline_entity()` (`None` without
+the tier), `Split::Deadline`, and the forwarders the core reaches the tier
+by: `admit`, `withdraw`, `note_time`, `declines` (T12) and `reserve_state`.
+Its impls are two: `Eevdf` alone, and one for `Over<U, Eevdf>` whatever `U`
+is, keyed by `U`'s kind (`ferrix_sched_class::deadline::UpperClass::Kind`,
+`RealtimeKind` for `FifoRr`, `DeadlineKind` for `Edf`) through
+`ferrix_sched_fair::UpperKind`, implemented once for each kind. The impl
+names no class crate, and the two kinds never overlap. `Over<Edf,
+Over<FifoRr, Eevdf>>` is not built: the flag file refuses the pair and the
+arms file's `compile_error!` is the backstop (Q3, option 2).
 
 ### Each behaviour 7088 reviewed, and where it goes
 
@@ -1667,7 +1663,7 @@ Its impls become:
 |---|---|
 | **Admission**: deadline = period, runtime within 100 µs and the period, period 1 ms to 10 s, ≤ 950,000 ppm and ≤ 32 entries a processor, each refused by name (`Malformed`, `Unschedulable`, `Full`, `Already`); the caller's processor first, then the rest of its mask | `DeadlineClass::admit` on `EdfQueue`, the same body, under the queue's lock. Reached through a named forwarder, `DeadlineTier::admit(&mut StackQueue)`, as `FairTier`'s are. `sched::reserve::take` keeps its walk. The mask it walks is `affinity::mask_for`, which since game mode's layer B is read within the task's domain, so 5a's partition holds for free. |
 | **The hard budget**: running charges it; at zero the entry is throttled until its period ends, on an idle processor too; refill moves the deadline a period, or restarts at `now` after a stall longer than a period | `Edf::charge` and the refill in the class's clock (below). `Edf::ready(queue, _)` is "an entry ready and not throttled". It ignores `below_waiting`, unlike FIFO's floor, which binds only while something waits (R4): the budget is hard. While all its entries are throttled, `len` is honest, `pick` answers `None`, and `decision_in_ns` answers the next refill. `Over` already falls through to the lower tier on those answers and arms that refill (R3, R4). |
-| **The clock**: develop's `note_time(now)` at `account` and before `pick_next`, with absolute time | A named forwarder, `DeadlineTier::note_time(now)`, called by the core at the same two places, and also before an enqueue onto the tier, so the wake rule reads a fresh `now` on a tickless processor (Q4). `Edf::elapse` does nothing: the tier's time is absolute, not summed. |
+| **The clock**: develop's `note_time(now)` at `account` and before `pick_next`, with absolute time | As built (DG.4): `StackTiers::note_time` in `CpuQueue::account_with` before the charge, in `pick_next` before the pick, and in `insert_at` before each enqueue (through `account` when something runs). The budget is charged by `charge(ran_ns)` alone; `Edf::elapse` does nothing. |
 | **The wake rule**: a woken entry whose budget-to-deadline ratio overflows its bandwidth gets a fresh budget and deadline (Linux's `dl_entity_overflow`) | `Edf::enqueue`, the same body. |
 | **The pin**: an admission pins its thread to the admitting processor (`mask_before` kept), so balance, steal, push and wake placement cannot move it | Unchanged in `sched::reserve`, with the fields read through `ReserveCell`. Also `Edf::steals_work` is false, and the tier's `waiting_where` answers only for a processor taken out of service (below). |
 | **Adopt while running**: a thread admitted while it runs leaves fair for its entry at once, so it does not wait for its next sleep | Moved to the next decision on its processor, by 4b's path: `reserve::take` sets `reserved_on`, then asks for a decision, and `CpuQueue::requeue_if_moved` moves it into the tier before the pick. Then `yield_now`, as today. B1 holds (a running task is never a waiting entity), and FX-0537's check covers this path. The admitted share counts from `admit`, before the move. |
@@ -1678,6 +1674,14 @@ Its impls become:
 | **Affinity's `Reserved`**: `set_affinity` on a reserved thread answers `AffinityRefusal::Reserved` | Unchanged. The variant is always present, and it is answered only when `stack::DEADLINE` is true. |
 | **A processor out of service** moves its reserved threads with the rest; they run fair where they land, and their share stays counted where it was | `move_one_off` also asks the deadline tier's waiting entries (`waiting_where`), so none is stranded. On the target, `reserved_on != cpu`, so `entity_with` queues it fair: develop's behaviour. |
 | **5a's partition**: a task pinned only to leaving processors refuses a `SoftRt` domain's creation | A reserved task is pinned to one processor, so a reservation on a processor `create_soft` would take refuses the switch by that existing rule, named in the refusal. No new rule. |
+| **A child** of `fork`, `clone` or `launch::load_native` (7088 E.3) | Starts with an empty cell: every `Task` constructor makes `ReserveCell::empty()`, so a child is fair (the `edf` line's `child` case). |
+| **Stop, freeze, a move to another job** | Unchanged in kind: a stopped or frozen reserved thread is off the queue like any blocked one, its admission kept and its share counted; a move between jobs moves no reservation, which stays the thread's until it gives it back or is freed. |
+| **A throttled lock holder** (7088 E.4) | Unbounded, as develop has it and K9 §2a states: no inheritance; a thread throttled while it holds a sleep lock holds up everyone behind it until its refill. |
+| **A kill or an end** (ED.6) | Waits for the refill, at most the period, 10 s at the longest: a throttled thread does not run, to see its end, before then. |
+| **An earlier deadline waking** (E.5) | Preempts: `Edf::should_preempt`, asked by every wake through `Stack::should_preempt` (L.sched.131's path); a host test of the class. |
+| **The per-period property** (ED.3) | A host test of the class over random admitted sets, every period's budget exactly given and the tier below given the rest; its mutation (the overflow rule, the refill) fails it. |
+| **The errno mapping** (ED.5) | `sched_setattr`: `Malformed` is `EINVAL`, `Unschedulable`, `Full` and `Already` are `EBUSY`, `Denied` is `EPERM`; `THREAD_RESERVE`: `INVALID_ARGS`, `LIMIT_REACHED`, `BAD_STATE`, `ACCESS_DENIED`; without the tier, `SCHED_DEADLINE` is `EINVAL` and the call `NOT_SUPPORTED`. |
+| **As stated** (DG.7) | `direct::begin`'s earlier `waiting()` test still counts a throttled reservation, which 7132 relied on; `Edf::hand_over` never fuses; a given-back entry is never throttled and counts toward `Full` until it goes; a withdrawal, as an admission, asks for a decision (`give_back` and `take` yield). |
 | **Develop's checks**: `reserve_check`, host tests, `test-reserve` | Kept, run against `Edf` through the stack. The host tests become the class's own and run over the generic tier set 4a requires. |
 
 ### The flags

@@ -109,6 +109,11 @@ pub const fn flag_word(chosen: &[bool]) -> u64 {
     word
 }
 
+/// Whether the kernel's stack has a deadline tier, as its flag says: the
+/// lift names no kernel crate, so this file, the arms file's twin for linuxd's
+/// flag word, reads it (docs/SCHED-CLASSES.md §9g).
+pub const SCHED_DEADLINE_TIER: bool = cfg!(ferrix_sched_deadline = "edf_cbs");
+
 /// The shim's own modules, found by position under `src/kernel/src/lift/core`.
 pub mod lift {
     pub mod core {

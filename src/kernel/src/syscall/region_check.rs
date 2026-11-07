@@ -607,13 +607,13 @@ fn pin(side: &Side, word: u64) -> Result<bool, &'static str> {
     };
     // Every processor again for `ANY_PROCESSOR`, which a thread pinned for a case asks.
     let mask = if word == ANY_PROCESSOR {
-        let mut all = ferrix_sched_class::CpuSet::of(0);
+        let mut all = crate::sched::CpuSet::of(0);
         for cpu in 1..crate::smp::count() {
             let _ = all.insert(cpu);
         }
         all
     } else {
-        ferrix_sched_class::CpuSet::of(usize::try_from(word).unwrap_or(0) % crate::smp::count())
+        crate::sched::CpuSet::of(usize::try_from(word).unwrap_or(0) % crate::smp::count())
     };
     let _ = crate::sched::set_affinity(&task, &mask);
     if let Ok((gone, _)) = side.with_handles(|table| table.remove(handle)) {
@@ -789,16 +789,16 @@ fn domain_end(started: [u64; 4], word: u64) -> bool {
 }
 
 /// Whether the image has reservations and direct switches: case 197 (ledger 7088, 7134 (d)).
-#[cfg(all(ferrix_sched_deadline = "edf_cbs", ferrix_fast_ipc))]
+#[cfg(ferrix_fast_ipc)]
 const ASK_EDF_BUILT: u8 = 51;
 /// Read the count of direct switches, and each way it declined at T12.
-#[cfg(all(ferrix_sched_deadline = "edf_cbs", ferrix_fast_ipc))]
+#[cfg(ferrix_fast_ipc)]
 const ASK_EDF_START: u8 = 52;
 /// Whether it moved by the word.
-#[cfg(all(ferrix_sched_deadline = "edf_cbs", ferrix_fast_ipc))]
+#[cfg(ferrix_fast_ipc)]
 const ASK_EDF_MOVED: u8 = 53;
 /// Whether it did not move, and T12 did by the word.
-#[cfg(all(ferrix_sched_deadline = "edf_cbs", ferrix_fast_ipc))]
+#[cfg(ferrix_fast_ipc)]
 const ASK_EDF_DECLINED: u8 = 54;
 
 /// Read the count of direct switches, where the image has them.
@@ -887,7 +887,7 @@ fn count_end(started: (u64, u64), refills_started: u64, word: u64, report: &mut 
 #[derive(Default)]
 struct FeatureCounts {
     /// [`ASK_EDF_START`]'s.
-    #[cfg(all(ferrix_sched_deadline = "edf_cbs", ferrix_fast_ipc))]
+    #[cfg(ferrix_fast_ipc)]
     edf_started: [u64; 2],
     /// [`ASK_DOMAIN_START`]'s.
     #[cfg(ferrix_partition_speculation = "partition")]
@@ -902,10 +902,7 @@ struct FeatureCounts {
 
 /// The asks only some builds answer: no on any other, as an unknown ask (ledger 7216, 7249).
 #[cfg_attr(
-    not(any(
-        ferrix_partition_speculation = "partition",
-        all(ferrix_sched_deadline = "edf_cbs", ferrix_fast_ipc)
-    )),
+    not(ferrix_partition_speculation = "partition"),
     allow(
         unused_variables,
         clippy::needless_pass_by_ref_mut,
@@ -920,18 +917,18 @@ fn feature_ask(
     counts_from: &mut FeatureCounts,
 ) -> Result<bool, &'static str> {
     Ok(match what {
-            #[cfg(all(ferrix_sched_deadline = "edf_cbs", ferrix_fast_ipc))]
-            ASK_EDF_BUILT => true,
-            #[cfg(all(ferrix_sched_deadline = "edf_cbs", ferrix_fast_ipc))]
-            ASK_EDF_START => {
+            #[cfg(ferrix_fast_ipc)]
+            ASK_EDF_BUILT => crate::sched::DEADLINE_TIER,
+            #[cfg(ferrix_fast_ipc)]
+            ASK_EDF_START if crate::sched::DEADLINE_TIER => {
                 let counts = crate::sched::direct::counts();
                 counts_from.edf_started = [counts[0], counts[13]];
                 true
             }
-            #[cfg(all(ferrix_sched_deadline = "edf_cbs", ferrix_fast_ipc))]
-            ASK_EDF_MOVED => crate::sched::direct::counts()[0] - counts_from.edf_started[0] >= word,
-            #[cfg(all(ferrix_sched_deadline = "edf_cbs", ferrix_fast_ipc))]
-            ASK_EDF_DECLINED => {
+            #[cfg(ferrix_fast_ipc)]
+            ASK_EDF_MOVED if crate::sched::DEADLINE_TIER => crate::sched::direct::counts()[0] - counts_from.edf_started[0] >= word,
+            #[cfg(ferrix_fast_ipc)]
+            ASK_EDF_DECLINED if crate::sched::DEADLINE_TIER => {
                 let counts = crate::sched::direct::counts();
                 let (trips, declined) = (counts[0] - counts_from.edf_started[0], counts[13] - counts_from.edf_started[1]);
                 crate::console::println!(
@@ -944,7 +941,7 @@ fn feature_ask(
             #[cfg(ferrix_partition_speculation = "partition")]
             ASK_DOMAIN_START => {
                 if let Some(me) = crate::sched::current() {
-                    let mut away = ferrix_sched_class::CpuSet::of(1 % crate::smp::count());
+                    let mut away = crate::sched::CpuSet::of(1 % crate::smp::count());
                     let _ = away.insert(crate::smp::count() - 1);
                     let _ = crate::sched::set_affinity(&me, &away);
                     crate::sched::yield_now();
@@ -955,7 +952,7 @@ fn feature_ask(
             #[cfg(ferrix_partition_speculation = "partition")]
             ASK_DOMAIN_END => {
                 if let Some(me) = crate::sched::current() {
-                    let mut all = ferrix_sched_class::CpuSet::of(0);
+                    let mut all = crate::sched::CpuSet::of(0);
                     for cpu in 1..crate::smp::count() {
                         let _ = all.insert(cpu);
                     }
@@ -973,7 +970,7 @@ fn feature_ask(
                     counts_from.fast_started = crate::arch::fast_check::restricted_fast_counts(&task);
                     // The fast path reads per-processor tables of this size by a logical
                     // number with no bound check (ledger 6747 (3c)).
-                    crate::smp::count() <= ferrix_sched_class::MAX_CPUS
+                    crate::smp::count() <= crate::sched::MOST_CPUS
                 }
                 None => false,
             },

@@ -624,6 +624,11 @@ impl<T> SchedClass<T> for FifoRr {
     }
 }
 
+/// A fixed-priority tier, to the stack's one impl over its upper tier (ledger 7763 DG.6).
+impl<T> ferrix_sched_class::deadline::UpperClass<T> for FifoRr {
+    type Kind = ferrix_sched_class::deadline::RealtimeKind;
+}
+
 impl<T> RealtimeClass<T> for FifoRr {
     type Slot = FifoSlot<T>;
     const RR_QUANTUM_NS: u64 = RR_QUANTUM_NS;

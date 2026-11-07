@@ -12,14 +12,12 @@ use ferrix_sync::IrqControl;
 pub enum AffinityRefusal {
     KernelThread,
     Empty,
-    #[cfg(ferrix_sched_deadline = "edf_cbs")]
     Reserved,
 }
 pub fn effective_mask(task: &Task) -> CpuSet {
     task.affinity()
 }
 pub fn set_affinity(task: &Arc<Task>, asked: &CpuSet) -> Result<CpuSet, AffinityRefusal> {
-    #[cfg(ferrix_sched_deadline = "edf_cbs")]
     if task.reserved.load(core::sync::atomic::Ordering::Relaxed) {
         return Err(AffinityRefusal::Reserved);
     }
@@ -48,7 +46,6 @@ fn tell_kernel(thread: u32, mask: &CpuSet) -> Result<(), AffinityRefusal> {
     }
     ferrix_native::lift_calls::thread_affinity(ferrix_rt::Kernel, thread, &bytes).map_err(|why| {
         match why {
-            #[cfg(ferrix_sched_deadline = "edf_cbs")]
             ferrix_native::error::Error::AlreadyBound => AffinityRefusal::Reserved,
             _ => AffinityRefusal::Empty,
         }

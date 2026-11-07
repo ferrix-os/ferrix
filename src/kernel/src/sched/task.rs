@@ -22,6 +22,7 @@ use core::sync::atomic::{
     AtomicBool, AtomicI64, AtomicPtr, AtomicU8, AtomicU32, AtomicU64, Ordering,
 };
 
+use ferrix_sched_class::deadline::ReserveCell;
 use ferrix_sched_class::{CpuSet, RtParams, RtPolicy, UpperCell, WORDS};
 use ferrix_sched_fair::{EntityState, Node, Slot, Split, StackTiers};
 use ferrix_sync::IrqControl;
@@ -377,13 +378,11 @@ pub struct Task {
     /// so that queueing, which a wake-up does from an interrupt handler,
     /// allocates nothing (finding F-23). Allocated with the task.
     run_slot: SlotCell<Arc<Task>>,
-    /// The processor holding its reservation, past the last one for none, and the mask it
-    /// had before (ledger 7088 E.3).
-    #[cfg(ferrix_sched_deadline = "edf_cbs")]
-    pub(crate) reserved_on: core::sync::atomic::AtomicUsize,
-    /// See `reserved_on`.
-    #[cfg(ferrix_sched_deadline = "edf_cbs")]
-    pub(crate) mask_before: crate::sync::SpinLock<Option<CpuSet>>,
+    /// The processor holding its reservation, and the mask its pin replaced
+    /// (ledger 7088 E.3): empty for every new task, a child of a reserved one
+    /// included; zero-sized without a deadline tier (docs/SCHED-CLASSES.md
+    /// §9g, ledger 7763 DG.9).
+    pub(crate) reserve: super::stack::ReserveOf,
     /// The node a processor's sleeper set, or the reaper's list, holds it
     /// in, while neither does. As `run_slot`, for sleeping and for dying.
     /// A sleeper set's node carries a [`Due`], since timer objects are filed
@@ -426,6 +425,10 @@ pub struct Task {
     /// (`sched::finish_switch`, V4).
     evicted: AtomicBool,
 }
+
+/// `entity_rt` for an entity of the deadline tier: no policy's bits, so that
+/// a change of either moves it at its processor's next decision (§9g).
+const DEADLINE_BITS: u32 = 1 << 20;
 
 /// A task's policy word: the priority in the low byte, the policy above it,
 /// then the two flags.
@@ -924,10 +927,7 @@ impl Task {
         };
         let bare_thread = thread.as_ref().is_some_and(|thread| thread.is_bare());
         Ok(Task {
-            #[cfg(ferrix_sched_deadline = "edf_cbs")]
-            reserved_on: core::sync::atomic::AtomicUsize::new(usize::MAX),
-            #[cfg(ferrix_sched_deadline = "edf_cbs")]
-            mask_before: crate::sync::SpinLock::new(None),
+            reserve: ReserveCell::empty(),
             id: new.id,
             name: new.name,
             entry: Some((new.entry, new.argument)),
@@ -999,10 +999,7 @@ impl Task {
     ) -> Result<Task, AllocError> {
         let (run_slot, sleep_slot) = slots()?;
         Ok(Task {
-            #[cfg(ferrix_sched_deadline = "edf_cbs")]
-            reserved_on: core::sync::atomic::AtomicUsize::new(usize::MAX),
-            #[cfg(ferrix_sched_deadline = "edf_cbs")]
-            mask_before: crate::sync::SpinLock::new(None),
+            reserve: ReserveCell::empty(),
             id,
             name,
             entry: None,
@@ -1073,6 +1070,16 @@ impl Task {
     ///
     /// Under the lock of the queue it goes on, the only taker of its node.
     pub(crate) fn entity_with(&self, slot: TaskSlot) -> super::stack::StackEntity {
+        // Admitted on the processor whose queue it goes on: the deadline
+        // tier's (docs/SCHED-CLASSES.md §9g). Anywhere else -- a processor
+        // taken out of service moved it -- it is fair there (7088 E.3).
+        if self.deadline_here()
+            && let Some(entity) = super::stack::Stack::deadline_entity()
+        {
+            self.parked.put(slot);
+            self.entity_rt.store(DEADLINE_BITS, Ordering::Relaxed);
+            return entity;
+        }
         let word = self.rt_word();
         if let Some(params) = word.params() {
             // The node is put in its cell before the policy is stored
@@ -1101,6 +1108,7 @@ impl Task {
     pub(crate) fn keep_entity(&self, entity: super::stack::StackEntity) {
         match super::stack::Stack::split(entity) {
             Split::Upper(node) => self.keep_upper(node),
+            Split::Deadline => self.unpark(),
             Split::Fair((state, slot)) => {
                 self.return_run_slot(slot);
                 self.store_entity_state(state);
@@ -1113,7 +1121,32 @@ impl Task {
     pub(crate) fn keep_refused(&self, entity: super::stack::StackEntity) {
         match super::stack::Stack::split(entity) {
             Split::Upper(node) => self.keep_upper(node),
+            Split::Deadline => self.unpark(),
             Split::Fair((_, slot)) => self.return_run_slot(slot),
+        }
+    }
+
+    /// Its parked run slot back where it is held while no queue holds the
+    /// task: what leaving the deadline tier hands back.
+    fn unpark(&self) {
+        if let Some(slot) = self.parked.take() {
+            self.return_run_slot(slot);
+        }
+    }
+
+    /// Whether it holds a reservation on the processor it is homed on: the
+    /// deadline tier's there.
+    pub(crate) fn deadline_here(&self) -> bool {
+        self.reserve.on() == self.cpu()
+    }
+
+    /// The tier bits its queue's entity should have now: the deadline
+    /// tier's when admitted here, else its policy's.
+    fn wanted_bits(&self) -> u32 {
+        if super::stack::DEADLINE && self.deadline_here() {
+            DEADLINE_BITS
+        } else {
+            self.rt_word().tier_bits()
         }
     }
 
@@ -1152,7 +1185,7 @@ impl Task {
     /// has now: false for a running task whose policy changed, until its
     /// processor's next decision moves it.
     pub(crate) fn entity_is_current(&self) -> bool {
-        self.entity_rt.load(Ordering::Relaxed) == self.rt_word().tier_bits()
+        self.entity_rt.load(Ordering::Relaxed) == self.wanted_bits()
     }
 
     /// Whether its run slot is parked: a tier above fair holds it, and
@@ -1568,7 +1601,7 @@ impl Task {
     /// never for an exempt task, whose mark its constructor set for good.
     pub(crate) fn set_domain_slot(&self, slot: u8) -> bool {
         self.domain
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |now| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |now| {
                 (now != super::domains::EXEMPT && now != slot).then_some(slot)
             })
             .is_ok()

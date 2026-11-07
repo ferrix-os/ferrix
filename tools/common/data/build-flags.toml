@@ -137,7 +137,7 @@ values.not_applicable = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"]
 [flags.kernel_memory]
 why = "K16's memory retyped from the job's own reservation, or today's fallible, charged shared heap"
 barest = "retyped"  # max_plus's (SCHED-CLASSES.md section 9c, E13): no shared kernel heap after boot
-values.retyped = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "M6", built = "adhoc", requires = ["personality=user"] }
+values.retyped = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "M6", built = "adhoc", requires = ["personality=user|none"] }  # none: max_plus's barest kernel, no Linux personality (the customer, 2026-11-07; ledger 7763)
 values.heap = { allows = ["present", "sc2", "none"], lands = "today", built = "yes" }
 
 # The scheduler (docs/SCHED-CLASSES.md §6, §9a; container review 20 (not on
@@ -163,9 +163,9 @@ values.absent = { allows = ["sc4", "present", "sc2", "none"], lands = "today", b
 values.arinc_table = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "M3", built = "no" }
 
 [flags.sched_deadline]
-why = "stage 14's HardRt tier, partitioned EDF with CBS servers (ferrix-sched-edf), or none"
+why = "partitioned EDF with a hard CBS above the fair tier, reservations in the boot domain (ferrix-sched-edf; SCHED-CLASSES.md section 9g), or none"
 barest = "absent"  # max_plus's (SCHED-CLASSES.md section 9c, E13): no tier
-values.edf_cbs = { allows = ["present", "sc2", "none"], lands = "M3", built = "no" }
+values.edf_cbs = { allows = ["present", "sc2", "none"], lands = "M3", built = "yes", built_on = ["x86_64", "aarch64"], requires = ["personality=user", "sched_fair=eevdf", "sched_realtime=absent"] }
 values.absent = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
 
 [flags.sched_realtime]
@@ -174,11 +174,12 @@ barest = "absent"  # max_plus's (SCHED-CLASSES.md section 9c, E13): no tier
 values.fifo_rr = { allows = ["none"], lands = "stage 14, step 4b (container review 29, R11)", built = "yes" }
 values.absent = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
 
-# eevdf's `present` stands under F-76 until S7 classifies ferrix-sched-fair.
+# eevdf's `present` and `sc2` stand under F-76 until S7 classifies ferrix-sched-fair; `sc2`
+# is fast's, beneath edf_cbs, the code develop built there under schedule=edf (ledger 7763 DG.1).
 [flags.sched_fair]
 why = "the fair tier, EEVDF (ferrix-sched-fair), today's scheduler, or none"
 barest = "absent"  # max_plus's (SCHED-CLASSES.md section 9c, E13): no tier
-values.eevdf = { allows = ["present", "none"], lands = "today", built = "yes" }
+values.eevdf = { allows = ["present", "sc2", "none"], lands = "today", built = "yes" }
 values.absent = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
 
 [flags.checks]

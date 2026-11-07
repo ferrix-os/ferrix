@@ -83,7 +83,7 @@ runtime_settings = "fixed"
 
 [build]
 cargo_profile = "release"
-toolchain = "1.97.1"
+toolchain = "1.99.1"
 codegen = { opt-level = 2, lto = true, codegen-units = 1, panic = "abort" }
 
 [build.rustflags]

@@ -3474,7 +3474,10 @@ review 12 (not on record; ledger 5684)):
 `ferrix-sched` is now two crates, `ferrix-sched-class` (the
 scheduling-class interface, domains and balancing) and `ferrix-sched-fair`
 (EEVDF), `docs/SCHED-CLASSES.md` §11; so 26 in all, the core's files naming
-22 and the item's 16. Their code runs in the
+22 and the item's 16. **Extended 2026-11-07** (ledger 7763 DG.1): `sched_fair=eevdf` now allows
+`sc2` as well as `present`, for `fast`, where EEVDF runs beneath the deadline
+tier as it ran beneath develop's `schedule=edf`; the debt stands for `sc2` too
+until S7 classifies `ferrix-sched-fair`. Their code runs in the
 item, and none of the item-scoped gates -- unsafe, panic, complexity,
 fallible allocation, traceability, coverage -- reads it. Two of them break
 the core ring's own rule that nothing in it depends on a filesystem,

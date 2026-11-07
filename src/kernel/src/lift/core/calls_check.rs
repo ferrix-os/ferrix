@@ -139,13 +139,13 @@ fn arch_prctl_answers_nosys() -> Result<(), &'static str> {
 }
 
 /// `THREAD_RESERVE`'s authority (ledger 7088 E.2): a job handle with `SET_LIMIT`, at or above
-/// the caller's own job; in a kernel without `schedule=edf`, no such call.
+/// the caller's own job; in a kernel without the deadline tier, no such call.
 ///
 /// Verifies: L.sched.182
 fn reserve(job: Handle, arena: Handle) -> Result<(), &'static str> {
     let asked =
         |handle| lift_calls::thread_reserve(Kernel, handle, 1_000_000, 10_000_000, 10_000_000);
-    if cfg!(not(ferrix_sched_deadline = "edf_cbs")) {
+    if !crate::sched::DEADLINE_TIER {
         return expect("THREAD_RESERVE, no edf", asked(job), Error::Unsupported);
     }
     expect("THREAD_RESERVE on a VMO", asked(arena), Error::WrongType)?;

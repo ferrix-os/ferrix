@@ -1,5 +1,5 @@
 //! `test-reserve`: a time reservation as a Linux program asks for one, on a kernel of
-//! `schedule=edf` (`src/tests/reserve/`, `docs/microkernel/K9.md`, ledger 7011 S.6).
+//! `sched_deadline=edf_cbs` (`src/tests/reserve/`, `docs/microkernel/K9.md`, ledger 7011 S.6).
 
 use crate::args::Args;
 use crate::sem::{boot, build_test, says, status};
@@ -11,7 +11,7 @@ pub(crate) const TASKS: &[Task] = &[Task {
     name: "test-reserve",
     help_at: 588,
     help: &[
-        "test-reserve  Boot reserve-test as init on a schedule=edf kernel and require sched_setattr's admission,",
+        "test-reserve  Boot reserve-test as init on a sched_deadline=edf_cbs kernel and require sched_setattr's admission,",
         "              refusals by name, a budget held to its share and a child not held to it",
     ],
     run: |_, args| test_reserve(args),
@@ -29,8 +29,8 @@ const STEPS: [&str; 8] = [
 ];
 
 fn test_reserve(args: &Args) -> Result<()> {
-    if flags::this_run()?.value("schedule") != Some("edf") {
-        return Err(Error::new("test-reserve is for schedule=edf"));
+    if flags::this_run()?.value("sched_deadline") != Some("edf_cbs") {
+        return Err(Error::new("test-reserve is for sched_deadline=edf_cbs"));
     }
     for arch in args.arches()? {
         let log = paths::build_dir(arch).join("serial.log");

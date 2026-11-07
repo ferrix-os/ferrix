@@ -651,7 +651,6 @@ dependencies = [
  "ferrix-paging",
  "ferrix-partition-desc",
  "ferrix-pci",
- "ferrix-sched-class",
  "ferrix-sched-fair",
  "ferrix-smbios",
  "ferrix-sync",
@@ -715,7 +714,6 @@ dependencies = [
  "ferrix-linux-abi",
  "ferrix-logctl",
  "ferrix-native-abi",
- "ferrix-sched-fair",
 ]
 
 [[package]]
@@ -731,7 +729,6 @@ dependencies = [
  "ferrix-net",
  "ferrix-netring",
  "ferrix-netwire",
- "ferrix-sched-fair",
 ]
 
 [[package]]
@@ -739,6 +736,7 @@ name = "ferrix-kernel-sched-select"
 version = "0.1.0"
 dependencies = [
  "ferrix-sched-class",
+ "ferrix-sched-edf",
  "ferrix-sched-fair",
  "ferrix-sched-fifo",
  "ferrix-sched-fixture",
@@ -886,8 +884,6 @@ dependencies = [
  "ferrix-linux-abi",
  "ferrix-logctl",
  "ferrix-native-abi",
- "ferrix-sched-class",
- "ferrix-sched-fair",
 ]
 
 [[package]]
@@ -902,8 +898,6 @@ dependencies = [
  "ferrix-native-abi",
  "ferrix-net",
  "ferrix-netring",
- "ferrix-sched-class",
- "ferrix-sched-fair",
 ]
 
 [[package]]
@@ -1270,6 +1264,13 @@ name = "ferrix-sched-class"
 version = "0.1.0"
 dependencies = [
  "ferrix-sync",
+]
+
+[[package]]
+name = "ferrix-sched-edf"
+version = "0.1.0"
+dependencies = [
+ "ferrix-sched-class",
 ]
 
 [[package]]

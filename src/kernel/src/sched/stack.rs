@@ -47,6 +47,20 @@ pub(crate) type UpperCellOf = <Stack as StackTiers<Arc<Task>>>::Cell;
 /// real-time policy (`sched_setscheduler`, L.sched.138).
 pub(crate) const REALTIME: bool = <Stack as StackTiers<Arc<Task>>>::REALTIME;
 
+/// Whether the stack has a deadline tier: whether a thread may hold a
+/// reservation (`sched::reserve`, docs/SCHED-CLASSES.md §9g). Every call the
+/// tier serves reads this, never a scheduler flag (D6).
+pub(crate) const DEADLINE: bool = <Stack as StackTiers<Arc<Task>>>::DEADLINE;
+
+/// Where a task keeps its reservation: zero-sized without a deadline tier
+/// (ledger 7763 DG.9).
+pub(crate) type ReserveOf = <Stack as StackTiers<Arc<Task>>>::Reserve;
+
+const _: () = assert!(
+    DEADLINE || size_of::<ReserveOf>() == 0,
+    "a stack without a deadline tier keeps no reservation in its tasks"
+);
+
 /// The round-robin quantum of that tier, zero with none.
 pub(crate) const RR_QUANTUM_NS: u64 = <Stack as StackTiers<Arc<Task>>>::RR_QUANTUM_NS;
 

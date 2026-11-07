@@ -423,7 +423,6 @@ pub(crate) fn sys_sched_setaffinity(
         // A Linux thread always runs on a task with a thread; a task with
         // none is the kernel's, and refused (L.sched.96).
         Err(sched::AffinityRefusal::KernelThread) => Err(Errno::EINVAL),
-        #[cfg(ferrix_sched_deadline = "edf_cbs")]
         Err(sched::AffinityRefusal::Reserved) => Err(Errno::EBUSY),
     }
 }
@@ -685,8 +684,9 @@ pub(crate) fn sys_sched_setattr(
     let nice = (word(16) as i32).clamp(-20, 19);
     let priority = word(20);
     let runtime = u64::from(word(24)) | (u64::from(word(28)) << 32);
-    #[cfg(ferrix_sched_deadline = "edf_cbs")]
-    {
+    // `SCHED_DEADLINE` where the stack has a deadline tier (docs/SCHED-CLASSES.md §9g); without
+    // one it is EINVAL below, as any policy this kernel does not take.
+    if sched::DEADLINE_TIER {
         let deadline = u64::from(word(32)) | (u64::from(word(36)) << 32);
         let period = u64::from(word(40)) | (u64::from(word(44)) << 32);
         let asked = Deadline {
@@ -745,7 +745,6 @@ pub(crate) fn sys_sched_setattr(
 }
 
 /// What `sched_setattr` read, for [`deadline_setattr`].
-#[cfg(ferrix_sched_deadline = "edf_cbs")]
 struct Deadline {
     policy: u32,
     flags: u64,
@@ -755,11 +754,10 @@ struct Deadline {
     period: u64,
 }
 
-/// `SCHED_DEADLINE`'s two doors under `sched_deadline=edf_cbs`: the calling thread alone takes
+/// `SCHED_DEADLINE`'s two doors with the deadline tier: the calling thread alone takes
 /// a reservation, deadline equal to period, or falls back to `SCHED_OTHER`; `CAP_SYS_NICE`
 /// here, and the kernel's own authority below it (ledger 7088 E.2). `None` for what is not
-/// its. Not built until the deadline tier is (docs/SCHED-CLASSES.md §9g).
-#[cfg(ferrix_sched_deadline = "edf_cbs")]
+/// its. Asked only where the stack has the deadline tier (docs/SCHED-CLASSES.md §9g).
 fn deadline_setattr(process: &Process, pid: i32, attr: &Deadline) -> Option<Result<usize, Errno>> {
     const SCHED_DEADLINE: u32 = 6;
     let held = sched::reserve::holds_own();
@@ -768,9 +766,8 @@ fn deadline_setattr(process: &Process, pid: i32, attr: &Deadline) -> Option<Resu
     }
     let mine = pid == 0
         || attributes::thread_named(process, pid).is_some_and(|thread| {
-            attributes::task_of(&thread).is_some_and(|task| {
-                sched::current().is_some_and(|own| alloc::sync::Arc::ptr_eq(&task, &own))
-            })
+            attributes::task_of(&thread)
+                .is_some_and(|task| sched::current().is_some_and(|own| Arc::ptr_eq(&task, &own)))
         });
     if !mine {
         return Some(Err(Errno::EPERM));

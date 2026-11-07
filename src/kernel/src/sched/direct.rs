@@ -33,10 +33,11 @@
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use ferrix_sched_fair::JobPlan;
+use ferrix_sched_fair::{JobPlan, StackTiers};
 use ferrix_sync::{IrqControl, SpinLock};
 
 use super::queue::CpuQueue;
+use super::stack::Stack;
 use super::task::{BLOCKED, RUNNABLE, Task};
 use super::{finish_switch, queue_of, switch_chosen, this_cpu, work};
 use crate::arch;
@@ -194,16 +195,12 @@ pub(crate) fn begin(caller: &Task, peer: &Task) -> Result<Direct, Count> {
     // nothing. Declined rather than woken here, so that a decline leaves the
     // queue as it was.
     let now = crate::timer::now_nanos();
-    if queue.waiting() != 0 || queue.sleeper_due(now) {
-        return Err(Count::T12);
-    }
-    // Reservations take the long way: this one way in never passes over one, and neither
-    // end's budget is charged on a path that does not charge it (ledger 7088 E.5).
-    #[cfg(ferrix_sched_deadline = "edf_cbs")]
-    if queue.fair.runs_reserved()
-        || queue.fair.any_ready()
-        || queue.fair.is_reserved(caller.id)
-        || queue.fair.is_reserved(peer.id)
+    // Reservations take the long way too: this one way in never passes over one, and neither
+    // end's budget is charged on a path that does not charge it (ledger 7088 E.5, 7763). The
+    // waiting count still counts a throttled reservation, which 7132 relies on.
+    if queue.waiting() != 0
+        || queue.sleeper_due(now)
+        || <Stack as StackTiers<Arc<Task>>>::declines(&queue.stack, caller.id, peer.id)
     {
         return Err(Count::T12);
     }

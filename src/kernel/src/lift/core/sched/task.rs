@@ -59,7 +59,6 @@ pub struct Task {
     /// (`sched::lock_taken`). Only the thread itself reaches these.
     pub(crate) pending_up: AtomicBool,
     /// Whether it holds a reservation.
-    #[cfg(ferrix_sched_deadline = "edf_cbs")]
     pub(crate) reserved: AtomicBool,
     /// In a sigreturn, whose capture wants only the processor's mask.
     pub(crate) sigreturning: AtomicBool,
@@ -104,7 +103,32 @@ impl Drop for Task {
     }
 }
 
+/// A thread's policy as linuxd's model sees it: `SCHED_OTHER` always, since no
+/// native call gives a thread of linuxd's a real-time policy
+/// (docs/SCHED-CLASSES.md §9e; the kernel's `RtWord`).
+#[derive(Clone, Copy, Debug)]
+pub struct RtWord;
+
+impl RtWord {
+    /// No real-time policy.
+    #[must_use]
+    pub const fn params(self) -> Option<ferrix_sched_class::RtParams> {
+        None
+    }
+    /// No reset-on-fork.
+    #[must_use]
+    pub const fn resets_on_fork(self) -> bool {
+        false
+    }
+}
+
 impl Task {
+    /// Its policy word: `SCHED_OTHER`.
+    #[must_use]
+    pub const fn rt_word(&self) -> RtWord {
+        RtWord
+    }
+
     /// `task`'s wake, kept for when this thread's last lock goes. `false`: none is
     /// held, or there is no room, and the caller wakes it now.
     pub(crate) fn wake_later(&self, task: &Arc<Task>) -> bool {

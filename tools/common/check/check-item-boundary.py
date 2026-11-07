@@ -2792,7 +2792,8 @@ def flag_file_problems(flags: dict) -> list[str]:
                 problems.append(f"{where} names no lands")
             for pair in spec.get("requires", []) + spec.get("conflicts", []):
                 other, _, other_value = pair.partition("=")
-                if other_value not in declared.get(other, set()):
+                # `flag=a|b` names either value (the max_plus relaxation, ledger 7763).
+                if any(one not in declared.get(other, set()) for one in other_value.split("|")):
                     problems.append(f"{where} names {pair}, which is not declared")
     return problems
 
@@ -2883,7 +2884,7 @@ def profile_problems(name: str, profile: dict, flags: dict) -> tuple[list[str], 
             continue
         for pair in spec.get("requires", []):
             other, _, other_value = pair.partition("=")
-            if values.get(other) != other_value:
+            if values.get(other) not in other_value.split("|"):
                 problems.append(f"{flag}={value} requires {pair}")
         for pair in spec.get("conflicts", []):
             other, _, other_value = pair.partition("=")

@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-3025 declarations in the core's files, 215 in the item's; 245 checks-only.
+3030 declarations in the core's files, 215 in the item's; 246 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2916,6 +2916,8 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `BASE_SLICE_NS` | const | load |  |
+| `DEADLINE_TIER` | const | item, load, bin |  |
+| `MOST_CPUS` | const | item (checks) | checks-only |
 | `REAPER_PATIENCE_NANOS` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `PolicyRefused` | enum | load |  |
 | `ServiceRefusal` | enum | item, load |  |
@@ -2988,11 +2990,14 @@ checks above is `pub` for raised checks (F3).
 | `vtime` | mod | item, load |  |
 | `work` | mod | item, load, bin |  |
 | `AffinityRefusal` | re-export | item, load |  |
+| `CPU_SET_WORDS` | re-export | item |  |
+| `CpuSet` | re-export | item |  |
 | `Due` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `FIRE_BATCH` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Fired` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `LastLook` | re-export | item |  |
 | `Mark` | re-export | load |  |
+| `NICE_0_WEIGHT` | re-export | item, load |  |
 | `ReadyList` | re-export | load |  |
 | `Task` | re-export | item, load, bin |  |
 | `TaskId` | re-export | load |  |

@@ -64,6 +64,7 @@ const FAIL_NOT_ADMITTED: usize = 2;
 const FAIL_AFFINITY: usize = 4;
 const FAIL_CHILD: usize = 8;
 const FAIL_GIVE_BACK: usize = 16;
+const FAIL_TIER: usize = 32;
 
 fn spin_until_stopped() {
     while crate::timer::now_nanos() < STOP_AT.load(Ordering::Relaxed) {
@@ -109,6 +110,11 @@ fn reserved_low(argument: usize) {
     }
     if reserve::take(LOW) != Err(Refusal::Already) {
         let _ = FOUND.fetch_or(FAIL_REFUSALS, Ordering::Relaxed);
+    }
+    // Admitted while it ran: its processor's decision in `take` moved it into the deadline
+    // tier, admitted where it runs (L.sched.184).
+    if super::current().is_none_or(|task| !task.queued_upper() || !task.deadline_here()) {
+        let _ = FOUND.fetch_or(FAIL_TIER, Ordering::Relaxed);
     }
     let here = crate::smp::this_cpu().map_or(0, |cpu| cpu.logical);
     LANDED.store(here, Ordering::Release);
@@ -183,11 +189,13 @@ fn near(ran: u64, of: u64, want: u64) -> bool {
 /// Run the check.
 ///
 /// Verifies: H.SCHED.28, L.sched.179, L.sched.180, L.sched.181, L.sched.183
+/// Verifies: L.sched.184
 ///
 /// # Errors
 ///
 /// What did not hold.
 pub fn run() -> Result<(), &'static str> {
+    hard_rt_refused()?;
     let given = start(0, "reserve-back", given_back, 0)?;
     wait_until_gone(&given, 5_000 * MS)?;
     if FOUND.load(Ordering::Relaxed) != 0 {
@@ -249,6 +257,9 @@ pub fn run() -> Result<(), &'static str> {
     if found & FAIL_CHILD != 0 {
         return Err("edf: a child inherited its parent's reservation");
     }
+    if found & FAIL_TIER != 0 {
+        return Err("edf: a thread admitted while it ran was not the deadline tier's at once");
+    }
     if !near(low_ran, watched, 200) {
         return Err("edf: a reservation was not held to 20% against one earlier and a fair one");
     }
@@ -300,4 +311,17 @@ fn unschedulable(cpu: usize) -> Result<(), &'static str> {
         return Err("edf: an unschedulable set was not refused");
     }
     Ok(())
+}
+
+/// A deadline tier makes no `HardRt` domain: with the tier built and the windows absent, asking
+/// for one is `ModeUnavailable` (docs/SCHED-CLASSES.md §9g, ledger 7763 DG.2).
+///
+/// Verifies: L.sched.185
+fn hard_rt_refused() -> Result<(), &'static str> {
+    match super::make_domain(CpuSet::of(0), ferrix_sched_class::Mode::HardRt) {
+        Err(ferrix_sched_class::DomainError::ModeUnavailable(ferrix_sched_class::Mode::HardRt)) => {
+            Ok(())
+        }
+        _ => Err("edf: a HardRt domain was not refused ModeUnavailable beside a deadline tier"),
+    }
 }

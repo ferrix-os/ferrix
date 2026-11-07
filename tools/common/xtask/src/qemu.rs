@@ -819,7 +819,7 @@ const USER_BOOT_LINES: &[(Option<(&str, &str)>, &str)] = &[
     (None, "  stage 5  "),
     (None, "  window   an unmap's "),
     (
-        Some(("schedule", "edf")),
+        Some(("sched_deadline", "edf_cbs")),
         "  edf      a budget's rules held",
     ),
     (None, "  generic  "),
