@@ -853,6 +853,7 @@ impl<T> RunQueue<T> {
                     weight,
                     vlag,
                     sum_exec,
+                    request_ns,
                 },
                 Slot(leaving),
             ),
@@ -1204,6 +1205,7 @@ impl<T> RunQueue<T> {
                     weight,
                     vlag,
                     sum_exec,
+                    request_ns,
                 },
                 Slot(node),
             ),
@@ -1516,7 +1518,7 @@ const _: () = assert!(
 /// record; ledger 5684), F1 and F7). The fair-only calls the kernel makes --
 /// weights, the
 /// picture the checks and `/proc` read, the slice, the levelling, the steal
-/// choice -- reach it through here, read-only but for the three named
+/// choice -- reach it through here, read-only but for the four named
 /// changes; every change of membership or of the running entity goes
 /// through the stack. A stack without a fair tier does not implement it,
 /// so a kernel that still calls the fair tier does not compile for it.
@@ -1540,6 +1542,9 @@ pub trait FairTier<T>: ferrix_sched_class::SchedClass<T> {
 
     /// [`RunQueue::level`] on the fair tier.
     fn level(queue: &mut Self::Queue);
+
+    /// [`RunQueue::set_request`] on the fair tier.
+    fn set_request(queue: &mut Self::Queue, id: u64, request_ns: u64) -> bool;
 }
 
 impl<T> FairTier<T> for Eevdf {
@@ -1554,6 +1559,9 @@ impl<T> FairTier<T> for Eevdf {
     }
     fn level(queue: &mut RunQueue<T>) {
         queue.level();
+    }
+    fn set_request(queue: &mut RunQueue<T>, id: u64, request_ns: u64) -> bool {
+        queue.set_request(id, request_ns)
     }
 }
 
@@ -1571,6 +1579,9 @@ impl<T, U: ferrix_sched_class::SchedClass<T>, L: FairTier<T>> FairTier<T>
     }
     fn level(queue: &mut Self::Queue) {
         L::level(&mut queue.lower);
+    }
+    fn set_request(queue: &mut Self::Queue, id: u64, request_ns: u64) -> bool {
+        L::set_request(&mut queue.lower, id, request_ns)
     }
 }
 
@@ -1621,7 +1632,8 @@ pub trait StackTiers<T>: FairTier<T> {
     fn split(entity: Self::Entity) -> Split<Self::UpperSlot, T>;
     /// The identifier of a waiting entity of the tier above fair whose
     /// payload `matches`, never the running one; `None` with no such tier.
-    /// For a scheduling domain's switch (docs/SCHED-CLASSES.md §9f), with
+    /// For a processor taken out of service (`docs/CORE-QUARANTINE.md`) and
+    /// a scheduling domain's switch (docs/SCHED-CLASSES.md §9f), with
     /// [`RunQueue::latest_where`] for the fair tier.
     fn upper_waiting_where(queue: &Self::Queue, matches: impl Fn(&T) -> bool) -> Option<u64>;
 }

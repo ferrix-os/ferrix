@@ -205,25 +205,32 @@
       "purpose": "docs/CHARDEV.md step 1, character devices served from ring 3 (customer, 2026-10-25; consultant OK IF, ledger 4352 (G1)): the root chardev grant carried to devmgr in DEVICES through a hook the load ring registers"
     },
     {
-      "ids": ["H.DEV.7-8", "L.discovery.8-12", "L.device.60-65"],
-      "owner": "driver-model",
-      "branch": "driver-model-step1",
-      "date": "2026-10-25",
-      "purpose": "docs/DRIVER-MODEL.md step 1, generic device-tree nodes (customer, 2026-10-25: a driver never needs a kernel change; consultant OK IF D1-D23, ledger 4475): H.DEV for publishing every enabled, non-kernel-owned node and for kernel-owned-by-use; L.discovery for the seal point, KERNEL_DEPENDS, page-rounded overlap, SPI-only vectors and no double publication; L.device for references, subtree and identity in device_info, DMA failing closed. V-19 is held in VULNERABILITY-ANALYSIS for this step."
-    },
-    {
-      "ids": ["L.sched.111", "L.sched.117"],
+      "ids": ["L.sched.133", "L.sched.139"],
       "owner": "sched-classes",
-      "branch": "claude/ferrix-roadmap-completion-hkxlpp",
+      "branch": "feature/ferrix-roadmap-completion-hkxlpp",
       "date": "2026-10-27",
       "purpose": "Withdrawn, never to be reused: written for step 4b (docs/SCHED-CLASSES.md section 9e) as the Linux policy calls' permission rule (133) and argument checks (139), and dropped by the consultant's code review, container review 30, B2 (not on record; ledger 5684), the behaviour being the load ring's, not the item's; test-rtsched still shows both (container review 31, condition 2). Renumbered on 2026-11-02 from L.sched.111 and 117"
     },
     {
-      "ids": ["L.sched.129-130"],
+      "ids": ["L.sched.151-152"],
       "owner": "sched-classes",
       "branch": "feature/sched-softrt-domain",
-      "date": "2026-10-28",
-      "purpose": "docs/SCHED-CLASSES.md step 5b (stage 14): the domain authority object and the domain_create and domain_admit calls (section 9f, V1, V6's close and exit). H.SCHED.21-23 and L.sched.118-128 were written by step 5a. Released in the commits that write them"
+      "date": "2026-11-02",
+      "purpose": "docs/SCHED-CLASSES.md steps 3b to 5 (stage 14, the consultant's OK IF D1-D13, G1-G10, F1-F16, R1-R15 and V1-V16): H.SCHED.20-22 and L.sched.124-139 (the class-crate record, the stack of two tiers and SCHED_FIFO/SCHED_RR above fair) written and released on feature/ferrix-roadmap-completion-hkxlpp, 133 and 139 withdrawn; H.SCHED.23-25 and L.sched.140-150 written and released on feature/sched-softrt-domain for step 5a, the SoftRt domain inside the scheduler; L.sched.151-152 kept for step 5b, the domain authority object and the domain_create and domain_admit calls (section 9f, V1, V6's close and exit). Renumbered on 2026-11-02 from H.SCHED.18-23 and L.sched.102-130, which core quarantine and game-mode-sched took on develop first. Released in the commits that write them"
+    },
+    {
+      "ids": ["H.SCHED.19", "L.sched.110-122"],
+      "owner": "game-mode-sched",
+      "branch": "docs/game-mode-sched",
+      "date": "2026-10-30",
+      "purpose": "docs/GAME-MODE-SCHED.md, game mode's layer B (GAME-MODE.md §13, ledger 5115 (12)): L.sched.107-109 F7 per-task slice requests (deadline from the effective request, never above the queue's slice, set only by sched_setattr or the mark; inherited by clone and fork, ledger 5232 (2)); H.SCHED.19 and L.sched.110-114 the frame mark (only the right marks, the order inside eligibility, the kernel's bound for the unmarked, the end at close/exec/unmark/exit and never inherited, nothing else changed); L.sched.115-118 lends (served request, wake history, no chains, a lent mark only orders); L.sched.119-120 the idle-gap class; L.sched.121-122 deadlines from the frame"
+    },
+    {
+      "ids": ["L.mm.131-134"],
+      "owner": "mk-boot-time",
+      "branch": "feature/mk-boot-time",
+      "date": "2026-11-05",
+      "purpose": "Per-check frame accounting (ledger 7191 K1-K11): attribution by tag, netting and closure, the latch, the cross free."
     }
   ]
 }

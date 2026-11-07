@@ -110,7 +110,7 @@ use ferrix_frame::Frame;
 use ferrix_native_abi::restricted::SHARED_BASE;
 use ferrix_paging::MapFlags;
 use ferrix_sched_class::CpuSet;
-use ferrix_sync::{SleepLock, SleepLockGuard};
+use ferrix_sync::{Once, SleepLock, SleepLockGuard};
 use ferrix_vma::{Backing, PageRange, Unmapping, Vma, VmaFlags};
 
 use crate::arch;

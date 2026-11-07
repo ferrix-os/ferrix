@@ -19,7 +19,8 @@ ferrix-blkring.workspace = true
 ferrix-linux-abi.workspace = true
 ferrix-logctl.workspace = true
 ferrix-native-abi.workspace = true
-ferrix-sched.workspace = true
+ferrix-sched-class.workspace = true
+ferrix-sched-fair.workspace = true
 
 [lints]
 workspace = true

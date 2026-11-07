@@ -22,7 +22,7 @@ use core::sync::atomic::{
     AtomicBool, AtomicI64, AtomicPtr, AtomicU8, AtomicU32, AtomicU64, Ordering,
 };
 
-use ferrix_sched_class::{CpuSet, RtParams, RtPolicy, UpperCell};
+use ferrix_sched_class::{CpuSet, RtParams, RtPolicy, UpperCell, WORDS};
 use ferrix_sched_fair::{EntityState, Node, Slot, Split, StackTiers};
 use ferrix_sync::IrqControl;
 
@@ -259,7 +259,7 @@ pub struct Task {
     /// (`finish_switch`, under the lock of the queue it was switched away
     /// from, which the switch hands over). A task moved between queues
     /// carries it false: a move of one with it set, or a pick of one another
-    /// processor runs, stops the machine (FX-0537, docs/SCHED-CLASSES.md
+    /// processor runs, stops the machine (FX-0540, docs/SCHED-CLASSES.md
     /// §9e, container review 30 (not on record; ledger 5684) B1).
     on_cpu: AtomicBool,
     /// Whether it is inside a system call, as the processor running it last
@@ -379,19 +379,26 @@ pub struct Task {
     run_slot: SlotCell<Arc<Task>>,
     /// The processor holding its reservation, past the last one for none, and the mask it
     /// had before (ledger 7088 E.3).
-    #[cfg(ferrix_schedule = "edf")]
+    #[cfg(ferrix_sched_deadline = "edf_cbs")]
     pub(crate) reserved_on: core::sync::atomic::AtomicUsize,
     /// See `reserved_on`.
-    #[cfg(ferrix_schedule = "edf")]
+    #[cfg(ferrix_sched_deadline = "edf_cbs")]
     pub(crate) mask_before: crate::sync::SpinLock<Option<CpuSet>>,
     /// The node a processor's sleeper set, or the reaper's list, holds it
     /// in, while neither does. As `run_slot`, for sleeping and for dying.
-    sleep_slot: SlotCell,
+    /// A sleeper set's node carries a [`Due`], since timer objects are filed
+    /// in the same set (`object::timer`).
+    sleep_slot: SlotCell<Due>,
+    /// The instant its sleep slot is filed under in its home's sleeper set,
+    /// or zero while it is not filed: written under that queue's lock as it
+    /// is filed and taken under it as it leaves, so that an early wake takes
+    /// the entry out by its key instead of walking the set (`L.sched.84`).
+    filed_at: AtomicU64,
     /// Its run slot while a tier above fair holds it: taken from `run_slot`
     /// as it is queued there, so that `run_slot` is held exactly while no
     /// queue holds the task whatever its tier (T11, `holds_slots`), and
     /// given back as it leaves. Empty for every fair task.
-    parked: SlotCell,
+    parked: SlotCell<Arc<Task>>,
     /// Its scheduling policy, as [`RtWord`] packs it: `SCHED_OTHER` (zero
     /// policy bits) or a real-time policy and priority, whether it owns a
     /// node of the tier above fair, and its reset-on-fork flag. Read without
@@ -525,7 +532,7 @@ impl<T> SlotCell<T> {
     }
 
     /// A cell holding nothing yet.
-    const fn empty() -> SlotCell {
+    const fn empty() -> SlotCell<T> {
         SlotCell(AtomicPtr::new(core::ptr::null_mut()))
     }
 
@@ -906,7 +913,21 @@ impl Task {
         } = new;
         let (user, core) = user_parts(thread.as_ref(), user_state)?;
         let (run_slot, sleep_slot) = slots()?;
+        let leftovers = if new.address_space.is_some()
+            || thread.is_some()
+            || user.is_some()
+            || core.is_some()
+        {
+            Some(fallible::try_box(super::leftovers::Leftovers::new())?)
+        } else {
+            None
+        };
+        let bare_thread = thread.as_ref().is_some_and(|thread| thread.is_bare());
         Ok(Task {
+            #[cfg(ferrix_sched_deadline = "edf_cbs")]
+            reserved_on: core::sync::atomic::AtomicUsize::new(usize::MAX),
+            #[cfg(ferrix_sched_deadline = "edf_cbs")]
+            mask_before: crate::sync::SpinLock::new(None),
             id: new.id,
             name: new.name,
             entry: Some((new.entry, new.argument)),
@@ -920,8 +941,15 @@ impl Task {
             reclaiming: AtomicBool::new(false),
             copy_poison: PoisonRecord::new(),
             wakees: Wakees::new(crate::timer::now_nanos()),
+            // Before `thread` and `affinity` move in.
+            domain: AtomicU8::new(first_domain(thread.is_none(), &affinity)),
             spawn_pin: pin_program(&affinity, thread.is_some()),
             affinity: Affinity::new(affinity),
+            restricted_mode: AtomicBool::new(false),
+            restricted_state: UnsafeCell::new(None),
+            leftovers,
+            active_user: AtomicPtr::new(core::ptr::null_mut()),
+            bare_thread,
             address_space: new.address_space,
             thread,
             core,
@@ -946,6 +974,8 @@ impl Task {
             reply: [const { AtomicU64::new(0) }; 4],
             run_slot: SlotCell::new(run_slot),
             sleep_slot: SlotCell::new(sleep_slot),
+            filed_at: AtomicU64::new(0),
+            adoption: Adoption::new(),
             parked: SlotCell::empty(),
             rt: AtomicU32::new(0),
             entity_rt: AtomicU32::new(0),
@@ -969,9 +999,9 @@ impl Task {
     ) -> Result<Task, AllocError> {
         let (run_slot, sleep_slot) = slots()?;
         Ok(Task {
-            #[cfg(ferrix_schedule = "edf")]
+            #[cfg(ferrix_sched_deadline = "edf_cbs")]
             reserved_on: core::sync::atomic::AtomicUsize::new(usize::MAX),
-            #[cfg(ferrix_schedule = "edf")]
+            #[cfg(ferrix_sched_deadline = "edf_cbs")]
             mask_before: crate::sync::SpinLock::new(None),
             id,
             name,
@@ -1024,6 +1054,8 @@ impl Task {
             reply: [const { AtomicU64::new(0) }; 4],
             run_slot: SlotCell::new(run_slot),
             sleep_slot: SlotCell::new(sleep_slot),
+            filed_at: AtomicU64::new(0),
+            adoption: Adoption::new(),
             parked: SlotCell::empty(),
             rt: AtomicU32::new(0),
             entity_rt: AtomicU32::new(0),
@@ -1522,11 +1554,6 @@ impl Task {
         self.affinity.contains(cpu)
     }
 
-    /// The processors it may run on.
-    pub(crate) fn affinity(&self) -> &CpuSet {
-        &self.affinity
-    }
-
     /// The slot of its scheduling domain, or `domains::EXEMPT`.
     pub(crate) fn domain_slot(&self) -> u8 {
         self.domain.load(Ordering::Acquire)
@@ -1557,6 +1584,14 @@ impl Task {
     /// queue it was taken off, in the switch away from it.
     pub(crate) fn take_evicted(&self) -> bool {
         self.evicted.swap(false, Ordering::Relaxed)
+    }
+
+    /// Store a new mask. Only `crate::sched::set_affinity`, under the lock
+    /// of the queue that owns it, with interrupts masked (L.sched.97); and
+    /// the boot check of the kernel-thread refusal's door for its own
+    /// kernel threads, by the same function.
+    pub(super) fn store_affinity(&self, set: CpuSet) {
+        self.affinity.write(set);
     }
 
     /// The queue that owns it.

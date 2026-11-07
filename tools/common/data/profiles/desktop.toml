@@ -12,7 +12,7 @@ buildable_from = "today"
 # exactly those whose tiers [flags] has present, which check-build-flags
 # holds both ways.
 modes = ["Throughput", "SoftRt"]
-image = { driver_updates = "absent", settings_writer = "present", slot_signing = "off" }
+image = { driver_updates = "absent", settings_writer = "present", slot_signing = "off", bad_frames = "choice" }
 # The families its loader accepts a slot manifest for (docs/SIGNING.md §1.4, §10.6).
 slot_families = ["x86_64-uefi-pc", "x86_64-n150", "aarch64-uefi-virt", "armv7a-uefi-virt", "armv7a-stm32mp157"]
 exceptions = []

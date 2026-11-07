@@ -2,7 +2,7 @@ use core::sync::atomic::AtomicBool;
 use core::sync::atomic::AtomicU32;
 use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering;
-use ferrix_sched::MAX_CPUS;
+use ferrix_sched_class::MAX_CPUS;
 use ferrix_sync::IrqControl;
 use ferrix_sync::IrqSpinLock;
 pub fn dispatch(irq: u32) {}

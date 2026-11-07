@@ -564,6 +564,8 @@ dependencies = [
  "ferrix-kernel-board-gs201-usb",
  "ferrix-kernel-board-stm32mp1",
  "ferrix-kernel-load",
+ "ferrix-kernel-logctl",
+ "ferrix-kernel-net-ring",
  "ferrix-kernel-sched-select",
  "ferrix-kernel-settings",
  "ferrix-linux-abi",
@@ -622,6 +624,7 @@ dependencies = [
  "ferrix-qr",
  "ferrix-sched-class",
  "ferrix-sched-fair",
+ "ferrix-sha256",
  "ferrix-sync",
  "ferrix-vdso",
  "ferrix-vfs",
@@ -648,6 +651,7 @@ dependencies = [
  "ferrix-paging",
  "ferrix-partition-desc",
  "ferrix-pci",
+ "ferrix-sched-class",
  "ferrix-sched-fair",
  "ferrix-smbios",
  "ferrix-sync",
@@ -699,6 +703,35 @@ dependencies = [
  "ferrix-vdso",
  "ferrix-vfs",
  "ferrix-vma",
+]
+
+[[package]]
+name = "ferrix-kernel-logctl"
+version = "0.1.0"
+dependencies = [
+ "ferrix-blkring",
+ "ferrix-kernel-core",
+ "ferrix-kernel-item",
+ "ferrix-linux-abi",
+ "ferrix-logctl",
+ "ferrix-native-abi",
+ "ferrix-sched-fair",
+]
+
+[[package]]
+name = "ferrix-kernel-net-ring"
+version = "0.1.0"
+dependencies = [
+ "ferrix-blkring",
+ "ferrix-bootinfo",
+ "ferrix-kernel-core",
+ "ferrix-kernel-load",
+ "ferrix-linux-abi",
+ "ferrix-native-abi",
+ "ferrix-net",
+ "ferrix-netring",
+ "ferrix-netwire",
+ "ferrix-sched-fair",
 ]
 
 [[package]]
@@ -757,7 +790,8 @@ dependencies = [
  "ferrix-pci",
  "ferrix-qr",
  "ferrix-rt",
- "ferrix-sched",
+ "ferrix-sched-class",
+ "ferrix-sched-fair",
  "ferrix-sha256",
  "ferrix-sync",
  "ferrix-vdso",
@@ -784,7 +818,8 @@ dependencies = [
  "ferrix-paging",
  "ferrix-pci",
  "ferrix-rt",
- "ferrix-sched",
+ "ferrix-sched-class",
+ "ferrix-sched-fair",
  "ferrix-smbios",
  "ferrix-sync",
  "ferrix-vfs",
@@ -828,7 +863,8 @@ dependencies = [
  "ferrix-procfs",
  "ferrix-renderctl",
  "ferrix-rt",
- "ferrix-sched",
+ "ferrix-sched-class",
+ "ferrix-sched-fair",
  "ferrix-seccomp",
  "ferrix-smbios",
  "ferrix-sndctl",
@@ -850,7 +886,8 @@ dependencies = [
  "ferrix-linux-abi",
  "ferrix-logctl",
  "ferrix-native-abi",
- "ferrix-sched",
+ "ferrix-sched-class",
+ "ferrix-sched-fair",
 ]
 
 [[package]]
@@ -865,7 +902,8 @@ dependencies = [
  "ferrix-native-abi",
  "ferrix-net",
  "ferrix-netring",
- "ferrix-sched",
+ "ferrix-sched-class",
+ "ferrix-sched-fair",
 ]
 
 [[package]]

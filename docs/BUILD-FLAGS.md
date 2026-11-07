@@ -411,7 +411,7 @@ profile.
 **The boot line**, printed early by every kernel:
 
 ```
-build profile=fast level=sc2 personality=user fs=server mitigations=on partition_speculation=partition ipc_fastpath=on restricted_fastpath=on kernel_memory=heap sched_dispatch=fixed sched_windows=absent sched_deadline=edf_cbs sched_realtime=absent sched_fair=absent checks=on
+build profile=fast level=none personality=user fs=server mitigations=on partition_speculation=partition ipc_fastpath=on restricted_fastpath=on kernel_memory=heap sched_dispatch=fixed sched_windows=absent sched_deadline=edf_cbs sched_realtime=absent sched_fair=eevdf checks=on
 ```
 
 The kernel computes every word of it from `cfg!` (rule 6). An ad-hoc build

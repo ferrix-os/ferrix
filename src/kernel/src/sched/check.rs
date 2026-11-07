@@ -218,6 +218,8 @@ pub fn run(topology: &Topology) -> Result<Report, &'static str> {
     a_waiter_drained_as_it_is_listed_is_woken(topology)?;
     super::mark_check::run(topology)?;
     super::deadline_check::run()?;
+    super::slice_check::run(topology)?;
+    super::affinity_check::run(topology)?;
     let realtime = super::rt_check::run()?;
     crate::console::println!("  sched    realtime {realtime}");
     let domains = super::domains_check::run()?;

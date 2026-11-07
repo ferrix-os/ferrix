@@ -5,7 +5,7 @@ use alloc::sync::Arc;
 use core::any::Any;
 use core::fmt;
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
-use ferrix_sched::CpuSet;
+use ferrix_sched_class::CpuSet;
 
 use crate::object::process::Host;
 use crate::sync::SpinLock;
@@ -59,7 +59,7 @@ pub struct Task {
     /// (`sched::lock_taken`). Only the thread itself reaches these.
     pub(crate) pending_up: AtomicBool,
     /// Whether it holds a reservation.
-    #[cfg(ferrix_schedule = "edf")]
+    #[cfg(ferrix_sched_deadline = "edf_cbs")]
     pub(crate) reserved: AtomicBool,
     /// In a sigreturn, whose capture wants only the processor's mask.
     pub(crate) sigreturning: AtomicBool,

@@ -28,9 +28,9 @@
 use alloc::sync::Arc;
 
 use ferrix_sched_class::{CpuLoad, Load, RtParams, SchedClass};
-use ferrix_sched_fair::{
-    Config, FairTier, JobPlan, StackTiers, Timeline, settle_job_fold, slice_for,
-};
+use ferrix_sched_fair::{Config, FairTier, StackTiers, Timeline, slice_for};
+#[cfg(ferrix_fast_ipc)]
+use ferrix_sched_fair::{JobPlan, settle_job_fold};
 
 use super::stack::{Stack, StackQueue};
 
@@ -287,14 +287,6 @@ const fn before(a: u64, b: u64) -> bool {
     (a.wrapping_sub(b) as i64) < 0
 }
 
-/// What a processor's queue holds, the one seam between the schedules (ledger 7088): the
-/// fair class alone, which is `present`'s and `desktop`'s, or reservations above it.
-#[cfg(not(ferrix_schedule = "edf"))]
-pub(crate) type Tier<T> = ferrix_sched::RunQueue<T>;
-/// See above.
-#[cfg(ferrix_schedule = "edf")]
-pub(crate) type Tier<T> = ferrix_sched_edf::OverFair<T>;
-
 /// One CPU's queue.
 #[derive(Debug)]
 pub(crate) struct CpuQueue {
@@ -459,8 +451,6 @@ impl CpuQueue {
         user: bool,
         extra: Option<(u32, i64)>,
     ) -> Option<(u32, u32)> {
-        #[cfg(ferrix_schedule = "edf")]
-        self.fair.note_time(now);
         self.account_load(now);
         let delta = now.saturating_sub(self.exec_start);
         self.exec_start = now;
@@ -821,6 +811,29 @@ impl CpuQueue {
         }
     }
 
+    /// Task `id`'s request as the fair class holds it, for stage 5's check of
+    /// slice requests (L.sched.107-108): its deadline less its virtual
+    /// runtime, its weight, what it asked for, whether it is running, and
+    /// the queue's slice now. `None` if it is not on this queue.
+    pub(crate) fn request_sample(&self, id: TaskId) -> Option<(i64, u32, u64, bool, u64)> {
+        let view = Stack::fair(&self.stack).get(id)?;
+        Some((
+            view.deadline.wrapping_sub(view.vruntime) as i64,
+            view.weight,
+            view.request_ns,
+            view.running,
+            Stack::fair(&self.stack).slice_ns(),
+        ))
+    }
+
+    /// Give a task a new slice request, whether it is running here, queued
+    /// here or neither (L.sched.107). Its own record is set either way; the
+    /// fair class keeps the deadline it has and measures the next with it.
+    pub(crate) fn set_request(&mut self, task: &Arc<Task>, request_ns: u64) {
+        task.set_request(request_ns);
+        let _ = Stack::set_request(&mut self.stack, task.id, request_ns);
+    }
+
     /// Take the running task out of the fair class, keeping what it needs to
     /// come back with.
     pub(crate) fn detach_current(&mut self) {
@@ -1009,16 +1022,32 @@ impl CpuQueue {
 
     /// The task another CPU should take from this one, if any may be moved.
     pub(crate) fn steal_candidate(&self, to: usize) -> Option<TaskId> {
-        // `may_run_on` is the one that matters now that affinity is a set:
-        // a task allowed on processors 0 and 1 must not be moved to 2 however
-        // idle 2 is. `is_pinned` stays because it says something different —
-        // a task with exactly one home should not be moved even *to* that
-        // home, since it is already there.
+        // `allowed` is the one that matters now that affinity is a set: a
+        // task allowed on processors 0 and 1 must not be moved to 2 however
+        // idle 2 is (L.sched.97; read exactly, under this queue's lock, the
+        // mask's writer's). `pinned` stays because it says something
+        // different -- a task with exactly one home should not be moved even
+        // *to* that home, since it is already there; one queued elsewhere is
+        // the pick push's (L.sched.98).
         // And its domain, which is `to`'s (D-2): asked under both queues'
         // locks, which `steal_from` holds.
         Stack::fair(&self.stack).latest_where(|task| {
-            !task.is_pinned()
-                && task.may_run_on(to)
+            !super::pinned(task)
+                && super::allowed(task, to)
+                && task.state() == RUNNABLE
+                && super::domains::admits(task, to)
+        })
+    }
+
+    /// A waiting real-time task processor `to` may take when this one goes
+    /// out of service (`docs/CORE-QUARANTINE.md`), by the rules
+    /// [`CpuQueue::steal_candidate`] applies to a fair one. A walk of the
+    /// tier above fair, never a steal: real-time tasks are not stolen
+    /// (`docs/SCHED-CLASSES.md` §9e, R5).
+    pub(crate) fn upper_evacuee(&self, to: usize) -> Option<TaskId> {
+        Stack::upper_waiting_where(&self.stack, |task| {
+            !super::pinned(task)
+                && super::allowed(task, to)
                 && task.state() == RUNNABLE
                 && super::domains::admits(task, to)
         })

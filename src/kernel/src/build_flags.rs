@@ -35,7 +35,7 @@ enum Values {
 }
 
 /// The profile, then the level, then every flag in the flag file's order.
-const FLAGS: [Flag; 21] = [
+const FLAGS: [Flag; 21 + 2 * cfg!(ferrix_personality = "user") as usize] = [
     Flag {
         name: "profile",
         values: Values::Cfg(&[
@@ -71,6 +71,7 @@ const FLAGS: [Flag; 21] = [
             (cfg!(ferrix_fs = "server"), "server"),
             (cfg!(ferrix_fs = "kernel"), "kernel"),
             (cfg!(ferrix_fs = "none"), "none"),
+            (cfg!(ferrix_fs = "lift"), "lift"),
         ]),
     },
     Flag {
@@ -163,26 +164,26 @@ const FLAGS: [Flag; 21] = [
     #[cfg(ferrix_personality = "user")]
     Flag {
         name: "fault_ahead",
-        values: &[
+        values: Values::Cfg(&[
             (cfg!(ferrix_fault_ahead = "off"), "off"),
             (cfg!(ferrix_fault_ahead = "on"), "on"),
             (
                 cfg!(ferrix_fault_ahead = "not_applicable"),
                 "not_applicable",
             ),
-        ],
+        ]),
     },
     #[cfg(ferrix_personality = "user")]
     Flag {
         name: "restricted_window",
-        values: &[
+        values: Values::Cfg(&[
             (cfg!(ferrix_restricted_window = "off"), "off"),
             (cfg!(ferrix_restricted_window = "on"), "on"),
             (
                 cfg!(ferrix_restricted_window = "not_applicable"),
                 "not_applicable",
             ),
-        ],
+        ]),
     },
     Flag {
         name: "smt",

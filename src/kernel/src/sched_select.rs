@@ -64,6 +64,7 @@ macro_rules! build_flag_word {
             cfg!(ferrix_fs = "server"),
             cfg!(ferrix_fs = "kernel"),
             cfg!(ferrix_fs = "none"),
+            cfg!(ferrix_fs = "lift"),
             cfg!(ferrix_mitigations = "on"),
             cfg!(ferrix_mitigations = "off"),
             cfg!(ferrix_partition_speculation = "exit"),
@@ -93,6 +94,12 @@ macro_rules! build_flag_word {
             cfg!(ferrix_program_barrier = "session"),
             cfg!(ferrix_ssbd = "always"),
             cfg!(ferrix_ssbd = "on_request"),
+            cfg!(ferrix_fault_ahead = "off"),
+            cfg!(ferrix_fault_ahead = "on"),
+            cfg!(ferrix_fault_ahead = "not_applicable"),
+            cfg!(ferrix_restricted_window = "off"),
+            cfg!(ferrix_restricted_window = "on"),
+            cfg!(ferrix_restricted_window = "not_applicable"),
             cfg!(ferrix_smt = "off"),
             cfg!(ferrix_smt = "stibp"),
             cfg!(ferrix_runtime_trades = "none"),
@@ -108,7 +115,7 @@ macro_rules! build_flag_word {
 /// [`build_flag_word!`]'s values as bits, the first lowest. More than 64
 /// values do not compile (D5): a value past the word would be one two
 /// crates could differ in unseen. With the scheduler's flags the word holds
-/// 51 (docs/BUILD-FLAGS.md).
+/// 61 (docs/BUILD-FLAGS.md).
 #[must_use]
 pub const fn flag_word(chosen: &[bool]) -> u64 {
     assert!(

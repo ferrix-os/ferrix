@@ -66,7 +66,7 @@ use core::alloc::Layout;
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 pub use affinity::{AffinityRefusal, effective_mask, set_affinity};
-use ferrix_sched::CpuSet;
+use ferrix_sched_class::CpuSet;
 pub use preempt::Preempt;
 pub use preempt::counting as records_kept;
 pub use task::{SleepSlot, Task, TaskId, UserThread};
@@ -131,7 +131,7 @@ fn new_task(
         in_restricted: core::sync::atomic::AtomicBool::new(false),
         thread_kept: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),
         pending_up: core::sync::atomic::AtomicBool::new(false),
-        #[cfg(ferrix_schedule = "edf")]
+        #[cfg(ferrix_sched_deadline = "edf_cbs")]
         reserved: core::sync::atomic::AtomicBool::new(false),
         sigreturning: core::sync::atomic::AtomicBool::new(false),
         reclaiming: core::sync::atomic::AtomicBool::new(false),
@@ -481,7 +481,7 @@ pub fn yield_now() {
     crate::sys::thread_yield();
 }
 /// The reservations, by the kernel's `THREAD_RESERVE` (`docs/microkernel/K9.md`).
-#[cfg(ferrix_schedule = "edf")]
+#[cfg(ferrix_sched_deadline = "edf_cbs")]
 pub mod reserve {
     use core::sync::atomic::Ordering;
     /// What a thread asks for: the kernel's words.

@@ -1122,7 +1122,8 @@ package FerrixSchedRequirements {
                 the woken readers are queued on the target and drained, and
                 it fires.";
             attribute :>> parent = "H.SCHED.18";
-            attribute :>> unit = ("sched::wake_at_home", "sched::rehome_blocked");
+            attribute :>> unit = ("sched::wake_at_home", "sched::rehome_blocked",
+                "sched::home_takes");
         }
         requirement <'L.sched.104'> evacuationLeavesNothingBehind : ItemLowLevel {
             attribute :>> statement = "A processor parking shall move every
@@ -1594,7 +1595,7 @@ package FerrixSchedRequirements {
                 its old tier. A task a processor runs, until the switch away from
                 it has saved its context, shall never be moved to another
                 processor or picked by one other than its own: move_onto and
-                pick_next stop the machine on one (FX-0537).";
+                pick_next stop the machine on one (FX-0540).";
             attribute :>> criterion = "The stage-5 move check on desktop: a fair
                 task made SCHED_FIFO while it spins beside another fair task takes
                 the processor from it, and given back to fair shares it again;
@@ -1602,7 +1603,7 @@ package FerrixSchedRequirements {
                 SCHED_FIFO and fair 200 times beside a waiting one, with
                 processors idle to steal, ends fair with no stop; its control,
                 the running task moved at the call with no decision asked for,
-                stops the machine with FX-0537 (three boots of three);
+                stops the machine with FX-0540 (three boots of three);
                 test-rtsched's chrt step reads each change back.";
             attribute :>> parent = "H.SCHED.21";
             attribute :>> unit = ("sched::set_policy",
@@ -1690,7 +1691,7 @@ package FerrixSchedRequirements {
                 placement and wake-affine checks still pass beside it.";
             attribute :>> parent = "H.SCHED.23";
             attribute :>> unit = ("sched::may_place", "sched::may_pull",
-                "sched::idle_allowed", "sched::pull_target", "sched::wake_onto", "sched::declines",
+                "sched::idle_allowed", "sched::pull_target", "sched::wake_onto",
                 "sched::place_on_idle", "sched::steal_work", "sched::balance",
                 "sched::queue::CpuQueue::steal_candidate", "sched::domains::steals",
                 "sched::domains::cpus_of", "sched::domains::count", "sched::spawn",
@@ -1724,7 +1725,7 @@ package FerrixSchedRequirements {
                 context.";
             attribute :>> criterion = "The stage-5 domain check on desktop, whose
                 spinners are running when the domain is made and when two of them
-                are admitted; FX-0537 stops the machine on a task moved while a
+                are admitted; FX-0540 stops the machine on a task moved while a
                 processor runs it.";
             attribute :>> parent = "H.SCHED.23";
             attribute :>> unit = ("sched::depart", "sched::finish_switch",
@@ -1756,7 +1757,7 @@ package FerrixSchedRequirements {
                 wake_at_home and wake_sleepers_placing.";
             attribute :>> parent = "H.SCHED.23";
             attribute :>> unit = ("sched::sent_to_domain", "sched::wake_at_home",
-                "sched::wake_sleepers_placing");
+                "sched::end_wake", "sched::wake_sleepers_placing");
         }
         requirement <'L.sched.146'> admissionMovesTheJob : ItemLowLevel {
             attribute :>> statement = "Admitting a job to the SoftRt domain shall

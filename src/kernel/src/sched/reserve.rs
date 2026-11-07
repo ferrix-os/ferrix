@@ -17,7 +17,7 @@
 use alloc::sync::Arc;
 use core::sync::atomic::Ordering;
 
-use ferrix_sched::CpuSet;
+use ferrix_sched_class::CpuSet;
 pub use ferrix_sched_edf::{Refusal, Reservation};
 
 use super::{Task, affinity, current, queue_of, this_cpu};

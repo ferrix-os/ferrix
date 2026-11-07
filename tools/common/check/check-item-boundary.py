@@ -2797,6 +2797,10 @@ def flag_file_problems(flags: dict) -> list[str]:
     return problems
 
 
+def judged_level(profile: dict) -> str | None:
+    """The level a profile's values are held to: its `target_level` while it
+    carries `level = "none"`, else its `level` (ledger 7011 LV.1)."""
+    return profile.get("target_level") or profile.get("level")
 FAMILY_FILE = ROOT / "tools" / "common" / "data" / "hardware-families.toml"
 _FAMILIES: dict | None = None
 

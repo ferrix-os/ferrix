@@ -640,6 +640,7 @@ const TASKS: &[&[Task]] = &[
     rustc::TASKS,
     seam::TASKS,
     seat::TASKS,
+    reserve::TASKS,
     rtsched::TASKS,
     sem::TASKS,
     serial::TASKS,
