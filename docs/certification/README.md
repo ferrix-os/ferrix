@@ -25,7 +25,7 @@ that does not exist.
 | Target | Standard | Verdict |
 |---|---|---|
 | EAL5+ | Common Criteria (ISO/IEC 15408) | **Not met.** Security Target and vulnerability analysis written, and the boundary has no upward reference left; blocked on design evidence at module granularity and an accredited laboratory. |
-| DAL C | DO-178C / ED-12C | **Not met.** Coverage of the item's kernel files is measured on every architecture, at 90.1% on x86-64, 89.9% on AArch64 and 84.5% on ARMv7-A, every other unreached statement argued or put down to absent hardware; the btrfs crates are not measured (F-56); planning data, requirements traceability and the 94, 144 and 163 statements that still need a test are not done. |
+| DAL C | DO-178C / ED-12C | **Not met.** Coverage of the item's kernel files is measured on every architecture, at 90.1% on x86-64, 89.9% on AArch64 and 84.5% on ARMv7-A (measured under rustc 1.97.1, carried), every other unreached statement argued or put down to absent hardware; the btrfs crates are not measured (F-56); planning data, requirements traceability and the 94, 144 and 163 statements that still need a test are not done. |
 | Class C | IEC 62304 | **Closest of the four.** No SOUP in the item; element-level safety analysis written. Blocked on a QMS and the integrator's risk file. |
 | SIL 2 | EN 50716:2023 | **Reachable.** Most of Annex A satisfied; generic software argument and application conditions written. Blocked on independent assessment. |
 
@@ -90,8 +90,8 @@ boundary.
 | Item product code | 79,079 lines: 64,788 in the kernel, 14,291 in the btrfs crates (2026-10-02) |
 | Uncertified load | 64,036 lines in the kernel (2026-10-02) |
 | In-kernel self-tests | 42,634 lines |
-| Statement coverage, certified item's kernel files | **90.1%** x86-64, **89.9%** AArch64, **84.5%** ARMv7-A; the btrfs crates are not measured (F-56) |
-| Statement coverage, core ring | 90.8% x86-64, 90.8% AArch64, 84.1% ARMv7-A |
+| Statement coverage, certified item's kernel files | **90.1%** x86-64, **89.9%** AArch64, **84.5%** ARMv7-A, measured under rustc 1.97.1, carried; the btrfs crates are not measured (F-56) |
+| Statement coverage, core ring | 90.8% x86-64, 90.8% AArch64, 84.1% ARMv7-A, measured under rustc 1.97.1, carried |
 | Unreached statements, kernel files | x86-64 762 — 438 argued, 227 hardware absent, **97 need a test**; AArch64 746 — 400, 201, **145**; ARMv7-A 1,131 — 557, 444, **130** |
 | SOUP in the item | **0** |
 | External crates, host-side | 21 |

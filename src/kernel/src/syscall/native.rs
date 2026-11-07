@@ -1287,7 +1287,12 @@ fn channel_write_read(caller: &dyn Host, a: &[u64; 6]) -> Result<(usize, [u64; 3
 /// past `count` zeroed ([`reply_words`]).
 pub fn sent_bytes(a: &[u64; 6]) -> [u8; nr::CHANNEL_WRITE_READ_BYTES] {
     let mut bytes = [0_u8; nr::CHANNEL_WRITE_READ_BYTES];
-    for (chunk, word) in bytes.chunks_exact_mut(size_of::<usize>()).zip(&a[2..5]) {
+    for (chunk, word) in bytes
+        .as_chunks_mut::<{ size_of::<usize>() }>()
+        .0
+        .iter_mut()
+        .zip(&a[2..5])
+    {
         // The word as the program held it: a `usize` in its registers,
         // the low half of the register on a 32-bit processor.
         chunk.copy_from_slice(&(*word as usize).to_ne_bytes());
@@ -1304,10 +1309,11 @@ pub fn words_of(bytes: &[u8], count: usize) -> [u64; 3] {
         to.copy_from_slice(from);
     }
     let mut words = [0_u64; 3];
-    for (word, chunk) in words.iter_mut().zip(held.chunks_exact(size_of::<usize>())) {
-        let mut raw = [0_u8; size_of::<usize>()];
-        raw.copy_from_slice(chunk);
-        *word = usize::from_ne_bytes(raw) as u64;
+    for (word, chunk) in words
+        .iter_mut()
+        .zip(held.as_chunks::<{ size_of::<usize>() }>().0)
+    {
+        *word = usize::from_ne_bytes(*chunk) as u64;
     }
     words
 }
@@ -1885,9 +1891,8 @@ fn copy_in(process: &Process, at: u64, count: usize) -> Result<Vec<u8>, Errno> {
 fn copy_in_handles(process: &Process, at: u64, count: usize) -> Result<Vec<Handle>, Errno> {
     let bytes = copy_in(process, at, count * HANDLE_BYTES)?;
     let mut handles = fallible::try_with_capacity(count).map_err(|_| status::NO_MEMORY)?;
-    for word in bytes.chunks_exact(HANDLE_BYTES) {
-        let word = <[u8; HANDLE_BYTES]>::try_from(word).map_err(|_| status::INVALID_ARGS)?;
-        fallible::push_within(&mut handles, Handle(u32::from_ne_bytes(word)))
+    for word in bytes.as_chunks::<HANDLE_BYTES>().0 {
+        fallible::push_within(&mut handles, Handle(u32::from_ne_bytes(*word)))
             .map_err(|_| status::INVALID_ARGS)?;
     }
     Ok(handles)
@@ -2381,11 +2386,11 @@ fn pager_query_dirty(
             _ => DIRTY_STATE_DIRTY,
         };
         let mut record = [0_u8; 24];
-        for (bytes, word) in
-            record
-                .chunks_exact_mut(8)
-                .zip([start * PAGE_SIZE, pages * PAGE_SIZE, code])
-        {
+        for (bytes, word) in record.as_chunks_mut::<8>().0.iter_mut().zip([
+            start * PAGE_SIZE,
+            pages * PAGE_SIZE,
+            code,
+        ]) {
             bytes.copy_from_slice(&word.to_ne_bytes());
         }
         let to = out.at.saturating_add(24 * at as u64);
@@ -2812,7 +2817,12 @@ fn job_get_quota(process: &Process, job: Handle, resource: u64, out: u64) -> Res
         }
     };
     let mut bytes = [0u8; 24];
-    for (chunk, value) in bytes.chunks_exact_mut(8).zip([used, limit, refused]) {
+    for (chunk, value) in bytes
+        .as_chunks_mut::<8>()
+        .0
+        .iter_mut()
+        .zip([used, limit, refused])
+    {
         chunk.copy_from_slice(&value.to_ne_bytes());
     }
     uaccess::copy_to_user(process.own_space(), out, &bytes).map_err(fault)?;
@@ -2858,7 +2868,7 @@ fn audit_read(
         read.id as u64,
         (read.id >> 64) as u64,
     ];
-    for (chunk, value) in words.chunks_exact_mut(8).zip(told) {
+    for (chunk, value) in words.as_chunks_mut::<8>().0.iter_mut().zip(told) {
         chunk.copy_from_slice(&value.to_ne_bytes());
     }
     uaccess::copy_to_user(process.own_space(), answer, &words).map_err(fault)?;
@@ -2923,7 +2933,7 @@ fn memory_scrub(
         u64::from(batch.stopped),
     ];
     let mut words = [0u8; types::MEMORY_SCRUB_ANSWER_WORDS * 8];
-    for (chunk, value) in words.chunks_exact_mut(8).zip(told) {
+    for (chunk, value) in words.as_chunks_mut::<8>().0.iter_mut().zip(told) {
         chunk.copy_from_slice(&value.to_ne_bytes());
     }
     uaccess::copy_to_user(process.own_space(), answer, &words).map_err(fault)?;
@@ -3460,7 +3470,9 @@ fn adopt_ticket(process: &Process, end: Handle, id: u64, out: u64) -> Result<usi
     let issuer = adopted.issuer();
     let mut bytes = [0_u8; size_of::<types::TicketIssuer>()];
     for (to, word) in bytes
-        .chunks_exact_mut(8)
+        .as_chunks_mut::<8>()
+        .0
+        .iter_mut()
         .zip([issuer.process(), issuer.job()])
     {
         to.copy_from_slice(&word.to_ne_bytes());
@@ -3941,7 +3953,7 @@ fn power_call(call: NativeCall, process: &Process, a: &[u64; 6]) -> Result<usize
         NativeCall::PowerRead => {
             let words = arch::power_read(&claim)?;
             let mut bytes = [0u8; 8 * POWER_READ_WORDS];
-            for (chunk, word) in bytes.chunks_exact_mut(8).zip(words) {
+            for (chunk, word) in bytes.as_chunks_mut::<8>().0.iter_mut().zip(words) {
                 chunk.copy_from_slice(&word.to_ne_bytes());
             }
             uaccess::copy_to_user(process.own_space(), a[1], &bytes).map_err(fault)?;

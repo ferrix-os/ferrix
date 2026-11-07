@@ -3,7 +3,7 @@ name = "ferrix-pkg"
 description = "Packages: an app's manifest, the record an installed package leaves, and the plan that installs a set of them (docs/APPS.md)"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 license.workspace = true
 publish = false
 

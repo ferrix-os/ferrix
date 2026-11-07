@@ -5,11 +5,6 @@
    "kind": "product",
    "stack": "task"
   },
-  "<ferrix_displayctl::message::Message>::decode": {
-   "frame": 4208,
-   "kind": "product",
-   "stack": "task"
-  },
   "<ferrix_fdt::Fdt>::for_each_lineage::<ferrix_kernel_core::discovery::tree::find_generic::{closure#1}>": {
    "frame": 6176,
    "kind": "product",
@@ -31,7 +26,7 @@
    "stack": "task"
   },
   "<ferrix_kernel_item::discovery::pci::Enumeration as ferrix_kernel_core::discovery::finder::Finder>::find": {
-   "frame": 4136,
+   "frame": 4208,
    "kind": "product",
    "stack": "task"
   },
@@ -41,7 +36,7 @@
    "stack": "task"
   },
   "<ferrix_kernel_load::fs::cgroupfs::reclaim_check::Group>::as_task::<core::result::Result<(), ferrix_linux_abi::errno::Errno>, ferrix_kernel_load::fs::cgroupfs::io_check::reads::{closure#0}>": {
-   "frame": 4152,
+   "frame": 4144,
    "kind": "check",
    "stack": "task"
   },
@@ -91,7 +86,7 @@
    "stack": "task"
   },
   "ferrix_kernel_core::device::check::check_input_functions": {
-   "frame": 17280,
+   "frame": 17320,
    "kind": "check",
    "stack": "boot"
   },
@@ -116,7 +111,7 @@
    "stack": "boot"
   },
   "ferrix_kernel_core::device::check::check_widening": {
-   "frame": 6496,
+   "frame": 8024,
    "kind": "check",
    "stack": "boot"
   },
@@ -161,7 +156,7 @@
    "stack": "task"
   },
   "ferrix_kernel_load::fs::netns_check::route_for_fill": {
-   "frame": 5272,
+   "frame": 5280,
    "kind": "check",
    "stack": "task"
   },
@@ -191,22 +186,22 @@
    "stack": "task"
   },
   "ferrix_kernel_load::interfaces::block_ring::driver_check::read_back": {
-   "frame": 9272,
+   "frame": 9264,
    "kind": "check",
    "stack": "task"
   },
   "ferrix_kernel_load::interfaces::block_ring::hop_check::reader_task": {
-   "frame": 4352,
+   "frame": 4360,
    "kind": "check",
    "stack": "task"
   },
   "ferrix_kernel_load::interfaces::block_ring::hop_check::run": {
-   "frame": 6144,
+   "frame": 6152,
    "kind": "check",
    "stack": "task"
   },
   "ferrix_kernel_load::interfaces::display::check::modes": {
-   "frame": 6936,
+   "frame": 6696,
    "kind": "check",
    "stack": "task"
   },
@@ -226,7 +221,7 @@
    "stack": "task"
   },
   "ferrix_kernel_load::syscall::check::check_a_signal_is_judged_against_its_takers_mask": {
-   "frame": 4232,
+   "frame": 4224,
    "kind": "check",
    "stack": "task"
   },
@@ -238,12 +233,12 @@
  },
  "desktop/release": {
   "<ferrix_kernel_core::discovery::tree::VirtioMmio as ferrix_kernel_core::discovery::finder::Finder>::find": {
-   "frame": 4208,
+   "frame": 4200,
    "kind": "product",
    "stack": "task"
   },
   "<ferrix_kernel_item::discovery::pci::Enumeration as ferrix_kernel_core::discovery::finder::Finder>::find": {
-   "frame": 4200,
+   "frame": 4168,
    "kind": "product",
    "stack": "task"
   },
@@ -258,12 +253,12 @@
    "stack": "task"
   },
   "<ferrix_kernel_load::fs::netns_check::Nl>::links": {
-   "frame": 4264,
+   "frame": 4344,
    "kind": "check",
    "stack": "task"
   },
   "<ferrix_kernel_load::net::netlink::check::Netlink>::talk": {
-   "frame": 4520,
+   "frame": 4528,
    "kind": "check",
    "stack": "task"
   },
@@ -288,17 +283,17 @@
    "stack": "task"
   },
   "ferrix_kernel::kmain": {
-   "frame": 11608,
+   "frame": 12208,
    "kind": "product",
    "stack": "boot"
   },
   "ferrix_kernel_core::device::check::check_input_functions": {
-   "frame": 10160,
+   "frame": 9736,
    "kind": "check",
    "stack": "boot"
   },
   "ferrix_kernel_core::device::check::check_intel_gpu_yield": {
-   "frame": 6152,
+   "frame": 6256,
    "kind": "check",
    "stack": "boot"
   },
@@ -308,7 +303,7 @@
    "stack": "boot"
   },
   "ferrix_kernel_core::device::check::check_lending_intel": {
-   "frame": 12912,
+   "frame": 10984,
    "kind": "check",
    "stack": "boot"
   },
@@ -348,7 +343,7 @@
    "stack": "task"
   },
   "ferrix_kernel_load::fs::btrfs::mount": {
-   "frame": 4976,
+   "frame": 4992,
    "kind": "product",
    "stack": "task"
   },
@@ -358,17 +353,17 @@
    "stack": "task"
   },
   "ferrix_kernel_load::fs::cgroupfs::io_check::reads": {
-   "frame": 4168,
+   "frame": 4160,
    "kind": "check",
    "stack": "task"
   },
   "ferrix_kernel_load::fs::cgroupfs::reclaim_check::tmpfs_read_throttled": {
-   "frame": 4240,
+   "frame": 4248,
    "kind": "check",
    "stack": "task"
   },
   "ferrix_kernel_load::fs::kmem_check::routes::{closure#0}": {
-   "frame": 5280,
+   "frame": 5288,
    "kind": "check",
    "stack": "task"
   },
@@ -398,12 +393,12 @@
    "stack": "task"
   },
   "ferrix_kernel_load::interfaces::display::check::pages": {
-   "frame": 6568,
+   "frame": 5400,
    "kind": "check",
    "stack": "task"
   },
   "ferrix_kernel_load::interfaces::display::run": {
-   "frame": 8200,
+   "frame": 8144,
    "kind": "product",
    "stack": "task"
   },
@@ -418,12 +413,12 @@
    "stack": "task"
   },
   "ferrix_kernel_load::syscall::check::check_a_pty_as_a_serial_port": {
-   "frame": 4872,
+   "frame": 4856,
    "kind": "check",
    "stack": "task"
   },
   "ferrix_kernel_load::syscall::check::check_process_create_reads_an_image_past_a_heap_block": {
-   "frame": 4216,
+   "frame": 4248,
    "kind": "check",
    "stack": "task"
   }
@@ -431,11 +426,6 @@
  "present/dev": {
   "<ferrix_btrfs::volume::Volume<alloc::boxed::Box<[ferrix_btrfs::chunk::ChunkMapEntry]>>>::open::<ferrix_btrfs_vfs::cache::Cached<ferrix_kernel_load::fs::btrfs::Disk>>": {
    "frame": 4616,
-   "kind": "product",
-   "stack": "task"
-  },
-  "<ferrix_displayctl::message::Message>::decode": {
-   "frame": 4208,
    "kind": "product",
    "stack": "task"
   },
@@ -460,7 +450,7 @@
    "stack": "task"
   },
   "<ferrix_kernel_item::discovery::pci::Enumeration as ferrix_kernel_core::discovery::finder::Finder>::find": {
-   "frame": 4136,
+   "frame": 4208,
    "kind": "product",
    "stack": "task"
   },
@@ -470,7 +460,7 @@
    "stack": "task"
   },
   "<ferrix_kernel_load::fs::cgroupfs::reclaim_check::Group>::as_task::<core::result::Result<(), ferrix_linux_abi::errno::Errno>, ferrix_kernel_load::fs::cgroupfs::io_check::reads::{closure#0}>": {
-   "frame": 4152,
+   "frame": 4144,
    "kind": "check",
    "stack": "task"
   },
@@ -520,7 +510,7 @@
    "stack": "task"
   },
   "ferrix_kernel_core::device::check::check_input_functions": {
-   "frame": 17280,
+   "frame": 17320,
    "kind": "check",
    "stack": "boot"
   },
@@ -545,7 +535,7 @@
    "stack": "boot"
   },
   "ferrix_kernel_core::device::check::check_widening": {
-   "frame": 6496,
+   "frame": 8024,
    "kind": "check",
    "stack": "boot"
   },
@@ -590,7 +580,7 @@
    "stack": "task"
   },
   "ferrix_kernel_load::fs::netns_check::route_for_fill": {
-   "frame": 5272,
+   "frame": 5280,
    "kind": "check",
    "stack": "task"
   },
@@ -620,22 +610,22 @@
    "stack": "task"
   },
   "ferrix_kernel_load::interfaces::block_ring::driver_check::read_back": {
-   "frame": 9272,
+   "frame": 9264,
    "kind": "check",
    "stack": "task"
   },
   "ferrix_kernel_load::interfaces::block_ring::hop_check::reader_task": {
-   "frame": 4352,
+   "frame": 4360,
    "kind": "check",
    "stack": "task"
   },
   "ferrix_kernel_load::interfaces::block_ring::hop_check::run": {
-   "frame": 6144,
+   "frame": 6152,
    "kind": "check",
    "stack": "task"
   },
   "ferrix_kernel_load::interfaces::display::check::modes": {
-   "frame": 6936,
+   "frame": 6696,
    "kind": "check",
    "stack": "task"
   },
@@ -655,7 +645,7 @@
    "stack": "task"
   },
   "ferrix_kernel_load::syscall::check::check_a_signal_is_judged_against_its_takers_mask": {
-   "frame": 4232,
+   "frame": 4224,
    "kind": "check",
    "stack": "task"
   },
@@ -667,12 +657,12 @@
  },
  "present/release": {
   "<ferrix_kernel_core::discovery::tree::VirtioMmio as ferrix_kernel_core::discovery::finder::Finder>::find": {
-   "frame": 4208,
+   "frame": 4200,
    "kind": "product",
    "stack": "task"
   },
   "<ferrix_kernel_item::discovery::pci::Enumeration as ferrix_kernel_core::discovery::finder::Finder>::find": {
-   "frame": 4200,
+   "frame": 4168,
    "kind": "product",
    "stack": "task"
   },
@@ -687,12 +677,12 @@
    "stack": "task"
   },
   "<ferrix_kernel_load::fs::netns_check::Nl>::links": {
-   "frame": 4264,
+   "frame": 4344,
    "kind": "check",
    "stack": "task"
   },
   "<ferrix_kernel_load::net::netlink::check::Netlink>::talk": {
-   "frame": 4520,
+   "frame": 4528,
    "kind": "check",
    "stack": "task"
   },
@@ -717,17 +707,17 @@
    "stack": "task"
   },
   "ferrix_kernel::kmain": {
-   "frame": 11608,
+   "frame": 12208,
    "kind": "product",
    "stack": "boot"
   },
   "ferrix_kernel_core::device::check::check_input_functions": {
-   "frame": 10160,
+   "frame": 9736,
    "kind": "check",
    "stack": "boot"
   },
   "ferrix_kernel_core::device::check::check_intel_gpu_yield": {
-   "frame": 6152,
+   "frame": 6256,
    "kind": "check",
    "stack": "boot"
   },
@@ -737,7 +727,7 @@
    "stack": "boot"
   },
   "ferrix_kernel_core::device::check::check_lending_intel": {
-   "frame": 12912,
+   "frame": 10984,
    "kind": "check",
    "stack": "boot"
   },
@@ -777,7 +767,7 @@
    "stack": "task"
   },
   "ferrix_kernel_load::fs::btrfs::mount": {
-   "frame": 4976,
+   "frame": 4992,
    "kind": "product",
    "stack": "task"
   },
@@ -787,17 +777,17 @@
    "stack": "task"
   },
   "ferrix_kernel_load::fs::cgroupfs::io_check::reads": {
-   "frame": 4168,
+   "frame": 4160,
    "kind": "check",
    "stack": "task"
   },
   "ferrix_kernel_load::fs::cgroupfs::reclaim_check::tmpfs_read_throttled": {
-   "frame": 4240,
+   "frame": 4248,
    "kind": "check",
    "stack": "task"
   },
   "ferrix_kernel_load::fs::kmem_check::routes::{closure#0}": {
-   "frame": 5280,
+   "frame": 5288,
    "kind": "check",
    "stack": "task"
   },
@@ -827,12 +817,12 @@
    "stack": "task"
   },
   "ferrix_kernel_load::interfaces::display::check::pages": {
-   "frame": 6568,
+   "frame": 5400,
    "kind": "check",
    "stack": "task"
   },
   "ferrix_kernel_load::interfaces::display::run": {
-   "frame": 8200,
+   "frame": 8144,
    "kind": "product",
    "stack": "task"
   },
@@ -847,12 +837,12 @@
    "stack": "task"
   },
   "ferrix_kernel_load::syscall::check::check_a_pty_as_a_serial_port": {
-   "frame": 4872,
+   "frame": 4856,
    "kind": "check",
    "stack": "task"
   },
   "ferrix_kernel_load::syscall::check::check_process_create_reads_an_image_past_a_heap_block": {
-   "frame": 4216,
+   "frame": 4248,
    "kind": "check",
    "stack": "task"
   }

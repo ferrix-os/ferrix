@@ -3,7 +3,7 @@ name = "ferrix-linux-abi"
 description = "Linux syscall ABI numbers, errno values and structure layouts"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 license.workspace = true
 publish = false
 

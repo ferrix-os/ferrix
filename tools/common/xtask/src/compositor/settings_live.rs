@@ -131,7 +131,9 @@ pub(super) fn test_settings_live(arch: Arch, programs: &Programs, args: &Args) -
         let red = |image: &crate::display::Image| {
             image
                 .pixels
-                .chunks_exact(3)
+                .as_chunks::<3>()
+                .0
+                .iter()
                 .filter(|p| matches!(p, [r, g, b] if *r > 230 && *g < 30 && *b < 30))
                 .count()
         };
@@ -144,8 +146,10 @@ pub(super) fn test_settings_live(arch: Arch, programs: &Programs, args: &Args) -
         }
         let top_changed = appearance
             .pixels
-            .chunks_exact(3)
-            .zip(windows.pixels.chunks_exact(3))
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .zip(windows.pixels.as_chunks::<3>().0)
             .take(appearance.width * 16)
             .filter(|(a, b)| a != b)
             .count();

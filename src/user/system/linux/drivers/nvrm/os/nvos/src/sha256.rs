@@ -89,10 +89,8 @@ const H0: [u32; 8] = [
 /// Fold one 64-byte block into `state`.
 fn block(state: &mut [u32; 8], chunk: &[u8; 64]) {
     let mut w = [0_u32; 64];
-    for (word, bytes) in w.iter_mut().zip(chunk.chunks_exact(4)) {
-        let mut four = [0_u8; 4];
-        four.copy_from_slice(bytes);
-        *word = u32::from_be_bytes(four);
+    for (word, bytes) in w.iter_mut().zip(chunk.as_chunks::<4>().0) {
+        *word = u32::from_be_bytes(*bytes);
     }
     for index in 16..64 {
         let at = |back: usize| w.get(index - back).copied().unwrap_or(0);
@@ -132,15 +130,12 @@ fn block(state: &mut [u32; 8], chunk: &[u8; 64]) {
 /// The SHA-256 digest of `data`.
 pub fn digest(data: &[u8]) -> [u8; 32] {
     let mut state = H0;
-    let mut chunks = data.chunks_exact(64);
-    for chunk in &mut chunks {
-        let mut whole = [0_u8; 64];
-        whole.copy_from_slice(chunk);
-        block(&mut state, &whole);
+    let (chunks, tail) = data.as_chunks::<64>();
+    for chunk in chunks {
+        block(&mut state, chunk);
     }
     // The tail, the 0x80 marker and the length in bits: one block, or two
     // when fewer than nine bytes are left after the tail.
-    let tail = chunks.remainder();
     let mut last = [0_u8; 128];
     last.get_mut(..tail.len())
         .unwrap_or_default()
@@ -154,13 +149,13 @@ pub fn digest(data: &[u8]) -> [u8; 32] {
     last.get_mut(end - 8..end)
         .unwrap_or_default()
         .copy_from_slice(&bits);
-    for chunk in last.chunks_exact(64).take(blocks) {
+    for chunk in last.as_chunks::<64>().0.iter().take(blocks) {
         let mut whole = [0_u8; 64];
         whole.copy_from_slice(chunk);
         block(&mut state, &whole);
     }
     let mut out = [0_u8; 32];
-    for (bytes, word) in out.chunks_exact_mut(4).zip(state) {
+    for (bytes, word) in out.as_chunks_mut::<4>().0.iter_mut().zip(state) {
         bytes.copy_from_slice(&word.to_be_bytes());
     }
     out

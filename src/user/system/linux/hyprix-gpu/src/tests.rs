@@ -52,7 +52,7 @@ fn difference(one: &[u8], other: &[u8], step: u8) -> (usize, u8) {
     assert_eq!(one.len(), other.len());
     let mut count = 0;
     let mut furthest = 0;
-    for (a, b) in one.chunks_exact(4).zip(other.chunks_exact(4)) {
+    for (a, b) in one.as_chunks::<4>().0.iter().zip(other.as_chunks::<4>().0) {
         let apart = a
             .iter()
             .zip(b)

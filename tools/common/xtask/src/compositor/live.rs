@@ -1041,7 +1041,7 @@ fn distinct_colours(path: &Path) -> Result<usize> {
     }
     let pixels = bytes.get(at + 1..).unwrap_or_default();
     let mut seen = std::collections::HashSet::new();
-    for pixel in pixels.chunks_exact(3).step_by(7) {
+    for pixel in pixels.as_chunks::<3>().0.iter().step_by(7) {
         let _ = seen.insert(pixel.to_vec());
         if seen.len() >= 4096 {
             break;

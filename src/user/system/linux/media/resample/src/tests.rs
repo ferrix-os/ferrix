@@ -110,7 +110,7 @@ fn stereo_channels_stay_apart() {
     let input: Vec<f32> = (0..4410).flat_map(|_| [0.5, -0.5]).collect();
     let mut out = Vec::new();
     resampler.process(&input, &mut out);
-    for frame in out.chunks_exact(2).skip(40) {
+    for frame in out.as_chunks::<2>().0.iter().skip(40) {
         assert!(
             (frame[0] - 0.5).abs() < 1e-3 && (frame[1] + 0.5).abs() < 1e-3,
             "{frame:?}"

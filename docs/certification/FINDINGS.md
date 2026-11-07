@@ -828,7 +828,7 @@ test can be written against and an assessor can check.
 ## D. Tools
 
 ### F-17 — the compiler is unqualified
-**Major.** `rustc 1.97.1`, pinned exactly, no unstable features in `src/kernel/` or
+**Major.** `rustc 1.99.1` (1.97.1 until 2026-11-06), pinned exactly, no unstable features in `src/kernel/` or
 `src/boot/common/uefi/` — good practice, and not qualification evidence.
 
 Ferrocene is the concrete route: a qualified Rust toolchain with evidence
@@ -836,6 +836,16 @@ packages for IEC 62304 Class C, IEC 61508 SIL 4 and ISO 26262 ASIL D. Adopting
 it means pinning a Ferrocene-released rustc and checking the qualified target
 list; `armv7a-none-eabi` and the three UEFI targets are the ones expected to
 fall outside it.
+
+**The gap widened on 2026-11-06** (ledger 7667 R.8). The product is now
+built by rustc 1.99.1, while Ferrocene's newest release, 26.05, is Rust
+1.95: four minor versions behind the pin, where it was two under 1.97.1.
+`cargo xtask check-ferrocene` builds the kernel and the item's crates with
+upstream 1.95.0 and so shows only that the source compiles there, not that
+the object code Ferrocene would make is the product's. The gap's present
+cost in the source is three `#[expect(clippy::manual_isolate_lowest_one)]`
+(ferrix-pci's BAR sizing and two in `arch/x86_64/powerctl/check.rs`), kept
+because `isolate_lowest_one` is newer than 1.95. F-17 stays open.
 
 ### F-18 — six code generators produce product code and are unqualified
 **Moderate.** `gen-wayland-protocol.py`, `gen-xkb-tables.py`, `gen-font.py`,
@@ -1664,7 +1674,8 @@ and there is no `#[alloc_error_handler]` in the tree, so a `Box::new`, `Arc::new
 handler and aborted. `src/lib/kernel/heap` reported `OutOfMemory` properly, and the
 `GlobalAlloc` adapter above it threw the distinction away. The obvious fix is
 unavailable: `#[alloc_error_handler]`, `Box::try_new`, `Arc::try_new` and
-`BTreeMap::try_insert` are unstable, verified against the pinned 1.97.1, and
+`BTreeMap::try_insert` are unstable, verified against the pinned 1.97.1 and
+again against 1.99.1 (2026-11-06), and
 `src/kernel/` uses no unstable features. Only `Vec::try_reserve` is stable.
 
 The count also missed the worst of it. The scheduler allocated a tree node on

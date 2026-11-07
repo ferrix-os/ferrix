@@ -441,7 +441,6 @@ mod tests {
     use rustls::crypto::hash::Hash as _;
     use rustls::crypto::hmac::Hmac as _;
     use rustls::crypto::tls13::Hkdf as _;
-    use rustls::pki_types::SignatureVerificationAlgorithm as _;
 
     use super::*;
 

@@ -965,10 +965,8 @@ fn fill(pixmap: &mut tiny_skia::Pixmap, (x, y, w, h): (f32, f32, f32, f32), colo
 /// A tiny-skia pixmap as premultiplied `ARGB8888` in memory order.
 fn argb(pixmap: &tiny_skia::Pixmap) -> Vec<u8> {
     let mut out = Vec::with_capacity(pixmap.data().len());
-    for pixel in pixmap.data().chunks_exact(4) {
-        if let [r, g, b, a] = *pixel {
-            out.extend([b, g, r, a]);
-        }
+    for &[r, g, b, a] in pixmap.data().as_chunks::<4>().0 {
+        out.extend([b, g, r, a]);
     }
     out
 }

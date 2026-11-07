@@ -16,7 +16,7 @@ name = "hyprix-gpu"
 description = "The compositor's GPU painter as a helper process: hyprix's display lists drawn by Vulkan into dmabufs"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 license = "MIT"
 publish = false
 

@@ -3,7 +3,7 @@ name = "ferrix-usb-device"
 description = "The device side of USB: chapter 9's standard requests and a CDC-ACM serial port, for any controller"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 license.workspace = true
 publish = false
 

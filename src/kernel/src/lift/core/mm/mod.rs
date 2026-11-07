@@ -191,7 +191,7 @@ static FOREIGN_NEXT: AtomicU64 = AtomicU64::new(ARENA_FRAMES);
 /// so a card's buffer churn ends here, and an answer of no memory.
 pub fn foreign_window(pages: u64) -> Option<(Frame, u64)> {
     let frame = FOREIGN_NEXT
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
             let end = next.checked_add(pages)?;
             (end <= ARENA_FRAMES + FOREIGN_FRAMES).then_some(end)
         })

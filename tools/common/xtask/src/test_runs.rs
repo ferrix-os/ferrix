@@ -4,8 +4,8 @@
 //!
 //! `cargo test` runs each test binary after the last, and nothing else in
 //! `check` starts until the last has ended: 33 to 68 s in the gate, most of
-//! it two btrfs crates. cargo 1.97 does not hold its build lock while test
-//! binaries run, so `check` can build the doc tests, the documentation and
+//! it two btrfs crates. cargo does not hold its build lock while test
+//! binaries run (1.97, and 1.99 since 2026-11-06), so `check` can build the doc tests, the documentation and
 //! the cross-target clippies meanwhile, and the binaries can run beside each
 //! other.
 //!

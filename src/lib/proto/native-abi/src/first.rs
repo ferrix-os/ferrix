@@ -23,9 +23,11 @@ pub const READY_MAGIC: u32 = u32::from_le_bytes(*b"FXRY");
 #[must_use]
 pub fn encode(images: u32, devices: u32) -> [u8; FIRST_BYTES] {
     let mut out = [0; FIRST_BYTES];
-    for (slot, word) in out
-        .chunks_exact_mut(4)
-        .zip([FIRST_MAGIC, FIRST_VERSION, images, devices])
+    for (slot, word) in
+        out.as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip([FIRST_MAGIC, FIRST_VERSION, images, devices])
     {
         slot.copy_from_slice(&word.to_le_bytes());
     }

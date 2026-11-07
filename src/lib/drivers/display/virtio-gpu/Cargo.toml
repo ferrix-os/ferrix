@@ -3,7 +3,7 @@ name = "ferrix-virtio-gpu"
 description = "A virtio-gpu 2D driver, as logic over a transport and DMA memory it is handed"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 license.workspace = true
 publish = false
 

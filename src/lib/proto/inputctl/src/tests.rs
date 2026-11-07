@@ -688,7 +688,9 @@ fn drain(queue: &mut Queue<Vec<Stamped>>) -> Vec<(u64, RawEvent)> {
         return Vec::new();
     };
     out[..len]
-        .chunks_exact(24)
+        .as_chunks::<24>()
+        .0
+        .iter()
         .map(|bytes| {
             let event = Event::read(Width::Bits64, bytes).expect("24 bytes");
             (

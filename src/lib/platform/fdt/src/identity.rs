@@ -305,8 +305,8 @@ fn put_reference(out: &mut Out<'_>, reference: &Reference<'_>) -> bool {
         && out.put(&[0, 0])
         && out.put(name)
         && out.pad();
-    for cell in reference.cells.chunks_exact(4) {
-        let word = cell.try_into().map_or(0, u32::from_be_bytes);
+    for cell in reference.cells.as_chunks::<4>().0 {
+        let word = u32::from_be_bytes(*cell);
         ok = ok && out.put(&word.to_le_bytes());
     }
     ok
@@ -560,8 +560,10 @@ impl<'r> RecordReference<'r> {
     /// The specifier's cells, uninterpreted.
     pub fn cells(&self) -> impl Iterator<Item = u32> + use<'r> {
         self.cells
-            .chunks_exact(4)
-            .map(|word| word.try_into().map_or(0, u32::from_le_bytes))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|word| u32::from_le_bytes(*word))
     }
 
     /// Whether it names an enabled node, whole.

@@ -432,7 +432,7 @@ impl Inode for CardFile {
             bytes
         };
         let mut state = self.state.lock();
-        for chunk in flips.chunks_exact(EventVblank::SIZE).rev() {
+        for chunk in flips.as_chunks::<{ EventVblank::SIZE }>().0.iter().rev() {
             let mut event = [0u8; 32];
             event.copy_from_slice(chunk);
             state.events.push_front(event);
@@ -1980,7 +1980,10 @@ fn dirty_rect(
         .map_err(|_| Errno::EFAULT)?;
     let (mut left, mut top, mut right, mut bottom) = (u32::MAX, u32::MAX, 0, 0);
     for clip in bytes
-        .chunks_exact(ClipRect::SIZE)
+        .as_chunks::<{ ClipRect::SIZE }>()
+        .0
+        .iter()
+        .map(<[u8; ClipRect::SIZE]>::as_slice)
         .filter_map(ClipRect::read)
     {
         left = left.min(u32::from(clip.x1));

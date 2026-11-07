@@ -18,7 +18,9 @@ fn main() {
         .collect();
     let pairs: Vec<(u32, u32)> = if words.len() >= 2 {
         words
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .filter_map(|pair| Some((*pair.first()?, *pair.get(1)?)))
             .collect()
     } else {

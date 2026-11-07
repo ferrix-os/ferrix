@@ -3,7 +3,7 @@ name = "ferrix-stm32-display"
 description = "The STM32MP15 display pipeline as logic over registers: LTDC, the I2C controller and the SiI9022 HDMI bridge a DK board wires to it"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 license.workspace = true
 publish = false
 

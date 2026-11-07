@@ -100,7 +100,8 @@ memory for it, is one console line, and the 128 KiB log is kept.
 
 The obvious fix is unavailable. `#[alloc_error_handler]` is an unstable
 library feature (rust-lang #51540), and so are `Box::try_new`, `Arc::try_new`
-and `BTreeMap::try_insert`, verified against the pinned 1.97.1. `src/kernel/` and
+and `BTreeMap::try_insert`, verified against the pinned 1.97.1 and again
+against 1.99.1 (2026-11-06). `src/kernel/` and
 `src/boot/common/uefi/` use no unstable features by policy, and `TOOLS.md` leans on that.
 Only `Vec::try_reserve` is stable. So fallible construction is built from
 stable parts, in two kinds:
@@ -2747,6 +2748,15 @@ one small object (`fallible::try_arc`, `ENOMEM` leaves the device unarmed).
 `docs/SIGNING.md` §2.3 and §8.5. These are the verifier's own bounds,
 `L.sigverify.11` (time) and `L.sigverify.12` (stack). No kernel path
 reaches the verifier: the loader, init and `devmgr` call it from S4 on.
+
+**Measured under Rust 1.97.1; to be re-taken under 1.99.1** (2026-11-06,
+the toolchain move). Both board measurements below were built with Rust
+1.97.1, and since then `src/lib/crypto/sha256/src/lib.rs` has changed too:
+`finish` and `compress` read their words through `as_chunks` in place of
+`chunks_exact`, for clippy 1.99's `chunks_exact_to_as_chunks`, with the
+rounds untouched. So neither the build nor the source is the one measured.
+The figures stand as measured under 1.97.1 until a DK1 run under 1.99.1
+re-takes them; that board run is the product owner's to schedule.
 
 Memory. **No allocation.** Every buffer is one the caller lends, the
 largest being the 4 KiB block. The verifier's own state is a few SHA-256

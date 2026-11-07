@@ -346,12 +346,8 @@ impl State {
         transfer.partial.push(word);
         transfer.left -= 1;
         if transfer.partial.len() == BLOCK_WORDS {
-            let words: [u32; BLOCK_WORDS] = transfer
-                .partial
-                .drain(..)
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap();
+            let words: [u32; BLOCK_WORDS] =
+                core::mem::take(&mut transfer.partial).try_into().unwrap();
             let at = transfer.block as usize;
             transfer.block += 1;
             self.blocks[at] = words;

@@ -138,10 +138,8 @@ fn words_of(bytes: &[u8]) -> [u64; 3] {
         start.copy_from_slice(bytes);
     }
     let mut words = [0_u64; 3];
-    for (word, chunk) in words.iter_mut().zip(padded.chunks_exact(WORD)) {
-        let mut raw = [0_u8; WORD];
-        raw.copy_from_slice(chunk);
-        *word = usize::from_ne_bytes(raw) as u64;
+    for (word, chunk) in words.iter_mut().zip(padded.as_chunks::<WORD>().0) {
+        *word = usize::from_ne_bytes(*chunk) as u64;
     }
     words
 }

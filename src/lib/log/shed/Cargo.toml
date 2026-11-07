@@ -3,7 +3,7 @@ name = "ferrix-log-shed"
 description = "Shedding under load by severity: the least severe line goes first, and every shed is said"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 license.workspace = true
 publish = false
 

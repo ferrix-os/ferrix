@@ -200,9 +200,8 @@ impl fmt::Display for Ipv6 {
             return write!(formatter, "::ffff:{four}");
         }
         let mut groups = [0_u16; 8];
-        for (slot, pair) in groups.iter_mut().zip(self.0.chunks_exact(2)) {
-            *slot =
-                u16::from(*pair.first().unwrap_or(&0)) << 8 | u16::from(*pair.get(1).unwrap_or(&0));
+        for (slot, pair) in groups.iter_mut().zip(self.0.as_chunks::<2>().0) {
+            *slot = u16::from_be_bytes(*pair);
         }
         let (start, len) = longest_zero_run(&groups);
         let mut first = true;

@@ -2009,7 +2009,8 @@ an `unsafe fn` the id opens the first line of its `# Safety` section:
 `/// (TRANSLATE) The caller guarantees ...`. Not the tidier
 `// SAFETY(DEVICE):` -- clippy's `undocumented_unsafe_blocks`, which the
 workspace denies, looks for the text `SAFETY:` and refused a block commented
-that way when it was tried (rustc 1.97.1). One site may carry two ids,
+that way when it was tried (rustc 1.97.1, and again on 1.99.1, 2026-11-06).
+One site may carry two ids,
 `(FRAME, DMA)`, when its one operation meets both; none does today.
 
 Putting the id on the existing line keeps every edit comment-only and moves

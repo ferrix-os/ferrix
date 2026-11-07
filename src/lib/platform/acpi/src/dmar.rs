@@ -461,10 +461,11 @@ impl<'a> DeviceScope<'a> {
     /// The path's `(device, function)` hops, in order. A trailing odd byte is
     /// not a hop.
     pub fn path(&self) -> impl Iterator<Item = (u8, u8)> + 'a {
-        self.path.chunks_exact(2).filter_map(|hop| match *hop {
-            [device, function] => Some((device, function)),
-            _ => None,
-        })
+        self.path
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&[device, function]| (device, function))
     }
 
     /// Whether the path is a whole number of hops, at least one. A path with

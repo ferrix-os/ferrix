@@ -604,8 +604,13 @@ pub(crate) fn warn_of_hpet(reason: HpetReason) {
     };
     let leaf = __cpuid(HYPERVISOR_LEAF);
     let mut name = [0u8; 12];
-    for (chunk, word) in name.chunks_exact_mut(4).zip([leaf.ebx, leaf.ecx, leaf.edx]) {
-        chunk.copy_from_slice(&word.to_le_bytes());
+    for (chunk, word) in name
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip([leaf.ebx, leaf.ecx, leaf.edx])
+    {
+        *chunk = word.to_le_bytes();
     }
     let shown = name
         .iter()

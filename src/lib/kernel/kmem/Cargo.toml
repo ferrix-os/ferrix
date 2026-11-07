@@ -3,7 +3,7 @@ name = "ferrix-kmem"
 description = "Kernel memory held for a program, charged to its job: the token and the hook the kernel installs"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 license.workspace = true
 publish = false
 

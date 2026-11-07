@@ -211,11 +211,9 @@ fn judge_wallpaper(screen: &Image) -> core::result::Result<String, String> {
     // filter's edge.
     let (left, top, right, bottom) = (558, 328, 791, 517);
     let mut marked = 0usize;
-    for (at, pixel) in screen.pixels.chunks_exact(3).enumerate() {
+    for (at, pixel) in screen.pixels.as_chunks::<3>().0.iter().enumerate() {
         let (x, y) = (at % screen.width, at / screen.width);
-        let Ok([r, g, b]) = <[u8; 3]>::try_from(pixel).map(|pixel| pixel.map(u32::from)) else {
-            continue;
-        };
+        let [r, g, b] = pixel.map(u32::from);
         let grey = r > 90 && g > 90 && b > 100;
         let inside = (left..right).contains(&x) && (top..bottom).contains(&y);
         if grey {

@@ -354,7 +354,7 @@ target_level = "sc2"
 claim_architectures = ["aarch64"]
 image = { driver_updates = "absent" }
 boot_options = { "ferrix.checks" = ["run"], "ferrix.root" = ["*"], "ferrix.onexit" = ["*"] }
-build = { cargo_profile = "release", toolchain = "1.97.1" }
+build = { cargo_profile = "release", toolchain = "1.99.1" }
 link = { x86_64 = "static PIE, PIC code model", aarch64 = "static PIE", armv7a = "fixed address with relocations" }
 
 [flags]

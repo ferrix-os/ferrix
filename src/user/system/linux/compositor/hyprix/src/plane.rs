@@ -62,7 +62,7 @@ pub fn image(surface: Option<&Surface<'_>>, size: (u32, u32)) -> Option<Vec<u8>>
         let to = image.get_mut(row * width * 4..(row * width + wide) * 4)?;
         to.copy_from_slice(from);
         if opaque {
-            for pixel in to.chunks_exact_mut(4) {
+            for pixel in to.as_chunks_mut::<4>().0 {
                 if let Some(alpha) = pixel.get_mut(3) {
                     *alpha = 0xFF;
                 }
@@ -111,7 +111,7 @@ pub fn turned(
     let side = (i64::from(size.0), i64::from(size.1));
     let width = usize::try_from(size.0).ok()?;
     let mut out = vec![0u8; image.len()];
-    for (index, pixel) in image.chunks_exact(4).enumerate() {
+    for (index, pixel) in image.as_chunks::<4>().0.iter().enumerate() {
         let (x, y) = (
             i64::try_from(index % width).ok()?,
             i64::try_from(index / width).ok()?,

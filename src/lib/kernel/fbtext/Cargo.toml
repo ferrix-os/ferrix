@@ -3,7 +3,7 @@ name = "ferrix-fbtext"
 description = "Text and filled rectangles on a linear framebuffer, with an embedded bitmap font"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 # The code is the workspace's licence. The embedded font is Spleen, under
 # BSD-2-Clause: see LICENSE-spleen, which a binary shipping this crate must
 # reproduce.

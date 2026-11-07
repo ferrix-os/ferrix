@@ -357,13 +357,12 @@ pub fn offers(base: &[u8; BLOCK_BYTES], following: &[[u8; BLOCK_BYTES]]) -> Offe
             offers.push(Source::Established(bit), mode);
         }
     }
-    let codes = base.get(38..54).unwrap_or(&[]).chunks_exact(2);
+    let codes = base.get(38..54).unwrap_or(&[]).as_chunks::<2>().0;
     let more: [u8; 12] = display_descriptors(base, 0xFA)
         .next()
         .and_then(|d| d.get(5..17)?.try_into().ok())
         .unwrap_or([0x01; 12]);
-    for pair in codes.chain(more.chunks_exact(2)) {
-        let [first, second] = [pair.first(), pair.get(1)].map(|b| b.copied().unwrap_or(1));
+    for &[first, second] in codes.iter().chain(more.as_chunks::<2>().0) {
         if let Some(mode) = standard(first, second) {
             offers.push(Source::Standard(u16::from_be_bytes([first, second])), mode);
         }

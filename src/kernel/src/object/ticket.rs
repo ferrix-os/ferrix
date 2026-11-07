@@ -106,7 +106,7 @@ pub(crate) fn issue_for(issuer: Sender, slot: u32) -> Result<Arc<Ticket>, IssueE
     let charge =
         Charge::to(slot, Resource::Objects, 1).map_err(|quota::Exceeded| IssueError::NoMemory)?;
     let id = NEXT_ID
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
         .map_err(|_| IssueError::NoMemory)?;
     crate::fallible::try_arc(Ticket {
         id,
@@ -155,7 +155,7 @@ impl Tickets {
         let charge = Charge::to(slot, Resource::Objects, 1)
             .map_err(|quota::Exceeded| IssueError::NoMemory)?;
         let id = NEXT_ID
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
             .map_err(|_| IssueError::NoMemory)?;
         let ticket = crate::fallible::try_arc(Ticket {
             id,

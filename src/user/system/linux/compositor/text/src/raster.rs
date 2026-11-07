@@ -207,7 +207,9 @@ pub(crate) fn blend_mask(
         };
         let skip = (first - column) as usize;
         for (pixel, &coverage) in pixels
-            .chunks_exact_mut(4)
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
             .zip(coverage_row.iter().skip(skip))
         {
             if coverage != 0 {
@@ -238,7 +240,7 @@ pub(crate) fn fill_rect(
         let Some(pixels) = data.get_mut(y * stride + left * 4..y * stride + right * 4) else {
             continue;
         };
-        for pixel in pixels.chunks_exact_mut(4) {
+        for pixel in pixels.as_chunks_mut::<4>().0 {
             blend(pixel, color, 255);
         }
     }

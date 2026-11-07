@@ -3,7 +3,7 @@ name = "ferrix-netlink"
 description = "Netlink messages: walking a buffer of them and their attributes, and building replies into a caller's buffer"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 license.workspace = true
 publish = false
 

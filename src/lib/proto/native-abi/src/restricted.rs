@@ -269,7 +269,7 @@ impl ContextX86_64 {
             tls2,
         ];
         let mut bytes = [0_u8; 232];
-        for (out, value) in bytes.chunks_exact_mut(8).zip(words) {
+        for (out, value) in bytes.as_chunks_mut::<8>().0.iter_mut().zip(words) {
             out.copy_from_slice(&value.to_ne_bytes());
         }
         bytes
@@ -297,7 +297,9 @@ impl ContextAarch64 {
         let mut bytes = [0_u8; 288];
         let rest = [self.sp, self.pc, self.pstate, self.tpidr, self.tpidrro];
         for (out, value) in bytes
-            .chunks_exact_mut(8)
+            .as_chunks_mut::<8>()
+            .0
+            .iter_mut()
             .zip(self.x.iter().chain(rest.iter()))
         {
             out.copy_from_slice(&value.to_ne_bytes());
@@ -309,7 +311,7 @@ impl ContextAarch64 {
 /// The `index`th word of `bytes`, zero past the end.
 fn word_at(bytes: &[u8], index: usize) -> u64 {
     let mut word = [0_u8; 8];
-    if let Some(found) = bytes.chunks_exact(8).nth(index) {
+    if let Some(found) = bytes.as_chunks::<8>().0.get(index) {
         word.copy_from_slice(found);
     }
     u64::from_ne_bytes(word)

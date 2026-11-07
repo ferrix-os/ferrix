@@ -1436,7 +1436,10 @@ fn read_program(process: &Process, at: u64, length: usize) -> Result<Vec<Insn>, 
         .map_err(|_| Errno::ENOMEM)?;
     program.extend(
         bytes
-            .chunks_exact(ferrix_seccomp::INSN_BYTES)
+            .as_chunks::<{ ferrix_seccomp::INSN_BYTES }>()
+            .0
+            .iter()
+            .map(<[u8; ferrix_seccomp::INSN_BYTES]>::as_slice)
             .filter_map(Insn::from_bytes),
     );
     Ok(program)

@@ -83,7 +83,7 @@ impl Header {
             !self.command,
         ];
         let mut bytes = [0; HEADER_BYTES];
-        for (chunk, word) in bytes.chunks_exact_mut(4).zip(words) {
+        for (chunk, word) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(words) {
             chunk.copy_from_slice(&word.to_le_bytes());
         }
         bytes

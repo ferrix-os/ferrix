@@ -857,7 +857,9 @@ fn text(text: &str, color: Color, size: Size, times: i64) -> (Vec<u8>, i64, i64)
                 for y in row * scale..(row + 1) * scale {
                     let at = (y * width + x) * 4;
                     let run = pixels.get_mut(at..at + scale * 4).unwrap_or_default();
-                    run.chunks_exact_mut(4)
+                    run.as_chunks_mut::<4>()
+                        .0
+                        .iter_mut()
                         .for_each(|pixel| pixel.copy_from_slice(&bytes));
                 }
             }

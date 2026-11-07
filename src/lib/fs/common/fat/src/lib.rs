@@ -344,7 +344,7 @@ fn entries(bytes: &[u8]) -> Vec<Entry> {
     let mut long: Vec<[u16; 13]> = Vec::new();
     let mut expected = 0_u8;
     let mut sum = 0_u8;
-    for raw in bytes.chunks_exact(32) {
+    for raw in bytes.as_chunks::<32>().0 {
         let first = raw.first().copied().unwrap_or(0);
         if first == 0 {
             break;

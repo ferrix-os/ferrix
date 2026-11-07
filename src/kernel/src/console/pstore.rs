@@ -103,7 +103,7 @@ pub fn stop(stop: Stop) -> bool {
         let word = stop.word();
         let _ = region
             .stop
-            .fetch_update(Ordering::Release, Ordering::Relaxed, |now| {
+            .try_update(Ordering::Release, Ordering::Relaxed, |now| {
                 (!is_failure(now)).then_some(word)
             });
         arch::write_back_for_reset(region.virt, region.len);
@@ -127,7 +127,7 @@ pub(crate) fn panicked(stop: Stop) {
         let word = stop.word();
         let _ = region
             .stop
-            .fetch_update(Ordering::Release, Ordering::Relaxed, |now| {
+            .try_update(Ordering::Release, Ordering::Relaxed, |now| {
                 (!is_failure(now)).then_some(word)
             });
     }

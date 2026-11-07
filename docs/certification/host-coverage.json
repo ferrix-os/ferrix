@@ -29,7 +29,7 @@
       "branch_outcomes_hit": 6,
       "lines": 137,
       "lines_hit": 137,
-      "sha256": "c7847ca9be82eeb353aaf9dae7a41320c88f84d1792dba12f9c2022d271214fd",
+      "sha256": "3456ee2c13db62e1ce9d8e79fa333aed626ac036dde61a2b1852780b83b93e0c",
       "unreached_branches": [],
       "unreached_lines": []
     },
@@ -161,7 +161,7 @@
     "tools/common/release/softsign/src/main.rs": "8466a576c596791e08b377f7572febb626e5d6e201d6dd85bdad3a104a514b2c",
     "tools/common/release/softsign/src/manifest.rs": "e2e71b0657c87b71269e5d8747ebd5b9495f81b8a02879768f95c6c7603980f7",
     "tools/common/release/softsign/src/tests.rs": "99af75e2deb865df261550b2139cf46bd08385a1a97bda39e9ec6b5e419225bc",
-    "tools/common/release/softsign/src/token.rs": "673f188c3de21f7f250b1abb8d7782d2da85075ecbb10da5410cfad962c1ab8c"
+    "tools/common/release/softsign/src/token.rs": "615e7b12794268a80883563691edec39c9535a447c258b8779de10f3fbc55982"
   },
   "toolchain": "rustc 1.99.0-nightly (84b36a78a 2026-08-06)"
 }

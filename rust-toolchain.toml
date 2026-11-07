@@ -5,7 +5,7 @@
 #
 # Kept in step with `rust-version` in Cargo.toml, which is what the v3 resolver
 # holds dependencies to.
-channel = "1.97.1"
+channel = "1.99.1"
 components = ["rustfmt", "clippy", "llvm-tools", "rust-src"]
 targets = [
     # The kernels: freestanding, no red zone, soft float, and on x86-64 the

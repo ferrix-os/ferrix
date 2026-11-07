@@ -53,11 +53,12 @@ FEATURES = ["Linux ABI", "ring-3 drivers", "btrfs", "Wayland desktop", "Chrome"]
 ARCHES = "x86-64 &middot; AArch64 &middot; ARMv7-A"
 
 # Real lines from test-rustc and test-selfhost serial logs, timestamps included.
+# The first four are test-rustc's on Rust 1.99.1 (gate r199-rustc, 2026-11-06).
 LOG = [
-    ("t", "11.41", "FERRIX-BOOT-OK stages 1-12"),
-    ("t", "12.38", "rustc 1.97.1 (8bab26f4f 2026-07-14)"),
-    ("t", "13.28", "cargo 1.97.1 (c980f4866 2026-06-30)"),
-    ("h", "18.17", "rustc-gate: hello from rustc on Ferrix"),
+    ("t", "37.16", "FERRIX-BOOT-OK stages 1-12"),
+    ("t", "37.41", "rustc 1.99.1 (58cf8f9c3 2026-10-13)"),
+    ("t", "37.53", "cargo 1.99.1 (5f94df478 2026-08-27)"),
+    ("h", "38.79", "rustc-gate: hello from rustc on Ferrix"),
     ("g", "", ""),
     ("t", "51.81", "   Compiling ferrix-kernel v0.1.0"),
     ("t", "106.99", "  image build/x86_64/ferrix.img"),

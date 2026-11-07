@@ -146,7 +146,7 @@ pub fn wait_any<S: Syscall>(
         return Err(Error::InvalidArgs);
     }
     let mut vector = [0_u8; ADDRESS_WAIT_ANY_MAX * 16];
-    for (word, element) in words.iter().zip(vector.chunks_exact_mut(16)) {
+    for (word, element) in words.iter().zip(vector.as_chunks_mut::<16>().0) {
         let (address, rest) = element.split_at_mut(8);
         let (expected, flags) = rest.split_at_mut(4);
         address.copy_from_slice(&word.address.to_ne_bytes());

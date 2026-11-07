@@ -149,7 +149,7 @@ name = "{name}"
 description = "What {name} is, in one line."
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 license = "MIT"
 publish = false
 
@@ -221,7 +221,7 @@ name = "{name}"
 description = "What {name} is, in one line."
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 license = "MIT"
 publish = false
 

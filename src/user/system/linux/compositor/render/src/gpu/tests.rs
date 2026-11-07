@@ -61,7 +61,7 @@ fn difference(one: &[u8], other: &[u8], step: u8) -> (usize, u8) {
     assert_eq!(one.len(), other.len());
     let mut count = 0;
     let mut furthest = 0;
-    for (a, b) in one.chunks_exact(4).zip(other.chunks_exact(4)) {
+    for (a, b) in one.as_chunks::<4>().0.iter().zip(other.as_chunks::<4>().0) {
         // Blue, green and red; the fourth byte is not part of the picture.
         let apart = a
             .iter()
@@ -176,9 +176,7 @@ fn blurred_scene(name: &str, kept: bool) -> Option<(Vec<u8>, Vec<u8>)> {
         *format = Format::Argb8888;
         // One tint at a third, premultiplied: whatever edges show through
         // the window are then the wallpaper's and not its own.
-        for pixel in data.chunks_exact_mut(4) {
-            pixel.copy_from_slice(&[40, 20, 10, 85]);
-        }
+        data.as_chunks_mut::<4>().0.fill([40, 20, 10, 85]);
     }
     let wallpaper = Pattern::Checkerboard.draw(SIZE.0, SIZE.1);
     let layers = [LayerFrame {
@@ -266,9 +264,7 @@ fn a_frame_drawn_inside_its_damage_is_the_same_picture() {
     let mut buffers = client_buffers(&layout);
     for (data, _, _, format) in buffers.values_mut() {
         *format = Format::Argb8888;
-        for pixel in data.chunks_exact_mut(4) {
-            pixel.copy_from_slice(&[40, 20, 10, 85]);
-        }
+        data.as_chunks_mut::<4>().0.fill([40, 20, 10, 85]);
     }
     let wallpaper = Pattern::Checkerboard.draw(SIZE.0, SIZE.1);
     let style = Style {
@@ -300,8 +296,8 @@ fn a_frame_drawn_inside_its_damage_is_the_same_picture() {
             let (data, wide, _, _) = buffers.get_mut(&first.window).expect("its buffer");
             let wide = *wide as usize;
             for row in data.chunks_exact_mut(wide * 4).skip(40).take(20) {
-                for pixel in row.chunks_exact_mut(4).skip(30).take(50) {
-                    pixel.copy_from_slice(&[0, 0, 200, 255]);
+                for pixel in row.as_chunks_mut::<4>().0.iter_mut().skip(30).take(50) {
+                    *pixel = [0, 0, 200, 255];
                 }
             }
         }
@@ -366,8 +362,10 @@ fn a_frame_drawn_inside_its_damage_is_the_same_picture() {
     // outside the damage the GPU's frame is the first frame's bytes.
     let mut inside = 0;
     for (at, (was, is)) in before
-        .chunks_exact(4)
-        .zip(drawn.chunks_exact(4))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(drawn.as_chunks::<4>().0)
         .enumerate()
     {
         let (x, y) = (at % SIZE.0 as usize, at / SIZE.0 as usize);
@@ -724,7 +722,7 @@ fn a_buffer_without_pixels_that_is_not_imported_draws_nothing() {
     let drawn = gpu
         .read(Rect::new(0, 0, wide.into(), 1))
         .expect("read back");
-    for pixel in drawn.chunks_exact(4) {
+    for pixel in drawn.as_chunks::<4>().0 {
         assert_eq!(pixel.get(..3), Some(&[0x60, 0x40, 0x20][..]), "the clear");
     }
 

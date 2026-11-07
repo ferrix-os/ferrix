@@ -1132,8 +1132,8 @@ fn encode_seminfo(in_use: Option<(usize, usize)>) -> [u8; SEMINFO_BYTES] {
         aem,                 // semaem
     ];
     let mut out = [0_u8; SEMINFO_BYTES];
-    for (to, field) in out.chunks_exact_mut(4).zip(fields) {
-        to.copy_from_slice(&field.to_le_bytes());
+    for (to, field) in out.as_chunks_mut::<4>().0.iter_mut().zip(fields) {
+        *to = field.to_le_bytes();
     }
     out
 }
@@ -1450,8 +1450,10 @@ fn set_all(caller: &Caller, memory: &dyn Memory, id: i32, arg: u64) -> Result<us
     bytes.resize(set.nsems * 2, 0);
     memory.read(arg, &mut bytes)?;
     let values: Vec<i32> = bytes
-        .chunks_exact(2)
-        .map(|pair| i32::from(u16::from_le_bytes(pair.try_into().unwrap_or([0, 0]))))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| i32::from(u16::from_le_bytes(*pair)))
         .collect();
     if values.iter().any(|&value| value > SEMVMX) {
         return Err(Errno::ERANGE);
@@ -1598,7 +1600,7 @@ fn read_sops(process: &Process, at: u64, count: usize) -> Result<Vec<SemBuf>, Er
     process.read(at, &mut bytes)?;
     let mut sops = Vec::new();
     sops.try_reserve_exact(count).map_err(|_| Errno::ENOMEM)?;
-    for one in bytes.chunks_exact(SEMBUF_BYTES) {
+    for one in bytes.as_chunks::<SEMBUF_BYTES>().0 {
         let half = |at: usize| {
             one.get(at..at + 2)
                 .and_then(|pair| pair.try_into().ok())

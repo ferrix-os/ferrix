@@ -128,7 +128,7 @@ impl Block {
     #[must_use]
     pub fn bytes(&self) -> [u8; BLOCK_BYTES] {
         let mut out = [0_u8; BLOCK_BYTES];
-        for (chunk, word) in out.chunks_exact_mut(4).zip(self.0.iter()) {
+        for (chunk, word) in out.as_chunks_mut::<4>().0.iter_mut().zip(self.0.iter()) {
             chunk.copy_from_slice(&word.to_le_bytes());
         }
         out

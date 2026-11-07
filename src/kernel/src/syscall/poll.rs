@@ -417,7 +417,9 @@ fn wait(process: &Process, fds: u64, nfds: u64, deadline: Option<u64>) -> Result
         uaccess::copy_from_user(process.space(), fds, &mut entries).map_err(|_| Errno::EFAULT)?;
     }
     let watched: Vec<i32> = entries
-        .chunks_exact(POLLFD_BYTES)
+        .as_chunks::<POLLFD_BYTES>()
+        .0
+        .iter()
         .filter_map(|entry| {
             entry
                 .first_chunk::<4>()
@@ -439,7 +441,7 @@ fn wait(process: &Process, fds: u64, nfds: u64, deadline: Option<u64>) -> Result
 /// hang-ups are reported whether they were asked for or not, as on Linux.
 fn scan(process: &Process, entries: &mut [u8]) -> Result<usize, Errno> {
     let mut ready = 0;
-    for entry in entries.chunks_exact_mut(POLLFD_BYTES) {
+    for entry in entries.as_chunks_mut::<POLLFD_BYTES>().0 {
         let fd = i32::from_le_bytes(
             entry
                 .get(..4)

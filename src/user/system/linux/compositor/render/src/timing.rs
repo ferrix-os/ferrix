@@ -202,7 +202,7 @@ pub fn drawn_surface(size: (u32, u32), alpha: bool, path: Path) {
     };
     let packed = (width << 40) | (height << 16) | (u64::from(alpha) << 8) | path | 0x80;
     let area = |packed: u64| (packed >> 40) * ((packed >> 16) & 0xFF_FFFF);
-    let _ = LARGEST.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |was| {
+    let _ = LARGEST.try_update(Ordering::Relaxed, Ordering::Relaxed, |was| {
         (area(packed) >= area(was)).then_some(packed)
     });
 }

@@ -286,7 +286,7 @@ fn put_words(out: &mut [u8], fields: &[u32]) -> Result<usize, SndError> {
     let want = fields.len().saturating_mul(4);
     let have = out.len();
     let slot = out.get_mut(..want).ok_or(SndError::Short { want, have })?;
-    for (cell, field) in slot.chunks_exact_mut(4).zip(fields) {
+    for (cell, field) in slot.as_chunks_mut::<4>().0.iter_mut().zip(fields) {
         cell.copy_from_slice(&field.to_le_bytes());
     }
     Ok(want)

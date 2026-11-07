@@ -55,7 +55,7 @@
       "aarch64"
     ],
     "profile": "release",
-    "toolchain": "1.97.1",
+    "toolchain": "1.99.1",
     "kernel_cargo_features": 0,
     "mitigations": "on",
     "mitigations_settings": [

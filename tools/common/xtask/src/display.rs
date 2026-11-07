@@ -148,8 +148,10 @@ const SETTLE_BLANK: Duration = Duration::from_secs(1);
 fn count_of(image: &Image, color: [u8; 3]) -> usize {
     image
         .pixels
-        .chunks_exact(3)
-        .filter(|pixel| *pixel == color)
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .filter(|pixel| **pixel == color)
         .count()
 }
 
@@ -528,10 +530,8 @@ pub(crate) fn mismatches(
     let width = image.width.max(1);
     let mut found = Vec::new();
     let mut count = 0;
-    for (index, pixel) in image.pixels.chunks_exact(3).enumerate() {
-        if let [red, green, blue] = *pixel
-            && [red, green, blue] != color
-        {
+    for (index, &[red, green, blue]) in image.pixels.as_chunks::<3>().0.iter().enumerate() {
+        if [red, green, blue] != color {
             count += 1;
             if found.len() < limit {
                 found.push((index % width, index / width, [red, green, blue]));

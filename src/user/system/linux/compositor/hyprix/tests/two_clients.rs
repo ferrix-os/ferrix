@@ -1482,11 +1482,16 @@ fn a_bar_takes_its_strip_and_the_windows_tile_under_it() {
 /// A `good` for [`frame_until`]: the frame is the checkerboard at the
 /// screen's size, every pixel of it.
 fn is_whole_checkerboard(frame: &[u8]) -> Result<(), String> {
-    let wrong = frame.chunks_exact(3).enumerate().find(|(at, rgb)| {
-        let (x, y) = (*at as u32 % WIDTH, *at as u32 / WIDTH);
-        let got = (u32::from(rgb[0]) << 16) | (u32::from(rgb[1]) << 8) | u32::from(rgb[2]);
-        got != Pattern::Checkerboard.pixel(x, y, HEIGHT)
-    });
+    let wrong = frame
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .enumerate()
+        .find(|(at, rgb)| {
+            let (x, y) = (*at as u32 % WIDTH, *at as u32 / WIDTH);
+            let got = (u32::from(rgb[0]) << 16) | (u32::from(rgb[1]) << 8) | u32::from(rgb[2]);
+            got != Pattern::Checkerboard.pixel(x, y, HEIGHT)
+        });
     match wrong {
         None => Ok(()),
         Some((at, rgb)) => Err(format!(
@@ -2049,8 +2054,10 @@ fn a_screenshot_is_the_frame_the_renderer_blesses() {
     );
     let differing = taken
         .pixels
-        .chunks_exact(3)
-        .zip(want.chunks_exact(3))
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .zip(want.as_chunks::<3>().0)
         .filter(|(shot, blessed)| shot != blessed)
         .count();
     assert_eq!(
@@ -2087,8 +2094,10 @@ fn a_window_that_is_not_shared_is_a_black_box_in_a_screenshot() {
     let mut inside = 0;
     for (index, (shot, blessed)) in taken
         .pixels
-        .chunks_exact(3)
-        .zip(want.chunks_exact(3))
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .zip(want.as_chunks::<3>().0)
         .enumerate()
     {
         let (x, y) = (
@@ -2099,7 +2108,7 @@ fn a_window_that_is_not_shared_is_a_black_box_in_a_screenshot() {
             (two.x..two.x + two.width).contains(&x) && (two.y..two.y + two.height).contains(&y);
         if hidden {
             inside += 1;
-            assert_eq!(shot, [0, 0, 0], "({x}, {y}) shows through the box; {line}");
+            assert_eq!(*shot, [0, 0, 0], "({x}, {y}) shows through the box; {line}");
         } else {
             assert_eq!(shot, blessed, "({x}, {y}) is not the screen's; {line}");
         }
@@ -2221,8 +2230,10 @@ fn the_window_left_after_a_close_is_drawn_from_its_own_buffer() {
 
     let differing = taken
         .pixels
-        .chunks_exact(3)
-        .zip(want.chunks_exact(3))
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .zip(want.as_chunks::<3>().0)
         .filter(|(shot, blessed)| shot != blessed)
         .count();
     assert_eq!(
@@ -2314,8 +2325,10 @@ fn a_client_that_destroys_one_of_its_two_windows_leaves_the_other_alone() {
 
     let differing = taken
         .pixels
-        .chunks_exact(3)
-        .zip(want.chunks_exact(3))
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .zip(want.as_chunks::<3>().0)
         .filter(|(shot, blessed)| shot != blessed)
         .count();
     assert_eq!(
@@ -2404,8 +2417,10 @@ fn a_locked_screen_shows_the_lock_and_none_of_the_windows() {
     let taken = taken.unwrap_or_else(|why| panic!("the screenshot: {why}"));
     let differing = taken
         .pixels
-        .chunks_exact(3)
-        .zip(want.chunks_exact(3))
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .zip(want.as_chunks::<3>().0)
         .filter(|(shot, blessed)| shot != blessed)
         .count();
     assert_eq!(
@@ -2499,8 +2514,10 @@ fn menu_is(name: &str, shape: Shape, lines: &str, golden: &str) {
 
     let differing = taken
         .pixels
-        .chunks_exact(3)
-        .zip(want.chunks_exact(3))
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .zip(want.as_chunks::<3>().0)
         .filter(|(shot, blessed)| shot != blessed)
         .count();
     assert_eq!(
@@ -2726,9 +2743,7 @@ impl Patcher {
             .map_err(|_| "a window too large to draw".to_owned())?;
         let mut shared =
             compositor_shm::Shared::new(len).map_err(|error| format!("memory: {error}"))?;
-        for pixel in shared.bytes_mut().chunks_exact_mut(4) {
-            pixel.copy_from_slice(&patch::BASE);
-        }
+        shared.bytes_mut().as_chunks_mut::<4>().0.fill(patch::BASE);
         let fd = shared.as_raw_fd();
         self.shared = Some(shared);
         send(
@@ -2783,9 +2798,7 @@ impl Patcher {
                 let Some(row) = bytes.get_mut(at..at + side * 4) else {
                     continue;
                 };
-                for pixel in row.chunks_exact_mut(4) {
-                    pixel.copy_from_slice(&patch::MARK);
-                }
+                row.as_chunks_mut::<4>().0.fill(patch::MARK);
             }
         }
         self.marked = self.marked.saturating_add(1);
@@ -3095,8 +3108,10 @@ fn smallest(report: &str) -> Option<(i64, i64)> {
 fn how_many(frame: &[u8], colour: [u8; 4]) -> usize {
     let want = [colour[2], colour[1], colour[0]];
     frame
-        .chunks_exact(3)
-        .filter(|pixel| *pixel == want.as_slice())
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .filter(|pixel| **pixel == want)
         .count()
 }
 
@@ -3715,8 +3730,10 @@ fn compositor_picture(ends: &Ends, name: &str) -> Vec<u8> {
             Ok(frame)
         });
         let xrgb: Vec<u8> = frame
-            .chunks_exact(3)
-            .flat_map(|rgb| [rgb[2], rgb[1], rgb[0], 0xFF])
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .flat_map(|&[r, g, b]| [b, g, r, 0xFF])
             .collect();
         compositor_render::golden::check_in(&directory, name, WIDTH, HEIGHT, &xrgb);
     }

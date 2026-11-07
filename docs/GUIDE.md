@@ -15,7 +15,7 @@ nobody here wrote, four `execve`s deep, over some 350 MiB of shared libraries
 mapped from disk — and runs what it made:
 
 ```
-rustc 1.97.1 (8bab26f4f 2026-07-14)
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
 ...
 rustc-gate: hello from rustc on Ferrix
 ```

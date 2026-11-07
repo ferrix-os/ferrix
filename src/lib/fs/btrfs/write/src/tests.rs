@@ -62,7 +62,7 @@ pub(crate) struct MemDevice {
 impl MemDevice {
     pub(crate) fn new(packed: &[u8]) -> MemDevice {
         let mut blocks = BTreeMap::new();
-        for record in packed.chunks_exact(8 + BLOCK) {
+        for record in packed.as_chunks::<{ 8 + BLOCK }>().0 {
             let offset = u64::from_le_bytes(record[..8].try_into().unwrap());
             let block: [u8; BLOCK] = record[8..].try_into().unwrap();
             let _ = blocks.insert(offset, Box::new(block));

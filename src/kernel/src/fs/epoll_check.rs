@@ -745,7 +745,9 @@ fn wait(
     uaccess::copy_from_user(process.space(), page + AT_EVENTS, &mut bytes)
         .map_err(|_| "could not read the events back")?;
     Ok(bytes
-        .chunks_exact(EVENT_BYTES)
+        .as_chunks::<EVENT_BYTES>()
+        .0
+        .iter()
         .map(|event| {
             let mut events = [0_u8; 4];
             let mut data = [0_u8; 8];

@@ -665,8 +665,8 @@ fn quota(side: &Side, job: Handle, resource: u64) -> Result<[u64; 3], &'static s
         .map_err(|_| "job_get_quota failed")?;
     let bytes = side.get(QUOTA_AT, 24)?;
     let mut words = [0_u64; 3];
-    for (word, chunk) in words.iter_mut().zip(bytes.chunks_exact(8)) {
-        *word = u64::from_ne_bytes(chunk.try_into().map_err(|_| "a short quota")?);
+    for (word, chunk) in words.iter_mut().zip(bytes.as_chunks::<8>().0) {
+        *word = u64::from_ne_bytes(*chunk);
     }
     Ok(words)
 }

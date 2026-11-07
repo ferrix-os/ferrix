@@ -193,7 +193,7 @@ pub fn report_unanswered(lines: u32) {
 
 /// One `ENOSYS`, reported if [`report_unanswered`] left room for it.
 pub fn unanswered(call: Option<Syscall>, number: usize) {
-    let room = UNANSWERED_LINES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| {
+    let room = UNANSWERED_LINES.try_update(Ordering::Relaxed, Ordering::Relaxed, |left| {
         left.checked_sub(1)
     });
     if room.is_err() {

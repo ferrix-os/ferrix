@@ -40,13 +40,11 @@ impl Checksum {
             self.sum += u64::from(u16::from_be_bytes([high, low]));
             rest = tail;
         }
-        let mut words = rest.chunks_exact(2);
-        for word in words.by_ref() {
-            if let Ok(pair) = <[u8; 2]>::try_from(word) {
-                self.sum += u64::from(u16::from_be_bytes(pair));
-            }
+        let (words, tail) = rest.as_chunks::<2>();
+        for word in words {
+            self.sum += u64::from(u16::from_be_bytes(*word));
         }
-        self.odd = words.remainder().first().copied();
+        self.odd = tail.first().copied();
     }
 
     /// Add a big-endian 16-bit field.

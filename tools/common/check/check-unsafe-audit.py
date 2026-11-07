@@ -54,7 +54,8 @@ and on an `unsafe fn`, at the start of its `# Safety` section's first line:
 
 Not `SAFETY(DEVICE):`, which reads better: clippy's
 `undocumented_unsafe_blocks` looks for the text `SAFETY:` and refuses a block
-whose comment spells it any other way (measured, rustc 1.97.1). One site may
+whose comment spells it any other way (measured, rustc 1.97.1, and again on
+1.99.1, 2026-11-06). One site may
 name two ids, `(FRAME, DMA)`, when its one operation meets both; the per-id
 counts count it under each.
 
