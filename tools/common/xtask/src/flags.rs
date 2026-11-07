@@ -907,6 +907,27 @@ mod tests {
     }
 
     #[test]
+    fn retyped_kernel_memory_needs_the_user_personality() {
+        let alone = resolve(None, &set(&[("kernel_memory", "retyped")]));
+        assert!(alone.is_err(), "retyped without personality=user");
+        let with = resolve(
+            None,
+            &set(&[
+                ("kernel_memory", "retyped"),
+                ("personality", "user"),
+                ("fs", "lift"),
+                ("partition_speculation", "partition"),
+                ("restricted_fastpath", "off"),
+                ("restricted_window", "off"),
+                ("fault_ahead", "off"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(with.value("kernel_memory"), Some("retyped"));
+        assert_eq!(with.level, "none");
+    }
+
+    #[test]
     fn signed_slots_with_no_board_family_are_refused() {
         let mut profile = super::Profile::load("max_plus").unwrap();
         assert!(super::unnamed_boards(&profile, |_| true).is_none());

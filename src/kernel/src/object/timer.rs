@@ -190,7 +190,9 @@ impl From<AllocError> for TimerError {
 pub fn heap_bytes() -> usize {
     ferrix_kmem::arc_footprint::<TimerCore>()
         .saturating_add(ferrix_kmem::arc_footprint::<Timer>())
-        .saturating_add(ferrix_kmem::boxed_footprint::<ferrix_sched::Node<sched::Due>>())
+        .saturating_add(ferrix_kmem::boxed_footprint::<
+            ferrix_sched_fair::Node<sched::Due>,
+        >())
         .saturating_add(ferrix_kmem::buffer_footprint::<Observer>(TIMER_OBSERVERS))
         .saturating_add(ferrix_kmem::buffer_footprint::<(Observer, Signals)>(
             TIMER_OBSERVERS,

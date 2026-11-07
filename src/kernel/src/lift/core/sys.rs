@@ -158,7 +158,7 @@ pub mod arena {
 }
 
 /// `THREAD_RESERVE` on the partition's job.
-#[cfg(ferrix_schedule = "edf")]
+#[cfg(ferrix_sched_deadline = "edf_cbs")]
 pub fn thread_reserve(
     runtime: u64,
     deadline: u64,

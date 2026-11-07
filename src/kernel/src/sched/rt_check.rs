@@ -39,10 +39,11 @@
 //!   fair 200 times beside a waiting one, with processors idle to steal:
 //!   the running task is moved only at its processor's next decision
 //!   (container review 30 (not on record; ledger 5684), B1; its control is the move
-//!   made at the call, FX-0537).
-//! * **The modes** (L.sched.137, L.sched.138): a `SoftRt` domain is refused
-//!   by name where the tier is built, `ModeUnavailable` where it is not, and
-//!   a real-time policy refused there too.
+//!   made at the call, FX-0540).
+//! * **The modes** (L.sched.137, L.sched.138): a `SoftRt` domain is made
+//!   where the tier is built (run at run time by `domains_check`),
+//!   `ModeUnavailable` where it is not, and a real-time policy refused there
+//!   too.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -762,7 +763,7 @@ fn the_move(c: usize) -> Result<(), &'static str> {
 /// 10 ms after each flip to fair,
 /// from here. Moved at the call instead, it sits in fair's tree as a waiting
 /// task while it runs, an idle processor steals it, and `move_onto` stops
-/// the machine (FX-0537): that change is this case's control. Only with
+/// the machine (FX-0540): that change is this case's control. Only with
 /// three processors or more, so that one is idle to steal.
 ///
 /// Verifies: L.sched.134

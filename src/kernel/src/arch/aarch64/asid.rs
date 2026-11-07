@@ -20,7 +20,7 @@ pub(crate) mod check;
 use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use super::cpu;
-use ferrix_sched::MAX_CPUS;
+use ferrix_sched_class::MAX_CPUS;
 
 /// How many tags a processor has: ASIDs 1 to 16.
 pub(crate) const SLOTS: usize = 16;

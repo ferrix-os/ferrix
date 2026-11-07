@@ -603,7 +603,7 @@ fn watch_detached(process: Arc<dyn Host>, job: Arc<Job>) -> Result<(), &'static 
             core.exit_status(),
         );
     }
-    sched::spawn("devmgr watch", watch, 0, ferrix_sched::NICE_0_WEIGHT)
+    sched::spawn("devmgr watch", watch, 0, ferrix_sched_fair::NICE_0_WEIGHT)
         .map(|_| ())
         .map_err(|_| "no task to watch devmgr on")
 }

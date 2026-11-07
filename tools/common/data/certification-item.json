@@ -517,7 +517,7 @@
         "ring": "core",
         "path": "src/lib/kernel/sched-edf",
         "in_ring0_when": [
-          "schedule=edf"
+          "sched_deadline=edf_cbs"
         ],
         "below": "ferrix-sched's run queue, its fair class beneath the reservations.",
         "above": "sched/queue.rs's Tier and sched/reserve.rs: partitioned EDF, a hard CBS and per-processor admission, ledger 7011 S.4, 7088. No kernel but schedule=edf's links it."
@@ -579,7 +579,6 @@
         "(docs/certification/ITEM.md section 2)."
       ],
       "ferrix-fallible": "Fallible Box/Vec/VecDeque/String construction on stable Rust (F-23). The core's own allocation toolkit, src/kernel/src/fallible.rs, is built on it, so an item crate converting to fallible allocation uses the same code the core does rather than a second copy. It also dispatches an item crate's map inserts to the reserved section the kernel installs at boot (set_section, in_section; src/kernel/src/fallible.rs library_section, L.mm.63): ferrix-btrfs-write's every BTreeMap and BTreeSet insert relies on that dispatch to be fallible.",
-      "ferrix-sched": "The fair class and the sleepers' timeline, as the kernel's core has always named them; ferrix-sched-edf's beneath it (ledger 7088 G.3).",
       "ferrix-sync": "The spin and sleep locks src/kernel/src/sync.rs wraps for the whole core, and ferrix-fallible's one dependency (its injector's `Once`)."
     }
   },

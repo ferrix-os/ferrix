@@ -1269,7 +1269,7 @@ entity while it ran. Moved to fair, it was a steal candidate
 idle processor took it and switched to a context never saved: the crash
 `test-rtsched` met in two boots of four on a loaded host. Confirmed: with
 the immediate move restored and no decision asked for, the flips case
-below stops the machine with FX-0537 at a steal in three boots of three.
+below stops the machine with FX-0540 at a steal in three boots of three.
 The rule is now held twice:
 * by construction: a change of policy moves a running task only at its
   processor's next decision (`CpuQueue::requeue_if_moved`, before the
@@ -1278,13 +1278,13 @@ The rule is now held twice:
   set as a switch to it commits (`switch_chosen`) and cleared once the
   switch away from it has saved its context (`finish_switch`), both under
   the owning queue's lock; `move_onto` (a steal or a placement) and
-  `pick_next` stop the machine (FX-0537) on a task so marked that is not
+  `pick_next` stop the machine (FX-0540) on a task so marked that is not
   their own processor's running task. Its control is the immediate move
   restored with no decision asked for, which the boot check `flips` -- an
   unpinned running task flipped between `SCHED_FIFO` and fair 200 times
   beside a waiting one, with processors idle to steal -- turns into
-  FX-0537. The control, for the gate host's `gate.sh control --expect
-  FX-0537` (desktop, x86-64), in `CpuQueue::set_policy`:
+  FX-0540. The control, for the gate host's `gate.sh control --expect
+  FX-0540` (desktop, x86-64), in `CpuQueue::set_policy`:
 
   ```
   -        if running {
@@ -1314,7 +1314,16 @@ The audit of every other path that enqueues a task, by caller of
   switch hands over;
 * a weight or a job's share (`set_weight`, `regroup_current`): changed in
   place, never re-queued;
-* affinity: `sched_setaffinity` is validated and not applied, so no move.
+* affinity, applied since game mode's layer B (`docs/GAME-MODE-SCHED.md`
+  §2.1, merged here 2026-11-02): the pick push (`affinity::push_picked`)
+  moves a waiting entity of either tier, released by `queue_upper`; the
+  push at a switch's tail (`push_off`) a task `depart` took off its queue
+  before the switch saved it;
+* a processor taken out of service (`docs/CORE-QUARANTINE.md`,
+  `move_one_off`): a waiting fair entity, else a waiting entity of the
+  tier above fair (`CpuQueue::upper_evacuee`, the tier's `waiting_where`),
+  so that no real-time task is stranded on a parked processor; never the
+  running one.
 None puts a running task in a queue as a waiting one.
 
 ## 9f. Step 5: a `SoftRt` domain made at run time (OK IF V1-V16, 2026-10-27)
@@ -1343,7 +1352,7 @@ domain's processors, both: `may_run_on` reads the two.
 * **D-1 partition**: a task runs only on a processor of its domain. The
   pick (`pick_next`) and every move between queues (`move_onto`) stop the
   machine on a task whose domain is not the processor's (a new FX code), as
-  FX-0537 does for a running task; the per-processor kernel tasks (idle,
+  FX-0540 does for a running task; the per-processor kernel tasks (idle,
   the boot task) belong to no domain and are exempt by name.
 * **D-2 no stealing across**: a steal, a pull, a placement on an idle
   processor and the balance consider only processors of the task's domain;
@@ -1423,7 +1432,7 @@ L.sched.137 restated.
    leaves open?
 2. Moving tasks at each processor's decision (as 4b's B1 fix does)
    rather than migrating them from the switching task under both locks:
-   accepted, given FX-0537's mark?
+   accepted, given FX-0540's mark?
 3. Per-processor kernel tasks (idle, the boot task) exempt from D-1 by
    name: enough, or must the reaper and the network's workers, which are
    spawned unpinned today, be given the boot domain explicitly?
@@ -1449,7 +1458,7 @@ they differ:
   ordinary wake; a boot check calls a `SoftRt`-domain server from a
   boot-domain client, its control the fallback removed.
 * **V4** a running task is moved only once its context is saved
-  (`finish_switch`, or waiting for its `on_cpu` mark); FX-0537 the check.
+  (`finish_switch`, or waiting for its `on_cpu` mark); FX-0540 the check.
 * **V5** placement, steal, pull and spawn re-read the slot word under the
   target queue's lock and refuse a leaving or foreign processor, or the
   switch synchronises between stopping and quiescing; the partition check
@@ -1896,8 +1905,8 @@ between queues carries it false; (6) container review 28's conditions 1 and 4 ar
 (rule (e)'s widening with its self-tests, `Over::decision_in_ns`'s `None`
 with its host test, both above), and rule (e) stays as widened for now,
 as §9d records; (7) this line, and the landing names container review 31. Owed on the
-gate host: (1) the FX-0537 control through `gate.sh control --expect
-FX-0537` on desktop x86-64 with the patch §9e quotes, and the flips check
+gate host: (1) the FX-0540 control through `gate.sh control --expect
+FX-0540` on desktop x86-64 with the patch §9e quotes, and the flips check
 in the desktop boots' rows on three architectures; (5) the develop
 reservations (H.SCHED.20-22 and this branch's L.sched ids, after which
 `--check` is clean), S5's ELF table for `present` before and after on
@@ -1933,7 +1942,7 @@ whose classes line reads `fifo_rr+eevdf` on all three architectures.
   reads both), a weight kept (L.sched.130), N2's consts restated, the fold
   gate with L.sched.64-66 restated and the fast path's fifth job case; and
   B1 (§9e): the running task moved at its next decision, the on-processor
-  mark and FX-0537, the flips check and its control, the audit.
+  mark and FX-0540, the flips check and its control, the audit.
 * R7, R8, R9: `present`'s refusal (L.sched.138, now `set_policy`'s
   `NoTier` and `realtime_built`), inheritance in `prepare_user`
   (L.sched.135), `SoftRt` refused by name (L.sched.137). The Linux layer's
@@ -2060,6 +2069,15 @@ in a core file, a declared value with no arm, a value with two arms,
 hash. Next: 3b; N4's measurement on the gate host. C3 decided by the
 customer on 2026-10-27: no fair tier in `max` (§7a).
 
+**Step 5a (2026-10-28), ledger line 32 (OK IF V1-V16).** The scheduler's
+half of the run-time `SoftRt` domain, §9f "Step 5a, as built": the
+partition (H.SCHED.23, FX-0538), the switch, admission and dissolution in
+the kernel, the exemption, the refusals (H.SCHED.25), L.sched.137
+restated and L.sched.140-150; booted on AArch64 and ARMv7-A with the
+domain check, two controls stopping the machine as they should. Owed:
+step 5b (the authority object, the calls, the handle, V3's check), the
+gate rows and V14's measurements.
+
 **2026-11-02: develop merged in, ids renumbered.** Core quarantine and
 game mode's layer B landed on develop first and took H.SCHED.18-19 and
 L.sched.102-123, so this work's ids moved by one fixed shift to the
@@ -2075,6 +2093,21 @@ are one, the policy calls' with game mode's `sched_runtime` for a
 `SCHED_OTHER` thread and `sched_getattr` answering it. Owed: the
 consultant's look at the joined `sched_setattr` and at real-time tasks
 leaving a processor going out of service.
+
+**2026-11-02: step 5a with develop's applied affinity.** A mask is now a
+task's to change (`sched_setaffinity`, L.sched.96-101), so step 5a reads
+it within the task's domain: `affinity::mask_for` narrows a program's
+mask to its domain's processors, falling back to the whole domain where
+none is left in service, as a cpuset's change narrows a mask on Linux;
+`allowed` asks the domain's admission first, so the pick push, the push
+at a switch's tail, the fallback and every placer stay inside the domain
+(D-1), each asking the admission again under the target's lock (V5); a
+task pushed off at a switch's tail that its domain no longer has there is
+placed as an evicted one is. The quarantine's evacuation asks the
+admission too. Owed: the consultant's look at the domain-aware mask, and
+the customer's word on taking a `SoftRt` domain's processor out of
+service (as built, its tasks have nowhere inside the domain to go once
+all of its processors are parked).
 
 **2026-11-03: the round after ledger 5684** (NOT YET on B1-B4, with its
 corrections at 5705). What was done, and on which hash. No new review is
@@ -2146,7 +2179,7 @@ Controls, each with marker, sabotage and failure in its log. On c5fdb85ef,
 `d9-mode-absent`, `d9-mode-left`; D10's `d10-dispatch`; E13's `e13-noname`,
 `e13-notsc4`, `e13-otherallows`, `e13-notbarest`, `e13-bootoption`; G6's
 `g6-i-fixture`, `g6-ii-inline`, `g6-iii-present`. On fcc9620d5, `pr38fix-w3c-`:
-`b1-flips` (FX-0537, the patch §9e quotes), `c3-node`, `c4-neighbour`, `c4-robust`,
+`b1-flips` (FX-0540, the patch §9e quotes), `c3-node`, `c4-neighbour`, `c4-robust`,
 `r12-inherit` (the native launch's check), `r12-wake`, `l124-name`, `cond1-map`. On
 1cd9dc06c: `pr38fix-w4c-r12-move`. All FIRED. Kernel cases ran on x86_64 under kvm;
 static and host cases name no accelerator.

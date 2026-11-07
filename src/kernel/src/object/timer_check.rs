@@ -20,9 +20,10 @@ use ferrix_native_abi::status;
 use ferrix_native_abi::types::{
     PACKET_SIGNAL, TIMER_CLOCK_BOOT, TIMER_CLOCK_MONOTONIC, TIMER_RELATIVE, TimerSpec,
 };
+use ferrix_sched_class::CpuSet;
+use ferrix_sched_fair::NICE_0_WEIGHT;
 #[cfg(ferrix_checks = "on")]
-use ferrix_sched::Timeline;
-use ferrix_sched::{CpuSet, NICE_0_WEIGHT};
+use ferrix_sched_fair::Timeline;
 
 use crate::object::Object;
 use crate::object::check::{SCRATCH, Side, reg};

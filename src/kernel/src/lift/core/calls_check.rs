@@ -31,8 +31,8 @@ fn expect<T: core::fmt::Debug>(
 /// Each refusal, on `job`, a handle of the wrong kind for every call here, and
 /// `arena`, the writable arena's. The number that held, or the first that did not.
 pub fn run(job: Handle, arena: Handle, executable: Handle) -> Result<u32, &'static str> {
-    let mask = [0_u8; ferrix_sched::WORDS * 8];
-    let wrong_words = [0_u8; (ferrix_sched::WORDS + 1) * 8];
+    let mask = [0_u8; ferrix_sched_class::WORDS * 8];
+    let wrong_words = [0_u8; (ferrix_sched_class::WORDS + 1) * 8];
     expect(
         "DEBUG_WRITE, no such handle",
         lift_calls::debug_write(Kernel, NOBODY, b"x"),
@@ -145,7 +145,7 @@ fn arch_prctl_answers_nosys() -> Result<(), &'static str> {
 fn reserve(job: Handle, arena: Handle) -> Result<(), &'static str> {
     let asked =
         |handle| lift_calls::thread_reserve(Kernel, handle, 1_000_000, 10_000_000, 10_000_000);
-    if cfg!(not(ferrix_schedule = "edf")) {
+    if cfg!(not(ferrix_sched_deadline = "edf_cbs")) {
         return expect("THREAD_RESERVE, no edf", asked(job), Error::Unsupported);
     }
     expect("THREAD_RESERVE on a VMO", asked(arena), Error::WrongType)?;

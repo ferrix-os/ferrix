@@ -15,10 +15,10 @@
 //!
 //! Policy and priority are the scheduler's: `SCHED_FIFO` and `SCHED_RR`, in
 //! a build with a tier above fair, move a thread's task to that tier, under
-//! Linux's permission rule (`docs/SCHED-CLASSES.md` §9e). Affinity is
-//! validated as Linux validates it and then not applied, as its handler
-//! says; the processors themselves are real, and that is what
-//! `sched_getaffinity` reports.
+//! Linux's permission rule (`docs/SCHED-CLASSES.md` §9e). A thread's
+//! processors (`sched_setaffinity`, applied and read back as Linux 7.0
+//! does: `docs/GAME-MODE-SCHED.md` §2.1) and a fair thread's slice request
+//! (`sched_setattr`, §2.2) are the scheduler's too.
 
 use alloc::sync::Arc;
 use alloc::vec;
@@ -26,7 +26,7 @@ use alloc::vec::Vec;
 
 use ferrix_linux_abi::errno::Errno;
 use ferrix_linux_abi::nr::Syscall;
-use ferrix_sched_class::{RtParams, RtPolicy};
+use ferrix_sched_class::{CpuSet, RtParams, RtPolicy};
 use ferrix_vfs::fd::MAX_LIMIT;
 
 use crate::sched;
@@ -61,8 +61,6 @@ pub(crate) fn dispatch(
         Syscall::SchedGetparam => sys_sched_getparam(process, int(a[0]), a[1]),
         Syscall::SchedSetparam => sys_sched_setparam(process, int(a[0]), a[1]),
         Syscall::SchedGetscheduler => sys_sched_getscheduler(process, int(a[0])),
-        Syscall::SchedSetattr => sys_sched_setattr(process, int(a[0]), a[1], a[2]),
-        Syscall::SchedGetattr => sys_sched_getattr(process, int(a[0]), a[1], a[2] as u32, a[3]),
         Syscall::SchedSetscheduler => sys_sched_setscheduler(process, int(a[0]), int(a[1]), a[2]),
         Syscall::SchedSetattr => sys_sched_setattr(process, int(a[0]), a[1], a[2] as u32),
         Syscall::SchedGetattr => {
@@ -425,7 +423,7 @@ pub(crate) fn sys_sched_setaffinity(
         // A Linux thread always runs on a task with a thread; a task with
         // none is the kernel's, and refused (L.sched.96).
         Err(sched::AffinityRefusal::KernelThread) => Err(Errno::EINVAL),
-        #[cfg(ferrix_schedule = "edf")]
+        #[cfg(ferrix_sched_deadline = "edf_cbs")]
         Err(sched::AffinityRefusal::Reserved) => Err(Errno::EBUSY),
     }
 }
@@ -627,13 +625,20 @@ const SCHED_FLAG_KEEP_PARAMS: u64 = 0x10;
 const SCHED_FLAG_UTIL_CLAMP: u64 = 0x60;
 /// Every flag Linux knows, `SCHED_FLAG_ALL`: another is `EINVAL`.
 const SCHED_FLAG_ALL: u64 = 0x7f;
+/// The longest `sched_runtime` a fair task may ask for, 100 ms: Linux's
+/// ceiling in `__setparam_fair`. What the queue then grants is never longer
+/// than its own slice (`ferrix_sched_fair::effective_request`).
+const MAX_REQUEST_NS: u64 = 100_000_000;
 
 /// `sched_setattr`: as `sched_setscheduler`, from a `struct sched_attr`,
 /// read as Linux's `sched_copy_attr` reads it (test-rtsched's errors step): a size of zero
 /// is the first size, one below it or above a page `E2BIG` with the size
 /// this kernel knows written back, and bytes past that size must be zero.
 /// Under `SCHED_OTHER` its nice value is the thread's, as `setpriority`
-/// sets it.
+/// sets it, and its `sched_runtime` the thread's slice request
+/// (`docs/GAME-MODE-SCHED.md` §2.2, F7; L.sched.109): zero for the queue's
+/// slice, else clamped to 0.1 to 100 ms as Linux 7.0's `__setparam_fair`
+/// clamps it.
 pub(crate) fn sys_sched_setattr(
     process: &Process,
     pid: i32,
@@ -679,6 +684,23 @@ pub(crate) fn sys_sched_setattr(
     let sched_flags = u64::from(word(8)) | (u64::from(word(12)) << 32);
     let nice = (word(16) as i32).clamp(-20, 19);
     let priority = word(20);
+    let runtime = u64::from(word(24)) | (u64::from(word(28)) << 32);
+    #[cfg(ferrix_sched_deadline = "edf_cbs")]
+    {
+        let deadline = u64::from(word(32)) | (u64::from(word(36)) << 32);
+        let period = u64::from(word(40)) | (u64::from(word(44)) << 32);
+        let asked = Deadline {
+            policy: policy as u32,
+            flags: sched_flags,
+            priority,
+            runtime,
+            deadline,
+            period,
+        };
+        if let Some(answer) = deadline_setattr(process, pid, &asked) {
+            return answer;
+        }
+    }
     if sched_flags & !SCHED_FLAG_ALL != 0 {
         return Err(Errno::EINVAL);
     }
@@ -716,13 +738,88 @@ pub(crate) fn sys_sched_setattr(
             attributes::apply_nice(thread.nice(), &task);
         }
     }
+    if params.is_none() && !keep_params {
+        attributes::set_slice_request(&thread, slice_request(runtime));
+    }
     Ok(0)
+}
+
+/// What `sched_setattr` read, for [`deadline_setattr`].
+#[cfg(ferrix_sched_deadline = "edf_cbs")]
+struct Deadline {
+    policy: u32,
+    flags: u64,
+    priority: u32,
+    runtime: u64,
+    deadline: u64,
+    period: u64,
+}
+
+/// `SCHED_DEADLINE`'s two doors under `sched_deadline=edf_cbs`: the calling thread alone takes
+/// a reservation, deadline equal to period, or falls back to `SCHED_OTHER`; `CAP_SYS_NICE`
+/// here, and the kernel's own authority below it (ledger 7088 E.2). `None` for what is not
+/// its. Not built until the deadline tier is (docs/SCHED-CLASSES.md §9g).
+#[cfg(ferrix_sched_deadline = "edf_cbs")]
+fn deadline_setattr(process: &Process, pid: i32, attr: &Deadline) -> Option<Result<usize, Errno>> {
+    const SCHED_DEADLINE: u32 = 6;
+    let held = sched::reserve::holds_own();
+    if attr.policy != SCHED_DEADLINE && !held {
+        return None;
+    }
+    let mine = pid == 0
+        || attributes::thread_named(process, pid).is_some_and(|thread| {
+            attributes::task_of(&thread).is_some_and(|task| {
+                sched::current().is_some_and(|own| alloc::sync::Arc::ptr_eq(&task, &own))
+            })
+        });
+    if !mine {
+        return Some(Err(Errno::EPERM));
+    }
+    if attr.flags != 0 || attr.priority != 0 {
+        return Some(Err(Errno::EINVAL));
+    }
+    if let Err(why) = credentials::require_privilege(process) {
+        return Some(Err(why));
+    }
+    if attr.policy != SCHED_DEADLINE {
+        let _ = sched::reserve::give_back();
+        return None;
+    }
+    use sched::reserve::{Refusal, Reservation};
+    Some(
+        match sched::reserve::take(Reservation {
+            runtime_ns: attr.runtime,
+            deadline_ns: attr.deadline,
+            period_ns: if attr.period == 0 {
+                attr.deadline
+            } else {
+                attr.period
+            },
+        }) {
+            Ok(()) => Ok(0),
+            Err(Refusal::Malformed) => Err(Errno::EINVAL),
+            // As Linux's admission answers.
+            Err(Refusal::Unschedulable | Refusal::Full | Refusal::Already) => Err(Errno::EBUSY),
+            Err(Refusal::Denied) => Err(Errno::EPERM),
+        },
+    )
+}
+
+/// A fair thread's slice request from `sched_attr::sched_runtime`: zero for
+/// the queue's slice, else clamped to 0.1 to 100 ms.
+fn slice_request(runtime: u64) -> u64 {
+    match runtime {
+        0 => 0,
+        asked => asked.clamp(ferrix_sched_fair::MIN_REQUEST_NS, MAX_REQUEST_NS),
+    }
 }
 
 /// `sched_getattr`: the thread's policy, flags, nice value and priority in a
 /// `struct sched_attr` of at most `size` bytes, its size field the bytes
 /// written (test-rtsched's errors step): a size below the first one, above a page, or
-/// nonzero flags are `EINVAL`.
+/// nonzero flags are `EINVAL`. A fair thread's `sched_runtime` is the
+/// request its task has, or with none the slice a task alone on its queue
+/// is given; Linux answers its own base slice there.
 pub(crate) fn sys_sched_getattr(
     process: &Process,
     pid: i32,
@@ -748,9 +845,26 @@ pub(crate) fn sys_sched_getattr(
     put(8, u32::from(resets) * SCHED_FLAG_RESET_ON_FORK as u32);
     put(16, thread.nice() as u32);
     put(20, priority);
+    if policy == SCHED_OTHER {
+        let runtime = fair_runtime(&thread);
+        put(24, runtime as u32);
+        put(28, (runtime >> 32) as u32);
+    }
     let out = attr.get(..written as usize).ok_or(Errno::EINVAL)?;
     uaccess::copy_to_user(process.space(), at, out).map_err(|_| Errno::EFAULT)?;
     Ok(0)
+}
+
+/// A fair thread's `sched_runtime` as `sched_getattr` answers it: its task's
+/// own record, which is what its queue is told, not the thread's -- so a
+/// task made without its thread's request reads none (L.sched.109's check).
+fn fair_runtime(thread: &crate::syscall::thread::Thread) -> u64 {
+    let asked =
+        attributes::task_of(thread).map_or(thread.slice_request(), |task| task.request_ns());
+    match asked {
+        0 => sched::BASE_SLICE_NS,
+        asked => asked,
+    }
 }
 
 /// `sched_get_priority_min` and `_max`, as Linux defines them for every

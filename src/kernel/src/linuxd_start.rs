@@ -535,9 +535,14 @@ fn start_further(
             core.exit_status()
         );
     }
-    crate::sched::spawn("partition watch", watch, 0, ferrix_sched::NICE_0_WEIGHT)
-        .map(|_| ())
-        .map_err(|_| "no task to watch it")
+    crate::sched::spawn(
+        "partition watch",
+        watch,
+        0,
+        ferrix_sched_fair::NICE_0_WEIGHT,
+    )
+    .map(|_| ())
+    .map_err(|_| "no task to watch it")
 }
 
 /// linuxd's image out of `archive` and into `space`.
