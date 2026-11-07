@@ -659,7 +659,7 @@ fn still_listed(_: Option<()>) -> bool {
 fn a_wait_on_many_words_answers_which(a: &Side, report: &mut Report) -> Result<(), &'static str> {
     let words = [WORD, WORD_B, WORD_C];
     let mut vector = [0_u8; 48];
-    for (index, (&at, element)) in words.iter().zip(vector.chunks_exact_mut(16)).enumerate() {
+    for (index, (&at, element)) in words.iter().zip(vector.as_chunks_mut::<16>().0).enumerate() {
         set(a, at, 20 + index as u32)?;
         let (address, rest) = element.split_at_mut(8);
         address.copy_from_slice(&at.to_ne_bytes());

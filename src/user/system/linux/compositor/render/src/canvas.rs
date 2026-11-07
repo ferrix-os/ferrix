@@ -1139,10 +1139,13 @@ fn copy_rows(data: &mut [u8], width: usize, surface: &Surface<'_>, rect: Rect, c
 fn copy_opaque(dst: &mut [u8], src: &[u8]) {
     // A word a pixel, with the alpha byte set in it, rather than four byte
     // stores: the same bytes, in a loop the compiler can widen.
-    for (dst, src) in dst.chunks_exact_mut(4).zip(src.chunks_exact(4)) {
-        if let (Ok(dst), Ok(src)) = (<&mut [u8; 4]>::try_from(dst), <[u8; 4]>::try_from(src)) {
-            *dst = (u32::from_le_bytes(src) | 0xFF00_0000).to_le_bytes();
-        }
+    for (dst, src) in dst
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(src.as_chunks::<4>().0)
+    {
+        *dst = (u32::from_le_bytes(*src) | 0xFF00_0000).to_le_bytes();
     }
 }
 
@@ -1230,11 +1233,11 @@ fn stretch_row(out: &mut [u8], rows: (&[u8], &[u8]), down: u32, columns: &[(u32,
             .map_or(0, u32::from_le_bytes)
     };
     let (upper, lower) = rows;
-    for (pixel, &(left, right, across)) in out.chunks_exact_mut(4).zip(columns) {
+    for (pixel, &(left, right, across)) in out.as_chunks_mut::<4>().0.iter_mut().zip(columns) {
         let above = mix(texel(upper, left), texel(upper, right), across);
         let below = mix(texel(lower, left), texel(lower, right), across);
         let value = mix(above, below, down) | 0xFF00_0000;
-        pixel.copy_from_slice(&value.to_le_bytes());
+        *pixel = value.to_le_bytes();
     }
 }
 
@@ -1578,7 +1581,7 @@ fn by_column(
     let Some(pixels) = pixels else {
         return;
     };
-    for (x, pixel) in (from..).zip(pixels.chunks_exact_mut(4)) {
+    for (x, pixel) in (from..).zip(pixels.as_chunks_mut::<4>().0) {
         let Ok(at) = usize::try_from(x.saturating_sub(left)) else {
             continue;
         };
@@ -1659,13 +1662,10 @@ impl Blended {
     /// Blend every pixel of `pixels`, canvas bytes, through the table.
     fn apply(&self, pixels: &mut [u8]) {
         let [blue, green, red] = &self.0;
-        for pixel in pixels.chunks_exact_mut(4) {
-            if let [b, g, r, _] = pixel {
-                let look = |table: &[u8; 256], byte: u8| {
-                    table.get(usize::from(byte)).copied().unwrap_or(byte)
-                };
-                (*b, *g, *r) = (look(blue, *b), look(green, *g), look(red, *r));
-            }
+        let look =
+            |table: &[u8; 256], byte: u8| table.get(usize::from(byte)).copied().unwrap_or(byte);
+        for [b, g, r, _] in pixels.as_chunks_mut::<4>().0 {
+            (*b, *g, *r) = (look(blue, *b), look(green, *g), look(red, *r));
         }
     }
 }
@@ -1732,12 +1732,13 @@ impl Blend<'_> {
 fn over_row(into: &mut [u8], pixels: &[u8], opaque: bool, opacity: f32, fade: Option<&Fade>) {
     const FACTOR: f32 = 1.0 / 255.0;
     let whole = opacity >= 1.0;
-    for (into, pixel) in into.chunks_exact_mut(4).zip(pixels.chunks_exact(4)) {
-        let (Ok(into), Ok(mut source)) =
-            (<&mut [u8; 4]>::try_from(into), <[u8; 4]>::try_from(pixel))
-        else {
-            continue;
-        };
+    for (into, &pixel) in into
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(pixels.as_chunks::<4>().0)
+    {
+        let mut source = pixel;
         if opaque {
             source[3] = 0xFF;
         }

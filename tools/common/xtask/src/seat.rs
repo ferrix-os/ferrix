@@ -210,14 +210,12 @@ fn showing(screen: &Image) -> Showing {
         screen.height / 4..screen.height * 3 / 4,
     );
     let mut colours = std::collections::BTreeSet::new();
-    for (index, pixel) in screen.pixels.chunks_exact(3).enumerate() {
+    for (index, &pixel) in screen.pixels.as_chunks::<3>().0.iter().enumerate() {
         let (x, y) = (index % screen.width.max(1), index / screen.width.max(1));
         if !columns.contains(&x) || !rows.contains(&y) || cursor(x, y) {
             continue;
         }
-        if let [red, green, blue] = *pixel {
-            let _ = colours.insert([red, green, blue]);
-        }
+        let _ = colours.insert(pixel);
         if colours.len() > GRADIENT_COLOURS {
             return Showing::Gradient;
         }

@@ -79,7 +79,7 @@ pub fn parse(word: impl Fn(usize) -> u16) -> Result<Parsed, Refused> {
 /// An ATA string: each word holds two characters, the first in its high
 /// byte.
 fn swapped(word: &impl Fn(usize) -> u16, first: usize, out: &mut [u8]) {
-    for (i, pair) in out.chunks_exact_mut(2).enumerate() {
+    for (i, pair) in out.as_chunks_mut::<2>().0.iter_mut().enumerate() {
         pair.copy_from_slice(&word(first + i).to_be_bytes());
     }
 }

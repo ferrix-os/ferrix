@@ -123,7 +123,6 @@ pub(crate) fn judge(row: Row, lines: &[String]) -> std::result::Result<(), Strin
             if !published.is_some_and(|count| count > 0) {
                 return Err("the kernel published no generic node".to_owned());
             }
-            Ok(())
         }
         Row::ProviderAbsent => {
             let _ = find(REFUSED).ok_or_else(|| format!("no line `{REFUSED}`"))?;
@@ -133,9 +132,9 @@ pub(crate) fn judge(row: Row, lines: &[String]) -> std::result::Result<(), Strin
                     line.trim()
                 ));
             }
-            Ok(())
         }
     }
+    Ok(())
 }
 
 /// Edit QEMU's tree, as `dtc` writes it in source form: the PL031's node

@@ -798,7 +798,12 @@ pub(crate) fn digests_of_what_it_holds(archive: &[u8]) -> Result<Vec<u8>> {
     with_files_changed(archive, |name, data| match name {
         "etc/ferrix/certified" => {
             let mut list = data.to_vec();
-            for entry in list.get_mut(12..).unwrap_or_default().chunks_exact_mut(64) {
+            for entry in list
+                .get_mut(12..)
+                .unwrap_or_default()
+                .as_chunks_mut::<64>()
+                .0
+            {
                 let (digest, named) = entry.split_at_mut(32);
                 let end = named.iter().position(|byte| *byte == 0).unwrap_or(32);
                 if let Some(bytes) = named.get(..end).and_then(holds) {

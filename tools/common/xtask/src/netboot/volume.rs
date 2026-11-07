@@ -139,8 +139,7 @@ impl Volume {
             return Err(Error::new("directories nested deeper than the image's"));
         }
         let directory = self.read_chain(cluster)?;
-        for slot in directory.chunks_exact(32) {
-            let entry: [u8; 32] = field(slot, 0)?;
+        for &entry in directory.as_chunks::<32>().0 {
             let [first, ..] = entry;
             let [attributes] = field::<1>(&entry, 11)?;
             if first == 0 {

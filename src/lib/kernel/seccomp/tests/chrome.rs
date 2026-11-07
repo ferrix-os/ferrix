@@ -35,7 +35,9 @@ const PROGRAMS: [(&[u8], &str); 3] = [
 
 fn load(bytes: &[u8]) -> ferrix_seccomp::Program {
     let insns: Vec<Insn> = bytes
-        .chunks_exact(8)
+        .as_chunks::<8>()
+        .0
+        .iter()
         .map(|chunk| Insn::from_bytes(chunk).expect("eight bytes"))
         .collect();
     verify(&insns).expect("a filter the real kernel accepted")

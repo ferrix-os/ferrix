@@ -348,7 +348,7 @@ pub fn write_table(
     let mut array = vec![0_u8; (ENTRIES * ENTRY_SIZE) as usize];
     for (at, (partition, entry)) in partitions
         .iter()
-        .zip(array.chunks_exact_mut(ENTRY_SIZE as usize))
+        .zip(array.as_chunks_mut::<{ ENTRY_SIZE as usize }>().0)
         .enumerate()
     {
         let overlaps = partitions.iter().enumerate().any(|(other_at, other)| {

@@ -4,7 +4,7 @@ description = "Linux-ABI round trips timed: a pipe, a Unix stream socket and a f
 version = "0.1.0"
 edition = "2024"
 # Matches Ferrix's rust-toolchain.toml, which rustup finds from here.
-rust-version = "1.97"
+rust-version = "1.99"
 license = "MIT"
 publish = false
 

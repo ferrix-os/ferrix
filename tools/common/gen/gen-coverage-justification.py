@@ -299,6 +299,11 @@ def render(residuals: dict[str, dict]) -> str:
         "A-7 asks about. The suite is every boot gate `cargo xtask coverage` "
         "runs on that architecture; see VERIFICATION.md §3.",
         "",
+        # Until `cargo xtask coverage` runs on 1.99.1 (docs/BACKLOG.md, P1;
+        # ledger 7667 R.6), then this sentence goes.
+        "**Measured under rustc 1.97.1, carried** to the 1.99.1 tree by "
+        "`carry-coverage.py`, not re-measured (VERIFICATION.md §3).",
+        "",
         "| Architecture | Profile | Unreached | Argued | Hardware absent | Needs a test |",
         "|---|---|---:|---:|---:|---:|",
     ]
@@ -533,6 +538,9 @@ def render_worklist(
         "work. The argued categories -- another architecture's code, the "
         "failure path, hardware the machine does not present -- are not here; "
         "their argument is in COVERAGE-RESIDUAL.md.",
+        "",
+        # Until `cargo xtask coverage` runs on 1.99.1 (ledger 7667 R.6).
+        "**Measured under rustc 1.97.1, carried** (VERIFICATION.md §3).",
         "",
         "Counts are statements unreached by the whole suite on that "
         "architecture. A dash is a file the architecture does not compile, or "

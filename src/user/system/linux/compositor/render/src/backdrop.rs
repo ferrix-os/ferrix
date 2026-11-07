@@ -73,13 +73,13 @@ fn same(one: &[u8], other: &[u8]) -> bool {
     if one.len() != other.len() {
         return false;
     }
-    let (ones, other_words) = (one.chunks_exact(WORD), other.chunks_exact(WORD));
-    let tails = ones.remainder() == other_words.remainder();
-    tails
-        && ones.zip(other_words).all(|(a, b)| {
-            let word = |bytes: &[u8]| <[u8; WORD]>::try_from(bytes).map_or(0, u64::from_ne_bytes);
-            word(a) == word(b)
-        })
+    let ((ones, one_tail), (others, other_tail)) =
+        (one.as_chunks::<WORD>(), other.as_chunks::<WORD>());
+    one_tail == other_tail
+        && ones
+            .iter()
+            .zip(others)
+            .all(|(a, b)| u64::from_ne_bytes(*a) == u64::from_ne_bytes(*b))
 }
 
 /// Where the tile at `at` along one direction of the grid begins, in pixels.

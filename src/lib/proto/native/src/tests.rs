@@ -653,8 +653,13 @@ fn a_job_is_limited_and_read_back_through_pointers() {
         let [_, resource, out, ..] = raw.args();
         assert_eq!(resource as u64, types::JOB_MEMORY);
         let mut words = [0u8; 24];
-        for (chunk, value) in words.chunks_exact_mut(8).zip([4096u64, 8192, 3]) {
-            chunk.copy_from_slice(&value.to_ne_bytes());
+        for (chunk, value) in words
+            .as_chunks_mut::<8>()
+            .0
+            .iter_mut()
+            .zip([4096u64, 8192, 3])
+        {
+            *chunk = value.to_ne_bytes();
         }
         write(raw, out, &words);
         0
@@ -1279,8 +1284,10 @@ fn words_of_packs_every_length_as_one_copy_would() {
         let mut padded = [0_u8; channel::WRITE_READ_BYTES];
         padded[..len].copy_from_slice(bytes);
         let expected: Vec<usize> = padded
-            .chunks_exact(size_of::<usize>())
-            .map(|chunk| usize::from_ne_bytes(chunk.try_into().unwrap()))
+            .as_chunks::<{ size_of::<usize>() }>()
+            .0
+            .iter()
+            .map(|chunk| usize::from_ne_bytes(*chunk))
             .collect();
         let words = channel::Words::of(bytes).unwrap();
         assert_eq!(words.as_slice(), expected.as_slice(), "length {len}");

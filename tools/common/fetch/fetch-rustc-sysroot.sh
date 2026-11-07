@@ -23,7 +23,7 @@
 # Every download is pinned by the SHA-256 its own index gave: Debian's
 # Packages files for trixie and sid at snapshot.debian.org's 20260923T000000Z,
 # which is also where they are fetched from, since the mirrors drop a package
-# a point release replaces; and the channel manifest channel-rust-1.97.1.toml
+# a point release replaces; and the channel manifest channel-rust-1.99.1.toml
 # (the `xz_hash` of each component).
 # With them come rustfmt, clippy, rust-analyzer and the standard library's
 # source, of the same release: what `cargo xtask check` and an editor run
@@ -249,25 +249,25 @@ older_debs=(
 
 # Path under the dist server and SHA-256 of each Rust component.
 components=(
-    "dist/2026-07-16/rustc-1.97.1-x86_64-unknown-linux-gnu.tar.xz 9819d0a32d56bd339585319c80260e332779f5541fd66838ab7e016d6c814819"
-    "dist/2026-07-16/rust-std-1.97.1-x86_64-unknown-linux-gnu.tar.xz 1c1e704ae80126b7de34f72ea2825f7fd01736dec20732faed47374b95282fba"
-    "dist/2026-07-16/rust-std-1.97.1-x86_64-unknown-none.tar.xz 24e213f586ecb1811a11bd40dbb53690fbae469cce89dc60f7cf20eaeaaeab29"
-    "dist/2026-07-16/rust-std-1.97.1-x86_64-unknown-uefi.tar.xz 35f18a13185697e26540ef139de4408689fa77fb6427b355e0a9954d632f20fc"
-    "dist/2026-07-16/rust-std-1.97.1-aarch64-unknown-none-softfloat.tar.xz 02eb0d235d8f3af63ce896178a96fcf0e78e05b5241e5ddc92d6a07e28bf5e0e"
-    "dist/2026-07-16/rust-std-1.97.1-aarch64-unknown-uefi.tar.xz 90fd767018a4800c764bf06212eb96dfd17f0f7da1c2a070ee30d66c0057ac79"
-    "dist/2026-07-16/rust-std-1.97.1-armv7a-none-eabi.tar.xz d9afee2a85c5a38a07ba5277ab3b1fe8560a6bfd06301256bdc57b79442f270d"
-    "dist/2026-07-16/rust-std-1.97.1-armv7-unknown-linux-musleabi.tar.xz ad50b2c455548ca7a7660251a6b8ea09156182583204053da9ea000b50723ab6"
-    "dist/2026-07-16/rust-std-1.97.1-x86_64-unknown-linux-musl.tar.xz 51d83178680556f73a5fa8ad865b76a1ff541867445c00fc65dc67246bc2de66"
-    "dist/2026-07-16/rust-std-1.97.1-aarch64-unknown-linux-musl.tar.xz 49ff0879d94e2e8e86d5e85eb15a9215943e8c78b51363d6553443598cab5d31"
-    "dist/2026-07-16/cargo-1.97.1-x86_64-unknown-linux-gnu.tar.xz e1be5f5ff7f7f80ca506fb65770b759edbdc6d303781ed71c5de8ec8a8394779"
+    "dist/2026-10-15/rustc-1.99.1-x86_64-unknown-linux-gnu.tar.xz 2ff05ff9c08a90861e7f6e4065b40a8b87463b4576186fd613871c3e37f2091f"
+    "dist/2026-10-15/rust-std-1.99.1-x86_64-unknown-linux-gnu.tar.xz 109b074225bf5b9ea3820890876bfdf4ed161adbfaf94b2b4b5984c85ee5d958"
+    "dist/2026-10-15/rust-std-1.99.1-x86_64-unknown-none.tar.xz ae62c0c5ea47af55eb432dabc8f4a92c1815965633fc3ecf4056c02948f302cf"
+    "dist/2026-10-15/rust-std-1.99.1-x86_64-unknown-uefi.tar.xz 436c3de8edf19b2bea8f877f495927d2bdef4f3f6e6c67eae3eb5d31b0820616"
+    "dist/2026-10-15/rust-std-1.99.1-aarch64-unknown-none-softfloat.tar.xz 6ff3ecba5ae285c5286ad6f5024994d818cee569c59d980aa2edc9e5fa3bcd4e"
+    "dist/2026-10-15/rust-std-1.99.1-aarch64-unknown-uefi.tar.xz e48e00681ea2c989d39274e3ed50ffdacb3bccea0950ea1789ab5075c8f36dae"
+    "dist/2026-10-15/rust-std-1.99.1-armv7a-none-eabi.tar.xz 9eba50e7713f419cfd3848e07173704267d4049fde86a10203535f699205980f"
+    "dist/2026-10-15/rust-std-1.99.1-armv7-unknown-linux-musleabi.tar.xz eaf5ee2b0948e18e586af42aa9aeb0e8e5aba515bc2d862bf0d23dc59569a8a9"
+    "dist/2026-10-15/rust-std-1.99.1-x86_64-unknown-linux-musl.tar.xz 1dd241eaeb19ff3b5180461c77bdee93d6cafc669eda9de834e7c06b0ec3ca95"
+    "dist/2026-10-15/rust-std-1.99.1-aarch64-unknown-linux-musl.tar.xz 2f3eb0d0610e2b7f6b2121d106e2490ac648decfa0c09b30873bdfc60de6c1ab"
+    "dist/2026-10-15/cargo-1.99.1-x86_64-unknown-linux-gnu.tar.xz 53f3521949404d595efb06a55c12c5658d4ed1c75566f33d3d514eaebe70bd8a"
     # What working on the tree from within Ferrix needs beside the compiler
     # (docs/DEV-ON-FERRIX.md): `cargo xtask check` starts with `cargo fmt`
     # and runs clippy, and an editor's language server reads the standard
     # library's source.
-    "dist/2026-07-16/rustfmt-1.97.1-x86_64-unknown-linux-gnu.tar.xz 907fe97d6afbde1eca1b34c992c76e1406d422e2e6f137813d382acec7eb4d14"
-    "dist/2026-07-16/clippy-1.97.1-x86_64-unknown-linux-gnu.tar.xz 3441df8fb54db985f8c8a3e8356b8874a3f92cc8cca8565cfe36f1dc15935e72"
-    "dist/2026-07-16/rust-analyzer-1.97.1-x86_64-unknown-linux-gnu.tar.xz 4d6b6055bea92ed2b2e53a35577d9b43dd4d0c6234be72044d3097b7d3f16572"
-    "dist/2026-07-16/rust-src-1.97.1.tar.xz e9a1e616d04c6845895c827a178b9227f7c7199f3f4a80af81ab3aff7b80156b"
+    "dist/2026-10-15/rustfmt-1.99.1-x86_64-unknown-linux-gnu.tar.xz e3b36c4c7ec3486c059d8067ff48787676612007123aad7a4e8ec12c48ee9ba2"
+    "dist/2026-10-15/clippy-1.99.1-x86_64-unknown-linux-gnu.tar.xz 458339712a058e52cc4522ff9ef8b59cd1ea1340312216cd94194c464a3f6dc5"
+    "dist/2026-10-15/rust-analyzer-1.99.1-x86_64-unknown-linux-gnu.tar.xz 5f2613d62003fc8cbe788d4ae409359c91c241ba248adbefe032df8bb77357bf"
+    "dist/2026-10-15/rust-src-1.99.1.tar.xz e485a88c45db546b73571df7bebfcb4454ba4fb552c492e25fc5b00eeb5bf22d"
 )
 
 # The same packages and components for an AArch64 host, in place of the lists

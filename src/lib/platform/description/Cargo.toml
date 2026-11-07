@@ -3,7 +3,7 @@ name = "ferrix-description"
 description = "Which of its ACPI tables and device tree a machine is read by, decided once"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 license.workspace = true
 publish = false
 

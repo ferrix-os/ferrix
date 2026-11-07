@@ -399,7 +399,7 @@ impl<D: WriteDevice> WriteVolume<D> {
         let sector = u64::from(self.sectorsize());
         let mut run: Vec<u8> = Vec::new();
         let mut start = key.offset;
-        for (index, sum) in data.chunks_exact(4).enumerate() {
+        for (index, sum) in data.as_chunks::<4>().0.iter().enumerate() {
             let at = key
                 .offset
                 .saturating_add((index as u64).saturating_mul(sector));

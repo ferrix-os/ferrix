@@ -369,8 +369,13 @@ fn record_of(index: usize) -> Option<Proc> {
 fn this_vendor() -> (Vendor, u32) {
     let id = core::arch::x86_64::__cpuid(0);
     let mut name = [0_u8; 12];
-    for (chunk, word) in name.chunks_exact_mut(4).zip([id.ebx, id.edx, id.ecx]) {
-        chunk.copy_from_slice(&word.to_le_bytes());
+    for (chunk, word) in name
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip([id.ebx, id.edx, id.ecx])
+    {
+        *chunk = word.to_le_bytes();
     }
     let ebx = if core::arch::x86_64::__cpuid(0x8000_0000).eax >= 0x8000_0007 {
         core::arch::x86_64::__cpuid(0x8000_0007).ebx

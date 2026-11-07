@@ -387,13 +387,11 @@ fn catalog(esp_block: u64) -> Vec<u8> {
     let sum = out
         .get(..32)
         .unwrap_or_default()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .fold(0_u16, |sum, word| {
-            let pair = [
-                word.first().copied().unwrap_or(0),
-                word.get(1).copied().unwrap_or(0),
-            ];
-            sum.wrapping_add(u16::from_le_bytes(pair))
+            sum.wrapping_add(u16::from_le_bytes(*word))
         });
     set(&mut out, 28, &0_u16.wrapping_sub(sum).to_le_bytes());
     set(&mut out, 32, &[0x88]);

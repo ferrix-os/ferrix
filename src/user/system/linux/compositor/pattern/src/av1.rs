@@ -284,7 +284,13 @@ fn convert(picture: &Dav1dPicture) -> Result<Frame, String> {
         let Some(pixels_row) = pixels.get_mut(row.saturating_mul(width * 4)..) else {
             return Err("a frame too large to hold".to_owned());
         };
-        for (column, pixel) in pixels_row.chunks_exact_mut(4).take(width).enumerate() {
+        for (column, pixel) in pixels_row
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .take(width)
+            .enumerate()
+        {
             // SAFETY: every offset is inside the plane dav1d says it wrote:
             // luma is `height` rows of `y_stride`, chroma half that each way.
             let y = unsafe { *y_plane.wrapping_offset(y_row + column as isize) };
@@ -371,7 +377,12 @@ mod tests {
         };
         let first = &frame.pixels[0..4];
         assert!(
-            frame.pixels.chunks_exact(4).any(|pixel| pixel != first),
+            frame
+                .pixels
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .any(|pixel| pixel != first),
             "a decoded frame was one flat colour"
         );
     }

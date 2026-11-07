@@ -734,6 +734,11 @@ fn pid_one(outside: &[String], host: &str) -> ! {
 /// is charged for what it touched: nothing a fault brought along pushes it over, so
 /// `memory.events` does not move (`fault_ahead`, ledger 6537). The room left is under
 /// `write_ahead`'s seven pages, once the walk's own tables are counted.
+///
+/// The room is measured last: everything this program allocates for itself (the reads of
+/// `memory.events` among them, whose heap growth is the allocator's and differs between builds)
+/// happens before `memory.current` is read, and nothing allocates between that read and the
+/// walk's end, so the room left is the walk's alone.
 fn walk_to_the_limit() {
     const PAGE: usize = 4096;
     /// What is left beyond the walk: about four pages once its tables are charged, under
@@ -746,13 +751,19 @@ fn walk_to_the_limit() {
         );
         field(&text, "max")
     };
+    // Before `memory.current` is read, not after: this read can grow the heap by a page (seen in
+    // the builds of both rustc 1.97.1 and 1.99.1), and after the read that page came out of the
+    // room `LEFT` names; under 1.99.1's build the walk then went over.
+    let before = events();
     let used = get(
         &format!("{CTN}/memory.current"),
         "memory.current could not be read",
     );
-    let used: usize = used.trim().parse().unwrap_or(LIMIT);
+    // Not a walk of no pages, which would pass: a figure that does not read fails the case.
+    let Ok(used) = used.trim().parse::<usize>() else {
+        fail("memory.current did not read as a number");
+    };
     let pages = (LIMIT.saturating_sub(used) / PAGE).saturating_sub(LEFT);
-    let before = events();
     // Longer than the walk, so that a fault near its end has somewhere ahead to look.
     let mapped = pages + 16;
     // SAFETY: a fresh anonymous mapping, touched below and unmapped before the return.

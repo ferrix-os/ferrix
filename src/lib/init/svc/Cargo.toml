@@ -3,7 +3,7 @@ name = "ferrix-svc"
 description = "The service manager's pure core: unit files in systemd's syntax, the dependency graph, operations, the slice tree and restart policy, as a state machine of events and actions"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 license.workspace = true
 publish = false
 

@@ -41,7 +41,9 @@ struct Disk(Arc<Mutex<BTreeMap<u64, [u8; BLOCK]>>>);
 impl Disk {
     fn new(packed: &[u8]) -> Disk {
         let blocks = packed
-            .chunks_exact(8 + BLOCK)
+            .as_chunks::<{ 8 + BLOCK }>()
+            .0
+            .iter()
             .map(|record| {
                 let offset = u64::from_le_bytes(record[..8].try_into().unwrap());
                 (offset, record[8..].try_into().unwrap())

@@ -127,7 +127,7 @@ fn a_late_hop_by_hop_a_second_fragment_and_a_short_header_are_refused() {
 #[test]
 fn a_chain_past_the_bound_is_refused_and_no_next_header_ends_it() {
     let mut long = [0u8; 8 * (MAX_EXTENSION_HEADERS + 2)];
-    for chunk in long.chunks_exact_mut(8) {
+    for chunk in long.as_chunks_mut::<8>().0 {
         chunk[0] = next_header::DESTINATION_OPTIONS;
     }
     assert!(matches!(

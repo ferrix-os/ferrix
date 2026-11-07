@@ -514,7 +514,7 @@ impl Process {
         let membership = self.membership.lock();
         let charged = self
             .tasks
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |tasks| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |tasks| {
                 tasks.checked_sub(1)
             });
         if charged.is_ok() {

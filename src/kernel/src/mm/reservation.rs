@@ -239,7 +239,7 @@ pub(super) fn freed(first: Frame, n: u64) {
             adjust(slot, |slot| {
                 let _ = slot
                     .drawn
-                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |drawn| {
+                    .try_update(Ordering::Relaxed, Ordering::Relaxed, |drawn| {
                         Some(drawn.saturating_sub(1))
                     });
             });
@@ -253,7 +253,7 @@ fn adjust(slot: &Slot, change: impl FnOnce(&Slot)) {
     let before = slot.outstanding();
     change(slot);
     let after = slot.outstanding();
-    let _ = OUTSTANDING.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |outstanding| {
+    let _ = OUTSTANDING.try_update(Ordering::Relaxed, Ordering::Relaxed, |outstanding| {
         Some(outstanding.saturating_add(after).saturating_sub(before))
     });
 }

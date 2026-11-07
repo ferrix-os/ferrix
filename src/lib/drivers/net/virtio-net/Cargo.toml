@@ -3,7 +3,7 @@ name = "ferrix-virtio-net"
 description = "virtio-net driver logic: bring-up, frames and completions over an abstract transport and DMA memory"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 license.workspace = true
 publish = false
 

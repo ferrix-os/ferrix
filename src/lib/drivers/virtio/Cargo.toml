@@ -3,7 +3,7 @@ name = "ferrix-virtio"
 description = "virtio split virtqueue, as logic over an abstract shared memory"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 license.workspace = true
 publish = false
 

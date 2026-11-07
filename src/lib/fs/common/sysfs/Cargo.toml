@@ -3,7 +3,7 @@ name = "ferrix-sysfs"
 description = "The text of sysfs: what each attribute file prints, how a link's target is spelled, and what a write to bind or unbind names, byte for byte as Linux has it"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 license.workspace = true
 publish = false
 

@@ -127,11 +127,13 @@ impl Reader {
             let read = pending::audit_read(Native, &self.handle, which, from, &mut buffer)
                 .map_err(refused)?;
             self.lost += read.lost;
-            for chunk in buffer.chunks_exact(RECORD_BYTES).take(read.copied) {
-                let Ok(bytes) = <&[u8; RECORD_BYTES]>::try_from(chunk) else {
-                    continue;
-                };
-                let sequence = Record::from_bytes(bytes).sequence;
+            for chunk in buffer
+                .as_chunks::<RECORD_BYTES>()
+                .0
+                .iter()
+                .take(read.copied)
+            {
+                let sequence = Record::from_bytes(chunk).sequence;
                 match which {
                     AUDIT_BOOT => {
                         let _ = self.pinned.insert(sequence);

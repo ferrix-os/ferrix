@@ -71,8 +71,8 @@ fn refused<T>(result: io::Result<T>, errno: i32) -> bool {
 
 /// Fill `dumb` with `colour`.
 fn fill(dumb: &mut Dumb, colour: u32) {
-    for pixel in dumb.pixels().chunks_exact_mut(4) {
-        pixel.copy_from_slice(&colour.to_le_bytes());
+    for pixel in dumb.pixels().as_chunks_mut::<4>().0 {
+        *pixel = colour.to_le_bytes();
     }
 }
 

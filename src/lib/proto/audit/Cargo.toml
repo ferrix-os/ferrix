@@ -3,7 +3,7 @@ name = "ferrix-audit"
 description = "The audit record: the 64-byte layout the kernel keeps and a reader is handed"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 license.workspace = true
 publish = false
 

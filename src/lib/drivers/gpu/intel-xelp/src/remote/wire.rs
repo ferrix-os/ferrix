@@ -693,5 +693,9 @@ impl Batch {
 
 /// The records of a received message, in order.
 pub fn records(bytes: &[u8]) -> impl Iterator<Item = &[u8]> {
-    bytes.chunks_exact(RECORD_BYTES)
+    bytes
+        .as_chunks::<RECORD_BYTES>()
+        .0
+        .iter()
+        .map(<[u8; RECORD_BYTES]>::as_slice)
 }

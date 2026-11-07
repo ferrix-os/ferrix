@@ -319,7 +319,7 @@ pub(crate) fn describe() -> String {
 
 /// The packed records, as `(offset, block)`.
 fn records() -> impl Iterator<Item = (u64, &'static [u8])> {
-    PACKED.chunks_exact(RECORD).map(|record| {
+    PACKED.as_chunks::<RECORD>().0.iter().map(|record| {
         let (offset, block) = record.split_at(8);
         let offset = u64::from_le_bytes(offset.try_into().unwrap_or([0; 8]));
         (offset, block)
@@ -340,7 +340,7 @@ fn write_packed(path: &Path, packed: &[u8]) -> std::io::Result<()> {
 fn write_packed_sized(path: &Path, packed: &[u8], size: u64) -> std::io::Result<()> {
     let mut file = File::create(path)?;
     file.set_len(size)?;
-    for record in packed.chunks_exact(RECORD) {
+    for record in packed.as_chunks::<RECORD>().0 {
         let (offset, block) = record.split_at(8);
         let offset = u64::from_le_bytes(offset.try_into().unwrap_or([0; 8]));
         let _ = file.seek(SeekFrom::Start(offset))?;

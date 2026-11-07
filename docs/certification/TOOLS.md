@@ -19,7 +19,7 @@ qualification package, which is findings F-17, F-18 and F-19.
 
 | Tool | Version | Class | Note |
 |---|---|---|---|
-| `rustc` | 1.97.1, pinned in `rust-toolchain.toml` | **T3** | Generates the product. |
+| `rustc` | 1.99.1, pinned in `rust-toolchain.toml` (1.97.1 until 2026-11-06) | **T3** | Generates the product. |
 | `rust-lld` | bundled with the toolchain | **T3** | Links the product. |
 | `cargo` | bundled | T2 | Selects what is compiled; a wrong selection is visible in the artifact. |
 
@@ -31,7 +31,7 @@ cheap.
 
 The concrete route is **Ferrocene**, a qualified Rust toolchain with evidence
 packages for IEC 62304 Class C, IEC 61508 SIL 4 and ISO 26262 ASIL D. Adopting
-it means pinning a Ferrocene-released `rustc` in place of 1.97.1 and checking
+it means pinning a Ferrocene-released `rustc` in place of 1.99.1 and checking
 the qualified target list. `armv7a-none-eabi` and the three UEFI targets are
 the ones expected to fall outside it, and the reference configuration would
 have to say so.

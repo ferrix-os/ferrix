@@ -85,8 +85,8 @@ impl Block {
     /// The block as the 1024 bytes RFC 9106 hashes: little-endian words.
     fn to_bytes(&self) -> [u8; BLOCK_BYTES] {
         let mut bytes = [0_u8; BLOCK_BYTES];
-        for (chunk, word) in bytes.chunks_exact_mut(8).zip(self.0.iter()) {
-            chunk.copy_from_slice(&word.to_le_bytes());
+        for (chunk, word) in bytes.as_chunks_mut::<8>().0.iter_mut().zip(self.0.iter()) {
+            *chunk = word.to_le_bytes();
         }
         bytes
     }
@@ -94,10 +94,8 @@ impl Block {
     /// The block 1024 bytes stand for.
     fn from_bytes(bytes: &[u8; BLOCK_BYTES]) -> Block {
         let mut block = Block::ZERO;
-        for (word, chunk) in block.0.iter_mut().zip(bytes.chunks_exact(8)) {
-            let mut eight = [0_u8; 8];
-            eight.copy_from_slice(chunk);
-            *word = u64::from_le_bytes(eight);
+        for (word, chunk) in block.0.iter_mut().zip(bytes.as_chunks::<8>().0) {
+            *word = u64::from_le_bytes(*chunk);
         }
         block
     }

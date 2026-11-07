@@ -50,7 +50,9 @@ const PROGRAMS: [(&[u8], &str); 6] = [
 fn verify_and_the_naive_checker_answer_as_linux_did() {
     for (index, (bytes, answer)) in PROGRAMS.iter().enumerate() {
         let insns: Vec<Insn> = bytes
-            .chunks_exact(8)
+            .as_chunks::<8>()
+            .0
+            .iter()
             .map(|chunk| Insn::from_bytes(chunk).expect("eight bytes"))
             .collect();
         let linux_accepts = answer.trim() == "accepted";

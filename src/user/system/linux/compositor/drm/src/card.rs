@@ -314,8 +314,10 @@ pub fn plans_beside(card: &Card, held: &[(u32, u32)]) -> io::Result<Vec<Plan>> {
         };
         card.ioctl(drm::IOCTL_MODE_GETCONNECTOR, &mut connector)?;
         let modes: Vec<ModeInfo> = modes
-            .chunks_exact(ModeInfo::SIZE)
-            .filter_map(ModeInfo::read)
+            .as_chunks::<{ ModeInfo::SIZE }>()
+            .0
+            .iter()
+            .filter_map(|mode| ModeInfo::read(mode.as_slice()))
             .collect();
         let Some(mode) = modeset::choose_mode(&modes) else {
             continue;
@@ -747,8 +749,10 @@ fn plane_type(card: &Card, id: u32) -> io::Result<Option<String>> {
         };
         card.ioctl(drm::IOCTL_MODE_GETPROPERTY, &mut property)?;
         let names: Vec<(u64, String)> = enums
-            .chunks_exact(PropertyEnum::SIZE)
-            .filter_map(PropertyEnum::read)
+            .as_chunks::<{ PropertyEnum::SIZE }>()
+            .0
+            .iter()
+            .filter_map(|entry| PropertyEnum::read(entry.as_slice()))
             .map(|entry| (entry.value, modeset::c_name(&entry.name)))
             .collect();
         return Ok(Some(
@@ -1281,7 +1285,10 @@ impl Flusher {
 fn dirty_on(fd: libc::c_int, framebuffer: u32, clips: &[(u32, u32, u32, u32)]) -> io::Result<()> {
     let edge = |value: u32| u16::try_from(value).unwrap_or(u16::MAX);
     let mut bytes = vec![0u8; clips.len().min(MAX_CLIPS) * ClipRect::SIZE];
-    for (&(x, y, width, height), out) in clips.iter().zip(bytes.chunks_exact_mut(ClipRect::SIZE)) {
+    for (&(x, y, width, height), out) in clips
+        .iter()
+        .zip(bytes.as_chunks_mut::<{ ClipRect::SIZE }>().0)
+    {
         ClipRect {
             x1: edge(x),
             y1: edge(y),

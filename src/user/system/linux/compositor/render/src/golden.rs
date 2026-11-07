@@ -52,8 +52,10 @@ pub(crate) struct Mismatch {
 
 /// The pixels of `width`-wide `XRGB8888` bytes with no padding, as values.
 fn values(data: &[u8]) -> impl Iterator<Item = u32> + '_ {
-    data.chunks_exact(4)
-        .map(|pixel| u32::from_le_bytes(pixel.try_into().unwrap()))
+    data.as_chunks::<4>()
+        .0
+        .iter()
+        .map(|pixel| u32::from_le_bytes(*pixel))
 }
 
 /// Encode a `width` × `height` frame of `XRGB8888` bytes with no padding.

@@ -579,8 +579,8 @@ fn no_pager_and_the_image_rights(
     )?;
     let spec = [1_u64, 1, 0];
     let mut bytes = [0_u8; 24];
-    for (out, word) in bytes.chunks_exact_mut(8).zip(spec) {
-        out.copy_from_slice(&word.to_ne_bytes());
+    for (out, word) in bytes.as_chunks_mut::<8>().0.iter_mut().zip(spec) {
+        *out = word.to_ne_bytes();
     }
     side.put(BYTES_AT, &bytes)?;
     let paged = side.handle(

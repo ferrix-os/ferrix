@@ -546,7 +546,7 @@ A certificate attaches to a configuration, not to a repository.
 |---|---|
 | Architectures | x86-64, AArch64. **ARMv7-A is outside the claim** (the customer's G4, 2026-10-24, ledger 3906): no IOMMU is driven there, so no bus master's DMA is translated, and every ARMv7-A image boots with `ferrix.unisolated`; its rows are development rows, not claim evidence, and the DK1 a development board. It returns to the claim when an SMMU is driven on ARMv7-A and its rows boot without the word. On AArch64 a bus master needs its DMA translated alone (G4 (c)), its interrupts' residual as VULNERABILITY-ANALYSIS V-03 states it, until GICv3 ITS rows exist; then the full rule applies there too |
 | Profile | release |
-| Toolchain | rustc 1.97.1, pinned exactly in `rust-toolchain.toml` |
+| Toolchain | rustc 1.99.1, pinned exactly in `rust-toolchain.toml` (1.97.1 until 2026-11-06) |
 | Unstable features | none in `src/kernel/` or `src/boot/common/uefi/` |
 | Cargo features | 7 in the workspace, **0** in `src/kernel/` or `src/boot/common/uefi/` |
 | Where the loader boots from | the ESP's `FERRIX/` files, or on a disk with A/B system slots the slot its boot control record selects, verified, with the ESP's files as the rescue path (`docs/AB-BOOT.md`; SECURITY-TARGET A.FIRMWARE, SAFETY-MANUAL AoU-29). The loader has **no Cargo feature and no `cfg`** of its own; the A/B gate's negative controls are source sabotages run by `fleet/gate.sh control`. A netboot (the loader and its files from iPXE's read-only file system, `docs/NETBOOT.md`), where the loader sends its boot log to the server, is a development path, not the reference configuration |

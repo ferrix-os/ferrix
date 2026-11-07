@@ -944,7 +944,7 @@ impl Ucred {
             self.uid.to_le_bytes(),
             self.gid.to_le_bytes(),
         ];
-        for (slot, field) in bytes.chunks_exact_mut(4).zip(fields) {
+        for (slot, field) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(fields) {
             slot.copy_from_slice(&field);
         }
         bytes
@@ -983,7 +983,7 @@ impl Linger {
     pub fn to_bytes(self) -> [u8; Self::SIZE] {
         let mut bytes = [0_u8; Self::SIZE];
         let fields = [self.onoff.to_le_bytes(), self.linger.to_le_bytes()];
-        for (slot, field) in bytes.chunks_exact_mut(4).zip(fields) {
+        for (slot, field) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(fields) {
             slot.copy_from_slice(&field);
         }
         bytes

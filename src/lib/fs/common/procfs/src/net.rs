@@ -214,7 +214,7 @@ fn endpoint(out: &mut Vec<u8>, at: Endpoint) {
             put(out, format_args!("{:08X}:{:04X}", hex_v4(octets), port));
         }
         Endpoint::V6(octets, port) => {
-            for word in octets.chunks_exact(4) {
+            for word in octets.as_chunks::<4>().0 {
                 let bytes = [
                     *word.first().unwrap_or(&0),
                     *word.get(1).unwrap_or(&0),

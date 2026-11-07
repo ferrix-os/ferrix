@@ -277,10 +277,7 @@ fn audit() -> Result<u8, Failure> {
     let bytes = fs::read(newest.path())
         .map_err(|error| Failure::new(1, format!("{}: {error}", newest.path().display())))?;
     let mut out = io::stdout().lock();
-    for chunk in bytes.chunks_exact(RECORD_BYTES) {
-        let Ok(chunk) = <&[u8; RECORD_BYTES]>::try_from(chunk) else {
-            continue;
-        };
+    for chunk in bytes.as_chunks::<RECORD_BYTES>().0 {
         let _ = writeln!(out, "{}", describe(&Record::from_bytes(chunk)));
     }
     Ok(0)

@@ -104,21 +104,23 @@ pub(crate) fn digest(data: &[u8]) -> [u8; 32] {
         padded.push(0);
     }
     padded.extend_from_slice(&bits.to_be_bytes());
-    for block in padded.chunks_exact(64) {
+    for block in padded.as_chunks::<64>().0 {
         compress(&mut state, block);
     }
     let mut out = [0u8; 32];
-    for (chunk, word) in out.chunks_exact_mut(4).zip(state) {
-        chunk.copy_from_slice(&word.to_be_bytes());
+    for (chunk, word) in out.as_chunks_mut::<4>().0.iter_mut().zip(state) {
+        *chunk = word.to_be_bytes();
     }
     out
 }
 
 /// One 64-byte block into `state`.
-fn compress(state: &mut [u32; 8], block: &[u8]) {
+fn compress(state: &mut [u32; 8], block: &[u8; 64]) {
     let mut w: Vec<u32> = block
-        .chunks_exact(4)
-        .map(|bytes| u32::from_be_bytes(bytes.try_into().unwrap_or_default()))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|bytes| u32::from_be_bytes(*bytes))
         .collect();
     while w.len() < 64 {
         let at = |back: usize| w.get(w.len() - back).copied().unwrap_or_default();

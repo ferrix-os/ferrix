@@ -4523,7 +4523,7 @@ fn reap_one_at_a_time(most: usize) -> usize {
 /// Take `count` tasks whose reaper has dropped them off [`EXITED_UNREAPED`].
 fn note_reaped(count: usize) {
     let exited = EXITED_UNREAPED
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |exited| {
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |exited| {
             Some(exited.saturating_sub(count))
         })
         .unwrap_or_else(|exited| exited);

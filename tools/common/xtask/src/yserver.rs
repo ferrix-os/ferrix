@@ -1364,9 +1364,9 @@ mod tests {
     #[test]
     fn a_white_window_without_the_subwindow_is_not_xev() {
         let mut screen = screen_with_xev(400, 300, 30, 40);
-        for pixel in screen.pixels.chunks_exact_mut(3) {
-            if pixel == [0, 0, 0] {
-                pixel.fill(0xff);
+        for pixel in screen.pixels.as_chunks_mut::<3>().0 {
+            if *pixel == [0, 0, 0] {
+                *pixel = [0xff; 3];
             }
         }
         assert_eq!(find_xev(&screen), None);

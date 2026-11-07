@@ -55,7 +55,9 @@ struct Image(Arc<BTreeMap<u64, [u8; BLOCK]>>);
 impl Image {
     fn new(packed: &[u8]) -> Image {
         let blocks = packed
-            .chunks_exact(8 + BLOCK)
+            .as_chunks::<{ 8 + BLOCK }>()
+            .0
+            .iter()
             .map(|record| {
                 let offset = u64::from_le_bytes(record[..8].try_into().unwrap());
                 (offset, record[8..].try_into().unwrap())

@@ -513,7 +513,7 @@ pub fn edid_modes(bytes: &[u8], list: &mut ModeList) {
         }
     }
     // Standard timings: eight pairs at 38.
-    for pair in base.get(38..54).unwrap_or(&[]).chunks_exact(2) {
+    for pair in base.get(38..54).unwrap_or(&[]).as_chunks::<2>().0 {
         if let Some(timing) = standard_timing(pair) {
             let _ = list.add(timing, false);
         }
@@ -696,7 +696,8 @@ fn displayid_modes(block: &[u8], list: &mut ModeList) {
             for timing in block
                 .get(at + 3..at + 3 + size)
                 .unwrap_or(&[])
-                .chunks_exact(20)
+                .as_chunks::<20>()
+                .0
             {
                 if let Some((timing, preferred)) = displayid_timing(timing) {
                     let preferred = preferred && !list.has_preferred();

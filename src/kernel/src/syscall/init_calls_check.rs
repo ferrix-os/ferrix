@@ -588,7 +588,9 @@ fn events(side: &Side, set: i32, timeout: i32) -> Result<Vec<(u32, u64)>, &'stat
         .map_err(|_| "epoll_wait was refused")?;
     let bytes = side.get(EVENTS_AT, count * EVENT_BYTES)?;
     Ok(bytes
-        .chunks_exact(EVENT_BYTES)
+        .as_chunks::<EVENT_BYTES>()
+        .0
+        .iter()
         .map(|event| {
             let mut mask = [0_u8; 4];
             let mut cookie = [0_u8; 8];

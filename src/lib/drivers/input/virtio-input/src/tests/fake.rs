@@ -660,7 +660,7 @@ impl Device {
         if !event.is_report() {
             return;
         }
-        let report: Vec<Event> = self.pending.drain(..).collect();
+        let report: Vec<Event> = core::mem::take(&mut self.pending);
         if self.held.len() < report.len() {
             self.dropped_reports += 1;
             return;

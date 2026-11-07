@@ -3,7 +3,7 @@ name = "ferrix-usb-host"
 description = "A USB host as logic over registers and DMA memory: EHCI and xHCI, hubs, HID keyboards and mice, bulk-only disks, and interfaces exported to class drivers of their own"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 license.workspace = true
 publish = false
 

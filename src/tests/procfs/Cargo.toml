@@ -4,7 +4,7 @@ description = "/proc as lsof and a 32-bit Steam client read it: descriptor links
 version = "0.1.0"
 edition = "2024"
 # Matches Ferrix's rust-toolchain.toml, which rustup finds from here.
-rust-version = "1.97"
+rust-version = "1.99"
 license = "MIT"
 publish = false
 

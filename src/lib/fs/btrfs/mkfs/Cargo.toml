@@ -3,7 +3,7 @@ name = "ferrix-btrfs-mkfs"
 description = "mkfs.btrfs for one device: an empty volume ferrix-btrfs-write can open and grow"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 license.workspace = true
 publish = false
 

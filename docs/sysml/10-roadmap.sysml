@@ -622,7 +622,8 @@ package FerrixRoadmap {
              * ./hello on Ferrix, in CI.
              *
              * Met on 2026-09-22 on x86-64, verified by rustcTest: the
-             * rust-lang.org rustc 1.97.1, run by Debian's ld-linux and
+             * rust-lang.org rustc (1.97.1 then, 1.99.1 since 2026-11-06),
+             * run by Debian's ld-linux and
              * linking through cc and rust-lld, from a btrfs volume mounted
              * at /data. What was new: the sysroot, the gate, and faults on
              * a disk file's mapping that fill from the disk. */

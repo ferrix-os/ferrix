@@ -319,12 +319,12 @@ fn crc32c_more(state: u32, data: &[u8]) -> u32 {
 unsafe fn crc32c_x86(state: u32, data: &[u8]) -> u32 {
     use std::arch::x86_64::{_mm_crc32_u8, _mm_crc32_u64};
     let mut crc = u64::from(state);
-    let mut words = data.chunks_exact(8);
-    for word in &mut words {
-        crc = _mm_crc32_u64(crc, u64::from_le_bytes(word.try_into().unwrap_or([0; 8])));
+    let (words, tail) = data.as_chunks::<8>();
+    for word in words {
+        crc = _mm_crc32_u64(crc, u64::from_le_bytes(*word));
     }
     let mut crc = crc as u32;
-    for byte in words.remainder() {
+    for byte in tail {
         crc = _mm_crc32_u8(crc, *byte);
     }
     crc

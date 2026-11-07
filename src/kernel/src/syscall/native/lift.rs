@@ -164,8 +164,8 @@ mod served {
                     return Err(status::INVALID_ARGS);
                 }
                 let raw = copy_in(process, a[1], wanted * 8)?;
-                for (word, bytes) in words.iter_mut().zip(raw.chunks_exact(8)) {
-                    *word = u64::from_le_bytes(bytes.try_into().map_err(|_| status::INVALID_ARGS)?);
+                for (word, bytes) in words.iter_mut().zip(raw.as_chunks::<8>().0) {
+                    *word = u64::from_le_bytes(*bytes);
                 }
                 let task = if a[0] == 0 {
                     crate::sched::current().ok_or(status::BAD_STATE)?
@@ -234,7 +234,7 @@ mod served {
                 // Copied in before any lock (W5).
                 let raw = copy_in(process, a[2], count * 16)?;
                 let mut entries = [(0_u64, 0_u64, false, false); PLACE_MOST];
-                for (slot, bytes) in entries.iter_mut().zip(raw.chunks_exact(16)) {
+                for (slot, bytes) in entries.iter_mut().zip(raw.as_chunks::<16>().0) {
                     let (first, second) = bytes.split_at(8);
                     let first =
                         u64::from_le_bytes(first.try_into().map_err(|_| status::INVALID_ARGS)?);
