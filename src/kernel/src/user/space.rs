@@ -3247,10 +3247,11 @@ fn first_with_no_lock(
     round: Round,
 ) -> Result<Option<Resolved>, SpaceError> {
     let into_region = (address & !(PAGE_SIZE - 1)).saturating_sub(region.range.start());
-    if !round.filled && !round.asked {
-        if let Some(fill) = fill_first(inner, region, address, into_region)? {
-            return Ok(Some(fill));
-        }
+    if !round.filled
+        && !round.asked
+        && let Some(fill) = fill_first(inner, region, address, into_region)?
+    {
+        return Ok(Some(fill));
     }
     if round.asked {
         return Ok(None);

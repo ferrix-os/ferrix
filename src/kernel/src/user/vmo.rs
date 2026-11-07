@@ -1532,7 +1532,7 @@ impl Vmo {
         if pages.sealed {
             return Err(VmoError::Sealed);
         }
-        self.insert_spare(&mut *pages, index, spare)
+        self.insert_spare(&mut pages, index, spare)
     }
 
     /// Put a zeroed frame in page `index`, absent in `pages`: `spare`'s, or
@@ -1773,7 +1773,7 @@ impl Vmo {
         if self.sourced(index) {
             return Ok(Commit::Unfilled);
         }
-        self.insert_spare(&mut *pages, index, spare)
+        self.insert_spare(&mut pages, index, spare)
             .map(Commit::Frame)
     }
 
