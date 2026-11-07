@@ -504,6 +504,8 @@ fn a_stat() -> Stat<'static> {
         tty_nr: 0,
         tpgid: -1,
         flags: 0,
+        minflt: 151,
+        majflt: 9,
         utime: 3,
         stime: 4,
         priority: 20,
@@ -535,7 +537,7 @@ fn stat_has_every_field_in_its_place() {
     let out = show(&rendered(|out| stat::render(out, &a_stat())));
     assert_eq!(
         out,
-        "7 (cat) R 1 7 7 0 -1 0 0 0 0 0 3 4 0 0 20 0 1 0 460536 16637952 1824 \
+        "7 (cat) R 1 7 7 0 -1 0 151 0 9 0 3 4 0 0 20 0 1 0 460536 16637952 1824 \
          18446744073709551615 4194304 4333568 2147479552 0 0 0 1 2 4 0 0 0 17 3 0 0 0 0 0 0 0 \
          5242880 11 12 13 14 0\n",
         "stat"

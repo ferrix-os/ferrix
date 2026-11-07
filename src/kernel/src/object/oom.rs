@@ -167,6 +167,7 @@ pub fn user_fault(space: &AddressSpace, address: u64, access: Access) -> Result<
 /// [`user_fault`], charging the task's own job.
 fn user_fault_own(space: &AddressSpace, address: u64, access: Access) -> Result<(), SpaceError> {
     quota::count(crate::sched::running_group(), Counter::Faults, 1);
+    let _counted = TaskFault::begin();
     // Retried here rather than by running the instruction again, so that the
     // answers one fault takes are counted ([`out_of_memory_at`]).
     let mut attempt = 0_u32;
@@ -185,6 +186,25 @@ fn user_fault_own(space: &AddressSpace, address: u64, access: Access) -> Result<
             }
             done => return done,
         }
+    }
+}
+
+/// One fault of the running task, counted in its `minflt` or `majflt` when
+/// it ends, however it ends (`L.object.372`): the task's own counts, beside
+/// its job's `Counter::Faults`.
+struct TaskFault;
+
+impl TaskFault {
+    /// The running task's fault begins.
+    fn begin() -> TaskFault {
+        let _ = crate::sched::with_current(crate::sched::Task::begin_fault);
+        TaskFault
+    }
+}
+
+impl Drop for TaskFault {
+    fn drop(&mut self) {
+        let _ = crate::sched::with_current(crate::sched::Task::note_fault);
     }
 }
 
@@ -207,6 +227,7 @@ pub fn fault(space: &AddressSpace, address: u64, access: Access) -> Result<(), S
 /// [`fault`], charging the task's own job.
 fn fault_own(space: &AddressSpace, address: u64, access: Access) -> Result<(), SpaceError> {
     quota::count(crate::sched::running_group(), Counter::Faults, 1);
+    let _counted = TaskFault::begin();
     let mut attempt = 0_u32;
     loop {
         match space.fault(address, access) {

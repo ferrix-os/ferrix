@@ -349,6 +349,15 @@ pub struct Task {
     /// it was still runnable: Linux's `nvcsw` and `nivcsw`. Written only by
     /// the processor switching away from it, under its queue's lock.
     switched_out: [AtomicU64; 2],
+    /// Its page faults, and of those the ones whose page was read from a
+    /// disk: Linux's `min_flt + maj_flt` and `maj_flt`. Written only by the
+    /// task itself, at the end of each of its faults, so a load and a store
+    /// as `switched_out`'s; zero in every new task, kept across `execve`.
+    faults: [AtomicU64; 2],
+    /// Whether the fault it is resolving has read its page from a disk: set
+    /// by the fill, read and cleared when the fault is counted, so that a
+    /// fault whose fill ran more than once is one major fault.
+    fault_read_disk: AtomicBool,
     /// Its pending work, one bit for each thing the way back to user mode
     /// would have to act on (`sched::work`): written only through that
     /// module, set by a poster after the state it stands for and cleared by
@@ -843,6 +852,8 @@ impl Task {
             cpus_run_on: AtomicU64::new(0),
             kernel_ticks: AtomicU64::new(0),
             switched_out: [const { AtomicU64::new(0) }; 2],
+            faults: [const { AtomicU64::new(0) }; 2],
+            fault_read_disk: AtomicBool::new(false),
             work: AtomicU32::new(0),
             reply: [const { AtomicU64::new(0) }; 4],
             run_slot: SlotCell::new(run_slot),
@@ -916,6 +927,8 @@ impl Task {
             cpus_run_on: AtomicU64::new(0),
             kernel_ticks: AtomicU64::new(0),
             switched_out: [const { AtomicU64::new(0) }; 2],
+            faults: [const { AtomicU64::new(0) }; 2],
+            fault_read_disk: AtomicBool::new(false),
             work: AtomicU32::new(0),
             reply: [const { AtomicU64::new(0) }; 4],
             run_slot: SlotCell::new(run_slot),
@@ -1485,6 +1498,50 @@ impl Task {
                 Ordering::Relaxed,
             );
         }
+    }
+
+    /// Count one of its page faults, major if its fill read the disk since
+    /// the last count. Only the task itself calls it, for its own fault, so a
+    /// load and a store; the fault may have been on another process's space
+    /// (a copy through `with_page`), and still counts here, as the running
+    /// task's.
+    pub fn note_fault(&self) {
+        let major = self.fault_read_disk.swap(false, Ordering::Relaxed);
+        let [all, majors] = &self.faults;
+        all.store(
+            all.load(Ordering::Relaxed).wrapping_add(1),
+            Ordering::Relaxed,
+        );
+        if major {
+            majors.store(
+                majors.load(Ordering::Relaxed).wrapping_add(1),
+                Ordering::Relaxed,
+            );
+        }
+    }
+
+    /// A fault of its own begins: a disk read before it was no part of it.
+    pub fn begin_fault(&self) {
+        self.fault_read_disk.store(false, Ordering::Relaxed);
+    }
+
+    /// The fault it is resolving read its page from a disk.
+    pub fn note_fault_read_disk(&self) {
+        self.fault_read_disk.store(true, Ordering::Relaxed);
+    }
+
+    /// Its page faults that read nothing from a disk: `minflt`. No more than
+    /// all of them, since a major fault is counted only with its fault.
+    pub fn minor_faults(&self) -> u64 {
+        let [all, majors] = &self.faults;
+        all.load(Ordering::Relaxed)
+            .saturating_sub(majors.load(Ordering::Relaxed))
+    }
+
+    /// Its page faults that read their page from a disk: `majflt`.
+    pub fn major_faults(&self) -> u64 {
+        let [_, majors] = &self.faults;
+        majors.load(Ordering::Relaxed)
     }
 
     /// Switches away from it while it was blocked, asleep or dead:

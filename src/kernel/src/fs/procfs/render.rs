@@ -1635,6 +1635,10 @@ struct Times {
     voluntary: u64,
     /// Switches away while still runnable.
     involuntary: u64,
+    /// Page faults that read nothing from a disk.
+    minor_faults: u64,
+    /// Page faults that read their page from a disk.
+    major_faults: u64,
 }
 
 impl Times {
@@ -1645,6 +1649,8 @@ impl Times {
             kernel: sum.kernel.saturating_add(task.kernel_time()),
             voluntary: sum.voluntary.saturating_add(task.voluntary_switches()),
             involuntary: sum.involuntary.saturating_add(task.involuntary_switches()),
+            minor_faults: sum.minor_faults.saturating_add(task.minor_faults()),
+            major_faults: sum.major_faults.saturating_add(task.major_faults()),
         })
     }
 }
@@ -1706,6 +1712,10 @@ fn stat_of(process: &Process, tid: u32, times: Times) -> Result<Vec<u8>> {
         utime: (times.runtime / (NANOS / CLOCK_TICKS))
             .saturating_sub(times.kernel / (NANOS / CLOCK_TICKS)),
         stime: times.kernel / (NANOS / CLOCK_TICKS),
+        // Each task's own counts, summed over the live ones as the times are
+        // (`L.object.372`).
+        minflt: times.minor_faults,
+        majflt: times.major_faults,
         priority: 20,
         nice: 0,
         threads: thread_count(process),

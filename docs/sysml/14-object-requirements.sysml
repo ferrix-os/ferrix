@@ -4074,5 +4074,23 @@ package FerrixObjectRequirements {
             attribute :>> parent = "H.QUOTA.7";
             attribute :>> unit = "user::cache::reclaim";
         }
+        requirement <'L.object.372'> aTaskCountsItsFaults : ItemLowLevel {
+            attribute :>> statement = "Each task shall count its own page faults, those
+                taken for its program and those its system calls take on the program's
+                behalf, and of them the ones whose page was read from a disk once per
+                fault however often its fill ran; a new task's counts shall start at
+                zero and execve shall keep them. A process's stat and getrusage's
+                RUSAGE_SELF shall report minflt, the faults that read nothing from a
+                disk, and majflt summed over its live threads, and a thread's stat and
+                RUSAGE_THREAD the thread's own; minflt shall never be less than zero.";
+            attribute :>> criterion = "test-procfs's faults step: 64 fresh anonymous
+                pages written raise minflt in /proc/self/stat, /proc/self/task/<tid>/stat
+                and getrusage's RUSAGE_SELF and RUSAGE_THREAD by 64 to 128, and majflt
+                never goes back; with the count taken out of oom::user_fault_own the step
+                fails on its minflt sentence.";
+            attribute :>> parent = "H.QUOTA.10";
+            attribute :>> unit = ("sched::Task::note_fault", "sched::Task::minor_faults",
+                "sched::Task::major_faults", "object::oom::user_fault");
+        }
     }
 }

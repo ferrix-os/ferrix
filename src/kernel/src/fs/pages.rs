@@ -366,6 +366,8 @@ impl Filler for Fill {
         // A fault that had to read the disk: Linux's `pgmajfault`.
         if self.source.reads_disk() {
             quota::count(crate::sched::running_group(), Counter::MajorFaults, 1);
+            // The task's own `majflt`, once per fault however often its fill runs.
+            let _ = crate::sched::with_current(crate::sched::Task::note_fault_read_disk);
         }
         Ok(())
     }
