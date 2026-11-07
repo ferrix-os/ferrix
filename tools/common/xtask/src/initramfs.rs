@@ -755,11 +755,25 @@ fn may_remake_digests(level: &str) -> bool {
     level == "none"
 }
 
+/// The files that name a program by its bytes: K14's list and a partition's description.
+const DIGEST_FILES: [&str; 2] = ["etc/ferrix/certified", "etc/ferrix/partitions"];
+
+/// Whether `archive` carries any of [`DIGEST_FILES`].
+fn carries_digests(archive: &[u8]) -> bool {
+    DIGEST_FILES
+        .iter()
+        .any(|name| entry_of(archive, name).is_some())
+}
+
 /// `archive` with the digests it carries made again from the programs it holds, for an archive
 /// whose programs were changed after it was built, stripped for a card: K14's list and a
 /// partition's description name a program by its bytes, and an image that no longer
-/// matches them is refused at its start.
+/// matches them is refused at its start. An archive that carries neither is returned as it is,
+/// at any level: there is nothing to remake, so nothing of a claim's is rewritten.
 pub(crate) fn digests_of_what_it_holds(archive: &[u8]) -> Result<Vec<u8>> {
+    if !carries_digests(archive) {
+        return Ok(archive.to_vec());
+    }
     let level = crate::flags::this_run()?.level.clone();
     if !may_remake_digests(&level) {
         return Err(Error::new(format!(
@@ -1231,6 +1245,23 @@ mod tests {
         assert!(may_remake_digests("none"));
         assert!(!may_remake_digests("sc2"));
         assert!(!may_remake_digests("present"));
+    }
+
+    /// A `present` image carries no list and no description, so a stripped one has nothing to
+    /// remake and is not refused; one that carries either is held to its level.
+    #[test]
+    fn only_a_carried_list_is_remade() {
+        let archive = |name: &str| {
+            let mut out = Newc::new();
+            out.entry(name, S_IFREG | 0o644, 1, 1, (0, 0), b"bytes")
+                .unwrap();
+            out.finish().unwrap()
+        };
+        let plain = archive("bin/devmgr");
+        assert!(!carries_digests(&plain));
+        assert_eq!(digests_of_what_it_holds(&plain).unwrap(), plain);
+        assert!(carries_digests(&archive("etc/ferrix/certified")));
+        assert!(carries_digests(&archive("etc/ferrix/partitions")));
     }
 
     /// K14.12: this framing is the kernel's. The kernel's own boot check names this digest of
