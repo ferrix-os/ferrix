@@ -55,6 +55,8 @@ ferrofetch beside it.*
   time ([docs/DISPLAY.md](docs/DISPLAY.md)). GTK 4 and libadwaita programs
   from Debian 13 run on it ([docs/GNOME.md](docs/GNOME.md)). X11 programs
   appear as ordinary windows through yserver, an X server written in Rust.
+  SUPER+Z freezes a program in RAM, all of its processes, and SUPER+SHIFT+Z
+  thaws it where it stopped ([docs/APP-SUSPEND.md](docs/APP-SUSPEND.md)).
 - **Drivers outside the kernel:** disk, network, graphics, input, sound,
   console and power drivers run as processes. On x86-64 and AArch64 an IOMMU
   limits what a driver's device can reach. A driver's processes are sealed
@@ -68,6 +70,13 @@ ferrofetch beside it.*
   Pixel 7, on all eight cores, and on an STM32MP157D-DK1 board. NVIDIA's own
   driver runs as a process on an RTX 3060 passed to a virtual machine. Every
   landing that changes the image boots it on x86-64, AArch64 and ARMv7-A.
+- **When hardware fails:** on x86-64, Intel and AMD, Ferrix reads the
+  processor's error banks and logs every machine check, corrected ones
+  included (`/proc/ferrix-mce`). A bad page a program reads ends that
+  program, not the kernel, and its frame stays retired across a reboot. An
+  unstable core is taken out of service, and free memory is tested while
+  the machine idles ([docs/MACHINE-CHECK.md](docs/MACHINE-CHECK.md)).
+  Running out of memory ends a program, not the system.
 - **Users, namespaces and containers:** the full desktop runs as the user
   `ferrix`, not root, and passwords are checked by `authd`. Ferrix has pid,
   user, mount, network, UTS, IPC and cgroup namespaces, cgroup v2 limits and
@@ -82,11 +91,13 @@ ferrofetch beside it.*
   image ([docs/DEV-ON-FERRIX.md](docs/DEV-ON-FERRIX.md)). The zinc shell is
   zsh-compatible, runs oh-my-zsh, and behaves as zsh's `sh` emulation when it
   is started as `sh`.
-- **A kernel without the Linux layer, as a build:** the build flag
-  `linux_abi=off` builds a kernel that speaks only Ferrix's own system calls.
-  Its code is 1.4 MB against 7.4 MB with the Linux layer, on x86-64
-  ([docs/LINUX-ABI-SEPARATION.md](docs/LINUX-ABI-SEPARATION.md)). It is built,
-  not booted or claimed for anything yet.
+- **On the way to a microkernel:** in the `fast` build profile, Linux's
+  system calls, btrfs and the network switch run as processes (`linuxd`,
+  `btrfsd`, `netd`) on kernel objects held by handle, and it runs Linux
+  programs on AArch64 in QEMU ([docs/microkernel/FLIP.md](docs/microkernel/FLIP.md)).
+  The build flag `linux_abi=off` leaves the Linux layer out altogether: 1.4 MB
+  of code against 7.4 MB, on x86-64. Neither is the kernel the releases ship,
+  and neither is claimed for anything yet.
 
 [The roadmap](docs/roadmap/where-it-stands.md) tracks what is done and what is
 still being built, and [the backlog](docs/BACKLOG.md) what is broken.
@@ -132,6 +143,14 @@ open and closed findings alike, is in
   <tr>
     <td>The live ISO: Yoru and the installer.</td>
     <td>The installer's last page, before anything is written.</td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/brand/screenshots/suspend.png" alt="A program suspended with SUPER+Z: its window, a clock stopped at 23:52:12, at half opacity over ferrofetch, while a terminal reads its cgroup as frozen"></td>
+    <td width="50%"><img src="docs/brand/screenshots/machine-check.png" alt="A terminal showing uname as Ferrix 0.3.0 and /proc/ferrix-mce counting one corrected error on cpu2"></td>
+  </tr>
+  <tr>
+    <td>v0.3.0: SUPER+Z freezes a program in RAM; its clock stopped.</td>
+    <td>v0.3.0: a corrected memory error, injected in QEMU, logged and counted.</td>
   </tr>
 </table>
 
