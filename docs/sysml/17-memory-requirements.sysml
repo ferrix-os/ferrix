@@ -3376,6 +3376,8 @@ package FerrixMemoryRequirements {
                 one page served; the source cases still fill before mapping.";
             attribute :>> parent = "H.MEM.1";
             attribute :>> unit = ("user::space::AddressSpace::resolve",
+                "user::space::first_with_no_lock", "user::space::fill_first",
+                "user::space::ask_first", "user::space::wait_with_no_lock",
                 "user::vmo::Vmo::wants_fault_fill", "user::vmo::Vmo::note_served");
         }
         requirement <'L.user.223'> refillsBoundEveryRound : ItemLowLevel {
@@ -3401,13 +3403,14 @@ package FerrixMemoryRequirements {
             attribute :>> parent = "H.MEM.1";
             attribute :>> unit = ("user::vmo::Spare::zeroed", "user::vmo::Spare::take",
                 "user::vmo::Spare::give_back", "user::vmo::Spare::discard",
-                "user::vmo::Spare::drop", "user::vmo::spares_in_flight", "user::vmo::count_spare");
+                "user::vmo::Spare::drop", "user::vmo::spares_in_flight", "user::vmo::count_spare",
+                "user::space::copy_of_file_page");
         }
         requirement <'L.user.227'> noSpareNearAMemoryLimit : ItemLowLevel {
             attribute :>> statement = "A write fault shall take a spare frame only while
                 the running task's job has 64 pages of room under its memory limit, and a
                 commit within that room shall take its own frame as before spares.";
-            attribute :>> criterion = "The quota check's spare-room case: a job far from
+            attribute :>> criterion = "The rehome check's spare-room case: a job far from
                 its limit gets a spare; with 32 pages of room it gets none, the spares in
                 flight do not move, and eight write faults all commit.";
             attribute :>> parent = "H.QUOTA.2";
@@ -3418,9 +3421,10 @@ package FerrixMemoryRequirements {
                 are held machine-wide shall be answered with a 1 ms pause and a retry,
                 before anything is reclaimed or killed for it, for at most SPARE_WAITS
                 (16) answers.";
-            attribute :>> criterion = "The quota check's spare-wait case: with a spare
-                held, out_of_memory_at answers Retry for each of the first 16 attempts;
-                past them, or with none held, it does not wait.";
+            attribute :>> criterion = "The rehome check's spare-wait case: with a spare
+                held, out_of_memory_at answers Retry for each of the first 16 attempts, as
+                a task of a job held at its limit with nothing in it; past them, or with
+                none held, it does not wait.";
             attribute :>> parent = "H.QUOTA.6";
             attribute :>> unit = ("object::oom::out_of_memory_at", "object::oom::waits_for_spares");
         }

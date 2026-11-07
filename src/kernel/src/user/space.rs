@@ -1503,6 +1503,41 @@ fn copy_or_zero(file: &Vmo, index: u64, frame: Frame) -> Result<(), SpaceError> 
     Ok(())
 }
 
+/// A frame of the faulting job's holding page `index` of `file`, or zeros for
+/// a hole: the private copy a write to a private file mapping lands in.
+///
+/// A snapshot. The file's page is read through the direct map without its
+/// object's lock, so a write to the file landing meanwhile may be partly in
+/// the copy -- which is Linux's behaviour too: its private copy races a write
+/// to the file the same way. A fresh frame, never a second reference to the
+/// file's: a shared reference would make the file's next write copy on write,
+/// and the file would stop being what its shared mappings show. `spare`'s
+/// frame when it holds one, else one taken here.
+///
+/// # Errors
+///
+/// [`SpaceError::OutOfMemory`] for no frame, and [`copy_or_zero`]'s
+/// [`SpaceError::Evicted`]; the frame then goes back unwritten: a spare's to
+/// the spare, zeros still, and a fresh one, never zeroed, to the allocator.
+fn copy_of_file_page(file: &Vmo, index: u64, spare: &mut Spare) -> Result<Frame, SpaceError> {
+    let (frame, spared) = match spare.take() {
+        Some(frame) => (frame, true),
+        None => (
+            mm::allocate_user_frame().ok_or(SpaceError::OutOfMemory)?,
+            false,
+        ),
+    };
+    if let Err(error) = copy_or_zero(file, index, frame) {
+        if spared {
+            spare.give_back(frame);
+        } else {
+            Spare::discard(frame);
+        }
+        return Err(error);
+    }
+    Ok(frame)
+}
+
 /// The frame for page `index` of `vmo`, committed on first touch.
 ///
 /// A page of a file mapping (`file`) wholly past the end of its file is
@@ -2048,26 +2083,13 @@ impl AddressSpace {
             drop(spare);
             match resolved {
                 Ok(Resolved::Done) => return Ok(()),
-                Ok(Resolved::Fill { vmo, index }) => {
-                    crate::user::vmo::assert_no_spare_held();
-                    match vmo.fill_for_fault(index) {
-                        Ok(()) => {}
-                        Err(ferrix_vfs::Errno::ENOMEM) => return Err(SpaceError::OutOfMemory),
-                        Err(_) => return Err(SpaceError::Unreadable(address)),
-                    }
-                    filled = true;
-                }
-                Ok(Resolved::Ask { vmo, index, writes }) => {
-                    crate::user::vmo::assert_no_spare_held();
-                    match ask(&vmo, index, writes, mode) {
-                        Ok(()) => asked = true,
-                        // The process is ending: back to user mode with nothing
-                        // installed, where it leaves.
-                        Err(Refusal::Interrupted) if mode == FaultMode::Program => return Ok(()),
-                        Err(Refusal::NoMemory) => return Err(SpaceError::OutOfMemory),
-                        Err(_) => return Err(SpaceError::Unreadable(address)),
-                    }
-                }
+                Ok(need) => match wait_with_no_lock(need, address, mode)? {
+                    Waited::Filled => filled = true,
+                    Waited::Asked => asked = true,
+                    // The process is ending: back to user mode with nothing
+                    // installed, where it leaves.
+                    Waited::Leaving => return Ok(()),
+                },
                 Err(SpaceError::Evicted) => (filled, asked) = (false, false),
                 Err(error) => return Err(error),
             }
@@ -2105,43 +2127,8 @@ impl AddressSpace {
         let page = address & !(PAGE_SIZE - 1);
         let into_region = page.saturating_sub(region.range.start());
 
-        // A file's page its object lacks is filled with no lock held, as it
-        // was before this hold; the fault comes back once it is in.
-        if let Backing::File { id, offset } = region.backing
-            && let Some(file) = inner.objects.get(&id)
-            && !round.filled
-            && !round.asked
-        {
-            let index = offset.saturating_add(into_region) / PAGE_SIZE;
-            if !region.flags.shared && file.past_file_end(index) {
-                return Err(SpaceError::PastEnd(address));
-            }
-            if file.wants_fault_fill(index) {
-                return Ok(Resolved::Fill {
-                    vmo: Arc::clone(file),
-                    index,
-                });
-            }
-            file.note_served();
-        }
-
-        // A pager-backed object's page is its pager's to supply or let be
-        // written, asked with no lock held once a round, as before this hold.
-        if !round.asked {
-            let paged = match region.backing {
-                Backing::Anonymous { id, offset } => Some((id, offset)),
-                Backing::File { id, offset } if region.flags.shared => Some((id, offset)),
-                _ => None,
-            };
-            if let Some((id, offset)) = paged
-                && let Some(vmo) = inner.objects.get(&id).filter(|vmo| vmo.tracks_dirty())
-            {
-                return Ok(Resolved::Ask {
-                    vmo: Arc::clone(vmo),
-                    index: offset.saturating_add(into_region) / PAGE_SIZE,
-                    writes: access.write && region.flags.write,
-                });
-            }
+        if let Some(first) = first_with_no_lock(&inner, &region, address, access, round)? {
+            return Ok(first);
         }
 
         let (id, offset, file) = match region.backing {
@@ -2162,7 +2149,7 @@ impl AddressSpace {
             // hold.
             Backing::File { .. } => {
                 return self
-                    .fault_private_file(inner, address, access, spare, round)
+                    .fault_private_file(inner, &region, address, access, spare, round)
                     .map(|()| Resolved::Done);
             }
         };
@@ -2404,25 +2391,21 @@ impl AddressSpace {
     /// A file on a disk has had the page filled into its object already, by
     /// the round before this one, with no lock held, so the copy below copies
     /// the file's data rather than zeros. Called in [`AddressSpace::resolve`]'s
-    /// hold of this space's lock, `inner`, and lets it go. `_round` is the
+    /// hold of this space's lock, `inner`, and lets it go: `region` is the one
+    /// `resolve` found there and checked `access` against. `_round` is the
     /// round's: only linuxd's neighbour looks (`fault_around`, `write_ahead`)
     /// pass one already filled and asked on their first call, which is what
     /// the controls of ledger 6597 E1 key their plants to (ledger 7857 Q.3).
     fn fault_private_file<G: Deref<Target = Inner>>(
         &self,
         inner: G,
+        region: &Vma,
         address: u64,
         access: Access,
         spare: &mut Spare,
         _round: Round,
     ) -> Result<(), SpaceError> {
-        let region = *inner
-            .map
-            .find(address)
-            .ok_or(SpaceError::NotMapped(address))?;
-        if !permits(region.flags, access) {
-            return Err(SpaceError::Refused(address));
-        }
+        // `resolve` found the region and checked its rights in this hold.
         let Backing::File { id, offset } = region.backing else {
             return Err(SpaceError::NotMapped(address));
         };
@@ -2456,33 +2439,7 @@ impl AddressSpace {
                 let flags = typed(user_page(false, execute), &file);
                 return self.install_page(inner, placed(frame), flags, false);
             }
-            // From the spare, zeroed, or fresh and not: only a spare's frame
-            // may go back into it unwritten (a spare's frame reads as zeros).
-            let (frame, spared) = match spare.take() {
-                Some(frame) => (frame, true),
-                None => (
-                    mm::allocate_user_frame().ok_or(SpaceError::OutOfMemory)?,
-                    false,
-                ),
-            };
-            // A snapshot. The file's page is read through the direct map
-            // without its object's lock, so a write to the file landing
-            // meanwhile may be partly in the copy -- which is Linux's
-            // behaviour too: its private copy races a write to the file the
-            // same way. A fresh frame, never a second reference to the file's:
-            // a shared reference would make the file's next write copy on
-            // write, and the file would stop being what its shared mappings
-            // show.
-            if let Err(error) = copy_or_zero(&file, index, frame) {
-                // Not written: a spare's frame goes back to it, zeros still;
-                // a fresh one, never zeroed, to the allocator.
-                if spared {
-                    spare.give_back(frame);
-                } else {
-                    Spare::discard(frame);
-                }
-                return Err(error);
-            }
+            let frame = copy_of_file_page(&file, index, spare)?;
             // The shadow lacked the page under this space's lock, and every
             // change to a shadow is made under it, so no page can have arrived
             // meanwhile: a frame that did not go in is one there was no memory
@@ -3230,6 +3187,128 @@ fn ask(vmo: &Vmo, index: u64, writes: bool, mode: FaultMode) -> Result<(), Refus
             .map_err(|_| Refusal::NoMemory),
         _ => Ok(()),
     }
+}
+
+/// What [`wait_with_no_lock`] did.
+#[derive(Clone, Copy, Debug)]
+enum Waited {
+    /// The file's fill ran.
+    Filled,
+    /// The pager was asked.
+    Asked,
+    /// The process is ending, and a program's own fault goes back as it is.
+    Leaving,
+}
+
+/// Do what a fault's round must with no lock held (`need`, which is never
+/// [`Resolved::Done`]): the file's fill, or the ask of the pager. Runs with
+/// no spare held (`L.user.225`).
+///
+/// # Errors
+///
+/// [`SpaceError::OutOfMemory`] for no memory to fill or to record the ask;
+/// [`SpaceError::Unreadable`] at `address` for a page the file could not
+/// read, or the pager failed, timed out on or will never answer.
+fn wait_with_no_lock(need: Resolved, address: u64, mode: FaultMode) -> Result<Waited, SpaceError> {
+    crate::user::vmo::assert_no_spare_held();
+    match need {
+        Resolved::Done => Ok(Waited::Filled),
+        Resolved::Fill { vmo, index } => match vmo.fill_for_fault(index) {
+            Ok(()) => Ok(Waited::Filled),
+            Err(ferrix_vfs::Errno::ENOMEM) => Err(SpaceError::OutOfMemory),
+            Err(_) => Err(SpaceError::Unreadable(address)),
+        },
+        Resolved::Ask { vmo, index, writes } => match ask(&vmo, index, writes, mode) {
+            Ok(()) => Ok(Waited::Asked),
+            Err(Refusal::Interrupted) if mode == FaultMode::Program => Ok(Waited::Leaving),
+            Err(Refusal::NoMemory) => Err(SpaceError::OutOfMemory),
+            Err(_) => Err(SpaceError::Unreadable(address)),
+        },
+    }
+}
+
+/// What a round must do with no lock held before [`AddressSpace::resolve`]
+/// can go on with `region`'s page at `address`, decided under the lock
+/// (`L.user.222`): a fill, for a file region whose object lacks the page and
+/// whose fill has not run since the fault began or last lost its page; an
+/// ask, for a pager-backed object's page not yet asked for. `None` when
+/// neither: the page is the fault's to resolve now. A file page the object
+/// holds is counted served here, once a round.
+///
+/// # Errors
+///
+/// [`SpaceError::PastEnd`] for a private file mapping's page wholly past
+/// its file's end, refused before anything is read.
+fn first_with_no_lock(
+    inner: &Inner,
+    region: &Vma,
+    address: u64,
+    access: Access,
+    round: Round,
+) -> Result<Option<Resolved>, SpaceError> {
+    let into_region = (address & !(PAGE_SIZE - 1)).saturating_sub(region.range.start());
+    if !round.filled && !round.asked {
+        if let Some(fill) = fill_first(inner, region, address, into_region)? {
+            return Ok(Some(fill));
+        }
+    }
+    if round.asked {
+        return Ok(None);
+    }
+    Ok(ask_first(inner, region, access, into_region))
+}
+
+/// [`first_with_no_lock`]'s fill: a file region's page its object lacks is
+/// filled with no lock held, as it was before this hold, and the fault comes
+/// back once it is in; one the object holds is counted served.
+///
+/// # Errors
+///
+/// [`SpaceError::PastEnd`] for a private file mapping's page wholly past
+/// its file's end.
+fn fill_first(
+    inner: &Inner,
+    region: &Vma,
+    address: u64,
+    into_region: u64,
+) -> Result<Option<Resolved>, SpaceError> {
+    let Backing::File { id, offset } = region.backing else {
+        return Ok(None);
+    };
+    let Some(file) = inner.objects.get(&id) else {
+        return Ok(None);
+    };
+    let index = offset.saturating_add(into_region) / PAGE_SIZE;
+    if !region.flags.shared && file.past_file_end(index) {
+        return Err(SpaceError::PastEnd(address));
+    }
+    if file.wants_fault_fill(index) {
+        return Ok(Some(Resolved::Fill {
+            vmo: Arc::clone(file),
+            index,
+        }));
+    }
+    file.note_served();
+    Ok(None)
+}
+
+/// [`first_with_no_lock`]'s ask: a pager-backed object's page is its pager's
+/// to supply or let be written, asked with no lock held once a round, as
+/// before this hold.
+fn ask_first(inner: &Inner, region: &Vma, access: Access, into_region: u64) -> Option<Resolved> {
+    let paged = match region.backing {
+        Backing::Anonymous { id, offset } => Some((id, offset)),
+        Backing::File { id, offset } if region.flags.shared => Some((id, offset)),
+        _ => None,
+    };
+    paged.and_then(|(id, offset)| {
+        let vmo = inner.objects.get(&id).filter(|vmo| vmo.tracks_dirty())?;
+        Some(Resolved::Ask {
+            vmo: Arc::clone(vmo),
+            index: offset.saturating_add(into_region) / PAGE_SIZE,
+            writes: access.write && region.flags.write,
+        })
+    })
 }
 
 /// The region `address` lies in, if `access` is one it permits: what a fault

@@ -4083,7 +4083,9 @@ package FerrixObjectRequirements {
                 RUSAGE_SELF shall report minflt, the faults that read nothing from a
                 disk, and majflt summed over its live threads, and a thread's stat and
                 RUSAGE_THREAD the thread's own; minflt shall never be less than zero.";
-            attribute :>> criterion = "test-procfs's faults step: 64 fresh anonymous
+            attribute :>> criterion = "The rehome check's fault-count case: one fresh
+                page written through oom::fault is one minor fault of the running task and
+                no major one. test-procfs's faults step: 64 fresh anonymous
                 pages written raise minflt in /proc/self/stat, /proc/self/task/<tid>/stat
                 and getrusage's RUSAGE_SELF and RUSAGE_THREAD by 64 to 128, and majflt
                 never goes back; with the count taken out of oom::user_fault_own the step

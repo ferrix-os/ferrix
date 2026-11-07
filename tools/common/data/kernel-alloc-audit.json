@@ -168,8 +168,8 @@
     },
     "mm.rs": {
       "bucket": "frames",
-      "what": "the buddy: allocate_frames, _below, _run, user frames (charged), program frames (owner), page tables (the space's owner), the per-processor caches, and a restricted window's frames, charged to its job by their one caller, in a build with the flag on",
-      "sites": 38
+      "what": "the buddy: allocate_frames, _below, _run, user frames (charged), program frames (owner), page tables (the space's owner), the per-processor caches, and a restricted window's frames, charged to its job by their one caller, in a build with the flag on; a fault's single frame with its owner in one hold (allocate_owned_frame)",
+      "sites": 39
     },
     "mm/reserve.rs": {
       "bucket": "frames",
@@ -338,13 +338,13 @@
     },
     "user/space.rs": {
       "bucket": "job",
-      "what": "regions and tables: the space's owner; fork's copies the forker's",
-      "sites": 69
+      "what": "regions and tables: the space's owner; fork's copies the forker's; a fault's copies from its spare, the faulting job's",
+      "sites": 67
     },
     "user/vmo.rs": {
       "bucket": "job",
-      "what": "the object's payer or charge_target",
-      "sites": 59
+      "what": "the object's payer or charge_target; a fault's spare (Spare::zeroed), charge_target, given back in its fault",
+      "sites": 56
     },
     "vmap.rs": {
       "bucket": "pool",

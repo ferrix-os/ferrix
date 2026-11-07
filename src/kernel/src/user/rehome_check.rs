@@ -28,7 +28,7 @@ use crate::user::space::{
 use crate::user::vmo::{Commit, Filler, Spare, Vmo, VmoError};
 
 /// How many cases one run makes: the boot line's count.
-const CASES: u64 = 30;
+const CASES: u64 = 33;
 
 /// Where a run's fixed mappings go: on a page boundary on all architectures.
 const FIXED: u64 = 0x7200_0000;
@@ -91,6 +91,9 @@ fn once() -> Result<(), &'static str> {
     check_refills_bound_a_fault()?;
     check_an_unused_spare_goes_back()?;
     check_a_spare_is_never_held_across_a_fill()?;
+    check_a_task_counts_its_faults()?;
+    check_no_spare_near_a_limit()?;
+    check_a_refusal_waits_for_spares()?;
     check_is_anonymous()
 }
 
@@ -1497,6 +1500,121 @@ fn check_a_spare_is_never_held_across_a_fill() -> Result<(), &'static str> {
     write(&space, private + 5, 0x77).map_err(|_| "a write that fills failed")?;
     if source.calls.load(Ordering::Relaxed) == 0 || read(&space, private + 6) != Ok(pattern(6)) {
         return Err("a write fault on a file's page did not fill it first");
+    }
+    Ok(())
+}
+
+/// Run `work` charged to `job`, as a task of it would be.
+fn as_task_of<T>(job: &crate::object::job::Job, work: impl FnOnce() -> T) -> T {
+    let own = crate::sched::running_group();
+    crate::sched::set_current_group(job.quota_index());
+    let done = work();
+    crate::sched::set_current_group(own);
+    done
+}
+
+/// The memory a job uses, in bytes.
+fn memory_used(job: &crate::object::job::Job) -> u64 {
+    job.usage(crate::object::quota::Resource::Memory)
+        .map_or(0, |usage| usage.used)
+}
+
+/// A fault the running task takes for a program counts on the task: one
+/// fresh page written is one minor fault, and no major one.
+///
+/// Verifies: L.object.372
+fn check_a_task_counts_its_faults() -> Result<(), &'static str> {
+    let space = fresh()?;
+    let at = FIXED;
+    let _ = space
+        .map_anonymous(at, PAGE_SIZE, VmaFlags::READ_WRITE)
+        .map_err(|_| "no anonymous mapping to fault")?;
+    let counts = || {
+        crate::sched::with_current(|task| (task.minor_faults(), task.major_faults()))
+            .unwrap_or((0, 0))
+    };
+    let (minor, major) = counts();
+    crate::object::oom::fault(&space, at, Access::WRITE).map_err(|_| "a counted fault failed")?;
+    if counts() != (minor + 1, major) {
+        return Err("a fault the running task took was not counted as one minor fault");
+    }
+    Ok(())
+}
+
+/// A job within 64 pages of its memory limit gets no spare for a fault, and
+/// its commits there still go in; one far from it gets one.
+///
+/// Verifies: L.user.227
+fn check_no_spare_near_a_limit() -> Result<(), &'static str> {
+    const ROOM: u64 = 32;
+    let job = crate::object::job::Job::new_root().map_err(|_| "no job for the spare room")?;
+    let far = as_task_of(&job, || Spare::for_fault().take());
+    let Some(far) = far else {
+        return Err("a fault far from its job's memory limit got no spare");
+    };
+    let _ = mm::release_frame(far);
+    let space = fresh()?;
+    let _ = space
+        .map_anonymous(FIXED, 8 * PAGE_SIZE, VmaFlags::READ_WRITE)
+        .map_err(|_| "no mapping for the spare room")?;
+    let _ = job.set_limit(
+        crate::object::quota::Resource::Memory,
+        memory_used(&job) + ROOM * PAGE_SIZE,
+    );
+    let (near, faulted) = as_task_of(&job, || {
+        let before = crate::user::vmo::spares_in_flight();
+        let near =
+            Spare::for_fault().take().is_some() || crate::user::vmo::spares_in_flight() != before;
+        let faulted = (0..8)
+            .take_while(|&page| space.fault(FIXED + page * PAGE_SIZE, Access::WRITE).is_ok())
+            .count();
+        (near, faulted)
+    });
+    drop(space);
+    let _ = job.set_limit(
+        crate::object::quota::Resource::Memory,
+        crate::object::quota::UNLIMITED,
+    );
+    if near {
+        return Err("a fault within 64 pages of its job's memory limit took a spare");
+    }
+    if faulted != 8 {
+        return Err("a fault within 64 pages of its job's memory limit could not commit");
+    }
+    Ok(())
+}
+
+/// A fault a limit refused while a spare frame is held is answered with a
+/// pause and a retry, for at most `SPARE_WAITS` answers: as a task of a job
+/// held at its limit with nothing in it to reclaim or kill, so that without
+/// the wait an answer is a refusal, never a reclaim's retry nor the
+/// machine's kill (ledger 7857 Q.1).
+///
+/// Verifies: L.user.228
+fn check_a_refusal_waits_for_spares() -> Result<(), &'static str> {
+    use crate::object::oom;
+    let job = crate::object::job::Job::new_root().map_err(|_| "no job for the spare wait")?;
+    let space = fresh()?;
+    let held = Spare::zeroed();
+    if crate::user::vmo::spares_in_flight() == 0 {
+        return Err("a spare held was not counted in flight");
+    }
+    let _ = job.set_limit(crate::object::quota::Resource::Memory, memory_used(&job));
+    let answers = as_task_of(&job, || {
+        (0..oom::SPARE_WAITS)
+            .take_while(|&attempt| oom::out_of_memory_at(&space, attempt) == oom::Answer::Retry)
+            .count()
+    });
+    let _ = job.set_limit(
+        crate::object::quota::Resource::Memory,
+        crate::object::quota::UNLIMITED,
+    );
+    drop(held);
+    if answers != oom::SPARE_WAITS as usize {
+        return Err("a refusal with a spare held was not answered with a retry");
+    }
+    if oom::waits_for_spares(oom::SPARE_WAITS, 1) || oom::waits_for_spares(0, 0) {
+        return Err("a refusal waited for spares past SPARE_WAITS, or with none held");
     }
     Ok(())
 }

@@ -15,7 +15,6 @@ use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use ferrix_bootinfo::PAGE_SIZE;
 use ferrix_vma::VmaFlags;
 
-use crate::mm;
 use crate::object::job::{Job, KILLED_STATUS};
 use crate::object::oom;
 use crate::object::port::Port;
@@ -67,8 +66,6 @@ pub fn run() -> Result<Report, &'static str> {
         check_an_ended_victim_is_emptied(&tree)?;
         check_the_machine_wide_kill(&tree)?;
         check_a_move_settles_the_pending_charge(&tree)?;
-        check_no_spare_near_a_limit(&tree)?;
-        check_a_refusal_waits_for_spares(&tree)?;
         if Resource::ALL
             .iter()
             .any(|&resource| tree.usage(resource).is_none_or(|usage| usage.used != 0))
@@ -779,71 +776,4 @@ impl crate::user::vmo::Filler for ReadAgain {
     fn reclaimable(&self) -> bool {
         true
     }
-}
-
-/// A job within 64 pages of its memory limit gets no spare for a fault, and
-/// its commits there still go in; one far from it gets one.
-///
-/// Verifies: L.user.227
-fn check_no_spare_near_a_limit(tree: &Arc<Job>) -> Result<(), &'static str> {
-    const BASE: u64 = 0x40_0000;
-    const ROOM: u64 = 32;
-    let job = tree.new_child().map_err(|_| "a job refused a child")?;
-    let used = |job: &Job| job.usage(Resource::Memory).map_or(0, |usage| usage.used);
-    let (far, _) = as_task_of(&job, || crate::user::vmo::Spare::for_fault().take());
-    let Some(far) = far else {
-        return Err("a fault far from its job's memory limit got no spare");
-    };
-    let _ = mm::release_frame(far);
-    let _ = job.set_limit(Resource::Memory, used(&job) + ROOM * PAGE_SIZE);
-    let ((near, faulted), _) = as_task_of(&job, || {
-        let before = crate::user::vmo::spares_in_flight();
-        let near = crate::user::vmo::Spare::for_fault().take().is_some()
-            || crate::user::vmo::spares_in_flight() != before;
-        (near, fault_in(BASE, 8))
-    });
-    if near {
-        return Err("a fault within 64 pages of its job's memory limit took a spare");
-    }
-    let (faulted, space) = faulted?;
-    if faulted != 8 {
-        return Err("a fault within 64 pages of its job's memory limit could not commit");
-    }
-    drop(space);
-    let _ = job.set_limit(Resource::Memory, quota::UNLIMITED);
-    Ok(())
-}
-
-/// A fault a limit refused while a spare frame is held is answered with a
-/// pause and a retry, for at most `SPARE_WAITS` answers.
-///
-/// Verifies: L.user.228
-fn check_a_refusal_waits_for_spares(tree: &Arc<Job>) -> Result<(), &'static str> {
-    let job = tree.new_child().map_err(|_| "a job refused a child")?;
-    let faulter = member_of(&job)?;
-    let used = |job: &Job| job.usage(Resource::Memory).map_or(0, |usage| usage.used);
-    let held = crate::user::vmo::Spare::zeroed();
-    if crate::user::vmo::spares_in_flight() == 0 {
-        return Err("a spare held was not counted in flight");
-    }
-    // As a task of a job held at its limit with nothing to reclaim: without
-    // the wait, an answer is a kill inside this job or a refusal, never a
-    // reclaim's retry nor the machine's kill (ledger 7857 Q.1).
-    let _ = job.set_limit(Resource::Memory, used(&job));
-    let (answers, _) = as_task_of(&job, || {
-        (0..oom::SPARE_WAITS)
-            .take_while(|&attempt| {
-                oom::out_of_memory_at(faulter.space(), attempt) == oom::Answer::Retry
-            })
-            .count()
-    });
-    let _ = job.set_limit(Resource::Memory, quota::UNLIMITED);
-    drop(held);
-    if answers != oom::SPARE_WAITS as usize {
-        return Err("a refusal with a spare held was not answered with a retry");
-    }
-    if oom::waits_for_spares(oom::SPARE_WAITS, 1) || oom::waits_for_spares(0, 0) {
-        return Err("a refusal waited for spares past SPARE_WAITS, or with none held");
-    }
-    Ok(())
 }
