@@ -149,6 +149,10 @@ fn decodes_an_inline_extent_from_mkfs() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "238 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+)]
 fn decodes_a_regular_extent_and_ignores_its_padding() {
     assert!(
         TEXT[TEXT_FRAME_LEN..].iter().all(|&byte| byte == 0),
@@ -158,6 +162,10 @@ fn decodes_a_regular_extent_and_ignores_its_padding() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "127 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+)]
 fn decodes_a_mixed_extent_as_ruzstd_does() {
     // Four compressed blocks: Huffman literals with one stream and with four,
     // treeless literals, and FSE tables for all three sequence codes.
@@ -246,6 +254,10 @@ const CLI_FRAMES: [CliFrame; 7] = [
 ];
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "242 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+)]
 fn decodes_cli_frames_as_ruzstd_does() {
     for (name, frame, len, _) in CLI_FRAMES {
         let expected = ruzstd_decode(frame, len);
@@ -255,6 +267,10 @@ fn decodes_cli_frames_as_ruzstd_does() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "59 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+)]
 fn a_wrong_content_checksum_is_corrupt() {
     // The last byte of a checksummed frame is the checksum's top byte, so the
     // content decodes cleanly and only the checksum can notice.
@@ -649,6 +665,10 @@ fn round_trip(data: &[u8], what: &str) {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "126 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+)]
 fn ruzstd_frames_of_every_shape_round_trip() {
     let lengths: &[usize] = if cfg!(miri) {
         &[0, 1, 300, 2000]
@@ -715,6 +735,10 @@ fn whole_frames() -> Vec<(&'static str, Vec<u8>, usize)> {
 
 /// Verifies: L.btrfs.63
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "26 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+)]
 fn every_truncation_is_corrupt_and_total() {
     for (name, frame, len) in whole_frames() {
         let mut sweeper = Sweeper::new(len);
@@ -732,6 +756,10 @@ fn every_truncation_is_corrupt_and_total() {
 
 /// Verifies: L.btrfs.62
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "64 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+)]
 fn single_bit_flips_are_total() {
     for (name, frame, len) in whole_frames() {
         let mut sweeper = Sweeper::new(len);

@@ -1669,6 +1669,10 @@ fn an_extent_ends_where_linux_says_it_does() {
 
 /// Verifies: L.btrfs.1, L.btrfs.2, H.STORE.1
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "150 s (stopped at the 150 s cap) under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+)]
 fn parsing_never_panics_on_corrupt_input() {
     // A disk can be corrupt, and from stage 11 this runs in ring 0 with nothing
     // above it. Every accessor must answer or error for any bytes at all.
