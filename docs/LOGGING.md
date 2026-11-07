@@ -1776,6 +1776,20 @@ driver (§17) is still to come; this is its fallback made exact.
   that end before it are skipped by their summaries, the one being written
   is read from where the last read stopped -- at most 5,000 records ahead,
   and an idle pass, which sees no segment change size, reads nothing.
+  Each sealed segment's summary is read once and kept, and a sealed
+  segment is not looked at again, not even its size; the written one is
+  read from its offset (a seek), not whole. The blobs' reader, which runs
+  behind the records', holds what it read past them for its next turn and
+  reads on from where it stopped (it used to be set back, and so read the
+  written segment from its start, at every turn while the log grew). The
+  store's listing is kept until a directory of it changes (its
+  modification time or size, one `stat` each): the N150's store of 1,100
+  names took about 9 ms of kernel time to read, twice a pass. Busy,
+  it passes at most every 50 ms; idle, every 500 ms. (ef-load, 2026-11-07: on the N150 it had run
+  at 8.7k calls a second while Endfield loaded, a summary read for every
+  sealed segment and the whole written segment read at each pass, for both
+  the records' and the blobs' readers: 17.5 s of processor time, 14 s of
+  it the kernel's, over a 106 s load. The lode owner's backlog: below.)
 * `test-log` runs `lode upload-stub`, a collector on 127.0.0.1 that keeps
   what it is sent and answers 503 while told to. The uploader starts
   before it; 5 records reach it; while it refuses, nothing is counted as
@@ -1787,6 +1801,20 @@ driver (§17) is still to come; this is its fallback made exact.
   `systemd-journal-remote` (nazuna has none installed; the body is the
   same `-o export` that the format tests cover); a cursor past a store that was
   wiped and begun again, which today waits for the new store to pass it.
+* Backlog for the lode owner (ef-load, 2026-11-07; the minimal fix
+  above is landed): wait for a change -- lode telling the uploader a
+  segment grew, or inotify on the store -- rather than looking every
+  500 ms; one read of the store shared by the records' and the blobs'
+  readers, which each list and read it now; the store's listing (a
+  `readdir` and a size for each written segment) once a pass rather than
+  once a reader; and less work while the machine is loaded -- a longer
+  pass under pressure, or the uploader in a lower CPU weight. And the
+  sending itself: with the reading fixed, the N150's uploader still used
+  about 10 s of processor time (9 s of it the kernel's) over a 110-150 s
+  Endfield load, running busy rounds 20 to 30 times a second -- one TCP
+  connection and TLS handshake to the collector per request (`send`), a
+  request per batch or blob. A kept-alive connection, and fewer, larger
+  requests while the machine is loaded, are the levers left.
 
 ### Compression, as built (§8.2)
 

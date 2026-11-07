@@ -26,11 +26,11 @@ path = "tools/vendor/google/pixel7"
 repo = "https://github.com/ferrix-os/pixel7"
 commit = "4cd45a66a5848ba4daa404f38bf0dad4b1b622a8"
 
-# The website, served at https://ferrix-os.github.io/.
+# The website, served at https://ferrix-os.org/.
 [website]
 path = "docs/website"
 repo = "https://github.com/ferrix-os/ferrix-os.github.io"
-commit = "7a6da637cf6f7b0ba30741f971c1d6a9d19828a8"
+commit = "7de020e89022b6299648dda32e5a419b7a355ce0"
 
 # Every program a person starts: Ferrix's own and those ported onto
 # ferrousli, one folder an app (docs/APPS.md).

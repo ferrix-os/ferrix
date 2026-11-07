@@ -50,6 +50,25 @@ impl Segment {
         Some(whole.get(offset..).map(Vec::from).unwrap_or_default())
     }
 
+    /// Its bytes from `offset` on, as [`Segment::bytes`] answers them, but
+    /// for a segment not compressed -- one being written -- only those
+    /// bytes read: a seek to `offset`, not the whole file read and the
+    /// front thrown away.
+    #[must_use]
+    pub fn bytes_from(&self, offset: usize) -> Option<Vec<u8>> {
+        use std::io::{Seek as _, SeekFrom};
+        let mut file = File::open(&self.path).ok()?;
+        let mut magic = [0_u8; 8];
+        let got = file.read(&mut magic).ok()?;
+        if compress::is_compressed(magic.get(..got)?) {
+            return self.bytes(offset);
+        }
+        let mut tail = Vec::new();
+        let _ = file.seek(SeekFrom::Start(offset as u64)).ok()?;
+        let _ = file.read_to_end(&mut tail).ok()?;
+        Some(tail)
+    }
+
     /// Its size on disk.
     #[must_use]
     pub fn size(&self) -> u64 {
@@ -101,6 +120,82 @@ pub fn segments(dirs: &[PathBuf]) -> Vec<Segment> {
     }
     out.sort_by_key(|segment| segment.first);
     out
+}
+
+/// A store's segments as [`segments`] lists them, kept until one of its
+/// directories changes: a directory's modification time and size are looked
+/// at, one `stat` each, and the directories read again only when one moved.
+/// Reading the N150's store (1,100 names) took about 9 ms of the kernel's
+/// time, and the uploader's two readers each read it at every pass while
+/// Endfield loaded (ef-load, 2026-11-07).
+#[derive(Debug, Default)]
+pub struct Listing {
+    /// Each directory read, the store's and its users', and what `stat`
+    /// gave for it then.
+    stamps: Vec<(PathBuf, Option<(std::time::SystemTime, u64)>)>,
+    /// What was listed.
+    segments: Vec<Segment>,
+    /// How many times the directories were read.
+    pub reads: u64,
+}
+
+impl Listing {
+    /// The store's segments in `dirs`, read again only if a directory of
+    /// it changed since the last read (or `dirs` differ from that read's).
+    pub fn segments(&mut self, dirs: &[PathBuf]) -> &[Segment] {
+        let same_dirs = self
+            .stamps
+            .iter()
+            .map(|(path, _)| path)
+            .take(dirs.len())
+            .eq(dirs.iter());
+        let unchanged = same_dirs
+            && self.reads > 0
+            && self
+                .stamps
+                .iter()
+                .all(|(path, stamp)| stamp_of(path) == *stamp);
+        if !unchanged {
+            // The stamps before the listing: a change while it is read is
+            // seen at the next call, and read then.
+            let mut stamps: Vec<(PathBuf, Option<(std::time::SystemTime, u64)>)> = dirs
+                .iter()
+                .map(|dir| (dir.clone(), stamp_of(dir)))
+                .collect();
+            for path in dirs.iter().flat_map(|dir| user_dirs(dir)) {
+                let stamp = stamp_of(&path);
+                stamps.push((path, stamp));
+            }
+            self.segments = segments(dirs);
+            self.stamps = stamps;
+            self.reads += 1;
+        }
+        &self.segments
+    }
+}
+
+/// The users' directories in `dir` (`user-<uid>/`).
+fn user_dirs(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| ferrix_lode_core::access::user_of_dir(name).is_some())
+        })
+        .map(|entry| entry.path())
+        .collect()
+}
+
+/// A directory's modification time and size, which a name added, removed or
+/// renamed in it changes.
+fn stamp_of(dir: &Path) -> Option<(std::time::SystemTime, u64)> {
+    let meta = fs::metadata(dir).ok()?;
+    Some((meta.modified().ok()?, meta.len()))
 }
 
 /// The segments of the user's directory `dir`, named `user/<file>`.

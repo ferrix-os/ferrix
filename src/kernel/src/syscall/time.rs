@@ -635,6 +635,10 @@ struct Usage {
     voluntary: u64,
     /// Switches away while still runnable.
     involuntary: u64,
+    /// Page faults that read nothing from a disk.
+    minor_faults: u64,
+    /// Page faults that read their page from a disk.
+    major_faults: u64,
 }
 
 impl Usage {
@@ -659,6 +663,8 @@ impl Usage {
                 kernel: sum.kernel.saturating_add(one.kernel),
                 voluntary: sum.voluntary.saturating_add(one.voluntary),
                 involuntary: sum.involuntary.saturating_add(one.involuntary),
+                minor_faults: sum.minor_faults.saturating_add(one.minor_faults),
+                major_faults: sum.major_faults.saturating_add(one.major_faults),
             })
     }
 
@@ -669,6 +675,8 @@ impl Usage {
             kernel: task.kernel_time(),
             voluntary: task.voluntary_switches(),
             involuntary: task.involuntary_switches(),
+            minor_faults: task.minor_faults(),
+            major_faults: task.major_faults(),
         }
     }
 
@@ -696,8 +704,11 @@ fn put_words(out: &mut [u8], word: usize, values: &[u64]) {
 /// words: 144 bytes on the 64-bit pair and 72 on ARMv7-A, by `sizeof` against
 /// `linux/resource.h` for x86-64 and `arm-linux-gnueabihf`, and 72 for an
 /// i386 program, whose words are `word` bytes. `ru_utime` and `ru_stime` are
-/// the user and kernel time, `ru_nvcsw` and `ru_nivcsw` (words 16 and 17) the
-/// voluntary and involuntary switches; every other field is zero, as nothing
+/// the user and kernel time, `ru_minflt` and `ru_majflt` (words 8 and 9) the
+/// page faults that read nothing from a disk and those that read their page
+/// from one, and `ru_nvcsw` and `ru_nivcsw` (words 16 and 17) the voluntary
+/// and involuntary switches, each summed over the live threads for
+/// `RUSAGE_SELF` (`L.object.372`); every other field is zero, as nothing
 /// counts it. `RUSAGE_CHILDREN` (-1) is zero throughout: nothing keeps the
 /// usage of a child once it has been waited for. Anything else is `EINVAL`
 /// before the buffer is touched.
@@ -725,6 +736,8 @@ pub(crate) fn sys_getrusage(
     fields[1] = (user % NANOS) / micros;
     fields[2] = kernel / NANOS;
     fields[3] = (kernel % NANOS) / micros;
+    fields[8] = usage.minor_faults;
+    fields[9] = usage.major_faults;
     fields[16] = usage.voluntary;
     fields[17] = usage.involuntary;
     let mut bytes = [0_u8; 144];

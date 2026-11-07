@@ -139,6 +139,7 @@ Causes are listed most likely first.
 | [FX-0972](#fx-0972) | a boot check on a worker did not run to its end |
 | [FX-0973](#fx-0973) | a reclaim began inside a reclaim |
 | [FX-0974](#fx-0974) | a task tried to block holding an IrqSpinLock |
+| [FX-0975](#fx-0975) | a fault waited holding a spare frame |
 | [FX-1001](#fx-1001) | PCI enumeration failed its self-check |
 | [FX-1002](#fx-1002) | a device node handed out memory or an interrupt it does not have |
 | [FX-1003](#fx-1003) | an IOMMU domain gave a device the wrong addresses |
@@ -3286,6 +3287,22 @@ states.
 
 See: src/kernel/src/sched/mod.rs require_may_sleep;
 src/lib/kernel/sync/src/lib.rs IrqControl.
+
+<a id="fx-0975"></a>
+
+## FX-0975 — a fault waited holding a spare frame
+
+A write fault takes a zeroed frame before its space's lock, so that its commit
+takes none there, and gives it back before the fill or the pager's ask it may
+wait for. A spare held across that wait is a charged frame nobody uses for as
+long as the wait lasts, which the memory limit's kill would count against the
+job. Checks builds count each task's spares and stop here; release builds do not
+look.
+
+1. A path of `AddressSpace::fault_with` that fills or asks before letting its
+   spare go.
+
+See: src/kernel/src/user/space.rs fault_with; src/kernel/src/user/vmo.rs Spare.
 
 <a id="fx-1001"></a>
 
