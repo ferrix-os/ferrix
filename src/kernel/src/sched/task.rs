@@ -1539,6 +1539,13 @@ impl Task {
     }
 
     /// The spare frames it holds.
+    #[cfg_attr(
+        not(ferrix_checks = "on"),
+        expect(
+            dead_code,
+            reason = "AUDIT: read only by the checks build's FX-0975 assertion"
+        )
+    )]
     pub(crate) fn spares_held(&self) -> u32 {
         self.spares_held.load(Ordering::Relaxed)
     }
