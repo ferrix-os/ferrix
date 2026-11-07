@@ -1669,18 +1669,19 @@ fn an_extent_ends_where_linux_says_it_does() {
 
 /// Verifies: L.btrfs.1, L.btrfs.2, H.STORE.1
 #[test]
-#[cfg_attr(
-    miri,
-    ignore = "over 150 s under Miri on 2026-11-02, and every 37th index alone took 237 s, over the 20 s a test may take there; plain cargo test runs it"
-)]
 fn parsing_never_panics_on_corrupt_input() {
     // A disk can be corrupt, and from stage 11 this runs in ring 0 with nothing
     // above it. Every accessor must answer or error for any bytes at all.
     let superblock = SuperblockBuilder::new().build();
     let node = sample_leaf();
 
+    // Under Miri every 37th index: 28 of the 1,024 bytes of each, the longest
+    // test kept there (docs/RELIABILITY.md, Miri), and short of a sweep. The
+    // sweep is plain cargo test's; Miri's part is that the accessors' calls
+    // into core and alloc stay sound on damaged bytes.
+    let stride = if cfg!(miri) { 37 } else { 1 };
     for (name, good) in [("superblock", &superblock), ("node", &node)] {
-        for index in 0..good.len().min(1024) {
+        for index in (0..good.len().min(1024)).step_by(stride) {
             for patch in [0x00u8, 0x01, 0x7F, 0xFF] {
                 let mut bytes = good.clone();
                 bytes[index] = patch;

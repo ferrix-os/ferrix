@@ -82,7 +82,7 @@ fn decodes_an_inline_extent_mkfs_wrote() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "245 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "255 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn decodes_a_sector_padded_regular_extent_mkfs_wrote() {
     let file = yes("compressible line of text", 500_000);
@@ -100,7 +100,7 @@ fn decodes_a_sector_padded_regular_extent_mkfs_wrote() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "41 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "47 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn decodes_a_mixed_extent_as_miniz_oxide_does() {
     let expected = decompress_to_vec_zlib(MIXED_REGULAR).expect("miniz_oxide decodes the fixture");
@@ -229,7 +229,7 @@ fn first_block_type(stream: &[u8]) -> usize {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "36 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "37 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn reproduces_every_input_miniz_oxide_compresses() {
     let mut rng = Rng(0x5EED);
@@ -875,7 +875,7 @@ fn victims() -> Vec<(Vec<u8>, Vec<u8>)> {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "117 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "118 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn every_truncation_before_the_trailer_is_refused() {
     for (stream, plain) in victims() {
@@ -898,7 +898,7 @@ fn every_truncation_before_the_trailer_is_refused() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "79 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "79 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn bit_flips_give_an_error_or_what_miniz_oxide_decodes() {
     #[cfg(not(miri))]

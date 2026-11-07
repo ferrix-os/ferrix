@@ -151,7 +151,7 @@ fn decodes_an_inline_extent_from_mkfs() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "238 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "248 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn decodes_a_regular_extent_and_ignores_its_padding() {
     assert!(
@@ -164,7 +164,7 @@ fn decodes_a_regular_extent_and_ignores_its_padding() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "127 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "130 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn decodes_a_mixed_extent_as_ruzstd_does() {
     // Four compressed blocks: Huffman literals with one stream and with four,
@@ -256,7 +256,7 @@ const CLI_FRAMES: [CliFrame; 7] = [
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "242 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "249 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn decodes_cli_frames_as_ruzstd_does() {
     for (name, frame, len, _) in CLI_FRAMES {
@@ -269,7 +269,7 @@ fn decodes_cli_frames_as_ruzstd_does() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "59 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "61 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn a_wrong_content_checksum_is_corrupt() {
     // The last byte of a checksummed frame is the checksum's top byte, so the
@@ -578,7 +578,7 @@ fn workspace_size_is_as_documented() {
 // among `whole_frames`.
 #[cfg_attr(
     miri,
-    ignore = "over 150 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "260 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn stale_workspace_contents_do_not_matter() {
     let mut buffer = vec![0xA5u8; Workspace::SIZE + 100];
@@ -672,7 +672,7 @@ fn round_trip(data: &[u8], what: &str) {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "126 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "131 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn ruzstd_frames_of_every_shape_round_trip() {
     let lengths: &[usize] = if cfg!(miri) {
@@ -708,7 +708,7 @@ fn ruzstd_frames_of_every_shape_round_trip() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "over 150 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "did not finish in 1,800 s of real time under Miri on 2026-11-03, so libtest gave no figure, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn ruzstd_frames_of_random_shape_and_length_round_trip() {
     let mut rng = Rng(8878);
@@ -765,7 +765,7 @@ fn every_truncation_is_corrupt_and_total() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "64 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "1969 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn single_bit_flips_are_total() {
     for (name, frame, len) in whole_frames() {
@@ -788,7 +788,7 @@ fn single_bit_flips_are_total() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "over 150 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "did not finish in 1,800 s of real time under Miri on 2026-11-03, so libtest gave no figure, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn bit_flips_in_a_full_extent_are_total() {
     // Every bit of the headers and tables at the front of the first block,
@@ -859,7 +859,7 @@ fn an_output_buffer_smaller_than_the_content_is_corrupt() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "over 150 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "140 s by libtest under Miri on 2026-11-03, over the 25 s a test may take there; plain cargo test runs it"
 )]
 fn decodes_on_a_32_kib_stack() {
     // A kernel stack is small, and the workspace exists so that a decode does

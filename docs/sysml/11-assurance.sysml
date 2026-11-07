@@ -149,10 +149,14 @@ package FerrixAssurance {
     }
     #implemented verification miri : Gate {
         attribute :>> command = "cargo miri test";
-        doc /* src/lib/platform/elf, bootinfo, ustack, objects, vfs, pci, block, blkring, native, virtio-blk, frame, heap and paging. cargo xtask check --miri runs the same list,
-             * and an xtask test holds it to the workflow. A test too slow to
-             * interpret runs shorter under cfg(miri) rather than being
-             * ignored. */
+        doc /* The src/lib crates MIRI_PACKAGES names in
+             * tools/common/xtask/src/check.rs. CI's Miri job and cargo xtask
+             * check --miri run that list, and an xtask test holds the two
+             * together. A test too slow to interpret is made cheap first, then
+             * runs shorter under cfg(miri). It is ignored there only with its
+             * reason beside it, either that it cannot run under Miri or that
+             * it would break a named budget, and what stays reached is stated
+             * with the budget: docs/RELIABILITY.md, Miri. */
     }
     #implemented verification fuzz : Gate {
         attribute :>> command = "cargo fuzz run <target>, for every target cargo fuzz list names";
