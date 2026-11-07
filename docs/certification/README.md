@@ -226,7 +226,7 @@ retrofitted.
 *In place:* most of the Annex A technique table. Strongly typed language (HR) —
 Rust. Defensive programming (HR) — the panic audit plus a lint table denying
 `unwrap`, `expect`, `panic`, indexing and slicing in production code. Static
-analysis (HR) — clippy at ten configurations, Miri over 15 crates, 30 fuzz
+analysis (HR) — clippy at ten configurations, Miri over 19 crates, 30 fuzz
 targets with committed corpora. Structured methodology (HR) — the SysML model.
 Role independence is permissive at SIL 2, where roles may be combined with
 justification, so F-27 is survivable here as it is not elsewhere.

@@ -30,7 +30,7 @@ structural coverage measurement at all. As of 2026-09-25 it does, via QEMU's
 | In-kernel self-tests | `check.rs` / `*_check.rs`, run on every boot | **31,135 lines**, 29 files |
 | Boot gates | `cargo xtask test-*` under QEMU | 18 commands, 3 architectures |
 | Host unit tests | `cargo test` over `src/lib/` | ~1,950 plus doc tests (2026-09-23), `xtask` 242 |
-| UB detection | `cargo miri test` | 13 crates |
+| UB detection | `cargo miri test` | 19 crates |
 | Fuzzing | `cargo fuzz`, corpora committed | 30 targets |
 | Supply chain | `cargo deny check` | empty ignore list |
 | Static analysis | `clippy` at ten configurations | denies `unwrap`, `expect`, `panic`, indexing, slicing |
