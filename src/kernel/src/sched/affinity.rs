@@ -66,8 +66,8 @@ pub enum AffinityRefusal {
     /// The mask names no processor of the domain in service (ledger 5156
     /// (A1), Linux's `cpu_active_mask`).
     Empty,
-    /// A reservation holds its processor (ledger 7088 E.3).
-    #[cfg(ferrix_sched_deadline = "edf_cbs")]
+    /// A reservation holds its processor (ledger 7088 E.3); answered only
+    /// where the stack has a deadline tier.
     Reserved,
 }
 
@@ -140,7 +140,6 @@ pub fn effective_mask(task: &Task) -> CpuSet {
 /// (L.sched.96); [`AffinityRefusal::Empty`] when nothing is left.
 pub fn set_affinity(task: &Arc<Task>, asked: &CpuSet) -> Result<CpuSet, AffinityRefusal> {
     // A reservation holds its processor (ledger 7088 E.3).
-    #[cfg(ferrix_sched_deadline = "edf_cbs")]
     if super::reserve::holds(task) {
         return Err(AffinityRefusal::Reserved);
     }

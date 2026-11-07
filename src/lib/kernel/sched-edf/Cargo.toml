@@ -1,6 +1,6 @@
 [package]
 name = "ferrix-sched-edf"
-description = "Partitioned EDF with a hard constant-bandwidth server, over the fair class"
+description = "Partitioned EDF with a hard constant-bandwidth server: the class stack's deadline tier (docs/SCHED-CLASSES.md section 9g)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,7 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-ferrix-sched = { workspace = true }
+ferrix-sched-class = { workspace = true }
 
 [lints]
 workspace = true

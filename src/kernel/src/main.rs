@@ -2229,10 +2229,12 @@ fn check_user_shape() {
         Ok(cases) => println!("  window   an unmap's {cases} decisions held"),
         Err(why) => fatal!(catalog::WINDOW_UNMAP, "window self-check failed: {why}"),
     }
-    #[cfg(ferrix_sched_deadline = "edf_cbs")]
-    match sched::reserve_check::run() {
-        Ok(()) => println!("  edf      a budget's rules held, an unschedulable set refused"),
-        Err(why) => fatal!(catalog::SCHEDULE_EDF, "edf self-check failed: {why}"),
+    // Where the stack has a deadline tier (docs/SCHED-CLASSES.md §9g).
+    if sched::DEADLINE_TIER {
+        match sched::reserve_check::run() {
+            Ok(()) => println!("  edf      a budget's rules held, an unschedulable set refused"),
+            Err(why) => fatal!(catalog::SCHEDULE_EDF, "edf self-check failed: {why}"),
+        }
     }
 }
 

@@ -1466,7 +1466,7 @@ package FerrixSchedRequirements {
                 "sched::task::Task::set_filed_at", "sched::task::Task::filed_at");
         }
         requirement <'L.sched.179'> admissionRefusesAnUnschedulableSet : ItemLowLevel {
-            attribute :>> statement = "Under schedule=edf a reservation shall be admitted only with
+            attribute :>> statement = "Under sched_deadline=edf_cbs a reservation shall be admitted only with
                 a deadline equal to its period, a budget of 0.1 ms up to the period, a period of 1 ms
                 to 10 s, and, on the processor it names, reservations' shares summing to at most
                 95% in at most 32 entries; anything else shall be refused by name, changing nothing.";
@@ -1498,7 +1498,7 @@ package FerrixSchedRequirements {
         requirement <'L.sched.182'> reservingTakesAJobsAuthority : ItemLowLevel {
             attribute :>> statement = "THREAD_RESERVE shall act on the calling thread alone, on a job
                 handle with SET_LIMIT at or above its own job, and shall answer NOT_SUPPORTED in a kernel
-                without schedule=edf; three zeros shall give the reservation back.";
+                without sched_deadline=edf_cbs; three zeros shall give the reservation back.";
             attribute :>> criterion = "test-reserve's `admitted`, `other`, `back`. Control: the walk up the
                 jobs removed lets a job's handle from beside it through.";
             attribute :>> parent = "H.SCHED.28";
@@ -1513,6 +1513,31 @@ package FerrixSchedRequirements {
                 `back`.";
             attribute :>> parent = "H.SCHED.28";
             attribute :>> unit = ("sched::reserve::forget", "sched::reserve::give_back", "sched::affinity::set_affinity");
+        }
+        requirement <'L.sched.184'> anAdmittedTaskIsTheDeadlineTiers : ItemLowLevel {
+            attribute :>> statement = "A thread admitted on its processor shall be queued there as
+                the deadline tier's entity, and anywhere else as its policy's; a running thread
+                admitted or given back shall move between the tiers at its processor's next
+                decision, never queued as a waiting entity while it runs; and a task queued as
+                admitted where it holds no admission shall stop the machine (FX-0541).";
+            attribute :>> criterion = "The `edf` boot check on fast: a thread admitted while it runs
+                is the deadline tier's, admitted where it runs, after its own decision; a control
+                that builds the deadline entity on a processor without the admission stops the
+                machine with FX-0541.";
+            attribute :>> parent = "H.SCHED.28";
+            attribute :>> unit = ("sched::task::Task::entity_with", "sched::task::Task::deadline_here",
+                "sched::task::Task::entity_is_current", "sched::queue::CpuQueue::insert_at",
+                "sched::reserve::pinned_to");
+        }
+        requirement <'L.sched.185'> aDeadlineTierMakesNoHardRtDomain : ItemLowLevel {
+            attribute :>> statement = "A HardRt domain shall be refused ModeUnavailable unless the
+                windows tier is built: a deadline tier serves reservations in the boot domain and
+                makes no HardRt domain.";
+            attribute :>> criterion = "The `edf` boot check on fast: a HardRt domain asked for beside
+                the deadline tier is refused ModeUnavailable; check-build-flags reads mode_available
+                for fast's flags as Throughput alone.";
+            attribute :>> parent = "H.SCHED.28";
+            attribute :>> unit = ("sched::make_domain");
         }
     }
 

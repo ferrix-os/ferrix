@@ -451,6 +451,8 @@ impl CpuQueue {
         user: bool,
         extra: Option<(u32, i64)>,
     ) -> Option<(u32, u32)> {
+        // The deadline tier's time, before the charge (ledger 7763 DG.4).
+        <Stack as StackTiers<Arc<Task>>>::note_time(&mut self.stack, now);
         self.account_load(now);
         let delta = now.saturating_sub(self.exec_start);
         self.exec_start = now;
@@ -720,6 +722,13 @@ impl CpuQueue {
         };
         if self.current.is_some() {
             self.account(now.unwrap_or_else(crate::timer::now_nanos));
+        } else if super::stack::DEADLINE {
+            // The deadline tier's time, before each enqueue onto it (DG.4); `account` tells it
+            // above.
+            <Stack as StackTiers<Arc<Task>>>::note_time(
+                &mut self.stack,
+                now.unwrap_or_else(crate::timer::now_nanos),
+            );
         }
         // A task new to any queue is counted in its job's load here, once;
         // one woken was counted as it became runnable. Its weight is its
@@ -732,7 +741,17 @@ impl CpuQueue {
             Arc::clone(task),
             task.entity_with(slot),
         ) {
-            // The only refusals are a duplicate identifier and a zero weight,
+            // An admitted entity on a processor that holds no admission for it:
+            // `entity_with` reads the same word under this lock, so this is that
+            // rule broken (docs/SCHED-CLASSES.md §9g, L.sched.184).
+            if refused.reason == ferrix_sched_class::Refusal::NoSuchTier {
+                crate::panic::fatal!(
+                    crate::panic::catalog::ADMITTED_NOT_HERE,
+                    "a task was queued as admitted where it holds no admission: task {}",
+                    task.id
+                );
+            }
+            // The only other refusals are a duplicate identifier and a zero weight,
             // neither of which this kernel can produce; dropping the clone is
             // what keeps the task alive in the table regardless.
             task.keep_refused(refused.entity);
@@ -907,6 +926,10 @@ impl CpuQueue {
 
     /// What should run now: the fair class's choice, or the idle task.
     pub(crate) fn pick_next(&mut self) -> Option<Arc<Task>> {
+        // The deadline tier's time, before the pick (DG.4).
+        if super::stack::DEADLINE {
+            <Stack as StackTiers<Arc<Task>>>::note_time(&mut self.stack, crate::timer::now_nanos());
+        }
         if let Some(task) = Stack::pick(&mut self.stack) {
             // Only this processor's own running task may be picked while a
             // processor runs it (container review 30 (not on record; ledger 5684), B1): any

@@ -22,8 +22,8 @@
 // §9b, G2): naming it, even `as _`, would load it and hand its rlib to the
 // linker, the opposite of what it shows. check-item-boundary's rule (d)
 // refuses any name of it, so this lint is the only thing it is excused from.
-// ferrix_sched_fifo is named only by its arm, so a build without it leaves
-// it unnamed and unlinked as well (§9e, R11).
+// ferrix_sched_fifo and ferrix_sched_edf are named only by their arms, so a
+// build without one leaves it unnamed and unlinked as well (§9e, R11; §9g).
 #![expect(
     unused_crate_dependencies,
     reason = "ferrix_sched_fixture, the standing negative case no build links (SCHED-CLASSES.md §9b)"
@@ -179,9 +179,25 @@ compile_error!(
     "sched_windows=arinc_table is not built yet (ferrix-sched-windows-table, M3; SCHED-CLASSES.md section 9c)"
 );
 
-// sched_deadline: HardRt's EDF with CBS.
+// sched_deadline: partitioned EDF with a hard CBS (ferrix-sched-edf, SCHED-CLASSES.md §9g).
+/// `sched_deadline` as this build has it.
 #[cfg(ferrix_sched_deadline = "edf_cbs")]
-compile_error!("sched_deadline=edf_cbs is not built yet (ferrix-sched-edf, M3)");
+pub const DEADLINE: Value = Value {
+    name: "edf_cbs",
+    place: 0,
+    present: true,
+};
+/// The deadline tier over `L`: reservations above it (ferrix-sched-edf,
+/// SCHED-CLASSES.md §9g, ledger 7763).
+#[cfg(ferrix_sched_deadline = "edf_cbs")]
+pub type Deadline<L> = ferrix_sched_class::Over<ferrix_sched_edf::Edf, L>;
+// The one combination arm (ledger 7763 DG.3): a stack has at most one tier
+// above fair, so the flag file refuses `edf_cbs` with `fifo_rr` by its
+// `requires`, and this is the backstop.
+#[cfg(all(ferrix_sched_deadline = "edf_cbs", ferrix_sched_realtime = "fifo_rr"))]
+compile_error!(
+    "sched_deadline=edf_cbs with sched_realtime=fifo_rr is not built (SCHED-CLASSES.md section 9g, DG.3)"
+);
 /// `sched_deadline` as this build has it.
 #[cfg(ferrix_sched_deadline = "absent")]
 pub const DEADLINE: Value = Value {
@@ -254,15 +270,18 @@ const _: () = assert!(
 );
 
 /// Whether `mode`'s tiers are compiled in (D9): `Throughput` needs the fair
-/// tier, `SoftRt` the realtime and fair tiers, `HardRt` the deadline tier or the
-/// windows tier, whose crate schedules by fixed priority inside its windows
-/// (SCHED-CLASSES.md C6). A domain
+/// tier, `SoftRt` the realtime and fair tiers, `HardRt` the windows tier, whose
+/// crate schedules by fixed priority inside its windows (SCHED-CLASSES.md C6),
+/// and not the deadline tier, which serves reservations in the boot domain
+/// until a step builds `HardRt` domains (§9g, ledger 7763 DG.2). A domain
 /// asked for a mode this answers no for is refused `ModeUnavailable`.
 #[must_use]
 pub const fn mode_available(mode: SchedMode) -> bool {
     match mode {
         SchedMode::Throughput => FAIR.present,
         SchedMode::SoftRt => REALTIME.present && FAIR.present,
-        SchedMode::HardRt => DEADLINE.present || WINDOWS.present,
+        // The windows alone: a deadline tier in the boot domain is a
+        // reservation service, not a HardRt domain (ledger 7763 DG.2).
+        SchedMode::HardRt => WINDOWS.present,
     }
 }

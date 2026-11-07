@@ -334,6 +334,18 @@ isolation: the boot domain's tasks never run on its processors
 interrupt they took before** (C1), each of them noise on a real-time task
 there; the per-processor kernel tasks run there too (V7).
 
+**Reservations in the boot domain** (`sched_deadline=edf_cbs`, `fast`;
+docs/SCHED-CLASSES.md §9g, ledger 7763 DG.2). Beside FIFO's, the boot
+domain's guarantee under the deadline tier is 7088's admission and budget
+and nothing more: an implicit-deadline reservation admitted to its
+processor (at most 95% and 32 entries a processor, refused by name) runs
+its budget in every period, earliest deadline first, and not past it, hard
+even on an idle processor, with the fair class given the rest (H.SCHED.28,
+L.sched.179-185). It is no `HardRt` domain: no isolation, no bound on the
+kernel's non-preemptible sections, no threaded interrupts, a throttled lock
+holder unbounded (7088 E.4), and no timing claim. `HardRt` is available
+only with the windows tier (L.sched.185).
+
 **C2.** A `SCHED_FIFO` task at priority 99 starves the kernel's own fair
 worker tasks -- the reaper, the network's -- on its processor for 950 ms of
 every second; the floor is what bounds that, and nothing else does.

@@ -431,11 +431,19 @@ def tier_order_problems(source: str, flag_file: dict) -> list[str]:
     return []
 
 
+LIFT_ROOT = "src/kernel/src/lift_core.rs"
+
+
 def sched_cfg_problems(rust_files: list[tuple[str, str]]) -> list[str]:
     """No `ferrix_sched_*` cfg in the kernel outside the arms file (D6)."""
     problems = []
     for rel, source in rust_files:
         if not rel.startswith(KERNEL) or rel == ARMS:
+            continue
+        # linuxd's shim names no kernel crate (check-lift), so its root reads the scheduler's
+        # flags itself: its flag word, as every kernel root's, and the deadline tier's one
+        # answer (SCHED-CLASSES.md section 9g).
+        if rel == LIFT_ROOT:
             continue
         for line, name in cfg_names(source):
             if name.startswith("ferrix_sched_"):
@@ -518,6 +526,10 @@ def mode_map(source: str) -> dict[str, tuple[str, set[str]]]:
     return modes
 
 
+# The tiers a profile's boot domain uses beside the modes' own (ledger 7763 DG.2).
+BOOT_DOMAIN_TIERS = {"sched_deadline"}
+
+
 def mode_problems(profiles: dict[str, dict], modes: dict[str, tuple[str, set[str]]]) -> list[str]:
     """Each profile's `modes` is the set of modes whose tiers it has present,
     both ways, never empty, and every tier it has present is one an allowed
@@ -542,6 +554,10 @@ def mode_problems(profiles: dict[str, dict], modes: dict[str, tuple[str, set[str
             problems.append(f"profiles/{name}.toml: has {mode}'s tiers present and leaves {mode} out of modes "
                             "(compiled code no mode uses)")
         used = set().union(*(modes[mode][1] for mode in listed & set(modes))) if listed & set(modes) else set()
+        # A deadline tier serves reservations in the boot domain, a Throughput one, and is no
+        # HardRt domain's (SCHED-CLASSES.md section 9g; ledger 7763 DG.2).
+        if "Throughput" in listed:
+            used |= BOOT_DOMAIN_TIERS
         for tier in sorted(present - used):
             problems.append(f"profiles/{name}.toml: {tier}={flags[tier]} is present and no mode it allows uses "
                             "it (compiled code no mode uses)")
@@ -848,9 +864,20 @@ def self_test() -> list[str]:
         "pub const fn mode_available(mode: SchedMode) -> bool {\n    match mode {\n"
         "        SchedMode::Throughput => FAIR.present,\n"
         "        SchedMode::SoftRt => REALTIME.present && FAIR.present,\n"
-        "        SchedMode::HardRt => DEADLINE.present || WINDOWS.present,\n    }\n}\n")
+        "        SchedMode::HardRt => WINDOWS.present,\n    }\n}\n")
     if set(arms_modes) != {"Throughput", "SoftRt", "HardRt"} or arms_modes["SoftRt"][1] != {"sched_realtime", "sched_fair"}:
         failures.append(f"mode_available's match was misread: {arms_modes}")
+    # mode_available itself, as the arms file has it, for fast's flags (ledger 7763 DG.2): a
+    # deadline tier over fair gives Throughput alone, never HardRt.
+    real_modes = mode_map((ROOT / ARMS).read_text())
+    fast_present = {"sched_deadline", "sched_fair"}
+    fast_have = {mode for mode, (needs, _) in real_modes.items() if eval(needs, {}, {"present": fast_present})}  # noqa: S307
+    if fast_have != {"Throughput"}:
+        failures.append(f"mode_available gives fast's flags {sorted(fast_have)}, not Throughput alone")
+    fast_like = {"f": {"level": "none", "modes": ["Throughput"],
+                       "flags": {"sched_dispatch": "fixed", "sched_deadline": "edf_cbs", "sched_fair": "eevdf"}}}
+    if mode_problems(fast_like, real_modes):
+        failures.append(f"fast's modes were refused: {mode_problems(fast_like, real_modes)}")
     good_modes = {"p": {"level": "present", "modes": ["Throughput"],
                         "flags": {"sched_dispatch": "fixed", "sched_fair": "eevdf", "sched_windows": "absent"}}}
     if mode_problems(good_modes, arms_modes):

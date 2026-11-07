@@ -230,7 +230,7 @@ static RESERVED_PONG_STACK: Stack = Stack(core::cell::UnsafeCell::new([0; 0x8000
 /// Trips of case 197, each way.
 const EDF_TRIPS: u64 = 16;
 
-/// Case 197: under `schedule=edf`, a reserved thread's channel call takes the long way: the
+/// Case 197: under `sched_deadline=edf_cbs`, a reserved thread's channel call takes the long way: the
 /// direct switch would pass over a reservation and charge neither budget (ledger 7088 E.5,
 /// 7134 (d)). The same trips unreserved go direct, so the zero is the decline's.
 fn reserved_declines(given: &Given) -> Result<(), i32> {

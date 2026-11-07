@@ -935,11 +935,11 @@ package FerrixItemRequirements {
             attribute :>> parent = "ASR-8";
         }
         requirement <'H.SCHED.28'> aReservationHoldsItsProcessorsShare : ItemHighLevel {
-            attribute :>> statement = "Under schedule=edf a thread with the authority may hold a
+            attribute :>> statement = "Under sched_deadline=edf_cbs a thread with the authority may hold a
                 budget in each period on one processor: a set too wide for it shall be refused
                 by name, the thread shall run no more than its budget in a period, the earliest
                 deadline with budget shall run first, and the fair class shall have the rest.";
-            attribute :>> criterion = "L.sched.179 to L.sched.183. No timing claim.";
+            attribute :>> criterion = "L.sched.179 to L.sched.185. No timing claim.";
             attribute :>> parent = "ASR-8";
         }
         requirement <'H.SCHED.20'> theClassesTheFlagsSelectAndNoOther : ItemHighLevel {

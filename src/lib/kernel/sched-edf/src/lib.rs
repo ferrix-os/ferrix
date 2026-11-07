@@ -1,91 +1,51 @@
-//! `schedule=edf`: partitioned earliest-deadline-first with a hard constant-bandwidth
-//! server, above the fair class (`docs/BUILD-FLAGS.md`, ledger 7011 S.4).
+//! `sched_deadline=edf_cbs`: partitioned earliest-deadline-first with a hard constant-bandwidth
+//! server, the class stack's deadline tier (`docs/SCHED-CLASSES.md` §9g; ledger 7011 S.4, 7088,
+//! 7763).
 //!
-//! A pure crate: a function of the numbers it is handed, with no clock of its own, no
-//! unsafe and no allocation after construction. [`OverFair`] answers every method of
-//! [`RunQueue`] the kernel calls, so one type holds every door.
+//! A pure crate: a function of the numbers it is handed, with no clock of its own, no unsafe and
+//! no allocation after its queue is made. [`Edf`] is a [`SchedClass`] and a [`DeadlineClass`];
+//! the arms file stacks it above the fair class as `Over<Edf, Eevdf>`.
 //!
 //! # A reservation
 //!
-//! A thread is admitted to one processor with a [`Reservation`]: `runtime` in every
-//! `period`, due by the period's end: an implicit deadline, since the sum of `runtime /
-//! period` that admission tests does not suffice for a shorter one (ledger 7088 E.1). The
-//! sum is at most [`LIMIT_PPM`] parts per million, which leaves the fair class its share,
-//! with at most [`MOST`] on a processor.
+//! A thread is admitted to one processor with a [`Reservation`]: `runtime` in every `period`,
+//! due by the period's end: an implicit deadline, since the sum of `runtime / period` that
+//! admission tests does not suffice for a shorter one (ledger 7088 E.1). The sum is at most
+//! [`LIMIT_PPM`] parts per million, which leaves the tier below its share, with at most [`MOST`]
+//! on a processor. Its entry in the processor's fixed table is the task's node in this tier:
+//! made with the queue, so admission is where [`Refusal::Full`] is answered and no scheduler
+//! path allocates. The entity it is queued with, [`Admitted`], carries nothing: the task's fair
+//! parts stay with the task while this tier holds it.
 //!
 //! # The server
 //!
-//! Running charges the budget. At zero the thread is **throttled**, hard: it does not run
-//! again until its period ends, when its budget refills and its deadline moves on a period.
-//! A thread that wakes with less time left than its remaining budget's bandwidth asks for
-//! is given a fresh budget and deadline, Linux's rule, so that sleeping cannot store up
-//! bandwidth.
+//! Running charges the budget. At zero the thread is **throttled**, hard: it does not run again
+//! until its period ends, when its budget refills and its deadline moves on a period, whether
+//! or not anything below waits ([`SchedClass::ready`] ignores that). A thread that wakes with
+//! less time left than its remaining budget's bandwidth asks for is given a fresh budget and
+//! deadline, Linux's rule, so that sleeping cannot store up bandwidth.
 //!
-//! No timing claim is made here: this is the scheduling rule, and [`OverFair`]'s pick is a
-//! scan of [`MOST`] entries.
+//! # Time
+//!
+//! Absolute (ledger 7763 DG.4): [`DeadlineClass::note_time`] before a charge, before a pick and
+//! before each enqueue; [`SchedClass::charge`] alone charges the budget and
+//! [`SchedClass::elapse`] does nothing.
+//!
+//! No timing claim is made here: this is the scheduling rule, and the pick is a scan of
+//! [`MOST`] entries.
 
 #![no_std]
 #![forbid(unsafe_code)]
 
-extern crate alloc;
+use ferrix_sched_class::deadline::{DeadlineClass, DeadlineKind, UpperClass};
+pub use ferrix_sched_class::deadline::{
+    LEAST_PERIOD_NS, LEAST_RUNTIME_NS, LIMIT_PPM, MOST, MOST_PERIOD_NS, Refusal, Reservation,
+};
+use ferrix_sched_class::{Back, Handed, LOAD_UNIT, Left, SchedClass};
 
-use ferrix_sched::{Config, EntityState, EntityView, Left, Refused, RunQueue, SchedError, Slot};
-
-/// The most reservations on one processor: what bounds a pick's scan.
-pub const MOST: usize = 32;
-/// The most of a processor reservations may ask for, in parts per million.
-pub const LIMIT_PPM: u64 = 950_000;
-/// The least budget a reservation may have: Linux's 1,024 ns would be shorter than a switch.
-pub const LEAST_RUNTIME_NS: u64 = 100_000;
-/// The shortest period, which bounds the refill timer's rate.
-pub const LEAST_PERIOD_NS: u64 = 1_000_000;
-/// The longest period, which keeps the arithmetic in range.
-pub const MOST_PERIOD_NS: u64 = 10_000_000_000;
-
-/// What a thread asks for.
+/// The entity of an admitted task: it goes to its admission's entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Reservation {
-    /// Its budget in each period.
-    pub runtime_ns: u64,
-    /// When each period's work is due, from the period's start.
-    pub deadline_ns: u64,
-    /// The period.
-    pub period_ns: u64,
-}
-
-/// Why a thread was not admitted.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Refusal {
-    /// Not `LEAST_RUNTIME_NS <= runtime <= period`, `deadline == period`, and the period
-    /// within `LEAST_PERIOD_NS` to `MOST_PERIOD_NS`.
-    Malformed,
-    /// With it the processor's reservations would pass [`LIMIT_PPM`]: an unschedulable set.
-    Unschedulable,
-    /// The processor already holds [`MOST`].
-    Full,
-    /// It is already admitted.
-    Already,
-}
-
-impl Reservation {
-    /// Its share of a processor, in parts per million, rounded up, or why it has none.
-    ///
-    /// # Errors
-    ///
-    /// [`Refusal::Malformed`].
-    pub const fn share_ppm(self) -> Result<u64, Refusal> {
-        if self.runtime_ns < LEAST_RUNTIME_NS
-            || self.runtime_ns > self.period_ns
-            || self.deadline_ns != self.period_ns
-            || self.period_ns < LEAST_PERIOD_NS
-            || self.period_ns > MOST_PERIOD_NS
-        {
-            return Err(Refusal::Malformed);
-        }
-        // At most 10^10 * 10^6, well inside 64 bits.
-        Ok((self.runtime_ns * 1_000_000).div_ceil(self.period_ns))
-    }
-}
+pub struct Admitted;
 
 /// A reservation on this processor.
 #[derive(Debug)]
@@ -101,19 +61,18 @@ struct Entry<T> {
     throttled: bool,
     /// When a throttled thread's budget comes back.
     refill_at: u64,
-    /// On this queue, and not running: what the fair class would hold of it.
-    ready: Option<(T, EntityState, Slot<T>)>,
-    /// Running here, the same three.
-    running: Option<(T, EntityState, Slot<T>)>,
-    /// Given back while it runs: the fair class's at its next way off the processor. Never
-    /// put in the fair class's tree while it runs, where a steal would find it.
+    /// On this queue, and not running.
+    ready: Option<T>,
+    /// Running here.
+    running: Option<T>,
+    /// Given back: its share is returned, and it goes once no queue holds it here. Never
+    /// throttled, and still counted toward [`MOST`] until it goes (ledger 7763 DG.7).
     leaving: bool,
 }
 
-/// One processor's classes: its reservations, and the fair class beneath them.
+/// One processor's reservations.
 #[derive(Debug)]
-pub struct OverFair<T> {
-    fair: RunQueue<T>,
+pub struct EdfQueue<T> {
     entries: [Option<Entry<T>>; MOST],
     /// The sum of the entries' shares.
     used_ppm: u64,
@@ -126,171 +85,19 @@ pub struct OverFair<T> {
     refills: u64,
 }
 
-impl<T> OverFair<T> {
-    /// An empty pair of classes.
-    ///
-    /// # Errors
-    ///
-    /// As [`RunQueue::new`].
-    pub fn new(config: Config) -> Result<OverFair<T>, SchedError> {
-        Ok(OverFair {
-            fair: RunQueue::new(config)?,
-            entries: core::array::from_fn(|_| None),
-            used_ppm: 0,
-            now: 0,
-            running: None,
-            throttles: 0,
-            refills: 0,
-        })
-    }
+/// The class.
+#[derive(Debug)]
+pub struct Edf;
 
-    /// Admit thread `id`.
-    ///
-    /// # Errors
-    ///
-    /// [`Refusal`], with nothing changed.
-    pub fn admit(&mut self, id: u64, reservation: Reservation) -> Result<(), Refusal> {
-        let share_ppm = reservation.share_ppm()?;
-        if self.entry_of(id).is_some() {
-            return Err(Refusal::Already);
-        }
-        if self.used_ppm.saturating_add(share_ppm) > LIMIT_PPM {
-            return Err(Refusal::Unschedulable);
-        }
-        let Some(free) = self.entries.iter_mut().find(|entry| entry.is_none()) else {
-            return Err(Refusal::Full);
-        };
-        *free = Some(Entry {
-            id,
-            reservation,
-            share_ppm,
-            left_ns: 0,
-            deadline_at: 0,
-            throttled: false,
-            refill_at: 0,
-            ready: None,
-            running: None,
-            leaving: false,
-        });
-        self.used_ppm += share_ppm;
-        Ok(())
-    }
-
-    /// Take thread `id`'s reservation away. Answers false if it holds none, or is on this
-    /// queue: it must leave the queue first, and so comes back to the fair class.
-    pub fn discharge(&mut self, id: u64) -> bool {
-        let Some(at) = self.entry_of(id) else {
-            return false;
-        };
-        let Some(entry) = self.entries.get_mut(at) else {
-            return false;
-        };
-        let held = entry
-            .as_ref()
-            .is_some_and(|entry| entry.ready.is_some() || entry.running.is_some());
-        if held {
-            return false;
-        }
-        if let Some(gone) = entry.take() {
-            self.used_ppm = self.used_ppm.saturating_sub(gone.share_ppm);
-        }
-        true
-    }
-
-    /// Take thread `id`'s reservation away wherever it stands on this queue: ready, it moves
-    /// to the fair class now; running, its share comes back now and it moves at its next way
-    /// off the processor. Answers whether it held one.
-    pub fn withdraw(&mut self, id: u64) -> bool {
-        let Some(at) = self.entry_of(id) else {
-            return false;
-        };
-        let Some(entry) = self.entries.get_mut(at).and_then(Option::as_mut) else {
-            return false;
-        };
-        if entry.leaving {
-            return false;
-        }
-        self.used_ppm = self.used_ppm.saturating_sub(entry.share_ppm);
-        entry.share_ppm = 0;
-        entry.throttled = false;
-        entry.leaving = true;
-        if entry.running.is_none() {
-            self.settle_leaving();
-        }
-        true
-    }
-
-    /// Every entry given back and not running now goes: its thread, if queued, to the fair class.
-    fn settle_leaving(&mut self) {
-        for slot in &mut self.entries {
-            if !slot
-                .as_ref()
-                .is_some_and(|entry| entry.leaving && entry.running.is_none())
-            {
-                continue;
-            }
-            let Some(mut gone) = slot.take() else {
-                continue;
-            };
-            if let Some((payload, state, parts)) = gone.ready.take() {
-                // Only a duplicate or a zero weight is refused, and it held neither there.
-                drop(self.fair.enqueue(gone.id, payload, state, parts));
-            }
-        }
-    }
-
-    /// A thread just admitted here leaves the fair class for its entry, running or queued,
-    /// and the classes choose again: otherwise it would stay fair until it next slept.
-    pub fn adopt(&mut self, id: u64) {
-        let parts = if self.fair.current_id() == Some(id) {
-            self.fair.remove_curr()
-        } else {
-            self.fair
-                .remove(id)
-                .map(|(payload, state, slot)| (id, payload, state, slot))
-        };
-        if let Some((id, payload, state, slot)) = parts {
-            drop(self.enqueue(id, payload, state, slot));
-        }
-    }
-
-    /// Whether thread `id` holds a reservation here.
-    #[must_use]
-    pub fn is_reserved(&self, id: u64) -> bool {
-        self.entry_of(id).is_some()
-    }
-
-    /// Whether a reservation with budget is waiting to run.
-    #[must_use]
-    pub fn any_ready(&self) -> bool {
-        self.entries
-            .iter()
-            .flatten()
-            .any(|entry| entry.ready.is_some() && !entry.throttled)
-    }
-
-    /// Whether a reservation is running here.
-    #[must_use]
-    pub const fn runs_reserved(&self) -> bool {
-        self.running.is_some()
-    }
-
-    /// The sum of the shares, in parts per million.
-    #[must_use]
-    pub const fn used_ppm(&self) -> u64 {
-        self.used_ppm
-    }
-
-    /// How many times a reservation ran out of budget and came back.
-    #[must_use]
-    pub const fn throttles_and_refills(&self) -> (u64, u64) {
-        (self.throttles, self.refills)
-    }
-
+impl<T> EdfQueue<T> {
     fn entry_of(&self, id: u64) -> Option<usize> {
         self.entries
             .iter()
             .position(|entry| entry.as_ref().is_some_and(|entry| entry.id == id))
+    }
+
+    fn entry_mut(&mut self, at: usize) -> Option<&mut Entry<T>> {
+        self.entries.get_mut(at).and_then(Option::as_mut)
     }
 
     fn running_entry(&self) -> Option<&Entry<T>> {
@@ -300,13 +107,33 @@ impl<T> OverFair<T> {
     }
 
     fn running_entry_mut(&mut self) -> Option<&mut Entry<T>> {
-        self.running
-            .and_then(|at| self.entries.get_mut(at))
-            .and_then(Option::as_mut)
+        self.running.and_then(|at| self.entry_mut(at))
     }
 
-    /// Tell the class the time: every budget whose period ended by `now` comes back.
-    pub fn note_time(&mut self, now: u64) {
+    /// Every entry given back that no queue holds here any more goes.
+    fn settle_leaving(&mut self) {
+        for slot in &mut self.entries {
+            if slot.as_ref().is_some_and(|entry| {
+                entry.leaving && entry.running.is_none() && entry.ready.is_none()
+            }) {
+                *slot = None;
+            }
+        }
+    }
+
+    /// The earliest deadline ready with budget.
+    fn earliest(&self) -> Option<(usize, u64)> {
+        self.entries
+            .iter()
+            .enumerate()
+            .filter_map(|(at, entry)| Some((at, entry.as_ref()?)))
+            .filter(|(_, entry)| entry.ready.is_some() && !entry.throttled)
+            .min_by_key(|(_, entry)| entry.deadline_at)
+            .map(|(at, entry)| (at, entry.deadline_at))
+    }
+
+    /// Every budget whose period ended by `now` comes back.
+    fn note_time(&mut self, now: u64) {
         self.now = self.now.max(now);
         let now = self.now;
         let mut refilled = 0;
@@ -333,28 +160,61 @@ impl<T> OverFair<T> {
         }
         self.refills += refilled;
     }
+}
 
-    /// As [`RunQueue::enqueue`]: a reserved thread goes to its entry, under the wake rule.
-    ///
-    /// # Errors
-    ///
-    /// As [`RunQueue::enqueue`].
-    pub fn enqueue(
-        &mut self,
+impl<T> SchedClass<T> for Edf {
+    const NAME: &'static str = "edf_cbs";
+    type Queue = EdfQueue<T>;
+    type Entity = Admitted;
+    type Config = ();
+
+    fn new_queue((): ()) -> Result<EdfQueue<T>, ferrix_sched_class::Refusal> {
+        Ok(EdfQueue {
+            entries: core::array::from_fn(|_| None),
+            used_ppm: 0,
+            now: 0,
+            running: None,
+            throttles: 0,
+            refills: 0,
+        })
+    }
+
+    /// The reservations queued here, running or not, a throttled one counted: it is on the
+    /// queue.
+    fn len(queue: &EdfQueue<T>) -> usize {
+        queue
+            .entries
+            .iter()
+            .flatten()
+            .filter(|entry| entry.ready.is_some() || entry.running.is_some())
+            .count()
+    }
+
+    /// A reserved thread goes to its entry, under the wake rule. One with no entry here is
+    /// refused [`ferrix_sched_class::Refusal::NoSuchTier`]: the kernel builds [`Admitted`] only
+    /// for a task admitted on this processor.
+    fn enqueue(
+        queue: &mut EdfQueue<T>,
         id: u64,
         payload: T,
-        state: EntityState,
-        slot: Slot<T>,
-    ) -> Result<(), Refused<T>> {
-        let now = self.now;
-        let at = self.entry_of(id);
-        let Some(entry) = at
-            .and_then(|at| self.entries.get_mut(at))
-            .and_then(Option::as_mut)
-        else {
-            return self.fair.enqueue(id, payload, state, slot);
+        entity: Admitted,
+    ) -> Result<(), Back<T, Admitted>> {
+        let now = queue.now;
+        let Some(entry) = queue.entry_of(id).and_then(|at| queue.entry_mut(at)) else {
+            return Err(Back {
+                payload,
+                entity,
+                reason: ferrix_sched_class::Refusal::NoSuchTier,
+            });
         };
-        if !entry.throttled {
+        if entry.ready.is_some() || entry.running.is_some() {
+            return Err(Back {
+                payload,
+                entity,
+                reason: ferrix_sched_class::Refusal::Duplicate(id),
+            });
+        }
+        if !entry.throttled && !entry.leaving {
             let Reservation {
                 runtime_ns,
                 deadline_ns,
@@ -370,296 +230,269 @@ impl<T> OverFair<T> {
                 entry.refill_at = now.saturating_add(period_ns);
             }
         }
-        entry.ready = Some((payload, state, slot));
+        entry.ready = Some(payload);
         Ok(())
     }
 
-    /// As [`RunQueue::pick_next`], which puts what runs back first: the earliest deadline
-    /// with budget, else the fair class.
-    pub fn pick_next(&mut self) -> Option<&T> {
-        self.note_time(self.now);
-        if let Some(entry) = self.running_entry_mut() {
-            entry.ready = entry.running.take();
+    /// Queued or running: it stays admitted here, and is the tier below's wherever it goes until
+    /// it comes back here; a given-back entry goes with it.
+    fn remove(queue: &mut EdfQueue<T>, id: u64) -> Option<(T, Admitted)> {
+        let at = queue.entry_of(id)?;
+        let runs = queue.running == Some(at);
+        let entry = queue.entry_mut(at)?;
+        let payload = if runs {
+            entry.running.take()
+        } else {
+            entry.ready.take()
+        }?;
+        if runs {
+            queue.running = None;
         }
-        self.running = None;
-        self.settle_leaving();
-        let earliest = self
-            .entries
-            .iter()
-            .enumerate()
-            .filter_map(|(at, entry)| Some((at, entry.as_ref()?)))
-            .filter(|(_, entry)| entry.ready.is_some() && !entry.throttled)
-            .min_by_key(|(_, entry)| entry.deadline_at)
-            .map(|(at, _)| at);
-        let Some(entry) = earliest
-            .and_then(|at| self.entries.get_mut(at))
-            .and_then(Option::as_mut)
-        else {
-            return self.fair.pick_next();
-        };
-        entry.running = entry.ready.take();
-        self.running = earliest;
-        self.fair.put_curr_back();
-        self.current()
+        queue.settle_leaving();
+        Some((payload, Admitted))
     }
 
-    /// As [`RunQueue::hand_over`], the same long way when a reservation is here at all.
-    ///
-    /// # Errors
-    ///
-    /// As [`RunQueue::hand_over`].
-    pub fn hand_over(
-        &mut self,
+    fn remove_current(queue: &mut EdfQueue<T>) -> Option<Left<T, Admitted>> {
+        let at = queue.running.take()?;
+        let entry = queue.entry_mut(at)?;
+        let id = entry.id;
+        let left = entry.running.take().map(|payload| (id, payload, Admitted));
+        queue.settle_leaving();
+        left
+    }
+
+    /// The earliest deadline with budget, the running one competing again.
+    fn pick(queue: &mut EdfQueue<T>) -> Option<&T> {
+        Self::put_back(queue);
+        let (at, _) = queue.earliest()?;
+        let entry = queue.entry_mut(at)?;
+        entry.running = entry.ready.take();
+        queue.running = Some(at);
+        queue.running_entry()?.running.as_ref()
+    }
+
+    fn put_back(queue: &mut EdfQueue<T>) {
+        if let Some(entry) = queue.running_entry_mut() {
+            entry.ready = entry.running.take();
+        }
+        queue.running = None;
+    }
+
+    fn current(queue: &EdfQueue<T>) -> Option<&T> {
+        queue.running_entry()?.running.as_ref()
+    }
+
+    /// Never fused: the general sequence, so that the direct switch never passes over a
+    /// reservation (ledger 7763 DG.7; 7088 E.5).
+    fn hand_over(
+        queue: &mut EdfQueue<T>,
         id: u64,
         payload: T,
-        state: EntityState,
-        slot: Slot<T>,
-        slice_after: u64,
-    ) -> Result<Option<Left<T>>, Refused<T>> {
-        if self.running.is_none() && !self.any_ready() && self.entry_of(id).is_none() {
-            return self.fair.hand_over(id, payload, state, slot, slice_after);
-        }
-        self.enqueue(id, payload, state, slot)?;
-        let _ = self.fair.set_slice_ns(slice_after);
-        let left = self.remove_curr();
-        let _ = self.pick_next();
+        entity: Admitted,
+        _: u64,
+    ) -> Handed<T, Admitted> {
+        Self::enqueue(queue, id, payload, entity)?;
+        let left = Self::remove_current(queue);
+        let _ = Self::pick(queue);
         Ok(left)
     }
 
-    /// As [`RunQueue::update_curr`]: a running reservation's budget is charged.
-    pub fn update_curr(&mut self, delta_ns: u64) -> bool {
-        let Some(entry) = self.running_entry_mut() else {
-            return self.fair.update_curr(delta_ns);
+    /// A running reservation's budget is charged; at zero it is throttled. Whether a decision
+    /// is due.
+    fn charge(queue: &mut EdfQueue<T>, ran_ns: u64) -> bool {
+        let Some(entry) = queue.running_entry_mut() else {
+            return false;
         };
-        let ended = entry.left_ns <= delta_ns;
-        entry.left_ns = entry.left_ns.saturating_sub(delta_ns);
+        let ended = entry.left_ns <= ran_ns;
+        entry.left_ns = entry.left_ns.saturating_sub(ran_ns);
         if ended && !entry.throttled && !entry.leaving {
             entry.throttled = true;
-            self.throttles += 1;
+            queue.throttles += 1;
         }
         ended
     }
 
-    /// As [`RunQueue::yield_curr`]: a reservation gives up its budget until its next period.
-    pub fn yield_curr(&mut self) {
-        let Some(entry) = self.running_entry_mut() else {
-            self.fair.yield_curr();
-            return;
-        };
-        entry.left_ns = 0;
-        if !entry.throttled {
-            entry.throttled = true;
-            self.throttles += 1;
+    fn remaining_ns(queue: &EdfQueue<T>) -> Option<u64> {
+        queue.running_entry().map(|entry| entry.left_ns)
+    }
+
+    /// A reservation out of budget gives way, and any with budget and an earlier deadline takes
+    /// the processor.
+    fn should_preempt(queue: &EdfQueue<T>) -> bool {
+        let earliest = queue.earliest().map(|(_, at)| at);
+        match queue.running_entry() {
+            Some(running) => {
+                (running.throttled && !running.leaving)
+                    || earliest.is_some_and(|at| at < running.deadline_at)
+            }
+            None => earliest.is_some(),
         }
     }
 
-    /// As [`RunQueue::decision_in_ns`]: also a running budget's end, and the next refill.
-    #[must_use]
-    pub fn decision_in_ns(&self) -> Option<u64> {
-        let refill = self
+    /// A running budget's end, and the next refill.
+    fn decision_in_ns(queue: &EdfQueue<T>) -> Option<u64> {
+        let refill = queue
             .entries
             .iter()
             .flatten()
             .filter(|entry| entry.throttled)
-            .map(|entry| entry.refill_at.saturating_sub(self.now))
+            .map(|entry| entry.refill_at.saturating_sub(queue.now))
             .min();
-        let here = match self.running_entry() {
-            Some(entry) => Some(entry.left_ns),
-            None => self.fair.decision_in_ns(),
-        };
+        let here = queue.running_entry().map(|entry| entry.left_ns);
         match (refill, here) {
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
         }
     }
 
-    /// As [`RunQueue::should_preempt`]: a reservation out of budget gives way, and any with
-    /// budget and an earlier deadline takes the processor.
-    #[must_use]
-    pub fn should_preempt(&self) -> bool {
-        let earliest = self
-            .entries
-            .iter()
-            .flatten()
-            .filter(|entry| entry.ready.is_some() && !entry.throttled)
-            .map(|entry| entry.deadline_at)
-            .min();
-        match self.running_entry() {
-            Some(running) => {
-                running.throttled || earliest.is_some_and(|at| at < running.deadline_at)
-            }
-            None => earliest.is_some() || self.fair.should_preempt(),
-        }
+    fn load_weight(queue: &EdfQueue<T>) -> u64 {
+        LOAD_UNIT * Self::len(queue) as u64
     }
 
-    /// As [`RunQueue::remaining_ns`].
-    #[must_use]
-    pub fn remaining_ns(&self) -> Option<u64> {
-        match self.running_entry() {
-            Some(entry) => Some(entry.left_ns),
-            None => self.fair.remaining_ns(),
-        }
-    }
-
-    /// As [`RunQueue::remove_curr`].
-    pub fn remove_curr(&mut self) -> Option<Left<T>> {
-        let Some(at) = self.running else {
-            return self.fair.remove_curr();
+    /// A reservation gives up its budget until its next period.
+    fn yield_current(queue: &mut EdfQueue<T>) {
+        let Some(entry) = queue.running_entry_mut() else {
+            return;
         };
-        self.running = None;
-        let entry = self.entries.get_mut(at).and_then(Option::as_mut)?;
-        let id = entry.id;
-        let left = entry
-            .running
-            .take()
-            .map(|(payload, state, slot)| (id, payload, state, slot));
-        self.settle_leaving();
-        left
-    }
-
-    /// As [`RunQueue::remove`]: a reservation that is taken off this queue stays admitted
-    /// here, and until it comes back is the fair class's wherever it goes.
-    pub fn remove(&mut self, id: u64) -> Option<(T, EntityState, Slot<T>)> {
-        if let Some(entry) = self
-            .entry_of(id)
-            .and_then(|at| self.entries.get_mut(at))
-            .and_then(Option::as_mut)
-        {
-            return entry.ready.take();
-        }
-        self.fair.remove(id)
-    }
-
-    /// As [`RunQueue::current`].
-    #[must_use]
-    pub fn current(&self) -> Option<&T> {
-        match self.running_entry() {
-            Some(entry) => entry.running.as_ref().map(|(payload, _, _)| payload),
-            None => self.fair.current(),
+        entry.left_ns = 0;
+        if !entry.throttled && !entry.leaving {
+            entry.throttled = true;
+            queue.throttles += 1;
         }
     }
 
-    /// As [`RunQueue::current_id`].
-    #[must_use]
-    pub fn current_id(&self) -> Option<u64> {
-        match self.running_entry() {
-            Some(entry) => Some(entry.id),
-            None => self.fair.current_id(),
-        }
+    /// A reservation with budget, waiting or running: whatever waits below, since the budget
+    /// is hard.
+    fn ready(queue: &EdfQueue<T>, _: bool) -> bool {
+        queue.earliest().is_some() || queue.running_entry().is_some_and(|entry| !entry.throttled)
     }
 
-    /// As [`RunQueue::len`], the reservations queued here counted.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        let held = self
-            .entries
-            .iter()
-            .flatten()
-            .filter(|entry| entry.ready.is_some() || entry.running.is_some())
-            .count();
-        self.fair.len() + held
+    /// Nothing: this class's time is absolute (DG.4).
+    fn elapse(_: &mut EdfQueue<T>, _: u64) {}
+
+    /// Never: a reservation is its processor's.
+    fn steals_work(_: &EdfQueue<T>) -> bool {
+        false
     }
 
-    /// As [`RunQueue::is_empty`], a throttled reservation counted: it is on the queue.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    /// As [`RunQueue::check_invariants`], and the shares' sum.
-    ///
-    /// # Errors
-    ///
-    /// The invariant that failed.
-    pub fn check_invariants(&self) -> Result<(), &'static str> {
-        self.fair.check_invariants()?;
-        let shares: u64 = self
+    fn check(queue: &EdfQueue<T>) -> Result<(), &'static str> {
+        let shares: u64 = queue
             .entries
             .iter()
             .flatten()
             .map(|entry| entry.share_ppm)
             .sum();
-        if shares != self.used_ppm {
+        if shares != queue.used_ppm {
             return Err("edf: the shares' sum is not the entries'");
         }
-        if self.used_ppm > LIMIT_PPM {
+        if queue.used_ppm > LIMIT_PPM {
             return Err("edf: more admitted than the limit");
         }
-        if self.running.is_some() && self.fair.current().is_some() {
-            return Err("edf: both classes hold a running task");
+        if let Some(at) = queue.running
+            && queue
+                .entries
+                .get(at)
+                .and_then(Option::as_ref)
+                .is_none_or(|entry| entry.running.is_none())
+        {
+            return Err("edf: the running entry holds no task");
         }
-        Ok(())
-    }
-
-    /// The fair class's own answers, which a reservation is no part of.
-    #[must_use]
-    pub fn avg_vruntime(&self) -> u64 {
-        self.fair.avg_vruntime()
-    }
-    /// As [`RunQueue::for_each`], the fair class's alone.
-    pub fn for_each(&self, visit: impl FnMut(EntityView<'_, T>)) {
-        self.fair.for_each(visit);
-    }
-    /// As [`RunQueue::set_weight`].
-    ///
-    /// # Errors
-    ///
-    /// As [`RunQueue::set_weight`].
-    pub fn set_weight(&mut self, id: u64, weight: u32) -> Result<bool, SchedError> {
-        self.fair.set_weight(id, weight)
-    }
-    /// As [`RunQueue::get`].
-    #[must_use]
-    pub fn get(&self, id: u64) -> Option<EntityView<'_, T>> {
-        self.fair.get(id)
-    }
-    /// As [`RunQueue::slice_ns`].
-    #[must_use]
-    pub fn slice_ns(&self) -> u64 {
-        self.fair.slice_ns()
-    }
-    /// As [`RunQueue::set_request`].
-    pub fn set_request(&mut self, id: u64, request_ns: u64) -> bool {
-        self.fair.set_request(id, request_ns)
-    }
-    /// As [`RunQueue::load_weight`].
-    #[must_use]
-    pub fn load_weight(&self) -> u64 {
-        self.fair.load_weight()
-    }
-    /// As [`RunQueue::latest_where`], the fair class's alone: nothing moves a reservation.
-    #[must_use]
-    pub fn latest_where(&self, movable: impl Fn(&T) -> bool) -> Option<u64> {
-        self.fair.latest_where(movable)
-    }
-    /// As [`RunQueue::set_slice_ns`].
-    ///
-    /// # Errors
-    ///
-    /// As [`RunQueue::set_slice_ns`].
-    pub fn set_slice_ns(&mut self, slice_ns: u64) -> Result<(), SchedError> {
-        self.fair.set_slice_ns(slice_ns)
-    }
-    /// As [`RunQueue::config`].
-    #[must_use]
-    pub fn config(&self) -> Config {
-        self.fair.config()
-    }
-    /// As [`RunQueue::queued`], the reservations ready here counted.
-    #[must_use]
-    pub fn queued(&self) -> usize {
-        let ready = self
+        if queue
             .entries
             .iter()
             .flatten()
-            .filter(|entry| entry.ready.is_some())
-            .count();
-        self.fair.queued() + ready
+            .any(|entry| entry.leaving && (entry.throttled || entry.share_ppm != 0))
+        {
+            return Err("edf: an entry given back is throttled or still holds a share");
+        }
+        Ok(())
     }
-    /// As [`RunQueue::level`].
-    pub fn level(&mut self) {
-        self.fair.level();
+}
+
+impl<T> DeadlineClass<T> for Edf {
+    fn admitted() -> Admitted {
+        Admitted
     }
+
+    fn admit(queue: &mut EdfQueue<T>, id: u64, reservation: Reservation) -> Result<(), Refusal> {
+        let share_ppm = reservation.share_ppm()?;
+        if queue.entry_of(id).is_some() {
+            return Err(Refusal::Already);
+        }
+        if queue.used_ppm.saturating_add(share_ppm) > LIMIT_PPM {
+            return Err(Refusal::Unschedulable);
+        }
+        let Some(free) = queue.entries.iter_mut().find(|entry| entry.is_none()) else {
+            return Err(Refusal::Full);
+        };
+        *free = Some(Entry {
+            id,
+            reservation,
+            share_ppm,
+            left_ns: 0,
+            deadline_at: 0,
+            throttled: false,
+            refill_at: 0,
+            ready: None,
+            running: None,
+            leaving: false,
+        });
+        queue.used_ppm += share_ppm;
+        Ok(())
+    }
+
+    fn withdraw(queue: &mut EdfQueue<T>, id: u64) -> bool {
+        let Some(at) = queue.entry_of(id) else {
+            return false;
+        };
+        let Some(entry) = queue.entry_mut(at) else {
+            return false;
+        };
+        if entry.leaving {
+            return false;
+        }
+        let share = entry.share_ppm;
+        entry.share_ppm = 0;
+        entry.throttled = false;
+        entry.leaving = true;
+        queue.used_ppm = queue.used_ppm.saturating_sub(share);
+        queue.settle_leaving();
+        true
+    }
+
+    fn note_time(queue: &mut EdfQueue<T>, now: u64) {
+        queue.note_time(now);
+    }
+
+    fn is_reserved(queue: &EdfQueue<T>, id: u64) -> bool {
+        queue.entry_of(id).is_some()
+    }
+
+    fn any_ready(queue: &EdfQueue<T>) -> bool {
+        queue.earliest().is_some()
+    }
+
+    fn runs_reserved(queue: &EdfQueue<T>) -> bool {
+        queue.running.is_some()
+    }
+
+    fn state(queue: &EdfQueue<T>) -> (u64, u64, u64) {
+        (queue.used_ppm, queue.throttles, queue.refills)
+    }
+
+    fn waiting_where(queue: &EdfQueue<T>, matches: impl Fn(&T) -> bool) -> Option<u64> {
+        queue
+            .entries
+            .iter()
+            .flatten()
+            .find(|entry| entry.ready.as_ref().is_some_and(&matches))
+            .map(|entry| entry.id)
+    }
+}
+
+/// A deadline tier, to the stack's one impl over its upper tier (ledger 7763 DG.6).
+impl<T> UpperClass<T> for Edf {
+    type Kind = DeadlineKind;
 }
 
 #[cfg(test)]

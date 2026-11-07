@@ -107,11 +107,11 @@
       "purpose": "schedule=windows, ledger 7011 S.1-S.8; native 0x10E2-0x10E4 and panic FX-0971 with it. K9's H.SCHED.26-27 and L.sched.153-170 pass from the finished mk-restricted to mk-flip for windows, with FX-0927. Its EDF part, H.SCHED.29-30 and L.sched.184-193, was split off to sched-classes on 2026-11-07 (below)."
     },
     {
-      "ids": ["H.SCHED.29-30", "L.sched.184-193"],
+      "ids": ["H.SCHED.29-30", "L.sched.186-193"],
       "owner": "sched-classes",
       "branch": "feature/sched-classes-on-develop",
       "date": "2026-11-07",
-      "purpose": "docs/SCHED-CLASSES.md section 9g, EDF as the deadline tier of the class stack (develop's schedule=edf, b33c7d740, re-homed; the consultant's OK IF DG.1-DG.11, ledger 7763): the tier's entity and its move at a decision, the reservation cell zero-sized without the tier, HardRt's mode on the windows alone, a child's empty reservation, a stop, a freeze and a move between jobs, a kill waiting out a refill, an earlier deadline preempting, the errno mapping. Panic codes FX-0538 to FX-0541 with them: FX-0538 to FX-0540 the branch's own (FX-0540 renumbered from FX-0537, which develop's BLOCK_IN_AN_INTERRUPT took), FX-0541 for an admitted entity queued where it is not admitted. Split from mk-flip's schedule=edf part by the product owner on 2026-11-07, the customer's decision (ledger 7763 DG.5); mk-flip's owner has been told (docs/BACKLOG.md). Released in the commits that write them."
+      "purpose": "docs/SCHED-CLASSES.md section 9g, EDF as the deadline tier of the class stack (develop's schedule=edf, b33c7d740, re-homed; the consultant's OK IF DG.1-DG.11, ledger 7763): the tier's entity and its move at a decision, the reservation cell zero-sized without the tier, HardRt's mode on the windows alone, a child's empty reservation, a stop, a freeze and a move between jobs, a kill waiting out a refill, an earlier deadline preempting, the errno mapping. Panic codes FX-0538 to FX-0541 with them: FX-0538 to FX-0540 the branch's own (FX-0540 renumbered from FX-0537, which develop's BLOCK_IN_AN_INTERRUPT took), FX-0541 for an admitted entity queued where it is not admitted. Split from mk-flip's schedule=edf part by the product owner on 2026-11-07, the customer's decision (ledger 7763 DG.5); mk-flip's owner has been told (docs/BACKLOG.md). Released in the commits that write them: L.sched.184-185 written with the port."
     },
     {
       "ids": ["H.FAIL.14", "L.lockup.6-9"],

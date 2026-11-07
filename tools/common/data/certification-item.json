@@ -519,8 +519,8 @@
         "in_ring0_when": [
           "sched_deadline=edf_cbs"
         ],
-        "below": "ferrix-sched's run queue, its fair class beneath the reservations.",
-        "above": "sched/queue.rs's Tier and sched/reserve.rs: partitioned EDF, a hard CBS and per-processor admission, ledger 7011 S.4, 7088. No kernel but schedule=edf's links it."
+        "below": "ferrix-sched-class's interface alone; the fair tier beneath it is the stack's lower tier, named by no file of it (docs/SCHED-CLASSES.md section 9g).",
+        "above": "the arms file's Deadline arm (sched_select.rs), reached by sched/queue.rs, sched/direct.rs and sched/reserve.rs through ferrix-sched-fair's StackTiers: partitioned EDF, a hard CBS and per-processor admission, ledger 7011 S.4, 7088, 7763. No kernel but sched_deadline=edf_cbs's links it."
       },
       "ferrix-slots": {
         "ring": "item",
@@ -579,6 +579,7 @@
         "(docs/certification/ITEM.md section 2)."
       ],
       "ferrix-fallible": "Fallible Box/Vec/VecDeque/String construction on stable Rust (F-23). The core's own allocation toolkit, src/kernel/src/fallible.rs, is built on it, so an item crate converting to fallible allocation uses the same code the core does rather than a second copy. It also dispatches an item crate's map inserts to the reserved section the kernel installs at boot (set_section, in_section; src/kernel/src/fallible.rs library_section, L.mm.63): ferrix-btrfs-write's every BTreeMap and BTreeSet insert relies on that dispatch to be fallible.",
+      "ferrix-sched-class": "The scheduling-class interface the core names every class by (docs/SCHED-CLASSES.md section 4): SchedClass, Over, the domains, balancing and, since section 9g, the deadline interface ferrix-sched-edf implements; ferrix-sched's place here before the split, so its F-76 entries in ferrix-kernel-core's and ferrix-kernel-sched-select's unclassified_deps leave (the consultant's line owed, docs/SCHED-CLASSES.md section 9g).",
       "ferrix-sync": "The spin and sleep locks src/kernel/src/sync.rs wraps for the whole core, and ferrix-fallible's one dependency (its injector's `Once`)."
     }
   },
@@ -878,7 +879,6 @@
         "ferrix-paging": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-pci": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-qr": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
-        "ferrix-sched-class": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement (split from ferrix-sched, docs/SCHED-CLASSES.md; classified under S7)",
         "ferrix-sched-fair": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement (split from ferrix-sched, docs/SCHED-CLASSES.md; classified under S7)",
         "ferrix-vdso": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-vfs": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
@@ -892,7 +892,6 @@
         "core"
       ],
       "unclassified_deps": {
-        "ferrix-sched-class": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement (the scheduler selection's class crates, docs/SCHED-CLASSES.md §9a; grown under container review 20 (not on record; ledger 5684), D4; classified under S7)",
         "ferrix-sched-fair": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement (the scheduler selection's class crates, docs/SCHED-CLASSES.md §9a; grown under container review 20 (not on record; ledger 5684), D4; classified under S7)",
         "ferrix-sched-fifo": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement (SCHED_FIFO and SCHED_RR, named only by the fifo_rr arm, docs/SCHED-CLASSES.md §9e; grown under container review 29 (not on record; ledger 5684), R11; classified under S7)"
       }
@@ -991,6 +990,13 @@
       "rust_name": "ferrix_sched_fixture",
       "fixture": true
     },
+    "ferrix-sched-edf": {
+      "rust_name": "ferrix_sched_edf",
+      "flag": "sched_deadline",
+      "present_when": "edf_cbs",
+      "name": "edf_cbs",
+      "marker": "<ferrix_sched_edf::Edf as ferrix_sched_class::SchedClass<"
+    },
     "ferrix-sched-fifo": {
       "rust_name": "ferrix_sched_fifo",
       "flag": "sched_realtime",
@@ -1002,7 +1008,10 @@
       "ferrix-sched-fair": {
         "ferrix-kernel-core": "N7: the NICE_ weights, carried_weight and the job fold, slice_for and Config, the sleepers' and the dead's Timeline, Node, Slot and EntityState, the steal's Option<EntityState>, FairEntity in stack.rs's const",
         "ferrix-kernel-item": "N7: the NICE_ weights and weight_of_nice in the item's spawns and attributes",
-        "ferrix-kernel-load": "N7: the NICE_ weights in the load ring's spawns (interfaces/*, fs, net, discovery/devmgr.rs, the gs201 watchdog)"
+        "ferrix-kernel-load": "N7: the NICE_ weights in the load ring's spawns (interfaces/*, fs, net, discovery/devmgr.rs, the gs201 watchdog)",
+        "ferrix-lift-core": "N7, as ferrix-kernel-core's, for linuxd's build of the same files (docs/microkernel/M5-LIFT.md section 1): the NICE_ weights and carried_weight in object/quota.rs, Node in object/timer.rs's footprint; named ferrix-sched before the split, an infrastructure crate then (docs/SCHED-CLASSES.md section 9g; the consultant's line owed)",
+        "ferrix-lift-item": "N7, as ferrix-kernel-item's, for linuxd's build of the same files (M5-LIFT.md section 1); named ferrix-sched before the split (the consultant's line owed)",
+        "ferrix-lift-load": "N7, as ferrix-kernel-load's, for linuxd's build of the same files (M5-LIFT.md section 1): the NICE_ weights, weight_of_nice, MIN_REQUEST_NS and effective_request; named ferrix-sched before the split (the consultant's line owed)"
       }
     }
   },

@@ -13,7 +13,7 @@
         "partition_speculation=partition",
         "ipc_fastpath=on",
         "fault_ahead=on",
-        "schedule=edf"
+        "sched_deadline=edf_cbs"
       ],
       "x86_64": [
         "restricted_fastpath=on"

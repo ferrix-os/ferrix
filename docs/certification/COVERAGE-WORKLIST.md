@@ -14,7 +14,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 |---|---:|---:|---:|---:|
 | [`arch/x86_64`](#archx86_64) | 405 | - | - | 17 |
 | [`discovery`](#discovery) | 170 | 105 | 125 | 8 |
-| [`sched`](#sched) | 150 | 2 | 2 | 11 |
+| [`sched`](#sched) | 149 | 2 | 2 | 11 |
 | [`syscall`](#syscall) | 115 | 10 | 10 | 3 |
 | [`iommu`](#iommu) | 99 | - | 1 | 2 |
 | [`user`](#user) | 72 | - | 1 | 3 |
@@ -37,7 +37,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`audit`](#audit) | 1 | - | - | 1 |
 | [`signal_frame`](#signal_frame) | - | - | 1 | 1 |
 | [`timer`](#timer) | - | - | 1 | 1 |
-| **Total** | **1239** | **162** | **215** | 76 |
+| **Total** | **1238** | **162** | **215** | 76 |
 
 ---
 
@@ -158,8 +158,8 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `sched/direct.rs` | `core` | 37 | - | - | 37 | 110, 118, 133, 168-170, 174-175, 197, 214, 217-219, 226, 241, 247, 251, 253, 274, 304, 312, 314, 325-326, 328-329, 334-336, 338, 340, 345, 348-349, 362-363, 371 |
-| `sched/mod.rs` | `core` | 21 | 2 | 1 | 1 | 1632 |
+| `sched/direct.rs` | `core` | 36 | - | - | 36 | 111, 119, 134, 169-171, 175-176, 211, 214-216, 223, 238, 244, 248, 250, 271, 301, 309, 311, 322-323, 325-326, 331-333, 335, 337, 342, 345-346, 359-360, 368 |
+| `sched/mod.rs` | `core` | 21 | 2 | 1 | 1 | 1640 |
 | `sched/queue.rs` | `core` | 21 | 0 | 0 | 0 | - |
 | `sched/wait.rs` | `core` | 15 | 0 | 0 | 0 | - |
 | `sched/inspect.rs` | `core` | 13 | - | - | 13 | 101, 161-163, 165-166, 168, 172, 178, 180, 183, 188, 191 |

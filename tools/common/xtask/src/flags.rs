@@ -621,7 +621,12 @@ fn declared(
 /// Every value declared, its requirements met and its conflicts absent, and
 /// allowed at the build's level or by the profile's dated exception.
 fn consistent(file: &FlagFile, profile: &Profile, resolved: &Resolved) -> Result<()> {
-    let has = |(flag, value): &(String, String)| resolved.value(flag) == Some(value.as_str());
+    // `flag=a|b`: either value (the max_plus relaxation, ledger 7763).
+    let has = |(flag, value): &(String, String)| {
+        resolved
+            .value(flag)
+            .is_some_and(|have| value.split('|').any(|one| one == have))
+    };
     for (flag, value) in &resolved.values {
         let declared = file
             .flag(flag)
@@ -929,7 +934,7 @@ mod tests {
 
     #[test]
     fn signed_slots_with_no_board_family_are_refused() {
-        let mut profile = super::Profile::load("max_plus").unwrap();
+        let mut profile = Profile::load("max_plus").unwrap();
         assert!(super::unnamed_boards(&profile, |_| true).is_none());
         assert!(
             super::unnamed_boards(&profile, |_| false).is_some_and(|why| why.contains("recorded"))
@@ -939,9 +944,7 @@ mod tests {
             super::unnamed_boards(&profile, |_| true)
                 .is_some_and(|why| why.contains("names no board"))
         );
-        assert!(
-            super::unnamed_boards(&super::Profile::load("present").unwrap(), |_| false).is_none()
-        );
+        assert!(super::unnamed_boards(&Profile::load("present").unwrap(), |_| false).is_none());
     }
 
     #[test]
@@ -949,14 +952,14 @@ mod tests {
         let resolved = resolve_unbuilt(Some("max_plus"), &[]).unwrap();
         assert_eq!(resolved.level, "sc4_plus");
         assert!(resolve(Some("max_plus"), &[]).is_err());
-        let mut profile = super::Profile::load("max_plus").unwrap();
+        let mut profile = Profile::load("max_plus").unwrap();
         assert!(
             profile
                 .pending
                 .contains(&("personality".to_owned(), "none".to_owned()))
         );
         profile.pending.clear();
-        let why = super::consistent(&FlagFile::load().unwrap(), &profile, &resolved)
+        let why = consistent(&FlagFile::load().unwrap(), &profile, &resolved)
             .unwrap_err()
             .to_string();
         assert!(why.contains("rule 3"), "{why}");
@@ -1078,7 +1081,7 @@ mod tests {
                 "partition_speculation=exit",
                 "restricted_fastpath=off",
                 "kernel_memory=retyped",
-                "schedule=windows",
+                "sched_windows=arinc",
                 "fault_ahead=off",
             ],
         ),
@@ -1163,7 +1166,7 @@ mod tests {
                 "fs=server",
                 "partition_speculation=partition",
                 "restricted_fastpath=on",
-                "schedule=edf",
+                "sched_deadline=edf_cbs",
                 "fault_ahead=on",
             ]
         );

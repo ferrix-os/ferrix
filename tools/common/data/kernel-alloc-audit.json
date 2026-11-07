@@ -269,13 +269,14 @@
     "sched/mod.rs": {
       "bucket": "job",
       "what": "a task and its stack: the job's; new_idle_task, adopt_boot_task boot; reap_* free; cpu_times the caller's",
-      "sites": 40
+      "sites": 41
     },
     "sched/queue.rs": {
       "bucket": "none",
       "what": "marked NOALLOC: run-queue trees with node room in the task",
-      "sites": 9
+      "sites": 11
     },
+    "sched/domains.rs": {"bucket": "none", "what": "marked NOALLOC: the domain switch's queue inserts and pushes into room its caller made first (docs/SCHED-CLASSES.md section 9f)", "sites": 8},
     "sched/task.rs": {
       "bucket": "job",
       "what": "the thread's",

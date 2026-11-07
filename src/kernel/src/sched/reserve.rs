@@ -1,5 +1,7 @@
-//! `schedule=edf`'s reservations: one body, for the native call and the boot check alike
-//! (`docs/microkernel/K9.md`, ledger 7011 S.4, 7088).
+//! The deadline tier's reservations: one body, for the native call and the boot check alike
+//! (`docs/microkernel/K9.md`, `docs/SCHED-CLASSES.md` §9g; ledger 7011 S.4, 7088, 7763).
+//! Every way in answers [`Refusal::Unschedulable`] in a stack without a deadline tier
+//! ([`super::stack::DEADLINE`]), whose tasks' cells hold nothing.
 //!
 //! A reservation names one processor, the first with room, the caller's own first. The thread
 //! is pinned there, so balance, steal, push and wake placement cannot move it, and
@@ -15,18 +17,20 @@
 //! (7088 E.4). No timing claim is made of any of it.
 
 use alloc::sync::Arc;
-use core::sync::atomic::Ordering;
 
 use ferrix_sched_class::CpuSet;
-pub use ferrix_sched_edf::{Refusal, Reservation};
+use ferrix_sched_class::deadline::{NONE, ReserveCell};
+pub use ferrix_sched_class::deadline::{Refusal, Reservation};
+use ferrix_sched_fair::StackTiers;
 
+use super::stack::{DEADLINE, Stack};
 use super::{Task, affinity, current, queue_of, this_cpu};
 use crate::arch;
 use ferrix_sync::IrqControl;
 
 /// Whether `task` holds a reservation.
 pub(crate) fn holds(task: &Task) -> bool {
-    task.reserved_on.load(Ordering::Acquire) != usize::MAX
+    DEADLINE && task.reserve.on() != NONE
 }
 
 /// Have `cpu`'s queue admit `id`, masked.
@@ -35,7 +39,7 @@ fn admit_on(cpu: usize, id: u64, asked: Reservation) -> Result<(), Refusal> {
         return Err(Refusal::Unschedulable);
     };
     let saved = <arch::Irq as IrqControl>::disable();
-    let answer = lock.lock().fair.admit(id, asked);
+    let answer = <Stack as StackTiers<_>>::admit(&mut lock.lock().stack, id, asked);
     <arch::Irq as IrqControl>::restore(saved);
     answer
 }
@@ -47,6 +51,9 @@ fn admit_on(cpu: usize, id: u64, asked: Reservation) -> Result<(), Refusal> {
 /// [`Refusal`], with nothing changed: `Unschedulable` when no processor it may run on has room.
 pub fn take(asked: Reservation) -> Result<(), Refusal> {
     let _ = asked.share_ppm()?;
+    if !DEADLINE {
+        return Err(Refusal::Unschedulable);
+    }
     let task = current().ok_or(Refusal::Malformed)?;
     if holds(&task) {
         return Err(Refusal::Already);
@@ -68,21 +75,17 @@ pub fn take(asked: Reservation) -> Result<(), Refusal> {
     Err(last)
 }
 
-/// Pin the thread `cpu` admitted, and let the classes choose again.
+/// Pin the thread `cpu` admitted, and let the classes choose again: at that decision its
+/// processor moves it into the deadline tier (`CpuQueue::requeue_if_moved`), so it is never a
+/// waiting entity while it runs (container review 30, B1; ledger 7763).
 fn pinned_to(task: &Arc<Task>, cpu: usize, mask: CpuSet) -> Result<(), Refusal> {
-    *task.mask_before.lock() = Some(mask);
+    task.reserve.keep_mask(Some(mask));
     if affinity::set_mask(task, &CpuSet::of(cpu)).is_err() {
         let _ = withdraw(task, cpu);
-        *task.mask_before.lock() = None;
+        task.reserve.keep_mask(None);
         return Err(Refusal::Unschedulable);
     }
-    task.reserved_on.store(cpu, Ordering::Release);
-    // Pinned, so on `cpu` by now: into its entry, and whatever is due runs.
-    if let Some(lock) = queue_of(cpu) {
-        let saved = <arch::Irq as IrqControl>::disable();
-        lock.lock().fair.adopt(task.id);
-        <arch::Irq as IrqControl>::restore(saved);
-    }
+    let _ = task.reserve.swap_on(cpu);
     super::yield_now();
     Ok(())
 }
@@ -93,7 +96,7 @@ fn withdraw(task: &Task, cpu: usize) -> bool {
         return false;
     };
     let saved = <arch::Irq as IrqControl>::disable();
-    let done = lock.lock().fair.withdraw(task.id);
+    let done = <Stack as StackTiers<_>>::withdraw(&mut lock.lock().stack, task.id);
     <arch::Irq as IrqControl>::restore(saved);
     done
 }
@@ -105,16 +108,16 @@ fn withdraw(task: &Task, cpu: usize) -> bool {
 /// [`Refusal::Already`] for a thread that holds none.
 pub fn give_back() -> Result<(), Refusal> {
     let task = current().ok_or(Refusal::Malformed)?;
-    let cpu = task.reserved_on.swap(usize::MAX, Ordering::AcqRel);
-    if cpu == usize::MAX {
+    let cpu = task.reserve.swap_on(NONE);
+    if cpu == NONE {
         return Err(Refusal::Already);
     }
     let _ = withdraw(&task, cpu);
-    let before = task.mask_before.lock().take();
+    let before = task.reserve.take_mask();
     if let Some(mask) = before {
         let _ = affinity::set_mask(&task, &mask);
     }
-    // Off the processor once, and it is the fair class's.
+    // Off the processor once, and it is the fair class's: the decision moves it (DG.7).
     super::yield_now();
     Ok(())
 }
@@ -127,7 +130,8 @@ pub(crate) fn state_of(cpu: usize) -> Option<(u64, u64, u64)> {
     let saved = <arch::Irq as IrqControl>::disable();
     let (used, (throttles, refills)) = {
         let queue = lock.lock();
-        (queue.fair.used_ppm(), queue.fair.throttles_and_refills())
+        let (used, throttles, refills) = <Stack as StackTiers<_>>::reserve_state(&queue.stack);
+        (used, (throttles, refills))
     };
     <arch::Irq as IrqControl>::restore(saved);
     Some((used, throttles, refills))
@@ -142,8 +146,8 @@ pub fn holds_own() -> bool {
 /// A task being freed gives its share back, wherever it is held: it may have died before it
 /// ever moved to the processor that admitted it (ledger 7088 E.3).
 pub(crate) fn forget(task: &Task) {
-    let cpu = task.reserved_on.swap(usize::MAX, Ordering::AcqRel);
-    if cpu == usize::MAX {
+    let cpu = task.reserve.swap_on(NONE);
+    if cpu == NONE {
         return;
     }
     let _ = withdraw(task, cpu);

@@ -330,7 +330,7 @@ pub const SPACE_WINDOW: usize = 0x10BC;
 pub const SPACE_PLACE: usize = 0x10BD;
 /// `(job, runtime, deadline, period)`: the calling thread takes a time reservation, or gives
 /// its reservation back when all three are zero. On a job handle with `SET_LIMIT` at or above
-/// the caller's job. `NOT_SUPPORTED` in a kernel without `schedule=edf`.
+/// the caller's job. `NOT_SUPPORTED` in a kernel without the deadline tier (`sched_deadline=edf_cbs`).
 pub const THREAD_RESERVE: usize = 0x10E1;
 /// The most records one [`NativeCall::AuditRead`] copies.
 pub const AUDIT_READ_MAX: u64 = 64;

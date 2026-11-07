@@ -27,6 +27,7 @@ use core::fmt;
 use core::marker::PhantomData;
 
 mod balance;
+pub mod deadline;
 mod domain;
 
 pub use balance::{
@@ -210,11 +211,15 @@ pub trait SchedClass<T> {
     /// that throttles itself answers false while throttled and something
     /// below waits, though it holds tasks: a stack asks this, never the
     /// class's length, so a throttled tier neither preempts nor arms a timer.
+    /// A class whose budget is hard (a deadline class, [`deadline::DeadlineClass`])
+    /// ignores `below_waiting`: throttled, it is not ready whatever waits below.
     fn ready(queue: &Self::Queue, below_waiting: bool) -> bool;
 
     /// `ns` of real time passed on the CPU while another tier ran, or nothing
     /// did: what a class whose budget is measured per period of real time counts its
-    /// period by (R4). Nothing for a class without one.
+    /// period by (R4). Nothing for a class without one, and nothing for a class
+    /// on absolute time, which is told the time instead
+    /// ([`deadline::DeadlineClass::note_time`], ledger 7763 DG.4).
     fn elapse(queue: &mut Self::Queue, ns: u64);
 
     /// Whether an idle CPU may take this queue's tasks, now. False for every

@@ -1,5 +1,5 @@
 //! A time reservation as a Linux program asks for one, run as init by `cargo xtask
-//! test-reserve` on a kernel of `schedule=edf` (`docs/microkernel/K9.md`, ledger 7011 S.6).
+//! test-reserve` on a kernel of `sched_deadline=edf_cbs` (`docs/microkernel/K9.md`, ledger 7011 S.6).
 //!
 //! Each step prints `reserve: <step> ok`, ending `reserve: all ok` and status 0, or
 //! `reserve: FAILED <what>` and status 1.

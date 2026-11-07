@@ -131,7 +131,6 @@ fn new_task(
         in_restricted: core::sync::atomic::AtomicBool::new(false),
         thread_kept: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),
         pending_up: core::sync::atomic::AtomicBool::new(false),
-        #[cfg(ferrix_sched_deadline = "edf_cbs")]
         reserved: core::sync::atomic::AtomicBool::new(false),
         sigreturning: core::sync::atomic::AtomicBool::new(false),
         reclaiming: core::sync::atomic::AtomicBool::new(false),
@@ -480,8 +479,57 @@ pub fn current_runtime() -> u64 {
 pub fn yield_now() {
     crate::sys::thread_yield();
 }
+/// The weight of a thread of ordinary priority: what the kernel's fair tier
+/// counts as one (`ferrix_sched_class::LOAD_UNIT`, which ferrix-sched-fair holds
+/// equal to its nice-0 weight), so that no file linuxd compiles names a class crate.
+pub const NICE_0_WEIGHT: u32 = ferrix_sched_class::LOAD_UNIT as u32;
+/// Why a policy was refused: linuxd's threads take none but `SCHED_OTHER`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PolicyRefused {
+    /// No real-time tier reaches linuxd's threads (L.sched.138).
+    NoTier,
+    /// No memory for a node (never here).
+    NoMemory,
+}
+/// Whether a thread may ask for a real-time policy: never under linuxd.
+#[must_use]
+pub const fn realtime_built() -> bool {
+    false
+}
+/// The round-robin quantum: none.
+#[must_use]
+pub const fn rr_quantum_ns() -> u64 {
+    0
+}
+/// Whether the running thread's children start `SCHED_OTHER`: they always do.
+#[must_use]
+pub const fn current_resets_on_fork() -> bool {
+    false
+}
+/// `SCHED_OTHER` is kept; a real-time policy is refused.
+///
+/// # Errors
+///
+/// [`PolicyRefused::NoTier`] for a real-time policy.
+pub fn set_policy(
+    _: &Arc<Task>,
+    params: Option<ferrix_sched_class::RtParams>,
+    _: bool,
+) -> Result<(), PolicyRefused> {
+    if params.is_some() {
+        return Err(PolicyRefused::NoTier);
+    }
+    Ok(())
+}
+/// The slot of the scheduling domain a job's word names: the kernel's to
+/// decide, so linuxd's model has the boot domain's alone (docs/SCHED-CLASSES.md §9f).
+pub(crate) const fn domain_slot_of_word(_: u32) -> u8 {
+    0
+}
+/// Whether the kernel's stack has a deadline tier (docs/SCHED-CLASSES.md §9g):
+/// whether `THREAD_RESERVE` has a body.
+pub const DEADLINE_TIER: bool = crate::SCHED_DEADLINE_TIER;
 /// The reservations, by the kernel's `THREAD_RESERVE` (`docs/microkernel/K9.md`).
-#[cfg(ferrix_sched_deadline = "edf_cbs")]
 pub mod reserve {
     use core::sync::atomic::Ordering;
     /// What a thread asks for: the kernel's words.

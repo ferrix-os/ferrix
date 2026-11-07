@@ -1586,36 +1586,43 @@ impl<T, U: ferrix_sched_class::SchedClass<T>, L: FairTier<T>> FairTier<T>
 }
 
 /// What a stack's entity is made of, seen from a task: its fair record and
-/// run slot, or the node of a tier above fair (docs/SCHED-CLASSES.md §9e,
-/// R6: F6, F7).
+/// run slot, the node of a fixed-priority tier above fair (docs/SCHED-CLASSES.md
+/// §9e, R6: F6, F7), or a deadline tier's admission, which carries nothing
+/// (§9g).
 #[derive(Debug)]
 pub enum Split<U, T> {
     /// A real-time task's node.
     Upper(U),
+    /// An admitted task's entity: its node is its processor's entry.
+    Deadline,
     /// A fair task's record and run slot.
     Fair(FairEntity<T>),
 }
 
 /// The tiers of a class stack as the kernel's task sees them: whether there
-/// is one above fair, the node and the cell a task keeps for it, and how the
-/// stack's entity is built from a task's parts and taken apart again. The
-/// fair entity is the innermost of every stack's (F7): the fair-only stack's
-/// entity is exactly [`FairEntity`], and [`StackTiers::fair_entity`] is the
-/// identity there.
+/// is one above fair and of which kind, the node and the cells a task keeps
+/// for it, and how the stack's entity is built from a task's parts and taken
+/// apart again. The fair entity is the innermost of every stack's (F7): the
+/// fair-only stack's entity is [`FairEntity`] itself. A stack has at most one
+/// tier above fair (ledger 7763 DG.3).
 pub trait StackTiers<T>: FairTier<T> {
-    /// Whether the stack has a tier above fair: whether a task may ask for a
-    /// real-time policy.
+    /// Whether the stack has a fixed-priority tier above fair: whether a task
+    /// may ask for a real-time policy.
     const REALTIME: bool;
+    /// Whether the stack has a deadline tier above fair: whether a thread may
+    /// hold a reservation (§9g).
+    const DEADLINE: bool;
     /// The round-robin quantum of the tier above fair, in nanoseconds; zero
     /// with no such tier.
     const RR_QUANTUM_NS: u64;
-    /// A task's node in the tier above fair; no values for the fair-only
-    /// stack.
+    /// A task's node in a fixed-priority tier above fair; no values without one.
     type UpperSlot;
-    /// Where a task keeps that node while off every queue; zero-sized for
-    /// the fair-only stack.
+    /// Where a task keeps that node while off every queue; zero-sized
+    /// without such a tier.
     type Cell: ferrix_sched_class::UpperCell<Self::UpperSlot>;
-    /// A fresh node, `None` with no tier above fair or no memory (R1).
+    /// Where a task keeps its reservation; zero-sized without a deadline tier.
+    type Reserve: ferrix_sched_class::deadline::ReserveCell;
+    /// A fresh node, `None` with no fixed-priority tier or no memory (R1).
     fn new_upper_slot() -> Option<Self::UpperSlot>;
     /// The stack's configuration, from the fair tier's: the tiers above
     /// fair take none.
@@ -1628,6 +1635,9 @@ pub trait StackTiers<T>: FairTier<T> {
     fn fair_entity(entity: FairEntity<T>) -> Self::Entity;
     /// The stack's entity for a real-time task.
     fn upper_entity(params: ferrix_sched_class::RtParams, slot: Self::UpperSlot) -> Self::Entity;
+    /// The stack's entity for a task admitted on the queue's processor; `None`
+    /// with no deadline tier.
+    fn deadline_entity() -> Option<Self::Entity>;
     /// A task's parts back out of the stack's entity.
     fn split(entity: Self::Entity) -> Split<Self::UpperSlot, T>;
     /// The identifier of a waiting entity of the tier above fair whose
@@ -1636,13 +1646,37 @@ pub trait StackTiers<T>: FairTier<T> {
     /// a scheduling domain's switch (docs/SCHED-CLASSES.md §9f), with
     /// [`RunQueue::latest_where`] for the fair tier.
     fn upper_waiting_where(queue: &Self::Queue, matches: impl Fn(&T) -> bool) -> Option<u64>;
+    /// Admit thread `id` to the deadline tier (§9g).
+    ///
+    /// # Errors
+    ///
+    /// The tier's refusal; [`ferrix_sched_class::deadline::Refusal::Unschedulable`] with no
+    /// deadline tier.
+    fn admit(
+        queue: &mut Self::Queue,
+        id: u64,
+        reservation: ferrix_sched_class::deadline::Reservation,
+    ) -> Result<(), ferrix_sched_class::deadline::Refusal>;
+    /// Take thread `id`'s reservation away; whether it held one.
+    fn withdraw(queue: &mut Self::Queue, id: u64) -> bool;
+    /// Tell the deadline tier the time (ledger 7763 DG.4); nothing without one.
+    fn note_time(queue: &mut Self::Queue, now: u64);
+    /// Whether the direct switch between `caller` and `peer` must take the
+    /// long way (7088 E.5, T12): a reservation runs or waits with budget here,
+    /// or either end holds one. False without a deadline tier.
+    fn declines(queue: &Self::Queue, caller: u64, peer: u64) -> bool;
+    /// The share admitted, and the throttles and refills so far; zeros without
+    /// a deadline tier.
+    fn reserve_state(queue: &Self::Queue) -> (u64, u64, u64);
 }
 
 impl<T> StackTiers<T> for Eevdf {
     const REALTIME: bool = false;
+    const DEADLINE: bool = false;
     const RR_QUANTUM_NS: u64 = 0;
     type UpperSlot = core::convert::Infallible;
     type Cell = ferrix_sched_class::NoCell<core::convert::Infallible>;
+    type Reserve = ferrix_sched_class::deadline::NoReserve;
 
     fn new_upper_slot() -> Option<core::convert::Infallible> {
         None
@@ -1665,24 +1699,188 @@ impl<T> StackTiers<T> for Eevdf {
     ) -> FairEntity<T> {
         match slot {}
     }
+    fn deadline_entity() -> Option<FairEntity<T>> {
+        None
+    }
     fn split(entity: FairEntity<T>) -> Split<core::convert::Infallible, T> {
         Split::Fair(entity)
     }
     fn upper_waiting_where(_: &RunQueue<T>, _: impl Fn(&T) -> bool) -> Option<u64> {
         None
     }
+    fn admit(
+        _: &mut RunQueue<T>,
+        _: u64,
+        _: ferrix_sched_class::deadline::Reservation,
+    ) -> Result<(), ferrix_sched_class::deadline::Refusal> {
+        Err(ferrix_sched_class::deadline::Refusal::Unschedulable)
+    }
+    fn withdraw(_: &mut RunQueue<T>, _: u64) -> bool {
+        false
+    }
+    fn note_time(_: &mut RunQueue<T>, _: u64) {}
+    fn declines(_: &RunQueue<T>, _: u64, _: u64) -> bool {
+        false
+    }
+    fn reserve_state(_: &RunQueue<T>) -> (u64, u64, u64) {
+        (0, 0, 0)
+    }
 }
 
-impl<T, U: ferrix_sched_class::RealtimeClass<T, Config = ()>> StackTiers<T>
-    for ferrix_sched_class::Over<U, Eevdf>
+/// What a tier above fair adds to [`StackTiers`], by its kind
+/// ([`ferrix_sched_class::deadline::UpperClass::Kind`]): the one impl over
+/// `Over<U, Eevdf>` below reads it, so it names no class crate, and the two
+/// kinds never overlap (ledger 7763 DG.6).
+pub trait UpperKind<T, U: ferrix_sched_class::SchedClass<T>> {
+    /// [`StackTiers::REALTIME`].
+    const REALTIME: bool;
+    /// [`StackTiers::DEADLINE`].
+    const DEADLINE: bool;
+    /// [`StackTiers::RR_QUANTUM_NS`].
+    const RR_QUANTUM_NS: u64;
+    /// [`StackTiers::UpperSlot`].
+    type UpperSlot;
+    /// [`StackTiers::Cell`].
+    type Cell: ferrix_sched_class::UpperCell<Self::UpperSlot>;
+    /// [`StackTiers::Reserve`].
+    type Reserve: ferrix_sched_class::deadline::ReserveCell;
+    /// [`StackTiers::new_upper_slot`].
+    fn new_upper_slot() -> Option<Self::UpperSlot>;
+    /// The upper tier's entity for a real-time task.
+    fn upper_entity(params: ferrix_sched_class::RtParams, slot: Self::UpperSlot) -> U::Entity;
+    /// The upper tier's entity for an admitted task.
+    fn deadline_entity() -> Option<U::Entity>;
+    /// An upper entity taken apart.
+    fn split(entity: U::Entity) -> Split<Self::UpperSlot, T>;
+    /// [`StackTiers::upper_waiting_where`] on the upper tier.
+    fn waiting_where(queue: &U::Queue, matches: impl Fn(&T) -> bool) -> Option<u64>;
+    /// [`StackTiers::admit`] on the upper tier.
+    ///
+    /// # Errors
+    ///
+    /// As [`StackTiers::admit`].
+    fn admit(
+        queue: &mut U::Queue,
+        id: u64,
+        reservation: ferrix_sched_class::deadline::Reservation,
+    ) -> Result<(), ferrix_sched_class::deadline::Refusal>;
+    /// [`StackTiers::withdraw`] on the upper tier.
+    fn withdraw(queue: &mut U::Queue, id: u64) -> bool;
+    /// [`StackTiers::note_time`] on the upper tier.
+    fn note_time(queue: &mut U::Queue, now: u64);
+    /// [`StackTiers::declines`] on the upper tier.
+    fn declines(queue: &U::Queue, caller: u64, peer: u64) -> bool;
+    /// [`StackTiers::reserve_state`] on the upper tier.
+    fn reserve_state(queue: &U::Queue) -> (u64, u64, u64);
+}
+
+impl<T, U: ferrix_sched_class::RealtimeClass<T>> UpperKind<T, U>
+    for ferrix_sched_class::deadline::RealtimeKind
 {
     const REALTIME: bool = true;
+    const DEADLINE: bool = false;
     const RR_QUANTUM_NS: u64 = U::RR_QUANTUM_NS;
     type UpperSlot = U::Slot;
     type Cell = ferrix_sched_class::LockedCell<U::Slot>;
+    type Reserve = ferrix_sched_class::deadline::NoReserve;
 
     fn new_upper_slot() -> Option<U::Slot> {
         U::new_slot()
+    }
+    fn upper_entity(params: ferrix_sched_class::RtParams, slot: U::Slot) -> U::Entity {
+        U::entity(params, slot)
+    }
+    fn deadline_entity() -> Option<U::Entity> {
+        None
+    }
+    fn split(entity: U::Entity) -> Split<U::Slot, T> {
+        Split::Upper(U::into_slot(entity))
+    }
+    fn waiting_where(queue: &U::Queue, matches: impl Fn(&T) -> bool) -> Option<u64> {
+        U::waiting_where(queue, matches)
+    }
+    fn admit(
+        _: &mut U::Queue,
+        _: u64,
+        _: ferrix_sched_class::deadline::Reservation,
+    ) -> Result<(), ferrix_sched_class::deadline::Refusal> {
+        Err(ferrix_sched_class::deadline::Refusal::Unschedulable)
+    }
+    fn withdraw(_: &mut U::Queue, _: u64) -> bool {
+        false
+    }
+    fn note_time(_: &mut U::Queue, _: u64) {}
+    fn declines(_: &U::Queue, _: u64, _: u64) -> bool {
+        false
+    }
+    fn reserve_state(_: &U::Queue) -> (u64, u64, u64) {
+        (0, 0, 0)
+    }
+}
+
+impl<T, U: ferrix_sched_class::deadline::DeadlineClass<T>> UpperKind<T, U>
+    for ferrix_sched_class::deadline::DeadlineKind
+{
+    const REALTIME: bool = false;
+    const DEADLINE: bool = true;
+    const RR_QUANTUM_NS: u64 = 0;
+    type UpperSlot = core::convert::Infallible;
+    type Cell = ferrix_sched_class::NoCell<core::convert::Infallible>;
+    type Reserve = ferrix_sched_class::deadline::HeldReserve;
+
+    fn new_upper_slot() -> Option<core::convert::Infallible> {
+        None
+    }
+    fn upper_entity(_: ferrix_sched_class::RtParams, slot: core::convert::Infallible) -> U::Entity {
+        match slot {}
+    }
+    fn deadline_entity() -> Option<U::Entity> {
+        Some(U::admitted())
+    }
+    fn split(_: U::Entity) -> Split<core::convert::Infallible, T> {
+        Split::Deadline
+    }
+    fn waiting_where(queue: &U::Queue, matches: impl Fn(&T) -> bool) -> Option<u64> {
+        U::waiting_where(queue, matches)
+    }
+    fn admit(
+        queue: &mut U::Queue,
+        id: u64,
+        reservation: ferrix_sched_class::deadline::Reservation,
+    ) -> Result<(), ferrix_sched_class::deadline::Refusal> {
+        U::admit(queue, id, reservation)
+    }
+    fn withdraw(queue: &mut U::Queue, id: u64) -> bool {
+        U::withdraw(queue, id)
+    }
+    fn note_time(queue: &mut U::Queue, now: u64) {
+        U::note_time(queue, now);
+    }
+    fn declines(queue: &U::Queue, caller: u64, peer: u64) -> bool {
+        U::runs_reserved(queue)
+            || U::any_ready(queue)
+            || U::is_reserved(queue, caller)
+            || U::is_reserved(queue, peer)
+    }
+    fn reserve_state(queue: &U::Queue) -> (u64, u64, u64) {
+        U::state(queue)
+    }
+}
+
+impl<T, U> StackTiers<T> for ferrix_sched_class::Over<U, Eevdf>
+where
+    U: ferrix_sched_class::deadline::UpperClass<T, Config = ()>,
+    U::Kind: UpperKind<T, U>,
+{
+    const REALTIME: bool = <U::Kind as UpperKind<T, U>>::REALTIME;
+    const DEADLINE: bool = <U::Kind as UpperKind<T, U>>::DEADLINE;
+    const RR_QUANTUM_NS: u64 = <U::Kind as UpperKind<T, U>>::RR_QUANTUM_NS;
+    type UpperSlot = <U::Kind as UpperKind<T, U>>::UpperSlot;
+    type Cell = <U::Kind as UpperKind<T, U>>::Cell;
+    type Reserve = <U::Kind as UpperKind<T, U>>::Reserve;
+
+    fn new_upper_slot() -> Option<Self::UpperSlot> {
+        <U::Kind as UpperKind<T, U>>::new_upper_slot()
     }
     fn stack_config(fair: Config) -> ((), Config) {
         ((), fair)
@@ -1693,17 +1891,39 @@ impl<T, U: ferrix_sched_class::RealtimeClass<T, Config = ()>> StackTiers<T>
     fn fair_entity(entity: FairEntity<T>) -> Self::Entity {
         ferrix_sched_class::Tier::Lower(entity)
     }
-    fn upper_entity(params: ferrix_sched_class::RtParams, slot: U::Slot) -> Self::Entity {
-        ferrix_sched_class::Tier::Upper(U::entity(params, slot))
+    fn upper_entity(params: ferrix_sched_class::RtParams, slot: Self::UpperSlot) -> Self::Entity {
+        ferrix_sched_class::Tier::Upper(<U::Kind as UpperKind<T, U>>::upper_entity(params, slot))
     }
-    fn split(entity: Self::Entity) -> Split<U::Slot, T> {
+    fn deadline_entity() -> Option<Self::Entity> {
+        <U::Kind as UpperKind<T, U>>::deadline_entity().map(ferrix_sched_class::Tier::Upper)
+    }
+    fn split(entity: Self::Entity) -> Split<Self::UpperSlot, T> {
         match entity {
-            ferrix_sched_class::Tier::Upper(entity) => Split::Upper(U::into_slot(entity)),
+            ferrix_sched_class::Tier::Upper(entity) => <U::Kind as UpperKind<T, U>>::split(entity),
             ferrix_sched_class::Tier::Lower(entity) => Split::Fair(entity),
         }
     }
     fn upper_waiting_where(queue: &Self::Queue, matches: impl Fn(&T) -> bool) -> Option<u64> {
-        U::waiting_where(&queue.upper, matches)
+        <U::Kind as UpperKind<T, U>>::waiting_where(&queue.upper, matches)
+    }
+    fn admit(
+        queue: &mut Self::Queue,
+        id: u64,
+        reservation: ferrix_sched_class::deadline::Reservation,
+    ) -> Result<(), ferrix_sched_class::deadline::Refusal> {
+        <U::Kind as UpperKind<T, U>>::admit(&mut queue.upper, id, reservation)
+    }
+    fn withdraw(queue: &mut Self::Queue, id: u64) -> bool {
+        <U::Kind as UpperKind<T, U>>::withdraw(&mut queue.upper, id)
+    }
+    fn note_time(queue: &mut Self::Queue, now: u64) {
+        <U::Kind as UpperKind<T, U>>::note_time(&mut queue.upper, now);
+    }
+    fn declines(queue: &Self::Queue, caller: u64, peer: u64) -> bool {
+        <U::Kind as UpperKind<T, U>>::declines(&queue.upper, caller, peer)
+    }
+    fn reserve_state(queue: &Self::Queue) -> (u64, u64, u64) {
+        <U::Kind as UpperKind<T, U>>::reserve_state(&queue.upper)
     }
 }
 

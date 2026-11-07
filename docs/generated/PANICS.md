@@ -71,6 +71,7 @@ Causes are listed most likely first.
 | [FX-0538](#fx-0538) | a task was about to run outside its scheduling domain |
 | [FX-0539](#fx-0539) | a task with a real-time policy had no node to be queued with |
 | [FX-0540](#fx-0540) | a task a processor runs was found waiting in a run queue |
+| [FX-0541](#fx-0541) | a task was queued as admitted where it holds no admission |
 | [FX-0601](#fx-0601) | the memory a process is built from failed its self-check |
 | [FX-0602](#fx-0602) | a page taken from a mapped object stayed reachable, or was not taken as it should be |
 | [FX-0701](#fx-0701) | the system call dispatch path failed its self-check |
@@ -1420,6 +1421,25 @@ consultant's container review 30 (not on record; ledger 5684), B1).
 
 See: src/kernel/src/sched/queue.rs CpuQueue::set_policy and pick_next;
 src/kernel/src/sched/mod.rs move_onto; docs/SCHED-CLASSES.md §9e.
+
+<a id="fx-0541"></a>
+
+## FX-0541 — a task was queued as admitted where it holds no admission
+
+A task is queued in the deadline tier only on the processor whose admission it
+holds: `Task::entity_with` reads the task's reservation cell under the queue's
+lock and builds the tier's entity only when the cell names that processor. The
+tier refusing the entity for want of an entry means that rule broke, and the
+task would run on no budget at all, so the machine is stopped
+(docs/SCHED-CLASSES.md §9g, L.sched.184).
+
+1. The reservation cell was set before the processor's admission was made, or
+   after it was taken away (`sched::reserve`).
+2. A processor taken out of service moved an admitted task, and its cell was
+   read against the processor it left.
+
+See: src/kernel/src/sched/task.rs Task::entity_with;
+src/kernel/src/sched/queue.rs CpuQueue::insert_at.
 
 <a id="fx-0601"></a>
 
@@ -3291,10 +3311,10 @@ docs/microkernel/BOOT-AUTHORITY.md.
 
 ## FX-0970 — a time reservation did not behave as the scheduler promises
 
-Under `schedule=edf` a thread may hold a budget in each period on one processor:
-admission refuses a set too wide for it, a thread out of budget waits for its
-next period, the earliest deadline with budget runs first, and the fair class
-has the rest.
+Under `sched_deadline=edf_cbs` a thread may hold a budget in each period on one
+processor: admission refuses a set too wide for it, a thread out of budget waits
+for its next period, the earliest deadline with budget runs first, and the fair
+class has the rest.
 
 1. A change to the tier's pick, charge or refill, or to a door that moves a
    reserved thread.
