@@ -2162,7 +2162,7 @@ impl AddressSpace {
             // hold.
             Backing::File { .. } => {
                 return self
-                    .fault_private_file(inner, address, access, spare)
+                    .fault_private_file(inner, address, access, spare, round)
                     .map(|()| Resolved::Done);
             }
         };
@@ -2404,13 +2404,17 @@ impl AddressSpace {
     /// A file on a disk has had the page filled into its object already, by
     /// the round before this one, with no lock held, so the copy below copies
     /// the file's data rather than zeros. Called in [`AddressSpace::resolve`]'s
-    /// hold of this space's lock, `inner`, and lets it go.
+    /// hold of this space's lock, `inner`, and lets it go. `_round` is the
+    /// round's: only linuxd's neighbour looks (`fault_around`, `write_ahead`)
+    /// pass one already filled and asked on their first call, which is what
+    /// the controls of ledger 6597 E1 key their plants to (ledger 7857 Q.3).
     fn fault_private_file<G: Deref<Target = Inner>>(
         &self,
         inner: G,
         address: u64,
         access: Access,
         spare: &mut Spare,
+        _round: Round,
     ) -> Result<(), SpaceError> {
         let region = *inner
             .map

@@ -821,15 +821,23 @@ fn check_no_spare_near_a_limit(tree: &Arc<Job>) -> Result<(), &'static str> {
 fn check_a_refusal_waits_for_spares(tree: &Arc<Job>) -> Result<(), &'static str> {
     let job = tree.new_child().map_err(|_| "a job refused a child")?;
     let faulter = member_of(&job)?;
+    let used = |job: &Job| job.usage(Resource::Memory).map_or(0, |usage| usage.used);
     let held = crate::user::vmo::Spare::zeroed();
     if crate::user::vmo::spares_in_flight() == 0 {
         return Err("a spare held was not counted in flight");
     }
-    let answers = (0..oom::SPARE_WAITS)
-        .take_while(|&attempt| {
-            oom::out_of_memory_at(faulter.space(), attempt) == oom::Answer::Retry
-        })
-        .count();
+    // As a task of a job held at its limit with nothing to reclaim: without
+    // the wait, an answer is a kill inside this job or a refusal, never a
+    // reclaim's retry nor the machine's kill (ledger 7857 Q.1).
+    let _ = job.set_limit(Resource::Memory, used(&job));
+    let (answers, _) = as_task_of(&job, || {
+        (0..oom::SPARE_WAITS)
+            .take_while(|&attempt| {
+                oom::out_of_memory_at(faulter.space(), attempt) == oom::Answer::Retry
+            })
+            .count()
+    });
+    let _ = job.set_limit(Resource::Memory, quota::UNLIMITED);
     drop(held);
     if answers != oom::SPARE_WAITS as usize {
         return Err("a refusal with a spare held was not answered with a retry");
