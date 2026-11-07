@@ -245,7 +245,7 @@ fn partition(spinners: &[Arc<Task>], online: usize) -> Result<(), &'static str> 
     Ok(())
 }
 
-/// A SoftRt domain's processor is not taken out of service: its members would
+/// A `SoftRt` domain's processor is not taken out of service: its members would
 /// wait for a processor their domain admits (ledger 5695 B3).
 ///
 /// Verifies: L.sched.149
