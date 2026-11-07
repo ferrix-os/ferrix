@@ -1409,8 +1409,18 @@ fn place_moving(task: &Arc<Task>) -> bool {
     if task.is_exempt() {
         allowed = task.affinity();
     }
+    // Its mask as every placer reads it (`allowed`: the domain first, then the
+    // mask with its fallback), and a processor in service: a program pinned
+    // to a leaving processor still has its domain's (ledger 5695 B2).
+    let exempt = task.is_exempt();
     let mut inside = CpuSet::empty();
-    for cpu in allowed.iter().filter(|cpu| task.may_run_on(*cpu)) {
+    for cpu in allowed.iter().filter(|cpu| {
+        if exempt {
+            task.may_run_on(*cpu)
+        } else {
+            may_place(task, *cpu)
+        }
+    }) {
         // NOALLOC: a `CpuSet` is a fixed bitmap.
         let _ = inside.insert(cpu);
     }
@@ -1424,7 +1434,9 @@ fn place_moving(task: &Arc<Task>) -> bool {
     let saved = <arch::Irq as IrqControl>::disable();
     let placed = {
         let mut queue = lock.lock();
-        let fits = domains::admits(task, to) && !task.is_on_cpu();
+        // Asked again under the target's lock (V5, ledger 5695 B2).
+        let fits =
+            (exempt || may_place(task, to)) && domains::admits(task, to) && !task.is_on_cpu();
         if fits {
             move_onto(task, to, &mut queue);
         }
@@ -1598,11 +1610,12 @@ pub fn prepare_user(
 ) -> Result<PreparedTask, &'static str> {
     let here = this_cpu().ok_or("no processor to start a program on")?;
     let anywhere = *domain_cpus().ok_or("the scheduler has no domain")?;
-    // Placed in its job's domain (V10); `enqueue` reads the job's again
+    // Placed in its job's domain (V10), by its process's copy of the job's
+    // word; `enqueue` reads that again
     // under the queue's lock, for a job admitted meanwhile. A thread made by
     // `clone`, `fork` or `vfork` starts with its creator's mask (L.sched.101);
     // any other with the whole machine, its domain the placement's bound.
-    let slot = thread.process().core().job().sched_slot();
+    let slot = domains::slot_of_word(thread.process().core().sched_word());
     let (cpu, affinity) = match cpu {
         Some(cpu) => (cpu, CpuSet::of(cpu)),
         None => {
@@ -2021,11 +2034,14 @@ fn enqueue(task: &Arc<Task>, cpu: usize, lock: &'static SpinLock<CpuQueue>) {
     let saved = <arch::Irq as IrqControl>::disable();
     let placed = {
         let mut queue = lock.lock();
-        // A user task's domain is its job's as it is queued, read under the
-        // lock an admission settles it under (V10); a task that may not run
+        // A user task's domain is its job's as it is queued: its process's copy
+        // of the job's word, one load and no walk of the job chain under this
+        // lock (ledger 5695 B1), read under the lock an admission settles it
+        // under (V10); a task that may not run
         // here for it is placed in its domain instead (V5).
         if let Some(thread) = task.thread() {
-            let _ = task.set_domain_slot(thread.process().core().job().sched_slot());
+            let _ =
+                task.set_domain_slot(domains::slot_of_word(thread.process().core().sched_word()));
         }
         if !domains::admits(task, cpu) {
             domains::push_moving(Arc::clone(task));
@@ -3189,9 +3205,13 @@ pub(crate) fn service_refusal(cpu: usize) -> Result<(), ServiceRefusal> {
     if (0..count).filter(|&other| in_service(other)).count() <= 1 {
         return Err(ServiceRefusal::Last);
     }
+    // A SoftRt domain's processor, or one leaving for one, stays: taken out,
+    // its members would wait for a processor their domain admits, which its
+    // admission promised them (ledger 5695 B3).
     if !DOMAIN
         .get()
         .is_some_and(|domain| domain.mode().steals_work())
+        || domains::slot_of(cpu) != domains::BOOT
     {
         return Err(ServiceRefusal::NoStealing);
     }

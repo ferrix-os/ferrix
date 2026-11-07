@@ -2186,7 +2186,11 @@ design review, ledger line 32 (OK IF V1-V16); design in
 * **Time, every path that places a task** (a spawn, a wake, a pull, a
   placement on an idle processor, a steal, the balance, the pick, the
   direct switch): one load of the processor's word, one of the task's, one
-  of `LIVE` (`domains::admits`), under the lock the path already holds. A
+  of `LIVE` (`domains::admits`), under the lock the path already holds; a
+  user task's queueing adds one load of its process's copy of its job's word
+  (`Process::sched_word`) and one of `LIVE`, never a walk of the job chain:
+  that walk is made as the process is made, as it moves and as its job is
+  admitted, under no queue's lock (ledger 5695 B1). A
   steal and the balance walk their own domain's processors only; the
   pull's factor is a count kept with the domain (`domains::count`).
 * **Time, a decision on a leaving processor** (`choose_next`, its own

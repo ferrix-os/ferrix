@@ -198,9 +198,10 @@ fn a_job_admitted() -> Result<Arc<Job>, &'static str> {
 /// Verifies: H.SCHED.23, H.SCHED.24, L.sched.140, L.sched.141, L.sched.142
 /// Verifies: L.sched.143, L.sched.145, L.sched.146, L.sched.147, L.sched.148
 fn partition(spinners: &[Arc<Task>], online: usize) -> Result<(), &'static str> {
-    let soft = domains::create_soft(online - 2)
+    let made = domains::create_soft(online - 2)
         .map_err(|_| "a SoftRt domain of all but two processors was refused")?;
-    let soft = mask(&soft);
+    stays_in_service(&made)?;
+    let soft = mask(&made);
     if domains::create_soft(1) != Err(Refused::Exists) {
         return Err("a second SoftRt domain was not refused");
     }
@@ -240,6 +241,21 @@ fn partition(spinners: &[Arc<Task>], online: usize) -> Result<(), &'static str> 
         return Err(
             "a dissolved SoftRt domain's processors were not given back to the boot domain",
         );
+    }
+    Ok(())
+}
+
+/// A SoftRt domain's processor is not taken out of service: its members would
+/// wait for a processor their domain admits (ledger 5695 B3).
+///
+/// Verifies: L.sched.149
+fn stays_in_service(made: &CpuSet) -> Result<(), &'static str> {
+    let Some(cpu) = made.iter().next() else {
+        return Err("a SoftRt domain was made of no processor");
+    };
+    let deadline = crate::timer::now_nanos().saturating_add(GONE_NANOS);
+    if super::take_out_of_service(cpu, deadline) != Err(super::ServiceRefusal::NoStealing) {
+        return Err("a SoftRt domain's processor was not refused to service removal");
     }
     Ok(())
 }

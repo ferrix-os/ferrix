@@ -7,6 +7,18 @@ Moved out of [`docs/BACKLOG.md`](../BACKLOG.md) on 2026-10-16. A decision is rec
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-11-07 (customer, in the product owner's session)** **`max_plus` keeps
+  `kernel_memory=retyped` without a Linux personality**: asked "max_plus mem"
+  (develop's `retyped` requires `personality=user`; `max_plus`, the barest
+  kernel, has `personality=none`), the answer was "Relax the requirement". So
+  `retyped` requires `personality=user|none` in `build-flags.toml`, the form
+  `flag=a|b` read by xtask and check-item-boundary; landed with PR #50
+  (`docs/SCHED-CLASSES.md` §9g), for the consultant's diff check.
+* **2026-11-07 (customer, in the product owner's session)** **The fast path's
+  2.2% on `present` is not accepted** (ledger 5684 B4): the round trip with
+  `ferrix.fastpath=on` costs 918 to 928 ns against 898 to 908 on #38's tree.
+  The cost is found and removed before PR #50 lands, measured by the
+  optimize-ipc-round-trip skill's protocol.
 * **2026-11-05 (customer)** **The optional kernel parts live in
   `src/kernel/extensions/<group>/<name>/`**: "ok i like src/kernel/extensions".
   Over the design's `src/kernel-parts/` and the first suggestion, `src/lib/kernel/`

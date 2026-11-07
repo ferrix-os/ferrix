@@ -137,7 +137,7 @@ values.not_applicable = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"]
 [flags.kernel_memory]
 why = "K16's memory retyped from the job's own reservation, or today's fallible, charged shared heap"
 barest = "retyped"  # max_plus's (SCHED-CLASSES.md section 9c, E13): no shared kernel heap after boot
-values.retyped = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "M6", built = "adhoc", requires = ["personality=user|none"] }  # none: max_plus's barest kernel, no Linux personality (the customer, 2026-11-07; ledger 7763)
+values.retyped = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "M6", built = "adhoc", requires = ["personality=user|none"] }  # none: max_plus's barest kernel, no Linux personality (the customer, 2026-11-07: docs/backlog/DECISIONS.md)
 values.heap = { allows = ["present", "sc2", "none"], lands = "today", built = "yes" }
 
 # The scheduler (docs/SCHED-CLASSES.md §6, §9a; container review 20 (not on

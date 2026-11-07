@@ -364,10 +364,18 @@ pub(crate) fn create_soft(count: usize) -> Result<CpuSet, Refused> {
     if !ferrix_kernel_sched_select::mode_available(Mode::SoftRt) {
         return Err(Refused::Unavailable);
     }
-    if online < 4 {
+    // Counted among the processors in service alone, so that neither the two
+    // the boot domain keeps nor the domain's own are parked ones (H.SCHED.25,
+    // ledger 5695 B3).
+    let mut serving = CpuSet::empty();
+    for cpu in (0..online).filter(|&cpu| super::in_service(cpu)) {
+        // NOALLOC: a `CpuSet` is a fixed bitmap.
+        let _ = serving.insert(cpu);
+    }
+    if serving.len() < 4 {
         return Err(Refused::TooFew);
     }
-    if count == 0 || count > online - 2 {
+    if count == 0 || count > serving.len() - 2 {
         return Err(Refused::Count);
     }
     if CLAIMED.swap(true, Ordering::AcqRel) {
@@ -377,8 +385,14 @@ pub(crate) fn create_soft(count: usize) -> Result<CpuSet, Refused> {
         CLAIMED.store(false, Ordering::Release);
         return Err(refused);
     }
+    // The highest-numbered processors in service, never the boot processor:
+    // `serving` keeps at least two below them.
     let mut leaving = CpuSet::empty();
-    for cpu in online - count..online {
+    for cpu in (1..online)
+        .rev()
+        .filter(|&cpu| serving.contains(cpu))
+        .take(count)
+    {
         // NOALLOC: a `CpuSet` is a fixed bitmap.
         let _ = leaving.insert(cpu);
     }
@@ -466,6 +480,15 @@ pub(crate) fn admit(job: &Job) -> Result<usize, Refused> {
     let members = members_of(Some(job))?;
     placeable(&members)?;
     job.set_sched_domain(word(SOFT));
+    // Each process's own copy, which `enqueue` reads instead of walking the
+    // job chain under its queue's lock (ledger 5695 B1).
+    for host in crate::object::process::live()
+        .map_err(|_| Refused::NoMemory)?
+        .iter()
+        .filter(|host| job.contains(&host.core().job()))
+    {
+        host.core().set_sched_word(word(SOFT));
+    }
     admit_tasks(&members)
 }
 

@@ -112,6 +112,12 @@ pub struct Process {
     /// Its job's quota slot, read without the membership lock: what the
     /// scheduler files its threads under. Written only under `membership`.
     slot: AtomicU32,
+    /// The scheduling domain's word of its job, the nearest one admitted up
+    /// the chain (`Job::sched_word`), read without the membership lock: what
+    /// `sched::enqueue` reads under a queue's lock, one load and no walk
+    /// (docs/SCHED-CLASSES.md §9f; ledger 5695 B1). Written as it is made,
+    /// as it moves between jobs (B4) and by an admission of its job.
+    sched_word: AtomicU32,
     /// Whether its job, or one above, is frozen (`cgroup.freeze`): its
     /// threads stop on their way back to user mode, and nothing but the
     /// process ending lets them go. Written under `membership`, so that a
@@ -338,6 +344,7 @@ impl Process {
         let domain = job.domain();
         space.claim_domain(domain);
         let frozen = job.freezing();
+        let sched_word = job.sched_word();
         Ok(Process {
             #[cfg(ferrix_personality = "user")]
             debug_budget: DebugBudget::new(),
@@ -351,6 +358,7 @@ impl Process {
             counted: AtomicBool::new(true),
             tasks: AtomicU64::new(u64::from(!over_quota)),
             slot: AtomicU32::new(slot),
+            sched_word: AtomicU32::new(sched_word),
             frozen: AtomicBool::new(frozen),
             over_quota,
             exit,
@@ -613,6 +621,16 @@ impl Process {
         unsafe { crate::sync::try_lock_masked(self.table_of_mode()) }.map(|table| look(&table))
     }
 
+    /// Its job's scheduling-domain word (`Job::sched_word`), one load.
+    pub(crate) fn sched_word(&self) -> u32 {
+        self.sched_word.load(Ordering::Acquire)
+    }
+
+    /// Its job was admitted to the domain whose word is `word`.
+    pub(crate) fn set_sched_word(&self, word: u32) {
+        self.sched_word.store(word, Ordering::Release);
+    }
+
     /// The job it is in: its cgroup.
     pub fn job(&self) -> Arc<Job> {
         Arc::clone(&self.membership.lock())
@@ -657,6 +675,8 @@ impl Process {
     /// `to`'s task limits allow them.
     fn move_charged(&self, to: &Arc<Job>, checked: bool) -> Result<(), JobError> {
         let mut flipped = job::Flipped::new();
+        // Its new job's domain word, walked here and not under any lock (B4).
+        let sched_word = to.sched_word();
         let left = {
             let mut membership = self.membership.lock();
             if to.refuses() {
@@ -696,6 +716,7 @@ impl Process {
             }
             quota::uncharge(membership.quota_index(), Resource::Tasks, tasks);
             self.slot.store(to.quota_index(), Ordering::Release);
+            self.sched_word.store(sched_word, Ordering::Release);
             self.job_id.store(to.id(), Ordering::Release);
             // Frozen with the cgroup it goes into, thawed with the one it
             // leaves; the personality kicks its threads, having moved it.

@@ -1837,14 +1837,17 @@ package FerrixSchedRequirements {
         requirement <'L.sched.149'> theSoftDomainsRefusals : ItemLowLevel {
             attribute :>> statement = "domains::create_soft shall refuse
                 Unavailable in a build without the realtime tier, TooFew below four
-                processors, Count for no processors or more than all but two, and
-                Exists while a domain exists or is being made, each before
-                anything changes; its processors are the highest-numbered.";
+                processors in service, Count for no processors or more than all but
+                two of those in service, and Exists while a domain exists or is being
+                made, each before anything changes; its processors are the
+                highest-numbered in service, never the boot processor; and a
+                processor of a SoftRt domain shall be refused removal from service.";
             attribute :>> criterion = "The stage-5 domain check: on desktop with
                 four processors, a domain of none and of three refused Count and a
-                second refused Exists; on present, Unavailable.";
+                second refused Exists, and the domain's processor refused removal
+                from service; on present, Unavailable.";
             attribute :>> parent = "H.SCHED.25";
-            attribute :>> unit = "sched::domains::create_soft";
+            attribute :>> unit = ("sched::domains::create_soft", "sched::service_refusal");
         }
         requirement <'L.sched.150'> theDirectSwitchStaysInside : ItemLowLevel {
             attribute :>> statement = "The direct switch shall decline (T11) a

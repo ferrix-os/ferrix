@@ -417,7 +417,9 @@ pub struct Task {
     /// §9f, `sched::domains`), or [`super::domains::EXEMPT`] for a
     /// per-processor kernel task, which belongs to none: set once by its
     /// constructor, and for any other task changed only by its job's
-    /// admission or dissolution and as it moves between jobs.
+    /// admission or dissolution, and as its process moves between jobs: the
+    /// move writes the process's copy of its new job's word, and the task's
+    /// next queueing reads it (`sched::enqueue`; ledger 5695 B4).
     domain: AtomicU8,
     /// Whether a decision took it off its processor, still runnable, for
     /// running outside its domain (`sched::depart`): the switch

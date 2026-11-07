@@ -1242,15 +1242,23 @@ impl Job {
     /// or the nearest job above it was admitted to, while that domain lives,
     /// and otherwise the boot domain's (`sched::domains`, V10).
     pub(crate) fn sched_slot(&self) -> u8 {
+        crate::sched::domain_slot_of_word(self.sched_word())
+    }
+
+    /// The word of the domain it or the nearest job above it was admitted to,
+    /// zero for none: a walk up the chain, so never under a queue's lock;
+    /// each process keeps its own copy for that (`Process::sched_word`,
+    /// ledger 5695 B1).
+    pub(crate) fn sched_word(&self) -> u32 {
         let mut at = Some(self);
         while let Some(job) = at {
             let word = job.sched_domain.load(Ordering::Acquire);
             if word != 0 {
-                return crate::sched::domain_slot_of_word(word);
+                return word;
             }
             at = job.parent.as_deref();
         }
-        crate::sched::domain_slot_of_word(0)
+        0
     }
 
     /// Admit it, and every job beneath it, to the domain whose word is
