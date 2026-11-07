@@ -85,11 +85,13 @@ fn once() -> Result<(), &'static str> {
     check_the_loader_pattern()?;
     #[cfg(not(all(ferrix_personality = "user", ferrix_load_built = "none")))]
     check_make_combining()?;
+    // Before the refused commit, whose frame goes back through a spare's
+    // drop too: a drop that kept its frame is this case's to name.
+    check_an_unused_spare_goes_back()?;
     check_a_refused_commit_gives_its_frame_back()?;
     check_commit_with_uses_a_spare_for_an_absent_page()?;
     check_a_present_file_page_is_served()?;
     check_refills_bound_a_fault()?;
-    check_an_unused_spare_goes_back()?;
     check_a_spare_is_never_held_across_a_fill()?;
     check_a_task_counts_its_faults()?;
     check_no_spare_near_a_limit()?;
@@ -1411,7 +1413,8 @@ fn check_a_present_file_page_is_served() -> Result<(), &'static str> {
 }
 
 /// A fill whose page is taken back every time ends the fault Unreadable
-/// within the fault's rounds.
+/// within the fault's rounds: at most 32 fills, a fill and the look after it
+/// a round each.
 ///
 /// Verifies: L.user.223
 fn check_refills_bound_a_fault() -> Result<(), &'static str> {
@@ -1437,8 +1440,10 @@ fn check_refills_bound_a_fault() -> Result<(), &'static str> {
     if space.fault(shared, Access::READ) != Err(SpaceError::Unreadable(shared)) {
         return Err("a fault whose page was taken back every time did not end Unreadable");
     }
+    // A fill and the look that finds its page gone take a round each, so the
+    // 64 rounds hold 32 fills at most.
     let calls = source.calls.load(Ordering::Relaxed);
-    if calls == 0 || calls > 64 {
+    if calls == 0 || calls > 32 {
         return Err("a fault whose page was taken back every time filled past its rounds");
     }
     Ok(())

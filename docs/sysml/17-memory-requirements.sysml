@@ -3388,7 +3388,7 @@ package FerrixMemoryRequirements {
                 about 32 times, and one that needs a fill and an ask about 21.";
             attribute :>> criterion = "The rehome check's refill case: a source that
                 takes back every page it fills ends the fault Unreadable after between 1
-                and 64 fills.";
+                and 32 fills.";
             attribute :>> parent = "H.MEM.1";
             attribute :>> unit = ("user::space::AddressSpace::fault_with");
         }
