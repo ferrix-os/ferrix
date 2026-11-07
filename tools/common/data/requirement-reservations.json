@@ -13,6 +13,15 @@
   "reservations": [
     {
       "ids": [
+        "L.user.226"
+      ],
+      "owner": "ef-fix",
+      "branch": "perf/ef-load-fixes",
+      "date": "2026-11-07",
+      "purpose": "Endfield load time: /proc's resident count reused while recent for its cost, a fresh count below 200 us and a 1 s cap (consultant ledger 7812 E.1)"
+    },
+    {
+      "ids": [
         "L.object.372",
         "L.user.220-225"
       ],
