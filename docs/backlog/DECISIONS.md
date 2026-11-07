@@ -19,6 +19,14 @@ otherwise; one a later decision replaced is deleted, and the history keeps it.
   `ferrix.fastpath=on` costs 918 to 928 ns against 898 to 908 on #38's tree.
   The cost is found and removed before PR #50 lands, measured by the
   optimize-ipc-round-trip skill's protocol.
+* **2026-11-07 (customer, through the product owner's session)** **The `call`
+  row's cost is not accepted either**: on the -2 branch's ad0b4e7ed against
+  develop 09723c941, `present` with the fast path on, `bench-ipc`'s
+  `domain-call` read 1.000 (729 against 739 ns) but its `call` row (a client
+  outside a speculation domain, an IBPB at every switch) read 2,916 to 2,956
+  ns against 2,816 to 2,836, about +4%, in all five rounds. That cost is also
+  removed before PR #50's successor lands, both rows within noise of develop,
+  by the same protocol.
 * **2026-11-05 (customer)** **The optional kernel parts live in
   `src/kernel/extensions/<group>/<name>/`**: "ok i like src/kernel/extensions".
   Over the design's `src/kernel-parts/` and the first suggestion, `src/lib/kernel/`
