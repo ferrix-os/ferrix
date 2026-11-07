@@ -67,8 +67,10 @@ Causes are listed most likely first.
 | [FX-0534](#fx-0534) | a task's run or sleep slot was given back while it held one |
 | [FX-0535](#fx-0535) | a channel end was closed with interrupts masked |
 | [FX-0536](#fx-0536) | the view of a blocked task read it wrongly |
-| [FX-0537](#fx-0537) | a task a processor runs was found waiting in a run queue |
+| [FX-0537](#fx-0537) | a task tried to block in an interrupt |
+| [FX-0538](#fx-0538) | a task was about to run outside its scheduling domain |
 | [FX-0539](#fx-0539) | a task with a real-time policy had no node to be queued with |
+| [FX-0540](#fx-0540) | a task a processor runs was found waiting in a run queue |
 | [FX-0601](#fx-0601) | the memory a process is built from failed its self-check |
 | [FX-0602](#fx-0602) | a page taken from a mapped object stayed reachable, or was not taken as it should be |
 | [FX-0701](#fx-0701) | the system call dispatch path failed its self-check |
@@ -1341,7 +1343,66 @@ src/kernel/src/mm.rs; src/kernel/src/arch/inspect.rs; docs/DEBUG.md.
 
 <a id="fx-0537"></a>
 
-## FX-0537 — a task a processor runs was found waiting in a run queue
+## FX-0537 — a task tried to block in an interrupt
+
+An interrupt handler may not block: there is no task of its own to wait as, and
+the one it interrupted would never get back. A lock held across a block is
+FX-0503.
+
+1. A drop that can reach a sleep ran in an interrupt: a task's last reference is
+   handed to the reaper for that reason (`sched::leftovers`, F-104), and
+   anything else that does as much needs the same.
+
+See: src/kernel/src/sched/mod.rs require_may_sleep;
+src/kernel/src/sched/leftovers.rs.
+
+<a id="fx-0538"></a>
+
+## FX-0538 — a task was about to run outside its scheduling domain
+
+Each processor names the scheduling domain it is in, and each task the domain it
+runs in (docs/SCHED-CLASSES.md §9f): the boot domain, or the one `SoftRt` domain
+made at run time. A task runs only on a processor of its own domain (D-1), the
+per-processor kernel tasks excepted. Every placement, steal, pull and wake asks
+that under the target processor's queue lock, and a task's domain or a
+processor's changes only under that lock; so a pick, a move between queues or a
+direct switch that finds a task outside the processor's domain has found a
+placement that skipped the question, and the machine is stopped before the task
+runs where its domain's guarantee does not hold (V2).
+
+1. A path queued a task on a processor without asking `domains::admits` under
+   that processor's lock: a new placement, steal or wake that bypassed
+   `may_place`.
+2. A processor leaving the boot domain did not move what it held before its pick
+   (`sched::rehome_waiting`), or a running task outside its domain was picked
+   again rather than taken off (`sched::depart`).
+3. A task's domain, or a processor's, was changed without the queue lock that
+   owns it (`domains::settle_task`, `domains::set_slots`).
+
+See: src/kernel/src/sched/domains.rs; src/kernel/src/sched/mod.rs move_onto,
+depart and require_admitted; src/kernel/src/sched/direct.rs;
+docs/SCHED-CLASSES.md §9f.
+
+<a id="fx-0539"></a>
+
+## FX-0539 — a task with a real-time policy had no node to be queued with
+
+A task that asks for `SCHED_FIFO` or `SCHED_RR` is given its node of the tier
+above fair before the policy is stored, and only the queue holding the task
+takes the node from its cell. A task being queued with a real-time policy and an
+empty cell has broken that rule. Queued as fair, it would run at the wrong tier
+while every test of its policy says it is real-time, so the machine is stopped
+(L.sched.129, ledger 5684's C3).
+
+1. A path stored a real-time policy before it put the node in the cell
+   (`sched::set_policy`, `sched::prepare_user`).
+2. A task was queued while a queue still held it, so that queue holds the node.
+
+See: src/kernel/src/sched/task.rs Task::entity_with; docs/SCHED-CLASSES.md §9e.
+
+<a id="fx-0540"></a>
+
+## FX-0540 — a task a processor runs was found waiting in a run queue
 
 A task is marked as on a processor from the moment a switch to it commits until
 the switch away from it has saved its context, both under the lock of the queue
@@ -1359,30 +1420,6 @@ consultant's container review 30 (not on record; ledger 5684), B1).
 
 See: src/kernel/src/sched/queue.rs CpuQueue::set_policy and pick_next;
 src/kernel/src/sched/mod.rs move_onto; docs/SCHED-CLASSES.md §9e.
-
-<a id="fx-0539"></a>
-
-## FX-0539 — a task with a real-time policy had no node to be queued with
-
-A task that asks for `SCHED_FIFO` or `SCHED_RR` is given its node of the tier
-above fair before the policy is stored, and only the queue holding the task
-takes the node from its cell. A task being queued with a real-time policy and an
-empty cell has broken that rule. Queued as fair, it would run at the wrong tier
-while every test of its policy says it is real-time, so the machine is stopped
-(L.sched.129, ledger 5684's C3).
-
-1. A path queued a task on a processor without asking `domains::admits` under
-   that processor's lock: a new placement, steal or wake that bypassed
-   `may_place`.
-2. A processor leaving the boot domain did not move what it held before its pick
-   (`sched::rehome_waiting`), or a running task outside its domain was picked
-   again rather than taken off (`sched::depart`).
-3. A task's domain, or a processor's, was changed without the queue lock that
-   owns it (`domains::settle_task`, `domains::set_slots`).
-
-See: src/kernel/src/sched/domains.rs; src/kernel/src/sched/mod.rs move_onto,
-depart and require_admitted; src/kernel/src/sched/direct.rs;
-docs/SCHED-CLASSES.md §9f.
 
 <a id="fx-0601"></a>
 

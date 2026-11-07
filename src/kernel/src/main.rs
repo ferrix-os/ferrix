@@ -1302,6 +1302,12 @@ fn start_scheduler(cpus: &'static smp::Topology) {
             "could not start the scheduler: {problem}"
         );
     }
+    if let Err(problem) = sched::start_reaper() {
+        fatal!(
+            catalog::SCHEDULER_BRING_UP,
+            "could not start the scheduler: {problem}"
+        );
+    }
     // First thing once a task can run: on the Pixel 7 the watchdogs have
     // been counting since the loader, and the checks below take seconds.
     arch::start_watchdogs();
@@ -2223,7 +2229,7 @@ fn check_user_shape() {
         Ok(cases) => println!("  window   an unmap's {cases} decisions held"),
         Err(why) => fatal!(catalog::WINDOW_UNMAP, "window self-check failed: {why}"),
     }
-    #[cfg(ferrix_schedule = "edf")]
+    #[cfg(ferrix_sched_deadline = "edf_cbs")]
     match sched::reserve_check::run() {
         Ok(()) => println!("  edf      a budget's rules held, an unschedulable set refused"),
         Err(why) => fatal!(catalog::SCHEDULE_EDF, "edf self-check failed: {why}"),

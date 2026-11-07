@@ -152,8 +152,13 @@ fn start_task(
             args,
         });
     }
-    sched::spawn("addrwait waiter", waiter, slot, ferrix_sched::NICE_0_WEIGHT)
-        .map_err(|_| "addrwait: could not start a waiter")
+    sched::spawn(
+        "addrwait waiter",
+        waiter,
+        slot,
+        ferrix_sched_fair::NICE_0_WEIGHT,
+    )
+    .map_err(|_| "addrwait: could not start a waiter")
 }
 
 /// Slot `slot`'s answer, waiting up to `nanos` for it; `None` if it has none

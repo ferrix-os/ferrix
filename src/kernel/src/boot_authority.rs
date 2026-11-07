@@ -134,7 +134,7 @@ pub(crate) fn seal() {
             crate::mm::seal::report();
         }
     }
-    if crate::sched::spawn("seal report", report, 0, ferrix_sched::NICE_0_WEIGHT).is_err() {
+    if crate::sched::spawn("seal report", report, 0, ferrix_sched_fair::NICE_0_WEIGHT).is_err() {
         println!("  retyped  no task to report on");
     }
     println!("  retyped  sealed");
@@ -574,7 +574,7 @@ fn watch_manager(bare: Arc<Bare>) {
             core.exit_status()
         );
     }
-    if crate::sched::spawn("manager watch", watch, 0, ferrix_sched::NICE_0_WEIGHT).is_err() {
+    if crate::sched::spawn("manager watch", watch, 0, ferrix_sched_fair::NICE_0_WEIGHT).is_err() {
         fatal!(catalog::FIRST_PROCESSES, "no task to watch the manager on");
     }
 }

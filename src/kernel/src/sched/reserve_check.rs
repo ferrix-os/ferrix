@@ -5,7 +5,8 @@
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
-use ferrix_sched::{CpuSet, NICE_0_WEIGHT};
+use ferrix_sched_class::CpuSet;
+use ferrix_sched_fair::NICE_0_WEIGHT;
 
 use super::reserve::{self, Refusal, Reservation};
 use super::{Task, spawn_on, wait_until_gone};

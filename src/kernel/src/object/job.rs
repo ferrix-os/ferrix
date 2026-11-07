@@ -212,6 +212,26 @@ pub struct Job {
     domain: u64,
     /// Sealed as it was made, as is every job made inside it (`H.OBJ.22`).
     sealed: bool,
+    /// Its processes' executable memory comes only from sealed, measured VMOs
+    /// (`docs/microkernel/K14.md` §3). Set once, never cleared; inherited by
+    /// every job made inside it.
+    measured: AtomicBool,
+    /// A process in it, or in a job inside it, was granted a device that needs a
+    /// certified driver: nobody may attach a supervisor from now on (K14 §5).
+    granted_below: AtomicBool,
+    /// A supervisor was attached by something that does not pass: nothing in it
+    /// or below it passes, however its image reads (K14 §5, G.3).
+    supervised_outside: AtomicBool,
+    /// Its criticality level, fixed as it is made and at most its parent's
+    /// (`docs/microkernel/K17.md`).
+    level: u8,
+    /// Whether it or a job above it asked for a level: what K14's rules read,
+    /// since a job that never asked is at the top by inheritance alone.
+    declared: bool,
+    /// Its supervisor slot (`docs/microkernel/K4.md` §2.2): the exception
+    /// channel attached to it, if any, which hears the faults of every
+    /// process in it and in the jobs inside it.
+    supervisor: Supervisor,
     /// The scheduling domain it was admitted to (`sched::domains`,
     /// docs/SCHED-CLASSES.md §9f, V10), as that domain's word: zero for
     /// none, when it is in its parent's, and so in the boot domain at the
@@ -451,6 +471,12 @@ impl Job {
             audit_budget,
             domain: 0,
             sealed: false,
+            measured: AtomicBool::new(false),
+            granted_below: AtomicBool::new(false),
+            supervised_outside: AtomicBool::new(false),
+            level: ferrix_native_abi::types::JOB_LEVEL_TOP,
+            declared: false,
+            supervisor: Supervisor::new(),
             sched_domain: AtomicU32::new(0),
         })
     }

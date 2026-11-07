@@ -49,7 +49,7 @@
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use ferrix_sched::{CpuSet, MAX_CPUS};
+use ferrix_sched_class::{CpuSet, MAX_CPUS};
 use ferrix_sync::IrqControl;
 
 use super::queue::CpuQueue;
@@ -67,7 +67,7 @@ pub enum AffinityRefusal {
     /// (A1), Linux's `cpu_active_mask`).
     Empty,
     /// A reservation holds its processor (ledger 7088 E.3).
-    #[cfg(ferrix_schedule = "edf")]
+    #[cfg(ferrix_sched_deadline = "edf_cbs")]
     Reserved,
 }
 
@@ -76,25 +76,45 @@ fn in_service_set() -> CpuSet {
     CpuSet::from_words(ACTIVE.each_ref().map(|word| word.load(Ordering::Acquire)))
 }
 
+/// The processors of `task`'s scheduling domain now
+/// (`docs/SCHED-CLASSES.md` §9f): the boot domain's, or a `SoftRt` domain's
+/// for a task admitted to one.
+fn own_cpus(task: &Task) -> CpuSet {
+    super::domains::cpus_of(task.domain_slot(), super::online())
+}
+
 /// The set `task`'s placement is asked against beside `placeable`: its
-/// stored mask; or, for a task that runs a program whose stored mask names
-/// no processor in service, every processor of the domain, the fallback
-/// (L.sched.123: a mask never vetoes a park). A kernel thread's spawn mask
-/// stands as it is: the per-processor kernel tasks stay where they are.
+/// stored mask within its scheduling domain; or, for a task that runs a
+/// program whose stored mask names no processor of its domain in service,
+/// every processor of its domain, the fallback (L.sched.123: a mask never
+/// vetoes a park; nor a domain's switch, as a cpuset's change does not on
+/// Linux). A kernel thread's spawn mask stands as it is: the per-processor
+/// kernel tasks stay where they are, and the domain is [`allowed`]'s other
+/// conjunct.
 pub(crate) fn mask_for(task: &Task) -> CpuSet {
     let stored = task.affinity();
-    if task.thread().is_none() || !stored.intersection(&in_service_set()).is_empty() {
+    if task.thread().is_none() {
         return stored;
     }
-    domain_cpus().copied().unwrap_or(stored)
+    let own = own_cpus(task);
+    let inside = stored.intersection(&own);
+    if inside.intersection(&in_service_set()).is_empty() {
+        own
+    } else {
+        inside
+    }
 }
 
 /// Whether `task`'s mask allows `cpu` (L.sched.97): the conjunct every
 /// placer asks beside `placeable(cpu)`. One word and one bit when the
 /// stored mask names `cpu` and `cpu` is in service, for then the mask is the
 /// stored one.
+///
+/// And its domain admits it there (D-1): asked first, so that no mask, the
+/// fallback's included, places a task outside its domain.
 pub(crate) fn allowed(task: &Task, cpu: usize) -> bool {
-    (task.may_run_on(cpu) && super::in_service(cpu)) || mask_for(task).contains(cpu)
+    super::domains::admits(task, cpu)
+        && ((task.may_run_on(cpu) && super::in_service(cpu)) || mask_for(task).contains(cpu))
 }
 
 /// Whether `task`'s mask names one processor or none: never stolen,
@@ -120,7 +140,7 @@ pub fn effective_mask(task: &Task) -> CpuSet {
 /// (L.sched.96); [`AffinityRefusal::Empty`] when nothing is left.
 pub fn set_affinity(task: &Arc<Task>, asked: &CpuSet) -> Result<CpuSet, AffinityRefusal> {
     // A reservation holds its processor (ledger 7088 E.3).
-    #[cfg(ferrix_schedule = "edf")]
+    #[cfg(ferrix_sched_deadline = "edf_cbs")]
     if super::reserve::holds(task) {
         return Err(AffinityRefusal::Reserved);
     }
@@ -228,9 +248,11 @@ pub(crate) fn keep_inside() {
 }
 
 /// Whether the way out may let go of `PLACE` for the running task: its mask
-/// is the whole domain again, so no placement can leave it outside.
+/// holds its whole scheduling domain again, so no placement can leave it
+/// outside. Read again at each way out: an admission changes the domain.
 pub(crate) fn unmasked(task: &Task) -> bool {
-    domain_cpus().is_some_and(|domain| domain.intersection(&task.affinity()) == *domain)
+    let own = own_cpus(task);
+    own.intersection(&task.affinity()) == own
 }
 
 /// Processors with a task to push off at the switch's tail ([`push_off`]),
@@ -273,12 +295,16 @@ pub(crate) fn pushed() -> u64 {
 }
 
 /// The processors `task` may be pushed to from `home`, best first: idle
-/// ones (`IDLE`), then the rest, lowest first; each allowed and placeable.
-fn destinations(task: &Task, home: usize) -> impl Iterator<Item = usize> {
+/// ones (`IDLE`), then the rest, lowest first; each allowed, in its domain
+/// and placeable.
+fn destinations(task: &Task, home: usize) -> impl Iterator<Item = usize> + '_ {
     let mask = mask_for(task);
     let idle = IDLE.load(Ordering::SeqCst);
     let is_idle = move |cpu: usize| cpu < 64 && idle & (1_u64 << cpu) != 0;
-    let usable = move |cpu: &usize| *cpu != home && mask.contains(*cpu) && placeable(*cpu);
+    // Its domain too (D-1): a kernel thread's mask is not narrowed to it.
+    let usable = move |cpu: &usize| {
+        *cpu != home && mask.contains(*cpu) && super::domains::admits(task, *cpu) && placeable(*cpu)
+    };
     let first = (0..MAX_CPUS)
         .filter(usable)
         .filter(move |&cpu| is_idle(cpu));
@@ -310,10 +336,14 @@ pub(super) fn push_picked(queue: &mut CpuQueue, home: usize, task: &Arc<Task>) -
         let Some(mut theirs) = theirs else {
             continue;
         };
-        let Some((task, state)) = queue.release(task.id) else {
+        // Its domain, asked again under `to`'s lock (V5).
+        if !super::domains::admits(task, to) {
+            continue;
+        }
+        let Some(task) = queue.release(task.id, task.queued_upper()) else {
             return false;
         };
-        move_onto(&task, Some(state), to, &mut theirs);
+        move_onto(&task, to, &mut theirs);
         drop(theirs);
         let _ = PUSHED.fetch_add(1, Ordering::Relaxed);
         kick(to);
@@ -336,7 +366,14 @@ pub(super) fn push_off(task: &Arc<Task>, home: usize) {
     };
     if to == home {
         let mut queue = mine.lock();
-        move_onto(task, None, home, &mut queue);
+        // Its domain asked under the lock it changes under (V5): a task its
+        // domain no longer has here is placed in it, as an evicted one is.
+        if !super::domains::admits(task, home) {
+            drop(queue);
+            super::domains::push_moving(Arc::clone(task));
+            return;
+        }
+        move_onto(task, home, &mut queue);
         return;
     }
     let (first, second) = if home < to {
@@ -351,7 +388,13 @@ pub(super) fn push_off(task: &Arc<Task>, home: usize) {
     } else {
         &mut *first_queue
     };
-    move_onto(task, None, to, destination);
+    if !super::domains::admits(task, to) {
+        drop(second_queue);
+        drop(first_queue);
+        super::domains::push_moving(Arc::clone(task));
+        return;
+    }
+    move_onto(task, to, destination);
     drop(second_queue);
     drop(first_queue);
     let _ = PUSHED.fetch_add(1, Ordering::Relaxed);

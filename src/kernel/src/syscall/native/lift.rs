@@ -68,7 +68,7 @@ mod served {
 
     /// `THREAD_RESERVE`: the kernel's own authority, a job handle with `SET_LIMIT`, ahead of
     /// anything linuxd asks of a program (ledger 7088 E.2).
-    #[cfg(ferrix_schedule = "edf")]
+    #[cfg(ferrix_sched_deadline = "edf_cbs")]
     fn thread_reserve(process: &Process, a: &[u64; 6]) -> Result<usize, Errno> {
         use crate::sched::reserve::{self, Refusal, Reservation};
         let job = super::super::job_in(
@@ -107,7 +107,7 @@ mod served {
     }
 
     /// Without `schedule=edf`, the call has no body.
-    #[cfg(not(ferrix_schedule = "edf"))]
+    #[cfg(not(ferrix_sched_deadline = "edf_cbs"))]
     fn thread_reserve(_: &Process, _: &[u64; 6]) -> Result<usize, Errno> {
         Err(status::NOT_SUPPORTED)
     }
@@ -158,7 +158,7 @@ mod served {
                 })
             }
             NativeCall::ThreadAffinity => {
-                let mut words = [0_u64; ferrix_sched::WORDS];
+                let mut words = [0_u64; ferrix_sched_class::WORDS];
                 let wanted = a[2] as usize;
                 if wanted > words.len() {
                     return Err(status::INVALID_ARGS);
@@ -180,9 +180,9 @@ mod served {
                     }
                     thread.task().ok_or(status::BAD_STATE)?
                 };
-                let set = ferrix_sched::CpuSet::from_words(words);
+                let set = ferrix_sched_class::CpuSet::from_words(words);
                 let _ = crate::sched::set_affinity(&task, &set).map_err(|why| match why {
-                    #[cfg(ferrix_schedule = "edf")]
+                    #[cfg(ferrix_sched_deadline = "edf_cbs")]
                     crate::sched::AffinityRefusal::Reserved => status::ALREADY_BOUND,
                     _ => status::INVALID_ARGS,
                 })?;

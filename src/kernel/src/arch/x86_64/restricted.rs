@@ -448,8 +448,8 @@ fn all_calls_exit() -> bool {
 const FAST: bool = cfg!(ferrix_restricted_fastpath = "on");
 
 /// `CR0.TS` is set on this processor by [`fast_exit`]. Read at every switch: one byte.
-static TS_SET: [core::sync::atomic::AtomicBool; ferrix_sched::MAX_CPUS] =
-    [const { core::sync::atomic::AtomicBool::new(false) }; ferrix_sched::MAX_CPUS];
+static TS_SET: [core::sync::atomic::AtomicBool; ferrix_sched_class::MAX_CPUS] =
+    [const { core::sync::atomic::AtomicBool::new(false) }; ferrix_sched_class::MAX_CPUS];
 
 #[inline(always)]
 fn ts_set_here() -> Option<&'static core::sync::atomic::AtomicBool> {
@@ -583,16 +583,17 @@ static WINDOWS_LIVE: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU
 
 /// The space whose window this processor holds, null for none: the mark every way in reads first.
 #[cfg(ferrix_restricted_window = "on")]
-static WINDOW_OPEN: [core::sync::atomic::AtomicPtr<AddressSpace>; ferrix_sched::MAX_CPUS] =
-    [const { core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()) }; ferrix_sched::MAX_CPUS];
+static WINDOW_OPEN: [core::sync::atomic::AtomicPtr<AddressSpace>; ferrix_sched_class::MAX_CPUS] =
+    [const { core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()) };
+        ferrix_sched_class::MAX_CPUS];
 /// Trips and declines, this processor's, for the row and the check.
 #[cfg(ferrix_restricted_window = "on")]
-static WINDOW_TRIPS: [core::sync::atomic::AtomicU64; ferrix_sched::MAX_CPUS] =
-    [const { core::sync::atomic::AtomicU64::new(0) }; ferrix_sched::MAX_CPUS];
+static WINDOW_TRIPS: [core::sync::atomic::AtomicU64; ferrix_sched_class::MAX_CPUS] =
+    [const { core::sync::atomic::AtomicU64::new(0) }; ferrix_sched_class::MAX_CPUS];
 /// See [`WINDOW_TRIPS`].
 #[cfg(ferrix_restricted_window = "on")]
-static WINDOW_DECLINES: [core::sync::atomic::AtomicU64; ferrix_sched::MAX_CPUS] =
-    [const { core::sync::atomic::AtomicU64::new(0) }; ferrix_sched::MAX_CPUS];
+static WINDOW_DECLINES: [core::sync::atomic::AtomicU64; ferrix_sched_class::MAX_CPUS] =
+    [const { core::sync::atomic::AtomicU64::new(0) }; ferrix_sched_class::MAX_CPUS];
 /// The stub's page and the canary's, once each for the machine, zero until the first window.
 #[cfg(ferrix_restricted_window = "on")]
 static WINDOW_SHARED: [core::sync::atomic::AtomicU64; 2] =

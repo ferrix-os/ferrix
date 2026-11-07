@@ -57,7 +57,7 @@ use ferrix_frame::{Frame, Frames, PageEntry};
 use ferrix_heap::{Backing, CpuCache, Heap, Request};
 use ferrix_paging::coherence::{Clean, Unpublished, Walked};
 use ferrix_paging::{Encoding, MapFlags, Mapper, PhysAddr, PhysMem, Released, VirtAddr};
-use ferrix_sched::MAX_CPUS;
+use ferrix_sched_class::MAX_CPUS;
 use ferrix_sync::IrqControl;
 use ferrix_sync::IrqSpinLock;
 

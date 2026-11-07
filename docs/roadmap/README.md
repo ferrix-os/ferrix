@@ -221,7 +221,7 @@ single file across.
 |  | [Chrome — a browser on Ferrix](chrome.md) | ◐ in progress | headless and in a window, 2026-09-24; the DK1 ≈ 45–55 points |
 |  | [Claude Code — Anthropic's coding agent on Ferrix](claude-code.md) | ◐ in progress | the command line, 2026-09-30; the desktop app assessed, 2026-10-14 |
 | 13 | [Namespaces, cgroups v2, seccomp](stage-13-namespaces-cgroups-v2-seccomp.md) | ✓ done | month |
-|  | [Namespace and cgroup follow-ons](follow-ons.md) | ◐ in progress | unsized; built 2026-10-26, landing owed |
+|  | [Namespace and cgroup follow-ons](follow-ons.md) | ✓ done | unsized; built and landed 2026-10-26 |
 | 14 | [Real-time domains](stage-14-real-time-domains.md) | ◐ in progress | month |
 | 15 | [A real userland](stage-15-real-userland.md) | ◐ in progress | week |
 | 16 | [`rustc`](stage-16-rustc.md) | ✓ done | the goal; ≈ 40 guessed, 8 spent |

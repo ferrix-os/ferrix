@@ -199,7 +199,7 @@ pub(crate) fn begin(caller: &Task, peer: &Task) -> Result<Direct, Count> {
     }
     // Reservations take the long way: this one way in never passes over one, and neither
     // end's budget is charged on a path that does not charge it (ledger 7088 E.5).
-    #[cfg(ferrix_schedule = "edf")]
+    #[cfg(ferrix_sched_deadline = "edf_cbs")]
     if queue.fair.runs_reserved()
         || queue.fair.any_ready()
         || queue.fair.is_reserved(caller.id)

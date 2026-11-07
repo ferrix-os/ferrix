@@ -643,7 +643,8 @@ def audit_field_problems(flag_file: dict, profiles: list[str]) -> list[str]:
 # Rule 6e (docs/KERNEL-CRATES.md section 6; ledger 3558 (11), 3623 (R3)): a
 # removable crate's flag selects code in the composition root alone. Besides
 # main.rs, only the flag lists that name every declared value by rule 6 may
-# name it: build_flags.rs's table and sched_select.rs's flag word.
+# name it: build_flags.rs's table and sched_select.rs's flag word, as
+# lift_core.rs's is under linuxd (docs/microkernel/M5-LIFT.md §1).
 MANIFEST = ROOT / "tools" / "common" / "data" / "certification-item.json"
 COMPOSITION_ROOT = "src/kernel/src/main.rs"
 

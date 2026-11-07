@@ -109,7 +109,7 @@ fn take_down(
     space: &AddressSpace,
     at: u64,
     pages: u64,
-) -> Result<(crate::smp::TlbPages, Option<ferrix_sched::CpuSet>), &'static str> {
+) -> Result<(crate::smp::TlbPages, Option<ferrix_sched_class::CpuSet>), &'static str> {
     let range = PageRange::from_len(at, pages * PAGE_SIZE).map_err(|_| "a range")?;
     Ok(space.window_take_down(range))
 }
@@ -117,7 +117,7 @@ fn take_down(
 /// What `unmap` does after the decision.
 fn finish(
     space: &AddressSpace,
-    cpus: Option<ferrix_sched::CpuSet>,
+    cpus: Option<ferrix_sched_class::CpuSet>,
     flush: &mut crate::smp::TlbPages,
 ) {
     if let Some(cpus) = cpus {

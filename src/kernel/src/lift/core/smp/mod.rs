@@ -9,8 +9,8 @@ use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering;
 use ferrix_bootinfo::BootView;
 use ferrix_bootinfo::PAGE_SIZE;
-use ferrix_sched::CpuSet;
-use ferrix_sched::MAX_CPUS;
+use ferrix_sched_class::CpuSet;
+use ferrix_sched_class::MAX_CPUS;
 use ferrix_sync::IrqControl;
 use ferrix_sync::Once;
 #[repr(C)]
@@ -94,11 +94,11 @@ impl CpuMask {
     }
     pub fn join(&self, cpu: usize) {}
     pub fn leave(&self, cpu: usize) {}
-    pub fn snapshot(&self) -> ferrix_sched::CpuSet {
-        ferrix_sched::CpuSet::empty()
+    pub fn snapshot(&self) -> ferrix_sched_class::CpuSet {
+        ferrix_sched_class::CpuSet::empty()
     }
 }
-pub fn add_cpus(into: &mut ferrix_sched::CpuSet, from: &ferrix_sched::CpuSet) {}
+pub fn add_cpus(into: &mut ferrix_sched_class::CpuSet, from: &ferrix_sched_class::CpuSet) {}
 /// A shootdown: `mm::unmap_in` asked the kernel, which ran it.
 #[derive(Debug)]
 pub struct TlbPages {
@@ -127,4 +127,4 @@ impl TlbPages {
     pub fn add_range(&mut self, start: u64, len: u64) {}
     pub fn add_all(&mut self, other: &mut TlbPages) {}
 }
-pub fn flush_tlb_pages(cpus: &ferrix_sched::CpuSet, pages: &mut TlbPages) {}
+pub fn flush_tlb_pages(cpus: &ferrix_sched_class::CpuSet, pages: &mut TlbPages) {}
