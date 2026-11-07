@@ -1511,7 +1511,7 @@ impl Task {
     /// load and a store; the fault may have been on another process's space
     /// (a copy through `with_page`), and still counts here, as the running
     /// task's.
-    pub fn note_fault(&self) {
+    pub(crate) fn note_fault(&self) {
         let major = self.fault_read_disk.swap(false, Ordering::Relaxed);
         let [all, majors] = &self.faults;
         all.store(
@@ -1528,7 +1528,7 @@ impl Task {
 
     /// It took a spare frame (`up`) or let one go: only the task itself, so a
     /// load and a store.
-    pub fn note_spare(&self, up: bool) {
+    pub(crate) fn note_spare(&self, up: bool) {
         let held = self.spares_held.load(Ordering::Relaxed);
         let held = if up {
             held.wrapping_add(1)
@@ -1539,12 +1539,12 @@ impl Task {
     }
 
     /// The spare frames it holds.
-    pub fn spares_held(&self) -> u32 {
+    pub(crate) fn spares_held(&self) -> u32 {
         self.spares_held.load(Ordering::Relaxed)
     }
 
     /// A fault of its own begins: a disk read before it was no part of it.
-    pub fn begin_fault(&self) {
+    pub(crate) fn begin_fault(&self) {
         self.fault_read_disk.store(false, Ordering::Relaxed);
     }
 

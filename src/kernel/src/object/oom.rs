@@ -106,12 +106,12 @@ pub const MOST_ANSWERS: u32 = 1024;
 /// held for a fault's commit, microseconds, so a few pauses see every one
 /// that was held when the limit refused go back, and a machine faulting
 /// without pause still reaches its kill.
-pub const SPARE_WAITS: u32 = 16;
+pub(crate) const SPARE_WAITS: u32 = 16;
 
 /// Whether the answer to a fault's `attempt` is a pause for the `held`
 /// spare frames to go back, rather than a reclaim or a kill
 /// (`L.user.228`): while any is held, for the first [`SPARE_WAITS`].
-pub const fn waits_for_spares(attempt: u32, held: u64) -> bool {
+pub(crate) const fn waits_for_spares(attempt: u32, held: u64) -> bool {
     attempt < SPARE_WAITS && held != 0
 }
 

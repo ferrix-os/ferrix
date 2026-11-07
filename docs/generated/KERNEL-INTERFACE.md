@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-3016 declarations in the core's files, 215 in the item's; 245 checks-only.
+3019 declarations in the core's files, 215 in the item's; 245 checks-only.
 
 ## ferrix-kernel-core
 
@@ -3152,6 +3152,9 @@ checks above is `pub` for raised checks (F3).
 | `Task::is_dead` | method | load |  |
 | `Task::is_queued` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Task::kernel_time` | method | item, load |  |
+| `Task::major_faults` | method | load |  |
+| `Task::minor_faults` | method | load |  |
+| `Task::note_fault_read_disk` | method | load |  |
 | `Task::preemptions` | method | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Task::request_ns` | method | load |  |
 | `Task::runtime` | method | item, load |  |
