@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "504814a849d84f7950570ede5cff4327d6fa5a435b216d1e4559c6c8efb94f5f",
+  "digest": "d9d453724b81a5db5b0775369456ff2ce2ae6650021d06b7f4dc578f53860e6b",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -53460,10 +53460,10 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::theSoftDomainsRefusals",
                       "kind": "attribute",
                       "redefines": "statement",
-                      "value": "\"domains::create_soft shall refuse Unavailable in a build without the realtime tier, TooFew below four processors, Count for no processors or more than all but two, and Exists while a domain exists or is being made, each before anything changes; its processors are the highest-numbered.\"",
+                      "value": "\"domains::create_soft shall refuse Unavailable in a build without the realtime tier, TooFew below four processors in service, Count for no processors or more than all but two of those in service, and Exists while a domain exists or is being made, each before anything changes; its processors are the highest-numbered in service, never the boot processor; and a processor of a SoftRt domain shall be refused removal from service.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1842
+                        "line": 1844
                       }
                     },
                     {
@@ -53471,10 +53471,10 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::theSoftDomainsRefusals",
                       "kind": "attribute",
                       "redefines": "criterion",
-                      "value": "\"The stage-5 domain check: on desktop with four processors, a domain of none and of three refused Count and a second refused Exists; on present, Unavailable.\"",
+                      "value": "\"The stage-5 domain check: on desktop with four processors, a domain of none and of three refused Count and a second refused Exists, and the domain's processor refused removal from service; on present, Unavailable.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1845
+                        "line": 1848
                       }
                     },
                     {
@@ -53485,7 +53485,7 @@
                       "value": "\"H.SCHED.25\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1846
+                        "line": 1849
                       }
                     },
                     {
@@ -53493,10 +53493,10 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::theSoftDomainsRefusals",
                       "kind": "attribute",
                       "redefines": "unit",
-                      "value": "\"sched::domains::create_soft\"",
+                      "value": "(\"sched::domains::create_soft\", \"sched::service_refusal\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1847
+                        "line": 1850
                       }
                     }
                   ]
@@ -53509,7 +53509,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1849
+                    "line": 1852
                   },
                   "children": [
                     {
@@ -53520,7 +53520,7 @@
                       "value": "\"The direct switch shall decline (T11) a parked peer its processor does not admit, which the ordinary wake then places in its domain.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1852
+                        "line": 1855
                       }
                     },
                     {
@@ -53531,7 +53531,7 @@
                       "value": "\"Review of direct::begin, whose decline is counted; L.sched.140's hand-over stop behind it.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1854
+                        "line": 1857
                       }
                     },
                     {
@@ -53542,7 +53542,7 @@
                       "value": "\"H.SCHED.23\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1855
+                        "line": 1858
                       }
                     },
                     {
@@ -53553,7 +53553,7 @@
                       "value": "\"sched::direct::begin\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1856
+                        "line": 1859
                       }
                     }
                   ]

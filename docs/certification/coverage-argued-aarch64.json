@@ -1051,119 +1051,119 @@
     },
     {
       "file": "object/process.rs",
-      "lines": "1105",
+      "lines": "1126",
       "category": "defensive",
       "match": "debug_assert!(",
       "why": "The failure half of a debug assertion that interrupts are enabled when a process's watchers are reached: their lock is a plain one, which an interrupt handler may not take. Every caller is a system call or a task's exit, with interrupts on; reaching the row is the assertion firing."
     },
     {
       "file": "object/process.rs",
-      "lines": "1130",
+      "lines": "1151",
       "category": "defensive",
       "match": "debug_assert!(",
       "why": "As `Exit::observe`'s: the failure half of the assertion that interrupts are on when a process's watchers are closed."
     },
     {
       "file": "object/process.rs",
-      "lines": "1278",
+      "lines": "1299",
       "category": "defensive",
       "match": "debug_assert!(",
       "why": "The failure half of the assertion that an unstarted process's last handle is dropped with interrupts on, since the kill it causes may block. Handles close from system calls and exits, with interrupts on; the object check closes unstarted children's handles and reaches the kill."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "1848",
+      "lines": "1861",
       "category": "failure-path",
       "match": "debug_assert!(",
       "why": "The debug assertion's own row is its panic call: a prepared task dropped with interrupts masked, which would free its stack waiting on every processor with interrupts off. The condition is evaluated under line 1105's and 1113's rows, which are reached (an unstarted child's drop at stage 9)."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "2184",
+      "lines": "2200",
       "category": "defensive",
       "match": "arch::wait_for_interrupt();",
       "why": "After the switch away from a dead task, which never returns to it: a dead task is never picked again (stage 5's a_dead_task_is_not_filed_as_a_sleeper, and check_invariants' DEAD_STILL_QUEUED, hold that). If it ever were picked, halting here is the only answer that corrupts nothing."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3973-3975",
+      "lines": "3993-3995",
       "category": "failure-path",
       "match": "preempt_count(cpu),",
       "why": "FX-0503: a task blocked or yielded while holding a lock that disables preemption, which the preemption count cannot survive. The report names the lock's site and stops the machine; a kernel that never blocks under a spin lock never takes it."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "5142-5143",
+      "lines": "5162-5163",
       "category": "failure-path",
       "match": "pub(crate) fn report_queues() {",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "5147",
+      "lines": "5167",
       "category": "failure-path",
       "match": "for (cpu, lock) in queues.iter().enumerate() {",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "5152-5153",
+      "lines": "5172-5173",
       "category": "failure-path",
       "match": "queue.len(),",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "5156-5157",
+      "lines": "5176-5177",
       "category": "failure-path",
       "match": ".and_then(|flags| flags.get(cpu))",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "5161",
+      "lines": "5181",
       "category": "failure-path",
       "match": "}",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "5164-5165",
+      "lines": "5184-5185",
       "category": "failure-path",
       "match": "pub(crate) fn print_picks(cpu: usize) {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "5170",
+      "lines": "5190",
       "category": "failure-path",
       "match": "let Ok(mut picks) = fallible::try_with_capacity::<queue::Pic",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "5174",
+      "lines": "5194",
       "category": "failure-path",
       "match": "for pick in lock.lock().picks() {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "5181",
+      "lines": "5201",
       "category": "failure-path",
       "match": "pick.at / 1000,",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "5186",
+      "lines": "5206",
       "category": "failure-path",
       "match": "for seen in pick.seen.iter().take(pick.count) {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "5196",
+      "lines": "5216",
       "category": "failure-path",
       "match": "}",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."

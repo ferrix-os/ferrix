@@ -159,7 +159,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
 | `sched/direct.rs` | `core` | 36 | - | - | 36 | 111, 119, 134, 169-171, 175-176, 211, 214-216, 223, 238, 244, 248, 250, 271, 301, 309, 311, 322-323, 325-326, 331-333, 335, 337, 342, 345-346, 359-360, 368 |
-| `sched/mod.rs` | `core` | 21 | 2 | 1 | 1 | 1640 |
+| `sched/mod.rs` | `core` | 21 | 2 | 1 | 1 | 1653 |
 | `sched/queue.rs` | `core` | 21 | 0 | 0 | 0 | - |
 | `sched/wait.rs` | `core` | 15 | 0 | 0 | 0 | - |
 | `sched/inspect.rs` | `core` | 13 | - | - | 13 | 101, 161-163, 165-166, 168, 172, 178, 180, 183, 188, 191 |
@@ -215,7 +215,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 |---|---|---:|---:|---:|---:|---|
 | `object/channel.rs` | `core` | 32 | 4 | 4 | 4 | 691-693, 698 |
 | `object/pin.rs` | `core` | 3 | 1 | 21 | 0 | - |
-| `object/process.rs` | `core` | 8 | 3 | 3 | 2 | 206, 241 |
+| `object/process.rs` | `core` | 8 | 3 | 3 | 2 | 212, 247 |
 | `object/quota.rs` | `core` | 4 | 0 | 0 | 0 | - |
 | `object/interrupt.rs` | `core` | 3 | 0 | 0 | 0 | - |
 | `object/mod.rs` | `core` | 0 | 2 | 2 | 0 | - |
