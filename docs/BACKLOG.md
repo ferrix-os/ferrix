@@ -856,6 +856,13 @@ Every such branch on GitHub, grouped by line of work and with which one to
 resume from, is in `docs/roadmap/open-branches.md` (2026-10-01, os-5d).
 This section keeps the detail of the families below.
 
+**To mk-flip (2026-11-07, the product owner, the customer's decision, ledger 7763 DG.5).**
+Your reservation's `schedule=edf` part, H.SCHED.29-30 and L.sched.184-193, moved to
+sched-classes (`feature/sched-classes-on-develop`), which re-homes EDF as the class
+stack's deadline tier (`docs/SCHED-CLASSES.md` §9g). H.SCHED.31 and L.sched.194-199 stay
+yours for `schedule=windows`, which on that stack is `sched_windows=arinc`; FX-0538 to
+FX-0541 are sched-classes'. Ask the product owner if windows needs more.
+
 The wind-downs of 2026-09-13, -14 and -17 surveyed every branch; what is
 left of them, each with its row above: `os-12/ports-autobuild` (the ports
 built when stale) and
