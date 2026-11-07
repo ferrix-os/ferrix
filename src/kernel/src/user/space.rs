@@ -2024,7 +2024,10 @@ impl AddressSpace {
         // its use is filled again; it is never used as zeros (`user::cache`).
         // So is a pager's page a write-back took the write right from. Each
         // round is one of the REFILLS, whether it ended in a fill, an ask of
-        // the pager or a page taken back (`L.user.223`).
+        // the pager or a page taken back (`L.user.223`): a fill and an ask
+        // take a round each, so an object that needs both and loses its page
+        // every time ends after about 21 tries, where one that needs a fill
+        // alone ends after 32.
         let (mut filled, mut asked) = (false, false);
         for _ in 0..REFILLS {
             // A write fault nearly always needs a frame: a fresh page's, or a
@@ -2035,7 +2038,7 @@ impl AddressSpace {
             // frame it needs is asked for under the lock, refused there as
             // before.
             let mut spare = if access.write {
-                Spare::zeroed()
+                Spare::for_fault()
             } else {
                 Spare::none()
             };
@@ -2449,10 +2452,15 @@ impl AddressSpace {
                 let flags = typed(user_page(false, execute), &file);
                 return self.install_page(inner, placed(frame), flags, false);
             }
-            let frame = spare
-                .take()
-                .or_else(mm::allocate_user_frame)
-                .ok_or(SpaceError::OutOfMemory)?;
+            // From the spare, zeroed, or fresh and not: only a spare's frame
+            // may go back into it unwritten (a spare's frame reads as zeros).
+            let (frame, spared) = match spare.take() {
+                Some(frame) => (frame, true),
+                None => (
+                    mm::allocate_user_frame().ok_or(SpaceError::OutOfMemory)?,
+                    false,
+                ),
+            };
             // A snapshot. The file's page is read through the direct map
             // without its object's lock, so a write to the file landing
             // meanwhile may be partly in the copy -- which is Linux's
@@ -2462,9 +2470,13 @@ impl AddressSpace {
             // write, and the file would stop being what its shared mappings
             // show.
             if let Err(error) = copy_or_zero(&file, index, frame) {
-                // Not written: as the spare left it, or a fresh frame
-                // nothing has seen.
-                spare.give_back(frame);
+                // Not written: a spare's frame goes back to it, zeros still;
+                // a fresh one, never zeroed, to the allocator.
+                if spared {
+                    spare.give_back(frame);
+                } else {
+                    Spare::discard(frame);
+                }
                 return Err(error);
             }
             // The shadow lacked the page under this space's lock, and every

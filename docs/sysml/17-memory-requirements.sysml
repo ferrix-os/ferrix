@@ -3381,7 +3381,9 @@ package FerrixMemoryRequirements {
         requirement <'L.user.223'> refillsBoundEveryRound : ItemLowLevel {
             attribute :>> statement = "Each round of a fault, whether it ended in a fill,
                 an ask of the pager or a page taken back, shall count against REFILLS
-                (64), and a fault whose rounds run out shall end Unreadable.";
+                (64), and a fault whose rounds run out shall end Unreadable: a fill and
+                an ask take a round each, so a page lost after every fill is tried
+                about 32 times, and one that needs a fill and an ask about 21.";
             attribute :>> criterion = "The rehome check's refill case: a source that
                 takes back every page it fills ends the fault Unreadable after between 1
                 and 64 fills.";
@@ -3401,7 +3403,7 @@ package FerrixMemoryRequirements {
                 fault on a copy-on-write page with one holder and a spurious one after it
                 net a frame window to zero; the check's whole second run nets to zero.";
             attribute :>> parent = "H.MEM.1";
-            attribute :>> unit = ("user::vmo::Spare::zeroed", "user::vmo::Spare::take",
+            attribute :>> unit = ("user::vmo::Spare::zeroed", "user::vmo::Spare::for_fault", "user::vmo::Spare::take",
                 "user::vmo::Spare::give_back", "user::vmo::Spare::discard",
                 "user::vmo::Spare::drop", "user::vmo::spares_in_flight", "user::vmo::count_spare",
                 "object::oom::out_of_memory_at");

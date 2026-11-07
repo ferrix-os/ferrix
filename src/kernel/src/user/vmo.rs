@@ -370,6 +370,23 @@ impl Spare {
         Spare(None)
     }
 
+    /// [`Spare::zeroed`] for a write fault taken before its space's lock:
+    /// nothing when the job is within [`SPARE_ROOM`] of its memory limit, so
+    /// that near the limit a fault charges exactly what it did before spares,
+    /// the frame its commit takes under the lock (`L.user.224`).
+    pub(crate) fn for_fault() -> Spare {
+        if crate::object::quota::at_limit(
+            crate::object::quota::charge_target(),
+            Resource::Memory,
+            SPARE_ROOM,
+        )
+        .is_some()
+        {
+            return Spare(None);
+        }
+        Spare::zeroed()
+    }
+
     /// Give back a frame a taker wrote and did not use: never into a spare,
     /// whose frame must read as zeros, but to the allocator, at once.
     pub(crate) fn discard(frame: Frame) {
@@ -382,18 +399,6 @@ impl Spare {
     /// held; a fault takes its spare holding none, so that neither the lock
     /// nor the zeros are waited behind.
     pub(crate) fn zeroed() -> Spare {
-        // Near its job's memory limit a fault takes no spare, and charges
-        // exactly what it did before spares: the frame it commits, under the
-        // lock (`L.user.224`).
-        if crate::object::quota::at_limit(
-            crate::object::quota::charge_target(),
-            Resource::Memory,
-            SPARE_ROOM,
-        )
-        .is_some()
-        {
-            return Spare(None);
-        }
         let frame = mm::allocate_user_frame();
         if let Some(frame) = frame {
             // Zeroed rather than merely allocated, as `Vmo::commit` always
