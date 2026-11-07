@@ -1578,6 +1578,285 @@ close dissolves (V1, V6's close and exit, V15's native program).
   `present`'s refusal through the call); V14's ELF table and round trip
   (the pick and the hand-over each gained one domain test); the gate rows.
 
+## 9g. EDF as the deadline tier: develop's `schedule=edf` re-homed (OK IF DG.1-DG.11, 2026-11-07)
+
+Develop landed partitioned EDF with a hard CBS on 2026-11-05 (b33c7d740,
+ledger 7011 S.1, S.4-S.8, 7088, 7132; built on x86-64 and AArch64 by
+4d8242298) as `ferrix_sched_edf::OverFair<T>`. It wraps the fair
+`RunQueue` and answers its methods behind one seam (`sched::Tier`, the type
+of `CpuQueue.fair`), selected by `schedule=edf`. Its commit said that
+whoever lands this document's stack re-homes it. The customer chose
+(2026-11-07) to make it a real tier of the class stack: `Deadline<L> =
+Over<Edf, L>`, above `fifo_rr` as Linux puts `SCHED_DEADLINE` above
+`SCHED_FIFO`. This section is that port's design. It changes the shape of
+reviewed code. Its scheduling rule (admission, budget, refill, wake rule)
+stays as 7088 reviewed it, line for line.
+
+### The class
+
+`ferrix-sched-edf` becomes a class crate. It stays pure, `no_std` and free
+of `unsafe`, and allocates nothing after its queue is made. It holds:
+
+* `Edf`, which implements `SchedClass<T>` (`NAME` `edf_cbs`), with
+  `Queue = EdfQueue<T>`.
+* A trait of its own, `DeadlineClass<T>: SchedClass<T>`. It has the named
+  operations the core reaches through the stack (below), the way
+  `RealtimeClass` has FIFO's.
+
+`OverFair` goes. Nothing in the crate names `ferrix-sched-fair` any more:
+its dependency becomes `ferrix-sched-class` alone. The fair class beneath
+it is the stack's lower tier, not a field.
+
+**The entity and the node.** An admission is an entry in a fixed array of
+`MOST` (32) entries in the processor's `EdfQueue`. It is made when the
+queue is made, so admission is where `Full` is refused and no scheduler
+path allocates (NOALLOC, as R1 is for FIFO):
+
+* The entry is the task's node in the deadline tier. It holds the id, the
+  `Reservation`, the share, the budget left, the absolute deadline, the
+  throttle and its refill time, and the payload while the task is queued
+  or running.
+* It lives in the queue of the processor that admitted it, so a task needs
+  no upper cell for this tier. `Edf::Entity` is a unit, `Admitted`: what
+  the entity carries is the fact that it goes to its entry.
+* A task's fair parts stay where 4b keeps them: the record's atomics and
+  its run slot, in `Task`. A reserved task's weight therefore applies when
+  it returns to fair (L.sched.130's rule, unchanged).
+* The stack's entity nests one level deeper:
+  `Tier<Admitted, Tier<FifoEntity, FairEntity>>` with every tier, and
+  `Tier<Admitted, FairEntity>` for `fast`.
+* `ferrix_sched_fair::Split` gains a third arm, `Deadline`.
+  `Task::entity_with` builds it when the task holds an admission on this
+  queue's processor (`reserved_on == cpu`). It builds the FIFO arm for a
+  real-time policy, and the fair arm otherwise.
+* An enqueue of `Admitted` whose id has no entry here is refused by
+  `Back`. `entity_with` never builds one: its test reads the same word
+  under the same lock. Such a refusal stops the machine with a new panic
+  code, the FX-0539 shape for this tier.
+
+**Where the task keeps its reservation.** Develop has two `Task` fields
+under `cfg(ferrix_schedule = "edf")`: `reserved_on`, and `mask_before`, the
+mask a reservation's pin replaced. The core may not select code by a
+`sched_*` flag (rule 6e, D6). So both move into one cell type from the
+stack, `<Stack as StackTiers>::ReserveCell`, as 4b's `UpperCellOf` did. It
+is zero-sized when the stack has no deadline tier, so `present` and
+`desktop` keep `Task`'s size. A const assertion holds that, beside 4b's
+fair-only one.
+
+**`StackTiers`.** 4a/4b wrote it for at most one tier above fair. It
+gains:
+
+* `const DEADLINE: bool`;
+* `type ReserveCell`;
+* `fn deadline_entity()`;
+* the arm in `split`;
+* `remove_in(queue, id, tier)`, which takes a tier enum (Deadline,
+  Realtime, Fair) instead of `upper: bool`, so that no other tier's queue
+  is walked (B3, kept).
+
+Its impls become:
+
+* `Eevdf` alone;
+* `Over<FifoRr, Eevdf>`, today's two;
+* `Over<Edf, Eevdf>`, for `fast`;
+* `Over<Edf, Over<FifoRr, Eevdf>>`, the full order (Q3).
+
+### Each behaviour 7088 reviewed, and where it goes
+
+| Behaviour (develop) | In the stack |
+|---|---|
+| **Admission**: deadline = period, runtime within 100 µs and the period, period 1 ms to 10 s, ≤ 950,000 ppm and ≤ 32 entries a processor, each refused by name (`Malformed`, `Unschedulable`, `Full`, `Already`); the caller's processor first, then the rest of its mask | `DeadlineClass::admit` on `EdfQueue`, the same body, under the queue's lock. Reached through a named forwarder, `DeadlineTier::admit(&mut StackQueue)`, as `FairTier`'s are. `sched::reserve::take` keeps its walk. The mask it walks is `affinity::mask_for`, which since game mode's layer B is read within the task's domain, so 5a's partition holds for free. |
+| **The hard budget**: running charges it; at zero the entry is throttled until its period ends, on an idle processor too; refill moves the deadline a period, or restarts at `now` after a stall longer than a period | `Edf::charge` and the refill in the class's clock (below). `Edf::ready(queue, _)` is "an entry ready and not throttled". It ignores `below_waiting`, unlike FIFO's floor, which binds only while something waits (R4): the budget is hard. While all its entries are throttled, `len` is honest, `pick` answers `None`, and `decision_in_ns` answers the next refill. `Over` already falls through to the lower tier on those answers and arms that refill (R3, R4). |
+| **The clock**: develop's `note_time(now)` at `account` and before `pick_next`, with absolute time | A named forwarder, `DeadlineTier::note_time(now)`, called by the core at the same two places, and also before an enqueue onto the tier, so the wake rule reads a fresh `now` on a tickless processor (Q4). `Edf::elapse` does nothing: the tier's time is absolute, not summed. |
+| **The wake rule**: a woken entry whose budget-to-deadline ratio overflows its bandwidth gets a fresh budget and deadline (Linux's `dl_entity_overflow`) | `Edf::enqueue`, the same body. |
+| **The pin**: an admission pins its thread to the admitting processor (`mask_before` kept), so balance, steal, push and wake placement cannot move it | Unchanged in `sched::reserve`, with the fields read through `ReserveCell`. Also `Edf::steals_work` is false, and the tier's `waiting_where` answers only for a processor taken out of service (below). |
+| **Adopt while running**: a thread admitted while it runs leaves fair for its entry at once, so it does not wait for its next sleep | Moved to the next decision on its processor, by 4b's path: `reserve::take` sets `reserved_on`, then asks for a decision, and `CpuQueue::requeue_if_moved` moves it into the tier before the pick. Then `yield_now`, as today. B1 holds (a running task is never a waiting entity), and FX-0537's check covers this path. The admitted share counts from `admit`, before the move. |
+| **Give back while running**: the share returns at once; the thread stays the running entity and becomes fair's at its next way off the processor, never put in fair's tree while it runs | `DeadlineTier::withdraw` returns the share and marks the entry `leaving` at once. The move to fair is `requeue_if_moved`'s, at the next decision, as above. A queued, not running, entry moves at the call. |
+| **The share returned when the task is freed** (it may die before it reaches the admitting processor) | `reserve::forget` at the reaper, unchanged: `withdraw` on the admitting processor's queue through the forwarder. |
+| **`THREAD_RESERVE`, native 0x10E1**: a job handle with `SET_LIMIT` at or above the caller's, the calling thread alone; linuxd's capability on top; `NOT_SUPPORTED` without the tier | The ABI, its decode, its authority and both `lift/` sides are unchanged. The kernel's arm is selected by `stack::DEADLINE`, a constant from the arms file, instead of `cfg(ferrix_schedule = "edf")`. |
+| **T12**: the direct switch declines while a reservation runs or waits with budget on the processor, or either end holds one | `direct::begin` asks `DeadlineTier::declines(queue, caller, peer)` when `stack::DEADLINE` is true. The answer is the same four tests. `Over::hand_over`'s fused step never crosses tiers already. F10's fold gate (both ends fair) is unchanged. |
+| **Affinity's `Reserved`**: `set_affinity` on a reserved thread answers `AffinityRefusal::Reserved` | Unchanged. The variant is always present, and it is answered only when `stack::DEADLINE` is true. |
+| **A processor out of service** moves its reserved threads with the rest; they run fair where they land, and their share stays counted where it was | `move_one_off` also asks the deadline tier's waiting entries (`waiting_where`), so none is stranded. On the target, `reserved_on != cpu`, so `entity_with` queues it fair: develop's behaviour. |
+| **5a's partition**: a task pinned only to leaving processors refuses a `SoftRt` domain's creation | A reserved task is pinned to one processor, so a reservation on a processor `create_soft` would take refuses the switch by that existing rule, named in the refusal. No new rule. |
+| **Develop's checks**: `reserve_check`, host tests, `test-reserve` | Kept, run against `Edf` through the stack. The host tests become the class's own and run over the generic tier set 4a requires. |
+
+### The flags
+
+`schedule` retires, as this document's per-tier flags replace it (§6,
+§9a):
+
+| Develop | This stack |
+|---|---|
+| `schedule=fair` (`present`, `desktop`) | `sched_fair=eevdf`, every other tier `absent` (`desktop` keeps `sched_realtime=fifo_rr`) |
+| `schedule=edf` (`fast`) | `sched_deadline=edf_cbs` over `sched_fair=eevdf` (Q1). `edf_cbs` becomes built with `built_on = ["x86_64", "aarch64"]` and `requires = ["personality=user"]`, as develop has it. Its `compile_error!` arm becomes `Deadline<L> = Over<ferrix_sched_edf::Edf, L>`. |
+| `schedule=windows` (`max`; K9's, which feature/mk-max is building) | `sched_windows=arinc`: K9's static windows with fixed priorities inside them and no fair class (C3, C6). `max_plus`'s `arinc_table` is unchanged. feature/mk-max replaces `cfg(ferrix_schedule = "windows")` with `ferrix_sched_windows = "arinc"`, and its pick becomes the `Windows<L>` arm when it rebases onto this. Its shape (a tier or a supervisor around the stack) is its own design's, not decided here. |
+
+check-build-flags.py is changed as follows:
+
+* It loses `schedule`.
+* The arms file, the profiles and `build_flag_word!` lose
+  `ferrix_schedule`. Every `cfg(ferrix_schedule = …)` in the kernel and
+  in `lift/` becomes a constant from the arms file. Only the arms file
+  selects by a scheduler flag (D6).
+* The release ELF table of `present` and `desktop`, before and after, is
+  unchanged but for the `ReserveCell` const and the 0x10E1 arm's guard
+  (S5).
+
+### Open questions, with a recommendation each
+
+**Q1. `fast`'s fair tier.** `fast` relies today on fair beneath EDF: the
+5% EDF leaves, the kernel's own fair workers (the reaper, the network) and
+every thread without a reservation. The branch's `fast.toml` says
+`sched_fair = "absent"`, and that cannot build while the core uses fair
+outside `Stack` (§11). The trouble is that `eevdf` allows `present` and
+`none` only, and `fast` is held to `target_level = "sc2"` (ledger 7011
+LV.1).
+  1. **`fast` takes `sched_fair=eevdf`.** `edf_cbs` gains
+     `requires = ["sched_fair=eevdf"]`, and `eevdf` gains `sc2` in its
+     `allows` only through that `requires`: never alone at `sc2`. This is
+     the code develop builds for `fast` today (EDF over a fair class,
+     both at `sc2`), named honestly. F-76's note on eevdf's `present`
+     extends to `sc2` until S7 classifies `ferrix-sched-fair`.
+  2. `fast` keeps fair absent, and EDF's 5% goes to an idle task. Not
+     buildable until the core's fair-only calls (§11) go, which is not
+     this step. The kernel's fair workers would also need reservations.
+  3. EDF carries its own minimal background class (a FIFO list of the
+     non-reserved). That is a second fair class to certify.
+
+  **Recommended: 1.** It changes no behaviour of `fast` from develop's.
+
+**Q2. `HardRt`'s `mode_available`.** As written, `HardRt` is available
+when `DEADLINE.present || WINDOWS.present`. 5a builds no `HardRt` domain,
+and a deadline tier in the boot `Throughput` domain is a reservation
+service, not a `HardRt` domain (no isolation, no bound on the kernel's
+non-preemptible sections, interrupts not threaded, as R9 said of FIFO in
+`desktop`'s boot domain).
+  1. **`HardRt` is available on `WINDOWS.present` alone**, until a step
+     builds `HardRt` domains and restates it. `fast`'s `modes` becomes
+     `["Throughput"]`, which check-build-flags holds both ways as today.
+     The boot domain's guarantee with `edf_cbs` is 7088's admission and
+     budget, said in REALTIME.md beside FIFO's.
+  2. `mode_available(HardRt)` stays as written ("compiled"), and
+     `Domain::new(HardRt)` is refused by a name of its own, "compiled,
+     not yet creatable", the way 4b refused `SoftRt` (L.sched.137's
+     shape). `fast` keeps `modes = ["HardRt"]`.
+
+  **Recommended: 1.** It never says `HardRt` where nothing provides it,
+  and it needs no new refusal or id.
+
+**Q3. The three-tier stack.** No profile takes `edf_cbs` with `fifo_rr`
+today.
+  1. **Build `Over<Edf, Over<FifoRr, Eevdf>>`'s `StackTiers` impl and its
+     host tests now, but no profile takes it.** The arms file's order
+     (`Windows<Deadline<Realtime<Fair>>>`) already says EDF is above FIFO.
+  2. Make the combination a `compile_error!` in the arms file until a
+     profile asks for it.
+
+  **Recommended: 2.** It is the least new code under review, and the
+  order stays written in the arms file for when it is wanted.
+
+**Q4. The clock.** The tier uses absolute time from the core
+(`note_time`, develop's reviewed sites, plus before an enqueue onto the
+tier), not the summed `elapse` FIFO's floor uses since ledger 5684 C1. The
+alternative is to sum `elapse` and accept a stale `now` on a wake until
+the next `account`, which the wake rule reads. **Recommended: absolute.**
+
+### Requirements and evidence
+
+H.SCHED.28 and L.sched.179-183 (develop's, b33c7d740) are kept, their
+statements unchanged, their `Satisfied by` restated to
+the new functions. New ids only for what the port adds:
+
+* the deadline tier's entity and the `requeue_if_moved` move;
+* the `ReserveCell`'s zero size;
+* Q2's mode rule, if option 1 is chosen.
+
+They come from H.SCHED.29-31 / L.sched.184-199, feature/mk-flip's
+reservation, if its owner gives them up, or from a new reservation above
+L.sched.201 (Q5, the consultant's).
+
+The evidence:
+
+* `reserve_check`'s cases on `fast` (x86-64 and AArch64);
+* the class's host tests;
+* the generic tier test set over `Edf`;
+* `test-reserve`;
+* a control each: the adopt move skipped (FX-0537), and `ready` honouring
+  `below_waiting` (the hard budget broken, caught by the idle-throttle
+  case);
+* `present`'s and `desktop`'s ELF tables, and the round trip on the
+  landing hash (S5).
+
+**As the review has it** (ledger 7763, OK IF DG.1-DG.11; code starts once
+DG.5's reservation has landed, and comes back for its diff check). The
+answers: Q1 option 1, Q2 option 1, Q3 option 2, Q4 absolute time, Q5
+mk-flip's reservation. The conditions, as the ledger words them:
+
+* **DG.1 (Q1).** `fast.toml` takes `sched_fair = "eevdf"`; eevdf's `allows`
+  gains `sc2` plainly, with no "only through `requires`" mechanism;
+  `edf_cbs` requires `personality=user`, `sched_fair=eevdf` and
+  `sched_realtime=absent`. F-76's note, and its entry in FINDINGS, extend to
+  `sc2` until S7 classifies `ferrix-sched-fair`. "Never alone at sc2", if
+  wanted, is a check-build-flags rule with tests and a control.
+* **DG.2 (Q2).** `mode_available(HardRt)` is `WINDOWS.present` alone;
+  `fast`'s `modes` is `["Throughput"]`; "HardRt tier" leaves
+  `sched_deadline`'s `why`; REALTIME.md states the boot domain's guarantee
+  under `edf_cbs` (7088's admission and budget) beside FIFO's; a host test
+  of `mode_available` for `fast`'s flags.
+* **DG.3 (Q3).** `edf_cbs` with `fifo_rr` is refused first in the flag
+  file, by DG.1's `requires`, so xtask names it at resolve; the arms file's
+  `compile_error!` stays as a backstop, held by check-build-flags as the one
+  combination arm. The impl list, the entity nesting and the tier enum
+  above are cut to what is built.
+* **DG.4 (Q4).** Develop's split kept: deadline and refill from a monotone
+  `note_time`, the budget charged by `charge(ran_ns)` alone, never by both;
+  `Edf::elapse` does nothing. Every `note_time` site named: before the
+  charge, before the pick, before each enqueue onto the tier. The trait's
+  `ready` and `elapse` documentation amended for a class on absolute time.
+  The generic tier test set drives `Edf` through `note_time`; a generic case
+  that cannot apply is named, not skipped.
+* **DG.5 (Q5).** The ids from mk-flip's H.SCHED.29-31 and L.sched.184-199
+  (their purpose is `schedule=edf`; none is written on develop), split off
+  that entry in a reservations commit agreed through the product owner and
+  landed before the code, with the new panic code reserved there too
+  (FX-0970 and FX-0971 are taken). No id above 201.
+* **DG.6 (where `StackTiers`' impl lives).** A blanket impl over a
+  `DeadlineClass` would overlap 4b's over `RealtimeClass`, and the orphan
+  rule bars it from `ferrix-sched-edf` and from the arms file. Preferred:
+  one impl keyed by an associated kind on the upper class, naming no class
+  crate. If `ferrix-sched-fair` names `ferrix-sched-edf` instead, the release
+  symbols show `present` and `desktop` link nothing of it, and §9b G2's
+  naming rule still holds.
+* **DG.7 (rows the table lacks, against 7088 and 7132).** E.3: a child of
+  `fork`, `clone` or `launch::load_native` gets an empty `ReserveCell`; stop
+  and freeze, and a move to another job. E.4: a throttled lock holder is
+  unbounded. ED.6: a kill or an end waits for the refill, at most 10 s.
+  E.5: a wake with an earlier deadline preempts. ED.3: the per-period
+  property as a class host test whose mutation fails. ED.5: the errno
+  mapping. And stated: `direct::begin`'s earlier `waiting()` test still
+  counts throttled entries (7132 relied on it); `Edf::hand_over` never
+  fuses; a leaving entry is never throttled and counts toward `Full` until
+  settled; `withdraw` asks for a decision as the adopt does.
+* **DG.8 (controls).** Moved code fails the carry test, so these fire again
+  through `gate.sh control --expect` on the port's hash: mkf-6c-admit,
+  mkf-6c-pick, mkf-19c-walk, mkf-8c-door, mkf-8c-throttle; ED.4's three
+  (forget, a child inheriting, the kernel's `Reserved`); this design's two
+  (the adopt move skipped, `ready` honouring `below_waiting`). Rows:
+  `reserve_check` on `fast` on x86-64 and AArch64, and `test-reserve`,
+  PASSED with the accelerator named; Miri reaches the class crate, shown by
+  its job's log (ED.7).
+* **DG.9 (S5, ED.2).** `present` and `desktop` release builds, x86-64 and
+  AArch64, compared per symbol body hash, base against tip; only what this
+  section names differs; `Task`'s size assertion kept; 0x10E1 still answers
+  `NOT_SUPPORTED` on `present`.
+* **DG.10.** H.SCHED.28 and L.sched.179-183 change in `Satisfied by` alone;
+  each new requirement has one check; the new panic code has a control:
+  `entity_with` planted to build the deadline arm when `reserved_on != cpu`,
+  which fires on the new code.
+* **DG.11.** This section is in this document with ledger 7763 in "Where it
+  stands"; feature/mk-max's windows arm is named here and not decided; the
+  port lands after #38/#40, or with them, under 5684's open conditions.
+
 ## 10. The review's conditions (OK IF S1-S14, 2026-10-26)
 
 A certification-consultant subagent of the customer's session, container
@@ -2238,3 +2517,10 @@ own through `gate.sh`, because the boot's own check fails first. The container's
 control runs are not counted. The rows and controls above stand on the hashes named;
 the docs and evidence commits after them change no code.
 
+**On develop, and EDF to re-home (2026-11-07).** #38 and #40 replayed onto
+develop 88cc1a881 (feature/sched-classes-on-develop). Develop's
+`schedule=edf` (b33c7d740) is dormant there, its cfg renamed to
+`sched_deadline = "edf_cbs"`, which the arms file still refuses, until §9g's
+port: designed and reviewed OK IF DG.1-DG.11 (ledger 7763). The port waits
+for DG.5's reservation; until it lands, `fast` does not build on the
+branch.
