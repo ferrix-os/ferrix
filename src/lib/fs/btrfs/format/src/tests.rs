@@ -1675,11 +1675,12 @@ fn parsing_never_panics_on_corrupt_input() {
     let superblock = SuperblockBuilder::new().build();
     let node = sample_leaf();
 
-    // Under Miri every 37th index: 28 of the 1,024 bytes of each, the longest
-    // test kept there (docs/RELIABILITY.md, Miri), and short of a sweep. The
-    // sweep is plain cargo test's; Miri's part is that the accessors' calls
-    // into core and alloc stay sound on damaged bytes.
-    let stride = if cfg!(miri) { 37 } else { 1 };
+    // Under Miri every 127th index: 9 of the 1,024 bytes of each, the longest
+    // test kept there (docs/RELIABILITY.md, Miri), and far short of a sweep. At
+    // every 37th, part 4 of CI's Miri job went over its budget. The sweep is
+    // plain cargo test's; Miri's part is that the accessors' calls into core
+    // and alloc stay sound on damaged bytes.
+    let stride = if cfg!(miri) { 127 } else { 1 };
     for (name, good) in [("superblock", &superblock), ("node", &node)] {
         for index in (0..good.len().min(1024)).step_by(stride) {
             for patch in [0x00u8, 0x01, 0x7F, 0xFF] {

@@ -535,8 +535,8 @@ is left, each with how to know it is done:
 
    *The set.* The figures are libtest's, Miri's virtual clock and not time
    ([RELIABILITY.md](../RELIABILITY.md), Miri, has the rule). 137 tests run
-   under Miri, 891 s in all: those of at most 25 s, and four kept above
-   that for what they reach, of 32, 40, 61 and 237 s. 35 are ignored: 34 over
+   under Miri, 732 s in all: those of at most 25 s, and four kept above
+   that for what they reach, of 32, 40, 61 and 78 s. 35 are ignored: 34 over
    25 s, each label giving its figure or saying the run did not finish, and
    `whatever_lzokay_compresses_decodes_to_its_input` for the undefined
    behaviour of `lzokay-native`'s compressor (`Dict::init`,
@@ -547,8 +547,9 @@ is left, each with how to know it is done:
    `expand_inline`, and `expand_extent` as far as a compressed regular extent
    coming out as its bytes (`a_compressed_extent_reads_back_as_its_bytes`,
    zlib): a panic after the read in `expand_extent` fails that test under
-   Miri. `parsing_never_panics_on_corrupt_input` runs on 28 of each buffer's
-   1,024 indices. Host line coverage of the kept tests, built natively with
+   Miri. `parsing_never_panics_on_corrupt_input` runs on 9 of each buffer's
+   1,024 indices, every 127th: every 37th took the job over budget, 15 min 37 s
+   at c158bd2f4, and reached no more product lines. Host line coverage of the kept tests, built natively with
    `--cfg miri` and so an upper bound on Miri's reach, is 3,124 of 3,426
    product lines, 91.2%, against 92.2% for all 172.
 

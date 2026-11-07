@@ -197,12 +197,13 @@ what stays reached stated where the budget is.
 budget of 15 minutes of real time, read off the run. Every other figure for it
 is on one clock, libtest's `finished in`, which under Miri's isolation is
 Miri's virtual clock and not time: it counts the work interpreted and reads
-about the same on any host, where real time does not (one set of tests read
-503.51 s by libtest and took 411 s on CI at 7c5eda2d5, and read 509.91 s and
-took at most 197 s on the gate host). A test over 25 s by libtest is ignored
+about the same on any host, where real time does not (on CI, 503.51 s by
+libtest took 411 s at 7c5eda2d5 and 883.83 s took 837 s at c158bd2f4; on the
+gate host 890.89 s took 448 s). A test over 25 s by libtest is ignored
 there, its label giving its figure or saying that the run did not finish. A
 test is kept above that only as the cheapest reach of something:
-`parsing_never_panics_on_corrupt_input` (237 s, every 37th index),
+`parsing_never_panics_on_corrupt_input` (78 s, every 127th index; every 37th
+took the job to 15 min 37 s and reached no more product lines),
 `the_zlib_image_reads_back_exactly` (61 s, a part of the image),
 `every_truncation_is_corrupt_and_total` in zstd (40 s) and
 `a_data_sector_that_fails_its_checksum_is_an_error_not_bytes` (32 s). On
