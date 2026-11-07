@@ -526,11 +526,22 @@ is left, each with how to know it is done:
    baseline): images with each feature the reader or the writer refuses,
    opened, and the refusal named.
 7. **Miri over `src/lib/fs/btrfs/format`** in CI. Done 2026-11-02: part 4
-   of CI's Miri job runs `ferrix-btrfs`, with every test that took over 20 s
-   under Miri ignored there (each says its measured time) and the two
-   `lzokay-native` oracle tests ignored for that crate's own undefined
-   behaviour (`Dict::init`). Plain `cargo test` runs all 171. The reader's
-   own code showed none.
+   of CI's Miri job runs `ferrix-btrfs`. The crate forbids `unsafe` and has
+   no runtime dependencies, so an out-of-bounds index panics under plain
+   `cargo test` too; what Miri adds is a check of the `unsafe` in `core` and
+   `alloc` under the crate's calls, and of the test-only oracle crates. Most
+   tests that took over 20 s under Miri are ignored there, each saying its
+   measured time; the two `lzokay-native` oracle tests are ignored for that
+   crate's own undefined behaviour (`Dict::init`). The file-data path stays
+   under Miri: four tests of 20 to 38 s and a part of the zlib image
+   (`miri_reads` in `fs/tests.rs`) reach `expand_inline`, `expand_extent`,
+   `read_verified`, `copy_extent`, `read_checked`, `verify_sectors`,
+   `copy_from`, `expanded_len`, `read_logical`, `last_at_or_before`,
+   `CsumItem::get`, `checksum_for` and the zstd Huffman literals
+   (`huffman::decode`, `direct_weights`). Host line coverage of the Miri set
+   reaches 454 of the 502 functions the full suite reaches; none of the
+   named functions is left out. Plain `cargo test` runs all 171 tests. No
+   undefined behaviour showed in the reader's own code.
 8. **Arithmetic that cannot overflow** (`L.btrfs.23`, the certification
    consultant's advice). The release kernel builds without overflow checks,
    so an unchecked sum of two values read from a volume wraps silently, and

@@ -572,9 +572,14 @@ fn workspace_size_is_as_documented() {
 }
 
 #[test]
-// Two full extents through both decoders; the extent itself is already
-// checked under Miri by `decodes_a_mixed_extent_as_ruzstd_does`.
-#[cfg_attr(miri, ignore)]
+// Two full extents through both decoders. Under Miri a full extent is
+// still decoded whole: `every_truncation_is_corrupt_and_total` and
+// `random_rewrites_of_real_frames_are_total` run the text extent's frame
+// among `whole_frames`.
+#[cfg_attr(
+    miri,
+    ignore = "over 150 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+)]
 fn stale_workspace_contents_do_not_matter() {
     let mut buffer = vec![0xA5u8; Workspace::SIZE + 100];
     let mut out = vec![0u8; 128 * 1024];
@@ -701,7 +706,10 @@ fn ruzstd_frames_of_every_shape_round_trip() {
 }
 
 #[test]
-#[cfg_attr(miri, ignore)]
+#[cfg_attr(
+    miri,
+    ignore = "over 150 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+)]
 fn ruzstd_frames_of_random_shape_and_length_round_trip() {
     let mut rng = Rng(8878);
     for round in 0..60 {
@@ -726,7 +734,10 @@ fn whole_frames() -> Vec<(&'static str, Vec<u8>, usize)> {
         ("repeat offsets", repeat_offsets_frame(), 52),
     ];
     for (name, frame, len, _) in CLI_FRAMES {
-        if !cfg!(miri) || frame.len() < 200 {
+        // Under Miri, the small frames and the one whose Huffman weights are
+        // sent directly as nibbles, the only frame that reaches
+        // `huffman::direct_weights`.
+        if !cfg!(miri) || frame.len() < 200 || name == "nibbles4k.l3" {
             frames.push((name, frame.to_vec(), len));
         }
     }
@@ -735,10 +746,6 @@ fn whole_frames() -> Vec<(&'static str, Vec<u8>, usize)> {
 
 /// Verifies: L.btrfs.63
 #[test]
-#[cfg_attr(
-    miri,
-    ignore = "26 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
-)]
 fn every_truncation_is_corrupt_and_total() {
     for (name, frame, len) in whole_frames() {
         let mut sweeper = Sweeper::new(len);
@@ -779,7 +786,10 @@ fn single_bit_flips_are_total() {
 }
 
 #[test]
-#[cfg_attr(miri, ignore)]
+#[cfg_attr(
+    miri,
+    ignore = "over 150 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+)]
 fn bit_flips_in_a_full_extent_are_total() {
     // Every bit of the headers and tables at the front of the first block,
     // then a stride through the rest.
@@ -847,7 +857,10 @@ fn an_output_buffer_smaller_than_the_content_is_corrupt() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[cfg_attr(miri, ignore)]
+#[cfg_attr(
+    miri,
+    ignore = "over 150 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+)]
 fn decodes_on_a_32_kib_stack() {
     // A kernel stack is small, and the workspace exists so that a decode does
     // not need a large one. This is a tripwire for a table creeping back onto

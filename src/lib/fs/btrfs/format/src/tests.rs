@@ -1671,7 +1671,7 @@ fn an_extent_ends_where_linux_says_it_does() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "150 s (stopped at the 150 s cap) under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+    ignore = "over 150 s under Miri on 2026-11-02, and every 37th index alone took 237 s, over the 20 s a test may take there; plain cargo test runs it"
 )]
 fn parsing_never_panics_on_corrupt_input() {
     // A disk can be corrupt, and from stage 11 this runs in ring 0 with nothing
