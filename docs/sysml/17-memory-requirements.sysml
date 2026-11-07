@@ -3390,7 +3390,8 @@ package FerrixMemoryRequirements {
         }
         requirement <'L.user.224'> aSpareIsUsedOrGivenBackOnce : ItemLowLevel {
             attribute :>> statement = "A write fault shall take a zeroed spare frame of
-                the running task's job with no lock held, and shall either put it in the
+                the running task's job with no lock held, only while the job has 64
+                pages of room under its memory limit, and shall either put it in the
                 page or the copy the fault makes, or give it back to the allocator when
                 its round ends, exactly once; a frame a taker wrote and did not use
                 shall go to the allocator, never back into a spare. A fault a memory

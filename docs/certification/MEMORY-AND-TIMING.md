@@ -580,8 +580,10 @@ even for an instant, and a refused charge takes nothing.
   frame per faulting task, taken and zeroed before the space's lock and
   used by the commit or the copy under it, or given back as the round ends:
   never held across the fill or the pager's ask a round may wait for
-  (`L.user.225`, FX-0975 in a checks build). So the charge it adds is one
-  page a task for the length of one hold of its space's lock, and the
+  (`L.user.225`, FX-0975 in a checks build). It is taken only while the job
+  has 64 pages of room under its memory limit (`user::vmo::SPARE_ROOM`), so
+  near the limit a fault charges what it did before. So the charge it adds
+  is one page a task for the length of one hold of its space's lock, and the
   spares held machine-wide are counted. A fault a limit refused waits for
   those to go back, a 1 ms pause at a time and at most 16
   (`object::oom::SPARE_WAITS`), before anything is reclaimed or killed for

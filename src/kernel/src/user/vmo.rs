@@ -312,6 +312,11 @@ pub trait Filler: Send + Sync + fmt::Debug {
 #[must_use = "a spare's frame goes back when it drops"]
 pub(crate) struct Spare(Option<Frame>);
 
+/// The room a job must have below its memory limit, in bytes, for a fault
+/// of one of its tasks to take a spare: 64 pages, so that the spares of
+/// faults in flight never stand between a job and its last pages.
+const SPARE_ROOM: u64 = 64 * PAGE_SIZE;
+
 /// Spare frames held, counted where each was taken and where it went, one
 /// slot a processor so that faults on four processors do not share a line:
 /// the sum over the slots is what is held machine-wide, which the memory
@@ -377,6 +382,18 @@ impl Spare {
     /// held; a fault takes its spare holding none, so that neither the lock
     /// nor the zeros are waited behind.
     pub(crate) fn zeroed() -> Spare {
+        // Near its job's memory limit a fault takes no spare, and charges
+        // exactly what it did before spares: the frame it commits, under the
+        // lock (`L.user.224`).
+        if crate::object::quota::at_limit(
+            crate::object::quota::charge_target(),
+            Resource::Memory,
+            SPARE_ROOM,
+        )
+        .is_some()
+        {
+            return Spare(None);
+        }
         let frame = mm::allocate_user_frame();
         if let Some(frame) = frame {
             // Zeroed rather than merely allocated, as `Vmo::commit` always
