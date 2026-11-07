@@ -98,9 +98,8 @@ New since v0.2.0:
   btrfs, the init) in the test machines. The live ISO's kernel is still
   the `desktop` profile, the Linux layer in ring 0, and nothing of this
   is claimed for anything yet ([docs/microkernel/FLIP.md](https://github.com/ferrix-os/ferrix/blob/v0.3.0/docs/microkernel/FLIP.md)).
-- **Smaller things.** Page faults are counted per task, so `ps`, `top` and
-  `getrusage` see minor and major faults; `msync(MS_SYNC)` writes a shared
-  file mapping's pages to the disk; a fullscreen window of another shape is fitted, not
+- **Smaller things.** `msync(MS_SYNC)` writes a shared file mapping's pages
+  to the disk; a fullscreen window of another shape is fitted, not
   stretched, and covers the dock; an X program's crash report names the
   program, not the X server; `authd`'s password hashing takes at most a
   quarter of free memory; Ferrix calls itself 0.3.0 (`uname`, the boot
@@ -144,13 +143,15 @@ What does not work, yet (unchanged from v0.2.0 unless it says so):
   not resize another system's partition or write a firmware boot entry,
   and speaks English only.
 
-What was checked for this release, on 182712930, whose code the tag
-carries (only documents and pictures follow it): the image row's gates
+What was checked for this release, on the tagged commit itself: the
+image row's gates
 (`check`, the release build, boots on x86-64 under KVM and under QEMU's
 emulator, AArch64 and ARMv7-A at four and at two processors, and ring 0's
 size budget); the release workflow's dry run, which built every asset;
-and the dry run's ISO booted on Try Ferrix's virtio machine for the
-pictures above. Real PCs, VirtualBox and VMware were not checked.
+and the dry run's ISO booted to the desktop on Try Ferrix's virtio
+machine. The pictures above come from the same check one commit of code
+earlier (182712930, before the fault path's revert, which changes no
+screen). Real PCs, VirtualBox and VMware were not checked.
 
 ## v0.2.0 (2026-10-29), the first live ISO
 
