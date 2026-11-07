@@ -31,7 +31,7 @@
     },
     "arch/aarch64/trap.rs::system_call": {
       "complexity": 15,
-      "lines": 50,
+      "lines": 48,
       "recursive": false
     },
     "arch/armv7a/signal.rs::setup_signal_frame": {
@@ -176,12 +176,12 @@
     },
     "object/process.rs::move_charged": {
       "complexity": 16,
-      "lines": 48,
+      "lines": 50,
       "recursive": false
     },
     "sched/task.rs::new": {
-      "complexity": 9,
-      "lines": 77,
+      "complexity": 8,
+      "lines": 72,
       "recursive": false
     },
     "smp.rs::invalidate_pages": {
@@ -540,8 +540,8 @@
       "recursive": false
     },
     "syscall/native/lift.rs::call": {
-      "complexity": 77,
-      "lines": 170,
+      "complexity": 76,
+      "lines": 169,
       "recursive": false
     },
     "syscall/native/region.rs::answer": {

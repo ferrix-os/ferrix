@@ -276,7 +276,7 @@
       "what": "marked NOALLOC: run-queue trees with node room in the task",
       "sites": 11
     },
-    "sched/domains.rs": {"bucket": "none", "what": "marked NOALLOC: the domain switch's queue inserts and pushes into room its caller made first (docs/SCHED-CLASSES.md section 9f)", "sites": 8},
+    "sched/domains.rs": {"bucket": "boot", "what": "the admission's lists of live processes, refused NoMemory, in a task that may sleep: only the boot check admits until step 5b; otherwise marked NOALLOC, the switch's queue inserts and pushes into room its caller made first (docs/SCHED-CLASSES.md section 9f)", "sites": 9},
     "sched/task.rs": {
       "bucket": "job",
       "what": "the thread's",

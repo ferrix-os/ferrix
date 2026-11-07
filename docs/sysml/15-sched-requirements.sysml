@@ -1799,7 +1799,7 @@ package FerrixSchedRequirements {
                 processors; its control, a queued member not taken off, stops the
                 machine with FX-0538.";
             attribute :>> parent = "H.SCHED.23";
-            attribute :>> unit = ("sched::domains::admit",
+            attribute :>> unit = ("sched::domains::admit", "object::job::Job::sched_word",
                 "sched::domains::admit_tasks", "sched::domains::placeable",
                 "sched::domains::settle_task", "sched::domains::members_of",
                 "sched::domains::word", "sched::domains::soft_exists",

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "d9d453724b81a5db5b0775369456ff2ce2ae6650021d06b7f4dc578f53860e6b",
+  "digest": "7f419192acdaea28a6d1551273248810195751e3cbeeebbdfaccd04c56cd389a",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -53322,7 +53322,7 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::admissionMovesTheJob",
                       "kind": "attribute",
                       "redefines": "unit",
-                      "value": "(\"sched::domains::admit\", \"sched::domains::admit_tasks\", \"sched::domains::placeable\", \"sched::domains::settle_task\", \"sched::domains::members_of\", \"sched::domains::word\", \"sched::domains::soft_exists\", \"object::job::Job::sched_slot\", \"object::job::Job::set_sched_domain\", \"sched::prepare_user\", \"sched::domain_slot_of_word\")",
+                      "value": "(\"sched::domains::admit\", \"object::job::Job::sched_word\", \"sched::domains::admit_tasks\", \"sched::domains::placeable\", \"sched::domains::settle_task\", \"sched::domains::members_of\", \"sched::domains::word\", \"sched::domains::soft_exists\", \"object::job::Job::sched_slot\", \"object::job::Job::set_sched_domain\", \"sched::prepare_user\", \"sched::domain_slot_of_word\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 1807
