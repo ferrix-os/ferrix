@@ -101,6 +101,13 @@ pub const MACHINE_RECLAIMS: u32 = 16;
 // CHECKS-ONLY: object/quota_check.rs, besides `out_of_memory_at` here.
 pub const MOST_ANSWERS: u32 = 1024;
 
+/// The most answers to one fault that wait for other faults' spare frames
+/// to go back before a reclaim or a kill (`out_of_memory_at`): a spare is
+/// held for a fault's commit, microseconds, so a few pauses see every one
+/// that was held when the limit refused go back, and a machine faulting
+/// without pause still reaches its kill.
+const SPARE_WAITS: u32 = 16;
+
 /// Set while one fault chooses and kills, as Linux's `oom_lock` is held:
 /// two faults at one full limit kill one process, not two. A flag, not a
 /// lock, since a kill wakes tasks and must hold no spin lock
@@ -288,6 +295,15 @@ pub fn out_of_memory(space: &AddressSpace) -> Answer {
 pub fn out_of_memory_at(space: &AddressSpace, attempt: u32) -> Answer {
     if attempt >= MOST_ANSWERS {
         return Answer::Refused;
+    }
+    // Another fault's spare frame may be what filled the limit: charged, and
+    // given back within its fault, which never waits holding it. So before
+    // anything is reclaimed or killed for this refusal, wait for those to go
+    // back, a pause at a time, a few times at most (`L.user.224`): a kill
+    // for a frame nobody touched would take a process for nothing.
+    if attempt < SPARE_WAITS && crate::user::vmo::spares_in_flight() != 0 {
+        crate::sched::sleep_for(PAUSE_NANOS);
+        return Answer::Retry;
     }
     let group = crate::sched::running_group();
     let Some(full) = quota::at_limit(group, Resource::Memory, PAGE_SIZE) else {

@@ -31,15 +31,6 @@
     },
     {
       "ids": [
-        "L.user.220-225"
-      ],
-      "owner": "fault-path",
-      "branch": "fault-path",
-      "date": "2026-11-07",
-      "purpose": "A cheaper page fault (Endfield load time): per-task fault counts, the commit's frame before its reserve section, one space-lock hold per fault, a write fault's spare frame (consultant ledger 7788 FP.16)"
-    },
-    {
-      "ids": [
         "L.object.341-345", "L.object.348-369"
       ],
       "owner": "mk-authority",

@@ -4089,8 +4089,10 @@ package FerrixObjectRequirements {
                 never goes back; with the count taken out of oom::user_fault_own the step
                 fails on its minflt sentence.";
             attribute :>> parent = "H.QUOTA.10";
-            attribute :>> unit = ("sched::Task::note_fault", "sched::Task::minor_faults",
-                "sched::Task::major_faults", "object::oom::user_fault");
+            attribute :>> unit = ("sched::task::Task::note_fault", "sched::task::Task::minor_faults",
+                "sched::task::Task::major_faults", "sched::task::Task::begin_fault",
+                "sched::task::Task::note_fault_read_disk", "object::oom::user_fault",
+                "object::oom::TaskFault::begin", "object::oom::TaskFault::drop");
         }
     }
 }

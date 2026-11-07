@@ -25,10 +25,10 @@ use crate::mm;
 use crate::user::space::{
     Access, AddressSpace, Destination, FileMapping, FilePlace, MMAP_MIN_ADDR, SpaceError,
 };
-use crate::user::vmo::{Filler, Vmo, VmoError};
+use crate::user::vmo::{Commit, Filler, Spare, Vmo, VmoError};
 
 /// How many cases one run makes: the boot line's count.
-const CASES: u64 = 24;
+const CASES: u64 = 30;
 
 /// Where a run's fixed mappings go: on a page boundary on all architectures.
 const FIXED: u64 = 0x7200_0000;
@@ -85,6 +85,12 @@ fn once() -> Result<(), &'static str> {
     check_the_loader_pattern()?;
     #[cfg(not(all(ferrix_personality = "user", ferrix_load_built = "none")))]
     check_make_combining()?;
+    check_a_refused_commit_gives_its_frame_back()?;
+    check_commit_with_uses_a_spare_for_an_absent_page()?;
+    check_a_present_file_page_is_served()?;
+    check_refills_bound_a_fault()?;
+    check_an_unused_spare_goes_back()?;
+    check_a_spare_is_never_held_across_a_fill()?;
     check_is_anonymous()
 }
 
@@ -194,6 +200,8 @@ fn file_holds(object: &Vmo, at: u64, bytes: &[u8]) -> bool {
 struct Source {
     /// Calls that asked for a page.
     calls: AtomicUsize,
+    /// Faults that found their page with nothing to fill.
+    served: AtomicUsize,
 }
 
 impl Source {
@@ -201,6 +209,7 @@ impl Source {
     fn new() -> Arc<Source> {
         Arc::new(Source {
             calls: AtomicUsize::new(0),
+            served: AtomicUsize::new(0),
         })
     }
 }
@@ -208,6 +217,10 @@ impl Source {
 impl Filler for Source {
     fn fill(&self, vmo: &Vmo, index: u64) -> Result<(), Errno> {
         self.fill_one(vmo, index)
+    }
+
+    fn served(&self) {
+        let _ = self.served.fetch_add(1, Ordering::Relaxed);
     }
 
     fn fill_one(&self, vmo: &Vmo, index: u64) -> Result<(), Errno> {
@@ -1271,6 +1284,219 @@ fn check_make_combining() -> Result<(), &'static str> {
         }
     } else if made || plain.is_combining() {
         return Err("make_combining took an object where no attribute has been argued");
+    }
+    Ok(())
+}
+
+/// A source that never keeps a page: each fill puts it in and takes it back
+/// out, as a reclaim racing every fill would.
+#[derive(Debug)]
+struct EvictedAlways {
+    /// Fills asked for.
+    calls: AtomicUsize,
+}
+
+impl Filler for EvictedAlways {
+    fn fill(&self, vmo: &Vmo, index: u64) -> Result<(), Errno> {
+        self.fill_one(vmo, index)
+    }
+
+    fn fill_one(&self, vmo: &Vmo, index: u64) -> Result<(), Errno> {
+        let _ = self.calls.fetch_add(1, Ordering::Relaxed);
+        put_a_page(vmo, index)?;
+        let _ = vmo.decommit_range(index, 1);
+        Ok(())
+    }
+
+    fn is_sourced(&self, _index: u64) -> bool {
+        true
+    }
+}
+
+/// A commit whose reserve section cannot be entered gives back the frame it
+/// took before it: the page stays absent and the free count is as before.
+///
+/// Verifies: L.user.220
+fn check_a_refused_commit_gives_its_frame_back() -> Result<(), &'static str> {
+    let object = Vmo::new_anonymous(2).map_err(|_| "no object to commit")?;
+    // Preemption off, so the refusal and the commit are on one processor.
+    let window = mm::FrameWindow::open();
+    crate::sched::preempt_disable();
+    mm::refuse_reserve_fills(true);
+    let refused = object.commit(1);
+    mm::refuse_reserve_fills(false);
+    crate::sched::preempt_enable();
+    if refused != Err(VmoError::OutOfMemory) || object.page(1).is_some() {
+        return Err("a commit went ahead in a section that could not be entered");
+    }
+    if window.kept() != 0 {
+        window.report("commit");
+        return Err("a commit refused its section kept the frame it took");
+    }
+    Ok(())
+}
+
+/// `commit_with` puts the spare's frame in an absent page, and leaves the
+/// spare as it was for a present page, one past the object's end and one
+/// past its file's.
+///
+/// Verifies: L.user.221
+fn check_commit_with_uses_a_spare_for_an_absent_page() -> Result<(), &'static str> {
+    let object = Vmo::new_anonymous(2).map_err(|_| "no object to commit")?;
+    let present = object.commit(0).map_err(|_| "no page to commit")?;
+    let mut spare = Spare::zeroed();
+    let Some(frame) = spare.take() else {
+        return Err("no spare frame");
+    };
+    spare.give_back(frame);
+    if object.commit_with(0, &mut spare) != Ok(present) {
+        return Err("commit_with of a present page did not answer its frame");
+    }
+    if object.commit_with(2, &mut spare).is_ok() {
+        return Err("commit_with past the object's end committed");
+    }
+    let file = memory_file(PAGE_SIZE)?;
+    if file.commit_within_with(3, &mut spare) != Ok(Commit::PastEnd) {
+        return Err("commit_within_with past the file's end did not refuse");
+    }
+    if object.commit_with(1, &mut spare) != Ok(frame) {
+        return Err("commit_with of an absent page did not use the spare it kept");
+    }
+    if spare.take().is_some() {
+        return Err("commit_with used a spare and left it holding its frame");
+    }
+    Ok(())
+}
+
+/// A fault on a file page its object holds asks its fill nothing and counts
+/// the page served, once.
+///
+/// Verifies: L.user.222
+fn check_a_present_file_page_is_served() -> Result<(), &'static str> {
+    let source = Source::new();
+    let object = Vmo::new_filled(4, Some(Arc::clone(&source) as Arc<dyn Filler>))
+        .map_err(|_| "no object over a source")?;
+    put_a_page(&object, 1).map_err(|_| "no page for the source's object")?;
+    let space = fresh()?;
+    let shared = space
+        .map_file(
+            FilePlace::Anywhere(None),
+            4 * PAGE_SIZE,
+            VmaFlags {
+                shared: true,
+                ..VmaFlags::READ
+            },
+            Arc::clone(&object),
+            0,
+            mapping(false),
+        )
+        .map_err(|_| "no shared mapping of an object over a source")?;
+    if read(&space, shared + PAGE_SIZE + 2) != Ok(pattern(PAGE_SIZE + 2)) {
+        return Err("a fault on a present file page did not show it");
+    }
+    let (calls, served) = (
+        source.calls.load(Ordering::Relaxed),
+        source.served.load(Ordering::Relaxed),
+    );
+    if calls != 0 {
+        return Err("a fault on a present file page asked its fill");
+    }
+    if served != 1 {
+        return Err("a fault on a present file page was not counted served once");
+    }
+    Ok(())
+}
+
+/// A fill whose page is taken back every time ends the fault Unreadable
+/// within the fault's rounds.
+///
+/// Verifies: L.user.223
+fn check_refills_bound_a_fault() -> Result<(), &'static str> {
+    let source = Arc::new(EvictedAlways {
+        calls: AtomicUsize::new(0),
+    });
+    let object = Vmo::new_filled(2, Some(Arc::clone(&source) as Arc<dyn Filler>))
+        .map_err(|_| "no object over a source that never keeps")?;
+    let space = fresh()?;
+    let shared = space
+        .map_file(
+            FilePlace::Anywhere(None),
+            2 * PAGE_SIZE,
+            VmaFlags {
+                shared: true,
+                ..VmaFlags::READ
+            },
+            object,
+            0,
+            mapping(false),
+        )
+        .map_err(|_| "no mapping over a source that never keeps")?;
+    if space.fault(shared, Access::READ) != Err(SpaceError::Unreadable(shared)) {
+        return Err("a fault whose page was taken back every time did not end Unreadable");
+    }
+    let calls = source.calls.load(Ordering::Relaxed);
+    if calls == 0 || calls > 64 {
+        return Err("a fault whose page was taken back every time filled past its rounds");
+    }
+    Ok(())
+}
+
+/// A write fault that needs no frame -- on a page already in and writable,
+/// and on a copy-on-write page nobody else holds -- gives its spare back:
+/// the frames free are as before the fault.
+///
+/// Verifies: L.user.224
+fn check_an_unused_spare_goes_back() -> Result<(), &'static str> {
+    let space = fresh()?;
+    let at = FIXED;
+    let _ = space
+        .map_anonymous(at, 2 * PAGE_SIZE, VmaFlags::READ_WRITE)
+        .map_err(|_| "no anonymous mapping for the spare")?;
+    write(&space, at, 1).map_err(|_| "a first write failed")?;
+    let child = space.fork().map_err(|_| "no fork for the spare")?;
+    drop(child);
+    // The fork left the page copy-on-write with one holder: this fault maps
+    // it writable with no copy (its table work outside the window, as the
+    // tables an unmap empties go back after their shootdown), and the next
+    // finds it in and is spurious.
+    if space.fault(at, Access::WRITE).is_err() {
+        return Err("a write fault on a copy-on-write page with one holder failed");
+    }
+    let window = mm::FrameWindow::open();
+    let spurious = space.fault(at, Access::WRITE);
+    let kept = window.kept();
+    if spurious.is_err() || kept != 0 {
+        window.report("spare");
+        return Err("a write fault that needed no frame kept its spare");
+    }
+    if read(&space, at) != Ok(1) {
+        return Err("a write fault that needed no frame lost the page's byte");
+    }
+    Ok(())
+}
+
+/// A write fault that fills a file's page first lets its spare go before the
+/// fill: the fill sees none held (FX-0975 otherwise, in a checks build).
+///
+/// Verifies: L.user.225
+fn check_a_spare_is_never_held_across_a_fill() -> Result<(), &'static str> {
+    let source = Source::new();
+    let object = Vmo::new_filled(2, Some(Arc::clone(&source) as Arc<dyn Filler>))
+        .map_err(|_| "no object over a source")?;
+    let space = fresh()?;
+    let private = space
+        .map_file(
+            FilePlace::Anywhere(None),
+            2 * PAGE_SIZE,
+            VmaFlags::READ_WRITE,
+            object,
+            0,
+            mapping(false),
+        )
+        .map_err(|_| "no private mapping over a source")?;
+    write(&space, private + 5, 0x77).map_err(|_| "a write that fills failed")?;
+    if source.calls.load(Ordering::Relaxed) == 0 || read(&space, private + 6) != Ok(pattern(6)) {
+        return Err("a write fault on a file's page did not fill it first");
     }
     Ok(())
 }

@@ -353,6 +353,13 @@ impl Filler for Fill {
         self.sourced(index)
     }
 
+    /// As [`Fill::fill`] counts a page it had nothing to do for: a fault
+    /// now asks first, under its space's lock, and calls the fill only when
+    /// there is a page to read (`L.user.222`).
+    fn served(&self) {
+        super::seam::served(1);
+    }
+
     /// Read ahead as far as a read asks at most, [`MAX_FILL_RUN`] pages: a
     /// program's libraries are faulted in a page at a time, and a disk read
     /// per page is what would make that slow.

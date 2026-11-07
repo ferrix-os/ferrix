@@ -120,7 +120,7 @@ use crate::object::pager::{Command, FaultMode, Refusal};
 use crate::smp::{self, CpuMask, TlbPages};
 use crate::user::memory_type::{self, MemoryType};
 use crate::user::vmo::{
-    Commit, Kept, Own, PageState, Retired, ShadowCopies, Sharing, Vmo, VmoError,
+    Commit, Kept, Own, PageState, Retired, ShadowCopies, Sharing, Spare, Vmo, VmoError,
 };
 
 /// The lowest address a program may map anything at: 64 KiB, the
@@ -1441,14 +1441,52 @@ fn this_logical_cpu() -> usize {
     }
 }
 
-/// How many times a fault fills a page that reclaim took again before it gives
-/// the program a `SIGBUS`: reclaim would have to take it every time.
+/// How many rounds a fault takes before it gives the program a `SIGBUS`: a
+/// fill of a page that reclaim takes again every time, or a pager's page a
+/// write-back takes the write right from every time, would go on for ever
+/// (`L.user.223`).
 const REFILLS: usize = 64;
+
+/// What a fault's round has done before it resolves: filled the page, asked
+/// the pager. Both start again after a page taken back ([`SpaceError::Evicted`]).
+#[derive(Clone, Copy, Debug)]
+struct Round {
+    /// The file's fill has run for the page.
+    filled: bool,
+    /// The pager has been asked for it.
+    asked: bool,
+}
+
+/// What one round of a fault came to under this space's lock
+/// ([`AddressSpace::resolve`]).
+#[derive(Debug)]
+enum Resolved {
+    /// The page is in, or the fault was spurious: the instruction retries.
+    Done,
+    /// The file's object lacks page `index`, which its source holds: fill it
+    /// with no lock held, and resolve again.
+    Fill {
+        /// The file's object.
+        vmo: Arc<Vmo>,
+        /// The page.
+        index: u64,
+    },
+    /// The pager-backed object's page `index` is for its pager to supply or
+    /// let be written (`writes`): ask with no lock held, and resolve again.
+    Ask {
+        /// The object.
+        vmo: Arc<Vmo>,
+        /// The page.
+        index: u64,
+        /// Whether the fault writes a region that may be written.
+        writes: bool,
+    },
+}
 
 /// Fill `frame` with page `index` of `file`: a copy of it, or zeros for a hole.
 /// A page of a file on a disk that was filled before the caller's lock and
-/// reclaimed since is not a hole: the frame is given back and the fault is to
-/// fill it again (`user::cache`).
+/// reclaimed since is not a hole: the frame, unwritten, is left to the caller
+/// to give back, and the fault is to fill it again (`user::cache`).
 fn copy_or_zero(file: &Vmo, index: u64, frame: Frame) -> Result<(), SpaceError> {
     match file.page(index) {
         // A write-combining object's page is read through the write-back
@@ -1458,10 +1496,8 @@ fn copy_or_zero(file: &Vmo, index: u64, frame: Frame) -> Result<(), SpaceError> 
             mm::copy_frame(frame, original);
         }
         Some(original) => mm::copy_frame(frame, original),
-        None if file.sourced(index) => {
-            let _ = mm::release_frame(frame);
-            return Err(SpaceError::Evicted);
-        }
+        // The frame is the caller's still, unwritten, to give back.
+        None if file.sourced(index) => return Err(SpaceError::Evicted),
         None => mm::zero_frame(frame),
     }
     Ok(())
@@ -1473,17 +1509,26 @@ fn copy_or_zero(file: &Vmo, index: u64, frame: Frame) -> Result<(), SpaceError> 
 /// refused with [`SpaceError::PastEnd`] at `address`, never committed: the
 /// end is read under the object's pages lock, and a truncation lowers it
 /// before it takes that lock to take pages away.
-fn commit_page(vmo: &Vmo, index: u64, file: bool, address: u64) -> Result<Frame, SpaceError> {
+fn commit_page(
+    vmo: &Vmo,
+    index: u64,
+    file: bool,
+    address: u64,
+    spare: &mut Spare,
+) -> Result<Frame, SpaceError> {
     // A pager-backed object's absent page is its pager's, never zeros: it is
     // committed as a file's is, and its absence sends the fault round again.
     if file || vmo.is_pager_backed() {
-        match vmo.commit_within(index).map_err(SpaceError::Backing)? {
+        match vmo
+            .commit_within_with(index, spare)
+            .map_err(SpaceError::Backing)?
+        {
             Commit::Frame(frame) => Ok(frame),
             Commit::PastEnd => Err(SpaceError::PastEnd(address)),
             Commit::Unfilled => Err(SpaceError::Evicted),
         }
     } else {
-        vmo.commit(index).map_err(SpaceError::Backing)
+        vmo.commit_with(index, spare).map_err(SpaceError::Backing)
     }
 }
 
@@ -1525,19 +1570,23 @@ fn copy_on_write(
     vmo: &Vmo,
     index: u64,
     shared: Frame,
+    spare: &mut Spare,
 ) -> Result<(Frame, Option<Retired>), SpaceError> {
-    let copy = mm::allocate_user_frame().ok_or(SpaceError::OutOfMemory)?;
+    let copy = spare
+        .take()
+        .or_else(mm::allocate_user_frame)
+        .ok_or(SpaceError::OutOfMemory)?;
     mm::copy_frame(copy, shared);
     match vmo.take_page(index, copy) {
         Ok(retired) => Ok((copy, Some(retired))),
         // Held since the count was read. A held page is this object's alone,
         // so the write goes to it, uncopied.
         Err(Kept::Held) => {
-            let _ = mm::release_frame(copy);
+            Spare::discard(copy);
             Ok((vmo.page(index).unwrap_or(shared), None))
         }
         Err(Kept::NoMemory) => {
-            let _ = mm::release_frame(copy);
+            Spare::discard(copy);
             Err(SpaceError::OutOfMemory)
         }
     }
@@ -1973,76 +2022,124 @@ impl AddressSpace {
         fault_requested();
         // A page of a file on a disk that reclaim takes between its fill and
         // its use is filled again; it is never used as zeros (`user::cache`).
-        // So is a pager's page a write-back took the write right from.
+        // So is a pager's page a write-back took the write right from. Each
+        // round is one of the REFILLS, whether it ended in a fill, an ask of
+        // the pager or a page taken back (`L.user.223`).
+        let (mut filled, mut asked) = (false, false);
         for _ in 0..REFILLS {
-            self.fill_file_page(address)?;
-            if !self.ask_pager(address, access, mode)? {
-                // The process is ending: back to user mode with nothing
-                // installed, where it leaves.
-                return Ok(());
-            }
-            match self.resolve(address, access) {
-                Err(SpaceError::Evicted) => {}
-                done => return done,
+            // A write fault nearly always needs a frame: a fresh page's, or a
+            // copy's. Taken and zeroed here, with no lock held, so that neither
+            // the allocator's lock nor the zeros are waited behind under this
+            // space's lock by its other threads' faults (`L.user.224`). None
+            // when the job is at its limit: the fault goes on without, and a
+            // frame it needs is asked for under the lock, refused there as
+            // before.
+            let mut spare = if access.write {
+                Spare::zeroed()
+            } else {
+                Spare::none()
+            };
+            let resolved = self.resolve(address, access, &mut spare, Round { filled, asked });
+            // Given back before any wait: a spare is never held across a
+            // fill or an ask (`L.user.225`).
+            drop(spare);
+            match resolved {
+                Ok(Resolved::Done) => return Ok(()),
+                Ok(Resolved::Fill { vmo, index }) => {
+                    crate::user::vmo::assert_no_spare_held();
+                    match vmo.fill_for_fault(index) {
+                        Ok(()) => {}
+                        Err(ferrix_vfs::Errno::ENOMEM) => return Err(SpaceError::OutOfMemory),
+                        Err(_) => return Err(SpaceError::Unreadable(address)),
+                    }
+                    filled = true;
+                }
+                Ok(Resolved::Ask { vmo, index, writes }) => {
+                    crate::user::vmo::assert_no_spare_held();
+                    match ask(&vmo, index, writes, mode) {
+                        Ok(()) => asked = true,
+                        // The process is ending: back to user mode with nothing
+                        // installed, where it leaves.
+                        Err(Refusal::Interrupted) if mode == FaultMode::Program => return Ok(()),
+                        Err(Refusal::NoMemory) => return Err(SpaceError::OutOfMemory),
+                        Err(_) => return Err(SpaceError::Unreadable(address)),
+                    }
+                }
+                Err(SpaceError::Evicted) => (filled, asked) = (false, false),
+                Err(error) => return Err(error),
             }
         }
         Err(SpaceError::Unreadable(address))
     }
 
-    /// Before a fault on a pager-backed object: have its pager supply the
-    /// page if it is absent, and for a write to a Clean or awaiting-clean page
-    /// have it Dirty, asking the pager first if the object traps dirty
-    /// (`docs/microkernel/K3.md` §2.2 to §2.5). With no lock held, between
-    /// this space's lock, under which the region is looked up, and the one
-    /// [`AddressSpace::resolve`] takes. `Ok(false)` when the process is
-    /// ending and a program's fault should go back to user mode as it is.
+    /// One round of [`AddressSpace::fault`], in one hold of this space's
+    /// lock: find the region, and ask its object for the page and install it
+    /// -- or say what must happen first with no lock held, which today's
+    /// round then does before it resolves again (`L.user.222`).
     ///
-    /// # Errors
-    ///
-    /// [`SpaceError::Unreadable`] for a page the pager failed, timed out on
-    /// or will never answer, or that a copy may not wait for;
-    /// [`SpaceError::OutOfMemory`] for the request's own record.
-    fn ask_pager(&self, address: u64, access: Access, mode: FaultMode) -> Result<bool, SpaceError> {
-        let Some((vmo, index, writes)) = self.paged_object_at(address, access) else {
-            return Ok(true);
-        };
-        match ask(&vmo, index, writes, mode) {
-            Ok(()) => Ok(true),
-            Err(Refusal::Interrupted) if mode == FaultMode::Program => Ok(false),
-            Err(Refusal::NoMemory) => Err(SpaceError::OutOfMemory),
-            Err(_) => Err(SpaceError::Unreadable(address)),
-        }
-    }
-
-    /// The pager-backed object a shared or anonymous region maps at
-    /// `address`, the page's index in it, and whether `access` writes a
-    /// region that may be written; `None` for any other region or none.
-    fn paged_object_at(&self, address: u64, access: Access) -> Option<(Arc<Vmo>, u64, bool)> {
-        let inner = self.inner.lock();
-        let region = inner.map.find(address)?;
-        let (id, offset) = match region.backing {
-            Backing::Anonymous { id, offset } => (id, offset),
-            Backing::File { id, offset } if region.flags.shared => (id, offset),
-            _ => return None,
-        };
-        let vmo = inner.objects.get(&id).filter(|vmo| vmo.tracks_dirty())?;
-        let into = (address & !(PAGE_SIZE - 1)).saturating_sub(region.range.start());
-        Some((
-            Arc::clone(vmo),
-            offset.saturating_add(into) / PAGE_SIZE,
-            access.write && region.flags.write,
-        ))
-    }
-
-    /// [`AddressSpace::fault`] once a file's page is in its object: find the
-    /// region, ask its object for the page, install it.
-    fn resolve(&self, address: u64, access: Access) -> Result<(), SpaceError> {
+    /// In order, under the lock: the region's rights, which refuse before
+    /// anything is read; a device region's page; a private file mapping's
+    /// page wholly past the file's end, refused; a file region's page its
+    /// file's object lacks and its source holds, which comes back as
+    /// [`Resolved::Fill`] (a private mapping whose shadow holds the page is
+    /// filled all the same, as it was when the fill ran before the lock), unless
+    /// the fill or the ask has run since the fault began or last lost its page,
+    /// as the fill ran once a round ahead of the ask; a
+    /// pager-backed page not yet asked for, as [`Resolved::Ask`]. Only then
+    /// the page itself. A frame the page needs comes from `spare` when it
+    /// holds one, and is asked for here otherwise.
+    fn resolve(
+        &self,
+        address: u64,
+        access: Access,
+        spare: &mut Spare,
+        round: Round,
+    ) -> Result<Resolved, SpaceError> {
         let inner = self.inner.lock();
 
         let region = permitted(&inner, address, access)?;
 
         let page = address & !(PAGE_SIZE - 1);
         let into_region = page.saturating_sub(region.range.start());
+
+        // A file's page its object lacks is filled with no lock held, as it
+        // was before this hold; the fault comes back once it is in.
+        if let Backing::File { id, offset } = region.backing
+            && let Some(file) = inner.objects.get(&id)
+            && !round.filled
+            && !round.asked
+        {
+            let index = offset.saturating_add(into_region) / PAGE_SIZE;
+            if !region.flags.shared && file.past_file_end(index) {
+                return Err(SpaceError::PastEnd(address));
+            }
+            if file.wants_fault_fill(index) {
+                return Ok(Resolved::Fill {
+                    vmo: Arc::clone(file),
+                    index,
+                });
+            }
+            file.note_served();
+        }
+
+        // A pager-backed object's page is its pager's to supply or let be
+        // written, asked with no lock held once a round, as before this hold.
+        if !round.asked {
+            let paged = match region.backing {
+                Backing::Anonymous { id, offset } => Some((id, offset)),
+                Backing::File { id, offset } if region.flags.shared => Some((id, offset)),
+                _ => None,
+            };
+            if let Some((id, offset)) = paged
+                && let Some(vmo) = inner.objects.get(&id).filter(|vmo| vmo.tracks_dirty())
+            {
+                return Ok(Resolved::Ask {
+                    vmo: Arc::clone(vmo),
+                    index: offset.saturating_add(into_region) / PAGE_SIZE,
+                    writes: access.write && region.flags.write,
+                });
+            }
+        }
 
         let (id, offset, file) = match region.backing {
             Backing::Anonymous { id, offset } => (id, offset.saturating_add(into_region), false),
@@ -2053,13 +2150,17 @@ impl AddressSpace {
             }
             // A device region has no object: its page is the device's own.
             device @ Backing::Device { .. } => {
-                return self.fault_device(page, into_region, region.flags, device);
+                return self
+                    .fault_device(page, into_region, region.flags, device)
+                    .map(|()| Resolved::Done);
             }
             // A private file mapping reads the file's pages until it writes
-            // one, and writes into a shadow object of its own.
+            // one, and writes into a shadow object of its own: in this same
+            // hold.
             Backing::File { .. } => {
-                drop(inner);
-                return self.fault_private_file(address, access);
+                return self
+                    .fault_private_file(inner, address, access, spare)
+                    .map(|()| Resolved::Done);
             }
         };
 
@@ -2080,14 +2181,14 @@ impl AddressSpace {
         // read-only entry is the kernel's device rather than the region's
         // permission.
         if access.write && region.cow {
-            let shared = vmo.commit(index).map_err(SpaceError::Backing)?;
+            let shared = vmo.commit_with(index, spare).map_err(SpaceError::Backing)?;
 
             // The one real decision. A page nobody else holds any more needs
             // no copy: the other side has already copied it, or unmapped, or
             // exited, and copying would allocate a frame in order to duplicate
             // data this space is the sole owner of.
             let (frame, retired) = if mm::frame_references(shared) > 1 {
-                copy_on_write(&vmo, index, shared)?
+                copy_on_write(&vmo, index, shared, spare)?
             } else {
                 (shared, None)
             };
@@ -2137,7 +2238,9 @@ impl AddressSpace {
                 ),
                 None => self.shoot(&cpus, &mut pages),
             }
-            return mapped.map_err(|_| SpaceError::OutOfMemory);
+            return mapped
+                .map(|()| Resolved::Done)
+                .map_err(|_| SpaceError::OutOfMemory);
         }
 
         // A pager-backed object's Clean page is never mapped writable
@@ -2148,7 +2251,9 @@ impl AddressSpace {
         // page's is.
         if let Some(frame) = self.read_only_paged(&vmo, index, (page, address), access)? {
             let flags = writable_flags(&region, &vmo);
-            return self.install_page(inner, placed(id, index, page, frame), flags, true);
+            return self
+                .install_page(inner, placed(id, index, page, frame), flags, true)
+                .map(|()| Resolved::Done);
         }
 
         // Already present, and the fault was spurious: another processor
@@ -2161,11 +2266,11 @@ impl AddressSpace {
         // region's permissions, so a fault on a present one asked for nothing
         // the mapping does not already grant.
         if master_translate!(self, self.root * PAGE_SIZE, page).is_some() {
-            return Ok(());
+            return Ok(Resolved::Done);
         }
 
         // A pager-backed object's absent page is its pager's, never zeros.
-        let frame = commit_page(&vmo, index, file, address)?;
+        let frame = commit_page(&vmo, index, file, address, spare)?;
 
         // A copy-on-write region is installed read-only however writable the
         // region is, so that the *next* write faults here again and can copy;
@@ -2196,7 +2301,7 @@ impl AddressSpace {
         .map_err(|_| SpaceError::OutOfMemory)?;
 
         drop(inner);
-        Ok(())
+        Ok(Resolved::Done)
     }
 
     /// For [`AddressSpace::resolve`]'s write to page `index` of `vmo`, a
@@ -2223,48 +2328,29 @@ impl AddressSpace {
             return Err(SpaceError::Evicted);
         }
         if master_flags!(self, self.root * PAGE_SIZE, page).is_some_and(|flags| !flags.write) {
-            return commit_page(vmo, index, true, address).map(Some);
+            return commit_page(vmo, index, true, address, &mut Spare::none()).map(Some);
         }
         Ok(None)
     }
 
-    /// Before a fault on a file mapping: have the file's object hold the
-    /// page, if the file is on a disk and nothing has read the page yet.
-    ///
-    /// Everything below commits an absent page of a file's object as zeros,
-    /// which is right for tmpfs, whose object is the file, and wrong for a
-    /// page cache, whose absent page is on the disk -- a shared mapping would
-    /// show zeros, and a private one's first write would copy them over the
-    /// file's data. The fill waits for the disk, so it runs here, between
-    /// this space's lock and the one the fault takes: the region is looked up
-    /// under the lock and the page filled after it is let go. A region
-    /// unmapped in between costs a fill nobody maps, which the page cache
-    /// keeps; a truncation in between is the fault's to refuse, as ever.
-    ///
-    /// # Errors
-    ///
-    /// [`SpaceError::Unreadable`] for a page the filesystem could not read,
-    /// and [`SpaceError::OutOfMemory`] for frames to read it into.
-    fn fill_file_page(&self, address: u64) -> Result<(), SpaceError> {
-        self.fill_file_pages(address, false)
-    }
-
-    /// [`AddressSpace::fill_file_page`] for the page at `address` alone, with
-    /// no read-ahead after it: for the loader, which writes zeros into a
+    /// Have the file's object hold the page at `address` alone, if the file
+    /// is on a disk and nothing has read the page yet, with no read-ahead
+    /// after it: for the loader, which writes zeros into a
     /// writable segment's last file page itself, and must read that page of
     /// the program and no other (`syscall/load.rs`, `zero_tails`). The write's
     /// own fault then finds the page in the file's object and reads nothing.
     ///
     /// # Errors
     ///
-    /// As [`AddressSpace::fill_file_page`].
+    /// [`SpaceError::Unreadable`] for a page the filesystem could not read,
+    /// and [`SpaceError::OutOfMemory`] for frames to read it into.
     pub fn fill_file_page_alone(&self, address: u64) -> Result<(), SpaceError> {
         self.fill_file_pages(address, true)
     }
 
-    /// The body of [`AddressSpace::fill_file_page`] and
-    /// [`AddressSpace::fill_file_page_alone`]: `alone` asks the file for the
-    /// one page, without the read-ahead a fault's fill does.
+    /// The body of [`AddressSpace::fill_file_page_alone`]: `alone` asks the
+    /// file for the one page, without the read-ahead a fault's fill does
+    /// ([`Vmo::fill_for_fault`], which a fault's round runs itself).
     fn fill_file_pages(&self, address: u64, alone: bool) -> Result<(), SpaceError> {
         let (vmo, index) = {
             let inner = self.inner.lock();
@@ -2313,10 +2399,16 @@ impl AddressSpace {
     ///   write faults here.
     ///
     /// A file on a disk has had the page filled into its object already, by
-    /// [`AddressSpace::fill_file_page`] before this was called, so the copy
-    /// below copies the file's data rather than zeros.
-    fn fault_private_file(&self, address: u64, access: Access) -> Result<(), SpaceError> {
-        let inner = self.inner.lock();
+    /// the round before this one, with no lock held, so the copy below copies
+    /// the file's data rather than zeros. Called in [`AddressSpace::resolve`]'s
+    /// hold of this space's lock, `inner`, and lets it go.
+    fn fault_private_file<G: Deref<Target = Inner>>(
+        &self,
+        inner: G,
+        address: u64,
+        access: Access,
+        spare: &mut Spare,
+    ) -> Result<(), SpaceError> {
         let region = *inner
             .map
             .find(address)
@@ -2353,11 +2445,14 @@ impl AddressSpace {
                 if present.is_some() {
                     return Ok(());
                 }
-                let frame = commit_page(&file, index, true, address)?;
+                let frame = commit_page(&file, index, true, address, spare)?;
                 let flags = typed(user_page(false, execute), &file);
                 return self.install_page(inner, placed(frame), flags, false);
             }
-            let frame = mm::allocate_user_frame().ok_or(SpaceError::OutOfMemory)?;
+            let frame = spare
+                .take()
+                .or_else(mm::allocate_user_frame)
+                .ok_or(SpaceError::OutOfMemory)?;
             // A snapshot. The file's page is read through the direct map
             // without its object's lock, so a write to the file landing
             // meanwhile may be partly in the copy -- which is Linux's
@@ -2366,14 +2461,19 @@ impl AddressSpace {
             // a shared reference would make the file's next write copy on
             // write, and the file would stop being what its shared mappings
             // show.
-            copy_or_zero(&file, index, frame)?;
+            if let Err(error) = copy_or_zero(&file, index, frame) {
+                // Not written: as the spare left it, or a fresh frame
+                // nothing has seen.
+                spare.give_back(frame);
+                return Err(error);
+            }
             // The shadow lacked the page under this space's lock, and every
             // change to a shadow is made under it, so no page can have arrived
             // meanwhile: a frame that did not go in is one there was no memory
             // to record (finding F-23), and the fault ran out of memory as
             // surely as if the copy's own frame had been refused.
             if !shadow.insert_absent(index, frame) {
-                let _ = mm::release_frame(frame);
+                Spare::discard(frame);
                 return Err(SpaceError::OutOfMemory);
             }
             let flags = user_page(region.flags.write, execute);
@@ -2388,7 +2488,7 @@ impl AddressSpace {
             // left: returning because a page is present would send the write
             // back into that entry forever.
             if mm::frame_references(copied) > 1 {
-                return self.copy_shadow_page(inner, &shadow, placed(copied), execute);
+                return self.copy_shadow_page(inner, &shadow, placed(copied), execute, spare);
             }
             let flags = user_page(true, execute);
             return self.install_page(inner, placed(copied), flags, present.is_some());
@@ -2445,18 +2545,22 @@ impl AddressSpace {
         shadow: &Arc<Vmo>,
         at: Placement,
         execute: bool,
+        spare: &mut Spare,
     ) -> Result<(), SpaceError> {
-        let copy = mm::allocate_user_frame().ok_or(SpaceError::OutOfMemory)?;
+        let copy = spare
+            .take()
+            .or_else(mm::allocate_user_frame)
+            .ok_or(SpaceError::OutOfMemory)?;
         mm::copy_frame(copy, at.frame);
         let (frame, retired) = match shadow.take_page(at.index, copy) {
             Ok(retired) => (copy, Some(retired)),
             // Held since the count was read: the write goes to the held page.
             Err(Kept::Held) => {
-                let _ = mm::release_frame(copy);
+                Spare::discard(copy);
                 (shadow.page(at.index).unwrap_or(at.frame), None)
             }
             Err(Kept::NoMemory) => {
-                let _ = mm::release_frame(copy);
+                Spare::discard(copy);
                 return Err(SpaceError::OutOfMemory);
             }
         };
@@ -3231,7 +3335,23 @@ impl AddressSpace {
                 4 * PAGE_SIZE,
             )
             .is_none();
-            if resident && room && self.resolve(at, reading).is_ok() {
+            // No spare, and asked: a neighbour's round is the fault's own, and
+            // only a page that resolves in it comes in.
+            if resident
+                && room
+                && matches!(
+                    self.resolve(
+                        at,
+                        reading,
+                        &mut Spare::none(),
+                        Round {
+                            filled: true,
+                            asked: true
+                        }
+                    ),
+                    Ok(Resolved::Done)
+                )
+            {
                 found[count] = at;
                 count += 1;
             }
@@ -3289,7 +3409,21 @@ impl AddressSpace {
                 4 * PAGE_SIZE,
             )
             .is_none();
-            if !free || !room || self.resolve(at, writing).is_err() {
+            if !free
+                || !room
+                || !matches!(
+                    self.resolve(
+                        at,
+                        writing,
+                        &mut Spare::none(),
+                        Round {
+                            filled: true,
+                            asked: true
+                        }
+                    ),
+                    Ok(Resolved::Done)
+                )
+            {
                 break;
             }
             found[count] = at;

@@ -358,6 +358,10 @@ pub struct Task {
     /// by the fill, read and cleared when the fault is counted, so that a
     /// fault whose fill ran more than once is one major fault.
     fault_read_disk: AtomicBool,
+    /// Spare frames it holds for a fault (`user::vmo::Spare`): changed only
+    /// by the task itself, as it takes one and as it lets one go, and read
+    /// by it before a fault's wait, which may never hold one (`L.user.225`).
+    spares_held: AtomicU32,
     /// Its pending work, one bit for each thing the way back to user mode
     /// would have to act on (`sched::work`): written only through that
     /// module, set by a poster after the state it stands for and cleared by
@@ -854,6 +858,7 @@ impl Task {
             switched_out: [const { AtomicU64::new(0) }; 2],
             faults: [const { AtomicU64::new(0) }; 2],
             fault_read_disk: AtomicBool::new(false),
+            spares_held: AtomicU32::new(0),
             work: AtomicU32::new(0),
             reply: [const { AtomicU64::new(0) }; 4],
             run_slot: SlotCell::new(run_slot),
@@ -929,6 +934,7 @@ impl Task {
             switched_out: [const { AtomicU64::new(0) }; 2],
             faults: [const { AtomicU64::new(0) }; 2],
             fault_read_disk: AtomicBool::new(false),
+            spares_held: AtomicU32::new(0),
             work: AtomicU32::new(0),
             reply: [const { AtomicU64::new(0) }; 4],
             run_slot: SlotCell::new(run_slot),
@@ -1518,6 +1524,23 @@ impl Task {
                 Ordering::Relaxed,
             );
         }
+    }
+
+    /// It took a spare frame (`up`) or let one go: only the task itself, so a
+    /// load and a store.
+    pub fn note_spare(&self, up: bool) {
+        let held = self.spares_held.load(Ordering::Relaxed);
+        let held = if up {
+            held.wrapping_add(1)
+        } else {
+            held.wrapping_sub(1)
+        };
+        self.spares_held.store(held, Ordering::Relaxed);
+    }
+
+    /// The spare frames it holds.
+    pub fn spares_held(&self) -> u32 {
+        self.spares_held.load(Ordering::Relaxed)
     }
 
     /// A fault of its own begins: a disk read before it was no part of it.
