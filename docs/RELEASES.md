@@ -29,6 +29,129 @@ runners 418. Each pinned download that such a host serves names a mirror
 too, which is checked against the same pin. See the [discovery plan](marketing/PLAYBOOK.md#what-to-do-next-in-order)
 for how future releases should be presented.
 
+## v0.3.0 (2026-11-08), surviving bad hardware
+
+Nine days of work since v0.2.0, most of it below the desktop: Ferrix now
+reads the processor's error banks and survives memory that fails, the
+compositor can freeze a program and thaw it later, the kernel runs more
+lightly under a game's load, and the switch to a microkernel has its first
+working build. The live ISO and its installer are the same as v0.2.0's.
+Download `ferrix-v0.3.0-x86_64.iso` below, check it against `SHA256SUMS`,
+and follow [Try Ferrix](https://github.com/ferrix-os/ferrix/blob/v0.3.0/docs/TRY-FERRIX.md).
+
+**This is still a development preview, not a finished system.** What
+v0.2.0's notes say about Secure Boot, signatures, the IOMMU and the
+certification claim still holds; it is repeated under *What does not
+work, yet*.
+
+New since v0.2.0:
+
+- **A log of hardware errors.** The kernel reads and enables every
+  processor's machine-check banks, polls them every 5 s, and logs each
+  error with its bank, address and kind; `/proc/ferrix-mce` counts them
+  per processor. Corrected errors (ECC, a cache retry) are what an
+  unstable overclock or a failing DIMM shows first, and Ferrix used to
+  see none of them. Intel's and AMD's own rules are both followed (AMD's
+  SMCA banks included; with Intel's rules every uncorrected error stopped
+  a Ryzen), and on Intel a corrected error interrupts its processor at
+  once (CMCI). An error left in the banks by the crash before is read at
+  the next boot.
+- **Memory that fails no longer takes the system down.** A bad page that
+  a program reads kills that program, not the kernel, and the frame is
+  retired. A system call that copies from a bad page fails with `SIGBUS`;
+  a bad page in a clean cached file costs a disk read; a ring-3 driver
+  that reads one ends alone and `devmgr` starts it again. A retired frame
+  stays out after a warm reset and, on a boot disk, after a power cycle
+  (`ferrix.badframes=persist|reset|off`). A RAM scrubber tests free
+  memory while the machine idles and retires a frame that fails twice
+  (on bare metal only: in a virtual machine it stands down). A processor
+  that keeps reporting errors of its own is taken out of service while the
+  system runs, and root brings it back
+  (`echo 1 > /sys/devices/system/cpu/cpuN/online`). Intel's recovery has
+  been run only under QEMU's emulator: no Intel processor at hand reports
+  that it can recover (`MCG_SER_P`).
+- **Suspend one program.** SUPER+Z freezes the focused window's program,
+  all of its processes, in RAM: it takes no processor time at all, its
+  window stays on screen at half opacity, and SUPER+SHIFT+Z thaws it where
+  it stopped (`hyprctl dispatch suspend|resume`). A Proton game froze and
+  came back in the world this way on the N150, its server permitting
+  (Endfield's drops a silent session after a few minutes).
+- **Lighter under load.** Per-processor caches in front of the kernel
+  heap; PCIDs on x86-64 where every processor has them, so switching back
+  to a program reuses its cached translations instead of refilling them; the boot's initramfs and the root's copy given back once the
+  root is mounted (about 195 MB on the N150's image); `/proc/<pid>/status`
+  splits the resident set into anonymous, file and shared memory as Linux
+  does. Intel graphics on the N150 map GPU memory with 2 MiB and 64 KiB
+  pages, and the IOMMU maps those runs with 2 MiB entries.
+- **Running out of memory is survivable.** The machine-wide OOM killer
+  ends a program instead of the kernel panicking; a large kernel buffer
+  that a full heap cannot give is refused with an error; a job at its
+  memory limit reclaims its own cache before it is refused; and `devmgr`
+  backs off a driver that keeps crashing, re-initialises its device, and
+  finally quarantines it.
+- **The microkernel, as a build.** The Linux system calls, btrfs and the
+  network switch can each run as an ordinary process -- `linuxd`, `btrfsd`
+  and `netd` -- in place of the kernel, behind new kernel objects (address
+  spaces, pager-backed memory, exception channels and timers, all by
+  handle). The `fast` build profile, a small kernel with these outside it,
+  builds on AArch64 and runs Linux programs there (busybox, Rust threads,
+  btrfs, the init) in the test machines. The live ISO's kernel is still
+  the `desktop` profile, the Linux layer in ring 0, and nothing of this
+  is claimed for anything yet ([docs/microkernel/FLIP.md](https://github.com/ferrix-os/ferrix/blob/v0.3.0/docs/microkernel/FLIP.md)).
+- **Smaller things.** Page faults are counted per task, so `ps`, `top` and
+  `getrusage` see minor and major faults; `msync(MS_SYNC)` writes a shared
+  file mapping's pages to the disk; a fullscreen window of another shape is fitted, not
+  stretched, and covers the dock; an X program's crash report names the
+  program, not the X server; `authd`'s password hashing takes at most a
+  quarter of free memory; Ferrix calls itself 0.3.0 (`uname`, the boot
+  lines, `ferrofetch`), where v0.2.0 still said 0.1.0. Built with Rust
+  1.99.1.
+- **Fixed:** a game that filled memory on the N150 stopped the kernel
+  (FX-0008) when a buffer of many pages could not be found; on AArch64
+  and ARMv7-A a kernel stack overflow wrote below its guard page, or
+  looped with no report, before stopping (F-103); a task freed from an
+  interrupt ran work that may sleep there (F-104).
+
+On v0.3.0's live ISO, in Try Ferrix's QEMU machine:
+
+![A program suspended with SUPER+Z: its window, a clock stopped at 23:52:12, at half opacity over ferrofetch, while a terminal reads its cgroup as frozen and the time as 23:52:48](https://raw.githubusercontent.com/ferrix-os/ferrix/v0.3.0/docs/brand/screenshots/suspend.png)
+
+*SUPER+Z froze the clock's terminal at 23:52:12: half opacity, `frozen 1`,
+and `date` 36 seconds later.*
+
+![A terminal reading uname as Ferrix 0.3.0, /proc/ferrix-mce with one corrected error on cpu2, the RAM scrubber standing down, and the resident set split by kind](https://raw.githubusercontent.com/ferrix-os/ferrix/v0.3.0/docs/brand/screenshots/machine-check.png)
+
+*A corrected memory error injected on processor 2 through QEMU's monitor,
+logged and counted; the scrubber stands down in a virtual machine.*
+
+What does not work, yet (unchanged from v0.2.0 unless it says so):
+
+- **Installing from a CD or a USB stick**: Ferrix has no CD driver and
+  does not yet read USB disks as disks. Attach the ISO to a virtual
+  machine as a virtio, SATA or NVMe disk to install; Try Ferrix shows how.
+- **Graphics on a PC are the firmware's framebuffer**, drawn in software;
+  Intel graphics only under an option this image does not set; AMD and
+  NVIDIA graphics not at all. **Input on a PC is USB only**, no PS/2.
+  **Little hardware**: Ethernet on virtio-net, the Motorcomm YT6801 and
+  some Realtek RTL8111/8168 chips; no Wi-Fi, no Bluetooth.
+- **The installed system needs an IOMMU** (VT-d, AMD-Vi, or the virtual
+  machine's); the live session runs without one and says so.
+- **Not signed for Secure Boot**: turn it off to start the ISO.
+- **Very heavy programs** can still stall the system under load (F-95).
+- In the live session, `dmesg` and `journalctl` show the session's user
+  nothing of the kernel's log; `/proc/ferrix-mce` is readable.
+- The dock's clock shows UTC whatever the time zone. The installer does
+  not resize another system's partition or write a firmware boot entry,
+  and speaks English only.
+
+What was checked for this release, on 182712930, whose code the tag
+carries (only documents and pictures follow it): the image row's gates
+(`check`, the release build, boots on x86-64 under KVM and under QEMU's
+emulator, AArch64 and ARMv7-A at four and at two processors, and ring 0's
+size budget); the release workflow's dry run, which built every asset;
+and the dry run's ISO booted on Try Ferrix's virtio machine for the
+pictures above. Real PCs, VirtualBox and VMware were not checked.
+
 ## v0.2.0 (2026-10-29), the first live ISO
 
 A live ISO you can boot: Ferrix's desktop, Yoru, starts from memory, with

@@ -1,5 +1,32 @@
 # Ferrix screenshots
 
+## v0.3.0's live ISO, 2026-11-08
+
+Taken from the release workflow's dry run of 182712930 (run 42424988530,
+`ferrix-dry-run-x86_64.iso`, the commit v0.3.0's code is), booted with Try
+Ferrix's QEMU command line under KVM on nazuna (Ryzen 9 9900X, QEMU 10.2.1,
+4 processors, 4 GiB), the screen taken by QEMU's `screendump` and the
+keys and pointer sent over QMP. Nothing was edited.
+
+**desktop-0.3.0.png** (1920x1080): Try Ferrix, then `ferrofetch` (OS
+Ferrix 0.3.0) snapped left and `btop` right; `memscru` in btop's list is
+the RAM scrubber, which stands down in a virtual machine.
+
+**suspend.png** (1920x1080): a third terminal running `date +%T` once a
+second, dragged over the left one and suspended with SUPER+Z: it stops at
+23:52:12 and is drawn at half opacity. The right terminal finds its
+`sleep` in `session-1.scope/suspend-138`, reads `frozen 1`, and gives the
+time as 23:52:48. The first take typed the second command before the first
+had finished; the right terminal was cleared and the commands typed again
+for this one.
+
+**machine-check.png** (1920x1080): on workspace 2, a corrected memory read
+error (`MCi_STATUS` 0x9c0000000000009f, bank 1) injected on processor 2
+with QEMU's `mce` monitor command, as `test-mce-corrected` does; the
+kernel logged `mce: cpu 2 bank 1 corrected ... total=1` on the serial
+console within its 5 s poll, and `/proc/ferrix-mce` counts it. The
+scrubber's line and the resident set split by kind follow.
+
 ## The Yoru hero and the live ISO, 2026-10-28
 
 **hero-n150.png** (1920x1080) replaces the 2026-10-23 hero below. It was
