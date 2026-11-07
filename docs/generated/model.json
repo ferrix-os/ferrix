@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "34cd88d8034f9faa2f4fe8357b2a3f0bddb2027098120d8386c4854e7ffd5863",
+  "digest": "76c7919b5beda9d9eac44fe0d1f0ebae64a96b07717284d5e1767ffca6cec2b3",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -72131,7 +72131,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::SpacesByHandle::refillsBoundEveryRound",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"The rehome check's refill case: a source that takes back every page it fills ends the fault Unreadable after between 1 and 64 fills.\"",
+                  "value": "\"The rehome check's refill case: a source that takes back every page it fills ends the fault Unreadable after between 1 and 32 fills.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 3391
