@@ -56,7 +56,7 @@ pool=${FERRIX_YSERVER_POOL:-$out/pool}
 # The fork, and the commit of it that is built. YSERVER_REPO may name a local
 # clone, for a commit not yet pushed.
 repo=${YSERVER_REPO:-https://github.com/ferrix-os/yserver.git}
-YSERVER_COMMIT=496bf8e675b4f0559748418206fbc11790e8d1a2
+YSERVER_COMMIT=7812b8b93b32ab597d7ee385a43686cd66347726
 # The toolchain yserver is built with: pinned apart from the one Ferrix pins
 # in rust-toolchain.toml, because upstream yserver tracks the current stable
 # Rust, while the kernel's pin is a decision of its own.
