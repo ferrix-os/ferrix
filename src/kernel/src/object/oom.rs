@@ -106,7 +106,14 @@ pub const MOST_ANSWERS: u32 = 1024;
 /// held for a fault's commit, microseconds, so a few pauses see every one
 /// that was held when the limit refused go back, and a machine faulting
 /// without pause still reaches its kill.
-const SPARE_WAITS: u32 = 16;
+pub const SPARE_WAITS: u32 = 16;
+
+/// Whether the answer to a fault's `attempt` is a pause for the `held`
+/// spare frames to go back, rather than a reclaim or a kill
+/// (`L.user.228`): while any is held, for the first [`SPARE_WAITS`].
+pub const fn waits_for_spares(attempt: u32, held: u64) -> bool {
+    attempt < SPARE_WAITS && held != 0
+}
 
 /// Set while one fault chooses and kills, as Linux's `oom_lock` is held:
 /// two faults at one full limit kill one process, not two. A flag, not a
@@ -301,7 +308,7 @@ pub fn out_of_memory_at(space: &AddressSpace, attempt: u32) -> Answer {
     // anything is reclaimed or killed for this refusal, wait for those to go
     // back, a pause at a time, a few times at most (`L.user.224`): a kill
     // for a frame nobody touched would take a process for nothing.
-    if attempt < SPARE_WAITS && crate::user::vmo::spares_in_flight() != 0 {
+    if waits_for_spares(attempt, crate::user::vmo::spares_in_flight()) {
         crate::sched::sleep_for(PAUSE_NANOS);
         return Answer::Retry;
     }

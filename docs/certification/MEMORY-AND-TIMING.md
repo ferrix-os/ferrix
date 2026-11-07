@@ -582,7 +582,10 @@ even for an instant, and a refused charge takes nothing.
   never held across the fill or the pager's ask a round may wait for
   (`L.user.225`, FX-0975 in a checks build). It is taken only while the job
   has 64 pages of room under its memory limit (`user::vmo::SPARE_ROOM`), so
-  near the limit a fault charges what it did before. So the charge it adds
+  near the limit a fault charges what it did before (`L.user.227`). The room
+  test and the take are not one step, so the spares in flight within those
+  64 pages are bounded only by the job's tasks between their take and their
+  resolve; past that, a refusal waits (`L.user.228`). So the charge it adds
   is one page a task for the length of one hold of its space's lock, and the
   spares held machine-wide are counted. A fault a limit refused waits for
   those to go back, a 1 ms pause at a time and at most 16

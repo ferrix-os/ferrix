@@ -13,15 +13,6 @@
   "reservations": [
     {
       "ids": [
-        "L.user.227-228"
-      ],
-      "owner": "fault-path",
-      "branch": "fault-path",
-      "date": "2026-11-07",
-      "purpose": "fault-path's spare: no spare within SPARE_ROOM of a memory limit, and the OOM's wait for spares in flight (consultant ledger 7842 B2)"
-    },
-    {
-      "ids": [
         "L.user.226"
       ],
       "owner": "ef-fix",

@@ -3391,22 +3391,38 @@ package FerrixMemoryRequirements {
             attribute :>> unit = ("user::space::AddressSpace::fault_with");
         }
         requirement <'L.user.224'> aSpareIsUsedOrGivenBackOnce : ItemLowLevel {
-            attribute :>> statement = "A write fault shall take a zeroed spare frame of
-                the running task's job with no lock held, only while the job has 64
-                pages of room under its memory limit, and shall either put it in the
-                page or the copy the fault makes, or give it back to the allocator when
-                its round ends, exactly once; a frame a taker wrote and did not use
-                shall go to the allocator, never back into a spare. A fault a memory
-                limit refused shall wait for the spares held machine-wide to go back, at
-                most SPARE_WAITS pauses, before anything is reclaimed or killed for it.";
+            attribute :>> statement = "A spare frame a write fault took shall either go
+                into the page or the copy the fault makes, or back to the allocator when
+                its round ends, exactly once; an unwritten frame taken from a spare may
+                go back into it, and every other frame shall go to the allocator.";
             attribute :>> criterion = "The rehome check's unused-spare case: a write
                 fault on a copy-on-write page with one holder and a spurious one after it
                 net a frame window to zero; the check's whole second run nets to zero.";
             attribute :>> parent = "H.MEM.1";
-            attribute :>> unit = ("user::vmo::Spare::zeroed", "user::vmo::Spare::for_fault", "user::vmo::Spare::take",
+            attribute :>> unit = ("user::vmo::Spare::zeroed", "user::vmo::Spare::take",
                 "user::vmo::Spare::give_back", "user::vmo::Spare::discard",
-                "user::vmo::Spare::drop", "user::vmo::spares_in_flight", "user::vmo::count_spare",
-                "object::oom::out_of_memory_at");
+                "user::vmo::Spare::drop", "user::vmo::spares_in_flight", "user::vmo::count_spare");
+        }
+        requirement <'L.user.227'> noSpareNearAMemoryLimit : ItemLowLevel {
+            attribute :>> statement = "A write fault shall take a spare frame only while
+                the running task's job has 64 pages of room under its memory limit, and a
+                commit within that room shall take its own frame as before spares.";
+            attribute :>> criterion = "The quota check's spare-room case: a job far from
+                its limit gets a spare; with 32 pages of room it gets none, the spares in
+                flight do not move, and eight write faults all commit.";
+            attribute :>> parent = "H.QUOTA.2";
+            attribute :>> unit = ("user::vmo::Spare::for_fault");
+        }
+        requirement <'L.user.228'> aRefusalWaitsForSparesInFlight : ItemLowLevel {
+            attribute :>> statement = "A fault a memory limit refused while spare frames
+                are held machine-wide shall be answered with a 1 ms pause and a retry,
+                before anything is reclaimed or killed for it, for at most SPARE_WAITS
+                (16) answers.";
+            attribute :>> criterion = "The quota check's spare-wait case: with a spare
+                held, out_of_memory_at answers Retry for each of the first 16 attempts;
+                past them, or with none held, it does not wait.";
+            attribute :>> parent = "H.QUOTA.6";
+            attribute :>> unit = ("object::oom::out_of_memory_at", "object::oom::waits_for_spares");
         }
         requirement <'L.user.225'> aSpareIsNeverHeldAcrossAWait : ItemLowLevel {
             attribute :>> statement = "A fault shall let its spare go before it runs a

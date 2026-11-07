@@ -310,7 +310,7 @@ pub trait Filler: Send + Sync + fmt::Debug {
 /// allocator, once, when the spare drops -- never both, and never twice.
 #[derive(Debug)]
 #[must_use = "a spare's frame goes back when it drops"]
-pub(crate) struct Spare(Option<Frame>);
+pub struct Spare(Option<Frame>);
 
 /// The room a job must have below its memory limit, in bytes, for a fault
 /// of one of its tasks to take a spare: 64 pages, so that the spares of
@@ -374,7 +374,7 @@ impl Spare {
     /// nothing when the job is within [`SPARE_ROOM`] of its memory limit, so
     /// that near the limit a fault charges exactly what it did before spares,
     /// the frame its commit takes under the lock (`L.user.224`).
-    pub(crate) fn for_fault() -> Spare {
+    pub fn for_fault() -> Spare {
         if crate::object::quota::at_limit(
             crate::object::quota::charge_target(),
             Resource::Memory,
@@ -398,7 +398,7 @@ impl Spare {
     /// Takes the allocator's lock alone, the innermost, so any lock may be
     /// held; a fault takes its spare holding none, so that neither the lock
     /// nor the zeros are waited behind.
-    pub(crate) fn zeroed() -> Spare {
+    pub fn zeroed() -> Spare {
         let frame = mm::allocate_user_frame();
         if let Some(frame) = frame {
             // Zeroed rather than merely allocated, as `Vmo::commit` always
@@ -410,7 +410,7 @@ impl Spare {
     }
 
     /// The frame, now the caller's to put in an object; the spare is empty.
-    pub(crate) fn take(&mut self) -> Option<Frame> {
+    pub fn take(&mut self) -> Option<Frame> {
         let frame = self.0.take();
         if frame.is_some() {
             count_spare(false);
