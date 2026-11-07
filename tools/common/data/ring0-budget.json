@@ -31,21 +31,21 @@
     }
   },
   "rise": {
-    "ledger": 7667,
-    "why": "Rust 1.99.1 (chore/rust-1.99.1, ledger 7667 R.2): source lines only, no code added. clippy 1.99's chunks_exact_to_as_chunks rewrites (210319ee0), which rustfmt splits over more lines, less the short-chunk fallbacks removed: count B +22 on x86-64 (clock.rs and mce.rs among them) and +10 on AArch64, library files +11 to +13 (ferrix-sha256, the btrfs crates); the same 79 to 82 library files per build as before, so 1.99.1 links no new file into ring 0. Measured by gate r199-ring0 on 258df8ae9 against r199-base-ring0 on 3ef2e61c7 (1.97.1), whose figures were the baseline 7256 set"
+    "ledger": 7893,
+    "why": "Develop's code since 7667's baseline, accepted as code, not compacted (ledger 7893, closing AF-RING0 of 7738): count A +576, count B +569, library files +7 in all six builds, library file counts unchanged (80/81/81/82/79/80). By max AArch64 count A, each window between gate runs: S4 of the crate split 3f9191c51 +59 (mkc6b-ring0 against mki5b-16 on 3f7e8c054); 3f9191c51..88cc1a881 +126, 9cdbe75e1 FX-0974 (its +7 library lines are ferrix-sync's guard hooks, the one ring-0 library changed), a156af89a fl-096 and 2096c7c65 (r199e-base-ring0b on 88cc1a881); the 1.99.1 series +21, already 7667's; fault-path 6175c9939..53ab14eec +391, its spare frames and per-task fault counts, the only kernel change after the 1.99.1 series (r199e-ring0 on 8d6870906 against batch-20261107T223544Z-b0-1 on c8479539e). Each landed with this row red; docs/BACKLOG.md's row says how that is stopped."
   },
   "baseline": {
     "user": {
-      "x86_64": {"a": 92082, "b": 64940},
-      "aarch64": {"a": 86193, "b": 58946}
+      "x86_64": {"a": 92658, "b": 65509},
+      "aarch64": {"a": 86769, "b": 59515}
     },
     "fast": {
-      "x86_64": {"a": 92881, "b": 65252},
-      "aarch64": {"a": 86783, "b": 59049}
+      "x86_64": {"a": 93457, "b": 65821},
+      "aarch64": {"a": 87359, "b": 59618}
     },
     "max": {
-      "x86_64": {"a": 92119, "b": 65009},
-      "aarch64": {"a": 86230, "b": 59015}
+      "x86_64": {"a": 92695, "b": 65578},
+      "aarch64": {"a": 86806, "b": 59584}
     }
   },
   "check_files": [
