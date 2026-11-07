@@ -9,8 +9,7 @@
 //! Every field [`Stat`] does not carry is one Linux itself prints as zero for
 //! an ordinary process — `itrealvalue`, `kstkesp`, `kstkeip`, `wchan`,
 //! `nswap`, `cnswap` — or one a kernel with no accounting of it would have to
-//! invent, as the waited-for children's `cminflt` and `cmajflt`; each is
-//! named at the place it is written.
+//! invent; each is named at the place it is written.
 
 use alloc::vec::Vec;
 
@@ -38,10 +37,6 @@ pub struct Stat<'a> {
     pub tpgid: i32,
     /// (9) `flags`: the `PF_*` bits.
     pub flags: u32,
-    /// (10) `minflt`: page faults that read nothing from a disk.
-    pub minflt: u64,
-    /// (12) `majflt`: page faults that read their page from a disk.
-    pub majflt: u64,
     /// (14) `utime`, in clock ticks.
     pub utime: u64,
     /// (15) `stime`, in clock ticks.
@@ -107,9 +102,9 @@ pub fn render(out: &mut Vec<u8>, stat: &Stat<'_>) {
             stat.flags,
         ),
     );
-    // (10-13) minflt, cminflt, majflt, cmajflt: the children's two are
-    // waited-for children's, which nothing keeps, as for cutime and cstime.
-    put(out, format_args!(" {} 0 {} 0", stat.minflt, stat.majflt));
+    // (10-13) minflt, cminflt, majflt, cmajflt: fault counts, which nothing
+    // counts per process yet.
+    out.extend_from_slice(b" 0 0 0 0");
     // (16-17) cutime, cstime: waited-for children's times.
     put(out, format_args!(" {} {} 0 0", stat.utime, stat.stime));
     // (21) itrealvalue: always zero since Linux 2.6.17.

@@ -134,7 +134,7 @@ package FerrixMemoryRequirements {
                 pages in, and with both spaces dropped every job's memory reads 0.";
             attribute :>> parent = ("H.QUOTA.2", "H.QUOTA.4");
             attribute :>> unit = ("mm::allocate_user_frame", "mm::release_frame",
-                "mm::deallocate_frames", "mm::allocate_user_run", "mm::allocate_owned_frame");
+                "mm::deallocate_frames", "mm::allocate_user_run");
         }
         requirement <'L.mm.9'> userTablesAreChargedToTheirJob : ItemLowLevel {
             attribute :>> statement = "A page table map_in makes for a user mapping
@@ -1934,6 +1934,7 @@ package FerrixMemoryRequirements {
                 two-page region is answered NotMapped.";
             attribute :>> parent = "H.MEM.1";
             attribute :>> unit = ("user::space::AddressSpace::fault",
+                "user::space::AddressSpace::fill_file_page",
                 "user::space::AddressSpace::resolve",
                 "user::space::SpaceError::fmt");
         }
@@ -2940,7 +2941,7 @@ package FerrixMemoryRequirements {
                 disk show its bytes, not zeros, on their first touch; a page whose
                 read fails ends the program with SIGBUS.";
             attribute :>> parent = "H.MEM.1";
-            attribute :>> unit = ("user::space::AddressSpace::fault_with",
+            attribute :>> unit = ("user::space::AddressSpace::fill_file_page",
                 "user::space::AddressSpace::fill_file_pages",
                 "user::space::AddressSpace::fill_file_page_alone");
         }
@@ -3337,109 +3338,6 @@ package FerrixMemoryRequirements {
             attribute :>> unit = ("syscall::native::unpaged_vmo_in");
         }
 
-        // --- A cheaper fault (fault-path, consultant ledger 7788) ---
-
-        requirement <'L.user.220'> aRefusedCommitGivesItsFrameBack : ItemLowLevel {
-            attribute :>> statement = "A commit shall take and zero its frame before
-                its reserve section, which shall hold the insert alone; a commit whose
-                section cannot be entered shall give back the frame it took, leaving the
-                page absent and the frames held and the job's memory as before.";
-            attribute :>> criterion = "The rehome check's refused-commit case: with this
-                processor's reserve fills refused, commit answers OutOfMemory, the page
-                stays absent and a frame window nets to zero.";
-            attribute :>> parent = "H.MEM.1";
-            attribute :>> unit = ("user::vmo::Vmo::commit", "user::vmo::Vmo::insert_spare");
-        }
-        requirement <'L.user.221'> aCommitUsesItsSpareForAnAbsentPage : ItemLowLevel {
-            attribute :>> statement = "commit_with and commit_within_with shall put the
-                spare's frame in the page only when the page is absent and goes in, and
-                shall leave the spare as it was on every other answer: a page present,
-                past the object's end, past its file's, sealed, the source's to fill or
-                a section refused.";
-            attribute :>> criterion = "The rehome check's spare case: a present page
-                answers its own frame, past the object's end and past the file's end
-                refuse, each keeping the spare; an absent page then gets exactly the
-                spare's frame and the spare is empty.";
-            attribute :>> parent = "H.MEM.1";
-            attribute :>> unit = ("user::vmo::Vmo::commit_with",
-                "user::vmo::Vmo::commit_within_with", "user::vmo::Vmo::commit_within");
-        }
-        requirement <'L.user.222'> theFaultDecidesItsFillUnderTheLock : ItemLowLevel {
-            attribute :>> statement = "A fault shall look its region up in one hold of its
-                space's lock and, in that hold, refuse an access the region forbids, a
-                private file page wholly past the file's end, and only then, for a file
-                region whose object's fill is the page cache's and lacks the page, let
-                the lock go and have the fill run before it looks again; a file page the
-                object holds shall be counted served once, and the fill not asked.";
-            attribute :>> criterion = "The rehome check's served case: a fault on a
-                present file page of a filled object asks the fill nothing and counts
-                one page served; the source cases still fill before mapping.";
-            attribute :>> parent = "H.MEM.1";
-            attribute :>> unit = ("user::space::AddressSpace::resolve",
-                "user::space::first_with_no_lock", "user::space::fill_first",
-                "user::space::ask_first", "user::space::wait_with_no_lock",
-                "user::vmo::Vmo::wants_fault_fill", "user::vmo::Vmo::note_served");
-        }
-        requirement <'L.user.223'> refillsBoundEveryRound : ItemLowLevel {
-            attribute :>> statement = "Each round of a fault, whether it ended in a fill,
-                an ask of the pager or a page taken back, shall count against REFILLS
-                (64), and a fault whose rounds run out shall end Unreadable: a fill and
-                an ask take a round each, so a page lost after every fill is tried
-                about 32 times, and one that needs a fill and an ask about 21.";
-            attribute :>> criterion = "The rehome check's refill case: a source that
-                takes back every page it fills ends the fault Unreadable after between 1
-                and 32 fills.";
-            attribute :>> parent = "H.MEM.1";
-            attribute :>> unit = ("user::space::AddressSpace::fault_with");
-        }
-        requirement <'L.user.224'> aSpareIsUsedOrGivenBackOnce : ItemLowLevel {
-            attribute :>> statement = "A spare frame a write fault took shall either go
-                into the page or the copy the fault makes, or back to the allocator when
-                its round ends, exactly once; an unwritten frame taken from a spare may
-                go back into it, and every other frame shall go to the allocator.";
-            attribute :>> criterion = "The rehome check's unused-spare case: a write
-                fault on a copy-on-write page with one holder and a spurious one after it
-                net a frame window to zero; the check's whole second run nets to zero.";
-            attribute :>> parent = "H.MEM.1";
-            attribute :>> unit = ("user::vmo::Spare::zeroed", "user::vmo::Spare::take",
-                "user::vmo::Spare::give_back", "user::vmo::Spare::discard",
-                "user::vmo::Spare::drop", "user::vmo::spares_in_flight", "user::vmo::count_spare",
-                "user::space::copy_of_file_page");
-        }
-        requirement <'L.user.227'> noSpareNearAMemoryLimit : ItemLowLevel {
-            attribute :>> statement = "A write fault shall take a spare frame only while
-                the running task's job has 64 pages of room under its memory limit, and a
-                commit within that room shall take its own frame as before spares.";
-            attribute :>> criterion = "The rehome check's spare-room case: a job far from
-                its limit gets a spare; with 32 pages of room it gets none, the spares in
-                flight do not move, and eight write faults all commit.";
-            attribute :>> parent = "H.QUOTA.2";
-            attribute :>> unit = ("user::vmo::Spare::for_fault");
-        }
-        requirement <'L.user.228'> aRefusalWaitsForSparesInFlight : ItemLowLevel {
-            attribute :>> statement = "A fault a memory limit refused while spare frames
-                are held machine-wide shall be answered with a 1 ms pause and a retry,
-                before anything is reclaimed or killed for it, for at most SPARE_WAITS
-                (16) answers.";
-            attribute :>> criterion = "The rehome check's spare-wait case: with a spare
-                held, out_of_memory_at answers Retry for each of the first 16 attempts, as
-                a task of a job held at its limit with nothing in it; past them, or with
-                none held, it does not wait.";
-            attribute :>> parent = "H.QUOTA.6";
-            attribute :>> unit = ("object::oom::out_of_memory_at", "object::oom::waits_for_spares");
-        }
-        requirement <'L.user.225'> aSpareIsNeverHeldAcrossAWait : ItemLowLevel {
-            attribute :>> statement = "A fault shall let its spare go before it runs a
-                fill or asks a pager, and a checks build shall stop as FX-0975 if the
-                running task holds one there.";
-            attribute :>> criterion = "The rehome check's fill case: a write fault on a
-                file page fills it first and maps the file's byte; with the release
-                before the fill taken out the boot stops as FX-0975.";
-            attribute :>> parent = "H.MEM.1";
-            attribute :>> unit = ("user::vmo::assert_no_spare_held",
-                "sched::task::Task::note_spare", "sched::task::Task::spares_held");
-        }
-
         requirement <'L.user.158'> aRegionByHandleKeepsItsCeiling : ItemLowLevel {
             attribute :>> statement = "A region vmo_map or space_map made shall record
                 the most its handle allowed, readable always, writable only with
@@ -3645,10 +3543,11 @@ package FerrixMemoryRequirements {
             attribute :>> parent = "H.MEM.22";
             attribute :>> unit = ("object::pager::PagerLink::request",
                 "object::pager::PagerCore::list_or_join", "user::vmo::Vmo::absent_run",
-                "user::vmo::Vmo::sourced", "user::space::AddressSpace::resolve",
+                "user::vmo::Vmo::sourced", "user::space::AddressSpace::ask_pager",
                 "user::space::AddressSpace::fault_with", "user::space::commit_page",
                 "object::pager::Request::covers", "user::vmo::Vmo::pager",
-                "user::vmo::Vmo::filler", "user::space::ask", "user::space::permitted");
+                "user::vmo::Vmo::filler", "user::space::AddressSpace::paged_object_at",
+                "user::space::ask", "user::space::permitted");
         }
         requirement <'L.user.147'> aRequestIsListedWithoutAllocating : ItemLowLevel {
             attribute :>> statement = "A request shall be opened with no address

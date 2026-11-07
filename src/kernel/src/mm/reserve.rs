@@ -32,8 +32,6 @@
 //! for its length, so nothing else runs on its processor to draw on the same
 //! reserve, and no other processor ever reaches it. Sections are short by
 //! construction: one `Arc::new` or one map insert, never anything that waits.
-//! A page fault's commit is the insert alone: its frame is taken and zeroed
-//! before the section (`Vmo::commit_with`).
 //!
 //! **Depth.** `ferrix_fallible` bounds what one operation can ask for, and its
 //! tests measure the pinned standard library against the bounds: `Arc::new`

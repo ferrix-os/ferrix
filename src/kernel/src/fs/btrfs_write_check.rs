@@ -273,59 +273,6 @@ fn build() -> Result<Vec<Expected>, &'static str> {
     Ok(expected)
 }
 
-/// A read fault, by this task as a program's would be, on the first page of
-/// a file of the volume nothing has read since its mount: it must read the
-/// page from the disk (`fs::seam`'s from-disk count moves) and count one
-/// major fault on the task (`L.object.372`). How many pages it read.
-///
-/// Verifies: L.object.372
-fn major_fault(expected: &[Expected]) -> Result<u64, &'static str> {
-    use crate::user::space::{Access, AddressSpace, FileMapping, FilePlace};
-    use alloc::sync::Arc;
-    use core::any::Any;
-
-    let file = expected
-        .iter()
-        .find(|file| file.len >= 4096)
-        .ok_or("no file of a page or more to fault on")?;
-    let ns = fs::namespace();
-    let ctx = ns.context();
-    let object = ns
-        .resolve(&ctx, None, file.path, true)
-        .map_err(|_| "the file to fault on is gone")?
-        .inode()
-        .map_err(|_| "the file to fault on has no inode")?
-        .mapping()
-        .and_then(|object| object.downcast::<crate::user::vmo::Vmo>().ok())
-        .ok_or("the file to fault on has no object to map")?;
-    let space = AddressSpace::new().map_err(|_| "no address space for the majflt step")?;
-    let at = space
-        .map_file(
-            FilePlace::Anywhere(None),
-            4096,
-            ferrix_vma::VmaFlags::READ,
-            object,
-            0,
-            FileMapping {
-                file: Arc::new(()) as Arc<dyn Any + Send + Sync>,
-                may_write: false,
-            },
-        )
-        .map_err(|_| "the file to fault on would not map")?;
-    let majors = || crate::sched::with_current(crate::sched::Task::major_faults).unwrap_or(0);
-    let (before, disk) = (majors(), fs::seam::from_disk());
-    crate::object::oom::fault(&space, at, Access::READ)
-        .map_err(|_| "a read fault on a file of the volume failed")?;
-    let read = fs::seam::from_disk().saturating_sub(disk);
-    if read == 0 {
-        return Err("the majflt step's page was in memory already: nothing was read from the disk");
-    }
-    if majors() != before + 1 {
-        return Err("a read fault that read its page from the disk did not count one major fault");
-    }
-    Ok(read)
-}
-
 /// Read everything back and compare, after the remount.
 fn verify(expected: &[Expected], report: &mut Report) -> Result<(), &'static str> {
     let ns = fs::namespace();
@@ -420,12 +367,6 @@ pub fn run() -> Result<Report, &'static str> {
     let _ = ns
         .mount(again, &at)
         .map_err(|_| "the volume could not be mounted again")?;
-    // Before anything reads the volume back: its pages are on the disk alone.
-    let major = major_fault(&expected)?;
-    crate::console::println!(
-        "  majflt   btrfs-rw: a read fault on a file not read since the mount read {major} \
-         page(s) from the disk and counted one major fault"
-    );
     verify(&expected, &mut report)?;
     let filled = fill(&expected)?;
     crate::console::println!(

@@ -31,7 +31,7 @@
     },
     "arch/aarch64/trap.rs::system_call": {
       "complexity": 15,
-      "lines": 48,
+      "lines": 50,
       "recursive": false
     },
     "arch/armv7a/signal.rs::setup_signal_frame": {
@@ -181,7 +181,7 @@
     },
     "sched/task.rs::new": {
       "complexity": 9,
-      "lines": 80,
+      "lines": 77,
       "recursive": false
     },
     "smp.rs::invalidate_pages": {
@@ -540,7 +540,7 @@
       "recursive": false
     },
     "syscall/native/lift.rs::call": {
-      "complexity": 76,
+      "complexity": 77,
       "lines": 170,
       "recursive": false
     },
@@ -584,6 +584,11 @@
       "lines": 45,
       "recursive": false
     },
+    "user/space.rs::fault_private_file": {
+      "complexity": 15,
+      "lines": 53,
+      "recursive": false
+    },
     "user/space.rs::fork": {
       "complexity": 19,
       "lines": 72,
@@ -610,8 +615,8 @@
       "recursive": false
     },
     "user/space.rs::resolve": {
-      "complexity": 22,
-      "lines": 89,
+      "complexity": 20,
+      "lines": 80,
       "recursive": false
     },
     "user/vmo.rs::commit_run": {

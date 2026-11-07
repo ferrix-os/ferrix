@@ -624,59 +624,19 @@ fn uncharge_owner(owner: u32) {
 pub fn allocate_user_frame() -> Option<Frame> {
     let owner = crate::object::quota::charge_target();
     crate::object::quota::charge_frame(owner).ok()?;
-    let frame = if reservation_for(owner) == reservation::NONE {
-        allocate_owned_frame(owner)
-    } else {
-        // Drawn from a reservation: as before, its own hold and then the owner's.
-        allocate_program_frames(0, owner).and_then(|frame| {
-            with_frames(|frames| frames.set_owner(frame, owner))
-                .and_then(Result::ok)
-                .map(|()| frame)
-                .or_else(|| {
-                    deallocate_frames(frame, 0);
-                    None
-                })
-        })
-    };
+    let frame = allocate_program_frames(0, owner).and_then(|frame| {
+        with_frames(|frames| frames.set_owner(frame, owner))
+            .and_then(Result::ok)
+            .map(|()| frame)
+            .or_else(|| {
+                deallocate_frames(frame, 0);
+                None
+            })
+    });
     if frame.is_none() {
         crate::object::quota::uncharge_frame(owner);
     }
     frame
-}
-
-/// One frame of a program's memory for the job whose slot is `owner`, which
-/// draws from no reservation: the floor read, the frame taken and its owner
-/// recorded in one hold of the allocator's lock, where they were two
-/// (`allocate_program_frames`, then `set_owner`): a page fault's commit takes
-/// one, and four processors faulting at once queue on this lock. An owner
-/// the allocator refuses to record -- a fresh single frame never is refused
-/// -- gives the frame back in the same hold, to what it was taken from, and
-/// counts as taken and freed, as the two holds did.
-fn allocate_owned_frame(owner: u32) -> Option<Frame> {
-    if fallible::frame_refused() {
-        return None;
-    }
-    let taken = with_frames(|frames| {
-        let left = frames.free_frames().checked_sub(1)?;
-        if left < program_floor() {
-            return None;
-        }
-        let frame = frames.allocate(0)?;
-        if frames.set_owner(frame, owner).is_ok() {
-            return Some(Some(frame));
-        }
-        // A frame just taken is in no retired set: the allocator keeps those
-        // out (`keep_retired`), so it goes straight back.
-        if frames.deallocate(frame, 0).is_ok() {
-            reservation::freed(frame, 1);
-        }
-        Some(None)
-    })??;
-    count(Route::Allocated, 1);
-    if taken.is_none() {
-        count(Route::Freed, 1);
-    }
-    taken
 }
 
 /// Take `2^order` frames lying back to back as single frames of a program's

@@ -13,6 +13,17 @@
   "reservations": [
     {
       "ids": [
+        "L.object.372",
+        "L.user.220-225",
+        "L.user.227-228"
+      ],
+      "owner": "fault-path",
+      "branch": "fault-path",
+      "date": "2026-11-08",
+      "purpose": "Written by the fault path (ledger 7788, 7842-7883), on main from c8479539e, withdrawn by its revert (ledger 7908); held for its re-landing with the same meanings, else retired, never reused"
+    },
+    {
+      "ids": [
         "L.object.341-345", "L.object.348-369"
       ],
       "owner": "mk-authority",

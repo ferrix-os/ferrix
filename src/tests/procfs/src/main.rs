@@ -32,13 +32,6 @@
 //!   and `stack`; a uid 1000 child refused them but `wchan`, which reads
 //!   `0`; and `/proc/self/environ`, the environment block in the program's memory.
 //!
-//! * **faults**: `minflt` counts a program's page faults (`L.object.372`).
-//!   Writing 64 fresh anonymous pages raises field 10 of `/proc/self/stat`
-//!   and of `/proc/self/task/<tid>/stat`, and `ru_minflt` of `getrusage`
-//!   for `RUSAGE_SELF` and `RUSAGE_THREAD`, each by at least 64 and by no
-//!   more than the reads' own faults could add; and `majflt` never goes
-//!   back.
-//!
 //! Built with `negative-fd`, the link steps `lstat` where they mean `stat`
 //! and must fail on the first; with `negative-ino`, the inode step holds the
 //! numbers to 16 bits and must fail; with `negative-off`, it holds the
@@ -397,109 +390,6 @@ fn mincore() -> Step {
         let _ = libc::munmap(at.cast(), 2 * page);
         let _ = libc::munmap(at.add(3 * page).cast(), page);
     }
-    outcome
-}
-
-/// Fresh anonymous pages the faults step writes.
-const FAULT_PAGES: u64 = 64;
-
-/// Faults the step's own reads and calls may add beside its pages: the
-/// stat files' buffers and the formatting, a handful of pages at most.
-const FAULT_SLACK: u64 = 64;
-
-/// Fields 10 and 12 of a stat file: `minflt` and `majflt`.
-fn stat_faults(path: &str) -> Result<(u64, u64), String> {
-    let bytes = read_proc(path).map_err(|errno| format!("{path}: errno {errno}"))?;
-    let text = String::from_utf8_lossy(&bytes);
-    // Past the command name, whose parentheses may hold anything: field 3 on.
-    let rest = text
-        .rsplit_once(") ")
-        .map(|(_, rest)| rest)
-        .ok_or_else(|| format!("{path}: no command name in {text:?}"))?;
-    let fields: Vec<&str> = rest.split_whitespace().collect();
-    let field = |n: usize| -> Result<u64, String> {
-        fields
-            .get(n - 3)
-            .and_then(|value| value.parse().ok())
-            .ok_or_else(|| format!("{path}: field {n} of {text:?}"))
-    };
-    Ok((field(10)?, field(12)?))
-}
-
-/// `ru_minflt` and `ru_majflt` of `getrusage(who)`.
-fn rusage_faults(who: c_int) -> Result<(u64, u64), String> {
-    // SAFETY: a zeroed `rusage` is a valid one, and the call writes only it.
-    let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
-    // SAFETY: `usage` is a writable `rusage`.
-    if unsafe { libc::getrusage(who, &mut usage) } != 0 {
-        return Err(format!("getrusage({who}): errno {}", errno()));
-    }
-    let count = |value: libc::c_long| u64::try_from(value).unwrap_or(u64::MAX);
-    Ok((count(usage.ru_minflt), count(usage.ru_majflt)))
-}
-
-/// Every count the faults step reads, in one order.
-fn all_faults(task: &str) -> Result<[(u64, u64); 4], String> {
-    Ok([
-        stat_faults("/proc/self/stat")?,
-        stat_faults(task)?,
-        rusage_faults(libc::RUSAGE_SELF)?,
-        rusage_faults(libc::RUSAGE_THREAD)?,
-    ])
-}
-
-/// `minflt` counts the pages a program writes.
-fn faults() -> Step {
-    const NAMES: [&str; 4] = [
-        "/proc/self/stat",
-        "/proc/self/task/<tid>/stat",
-        "getrusage(RUSAGE_SELF)",
-        "getrusage(RUSAGE_THREAD)",
-    ];
-    let page = 4096_usize;
-    let pages = FAULT_PAGES as usize;
-    // SAFETY: no arguments.
-    let tid = unsafe { libc::syscall(libc::SYS_gettid) };
-    let task = format!("/proc/self/task/{tid}/stat");
-    // Read once untimed, so the reads' own first touches are behind us.
-    let _ = all_faults(&task)?;
-    // SAFETY: a fresh private anonymous mapping, unmapped before returning.
-    let at = unsafe {
-        libc::mmap(
-            std::ptr::null_mut(),
-            pages * page,
-            libc::PROT_READ | libc::PROT_WRITE,
-            libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
-            -1,
-            0,
-        )
-    };
-    if at == libc::MAP_FAILED {
-        return Err(format!("mmap: errno {}", errno()));
-    }
-    let at = at.cast::<u8>();
-    let outcome = (|| {
-        let before = all_faults(&task)?;
-        for index in 0..pages {
-            // SAFETY: inside the mapping, which is writable.
-            unsafe { at.add(index * page).write_volatile(1) };
-        }
-        let after = all_faults(&task)?;
-        for ((name, (minor0, major0)), (minor1, major1)) in NAMES.iter().zip(before).zip(after) {
-            let moved = minor1.saturating_sub(minor0);
-            if minor1 < minor0 || !(FAULT_PAGES..=FAULT_PAGES + FAULT_SLACK).contains(&moved) {
-                return Err(format!(
-                    "{name}: minflt {minor0} -> {minor1} over {FAULT_PAGES} written pages"
-                ));
-            }
-            if major1 < major0 {
-                return Err(format!("{name}: majflt went back, {major0} -> {major1}"));
-            }
-        }
-        Ok(())
-    })();
-    // SAFETY: the mapping made above.
-    let _ = unsafe { libc::munmap(at.cast(), pages * page) };
     outcome
 }
 
@@ -928,7 +818,7 @@ fn environ_reads_memory() -> Step {
 }
 
 fn main() {
-    let steps: [Named; 10] = [
+    let steps: [Named; 9] = [
         ("tcp", tcp),
         ("unix", unix),
         ("eventfd", eventfd),
@@ -937,7 +827,6 @@ fn main() {
         ("memfd", memfd),
         ("inodes", inodes),
         ("mincore", mincore),
-        ("faults", faults),
         ("debug", debug),
     ];
     for (name, step) in steps {

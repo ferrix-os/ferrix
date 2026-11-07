@@ -242,22 +242,6 @@ pub(crate) static RECLAIM_IN_RECLAIM: Explanation = Explanation {
     see: "src/kernel/src/user/cache.rs; src/kernel/src/object/quota.rs; src/kernel/src/object/oom.rs",
 };
 
-/// For `user::vmo::assert_no_spare_held`, in checks builds only (`L.user.225`).
-pub(crate) static SPARE_ACROSS_A_WAIT: Explanation = Explanation {
-    code: "FX-0975",
-    title: "a fault waited holding a spare frame",
-    meaning: "A write fault takes a zeroed frame before its space's lock, so that its commit takes \
-              none there, and gives it back before the fill or the pager's ask it may wait for. A \
-              spare held across that wait is a charged frame nobody uses for as long as the wait \
-              lasts, which the memory limit's kill would count against the job. Checks builds \
-              count each task's spares and stop here; release builds do not look.",
-    causes: &[
-        "A path of `AddressSpace::fault_with` that fills or asks before letting its spare \
-               go.",
-    ],
-    see: "src/kernel/src/user/space.rs fault_with; src/kernel/src/user/vmo.rs Spare",
-};
-
 /// For `sched::require_may_sleep`, in development builds only.
 pub(crate) static BLOCK_HOLDING_AN_IRQ_LOCK: Explanation = Explanation {
     code: "FX-0974",
@@ -4455,7 +4439,6 @@ pub(crate) static ALL: &[&Explanation] = &[
     &BOOT_CHECK_WORKER,
     &RECLAIM_IN_RECLAIM,
     &BLOCK_HOLDING_AN_IRQ_LOCK,
-    &SPARE_ACROSS_A_WAIT,
     &STAGE10_PCI,
     &STAGE10_DEVICES,
     &STAGE10_IOMMU,

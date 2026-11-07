@@ -353,13 +353,6 @@ impl Filler for Fill {
         self.sourced(index)
     }
 
-    /// As [`Fill::fill`] counts a page it had nothing to do for: a fault
-    /// now asks first, under its space's lock, and calls the fill only when
-    /// there is a page to read (`L.user.222`).
-    fn served(&self) {
-        super::seam::served(1);
-    }
-
     /// Read ahead as far as a read asks at most, [`MAX_FILL_RUN`] pages: a
     /// program's libraries are faulted in a page at a time, and a disk read
     /// per page is what would make that slow.
@@ -373,8 +366,6 @@ impl Filler for Fill {
         // A fault that had to read the disk: Linux's `pgmajfault`.
         if self.source.reads_disk() {
             quota::count(crate::sched::running_group(), Counter::MajorFaults, 1);
-            // The task's own `majflt`, once per fault however often its fill runs.
-            let _ = crate::sched::with_current(crate::sched::Task::note_fault_read_disk);
         }
         Ok(())
     }
