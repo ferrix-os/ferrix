@@ -53,6 +53,11 @@ const PATIENCE: Duration = Duration::from_secs(10);
 /// How long an idle pass waits before looking again.
 const IDLE: Duration = Duration::from_millis(500);
 
+/// The least time between two busy passes: a backlog is sent at most a
+/// batch per destination this often, and a log that grows without pause
+/// is not read in a loop that never sleeps (ef-load, 2026-11-07).
+const BUSY_FLOOR: Duration = Duration::from_millis(50);
+
 /// Where a reader has got to in the store.
 #[derive(Debug, Default)]
 struct Reader {
@@ -63,16 +68,32 @@ struct Reader {
     /// Every segment's name and size when the reader last caught up, so an
     /// idle pass reads nothing.
     seen: Vec<(String, u64)>,
+    /// Each sealed segment's name and the last sequence number its summary
+    /// gives: a sealed segment never changes, so its summary is read once
+    /// and not at every pass.
+    sealed: Vec<(String, u64)>,
+    /// The store's segments, listed again only when a directory changed.
+    listing: store::Listing,
 }
 
 impl Reader {
     /// Append to `out`, in order, the records after `high` and at most
     /// [`WINDOW`] past it.
     fn more(&mut self, dirs: &[PathBuf], out: &mut Vec<Record>) {
-        let segments = store::segments(dirs);
+        let segments = self.listing.segments(dirs).to_vec();
+        // A sealed segment's records were read when it was first seen
+        // sealed, and it gains none: it is not looked at again, its size
+        // given as `u64::MAX` (none a file has) so that the sealing of a
+        // segment still counts as a change.
         let sizes: Vec<(String, u64)> = segments
             .iter()
-            .map(|each| (each.name.clone(), each.size()))
+            .map(|each| {
+                let sealed = self.sealed.iter().any(|(name, _)| *name == each.name);
+                (
+                    each.name.clone(),
+                    if sealed { u64::MAX } else { each.size() },
+                )
+            })
             .collect();
         if sizes == self.seen {
             return;
@@ -80,15 +101,14 @@ impl Reader {
         let top = self.high.saturating_add(WINDOW);
         let mut fresh: Vec<Record> = Vec::new();
         let mut cut = false;
+        self.sealed
+            .retain(|(name, _)| sizes.iter().any(|(each, _)| each == name));
         for each in &segments {
-            let summary = each.summary();
-            if summary
-                .as_ref()
-                .is_some_and(|summary| summary.seqs.1 <= self.high)
-            {
+            let last = self.sealed_last(each);
+            if last.is_some_and(|last| last <= self.high) {
                 continue;
             }
-            let (records, place) = self.read(each, summary.is_some());
+            let (records, place) = self.read(each, last.is_some());
             let mut over = false;
             for record in records {
                 if record.seqnum > top {
@@ -112,8 +132,27 @@ impl Reader {
         if let Some(last) = fresh.last() {
             self.high = last.seqnum;
         }
+        // What this pass found sealed is seen as sealed, so that the next
+        // pass with nothing new reads nothing.
+        let mut sizes = sizes;
+        for (name, size) in &mut sizes {
+            if self.sealed.iter().any(|(each, _)| each == name) {
+                *size = u64::MAX;
+            }
+        }
         self.seen = if cut { Vec::new() } else { sizes };
         out.extend(fresh);
+    }
+
+    /// The last sequence number of `each` if it is sealed, from its
+    /// summary, which is read only the first time.
+    fn sealed_last(&mut self, each: &Segment) -> Option<u64> {
+        if let Some((_, last)) = self.sealed.iter().find(|(name, _)| *name == each.name) {
+            return Some(*last);
+        }
+        let last = each.summary()?.seqs.1;
+        self.sealed.push((each.name.clone(), last));
+        Some(last)
     }
 
     /// A segment's records: a sealed one's whole, a written one's from
@@ -130,7 +169,7 @@ impl Reader {
             .iter()
             .find(|(name, _)| *name == each.name)
             .map_or_else(|| header.encode().len(), |(_, place)| *place);
-        let Some(bytes) = each.bytes(from) else {
+        let Some(bytes) = each.bytes_from(from) else {
             return (Vec::new(), None);
         };
         let (records, used) = segment::entries(&bytes);
@@ -181,6 +220,9 @@ struct BlobStream {
     reader: Reader,
     /// The blobs to send, in order, each with its record's sequence number.
     queue: VecDeque<(u64, Reference)>,
+    /// Records its reader read past what the records' stream had sent, kept
+    /// for when that stream has sent them.
+    held: Vec<Record>,
     /// The last record whose blobs are queued.
     through: u64,
     /// Blobs it was sent, the newest [`SENT_MAX`], not sent again.
@@ -191,6 +233,30 @@ struct BlobStream {
     backoff: Backoff,
     /// No try before this.
     next_try: Instant,
+}
+
+impl BlobStream {
+    /// The records through `acknowledged` its reader has not given before:
+    /// those it holds from an earlier read first, then, unless those already
+    /// reach past `acknowledged`, more from the store. What is read past
+    /// `acknowledged` is held for a later call. The reader goes on from
+    /// where it stopped: it was set back to `acknowledged`, and so read the
+    /// segment being written from its start, at every call while the log
+    /// grew (ef-load, 2026-11-07).
+    fn through_acknowledged(&mut self, dirs: &[PathBuf], acknowledged: u64) -> Vec<Record> {
+        let mut records = core::mem::take(&mut self.held);
+        if records
+            .last()
+            .is_none_or(|record| record.seqnum <= acknowledged)
+        {
+            self.reader.more(dirs, &mut records);
+        }
+        let (now, later) = records
+            .into_iter()
+            .partition(|record| record.seqnum <= acknowledged);
+        self.held = later;
+        now
+    }
 }
 
 /// How many blob ids a destination remembers as sent.
@@ -316,6 +382,7 @@ pub fn run(args: &[String]) -> i32 {
                         ..Reader::default()
                     },
                     queue: VecDeque::new(),
+                    held: Vec::new(),
                     through: blob_cursor,
                     sent: VecDeque::new(),
                     off: false,
@@ -337,9 +404,7 @@ pub fn run(args: &[String]) -> i32 {
                 busy |= pass_blobs(each, &dirs, &identity);
             }
         }
-        if !busy {
-            std::thread::sleep(IDLE);
-        }
+        std::thread::sleep(if busy { BUSY_FLOOR } else { IDLE });
     }
 }
 
@@ -477,15 +542,7 @@ fn pass_blobs(each: &mut Upload, dirs: &[PathBuf], identity: &Identity) -> bool 
         if stream.through >= acknowledged {
             return false;
         }
-        let mut records = Vec::new();
-        stream.reader.more(dirs, &mut records);
-        if stream.reader.high > acknowledged {
-            // Read past what the records' stream has sent: read again from
-            // there next time, the written segment from its start.
-            stream.reader.high = acknowledged;
-            stream.reader.seen.clear();
-            stream.reader.places.clear();
-        }
+        let records = stream.through_acknowledged(dirs, acknowledged);
         let mut through = stream.through;
         for record in records
             .iter()
@@ -692,6 +749,116 @@ mod tests {
     #![allow(clippy::unwrap_used, reason = "tests")]
 
     use super::*;
+
+    /// A record of the boot the tests' segments are of.
+    fn record(seqnum: u64) -> Record {
+        let mut record = Record::new(6, seqnum, seqnum);
+        record.seqnum = seqnum;
+        record.boot_id = [1; 16];
+        record
+    }
+
+    /// A store read as it is written, sealed and followed by a new segment
+    /// gives every record once, in order; a written segment is read from
+    /// where the last read stopped; a sealed one's summary is kept, its
+    /// size no longer looked at.
+    #[test]
+    fn a_store_read_as_it_grows_and_seals_gives_each_record_once() {
+        let dir = std::env::temp_dir().join(format!("lode-upload-reader-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let dirs = [dir.clone()];
+        let mut writer = store::Writer::open(&dir, [7; 16]).unwrap();
+        let mut reader = Reader::default();
+        let mut got = Vec::new();
+        writer.append(&[record(1), record(2)], "box").unwrap();
+        reader.more(&dirs, &mut got);
+        writer.append(&[record(3)], "box").unwrap();
+        reader.more(&dirs, &mut got);
+        reader.more(&dirs, &mut got);
+        writer.seal().unwrap();
+        reader.more(&dirs, &mut got);
+        let first = store::segments(&dirs).pop().unwrap();
+        assert_eq!(reader.sealed, [(first.name.clone(), 3)]);
+        assert_eq!(reader.seen, [(first.name.clone(), u64::MAX)]);
+        writer.append(&[record(4), record(5)], "box").unwrap();
+        reader.more(&dirs, &mut got);
+        let seqs: Vec<u64> = got.iter().map(|record| record.seqnum).collect();
+        assert_eq!(seqs, [1, 2, 3, 4, 5]);
+        assert_eq!(reader.sealed.len(), 1);
+        // The directory was read again only when a segment (or a summary)
+        // was added: at the first read, the seal, and the second segment.
+        let reads = reader.listing.reads;
+        reader.more(&dirs, &mut got);
+        reader.more(&dirs, &mut got);
+        assert_eq!(reader.listing.reads, reads);
+        writer.append(&[record(6)], "box").unwrap();
+        reader.more(&dirs, &mut got);
+        assert_eq!(reader.listing.reads, reads);
+        assert_eq!(got.last().map(|record| record.seqnum), Some(6));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The blob stream's reader, behind the records': each call gives the
+    /// records through what was acknowledged, once each, holds what it read
+    /// past, and goes on from where it stopped rather than reading the
+    /// written segment again from its start.
+    #[test]
+    fn the_blob_reader_holds_what_it_read_past_and_reads_on() {
+        let dir = std::env::temp_dir().join(format!("lode-upload-blobs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let dirs = [dir.clone()];
+        let mut writer = store::Writer::open(&dir, [7; 16]).unwrap();
+        let mut stream = BlobStream {
+            cursor: 0,
+            path: dir.join("cursor"),
+            reader: Reader::default(),
+            queue: VecDeque::new(),
+            held: Vec::new(),
+            through: 0,
+            sent: VecDeque::new(),
+            off: false,
+            backoff: Backoff::default(),
+            next_try: Instant::now(),
+        };
+        let seqs = |records: &[Record]| records.iter().map(|r| r.seqnum).collect::<Vec<u64>>();
+        writer
+            .append(&(1..=6).map(record).collect::<Vec<_>>(), "box")
+            .unwrap();
+        assert_eq!(seqs(&stream.through_acknowledged(&dirs, 3)), [1, 2, 3]);
+        assert_eq!(seqs(&stream.held), [4, 5, 6]);
+        let place = stream.reader.places.clone();
+        assert!(!place.is_empty());
+        // Nothing new acknowledged past the held ones: no read at all.
+        assert_eq!(seqs(&stream.through_acknowledged(&dirs, 5)), [4, 5]);
+        assert_eq!(stream.reader.places, place);
+        writer.append(&[record(7), record(8)], "box").unwrap();
+        assert_eq!(seqs(&stream.through_acknowledged(&dirs, 8)), [6, 7, 8]);
+        assert!(stream.held.is_empty());
+        assert_eq!(stream.reader.high, 8);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A written segment's tail read from an offset is the same bytes as
+    /// the whole file read and cut there.
+    #[test]
+    fn a_tail_read_from_an_offset_is_the_whole_file_cut_there() {
+        let dir = std::env::temp_dir().join(format!("lode-upload-tail-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut writer = store::Writer::open(&dir, [7; 16]).unwrap();
+        writer
+            .append(&[record(1), record(2), record(3)], "box")
+            .unwrap();
+        let segment = store::segments(std::slice::from_ref(&dir)).pop().unwrap();
+        let whole = segment.bytes(0).unwrap();
+        for offset in [0, 1, whole.len() / 2, whole.len(), whole.len() + 10] {
+            assert_eq!(
+                segment.bytes_from(offset),
+                segment.bytes(offset),
+                "at {offset}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// `localhost` as many machines resolve it, `::1` first, to a collector
     /// listening on `127.0.0.1` alone: the second address takes it.
