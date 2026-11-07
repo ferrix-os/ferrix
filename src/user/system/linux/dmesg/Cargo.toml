@@ -8,7 +8,7 @@
 [package]
 name = "dmesg"
 description = "Ferrix's dmesg: the kernel log from /dev/kmsg or syslog(2), as util-linux shows it"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2024"
 # Matches Ferrix's rust-toolchain.toml, which rustup finds from here.
 rust-version = "1.99"

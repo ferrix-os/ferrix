@@ -20,7 +20,7 @@
 //! `uname -a` reads
 //!
 //! ```text
-//! Ferrix ferrix 6.1.0-ferrix #1 Ferrix 0.1.0 x86_64 GNU/Linux
+//! Ferrix ferrix 6.1.0-ferrix #1 Ferrix 0.3.0 x86_64 GNU/Linux
 //! ```
 //!
 //! `nodename` and `domainname` are the two a program may change, with
@@ -75,8 +75,9 @@ pub(crate) const SYSNAME: &str = "Ferrix";
 /// the suffix, which is exactly what a distribution kernel does.
 pub(crate) const RELEASE: &str = "6.1.0-ferrix";
 
-/// The version string, which by convention starts with a build number.
-pub(crate) const VERSION: &str = "#1 Ferrix 0.1.0";
+/// The version string, which by convention starts with a build number, then
+/// the release this kernel is: the workspace's version, so the two never part.
+pub(crate) const VERSION: &str = concat!("#1 Ferrix ", env!("CARGO_PKG_VERSION"));
 
 /// A name set by `sethostname` or `setdomainname`: its bytes, NUL-padded, and
 /// how many of them were given.
