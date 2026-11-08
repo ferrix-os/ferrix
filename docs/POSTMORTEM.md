@@ -1107,6 +1107,15 @@ open `EBUSY`, magic close, timeout 0 `EINVAL`, 40 s more: no report, no
 reset; (4) init feeding with `ferrix.init.watchdog=5` for 45 s: no report,
 no reset; (5) without the option no node and the TCO untouched.
 
+**Found on the box, 2026-11-08 01:27** (diagnostic image main-a3c5ef1dd,
+develop 589fcb096 plus this and S4a): `watchdog the TCO is left alone:
+firmware locked it halted; the deadline alone`. The box's AMI firmware sets
+`TCO_LOCK` with the timer halted, so no system can start it before the next
+platform reset. On the box, then, a hang with every processor masked is
+still the plug's; what the box gets is the deadline (FX-9008), the panic
+path's own bounds and S4a's lockup report. A hardware reset there needs a
+firmware setting (NVRAM: the customer's decision) or another timer.
+
 **The box** (queued in `BOX-QUEUE.md` as `box-watchdog`): its command line
 gains `ferrix.watchdog=on ferrix.init.watchdog=60`. To see on it, in order:
 the claim line (or the refusal saying what firmware left in `TCO1_CNT`);

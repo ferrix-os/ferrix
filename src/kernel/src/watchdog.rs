@@ -279,8 +279,13 @@ pub fn set_timeout(seconds: u32) -> Option<u32> {
         return None;
     }
     TIMEOUT.store(seconds, Ordering::Relaxed);
-    if armed() {
-        arm();
+    // A feed with the new length, and the hardware with it: never an arm of
+    // a deadline disarmed meanwhile (`feed` moves only one that is armed).
+    if feed() && hardware::claimed() {
+        let seconds = seconds.saturating_add(HARDWARE_MARGIN);
+        if let Err(why) = hardware::arm(seconds) {
+            println!("  watchdog the TCO did not arm ({why}): the deadline alone");
+        }
     }
     Some(seconds)
 }
