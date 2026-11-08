@@ -256,6 +256,7 @@ fn deliver(
     let mut written = 0;
     for event in ready {
         let offset = u64::try_from(written * EVENT_BYTES).map_err(|_| Errno::EINVAL)?;
+        crate::syscall::diag_exit::epoll_event(process, event.events, event.data);
         let encoded = encode(event.events, event.data);
         if uaccess::copy_to_user(process.space(), at.saturating_add(offset), &encoded).is_err() {
             break;

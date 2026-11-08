@@ -366,3 +366,22 @@ pub(crate) fn efault(process: &Process, number: usize, args: &[u64; 6], ip: u64)
     );
 }
 
+
+/// Hang-ups and errors the wineserver's epoll reports: a thread whose request
+/// pipe it sees hung up is a thread it kills.
+pub(crate) fn epoll_event(process: &Process, events: u32, data: u64) {
+    static HUPS: AtomicU32 = AtomicU32::new(300);
+    if events & (0x8 | 0x10 | 0x2000) == 0 {
+        return;
+    }
+    let name = name_of(process);
+    if !name.starts_with(b"wineserver") || !take(&HUPS) {
+        return;
+    }
+    crate::println!(
+        "fxdiag: wineserver {} epoll events {:#x} data {:#x}",
+        process.pid(),
+        events,
+        data
+    );
+}
