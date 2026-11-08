@@ -936,11 +936,13 @@ jobs:
     needs: [authorship, assembly, audits, model, layering, check, test, ferrousli,
             build, boot, rustc, deny, miri, fuzz, dependencies]
     runs-on: ubuntu-latest
-    # statuses: the dispatched run reports itself to the promotion (below).
-    # A fork's pull request gets a read-only token whatever this says.
+    # statuses: the dispatched run reports itself to the promotion (below);
+    # actions: it wakes Promote. A fork's pull request gets a read-only token
+    # whatever this says.
     permissions:
       contents: read
       statuses: write
+      actions: write
     steps:
       - name: Every job passed
         id: verdict
@@ -977,3 +979,15 @@ jobs:
         run: |
           gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f "state=$STATE" \
             -f "context=CI result" -f "description=CI run ${GITHUB_RUN_ID}: $STATE" -f "target_url=$URL"
+
+      # Promote's `workflow_run` trigger never fires for a promotion: Promote
+      # dispatches this run with the workflow's token, and a run started by
+      # that token starts no `workflow_run` (GitHub's rule against loops;
+      # workflow_dispatch is the exception). Main then waited for the 15-minute
+      # cron, which GitHub ran late or not at all, and was moved by hand three
+      # times on 2026-11-07. So the verdict, once posted, wakes Promote itself.
+      - name: Wake Promote
+        if: always() && github.event_name == 'workflow_dispatch' && startsWith(github.ref_name, 'promote/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run promote.yml --repo "$GITHUB_REPOSITORY" --ref main

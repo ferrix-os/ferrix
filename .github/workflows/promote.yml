@@ -2,7 +2,9 @@ name: Promote
 
 # Moves what landed on develop to main without anyone clicking
 # (docs/REPO-FLOW.md, "Promotion"). On every push to develop, when a
-# promotion's CI ends, and every 15 minutes as a fallback:
+# promotion's CI ends (ci.yml's last step dispatches this workflow; its
+# `workflow_run` below never fires for a run this workflow dispatched), and
+# every 15 minutes as a fallback:
 #
 #   1. if a promotion branch promote/<sha> has CI green, its `flow/lane` and
 #      `certification/verdict` green, and main is an ancestor of it, push it
