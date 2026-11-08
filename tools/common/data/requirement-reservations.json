@@ -13,6 +13,15 @@
   "reservations": [
     {
       "ids": [
+        "L.user.229"
+      ],
+      "owner": "r5-teardown",
+      "branch": "r5-teardown",
+      "date": "2026-11-08",
+      "purpose": "R5 (docs/ROBUSTNESS.md 4.6): a copy-on-write write by a page's only holder makes its read-only translation writable in place, beginning no shootdown (consultant ledger 8299, D)"
+    },
+    {
+      "ids": [
         "L.mm.135"
       ],
       "owner": "ef-slow",
