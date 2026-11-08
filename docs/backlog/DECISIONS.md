@@ -7,6 +7,16 @@ Moved out of [`docs/BACKLOG.md`](../BACKLOG.md) on 2026-10-16. A decision is rec
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-11-08, about 13:20 (customer, through the product owner's session)**
+  **No code duplication; reuse through traits**: PR #51 is not parked, and
+  desktop's `call` row still reaches +2% at most, with 0.000% code
+  duplication: "don't duplicate code ... try to be smart and reuse code ...
+  use traits and stuff to reuse existing code". No hand-written twin of a
+  path (the fair hand-over helpers, the shortcut's second hand-over, a second
+  compile of the scheduler path); one generic body, the fast case from the
+  type system (traits, associated types or consts, shared default methods).
+  Measured both ways: the protocol's boot and `ferrix.checks=skip`, as the
+  desktop ships.
 * **2026-11-08, about 11:15 (customer, through the product owner's session)**
   **A shortcut while no FIFO scheduling is used**: "can you add some special
   path where if no fifo scheduling is used on the system during runtime is
