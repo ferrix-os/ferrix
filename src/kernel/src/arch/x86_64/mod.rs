@@ -2321,7 +2321,9 @@ pub fn wait_for_interrupt() {
     cpu::hlt();
 }
 
-/// The free-running counter.
+/// The free-running counter. Inlined always, as `timer::now_nanos` is: the
+/// direct switch reads it once a direction (ledger 5684 B4).
+#[inline(always)]
 pub fn counter_now() -> u64 {
     clock::counter_now()
 }

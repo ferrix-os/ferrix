@@ -874,7 +874,9 @@ fn main_counter(regs: Mmio) -> u64 {
     }
 }
 
-/// The counter's current value.
+/// The counter's current value: the TSC's `rdtsc` inline, the HPET's read out of
+/// line ([`main_counter`]).
+#[inline(always)]
 pub(crate) fn counter_now() -> u64 {
     let base = HPET.load(Ordering::Relaxed);
     if base == 0 {
