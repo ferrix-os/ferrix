@@ -49,6 +49,8 @@ mod smp;
 pub(in crate::arch) mod speculation;
 pub mod switch;
 pub mod syscall;
+#[cfg(not(ferrix_personality = "user"))]
+pub mod tco;
 pub mod trap;
 
 pub use cpu::hardware_random;
@@ -2090,13 +2092,27 @@ const KBC_PORT: u16 = 0x64;
 const KBC_INPUT_FULL: u8 = 1 << 1;
 /// The command that pulses the reset line.
 const KBC_PULSE_RESET: u8 = 0xFE;
+/// What the status port reads on a machine with no controller behind it: the
+/// bus's all ones.
+const KBC_ABSENT: u8 = 0xFF;
+
+/// The PCI reset control register of every Intel chipset since the PIIX, and
+/// of AMD's: bit 1 asks for a hard reset, bit 2 going from 0 to 1 makes it.
+const RESET_CONTROL_PORT: u16 = 0xCF9;
+const RESET_CONTROL_HARD: u8 = 0x02;
+const RESET_CONTROL_HARD_NOW: u8 = 0x06;
 
 /// Reset the machine, once the console has sent its last line.
 ///
-/// Three ways, in the order Linux tries them on a PC: the FADT's reset
-/// register, the keyboard controller's reset pulse, and a triple fault. Each
-/// of the first two gets time to act, and one that returns is a machine that
-/// did not reset, so the next is tried. A triple fault cannot return.
+/// Four ways, in the order Linux tries them on a PC: the FADT's reset
+/// register, the keyboard controller's reset pulse, the chipset's reset
+/// control register (Linux's `reboot=pci`), and a triple fault. Each of the
+/// first three gets time to act, and one that returns is a machine that did
+/// not reset, so the next is tried. A triple fault cannot return.
+///
+/// A status port that reads all ones has no controller behind it (the N150
+/// box), and its ten pulses are skipped rather than waited out: with the
+/// controller's input-full bit read as set, each would wait its full second.
 pub fn reset() -> ! {
     #[cfg(not(ferrix_personality = "user"))]
     powerctl::restore("reset");
@@ -2112,7 +2128,9 @@ pub fn reset() -> ! {
         settle();
     }
 
-    for _ in 0..10 {
+    // SAFETY: (FIRMWARE) reading the 8042's status port has no side effect.
+    let controller = unsafe { cpu::inb(KBC_PORT) } != KBC_ABSENT;
+    for _ in 0..if controller { 10 } else { 0 } {
         for _ in 0..1000 {
             // SAFETY: (FIRMWARE) reading the 8042's status port has no side effect.
             if unsafe { cpu::inb(KBC_PORT) } & KBC_INPUT_FULL == 0 {
@@ -2125,6 +2143,14 @@ pub fn reset() -> ! {
         unsafe { cpu::outb(KBC_PORT, KBC_PULSE_RESET) };
         settle();
     }
+
+    // SAFETY: (FIRMWARE) the chipset's reset control register: the hard reset it
+    // asks for is the point; on a chipset without it the writes are discarded.
+    unsafe { cpu::outb(RESET_CONTROL_PORT, RESET_CONTROL_HARD) };
+    settle_briefly();
+    // SAFETY: (FIRMWARE) as above: bit 2 rising makes the reset bit 1 asked for.
+    unsafe { cpu::outb(RESET_CONTROL_PORT, RESET_CONTROL_HARD_NOW) };
+    settle();
 
     // SAFETY: (FIRMWARE) the last way to reset the machine, taken on purpose.
     unsafe { cpu::triple_fault() }

@@ -126,11 +126,12 @@ pub mod lift {
         pub mod timer;
         pub mod trap;
         pub mod vmap;
+        pub mod watchdog;
     }
 }
 pub use lift::core::{
     audit, bridge, device, discovery, fill, heap, iommu, irq, mm, mmio, restricted, sched, smp,
-    sync, sys, timer, trap, vmap,
+    sync, sys, timer, trap, vmap, watchdog,
 };
 pub mod claim;
 pub mod fallible;

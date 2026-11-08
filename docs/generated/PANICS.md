@@ -175,6 +175,7 @@ Causes are listed most likely first.
 | [FX-9005](#fx-9005) | the processor reported a hardware error |
 | [FX-9006](#fx-9006) | an exception nested on its own interrupt stack |
 | [FX-9007](#fx-9007) | a kernel stack overflowed |
+| [FX-9008](#fx-9008) | user space stopped feeding its watchdog |
 
 <a id="fx-0001"></a>
 
@@ -4433,3 +4434,27 @@ entry's save if an interrupt was what reached the guard.
 See: src/kernel/src/arch/aarch64/trap.rs ferrix_stack_hit;
 src/kernel/src/arch/armv7a/trap.rs ferrix_stack_hit; src/kernel/src/trap.rs
 stack_overflow.
+
+<a id="fx-9008"></a>
+
+## FX-9008 — user space stopped feeding its watchdog
+
+With `ferrix.watchdog=on` a privileged program -- init, under
+`ferrix.init.watchdog=` -- opened `/dev/watchdog` and so promised to feed it
+within its timeout. No feed came for that long: the program's own loop did not
+turn. The kernel still ran -- its watchdog task woke to see the deadline pass --
+so what stopped is user space, or the part of the kernel it waits on. Where the
+chipset's TCO timer is claimed, it now resets the machine within the seconds the
+report's `watchdog` line gives, whether or not `ferrix.panic=reset` does it
+first.
+
+1. Every program blocked on a kernel lock, a wait or a page that never comes:
+   the system froze under them. The log's last lines before this report say what
+   ran last.
+2. The feeder alone was stopped or starved: a `SIGSTOP`, or a loop of its own
+   that blocks on something slow for longer than the timeout.
+3. A timeout shorter than the feeder's period, or than a long synchronous step
+   it takes (a disk sync, a large exec).
+
+See: src/kernel/src/watchdog.rs; src/kernel/src/fs/watchdog.rs;
+docs/POSTMORTEM.md 6.11.

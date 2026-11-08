@@ -141,6 +141,26 @@ pub mod timer;
 pub mod trap;
 pub mod user;
 pub mod vmap;
+#[cfg(not(ferrix_personality = "user"))]
+pub mod watchdog;
+/// The watchdog in a `personality=user` kernel: none, so ring 0's budget
+/// keeps its figures (`docs/POSTMORTEM.md` §6.11 is the box's kernel's,
+/// `personality=kernel`). What the core's callers reach is here, empty.
+#[cfg(ferrix_personality = "user")]
+pub mod watchdog {
+    /// Not served.
+    pub fn read_option(_view: &ferrix_bootinfo::BootView<'_>) {}
+    /// Nothing to start.
+    pub fn start() {}
+    /// Nothing to disarm.
+    pub fn stop_for_shutdown(_why: &str) {}
+    /// No timer behind a report.
+    pub(crate) fn on_report(_resetting: bool) -> Option<u64> {
+        None
+    }
+    /// No timer to halt.
+    pub(crate) fn before_reset() {}
+}
 /// Finding what the machine has: the core's modules of `discovery/` (firmware tables, the device tree and the board they describe), whose `mod.rs` is the item's and re-exports them.
 pub mod discovery {
     // ACPI is how the 64-bit pair describe themselves. An ARMv7-A machine has
