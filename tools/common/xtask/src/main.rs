@@ -238,6 +238,7 @@ mod uvm;
 mod vfs;
 mod vnc;
 mod wallpaper;
+mod watchdog;
 mod waybar;
 mod window;
 mod wine;
@@ -628,6 +629,7 @@ const TASKS: &[&[Task]] = &[
     pkg::TASKS,
     ports::TASKS,
     postmortem::TASKS,
+    watchdog::TASKS,
     powerfail::TASKS,
     pty::TASKS,
     remote::TASKS,

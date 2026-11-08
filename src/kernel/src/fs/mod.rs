@@ -136,6 +136,7 @@ pub mod timerfd_check;
 #[cfg(not(ferrix_load_built = "lift"))]
 pub mod userns_check;
 pub(crate) mod wake;
+pub(crate) mod watchdog;
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;

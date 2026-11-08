@@ -316,6 +316,10 @@ why = "what a panic does after its report (panic/reset.rs, H.FAIL.5): halt, the 
 values = ["early", "held"]
 why = "check-only, for cargo xtask test-postmortem (panic/reset_check.rs, ledger 7973): early forces a second panic inside the first report before its reset line (L.panic.4); held takes the console port's lock for good as the first report begins (L.console.15); never on a product command line"
 
+[boot_options."ferrix.watchdog"]
+values = ["on"]
+why = "serve /dev/watchdog (watchdog.rs, fs/watchdog.rs, docs/POSTMORTEM.md §6.11, H.FAIL.14): a deadline a privileged program arms and feeds, reported under FX-9008 when no feed comes while the kernel runs; a reset follows only under ferrix.panic=reset, and a kernel that stops is not detected. Absent, the reference and the default, serves no node and runs no task; any other value is said and taken as off (L.lockup.9). Its feeder is the integrator's: init's own ferrix.init.watchdog=<seconds>, which init reads from /proc/cmdline and this registry, of what the kernel and the loader read, does not hold. For the N150 box, outside the reference configuration (SAFETY-MANUAL AoU-48, certification-item.json `watchdog`)"
+
 [boot_options."ferrix.vtd"]
 values = ["on", "off"]
 why = "whether the kernel drives the VT-d units it accepts (iommu.rs, L.iommu.71): on, the reference and the default; off leaves every unit alone, no DMA translated and no interrupt remapped, outside the reference configuration, for recovery only (SAFETY-MANUAL AoU-8, certification-item.json `vtd`)"

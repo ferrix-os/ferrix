@@ -779,6 +779,25 @@ machine with no serial line a panic's report reaches nobody until the next boot 
 provides the line, or relies on pstore and says so.
 
 
+### AoU-48 — the watchdog reports a starved feeder, and the feeder is the integrator's
+
+`ferrix.watchdog=on` (H.FAIL.14, `src/kernel/src/watchdog.rs`, `docs/POSTMORTEM.md` §6.11) serves
+`/dev/watchdog`: a privileged program's open arms a deadline, each write or `WDIOC_KEEPALIVE` moves it,
+and a timeout that passes with no feed ends in a failure report under FX-9008. The reference configuration
+does not give it. An integrator who does accepts that:
+
+* **the integrator chooses the feeder**, and a feed proves only that the feeder's own loop turned: nothing
+  else the machine runs is watched unless the feeder makes its feed wait on it (init's
+  `ferrix.init.watchdog=` feeds from its own loop);
+* **the magic close and `WDIOS_DISABLECARD` disarm it** on purpose, and a feeder that does either before
+  it stops leaves nothing watched;
+* **a report resets the machine only under `ferrix.panic=reset`** (AoU-32, with its limits); otherwise it
+  halts as every report does;
+* **a kernel that stops is not detected**: the deadline is looked at by a kernel task, so every processor
+  masked, a scheduler that no longer runs, or a report that never ends stops the watchdog too. The lockup
+  detector and the chipset's TCO timer that would close that gap are not part of the element (§6.11:
+  parked).
+
 ### AoU-41 — a safety partition maps no pager-backed VMO it did not choose
 A pager-backed VMO (`docs/microkernel/K3.md`) has absent pages its pager
 supplies: a fault on one waits for that pager, up to the pager's bound of at

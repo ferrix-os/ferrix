@@ -136,7 +136,7 @@
     },
     "linuxd_start.rs::start": {
       "complexity": 23,
-      "lines": 78,
+      "lines": 81,
       "recursive": false
     },
     "linuxd_start.rs::start_further": {
@@ -161,7 +161,7 @@
     },
     "main.rs::kmain": {
       "complexity": 11,
-      "lines": 89,
+      "lines": 90,
       "recursive": false
     },
     "main.rs::start_scheduler": {

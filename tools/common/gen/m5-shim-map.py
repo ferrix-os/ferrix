@@ -112,6 +112,7 @@ RULES = [
     ("user::space", "H", "K2's SPACE_* on the process's space handle; layout lock and the VMA list are linuxd's"),
     ("user::vmo", "H", "VMO_* on a handle; Filler becomes K3's pager"),
     ("user", "H", "as above"),
+    ("watchdog", "R", "none: linuxd serves no /dev/watchdog, so its open is ENXIO and a stop on purpose disarms nothing (lift/core/watchdog.rs; the deadline is ring 0's, docs/POSTMORTEM.md 6.11)"),
     ("vmap", "R", "a VMO mapped into the shared region"),
 ]
 X86 = {

@@ -912,4 +912,72 @@ package FerrixConsoleRequirements {
             attribute :>> unit = ("panic::abridged", "panic::reset::resetting_here");
         }
     }
+
+    package Watchdog {
+        doc /* `ferrix.watchdog=on` (src/kernel/src/watchdog.rs, the core;
+             * /dev/watchdog in src/kernel/src/fs/watchdog.rs, the load):
+             * a deadline a privileged program arms and feeds, and a report
+             * when no feed comes (docs/POSTMORTEM.md §6.11; consultant
+             * ledger lines 7925 and 8078). Software only: the chipset's TCO
+             * timer and the lockup detector are parked, so a kernel that
+             * stops is not detected, and a report resets only under
+             * ferrix.panic=reset. */
+
+        requirement <'L.lockup.6'> aMissedFeedIsReportedInItsWindow : ItemLowLevel {
+            attribute :>> statement = "Once an open has armed it, look_forever shall
+                look at the deadline once a second, and expired shall report a
+                passed deadline under FX-9008, naming the opener's process id and
+                name, the timeout and the milliseconds since the last feed.";
+            attribute :>> criterion = "In test-watchdog (x86-64 under KVM), with busybox's
+                watchdog feeding a 5 s timeout every second: a feeder stopped with
+                SIGSTOP is reported under FX-9008 3.5 to 15 s after the stop (the
+                timeout, the task's 1 s look and a slack of 9 s for a loaded host),
+                the headline naming the opener, its 5 s timeout and the last feed;
+                the report halts without ferrix.panic=reset and, with it, says the
+                reset line and the machine starts again by itself, boot 2's loader
+                quoting the report.";
+            attribute :>> parent = "H.FAIL.14";
+            attribute :>> unit = ("watchdog::look_forever", "watchdog::expired");
+        }
+        requirement <'L.lockup.7'> onlyAnOpenOrEnableArms : ItemLowLevel {
+            attribute :>> statement = "release without the magic close shall leave an
+                armed deadline armed and say so; feed and set_timeout shall move
+                only an armed deadline, by a compare-and-swap from a deadline that
+                is not 0, and never arm a disarmed one.";
+            attribute :>> criterion = "In test-watchdog: a feeder ended with SIGKILL
+                (its file's last release without the magic V) is said to stay armed
+                and is reported under FX-9008 within L.lockup.6's window; a file
+                disarmed by WDIOS_DISABLECARD, then written to and held open, is not
+                reported in the timeout and 5 s. Controls through gate.sh: release
+                that always disarms (the SIGKILL case has no report), feed's
+                compare-and-swap made a store (the DISABLECARD case is reported).";
+            attribute :>> parent = "H.FAIL.14";
+            attribute :>> unit = ("watchdog::release", "watchdog::feed", "watchdog::set_timeout");
+        }
+        requirement <'L.lockup.8'> aStopOnPurposeDisarmsFirst : ItemLowLevel {
+            attribute :>> statement = "Each stop on purpose -- reboot(2)'s restart,
+                power-off and halt, the settings' restart, init's exit under
+                ferrix.onexit and linuxd's exit -- shall call stop_for_shutdown
+                before the stop, which disarms an armed deadline and says so.";
+            attribute :>> criterion = "In test-watchdog, halt -f (reboot(2)'s halt)
+                with the feeder running says the watchdog is disarmed for a halt,
+                with no FX-9008. The halt stops the machine at once, so the task
+                never outlives the stop and no case can wait past the timeout. By
+                inspection: each stop site calls stop_for_shutdown before
+                console::pstore::stop.";
+            attribute :>> parent = "H.FAIL.14";
+            attribute :>> unit = "watchdog::stop_for_shutdown";
+        }
+        requirement <'L.lockup.9'> offUnlessAsked : ItemLowLevel {
+            attribute :>> statement = "read_option shall ask for the watchdog for
+                exactly the value on of ferrix.watchdog, saying any other value is
+                not understood and taking it as off; unasked, start shall spawn no
+                task and serve nothing, and /dev/watchdog shall not be present.";
+            attribute :>> criterion = "In test-watchdog, a boot with ferrix.watchdog=On
+                says the value is not understood, has no /dev/watchdog and never
+                says the watchdog is served.";
+            attribute :>> parent = "H.FAIL.14";
+            attribute :>> unit = ("watchdog::read_option", "watchdog::start", "watchdog::served");
+        }
+    }
 }

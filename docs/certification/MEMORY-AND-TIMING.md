@@ -2583,6 +2583,28 @@ counted. So the margin is about 2.6 KiB less whatever those callees take; the bl
 `Process` (4,000 and 2,528 bytes) are what to shrink first (`docs/BACKLOG.md`). Debug build; a release
 build's frames differ.
 
+### 2.2al The watchdog's deadline (`watchdog`, H.FAIL.14, 2026-11-08)
+
+Only under `ferrix.watchdog=on` (`docs/POSTMORTEM.md` §6.11); off, nothing
+below runs. It allocates nothing after boot but its one task's stack, made
+once at `watchdog::start`, and takes no lock: its state is atomics.
+
+* **The task**: once a second, one load of the deadline and one read of the
+  clock, then `sched::sleep_for`'s own bound. A passed deadline ends in the
+  report, whose bounds are the panic path's (§2.2o; under `ferrix.panic=reset`
+  10 s more, above).
+* **A feed** (a write, `WDIOC_KEEPALIVE`, a new timeout): one read of the
+  clock and one compare-and-swap on the deadline, with one store on success.
+  No write-back of the pstore region: no hardware timer resets the machine
+  behind it.
+* **An open, a release, a disarm**: one compare-and-swap or swap and a
+  console line.
+* **The report's time after a missed feed**: within the timeout plus the
+  task's 1 s look, and the scheduler's latency for a nice-0 task on a loaded
+  machine; `test-watchdog` bounds it at the timeout plus 10 s (L.lockup.6).
+  A kernel that stops runs no task, so this bound holds only while the
+  kernel runs (SAFETY-MANUAL AoU-48).
+
 ### 2.3 What is missing, per standard
 
 * **DO-178C DAL C** does not require WCET as such, but does require that

@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-3018 declarations in the core's files, 215 in the item's; 245 checks-only.
+3034 declarations in the core's files, 215 in the item's; 245 checks-only.
 
 ## ferrix-kernel-core
 
@@ -56,6 +56,8 @@ checks above is `pub` for raised checks (F3).
 | `trap` | mod | item, load, bin |  |
 | `user` | mod | item, load, bin |  |
 | `vmap` | mod | item, load, bin |  |
+| `watchdog` | mod | item, load, bin |  |
+| `watchdog` | mod | item, load, bin |  |
 
 ### `arch`
 
@@ -3821,6 +3823,25 @@ checks above is `pub` for raised checks (F3).
 | `Stack::top` | field | item, load, bin |  |
 | `Usage::allocations` | field | load, bin |  |
 | `Usage::bytes` | field | item, load, bin |  |
+
+### `watchdog`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `disable` | fn | load |  |
+| `enable` | fn | load |  |
+| `feed` | fn | load |  |
+| `open` | fn | load |  |
+| `release` | fn | load |  |
+| `served` | fn | load |  |
+| `set_timeout` | fn | load |  |
+| `start` | fn | bin |  |
+| `start` | fn | bin |  |
+| `stop_for_shutdown` | fn | item, load |  |
+| `stop_for_shutdown` | fn | item, load |  |
+| `time_left` | fn | load |  |
+| `timeout` | fn | load |  |
+| `Busy` | struct | item, load |  |
 
 ## ferrix-kernel-item
 

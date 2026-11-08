@@ -381,6 +381,9 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // rest on — nothing outside what the device has — required of each.
     // Straight after enumeration, which builds the PCI half.
     check_devices(view);
+    // The watchdog, if asked (`docs/POSTMORTEM.md` §6.11): its task needs
+    // the scheduler, and init may open it.
+    watchdog::start(view);
     iommu::report(view, device::devices());
     #[cfg(ferrix_load_built = "ring0")]
     iommu::domain_check::check_iommu();

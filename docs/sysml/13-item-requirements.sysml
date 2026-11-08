@@ -2219,6 +2219,26 @@ package FerrixItemRequirements {
                 only.";
             attribute :>> parent = ("O.FAILSAFE", "ASR-6");
         }
+        // Added 2026-11-08 by box-watchdog / crash-tools (consultant ledger
+        // lines 7925, 8078): the N150 box's watchdog, outside the reference
+        // configuration (ferrix.watchdog off).
+        requirement <'H.FAIL.14'> aStarvedFeederIsReported : ItemHighLevel {
+            doc /* docs/POSTMORTEM.md §6.11. Software only: the deadline is looked
+                at by a kernel task, so a kernel that stops is not detected (the
+                lockup detector, S4a, and the chipset's TCO are parked), and a
+                report resets the machine only under ferrix.panic=reset. */
+            attribute :>> statement = "With ferrix.watchdog=on, once a privileged
+                program has opened /dev/watchdog, a timeout that passes with no
+                feed while the kernel runs shall end in a failure report under
+                FX-9008; a feed shall prove only that the feeder's own loop
+                turned, and no feed, write or timeout shall arm a deadline that
+                was disarmed.";
+            attribute :>> criterion = "L.lockup.6-9 verified; test-watchdog's cases on
+                x86-64 under KVM: a stopped and a killed feeder reported, a feed for
+                four timeouts, a magic close, DISABLECARD, a halt, init's feed and the
+                option off not reported.";
+            attribute :>> parent = ("O.FAILSAFE", "ASR-6");
+        }
         requirement <'H.FAIL.11'> aCleanCachedPageCostsADiskRead : ItemHighLevel {
             doc /* docs/MACHINE-CHECK-PAGECACHE.md (customer, 2026-10-30, machine-check item 3; consultant OK IF ledger 5294). */
             attribute :>> statement = "On x86-64 with recovery on, poison in a clean

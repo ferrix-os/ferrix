@@ -131,6 +131,19 @@
       "H.FAIL.1 and SAFETY-MANUAL 3 claim; any other value is said and taken",
       "as halt (ITEM.md 5, AoU-32)."
     ],
+    "watchdog": "off",
+    "watchdog_settings": [
+      "off",
+      "on"
+    ],
+    "watchdog_why": [
+      "`ferrix.watchdog=on` serves /dev/watchdog (docs/POSTMORTEM.md 6.11): a",
+      "deadline a privileged program arms and feeds, reported under FX-9008 when",
+      "no feed comes; a reset follows only under ferrix.panic=reset, and a kernel",
+      "that stops is not detected. For the N150 box, outside the claim: `off`,",
+      "the default and the reference, serves no node and runs no task; any other",
+      "value is said and taken as off."
+    ],
     "vtd": "on",
     "vtd_settings": [
       "on",
@@ -259,6 +272,7 @@
         "trap/**",
         "user/**",
         "vmap.rs",
+        "watchdog.rs",
         "kernel_core.rs"
       ]
     },

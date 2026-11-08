@@ -1016,7 +1016,95 @@ S4a 6-8 points, S4b 8-10, the box steps about 1: 15 to 19 points.
   lockup module registers into, as power's flushes do.
 * The rest (D5, D8-D12, D14) are the code reviews' to check.
 
+### 6.11 The box's watchdog, as landed (2026-11-08, box-watchdog, crash-tools)
+
+**Why.** On 2026-11-08 at about 00:09 the N150 box went silent under a game
+with `ferrix.panic=reset` on its command line and stayed so until the plug
+was cycled four minutes later; the power cut took the pstore region, and a
+hang and a panic whose report never shipped read the same. Its later hangs
+that night were a btrfs transaction aborted out of memory, user space then
+starved (`docs/BACKLOG.md`, the btrfs-oom row, fixed by 197835013). Nothing
+here claims to explain 00:09 (consultant ledger 7925 BW.13): its finding
+number waits for the root cause.
+
+**What landed** (consultant ledger lines 7925 and 8078, OK IF SW.1-SW.12),
+off unless `ferrix.watchdog=on`, which the reference configuration does not
+give (H.FAIL.14, L.lockup.6-9; SAFETY-MANUAL AoU-48):
+
+* `/dev/watchdog`, 10:130, 0600, Linux's interface (`src/kernel/src/fs/watchdog.rs`,
+  the load; S4c's file from `s4-lockup`): an open by a privileged program arms
+  with the timeout set (60 s until `WDIOC_SETTIMEOUT`, 1 to 600 s), one
+  opener at a time (`EBUSY`); a write or `WDIOC_KEEPALIVE` feeds; the magic
+  `V` lets the last release disarm, any other release leaves it armed and
+  says so; `WDIOS_DISABLECARD` disarms, `ENABLECARD` arms again.
+* A deadline on the kernel's clock (`src/kernel/src/watchdog.rs`, the core),
+  looked at once a second by the kernel task `watchdog`. Past it: FX-9008,
+  naming the opener, its timeout and the time since the last feed, then
+  `ferrix.panic`'s halt or reset. A feed or a new timeout moves only an armed
+  deadline, by a compare-and-swap from one that is not 0, so a deadline
+  disarmed meanwhile is never armed again by them.
+* Every stop on purpose -- `reboot(2)`'s restart, power-off and halt, the
+  settings' restart, init's exit under `ferrix.onexit`, linuxd's exit --
+  disarms first and says `watchdog disarmed for ...`.
+* The feeder is init's (`ferrix.init.watchdog=<seconds>`, S4c's feeder): it
+  opens `/dev/watchdog` with that timeout and feeds a third of it apart from
+  its own loop. A kernel timer is no feeder: it ticks on while all of user
+  space waits (2026-10-31: ping answered, every program stopped).
+
+**What it does not catch.** The task runs on the kernel's own scheduler and
+timer: it reports ring 3 that stops feeding while the kernel runs. A kernel
+that stops -- every processor masked, the scheduler gone, a report that never
+ends -- stops the task too, and nothing reports it or resets the machine. A
+report resets only under `ferrix.panic=reset`; otherwise it halts.
+
+**Parked** (`docs/BACKLOG.md`, one row each):
+
+* **The chipset's TCO timer** ("claims it when free"): the box's AMI
+  firmware locks it halted (`TCO_LOCK`; the claim line on main-a3c5ef1dd,
+  2026-11-08 01:27: `watchdog the TCO is left alone: firmware locked it
+  halted`), so on the only machine that asked for it it could never reset.
+  Its code -- the claim, arm, feed, the cut to 25.2 s at a report, the halt
+  before the report's reset -- stays on `feature/box-watchdog` 809fca3e5 and
+  59a346b5e; a landing of it is a new code review against 7925's BW.2, BW.4
+  (H.FAIL.7, L.tco.1-6), BW.7, BW.10, BW.12 and controls K1, K2, K4, K9,
+  2889's ruling (a) still granted.
+* **S4a, the lockup detector** (branch `s4-lockup`): design OK IF D1-D14
+  (2889), code review and controls owed; its watch tick is to be one look
+  with the deadline task above, not two. It closes the gap above.
+
+**Gate**, `cargo xtask test-watchdog` (x86-64 under KVM; busybox's
+`watchdog -F -T 5 -t 1`): (1) the feeder stopped by `SIGSTOP`, FX-9008 3.5 to
+15 s later naming the opener, its 5 s timeout and the last feed, and a halt;
+(2) the same under `ferrix.panic=reset`, the reset line, the machine starting
+again and boot 2's loader quoting the report; (3) the feeder killed, its
+release without `V` said to leave it armed, FX-9008 in the window; (4) fed for
+four timeouts, a second open `EBUSY`, the magic close, a timeout of 0
+`EINVAL`, 10 s more and no report; (5) `src/tests/watchdog` disarms with
+`WDIOS_DISABLECARD`, writes and holds it open, no report in 10 s; (6)
+`halt -f` with the feeder running says it disarmed for a halt; (7) init
+feeding with `ferrix.init.watchdog=5` for 20 s, no report; (8)
+`ferrix.watchdog=On` said not understood, no node. The halt stops the
+machine at once, so no case can wait past a stop's timeout: case (6) checks
+the line.
+
+**Seen on the box** (a hardware observation, not a gate row): on
+main-cfde84d79 (develop 589fcb096 plus never-land diagnostics carrying this
+watchdog) with `ferrix.watchdog=on ferrix.init.watchdog=15
+ferrix.panic=reset`, `kill -STOP 1` at 02:32:52 on 2026-11-08 ended in
+FX-9008 (`armed by process 1 (init) with a 15 s timeout, last fed 15894 ms
+ago`), a reset by itself and the record kept on the event log
+(`BOX-QUEUE.md`, 02:34); and main-8b09e2409 (develop 197835013 plus the same
+diagnostics) played Endfield 75 minutes, 04:13-05:29, with the watchdog fed
+and no false report. Whether the box runs unattended with
+`ferrix.watchdog=on` is the product owner's decision (D14).
+
 ## 7. Where it stands
+
+2026-11-08, §6.11 (box-watchdog, crash-tools): the software watchdog
+landed alone under consultant ledger 8078 (OK IF SW.1-SW.12, replacing
+7925's BW.1-BW.16 for it): `/dev/watchdog`, the deadline task and FX-9008,
+init's feeder, `test-watchdog`. The TCO timer and S4a are parked, each with
+a BACKLOG row; a kernel that stops is still not detected.
 
 2026-10-21, §6 (lockup): S4's design, the lockup detector and the TCO
 watchdog. Design verdict **OK IF D1-D14** (consultant ledger line 2889);
