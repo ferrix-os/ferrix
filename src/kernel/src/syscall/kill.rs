@@ -96,6 +96,7 @@ pub(crate) fn send(target: &Process, signal: u32, origin: Origin) {
     if signal == 0 || signal > NSIG || target.is_terminated() {
         return;
     }
+    crate::syscall::diag_exit::signal_to_process(target, signal, &origin);
     if signal == SIGCONT {
         target.leave_stop();
     }
@@ -117,6 +118,7 @@ pub(crate) fn send_to_thread(thread: &Thread, signal: u32, origin: Origin) {
     if signal == 0 || signal > NSIG || target.is_terminated() {
         return;
     }
+    crate::syscall::diag_exit::signal_to_thread(target, thread.tid(), signal, &origin);
     if signal == SIGCONT {
         target.leave_stop();
     }

@@ -220,6 +220,8 @@ pub mod syscall {
     #[cfg(ferrix_load_built = "ring0")]
     pub mod init_calls_check;
     #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
+    pub mod diag_exit;
+    #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod kill;
     #[cfg(any(ferrix_load_built = "ring0", ferrix_load_built = "lift"))]
     pub mod launch;

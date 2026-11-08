@@ -1164,6 +1164,11 @@ impl Process {
     /// Whether `thread` is to leave rather than run on: its process is ending,
     /// or another of its threads is replacing the program.
     #[inline(always)]
+    /// DIAG: the thread replacing the program, or 0.
+    pub(crate) fn exec_thread_now(&self) -> u32 {
+        self.exec_thread.load(Ordering::Acquire)
+    }
+
     pub(crate) fn must_leave(&self, thread: &Thread) -> bool {
         if self.is_terminated() {
             return true;
@@ -2875,6 +2880,7 @@ fn end_thread(status: Option<i32>, group: bool) -> ! {
         // then any the process was sent is handed to a thread that stays.
         thread.mark_gone();
         let process = Arc::clone(thread.process());
+        crate::syscall::diag_exit::thread_end(&process, thread.tid(), status, group);
         process.retarget_shared_signals();
         if let Some(status) = status {
             if thread.tid() == process.pid() {

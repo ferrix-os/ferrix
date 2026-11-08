@@ -190,17 +190,46 @@ fn user_fault_own(space: &AddressSpace, address: u64, access: Access) -> Result<
         // `PAGER_VMO_NO_COPY_WAIT`, which is about copies (K3.md §2.4).
         match space.fault_with(address, access, crate::object::pager::FaultMode::Program) {
             Err(error) if is_charge_refusal(&error) => match out_of_memory_at(space, attempt) {
-                Answer::Refused => return Err(error),
-                Answer::Victim => return Ok(()),
+                Answer::Refused => {
+                    diag_fault_error(address, access.write, &error, false, false);
+                    return Err(error);
+                }
+                Answer::Victim => {
+                    diag_fault_error(address, access.write, &"victim", false, false);
+                    return Ok(());
+                }
                 Answer::Retry => attempt = attempt.saturating_add(1),
             },
             Ok(()) => {
                 throttle();
                 return Ok(());
             }
-            done => return done,
+            Err(error) => {
+                let ordinary = matches!(error, SpaceError::NotMapped(_) | SpaceError::Refused(_));
+                diag_fault_error(address, access.write, &error, false, ordinary);
+                return Err(error);
+            }
         }
     }
+}
+
+/// DIAG, never to land (fault-relanding): a fault that failed for a reason
+/// other than a missing or forbidden region, printed.
+fn diag_fault_error(address: u64, write: bool, error: &dyn core::fmt::Debug, copy: bool, ordinary: bool) {
+    static LEFT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(300);
+    if ordinary {
+        return;
+    }
+    if LEFT
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| left.checked_sub(1))
+        .is_err()
+    {
+        return;
+    }
+    println!(
+        "fxdiag: fault error {:?} addr {:#x} write {} copy {}",
+        error, address, write, copy
+    );
 }
 
 /// One fault of the running task, counted in its `minflt` or `majflt` when
@@ -247,6 +276,7 @@ fn fault_own(space: &AddressSpace, address: u64, access: Access) -> Result<(), S
         match space.fault(address, access) {
             Err(error) if is_charge_refusal(&error) => {
                 if out_of_memory_at(space, attempt) != Answer::Retry {
+                    diag_fault_error(address, access.write, &error, true, false);
                     return Err(error);
                 }
                 attempt = attempt.saturating_add(1);
@@ -255,7 +285,11 @@ fn fault_own(space: &AddressSpace, address: u64, access: Access) -> Result<(), S
                 throttle();
                 return Ok(());
             }
-            done => return done,
+            Err(error) => {
+                let ordinary = matches!(error, SpaceError::NotMapped(_) | SpaceError::Refused(_));
+                diag_fault_error(address, access.write, &error, true, ordinary);
+                return Err(error);
+            }
         }
     }
 }
