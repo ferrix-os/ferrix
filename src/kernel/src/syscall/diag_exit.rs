@@ -4,6 +4,15 @@
 //! every way that can happen, each line prefixed `fxdiag:`.
 
 use alloc::vec::Vec;
+
+/// To the kernel log only, never the console: a console line through fbcon
+/// costs, and a flood of them may stall the box (FX-9008 at 09:10).
+macro_rules! fxlog {
+    ($($argument:tt)*) => {{
+        let line = alloc::format!("{}\n", format_args!($($argument)*));
+        crate::console::log::record(line.as_bytes(), crate::console::log::KERNEL);
+    }};
+}
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use ferrix_vfs::OpenFile;
@@ -71,7 +80,7 @@ fn print_calls(tid: u32) {
         if shown > 60 {
             break;
         }
-        crate::println!(
+        fxlog!(
             "fxdiag:   call {} -> {:#x} ({:#x}, {:#x}, {:#x}) at {} us",
             head & 0xffff_ffff,
             entry[1].load(Ordering::Relaxed),
@@ -108,14 +117,14 @@ fn thread_name() -> [u8; 16] {
 /// region's start and the rights.
 fn print_where(process: &Process, label: &str, address: u64) {
     let Ok(regions) = process.space().regions() else {
-        crate::println!("fxdiag:   {} {:#x} (no region list)", label, address);
+        fxlog!("fxdiag:   {} {:#x} (no region list)", label, address);
         return;
     };
     let Some(region) = regions
         .iter()
         .find(|region| region.start <= address && address < region.end)
     else {
-        crate::println!("fxdiag:   {} {:#x} unmapped", label, address);
+        fxlog!("fxdiag:   {} {:#x} unmapped", label, address);
         return;
     };
     let rights = [
@@ -137,7 +146,7 @@ fn print_where(process: &Process, label: &str, address: u64) {
         Some((file, offset)) => {
             let root = process.fs_context().lock().root.clone();
             let path = fs::namespace().path_of(file.location(), &root);
-            crate::println!(
+            fxlog!(
                 "fxdiag:   {} {:#x} {} {}+{:#x}",
                 label,
                 address,
@@ -146,7 +155,7 @@ fn print_where(process: &Process, label: &str, address: u64) {
                 address - region.start + offset
             );
         }
-        None => crate::println!(
+        None => fxlog!(
             "fxdiag:   {} {:#x} {} anon {:#x}-{:#x}+{:#x}",
             label,
             address,
@@ -235,7 +244,7 @@ pub(crate) fn exit_call(process: &Process, tid: u32, group: bool, status: i32, i
         return;
     }
     let name = name_of(process);
-    crate::println!(
+    fxlog!(
         "fxdiag: {} pid {} tid {} ({}/{}) status {} threads {} ip {:#x} sp {:#x}",
         if group { "exit_group" } else { "LEADER exit" },
         process.pid(),
@@ -266,7 +275,7 @@ pub(crate) fn thread_end(process: &Process, tid: u32, status: Option<i32>, group
     if !take(&EXITS) {
         return;
     }
-    crate::println!(
+    fxlog!(
         "fxdiag: LEADER ends pid {} tid {} status {:?} threads {} terminated {} exec_thread {}",
         process.pid(),
         tid,
@@ -294,7 +303,7 @@ pub(crate) fn signal_to_thread(process: &Process, tid: u32, signal: u32, origin:
     if !take(&SIGNALS) {
         return;
     }
-    crate::println!(
+    fxlog!(
         "fxdiag: signal {} to pid {} tid {} ({}) from {:?} by pid {} tid {}",
         signal,
         process.pid(),
@@ -314,7 +323,7 @@ pub(crate) fn signal_to_process(process: &Process, signal: u32, origin: &dyn cor
     if !watched(process) || !take(&SIGNALS) {
         return;
     }
-    crate::println!(
+    fxlog!(
         "fxdiag: signal {} to process {} ({}) from {:?} by pid {} tid {}",
         signal,
         process.pid(),
@@ -333,7 +342,7 @@ pub(crate) fn fault_signal(process: &Process, tid: u32, signal: u32, code: i32, 
     if !take(&FAULTS) {
         return;
     }
-    crate::println!(
+    fxlog!(
         "fxdiag: fault signal {} code {} addr {:#x} pc {:#x} pid {} tid {} ({}/{}) fatal {}",
         signal,
         code,
@@ -356,7 +365,7 @@ pub(crate) fn efault(process: &Process, number: usize, args: &[u64; 6], ip: u64)
     if !watched(process) || !take(&EFAULTS) {
         return;
     }
-    crate::println!(
+    fxlog!(
         "fxdiag: EFAULT call {} args {:#x} {:#x} {:#x} {:#x} pid {} tid {} ({}) ip {:#x}",
         number,
         args[0],
@@ -382,7 +391,7 @@ pub(crate) fn epoll_event(process: &Process, events: u32, data: u64) {
     if !name.starts_with(b"wineserver") || !take(&HUPS) {
         return;
     }
-    crate::println!(
+    fxlog!(
         "fxdiag: wineserver {} epoll events {:#x} data {:#x}",
         process.pid(),
         events,

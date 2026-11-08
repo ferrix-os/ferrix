@@ -211,10 +211,11 @@ fn diag_fault_error(address: u64, write: bool, error: &dyn core::fmt::Debug, cop
     {
         return;
     }
-    println!(
-        "fxdiag: fault error {:?} addr {:#x} write {} copy {}",
+    let line = alloc::format!(
+        "fxdiag: fault error {:?} addr {:#x} write {} copy {}\n",
         error, address, write, copy
     );
+    crate::console::log::record(line.as_bytes(), crate::console::log::KERNEL);
 }
 
 /// [`AddressSpace::fault`] for a page a system call touches on the running
