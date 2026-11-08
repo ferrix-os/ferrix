@@ -646,6 +646,15 @@ fn force_held(signal: u32, code: i32, address: u64, pc: u64) -> Option<Posted> {
     let thread = thread::current()?;
     let origin = Origin::Fault { code, address };
     let posted = thread.with_signals(|shared, own| signal::force(shared, own, signal, origin));
+    crate::syscall::diag_exit::fault_signal(
+        thread.process(),
+        thread.tid(),
+        signal,
+        code,
+        address,
+        pc,
+        posted == Posted::Fatal,
+    );
     crate::sched::work::post_own(crate::sched::work::SIGNAL);
     if posted == Posted::Fatal {
         let held = crate::fs::crashes::hold(&thread, signal, code, address, pc);

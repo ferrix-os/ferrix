@@ -165,6 +165,16 @@ fn answer_as(
     if matches!(call, Syscall::Exit | Syscall::ExitGroup) && process.is_some() {
         // Nothing to drop first: the process is lent (B2).
         let status = truncate(args.args[0]) as i32 & 0xFF;
+        if let (Some(process), Some(thread)) = (process, thread) {
+            crate::syscall::diag_exit::exit_call(
+                process,
+                thread.tid(),
+                call == Syscall::ExitGroup,
+                status,
+                args.ip,
+                regs.map_or(0, arch::UserRegs::stack_pointer),
+            );
+        }
         if call == Syscall::Exit {
             process::exit_thread_current(status);
         }
@@ -220,6 +230,20 @@ fn answer_as(
     };
     if answer == Err(Errno::ENOSYS) {
         unanswered(Some(call), args.number);
+    }
+    if answer == Err(Errno::EFAULT)
+        && let Some(process) = caller
+    {
+        crate::syscall::diag_exit::efault(process, args.number, &args.args, args.ip);
+    }
+    if let (Some(process), Some(thread)) = (caller, thread) {
+        crate::syscall::diag_exit::record(
+            process,
+            thread.tid(),
+            args.number,
+            errno::encode(answer) as u64,
+            &args.args,
+        );
     }
     // A blocking call interrupted by a signal returns a restart code, never
     // seen by the program: record the call so the way back to user mode can
