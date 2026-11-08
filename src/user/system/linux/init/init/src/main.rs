@@ -43,6 +43,7 @@ mod sockets;
 mod spawn;
 mod sys;
 mod units;
+mod watchdog;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::ffi::CString;
@@ -195,6 +196,9 @@ struct Init {
     /// The audit record's reader, once `/` is settled
     /// (`docs/certification/AUDIT.md` §4).
     audit: Option<audit::Reader>,
+    /// The kernel's user watchdog, fed from this loop under
+    /// `ferrix.init.watchdog=` (`docs/POSTMORTEM.md` §6.11).
+    watchdog: watchdog::Watchdog,
 }
 
 /// The unit that runs `devmgr` when pid 1 starts it (§7.3), and the program
@@ -275,6 +279,7 @@ impl Init {
                 .map(str::to_owned),
         };
         let source = units::read(&mut log);
+        let watchdog = watchdog::Watchdog::from_command_line(&command_line, &say);
         let machine = Machine { command_line };
         let manager = Manager::new(source.clone(), Box::new(machine), options);
 
@@ -375,6 +380,7 @@ impl Init {
             forking: BTreeMap::new(),
             sockets: Sockets::default(),
             devices,
+            watchdog,
         };
         // `/` is settled already when the kernel started devmgr itself: the
         // audit record's reader starts now, and otherwise once it is.
@@ -421,6 +427,7 @@ impl Init {
                 .chain(devices)
                 .chain(self.lode.next_flush())
                 .chain(self.next_said())
+                .chain(self.watchdog.next_feed())
                 .min()
             {
                 None => -1,
@@ -439,6 +446,7 @@ impl Init {
                 }
             };
             self.gather(&ready);
+            self.watchdog.feed_if_due();
             self.say_shed(sys::monotonic() / 1000);
         }
     }

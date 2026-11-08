@@ -4261,6 +4261,31 @@ pub static PARTITION_MANAGER_ENDED: Explanation = Explanation {
     see: "src/user/system/native/partmgr/src/main.rs; docs/microkernel/BOOT-AUTHORITY.md",
 };
 
+/// For the watchdog (`watchdog.rs`): user space stopped feeding
+/// `/dev/watchdog` within the timeout its opener set.
+pub static WATCHDOG_STARVED: Explanation = Explanation {
+    code: "FX-9008",
+    title: "user space stopped feeding its watchdog",
+    meaning: "With `ferrix.watchdog=on` a privileged program -- init, under \
+              `ferrix.init.watchdog=` -- opened `/dev/watchdog` and so promised to feed it within \
+              its timeout. No feed came for that long: the program's own loop did not turn. \
+              The kernel still ran -- its watchdog task woke to see the deadline pass -- so \
+              what stopped is user space, or the part of the kernel it waits on. Where the \
+              chipset's TCO timer is claimed, it now resets the machine within the seconds \
+              the report's `watchdog` line gives, whether or not `ferrix.panic=reset` does it \
+              first.",
+    causes: &[
+        "Every program blocked on a kernel lock, a wait or a page that never comes: the \
+         system froze under them. The log's last lines before this report say what ran \
+         last.",
+        "The feeder alone was stopped or starved: a `SIGSTOP`, or a loop of its own that \
+         blocks on something slow for longer than the timeout.",
+        "A timeout shorter than the feeder's period, or than a long synchronous step it \
+         takes (a disk sync, a large exec).",
+    ],
+    see: "src/kernel/src/watchdog.rs; src/kernel/src/fs/watchdog.rs; docs/POSTMORTEM.md 6.11",
+};
+
 /// Every entry, in code order.
 #[expect(
     dead_code,
@@ -4490,4 +4515,5 @@ pub(crate) static ALL: &[&Explanation] = &[
     &MACHINE_CHECK,
     &NESTED_INTERRUPT_STACK,
     &KERNEL_STACK_OVERFLOW,
+    &WATCHDOG_STARVED,
 ];
