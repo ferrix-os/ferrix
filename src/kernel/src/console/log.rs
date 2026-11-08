@@ -294,7 +294,7 @@ fn slot_of(slots: &[AtomicU8], at: u64) -> Option<&AtomicU8> {
 
 /// The priority a kernel line is logged at: `KERN_INFO` of facility 0, the
 /// kernel's. The kernel's lines carry no level of their own.
-pub(crate) const KERNEL: u8 = 6;
+pub const KERNEL: u8 = 6;
 
 /// The priority a program's console output is logged at: `LOG_INFO` of
 /// `LOG_USER`, the facility Linux gives what a program writes to `/dev/kmsg`
@@ -592,7 +592,7 @@ fn now_usec() -> u64 {
 /// Record `bytes` in the kernel log at `priority`, [`KERNEL`] or
 /// [`PROGRAM`] or a record's own. What the console calls for every byte it
 /// sends, and all it asks of the log.
-pub(crate) fn record(bytes: &[u8], priority: u8) {
+pub fn record(bytes: &[u8], priority: u8) {
     let now = now_usec;
     record_lines(&LOG, &LOG_LINES, bytes, priority, &mut Stamp::new(&now));
     super::pstore::record(bytes);
