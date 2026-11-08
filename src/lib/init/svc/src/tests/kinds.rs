@@ -428,3 +428,22 @@ fn a_device_needs_no_file_and_its_name_is_its_node() {
     let described = load("dev-sda.device", "[Unit]\nDescription=The disk\n").unwrap();
     assert_eq!(described.unit.description.as_deref(), Some("The disk"));
 }
+
+#[test]
+fn watchdog_keys_parse_and_need_a_type_that_pings() {
+    let (s, warnings) = service(
+        "[Service]\nType=notify\nExecStart=/a\nWatchdogSec=3s\nWatchdogSignal=SIGQUIT\nTimeoutAbortSec=7s\n",
+    );
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(s.watchdog, Span::Finite(Duration::from_secs(3)));
+    assert_eq!(s.watchdog_signal, Signal(3));
+    assert_eq!(s.abort_timeout(), Span::Finite(Duration::from_secs(7)));
+    let (s, _) = service("[Service]\nType=notify\nExecStart=/a\nTimeoutStopSec=9s\n");
+    assert_eq!(s.watchdog, Span::Infinity);
+    assert_eq!(s.watchdog_signal, Signal::ABRT);
+    assert_eq!(s.abort_timeout(), Span::Finite(Duration::from_secs(9)));
+    let (s, warnings) = service("[Service]\nExecStart=/a\nWatchdogSec=3s\n");
+    assert_eq!(s.watchdog, Span::Infinity);
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(warnings[0].contains("WatchdogSec= needs Type=notify or Type=native"));
+}

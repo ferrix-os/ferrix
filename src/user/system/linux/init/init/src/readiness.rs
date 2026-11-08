@@ -4,7 +4,8 @@
 //! A notify service's pipe is open for as long as anything in the service
 //! holds its write end, and each `KEY=value` line on it becomes an event:
 //! `READY=1` readiness, `STATUS=` what `svc status` shows, `MAINPID=` the
-//! main process.
+//! main process, `WATCHDOG=` and `WATCHDOG_USEC=` the service watchdog's
+//! pings (`docs/WATCHDOG-STAGES.md` §5.2).
 //!
 //! A forking service is up when its first process exits 0. Its main process
 //! is then the one its `PIDFile=` names, or, with no such file, the one
@@ -16,7 +17,7 @@ use std::fs::{self, File};
 use std::io::{self, Read as _};
 use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 
-use ferrix_svc::event::{Event, Pid, UnitId};
+use ferrix_svc::event::{Event, Pid, Ping, UnitId};
 use ferrix_svc_proto::notify::{self, Lines, Notice};
 
 /// One notify pipe.
@@ -89,6 +90,18 @@ impl Readiness {
                 Notice::MainPid(pid) => events.push(Event::MainPid {
                     unit,
                     pid: Pid(pid),
+                }),
+                Notice::Watchdog => events.push(Event::Watchdog {
+                    unit,
+                    ping: Ping::Alive,
+                }),
+                Notice::WatchdogTrigger => events.push(Event::Watchdog {
+                    unit,
+                    ping: Ping::Trigger,
+                }),
+                Notice::WatchdogUsec(micros) => events.push(Event::Watchdog {
+                    unit,
+                    ping: Ping::Interval(std::time::Duration::from_micros(micros)),
                 }),
                 Notice::Stopping | Notice::Reloading | Notice::Other => {}
             }

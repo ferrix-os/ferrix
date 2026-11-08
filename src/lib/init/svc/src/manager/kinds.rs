@@ -179,6 +179,17 @@ impl Manager {
                     .is_some_and(|at| at <= now)
             })
             .collect();
+        let missed: Vec<UnitId> = (0..self.units.len())
+            .filter_map(|index| u32::try_from(index).ok().map(UnitId))
+            .filter(|&unit| {
+                self.slot(unit)
+                    .and_then(|s| s.watchdog)
+                    .is_some_and(|at| at <= now)
+            })
+            .collect();
+        for unit in missed {
+            self.watchdog_missed(unit, false);
+        }
         for unit in due {
             let Some(slot) = self.slot_mut(unit) else {
                 continue;

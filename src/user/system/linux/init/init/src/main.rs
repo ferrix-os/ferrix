@@ -44,6 +44,7 @@ mod spawn;
 mod sys;
 mod units;
 mod watchdog;
+mod watchdog_report;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::ffi::CString;
@@ -196,9 +197,6 @@ struct Init {
     /// The audit record's reader, once `/` is settled
     /// (`docs/certification/AUDIT.md` §4).
     audit: Option<audit::Reader>,
-    /// The kernel's user watchdog, fed from this loop under
-    /// `ferrix.init.watchdog=` (`docs/POSTMORTEM.md` §6.11).
-    watchdog: watchdog::Watchdog,
 }
 
 /// The unit that runs `devmgr` when pid 1 starts it (§7.3), and the program
@@ -279,7 +277,10 @@ impl Init {
                 .map(str::to_owned),
         };
         let source = units::read(&mut log);
-        let watchdog = watchdog::Watchdog::from_command_line(&command_line, &say);
+        // The kernel's user watchdog, fed from a thread of its own under
+        // `ferrix.init.watchdog=` (`docs/WATCHDOG-STAGES.md` §4); before the
+        // first fork, which waits for the feeder's first feed.
+        watchdog::start(&command_line, &say);
         let machine = Machine { command_line };
         let manager = Manager::new(source.clone(), Box::new(machine), options);
 
@@ -380,7 +381,6 @@ impl Init {
             forking: BTreeMap::new(),
             sockets: Sockets::default(),
             devices,
-            watchdog,
         };
         // `/` is settled already when the kernel started devmgr itself: the
         // audit record's reader starts now, and otherwise once it is.
@@ -396,6 +396,7 @@ impl Init {
     /// Step, act and wait, for as long as the machine runs.
     fn run(&mut self) -> ! {
         loop {
+            watchdog::turn();
             while let Some(event) = self.queue.pop_front() {
                 let actions = self.manager.step(event, now());
                 for action in actions {
@@ -419,7 +420,10 @@ impl Init {
                 .devices
                 .next_poll()
                 .map(|at| at.saturating_duration_since(std::time::Instant::now()));
-            self.lode.flush();
+            {
+                let _phase = watchdog::Phase::Lode.enter();
+                self.lode.flush();
+            }
             let timeout = match manager
                 .into_iter()
                 .chain(groups)
@@ -427,7 +431,6 @@ impl Init {
                 .chain(devices)
                 .chain(self.lode.next_flush())
                 .chain(self.next_said())
-                .chain(self.watchdog.next_feed())
                 .min()
             {
                 None => -1,
@@ -437,7 +440,10 @@ impl Init {
                     i32::try_from(millis).unwrap_or(i32::MAX)
                 }
             };
-            let ready = match sys::wait(self.epoll.as_fd(), timeout) {
+            watchdog::waiting();
+            let waited = sys::wait(self.epoll.as_fd(), timeout);
+            watchdog::turn();
+            let ready = match waited {
                 Ok(ready) => ready,
                 Err(error) => {
                     say(&format!("epoll_wait failed: {error}"));
@@ -446,7 +452,6 @@ impl Init {
                 }
             };
             self.gather(&ready);
-            self.watchdog.feed_if_due();
             self.say_shed(sys::monotonic() / 1000);
         }
     }
@@ -536,6 +541,7 @@ impl Init {
     /// Read the audit record's rings into the file. A reader that fails
     /// says so and stops, rather than saying it every second.
     fn read_audit(&mut self) {
+        let _phase = watchdog::Phase::Audit.enter();
         let Some(reader) = self.audit.as_mut() else {
             return;
         };
@@ -744,6 +750,34 @@ impl Init {
                     );
                 }
             }
+            Action::WatchdogMissed { unit, main, limit } => {
+                let _phase = watchdog::Phase::Proc.enter();
+                let name = self.display(unit);
+                let threads = main.map_or_else(
+                    || String::from("no main process"),
+                    |pid| watchdog_report::threads(pid.0),
+                );
+                let line = format!(
+                    "{name}: watchdog timeout (limit {} ms): {threads}",
+                    limit.as_millis()
+                );
+                say(&line);
+                // To lode as the unit's own line, from pid 1, so its record
+                // names the program (lode takes the console copy too).
+                let said = logs::Said {
+                    whose: Whose {
+                        unit,
+                        pid: 1,
+                        ids: (0, 0),
+                        stderr: true,
+                        invocation: self.invocations.get(&unit).cloned(),
+                    },
+                    line,
+                };
+                let _lode = watchdog::Phase::Lode.enter();
+                self.lode
+                    .send(&lode::encode(&said, &name, sys::monotonic() / 1000));
+            }
             Action::Reply { client, reply } => self.reply(client, reply),
             Action::Power(action) => power(action, self.audit.as_mut()),
         }
@@ -758,6 +792,7 @@ impl Init {
 
     /// Start a process for `unit`.
     fn spawn(&mut self, unit: UnitId, spec: &ferrix_svc::event::SpawnSpec) {
+        let _phase = watchdog::Phase::Spawn.enter();
         let failed = |init: &mut Init, errno: i32, why: &str| {
             let name = init.display(unit);
             say(&format!("{name}: {why}"));
@@ -911,6 +946,7 @@ impl Init {
     /// behind its cgroup, from the ELF file `ExecStart=` names, with a
     /// bootstrap channel of its own. Its pid is the one its cgroup has.
     fn spawn_native(&mut self, unit: UnitId, spec: &ferrix_svc::event::SpawnSpec) {
+        let _phase = watchdog::Phase::Native.enter();
         let name = self.display(unit);
         let fail = |init: &mut Init, why: String| {
             say(&format!("{name}: {why}"));
@@ -1279,6 +1315,7 @@ impl Init {
 
     /// A control connection is readable, or has room to write.
     fn client(&mut self, id: u64, events: u32) {
+        let _phase = watchdog::Phase::Control.enter();
         let Some(control) = self.control.as_mut() else {
             return;
         };
@@ -1460,6 +1497,7 @@ impl Init {
     /// `svc daemon-reload`: run the generators and read the directories
     /// again; what runs is left running.
     fn reload_units(&mut self) {
+        let _phase = watchdog::Phase::Units.enter();
         run_generators();
         let mut log = |line: String| say(&line);
         let source = units::read(&mut log);
@@ -1562,6 +1600,7 @@ impl Init {
 
 /// The uid `/etc/passwd` gives the user `name`.
 fn user_uid(name: &str) -> Option<u32> {
+    let _phase = watchdog::Phase::Users.enter();
     let text = fs::read_to_string("/etc/passwd").ok()?;
     text.lines().find_map(|line| {
         let mut fields = line.split(':');
@@ -1602,6 +1641,7 @@ fn refusal(uid: u32, call: &Call) -> Option<String> {
 
 /// The real uid of process `pid`, from `/proc/<pid>/status`.
 fn owner(pid: u32) -> Option<u32> {
+    let _phase = watchdog::Phase::Users.enter();
     let text = fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
     let line = text.lines().find(|line| line.starts_with("Uid:"))?;
     line.split_whitespace().nth(1)?.parse().ok()
@@ -1714,6 +1754,7 @@ fn run_generator(path: &Path) -> Result<Exit, String> {
 /// Mount a `.mount` unit. A mount the kernel has made already is a
 /// success (§8.1).
 fn mount(spec: &MountSpec) -> Result<(), ferrix_svc::event::Errno> {
+    let _phase = watchdog::Phase::Mount.enter();
     let errno =
         |error: io::Error| ferrix_svc::event::Errno(error.raw_os_error().unwrap_or(libc::EIO));
     if mounted(&spec.r#where) {
@@ -1739,6 +1780,7 @@ fn mount(spec: &MountSpec) -> Result<(), ferrix_svc::event::Errno> {
 
 /// Unmount what a `.mount` unit mounted.
 fn unmount(target: &str) -> Result<(), ferrix_svc::event::Errno> {
+    let _phase = watchdog::Phase::Mount.enter();
     let target = CString::new(target).map_err(|_| ferrix_svc::event::Errno(libc::EINVAL))?;
     sys::unmount(&target)
         .map_err(|error| ferrix_svc::event::Errno(error.raw_os_error().unwrap_or(libc::EIO)))

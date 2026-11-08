@@ -136,6 +136,9 @@ enum Sub {
     Stop,
     /// Sent the polite signal, waiting.
     StopSigterm,
+    /// Missed its watchdog: sent `WatchdogSignal=`, waiting
+    /// `TimeoutAbortSec=`.
+    StopWatchdog,
     /// Sent `SIGKILL` or wrote `cgroup.kill`, waiting.
     StopSigkill,
     /// Running `ExecStopPost=`.
@@ -169,6 +172,7 @@ impl Sub {
             Sub::Exited => "exited",
             Sub::Stop => "stop",
             Sub::StopSigterm => "stop-sigterm",
+            Sub::StopWatchdog => "stop-watchdog",
             Sub::StopSigkill => "stop-sigkill",
             Sub::StopPost => "stop-post",
             Sub::AutoRestart => "auto-restart",
@@ -211,6 +215,12 @@ struct Slot {
     adopted: bool,
     /// When its timer runs out.
     deadline: Option<Instant>,
+    /// When its service watchdog runs out, while armed
+    /// (`docs/WATCHDOG-STAGES.md` §5.3).
+    watchdog: Option<Instant>,
+    /// This run's `WATCHDOG_USEC=`, which replaces `WatchdogSec=` until the
+    /// next start.
+    watchdog_interval: Option<core::time::Duration>,
     main: Option<Pid>,
     control: Option<Pid>,
     /// A spawn asked for and not yet answered.
@@ -339,6 +349,7 @@ impl Manager {
             Event::OomKilled { unit } => self.oom_killed(unit),
             Event::Ready { unit, status } => self.ready(unit, status),
             Event::MainPid { unit, pid } => self.main_pid(unit, pid),
+            Event::Watchdog { unit, ping } => self.watchdog_ping(unit, ping),
             Event::Status { unit, status } => {
                 if let Some(slot) = self.slot_mut(unit) {
                     slot.status = Some(status);
@@ -360,7 +371,10 @@ impl Manager {
 
     /// When `step` next wants a [`Event::Timer`], if ever.
     pub fn deadline(&self) -> Option<Instant> {
-        let units = self.units.iter().filter_map(|slot| slot.deadline);
+        let units = self
+            .units
+            .iter()
+            .flat_map(|slot| slot.deadline.into_iter().chain(slot.watchdog));
         let shutdown = self.shutdown.as_ref().and_then(|s| s.deadline);
         units.chain(shutdown).min()
     }

@@ -4441,16 +4441,21 @@ stack_overflow.
 
 With `ferrix.watchdog=on` a privileged program -- init, under
 `ferrix.init.watchdog=` -- opened `/dev/watchdog` and so promised to feed it
-within its timeout. No feed came for that long: the program's own loop did not
-turn. The kernel still ran -- its watchdog task woke to see the deadline pass --
-so what stopped is user space, or the part of the kernel it waits on. The
-machine resets after this report only under `ferrix.panic=reset`.
+within its timeout. No feed came for that long: the feeder did not get to run,
+or chose not to feed. Init feeds from a thread of its own, so for init this
+means no thread of pid 1 was scheduled for the timeout (pid 1 stopped, or ring 3
+starved), or init's loop stayed stuck past `ferrix.init.watchdog.stall=`
+(docs/WATCHDOG-STAGES.md §4). The kernel still ran -- its watchdog task woke to
+see the deadline pass -- so what stopped is user space, or the part of the
+kernel it waits on. The machine resets after this report only under
+`ferrix.panic=reset`.
 
 1. Every program blocked on a kernel lock, a wait or a page that never comes:
    the system froze under them. The log's last lines before this report say what
    ran last.
 2. The feeder alone was stopped or starved: a `SIGSTOP`, or a loop of its own
-   that blocks on something slow for longer than the timeout.
+   that blocks on something slow for longer than the timeout. For init, the
+   log's `init: the loop has not turned` lines say which call held its loop.
 3. A timeout shorter than the feeder's period, or than a long synchronous step
    it takes (a disk sync, a large exec).
 

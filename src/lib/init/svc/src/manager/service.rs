@@ -16,10 +16,12 @@
 
 use alloc::format;
 use alloc::string::String;
+use core::time::Duration;
 
 use super::{Manager, OpId, OpKind, Sub};
 use crate::event::{
-    Action, ActiveState, ClientId, Errno, Exit, OpResult, Pid, Reply, Role, SpawnSpec, UnitId, Whom,
+    Action, ActiveState, ClientId, Errno, Exit, OpResult, Pid, Ping, Reply, Role, SpawnSpec,
+    UnitId, Whom,
 };
 use crate::exec::Command;
 use crate::kind::{Config, KillMode, OomPolicy, Service, ServiceType};
@@ -124,6 +126,8 @@ impl Manager {
         slot.status = None;
         slot.main = None;
         slot.control = None;
+        slot.watchdog = None;
+        slot.watchdog_interval = None;
         if !allowed {
             slot.result = Some(Ended::StartLimitHit);
             let line = format!("{}: start limit hit, not starting", slot.name);
@@ -166,6 +170,11 @@ impl Manager {
             List::Stop => (ActiveState::Deactivating, Sub::Stop),
             List::StopPost => (ActiveState::Deactivating, Sub::StopPost),
         };
+        if list == List::StartPost && index == 0 {
+            // Up: the service watchdog starts here, as systemd's
+            // `service_enter_start_post` resets it.
+            self.arm_watchdog(unit, service);
+        }
         let Some(command) = command else {
             self.after_list(unit, service, list);
             return;
@@ -197,8 +206,126 @@ impl Manager {
         }
     }
 
+    /// The watchdog interval in force for this run, if it has one.
+    fn watchdog_interval(&self, unit: UnitId, service: &Service) -> Option<Duration> {
+        if !service.can_ping() {
+            return None;
+        }
+        let overridden = self.slot(unit).and_then(|slot| slot.watchdog_interval);
+        match (overridden, service.watchdog) {
+            (Some(interval), _) | (None, Span::Finite(interval)) if !interval.is_zero() => {
+                Some(interval)
+            }
+            _ => None,
+        }
+    }
+
+    /// Start a service's watchdog from now, if it has one.
+    fn arm_watchdog(&mut self, unit: UnitId, service: &Service) {
+        let at = self
+            .watchdog_interval(unit, service)
+            .map(|interval| self.now + interval);
+        if let Some(slot) = self.slot_mut(unit) {
+            slot.watchdog = at;
+        }
+    }
+
+    /// A service's `WATCHDOG` line (`docs/WATCHDOG-STAGES.md` §5.2). A ping
+    /// while the service is not up arms nothing.
+    pub(super) fn watchdog_ping(&mut self, unit: UnitId, ping: Ping) {
+        let Some(service) = self.service(unit) else {
+            return;
+        };
+        let up = self
+            .slot(unit)
+            .is_some_and(|slot| matches!(slot.sub, Sub::StartPost | Sub::Running | Sub::Reload));
+        match ping {
+            Ping::Alive if up => self.arm_watchdog(unit, &service),
+            Ping::Alive => {}
+            Ping::Trigger if up => self.watchdog_missed(unit, true),
+            Ping::Trigger => {}
+            Ping::Interval(interval) if interval.is_zero() => {
+                let line = format!(
+                    "{}: WATCHDOG_USEC=0 is not an interval; the watchdog is unchanged",
+                    self.display(unit)
+                );
+                self.log(Some(unit), line);
+            }
+            Ping::Interval(interval) => {
+                if let Some(slot) = self.slot_mut(unit) {
+                    slot.watchdog_interval = Some(interval);
+                }
+                if up {
+                    self.arm_watchdog(unit, &service);
+                }
+            }
+        }
+    }
+
+    /// A service's watchdog ran out, or it asked with `WATCHDOG=trigger`:
+    /// say so, send `WatchdogSignal=` and wait `TimeoutAbortSec=` before
+    /// `cgroup.kill`. `ExecStop=` is not run: the program is not answering.
+    /// `Restart=` decides afterwards, the result `watchdog`.
+    pub(super) fn watchdog_missed(&mut self, unit: UnitId, triggered: bool) {
+        let Some(service) = self.service(unit) else {
+            return;
+        };
+        let Some(slot) = self.slot_mut(unit) else {
+            return;
+        };
+        slot.watchdog = None;
+        if !matches!(slot.sub, Sub::StartPost | Sub::Running | Sub::Reload) {
+            return;
+        }
+        let main = slot.main;
+        let limit = self
+            .watchdog_interval(unit, &service)
+            .unwrap_or(Duration::ZERO);
+        let line = if triggered {
+            format!("{}: watchdog requested by the service", self.display(unit))
+        } else {
+            format!(
+                "{}: watchdog timeout (limit {} ms)",
+                self.display(unit),
+                limit.as_millis()
+            )
+        };
+        self.log(Some(unit), line);
+        self.emit(Action::WatchdogMissed { unit, main, limit });
+        self.reloaded(unit, OpResult::Failed);
+        self.record(unit, Ended::Watchdog);
+        self.set_state(unit, ActiveState::Deactivating, Sub::StopWatchdog);
+        self.arm(unit, service.abort_timeout());
+        let Some(slot) = self.slot(unit) else {
+            return;
+        };
+        let (main, populated) = (slot.main, slot.populated);
+        if let Some(whom) = Self::whom(service.kill.mode, main, populated) {
+            self.emit(Action::Signal {
+                unit,
+                signal: service.watchdog_signal,
+                whom,
+            });
+        }
+        self.check_stopped(unit, &service);
+    }
+
+    /// Who a stop's first signal goes to, by `KillMode=`.
+    fn whom(mode: KillMode, main: Option<Pid>, populated: bool) -> Option<Whom> {
+        match (mode, main) {
+            (KillMode::None, _) | (KillMode::Process, None) => None,
+            (KillMode::Process | KillMode::Mixed, Some(main)) => Some(Whom::Process(main)),
+            (KillMode::ControlGroup | KillMode::Mixed, _) if populated => Some(Whom::Group),
+            _ => None,
+        }
+    }
+
     /// Ask the backend for a process.
     fn spawn(&mut self, unit: UnitId, service: &Service, command: Command, role: Role) {
+        let watchdog = match role {
+            Role::Main => self.watchdog_interval(unit, service),
+            Role::Control => None,
+        };
         let Some(slot) = self.slot_mut(unit) else {
             return;
         };
@@ -210,6 +337,15 @@ impl Manager {
         let mut environment = service.environment.clone();
         if let Some(main) = slot.main {
             environment.push((String::from("MAINPID"), format!("{}", main.0)));
+        }
+        // As systemd's `EXEC_SET_WATCHDOG`, so `sd_watchdog_enabled(3)`
+        // works unchanged. No `WATCHDOG_PID`: the notify descriptor is the
+        // service's own, and `sd_watchdog_enabled` takes its absence.
+        if let Some(interval) = watchdog {
+            environment.push((
+                String::from("WATCHDOG_USEC"),
+                format!("{}", interval.as_micros()),
+            ));
         }
         // Only the main process takes the sockets and the connection, as
         // under systemd.
@@ -416,7 +552,9 @@ impl Manager {
             Sub::StartPost => self.run_list(unit, service, List::StartPost, step + 1),
             Sub::Stop => self.run_list(unit, service, List::Stop, step + 1),
             Sub::StopPost => self.run_list(unit, service, List::StopPost, step + 1),
-            Sub::StopSigterm | Sub::StopSigkill => self.check_stopped(unit, service),
+            Sub::StopSigterm | Sub::StopWatchdog | Sub::StopSigkill => {
+                self.check_stopped(unit, service);
+            }
             _ => {}
         }
     }
@@ -452,7 +590,9 @@ impl Manager {
                     self.stop_sequence(unit, service);
                 }
             }
-            Sub::StopSigterm | Sub::StopSigkill => self.check_stopped(unit, service),
+            Sub::StopSigterm | Sub::StopWatchdog | Sub::StopSigkill => {
+                self.check_stopped(unit, service);
+            }
             _ => {}
         }
     }
@@ -470,7 +610,9 @@ impl Manager {
         match sub {
             Sub::Cleaning => self.run_list(unit, &service, List::StartPre, 0),
             Sub::Running if main.is_none() => self.stop_sequence(unit, &service),
-            Sub::StopSigterm | Sub::StopSigkill => self.check_stopped(unit, &service),
+            Sub::StopSigterm | Sub::StopWatchdog | Sub::StopSigkill => {
+                self.check_stopped(unit, &service);
+            }
             Sub::Dead | Sub::Failed => self.remove_group(unit),
             _ => {}
         }
@@ -576,7 +718,8 @@ impl Manager {
                 slot.deadline = None;
                 self.set_state(unit, ActiveState::Inactive, Sub::Dead);
             }
-            Sub::Stop | Sub::StopSigterm | Sub::StopSigkill | Sub::StopPost => {}
+            Sub::Stop | Sub::StopSigterm | Sub::StopWatchdog | Sub::StopSigkill | Sub::StopPost => {
+            }
             _ => self.stop_sequence(unit, &service),
         }
     }
@@ -590,12 +733,7 @@ impl Manager {
         };
         let (main, populated) = (slot.main, slot.populated);
         let kill = service.kill;
-        let whom = match (kill.mode, main) {
-            (KillMode::None, _) | (KillMode::Process, None) => None,
-            (KillMode::Process | KillMode::Mixed, Some(main)) => Some(Whom::Process(main)),
-            (KillMode::ControlGroup | KillMode::Mixed, _) if populated => Some(Whom::Group),
-            _ => None,
-        };
+        let whom = Self::whom(kill.mode, main, populated);
         if let Some(whom) = whom {
             self.emit(Action::Signal {
                 unit,
@@ -641,7 +779,10 @@ impl Manager {
         let Some(slot) = self.slot(unit) else {
             return;
         };
-        if !matches!(slot.sub, Sub::StopSigterm | Sub::StopSigkill) {
+        if !matches!(
+            slot.sub,
+            Sub::StopSigterm | Sub::StopWatchdog | Sub::StopSigkill
+        ) {
             return;
         }
         let gone = match service.kill.mode {
@@ -753,7 +894,7 @@ impl Manager {
                 self.record(unit, Ended::Timeout);
                 self.sigterm(unit, &service);
             }
-            Sub::StopSigterm => self.sigkill(unit, &service),
+            Sub::StopSigterm | Sub::StopWatchdog => self.sigkill(unit, &service),
             Sub::StopSigkill => {
                 let line = format!(
                     "{}: processes still around after SIGKILL",

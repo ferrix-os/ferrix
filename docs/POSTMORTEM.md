@@ -1047,9 +1047,17 @@ give (H.FAIL.14, L.lockup.6-9; SAFETY-MANUAL AoU-48):
   settings' restart, init's exit under `ferrix.onexit`, linuxd's exit --
   disarms first and says `watchdog disarmed for ...`.
 * The feeder is init's (`ferrix.init.watchdog=<seconds>`, S4c's feeder): it
-  opens `/dev/watchdog` with that timeout and feeds a third of it apart from
-  its own loop. A kernel timer is no feeder: it ticks on while all of user
-  space waits (2026-10-31: ping answered, every program stopped).
+  opens `/dev/watchdog` with that timeout and feeds a third of it apart.
+  Since 2026-11-08 (watchdog-stages, `docs/WATCHDOG-STAGES.md` §4, ledger
+  8355) it feeds from a thread of pid 1 that does nothing else, not from
+  init's event loop, which reaches the disk and the console: a feed proves
+  that a thread of pid 1 was scheduled, and that the loop has not been stuck
+  in one call past `ferrix.init.watchdog.stall=` (300 s by default). A stuck
+  loop is said on the kernel log at the timeout and each doubling. A kernel
+  timer is no feeder: it ticks on while all of user space waits (2026-10-31:
+  ping answered, every program stopped); the thread needs ring 3 scheduled
+  and pid 1 not stopped, and a stopped root filesystem can still stop every
+  other program while it feeds.
 
 **What it does not catch.** The task runs on the kernel's own scheduler and
 timer: it reports ring 3 that stops feeding while the kernel runs. A kernel
@@ -1073,7 +1081,8 @@ report resets only under `ferrix.panic=reset`; otherwise it halts.
   with the deadline task above, not two. It closes the gap above.
 
 **Gate**, `cargo xtask test-watchdog` (x86-64 under KVM; busybox's
-`watchdog -F -T 5 -t 1`): (1) the feeder stopped by `SIGSTOP`, FX-9008 3.5 to
+`watchdog -F -T 5 -t 1`; cases 9 to 12 with init, `docs/WATCHDOG-STAGES.md`
+§8): (1) the feeder stopped by `SIGSTOP`, FX-9008 3.5 to
 15 s later naming the opener, its 5 s timeout and the last feed, and a halt;
 (2) the same under `ferrix.panic=reset`, the reset line, the machine starting
 again and boot 2's loader quoting the report; (3) the feeder killed, its
@@ -1082,7 +1091,8 @@ four timeouts, a second open `EBUSY`, the magic close, a timeout of 0
 `EINVAL`, 10 s more and no report; (5) `src/tests/watchdog` disarms with
 `WDIOS_DISABLECARD`, writes and holds it open, no report in 10 s; (6)
 `halt -f` with the feeder running says it disarmed for a halt; (7) init
-feeding with `ferrix.init.watchdog=5` for 20 s, no report; (8)
+feeding with `ferrix.init.watchdog=5` for 20 s, no report, since 2026-11-08
+from its feeder thread and on AArch64 and ARMv7-A too; (8)
 `ferrix.watchdog=On` said not understood, no node. The halt stops the
 machine at once, so no case can wait past a stop's timeout: case (6) checks
 the line.

@@ -787,8 +787,19 @@ and a timeout that passes with no feed ends in a failure report under FX-9008. T
 does not give it. An integrator who does accepts that:
 
 * **the integrator chooses the feeder**, and a feed proves only that the feeder's own loop turned: nothing
-  else the machine runs is watched unless the feeder makes its feed wait on it (init's
-  `ferrix.init.watchdog=` feeds from its own loop);
+  else the machine runs is watched unless the feeder makes its feed wait on it. Init's
+  `ferrix.init.watchdog=` feeds from a thread of pid 1 that does nothing else
+  (`docs/WATCHDOG-STAGES.md` §4): its feed proves that a thread of pid 1 was scheduled and its clock sleep
+  woke, and that init's event loop has not been stuck in one call for longer than
+  `ferrix.init.watchdog.stall=` (300 s by default, at least three timeouts; 0 reports a stuck loop
+  without stopping the feed). It does not prove that the rest of user space makes progress: a root
+  filesystem that stops can stop every other program while the thread feeds on. Unlike a kernel timer it
+  needs ring 3 to be scheduled and pid 1 not stopped: `kill -STOP 1` ends in FX-9008
+  (`test-watchdog`'s *user* case). On every image xtask builds, init's program is a file of the boot archive unpacked into the
+  tmpfs that is `/` at boot; tmpfs pages have no backing store (there is no swap), and after a
+  `ferrix.devmgr=init` switch the tmpfs's release leaves the pages pid 1 maps
+  (`docs/RAM-RELEASE.md` §2), so a stopped disk cannot stop the thread through a page fault on init's
+  text. An integrator who runs init from a disk-backed file accepts that it can;
 * **the magic close and `WDIOS_DISABLECARD` disarm it** on purpose, and a feeder that does either before
   it stops leaves nothing watched;
 * **a report resets the machine only under `ferrix.panic=reset`** (AoU-32, with its limits); otherwise it

@@ -306,6 +306,8 @@ impl Slot {
             perpetual: false,
             adopted: false,
             deadline: None,
+            watchdog: None,
+            watchdog_interval: None,
             main: None,
             control: None,
             spawning: None,

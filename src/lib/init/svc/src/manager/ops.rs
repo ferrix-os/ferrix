@@ -208,6 +208,11 @@ impl Manager {
         let was = slot.active;
         slot.active = active;
         slot.sub = sub;
+        // A service watchdog runs only while the service is up, as
+        // systemd's `service_set_state` stops it in every other state.
+        if !matches!(sub, Sub::StartPost | Sub::Running | Sub::Reload) {
+            slot.watchdog = None;
+        }
         let op = slot.op;
         let service = slot.name.unit_type() == UnitType::Service;
         if was != active {

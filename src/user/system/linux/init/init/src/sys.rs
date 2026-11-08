@@ -434,7 +434,10 @@ pub(crate) fn fork_into(cgroup: BorrowedFd<'_>) -> io::Result<Forked> {
     };
     // SAFETY: `args` is a valid `clone_args` of the size given. With no
     // `CLONE_VM` and no stack the child runs on a copy of the address space,
-    // as after `fork`; init has one thread, so no lock is held in the copy.
+    // as after `fork`, holding no lock: init's only other thread is the
+    // watchdog's feeder (`watchdog.rs`), and the main loop forks only after
+    // the feeder's first feed, past which it allocates nothing and takes no
+    // lock, so the copy holds none of its.
     let ret = unsafe { libc::syscall(SYS_CLONE3, ptr::from_ref(&args), size_of::<CloneArgs>()) };
     match ret {
         ..0 => Err(io::Error::last_os_error()),
@@ -446,7 +449,10 @@ pub(crate) fn fork_into(cgroup: BorrowedFd<'_>) -> io::Result<Forked> {
 /// `fork(2)`, for a generator, which runs before any cgroup is made, and for
 /// the helper that makes a native service as its user.
 pub(crate) fn fork() -> io::Result<Forked> {
-    // SAFETY: init has one thread, so the child's copy holds no lock.
+    // SAFETY: the child's copy holds no lock: init's only other thread is
+    // the watchdog's feeder, which after its first feed (waited for before
+    // any fork, a daemon-reload's generators included) allocates nothing and
+    // takes no lock (`watchdog.rs`).
     match unsafe { libc::fork() } {
         ..0 => Err(io::Error::last_os_error()),
         0 => Ok(Forked::Child),
@@ -484,6 +490,40 @@ pub(crate) fn dup2(from: RawFd, to: RawFd) -> io::Result<()> {
 pub(crate) fn take_terminal(fd: RawFd, force: bool) -> io::Result<()> {
     // SAFETY: `TIOCSCTTY` takes an integer, not a pointer.
     check(unsafe { libc::ioctl(fd, libc::TIOCSCTTY, libc::c_int::from(force)) }).map(drop)
+}
+
+/// Sleep until `nanos` on `CLOCK_MONOTONIC`, an absolute deadline
+/// (`TIMER_ABSTIME`), so a late wake does not push every later one back.
+/// Allocates nothing and takes no lock: the watchdog's feeder calls it.
+pub(crate) fn sleep_until(nanos: u64) {
+    let deadline = libc::timespec {
+        tv_sec: libc::time_t::try_from(nanos / 1_000_000_000).unwrap_or(libc::time_t::MAX),
+        tv_nsec: libc::c_long::try_from(nanos % 1_000_000_000).unwrap_or(0),
+    };
+    loop {
+        // SAFETY: `deadline` is a valid `timespec` that lives across the
+        // call; with `TIMER_ABSTIME` the remainder pointer may be null.
+        let ret = unsafe {
+            libc::clock_nanosleep(
+                libc::CLOCK_MONOTONIC,
+                libc::TIMER_ABSTIME,
+                &raw const deadline,
+                ptr::null_mut(),
+            )
+        };
+        if ret != libc::EINTR {
+            return;
+        }
+    }
+}
+
+/// One `write(2)` of `bytes` to `fd`: whether all of them went. Allocates
+/// nothing and takes no lock (standard output's included): the watchdog's
+/// feeder calls it.
+pub(crate) fn write_raw(fd: RawFd, bytes: &[u8]) -> bool {
+    // SAFETY: `bytes` is readable for its length across the call.
+    let ret = unsafe { libc::write(fd, bytes.as_ptr().cast(), bytes.len()) };
+    usize::try_from(ret).is_ok_and(|written| written == bytes.len())
 }
 
 /// `WDIOC_SETTIMEOUT` on the watchdog device `fd` (`linux/watchdog.h`):

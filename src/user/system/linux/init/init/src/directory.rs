@@ -16,7 +16,7 @@
 //!   names, and watched for `TERMINATED`; how one ended is read with
 //!   `process_status` (K6).
 //! * The directory's messages on those channels ([`directory`]): READY
-//!   is readiness, OFFER a provider's channel for a name, OPEN a client's
+//!   is readiness, WATCHDOG the service watchdog's ping, OFFER a provider's channel for a name, OPEN a client's
 //!   request, which the manager routes ([`Action::Route`]) or refuses
 //!   ([`Action::Refuse`]); init forwards the client's end as CONNECT, or
 //!   answers REFUSED.
@@ -41,7 +41,7 @@ use ferrix_native_abi::bootstrap::{
 };
 use ferrix_native_abi::directory::{self as wire, Kind, MAX_MESSAGE, Message};
 use ferrix_native_abi::types::{PACKET_SIGNAL, PROCESS_EXITED, PROCESS_KILLED};
-use ferrix_svc::event::{Event, Exit, Name, Pid, Token, UnitId};
+use ferrix_svc::event::{Event, Exit, Name, Pid, Ping, Token, UnitId};
 use ferrix_svc::value::Signal;
 
 use crate::spawn::Ids;
@@ -416,6 +416,14 @@ impl Directory {
             };
             match (message.kind, handle) {
                 (Kind::Ready, _) => events.push(Event::Ready { unit, status: None }),
+                (Kind::Watchdog, None) => events.push(Event::Watchdog {
+                    unit,
+                    ping: if message.name == wire::WATCHDOG_TRIGGER {
+                        Ping::Trigger
+                    } else {
+                        Ping::Alive
+                    },
+                }),
                 (Kind::Offer, Some(handle)) => {
                     let _ = self
                         .offers

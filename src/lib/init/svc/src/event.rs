@@ -152,6 +152,14 @@ pub enum Event {
         /// The text.
         status: String,
     },
+    /// A `notify` service wrote a `WATCHDOG` line, or a `native` one sent
+    /// WATCHDOG (`docs/WATCHDOG-STAGES.md` §5.2).
+    Watchdog {
+        /// The unit.
+        unit: UnitId,
+        /// What it said.
+        ping: Ping,
+    },
     /// A `forking` service's main process, found in its `PIDFile=` or as the
     /// one process left in its cgroup.
     MainPid {
@@ -618,9 +626,32 @@ pub enum Action {
         /// The line.
         line: String,
     },
+    /// A service missed its watchdog (`docs/WATCHDOG-STAGES.md` §5.4):
+    /// say so, naming its main process's threads and what each waits in.
+    /// The signals follow as their own actions.
+    WatchdogMissed {
+        /// The unit.
+        unit: UnitId,
+        /// Its main process, if it has one.
+        main: Option<Pid>,
+        /// The interval it missed.
+        limit: core::time::Duration,
+    },
     /// The end (§8.2, steps 2 and 3): `sync`, remount `/` and `/data`
     /// read-only, unmount the rest in reverse order, and `reboot(2)`.
     Power(PowerAction),
+}
+
+/// What a service's `WATCHDOG` line says (systemd's `sd_notify(3)`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ping {
+    /// `WATCHDOG=1`: alive; the timer starts again.
+    Alive,
+    /// `WATCHDOG=trigger`: treat the watchdog as missed now.
+    Trigger,
+    /// `WATCHDOG_USEC=n`: the interval for the rest of this run. Zero is
+    /// refused with a warning, never taken as off.
+    Interval(core::time::Duration),
 }
 
 /// What one step asks for, in order.

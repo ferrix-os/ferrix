@@ -235,6 +235,17 @@ pub struct Service {
     pub timeout_stop: Span,
     /// `KillMode=`, `KillSignal=` and their siblings.
     pub kill: Kill,
+    /// `WatchdogSec=`: how long a service that is up may go without a
+    /// `WATCHDOG=1` (`docs/WATCHDOG-STAGES.md` §5); infinity is off. Only a
+    /// `notify` or `native` service can ping, so on any other type it stays
+    /// off, with a warning.
+    pub watchdog: Span,
+    /// `WatchdogSignal=`: the first signal at a missed ping, `SIGABRT` by
+    /// default so the program leaves a core.
+    pub watchdog_signal: Signal,
+    /// `TimeoutAbortSec=`: from that signal to `cgroup.kill`; `None` is
+    /// `TimeoutStopSec=`'s.
+    pub timeout_abort: Option<Span>,
     /// `Slice=`; `None` is `system.slice`.
     pub slice: Option<UnitName>,
     /// The resource keys.
@@ -293,6 +304,9 @@ impl Default for Service {
             timeout_start: DEFAULT_TIMEOUT,
             timeout_stop: DEFAULT_TIMEOUT,
             kill: Kill::default(),
+            watchdog: Span::Infinity,
+            watchdog_signal: Signal::ABRT,
+            timeout_abort: None,
             slice: None,
             limits: Limits::default(),
             oom_policy: OomPolicy::Stop,
@@ -317,6 +331,17 @@ impl Default for Service {
 }
 
 impl Service {
+    /// Whether this service's type has a way to ping: a notify descriptor
+    /// or a bootstrap channel.
+    pub fn can_ping(&self) -> bool {
+        matches!(self.service_type, ServiceType::Notify | ServiceType::Native)
+    }
+
+    /// `TimeoutAbortSec=`, or `TimeoutStopSec=` where it is not set.
+    pub fn abort_timeout(&self) -> Span {
+        self.timeout_abort.unwrap_or(self.timeout_stop)
+    }
+
     /// The terminal the service's standard streams name, if any.
     pub fn tty(&self) -> Option<&str> {
         let wants = matches!(
@@ -404,7 +429,7 @@ const EXEC_KEYS: [(&str, Setter<Service>); 6] = [
 ];
 
 /// The keys for how a service runs and ends.
-const RUN_KEYS: [(&str, Setter<Service>); 13] = [
+const RUN_KEYS: [(&str, Setter<Service>); 16] = [
     ("Type", |s, a, w| {
         s.service_type = keys::parsed(a, w, ServiceType::parse).unwrap_or(s.service_type);
     }),
@@ -444,6 +469,21 @@ const RUN_KEYS: [(&str, Setter<Service>); 13] = [
     ("TimeoutStopSec", |s, a, w| {
         if let Some(span) = keys::span(a, w) {
             s.timeout_stop = zero_is_infinity(span);
+        }
+    }),
+    ("WatchdogSec", |s, a, w| {
+        if let Some(span) = keys::span(a, w) {
+            s.watchdog = zero_is_infinity(span);
+        }
+    }),
+    ("WatchdogSignal", |s, a, w| {
+        s.watchdog_signal = keys::parsed(a, w, value::signal).unwrap_or(s.watchdog_signal);
+    }),
+    ("TimeoutAbortSec", |s, a, w| {
+        if a.value.is_empty() {
+            s.timeout_abort = None;
+        } else if let Some(span) = keys::span(a, w) {
+            s.timeout_abort = Some(zero_is_infinity(span));
         }
     }),
     ("TimeoutSec", |s, a, w| {
@@ -638,7 +678,11 @@ pub(super) fn parse(
     warnings: &mut Warnings,
 ) -> Result<Config, UnitError> {
     let mut service = Service::default();
+    let mut watchdog_at = None;
     for assignment in &section.assignments {
+        if assignment.key == "WatchdogSec" {
+            watchdog_at = Some(assignment);
+        }
         let key = assignment.key.as_str();
         if let Some(setter) = keys::find(&EXEC_KEYS, key)
             .or_else(|| keys::find(&RUN_KEYS, key))
@@ -656,6 +700,18 @@ pub(super) fn parse(
         } else {
             keys::unknown(&section.name, assignment, warnings);
         }
+    }
+    if let Some(assignment) = watchdog_at
+        && service.watchdog != Span::Infinity
+        && !service.can_ping()
+    {
+        warnings.at(
+            assignment,
+            String::from(
+                "WatchdogSec= needs Type=notify or Type=native to be pinged; the watchdog is off",
+            ),
+        );
+        service.watchdog = Span::Infinity;
     }
     check(&service)?;
     Ok(Config::Service(Box::new(service)))

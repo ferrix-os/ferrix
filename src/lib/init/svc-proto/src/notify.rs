@@ -3,7 +3,9 @@
 //! A `Type=notify` service writes `KEY=value` lines to the descriptor
 //! `NotifyFd=` names: s6's readiness descriptor, with `sd_notify`'s words.
 //! `READY=1` means ready; `STATUS=…` is shown by `svc status`; `MAINPID=`
-//! names the main process when it is not the one init started. Other keys
+//! names the main process when it is not the one init started; `WATCHDOG=1`,
+//! `WATCHDOG=trigger` and `WATCHDOG_USEC=` drive the service watchdog
+//! (`docs/WATCHDOG-STAGES.md` §5.2). Other keys
 //! are kept for later and ignored today, as `sd_notify`'s receivers ignore
 //! what they do not know. A line may arrive in pieces, so [`Lines`] keeps
 //! the unfinished end until its newline comes.
@@ -28,6 +30,13 @@ pub enum Notice {
     Stopping,
     /// `RELOADING=1`.
     Reloading,
+    /// `WATCHDOG=1`: alive.
+    Watchdog,
+    /// `WATCHDOG=trigger`: treat the watchdog as missed now.
+    WatchdogTrigger,
+    /// `WATCHDOG_USEC=n`: the interval for the rest of this run, in
+    /// microseconds.
+    WatchdogUsec(u64),
     /// Anything else, or a value that does not parse.
     Other,
 }
@@ -43,6 +52,9 @@ pub fn parse(line: &str) -> Notice {
         "MAINPID" => value.parse().map_or(Notice::Other, Notice::MainPid),
         "STOPPING" if value == "1" => Notice::Stopping,
         "RELOADING" if value == "1" => Notice::Reloading,
+        "WATCHDOG" if value == "1" => Notice::Watchdog,
+        "WATCHDOG" if value == "trigger" => Notice::WatchdogTrigger,
+        "WATCHDOG_USEC" => value.parse().map_or(Notice::Other, Notice::WatchdogUsec),
         _ => Notice::Other,
     }
 }

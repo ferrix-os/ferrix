@@ -195,7 +195,14 @@ fn readiness_lines_say_what_sd_notify_says() {
     assert_eq!(notify::parse("MAINPID=x"), Notice::Other);
     assert_eq!(notify::parse("STOPPING=1"), Notice::Stopping);
     assert_eq!(notify::parse("RELOADING=1"), Notice::Reloading);
-    assert_eq!(notify::parse("WATCHDOG=1"), Notice::Other);
+    assert_eq!(notify::parse("WATCHDOG=1"), Notice::Watchdog);
+    assert_eq!(notify::parse("WATCHDOG=trigger"), Notice::WatchdogTrigger);
+    assert_eq!(notify::parse("WATCHDOG=0"), Notice::Other);
+    assert_eq!(
+        notify::parse("WATCHDOG_USEC=2000000"),
+        Notice::WatchdogUsec(2_000_000)
+    );
+    assert_eq!(notify::parse("WATCHDOG_USEC=soon"), Notice::Other);
     assert_eq!(notify::parse("garbage"), Notice::Other);
 }
 

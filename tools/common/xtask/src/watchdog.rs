@@ -34,8 +34,19 @@
 //! 8. *off*: `ferrix.watchdog=On`, any value but `on`, is said and taken as
 //!    off: `/dev/watchdog` is absent and nothing is served.
 //!
+//! 9. to 12., init as pid 1 (`crate::watchdog_init`, `docs/WATCHDOG-STAGES.md`
+//!    §8): *service*, a service that stops answering its watchdog is ended
+//!    and started again; *blocked*, init's loop blocked 20 s is said and
+//!    still fed; *stall*, blocked past `ferrix.init.watchdog.stall=` it is no
+//!    longer fed and FX-9008 follows; *user*, hung user programs end in no
+//!    report, and pid 1 stopped ends in FX-9008.
+//!
+//! On AArch64 and ARMv7-A only case 7 runs: init's feeder is a thread, new
+//! code on every architecture.
+//!
 //! `FERRIX_TEST_WATCHDOG_ONLY=<case>,...` (`stopped`, `reset`, `killed`,
-//! `goes-on`, `disabled`, `halted`, `init`, `off`) runs those cases alone,
+//! `goes-on`, `disabled`, `halted`, `init`, `off`, `service`, `blocked`,
+//! `stall`, `user`) runs those cases alone,
 //! for a negative control's run; a gate row sets nothing and runs every case.
 
 use std::time::{Duration, Instant};
@@ -52,7 +63,7 @@ pub(crate) const TASKS: &[Task] = &[Task {
     name: "test-watchdog",
     help_at: 502,
     help: &[
-        "test-watchdog  /dev/watchdog (ferrix.watchdog=on): a feeder stopped or killed is reported under FX-9008, and reset by ferrix.panic=reset; a feed that goes on, a magic close, DISABLECARD, a halt, init's feed and the option off are not (x86_64)",
+        "test-watchdog  /dev/watchdog (ferrix.watchdog=on): a feeder stopped or killed is reported under FX-9008, and reset by ferrix.panic=reset; a feed that goes on, a magic close, DISABLECARD, a halt, init's feed and the option off are not; init ends a service that misses its watchdog, its own blocked loop is still fed until its stall bound, and hung user programs reset nothing (x86_64; case 7 on every architecture)",
     ],
     run: |_, args| test_watchdog(args),
 }];
@@ -65,14 +76,22 @@ const TEST_PATH: &str = "bin/watchdog-test";
 /// `cargo xtask test-watchdog`, for each architecture asked.
 pub(crate) fn test_watchdog(args: &Args) -> Result<()> {
     for arch in args.arches()? {
-        if arch != Arch::X86_64 {
-            return Err(Error::new(
-                "test-watchdog runs on x86_64: the watchdog has no architecture's code, and its \
-                 windows are measured under KVM",
-            ));
-        }
         let only = std::env::var("FERRIX_TEST_WATCHDOG_ONLY").unwrap_or_default();
         let wants = |case: &str| only.is_empty() || only.split(',').any(|each| each == case);
+        if arch != Arch::X86_64 {
+            // Init's feeder is a thread of pid 1, new code on every
+            // architecture: case 7 runs on each (the consultant's E3). The
+            // rest are x86-64's, where the windows are measured.
+            if !only.is_empty() && !wants("init") {
+                return Err(Error::new(
+                    "test-watchdog's cases other than `init` run on x86_64: the watchdog has no \
+                     architecture's code, and its windows are measured under KVM",
+                ));
+            }
+            init_feeds(arch, args)?;
+            println!("  {arch}: test-watchdog passed (case 7, init feeds)");
+            continue;
+        }
         let busybox = crate::busybox::program(arch)?;
         let shell = read(&busybox)?;
         let loader = crate::cargo::build_loader(arch, args.release)?;
@@ -118,6 +137,18 @@ pub(crate) fn test_watchdog(args: &Args) -> Result<()> {
         }
         if wants("off") {
             switched_off(arch, args, &parts, &shell)?;
+        }
+        if wants("service") {
+            crate::watchdog_init::service(arch, args)?;
+        }
+        if wants("blocked") {
+            crate::watchdog_init::blocked(arch, args)?;
+        }
+        if wants("stall") {
+            crate::watchdog_init::stall(arch, args)?;
+        }
+        if wants("user") {
+            crate::watchdog_init::user(arch, args)?;
         }
         println!("  {arch}: test-watchdog passed");
     }
@@ -609,7 +640,7 @@ fn init_feeds(arch: Arch, args: &Args) -> Result<()> {
     let archive = crate::initramfs::build(None, &natives, None, &files)?;
     let options = format!(
         "{} ferrix.watchdog=on ferrix.init.watchdog=5",
-        crate::init::command_line().trim_end()
+        crate::init::command_line_of(arch).trim_end()
     );
     let image = crate::fat::write_image_with(arch, &loader, &kernel, &archive, Some(&options))?;
     println!("  {arch}: init feeds /dev/watchdog for {INIT_SECONDS} s");

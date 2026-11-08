@@ -125,6 +125,9 @@ impl Signal {
     pub const HUP: Signal = Signal(1);
     /// `SIGINT`.
     pub const INT: Signal = Signal(2);
+    /// `SIGABRT`: `WatchdogSignal=`'s default, so a hung service leaves a
+    /// core.
+    pub const ABRT: Signal = Signal(6);
     /// `SIGKILL`.
     pub const KILL: Signal = Signal(9);
     /// `SIGTERM`.

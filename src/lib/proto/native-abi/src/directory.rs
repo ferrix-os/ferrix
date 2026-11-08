@@ -8,6 +8,8 @@
 //! CONNECT  init -> provider  name, the client unit; one handle: that end, forwarded
 //! REFUSED  init -> service   name; why
 //! GRANT    init -> service   name; one handle: a capability of init's, copied
+//! WATCHDOG service -> init   empty name, alive; `trigger`, missed now
+//!                            (docs/WATCHDOG-STAGES.md §5.2)
 //! ```
 //!
 //! GRANT is written into a new bootstrap channel before the service is
@@ -50,16 +52,23 @@ pub enum Kind {
     Refused,
     /// Init hands a service a capability of its own.
     Grant,
+    /// The service's watchdog ping: alive with an empty name, or missed now
+    /// with the name [`WATCHDOG_TRIGGER`].
+    Watchdog,
 }
 
+/// The name a WATCHDOG carries to say the service wants its watchdog fired.
+pub const WATCHDOG_TRIGGER: &str = "trigger";
+
 impl Kind {
-    const ALL: [Kind; 6] = [
+    const ALL: [Kind; 7] = [
         Kind::Ready,
         Kind::Offer,
         Kind::Open,
         Kind::Connect,
         Kind::Refused,
         Kind::Grant,
+        Kind::Watchdog,
     ];
 
     /// Its number on the wire.
@@ -72,6 +81,7 @@ impl Kind {
             Kind::Connect => 4,
             Kind::Refused => 5,
             Kind::Grant => 6,
+            Kind::Watchdog => 7,
         }
     }
 
@@ -80,7 +90,7 @@ impl Kind {
     pub const fn handles(self) -> usize {
         match self {
             Kind::Offer | Kind::Open | Kind::Connect | Kind::Grant => 1,
-            Kind::Ready | Kind::Refused => 0,
+            Kind::Ready | Kind::Refused | Kind::Watchdog => 0,
         }
     }
 }
@@ -174,6 +184,8 @@ mod tests {
             Message::named(Kind::Open, "ferrix.test", ""),
             Message::named(Kind::Connect, "ferrix.test", "asker.service"),
             Message::named(Kind::Refused, "ferrix.test", "not in Uses="),
+            Message::named(Kind::Watchdog, "", ""),
+            Message::named(Kind::Watchdog, WATCHDOG_TRIGGER, ""),
         ];
         for message in messages {
             let mut out = [0_u8; MAX_MESSAGE];
@@ -199,7 +211,7 @@ mod tests {
 
     #[test]
     fn only_offer_open_connect_and_grant_carry_a_handle() {
-        let carrying: [usize; 6] = Kind::ALL.map(Kind::handles);
-        assert_eq!(carrying, [0, 1, 1, 1, 0, 1]);
+        let carrying: [usize; 7] = Kind::ALL.map(Kind::handles);
+        assert_eq!(carrying, [0, 1, 1, 1, 0, 1, 0]);
     }
 }

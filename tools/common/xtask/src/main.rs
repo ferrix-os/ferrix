@@ -239,6 +239,7 @@ mod vfs;
 mod vnc;
 mod wallpaper;
 mod watchdog;
+mod watchdog_init;
 mod waybar;
 mod window;
 mod wine;

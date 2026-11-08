@@ -309,9 +309,11 @@ changes marked **(changed)**.
    `/dev/watchdog` and `write(2)` to the console. The system watchdog then
    measures what the customer asked it to: whether ring 3 gets to run at
    all. A main loop that does not turn is *reported* by that thread (how
-   long, and in which call), never a reset. Making the loop itself
-   non-blocking (systemd's discipline) is still right, and is §5.3's
-   follow-up list, but the machine's life no longer waits on it.
+   long, and in which call), and only past a long stall bound (300 s by
+   default, the consultant's R-1) does the thread stop feeding. Making the loop itself
+   non-blocking (systemd's discipline) is still right, and is §4's
+   last paragraph and its `docs/BACKLOG.md` row, but the machine's life no
+   longer waits on it.
 3. **GUI programs: "not responding" only when several signals agree
    (changed: the kernel's part is a report, not a flag).** hyprix's job,
    not init's: a window is not responding when, for longer than 5 s,
@@ -342,65 +344,123 @@ changes marked **(changed)**.
 GUI detection (3, 4) is hyprix's and lands with its owner; this document
 sets the rule and owns 1, 2 and 5.
 
-## 4. Init's feeder thread (step 2: lands first)
+## 4. Init's feeder thread (step 2)
 
-**What changes.** `Watchdog::from_command_line` opens the device as today
-and then starts a thread, `watchdog`, that feeds every third of the
-timeout. The main loop no longer feeds and no longer bounds its
-`epoll_wait` by the feed.
+As built (`src/user/system/linux/init/init/src/watchdog.rs`), under the
+consultant's A1 to A10 and ruling R-1 (ledger 8355).
 
-**What the thread may do, and nothing else:**
+**What changes.** `watchdog::start` opens the device as before, opens
+`/dev/kmsg` for writing, starts a thread, `watchdog`, and waits for its first
+feed. The thread feeds every third of the timeout. The main loop no longer
+feeds and no longer bounds its `epoll_wait` by the feed.
+
+**What the thread may do, and nothing else, after its first feed:**
 
 * `write(2)` of one byte (`1`, never `V`) to the open `/dev/watchdog`;
-* `clock_nanosleep(2)` for the interval;
+* `clock_nanosleep(2)` on `CLOCK_MONOTONIC` to an absolute deadline
+  (`TIMER_ABSTIME`), each the last plus the interval, so a late wake does
+  not push later ones back; a wake more than half an interval late is said
+  (A6);
 * read two atomics the main loop writes (below);
-* `write(2)` a line it formats into a fixed array on its own stack to
-  standard error, which is the console.
+* `write(2)` a line formatted into a fixed array on its own stack to
+  `/dev/kmsg`, opened before it started. `/dev/kmsg`'s write goes to
+  `console::write_record` (`src/kernel/src/fs/kmsg.rs`) and never waits on
+  a terminal; a refused write is dropped. Each turn feeds first, then
+  reports (A2).
 
-It allocates nothing, takes no lock (not standard output's: the main
-loop may hold it while the console is stopped), opens nothing after it
-starts, reads no file and asks no process. The main loop's `clone3`
-children run no allocator between `clone3` and `execve` (`spawn.rs`'s
-rule), so a second thread in pid 1 cannot leave a child holding its
-allocator's lock. The thread is started before the first unit and the
-main loop waits on an atomic for its first feed, so its own start-up
-(standard library thread set-up, which allocates) is over before any
-`clone3`.
+It allocates nothing, takes no lock (not standard output's), opens nothing
+and asks no process. Children are made by `clone3` or `fork`, which copy
+only the calling thread, and the main loop forks nothing before the
+thread's first feed, so its own start-up (the standard library's thread
+set-up, which allocates) is over before any fork: the SAFETY comments of
+`sys::fork_into` and `sys::fork` say this now in place of "init has one
+thread" (A4). `sys::block` runs before the thread starts, so it inherits
+init's blocked signal mask and takes none of the signals init reads through
+its signalfd.
 
-**The main loop's liveness, reported.** Before each turn's work the loop
-stores the monotonic time in `TURNED` and a *phase* code in `PHASE`: one
-of a short fixed list naming each of §1's blocking sites (`waiting` for
-`epoll_wait`, `mount`, `units`, `audit`, `spawn`, `say`, `lode`, ...). On
-each feed the thread looks: if `PHASE` is not `waiting` and `TURNED` is
-more than the stall bound old (the watchdog's timeout, so one full
-system-watchdog period), it writes
+**The main loop's liveness.** At the top of each turn and right after
+`epoll_wait` the loop stores the monotonic time in `TURNED` and the phase
+`turn`; right before `epoll_wait` it stores `waiting` (A5). Each of §1's
+blocking sites enters a phase of its own for its length, a guard that puts
+the one before back: `mount` (`mount`, `unmount`), `units`
+(`reload_units`), `audit` (`read_audit`), `spawn`, `native`
+(`spawn_native`), `lode` (the flush and the watchdog report's line),
+`control` (a client), `proc` (§5.4's reads), `users` (`user_uid`, `owner`).
+A site not listed still shows as `turn`. On each feed the thread looks: if
+the phase is not `waiting` and the loop has not turned for the watchdog's
+timeout, it says
 
 ```
-  init     the loop has not turned for 31 s, in `units`; the watchdog is still fed
+init: the loop has not turned for 6 s, in `units`; the watchdog is still fed
 ```
 
-once, then again at each doubling (62 s, 124 s, ...), and
+and again at each doubling of that age, and when the loop turns:
 
 ```
-  init     the loop turns again after 47 s
+init: the loop turns again after 21 s
 ```
 
-when it does. These are console lines, so lode takes them from
-`/dev/kmsg` and they are in the event log's tail at a later report.
-`waiting` is excluded because an idle init waits in `epoll_wait` with no
-timeout: idleness is not a stall.
+**The stall bound (ruling R-1).** Init's loop is the supervisor: while it
+is stuck nothing is restarted, no service watchdog (§5) fires, no native
+OPEN is answered, no `svc` command is served, no child is reaped and no
+clean shutdown runs (A7). So a stuck loop is a stuck machine after long
+enough, and the customer's second order names "it hangs but the watchdog is
+never triggered" as the failure to avoid. With
+`ferrix.init.watchdog.stall=<seconds>` (300 by default, at least three
+timeouts, a smaller value raised to that and said; 0 reports only), a loop
+stuck that long gets
 
-**What it no longer catches**, said in `watchdog.rs`'s module comment and
-`POSTMORTEM.md` §6.11: a deadlock inside init's main loop is no longer a
-reset. It is a report repeated at doublings. The machine stays reachable
-(sshd and the session do not need init's loop), and a person or a
-management agent can restart it. This is the customer's order: one stuck
-program, init's loop included, does not end the machine. `kill -STOP 1`
-stops every thread of pid 1 and is still FX-9008, as §6.11's case (1) and
-the box's 2026-11-08 02:32 run showed.
+```
+init: the loop has not turned for 16 s, in `units`; the watchdog is no longer fed
+```
 
-**The kernel's view.** Nothing in the kernel changes for step 2.
-FX-9008's text, "user space stopped feeding /dev/watchdog", stays true.
+and the thread stops feeding: FX-9008 follows a timeout later, naming init.
+A loop that turns again before that is fed again. Both options are init's;
+`tools/common/data/build-flags.toml`'s `ferrix.watchdog` entry names them
+(A9).
+
+**`say` cannot block on the console.** Ruling R-1 asked that a person's
+Ctrl-S on the console never become a reset. On Ferrix's console, flow
+control is stored and reported but changes nothing
+(`src/kernel/src/fs/terminal.rs`'s module comment: "On the console, flow
+control (`IXON`) and the baud rate are stored and reported but change
+nothing"), so `say`'s write to the console cannot be stopped by XOFF. It is
+a synchronous UART write, bounded by the line's length. Only a
+pseudoterminal acts on `IXON`, and init's standard output is the console.
+
+**Residency (A3, WC.1).** On every image xtask builds, `/sbin/init` is an
+entry of the boot archive (`tools/common/xtask/src/init.rs`, `carried`),
+which the kernel's `fs::init` unpacks into the tmpfs that is `/` at boot
+(`docs/RAM-RELEASE.md` §1). A tmpfs file's pages are memory with no backing
+store: Ferrix has no swap (`docs/APP-SUSPEND.md`, "Ferrix has no swap"), so
+they are never dropped or read again from a disk. Under
+`ferrix.devmgr=init` the switch moves pid 1 onto the volume, and the
+release of RAM-RELEASE §2 (B3) unlinks the tmpfs's files; an unlinked tmpfs
+file lives as long as its VMO is held, and pid 1 maps its own program
+(RAM-RELEASE §2: "pid 1's own program ... mapped while pid 1 runs"), so the
+release takes none of the pages pid 1 maps. A disk that stops therefore
+cannot stop the thread through a fault on init's text. AoU-48 states it,
+and that an integrator who runs init from a disk-backed file accepts that
+it can.
+
+**What a feed by init proves now** (A1; AoU-48, POSTMORTEM §6.11 and
+FX-9008's meaning in `panic/catalog.rs` restate it): a thread of pid 1 was
+scheduled and its clock sleep woke, and init's loop has not been stuck past
+the stall bound. It does not prove that the rest of user space makes
+progress: a root filesystem that stops can stop every other program while
+the thread feeds on. Unlike a kernel timer the thread needs ring 3 to be
+scheduled and pid 1 not stopped: `kill -STOP 1` stops it too, and FX-9008
+follows (§8, *user*).
+
+**The kernel's view.** No kernel code changes for step 2; only FX-9008's
+meaning text does, a core file, which comes back for its code review with
+this landing.
+
+**What stays to do in the loop itself** (A8): systemd may feed from its
+loop only because that loop never blocks. Ferrix's still reaches the disk
+in the sites of §1's table, and §5.4's `/proc` reads, which read kernel
+memory and no disk. `docs/BACKLOG.md` has the row that moves them out of
+the loop.
 
 ## 5. Per-service watchdogs (step 1: R10's stage 0)
 
@@ -459,6 +519,11 @@ for never pinging.
   (`ferrix-restart`'s `Policy`, unchanged).
 * **A process that exits** during `stop-watchdog` goes on as in
   `stop-sigterm` (`check_stopped`).
+* **Pings** (B2, B3): `WATCHDOG=1` before start-post arms nothing;
+  `WATCHDOG_USEC=0` is said and ignored, never a silent disarm; a
+  `WATCHDOG_USEC=` that does not parse is no ping. `ferrix-svc` has no
+  freezer, so B1 (stop the watchdog while frozen) has nothing to apply to
+  yet; a freezer that lands takes it.
 
 ### 5.4 The report (init's backend)
 
@@ -466,10 +531,10 @@ On `Action::WatchdogMissed` init reads, for each thread of the main
 process, `/proc/<pid>/task/<tid>/comm` and `/proc/<pid>/task/<tid>/wchan`
 (Ferrix's `wchan` names the call a thread waits in and its descriptor's
 target, `fs/procfs/debug.rs` `wchan_text`) and says, as one console line
-and one line to lode with the unit's name:
+and one line to lode as the unit's own line, from pid 1:
 
 ```
-  init     lode.service: watchdog timeout (limit 2s): pid 412 threads lode/412 futex, lode-io/413 read:/dev/vda
+  init     wd-test.service: watchdog timeout (limit 2000 ms): pid 633 threads sh/633 clock_nanosleep
 ```
 
 At most 16 threads are named, then `and N more`. These reads are of
@@ -494,7 +559,18 @@ This landing gives the mechanism and a test service; it sets no
 
 ## 6. Stage 1: the pre-timeout hang dump (R4 stage 1, kernel, core)
 
-Its own design verdict and code review (`ROBUSTNESS.md` §9, RD.0).
+**Not yet** (ledger 8355, C-B1 to C-B4): this section is a sketch and needs
+a design of its own before code. The dump must run where the look task
+never waits for it (a slow dump on a serial line delays FX-9008, RD.3(a));
+every lock it takes needs a bounded try form ending in "skipped (lock
+held)" (`sched::inspect::sample` and `mm::read_kernel_word` take theirs
+with `lock()`); its filter must not fill with idle daemons, since Ferrix has
+one blocked state (running and runnable first, then the opener's threads,
+then blocked tasks not waiting for an outside event, oldest first, with a
+count of the rest); and the pre-timeout follows Linux's `watchdog_dev.c`
+(`WDIOF_PRETIMEOUT`, `EINVAL` for a pretimeout not below the timeout, a new
+timeout zeroing one that no longer fits, its default stated as a departure
+from Linux's 0). A pre-timeout is at most the timeout less one second.
 
 * **The pre-timeout.** `WDIOC_SETPRETIMEOUT` and `WDIOC_GETPRETIMEOUT`
   (`linux/watchdog.h`; Linux's `watchdog_dev.c` `watchdog_ioctl`), the
@@ -524,7 +600,17 @@ Its own design verdict and code review (`ROBUSTNESS.md` §9, RD.0).
 
 ## 7. Stage 2: the sacrifice set (R4 stage 2, kernel, core)
 
-Its own design verdict and code review.
+**Not yet** (ledger 8355, D-B1 to D-B6): a sketch, needing a design of its
+own. The cgroup descriptor is acceptable in place of RD.4(a)'s job handle
+only with the permission check of a write to that cgroup's `cgroup.kill`,
+on the description that armed the watchdog, resolved in the load to a
+`Weak<Job>`; the set is 8 such, re-checked at kill time for one that came
+to hold the opener; RD.4(b)'s release rule holds (a release without `V`
+keeps the set; a disarm, the magic close and `stop_for_shutdown` clear it);
+the kill runs where the dump runs, since `Job::kill_members` allocates;
+init's own stall (§4's bound) clears the set before it stops feeding; and
+init refuses to register a subtree that holds a unit never sacrificed,
+which needs where hyprix runs settled first.
 
 * **The policy is init's.** After it arms the watchdog init registers the
   cgroups whose processes may be killed when ring 3 does not run: by
@@ -550,34 +636,69 @@ Its own design verdict and code review.
 
 ## 8. Tests
 
-`cargo xtask test-watchdog` gains these cases, each on x86-64 under KVM,
-and `test-boot` runs on x86-64 KVM, AArch64 and ARMv7-A for the init
-change:
+`cargo xtask test-watchdog` (`tools/common/xtask/src/watchdog_init.rs`)
+gains four cases with init as pid 1, each under `ferrix.watchdog=on
+ferrix.init.watchdog=5`, x86-64 under KVM; case 7 (init feeds for four
+timeouts, no report) also runs on AArch64 and on ARMv7-A `--smp 2` (E3).
+§6.11's eight cases stay. The state machine's cases are host tests
+(`src/lib/init/svc/src/tests/watchdog.rs`, E1): the interval in
+`WATCHDOG_USEC`; pings that keep it up and a miss that aborts, kills and
+restarts; a service that ignores `SIGABRT` killed after `TimeoutAbortSec=`;
+`WATCHDOG=trigger`; `WATCHDOG_USEC=` changing the interval and 0 refused;
+the start limit ending the restarts; a ping before it is up arming nothing;
+a stop with no watchdog during `stop-sigterm`; `WatchdogSec=` on
+`Type=simple` with its load warning and no watchdog (`tests/kinds.rs`); and
+a native service watched.
 
-| # | Case | Passes when | Control (fires on today's code) |
+| # | Case | Passes when | Control (`gate.sh control --expect`) |
 |---|---|---|---|
-| W1 | `wd-test.service` (`Type=notify`, `WatchdogSec=2`, `Restart=on-watchdog`, a busybox script that pings five times and then sleeps) under `ferrix.init.watchdog=5` | init says the watchdog timeout with the script's thread and `nanosleep`, `SIGABRT` ends it, it is restarted at least twice, the system watchdog fed throughout and no FX-9008 in 40 s | without the manager's watchdog (control patch) no timeout line appears: the hung service runs on |
-| W2 | a user program spinning (`while :; do :; done`) and one blocked for ever (`cat` on a FIFO) under `ferrix.init.watchdog=5` | no FX-9008 in 20 s, both still running | n/a: today passes too; the row guards it |
-| W3 | init's loop blocked: a FIFO named `wedge.service` in `/run/ferrix/units` and `svc daemon-reload` | init says the loop has not turned, in `units`; no FX-9008 for 3 timeouts; a write to the FIFO and init says it turns again | today's feed: FX-9008 within the timeout (control patch feeds from the loop again) |
-| W4 | every thread of pid 1 stopped (`kill -STOP 1`) | FX-9008 within the window, as §6.11 case (1) | n/a: the row proves a true stop still resets |
-| W5 (stage 1) | as W4 with a pre-timeout | the dump lines precede FX-9008, pid 1's threads among them | control patch with the dump disabled: no dump line |
+| W1 *service* | `wd-test.service` (`Type=notify`, `WatchdogSec=2s`, `TimeoutAbortSec=3s`, `Restart=on-watchdog`, `RestartSec=1s`): three pings, then `exec sleep` | at least two timeout reports naming the thread and its sleep, at least three starts (backing off), init feeding, no report in 40 s | the manager's miss removed (`kinds.rs`'s `self.watchdog_missed(unit, false);`): "never ended by its watchdog" (E2) |
+| W3 *blocked* | a FIFO `wedge.service` in `/run/ferrix/units` and `svc daemon-reload`; a writer 20 s later | the loop said stuck `in \`units\`` at least twice, still fed, no report, "turns again" (E4) | the feeder made to skip its feed while the loop is in `units`: FX-9008 |
+| W3b *stall* | as W3 under `ferrix.init.watchdog.stall=15`, never unwedged | the stall lines, "no longer fed", then FX-9008 naming init 3.5 to 15 s later (E5) | the bound never acted on: "never left unfed" |
+| W2+W4 *user* | a spinner and a FIFO reader blocked in `read` for 20 s, then `kill -STOP 1` | no report for the 20 s, the spinner's CPU time grown, the reader in `read`, then FX-9008 3.5 to 15 s after the stop (R-2's proof the watchdog was armed and fed; E6) | n/a: a guard row (R-2, E8) |
 
-§6.11's eight cases stay.
+W5 moved to the stage 1 review (E7). A boot case for a native service's
+WATCHDOG on its channel is owed: the host test covers the state machine,
+and lode, the first native service to ping, brings the program (§5.5).
 
 ## 9. Order
 
-1. This design, to the certification consultant.
+1. This design, to the certification consultant (done, ledger 8355).
 2. Step 2 (init's feeder thread, §4) and step 1 (per-service watchdogs,
    §5), ring 3 and `ferrix-svc`, one landing, W1 to W4.
-3. Stage 1 (§6), kernel core, its own code review, W5.
-4. Stage 2 (§7), kernel core, its own code review.
+3. Stage 1 (§6), kernel core: its own design, then code review, W5.
+4. Stage 2 (§7), kernel core: its own design, then code review.
 5. Each service's ping, by its owner (§5.5); hyprix's "not responding" (§3
    items 3 and 4), by hyprix's owner.
 
 ## 10. Where it stands
 
-2026-11-08, watchdog-stages: this design written; consultant's verdict
-below once given.
+2026-11-08, watchdog-stages. The certification consultant's design review
+of 981e981d7 is ledger 8355 (internal, not independent verification,
+F-27):
+
+* §4, the feeder thread: **OK IF A1-A10**; the FX-9008 meaning hunk in
+  `panic/catalog.rs` owes a code review with the landing.
+* §5, per-service watchdogs: **no review owed** (RD.8 confirmed: ferrix-svc,
+  ferrix-svc-proto, ferrix-restart, ferrix-native-abi and init are in no
+  ring); B1-B4 taken as advice (§5.3).
+* §6 and §7: **not yet**, each needing its own design (C-B1 to C-B4, D-B1
+  to D-B6).
+* §8: **OK IF E1-E8**.
+* Rulings: **R-1**, a stuck loop stops the feed after a long bound (§4);
+  **R-2**, the user case is a guard row with no control.
+
+The code review of the landing is ledger 8435: **OK IF WC.1-WC.8** (the
+residency citation, the feeder's start failure said, the native case in
+BACKLOG, the rows and the three controls through `gate.sh`, coverage
+carried, the commit citing both entries, this section). Its follow-up on
+2d555628b, ledger 8464: **OK**, WC.1-WC.8 met, may land.
+
+Steps 1 and 2 (§4, §5) are built on this branch, with W1 to W4 passing on
+x86-64 KVM and case 7 on AArch64 and ARMv7-A `--smp 2`. Owed: test-watchdog's
+native case, with lode's landing (WC.3); stage 1's and stage 2's
+designs; each service's ping by its owner (§5.5); hyprix's "not
+responding" (§3, 3 and 4); the loop's blocking sites (§4, BACKLOG).
 
 [win-hung]: https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-ishungappwindow
 [win-sc]: https://learn.microsoft.com/en-us/windows/win32/msi/msiserviceconfigfailureactions-table
