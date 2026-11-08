@@ -484,6 +484,8 @@ impl CpuQueue {
         }
         let share = self.follow_group_share(extra);
         if self.stats.measuring {
+            // Only while the fairness check measures.
+            core::hint::cold_path();
             self.measure();
         }
         share

@@ -3983,18 +3983,29 @@ fn switch_from(interrupted_user: bool, ending_hold: bool) {
 /// machine there (FX-0503). Made before every switch: `schedule_from`'s,
 /// `block_ending_hold`'s (after it lowers the last look's hold), and the
 /// direct switch's (A3).
+// The test inline and the stop out of line: every switch makes the one test
+// and falls straight through, a call and a return fewer than out of line (the
+// round trip's cross-domain row); the stop and its message are as they were.
+#[inline(always)]
 fn require_preemption_on(cpu: usize) {
     if preempt_count(cpu) > 0 {
-        let site = preempt_site(cpu);
-        crate::panic::fatal!(
-            crate::panic::catalog::SCHEDULE_WITH_PREEMPTION_HELD,
-            "a task blocked or yielded while holding a lock that disables preemption ({} held; \
-             the last was taken at {}:{})",
-            preempt_count(cpu),
-            site.map_or("?", |site| site.file()),
-            site.map_or(0, core::panic::Location::line),
-        );
+        switched_with_preemption_held(cpu);
     }
+}
+
+/// [`require_preemption_on`]'s stop (FX-0503).
+#[cold]
+#[inline(never)]
+fn switched_with_preemption_held(cpu: usize) {
+    let site = preempt_site(cpu);
+    crate::panic::fatal!(
+        crate::panic::catalog::SCHEDULE_WITH_PREEMPTION_HELD,
+        "a task blocked or yielded while holding a lock that disables preemption ({} held; \
+         the last was taken at {}:{})",
+        preempt_count(cpu),
+        site.map_or("?", |site| site.file()),
+        site.map_or(0, core::panic::Location::line),
+    );
 }
 
 /// With interrupts masked: decide, and switch if the decision changed
@@ -4547,6 +4558,8 @@ fn finish_switch() {
     // In the incoming context, under the lock the switch handed over: the
     // record must already name what the queue now runs (`borrow`).
     if borrow::auditing() {
+        // Only while a check audits: every other switch falls straight through.
+        core::hint::cold_path();
         borrow::audit(borrow::Site::Switch, queue.current.as_ref());
     }
     let previous = queue.previous.take();

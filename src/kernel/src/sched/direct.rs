@@ -325,6 +325,8 @@ impl Direct {
             );
         }
         if queue.stats.measuring {
+            // Only while the fairness check measures.
+            core::hint::cold_path();
             queue.note_pick(now);
         }
         self.next = next;
