@@ -68,7 +68,7 @@ fn print_calls(tid: u32) {
             continue;
         }
         shown += 1;
-        if shown > 80 {
+        if shown > 60 {
             break;
         }
         crate::println!(
@@ -196,7 +196,7 @@ fn print_stack(process: &Process, from: u64, sp: u64) {
             let label = fmt_label(&mut label, at.abs_diff(sp) as usize, at < sp);
             print_where(process, label, value);
             shown += 1;
-            if shown >= 120 {
+            if shown >= 60 {
                 break;
             }
         }
@@ -247,6 +247,10 @@ pub(crate) fn exit_call(process: &Process, tid: u32, group: bool, status: i32, i
         ip,
         sp
     );
+    // The heavy part only for the game-sized process: a console line costs.
+    if !watched(process) {
+        return;
+    }
     print_where(process, "ip", ip);
     print_calls(tid);
     print_stack(process, sp.saturating_sub(32 * 1024), sp);
@@ -281,7 +285,7 @@ pub(crate) fn thread_end(process: &Process, tid: u32, status: Option<i32>, group
 pub(crate) fn signal_to_thread(process: &Process, tid: u32, signal: u32, origin: &dyn core::fmt::Debug) {
     // SIGUSR1/2 (Wine's suspend and context calls), SIGCHLD, SIGALRM, SIGWINCH,
     // SIGURG, SIGIO and the real-time ones are routine.
-    if matches!(signal, 10 | 12 | 14 | 17 | 23 | 28 | 29) || signal >= 32 {
+    if matches!(signal, 10 | 12 | 13 | 14 | 17 | 23 | 28 | 29) || signal >= 32 {
         return;
     }
     if !(tid == process.pid() || watched(process)) {
@@ -304,7 +308,7 @@ pub(crate) fn signal_to_thread(process: &Process, tid: u32, signal: u32, origin:
 
 /// A signal sent to a whole watched process.
 pub(crate) fn signal_to_process(process: &Process, signal: u32, origin: &dyn core::fmt::Debug) {
-    if matches!(signal, 10 | 12 | 14 | 17 | 23 | 28 | 29) || signal >= 32 {
+    if matches!(signal, 10 | 12 | 13 | 14 | 17 | 23 | 28 | 29) || signal >= 32 {
         return;
     }
     if !watched(process) || !take(&SIGNALS) {
