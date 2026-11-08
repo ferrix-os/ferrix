@@ -7,6 +7,12 @@ Moved out of [`docs/BACKLOG.md`](../BACKLOG.md) on 2026-10-16. A decision is rec
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-11-08, about 08:30 (customer, through the product owner's session)**
+  **"Keep cutting, new design"**: with desktop's `call` row at 1.025 to 1.03
+  over develop on PR #51 (46736ea82; the fair-entity hand-over of ledger 8134
+  measured worse and did not land), the limit stays +2% with the FIFO tier
+  compiled in; neither accepting the figure nor relieving a countermeasure.
+  The next design changes what `Over` keeps per queue.
 * **2026-11-08 (customer, through the product owner's session)** **`present`'s
   `call` row at +2.5% is not accepted**: on PR #51's ef032a473 against develop
   09723c941, the fast path on, `bench-ipc`'s `call` row (outside a
