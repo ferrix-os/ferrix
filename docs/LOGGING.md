@@ -1815,6 +1815,21 @@ driver (§17) is still to come; this is its fallback made exact.
   connection and TLS handshake to the collector per request (`send`), a
   request per batch or blob. A kept-alive connection, and fewer, larger
   requests while the machine is loaded, are the levers left.
+* Backlog for the lode owner (box-watchdog, 2026-11-08,
+  `docs/POSTMORTEM.md` §6.11; nothing of lode's changed by it): the
+  watchdog leaves three new facts a boot's end should carry, and lode
+  reads none of them yet. (a) Boot 2's kernel line `watchdog the TCO reset
+  the previous boot` (and `WDIOC_GETBOOTSTATUS`'s `WDIOF_CARDRESET` on
+  `/dev/watchdog`): `lode-pstore` could name boot -1's end "reset by the
+  watchdog" beside the stop word, which says "no stop recorded" for a
+  hang the TCO ended. (b) A FX-9008 report in `LASTKERNEL.TXT` is a
+  user-space freeze, not a kernel fault: worth its own end reason in
+  `lode -b -1` and in what `lode-upload` ships first on the next boot. (c)
+  Each watchdog feed now writes the pstore region back, so after a TCO
+  reset `LASTKERNEL.TXT` holds the log up to the last feed (a third of
+  `ferrix.init.watchdog=`'s timeout old at most); `lode-upload`'s copy on
+  nazuna stops at whatever it had sent, so the two overlap -- the
+  importer's dedupe by sequence number should hold across that.
 
 ### Compression, as built (§8.2)
 

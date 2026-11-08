@@ -1012,7 +1012,117 @@ S4a 6-8 points, S4b 8-10, the box steps about 1: 15 to 19 points.
   lockup module registers into, as power's flushes do.
 * The rest (D5, D8-D12, D14) are the code reviews' to check.
 
+### 6.11 The box's watchdog, as built (2026-11-08, box-watchdog)
+
+**Why.** On 2026-11-08 at about 00:09 the N150 box went silent under a game
+with `ferrix.panic=reset` on its command line, and stayed so until the plug
+was cycled four minutes later. The power cut took the pstore region (the next
+boot's was boot 1), `lode-pstore` found no `LASTKERNEL.TXT`, and the
+uploaded log stops at its last record with no panic line: a hang and a panic
+whose report never shipped read the same. This section is the smallest whole
+answer: S4b's TCO, fed only from ring 3 as S4c asks, with S4c's deadline
+checked by a kernel task instead of S4a's watch tick, and the panic path made
+to reset whatever it meets. S4a (the lockup detector, branch `s4-lockup`)
+is not needed for it and is not in it.
+
+**What "stuck" means, and where the feed comes from.** The machine is stuck
+when nothing can reach it any more: its supervisor cannot turn its own loop.
+So the only feed is a privileged program's write to `/dev/watchdog` --
+init's, under `ferrix.init.watchdog=<seconds>` (S4c's feeder, unchanged).
+A kernel timer is not a feeder: it ticks on while all of user space waits on
+something that never comes (2026-10-31: ping answered, every program
+stopped), and a kernel thread feeds as long as the scheduler runs, which it
+did then too. A game, a compositor or a driver that hangs while init turns
+and sshd answers is not stuck, and no reset is wanted for it. Which services
+must also be alive for init to feed is init's policy to tighten later
+(systemd's `WatchdogSec=`); the kernel has no say in it.
+
+**The kernel's part** (`src/kernel/src/watchdog.rs`, core;
+`arch/x86_64/tco.rs`, core; `fs/watchdog.rs`, load), off unless
+`ferrix.watchdog=on`:
+
+* `/dev/watchdog`, 10:130, 0600, Linux's interface (S4c's file, over the
+  core's calls): open arms with the timeout set (60 s until
+  `WDIOC_SETTIMEOUT`, 1 to 600 s), one opener, privileged; a write feeds; the
+  magic `V` lets the last release disarm, any other release leaves it armed;
+  `WDIOC_GETBOOTSTATUS` says `WDIOF_CARDRESET` after a TCO reset.
+* A deadline on the kernel clock, looked at once a second by the kernel task
+  `watchdog`. Past it: FX-9008, naming the opener, its timeout and the time
+  since the last feed, then `ferrix.panic`'s halt or reset.
+* The chipset's TCO (8086:54a3 on the box, version 6, `TCOBASE` 0x400;
+  q35's ICH9 8086:2918, version 2, PM base + 0x60, `NO_REBOOT` in `GCS`),
+  claimed at boot after stage 10's nodes: halted, its status read and
+  cleared (`SECOND_TO_STS` said as `the TCO reset the previous boot`),
+  `NO_REBOOT` tested and set. Refused, and left as found, when firmware
+  locked it or holds `NO_REBOOT`. The open arms it for the timeout plus 30 s
+  (two expiries of half that each); each feed reloads it and clears a first
+  expiry.
+* **Each feed writes the pstore region back** from the caches: a hardware
+  reset writes nothing back, so the record it leaves in RAM is at most one
+  feed (a third of the timeout) stale.
+* **At a report** (`watchdog::on_report`, the first report's
+  `begin_report`): with the TCO claimed, under `ferrix.panic=reset` or with
+  the watchdog armed, the count is cut to 21 ticks, so the machine resets
+  within 25.2 s whatever the report does next -- a lock it waits for, a fault
+  in it, a reset that does not take. The report says so in a `watchdog`
+  line. Just before the report's own reset the TCO is halted again
+  (`before_reset`): `arch::reset` ends in a triple fault if nothing before
+  it takes, and a count left running would reset the next boot on a chipset
+  that keeps it across a reset (QEMU's does).
+* Every stop on purpose (`reboot(2)`'s four, init's exit, linuxd's) halts
+  the TCO and disarms the deadline first, so the box's Linux is never reset
+  by a count it did not start.
+
+**The panic path, made to reset** (§3's report, item 3 of the task):
+
+* Every write of a report used to wait up to ten million tries for the
+  console port's lock. A report on the processor that held it -- a fault or
+  machine check inside the console path, the fbcon draw included -- waited
+  that bound on each of its few hundred writes (each word of the catalog
+  text is one): tens of seconds to minutes before the reset. Now the first
+  wait that fails gives the lock up for the rest of the report
+  (`console::PORT_ABANDONED`).
+* A fault inside the first report on its own processor halted unless it came
+  after the reset line. Now the reporting processor is recorded as the
+  report begins, and any abridged report on it under `ferrix.panic=reset`
+  writes the record back, says the reset line and resets.
+* The 10 s wait reads the counter, never an interrupt; a counter that stops
+  moving for fifty million reads ends the wait at once.
+* `arch::reset` skips the 8042's ten pulses when its status port reads all
+  ones (no controller, the box: ten seconds saved) and tries the chipset's
+  `0xCF9` hard reset before the triple fault.
+* What remains that can stop a report before the TCO's cut: nothing in
+  software -- the cut is the report's third store, after masking interrupts.
+  A machine whose TCO is not claimed (no `ferrix.watchdog=on`, firmware
+  locked it) has the software bounds above only.
+
+**Gate**, `cargo xtask test-watchdog` (x86-64, q35, KVM, 4 processors):
+(1) busybox's `watchdog -T 5` stopped by `SIGSTOP` under `ferrix.panic=reset`:
+FX-9008 3.5 to 15 s later with the `watchdog` line, the report's own reset,
+boot 2's loader quoting the report and boot 2's kernel not blaming the TCO;
+(2) the same under the default halt: the TCO alone resets 15 to 45 s after
+the report, boot 2's kernel says the TCO reset it, boot 2's loader quotes
+the report (the record outlived the hardware reset); (3) fed 15 s, second
+open `EBUSY`, magic close, timeout 0 `EINVAL`, 40 s more: no report, no
+reset; (4) init feeding with `ferrix.init.watchdog=5` for 45 s: no report,
+no reset; (5) without the option no node and the TCO untouched.
+
+**The box** (queued in `BOX-QUEUE.md` as `box-watchdog`): its command line
+gains `ferrix.watchdog=on ferrix.init.watchdog=60`. To see on it, in order:
+the claim line (or the refusal saying what firmware left in `TCO1_CNT`);
+case (1) and case (2) once each; whether DRAM keeps the region across the
+TCO's reset (the loader's `pstore at` line names boot 1, and `lode -b -1`
+ends with the FX-9008 report); and that the Linux fallback boots unharmed
+after a Ferrix reboot.
+
 ## 7. Where it stands
+
+2026-11-08, §6.11 (box-watchdog): the TCO fed from ring 3, the deadline
+report FX-9008, the panic path made to reset (port lock given up once,
+abridged reports reset, stuck-counter wait, 0xCF9), each feed writing the
+pstore back. `test-watchdog` on q35; the box run is queued. S4a stays on
+`s4-lockup`; S4c's design is what §6.11 builds, without the watch tick and
+the `cpu` lines.
 
 2026-10-21, §6 (lockup): S4's design, the lockup detector and the TCO
 watchdog. Design verdict **OK IF D1-D14** (consultant ledger line 2889);

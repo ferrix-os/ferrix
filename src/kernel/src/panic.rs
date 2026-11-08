@@ -61,7 +61,7 @@ pub mod screen {
 
 use core::panic::PanicInfo;
 use core::ptr;
-use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
 
 use catalog::Explanation;
 
@@ -70,6 +70,10 @@ use crate::{arch, backtrace, smp};
 
 /// Whether a failure report has begun, on any processor.
 static REPORTING: AtomicBool = AtomicBool::new(false);
+
+/// The seconds within which the watchdog's hardware resets the machine, set
+/// as the first report begins; 0 when no timer stands behind it.
+static BACKSTOP_SECONDS: AtomicU64 = AtomicU64::new(0);
 
 /// The catalog entry the next panic is explained by, as [`fatal!`] recorded it.
 ///
@@ -209,6 +213,13 @@ pub(crate) fn begin_report(stop: ferrix_bootinfo::pstore::Stop) -> bool {
         // How this boot stopped, for the next boot's loader, before anything
         // in the report can fault (`console::pstore`).
         console::pstore::panicked(stop);
+        reset::reporting_here();
+        // The hardware's count cut short, before anything in the report can
+        // wait or fault: the reset no longer rests on the report reaching
+        // its end (`watchdog::on_report`).
+        if let Some(seconds) = crate::watchdog::on_report(reset::armed()) {
+            BACKSTOP_SECONDS.store(seconds, Ordering::Relaxed);
+        }
     }
     first
 }
@@ -217,15 +228,21 @@ pub(crate) fn begin_report(stop: ferrix_bootinfo::pstore::Stop) -> bool {
 /// report already under way has everything else.
 ///
 /// Under `ferrix.panic=reset`, a report inside the first one on the
-/// processor that announced the reset -- a fault while it drew the screen --
-/// still resets the machine ([`reset`]): the screen is the step likeliest to
-/// fault, on exactly the machine that has nobody at it.
+/// processor making it -- a fault anywhere in it, the screen being the step
+/// likeliest to -- still resets the machine ([`reset`]), on exactly the
+/// machine that has nobody at it. Before the reset it writes the record
+/// back, which the first report may not have reached, and says the reset
+/// line if the first report had not.
 pub(crate) fn abridged() -> ! {
     println!("  stopped   during another report, so this one is abridged");
     // The power core's raised limit back to firmware's (`L.x86_64.206`).
     arch::restore_power("panic");
     console::drain();
     if reset::resetting_here() {
+        if !reset::announced() {
+            reset::announce();
+        }
+        let _ = console::pstore::write_back();
         reset::wait_then_reset()
     }
     arch::halt()
@@ -255,6 +272,12 @@ pub(crate) fn conclude(entry: Option<&Explanation>) -> ! {
         (true, _) => println!(
             "  stopped   this processor resets the machine after the report, and {others} more were asked to stop"
         ),
+    }
+    let backstop = BACKSTOP_SECONDS.load(Ordering::Relaxed);
+    if backstop != 0 {
+        println!(
+            "  watchdog  the TCO resets the machine within {backstop} s, whatever this report does"
+        );
     }
     report_backtrace();
     if let Some(entry) = entry {

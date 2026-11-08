@@ -37,6 +37,7 @@ pub fn restart_with_word(process: &Process, arg: u64) -> Result<usize, Errno> {
         Ok(what) => println!("reboot: {what}"),
         Err(why) => println!("reboot: '{word}' changes nothing: {why}"),
     }
+    ferrix_kernel_load::watchdog::stop_for_shutdown("a restart");
     let _ = ferrix_kernel_load::console::pstore::stop(Stop::Restart);
     arch::reset()
 }

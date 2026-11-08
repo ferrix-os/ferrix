@@ -818,16 +818,19 @@ pub(crate) fn sys_reboot(
         // (`console::pstore::stop`).
         command::POWER_OFF => {
             println!("reboot: Power down");
+            crate::watchdog::stop_for_shutdown("a power-off");
             let _ = crate::console::pstore::stop(Stop::PowerOff);
             arch::power_off()
         }
         command::HALT => {
             println!("reboot: System halted");
+            crate::watchdog::stop_for_shutdown("a halt");
             let _ = crate::console::pstore::stop(Stop::Halt);
             arch::shutdown()
         }
         command::RESTART => {
             println!("reboot: Restarting system");
+            crate::watchdog::stop_for_shutdown("a restart");
             let _ = crate::console::pstore::stop(Stop::Restart);
             arch::reset()
         }

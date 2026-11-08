@@ -356,16 +356,19 @@ fn start(
     match core.exit_status() {
         Some(EXIT_RESTART) => {
             crate::audit::power(crate::audit::Subject::KERNEL, ferrix_audit::power::RESTART);
+            crate::watchdog::stop_for_shutdown("a restart");
             let _ = crate::console::pstore::stop(Stop::Restart);
             crate::arch::reset();
         }
         Some(EXIT_POWER_OFF) => {
             crate::audit::power(crate::audit::Subject::KERNEL, ferrix_audit::power::OFF);
+            crate::watchdog::stop_for_shutdown("a power-off");
             let _ = crate::console::pstore::stop(Stop::PowerOff);
             crate::arch::power_off();
         }
         Some(EXIT_HALT) => {
             crate::audit::power(crate::audit::Subject::KERNEL, ferrix_audit::power::HALT);
+            crate::watchdog::stop_for_shutdown("a halt");
             let _ = crate::console::pstore::stop(Stop::Halt);
             crate::arch::shutdown();
         }
