@@ -501,18 +501,46 @@ dirty nodes. Risk is how likely the gap is to stop play there.
 
 1. **W1, a memory reservation for an edit (high).** What Linux gets from
    NOFAIL tree nodes, Ferrix should get as `block_rsv` gets disk space:
-   reserve before the first change, never fail inside. `admit` already
-   computes an operation's worst case in nodes; take that many node
-   buffers (and the delayed-refs and path entries they bring) from the
-   heap into a per-volume pool before the edit, where ENOMEM aborts
-   nothing (returned as `ENOMEM`, the transaction intact), and have
-   `load`, COW and the delayed-reference inserts draw from the pool, so an
-   edit's allocations cannot fail. The commit's own worst case is
-   `commit_reserve`, reserved the same way before `settle`. This keeps
-   the kernel slim (no new allocator policy, one pool in the filesystem)
-   and keeps every wait bounded, which an unbounded NOFAIL would not.
-   13 points (core item: requirement, host tests failing each reservation
-   and each draw, control).
+   reserve before the first change, never fail inside. A pool of node
+   buffers, as first proposed, does not fit: a `TreeNode` is a parsed
+   list, a leaf up to a few hundred heap allocations of every size class.
+   **The design (the certification consultant's review: OK IF W1.1-W1.12,
+   ledger line 8337), three landings, each its own code review:**
+   * **W1-a, the kernel's scope (core, `mm.rs`, `sched`'s Task; L.mm.140,
+     L.mm.81 and L.object.225 amended for a new owner of a reservation).**
+     A guard sets, on the current task, which K12 reservation
+     (`mm::reservation`, L.mm.76-81) its task-context heap allocations
+     draw from first; it is cleared on every exit, never applies in
+     interrupt context, is inherited by nothing the task wakes or spawns,
+     and can be suspended (device I/O, W4's payload copy and the heap
+     kill's own list never draw it). Past the reservation's room an
+     allocation falls back to the shared heap, counted per reservation. A
+     deterministic boot check in `mm/check.rs` with the shared heap made
+     to refuse, and two controls. Its cost on the allocator's fast path:
+     one task field read, only while some reservation is bound.
+   * **W1-b, the glue (`fs/btrfs.rs`, load).** Each writable mount binds
+     a reservation and hands the writer a `Reserve { grow, enter }`; a
+     mount never refuses for want of an entry (64 are shared with jobs):
+     without one it keeps today's behaviour and says so once. At most
+     R_MAX = min(64 MiB, a stated fraction of memory, e.g. a 64th) per
+     mount, its reference value in `certification-item.json`; every
+     promised frame raises every unreserved program's floor (L.mm.77), so
+     MEMORY-AND-TIMING states the worst outstanding promise. Unmount
+     unbinds; a reload read-only (L.btrfs.123) shrinks it to nothing.
+   * **W1-c, the writer (`ferrix-btrfs-write`, item; L.btrfs.124-125).**
+     `admit`, at the outermost operation and before any change, grows the
+     reservation to what is drawn already plus the operation's worst case
+     in frames -- a per-node bound measured by a host test on worst-case
+     full leaves and internal nodes, slab rounding included -- and a
+     refusal answers `ENOMEM` with the tree, the dirty set, the delayed
+     references and the edits count unchanged; past R_MAX it commits
+     first, as `commit_if_heavy` does. The edit and the commit run inside
+     the scope. A reservation counts frames, not runs (W1.2): only
+     allocations of at most a page, or whose larger runs admission took
+     as real pages, are claimed not to fail; the rest stay fallible and
+     abort as today, and the requirement says no more. An overrun is
+     counted, and every check asserts it is nought.
+   13 points in all.
 2. **W2, going read-only without memory (high).** Keep what reading the
    last commit needs beside the running transaction, as Linux keeps
    `root->commit_root`: each tree's committed root (bytenr, level,

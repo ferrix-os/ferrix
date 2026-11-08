@@ -253,6 +253,13 @@
       "branch": "feature/mk-boot-time",
       "date": "2026-11-05",
       "purpose": "Per-check frame accounting (ledger 7191 K1-K11): attribution by tag, netting and closure, the latch, the cross free."
+    },
+    {
+      "ids": ["L.mm.140", "L.btrfs.124-125"],
+      "owner": "btrfs-reference",
+      "branch": "feature/btrfs-edit-reserve-mm",
+      "date": "2026-11-08",
+      "purpose": "W1 (docs/BTRFS-PRESSURE.md, ledger 8337 W1.11): L.mm.140 a task-scoped reservation routes the task's task-context heap allocations to that reservation's heap first (W1-a); L.btrfs.124 admission reserves an operation's bound before any change and a refusal changes nothing, L.btrfs.125 edits and commits run inside the handed reservation (W1-c)."
     }
   ]
 }
