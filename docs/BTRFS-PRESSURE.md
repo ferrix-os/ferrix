@@ -1,5 +1,9 @@
 # btrfs under memory pressure (`test-btrfs-pressure`)
 
+**2026-11-08, against Linux.** Ferrix's btrfs failure paths read against
+Linux v7.0's `fs/btrfs`: see "Against Linux's btrfs", and its work items
+W1-W7 in `docs/BACKLOG.md`.
+
 **2026-11-08.** The N150's hangs during play: a btrfs transaction aborted
 out of memory at the floor and its reload ran out too; see "The
 transaction aborted out of memory" and the gate's `commit` boot.
@@ -372,6 +376,185 @@ branch's base, one of them killing with `0 frames free`; the certification
 consultant's review (ledger line 8172) wants it as a requirement of its own
 (L.mm.139, reserved first), L.mm.37 amended, and a deterministic boot check
 with two controls before it lands (a BACKLOG row).
+
+## Against Linux's btrfs (2026-11-08, btrfs-reference)
+
+The customer asked whether Ferrix's btrfs was checked against Linux's, so
+as not to repeat mistakes Linux already fixed. It was not: the write path's
+error and memory handling (`fallible.rs`, `WriteVolume::guarded`,
+L.btrfs.122-123) was designed without reading `fs/btrfs`. This section
+reads it now, on the failure paths that failed on 2026-11-08.
+
+**The reference.** Linux v7.0, commit
+`028ef9c96e96197026887c0f092424679298aae8` ("Linux 7.0", 2026-04-12; the
+host runs 7.0.0), tag object `3131ff5a1174`: a sparse, blobless clone of
+`fs/btrfs`, `include/linux/gfp*.h`, `include/linux/sched/mm.h`,
+`include/linux/mempool.h` and `mm/{page_alloc,oom_kill,mempool,internal}`,
+with history since 2019, in `~/.local/share/ferrix/btrfs-ref/linux`
+(`README.txt` beside it). It is GPL-2.0: read for design and behaviour,
+and no line of it is copied into Ferrix. Paths below are relative to it;
+Ferrix's are to this tree at develop 29e3b47c2.
+
+### The one difference behind most of the others
+
+Linux's btrfs is written as if a small allocation does not fail, and in
+Linux it nearly never does. Ferrix's is written so that every allocation
+may fail, and treats each failure inside an edit like a disk error.
+
+* `mm/page_alloc.c`, `__alloc_pages_slowpath`: an allocation of order 3 or
+  less (`PAGE_ALLOC_COSTLY_ORDER`) that may block reclaims, retries
+  (`should_reclaim_retry`, up to `MAX_RECLAIM_RETRIES`, 16, rounds without
+  progress), then calls `__alloc_pages_may_oom`. For a `GFP_NOFS`
+  allocation -- everything btrfs does inside a transaction --
+  `mm/oom_kill.c`, `out_of_memory`, kills nobody ("The OOM killer does not
+  compensate for IO-less reclaim") and answers true, so the allocator
+  counts that as progress and goes round again. It waits for kswapd,
+  writeback and the OOM kills other tasks' `GFP_KERNEL` allocations make,
+  for as long as that takes. It fails only for a task that is itself an
+  OOM victim and has used its reserves (`tsk_is_oom_victim`, `ALLOC_OOM`),
+  for `__GFP_NORETRY`/`__GFP_RETRY_MAYFAIL`, and for orders above 3.
+* `__GFP_NOFAIL` where btrfs has no way back: every extent buffer, the
+  in-memory tree node (`fs/btrfs/extent_io.c`, `alloc_extent_buffer`: the
+  `kmem_cache_zalloc` of the buffer, `alloc_eb_folio_array(eb, true)` for
+  its pages, and `filemap_add_folio(..., GFP_NOFS | __GFP_NOFAIL)` into the
+  btree inode). Reading or COWing a tree node therefore never fails for
+  memory in Linux. History shows NOFAIL kept to that: 9f0eac070d23 (2022,
+  `btrfs_io_context` without NOFAIL, "could loop indefinitely" and the
+  callers handle errors) and 7dde7a8ab324 (2023, `set_extent_bit` drops
+  NOFAIL for "unlock, sleep and retry").
+* So `btrfs_abort_transaction(trans, -ENOMEM)` exists (most call sites
+  abort on any error) but is reached by fault injection, memcg limits and OOM victims.
+  8bb808c6ad91 (2022) stopped printing a stack trace for it, because the
+  syzbot reports of it were "an artificial condition".
+
+In Ferrix every allocation of `ferrix-btrfs-write` is fallible
+(`src/lib/fs/btrfs/write/src/fallible.rs`), and `guarded_with`
+(`write/src/volume.rs:259`) aborts the transaction on every error but
+`Exists` and `NotFound`, the commit included (`write/src/commit.rs:91`). A
+node an edit needs and cannot read into the clean cache fails the edit
+(`volume.rs:433`, `load`). Since L.mm.136-138 the kernel's heap reclaims
+and then kills before it refuses an allocation that may block
+(`src/kernel/src/mm.rs:1555`, `heap_or_reclaim`; `mm.rs:1603`,
+`heap_or_kill`), but both are bounded: eight reclaims, then at most 1024
+answers of the kill, about a second, after which the refusal stands and
+the volume aborts. Where Linux waits, Ferrix aborts after a second.
+
+### Item by item
+
+| # | Linux | Ferrix | Gap |
+|---|---|---|---|
+| L1 | **Abort.** `transaction.h`, `btrfs_abort_transaction`: the first abort sets `BTRFS_FS_STATE_TRANS_ABORTED` and logs the error with function and line; `transaction.c`, `__btrfs_abort_transaction`, stores the error in the handle and the transaction and calls `messages.c`, `__btrfs_handle_fs_error`, which sets `fs_info->fs_error` and forces `SB_RDONLY`. `transaction.c`, `cleanup_transaction` -> `disk-io.c`, `btrfs_cleanup_one_transaction`: delayed refs destroyed, dirty extent buffers cleared and marked stale (`btrfs_destroy_marked_extents`), pinned extents returned. Nothing is read from disk. | `volume.rs:224`, `abort_with` (first cause kept); `vfs/src/rw.rs:399`, `Shared::lock`, reloads the last commit read-only at the next use (`write/src/open.rs:185`, `reload_read_only`) and tells the notice. | Same outcome (read-only at the last commit); different cost. The notice says the cause, never the site: Linux logs `function:line` for every abort. |
+| L2 | **Which errors abort.** Call sites abort after the tree was changed and return before; 828ec765f796 (2025) stopped aborting on an `alloc_bitmap` ENOMEM in the free-space tree's conversion ("just an optimization"); 8793ed87b376 (2023) stopped failing a tree-mod-log allocation that turns out not to be needed. Writes after an abort answer `EROFS` (`file.c`, `btrfs_do_write_iter`'s `BTRFS_FS_ERROR` check; `inode.c`, `btrfs_start_delalloc_roots`); metadata writeback is ended at once (`extent_io.c`, `BTRFS_FS_ERROR` before `btrfs_submit_bbio`). | `guarded_with` aborts on any error but two; `operation_with` (`volume.rs`) aborts once an edit succeeded. `check_writable` (`volume.rs:213`) refuses edits; `errno` (`rw.rs:1773`) maps `ReadOnly` to `EROFS`. | Ferrix cannot tell work an edit needs from work that only helps (a clean-cache insert, a buffer for a heuristic): both abort. Linux has been taking such sites out one by one since 2023. |
+| L3 | **Reading after an abort.** No read path checks `BTRFS_FS_ERROR`. The roots in memory and the extent buffers they hold stay; file data is in the page cache, read through extent maps. Going read-only allocates nothing, and reads go on as before. 597441b3436a (2023): the abort's cleanup runs under NOFS, so reclaim does not re-enter the filesystem from it. | Reads of a writable mount go through the volume (`rw.rs:399`); after an abort they wait for `reload_read_only`, which reads the chunk tree, the roots and the free-space tree again. A reload short of memory is retried (L.btrfs.123), and until it works every answer is `EIO`: `Aborted` maps to `EIO` (`rw.rs:1773`), which a page-in turns into `SIGBUS` (`src/kernel/src/user/space.rs:2290`, only `ENOMEM` becomes `OutOfMemory`). | **The largest structural gap.** Ferrix needs memory to go read-only, at the moment memory is gone, and answers `EIO` (a fatal signal on a page-in) for want of memory. Linux needs none. |
+| L4 | **Space before the transaction.** `block-rsv.c`, `space-info.c`, `btrfs_reserve_metadata_bytes` -> `reserve_bytes`: a handle reserves its worst case at `btrfs_start_transaction(root, num_items)`; a shortfall queues a ticket and flushes (`enum btrfs_flush_state`: delayed items, delayed refs, delalloc, chunk allocation, commit), `FLUSH_ALL_STEAL` may take the global reserve; the delayed-refs reserve is its own. | `volume.rs:326`, `admit`: an operation's nodes plus `commit_reserve` (`volume.rs:345`) plus `GLOBAL_RESERVE` (`volume.rs:67`), refused with `ENOSPC` before any change; data room taken at `write` (`rw.rs`, "Room is taken at the write"), one commit and a retry. | Close in kind, coarser (one commit, no flush ladder). Disk space only, in both. Low risk on the box (hundreds of GB free). |
+| L5 | **Memory contexts.** `GFP_NOFS` on everything under a transaction, `memalloc_nofs_save` around code that calls generic allocators (`free-space-tree.c`, `file-item.c`, `acl.c`; 351cbf6e4410, d1825752e307): reclaim from inside a transaction must not re-enter the filesystem. Preallocate before the spin lock, fall back to `GFP_ATOMIC` under it, and on failure drop the lock, `cond_resched` and retry (`extent-io-tree.c`, `set_extent_bit`, `alloc_extent_state_atomic`, `search_again`). Mempools for I/O (`bio.c`, `btrfs_failed_bio_pool`; bios from the block layer's `bio_set`s). | Re-entry is answered by `drop_clean`'s `try_lock` (`rw.rs:344`) and the task's reclaiming mark (`mm.rs`, `heap_may_reclaim`): the equivalent of NOFS, and sound. Spin-locked infallible allocations remain (`rw.rs:793`, `Node::get`'s insert; `rw.rs:520`, the live-node collect; BACKLOG, "infallible allocations under spin locks"). No mempool: every disk read and write allocates a bounce buffer of its size (`src/kernel/src/fs/btrfs.rs:126` and `:157`), a writeback run up to 1 MiB contiguous (`rw.rs:1036`), a commit its node buffer and address list (`commit.rs:349`). | NOFS: no gap. Preallocation: known rows. **I/O with no reserve:** at an empty heap Ferrix can neither read a page in nor write a commit out. Linux's I/O path always makes progress. |
+| L6 | **ENOMEM in write and commit.** Small allocations wait (above); the commit writes extent buffers already in the btree inode's page cache (`transaction.c`, `btrfs_write_and_wait_transaction`), so writing allocates only bios, from mempools. | Any ENOMEM in `commit` aborts (`commit.rs:91`); after the heap's bounded reclaims and kills. | Bounded retry then abort, against an unbounded wait. See W1 for why the answer is a reserve, not an unbounded wait. |
+| L7 | **Dirty metadata under pressure.** Dirty extent buffers are pages of the btree inode, counted in `dirty_metadata_bytes`; past `BTRFS_DIRTY_METADATA_THRESH` (32 MiB, `fs.h`) `disk-io.c`, `__btrfs_btree_balance_dirty`, throttles the writer into writeback, and `extent_io.c`, `btree_writepages`, can write them before the commit; `ctree.c`, `should_cow_block`, COWs again any block with `BTRFS_HEADER_FLAG_WRITTEN`. A written buffer is clean page cache that `disk-io.c`, `btree_release_folio`, gives to reclaim once nothing references it. Clean buffers not referenced by a path are reclaimable at any time. 956a17d9d050 / ae1e766f623f (2024): the extent-map shrinker, made kswapd-only after direct-reclaim contention. | Dirty nodes are kernel heap (`WriteVolume::dirty`) until the commit, up to `COMMIT_THRESHOLD` 32 MiB of nodes (`rw.rs:195`), about twice that in heap, checked before a change of shape (`rw.rs:656`) and at a write (`rw.rs:1102`). Clean nodes are dropped only between operations and only by a reclaim that finds the lock free (`rw.rs:344`; F-99), so a task inside an operation cannot have its own volume's clean nodes back. | Ferrix pins up to ~64 MiB of unreclaimable heap per volume per transaction against a 32 MiB headroom, the mechanism of the 11-08 aborts. The threshold is Linux's number, but Linux's 32 MiB is a throttle on reclaimable page cache, not a cap on pinned heap. |
+| L8 | **Readers keep working.** Readers do not take the transaction; tree locks are per node, commit roots let some searches skip them; a reader never waits for a commit to finish its writeback. | Every read of a page the cache does not hold takes the volume's sleep lock, which a commit holds for its last slice and the commit itself (`rw.rs`, "A writeback lets the lock go between slices"). A writer that allocates while holding it, and the kill it asks for, wait on a victim that may be waiting for the same lock (BACKLOG, MP.3 and ledger 8172). | Under pressure the reader's progress depends on the writer's. Linux's OOM reaper (`mm/oom_kill.c`, `oom_reap_task_mm`) empties a victim's anonymous memory even while it sleeps in the kernel; Ferrix's empties it only once the victim let go of everything else (`src/kernel/src/object/oom.rs`, module text). |
+
+### Bug fixes in Linux's history that match what Ferrix hit
+
+From `git log -- fs/btrfs` since 2019 (174 subjects mention ENOMEM, abort,
+memory, NOFS, NOFAIL, OOM or read-only):
+
+* **ENOMEM aborting the filesystem for optional work**: 828ec765f796,
+  8793ed87b376, 162d053e15fe and a580fb2c3479 (no `BUG_ON` on ENOMEM).
+  Ferrix's equivalent is L2: no classification yet.
+* **The abort's own cleanup allocating into reclaim**: 597441b3436a. Ferrix's
+  reload allocating at the floor is the same class, worse, since it reads
+  the disk (L3).
+* **Allocations under spin locks**: 7dde7a8ab324 and the extent-state
+  preallocation; 905a95f3dd25, 8d54518b5e52 and 4addc1ffd67a (2023-2024)
+  took `GFP_ATOMIC` out by preallocating. Ferrix's `Node::get` and
+  `Dentry::insert_looked_up` (fixed on bugfix/vfs-no-alloc-under-lock) are
+  this class.
+* **Shrinkers in direct reclaim**: ae1e766f623f (spin-lock contention when
+  every allocating task ran the extent-map shrinker; kswapd only since).
+  Ferrix runs `drop_clean` and the page-cache clock in the allocating task
+  (no background reclaim, BACKLOG mem-pressure row).
+* **NOFAIL that loops for ever**: 9f0eac070d23. Linux keeps NOFAIL where no
+  error path exists and takes it out elsewhere: the reason W1 below is a
+  reserve, not a NOFAIL.
+
+### What to do, in order of risk on the N150
+
+The load: 16 GB, Endfield in the world at the floor (`MemFree` 33-460 MB,
+32 MiB watermark), the kernel heap growing in bursts of a transaction's
+dirty nodes. Risk is how likely the gap is to stop play there.
+
+1. **W1, a memory reservation for an edit (high).** What Linux gets from
+   NOFAIL tree nodes, Ferrix should get as `block_rsv` gets disk space:
+   reserve before the first change, never fail inside. `admit` already
+   computes an operation's worst case in nodes; take that many node
+   buffers (and the delayed-refs and path entries they bring) from the
+   heap into a per-volume pool before the edit, where ENOMEM aborts
+   nothing (returned as `ENOMEM`, the transaction intact), and have
+   `load`, COW and the delayed-reference inserts draw from the pool, so an
+   edit's allocations cannot fail. The commit's own worst case is
+   `commit_reserve`, reserved the same way before `settle`. This keeps
+   the kernel slim (no new allocator policy, one pool in the filesystem)
+   and keeps every wait bounded, which an unbounded NOFAIL would not.
+   13 points (core item: requirement, host tests failing each reservation
+   and each draw, control).
+2. **W2, going read-only without memory (high).** Keep what reading the
+   last commit needs beside the running transaction, as Linux keeps
+   `root->commit_root`: each tree's committed root (bytenr, level,
+   generation) and the committed chunk map, updated at every commit with
+   allocations made before the superblock is written (as `prepare_unpin`
+   is). An abort then drops the dirty nodes and switches to it with no
+   allocation and no disk read; `reload_read_only` becomes the fallback
+   for a log replay. 8 points.
+3. **W3, ENOMEM is not EIO (high, small).** While a reload is short of
+   memory (`reload_short`) answer `ENOMEM`, not `EIO`: a page-in then goes
+   to the OOM path (`space.rs:2290`) and is retried or kills, instead of
+   `SIGBUS` killing whatever touched an uncached text page (lode, hyprix,
+   auth on 2026-11-08). It amends L.btrfs.123's statement and criterion,
+   which say the mount answers `EIO` until a later use reloads it. Worth
+   landing before W2, which removes the case. 2 points.
+4. **W4, a reserve for I/O buffers (medium-high).** A per-mount mempool:
+   one bounce buffer for the largest device read and write
+   (`btrfs.rs:126`, `:157`) and one node buffer for the commit, made at
+   mount, used when the heap refuses, waited for when in use as
+   `mempool_alloc` waits -- but with a stated bound: Linux's wait ends
+   because the holder's disk I/O finishes, and Ferrix's disk is a ring-3
+   driver that can stall or restart, so the wait ends in `ENOMEM` at a
+   deadline (the I/O's timeout, about a second at most) and at once for a
+   killed task; the bound is W4's design review's to fix (ledger 8229
+   WD.4). Then a page-in and a commit can always reach the
+   disk. Fold `write_runs`'s 1 MiB run into it (BACKLOG BO.5's row: halve
+   to the reserve's size). The N150's FX-0008 of 131072 bytes at 11:17
+   (BACKLOG, fault-relanding row) has no site yet; a 128 KiB bounce buffer
+   is one candidate. 5 points.
+5. **W5, dirty metadata sized by headroom (medium).** Until dirty nodes
+   are reclaimable, commit when the dirty nodes' heap passes a share of
+   the headroom left, not only at 32 MiB: at the floor that commits
+   sooner and in smaller pieces, which is what Linux's dirty throttling
+   achieves for it. A read of the heap's headroom from the kernel through
+   the existing notice or a callback; no policy in the kernel. 3 points.
+   Writing dirty nodes before the commit with Linux's WRITTEN-flag re-COW
+   is the full answer and a new subsystem; not proposed now.
+6. **W6, classify allocations as needed or helpful (medium).** Audit
+   `ferrix-btrfs-write` for allocations whose failure need not abort (the
+   clean cache's insert in `load` when the node can be used uncached, the
+   commit's address list, lookups that only speed things up) and answer
+   them without the abort, as 828ec765f796 does; record each abort's site
+   (`#[track_caller]` location in `abort_with`) and put it in the notice,
+   as Linux's `function:line`. 5 points.
+7. **W7, reclaim clean nodes from inside an operation (medium-low).** Hold
+   the nodes a walk's path uses (a count, as an extent buffer's reference
+   does) so the clean nodes no path holds can be dropped by a reclaim made
+   from inside the same volume's operation; today the allocating writer
+   cannot have its own volume's clean nodes back (35 MiB `SReclaimable`
+   during play). 5 points.
+8. **Already rows, the same lesson:** the infallible inserts under spin
+   locks (`rw.rs`), the victim's reserves (`ALLOC_OOM`, MP.3), the kill
+   that cannot list the living (ledger 8172, `park/heap-kill-reserve`),
+   background reclaim (kswapd), and reaping a victim that sleeps in the
+   kernel, which belongs to the mem-pressure rows.
+
+Left as they are: the space reservation (L4) is close enough; Ferrix's
+answer to reclaim re-entering the filesystem (try-lock and the reclaiming
+mark) is as good as NOFS for it.
 
 ## The gate
 
