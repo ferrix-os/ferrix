@@ -46,7 +46,7 @@
 //!
 //! `FERRIX_TEST_WATCHDOG_ONLY=<case>,...` (`stopped`, `reset`, `killed`,
 //! `goes-on`, `disabled`, `halted`, `init`, `off`, `service`, `blocked`,
-//! `stall`, `user`) runs those cases alone,
+//! `stall`, `user`, `lode`, `auth`) runs those cases alone,
 //! for a negative control's run; a gate row sets nothing and runs every case.
 
 use std::time::{Duration, Instant};
@@ -149,6 +149,12 @@ pub(crate) fn test_watchdog(args: &Args) -> Result<()> {
         }
         if wants("user") {
             crate::watchdog_init::user(arch, args)?;
+        }
+        if wants("lode") {
+            crate::watchdog_init::lode(arch, args)?;
+        }
+        if wants("auth") {
+            crate::watchdog_init::auth(arch, args)?;
         }
         println!("  {arch}: test-watchdog passed");
     }

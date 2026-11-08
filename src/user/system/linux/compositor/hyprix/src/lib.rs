@@ -67,6 +67,7 @@ pub mod switcher;
 pub mod titlebar;
 pub(crate) mod wait;
 pub mod wallpaper;
+pub mod watchdog;
 pub mod x_owner;
 
 pub use options::{Options, Renderer};

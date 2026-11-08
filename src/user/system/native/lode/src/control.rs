@@ -3,7 +3,7 @@
 //!
 //! Made by lode while it is still root and left root's, mode 0600, so only
 //! root asks; lode also refuses a peer whose uid is not 0. A request is one
-//! line, `SYNC`, `FLUSH`, `ROTATE` or `RELOAD`; lode answers `OK` or `ERR <why>` once
+//! line, `SYNC`, `FLUSH`, `ROTATE`, `RELOAD` or `WEDGE`; lode answers `OK` or `ERR <why>` once
 //! it is done, and closes. A request that does not come within a few
 //! seconds of the connection is dropped, so a client cannot hold lode.
 
@@ -29,6 +29,10 @@ pub(crate) enum Request {
     Rotate,
     /// Read the rules, alerts and events again.
     Reload,
+    /// Stop the service's loop for ever, as a loop stuck in a call would:
+    /// test-watchdog's lode case (`docs/WATCHDOG-STAGES.md` §8). A debug
+    /// build alone carries it out; a release build refuses it.
+    Wedge,
 }
 
 impl Request {
@@ -39,6 +43,7 @@ impl Request {
             Request::Flush => b"FLUSH\n",
             Request::Rotate => b"ROTATE\n",
             Request::Reload => b"RELOAD\n",
+            Request::Wedge => b"WEDGE\n",
         }
     }
 
@@ -49,6 +54,7 @@ impl Request {
             b"FLUSH" => Request::Flush,
             b"ROTATE" => Request::Rotate,
             b"RELOAD" => Request::Reload,
+            b"WEDGE" => Request::Wedge,
             _ => return None,
         })
     }

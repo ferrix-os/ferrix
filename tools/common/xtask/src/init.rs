@@ -722,6 +722,12 @@ pub(crate) const HEADLESS_SIZE: &str = "1920x1200";
 /// half minute nvrm takes to publish it.
 pub(crate) const DISPLAY_WAIT: u32 = 60;
 
+/// `hyprix.service`'s watchdog (`docs/WATCHDOG-STAGES.md` §5.5): hyprix
+/// pings from its loop, which wakes at least every 2.5 s to do so; a loop
+/// that has not turned for 10 s is reported with its threads. Report only:
+/// a restart would end every client's connection (§5.6).
+const HYPRIX_WATCHDOG: &str = "NotifyFd=9\nWatchdogSec=10s\nWatchdogAction=report\n";
+
 /// What a desktop image carries so that init is pid 1 and the compositor a
 /// service of `graphical.target` (landing L10): init and its units, the
 /// compositor at `/bin/hyprix` with `hyprix.service` running it with
@@ -786,7 +792,7 @@ pub(crate) fn desktop_files(
          ExecStart={}\n\
          {home}\
          {}\
-         {restart}\
+         {restart}{HYPRIX_WATCHDOG}\
          StandardOutput=console\n\
          StandardError=console\n",
         command.join(" "),

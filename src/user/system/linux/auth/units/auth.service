@@ -9,6 +9,14 @@ After=auth.socket
 
 [Service]
 Type=simple
+# Watched from its loop (docs/WATCHDOG-STAGES.md §5.5): the loop turns at
+# least once a second, a password's hash takes well under that, and a loop
+# that has not turned for 20 s is stuck: it is aborted, killed and started
+# again, and auth.socket keeps the listener meanwhile. NotifyFd= gives a
+# simple service the pipe its pings go down, above the socket at 3.
+NotifyFd=9
+WatchdogSec=20s
+TimeoutAbortSec=5s
 ExecStart=/sbin/authd
 # The seat channel (docs/AUTH.md §3.7): the session's sessiond opens it to
 # arm the lock that hyprlock's acceptance grants. Init routes it only to a

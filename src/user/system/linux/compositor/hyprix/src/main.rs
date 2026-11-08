@@ -37,6 +37,12 @@ fn main() {
     // And the session's token, which lode trusts a screenshot provider by
     // (docs/LOGGING.md §19): out of the environment before any child.
     let lode = hyprix::lodeshot::adopt();
+    // And init's notify descriptor, for the unit's watchdog
+    // (docs/WATCHDOG-STAGES.md §5.5): out of the environment before any
+    // child, so no client pings for the compositor.
+    if hyprix::watchdog::adopt() {
+        report("hyprix: its loop pings hyprix.service's watchdog");
+    }
     let options = match Options::parse(std::env::args().skip(1)) {
         Ok(options) => Options { lode, ..options },
         Err(message) => {

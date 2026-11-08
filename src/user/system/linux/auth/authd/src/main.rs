@@ -21,6 +21,7 @@ mod accounts;
 mod audit;
 mod engine;
 mod local;
+mod notify;
 mod password;
 mod paths;
 mod phantom;
@@ -118,7 +119,8 @@ fn run() -> Result<(), String> {
     }
     say(&format!("authd: listening on {}", options.socket.display()));
     let mut seat = seat::Seat::offer();
-    server::serve(&listener, &mut engine, seat.as_mut(), &STOP);
+    let mut notify = notify::Notify::from_environment();
+    server::serve(&listener, &mut engine, seat.as_mut(), &STOP, &mut notify);
     say("authd: stopped");
     Ok(())
 }

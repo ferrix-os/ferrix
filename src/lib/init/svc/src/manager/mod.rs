@@ -221,6 +221,14 @@ struct Slot {
     /// This run's `WATCHDOG_USEC=`, which replaces `WatchdogSec=` until the
     /// next start.
     watchdog_interval: Option<core::time::Duration>,
+    /// Under `WatchdogAction=report`: when the miss it reported was due, so
+    /// the next ping can say how long the service did not answer.
+    watchdog_late: Option<Instant>,
+    /// When its last ping came, and the longest gap between two pings said
+    /// so far: a gap past half the interval is said, so the interval can be
+    /// set from what the service really takes.
+    watchdog_pinged: Option<Instant>,
+    watchdog_longest: core::time::Duration,
     main: Option<Pid>,
     control: Option<Pid>,
     /// A spawn asked for and not yet answered.

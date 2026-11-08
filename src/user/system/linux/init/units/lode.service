@@ -13,3 +13,10 @@ ExecStart=/sbin/lode
 Slice=drivers.slice
 Restart=always
 RestartSec=100ms
+# The service watchdog (docs/WATCHDOG-STAGES.md §5.5): lode pings init once
+# a second from its loop, whose waits are bounded (a 250 ms wait for the
+# kernel log, a 5 s fdatasync); a loop that has not turned for 30 s is
+# stuck, and is killed and started again. lode's own pages come back from
+# its store, which a restarted lode takes up.
+WatchdogSec=30s
+TimeoutAbortSec=5s

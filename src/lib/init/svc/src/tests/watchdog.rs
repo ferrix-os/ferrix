@@ -212,3 +212,42 @@ fn a_native_service_is_watched_too() {
     let _ = up(&mut rig, "n.service");
     assert!(missed(&rig.at(1000)));
 }
+
+#[test]
+fn report_only_says_the_miss_once_kills_nothing_and_says_the_answer() {
+    let mut rig = Rig::new(&[(
+        "c.service",
+        "[Service]\nType=notify\nExecStart=/bin/c\nWatchdogSec=2s\nWatchdogAction=report\nRestart=always\n",
+    )]);
+    let _ = up(&mut rig, "c.service");
+    let miss = rig.at(2000);
+    assert!(missed(&miss));
+    assert!(rig.kills(&miss).is_empty(), "nothing is signalled");
+    assert!(Rig::lines(&miss).contains(&String::from(
+        "c.service: WatchdogAction=report: left running"
+    )));
+    assert_eq!(rig.sub("c.service"), "running");
+    assert!(!missed(&rig.at(10_000)), "said once, not again");
+    let answer = ping(&mut rig, "c.service", Ping::Alive);
+    assert!(Rig::lines(&answer).contains(&String::from(
+        "c.service: answers its watchdog again, 8000 ms after it was due"
+    )));
+    assert!(missed(&rig.at(12_000)), "armed again");
+}
+
+#[test]
+fn a_ping_gap_past_half_the_interval_is_said_once_per_new_longest() {
+    let mut rig = Rig::new(&[("w.service", WATCHED)]);
+    let _ = up(&mut rig, "w.service");
+    let mut said = Vec::new();
+    for at in [500, 1000, 2000, 2500, 3700] {
+        rig.now = crate::time::Instant::from_millis(at);
+        said.extend(Rig::lines(&ping(&mut rig, "w.service", Ping::Alive)));
+    }
+    assert_eq!(
+        said,
+        [String::from(
+            "w.service: its watchdog's ping came 1200 ms after the last, past half its interval"
+        )]
+    );
+}

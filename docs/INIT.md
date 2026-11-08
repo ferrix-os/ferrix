@@ -348,7 +348,7 @@ WantedBy=multi-user.target
 | `RestartSec=`, `StartLimitBurst=`, `StartLimitIntervalSec=` | Backoff and the budget (§5.4) |
 | `KillMode=` | `control-group` (the default: every member of the cgroup), `mixed` (the signal to the main process, then `cgroup.kill` for the rest) or `process` |
 | `KillSignal=`, `TimeoutStopSec=` | The polite signal, and how long before `cgroup.kill` |
-| `WatchdogSec=`, `WatchdogSignal=`, `TimeoutAbortSec=` | A `notify` or `native` service's watchdog: `WATCHDOG=1` within the interval while it is up, or `WatchdogSignal=` (`SIGABRT`), `cgroup.kill` after `TimeoutAbortSec=`, and `Restart=` with the result `watchdog` (`docs/WATCHDOG-STAGES.md` §5) |
+| `WatchdogSec=`, `WatchdogSignal=`, `TimeoutAbortSec=`, `WatchdogAction=` | A `notify` or `native` service's watchdog, or any service's that names `NotifyFd=`; `WatchdogAction=report` (Ferrix's) only says a miss: `WATCHDOG=1` within the interval while it is up, or `WatchdogSignal=` (`SIGABRT`), `cgroup.kill` after `TimeoutAbortSec=`, and `Restart=` with the result `watchdog` (`docs/WATCHDOG-STAGES.md` §5) |
 | `Slice=` | Which slice the cgroup goes under; `system.slice` by default |
 | `MemoryMax=`, `MemoryHigh=`, `TasksMax=`, `CPUWeight=`, `CPUQuota=`, `IOWeight=` | The resource limits of §5.5 |
 | `OOMPolicy=` | `stop` (the default), `continue` or `kill`, when the kernel's OOM kill reaches the service |

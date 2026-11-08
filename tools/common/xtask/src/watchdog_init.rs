@@ -21,6 +21,13 @@
 //!   (`kill -STOP 1`), and FX-9008 within the window. The stop shows the
 //!   watchdog was armed and fed all along (the consultant's R-2).
 //!
+//! * *lode*: lode's loop wedged (`lode --wedge-service`, a debug build's):
+//!   `lode.service`'s 30 s watchdog must end it and init start it again, and
+//!   the new lode answer `lode --sync`, with nothing reported;
+//! * *auth*: authd stopped (`SIGSTOP`): `auth.service`'s 20 s watchdog must
+//!   name its threads, abort and kill it, and init start it again, with
+//!   nothing reported.
+//!
 //! Each runs under `ferrix.watchdog=on ferrix.init.watchdog=5`, x86-64.
 
 use std::time::{Duration, Instant};
@@ -46,7 +53,7 @@ const REPORT_AT_LEAST: Duration = Duration::from_millis(3_500);
 const REPORT_AT_MOST: Duration = Duration::from_secs(15);
 
 /// The applets the scripts call, each a link to busybox.
-const APPLETS: [&str; 6] = ["sleep", "mkfifo", "cat", "rm", "cut", "echo"];
+const APPLETS: [&str; 7] = ["sleep", "mkfifo", "cat", "rm", "cut", "echo", "pidof"];
 
 /// The driver: a service that runs `script` on the console.
 fn driver(script: &str) -> Vec<File> {
@@ -447,6 +454,126 @@ fn user_problem(lines: &[String], report_after: Option<Duration>) -> Option<Stri
         )),
         Some(_) => None,
     }
+}
+
+/// The lode case.
+pub(crate) fn lode(arch: Arch, args: &Args) -> Result<()> {
+    let script = "#!/bin/sh\nn=0\nuntil lode --sync > /dev/null 2>&1; do n=$((n+1)); [ $n -gt 60 ] && break; sleep 1; done\necho \"wd-drive: lode answers\"\nlode --wedge-service\necho \"wd-drive: lode wedged\"\nsleep 40\nn=0\nuntil lode --sync > /dev/null 2>&1; do n=$((n+1)); [ $n -gt 30 ] && break; sleep 1; done\n[ $n -le 30 ] && echo \"wd-drive: lode answers again\"\necho \"wd-drive: done\"\nsleep 1000\n";
+    let mut files = driver(script);
+    files.push(crate::lode::enabled());
+    let (image, kernel) = image(arch, args, files, "")?;
+    println!("  {arch}: lode's loop is wedged");
+    let lines = boot(arch, args, &image, &kernel, |watching| {
+        if !until(watching, "wd-drive: lode wedged", PATIENCE)? {
+            return Err(Error::new(format!("{arch}: the driver never wedged lode")));
+        }
+        let _ = watching.read_more(Instant::now() + Duration::from_secs(90), |lines| {
+            lines
+                .iter()
+                .any(|line| line.contains(qemu::PANIC_MARKER) || line.contains("wd-drive: done"))
+        })?;
+        Ok(())
+    })?;
+    restarted_problem(
+        &lines,
+        "lode.service",
+        "30000",
+        "wd-drive: lode wedged",
+        "wd-drive: lode answers again",
+    )
+    .map_or(Ok(()), |problem| {
+        Err(Error::new(format!("{arch}: lode case: {problem}")))
+    })?;
+    println!(
+        "  {arch}: lode's wedged loop was ended by its watchdog, lode started again and answers, and nothing was reported"
+    );
+    Ok(())
+}
+
+/// The auth case.
+pub(crate) fn auth(arch: Arch, args: &Args) -> Result<()> {
+    let script = "#!/bin/sh\nsvc start auth.service\nn=0\nuntil pidof authd > /dev/null; do n=$((n+1)); [ $n -gt 60 ] && break; sleep 1; done\nsleep 2\np=$(pidof authd)\necho \"wd-drive: stopping authd $p\"\nkill -STOP $p\nsleep 40\nq=$(pidof authd)\n[ -n \"$q\" ] && [ \"$q\" != \"$p\" ] && echo \"wd-drive: authd runs again as $q\"\necho \"wd-drive: done\"\nsleep 1000\n";
+    let mut files = driver(script);
+    files.extend(crate::auth::carried(arch, None)?);
+    // The `auth` account authd becomes, which this image has otherwise
+    // none of.
+    for (path, text) in [
+        ("etc/passwd", crate::auth::passwd()),
+        ("etc/group", crate::auth::group()),
+    ] {
+        files.push(File {
+            path: path.to_owned(),
+            mode: 0o644,
+            content: Content::Bytes(text.into_bytes()),
+        });
+    }
+    let (image, kernel) = image(arch, args, files, "")?;
+    println!("  {arch}: authd is stopped");
+    let lines = boot(arch, args, &image, &kernel, |watching| {
+        if !until(watching, "wd-drive: stopping authd", PATIENCE)? {
+            return Err(Error::new(format!(
+                "{arch}: the driver never stopped authd"
+            )));
+        }
+        let _ = watching.read_more(Instant::now() + Duration::from_secs(90), |lines| {
+            lines
+                .iter()
+                .any(|line| line.contains(qemu::PANIC_MARKER) || line.contains("wd-drive: done"))
+        })?;
+        Ok(())
+    })?;
+    restarted_problem(
+        &lines,
+        "auth.service",
+        "20000",
+        "wd-drive: stopping authd",
+        "wd-drive: authd runs again as ",
+    )
+    .map_or(Ok(()), |problem| {
+        Err(Error::new(format!("{arch}: auth case: {problem}")))
+    })?;
+    println!(
+        "  {arch}: the stopped authd was ended by its watchdog and started again, and nothing was reported"
+    );
+    Ok(())
+}
+
+/// Why a case whose service is wedged at `wedged` does not show the
+/// service's watchdog timeout after it, its restart and `again`.
+fn restarted_problem(
+    lines: &[String],
+    unit: &str,
+    limit: &str,
+    wedged: &str,
+    again: &str,
+) -> Option<String> {
+    let name = unit.trim_end_matches(".service");
+    if let Some(report) = lines.iter().find(|line| line.contains(qemu::PANIC_MARKER)) {
+        return Some(format!("a report came: `{}`", report.trim()));
+    }
+    let at = |text: &str| lines.iter().position(|line| line.contains(text));
+    let Some(wedge) = at(wedged) else {
+        return Some(format!("{name} was never wedged"));
+    };
+    let timeout = format!("{unit}: watchdog timeout (limit {limit} ms): ");
+    let Some(missed) = at(&timeout) else {
+        return Some(format!("{name} was never ended by its watchdog"));
+    };
+    if missed < wedge {
+        return Some(format!(
+            "a watchdog timeout of {name} came before it was wedged"
+        ));
+    }
+    if !lines.iter().skip(missed).any(|line| {
+        line.contains(&format!("{unit}: watchdog; restarting at"))
+            || line.contains(&format!("{unit}: active"))
+    }) {
+        return Some(format!("{name} was not started again"));
+    }
+    if at(again).is_none_or(|seen| seen < missed) {
+        return Some(format!("{name} did not answer again: no `{again}`"));
+    }
+    None
 }
 
 #[cfg(test)]

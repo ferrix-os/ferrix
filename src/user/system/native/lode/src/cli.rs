@@ -560,6 +560,8 @@ fn presentation(
         "--flush" => options.ask = Some(crate::control::Request::Flush),
         "--sync" => options.ask = Some(crate::control::Request::Sync),
         "--rotate" => options.ask = Some(crate::control::Request::Rotate),
+        // test-watchdog's lode case: a debug build's service stops its loop.
+        "--wedge-service" => options.ask = Some(crate::control::Request::Wedge),
         "--utc" => options.utc = true,
         "--no-pager" | "-a" | "--all" | "-q" | "--quiet" | "-l" | "--full" | "--no-hostname"
         | "-m" | "--merge" => {}

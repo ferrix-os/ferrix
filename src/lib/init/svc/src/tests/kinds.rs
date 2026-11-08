@@ -445,5 +445,8 @@ fn watchdog_keys_parse_and_need_a_type_that_pings() {
     let (s, warnings) = service("[Service]\nExecStart=/a\nWatchdogSec=3s\n");
     assert_eq!(s.watchdog, Span::Infinity);
     assert_eq!(warnings.len(), 1, "{warnings:?}");
-    assert!(warnings[0].contains("WatchdogSec= needs Type=notify or Type=native"));
+    assert!(warnings[0].contains("WatchdogSec= needs Type=notify, Type=native or NotifyFd="));
+    let (s, warnings) = service("[Service]\nExecStart=/a\nNotifyFd=9\nWatchdogSec=3s\n");
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(s.watchdog, Span::Finite(Duration::from_secs(3)));
 }

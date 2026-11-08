@@ -72,6 +72,20 @@ fn parse_restart(text: &str) -> Result<Restart, ValueError> {
     })
 }
 
+/// `WatchdogAction=`: what a missed watchdog does. systemd has no such key;
+/// Ferrix's compositor needs one, since restarting it ends every client's
+/// connection (`docs/WATCHDOG-STAGES.md` §5.6).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum WatchdogAction {
+    /// `kill`: `WatchdogSignal=`, `cgroup.kill`, then `Restart=`, as
+    /// systemd's watchdog does.
+    #[default]
+    Kill,
+    /// `report`: the miss is said, with the threads, once, and the service
+    /// is left running; the next ping says it answers again.
+    Report,
+}
+
 /// `KillMode=`: who is signalled to stop (§5.2).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum KillMode {
@@ -246,6 +260,9 @@ pub struct Service {
     /// `TimeoutAbortSec=`: from that signal to `cgroup.kill`; `None` is
     /// `TimeoutStopSec=`'s.
     pub timeout_abort: Option<Span>,
+    /// `WatchdogAction=`, Ferrix's own key (`docs/WATCHDOG-STAGES.md` §5.6):
+    /// what a missed ping does.
+    pub watchdog_action: WatchdogAction,
     /// `Slice=`; `None` is `system.slice`.
     pub slice: Option<UnitName>,
     /// The resource keys.
@@ -307,6 +324,7 @@ impl Default for Service {
             watchdog: Span::Infinity,
             watchdog_signal: Signal::ABRT,
             timeout_abort: None,
+            watchdog_action: WatchdogAction::Kill,
             slice: None,
             limits: Limits::default(),
             oom_policy: OomPolicy::Stop,
@@ -331,10 +349,12 @@ impl Default for Service {
 }
 
 impl Service {
-    /// Whether this service's type has a way to ping: a notify descriptor
-    /// or a bootstrap channel.
+    /// Whether this service has a way to ping: a notify descriptor (every
+    /// `notify` service's, or `NotifyFd=` named on another type) or a
+    /// bootstrap channel.
     pub fn can_ping(&self) -> bool {
         matches!(self.service_type, ServiceType::Notify | ServiceType::Native)
+            || self.notify_fd.is_some()
     }
 
     /// `TimeoutAbortSec=`, or `TimeoutStopSec=` where it is not set.
@@ -429,7 +449,7 @@ const EXEC_KEYS: [(&str, Setter<Service>); 6] = [
 ];
 
 /// The keys for how a service runs and ends.
-const RUN_KEYS: [(&str, Setter<Service>); 16] = [
+const RUN_KEYS: [(&str, Setter<Service>); 17] = [
     ("Type", |s, a, w| {
         s.service_type = keys::parsed(a, w, ServiceType::parse).unwrap_or(s.service_type);
     }),
@@ -478,6 +498,16 @@ const RUN_KEYS: [(&str, Setter<Service>); 16] = [
     }),
     ("WatchdogSignal", |s, a, w| {
         s.watchdog_signal = keys::parsed(a, w, value::signal).unwrap_or(s.watchdog_signal);
+    }),
+    ("WatchdogAction", |s, a, w| {
+        let action = keys::parsed(a, w, |text| {
+            Ok::<_, ValueError>(match text {
+                "kill" => WatchdogAction::Kill,
+                "report" => WatchdogAction::Report,
+                _ => return Err(ValueError::Invalid),
+            })
+        });
+        s.watchdog_action = action.unwrap_or(s.watchdog_action);
     }),
     ("TimeoutAbortSec", |s, a, w| {
         if a.value.is_empty() {
@@ -708,7 +738,7 @@ pub(super) fn parse(
         warnings.at(
             assignment,
             String::from(
-                "WatchdogSec= needs Type=notify or Type=native to be pinged; the watchdog is off",
+                "WatchdogSec= needs Type=notify, Type=native or NotifyFd= to be pinged; the watchdog is off",
             ),
         );
         service.watchdog = Span::Infinity;

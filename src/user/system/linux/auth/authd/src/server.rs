@@ -56,10 +56,13 @@ pub(crate) fn serve(
     engine: &mut Engine,
     mut seat: Option<&mut Seat>,
     stop: &AtomicBool,
+    notify: &mut crate::notify::Notify,
 ) {
     let mut connections: Vec<Connection> = Vec::new();
     while !stop.load(Ordering::Relaxed) {
         let now = Instant::now();
+        // The service watchdog's ping, from the loop itself.
+        notify.ping(now);
         for connection in &mut connections {
             flush(connection, now);
         }

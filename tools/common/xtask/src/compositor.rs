@@ -109,6 +109,7 @@ mod tole_demo;
 pub(crate) mod unity;
 mod user_desktop;
 mod walls;
+mod watchdog;
 mod weather;
 pub(crate) mod wine;
 mod yoru;
@@ -799,7 +800,7 @@ fn gates_busybox(arch: Arch) -> Option<String> {
 /// each takes minutes under emulation and there are twenty of them, so a
 /// change to one is otherwise an hour a try.
 type Boot = fn(Arch, &Programs, &Args) -> Result<()>;
-const BOOTS: [(&str, Boot); 72] = [
+const BOOTS: [(&str, Boot); 73] = [
     ("restart", test_driver_restart),
     ("dispatchers", test_dispatchers),
     ("bar", test_bar),
@@ -838,6 +839,7 @@ const BOOTS: [(&str, Boot); 72] = [
     ("desktop", test_desktop),
     ("idle", idle::test_idle),
     ("idle-user", idle::test_idle_user),
+    ("watchdog", watchdog::test_watchdog),
     ("caption", test_caption),
     ("wallpaper", test_wallpaper),
     ("yoru", yoru::test_yoru),

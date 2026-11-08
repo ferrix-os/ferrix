@@ -31,7 +31,7 @@ use ferrix_lode_core::segment::{self, Header};
 use ferrix_lode_core::time::Zone;
 use ferrix_lode_core::{access, units};
 use ferrix_lode_core::{console, kmsg};
-use ferrix_native_abi::directory::{MAX_MESSAGE, Message};
+use ferrix_native_abi::directory::{Kind, MAX_MESSAGE, Message};
 use ferrix_rt::Kernel;
 use ferrix_rt::native::channel::Channel;
 use ferrix_rt::native::{Deadline, Object, Signals};
@@ -64,6 +64,8 @@ const SEGMENT_MAX: usize = 16 * 1024 * 1024;
 const STORE_MAX: u64 = 1 << 30;
 /// The most the volatile store may hold.
 const RUNTIME_MAX: u64 = 64 << 20;
+/// How often the loop pings init's watchdog, in microseconds.
+const PING_US: u64 = 1_000_000;
 /// How long one wait for the kernel log lasts, in milliseconds.
 const WAIT_MS: u64 = 250;
 /// What `lode rotate` writes to the kernel log to ask for a rotation.
@@ -250,6 +252,7 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         alerting,
         identities: alloc::collections::VecDeque::new(),
         quarantine: crate::quarantine::Quarantine::new(quarantine, cpu_service),
+        wedged: false,
     };
     service.serve(channel, restarted)
 }
@@ -278,6 +281,8 @@ struct Service {
     handout: Handout,
     /// What root asks: sync, flush, rotate.
     control: Control,
+    /// Whether root asked `WEDGE`, which a debug build alone carries out.
+    wedged: bool,
     /// The alerts, and what each has counted.
     alerts: Alerts,
     /// Which kinds of event are on (`events.conf`).
@@ -413,6 +418,7 @@ impl Service {
         if restarted {
             self.seed_identities();
         }
+        let mut pinged_us: Option<u64> = None;
         loop {
             let mut batch: Vec<Record> = Vec::new();
             let now = clocks();
@@ -478,6 +484,20 @@ impl Service {
                 self.store.sync_if(true, now.monotonic_us);
                 return Ok(());
             }
+            // From the loop itself, so a loop that stops stops the ping
+            // (`docs/WATCHDOG-STAGES.md` §5.5): once a second at most.
+            if pinged_us.is_none_or(|at| now.monotonic_us.saturating_sub(at) >= PING_US) {
+                ping(channel);
+                pinged_us = Some(now.monotonic_us);
+            }
+            #[cfg(debug_assertions)]
+            if self.wedged {
+                // `WEDGE` (debug builds only): the loop stops here, as a
+                // loop stuck in a call would, for test-watchdog's lode case.
+                loop {
+                    sys::sleep_ms(1000);
+                }
+            }
             let mut stores = alloc::vec![self.store.volatile];
             stores.extend(self.store.persistent);
             self.handout.serve(now.monotonic_us, &stores);
@@ -515,6 +535,11 @@ impl Service {
                     Ok(String::new())
                 }
                 Request::Flush => self.store.flush().map(|()| String::new()),
+                Request::Wedge if cfg!(debug_assertions) => {
+                    self.wedged = true;
+                    Ok(String::new())
+                }
+                Request::Wedge => Err(String::from("only a debug build wedges")),
                 #[cfg(feature = "reload")]
                 Request::Reload => Ok(self.reload(now)),
                 // An image with no settings writer: what lode was started with stands.
@@ -1131,6 +1156,15 @@ fn closed(channel: &Channel<Kernel>) -> bool {
         channel.wait_one(Signals::PEER_CLOSED, Deadline::At(0)),
         Ok(signals) if signals.intersects(Signals::PEER_CLOSED)
     )
+}
+
+/// WATCHDOG, on init's channel: the service watchdog's ping. A write that
+/// fails is no ping, and init's watchdog then says so.
+fn ping(channel: &Channel<Kernel>) {
+    let mut out = [0_u8; MAX_MESSAGE];
+    if let Some(length) = Message::named(Kind::Watchdog, "", "").encode(&mut out) {
+        let _ = channel.write(out.get(..length).unwrap_or_default());
+    }
 }
 
 /// READY, on init's channel (`Type=native`).

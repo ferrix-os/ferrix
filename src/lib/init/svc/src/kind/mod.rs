@@ -37,7 +37,8 @@ use core::fmt;
 pub use mount::Mount;
 pub use sandbox::{FilterAction, FilterRule, ProtectSystem, Sandbox, SystemCallFilter};
 pub use service::{
-    Input, Kill, KillMode, OomPolicy, Output, Restart, Service, ServiceType, WorkingDirectory,
+    Input, Kill, KillMode, OomPolicy, Output, Restart, Service, ServiceType, WatchdogAction,
+    WorkingDirectory,
 };
 pub use socket::{Listen, Socket};
 

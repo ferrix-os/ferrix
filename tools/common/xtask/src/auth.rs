@@ -395,11 +395,11 @@ pub(crate) fn seed(account: &str, password: &str) -> Result<File> {
 }
 
 /// The test's accounts: root, `ferrix`, and `auth`.
-fn passwd() -> String {
+pub(crate) fn passwd() -> String {
     format!("root:x:0:0:root:/:/bin/sh\nferrix:x:1000:1000:ferrix:/:/bin/sh\n{PASSWD_LINE}")
 }
 
-fn group() -> String {
+pub(crate) fn group() -> String {
     format!("root:x:0:\nferrix:x:1000:\n{GROUP_LINE}")
 }
 

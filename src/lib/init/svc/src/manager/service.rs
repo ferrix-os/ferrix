@@ -24,7 +24,7 @@ use crate::event::{
     UnitId, Whom,
 };
 use crate::exec::Command;
-use crate::kind::{Config, KillMode, OomPolicy, Service, ServiceType};
+use crate::kind::{Config, KillMode, OomPolicy, Service, ServiceType, WatchdogAction};
 use crate::restart::{Decision, Ended};
 use crate::value::{Signal, Span};
 
@@ -128,6 +128,8 @@ impl Manager {
         slot.control = None;
         slot.watchdog = None;
         slot.watchdog_interval = None;
+        slot.watchdog_late = None;
+        slot.watchdog_pinged = None;
         if !allowed {
             slot.result = Some(Ended::StartLimitHit);
             let line = format!("{}: start limit hit, not starting", slot.name);
@@ -240,7 +242,21 @@ impl Manager {
             .slot(unit)
             .is_some_and(|slot| matches!(slot.sub, Sub::StartPost | Sub::Running | Sub::Reload));
         match ping {
-            Ping::Alive if up => self.arm_watchdog(unit, &service),
+            Ping::Alive if up => {
+                let late = self
+                    .slot_mut(unit)
+                    .and_then(|slot| slot.watchdog_late.take());
+                if let Some(due) = late {
+                    let line = format!(
+                        "{}: answers its watchdog again, {} ms after it was due",
+                        self.display(unit),
+                        self.now.saturating_since(due).as_millis()
+                    );
+                    self.log(Some(unit), line);
+                }
+                self.measure_ping(unit, &service);
+                self.arm_watchdog(unit, &service);
+            }
             Ping::Alive => {}
             Ping::Trigger if up => self.watchdog_missed(unit, true),
             Ping::Trigger => {}
@@ -260,6 +276,33 @@ impl Manager {
                 }
             }
         }
+    }
+
+    /// Note a ping's gap from the last; say a new longest past half the
+    /// interval (`docs/WATCHDOG-STAGES.md` §5.5: the intervals are set from
+    /// these).
+    fn measure_ping(&mut self, unit: UnitId, service: &Service) {
+        let now = self.now;
+        let half = self
+            .watchdog_interval(unit, service)
+            .map_or(Duration::MAX, |interval| interval / 2);
+        let Some(slot) = self.slot_mut(unit) else {
+            return;
+        };
+        let gap = slot
+            .watchdog_pinged
+            .replace(now)
+            .map(|last| now.saturating_since(last));
+        let Some(gap) = gap.filter(|gap| *gap > half && *gap > slot.watchdog_longest) else {
+            return;
+        };
+        slot.watchdog_longest = gap;
+        let line = format!(
+            "{}: its watchdog's ping came {} ms after the last, past half its interval",
+            self.display(unit),
+            gap.as_millis()
+        );
+        self.log(Some(unit), line);
     }
 
     /// A service's watchdog ran out, or it asked with `WATCHDOG=trigger`:
@@ -292,6 +335,20 @@ impl Manager {
         };
         self.log(Some(unit), line);
         self.emit(Action::WatchdogMissed { unit, main, limit });
+        if service.watchdog_action == WatchdogAction::Report {
+            // Said once, and left running: the next ping says it answers
+            // again, and re-arms (`docs/WATCHDOG-STAGES.md` §5.6).
+            let now = self.now;
+            if let Some(slot) = self.slot_mut(unit) {
+                slot.watchdog_late = Some(now);
+            }
+            let line = format!(
+                "{}: WatchdogAction=report: left running",
+                self.display(unit)
+            );
+            self.log(Some(unit), line);
+            return;
+        }
         self.reloaded(unit, OpResult::Failed);
         self.record(unit, Ended::Watchdog);
         self.set_state(unit, ActiveState::Deactivating, Sub::StopWatchdog);

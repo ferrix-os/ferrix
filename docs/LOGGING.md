@@ -2494,6 +2494,7 @@ architectures.
 | `--disk-usage`, `--vacuum-size/-time/-files` | built | journalctl's sentences and sizes (`FORMAT_BYTES`); a vacuum is recorded in the log | 0 |
 | `--rotate`, `--verify` | built | `lode rotate`, `lode verify` | 0 |
 | `--flush`, `--sync`, `--rotate` | built | the control socket `/run/lode/control` (`test-log` "jctl admin" and "flush" rows) | 0 |
+| `--wedge-service` (Ferrix's) | built, debug builds only | `WEDGE` on the control socket stops the service's loop, so its watchdog ends it (`docs/WATCHDOG-STAGES.md` §5.5; `test-watchdog`'s *lode* case); a release build refuses it | 0 |
 | `--relinquish-var` | missing | | 0.25 |
 | `--setup-keys`, `Seal=` (forward-secure sealing) | missing | the CRC catches damage, not tampering | 3 |
 | `--namespace`, `LogNamespace=`, `--list-namespaces` | missing | | 2 |

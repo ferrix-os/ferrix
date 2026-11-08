@@ -478,7 +478,7 @@ struct Gated {
 /// names stays open until the fork has its copy.
 fn gated(
     mut command: Command,
-    moves: [(i32, i32); 3],
+    moves: [(i32, i32); 4],
     ids: (u32, u32, Vec<u32>),
     keep: Vec<OwnedFd>,
 ) -> Result<Gated, String> {
@@ -560,7 +560,7 @@ fn start(
                 .env("PATH", "/usr/bin:/bin")
                 .env("XDG_RUNTIME_DIR", runtime)
                 .envs(bus.env.iter().map(|(name, value)| (name, value)));
-            let moves = [(write.as_raw_fd(), bus::ADDRESS_FD), none, none];
+            let moves = [(write.as_raw_fd(), bus::ADDRESS_FD), none, none, none];
             let gated = gated(command, moves, ids.clone(), vec![write])?;
             let pid = gate::read_pid(&gated.told);
             Some((gated, pid, read))
@@ -598,10 +598,19 @@ fn start(
     };
     #[cfg(not(feature = "settings-prompt"))]
     let prompt_move = (-1, -1);
+    // init's notify pipe (`NotifyFd=`), close-on-exec in this process so the
+    // bus does not get it, put back at its place for the compositor alone,
+    // whose loop pings the unit's watchdog (docs/WATCHDOG-STAGES.md §5.5).
+    let notify_move = NOTIFY
+        .get()
+        .copied()
+        .flatten()
+        .map_or((-1, -1), |fd| (fd, fd));
     let moves = [
         (channel.as_raw_fd(), compositor_seat::CHANNEL_FD),
         (lock.as_raw_fd(), LOCK_FD),
         prompt_move,
+        notify_move,
     ];
     let mut keep = vec![channel, lock];
     keep.extend(prompt);
@@ -686,11 +695,28 @@ fn start(
     }
 }
 
+/// [`notify_fd`]'s answer, taken first thing in `main`.
+static NOTIFY: std::sync::OnceLock<Option<i32>> = std::sync::OnceLock::new();
+
+/// init's notify descriptor (`NOTIFY_FD`), if init gave one: made
+/// close-on-exec, so only the compositor gets it, by its move.
+fn notify_fd() -> Option<i32> {
+    let fd = std::env::var("NOTIFY_FD")
+        .ok()?
+        .parse::<i32>()
+        .ok()
+        .filter(|fd| (6..64).contains(fd))?;
+    // SAFETY: fcntl on a descriptor number with constants; one that is not
+    // open answers EBADF.
+    let set = unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
+    (set == 0).then_some(fd)
+}
+
 /// In the child, before `exec`: each of `moves`' descriptors put at its
 /// place, not close-on-exec (a place of -1 is no move), then the account's
 /// groups, gid and uid, in that order, checked.
 fn become_account(
-    moves: [(i32, i32); 3],
+    moves: [(i32, i32); 4],
     (uid, gid, groups): &(u32, u32, Vec<u32>),
 ) -> std::io::Result<()> {
     let check = |result: libc::c_int| {
@@ -700,13 +726,14 @@ fn become_account(
             Ok(result)
         }
     };
-    // Each first above 5, so that putting one at 3, 4 or 5 cannot close
-    // another where it was; `dup2` then gives copies without close-on-exec.
-    let mut high = [-1; 3];
+    // Each first above the places (3, 4, 5 and init's notify descriptor,
+    // below 64), so that putting one at its place cannot close another
+    // where it was; `dup2` then gives copies without close-on-exec.
+    let mut high = [-1; 4];
     for (slot, (from, to)) in high.iter_mut().zip(moves) {
         if to >= 0 {
             // SAFETY: fcntl on a descriptor this process holds, with constants.
-            *slot = check(unsafe { libc::fcntl(from, libc::F_DUPFD, 6) })?;
+            *slot = check(unsafe { libc::fcntl(from, libc::F_DUPFD, 64) })?;
         }
     }
     for (from, (_, to)) in high.into_iter().zip(moves) {
@@ -1018,6 +1045,8 @@ fn wait_any(fds: [Option<i32>; 6], left: Duration) -> [bool; 6] {
 }
 
 fn main() -> ExitCode {
+    // First, before any child: init's notify descriptor close-on-exec.
+    let _ = NOTIFY.set(notify_fd());
     let args: Vec<String> = std::env::args().skip(1).collect();
     match run(&args) {
         Ok(code) => ExitCode::from(u8::try_from(code).unwrap_or(1)),

@@ -543,19 +543,53 @@ lock the hung program holds.
 
 ### 5.5 Who gets one
 
-hyprix, lode, auth and the GPU driver are the services whose hang every
-program feels (`ROBUSTNESS.md` §5.3's stage 0). Each needs its owner to
-ping from its work loop, so each is its own landing by its owner:
+hyprix, lode and auth are the services whose hang every program feels
+(`ROBUSTNESS.md` §5.3's stage 0). Since 2026-11-08 (the customer: "Have
+lode, auth and the compositor actually use the new watchdog") each pings
+from its own work loop, never a timer or a thread, so a loop that stops
+stops the ping:
 
-* lode (native): a WATCHDOG on its channel from its main loop;
-* hyprix: `WATCHDOG=1` from the frame loop, which also turns when idle;
-* auth: from its request loop;
-* the GPU driver is devmgr's (T0 driver restart, `docs/BACKLOG.md`), so its
-  watchdog is devmgr's heartbeat, not init's, and is out of this
-  document.
+| Service | Ping | Interval | On a miss | Why that interval |
+|---|---|---|---|---|
+| `lode.service` (native) | WATCHDOG (kind 7) on its channel, once a second, after `closed(channel)` in `serve`'s loop (`src/user/system/native/lode/src/serve.rs`) | `WatchdogSec=30s`, `TimeoutAbortSec=5s` | killed (its job), `Restart=always` | the loop's waits are bounded: 250 ms for the kernel log, 5 s for `fdatasync` (`SYNC_US`) |
+| `auth.service` | `WATCHDOG=1` at the top of `server::serve`'s loop, every quarter of `WATCHDOG_USEC` (`authd/src/notify.rs`) | `WatchdogSec=20s`, `TimeoutAbortSec=5s` | `SIGABRT`, killed, `Restart=on-failure`; `auth.socket` keeps the listener | the loop's `poll` wakes at least once a second (`TICK`); one password's hash is the longest step |
+| `hyprix.service` | `WATCHDOG=1` in the compositor's wait, every quarter of `WATCHDOG_USEC`, the wait capped at that (`hyprix/src/watchdog.rs`) | `WatchdogSec=10s` | **reported only** (`WatchdogAction=report`, §5.6) | a frame is milliseconds; 10 s is a stuck loop |
 
-This landing gives the mechanism and a test service; it sets no
-`WatchdogSec=` in a shipped unit.
+The services are `Type=simple` (auth, hyprix) or `Type=native` (lode), so
+their start is unchanged. A simple service gets a notify pipe when its unit
+names `NotifyFd=` (init's `spawn.rs`; `READY=1` means nothing to it), and
+`WatchdogSec=` is accepted for it (`Service::can_ping`). authd and hyprix
+take `NOTIFY_FD` and `WATCHDOG_USEC` from the environment; hyprix removes
+both and makes the descriptor close-on-exec before any thread or child, so
+no client can ping for it. Under a session user, `sessiond` is the unit's
+main process: it makes the descriptor close-on-exec first thing, so the
+session bus does not get it, and moves it back to its place for the
+compositor alone (`sessiond/src/main.rs`, `become_account`'s fourth move).
+That path is not booted by a gate yet: `test-compositor`'s boots run
+without a session user.
+
+**Measuring the intervals.** The manager says a ping whose gap from the
+last is past half the interval, once per new longest
+(`<unit>: its watchdog's ping came N ms after the last, past half its
+interval`), so a box's log shows how close a real load comes. None of the
+gate rows of this landing said one.
+
+The GPU driver is devmgr's (T0 driver restart, `docs/BACKLOG.md`), so its
+watchdog is devmgr's heartbeat, not init's, and is out of this document.
+
+### 5.6 Report only: the compositor
+
+Restarting hyprix ends every client's Wayland connection, and sessiond
+ends the session with its compositor (`sessiond/src/main.rs`'s module
+comment): a restart loses the desktop. Until a compositor restart keeps its
+clients, `hyprix.service` is `WatchdogAction=report`, Ferrix's own key
+(systemd has none): at a miss the manager says the timeout with the
+threads, once, then `<unit>: WatchdogAction=report: left running`, and
+signals nothing; the next ping says `<unit>: answers its watchdog again, N
+ms after it was due` and arms the watchdog again. `WatchdogAction=kill`, the
+default, is systemd's behaviour. A stuck compositor is then the person's
+to see and the report's to explain, and hyprix's own "not responding" for
+clients (§3, 3 and 4) is still to do.
 
 ## 6. Stage 1: the pre-timeout hang dump (R4 stage 1, kernel, core)
 
@@ -657,6 +691,15 @@ a native service watched.
 | W3b *stall* | as W3 under `ferrix.init.watchdog.stall=15`, never unwedged | the stall lines, "no longer fed", then FX-9008 naming init 3.5 to 15 s later (E5) | the bound never acted on: "never left unfed" |
 | W2+W4 *user* | a spinner and a FIFO reader blocked in `read` for 20 s, then `kill -STOP 1` | no report for the 20 s, the spinner's CPU time grown, the reader in `read`, then FX-9008 3.5 to 15 s after the stop (R-2's proof the watchdog was armed and fed; E6) | n/a: a guard row (R-2, E8) |
 
+Three cases for the shipped services, each with a control
+(`docs/WATCHDOG-STAGES.md` §5.5):
+
+| # | Case | Passes when | Control |
+|---|---|---|---|
+| *lode* | `lode --wedge-service` (a debug build's `WEDGE` on lode's control socket stops its loop) | `lode.service: watchdog timeout (limit 30000 ms)` with lode's thread, lode started again and answering `lode --sync`, no report | `WatchdogSec=` removed from `lode.service`: "lode was never ended by its watchdog" |
+| *auth* | `kill -STOP` of authd | `auth.service: watchdog timeout (limit 20000 ms)` with its thread, authd started again under a new pid, no report | `WatchdogSec=` removed from `auth.service`: "auth was never ended by its watchdog" |
+| `test-compositor --boot watchdog` | hyprix stopped for 20 s by a script it started, then continued | the timeout with hyprix's threads, "left running", "answers its watchdog again", no stop or restart of the unit, no kernel stop | `WatchdogSec=` 0 in xtask's `HYPRIX_WATCHDOG`: "never reported by its watchdog" |
+
 W5 moved to the stage 1 review (E7). A boot case for a native service's
 WATCHDOG on its channel is owed: the host test covers the state machine,
 and lode, the first native service to ping, brings the program (§5.5).
@@ -693,6 +736,12 @@ residency citation, the feeder's start failure said, the native case in
 BACKLOG, the rows and the three controls through `gate.sh`, coverage
 carried, the commit citing both entries, this section). Its follow-up on
 2d555628b, ledger 8464: **OK**, WC.1-WC.8 met, may land.
+
+2026-11-08, feature/service-watchdog-pings: lode, auth and hyprix ping
+their watchdogs from their loops (§5.5), hyprix report-only (§5.6),
+with the *lode*, *auth* and compositor *watchdog* cases and their controls
+(§8). Outside the item (ferrix-svc, init, lode, authd, hyprix, sessiond,
+xtask), so no review is owed unless the consultant classifies otherwise.
 
 Steps 1 and 2 (§4, §5) are built on this branch, with W1 to W4 passing on
 x86-64 KVM and case 7 on AArch64 and ARMv7-A `--smp 2`. Owed: test-watchdog's

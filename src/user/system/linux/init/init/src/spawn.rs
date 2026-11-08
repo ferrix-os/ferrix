@@ -259,6 +259,19 @@ pub(crate) fn prepare(
             let _ = environment.insert("NOTIFY_FD".to_owned(), fd.to_string());
             Some(fd)
         }
+        // Any other type with `NotifyFd=` named: a pipe for its watchdog's
+        // pings, its `READY=1` meaning nothing (docs/WATCHDOG-STAGES.md §5.1).
+        _ if spec.notify_fd.is_some() => {
+            let fd = spec.notify_fd.unwrap_or(3);
+            let fd = libc::c_int::try_from(fd)
+                .ok()
+                .filter(|fd| (3..64).contains(fd))
+                .ok_or_else(|| {
+                    Unprepared::new(libc::EINVAL, format!("NotifyFd={fd} is not from 3 to 63"))
+                })?;
+            let _ = environment.insert("NOTIFY_FD".to_owned(), fd.to_string());
+            Some(fd)
+        }
         _ => None,
     };
     let sockets = passed.sockets.len();

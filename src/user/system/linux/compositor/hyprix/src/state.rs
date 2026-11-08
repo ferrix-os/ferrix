@@ -2855,7 +2855,14 @@ impl<'r> Compositor<'r> {
     /// that: wait for one of them, or for the next frame, idle, or test
     /// timer.
     fn wait(&mut self, animating: bool) -> Result<(), String> {
-        let timeout = self.timeout(animating);
+        // The service watchdog's ping, from the loop itself; and no sleep
+        // longer than its period (crate::watchdog).
+        crate::watchdog::ping(Instant::now());
+        let timeout = match (self.timeout(animating), crate::watchdog::period()) {
+            (Some(timeout), Some(period)) => Some(timeout.min(period)),
+            (None, period) => period,
+            (timeout, None) => timeout,
+        };
         self.look(timeout)
     }
 
