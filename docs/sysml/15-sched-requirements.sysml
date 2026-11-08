@@ -579,7 +579,7 @@ package FerrixSchedRequirements {
                 the fast path's trips through Direct::switch (the counts line).";
             attribute :>> parent = "H.SCHED.13";
             attribute :>> unit = ("sched::switch_chosen", "sched::direct::Direct::switch",
-                "sched::require_preemption_on");
+                "sched::require_preemption_on", "sched::switched_with_preemption_held");
         }
         requirement <'L.sched.58'> theAssertsStopTheMachine : ItemLowLevel {
             attribute :>> statement = "Direct::hand_over shall stop the machine with

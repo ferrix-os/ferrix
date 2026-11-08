@@ -158,7 +158,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `sched/direct.rs` | `core` | 36 | - | - | 36 | 111, 119, 134, 169-171, 175-176, 211, 214-216, 223, 238, 244, 248, 250, 271, 306, 314, 316, 327-328, 330-331, 336-338, 340, 342, 347, 350-351, 364-365, 373 |
+| `sched/direct.rs` | `core` | 36 | - | - | 36 | 111, 119, 134, 169-171, 175-176, 211, 214-216, 223, 238, 244, 248, 250, 271, 306, 314, 316, 327, 330, 332-333, 338-340, 342, 344, 349, 352-353, 366-367, 375 |
 | `sched/mod.rs` | `core` | 21 | 2 | 1 | 1 | 1653 |
 | `sched/queue.rs` | `core` | 21 | 0 | 0 | 0 | - |
 | `sched/wait.rs` | `core` | 15 | 0 | 0 | 0 | - |

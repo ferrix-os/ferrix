@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "e8c2b4540c6f64763a7ea49a282e98406a7daf1043901d53faf5eebd04445953",
+  "digest": "9391435da606eaa7bf55746355d12a32ec68f044f804e4f4e4fd0be422f45a2d",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -49238,7 +49238,7 @@
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::theTailIsChooseNexts",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"sched::switch_chosen\", \"sched::direct::Direct::switch\", \"sched::require_preemption_on\")",
+                  "value": "(\"sched::switch_chosen\", \"sched::direct::Direct::switch\", \"sched::require_preemption_on\", \"sched::switched_with_preemption_held\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
                     "line": 582
