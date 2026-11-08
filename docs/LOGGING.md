@@ -1815,6 +1815,17 @@ driver (§17) is still to come; this is its fallback made exact.
   connection and TLS handshake to the collector per request (`send`), a
   request per batch or blob. A kept-alive connection, and fewer, larger
   requests while the machine is loaded, are the levers left.
+* Backlog for the lode owner (box-watchdog, 2026-11-08): on the N150 box
+  `lode pstore-fetch` says "no disk holds FERRIX/LASTKERNEL.TXT" on every
+  boot since at least 2026-11-07 21:53, run by hand as root too, while the
+  loader writes the file: the box's ESP (`/dev/vda1`, in `/proc/partitions`
+  with `vda` and `vda2`) holds `FERRIX/LASTKERNEL.TXT` and `.PRV` (read with
+  mtools on the box, 2026-11-08 02:10; the hang-3 panic report was in it).
+  So `pstore.rs`'s GPT or FAT reading refuses the box's disk without a
+  word: `read()` drops `Volume::open`'s and `esps`' errors. Say why per
+  disk, then fix the refusal. Until then nothing of a box panic reaches
+  `lode -b -1` or the uploader; the event-log partition (`ferrix-events`,
+  sda3 since 2026-11-08) keeps the report itself.
 
 ### Compression, as built (§8.2)
 

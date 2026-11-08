@@ -231,21 +231,29 @@ package FerrixConsoleRequirements {
             attribute :>> statement = "write_panicking shall try the port's lock at
                 most 10,000,000 times and then send the line straight to the port
                 without it, recorded in the kernel log if asked, leaving what was
-                queued in the ring.";
-            attribute :>> criterion = "A report written while another context holds
-                the port's lock for good reaches the port whole after at most
-                10,000,000 attempts, and is in the kernel log.";
+                queued in the ring; once one such wait has failed during a report it
+                shall not try the lock again for the rest of that report. (A holder
+                still alive then has its lines interleaved with the report's.)";
+            attribute :>> criterion = "Under the check-only ferrix.check.panic=held,
+                the first report's processor takes the port's lock for good and the
+                report still reaches its reset line within 5 s of its first line in
+                test-postmortem's held-lock case (491 ms under KVM), and exceeds it
+                with PORT_ABANDONED never set (gate.sh control). By inspection:
+                with_port_panicking returns at once while PORT_ABANDONED is set,
+                which only a failed wait during a report sets.";
             attribute :>> parent = "H.FAIL.4";
             attribute :>> unit = ("console::write_panicking",
-                "console::Unlocked::write_str");
+                "console::with_port_panicking", "console::Unlocked::write_str");
         }
         requirement <'L.console.16'> drainInAReportIsBounded : ItemLowLevel {
             attribute :>> statement = "During a failure report, drain shall try the
-                port's lock at most 10,000,000 times, leave the ring as it is if it
-                never gets it, and wait for the port either way.";
+                port's lock at most 10,000,000 times, and not at all once a wait of
+                the report has failed, leave the ring as it is if it never gets it,
+                and wait for the port either way.";
             attribute :>> criterion = "drain called during a report while another
                 context holds the port's lock for good returns after at most
-                10,000,000 attempts, having waited for the port to empty.";
+                10,000,000 attempts, and after none once one has failed, having
+                waited for the port to empty.";
             attribute :>> parent = "H.FAIL.4";
             attribute :>> unit = "console::drain";
         }
@@ -876,25 +884,30 @@ package FerrixConsoleRequirements {
             attribute :>> statement = "wait_then_reset shall wait 10 seconds on the
                 free-running counter, reading nothing but counter_hz and counter_now,
                 taking no lock and allocating nothing, wait not at all when the rate
-                is 0, and then call arch::reset.";
+                is 0, end the wait early once the counter has read the same
+                50,000,000 times in a row, and then call arch::reset.";
             attribute :>> criterion = "In test-postmortem's reset case the loader's
                 banner comes again at least 9.5 s and at most 60 s after the reset
-                line. By inspection: the function's body is the counter loop and
-                the reset.";
+                line, so the stuck-counter exit never cuts a running wait short. By
+                inspection: the function's body is the counter loop (`waited`) and
+                the reset; no emulator stops its counter.";
             attribute :>> parent = "H.FAIL.5";
             attribute :>> unit = "panic::reset::wait_then_reset";
         }
         requirement <'L.panic.4'> aFaultInTheScreenStillResets : ItemLowLevel {
-            attribute :>> statement = "When armed and the reset announced, abridged
-                on the processor that announced it shall go on to wait_then_reset;
-                on any other processor it shall halt. (On x86-64 a fault taken before
-                the kernel's GS base is installed reads another register value and
-                may halt: the fail-safe direction.)";
-            attribute :>> criterion = "A fault forced inside screen::draw under
-                ferrix.panic=reset still ends in the reset in test-postmortem's
-                reset case, and fails it with abridged's reset removed (gate.sh
-                control, the commit names both runs). By inspection: resetting_here
-                compares this processor's per-CPU register with the announcer's.";
+            attribute :>> statement = "When armed, abridged on the processor
+                begin_report recorded for the first report shall say the reset line
+                if the first report had not, write the pstore region back and go on
+                to wait_then_reset; on any other processor it shall halt. (On x86-64
+                a fault taken before the kernel's GS base is installed reads another
+                register value and may halt: the fail-safe direction.)";
+            attribute :>> criterion = "Under ferrix.panic=reset with the check-only
+                ferrix.check.panic=early, a fault forced inside the first report
+                before its reset line ends in the reset line, the reset and the
+                loader again in test-postmortem's early case, and halts with
+                resetting_here back on the announce (gate.sh control). By
+                inspection: resetting_here compares this processor's per-CPU
+                register with the one begin_report recorded.";
             attribute :>> parent = "H.FAIL.5";
             attribute :>> unit = ("panic::abridged", "panic::reset::resetting_here");
         }

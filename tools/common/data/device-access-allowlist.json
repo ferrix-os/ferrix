@@ -24,7 +24,7 @@
     "is here to catch."
   ],
 
-  "max_register_sites": 47,
+  "max_register_sites": 50,
   "//max_register_sites": [
     "The cap that binds. Register access is a fixed cost here: a console per",
     "architecture, the x86 port primitives and their few users, the MMIO",
@@ -78,8 +78,8 @@
     {
       "file": "src/kernel/src/arch/x86_64/mod.rs",
       "kind": "register",
-      "max_sites": 7,
-      "reason": "The keyboard controller's reset pulse, the last resort when a triple fault is the alternative, and the 0x80 post code used as an I/O delay. Since 2026-10-29 the ACPI S5 power-off (L.x86_64.213, ledger 4704): PM1's control blocks read and written once each through one closure, and SMI_CMD's handoff."
+      "max_sites": 10,
+      "reason": "The keyboard controller's reset pulse, the last resort when a triple fault is the alternative, and the 0x80 post code used as an I/O delay. Since 2026-10-29 the ACPI S5 power-off (L.x86_64.213, ledger 4704): PM1's control blocks read and written once each through one closure, and SMI_CMD's handoff. Since 2026-11-08 (L.x86_64.286, ledger 7973 PR.5): reset's one read of the 8042's status to skip a controller that is absent, and its two writes of 0xCF9 before the triple fault."
     },
     {
       "file": "src/kernel/src/arch/x86_64/console.rs",

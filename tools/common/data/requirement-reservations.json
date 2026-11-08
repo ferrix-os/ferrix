@@ -261,13 +261,6 @@
       "branch": "feature/mk-boot-time",
       "date": "2026-11-05",
       "purpose": "Per-check frame accounting (ledger 7191 K1-K11): attribution by tag, netting and closure, the latch, the cross free."
-    },
-    {
-      "ids": ["L.x86_64.286"],
-      "owner": "box-watchdog",
-      "branch": "bugfix/panic-reset-unconditional",
-      "date": "2026-11-08",
-      "purpose": "arch::x86_64::reset skips the 8042's pulses when its status port reads all ones and writes 0xCF9 (0x02, then 0x06) before the triple fault (the consultant's ledger 7973 PR.2)."
     }
   ]
 }

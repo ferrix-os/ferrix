@@ -1896,7 +1896,15 @@ Each stop adds one atomic update of the stop word before its write-back
 a second processor repeats, at most once per such stop; the first report adds
 one store of the panic's word as it begins.
 Under `ferrix.panic=reset` (H.FAIL.5) the panic path's bound gains 10 s on
-the counter, then `arch::reset`'s bounded tries.
+the counter, then `arch::reset`'s bounded tries. Since 2026-11-08 (ledger
+7973): the 10 s wait ends early once the counter has read the same 50,000,000
+times (`L.panic.3`); a report waits out one failed bound of 10,000,000 tries of
+the console port's lock in all, not one per write, and none after it
+(`L.console.15`, `L.console.16`); an abridged report on the first report's own
+processor adds one write-back of the region and the reset line before the wait
+(`L.panic.4`); and on x86-64 `arch::reset` skips the 8042's ten pulses when its
+status reads 0xFF and adds two 0xCF9 writes and about 50 ms before the triple
+fault (`L.x86_64.286`).
 The mirror itself (`L.console.42`) is the log's own lock-free record, once
 more per byte: a store and a compare-and-exchange on the region's count.
 

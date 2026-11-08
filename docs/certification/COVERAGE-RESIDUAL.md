@@ -8,9 +8,9 @@ The statements in the certified item that the measured suite did not reach, on e
 
 | Architecture | Profile | Unreached | Argued | Hardware absent | Needs a test |
 |---|---|---:|---:|---:|---:|
-| x86_64 | coverage | 1914 | 399 | 271 | **1244** |
-| aarch64 | debug | 629 | 310 | 157 | **162** |
-| armv7a | debug | 974 | 413 | 346 | **215** |
+| x86_64 | coverage | 1910 | 395 | 271 | **1244** |
+| aarch64 | debug | 627 | 308 | 157 | **162** |
+| armv7a | debug | 972 | 411 | 346 | **215** |
 
 *Argued* is the first four categories below; *hardware absent* is a statement about which machine was measured rather than an argument; *needs a test* is the gap.
 
@@ -18,12 +18,12 @@ The statements in the certified item that the measured suite did not reach, on e
 
 ## x86_64
 
-**1914** unreached statements, coverage profile.
+**1910** unreached statements, coverage profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
 | Unreachable on the measured architecture | 186 | 10% |
-| Reached only when the kernel is stopping | 144 | 8% |
+| Reached only when the kernel is stopping | 140 | 7% |
 | Reached only when something has already failed | 64 | 3% |
 | Run, and credited to another line | 5 | 0% |
 | Hardware the measured machine does not have | 271 | 14% |
@@ -42,7 +42,7 @@ Justified. These statements belong to another architecture or another board, and
 | 1 | `item` | `init.rs` |
 | 1 | `item` | `power.rs` |
 
-### x86_64: Reached only when the kernel is stopping — 144 statements
+### x86_64: Reached only when the kernel is stopping — 140 statements
 
 Justified. The panic report, its catalogue and the backtrace walker run when the kernel has already decided to stop. Exercising them means crashing deliberately, which only `test-shell`'s `ferrix.onexit=panic` boot does -- and a passing run that reached the rest would be a failing run.
 
@@ -53,9 +53,9 @@ Justified. The panic report, its catalogue and the backtrace walker run when the
 | 18 | `core` | `panic.rs` |
 | 16 | `core` | `trap.rs` |
 | 15 | `core` | `mm.rs` |
-| 11 | `core` | `panic/reset.rs` |
-| 8 | `core` | `console.rs` |
+| 9 | `core` | `panic/reset.rs` |
 | 6 | `core` | `arch/x86_64/trap.rs` |
+| 6 | `core` | `console.rs` |
 | 6 | `core` | `console/input.rs` |
 | 6 | `core` | `smp.rs` |
 | 4 | `core` | `arch/x86_64/paranoid.rs` |
@@ -163,7 +163,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 20 | `core` | `sched/mod.rs` |
 | 247 | | *and 44 more files* |
 
-### x86_64: argued line by line — 269 statements
+### x86_64: argued line by line — 267 statements
 
 From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it names and no others; the category is the one it is counted in above.
 
@@ -175,7 +175,7 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | `arch/x86_64/console.rs` | 209 | Hardware the measured machine does not have | The row is the loop's second and later passes, for a transmit holding register still full when a byte is to be written. QEMU's 16550 passes each byte to its character device as it is written and reports the register empty again at once, so the first read of the line status always finds room. A real UART at 115200 baud is busy for 87 us a byte. |
 | `arch/x86_64/console.rs` | 236 | Hardware the measured machine does not have | As line 186, for `drain`: the second pass waits for the shift register, and QEMU's port reports the transmitter idle on the first read. The function's own comment says so: harmless under QEMU, whose port sends instantly. |
 | `arch/x86_64/cpu.rs` | 1411, 1417 | Reached only when something has already failed | The triple fault is `reset`'s last way, taken only after the FADT's reset register and ten pulses of the keyboard controller's reset line have each failed to reset the machine. On q35 the FADT names port 0xCF9, which resets it at once: the suite's `boot-reset` gate shows the loader starting again. Reaching this would take a machine that ignores both documented resets. |
-| `arch/x86_64/mod.rs` | 2116, 2118 | Reached only when something has already failed | The keyboard controller's reset pulse, tried only when the FADT's reset register did not reset the machine. q35's register resets it at once (`boot-reset`), so the wait for the 8042's input buffer never starts. What it defends against is firmware that names a reset register that does nothing, which Linux's reboot order also allows for. |
+| `arch/x86_64/mod.rs` | 2132, 2134 | Reached only when something has already failed | The keyboard controller's reset pulse, tried only when the FADT's reset register did not reset the machine. q35's register resets it at once (`boot-reset`), so the wait for the 8042's input buffer never starts. What it defends against is firmware that names a reset register that does nothing, which Linux's reboot order also allows for. |
 | `arch/x86_64/paranoid.rs` | 152 | Reached only when the kernel is stopping | An exception nested on its own interrupt stack, which the stack's occupancy count exists to catch and stop on (FX-9006): the entry clears DR7 so that a breakpoint on the handler's own path cannot nest, and the stage 3 check shows it does not. |
 | `arch/x86_64/paranoid.rs` | 171, 173 | Reached only when the kernel is stopping | Any vector but #DB, NMI and #MC reaching the paranoid entry: only the double fault's gate also names an IST stack here, and a double fault stops the kernel. |
 | `arch/x86_64/paranoid.rs` | 185 | Reached only when the kernel is stopping | A #DB in the kernel that no armed hardware breakpoint raised -- a single step or a general detect, neither of which the kernel asks for -- which it stops on. The breakpoints the stage 3 check arms each set their DR6 bit. |
@@ -187,13 +187,11 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | `arch/x86_64/speculation.rs` | 1143 | Hardware the measured machine does not have | AMD's VIRT_SPEC_CTRL, used for SSBD only on a processor that offers it without SSBD in IA32_SPEC_CTRL: a guest of an older AMD host. Neither TCG nor the KVM reference host (which offers SSBD directly) presents that combination. |
 | `arch/x86_64/trap.rs` | 583, 607 | Reached only when the kernel is stopping | `vector_name`'s standalone copy, called by `report_trap` and by the paranoid entry's fatal arms, both of which run only when the kernel is stopping. `classify` carries its own inlined copy, which the stage 3 fault check reaches with a program's `hlt`. |
 | `arch/x86_64/trap.rs` | 714, 717-718, 737 | Reached only when the kernel is stopping | The register dump the trap path prints when the kernel stops on an exception it cannot handle (`trap::report`); a passing run never prints it. |
-| `console.rs` | 230-231 | Reached only when the kernel is stopping | `Unlocked::write_str`, and in it the kernel log's record of a failure report written without the port's lock. `Unlocked` is used only by `write_panicking` after `PANIC_SPINS` failed attempts at the lock, which is a processor stopping with the lock held by itself or by another processor that will never release it. A passing run never reaches it. `console::log_check` runs `write_panicking` on every boot, and it takes the lock at the first attempt. |
-| `console.rs` | 234-235 | Reached only when the kernel is stopping | The writer a failure report uses when the port's lock cannot be had in PANIC_SPINS tries -- held by a processor that stopped part way through a line. Reached only while the kernel is reporting a failure. |
-| `console.rs` | 242 | Reached only when the kernel is stopping | The writer a failure report uses when the port's lock cannot be had in PANIC_SPINS tries -- held by a processor that stopped part way through a line. Reached only while the kernel is reporting a failure. |
-| `console.rs` | 383 | Reached only when the kernel is stopping | The panicking arm of write: a failure report takes the port's lock with a bounded wait and falls back to Unlocked. Only a failure report sets PANICKING, so a passing boot never runs it. |
-| `console.rs` | 393 | Reached only when the kernel is stopping | As 197: reached only once `PANIC_SPINS` attempts at the port's lock failed during a failure report. |
-| `console.rs` | 409 | Reached only when the kernel is stopping | The panicking arm of drain: the last flush before a failure report stops the machine, with a bounded wait for the port's lock. |
-| `console.rs` | 419 | Hardware the measured machine does not have | A power-off's flush that found writers waiting for room in the transmit ring. An emulated port sends instantly and is never full (console/output.rs's BURST says so), so the ring never holds a writer back on a QEMU machine; a real UART's baud rate does. |
+| `console.rs` | 260-261 | Reached only when the kernel is stopping | `Unlocked::write_str`, and in it the kernel log's record of a failure report written without the port's lock. `Unlocked` is used only by `write_panicking` after `PANIC_SPINS` failed attempts at the lock, which is a processor stopping with the lock held by itself or by another processor that will never release it. A passing run never reaches it. `console::log_check` runs `write_panicking` on every boot, and it takes the lock at the first attempt. |
+| `console.rs` | 264-265 | Reached only when the kernel is stopping | The writer a failure report uses when the port's lock cannot be had in PANIC_SPINS tries -- held by a processor that stopped part way through a line. Reached only while the kernel is reporting a failure. |
+| `console.rs` | 272 | Reached only when the kernel is stopping | The writer a failure report uses when the port's lock cannot be had in PANIC_SPINS tries -- held by a processor that stopped part way through a line. Reached only while the kernel is reporting a failure. |
+| `console.rs` | 421 | Reached only when the kernel is stopping | As 197: reached only once `PANIC_SPINS` attempts at the port's lock failed during a failure report. |
+| `console.rs` | 443 | Hardware the measured machine does not have | A power-off's flush that found writers waiting for room in the transmit ring. An emulated port sends instantly and is never full (console/output.rs's BURST says so), so the ring never holds a writer back on a QEMU machine; a real UART's baud rate does. |
 | `console/input.rs` | 156 | Hardware the measured machine does not have | Console input left polled: an x86-64 machine whose MADT gives COM1's line no I/O APIC input, or an Arm machine whose device tree names the port's interrupt in a shape the parser does not follow. Every machine the suite boots names it. |
 | `console/input.rs` | 317 | Reached only when the kernel is stopping | A failure return of the boot self-check `console::input::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
 | `console/input.rs` | 333 | Reached only when the kernel is stopping | A failure return of the boot self-check `console::input::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
@@ -365,12 +363,12 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 
 ## aarch64
 
-**629** unreached statements, debug profile.
+**627** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
 | Unreachable on the measured architecture | 104 | 17% |
-| Reached only when the kernel is stopping | 119 | 19% |
+| Reached only when the kernel is stopping | 117 | 19% |
 | Reached only when something has already failed | 78 | 12% |
 | Run, and credited to another line | 9 | 1% |
 | Hardware the measured machine does not have | 157 | 25% |
@@ -387,7 +385,7 @@ Justified. These statements belong to another architecture or another board, and
 | 11 | `core` | `platform/google/gs201/watchdog.rs` |
 | 1 | `core` | `arch/speculation.rs` |
 
-### aarch64: Reached only when the kernel is stopping — 119 statements
+### aarch64: Reached only when the kernel is stopping — 117 statements
 
 Justified. The panic report, its catalogue and the backtrace walker run when the kernel has already decided to stop. Exercising them means crashing deliberately, which only `test-shell`'s `ferrix.onexit=panic` boot does -- and a passing run that reached the rest would be a failing run.
 
@@ -400,8 +398,8 @@ Justified. The panic report, its catalogue and the backtrace walker run when the
 | 13 | `core` | `panic.rs` |
 | 10 | `core` | `arch/aarch64/trap.rs` |
 | 6 | `core` | `console/input.rs` |
-| 5 | `core` | `console.rs` |
 | 5 | `core` | `sched/preempt.rs` |
+| 3 | `core` | `console.rs` |
 | 3 | `item` | `discovery/devmgr.rs` |
 | 2 | `core` | `sched/queue.rs` |
 | 1 | `core` | `object/job.rs` |
@@ -505,7 +503,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `mm.rs` |
 | 1 | `core` | `object/pin.rs` |
 
-### aarch64: argued line by line — 278 statements
+### aarch64: argued line by line — 276 statements
 
 From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it names and no others; the category is the one it is counted in above.
 
@@ -555,12 +553,10 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 | `arch/arm_common/pl011.rs` | 131 | Hardware the measured machine does not have | The drain's second turn: the port still sending. QEMU's PL011 reports its FIFO empty and not busy at every read, so `drain` returns on the first; the loop exists for a real port, whose last line would otherwise be cut off by the power-off (seen on the DK1's USART). |
 | `arch/arm_common/pl011.rs` | 154 | Hardware the measured machine does not have | A received byte carrying a framing, parity, break or overrun flag. QEMU's PL011 flags a byte only for a break on its character device, which no gate sends; on a real port it is line noise. The byte is delivered either way. |
 | `arch/speculation.rs` | 174 | Unreachable on the measured architecture | `none` names an empty set of defences, which only a `--mitigations off` build records: on AArch64 every processor's plan in the certified build starts from the index clamp. That build is another configuration, not the one certified. |
-| `console.rs` | 230 | Reached only when the kernel is stopping | The writer a failure report uses when the port's lock cannot be had in PANIC_SPINS tries -- held by a processor that stopped part way through a line. Reached only while the kernel is reporting a failure. |
-| `console.rs` | 235 | Reached only when the kernel is stopping | The writer a failure report uses when the port's lock cannot be had in PANIC_SPINS tries -- held by a processor that stopped part way through a line. Reached only while the kernel is reporting a failure. |
-| `console.rs` | 242 | Reached only when the kernel is stopping | The writer a failure report uses when the port's lock cannot be had in PANIC_SPINS tries -- held by a processor that stopped part way through a line. Reached only while the kernel is reporting a failure. |
-| `console.rs` | 383 | Reached only when the kernel is stopping | The panicking arm of write: a failure report takes the port's lock with a bounded wait and falls back to Unlocked. Only a failure report sets PANICKING, so a passing boot never runs it. |
-| `console.rs` | 409 | Reached only when the kernel is stopping | The panicking arm of drain: the last flush before a failure report stops the machine, with a bounded wait for the port's lock. |
-| `console.rs` | 419 | Hardware the measured machine does not have | A power-off's flush that found writers waiting for room in the transmit ring. An emulated port sends instantly and is never full (console/output.rs's BURST says so), so the ring never holds a writer back on a QEMU machine; a real UART's baud rate does. |
+| `console.rs` | 260 | Reached only when the kernel is stopping | The writer a failure report uses when the port's lock cannot be had in PANIC_SPINS tries -- held by a processor that stopped part way through a line. Reached only while the kernel is reporting a failure. |
+| `console.rs` | 265 | Reached only when the kernel is stopping | The writer a failure report uses when the port's lock cannot be had in PANIC_SPINS tries -- held by a processor that stopped part way through a line. Reached only while the kernel is reporting a failure. |
+| `console.rs` | 272 | Reached only when the kernel is stopping | The writer a failure report uses when the port's lock cannot be had in PANIC_SPINS tries -- held by a processor that stopped part way through a line. Reached only while the kernel is reporting a failure. |
+| `console.rs` | 443 | Hardware the measured machine does not have | A power-off's flush that found writers waiting for room in the transmit ring. An emulated port sends instantly and is never full (console/output.rs's BURST says so), so the ring never holds a writer back on a QEMU machine; a real UART's baud rate does. |
 | `console/input.rs` | 156 | Hardware the measured machine does not have | Console input left polled: an x86-64 machine whose MADT gives COM1's line no I/O APIC input, or an Arm machine whose device tree names the port's interrupt in a shape the parser does not follow. Every machine the suite boots names it. |
 | `console/input.rs` | 317 | Reached only when the kernel is stopping | A failure return of the boot self-check `console::input::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
 | `console/input.rs` | 333 | Reached only when the kernel is stopping | A failure return of the boot self-check `console::input::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
@@ -729,12 +725,12 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 
 ## armv7a
 
-**974** unreached statements, debug profile.
+**972** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
 | Unreachable on the measured architecture | 156 | 16% |
-| Reached only when the kernel is stopping | 173 | 18% |
+| Reached only when the kernel is stopping | 171 | 18% |
 | Reached only when something has already failed | 65 | 7% |
 | Run, and credited to another line | 19 | 2% |
 | Hardware the measured machine does not have | 346 | 36% |
@@ -753,7 +749,7 @@ Justified. These statements belong to another architecture or another board, and
 | 2 | `core` | `arch/armv7a/console.rs` |
 | 1 | `core` | `arch/speculation.rs` |
 
-### armv7a: Reached only when the kernel is stopping — 173 statements
+### armv7a: Reached only when the kernel is stopping — 171 statements
 
 Justified. The panic report, its catalogue and the backtrace walker run when the kernel has already decided to stop. Exercising them means crashing deliberately, which only `test-shell`'s `ferrix.onexit=panic` boot does -- and a passing run that reached the rest would be a failing run.
 
@@ -767,8 +763,8 @@ Justified. The panic report, its catalogue and the backtrace walker run when the
 | 14 | `core` | `arch/armv7a/trap.rs` |
 | 13 | `core` | `panic.rs` |
 | 6 | `core` | `console/input.rs` |
-| 5 | `core` | `console.rs` |
 | 5 | `core` | `sched/preempt.rs` |
+| 3 | `core` | `console.rs` |
 | 2 | `core` | `sched/queue.rs` |
 | 1 | `core` | `object/job.rs` |
 | 1 | `core` | `sched/wait.rs` |
@@ -873,7 +869,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `sched/mod.rs` |
 | 4 | | *and 4 more files* |
 
-### armv7a: argued line by line — 359 statements
+### armv7a: argued line by line — 357 statements
 
 From `coverage-argued-armv7a.json`. Each row is one argument, for the lines it names and no others; the category is the one it is counted in above.
 
@@ -908,10 +904,8 @@ From `coverage-argued-armv7a.json`. Each row is one argument, for the lines it n
 | `arch/armv7a/trap.rs` | 798 | Run, and credited to another line | `kind_name` for the reset entry, in `classify`'s arm above (line 550): named by the machine check's frame in its own copy, and in `dispatch`'s only when the kernel's reset stub is taken. |
 | `arch/armv7a/trap.rs` | 803 | Run, and credited to another line | `kind_name` for the hypervisor-trap entry, as line 592. |
 | `arch/speculation.rs` | 174 | Unreachable on the measured architecture | `none` names an empty set of defences, which only a `--mitigations off` build records: on ARMv7-A every processor's plan in the certified build holds the index clamp, a Cortex-A7's as well (`speculation defences: clamped indices`). That build is another configuration, not the one certified. |
-| `console.rs` | 230, 235 | Reached only when the kernel is stopping | The writer a failure report uses when the port's lock cannot be had in PANIC_SPINS tries -- held by a processor that stopped part way through a line. Reached only while the kernel is reporting a failure. |
-| `console.rs` | 242 | Reached only when the kernel is stopping | The writer a failure report uses when the port's lock cannot be had in PANIC_SPINS tries -- held by a processor that stopped part way through a line. Reached only while the kernel is reporting a failure. |
-| `console.rs` | 383 | Reached only when the kernel is stopping | The panicking arm of write: a failure report takes the port's lock with a bounded wait and falls back to Unlocked. Only a failure report sets PANICKING, so a passing boot never runs it. |
-| `console.rs` | 409 | Reached only when the kernel is stopping | The panicking arm of drain: the last flush before a failure report stops the machine, with a bounded wait for the port's lock. |
+| `console.rs` | 260, 265 | Reached only when the kernel is stopping | The writer a failure report uses when the port's lock cannot be had in PANIC_SPINS tries -- held by a processor that stopped part way through a line. Reached only while the kernel is reporting a failure. |
+| `console.rs` | 272 | Reached only when the kernel is stopping | The writer a failure report uses when the port's lock cannot be had in PANIC_SPINS tries -- held by a processor that stopped part way through a line. Reached only while the kernel is reporting a failure. |
 | `console/input.rs` | 317 | Reached only when the kernel is stopping | A failure return of the boot self-check `console::input::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
 | `console/input.rs` | 333 | Reached only when the kernel is stopping | A failure return of the boot self-check `console::input::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
 | `console/input.rs` | 336 | Reached only when the kernel is stopping | A failure return of the boot self-check `console::input::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |

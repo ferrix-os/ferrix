@@ -2174,6 +2174,7 @@ fn verify_hand_off(view: &BootView<'_>, memory: &mut EarlyMemory) {
     println!("  stage 1  loader hand-off verified");
     // After the check: a panic before it halts, whatever the command line.
     panic::reset::read_option(view);
+    panic::reset_check::read_option(view);
     console::screen::milestone(2);
 }
 

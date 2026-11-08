@@ -312,6 +312,10 @@ why = "test turns the RAM scrubber's stand-down off where a hypervisor is positi
 values = ["halt", "reset"]
 why = "what a panic does after its report (panic/reset.rs, H.FAIL.5): halt, the reference; reset, a stop-gap for the N150 box set by no loader, outside the reference configuration (SAFETY-MANUAL AoU-32, certification-item.json `panic`)"
 
+[boot_options."ferrix.check.panic"]
+values = ["early", "held"]
+why = "check-only, for cargo xtask test-postmortem (panic/reset_check.rs, ledger 7973): early forces a second panic inside the first report before its reset line (L.panic.4); held takes the console port's lock for good as the first report begins (L.console.15); never on a product command line"
+
 [boot_options."ferrix.vtd"]
 values = ["on", "off"]
 why = "whether the kernel drives the VT-d units it accepts (iommu.rs, L.iommu.71): on, the reference and the default; off leaves every unit alone, no DMA translated and no interrupt remapped, outside the reference configuration, for recovery only (SAFETY-MANUAL AoU-8, certification-item.json `vtd`)"

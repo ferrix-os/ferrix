@@ -54,7 +54,7 @@
     },
     {
       "file": "arch/x86_64/mod.rs",
-      "lines": "2116, 2118",
+      "lines": "2132, 2134",
       "category": "defensive",
       "match": "for _ in 0..1000 {",
       "why": "The keyboard controller's reset pulse, tried only when the FADT's reset register did not reset the machine. q35's register resets it at once (`boot-reset`), so the wait for the 8042's input buffer never starts. What it defends against is firmware that names a reset register that does nothing, which Linux's reboot order also allows for."
@@ -124,49 +124,35 @@
     },
     {
       "file": "console.rs",
-      "lines": "230-231",
+      "lines": "260-261",
       "category": "failure-path",
       "match": "fn write_str(&mut self, text: &str) -> fmt::Result {",
       "why": "`Unlocked::write_str`, and in it the kernel log's record of a failure report written without the port's lock. `Unlocked` is used only by `write_panicking` after `PANIC_SPINS` failed attempts at the lock, which is a processor stopping with the lock held by itself or by another processor that will never release it. A passing run never reaches it. `console::log_check` runs `write_panicking` on every boot, and it takes the lock at the first attempt."
     },
     {
       "file": "console.rs",
-      "lines": "234-235",
+      "lines": "264-265",
       "category": "failure-path",
       "match": "for byte in text.bytes() {",
       "why": "The writer a failure report uses when the port's lock cannot be had in PANIC_SPINS tries -- held by a processor that stopped part way through a line. Reached only while the kernel is reporting a failure."
     },
     {
       "file": "console.rs",
-      "lines": "242",
+      "lines": "272",
       "category": "failure-path",
       "match": "}",
       "why": "The writer a failure report uses when the port's lock cannot be had in PANIC_SPINS tries -- held by a processor that stopped part way through a line. Reached only while the kernel is reporting a failure."
     },
     {
       "file": "console.rs",
-      "lines": "383",
-      "category": "failure-path",
-      "match": "for _ in 0..PANIC_SPINS {",
-      "why": "The panicking arm of write: a failure report takes the port's lock with a bounded wait and falls back to Unlocked. Only a failure report sets PANICKING, so a passing boot never runs it."
-    },
-    {
-      "file": "console.rs",
-      "lines": "393",
+      "lines": "421",
       "category": "failure-path",
       "match": "let _ = Unlocked { logged }.write_fmt(arguments);",
       "why": "As 197: reached only once `PANIC_SPINS` attempts at the port's lock failed during a failure report."
     },
     {
       "file": "console.rs",
-      "lines": "409",
-      "category": "failure-path",
-      "match": "for _ in 0..PANIC_SPINS {",
-      "why": "The panicking arm of drain: the last flush before a failure report stops the machine, with a bounded wait for the port's lock."
-    },
-    {
-      "file": "console.rs",
-      "lines": "419",
+      "lines": "443",
       "category": "absent-hardware",
       "match": "output::wake_writers();",
       "why": "A power-off's flush that found writers waiting for room in the transmit ring. An emulated port sends instantly and is never full (console/output.rs's BURST says so), so the ring never holds a writer back on a QEMU machine; a real UART's baud rate does."

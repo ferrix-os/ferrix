@@ -3448,8 +3448,10 @@ package FerrixX8664Requirements {
         requirement <'L.x86_64.106'> tripleFaultResets : ItemLowLevel {
             attribute :>> statement = "triple_fault shall reset the processor by
                 loading an empty IDT and raising a breakpoint.";
-            attribute :>> criterion = "A --reset boot with no FADT reset register
-                and no keyboard controller starts the loader again.";
+            attribute :>> criterion = "By inspection: triple_fault loads an empty
+                IDT and raises a breakpoint, and is reset's last way. The --reset
+                boot under q35 resets through the FADT's register (0xCF9) before it,
+                so no boot reaches it today.";
             attribute :>> parent = "H.BOOT.7";
             attribute :>> unit = "arch::x86_64::cpu::triple_fault";
         }
@@ -4180,6 +4182,17 @@ package FerrixX8664Requirements {
                 (ledger 7363 F.4).";
             attribute :>> parent = "H.TRAP.22";
             attribute :>> unit = "arch::x86_64::restricted::swap_user_state";
+        }
+        requirement <'L.x86_64.286'> resetFallsBackPastAMissingController : ItemLowLevel {
+            attribute :>> statement = "reset shall skip the keyboard controller's
+                pulses when its status port reads 0xFF, and write 0xCF9 with 0x02 and
+                then 0x06 before the triple fault.";
+            attribute :>> criterion = "By inspection: reset reads port 0x64 once and
+                pulses only when it is not 0xFF, then writes 0x02 and 0x06 to 0xCF9,
+                then calls triple_fault. No emulator boots without both a FADT reset
+                register and a controller; the N150 box's run is a BACKLOG row.";
+            attribute :>> parent = "H.BOOT.7";
+            attribute :>> unit = "arch::x86_64::reset";
         }
         requirement <'L.x86_64.277'> aWindowOpensAlone : ItemLowLevel {
             attribute :>> statement = "Under restricted_window a stub shall run only on a processor alone in its

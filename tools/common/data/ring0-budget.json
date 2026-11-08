@@ -31,8 +31,8 @@
     }
   },
   "rise": {
-    "ledger": 7893,
-    "why": "Develop's code since 7667's baseline, accepted as code, not compacted (ledger 7893, closing AF-RING0 of 7738): count A +576, count B +569, library files +7 in all six builds, library file counts unchanged (80/81/81/82/79/80). By max AArch64 count A, each window between gate runs: S4 of the crate split 3f9191c51 +59 (mkc6b-ring0 against mki5b-16 on 3f7e8c054); 3f9191c51..88cc1a881 +126, 9cdbe75e1 FX-0974 (its +7 library lines are ferrix-sync's guard hooks, the one ring-0 library changed), a156af89a fl-096 and 2096c7c65 (r199e-base-ring0b on 88cc1a881); the 1.99.1 series +21, already 7667's; fault-path 6175c9939..53ab14eec +391, its spare frames and per-task fault counts, the only kernel change after the 1.99.1 series (r199e-ring0 on 8d6870906 against batch-20261107T223544Z-b0-1 on c8479539e). Each landed with this row red; docs/BACKLOG.md's row says how that is stopped."
+    "ledger": 7973,
+    "why": "Ledger 7973 (bugfix/panic-reset-unconditional): one new check file, panic/reset_check.rs, the check-only ferrix.check.panic options; baseline unchanged. Before it: Develop's code since 7667's baseline, accepted as code, not compacted (ledger 7893, closing AF-RING0 of 7738): count A +576, count B +569, library files +7 in all six builds, library file counts unchanged (80/81/81/82/79/80). By max AArch64 count A, each window between gate runs: S4 of the crate split 3f9191c51 +59 (mkc6b-ring0 against mki5b-16 on 3f7e8c054); 3f9191c51..88cc1a881 +126, 9cdbe75e1 FX-0974 (its +7 library lines are ferrix-sync's guard hooks, the one ring-0 library changed), a156af89a fl-096 and 2096c7c65 (r199e-base-ring0b on 88cc1a881); the 1.99.1 series +21, already 7667's; fault-path 6175c9939..53ab14eec +391, its spare frames and per-task fault counts, the only kernel change after the 1.99.1 series (r199e-ring0 on 8d6870906 against batch-20261107T223544Z-b0-1 on c8479539e). Each landed with this row red; docs/BACKLOG.md's row says how that is stopped."
   },
   "baseline": {
     "user": {
@@ -89,6 +89,7 @@
       "object/channel/check.rs",
       "object/rehome_check.rs",
       "object/reserve_check.rs",
+      "panic/reset_check.rs",
       "sched/affinity_check.rs",
       "sched/borrow_check.rs",
       "sched/check.rs",

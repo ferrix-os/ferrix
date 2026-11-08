@@ -98,6 +98,36 @@ static PORT: IrqSpinLock<Transmit, crate::arch::Irq> = IrqSpinLock::new(Transmit
 /// than the boot test's timeout.
 const PANIC_SPINS: u32 = 10_000_000;
 
+/// Whether a failure report has once waited [`PANIC_SPINS`] for the port's
+/// lock in vain. From then on every write of the report goes straight past
+/// the lock: whoever holds it is not going to release it, and a report of a
+/// few hundred writes that each waited the whole bound again would spend
+/// minutes before its reset (2026-11-08, the N150 box, whose
+/// `ferrix.panic=reset` never came).
+static PORT_ABANDONED: AtomicBool = AtomicBool::new(false);
+
+/// Wait a bounded time for the port's lock during a failure report, and
+/// give the guard to `with`; `false` if the lock never came, or was given up
+/// on by an earlier write of the report ([`PORT_ABANDONED`]). Only a report
+/// gives it up: the log's boot check, which runs this path without a panic,
+/// waits each time.
+fn with_port_panicking(with: impl FnOnce(&mut Transmit)) -> bool {
+    if PORT_ABANDONED.load(Ordering::Relaxed) {
+        return false;
+    }
+    for _ in 0..PANIC_SPINS {
+        if let Some(mut port) = PORT.try_lock() {
+            with(&mut port);
+            return true;
+        }
+        spin_loop();
+    }
+    if PANICKING.load(Ordering::Relaxed) {
+        PORT_ABANDONED.store(true, Ordering::Relaxed);
+    }
+    false
+}
+
 /// How much recent console output is kept for a failure report.
 ///
 /// A little more than the largest QR code carries, which is the most any
@@ -380,12 +410,10 @@ fn write_as(arguments: fmt::Arguments<'_>, kind: Kind) {
 /// boot rather than only on the one that fails.
 pub(crate) fn write_panicking(arguments: fmt::Arguments<'_>, logged: bool) {
     let kind = if logged { Kind::Line } else { Kind::Unlogged };
-    for _ in 0..PANIC_SPINS {
-        if let Some(mut port) = PORT.try_lock() {
-            let _ = Writer::new(&mut port, false, kind).write_fmt(arguments);
-            return;
-        }
-        spin_loop();
+    if with_port_panicking(|port| {
+        let _ = Writer::new(port, false, kind).write_fmt(arguments);
+    }) {
+        return;
     }
     // Whoever holds the lock is not going to release it — quite possibly
     // because it is this CPU, part way through the line that failed. What was
@@ -406,13 +434,9 @@ pub(crate) fn write_panicking(arguments: fmt::Arguments<'_>, logged: bool) {
 pub(crate) fn drain() {
     if READY.load(Ordering::Acquire) {
         if PANICKING.load(Ordering::Relaxed) {
-            for _ in 0..PANIC_SPINS {
-                if let Some(mut port) = PORT.try_lock() {
-                    let _ = port.flush();
-                    break;
-                }
-                spin_loop();
-            }
+            let _ = with_port_panicking(|port| {
+                let _ = port.flush();
+            });
         } else {
             let wake = PORT.lock().flush();
             if wake {

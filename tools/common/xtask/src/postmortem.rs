@@ -135,7 +135,9 @@ pub(crate) fn test_postmortem(
         }
         across_a_reset(arch, args, &build)?;
         switched_off(arch, args, &build)?;
-        reset_by_itself(arch, args, &build)?;
+        reset_by_itself(arch, args, &build, false)?;
+        reset_by_itself(arch, args, &build, true)?;
+        held_lock(arch, args, &build)?;
         misspelt(arch, args, &build)?;
         stops(arch, args, &build)?;
         if arch == Arch::X86_64 {
@@ -559,15 +561,19 @@ fn matches_serial(recorded: &[&str], serial: &[String]) -> Option<String> {
 /// `ferrix.panic=reset`: boot 1 panics and the machine resets itself after
 /// the wait; boot 2's loader quotes boot 1's panic.
 ///
-/// Verifies: H.FAIL.5, `L.panic.2`, `L.panic.3`
+/// Verifies: H.FAIL.5, `L.panic.2`, `L.panic.3`, `L.panic.4`
 fn reset_by_itself(
     arch: Arch,
     args: &Args,
     build: &impl Fn(Arch, &Args) -> Result<(PathBuf, PathBuf)>,
+    early: bool,
 ) -> Result<()> {
     let mut wanted = args.clone();
     wanted.kernel_options.push("ferrix.onexit=panic".to_owned());
     wanted.kernel_options.push("ferrix.panic=reset".to_owned());
+    if early {
+        wanted.kernel_options.push(EARLY_OPTION.to_owned());
+    }
     wanted.keep_ram = true;
     let (image, kernel) = build(arch, &wanted)?;
     let mut boot_1 = Vec::new();
@@ -626,19 +632,151 @@ fn reset_by_itself(
         Ok(())
     };
     let _ = qemu::watch_then(arch, &image, &kernel, &wanted, qemu::PANIC_MARKER, hook)?;
-    reset_problem(&boot_1, &after, waited).map_or(Ok(()), |problem| {
-        Err(Error::new(format!("{arch}: {problem}")))
+    let problem = if early {
+        early_problem(&boot_1).or_else(|| reset_problem_with(&boot_1, &after, waited, true))
+    } else {
+        reset_problem(&boot_1, &after, waited)
+    };
+    problem.map_or(Ok(()), |problem| {
+        let case = if early {
+            " (a fault before the reset line)"
+        } else {
+            ""
+        };
+        Err(Error::new(format!("{arch}{case}: {problem}")))
+    })?;
+    if early {
+        println!(
+            "  {arch}: a fault forced inside the first report, before its reset line, still reset the machine, and the next loader quoted it"
+        );
+    } else {
+        println!(
+            "  {arch}: ferrix.panic=reset reset the machine by itself, and the next loader quoted the panic"
+        );
+    }
+    Ok(())
+}
+
+/// The check-only option that holds the console's lock for good from the
+/// first report's start, and its line.
+const HELD_OPTION: &str = "ferrix.check.panic=held";
+const HELD_LINE: &str = "ferrix.check.panic=held: the console's lock is held from here";
+/// The longest from the report's first line to its reset line with the
+/// console's lock held for good: one bounded wait for the lock, not one per
+/// write (`L.console.15`; a wait per write took tens of seconds).
+const HELD_AT_MOST: Duration = Duration::from_secs(5);
+
+/// The held lock: the first report's processor takes the console's lock and
+/// never gives it back; the report must still reach its reset line within
+/// [`HELD_AT_MOST`] and the machine reset by itself.
+///
+/// Verifies: `L.console.15`
+fn held_lock(
+    arch: Arch,
+    args: &Args,
+    build: &impl Fn(Arch, &Args) -> Result<(PathBuf, PathBuf)>,
+) -> Result<()> {
+    let mut wanted = args.clone();
+    wanted.kernel_options.push("ferrix.onexit=panic".to_owned());
+    wanted.kernel_options.push("ferrix.panic=reset".to_owned());
+    wanted.kernel_options.push(HELD_OPTION.to_owned());
+    wanted.keep_ram = true;
+    let (image, kernel) = build(arch, &wanted)?;
+    let mut took = None;
+    let mut held = false;
+    let mut reset = false;
+    let hook = |watching: &mut Watching<'_>| -> Result<()> {
+        let start = Instant::now();
+        let announced = watching.read_more(start + PATIENCE, |lines| {
+            lines.iter().any(|line| line.contains(RESET_LINE))
+        })?;
+        if announced {
+            took = Some(start.elapsed());
+        }
+        held = watching
+            .lines()
+            .iter()
+            .chain(watching.after())
+            .any(|line| line.contains(HELD_LINE));
+        let seen = watching.after().len();
+        reset = watching.read_more(Instant::now() + RESET_WAIT_AT_MOST, |lines| {
+            lines
+                .get(seen..)
+                .unwrap_or_default()
+                .iter()
+                .any(|line| line.contains(LOADER_BANNER))
+        })?;
+        watching.stop_when_done();
+        Ok(())
+    };
+    let _ = qemu::watch_then(arch, &image, &kernel, &wanted, qemu::PANIC_MARKER, hook)?;
+    let problem = if !held {
+        Some(format!("boot 1 never said `{HELD_LINE}`"))
+    } else if let Some(took) = took.filter(|took| *took > HELD_AT_MOST) {
+        Some(format!(
+            "with the console's lock held the reset line came {} ms after the report began, over {} s: a bounded wait per write, not one per report",
+            took.as_millis(),
+            HELD_AT_MOST.as_secs()
+        ))
+    } else if took.is_none() {
+        Some(format!("boot 1 never said `{}`", RESET_LINE.trim()))
+    } else if !reset {
+        Some("the machine did not reset by itself".to_owned())
+    } else {
+        None
+    };
+    problem.map_or(Ok(()), |problem| {
+        Err(Error::new(format!("{arch} (the held lock): {problem}")))
     })?;
     println!(
-        "  {arch}: ferrix.panic=reset reset the machine by itself, and the next loader quoted the panic"
+        "  {arch}: with the console's lock held for good, the report reached its reset line {} ms after it began, and the machine reset",
+        took.map_or(0, |took| took.as_millis())
     );
     Ok(())
+}
+
+/// The check-only option that faults inside the first report, before its
+/// reset line (`src/kernel/src/panic/reset_check.rs`, `L.panic.4`).
+const EARLY_OPTION: &str = "ferrix.check.panic=early";
+/// The check's line as it faults, and the abridged report's.
+const EARLY_FAULTING: &str = "ferrix.check.panic=early: faulting inside the report now";
+const ABRIDGED: &str = "  stopped   during another report, so this one is abridged";
+
+/// Why the early case's boot 1 does not show the fault where it must: the
+/// check's line, then the abridged report, then the reset line after both.
+fn early_problem(boot_1: &[String]) -> Option<String> {
+    let at = |wanted: &str| boot_1.iter().position(|line| line.contains(wanted));
+    let Some(faulting) = at(EARLY_FAULTING) else {
+        return Some(format!("boot 1 never said `{EARLY_FAULTING}`"));
+    };
+    let Some(abridged) = at(ABRIDGED) else {
+        return Some(format!("boot 1 never said `{}`", ABRIDGED.trim()));
+    };
+    match at(RESET_LINE) {
+        Some(reset) if faulting < abridged && abridged < reset => None,
+        Some(_) => Some(
+            "boot 1's reset line did not come after the fault and the abridged report".to_owned(),
+        ),
+        None => Some(format!("boot 1 never said `{}`", RESET_LINE.trim())),
+    }
 }
 
 /// Why a `ferrix.panic=reset` boot did not reset as it should, if it did not:
 /// the report's `stopped` line says so, the reset came after the wait and
 /// not much later, and the next loader quotes boot 1's panic.
 fn reset_problem(boot_1: &[String], after: &[String], waited: Option<Duration>) -> Option<String> {
+    reset_problem_with(boot_1, after, waited, false)
+}
+
+/// [`reset_problem`], quoting boot 1's last panic line rather than its first
+/// when `last`: the loader quotes the last, and the early case's is the
+/// fault's.
+fn reset_problem_with(
+    boot_1: &[String],
+    after: &[String],
+    waited: Option<Duration>,
+    last: bool,
+) -> Option<String> {
     if !boot_1.iter().any(|line| line.contains(STOPPED_RESETS)) {
         return Some(format!(
             "boot 1's report did not say `{}`",
@@ -653,9 +791,14 @@ fn reset_problem(boot_1: &[String], after: &[String], waited: Option<Duration>) 
             RESET_LINE.trim()
         ));
     }
-    let panic = boot_1
+    let mut panics = boot_1
         .iter()
-        .find_map(|line| line.trim_end().strip_prefix("FERRIX-PANIC "));
+        .filter_map(|line| line.trim_end().strip_prefix("FERRIX-PANIC "));
+    let panic = if last {
+        panics.next_back()
+    } else {
+        panics.next()
+    };
     let Some(panic) = panic else {
         return Some("boot 1 printed no FERRIX-PANIC line".to_owned());
     };

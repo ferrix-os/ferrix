@@ -36,10 +36,20 @@ static ARMED: AtomicBool = AtomicBool::new(false);
 /// Whether the first report has announced its reset ([`announce`]).
 static ANNOUNCED: AtomicBool = AtomicBool::new(false);
 
-/// The per-CPU register of the processor whose first report announced the
-/// reset: an abridged report on that processor -- a fault while it drew the
-/// screen -- goes on to the reset instead of halting.
+/// The per-CPU register of the processor making the first report, recorded
+/// as the report begins ([`reporting_here`]): an abridged report on that
+/// processor -- a fault anywhere in the first one, from its opening lines to
+/// the screen -- goes on to the reset instead of halting.
 static RESETTING_ON: AtomicU64 = AtomicU64::new(0);
+
+/// Whether [`RESETTING_ON`] holds the first report's processor.
+static REPORTER_KNOWN: AtomicBool = AtomicBool::new(false);
+
+/// How many reads of the counter in a row may find it unmoved before the wait
+/// is taken to be on a counter that has stopped, and the reset made at once.
+/// Far more than any running counter needs to tick once -- the HPET's
+/// slowest is 10 MHz, the TSC's GHz -- and a second or so of reads.
+const STUCK_READS: u32 = 50_000_000;
 
 /// Read `ferrix.panic` from the loader's command line: once, after stage 1's
 /// check, on the boot processor. Exactly `reset` arms it; `halt` or no
@@ -75,28 +85,69 @@ pub(crate) fn armed() -> bool {
 pub(crate) fn announce() {
     println!("  reset     in {WAIT_SECONDS} s, as {OPTION}={RESET} asks");
     console::drain();
-    RESETTING_ON.store(arch::cpu_local_register(), Ordering::Relaxed);
     ANNOUNCED.store(true, Ordering::Release);
 }
 
-/// Whether this processor is the one whose report announced the reset.
+/// Remember this processor as the one making the first report: as it begins,
+/// before anything in it can fault. One store each, no lock.
+pub(crate) fn reporting_here() {
+    RESETTING_ON.store(arch::cpu_local_register(), Ordering::Relaxed);
+    REPORTER_KNOWN.store(true, Ordering::Release);
+}
+
+/// Whether this processor is the one making the first report, under
+/// `ferrix.panic=reset`: a report abridged on it is one the first report
+/// will never finish, wherever it faulted, so it resets. Before 2026-11-08
+/// only a fault after [`announce`] did, and one earlier -- in the trace, the
+/// explanation, the power restore -- halted a machine that had asked to be
+/// reset.
 pub(crate) fn resetting_here() -> bool {
     armed()
-        && ANNOUNCED.load(Ordering::Acquire)
+        && REPORTER_KNOWN.load(Ordering::Acquire)
         && RESETTING_ON.load(Ordering::Relaxed) == arch::cpu_local_register()
+}
+
+/// Whether the first report has said its reset line ([`announce`]).
+pub(crate) fn announced() -> bool {
+    ANNOUNCED.load(Ordering::Acquire)
 }
 
 /// Wait [`WAIT_SECONDS`] on the free-running counter, then reset the
 /// machine. With the counter's rate not yet known (x86-64 before stage 3),
-/// no wait.
+/// no wait; with a counter that stops moving part way ([`STUCK_READS`]
+/// reads unchanged), no more wait. The counter is read, never waited on by
+/// interrupt, so masked interrupts do not stretch it.
 pub(crate) fn wait_then_reset() -> ! {
     let hz = arch::counter_hz();
     if hz != 0 {
-        let start = arch::counter_now();
         let ticks = hz.saturating_mul(WAIT_SECONDS);
-        while arch::counter_now().wrapping_sub(start) < ticks {
-            core::hint::spin_loop();
-        }
+        let _ = waited(arch::counter_now, ticks, STUCK_READS);
     }
     arch::reset()
+}
+
+/// Spin until `now` has moved `ticks` past its first reading, or until it has
+/// read the same value `stuck` times in a row: whether the whole wait was
+/// waited. Wrapping arithmetic, so a counter that wraps mid-wait still ends
+/// it.
+fn waited(now: impl Fn() -> u64, ticks: u64, stuck: u32) -> bool {
+    let start = now();
+    let mut last = start;
+    let mut same = 0_u32;
+    loop {
+        let reading = now();
+        if reading.wrapping_sub(start) >= ticks {
+            return true;
+        }
+        if reading == last {
+            same = same.saturating_add(1);
+            if same >= stuck {
+                return false;
+            }
+        } else {
+            last = reading;
+            same = 0;
+        }
+        core::hint::spin_loop();
+    }
 }

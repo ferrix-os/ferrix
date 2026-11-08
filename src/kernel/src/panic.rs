@@ -42,6 +42,7 @@
 
 pub mod catalog;
 pub mod reset;
+pub mod reset_check;
 #[cfg(not(ferrix_personality = "user"))]
 pub mod screen;
 /// The panic screen in a `personality=user` kernel: none
@@ -209,6 +210,7 @@ pub(crate) fn begin_report(stop: ferrix_bootinfo::pstore::Stop) -> bool {
         // How this boot stopped, for the next boot's loader, before anything
         // in the report can fault (`console::pstore`).
         console::pstore::panicked(stop);
+        reset::reporting_here();
     }
     first
 }
@@ -217,15 +219,21 @@ pub(crate) fn begin_report(stop: ferrix_bootinfo::pstore::Stop) -> bool {
 /// report already under way has everything else.
 ///
 /// Under `ferrix.panic=reset`, a report inside the first one on the
-/// processor that announced the reset -- a fault while it drew the screen --
-/// still resets the machine ([`reset`]): the screen is the step likeliest to
-/// fault, on exactly the machine that has nobody at it.
+/// processor making it -- a fault anywhere in it, the screen being the step
+/// likeliest to -- still resets the machine ([`reset`]), on exactly the
+/// machine that has nobody at it. Before the reset it writes the record
+/// back, which the first report may not have reached, and says the reset
+/// line if the first report had not.
 pub(crate) fn abridged() -> ! {
     println!("  stopped   during another report, so this one is abridged");
     // The power core's raised limit back to firmware's (`L.x86_64.206`).
     arch::restore_power("panic");
     console::drain();
     if reset::resetting_here() {
+        if !reset::announced() {
+            reset::announce();
+        }
+        let _ = console::pstore::write_back();
         reset::wait_then_reset()
     }
     arch::halt()
@@ -237,6 +245,7 @@ pub(crate) fn abridged() -> ! {
 ///
 /// For the first report only, which [`begin_report`] says.
 pub(crate) fn conclude(entry: Option<&Explanation>) -> ! {
+    reset_check::hold_if_asked();
     match smp::this_cpu_for_report() {
         Ok(cpu) => println!(
             "  on        processor {} (hardware id {:#x})",
@@ -256,6 +265,7 @@ pub(crate) fn conclude(entry: Option<&Explanation>) -> ! {
             "  stopped   this processor resets the machine after the report, and {others} more were asked to stop"
         ),
     }
+    reset_check::fault_if_asked();
     report_backtrace();
     if let Some(entry) = entry {
         report_explanation(entry);

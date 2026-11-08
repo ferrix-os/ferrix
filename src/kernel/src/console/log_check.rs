@@ -773,3 +773,11 @@ pub fn check_pstore_placement(view: &ferrix_bootinfo::BootView<'_>) -> Result<us
     }
     Ok(refused)
 }
+
+/// Take the console port's lock and never give it back: for
+/// `ferrix.check.panic=held` (`panic::reset_check`), a report written on the
+/// processor that holds it, as a fault inside the console path would leave
+/// it. Whether the lock was taken.
+pub(crate) fn hold_port_for_check() -> bool {
+    super::PORT.try_lock().map(core::mem::forget).is_some()
+}

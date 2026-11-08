@@ -8,7 +8,7 @@
   ],
   "arch": "aarch64",
   "profile": "debug",
-  "unreached": 629,
+  "unreached": 627,
   "files": {
     "iommu/vtd.rs": {
       "ring": "core",
@@ -536,19 +536,19 @@
     "panic.rs": {
       "ring": "core",
       "lines": [
-        126,
-        145,
-        148,
-        152,
+        127,
+        146,
+        149,
         153,
-        158,
-        186,
+        154,
+        159,
         187,
         188,
-        194,
-        223,
+        189,
+        195,
         227,
-        245
+        231,
+        254
       ]
     },
     "platform/google/gs201/watchdog.rs": {
@@ -652,14 +652,12 @@
     "console.rs": {
       "ring": "core",
       "lines": [
-        230,
-        231,
-        235,
-        242,
-        383,
-        393,
-        409,
-        419
+        260,
+        261,
+        265,
+        272,
+        421,
+        443
       ]
     },
     "object/port.rs": {

@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-3016 declarations in the core's files, 215 in the item's; 245 checks-only.
+3018 declarations in the core's files, 215 in the item's; 245 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2757,6 +2757,7 @@ checks above is `pub` for raised checks (F3).
 | `mark_booted` | fn | bin |  |
 | `catalog` | mod | item, load, bin |  |
 | `reset` | mod | bin |  |
+| `reset_check` | mod | bin |  |
 | `screen` | mod | item, bin |  |
 | `screen` | mod | item, bin |  |
 | `fatal` | re-export | item, load, bin |  |
@@ -2886,6 +2887,12 @@ checks above is `pub` for raised checks (F3).
 | `Explanation` | struct | - |  |
 
 ### `panic::reset`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `read_option` | fn | bin |  |
+
+### `panic::reset_check`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
