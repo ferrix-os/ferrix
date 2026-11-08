@@ -571,7 +571,11 @@ The loader says on every boot with a log: `events   N records; newest
 panic kept as record #I (slot S)` when it appends. `ferrix-eventlog list
 DEVICE [--text]` (a static Linux binary, also in the inspection image)
 prints every record, oldest first, with the whole text on `--text`. Root
-only: it reads the raw partition (VULNERABILITY-ANALYSIS V-15).
+only: it reads the raw partition (VULNERABILITY-ANALYSIS V-15). Since
+2026-11-08 every Ferrix image with a shell carries it too, built against
+the target's musl (`/bin/ferrix-eventlog`, xtask `eventlog.rs`), so a
+machine reads its own records: `ferrix-eventlog list /dev/vda3 --text` on
+the N150 box, where Ferrix names the `ferrix-events` partition `vda3`.
 
 ### 4.5 The gate and its controls (E12)
 

@@ -209,3 +209,30 @@ fn a_boot_sector_that_is_not_fat32s_is_refused() {
     // Too short to hold a boot sector at all.
     assert_eq!(Volume::open(&[0_u8; 100][..]).err(), Some(Error::Io));
 }
+
+/// A volume whose sector count runs past what its table numbers -- as the
+/// N150 box's ESP, written by an older `xtask` 226 sectors over -- is read
+/// as Linux and firmware read it: its clusters are the table's, and a chain
+/// into the tail past them is outside the volume.
+#[test]
+fn a_volume_longer_than_its_table_reads_the_clusters_the_table_numbers() {
+    let mut long = image(&text(), false);
+    // 8 table sectors number 1024 entries, 1022 clusters; say 1500.
+    let claimed = RESERVED + FAT_SECTORS + 1500;
+    long[32..36].copy_from_slice(&(claimed as u32).to_le_bytes());
+    let mut volume = Volume::open(long.as_slice()).expect("opens, clamped");
+    assert_eq!(
+        volume.read_file("FERRIX/LASTKERNEL.TXT", 1 << 20),
+        Ok(text())
+    );
+    // The file's first cluster pointed at 1024, the first past the table.
+    let mut past = long.clone();
+    let data = (RESERVED + FAT_SECTORS) * 512;
+    let short = data + 512 + 2 * 32;
+    past[short + 26..short + 28].copy_from_slice(&1024_u16.to_le_bytes());
+    let mut volume = Volume::open(past.as_slice()).expect("opens, clamped");
+    assert_eq!(
+        volume.read_file("FERRIX/LASTKERNEL.TXT", 1 << 20),
+        Err(Error::Corrupt("a cluster outside the volume"))
+    );
+}

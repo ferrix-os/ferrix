@@ -174,6 +174,9 @@ pub(super) fn desktop(
     carried.ports.extend(crate::dhcp::carried(arch)?);
     // `dmesg`, in busybox's place (`crate::dmesg`).
     carried.ports.extend(crate::dmesg::carried(arch)?);
+    // The event log's reader, for a machine's own panic records
+    // (`crate::eventlog`).
+    carried.ports.extend(crate::eventlog::carried(arch)?);
     // The user's dotfiles and the fonts they name, from beside a real
     // `hyprland.conf`: `crate::dotfiles` says which and where.
     if let Some(path) = &args.config

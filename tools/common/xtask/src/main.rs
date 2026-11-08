@@ -127,6 +127,7 @@ mod dotfiles;
 mod driver_model;
 mod dxvk;
 mod edid;
+mod eventlog;
 mod everything;
 mod fat;
 mod ferrousli;
@@ -1179,6 +1180,8 @@ pub(crate) fn build_image(arch: Arch, args: &Args) -> Result<(PathBuf, PathBuf)>
     ports.extend(dhcp::carried(arch)?);
     // `dmesg`, in busybox's place.
     ports.extend(dmesg::carried(arch)?);
+    // The event log's reader (`crate::eventlog`).
+    ports.extend(eventlog::carried(arch)?);
     let initramfs = initramfs::build_with_utilities(
         Some(&program),
         &natives,
@@ -1215,6 +1218,8 @@ fn build_init_image(arch: Arch, args: &Args) -> Result<(PathBuf, PathBuf)> {
     carried.extend(apps::installed(arch, args)?);
     // `dmesg`, in busybox's place.
     carried.extend(dmesg::carried(arch)?);
+    // The event log's reader (`crate::eventlog`).
+    carried.extend(eventlog::carried(arch)?);
     let initramfs =
         initramfs::build_with_utilities(None, &natives, shell.as_deref(), &utilities, &carried)?;
     let mut cmdline = init::command_line();

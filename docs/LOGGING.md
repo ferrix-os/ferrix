@@ -1815,7 +1815,19 @@ driver (§17) is still to come; this is its fallback made exact.
   connection and TLS handshake to the collector per request (`send`), a
   request per batch or blob. A kept-alive connection, and fewer, larger
   requests while the machine is loaded, are the levers left.
-* Backlog for the lode owner (box-watchdog, 2026-11-08): on the N150 box
+* **Fixed 2026-11-08 (crash-tools), was backlog for the lode owner
+  (box-watchdog, 2026-11-08).** The cause: the box's ESP was written by an
+  older `xtask`, whose FAT32 volume says 226 sectors more than its table
+  numbers clusters for (`fat.rs` has said where its last cluster ends since);
+  Linux and firmware clamp such a volume, `ferrix-fat` refused it ("a table
+  too small for its clusters"), and `read()` dropped the refusal. Now
+  `ferrix-fat` takes the clusters the table numbers (host test
+  `a_volume_longer_than_its_table_reads_the_clusters_the_table_numbers`,
+  failing without the fix), and `lode pstore-fetch` names each refused
+  volume and why before it says no disk holds the file. Read off the box
+  (`/dev/vda1`'s boot sector: 1,048,576 sectors, 2 tables of 8,064, so
+  1,032,416 data clusters against 1,032,190 numbered). The report as it was:
+  on the N150 box
   `lode pstore-fetch` says "no disk holds FERRIX/LASTKERNEL.TXT" on every
   boot since at least 2026-11-07 21:53, run by hand as root too, while the
   loader writes the file: the box's ESP (`/dev/vda1`, in `/proc/partitions`

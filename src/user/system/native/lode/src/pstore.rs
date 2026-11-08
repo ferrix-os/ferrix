@@ -143,32 +143,56 @@ fn esps(name: &str, sectors: u64) -> Vec<u64> {
         .collect()
 }
 
+/// Why [`read`] found no file.
+pub(crate) enum Missing {
+    /// A volume that has it could not be read: give up and say so.
+    Failed(String),
+    /// No volume has it. Each line names a disk or a partition table's EFI
+    /// system partition that was not a volume it could look in, and why, so
+    /// a refusal is never silent; a disk with no FAT on it is not named.
+    Absent(Vec<String>),
+}
+
 /// The file's bytes off the first volume that has it, or why there are
-/// none: `Err` with `None` when no volume has it, which is a boot with
-/// nothing to import (a cold boot, or `ferrix.pstore=off`).
-pub(crate) fn read() -> Result<Vec<u8>, Option<String>> {
-    let mut why = None;
+/// none: [`Missing::Absent`] when no volume has it, which is a boot with
+/// nothing to import (a cold boot, or `ferrix.pstore=off`) unless one of its
+/// lines says a volume was refused.
+pub(crate) fn read() -> Result<Vec<u8>, Missing> {
+    let mut refused = Vec::new();
     for (name, sectors) in disks() {
         let mut places = esps(&name, sectors);
-        if places.is_empty() {
+        let tabled = !places.is_empty();
+        if !tabled {
             // No table: a FAT32 volume on the whole disk, or nothing.
             places.push(0);
         }
         for base in places {
             let Some(disk) = open(&name, base) else {
+                refused.push(alloc::format!("/dev/{name}: could not be opened"));
                 continue;
             };
-            let Ok(mut volume) = Volume::open(disk) else {
-                continue;
+            let mut volume = match Volume::open(disk) {
+                Ok(volume) => volume,
+                // A disk or partition with no FAT on it at all is no
+                // refusal: the root's btrfs, the event log, a swap area.
+                Err(Error::NotFat32("no boot signature")) if !tabled => continue,
+                Err(why) => {
+                    refused.push(alloc::format!(
+                        "/dev/{name} at byte {base}: not a volume to read: {why:?}"
+                    ));
+                    continue;
+                }
             };
             match volume.read_file(lastkernel::PATH, lastkernel::MOST) {
                 Ok(bytes) => return Ok(bytes),
                 Err(Error::NotFound | Error::NotAFile) => {}
-                Err(other) => why = Some(alloc::format!("/dev/{name}: {other:?}")),
+                Err(other) => {
+                    return Err(Missing::Failed(alloc::format!("/dev/{name}: {other:?}")));
+                }
             }
         }
     }
-    Err(why)
+    Err(Missing::Absent(refused))
 }
 
 /// Where `lode pstore-fetch` leaves the file for the service: lode's, 0600.
@@ -184,11 +208,14 @@ pub(crate) fn fetch() -> i32 {
     let bytes = loop {
         match read() {
             Ok(bytes) => break bytes,
-            Err(Some(why)) => {
+            Err(Missing::Failed(why)) => {
                 crate::cli::complain(&alloc::format!("lode pstore-fetch: {why}"));
                 return 1;
             }
-            Err(None) if waited >= WAIT_MS => {
+            Err(Missing::Absent(refused)) if waited >= WAIT_MS => {
+                for why in &refused {
+                    crate::cli::complain(&alloc::format!("lode pstore-fetch: {why}"));
+                }
                 crate::cli::out(
                     alloc::format!(
                         "lode pstore-fetch: no disk holds {}: nothing to import\n",
@@ -198,7 +225,7 @@ pub(crate) fn fetch() -> i32 {
                 );
                 return 0;
             }
-            Err(None) => {
+            Err(Missing::Absent(_)) => {
                 sys::sleep_ms(2000);
                 waited += 2000;
             }

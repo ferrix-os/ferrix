@@ -8,7 +8,9 @@
 //!
 //! * the boot sector must describe FAT32 (no fixed root directory, a FAT32
 //!   table size), with sector and cluster sizes of the allowed powers of two,
-//!   and a table and data area inside the volume;
+//!   and a table and data area inside the volume; the clusters are those
+//!   both the data area holds and the table numbers, the tail past the
+//!   table's last entry unused, as Linux and firmware take it;
 //! * a cluster number is used only inside the data area; a chain ends at an
 //!   end mark, and one that is longer than the volume has clusters, or than
 //!   its file needs, is a loop and an error; a free or bad cluster inside a
@@ -168,13 +170,18 @@ impl<D: Device> Volume<D> {
             .checked_sub(meta)
             .filter(|sectors| *sectors > 0)
             .ok_or(Error::NotFat32("tables larger than the volume"))?;
-        let clusters = u32::try_from(data_sectors / u64::from(per_cluster))
+        // The data area's clusters, as many as the table has entries for:
+        // a volume whose sector count runs past what its table can number
+        // (an older `xtask` ESP, 226 sectors over on 512 MiB; the N150 box's)
+        // has its tail unused, as Linux's `fat_fill_super` clamps it and
+        // firmware reads it. A cluster past the table is outside the volume.
+        let numbered = (u64::from(fat_size) * u64::from(bytes_per_sector) / 4)
+            .checked_sub(2)
+            .filter(|entries| *entries > 0)
+            .ok_or(Error::NotFat32("a table too small for any cluster"))?;
+        let clusters = u32::try_from((data_sectors / u64::from(per_cluster)).min(numbered))
             .map_err(|_| Error::NotFat32("more clusters than FAT32 numbers"))?
             .min(MASK - 1);
-        // The table must hold an entry for every cluster.
-        if u64::from(fat_size) * u64::from(bytes_per_sector) / 4 < u64::from(clusters) + 2 {
-            return Err(Error::NotFat32("a table too small for its clusters"));
-        }
         let volume = Volume {
             device,
             fat_start: u64::from(reserved) * u64::from(bytes_per_sector),
