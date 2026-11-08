@@ -244,6 +244,13 @@
       "branch": "feature/mk-boot-time",
       "date": "2026-11-05",
       "purpose": "Per-check frame accounting (ledger 7191 K1-K11): attribution by tag, netting and closure, the latch, the cross free."
+    },
+    {
+      "ids": ["L.device.86-87"],
+      "owner": "btrfs-reference",
+      "branch": "bugfix/btrfs-io-reserve",
+      "date": "2026-11-08",
+      "purpose": "W4 (docs/BTRFS-PRESSURE.md, ledger 8275 W4.8): L.device.86 the block ring's write payload copied fallibly, a per-disk reserve on refusal and a bounded ENOMEM wait; L.device.87 the requests map's insert fallible with nothing queued on a refusal."
     }
   ]
 }
