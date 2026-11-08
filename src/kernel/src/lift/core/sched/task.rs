@@ -78,6 +78,13 @@ pub struct Task {
     pub(crate) weight: AtomicU32,
     pub(crate) request: AtomicU64,
     pub(crate) voluntary: AtomicU64,
+    /// Its page faults and its major ones, as the kernel's task counts them
+    /// (`L.object.372`): written only by the thread itself.
+    pub(crate) faults: [AtomicU64; 2],
+    /// Whether the fault it is resolving read its page from a disk.
+    pub(crate) fault_read_disk: AtomicBool,
+    /// Spare frames it holds for a fault (`L.user.225`).
+    pub(crate) spares_held: AtomicU32,
     pub(crate) wakes: AtomicU64,
     pub(crate) thread: Option<Arc<dyn UserThread>>,
     /// What [`Task::thread`] was found to be by its own downcast, once it has been: the
@@ -158,6 +165,54 @@ impl Task {
     }
     pub fn involuntary_switches(&self) -> u64 {
         0
+    }
+    /// As the kernel's task: a fault of its own begins.
+    pub fn begin_fault(&self) {
+        self.fault_read_disk.store(false, Ordering::Relaxed);
+    }
+    /// As the kernel's task: the fault read its page from a disk.
+    pub fn note_fault_read_disk(&self) {
+        self.fault_read_disk.store(true, Ordering::Relaxed);
+    }
+    /// As the kernel's task: count one fault, major if it read the disk.
+    pub fn note_fault(&self) {
+        let major = self.fault_read_disk.swap(false, Ordering::Relaxed);
+        let [all, majors] = &self.faults;
+        all.store(
+            all.load(Ordering::Relaxed).wrapping_add(1),
+            Ordering::Relaxed,
+        );
+        if major {
+            majors.store(
+                majors.load(Ordering::Relaxed).wrapping_add(1),
+                Ordering::Relaxed,
+            );
+        }
+    }
+    /// Faults that read nothing from a disk.
+    pub fn minor_faults(&self) -> u64 {
+        let [all, majors] = &self.faults;
+        all.load(Ordering::Relaxed)
+            .saturating_sub(majors.load(Ordering::Relaxed))
+    }
+    /// Faults that read their page from a disk.
+    pub fn major_faults(&self) -> u64 {
+        let [_, majors] = &self.faults;
+        majors.load(Ordering::Relaxed)
+    }
+    /// As the kernel's task: a spare taken (`up`) or let go.
+    pub fn note_spare(&self, up: bool) {
+        let held = self.spares_held.load(Ordering::Relaxed);
+        let held = if up {
+            held.wrapping_add(1)
+        } else {
+            held.wrapping_sub(1)
+        };
+        self.spares_held.store(held, Ordering::Relaxed);
+    }
+    /// The spare frames it holds.
+    pub fn spares_held(&self) -> u32 {
+        self.spares_held.load(Ordering::Relaxed)
     }
     pub fn switches(&self) -> u64 {
         self.voluntary_switches()

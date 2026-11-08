@@ -59,6 +59,7 @@ const STEPS: &[&str] = &[
     "threads: mutex ok",
     "threads: copy ok",
     "threads: munmap-race ok",
+    "threads: fault-race ok",
     "threads: setuid ok",
     "threads: futex-signal ok",
     "threads: futex-stop ok",

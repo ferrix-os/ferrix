@@ -25,6 +25,7 @@
 //!   other processors with interrupts masked stops the machine here, which
 //!   is how a compositor drawing on several threads found it.
 //! * **munmap-race**: see [`munmap_race`].
+//! * **fault-race**: see [`fault_race`].
 //! * **setuid**: in a forked child with a second thread blocked on a
 //!   channel, root's `setuid(1000)` goes through musl's broadcast to both
 //!   threads, leaves both uid and euid 1000, and `setuid(0)` is then `EPERM`
@@ -45,9 +46,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex, mpsc};
 use std::thread;
 
-mod armed;
 mod affinity;
+mod armed;
 mod cpu_number;
+mod fault_race;
 mod futex_signal;
 mod munmap_race;
 mod setuid;
@@ -583,6 +585,10 @@ fn main() {
     println!("threads: munmap-race");
     munmap_race::check_munmap_race(fail);
     println!("threads: munmap-race ok");
+
+    println!("threads: fault-race");
+    fault_race::check_fault_race(fail);
+    println!("threads: fault-race ok");
 
     println!("threads: setuid");
     setuid::check_setuid(fail);

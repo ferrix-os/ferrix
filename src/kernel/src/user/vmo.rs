@@ -290,10 +290,154 @@ pub trait Filler: Send + Sync + fmt::Debug {
         false
     }
 
+    /// A fault found its page with nothing to fill: counted as a page
+    /// served (`/proc/ferrix-seam`'s `served`). Nothing by default.
+    fn served(&self) {}
+
     /// How many of the object's pages the file has written and not yet
     /// written back, for `/proc/meminfo`'s `Dirty`. None by default.
     fn dirty_pages(&self) -> u64 {
         0
+    }
+}
+
+/// A zeroed frame of the running task's job, held for a page that may need
+/// one, or nothing (`L.user.224`): a write fault takes one with no lock held
+/// (`AddressSpace::fault_with`), so that its commit or copy under the space's
+/// lock takes no frame there, and [`Vmo::commit_with`] takes one before its
+/// reserve section. Owning, and moved rather than copied: a frame in it goes
+/// either into an object, through [`Spare::take`], or back to the
+/// allocator, once, when the spare drops -- never both, and never twice.
+#[derive(Debug)]
+#[must_use = "a spare's frame goes back when it drops"]
+pub(crate) struct Spare(Option<Frame>);
+
+/// The room a job must have below its memory limit, in bytes, for a fault
+/// of one of its tasks to take a spare: 64 pages, so that the spares of
+/// faults in flight never stand between a job and its last pages.
+const SPARE_ROOM: u64 = 64 * PAGE_SIZE;
+
+/// Spare frames held, counted where each was taken and where it went, one
+/// slot a processor so that faults on four processors do not share a line:
+/// the sum over the slots is what is held machine-wide, which the memory
+/// limit's kill waits on (`object::oom`, `L.user.224`).
+#[repr(align(64))]
+struct SpareSlot(core::sync::atomic::AtomicI64);
+
+/// The slots of [`SpareSlot`], by logical processor number.
+static SPARES: [SpareSlot; ferrix_sched::MAX_CPUS] =
+    [const { SpareSlot(core::sync::atomic::AtomicI64::new(0)) }; ferrix_sched::MAX_CPUS];
+
+/// Count a spare taken (`up`) or let go, here and on the running task.
+fn count_spare(up: bool) {
+    let cpu = smp::this_cpu().map_or(0, |cpu| cpu.logical);
+    if let Some(slot) = SPARES.get(cpu) {
+        let _ = slot.0.fetch_add(if up { 1 } else { -1 }, Ordering::Relaxed);
+    }
+    let _ = crate::sched::with_current(|task| task.note_spare(up));
+}
+
+/// Spare frames held for faults machine-wide now: a charge a limit refused
+/// may be waiting on one of them to go back.
+pub(crate) fn spares_in_flight() -> u64 {
+    let sum: i64 = SPARES
+        .iter()
+        .map(|slot| slot.0.load(Ordering::Relaxed))
+        .fold(0_i64, i64::wrapping_add);
+    u64::try_from(sum).unwrap_or(0)
+}
+
+/// Stop the machine if the running task holds a spare frame: called before
+/// a fault's fill and its ask of a pager, which may wait (`L.user.225`).
+/// Checks builds only.
+pub(crate) fn assert_no_spare_held() {
+    #[cfg(ferrix_checks = "on")]
+    {
+        let held = crate::sched::with_current(crate::sched::Task::spares_held).unwrap_or(0);
+        if held != 0 {
+            crate::panic::fatal!(
+                crate::panic::catalog::SPARE_ACROSS_A_WAIT,
+                "a fault went to fill or ask holding {} spare frame(s)",
+                held
+            );
+        }
+    }
+}
+
+impl Spare {
+    /// No frame.
+    pub(crate) const fn none() -> Spare {
+        Spare(None)
+    }
+
+    /// [`Spare::zeroed`] for a write fault taken before its space's lock:
+    /// nothing when the job is within [`SPARE_ROOM`] of its memory limit, so
+    /// that near the limit a fault charges exactly what it did before spares,
+    /// the frame its commit takes under the lock (`L.user.224`).
+    pub(crate) fn for_fault() -> Spare {
+        if crate::object::quota::at_limit(
+            crate::object::quota::charge_target(),
+            Resource::Memory,
+            SPARE_ROOM,
+        )
+        .is_some()
+        {
+            return Spare(None);
+        }
+        Spare::zeroed()
+    }
+
+    /// Give back a frame a taker wrote and did not use: never into a spare,
+    /// whose frame must read as zeros, but to the allocator, at once.
+    pub(crate) fn discard(frame: Frame) {
+        let _ = mm::release_frame(frame);
+    }
+
+    /// A frame of the running task's job, zeroed: nothing when the job is
+    /// at its limit or there is no frame, and the caller goes on without.
+    /// Takes the allocator's lock alone, the innermost, so any lock may be
+    /// held; a fault takes its spare holding none, so that neither the lock
+    /// nor the zeros are waited behind.
+    pub(crate) fn zeroed() -> Spare {
+        let frame = mm::allocate_user_frame();
+        if let Some(frame) = frame {
+            // Zeroed rather than merely allocated, as `Vmo::commit` always
+            // zeroed: the page may be mapped as a fresh one.
+            mm::zero_frame(frame);
+            count_spare(true);
+        }
+        Spare(frame)
+    }
+
+    /// The frame, now the caller's to put in an object; the spare is empty.
+    pub(crate) fn take(&mut self) -> Option<Frame> {
+        let frame = self.0.take();
+        if frame.is_some() {
+            count_spare(false);
+        }
+        frame
+    }
+
+    /// Hold `frame` again: one [`Spare::take`] handed out and its taker did
+    /// not use. The spare must be empty, as it is after a take.
+    pub(crate) fn give_back(&mut self, frame: Frame) {
+        count_spare(true);
+        if let Some(held) = self.0.replace(frame) {
+            // Never reached: a taker gives back what it took. Not lost.
+            count_spare(false);
+            let _ = mm::release_frame(held);
+        }
+    }
+}
+
+impl Drop for Spare {
+    /// An unused frame goes back to the allocator, and its job's charge
+    /// with it. Nothing has mapped it, so no shootdown is owed.
+    fn drop(&mut self) {
+        if let Some(frame) = self.0.take() {
+            count_spare(false);
+            let _ = mm::release_frame(frame);
+        }
     }
 }
 
@@ -948,6 +1092,23 @@ impl Vmo {
         }
     }
 
+    /// Whether a fault must offer page `index` to the object's fill before it
+    /// commits it: the source is the page cache's ([`Filler`]) and the page is
+    /// absent (`L.user.222`). The fill decides what to read, as it did when a
+    /// fault called it on every round: the page cache's reads only a page its
+    /// source holds, and counts a hole served.
+    pub(crate) fn wants_fault_fill(&self, index: u64) -> bool {
+        self.filler().is_some() && self.page(index).is_none()
+    }
+
+    /// A fault found page `index` with nothing to fill: the source counts a
+    /// page served, as its fill did when it was asked and had nothing to do.
+    pub(crate) fn note_served(&self) {
+        if let Some(filler) = self.filler() {
+            filler.served();
+        }
+    }
+
     /// [`Vmo::fill_for_fault`] for page `index` alone, with no read-ahead
     /// ([`Filler::fill_one`]). Must be called with no lock held.
     ///
@@ -1339,6 +1500,24 @@ impl Vmo {
     /// [`VmoError::OutOfRange`] past the end of the object, and
     /// [`VmoError::OutOfMemory`] when the allocator has nothing left.
     pub fn commit(&self, index: u64) -> Result<Frame, VmoError> {
+        self.commit_with(index, &mut Spare::none())
+    }
+
+    /// [`Vmo::commit`], committing `spare`'s frame, zeroed with no lock held,
+    /// if the page is absent and `spare` holds one (`L.user.221`). The spare
+    /// is used only for an absent page that goes in; on every other return
+    /// it is left as it was, and the caller gives it back.
+    ///
+    /// The frame is taken and zeroed before the reserve section, which
+    /// covers the insert alone: the section masks interrupts, and the
+    /// allocator's lock and the zeros were most of a fault's masked time. A
+    /// section that cannot be entered leaves the frame in `spare`, which
+    /// gives it back (`L.user.220`).
+    ///
+    /// # Errors
+    ///
+    /// As [`Vmo::commit`].
+    pub(crate) fn commit_with(&self, index: u64, spare: &mut Spare) -> Result<Frame, VmoError> {
         let len = self.len_pages();
         if index >= len {
             return Err(VmoError::OutOfRange { index, pages: len });
@@ -1353,16 +1532,31 @@ impl Vmo {
         if pages.sealed {
             return Err(VmoError::Sealed);
         }
+        self.insert_spare(&mut pages, index, spare)
+    }
 
-        // Room to record the page before the frame is taken, so a refusal
-        // leaves nothing to give back.
-        let held = crate::fallible::reserve().map_err(|_| VmoError::OutOfMemory)?;
-        let frame = mm::allocate_user_frame().ok_or(VmoError::OutOfMemory)?;
-        mm::zero_frame(frame);
+    /// Put a zeroed frame in page `index`, absent in `pages`: `spare`'s, or
+    /// one taken and zeroed here, before the reserve section. A section that
+    /// cannot be entered leaves the frame in `spare`, the caller's to give
+    /// back.
+    fn insert_spare(
+        &self,
+        pages: &mut Pages,
+        index: u64,
+        spare: &mut Spare,
+    ) -> Result<Frame, VmoError> {
+        let frame = match spare.take() {
+            Some(frame) => frame,
+            None => Spare::zeroed().take().ok_or(VmoError::OutOfMemory)?,
+        };
         // The zeros out of the caches before a write-combining store can
         // reach the frame (`L.user.133`); the flag is read under this lock,
         // which `make_combining` takes after setting it.
         self.flush_if_combining(frame, 1);
+        let Ok(held) = crate::fallible::reserve() else {
+            spare.give_back(frame);
+            return Err(VmoError::OutOfMemory);
+        };
         let _ = crate::fallible::insert_held(&held, &mut pages.frames, index, frame);
         Ok(frame)
     }
@@ -1545,6 +1739,21 @@ impl Vmo {
     ///
     /// As [`Vmo::commit`].
     pub(crate) fn commit_within(&self, index: u64) -> Result<Commit, VmoError> {
+        self.commit_within_with(index, &mut Spare::none())
+    }
+
+    /// [`Vmo::commit_within`], committing `spare`'s frame for an absent page
+    /// as [`Vmo::commit_with`] does, and leaving it as it was on every other
+    /// return: a page present, past the end, sealed or the source's to fill.
+    ///
+    /// # Errors
+    ///
+    /// As [`Vmo::commit`].
+    pub(crate) fn commit_within_with(
+        &self,
+        index: u64,
+        spare: &mut Spare,
+    ) -> Result<Commit, VmoError> {
         let len = self.len_pages();
         if index >= len {
             return Err(VmoError::OutOfRange { index, pages: len });
@@ -1564,12 +1773,8 @@ impl Vmo {
         if self.sourced(index) {
             return Ok(Commit::Unfilled);
         }
-
-        let held = crate::fallible::reserve().map_err(|_| VmoError::OutOfMemory)?;
-        let frame = mm::allocate_user_frame().ok_or(VmoError::OutOfMemory)?;
-        mm::zero_frame(frame);
-        let _ = crate::fallible::insert_held(&held, &mut pages.frames, index, frame);
-        Ok(Commit::Frame(frame))
+        self.insert_spare(&mut pages, index, spare)
+            .map(Commit::Frame)
     }
 
     /// Whether page `index`, if absent, is its file's source to fill.
