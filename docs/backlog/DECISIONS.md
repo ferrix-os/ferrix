@@ -7,6 +7,14 @@ Moved out of [`docs/BACKLOG.md`](../BACKLOG.md) on 2026-10-16. A decision is rec
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-11-08, about 11:15 (customer, through the product owner's session)**
+  **A shortcut while no FIFO scheduling is used**: "can you add some special
+  path where if no fifo scheduling is used on the system during runtime is
+  will shortcut the fifo path, that way desktop, which should rarely use fifo
+  won't be hit". After the per-queue `lower_only` bit measured 1.025 (ledger
+  8160, not landed): a system-wide "no task has been real-time" state that
+  selects the fair-only path on the direct switch, flipped before the first
+  real-time task can be queued. Still +2% at most on desktop's `call` row.
 * **2026-11-08, about 08:30 (customer, through the product owner's session)**
   **"Keep cutting, new design"**: with desktop's `call` row at 1.025 to 1.03
   over develop on PR #51 (46736ea82; the fair-entity hand-over of ledger 8134
