@@ -122,6 +122,11 @@ freely; a new unmarked call fails the build, and so does an entry that has
 shrunk without being re-recorded, so a converted site cannot leave an
 allowance behind. The target is an empty baseline.
 
+The patterns and markers here are also what `check-ring0-alloc.py` counts in
+the rest of ring 0: a change to them re-records that gate's baseline
+(`tools/common/data/ring0-alloc-baseline.json`) in the same commit, and that
+commit is reviewed (the certification consultant, ledger 8202 R1.6).
+
     python3 tools/common/check/check-fallible-alloc.py
     python3 tools/common/check/check-fallible-alloc.py --report     # every site, and the markers
     python3 tools/common/check/check-fallible-alloc.py --record     # rewrite the baseline

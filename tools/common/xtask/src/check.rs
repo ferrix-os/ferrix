@@ -470,6 +470,18 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
         "fallible allocation",
         &[&["tools/common/check/check-fallible-alloc.py"]],
     ),
+    // The rest of ring 0 -- the load ring's kernel files and every crate
+    // the kernel links that is not the item's -- held to no new
+    // infallible allocation, a per-file ratchet over a recorded baseline:
+    // there a program drives the call, and an empty heap then stops the
+    // machine (FX-0008). docs/ROBUSTNESS.md, class A.
+    (
+        "ring-0 allocation",
+        &[
+            &["tools/common/check/check-ring0-alloc.py", "--self-test"],
+            &["tools/common/check/check-ring0-alloc.py"],
+        ],
+    ),
     // The safety manual is an out-of-context argument an integrator
     // designs against, so a claim in it that quietly stopped being true
     // would be worse than no manual. Every claim names its evidence, and
