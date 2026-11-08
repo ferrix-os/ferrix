@@ -164,23 +164,33 @@ struct Scratch {
 }
 
 impl Scratch {
+    /// A buffer set, or `ENOMEM` when the heap has no room for one: two of
+    /// its buffers are 128 KiB, one contiguous block each, which a machine at
+    /// its floor with its free memory in single frames may not have. An
+    /// infallible `vec!` here stopped the N150 box with FX-0008 ("memory
+    /// allocation of 131072 bytes failed", 2026-11-08) when a read found the
+    /// pool empty; the read now fails with `ENOMEM`, which a page-in answers
+    /// as a fault short of memory (reclaim, then try again).
     fn new() -> Result<Scratch> {
         let owned = Owned {
-            compressed: zeroed(MAX_UNCOMPRESSED),
-            plain: zeroed(MAX_UNCOMPRESSED),
-            zstd: zeroed(Workspace::SIZE),
-            csum_node: zeroed(MAX_NODE_SIZE as usize),
+            compressed: zeroed(MAX_UNCOMPRESSED)?,
+            plain: zeroed(MAX_UNCOMPRESSED)?,
+            zstd: zeroed(Workspace::SIZE)?,
+            csum_node: zeroed(MAX_NODE_SIZE as usize)?,
         };
         Ok(Scratch {
-            node: zeroed(MAX_NODE_SIZE as usize),
+            node: zeroed(MAX_NODE_SIZE as usize)?,
             read: ReadBuffers::new(owned).map_err(errno)?,
         })
     }
 }
 
-/// A heap buffer of `len` zeroes, built on the heap rather than moved there.
-fn zeroed(len: usize) -> Box<[u8]> {
-    vec![0u8; len].into_boxed_slice()
+/// A heap buffer of `len` zeroes, built on the heap rather than moved there,
+/// or `ENOMEM` when the heap has no room for it.
+fn zeroed(len: usize) -> Result<Box<[u8]>> {
+    try_zeroed(len)
+        .map(Vec::into_boxed_slice)
+        .ok_or(Errno::ENOMEM)
 }
 
 /// `len` zeroes on the heap, or `None` when the heap has no room for them.
