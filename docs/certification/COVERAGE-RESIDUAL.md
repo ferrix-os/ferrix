@@ -10,7 +10,7 @@ The statements in the certified item that the measured suite did not reach, on e
 |---|---|---:|---:|---:|---:|
 | x86_64 | coverage | 1910 | 395 | 271 | **1244** |
 | aarch64 | debug | 627 | 308 | 157 | **162** |
-| armv7a | debug | 972 | 411 | 346 | **215** |
+| armv7a | debug | 970 | 409 | 346 | **215** |
 
 *Argued* is the first four categories below; *hardware absent* is a statement about which machine was measured rather than an argument; *needs a test* is the gap.
 
@@ -725,12 +725,12 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 
 ## armv7a
 
-**972** unreached statements, debug profile.
+**970** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
 | Unreachable on the measured architecture | 156 | 16% |
-| Reached only when the kernel is stopping | 171 | 18% |
+| Reached only when the kernel is stopping | 169 | 17% |
 | Reached only when something has already failed | 65 | 7% |
 | Run, and credited to another line | 19 | 2% |
 | Hardware the measured machine does not have | 346 | 36% |
@@ -749,13 +749,13 @@ Justified. These statements belong to another architecture or another board, and
 | 2 | `core` | `arch/armv7a/console.rs` |
 | 1 | `core` | `arch/speculation.rs` |
 
-### armv7a: Reached only when the kernel is stopping — 171 statements
+### armv7a: Reached only when the kernel is stopping — 169 statements
 
 Justified. The panic report, its catalogue and the backtrace walker run when the kernel has already decided to stop. Exercising them means crashing deliberately, which only `test-shell`'s `ferrix.onexit=panic` boot does -- and a passing run that reached the rest would be a failing run.
 
 | Statements | Ring | File |
 |---:|---|---|
-| 52 | `core` | `panic/screen.rs` |
+| 50 | `core` | `panic/screen.rs` |
 | 19 | `item` | `main.rs` |
 | 19 | `core` | `sched/mod.rs` |
 | 18 | `core` | `trap.rs` |

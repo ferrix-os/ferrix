@@ -11,9 +11,10 @@
 //! report to keep in step. The report is picked out from the boot log above it
 //! by colour, from its `FERRIX-PANIC` line on.
 //!
-//! Beside the text is a QR code of the report itself, as plain text: a photo
-//! of a screen is how a report leaves a machine with no cable, and a photo of
-//! a code carries every character where a photo of text loses some. It holds
+//! Beside the text, drawn after it, is a QR code of the report itself, as
+//! plain text: a photo of a screen is how a report leaves a machine with no
+//! cable, and a photo of a code carries every character where a photo of text
+//! loses some. It holds
 //! as much of the report as a code with modules of at least
 //! [`MIN_MODULE_PIXELS`] can on this screen, cut at a line, from the marker
 //! line down, so what is lost to a small screen is the end of the explanation
@@ -219,8 +220,8 @@ pub(crate) unsafe fn surface() -> Option<Surface<'static>> {
     Surface::new(pixels, width, height, stride, order)
 }
 
-/// Paint the banner, the QR code of the report at the right, and as much of
-/// `text` as fits beside it, newest last.
+/// Paint the banner, as much of `text` as fits, newest last, and then the QR
+/// code of the report at its right.
 fn paint(surface: &mut Surface<'_>, text: &[u8], modules: &mut [u8], work: &mut [u8]) {
     surface.fill(BACKGROUND);
     let width = surface.width();
@@ -249,11 +250,17 @@ fn paint(surface: &mut Surface<'_>, text: &[u8], modules: &mut [u8], work: &mut 
         .saturating_add(MARGIN);
     let side = tall.min(inner.saturating_sub(text_wanted)).min(inner / 2);
     let report = report_start(text).and_then(|start| text.get(start..));
-    let code = report.and_then(|report| {
-        let right = MARGIN.saturating_add(inner);
-        draw_code(surface, right, top, side, report, modules, work)
-    });
-    let beside = code.map_or(0, |drawn| drawn.saturating_add(MARGIN));
+    // The text is drawn first and the code after it: drawing the code takes
+    // seconds on a slow processor, and a machine that stops or resets
+    // meanwhile (`ferrix.panic=reset`, a watchdog) must already show the
+    // report's own lines -- its code, its processor -- when it goes. So the
+    // code's column is kept before the code exists, whenever one fits.
+    let code = report.filter(|_| version_for(side).is_some());
+    let beside = if code.is_some() {
+        side.saturating_add(MARGIN)
+    } else {
+        0
+    };
 
     let body = Rect {
         x: MARGIN,
@@ -274,6 +281,13 @@ fn paint(surface: &mut Surface<'_>, text: &[u8], modules: &mut [u8], work: &mut 
             0x20..=0x7E => area.put_char(char::from(byte)),
             _ => area.put_char(char::REPLACEMENT_CHARACTER),
         }
+    }
+    // The text leaves the write-combining buffers before the code's first
+    // store, so it is on the screen whatever happens while the code draws.
+    arch::drain_write_combining();
+    if let Some(report) = code {
+        let right = MARGIN.saturating_add(inner);
+        let _ = draw_code(surface, right, top, side, report, modules, work);
     }
 }
 
@@ -328,14 +342,7 @@ fn encode<'m>(
     modules: &'m mut [u8],
     work: &mut [u8],
 ) -> Option<Symbol<'m>> {
-    let across = (side / MIN_MODULE_PIXELS).checked_sub(QUIET_ZONE.saturating_mul(2))?;
-    // A symbol is 17 + 4 * version modules across.
-    let version = u8::try_from(across.checked_sub(17)? / 4)
-        .unwrap_or(MAX_VERSION)
-        .min(MAX_VERSION);
-    if version == 0 {
-        return None;
-    }
+    let version = version_for(side)?;
     let room = ferrix_qr::max_data_size(version, 0);
     let payload = if report.len() <= room {
         report
@@ -348,6 +355,18 @@ fn encode<'m>(
         fits.get(..line)?
     };
     ferrix_qr::generate(None, payload, modules, work).ok()
+}
+
+/// The largest QR version whose symbol, with its quiet zone and modules of
+/// [`MIN_MODULE_PIXELS`], fits in `side` pixels: `None` if not even version 1
+/// does.
+fn version_for(side: usize) -> Option<u8> {
+    let across = (side / MIN_MODULE_PIXELS).checked_sub(QUIET_ZONE.saturating_mul(2))?;
+    // A symbol is 17 + 4 * version modules across.
+    let version = u8::try_from(across.checked_sub(17)? / 4)
+        .unwrap_or(MAX_VERSION)
+        .min(MAX_VERSION);
+    (version != 0).then_some(version)
 }
 
 /// What of `text` to show in `rows` rows of `columns` columns.

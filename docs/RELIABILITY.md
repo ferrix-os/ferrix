@@ -130,7 +130,9 @@ the width left beside it. The code holds as much of the report as fits at two
 pixels or more a module, cut at the end of a line, from the marker line down.
 When the report is taller than the screen, the text starts at the marker line
 and is cut at the bottom. On a small screen both lose the end of the
-explanation first, never the headline. The encoder is `src/lib/kernel/qr`, a port of Linux's `drm_panic_qr.rs` under
+explanation first, never the headline. The text is drawn, and drained from
+the write-combining buffers, before the code, so a machine that resets or stops
+while the code draws already shows the report's own lines. The encoder is `src/lib/kernel/qr`, a port of Linux's `drm_panic_qr.rs` under
 its MIT licence. It allocates nothing, and its tests read every symbol back
 through an independent decoder.
 

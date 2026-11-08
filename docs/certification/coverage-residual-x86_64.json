@@ -2230,9 +2230,9 @@
     "panic/screen.rs": {
       "ring": "core",
       "lines": [
-        346,
-        347,
-        348
+        353,
+        354,
+        355
       ]
     },
     "random.rs": {
