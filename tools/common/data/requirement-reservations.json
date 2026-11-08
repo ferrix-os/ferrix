@@ -244,6 +244,13 @@
       "branch": "feature/mk-boot-time",
       "date": "2026-11-05",
       "purpose": "Per-check frame accounting (ledger 7191 K1-K11): attribution by tag, netting and closure, the latch, the cross free."
+    },
+    {
+      "ids": ["L.mm.139"],
+      "owner": "btrfs-pressure",
+      "branch": "park/heap-kill-reserve",
+      "date": "2026-11-08",
+      "purpose": "The task killing for the kernel's heap (L.mm.138) has its refused allocations served from its processor's allocation reserve outside any section (consultant ledger 8172 B2)."
     }
   ]
 }
