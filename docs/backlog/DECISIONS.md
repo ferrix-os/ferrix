@@ -7,6 +7,19 @@ Moved out of [`docs/BACKLOG.md`](../BACKLOG.md) on 2026-10-16. A decision is rec
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-11-08 (customer, through the product owner's session)** **`present`'s
+  `call` row at +2.5% is not accepted**: on PR #51's ef032a473 against develop
+  09723c941, the fast path on, `bench-ipc`'s `call` row (outside a
+  speculation domain, an IBPB at every switch) read 2,886 to 2,896 ns against
+  2,816 to 2,836, 1.025, with `domain-call` at 1.000. Cutting goes on toward
+  develop's figure, within noise, by the optimize-ipc-round-trip skill's
+  protocol, and `present`'s gated `domain-call` stays at 1.000.
+* **2026-11-08 (customer, through the product owner's session)** **`desktop`'s
+  `call` row at +11.7% is unacceptable; at most +2%**: on 514a35367's tree
+  `desktop` (the FIFO tier above fair, `Over<Fifo, Eevdf>`) read 3,146 to
+  3,176 ns against develop's 2,806 to 2,826, 1.117, about +340 ns a round
+  trip. It is cut to +2% at most, and `desktop`'s `domain-call` (1.014 then)
+  stays within +2% too.
 * **2026-11-07 (customer, in the product owner's session)** **`max_plus` keeps
   `kernel_memory=retyped` without a Linux personality**: asked "max_plus mem"
   (develop's `retyped` requires `personality=user`; `max_plus`, the barest
