@@ -50,6 +50,7 @@ mod affinity;
 mod armed;
 mod cpu_number;
 mod fault_race;
+mod teardown_race;
 mod futex_signal;
 mod munmap_race;
 mod setuid;
@@ -587,6 +588,7 @@ fn main() {
     println!("threads: munmap-race ok");
 
     println!("threads: fault-race");
+    teardown_race::check_teardown_race(fail);
     fault_race::check_fault_race(fail);
     println!("threads: fault-race ok");
 
