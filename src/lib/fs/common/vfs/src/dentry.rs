@@ -243,15 +243,31 @@ impl Dentry {
     /// The caller keeps its own reference to `inode`, so that what is dropped
     /// here under the children lock is never the last one.
     ///
+    /// The new dentry and its key are made before the lock, where the heap
+    /// may reclaim or kill for them, and fallibly; under the lock only the
+    /// map's node is allocated, inside the host's reserved section
+    /// (`ferrix_fallible::try_map_insert`). A spin lock keeps its holder from
+    /// blocking, so an allocation made under it that the heap refused had no
+    /// answer but a stop (test-btrfs-pressure's hog boot, 2026-11-08: FX-0008
+    /// on the 204-byte copy of a name here). One made and not used -- a
+    /// dentry raced in ahead, or the generation moved -- is dropped after the
+    /// lock. It is charged before the look, so a job at its memory limit
+    /// racing another lookup of the same name may be told `ENOMEM` where it
+    /// would have been given the dentry that won: rare, and the next lookup
+    /// finds that one.
+    ///
     /// # Errors
     ///
-    /// `ENOMEM` past the job's memory limit, with nothing cached.
+    /// `ENOMEM` past the job's memory limit or with the heap empty, with
+    /// nothing cached.
     pub(crate) fn insert_looked_up(
         self: &Arc<Self>,
         name: &[u8],
         inode: Option<Arc<dyn Inode>>,
         generation: u64,
     ) -> Result<Option<(Arc<Dentry>, bool)>> {
+        let key = crate::boxed_name(name)?;
+        let child = Dentry::new(crate::boxed_name(name)?, Some(Arc::clone(self)), inode)?;
         let mut children = self.children.lock();
         if let Some(existing) = children.get(name).and_then(Weak::upgrade) {
             return Ok(Some((existing, false)));
@@ -259,9 +275,10 @@ impl Dentry {
         if self.generation() != generation {
             return Ok(None);
         }
-        let child = Dentry::new(Box::from(name), Some(Arc::clone(self)), inode)?;
         children.retain(|_, weak| weak.strong_count() > 0);
-        let _ = children.insert(Box::from(name), Arc::downgrade(&child));
+        let _ = ferrix_fallible::try_map_insert(&mut children, key, Arc::downgrade(&child))
+            .map_err(|_| crate::Errno::ENOMEM)?;
+        drop(children);
         Ok(Some((child, true)))
     }
 
@@ -279,7 +296,7 @@ impl Dentry {
         name: &[u8],
         inode: Option<Arc<dyn Inode>>,
     ) -> Result<Arc<Dentry>> {
-        Dentry::new(Box::from(name), Some(Arc::clone(self)), inode)
+        Dentry::new(crate::boxed_name(name)?, Some(Arc::clone(self)), inode)
     }
 
     /// A name was created in this directory: make its dentry positive.
@@ -289,12 +306,26 @@ impl Dentry {
     /// the new inode, and that is the one returned: a caller keeping a dentry
     /// for the new name — `open(O_CREAT)` — must keep the one later walks
     /// find, and not `walked`, which a rename may have unhashed meanwhile.
+    ///
+    /// The key is made before the lock and fallibly, and the map's node, if
+    /// the name is not there, inside the host's reserved section, as in
+    /// [`Dentry::insert_looked_up`].
+    ///
+    /// # Errors
+    ///
+    /// `ENOMEM` with the heap empty. The filesystem has made the name; what
+    /// the cache held for it is unhashed ([`Dentry::remove_name`]), so the
+    /// next walk asks the filesystem rather than find a stale miss.
     pub(crate) fn fill(
         self: &Arc<Self>,
         name: &[u8],
         walked: &Arc<Dentry>,
         inode: Arc<dyn Inode>,
-    ) -> Arc<Dentry> {
+    ) -> Result<Arc<Dentry>> {
+        let Ok(key) = crate::boxed_name(name) else {
+            self.remove_name(name);
+            return Err(crate::Errno::ENOMEM);
+        };
         // Whatever the two dentries held before, dropped after the locks: an
         // inode's last reference may run a filesystem's `Drop`, which these
         // locks, keeping their holder on its processor, must not wait for.
@@ -304,6 +335,18 @@ impl Dentry {
                 .get(name)
                 .and_then(Weak::upgrade)
                 .unwrap_or_else(|| Arc::clone(walked));
+            // The name is nearly always there, the walk's negative dentry:
+            // then its entry is replaced in place and nothing is allocated.
+            if let Some(entry) = children.get_mut(name) {
+                *entry = Arc::downgrade(&target);
+            } else if ferrix_fallible::try_map_insert(&mut children, key, Arc::downgrade(&target))
+                .is_err()
+            {
+                drop(children);
+                drop(target);
+                self.remove_name(name);
+                return Err(crate::Errno::ENOMEM);
+            }
             let first = {
                 let mut state = target.state.lock();
                 state.unhashed = false;
@@ -314,12 +357,11 @@ impl Dentry {
             } else {
                 walked.state.lock().inode.replace(inode)
             };
-            let _ = children.insert(Box::from(name), Arc::downgrade(&target));
             let _ = self.generation.fetch_add(1, Ordering::Relaxed);
             (target, [first, second])
         };
         drop(replaced);
-        target
+        Ok(target)
     }
 
     /// A name was removed from this directory: unhash whatever held it.
@@ -349,16 +391,23 @@ impl Dentry {
         new_parent: &Arc<Dentry>,
         new_name: &[u8],
     ) {
+        // The names are made before the locks, where the heap may reclaim or
+        // kill for them; the filesystem has already moved the name, so this
+        // cannot fail, and the map's node is still the one allocation made
+        // under a lock here.
+        let name = Box::from(new_name);
+        let key = Box::from(new_name);
         self.remove_name(old_name);
         new_parent.remove_name(new_name);
-        {
+        let old = {
             let mut state = child.state.lock();
-            state.name = Box::from(new_name);
             state.parent = Some(Arc::clone(new_parent));
             state.unhashed = false;
-        }
+            core::mem::replace(&mut state.name, name)
+        };
+        drop(old);
         let mut children = new_parent.children.lock();
-        let _ = children.insert(Box::from(new_name), Arc::downgrade(child));
+        let _ = children.insert(key, Arc::downgrade(child));
         let _ = new_parent.generation.fetch_add(1, Ordering::Relaxed);
     }
 

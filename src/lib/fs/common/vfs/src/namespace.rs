@@ -1549,7 +1549,7 @@ impl Namespace {
             };
             let _ = inode.set_attributes(&owner);
         }
-        Ok(walked.parent.dentry.fill(name, &walked.found.dentry, inode))
+        walked.parent.dentry.fill(name, &walked.found.dentry, inode)
     }
 
     /// `mkdirat`.
@@ -1663,6 +1663,8 @@ impl Namespace {
         let dir = dest.parent.inode()?;
         ctx.who.may_create(&dir.metadata())?;
         dir.link(name, &inode)?;
+        // Linked on the filesystem: a cache that could not record it has
+        // forgotten the name (`Dentry::fill`), and the link stands.
         let _ = dest.parent.dentry.fill(name, &dest.found.dentry, inode);
         Ok(())
     }

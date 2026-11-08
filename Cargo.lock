@@ -1446,6 +1446,7 @@ name = "ferrix-vfs"
 version = "0.1.0"
 dependencies = [
  "ferrix-cpio",
+ "ferrix-fallible",
  "ferrix-kmem",
  "ferrix-linux-abi",
  "ferrix-sync",

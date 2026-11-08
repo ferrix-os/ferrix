@@ -329,6 +329,50 @@ a BACKLOG row (ledger 8015 MP.8, 8043 MK.2 and MK.5). The certification
 consultant's review: OK IF MK.1-MK.6, ledger line 8043, after NOT YET
 B1-B3 / OK IF MP.1-MP.10 at line 8015.
 
+**Two refusals the kill could not answer (2026-11-08, btrfs-pressure).**
+The hog boot stopped on `bugfix/fault-relanding` (90713ad5b, gate.sh
+`fr-pressure`) with FX-0008, `memory allocation of 204 bytes failed`, in
+`openat`, and no kill before it. With a diagnostic in `mm::heap_or_kill`
+and `object::oom::for_kernel_heap` (logs
+`~/.local/share/ferrix/mem-pressure/bp-diag-fr*.log`), the branch failed 3 of 8 hog boots, in two ways;
+develop passed 6 of 6 the same afternoon (gate.sh `bp-dev-pressure` and
+five local hog boots), and the difference is timing, not code:
+
+* **An allocation under a spin lock.** `Dentry::insert_looked_up` copied
+  the name (200 bytes and the number: 204) and made the dentry while
+  holding the directory's children lock. A spin lock keeps its holder from
+  blocking, so the refusal is answered by neither the reclaims nor the
+  kill (`heap_may_reclaim`: preemption count 1), and the `Box` stops the
+  machine. Which allocation first meets the empty heap decides it: one
+  that may block kills the hog, one under the lock stops.
+* **The kill could not list the living.** The kill is asked because the
+  heap is empty, and the list of the live processes it chooses from
+  (`process::live`, two small vectors) found it as empty: `live() failed,
+  free 0`. The kill answered refused, and the allocation it was asked for
+  failed; that one was fallible, so the shell's create said `Out of
+  memory` and the volume aborted its transaction.
+
+The fix of the first (bugfix/vfs-no-alloc-under-lock):
+
+* the dentry cache makes what it keeps before its locks, fallibly
+  (`ferrix_fallible::try_boxed_slice`), and the map's node under the lock
+  inside the host's reserved section (`try_map_insert`):
+  `insert_looked_up` and `fill` (whose failure unhashes the name, so the
+  next walk asks the filesystem) answer `ENOMEM`; `move_child`, past the
+  filesystem's rename and so unable to fail, makes its names before the
+  locks;
+* a walk reports an allocation it cannot make as `ENOMEM` (`walk.rs`: the
+  path's copy, a link's fragment, the last component's name; a step
+  borrows its component rather than copying it).
+
+The second is not fixed here. Serving the killing task's refused
+allocations from its processor's allocation reserve (branch
+`park/heap-kill-reserve`, a4bcc40e0) passed 8 of 8 hog boots on the
+branch's base, one of them killing with `0 frames free`; the certification
+consultant's review (ledger line 8172) wants it as a requirement of its own
+(L.mm.139, reserved first), L.mm.37 amended, and a deterministic boot check
+with two controls before it lands (a BACKLOG row).
+
 ## The gate
 
 ```
