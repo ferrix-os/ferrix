@@ -159,12 +159,24 @@ fn effective(slot: u8) -> Option<u8> {
 /// the processor's domain is its own. Not its affinity, which the caller
 /// asks as well. Fails closed: a processor in no domain admits no task but
 /// the exempt (V2).
+///
+/// The task's slot is read once. One slot on both sides, below
+/// [`MAX_DOMAINS`], is one domain whatever [`LIVE`] says -- live, or
+/// dissolved and so the boot domain's on both -- so that case, every task
+/// and processor of a machine with no `SoftRt` domain, answers from those
+/// two loads; any other asks [`effective`] of each, as before (the round
+/// trip, ledger 5684 B4 and 5695 B6).
 pub(crate) fn admits(task: &Task, cpu: usize) -> bool {
-    if task.is_exempt() {
+    let mine = task.domain_slot();
+    if mine == EXEMPT {
         return true;
     }
-    let here = effective(slot_of(cpu));
-    here.is_some() && here == effective(task.domain_slot())
+    let here = slot_of(cpu);
+    if here == mine && here < MAX_DOMAINS {
+        return true;
+    }
+    let here = effective(here);
+    here.is_some() && here == effective(mine)
 }
 
 /// Whether `cpu` takes work from its neighbours: only in the boot domain,
