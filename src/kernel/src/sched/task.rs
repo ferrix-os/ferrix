@@ -1074,8 +1074,12 @@ impl Task {
     pub(crate) fn entity_with(&self, slot: TaskSlot) -> super::stack::StackEntity {
         // Admitted on the processor whose queue it goes on: the deadline
         // tier's (docs/SCHED-CLASSES.md §9g). Anywhere else -- a processor
-        // taken out of service moved it -- it is fair there (7088 E.3).
-        if self.deadline_here()
+        // taken out of service moved it -- it is fair there (7088 E.3). A
+        // stack without the tier asks nothing: `DEADLINE` folds the test
+        // away, so `present`'s and `desktop`'s queueing reads no reservation
+        // cell (ledger 5684 B4, the round trip).
+        if super::stack::DEADLINE
+            && self.deadline_here()
             && let Some(entity) = super::stack::Stack::deadline_entity()
         {
             self.parked.put(slot);

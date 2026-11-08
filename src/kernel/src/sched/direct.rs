@@ -292,8 +292,11 @@ impl Direct {
         // A fold only between two fair tasks (docs/SCHED-CLASSES.md §9e, R6,
         // F10): the fused step is the fair class's, and a real-time task on
         // either side takes the stack's general sequence, under which the
-        // caller's leave and the peer's join are made apart.
-        let plan = if caller.is_fair() && peer.is_fair() {
+        // caller's leave and the peer's join are made apart. A stack with no
+        // tier above fair has no real-time task to ask about (a policy is
+        // refused without one, L.sched.138), so `REALTIME` folds the two
+        // reads away there (ledger 5684 B4, the round trip).
+        let plan = if !super::stack::REALTIME || (caller.is_fair() && peer.is_fair()) {
             ferrix_sched_fair::plan_job_fold(joined, caller.group_word(), quota::NONE)
         } else {
             JobPlan::Separate
