@@ -126,6 +126,7 @@ pub fn run() -> Result<Report, &'static str> {
         kept_entry = reserved.draws_from();
     }
     a_rebound_reservation_is_whole(kept_entry)?;
+    check_the_heap_scope()?;
     if mm::outstanding_promise() != promise {
         return Err("a gone job's reservation still promised frames");
     }
@@ -390,5 +391,102 @@ fn check_the_heap(reserved: &Arc<Job>, sibling: &Arc<Job>) -> Result<u64, &'stat
     if outcome.is_ok() && kept > ferrix_heap::CLASSES as u64 {
         return Err("a reserved heap kept more than a page a class once its objects were freed");
     }
+    outcome
+}
+
+/// Frames the heap scope's check promises its reservation.
+const SCOPE_FRAMES: u64 = 16;
+
+/// The heap scope (`L.mm.140`, `docs/BTRFS-PRESSURE.md` W1-a): a reservation
+/// bound and promised [`SCOPE_FRAMES`], a scope entered on it, and the
+/// shared heap made to refuse this task's scoped allocations
+/// (`mm::refuse_shared_heap_for`), so that only the reservation serves:
+///
+/// * one object of every size class, each on a page drawn from the
+///   reservation, then objects until one is refused -- no more frames drawn
+///   than promised, and the refusal counted as an overrun;
+/// * an allocation in interrupt context, during the scope, on a shared page;
+/// * one with the scope suspended on a shared page, and one after the
+///   suspension on a reserved page again;
+/// * once the scope's guard is gone, the next allocation on a shared page;
+/// * every object freed, nothing of the reservation's heap held.
+///
+/// Verifies: L.mm.140
+fn check_the_heap_scope() -> Result<(), &'static str> {
+    use alloc::vec::Vec;
+    const CLASSES: [usize; 8] = [16, 32, 64, 128, 256, 512, 1024, 2048];
+    let me = crate::sched::current_id().ok_or("the heap scope's check runs outside a task")?;
+    let entry = mm::reservation_bind().ok_or("no reservation was free for the heap scope")?;
+    let on = |object: &Vec<u8>| mm::heap_drawn_from(object.as_ptr() as u64);
+    let outcome = (|| {
+        mm::reservation_resize(entry, SCOPE_FRAMES)
+            .map_err(|_| "the heap scope's reservation was refused")?;
+        let overruns = mm::heap_scope_overruns(entry);
+        let mut held: Vec<Vec<u8>> = Vec::new();
+        held.try_reserve(256)
+            .map_err(|_| "no room to hold the heap scope's objects")?;
+        let scope =
+            mm::heap_scope(entry).ok_or("a heap scope on a bound reservation was refused")?;
+        mm::refuse_shared_heap_for(me);
+        let mut served = true;
+        for size in CLASSES {
+            match crate::fallible::try_with_capacity::<u8>(size) {
+                Ok(object) => held.push(object),
+                Err(_) => served = false,
+            }
+        }
+        let classes_drawn = held.iter().all(|object| on(object) == entry);
+        let mut refused = false;
+        while held.len() < held.capacity() {
+            match crate::fallible::try_with_capacity::<u8>(2048) {
+                Ok(object) => held.push(object),
+                Err(_) => {
+                    refused = true;
+                    break;
+                }
+            }
+        }
+        mm::refuse_shared_heap_for(0);
+        let interrupted: Option<Vec<u8>> =
+            crate::irq::serviced(|| crate::fallible::try_with_capacity(64).ok());
+        let suspended = {
+            let _paused = mm::heap_scope_suspended().ok_or("the heap scope was not suspended")?;
+            crate::fallible::try_with_capacity::<u8>(64).ok()
+        };
+        let resumed = crate::fallible::try_with_capacity::<u8>(64).ok();
+        drop(scope);
+        let after = crate::fallible::try_with_capacity::<u8>(64).ok();
+        let (_, drawn) = mm::reservation_usage(entry);
+        let counted = mm::heap_scope_overruns(entry) > overruns;
+        let shared = |object: &Option<Vec<u8>>| object.as_ref().map(on) == Some(mm::NO_RESERVATION);
+        let result = if !served || !classes_drawn {
+            Err("a scoped allocation of a size class was not served from its reservation")
+        } else if held.iter().any(|object| on(object) != entry) {
+            Err("a scoped allocation was served from a shared page")
+        } else if !refused || drawn > SCOPE_FRAMES {
+            Err("a scoped allocation was served past its reservation's room")
+        } else if !counted {
+            Err("a scoped allocation past its reservation was not counted")
+        } else if !shared(&interrupted) {
+            Err("an interrupt's allocation during a heap scope was drawn from its reservation")
+        } else if !shared(&suspended) {
+            Err("an allocation with the heap scope suspended was drawn from its reservation")
+        } else if resumed.as_ref().map(on) != Some(entry) {
+            Err("an allocation after the scope's suspension was not drawn from its reservation")
+        } else if !shared(&after) {
+            Err("an allocation after the heap scope's end was drawn from its reservation")
+        } else {
+            Ok(())
+        };
+        drop((held, interrupted, suspended, resumed, after));
+        if result.is_ok() && mm::reserved_heap_bytes(entry) != 0 {
+            return Err(
+                "the heap scope's objects, freed, left the reservation's heap holding some",
+            );
+        }
+        result
+    })();
+    mm::refuse_shared_heap_for(0);
+    mm::reservation_unbind(entry);
     outcome
 }

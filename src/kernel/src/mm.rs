@@ -522,6 +522,171 @@ fn reservation_for(owner: u32) -> Reservation {
     entry
 }
 
+/// A heap scope (`L.mm.140`): while its guard lives, the current task's
+/// kernel-heap allocations in task context are served first by the
+/// reservation it names, from frames that reservation promises, and by the
+/// shared heap only past its room (counted, [`heap_scope_overruns`]). For a
+/// writer that admitted an operation's memory into a reservation before the
+/// operation began (`docs/BTRFS-PRESSURE.md`, W1): mechanism only, which
+/// reservation is the caller's.
+///
+/// Dropping the guard puts back what the task had before, on every exit of
+/// the scope. Interrupt context never draws from it (as [`reservation_for`]
+/// rules for a job), and nothing the task makes or wakes inherits it: the
+/// mark is the task's own, and a new task starts with none.
+///
+/// The caller keeps the reservation bound for the guard's whole life: the
+/// entry is checked bound only as the scope is entered, and one unbound
+/// and bound again for another owner meanwhile would have the scoped task
+/// draw that owner's promise (ledger 8448 A3; a writable mount unbinds only
+/// after its last scope). The guard stays with its task, neither `Send` nor
+/// `Sync`, since its drop writes the current task's mark; one forgotten
+/// (`mem::forget`) leaves the mark set for the task's life.
+#[must_use = "the scope lasts as long as its guard"]
+pub(crate) struct HeapScope {
+    previous: Reservation,
+    _task_bound: core::marker::PhantomData<*const ()>,
+}
+
+impl Drop for HeapScope {
+    fn drop(&mut self) {
+        let _ = crate::sched::with_current(|task| task.swap_heap_scope(self.previous));
+    }
+}
+
+/// Enter a heap scope drawing from `entry`, a bound reservation: `None`
+/// with no task to mark, in interrupt context, for no reservation, for one
+/// not bound, and in a `retyped` build, whose heap is routed by the charge
+/// (`seal::route`, K16) and has no scope.
+pub(crate) fn heap_scope(entry: Reservation) -> Option<HeapScope> {
+    if cfg!(ferrix_kernel_memory = "retyped")
+        || entry == NO_RESERVATION
+        || crate::irq::in_interrupt()
+        || !reservation::is_bound(usize::from(entry) - 1)
+    {
+        return None;
+    }
+    let previous = crate::sched::with_current(|task| task.swap_heap_scope(entry))?;
+    Some(HeapScope {
+        previous,
+        _task_bound: core::marker::PhantomData,
+    })
+}
+
+/// Suspend the current task's heap scope while the guard lives: what it
+/// allocates meanwhile is its job's again, as outside any scope. For what a
+/// scoped writer does that is not its own: a device's I/O, the heap's kill.
+pub(crate) fn heap_scope_suspended() -> Option<HeapScope> {
+    let previous = crate::sched::with_current(|task| task.swap_heap_scope(NO_RESERVATION))?;
+    Some(HeapScope {
+        previous,
+        _task_bound: core::marker::PhantomData,
+    })
+}
+
+/// The reservation the running task's heap scope names, or none; none in
+/// interrupt context.
+#[inline]
+fn scoped_here() -> Reservation {
+    if crate::irq::in_interrupt() {
+        return NO_RESERVATION;
+    }
+    crate::sched::with_current(crate::sched::Task::heap_scope).unwrap_or(NO_RESERVATION)
+}
+
+/// The reservation whose heap serves an allocation made here first, and
+/// whether a heap scope chose it: a task inside a heap scope draws from the
+/// scope's reservation, whatever its job's (`L.mm.140`, [`heap_scope`]);
+/// else a job with a reservation, in task context, from its own
+/// (`L.mm.81`); interrupt context never draws (`reservation_for`). K16's
+/// build routes by whoever the request is charged to, a call's ticket
+/// included, and has no scope.
+#[inline]
+fn heap_entry() -> (Reservation, bool) {
+    #[cfg(ferrix_kernel_memory = "retyped")]
+    {
+        (seal::route(seal::charged()), false)
+    }
+    #[cfg(not(ferrix_kernel_memory = "retyped"))]
+    {
+        if !reservation::any_bound() {
+            return (NO_RESERVATION, false);
+        }
+        match scoped_here() {
+            NO_RESERVATION => (reservation_for(crate::sched::running_group()), false),
+            scoped => {
+                debug_assert!(
+                    reservation::is_bound(usize::from(scoped) - 1),
+                    "a heap scope outlived its reservation's binding"
+                );
+                (scoped, true)
+            }
+        }
+    }
+}
+
+/// The shared heap's answer to `request`, with its drain, reclaims and
+/// kill (`L.mm.98`, `L.mm.136`-`L.mm.138`); after K16's seal it serves
+/// nobody (K16 §2, H.MEM.32).
+fn from_shared_heap(request: Request) -> Option<u64> {
+    #[cfg(ferrix_kernel_memory = "retyped")]
+    if seal::note_shared(request.size) {
+        return None;
+    }
+    let injected = fallible::injected_failures();
+    heap_or_drain(|| allocate_through_caches(request))
+        .or_else(|| heap_or_reclaim(request, injected))
+        .or_else(|| heap_or_kill(request, injected))
+}
+
+/// A scoped allocation past reservation `entry`'s room, on its way to the
+/// shared heap: counted (`L.mm.140`), and whether the shared heap may serve
+/// it, as it does unless the scope's check has it refuse.
+fn scope_overrun(entry: Reservation) -> bool {
+    note_scope_overrun(entry);
+    !shared_refused_here()
+}
+
+/// Scoped allocations that found their reservation's heap without room and
+/// went to the shared heap, per reservation (`L.mm.140`).
+static SCOPE_OVERRUNS: [AtomicU64; reservation::MOST] =
+    [const { AtomicU64::new(0) }; reservation::MOST];
+
+fn note_scope_overrun(entry: Reservation) {
+    if let Some(count) = usize::from(entry)
+        .checked_sub(1)
+        .and_then(|at| SCOPE_OVERRUNS.get(at))
+    {
+        let _ = count.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// How many scoped allocations ran past reservation `entry`'s room since
+/// boot: what a writer's checks require to stay nought.
+pub(crate) fn heap_scope_overruns(entry: Reservation) -> u64 {
+    usize::from(entry)
+        .checked_sub(1)
+        .and_then(|at| SCOPE_OVERRUNS.get(at))
+        .map_or(0, |count| count.load(Ordering::Relaxed))
+}
+
+// CHECKS-ONLY: object/reserve_check.rs
+/// The task whose scoped allocations the shared heap refuses, or 0: for
+/// the heap scope's check alone, read only on a scoped allocation's way to
+/// the shared heap, so that it costs nothing elsewhere.
+static REFUSE_SHARED_FOR: AtomicU64 = AtomicU64::new(0);
+
+// CHECKS-ONLY: object/reserve_check.rs
+/// Make the shared heap refuse `task`'s scoped allocations, or stop with 0.
+pub(crate) fn refuse_shared_heap_for(task: u64) {
+    REFUSE_SHARED_FOR.store(task, Ordering::Release);
+}
+
+fn shared_refused_here() -> bool {
+    let task = REFUSE_SHARED_FOR.load(Ordering::Relaxed);
+    task != 0 && crate::sched::current_id() == Some(task)
+}
+
 /// Bind a free reservation, promising nothing yet, for a job's slot. `None`
 /// when every one is bound or still draining.
 pub(crate) fn reservation_bind() -> Option<Reservation> {
@@ -1306,15 +1471,7 @@ unsafe impl GlobalAlloc for KernelAllocator {
         // A job with a reservation, in task context, is served by its own
         // heap while the reservation has room, and by the shared heap after
         // (`L.mm.81`); interrupt context never draws (`reservation_for`).
-        #[cfg(not(ferrix_kernel_memory = "retyped"))]
-        let entry = if reservation::any_bound() {
-            reservation_for(crate::sched::running_group())
-        } else {
-            NO_RESERVATION
-        };
-        // K16: whoever the request is charged to, a call's ticket included.
-        #[cfg(ferrix_kernel_memory = "retyped")]
-        let entry = seal::route(seal::charged());
+        let (entry, scoped) = heap_entry();
         // The reserve's check makes the heap refuse its own task's
         // allocations, so that the fallback below is what answers them
         // (L.mm.37, L.mm.139; `reserve::refuse_heap_for`).
@@ -1327,18 +1484,11 @@ unsafe impl GlobalAlloc for KernelAllocator {
                     .ok()
             })
             .or_else(|| {
-                if !heap_tried {
-                    return None;
-                }
-                // After the seal the shared heap serves nobody (K16 §2, H.MEM.32).
-                #[cfg(ferrix_kernel_memory = "retyped")]
-                if seal::note_shared(request.size) {
-                    return None;
-                }
-                let injected = fallible::injected_failures();
-                heap_or_drain(|| allocate_through_caches(request))
-                    .or_else(|| heap_or_reclaim(request, injected))
-                    .or_else(|| heap_or_kill(request, injected))
+                // A scoped allocation past its reservation's room is
+                // counted, and served by the shared heap as before
+                // (`L.mm.140`, [`scope_overrun`]).
+                let shared = heap_tried && (!scoped || scope_overrun(entry));
+                shared.then(|| from_shared_heap(request)).flatten()
             })
             // Refused even after the drain: inside a reserved section, the
             // reserve serves it instead (`mm/reserve.rs`, finding F-23), and
@@ -1591,6 +1741,9 @@ fn heap_or_reclaim(request: Request, injected: u64) -> Option<u64> {
     if injection_refused(injected) || !heap_may_reclaim() {
         return None;
     }
+    // A reclaim's own allocations are not the scoped task's to draw from
+    // its reservation (ledger 8448 A1, W1.3).
+    let _suspended = heap_scope_suspended();
     // A size class is refilled a page at a time; a larger request is a
     // block of its order.
     let pages = match Heap::class_of(request) {
@@ -1640,6 +1793,9 @@ fn heap_or_kill(request: Request, injected: u64) -> Option<u64> {
     if injection_refused(injected) || !heap_may_reclaim() {
         return None;
     }
+    // Nor the kill's: its list of the living and what it frees go by the
+    // shared heap (ledger 8448 A1, W1.3).
+    let _suspended = heap_scope_suspended();
     for _ in 0..oom::KERNEL_HEAP_ANSWERS {
         if free_frames() >= watermark() {
             return None;

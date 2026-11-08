@@ -259,6 +259,11 @@ pub struct Task {
     /// makes there is not answered by a second reclaim
     /// (`object::quota::KernelHeap`), and a second one begun is FX-0973.
     reclaiming: AtomicBool,
+    /// The memory reservation its task-context kernel-heap allocations draw
+    /// from first while a scope says so (`mm::heap_scope`, L.mm.140), or
+    /// none (0). Set and put back by the scope's guard alone; a task it
+    /// makes or wakes starts with none.
+    heap_scope: AtomicU8,
     /// A system call's copy that consumed poison, for the call's way out
     /// (`docs/MACHINE-CHECK-COPY.md` §3.3).
     copy_poison: PoisonRecord,
@@ -814,6 +819,7 @@ impl Task {
             queued: AtomicBool::new(false),
             in_call: AtomicBool::new(false),
             reclaiming: AtomicBool::new(false),
+            heap_scope: AtomicU8::new(0),
             copy_poison: PoisonRecord::new(),
             wakees: Wakees::new(crate::timer::now_nanos()),
             affinity: Affinity::new(affinity),
@@ -881,6 +887,7 @@ impl Task {
             queued: AtomicBool::new(false),
             in_call: AtomicBool::new(false),
             reclaiming: AtomicBool::new(false),
+            heap_scope: AtomicU8::new(0),
             copy_poison: PoisonRecord::new(),
             wakees: Wakees::new(0),
             // An adopted context — the boot task, or a processor's idle task —
@@ -1677,6 +1684,17 @@ impl Task {
     /// Whether it is inside a reclaim ([`Task::swap_reclaiming`]).
     pub(crate) fn reclaiming(&self) -> bool {
         self.reclaiming.load(Ordering::Relaxed)
+    }
+
+    /// Set the reservation its kernel-heap allocations draw from first
+    /// (`mm::heap_scope`): what it was before.
+    pub(crate) fn swap_heap_scope(&self, entry: u8) -> u8 {
+        self.heap_scope.swap(entry, Ordering::Relaxed)
+    }
+
+    /// The reservation its kernel-heap allocations draw from first, or 0.
+    pub(crate) fn heap_scope(&self) -> u8 {
+        self.heap_scope.load(Ordering::Relaxed)
     }
 
     /// Record a system call's copy that consumed poison ([`PoisonRecord::record`]).

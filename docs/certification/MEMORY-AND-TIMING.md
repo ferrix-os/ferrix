@@ -3150,6 +3150,29 @@ so the disk's lock is never taken under an element's. The requests map's
 entry is made inside a reserved section before the request is queued
 (`fallible::insert`), so a refusal leaves nothing the ring could dispatch.
 
+### 2.2ak A task's heap scope (`mm::heap_scope`, core, 2026-11-08)
+
+`L.mm.140`, ledger 8337 (`docs/BTRFS-PRESSURE.md`, "Against Linux's btrfs",
+W1-a). A guard marks the current task with a bound reservation; while it
+lives, the task's task-context kernel-heap allocations are served by that
+reservation's heap first (`L.mm.81`'s route, chosen by the mark rather than
+the task's job), and past its room by the shared heap, each such counted
+(`heap_scope_overruns`). The mark is one byte on the task, swapped in and
+back by the guard, never read in interrupt context, and inherited by
+nothing.
+
+**Cost.** On every allocation the allocator already asks whether any
+reservation is bound (`reservation::any_bound`, one load); only when one is,
+it now reads the running task's mark too -- one more load through the
+current task -- before it asks the job's reservation as before. A scoped
+allocation that falls to the shared heap adds a counter and, for the check,
+one load of `REFUSE_SHARED_FOR`; no other allocation reads it.
+
+**What it promises.** Nothing new of the frames: a scope draws on the
+promise its reservation already holds (`L.mm.76`-`L.mm.80`), a count of
+frames, not runs. Which reservation, and how large, is its user's (W1-b,
+W1-c), and so is the bound stated there.
+
 ## 3. Why F-24 is not closed, and F-23 is
 
 A document that says "the property does not hold" is not a closed finding, and

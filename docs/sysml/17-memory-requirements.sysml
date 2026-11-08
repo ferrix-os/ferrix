@@ -624,6 +624,31 @@ package FerrixMemoryRequirements {
             attribute :>> unit = ("object::oom::killing_for_the_heap", "mm::reserve::draw",
                 "mm::KernelAllocator::alloc", "mm::reserve::heap_refused_here");
         }
+        // docs/BTRFS-PRESSURE.md, "Against Linux's btrfs", W1-a (ledger 8337).
+        requirement <'L.mm.140'> aHeapScopeDrawsFromItsReservation : ItemLowLevel {
+            attribute :>> statement = "While a task holds a heap scope on a bound reservation,
+                its task-context kernel-heap allocations shall be served by that reservation's
+                heap first, whatever its job's reservation, and by the shared heap only past the
+                reservation's room, each such counted; never in interrupt context; not while
+                the scope is suspended; and from the guard's drop on as before the scope. A
+                scope is refused in a retyped build, in interrupt context, and on a reservation
+                not bound.";
+            attribute :>> criterion = "At stage 9 (object::reserve_check, check_the_heap_scope):
+                a reservation of 16 frames and a scope on it, the shared heap made to refuse the
+                checking task's scoped allocations: an object of each of the eight size classes
+                and then 2048-byte objects until one is refused all lie on pages drawn from the
+                reservation, no more than 16 frames drawn, the refusal counted; an allocation in
+                interrupt context, one with the scope suspended and one after the guard is
+                dropped lie on shared pages, one after the suspension on a drawn page; freed,
+                the reservation's heap holds nothing. Controls: the allocator not reading the
+                scope (the first fails), the guard not putting the task's scope back (the last
+                fails).";
+            attribute :>> parent = "H.QUOTA.15";
+            attribute :>> unit = ("mm::heap_scope", "mm::heap_scope_suspended",
+                "mm::HeapScope::drop", "mm::scoped_here", "mm::heap_entry",
+                "mm::scope_overrun", "mm::note_scope_overrun", "mm::shared_refused_here",
+                "mm::KernelAllocator::alloc");
+        }
         // docs/RAM-RELEASE.md §2, R1 (consultant ledger 4971, 5022).
         requirement <'L.mm.99'> theArchivesPagesComeBack : ItemLowLevel {
             attribute :>> statement = "Once the root is final, at most once a boot, the
@@ -930,7 +955,8 @@ package FerrixMemoryRequirements {
         }
         requirement <'L.mm.81'> aReservationHasItsOwnHeap : ItemLowLevel {
             attribute :>> statement = "An allocation by a task whose job draws
-                from a reservation, in task context, shall be served by that
+                from a reservation, or by a task inside a heap scope on one
+                (L.mm.140), in task context, shall be served by that
                 reservation's own heap, whose pages are drawn from it alone,
                 and by the shared heap only once it has no room; every other
                 allocation by the shared heap, whose pages are never drawn; a
@@ -947,7 +973,7 @@ package FerrixMemoryRequirements {
                 given all 4. Control: bind leaving the kept pages.";
             attribute :>> parent = "H.QUOTA.15";
             attribute :>> unit = ("mm::KernelAllocator::alloc", "mm::KernelAllocator::dealloc",
-                "mm::ReservedPages::allocate_pages", "mm::ReservedPages::deallocate_pages",
+                "mm::from_shared_heap", "mm::ReservedPages::allocate_pages", "mm::ReservedPages::deallocate_pages",
                 "mm::reserved_heap", "mm::heap_drawn_from", "mm::reservation_bind",
                 "mm::reservation::bind");
         }
