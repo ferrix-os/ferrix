@@ -315,6 +315,7 @@ gates that fail on `main` itself, not flakes, and come before any row below.
 
 | Item | Owner |
 |---|---|
+| **Open (2026-11-08, box-watchdog): N150 hard hang within seconds of a VR current-limit change under load.** The N150 box froze twice on 2026-11-08 during Endfield play (00:08:41 on 0ed9b9aa9, about 01:00 on develop main-1b5ec9c99): no FERRIX-PANIC, no machine check, `ferrix.panic=reset` never fired, the plug was needed. In both, the last kernel records are the power driver's `vrcurrent set` under full load (limited by amps/pl4, about 10 W, ratio 22-23): hang 1 `vrcurrent set 36.000 A (was 38.000 A)` at uptime 434.74 s, last record 435.81 s; hang 2 `backing off to 34 A: 74 C`, `vrcurrent set 34.000 A (was 36.000 A)` at 1155.16 s, then msrlog round 226 reading 0x601 back as 34 A, last record 1159.18 s. Evidence: lode-receive store on nazuna, `~/.local/share/ferrix/lode-receive/787baec0d391411e8c65fa9aab848475/system@f57bc88b8b6919c33989a7867e277aa3-00000000002200ec.fxj` (hang 1) and `system@3a8333f92d7880e5552c8c16d72b15f3-000000000023178f.fxj` (hang 2); unpacked copies and the count script in `~/.local/share/ferrix/bw-repro/lode/` and `vrcount.py`. **A correlation, not yet a cause:** under load the auto plan (`ferrix.power.vr=auto:30-44`) writes 0x601 about every 10 s, 3,718 lowers and 5,547 raises across 120-odd stored boots, so a record within seconds of a write is likely by chance, and the uploader lags about 20 s. The write itself (`arch/x86_64/powerctl.rs`, `logic::compose`): a read-modify-write of bits 12:0 only, the lock bit never set and a locked register refused, on one processor with interrupts masked, at 30 to 44 A over firmware's 25 A. Next: the same play with `ferrix.power.vr` removed (firmware's 25 A, nothing written) against the same with a single fixed step set once at boot; the pilot plays both for the same time on the diag image main-a3c5ef1dd (BOX-QUEUE.md). JetKVM session ends and USB-gadget resets were ruled out the same night (box-watchdog, 17 steps, no hang) | powerctl owner (`docs/POWERCTL.md`), box-watchdog on the box |
 | `test-init --arch all` failed three ways plus a fourth on the fix's tip, root-caused 2026-10-05 by po5-red: reader-state race, typed-ahead answers lost to `TCSAFLUSH`, xtask serial reader ending on non-UTF-8. Fixed on `po6/red`; why the guest printed a non-UTF-8 byte there is open. [more](backlog/red.md#red-003) | po5-red |
 | Stage 5 moving lock check panicked "tasks never moved between processors" under KVM: an idle processor stole another's only waiting task. Fixed on `po6/red` (`sched::steal_from`). Seen again 2026-10-06 in `test-ipc-equiv`, step 4's 27837766b. [more](backlog/red.md#red-004) | po5-red |
 | **Open (2026-10-15, bs-a).** Stage 5's moving lock check: "a task of the moving lock check never finished" (FX-0502) in the ARMv7-A boot of `test-container --arch all` on `bs-a-coverage-profile`, load about 20; passed on rerun. Next: print the check's per-task state on give-up. [more](backlog/red.md#red-005) | open |
@@ -857,6 +858,21 @@ taken.
 Every such branch on GitHub, grouped by line of work and with which one to
 resume from, is in `docs/roadmap/open-branches.md` (2026-10-01, os-5d).
 This section keeps the detail of the families below.
+
+**`feature/box-watchdog` (box-watchdog, 2026-11-08; parked, pushed, 809fca3e5 + a6cb0f40b).**
+The watchdog of `docs/POSTMORTEM.md` §6.11 on that branch: `ferrix.watchdog=on`, `/dev/watchdog` fed by init
+(`ferrix.init.watchdog=`), FX-9008 for a missed feed, the PCH's TCO behind it (q35's ICH9 and the box's 8086:54a3)
+cut to 25 s at a report, the pstore written back at each feed; `cargo xtask test-watchdog` passed locally on q35.
+Its panic-path part lands alone (`bugfix/panic-reset-unconditional`). What the rest owes: the certification
+consultant's OK IF BW.1-BW.16 (ledger 7925) less what the panic subset closes -- `watchdog.rs` and `tco.rs` in the
+core ring and the device-access allow-list (BW.1, BW.2), the reservations H.FAIL.7, L.tco.1-6, H.FAIL.14 and
+L.lockup.6-9 taken over from `lockup` and `s4-lockup` (BW.3), their requirements (BW.4), SAFETY-MANUAL,
+build-flags and MEMORY-AND-TIMING (BW.5), host tests for the tick arithmetic (BW.7), seven more test-watchdog
+cases (BW.8), controls K1-K6 and K9 (BW.9), the claim line on KVM and TCG (BW.10), the rows (BW.11), the box run
+(BW.12). **The N150 box's firmware locks its TCO halted** (`TCO_LOCK`, seen 2026-11-08 01:27 on main-a3c5ef1dd):
+on the box the TCO cannot reset; only the deadline and the panic path's own bounds help there, unless a firmware
+setting (the customer's) unlocks it. The diagnostic image the box runs, `diag/box-watchdog-lockup` a3c5ef1dd, adds
+S4a's lockup detector from `s4-lockup` and is never to land.
 
 **To mk-flip (2026-11-07, the product owner, the customer's decision, ledger 7763 DG.5).**
 Your reservation's `schedule=edf` part, H.SCHED.29-30 and L.sched.184-193, moved to
