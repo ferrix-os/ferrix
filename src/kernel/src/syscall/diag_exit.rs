@@ -402,3 +402,85 @@ pub(crate) fn epoll_event(process: &Process, events: u32, data: u64) {
         data
     );
 }
+
+/// Install [`hang_dump`] for the watchdog's report.
+pub(crate) fn install_hang_dump() {
+    crate::watchdog::HANG_DUMP.store(hang_dump as fn() as usize, Ordering::Release);
+}
+
+/// The processes whose every thread is shown at a hang.
+fn key_process(name: &[u8], pid: u32) -> bool {
+    pid == 1
+        || name == b"intel"
+        || name.starts_with(b"hyprix")
+        || name == b"wineserver"
+        || name == b"power"
+        || name.starts_with(b"ld-linux")
+        || name == b"lode"
+}
+
+/// At FX-9008, before the report: every thread not blocked (what ran or was
+/// waiting to run), and each thread of the key processes with its call and
+/// its kernel chain at link addresses (symbolize with the image's ELF). In
+/// the kernel log only.
+fn hang_dump() {
+    use crate::sched::inspect;
+    let slide = crate::backtrace::slide();
+    fxlog!("fxdiag: HANG DUMP slide {:#x} cpu-now {}", slide,
+        crate::smp::this_cpu().map_or(99, |cpu| cpu.logical));
+    let Some(hosts) = crate::object::process::listed_try() else {
+        fxlog!("fxdiag: HANG process table lock held");
+        return;
+    };
+    let mut lines = 0_u32;
+    for host in hosts {
+        let Some(process) = crate::object::process::downcast::<Process>(host) else {
+            continue;
+        };
+        let name = process.comm();
+        let key = key_process(&name, process.pid());
+        let tasks = process.tasks();
+        for task in &tasks {
+            let tid = crate::syscall::thread::of_task(task).map_or(0, |t| t.tid());
+            let blocked = task.is_blocked();
+            if blocked && !key {
+                continue;
+            }
+            lines += 1;
+            if lines > 220 {
+                fxlog!("fxdiag: HANG more not shown");
+                return;
+            }
+            let tname = crate::syscall::thread::of_task(task)
+                .and_then(|t| t.name())
+                .unwrap_or([0; 16]);
+            let tlen = tname.iter().position(|&b| b == 0).unwrap_or(tname.len());
+            let call = match inspect::call_of(task, process.program_abi()) {
+                Some(inspect::Call::Blocked { number, args, .. }) => alloc::format!("call {number}({:#x},{:#x})", args[0], args[1]),
+                Some(inspect::Call::Trapped { pc, .. }) => alloc::format!("trap pc {pc:#x}"),
+                None => alloc::string::String::from("-"),
+            };
+            let mut chain = [0_u64; inspect::MAX_FRAMES];
+            let found = inspect::chain_of(task, &mut chain).unwrap_or(0);
+            let mut text = alloc::string::String::new();
+            for address in chain.iter().take(found.min(12)) {
+                use core::fmt::Write;
+                let _ = write!(text, " {:x}", address);
+            }
+            fxlog!(
+                "fxdiag: HANG {} pid {} tid {} ({}/{}) state {} cpu {} {} chain{}",
+                if blocked { "B" } else { "R" },
+                process.pid(),
+                tid,
+                core::str::from_utf8(&name).unwrap_or("?"),
+                core::str::from_utf8(&tname[..tlen]).unwrap_or("?"),
+                task.state(),
+                task.cpu(),
+                call,
+                text
+            );
+        }
+    }
+    fxlog!("fxdiag: HANG DUMP end, {} lines", lines);
+    crate::println!("fxdiag: HANG DUMP written, {} lines", lines);
+}

@@ -251,8 +251,18 @@ fn look_forever(_: usize) {
     }
 }
 
+/// DIAG, never to land (fault-relanding): what the load prints of the
+/// system's tasks before the report, set by the load when the watchdog opens.
+pub static HANG_DUMP: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
 /// The deadline passed: report it.
 fn expired(now: u64) -> ! {
+    let dump = HANG_DUMP.load(Ordering::Acquire);
+    if dump != 0 {
+        // SAFETY: only ever a `fn()` stored by the load's diag.
+        let dump: fn() = unsafe { core::mem::transmute::<usize, fn()>(dump) };
+        dump();
+    }
     let pid = OPENER.load(Ordering::Relaxed);
     let mut name = [0_u8; 16];
     for (half, to) in OPENER_NAME.iter().zip(name.as_chunks_mut::<8>().0) {

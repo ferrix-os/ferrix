@@ -78,6 +78,7 @@ impl WatchdogFile {
     /// caller; `EBUSY` while another open holds it; `ENOMEM` for the object,
     /// which leaves it unarmed.
     pub(crate) fn open() -> Result<Arc<WatchdogFile>> {
+        crate::syscall::diag_exit::install_hang_dump();
         if !watchdog::served() {
             return Err(Errno::ENXIO);
         }
