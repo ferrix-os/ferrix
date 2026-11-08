@@ -24,7 +24,7 @@ use super::*;
 
 /// Physical memory as a sparse map, so a test can assert on descriptors
 /// without owning a machine.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct Memory {
     cells: BTreeMap<u64, u64>,
     next_frame: u64,
@@ -491,8 +491,14 @@ fn walk_properties<E: Encoding>() {
     unmapping_steps_over_a_hole_whole::<E>();
     unmapping_names_each_leaf::<E>();
     unmapping_refuses_to_cut_a_block::<E>();
+    unmapping_full_tables_reads_each_descriptor_a_bounded_number_of_times::<E>();
     protecting_keeps_the_frame_and_changes_the_permissions::<E>();
     protecting_a_hole_is_an_error::<E>();
+    write_protecting_changes_only_the_write_bit::<E>();
+    write_protecting_steps_over_holes_and_reads_each_page_once::<E>();
+    write_protecting_refuses_to_cut_a_block::<E>();
+    allowing_a_write_undoes_a_write_protect::<E>();
+    unmapping_releases_what_a_prune_per_leaf_released::<E>();
     the_walk_finds_every_leaf::<E>();
     the_walk_reports_canonical_addresses::<E>();
     the_walk_can_stop_early::<E>();
@@ -652,6 +658,503 @@ fn unmapping_steps_over_a_hole_whole<E: Encoding>() {
         E::NAME,
         memory.reads.get()
     );
+}
+
+/// Three full tables of pages unmapped: every page comes out, every table
+/// that held them goes, and the tables are pruned once each as the walk
+/// leaves them rather than read from their first entry after every page --
+/// which cost about 131,000 reads per table of 512 pages, and made a fork or
+/// a teardown of a big process take seconds (`docs/ROBUSTNESS.md` R5).
+fn unmapping_full_tables_reads_each_descriptor_a_bounded_number_of_times<E: Encoding>() {
+    let (mut memory, mapper) = Memory::with_root::<E>();
+    let pages = 3 * ENTRIES as u64;
+    let at = high::<E>(0x1000_0000);
+    mapper
+        .map_range(
+            &mut memory,
+            at,
+            // Off a block's alignment, so that it is mapped in pages.
+            PhysAddr(0x4000_1000),
+            pages * PAGE_SIZE,
+            MapFlags::KERNEL_DATA.read_only(),
+        )
+        .unwrap();
+    memory.reads.set(0);
+    let mut leaves = 0;
+    let mut tables = 0;
+    let removed = mapper
+        .unmap_range(&mut memory, at, pages * PAGE_SIZE, |freed| match freed {
+            Released::Page { .. } => leaves += 1,
+            Released::Table { .. } => tables += 1,
+        })
+        .unwrap();
+    assert_eq!(removed, pages, "{}: a page was missed", E::NAME);
+    assert_eq!(leaves, pages);
+    // The three leaf tables, and above them the one table each level holds
+    // between the root and those: two on the 64-bit pair, one on ARMv7-A.
+    assert_eq!(
+        tables,
+        3 + levels::<E>() - 2,
+        "{}: a table was not given back",
+        E::NAME
+    );
+    // A walk from the root per page, and one read of each table entry to
+    // find it empty, with room to spare; the old prune read 390,000.
+    assert!(
+        memory.reads.get() < pages * (levels::<E>() as u64 + 4),
+        "{}: {} descriptors read to unmap {pages} pages",
+        E::NAME,
+        memory.reads.get()
+    );
+    for page in [0, ENTRIES as u64, pages - 1] {
+        assert_eq!(
+            mapper.translate(&memory, VirtAddr(at.0 + page * PAGE_SIZE)),
+            None
+        );
+    }
+}
+
+/// `write_protect_range` takes the write permission away and leaves every
+/// other bit of the descriptor as it was, the cache attributes included, which
+/// a decode and re-encode would not on every architecture; a read-only page
+/// is left alone and not counted.
+fn write_protecting_changes_only_the_write_bit<E: Encoding>() {
+    let (mut memory, mapper) = Memory::with_root::<E>();
+    let at = high::<E>(0x1040_0000);
+    let kinds = [
+        MapFlags::USER_DATA,
+        MapFlags {
+            write_combining: true,
+            ..MapFlags::USER_DATA
+        },
+        MapFlags {
+            uncached: true,
+            ..MapFlags::USER_DATA
+        },
+        MapFlags {
+            execute: true,
+            ..MapFlags::USER_DATA
+        },
+        MapFlags::USER_DATA.read_only(),
+    ];
+    for (index, flags) in kinds.iter().enumerate() {
+        mapper
+            .map_range(
+                &mut memory,
+                VirtAddr(at.0 + index as u64 * PAGE_SIZE),
+                PhysAddr(0x60_0000 + index as u64 * PAGE_SIZE),
+                PAGE_SIZE,
+                *flags,
+            )
+            .unwrap();
+    }
+    let before: Vec<u64> = (0..kinds.len() as u64)
+        .map(|index| leaf_entry::<E>(&memory, &mapper, VirtAddr(at.0 + index * PAGE_SIZE)))
+        .collect();
+    let protected = mapper
+        .write_protect_range(&mut memory, at, kinds.len() as u64 * PAGE_SIZE)
+        .unwrap();
+    assert_eq!(
+        protected,
+        kinds.len() as u64 - 1,
+        "{}: the read-only page was counted",
+        E::NAME
+    );
+    for (index, flags) in kinds.iter().enumerate() {
+        let virt = VirtAddr(at.0 + index as u64 * PAGE_SIZE);
+        let after = leaf_entry::<E>(&memory, &mapper, virt);
+        let want = E::leaf_descriptor(
+            PhysAddr(0x60_0000 + index as u64 * PAGE_SIZE),
+            Level::PAGE,
+            flags.read_only(),
+        );
+        assert!(
+            !E::leaf_flags(after).write,
+            "{}: page {index} is still writable",
+            E::NAME
+        );
+        assert_eq!(
+            mapper.translate(&memory, virt),
+            Some(PhysAddr(0x60_0000 + index as u64 * PAGE_SIZE))
+        );
+        // The bits that differ from the old entry are the write permission's
+        // alone: exactly those that differ between the writable and the
+        // read-only encoding of the same page (the dirty bit aside, which
+        // x86-64 leaves set).
+        let writable = E::leaf_descriptor(PhysAddr(0), Level::PAGE, flags.read_only())
+            ^ E::leaf_descriptor(
+                PhysAddr(0),
+                Level::PAGE,
+                MapFlags {
+                    write: true,
+                    ..*flags
+                },
+            );
+        let changed = before.get(index).copied().unwrap() ^ after;
+        assert_eq!(
+            changed & !writable,
+            0,
+            "{}: page {index} lost a bit it should keep",
+            E::NAME
+        );
+        assert_eq!(
+            E::leaf_flags(after),
+            E::leaf_flags(want),
+            "{}: page {index}",
+            E::NAME
+        );
+    }
+}
+
+/// The descriptor that maps `virt`, which must be a page.
+fn leaf_entry<E: Encoding>(memory: &Memory, mapper: &Mapper<E>, virt: VirtAddr) -> u64 {
+    match mapper.find_leaf(memory, virt, None).unwrap() {
+        Found::Leaf(slot, entry, _) => {
+            assert_eq!(memory.read(slot), entry);
+            entry
+        }
+        Found::Hole(_) => panic!("{virt:?} is not mapped"),
+    }
+}
+
+/// A gigabyte with a page at each end and two tables of pages in the middle:
+/// the holes are stepped over whole and a run of pages in one table is read
+/// along it, so the cost is about a read per page mapped.
+fn write_protecting_steps_over_holes_and_reads_each_page_once<E: Encoding>() {
+    const GIB: u64 = 1 << 30;
+    let (mut memory, mapper) = Memory::with_root::<E>();
+    let at = high::<E>(0);
+    let middle = 2 * ENTRIES as u64;
+    let runs = [
+        (at.0, 1),
+        (at.0 + GIB / 2, middle),
+        (at.0 + GIB - PAGE_SIZE, 1),
+    ];
+    for (start, pages) in runs {
+        mapper
+            .map_range(
+                &mut memory,
+                VirtAddr(start),
+                // Off a block's alignment, so that it is mapped in pages.
+                PhysAddr(0x4000_1000),
+                pages * PAGE_SIZE,
+                MapFlags::USER_DATA,
+            )
+            .unwrap();
+    }
+    memory.reads.set(0);
+    let protected = mapper.write_protect_range(&mut memory, at, GIB).unwrap();
+    assert_eq!(protected, middle + 2, "{}: a page was missed", E::NAME);
+    assert!(
+        memory.reads.get() < middle + 8 * 1024,
+        "{}: {} descriptors read to protect {} pages",
+        E::NAME,
+        memory.reads.get(),
+        middle + 2
+    );
+    for (start, pages) in runs {
+        for page in [0, pages - 1] {
+            let flags = mapper
+                .leaf_flags(&memory, VirtAddr(start + page * PAGE_SIZE))
+                .unwrap();
+            assert!(!flags.write, "{}: {start:#x} + {page} is writable", E::NAME);
+        }
+    }
+}
+
+/// A range that cuts a block is refused at the block, which stays writable,
+/// and the pages before it in the range are protected.
+fn write_protecting_refuses_to_cut_a_block<E: Encoding>() {
+    let (mut memory, mapper) = Memory::with_root::<E>();
+    let block = high::<E>(0x5000_0000);
+    let page = VirtAddr(block.0 - PAGE_SIZE);
+    mapper
+        .map_range(
+            &mut memory,
+            page,
+            PhysAddr(0x20_0000),
+            PAGE_SIZE,
+            MapFlags::KERNEL_DATA,
+        )
+        .unwrap();
+    mapper
+        .map_range(
+            &mut memory,
+            block,
+            PhysAddr(0x40_0000),
+            2 * 1024 * 1024,
+            MapFlags::KERNEL_DATA,
+        )
+        .unwrap();
+    assert_eq!(mapper.mapping_level(&memory, block), Some(Level::MEGABYTE));
+    assert_eq!(
+        mapper
+            .write_protect_range(&mut memory, page, 2 * PAGE_SIZE)
+            .unwrap_err(),
+        MapError::BlockInTheWay(block)
+    );
+    assert!(!mapper.leaf_flags(&memory, page).unwrap().write);
+    assert!(mapper.leaf_flags(&memory, block).unwrap().write);
+    // The whole block is protected whole.
+    assert_eq!(
+        mapper
+            .write_protect_range(&mut memory, block, 2 * 1024 * 1024)
+            .unwrap(),
+        1
+    );
+    assert!(!mapper.leaf_flags(&memory, block).unwrap().write);
+}
+
+/// `allow_write` gives back exactly what `write_protect_range` took, and
+/// refuses a hole and a block.
+fn allowing_a_write_undoes_a_write_protect<E: Encoding>() {
+    let (mut memory, mapper) = Memory::with_root::<E>();
+    let at = high::<E>(0x1050_0000);
+    for flags in [
+        MapFlags::USER_DATA,
+        MapFlags {
+            write_combining: true,
+            ..MapFlags::USER_DATA
+        },
+    ] {
+        mapper
+            .map_range(&mut memory, at, PhysAddr(0x70_0000), PAGE_SIZE, flags)
+            .unwrap();
+        let before = leaf_entry::<E>(&memory, &mapper, at);
+        assert_eq!(
+            mapper
+                .write_protect_range(&mut memory, at, PAGE_SIZE)
+                .unwrap(),
+            1
+        );
+        assert_eq!(mapper.allow_write(&mut memory, at), Ok(true));
+        assert_eq!(
+            leaf_entry::<E>(&memory, &mapper, at),
+            before,
+            "{}: a bit was lost",
+            E::NAME
+        );
+        assert_eq!(
+            mapper.allow_write(&mut memory, at),
+            Ok(false),
+            "{}: counted twice",
+            E::NAME
+        );
+        let _ = mapper
+            .unmap_range(&mut memory, at, PAGE_SIZE, |_| {})
+            .unwrap();
+    }
+    assert_eq!(
+        mapper.allow_write(&mut memory, at),
+        Err(MapError::AlreadyMapped(at))
+    );
+    let block = high::<E>(0x5000_0000);
+    mapper
+        .map_range(
+            &mut memory,
+            block,
+            PhysAddr(0x40_0000),
+            2 * 1024 * 1024,
+            MapFlags::KERNEL_DATA.read_only(),
+        )
+        .unwrap();
+    assert_eq!(
+        mapper.allow_write(&mut memory, block),
+        Err(MapError::AlreadyMapped(block))
+    );
+    assert!(!mapper.leaf_flags(&memory, block).unwrap().write);
+}
+
+/// The unmap as it was before the prune moved to a table's end: a prune after
+/// every leaf. Kept here as the reference the walk is compared with (ledger
+/// 8299, A1).
+fn unmap_pruning_every_leaf<E: Encoding>(
+    mapper: &Mapper<E>,
+    memory: &mut Memory,
+    virt: VirtAddr,
+    len: u64,
+    released: &mut Vec<(VirtAddr, Released)>,
+) -> Result<u64, MapError> {
+    if !virt.is_aligned_to(PAGE_SIZE) || !len.is_multiple_of(PAGE_SIZE) {
+        return Err(MapError::Misaligned);
+    }
+    let mut done = 0u64;
+    let mut removed = 0u64;
+    while done < len {
+        let at = virt.checked_add(done).ok_or(MapError::RangeOverflow)?;
+        let mut path = Path::default();
+        match mapper.find_leaf(memory, at, Some(&mut path))? {
+            Found::Hole(level) => {
+                let span = level.span();
+                let next = (at.0 | (span - 1)).checked_add(1);
+                done = next.map_or(len, |next| (next - virt.0).min(len));
+            }
+            Found::Leaf(slot, entry, level) => {
+                let span = level.span();
+                if !at.is_aligned_to(span) || len - done < span {
+                    return Err(MapError::BlockInTheWay(at));
+                }
+                memory.write(slot, E::ABSENT);
+                released.push((
+                    at,
+                    Released::Page {
+                        phys: E::address(entry),
+                        level,
+                    },
+                ));
+                mapper.prune(memory, &path, &mut |what| released.push((at, what)));
+                removed += 1;
+                done += span;
+            }
+        }
+    }
+    Ok(removed)
+}
+
+/// On every shape of tree and range, the walk releases what a prune after
+/// every leaf released, in the same order and named with the same leaves,
+/// leaves the same descriptors behind and returns the same: full and partial
+/// tables, holes, blocks, mixed levels, a mapper that keeps its top tables,
+/// and each error.
+fn unmapping_releases_what_a_prune_per_leaf_released<E: Encoding>() {
+    let base = high::<E>(0x1000_0000);
+    let page = |n: u64| VirtAddr(base.0 + n * PAGE_SIZE);
+    // (what to map: start page, pages, physical), then the ranges to unmap.
+    type Shape = (&'static [(u64, u64, u64)], &'static [(u64, u64)]);
+    let shapes: &[Shape] = &[
+        // Three full tables.
+        (&[(0, 1536, 0x4000_1000)], &[(0, 1536)]),
+        // A partial table, then part of the next.
+        (&[(5, 700, 0x4000_1000)], &[(0, 1536), (10, 3)]),
+        // Holes: every third page.
+        (
+            &[
+                (0, 1, 0x4000_1000),
+                (3, 1, 0x4000_1000),
+                (6, 1, 0x4000_1000),
+                (600, 1, 0x4000_1000),
+            ],
+            &[(0, 1024)],
+        ),
+        // A block between pages: mixed levels.
+        (
+            &[
+                (511, 1, 0x4000_1000),
+                (512, 512, 0x4020_0000),
+                (1024, 2, 0x4000_1000),
+            ],
+            &[(0, 1536)],
+        ),
+        // A range that cuts a block: an error after pages came out.
+        (
+            &[(500, 12, 0x4000_1000), (512, 512, 0x4020_0000)],
+            &[(500, 20)],
+        ),
+        // A range starting inside a block.
+        (&[(512, 512, 0x4020_0000)], &[(513, 4)]),
+    ];
+    for keep_top in [false, true] {
+        for (maps, ranges) in shapes {
+            let (mut memory, mut mapper) = Memory::with_root::<E>();
+            if keep_top {
+                mapper.keep_top();
+            }
+            for &(first, pages, phys) in *maps {
+                mapper
+                    .map_range(
+                        &mut memory,
+                        page(first),
+                        PhysAddr(phys),
+                        pages * PAGE_SIZE,
+                        MapFlags::KERNEL_DATA,
+                    )
+                    .unwrap();
+            }
+            let mut reference = memory.clone();
+            for &(first, pages) in *ranges {
+                let mut want = Vec::new();
+                let wanted = unmap_pruning_every_leaf(
+                    &mapper,
+                    &mut reference,
+                    page(first),
+                    pages * PAGE_SIZE,
+                    &mut want,
+                );
+                let mut got = Vec::new();
+                let result = mapper.unmap_range_named(
+                    &mut memory,
+                    page(first),
+                    pages * PAGE_SIZE,
+                    |at, what| got.push((at, what)),
+                );
+                assert_eq!(
+                    result,
+                    wanted,
+                    "{}: unmapping {first}+{pages} returned otherwise",
+                    E::NAME
+                );
+                assert_eq!(
+                    got,
+                    want,
+                    "{}: unmapping {first}+{pages} released otherwise",
+                    E::NAME
+                );
+                assert_eq!(
+                    memory.cells,
+                    reference.cells,
+                    "{}: unmapping {first}+{pages} left other descriptors",
+                    E::NAME
+                );
+            }
+        }
+    }
+    unmapping_an_error_releases_what_a_prune_per_leaf_released::<E>(base);
+}
+
+/// The error half of [`unmapping_releases_what_a_prune_per_leaf_released`]: a
+/// misaligned range, and one that runs off the top of the address space
+/// after a page came out.
+fn unmapping_an_error_releases_what_a_prune_per_leaf_released<E: Encoding>(base: VirtAddr) {
+    let (mut memory, mapper) = Memory::with_root::<E>();
+    let mut got = Vec::new();
+    assert_eq!(
+        mapper.unmap_range_named(&mut memory, VirtAddr(base.0 + 1), PAGE_SIZE, |at, what| got
+            .push((at, what))),
+        Err(MapError::Misaligned)
+    );
+    let top = VirtAddr(u64::MAX - PAGE_SIZE + 1);
+    if E::is_canonical(top) {
+        mapper
+            .map_range(
+                &mut memory,
+                top,
+                PhysAddr(0x20_0000),
+                PAGE_SIZE,
+                MapFlags::KERNEL_DATA,
+            )
+            .unwrap();
+        let mut reference = memory.clone();
+        let mut want = Vec::new();
+        let wanted =
+            unmap_pruning_every_leaf(&mapper, &mut reference, top, 2 * PAGE_SIZE, &mut want);
+        let result = mapper.unmap_range_named(&mut memory, top, 2 * PAGE_SIZE, |at, what| {
+            got.push((at, what));
+        });
+        assert_eq!(result, wanted);
+        assert_eq!(result, Err(MapError::RangeOverflow));
+        assert_eq!(
+            got,
+            want,
+            "{}: an overflowing range released otherwise",
+            E::NAME
+        );
+        assert_eq!(
+            memory.cells,
+            reference.cells,
+            "{}: an overflowing range left a table linked",
+            E::NAME
+        );
+    }
 }
 
 /// Unmapping half a block is refused rather than rounded.
@@ -1282,6 +1785,28 @@ mod x86_bits {
             MapFlags::x86_framebuffer(Some(X86_PAT)),
         );
         assert_eq!(entry & (WRITE_THROUGH | CACHE_DISABLE), WRITE_THROUGH);
+    }
+
+    /// A leaf is written with the bits the processor would otherwise set
+    /// itself, accessed always and dirty when writable, so that it never
+    /// writes one: what lets `write_protect_range` and `allow_write` rewrite
+    /// a live leaf with a plain read and write (ledger 8299, A2).
+    #[test]
+    fn a_writable_leaf_has_its_accessed_and_dirty_bits_set() {
+        for flags in [MapFlags::USER_DATA, MapFlags::KERNEL_DATA] {
+            let entry = X86_64::leaf_descriptor(PhysAddr(0x20_0000), Level::PAGE, flags);
+            assert_eq!(entry & (1 << 5), 1 << 5, "accessed");
+            assert_eq!(entry & (1 << 6), 1 << 6, "dirty");
+            let allowed =
+                X86_64::write_allowed(X86_64::write_protected(entry, Level::PAGE), Level::PAGE);
+            assert_eq!(allowed, entry, "a protect and an allow lost a bit");
+        }
+        let read_only = X86_64::leaf_descriptor(
+            PhysAddr(0x20_0000),
+            Level::PAGE,
+            MapFlags::USER_DATA.read_only(),
+        );
+        assert_eq!(read_only & (1 << 5), 1 << 5, "accessed");
     }
 
     #[test]

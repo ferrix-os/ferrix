@@ -1670,7 +1670,8 @@ package FerrixMemoryRequirements {
                 names another frame than the held one at page 1, the held frame
                 keeps 1 reference, and the fork's page 1 reads `held`.";
             attribute :>> parent = ("H.DMA.3", "H.MEM.8");
-            attribute :>> unit = "user::vmo::Vmo::fork";
+            attribute :>> unit = ("user::vmo::Vmo::fork", "mm::share_frames",
+                "user::vmo::share_into");
         }
         requirement <'L.user.25'> holdsNest : ItemLowLevel {
             attribute :>> statement = "A page shall stay held until the last Held
@@ -2109,13 +2110,15 @@ package FerrixMemoryRequirements {
                 "user::space::sharing_of");
         }
         requirement <'L.user.58'> forkSharesAndAWriteCopies : ItemLowLevel {
-            attribute :>> statement = "fork shall take the parent's translations of
-                its private writable pages down and share their frames with the
+            attribute :>> statement = "fork shall take the write permission away
+                from the parent's translations of its private writable pages,
+                leaving them on the same frames, and share those frames with the
                 child, and a write to a page some other space
                 still holds shall copy it into a frame of the writer's own, while a
                 write to a page nobody else holds any more shall copy nothing.";
             attribute :>> criterion = "After a fork of 2 written private pages the
-                parent translates neither; read faults leave both sides on the
+                parent translates both to their original frames and neither
+                writably; read faults leave both sides on the
                 original frames with 2 holders each; the child's write, made with
                 its space installed, lands in a new frame of 1 holder, leaves the
                 original at 1 holder with the parent's value, and a second write
@@ -2123,12 +2126,28 @@ package FerrixMemoryRequirements {
                 other page keeps its frame and contents; 0 frames kept.";
             attribute :>> parent = ("H.MEM.8", "H.MEM.9");
             attribute :>> unit = ("user::space::AddressSpace::fork",
-                "user::space::AddressSpace::unmap_copied_on_write",
+                "user::space::AddressSpace::protect_copied_on_write",
                 "user::space::inherited", "user::space::attach_child",
                 "user::space::AddressSpace::begin_shootdown",
                 "user::space::AddressSpace::shoot",
                 "user::space::AddressSpace::resolve", "user::space::copy_on_write",
-                "user::space::AddressSpace::forget_in");
+                "user::space::AddressSpace::forget_in", "mm::write_protect_in");
+        }
+        requirement <'L.user.229'> aSoleHoldersWriteReusesThePage : ItemLowLevel {
+            attribute :>> statement = "A copy-on-write write fault whose space holds
+                the page alone shall make its present read-only translation
+                writable in place, on the same frame, beginning no shootdown.";
+            attribute :>> criterion = "After a fork of a written private page and
+                of a private file mapping's copied page, and the child's drop, the
+                parent's write fault to each leaves the same frame translated,
+                writable, at 1 holder, with shootdowns_begun unchanged; a write
+                through the parent's own address, made with its space installed
+                after a read through it cached the read-only translation,
+                reaches that frame; 0 frames kept.";
+            attribute :>> parent = ("H.MEM.8", "H.MEM.9");
+            attribute :>> unit = ("user::space::AddressSpace::write_copy_on_write",
+                "user::space::AddressSpace::write_shadow_copy_on_write",
+                "user::space::reusable_in_place", "mm::allow_write_in");
         }
         requirement <'L.user.59'> aKernelWriteToAnOwnPageTakesNothingDown : ItemLowLevel {
             attribute :>> statement = "with_page shall let a write go straight through
@@ -2965,6 +2984,7 @@ package FerrixMemoryRequirements {
                 `sweep` line).";
             attribute :>> parent = "H.MEM.11";
             attribute :>> unit = ("user::space::AddressSpace::add_region",
+                "user::vmo::record",
                 "user::space::AddressSpace::abandon_region", "user::space::unrooted",
                 "user::space::inherited", "user::space::attach_child",
                 "user::space::map_error", "user::space::remap_object",
@@ -2995,7 +3015,7 @@ package FerrixMemoryRequirements {
             attribute :>> unit = ("user::space::AddressSpace::unmap",
                 "user::space::AddressSpace::take_down",
                 "user::space::AddressSpace::protect",
-                "user::space::AddressSpace::unmap_copied_on_write",
+                "user::space::AddressSpace::protect_copied_on_write",
                 "user::space::AddressSpace::clear_for_remap",
                 "user::space::AddressSpace::shoot",
                 "user::space::AddressSpace::drop");

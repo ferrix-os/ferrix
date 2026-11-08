@@ -103,6 +103,18 @@ impl Encoding for X86_64 {
         level == Level::GIGABYTE || level == Level::MEGABYTE
     }
 
+    fn write_protected(entry: u64, _level: Level) -> u64 {
+        // The write bit alone. The dirty bit may stay: it says the page was
+        // written, which it was, and a read-only entry is never written.
+        entry & !WRITABLE
+    }
+
+    fn write_allowed(entry: u64, _level: Level) -> u64 {
+        // Dirty as well, as `leaf_descriptor` writes a writable leaf: the
+        // processor then has no dirty bit to set on the first write.
+        entry | WRITABLE | DIRTY
+    }
+
     fn leaf_flags(entry: u64) -> MapFlags {
         MapFlags {
             // A present descriptor is readable; there is no read bit to

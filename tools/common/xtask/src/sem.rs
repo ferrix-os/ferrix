@@ -32,6 +32,16 @@ pub(crate) const TASKS: &[Task] = &[
         run,
     },
     Task {
+        name: "stall-probe",
+        help_at: 545,
+        help: &[
+            "stall-probe   Boot threads-test's stall probe as init: another process's 1 ms sleep may overrun by at most 100 ms",
+            "              while a 320 MiB, 40-thread process forks four times, and 50 ms while it is torn down; both interim,",
+            "              10 ms after R5's step 2 (docs/ROBUSTNESS.md R5)",
+        ],
+        run,
+    },
+    Task {
         name: "test-sem",
         help_at: 550,
         help: &[
@@ -280,6 +290,7 @@ pub(crate) fn run(command: &str, args: &Args) -> Result<()> {
         "test-uvm" => crate::uvm::test_uvm(args),
         "test-nvrm" => crate::nvrm::test_nvrm(args),
         "test-nvrm-link" => crate::nvrm_link::test_nvrm_link(args),
+        "stall-probe" => crate::threads::stall_probe(args),
         _ => crate::threads::test_threads(args),
     }
 }

@@ -2339,6 +2339,41 @@ that grows with what the program asked for:
 Each such hold is a stop of its own processor and, through the wait above,
 of every processor whose task waits for the lock.
 
+**R5 step 1 (2026-11-08, `docs/ROBUSTNESS.md` §4.6, ledger 8299).** What
+changed in the holds above, measured by `cargo xtask stall-probe` (x86-64,
+KVM, 4 processors, a 320 MiB, 40-thread process):
+
+* **Unmap is linear.** `ferrix_paging::Mapper::unmap_range_named` prunes a
+  leaf's tables once the walk leaves that table, not after every leaf. The
+  old prune read the table from its first entry each time, about 131,000
+  reads per full table of 512 pages. That made `unmap`'s `take_down`,
+  `fork`'s old unmapping and `Drop`'s `unmap_unwalked` quadratic per table.
+  The walk is now a root walk per page mapped plus one read of each
+  table's entries to find it empty. The stall-probe's teardown phase
+  measured 0.06-29.9 ms over five runs. The ~30 ms has a cause not yet
+  named (R5-step2), and the interim budget is 50 ms, a measurement with no
+  control that fires: a long hold on one processor does not move a ticker
+  on another (ledger 8421 C1). Develop's 400.5 ms in that phase was most
+  likely the tail of the fault and shootdown storm after the forks, not the
+  teardown itself.
+* **Fork's parent write-protect** (`Mapper::write_protect_range`, under the
+  space's lock) costs about one descriptor read per page mapped, plus the
+  holes' root walks: 3.2-4.6 ms per 320 MiB. It replaces the old unmapping.
+* **`Vmo::fork` is still O(resident)** under the space's lock and the
+  VMO's pages lock: 31-34 ms per 320 MiB, about 400 ns a page, most of it
+  in `fallible::insert`'s reserve per entry. This is step 1's named
+  residual, and R5's step 2 (the fork in bounded steps) replaces it with a
+  per-chunk hold. Until then the stall-probe's fork budget is an interim
+  100 ms (five runs: 68.9-81.6 ms).
+* **`FRAMES`** is held with interrupts masked for at most `SHARE_BATCH`
+  (128) reference takes per hold in `Vmo::fork` (`mm::share_frames`),
+  instead of one hold per page.
+* **A copy-on-write write by a page's only holder** is O(1): one walk and
+  one descriptor write, with no shootdown (`mm::allow_write_in`,
+  L.user.229). Single-page shootdowns over 5 ms after the probe's forks
+  went from 2,853 to 415. The rest are true copies, made while a child
+  still holds the page.
+
 **The dead, freed on a busy machine** (L.sched.95, since 2026-10-24). A dead
 task's stack, and the address space and mapper entries its last reference
 holds, used to be freed only by an idle task. Under a load that leaves no

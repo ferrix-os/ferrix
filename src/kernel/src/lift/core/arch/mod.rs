@@ -45,3 +45,7 @@ pub const fn user_combining() -> bool {
 pub fn nospec_index(index: usize, end: usize) -> Option<usize> {
     (index < end).then_some(index)
 }
+
+/// The kernel's local page invalidation, reached only after `mm::allow_write_in`,
+/// which the lift refuses: nothing to do here (R5).
+pub fn flush_tlb_page(_address: u64) {}

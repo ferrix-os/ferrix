@@ -1754,12 +1754,28 @@ impl AddressSpace {
         let _ = inner.map.remove_quietly(range);
     }
 
-    /// Take this space's translations of every copy-on-write region out of
-    /// its tables, for `fork`: the pages its shootdown must cover.
-    fn unmap_copied_on_write(&self, map: &ferrix_vma::AddressSpace) -> TlbPages {
+    /// Take the write permission away from this space's translations of
+    /// every copy-on-write region, leaving them mapped, for `fork`: the pages
+    /// its shootdown must cover, which is the whole space once any page was
+    /// writable. Linux's `copy_present_ptes` write-protects the parent's
+    /// entry the same way, with one `flush_tlb_mm` at the end of `dup_mmap`
+    /// (`mm/memory.c`, `mm/mmap.c`).
+    ///
+    /// A range that would cut a block is taken down instead, as before: a
+    /// user region is mapped in pages, so that is a table this space does not
+    /// expect, and taking it down is what was always correct.
+    fn protect_copied_on_write(&self, map: &ferrix_vma::AddressSpace) -> TlbPages {
         let mut pages = TlbPages::new();
         for region in map.iter().filter(|region| region.cow) {
-            self.unmap_range(region.range, &mut pages);
+            match mm::write_protect_in(
+                self.root * PAGE_SIZE,
+                region.range.start(),
+                region.range.bytes(),
+            ) {
+                Ok(0) => {}
+                Ok(_) => pages.everything(),
+                Err(_) => self.unmap_range(region.range, &mut pages),
+            }
         }
         pages
     }
@@ -1776,21 +1792,29 @@ impl AddressSpace {
     /// object and leaves the other's alone. A `MAP_SHARED` object is not
     /// cloned but shared, since writes through it are meant to be visible.
     ///
-    /// # Why the parent's mappings are taken down
+    /// # Why the parent's mappings are write-protected
     ///
     /// Marking the map is not enough. The parent's page tables still hold
     /// *writable* translations to the pages it has just agreed to share, and a
     /// write through one of those would never reach [`AddressSpace::fault`] at
-    /// all — it would land in a page the child can read. So every region now
-    /// marked copy-on-write is unmapped in the parent, the processors in its
-    /// set are told, and the next access re-faults and is reinstalled
-    /// read-only because `cow` is set.
+    /// all — it would land in a page the child can read. So every translation
+    /// in a region now marked copy-on-write loses its write permission in
+    /// place ([`mm::write_protect_in`]), the processors in its set are told,
+    /// and the next write faults and copies because `cow` is set. A read
+    /// still hits.
     ///
-    /// Unmapping rather than write-protecting in place costs the parent one
-    /// extra fault per page — a read that would have hit now faults once — and
-    /// is what [`crate::mm`] offers today: `map_in` refuses to overwrite a live
-    /// mapping, by design, and there is no `protect_in`. Adding one is the
-    /// obvious improvement and changes nothing about what is correct here.
+    /// Until 2026-11 the translations were taken down instead, which cost a
+    /// fault per page read afterwards, and a walk from the root and a prune
+    /// per page under this lock: a 5 GB game's fork held it for seconds, with
+    /// its own faulting threads spinning on it on every other processor
+    /// (`docs/ROBUSTNESS.md` R5). Write-protecting is what Linux's
+    /// `copy_present_ptes` does to the source entry (`mm/memory.c`). Taking a
+    /// permission away needs no break-before-make on Arm, and the one
+    /// whole-space shootdown below covers every page, as Linux's
+    /// `flush_tlb_mm` at the end of `dup_mmap` (`mm/mmap.c`) does. Every
+    /// fault path already handles a write to a present read-only page of a
+    /// copy-on-write region: it is the state a read after the old unmapping
+    /// left.
     ///
     /// # How the child is attached
     ///
@@ -1886,7 +1910,7 @@ impl AddressSpace {
             mm::deallocate_frames(root, 0);
             return Err(SpaceError::OutOfMemory);
         };
-        let mut pages = self.unmap_copied_on_write(&inner.map);
+        let mut pages = self.protect_copied_on_write(&inner.map);
 
         // Read before the lock goes, because the child inherits them. A
         // native object is shared, so the child names the same one.
@@ -2080,64 +2104,7 @@ impl AddressSpace {
         // read-only entry is the kernel's device rather than the region's
         // permission.
         if access.write && region.cow {
-            let shared = vmo.commit(index).map_err(SpaceError::Backing)?;
-
-            // The one real decision. A page nobody else holds any more needs
-            // no copy: the other side has already copied it, or unmapped, or
-            // exited, and copying would allocate a frame in order to duplicate
-            // data this space is the sole owner of.
-            let (frame, retired) = if mm::frame_references(shared) > 1 {
-                copy_on_write(&vmo, index, shared)?
-            } else {
-                (shared, None)
-            };
-
-            // `map_in` refuses to overwrite a live mapping, deliberately, so
-            // the read-only entry comes down before the writable one goes in
-            // -- and so does every other translation of this object page in
-            // this space, since the object no longer names the frame they
-            // reach.
-            let mut pages = TlbPages::new();
-            let _ = self.forget_in(&inner, id, &[(index, 1)], &mut pages);
-            pages.add(page);
-            let mapped = mm::map_in(
-                self.root * PAGE_SIZE,
-                page,
-                frame * PAGE_SIZE,
-                PAGE_SIZE,
-                MapFlags {
-                    execute: region.flags.execute,
-                    ..MapFlags::USER_DATA
-                },
-            );
-
-            // A translation that existed a moment ago has just been replaced
-            // by a more permissive one, so every cached copy of the old one
-            // has to go. **This is not optional and it is not a performance
-            // matter**, twice over. The entry that was there says read-only,
-            // and the instruction that faulted is about to retry its write: if
-            // it finds the stale entry it faults again, arrives here again,
-            // finds one holder and no copy to make, installs the same writable
-            // entry again, and retries into the same stale entry — forever. And
-            // the entry reaches the shared frame, whose reference is about to
-            // be given back: a processor that kept it would be reading a page
-            // the allocator may hand to anyone.
-            //
-            // Set read after the takedown, under the lock; shootdown after the
-            // lock; the frame's reference only after the shootdown.
-            let cpus = self.begin_shootdown(&inner);
-            drop(inner);
-            match retired {
-                Some(retired) => vmo.retire(
-                    retired,
-                    Some(Own {
-                        space: self,
-                        shootdown: Some((cpus, pages)),
-                    }),
-                ),
-                None => self.shoot(&cpus, &mut pages),
-            }
-            return mapped.map_err(|_| SpaceError::OutOfMemory);
+            return self.write_copy_on_write(inner, &region, &vmo, (id, index), page);
         }
 
         // A pager-backed object's Clean page is never mapped writable
@@ -2197,6 +2164,121 @@ impl AddressSpace {
 
         drop(inner);
         Ok(())
+    }
+
+    /// [`AddressSpace::resolve`]'s write to a copy-on-write region's page
+    /// `index` of `vmo`, named `id`, at `page`, with this space's lock held as
+    /// `inner`: the copy, or the sole holder's reuse in place (L.user.229).
+    fn write_copy_on_write<G: Deref<Target = Inner>>(
+        &self,
+        inner: G,
+        region: &Vma,
+        vmo: &Arc<Vmo>,
+        (id, index): (u64, u64),
+        page: u64,
+    ) -> Result<(), SpaceError> {
+        let shared = vmo.commit(index).map_err(SpaceError::Backing)?;
+
+        // The one real decision. A page nobody else holds any more needs
+        // no copy: the other side has already copied it, or unmapped, or
+        // exited, and copying would allocate a frame in order to duplicate
+        // data this space is the sole owner of.
+        let (frame, retired) = if mm::frame_references(shared) > 1 {
+            copy_on_write(vmo, index, shared)?
+        } else {
+            (shared, None)
+        };
+
+        // Held alone and already mapped, read-only, to that frame -- what
+        // a fork's write-protect leaves once the child has gone: made
+        // writable where it is, as Linux's `wp_page_reuse` does
+        // (`mm/memory.c`), with no shootdown (`docs/ROBUSTNESS.md` R5,
+        // §4.6; ledger 8299). A storm of these after a big fork was a
+        // shootdown each, all queued on the one shootdown turn.
+        //
+        // Why no other processor need be told. The frame does not change
+        // and nothing is given back: this space is its only holder, so it
+        // can go back to the allocator only through this space's own
+        // unmap, forget or teardown, each of which takes the translation
+        // down and shoots it down first (`give_back`, `forget_in`, and
+        // `Drop`'s rule that no processor is left in the set). A processor
+        // that cached the read-only entry can therefore reach only this
+        // frame, read-only, and a write through it faults. That fault
+        // comes back here, because a region's `cow` is only ever set,
+        // never cleared (`ferrix_vma`); `allow_write_in` answers yes for a
+        // page already writable; and the faulting processor's own entry
+        // is invalidated below, under the lock, so on that processor. On
+        // x86-64 `invlpg` reaches the current PCID only, but a page fault
+        // also drops the entry that faulted (Intel SDM vol. 3A, 4.10.4),
+        // and a space that is not current here keeps a stale read-only
+        // entry under its PCID that faults once more when it runs, which
+        // ends the same way. On AArch64 and ARMv7-A `flush_tlb_page` is a
+        // broadcast invalidation of the page for every ASID (`TLBI
+        // VAAE1IS`, `TLBIMVAAIS`), so every core is told anyway; adding a
+        // permission needs no break-before-make. Linux relies on the same
+        // spurious fault (`fix_spurious_fault`). Only a leaf that decodes
+        // to what the path below would install, less the write, is
+        // reused (`reusable_in_place`).
+        if retired.is_none()
+            && master_translate!(self, self.root * PAGE_SIZE, page) == Some(frame * PAGE_SIZE)
+            && reusable_in_place(
+                master_flags!(self, self.root * PAGE_SIZE, page),
+                region.flags.execute,
+            )
+            && mm::allow_write_in(self.root * PAGE_SIZE, page)
+        {
+            // Under the lock, so on the processor that faulted.
+            arch::flush_tlb_page(page);
+            drop(inner);
+            return Ok(());
+        }
+
+        // `map_in` refuses to overwrite a live mapping, deliberately, so
+        // the read-only entry comes down before the writable one goes in
+        // -- and so does every other translation of this object page in
+        // this space, since the object no longer names the frame they
+        // reach.
+        let mut pages = TlbPages::new();
+        let _ = self.forget_in(&inner, id, &[(index, 1)], &mut pages);
+        pages.add(page);
+        let mapped = mm::map_in(
+            self.root * PAGE_SIZE,
+            page,
+            frame * PAGE_SIZE,
+            PAGE_SIZE,
+            MapFlags {
+                execute: region.flags.execute,
+                ..MapFlags::USER_DATA
+            },
+        );
+
+        // A translation that existed a moment ago has just been replaced
+        // by a more permissive one, so every cached copy of the old one
+        // has to go. **This is not optional and it is not a performance
+        // matter**, twice over. The entry that was there says read-only,
+        // and the instruction that faulted is about to retry its write: if
+        // it finds the stale entry it faults again, arrives here again,
+        // finds one holder and no copy to make, installs the same writable
+        // entry again, and retries into the same stale entry — forever. And
+        // the entry reaches the shared frame, whose reference is about to
+        // be given back: a processor that kept it would be reading a page
+        // the allocator may hand to anyone.
+        //
+        // Set read after the takedown, under the lock; shootdown after the
+        // lock; the frame's reference only after the shootdown.
+        let cpus = self.begin_shootdown(&inner);
+        drop(inner);
+        match retired {
+            Some(retired) => vmo.retire(
+                retired,
+                Some(Own {
+                    space: self,
+                    shootdown: Some((cpus, pages)),
+                }),
+            ),
+            None => self.shoot(&cpus, &mut pages),
+        }
+        mapped.map_err(|_| SpaceError::OutOfMemory)
     }
 
     /// For [`AddressSpace::resolve`]'s write to page `index` of `vmo`, a
@@ -2381,23 +2463,54 @@ impl AddressSpace {
         };
 
         if access.write && region.cow {
-            // A shadow page a fork left in another space too is copied again.
-            // One nobody else holds any more -- the other side copied its own,
-            // unmapped or exited -- is this space's alone, and is mapped
-            // writable in place of the read-only entry the fork or a read
-            // left: returning because a page is present would send the write
-            // back into that entry forever.
-            if mm::frame_references(copied) > 1 {
-                return self.copy_shadow_page(inner, &shadow, placed(copied), execute);
-            }
-            let flags = user_page(true, execute);
-            return self.install_page(inner, placed(copied), flags, present.is_some());
+            return self.write_shadow_copy_on_write(
+                inner,
+                &shadow,
+                placed(copied),
+                present,
+                execute,
+            );
         }
         if present == Some(copied) {
             return Ok(());
         }
         let flags = user_page(region.flags.write && !region.cow, execute);
         self.install_page(inner, placed(copied), flags, present.is_some())
+    }
+
+    /// [`AddressSpace::fault_private_file`]'s write to a copy-on-write
+    /// region's page whose copy `at.frame` the shadow holds, with this space's
+    /// lock held as `inner` and `present` the frame the page translates to.
+    ///
+    /// A shadow page a fork left in another space too is copied again. One
+    /// nobody else holds any more -- the other side copied its own, unmapped or
+    /// exited -- is this space's alone, and is mapped writable in place of the
+    /// read-only entry the fork or a read left: returning because a page is
+    /// present would send the write back into that entry forever.
+    fn write_shadow_copy_on_write<G: Deref<Target = Inner>>(
+        &self,
+        inner: G,
+        shadow: &Arc<Vmo>,
+        at: Placement,
+        present: Option<Frame>,
+        execute: bool,
+    ) -> Result<(), SpaceError> {
+        if mm::frame_references(at.frame) > 1 {
+            return self.copy_shadow_page(inner, shadow, at, execute);
+        }
+        // Mapped to this very page: made writable where it is, with no
+        // shootdown, for the reason `write_copy_on_write` gives (L.user.229).
+        if present == Some(at.frame)
+            && reusable_in_place(master_flags!(self, self.root * PAGE_SIZE, at.page), execute)
+            && mm::allow_write_in(self.root * PAGE_SIZE, at.page)
+        {
+            // Under the lock, so on the processor that faulted.
+            arch::flush_tlb_page(at.page);
+            drop(inner);
+            return Ok(());
+        }
+        let flags = user_page(true, execute);
+        self.install_page(inner, at, flags, present.is_some())
     }
 
     /// Map `at.frame` at `at.page` with `flags`, and let `inner`, this space's
@@ -3317,6 +3430,20 @@ pub(crate) const AHEAD_PAGES: u64 = 7;
 const PLACED_OBJECTS: usize = 4096;
 
 /// The translation flags of a user page.
+/// Whether a present leaf with `flags` may be made writable in place for a
+/// copy-on-write write by its only holder: it decodes to what the old path
+/// would install, a writable user page with the region's execute permission,
+/// on normal memory and not global, less the write permission. Anything else
+/// takes the page down and maps it again, as before (ledger 8299, A3).
+fn reusable_in_place(flags: Option<MapFlags>, execute: bool) -> bool {
+    flags.is_some_and(|flags| {
+        MapFlags {
+            write: true,
+            ..flags
+        } == user_page(true, execute)
+    })
+}
+
 fn user_page(write: bool, execute: bool) -> MapFlags {
     MapFlags {
         read: true,

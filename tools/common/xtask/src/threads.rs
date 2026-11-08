@@ -71,11 +71,39 @@ const STEPS: &[&str] = &[
 /// The line the negative control must fail with.
 const NEGATIVE_FAILURE: &str = "threads: FAILED /proc/self/status does not count every thread";
 
+/// What a `threads-test` build is for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Flavour {
+    /// Every step.
+    Plain,
+    /// The negative control's: one thread too many expected.
+    Negative,
+    /// The stall-probe step alone (`cargo xtask stall-probe`).
+    StallProbe,
+}
+
 /// Build `threads-test` for `arch`, as the negative control or not, and return
 /// where the program is.
 fn build(arch: Arch, negative: bool, i686: bool) -> Result<PathBuf> {
+    build_flavour(
+        arch,
+        if negative {
+            Flavour::Negative
+        } else {
+            Flavour::Plain
+        },
+        i686,
+    )
+}
+
+/// [`build`] for any [`Flavour`].
+fn build_flavour(arch: Arch, flavour: Flavour, i686: bool) -> Result<PathBuf> {
     let target = target(arch, i686)?;
-    let flavour = if negative { "negative" } else { "plain" };
+    let (flavour, feature) = match flavour {
+        Flavour::Plain => ("plain", None),
+        Flavour::Negative => ("negative", Some("negative-control")),
+        Flavour::StallProbe => ("stall-probe", Some("stall-probe")),
+    };
     let target_dir = paths::target_dir().join("threads-test").join(flavour);
     println!("  building threads-test ({flavour}) for {target}");
     let program = target_dir.join(target).join("release").join("threads-test");
@@ -86,8 +114,8 @@ fn build(arch: Arch, negative: bool, i686: bool) -> Result<PathBuf> {
     .args(["build", "--release", "--target", target])
     .env("CARGO_TARGET_DIR", &target_dir)
     .output(&program);
-    if negative {
-        build = build.args(["--features", "negative-control"]);
+    if let Some(feature) = feature {
+        build = build.args(["--features", feature]);
     }
     // Ferrix's own `.cargo/config.toml` uses this triple for the ARMv7-A
     // loader, with its linker script, and cargo merges a parent directory's
@@ -187,6 +215,54 @@ pub(crate) fn test_threads(args: &Args) -> Result<()> {
             )));
         }
         println!("  {arch}: the negative control failed on the /proc thread count, as it must");
+    }
+    Ok(())
+}
+
+/// The line the stall probe prints its measurement on.
+const STALL_MEASURED: &str = "threads: stall-probe ";
+
+/// Guest memory the stall probe needs at least, in MiB: its 320 MiB process,
+/// the copies its forks' children cause while they live, and the rest.
+const STALL_MEMORY_MIB: u32 = 1536;
+
+/// `stall-probe` (`docs/ROBUSTNESS.md` R5): boot `threads-test`'s stall-probe
+/// step as init and require that another process's 1 ms sleep overran by no
+/// more than 100 ms while a 320 MiB, 40-thread process forked four times, and
+/// by no more than 50 ms while it was then killed and reaped: both interim
+/// (ledger 8299 C, 8324 CT.1), lowered to 10 ms by R5's step 2. The program prints the figures and fails
+/// past the budget; this requires its `ok` line and status 0, and repeats the
+/// figures.
+///
+/// It fails on a kernel whose fork holds the address space's spin lock across
+/// work in proportion to the resident pages, which is its control: a row run
+/// on such a kernel FIRES with the program's own line.
+pub(crate) fn stall_probe(args: &Args) -> Result<()> {
+    let mut args = args.clone();
+    args.memory = args.memory.max(STALL_MEMORY_MIB);
+    for arch in args.arches()? {
+        let log = paths::build_dir(arch).join("serial.log");
+        let program = build_flavour(arch, Flavour::StallProbe, false)?;
+        let lines = boot(arch, &program, &args)?;
+        let measured = lines.iter().find(|line| line.contains(STALL_MEASURED));
+        if let Some(line) = measured {
+            let at = line.find(STALL_MEASURED).unwrap_or(0);
+            println!("  {arch}: {}", line.get(at..).unwrap_or(line).trim());
+        }
+        let passed = lines
+            .iter()
+            .any(|line| says(line, "threads: stall-probe ok"));
+        if !passed || status(&lines) != Some(0) {
+            let failed = lines.iter().find(|line| line.contains("threads: FAILED"));
+            return Err(Error::new(format!(
+                "{arch}: the stall probe did not pass{}.\n  Serial output is in {}",
+                failed.map_or(String::new(), |line| format!("; it said `{}`", line.trim())),
+                log.display()
+            )));
+        }
+        println!(
+            "  {arch}: another process kept within the budgets across the forks and the teardown"
+        );
     }
     Ok(())
 }

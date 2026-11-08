@@ -1267,29 +1267,47 @@ impl Vmo {
         let pages = self.pages.lock();
 
         let mut frames = BTreeMap::new();
+        // The shared pages' references are taken a batch at a time, in one
+        // hold of the allocator's lock each: a resident set of a million pages
+        // took a million holds, each masking interrupts (`docs/ROBUSTNESS.md`
+        // R5). A held page is copied, alone, as before. The batch is 2 KiB of
+        // stack (`mm::SHARE_BATCH`).
+        let mut batch = [(0_u64, 0 as Frame); mm::SHARE_BATCH];
+        let mut queued = 0;
+        let mut complete = true;
         for (&index, &frame) in &pages.frames {
-            let given = if pages.held.contains_key(&index) {
-                mm::allocate_user_frame().inspect(|&copy| mm::copy_frame(copy, frame))
-            } else {
-                mm::share_frame(frame).map(|_| frame)
-            };
-            // Recorded before it is counted as taken, so that the unwind below
-            // gives back exactly what the map holds.
-            let recorded = given.and_then(|given| {
-                crate::fallible::insert(&mut frames, index, given)
-                    .map_err(|_| {
-                        let _ = mm::release_frame(given);
-                    })
-                    .ok()
-            });
-            if recorded.is_none() {
-                // Unwind, or the pages this got through would be held by an
-                // object that is never built and never dropped.
-                for &taken in frames.values() {
-                    let _ = mm::release_frame(taken);
+            if pages.held.contains_key(&index) {
+                let copied = mm::allocate_user_frame().inspect(|&copy| mm::copy_frame(copy, frame));
+                if !copied.is_some_and(|copy| record(&mut frames, index, copy)) {
+                    complete = false;
+                    break;
                 }
-                return Err(VmoError::OutOfMemory);
+                continue;
             }
+            let Some(slot) = batch.get_mut(queued) else {
+                complete = false;
+                break;
+            };
+            *slot = (index, frame);
+            queued += 1;
+            if queued == mm::SHARE_BATCH {
+                complete = share_into(&mut frames, batch.get(..queued).unwrap_or(&[]));
+                queued = 0;
+                if !complete {
+                    break;
+                }
+            }
+        }
+        if complete && queued > 0 {
+            complete = share_into(&mut frames, batch.get(..queued).unwrap_or(&[]));
+        }
+        if !complete {
+            // Unwind, or the pages this got through would be held by an
+            // object that is never built and never dropped.
+            for &taken in frames.values() {
+                let _ = mm::release_frame(taken);
+            }
+            return Err(VmoError::OutOfMemory);
         }
 
         // An object that cannot be allocated drops its frames as it goes,
@@ -3731,4 +3749,33 @@ fn state_of(pages: &Pages, index: u64) -> PageState {
         .get(&index)
         .copied()
         .unwrap_or(PageState::Clean)
+}
+
+/// Record `frame`, a reference this fork took, at `index` of `frames`; on no
+/// memory give the reference back and say so. Recorded before it counts as
+/// taken, so that an unwind gives back exactly what the map holds.
+fn record(frames: &mut BTreeMap<u64, Frame>, index: u64, frame: Frame) -> bool {
+    if crate::fallible::insert(frames, index, frame).is_ok() {
+        return true;
+    }
+    let _ = mm::release_frame(frame);
+    false
+}
+
+/// Take a reference to each frame of `batch` in one hold of the allocator's
+/// lock ([`mm::share_frames`]) and record each at its index in `frames`;
+/// whether all were. A reference taken and not recorded is given back, and a
+/// refused one is not taken, so `frames` holds exactly the references taken.
+fn share_into(frames: &mut BTreeMap<u64, Frame>, batch: &[(u64, Frame)]) -> bool {
+    let shared = mm::share_frames(batch, |&(_, frame)| frame);
+    for (at, &(index, frame)) in batch.iter().enumerate().take(shared) {
+        if !record(frames, index, frame) {
+            // The rest were taken too: given back, never recorded.
+            for &(_, left) in batch.iter().take(shared).skip(at + 1) {
+                let _ = mm::release_frame(left);
+            }
+            return false;
+        }
+    }
+    shared == batch.len()
 }

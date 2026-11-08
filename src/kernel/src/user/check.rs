@@ -26,7 +26,7 @@ use ferrix_vma::VmaFlags;
 use crate::arch;
 use crate::mm;
 use crate::sync::SpinLock;
-use crate::user::space::{Access, AddressSpace, FilePlace, SpaceError, WindowPages};
+use crate::user::space::{Access, AddressSpace, FileMapping, FilePlace, SpaceError, WindowPages};
 use crate::user::vmo::{Vmo, VmoError};
 
 /// What the checks measured, for the boot log.
@@ -94,6 +94,7 @@ pub fn run() -> Result<Report, &'static str> {
 
     check_a_shared_region_survives_fork_as_one_object()?;
     let copied = check_fork_shares_pages_and_a_write_copies_one()?;
+    check_a_sole_holders_write_reuses_the_page()?;
     check_a_page_made_writable_after_fork_is_copied()?;
     let swapped = check_two_tasks_keep_their_own_address_spaces()?;
     let refused = crate::user::edge_check::run()?;
@@ -1319,6 +1320,87 @@ fn check_a_shared_region_survives_fork_as_one_object() -> Result<(), &'static st
     Ok(())
 }
 
+/// After a fork whose child has gone, the parent's write to a page it shared
+/// makes the read-only translation fork left writable where it is: the same
+/// frame, one holder, and no shootdown begun -- for a private anonymous page
+/// and for a private file mapping's copied page. The write is made with the
+/// parent installed, after a read that put the read-only entry in this
+/// processor's TLB, so a reuse that left that entry cached faults again and
+/// the check fails (`docs/ROBUSTNESS.md` R5, ledger 8299 D).
+///
+/// Verifies: L.user.229
+fn check_a_sole_holders_write_reuses_the_page() -> Result<(), &'static str> {
+    let before = quiet_frames()?;
+    {
+        let base = 0x6100_0000;
+        let parent = AddressSpace::new().map_err(|_| "reuse: could not make an address space")?;
+        let _ = parent
+            .map_anonymous(base, PAGE_SIZE, VmaFlags::READ_WRITE)
+            .map_err(|_| "reuse: mapping failed")?;
+        parent
+            .fault(base, Access::WRITE)
+            .map_err(|_| "reuse: a fault in a mapped region was not resolved")?;
+
+        let file = Vmo::new_filled(1, None).map_err(|_| "reuse: no object for a file")?;
+        file.set_file_len(PAGE_SIZE);
+        file.commit_and_write(0, 0, &[7_u8; 8])
+            .map_err(|_| "reuse: the file's page was refused")?;
+        let private = parent
+            .map_file(
+                FilePlace::Anywhere(None),
+                PAGE_SIZE,
+                VmaFlags::READ_WRITE,
+                Arc::clone(&file),
+                0,
+                FileMapping {
+                    file: Arc::new(()) as Arc<dyn core::any::Any + Send + Sync>,
+                    may_write: false,
+                },
+            )
+            .map_err(|_| "reuse: no private mapping of a file")?;
+        parent
+            .fault(private, Access::WRITE)
+            .map_err(|_| "reuse: a private write to a file mapping was not resolved")?;
+
+        let mut pages = [(base, 0_u64), (private, 0_u64)];
+        for (at, frame) in &mut pages {
+            *frame = mm::translate_in(parent.root_table(), *at)
+                .ok_or("reuse: a written page does not map")?;
+        }
+        let child = parent.fork().map_err(|_| "reuse: fork failed")?;
+        drop(child);
+
+        for (round, &(at, frame)) in (0_u64..).zip(&pages) {
+            if mm::frame_references(frame / PAGE_SIZE) != 1 {
+                return Err("reuse: a page the child held is still held twice once it has gone");
+            }
+            if mm::flags_in(parent.root_table(), at).is_none_or(|flags| flags.write) {
+                return Err("reuse: fork did not leave the parent's page read-only");
+            }
+            let begun = parent.shootdowns_begun();
+            fault_and_write_installed(&parent, at, PARENT_MARK + round)?;
+            if mm::translate_in(parent.root_table(), at) != Some(frame) {
+                return Err("reuse: a sole holder's write moved its page to another frame");
+            }
+            if !mm::flags_in(parent.root_table(), at).is_some_and(|flags| flags.write) {
+                return Err("reuse: a sole holder's write left its page read-only");
+            }
+            if mm::frame_references(frame / PAGE_SIZE) != 1 {
+                return Err("reuse: a sole holder's write changed its page's holders");
+            }
+            if parent.shootdowns_begun() != begun {
+                return Err("reuse: a sole holder's write began a shootdown");
+            }
+            if peek(frame) != PARENT_MARK + round {
+                return Err(
+                    "reuse: a write through the parent's own address did not reach its page",
+                );
+            }
+        }
+    }
+    expect_frames(before, "reusing a sole holder's page leaked frames")
+}
+
 /// Fork shares every private page, and the first write to one copies it.
 ///
 /// The whole of copy-on-write in the order the mechanism runs: share, fault,
@@ -1326,10 +1408,10 @@ fn check_a_shared_region_survives_fork_as_one_object() -> Result<(), &'static st
 ///
 /// # What this measures, and what it deliberately does not
 ///
-/// Frame *identity* and reference counts, not the free-frame count. Fork takes
-/// the parent's mappings down, which gives its now-empty page tables back, and
-/// a fault puts tables back to install a page — so the number of free frames
-/// moves for reasons that have nothing to do with whether a page was copied.
+/// Frame *identity* and reference counts, not the free-frame count. A fault
+/// puts tables in to install a page, and an unmap gives them back -- so the
+/// number of free frames moves for reasons that have nothing to do with
+/// whether a page was copied.
 /// Identity is the property anyway: two spaces reaching one frame is sharing,
 /// and reaching different frames is a copy. The free count still has the last
 /// word on leaks, once everything is dropped.
@@ -1361,10 +1443,16 @@ fn check_fork_shares_pages_and_a_write_copies_one() -> Result<u64, &'static str>
     let child = parent.fork().map_err(|_| "fork failed")?;
 
     // The parent must have lost its writable translations, or its own next
-    // write would reach a page the child can see without faulting at all.
+    // write would reach a page the child can see without faulting at all. It
+    // keeps them read-only, to the same frames, so that a read still hits
+    // (`docs/ROBUSTNESS.md` R5).
     for index in 0..pages {
-        if mm::translate_in(parent.root_table(), base + index * PAGE_SIZE).is_some() {
+        let at = base + index * PAGE_SIZE;
+        if mm::flags_in(parent.root_table(), at).is_some_and(|flags| flags.write) {
             return Err("fork left the parent a mapping it could still write through");
+        }
+        if mm::translate_in(parent.root_table(), at) != original.get(index as usize).copied() {
+            return Err("fork moved or took down the parent's translation of a page it shares");
         }
     }
 

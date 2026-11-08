@@ -497,6 +497,226 @@ W11-W13, and 8093 SW.12(b), which asks for one watch tick reconciled with
 the deadline task that has landed. This document does not land it. R3
 rides on top of it.
 
+### 4.6 R5's design: fork and teardown of a big process
+
+**What stopped the box.** Endfield (5 GB resident) forks for its embedded
+browser: Wine's `CreateProcess` forks twice, then `execve`s.
+`AddressSpace::fork` held the space's `SpinLock`, preemption off, across
+work in proportion to the resident pages. That work was `Vmo::fork`, then
+`unmap_copied_on_write`, then a shootdown. The game's 40 threads faulting
+the same space spun on that lock with preemption off on every other
+processor, so all of user space stopped for about 10 s (`ef-load/runs/kb-5`:
+the sampler's gap from 179.87 to 189.91 s, and card0 "longest 11589 ms").
+The game's own hang watchdog then ended its main thread. Teardowns of big
+spaces stalled the same way.
+
+**What it cost, measured.** `cargo xtask stall-probe` (below) on x86-64
+under KVM with 4 processors forks a 320 MiB, 40-thread process four times,
+then kills it:
+
+| | develop 8ccdab764 | step 1 |
+|---|---:|---:|
+| another process's worst lateness, forks | 826.9 ms | 79.6 ms |
+| the same, teardown phase | 400.5 ms (most likely the post-fork storm's tail) | 0.06-29.9 ms (five runs, below) |
+| longest fork | 869 ms | 107-400 ms (the fork thread waits for a processor) |
+| `Vmo::fork` under the lock | - | 31-34 ms |
+| write-protect under the lock | - | 3.2-4.6 ms |
+| single-page shootdowns over 5 ms after the forks | 2,853 | 415 |
+
+Linux 7.0 on the gate host itself (24 processors, the same program run as
+`threads-test --stall-probe-only`): forks 3.0 ms, teardown 0.09 ms, the
+longest fork 23 ms.
+
+Two causes were not where fault-relanding's notes put them:
+
+* **The unmap was quadratic.** `Mapper::unmap_range_named` pruned after
+  each leaf, and `is_empty` read the leaf's table from entry 0 to find it
+  not yet empty: about 131,000 reads per full table of 512 pages. That was
+  the "full 4-level walk per page, ~5 µs/page". It hit `fork`, `munmap` and
+  `Drop` (`unmap_unwalked`) alike. (Develop's 400 ms in the probe's
+  teardown phase was most likely not the teardown but the tail of the
+  post-fork fault and shootdown storm: with the per-leaf prune put back on
+  the branch, the phase measured 0.16 ms. A long hold on one processor
+  does not move the probe's ticker on another, so the teardown budget has
+  no control that fires (ledger 8421 C1). R5-step2 owes a teardown check
+  with the ticker on the teardown's own processor.)
+* **The shootdowns after the fork were reuses.** The child exits at once,
+  so nearly every page of the parent is held alone again by the time the
+  parent writes it. Each write still took the page down, mapped it again and
+  ran a single-page shootdown. Forty threads queued on the one shootdown turn.
+
+**What Linux does (v7.0, read, not copied).** `mm/mmap.c:dup_mmap` holds
+`mmap_write_lock(oldmm)`, a sleeping lock, for the whole copy. Faulting
+threads sleep on it; they do not spin. `mm/memory.c:copy_pte_range` takes
+the page-table spin lock per PMD and breaks it every 32 units of progress
+when `need_resched()` or `spin_needbreak()`, with `cond_resched()` between
+PMDs. `copy_present_ptes` write-protects the source entry in place
+(`wrprotect_ptes`), and one `flush_tlb_mm(oldmm)` at the end of `dup_mmap`
+covers it all. A write by the only holder reuses the page in place
+(`wp_page_reuse` through `ptep_set_access_flags`) with no remote flush;
+another processor's stale read-only entry costs it one spurious fault
+(`fix_spurious_fault`). On teardown, `mm/mmap.c:exit_mmap` runs
+`unmap_vmas` with an `mmu_gather` (`tlb_gather_mmu_fullmm`), and
+`zap_pmd_range`/`zap_pud_range` `cond_resched()` per entry. `mm/mmu_gather.c`
+frees pages in batches (`tlb_next_batch`, `MAX_GATHER_BATCH_COUNT`) with a
+`cond_resched()` per batch.
+
+**Step 1 (this landing): cheap work under the same locks.** It changes no
+lock and no order:
+
+1. *Linear prune* (`ferrix-paging`): `unmap_range_named` prunes a leaf's
+   tables once the walk leaves that table, or at the range's end, or before
+   an error returns. It no longer prunes after every leaf. The tables freed
+   and the leaf each is named with are the same as before.
+2. *Write-protect in place* (`Mapper::write_protect_range`,
+   `mm::write_protect_in`, `AddressSpace::protect_copied_on_write`). Fork
+   clears the write permission of every present leaf in a copy-on-write
+   region, holes stepped whole, a run in one table read along it. Every
+   other bit is kept: the per-architecture `Encoding::write_protected`
+   clears x86-64's `RW`, or sets `AP[2]` on AArch64 and ARMv7-A LPAE.
+   Then one whole-space shootdown, as before (`TlbPages::everything`).
+   Taking a permission away needs no break-before-make on Arm, and Arm's
+   invalidation is broadcast. A read after a fork now hits. A write takes
+   the copy-on-write branch that a read after the old unmapping led to.
+3. *Batched references* (`mm::share_frames`). `Vmo::fork` takes the shared
+   pages' references 128 at a time, in one hold of `FRAMES` each, instead
+   of one interrupt-masked hold per page. The unwind gives back exactly
+   what the new map holds, as before.
+4. *Reuse in place* (`Mapper::allow_write`, `mm::allow_write_in`). A
+   copy-on-write write whose writer holds the page alone, already mapped
+   read-only to that frame, sets the write bit where it is and invalidates
+   the faulting processor's own entry under the lock. There is no
+   shootdown, because no frame is given back and no translation changes its
+   frame. A processor still holding the read-only entry faults once more and
+   finds the page writable (`allow_write_in` answers yes for a page already
+   writable), as Linux's spurious-fault path does. On x86-64 a page fault
+   also drops the faulting entry. On Arm the page invalidation is broadcast.
+   The same applies to a private file mapping's shadow page. It is taken
+   only when the present leaf decodes to what the old path would install,
+   less the write permission: a user page with the region's execute
+   permission, on normal memory, not global (`reusable_in_place`). Anything
+   else takes the old path. It is L.user.229.
+
+**Step 1's TLB argument (ledger 8299, A4).** In the reuse the frame does not
+change and nothing is given back. This space is the page's only holder, so
+the frame goes back to the allocator only through this space's own unmap,
+forget or teardown. Each of those takes the translation down and shoots it
+down first (`give_back`, `forget_in`, and `Drop`'s rule that no processor is
+left in the set). A processor that cached the read-only entry can reach
+only that frame, read-only, and a write through it faults. The fault comes
+back to the copy-on-write branch, because a region's `cow` is only ever
+set, never cleared (`ferrix_vma`), and `allow_write_in` answers yes for a
+page that is already writable.
+
+The faulting processor's own entry is invalidated under the lock. On
+x86-64, `invlpg` reaches the current PCID only, and a page fault also drops
+the entry that faulted (Intel SDM vol. 3A, 4.10.4). A space that is not
+current on this processor keeps a stale read-only entry under its PCID, and
+that entry faults once more when the space runs, which ends the same way.
+On AArch64 and ARMv7-A, `flush_tlb_page` is `dsb ishst` and then a
+broadcast invalidation of the page for every ASID (`TLBI VAAE1IS`,
+`TLBIMVAAIS`). Changing only a permission needs no break-before-make.
+
+The write-protect and the reuse rewrite a live leaf with a plain read and
+write. That is safe because the hardware never writes a leaf this kernel
+made. On x86-64 every leaf is written with its accessed bit set, and a
+writable one with its dirty bit too. On Arm the access flag is set in every
+leaf, and `TCR_EL1.HA` and `HD` are clear.
+
+**Who writes a user frame after a software translation (A5).** A present
+read-only leaf is now the usual state after a fork, so each of these paths
+has to be checked:
+
+* `AddressSpace::with_page` and `with_present_page`, which carry
+  `syscall/uaccess.rs`'s copies and the futex word's. They let a write
+  through only when `writable_in_place` holds: a copy-on-write page with
+  more than one holder faults first. They read the holders, not the leaf's
+  write bit, so a read-only leaf held alone is written through the direct
+  map, which is right for a sole holder.
+* `lift/core/fill.rs`, the lift personality's fill. It copies the leaf's
+  own write bit into the shadow tables, so a read-only leaf stays read-only
+  there, and a write faults back to the space.
+* Pinned driver buffers (`Vmo::hold`). A held page is copied at fork, never
+  shared (L.user.24), so no write-protect reaches it.
+* Ring 0 writing through a user address directly. On x86-64 `CR0.WP` is
+  set (`arch::kernel_write_protected`), so a read-only leaf faults. On Arm
+  the unprivileged accesses are checked against EL0's permissions.
+
+**Where it stands (2026-11-08).** The restricted-window build
+(`personality=user`, `restricted_fastpath=on`, `restricted_window=on`,
+`--no-claim`) compiled and booted on x86-64 KVM, with xtask exiting 0. That
+is build evidence only, not a passing row: a user-personality boot prints
+no FERRIX-BOOT-OK, so gate.sh marks it FAILED (ledger 8421 C4). Step 1 was
+reviewed OK IF (ledger 8299:
+design A1-A6, code B1-B10, budget C1-C3, id D). Step 2's design was
+reviewed OK IF E1-E10, and its code review is still owed. The BACKLOG row is
+R5-step2. The stall-probe's budgets are interim: 100 ms forking and 50 ms
+tearing down (ledger 8299 C, 8324 CT.1), both lowered to 10 ms by step 2.
+Five consecutive runs of step 1 (x86-64, KVM, 4 processors) measured the
+forks at 76.1, 81.6, 78.4, 73.5 and 68.9 ms and the teardown at 16.0, 29.9,
+0.06, 28.4 and 28.2 ms. The teardown's ~28-30 ms has no cause named yet.
+Instrumentation that is not on the branch suggested that every
+`AddressSpace` and `Vmo` drop took under 3 ms at preemption count 0, and
+that the rest is run-queue lateness while the 40 threads exit. That is a
+hypothesis, not evidence (ledger 8324 CT.3). Finding the cause is R5-step2's.
+
+**Step 2 (designed, for its own review): fork in bounded steps.** After
+step 1, `Vmo::fork` of 320 MiB still holds the space lock for about 33 ms
+(400 ns a page, most of it in `fallible::insert`'s reserve per entry).
+Faulting threads spin on that lock on every processor, which is the 79.6 ms
+left. To bound it:
+
+* *A fork gate.* Under the space lock, fork sets `forking` on the space.
+  Every path that takes the space lock to change the space's pages first
+  checks the gate under the lock: the faults, `advise`, `with_page`'s retry
+  and the native map calls. If the gate is set, the path drops the lock and
+  sleeps on the space's wait queue until fork clears it. A path that may not
+  sleep (one holding a spin lock) is listed and argued, or refused. Those
+  paths are the analogue of Linux's sleeping `mmap_lock`: waiters sleep, so
+  the rest of the machine runs.
+* *Chunks.* With the gate set and `layout` held (fork already holds it),
+  each private object is forked in chunks of at most 512 pages
+  (`Vmo::fork_chunk(from) -> next`). Each chunk holds only that object's
+  `pages` lock; the space lock is not held. Then the map is cloned and the
+  regions write-protected in chunks of 512 pages, each under the space lock.
+  The whole-space shootdown follows, then the gate is cleared and the
+  waiters are woken. Between chunks no lock is held and the preemption
+  count is 0 (RD.5), so the fork thread can be preempted.
+* *Consistency.* No fault, `advise` or map call changes the parent while
+  the gate is set. The objects' page lists then change only by what does
+  not go through the space: `forget_pages`, driven by a shared object,
+  which fork does not fork but shares. A user write through a translation
+  still writable reaches a frame the child may share. That is Linux's
+  window too, until `flush_tlb_mm`. Every write that completes is in the
+  child or ordered after the fork, because a write to a page already
+  write-protected waits at the gate.
+* *Teardown.* `Drop for AddressSpace` already runs with no lock of its own,
+  in the reaper or at a retirement. Its unmap is now linear. A step at N
+  regions or 512 pages with `sched::yield_now` when a reschedule is pending
+  and the preemption count is 0 (RD.5's count-0-only steps) bounds it. Where
+  the count is raised (the reaper's preemption window) the drop goes to the
+  reaper's own list instead, so it never steps with the count raised.
+* *Expected.* The lock holds per chunk are about 0.2 ms, against the 10 ms
+  budget step 2 sets for the row.
+
+**Step 3 (later):** an object-level copy-on-write fork (a shared page list
+copied on first write), which makes `Vmo::fork` O(1). Not needed for the
+budget once step 2 lands.
+
+**The row.** (Budgets: see where it stands, above.) `cargo xtask stall-probe` boots `threads-test` built with
+its `stall-probe` feature as init, with 1536 MiB of guest memory. A ticker
+process sleeps 1 ms at a time and keeps its longest gap in each phase. A
+game process maps and writes 320 MiB, starts 40 writing threads, forks four
+times (each child `_exit`s), and is then killed and reaped. The row fails
+when the ticker's lateness passes `FORK_BUDGET_US` in the fork phase or
+`TEARDOWN_BUDGET_US` in the teardown phase. **Its control is today's code**: on develop 8ccdab764 it
+FIRED (`threads: FAILED stall-probe: another process waited past the
+budget while a big process forked`, 826,855 µs;
+`~/.local/share/ferrix/logs/r5-stall-probe-develop-8ccdab764.log`). After
+step 1 a `gate.sh control` that puts back the per-leaf prune and the
+unmapping fork must fire again. The same program runs on Linux as
+`threads-test --stall-probe-only`, for the comparison.
+
 ## 5. Class D: a wedged ring-3 service that everything depends on
 
 ### 5.1 Evidence
@@ -608,7 +828,7 @@ The points are story points. The first five are the ones to start.
 | R2 | **FX-0008 names its caller in the record.** The trace is image-relative in the event log and pstore (ledger 8043 MK.5's row). Without it every FX-0008 costs a code-reading hunt, as #7 did. A core panic-path design goes to the consultant first. | A | 3 | open (MK.5's row) |
 | R3 | **The long-hold detector**, riding on S4a's tick, which lands first (§4.4 (2), §4.5). Debug and box images on, the reference configuration off. Also the spin-waiter measurement (§4.4 (3)). | C | 5 + S4a's rebase 3 | open |
 | R4 | **The staged watchdog**: the pre-timeout hang dump (stage 1), then the sacrifice set (stage 2), §5.3. The dump first, in its own landing. | D | 3 + 5 | open, dump with fault-relanding |
-| R5 | **Bounded teardown**: address space, VMO, descriptor table and `munmap` in steps of N with no lock held between them (§4.4 (1)). Its order comes from R3's list and fault-relanding's root cause. | C | 8 | open, after fault-relanding |
+| R5 | **Bounded teardown**: address space, VMO, descriptor table and `munmap` in steps of N with no lock held between them (§4.4 (1)). Its order comes from R3's list and fault-relanding's root cause. | C | 8 | step 1 r5-teardown (§4.6); step 2 open |
 | R6 | **No contiguous runs for requests above a page**: served through `vmap` from order-0 frames, fallibly. Plus a sized, accounted reserve for allocations under a spin lock, in place of today's implicit headroom (§2.2). | A | 5 | open |
 | R7 | **Burn down class A by area**, highest exposure first: the allocations under a lock (tmpfs's maps and `move_child`, then R13's list), `syscall/`, `fs/socket.rs`, `fs/pipe.rs`, `ferrix-vfs` (`namespace`, `tmpfs`, `dentry`), `interfaces/render` and `display` (the GPU ioctls), `ferrix-net`. A crate at 0 gets clippy `disallowed-methods` and leaves the ratchet. Step 1 is a reachability map from the entry points. About 1 point per 40 sites. | A | ~35 | per area owner |
 | R8 | **OOM selection counts charged kernel memory and buffers**, plus init's typed `oom_protect` (§3.3 (3), (4)). | B | 5 | open |

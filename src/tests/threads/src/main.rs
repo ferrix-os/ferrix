@@ -52,6 +52,7 @@ mod futex_signal;
 mod munmap_race;
 mod setuid;
 mod slice_request;
+mod stall_probe;
 
 /// Threads the program spawns besides its main one.
 const THREADS: u64 = 4;
@@ -488,8 +489,22 @@ fn check_fault_ahead() {
     println!("threads: fault-ahead ok");
 }
 
+/// The **stall-probe** step alone ([`stall_probe`]): `cargo xtask
+/// stall-probe`'s program, built with the `stall-probe` feature, and the same
+/// step run as an ordinary program on Linux for its comparison.
+fn stall_probe_only() -> ! {
+    println!("threads: stall-probe");
+    stall_probe::check_stall_probe(fail);
+    println!("threads: stall-probe ok");
+    std::process::exit(0)
+}
+
 fn main() {
+    if cfg!(feature = "stall-probe") {
+        stall_probe_only();
+    }
     match std::env::args().nth(1).as_deref() {
+        Some("--stall-probe-only") => stall_probe_only(),
         Some(slice_request::EXEC_PROBE) => slice_request::probe(),
         // The slice step alone, for its comparison with Linux run as an
         // ordinary program there (ledger 5232 (5)): every other step wants

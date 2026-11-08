@@ -58,6 +58,8 @@ const AP_PL1_RW: u64 = 0b00 << 6;
 const AP_PL0_RW: u64 = 0b01 << 6;
 const AP_PL1_RO: u64 = 0b10 << 6;
 const AP_PL0_RO: u64 = 0b11 << 6;
+/// `AP[2]`, the bit that makes any of the four read-only.
+const AP_READ_ONLY: u64 = 0b10 << 6;
 
 /// Bits of a descriptor that hold a physical address: 12..39.
 const ADDRESS_MASK: u64 = 0x0000_00FF_FFFF_F000;
@@ -164,6 +166,15 @@ impl Encoding for Armv7a {
         // 1 GiB at level 1 and 2 MiB at level 2. There is no level 0 to
         // refuse.
         level == Level::GIGABYTE || level == Level::MEGABYTE
+    }
+
+    fn write_protected(entry: u64, _level: Level) -> u64 {
+        // `AP[2]`, as on AArch64: read-only, `AP[1]` as it was.
+        entry | AP_READ_ONLY
+    }
+
+    fn write_allowed(entry: u64, _level: Level) -> u64 {
+        entry & !AP_READ_ONLY
     }
 
     fn leaf_flags(entry: u64) -> MapFlags {

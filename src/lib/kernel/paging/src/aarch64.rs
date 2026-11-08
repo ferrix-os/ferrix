@@ -41,6 +41,8 @@ const AP_EL1_RW: u64 = 0b00 << 6;
 const AP_EL0_RW: u64 = 0b01 << 6;
 const AP_EL1_RO: u64 = 0b10 << 6;
 const AP_EL0_RO: u64 = 0b11 << 6;
+/// `AP[2]`, the bit that makes any of the four read-only.
+const AP_READ_ONLY: u64 = 0b10 << 6;
 
 /// `MAIR_EL1` index of normal write-back cacheable memory.
 pub const MAIR_NORMAL: u64 = 0;
@@ -153,6 +155,17 @@ impl Encoding for AArch64 {
         // 1 GiB at level 1 and 2 MiB at level 2, as on x86-64. A level-0 block
         // needs FEAT_LPA2, which we do not require.
         level == Level::GIGABYTE || level == Level::MEGABYTE
+    }
+
+    fn write_protected(entry: u64, _level: Level) -> u64 {
+        // `AP[2]`: read-only at every level the entry grants, its `AP[1]`
+        // (whether EL0 may reach it) as it was. A change of permission alone,
+        // which needs no break-before-make.
+        entry | AP_READ_ONLY
+    }
+
+    fn write_allowed(entry: u64, _level: Level) -> u64 {
+        entry & !AP_READ_ONLY
     }
 
     fn leaf_flags(entry: u64) -> MapFlags {

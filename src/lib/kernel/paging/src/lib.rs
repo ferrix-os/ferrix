@@ -478,6 +478,41 @@ pub trait Encoding {
     /// being wrong.
     fn leaf_flags(entry: u64) -> MapFlags;
 
+    /// The leaf descriptor `entry` at `level` with its write permission taken
+    /// away and every other bit as it was: what `fork` writes over a private
+    /// page it now shares (`Mapper::write_protect_range`).
+    ///
+    /// The default re-encodes the decoded permissions, which is exact only
+    /// for an encoding whose [`Encoding::leaf_flags`] reads back every bit
+    /// [`Encoding::leaf_descriptor`] writes. The three processor encodings
+    /// override it with the one bit they clear or set, since theirs do not
+    /// (x86-64 reads uncached and write-combining back as one, AArch64 and
+    /// ARMv7-A read write-combining as uncached).
+    fn write_protected(entry: u64, level: Level) -> u64 {
+        Self::leaf_descriptor(
+            Self::address(entry),
+            level,
+            Self::leaf_flags(entry).read_only(),
+        )
+    }
+
+    /// The leaf descriptor `entry` at `level` with write permission given and
+    /// every other bit as it was: [`Encoding::write_protected`]'s inverse,
+    /// for a copy-on-write page its writer turns out to hold alone
+    /// (`Mapper::allow_write`). The default re-encodes, with the caveat
+    /// [`Encoding::write_protected`] gives; the processor encodings override
+    /// it.
+    fn write_allowed(entry: u64, level: Level) -> u64 {
+        Self::leaf_descriptor(
+            Self::address(entry),
+            level,
+            MapFlags {
+                write: true,
+                ..Self::leaf_flags(entry)
+            },
+        )
+    }
+
     /// The descriptor value that means "nothing is mapped here".
     ///
     /// Zero on every architecture here, and named rather than written as a
@@ -841,10 +876,41 @@ impl<E: Encoding> Mapper<E> {
             return Err(MapError::Misaligned);
         }
 
+        // The walk to the last leaf removed, and that leaf's address: its
+        // tables are pruned once the removal leaves them, not after every
+        // leaf. Pruning after every leaf read the leaf's table from its first
+        // entry each time, to find it not yet empty: a full table of 512
+        // pages cost about 131,000 reads, which made a fork or a teardown of
+        // a big process take seconds (`docs/ROBUSTNESS.md` R5). Whatever is
+        // pending is pruned on the way out, an error's included.
+        let mut pending = None;
+        let removed = self.unmap_leaves(memory, virt, len, &mut pending, &mut released);
+        if let Some((path, last, _)) = pending {
+            self.prune(memory, &path, &mut |what| released(last, what));
+        }
+        removed
+    }
+
+    /// [`Mapper::unmap_range_named`]'s walk, leaving in `pending` the tables
+    /// of the last leaf it removed, which it has not pruned yet.
+    fn unmap_leaves(
+        &self,
+        memory: &mut impl PhysMem,
+        virt: VirtAddr,
+        len: u64,
+        pending: &mut Option<(Path, VirtAddr, Level)>,
+        released: &mut impl FnMut(VirtAddr, Released),
+    ) -> Result<u64, MapError> {
         let mut done = 0u64;
         let mut removed = 0u64;
         while done < len {
             let at = virt.checked_add(done).ok_or(MapError::RangeOverflow)?;
+            if let Some((path, last, level)) = *pending
+                && !same_table(last, at, level)
+            {
+                self.prune(memory, &path, &mut |what| released(last, what));
+                *pending = None;
+            }
             let mut path = Path::default();
             match self.find_leaf(memory, at, Some(&mut path))? {
                 // Nothing mapped: carry on past the hole. Unmapping one is not
@@ -873,13 +939,144 @@ impl<E: Encoding> Mapper<E> {
                             level,
                         },
                     );
-                    self.prune(memory, &path, &mut |what| released(at, what));
+                    *pending = Some((path, at, level));
                     removed += 1;
                     done += span;
                 }
             }
         }
         Ok(removed)
+    }
+
+    /// Write-protect up to `entries` descriptors of one table from `slot`, at
+    /// `level`, stopping before the first that points at a table below;
+    /// how many it stepped over and how many it protected.
+    fn protect_run(
+        memory: &mut impl PhysMem,
+        slot: PhysAddr,
+        level: Level,
+        entries: u64,
+    ) -> (u64, u64) {
+        let mut protected = 0;
+        for step in 0..entries {
+            let at_slot = PhysAddr(slot.0 + step * 8);
+            let entry = memory.read(at_slot);
+            if !E::is_present(entry) {
+                continue;
+            }
+            if !E::is_leaf(entry, level) {
+                return (step, protected);
+            }
+            if E::leaf_flags(entry).write {
+                memory.write(at_slot, E::write_protected(entry, level));
+                protected += 1;
+            }
+        }
+        (entries, protected)
+    }
+
+    /// Give the 4 KiB page mapped at `virt` write permission, leaving its frame
+    /// and every other bit as they were; whether it was read-only.
+    ///
+    /// What a write fault on a copy-on-write page does when the writer turns
+    /// out to be its only holder, as Linux's `wp_page_reuse` does
+    /// (`mm/memory.c`): the page is made writable where it is, rather than
+    /// taken down and mapped again. Adding a permission needs no shootdown:
+    /// a processor that cached the read-only entry faults on it once, finds
+    /// the page writable and goes on (Linux's `fix_spurious_fault`). Nor does
+    /// it need break-before-make on Arm, since only the permission changes.
+    ///
+    /// # Errors
+    ///
+    /// [`MapError::Misaligned`] for an address that is not page aligned, and
+    /// [`MapError::AlreadyMapped`] -- read as its opposite, as in
+    /// [`Mapper::protect_range`] -- if nothing is mapped there or a block is,
+    /// which it leaves as it was.
+    pub fn allow_write(&self, memory: &mut impl PhysMem, virt: VirtAddr) -> Result<bool, MapError> {
+        if !virt.is_aligned_to(PAGE_SIZE) {
+            return Err(MapError::Misaligned);
+        }
+        match self.find_leaf(memory, virt, None)? {
+            Found::Leaf(slot, entry, Level::PAGE) => {
+                if E::leaf_flags(entry).write {
+                    return Ok(false);
+                }
+                memory.write(slot, E::write_allowed(entry, Level::PAGE));
+                Ok(true)
+            }
+            _ => Err(MapError::AlreadyMapped(virt)),
+        }
+    }
+
+    /// Take the write permission away from every leaf mapped in the `len`
+    /// bytes at `virt`, leaving each in place with every other bit as it was;
+    /// holes are stepped over whole. Returns how many leaves were writable
+    /// and now are not.
+    ///
+    /// What `fork` does to the parent's private pages it has just shared
+    /// with the child, as Linux's `copy_present_ptes` write-protects the
+    /// source entry (`mm/memory.c`), instead of taking them down: a read
+    /// after the fork then hits, and only a write faults, to copy. A run of
+    /// leaves in one table is read straight along, not walked from the root
+    /// each time, so the cost is about one read per page mapped.
+    ///
+    /// The caller flushes the translations afterwards, as after any change
+    /// that takes a permission away: until then a processor may still write
+    /// through a writable translation it cached.
+    ///
+    /// Each leaf is rewritten by a plain read and write, not an atomic one,
+    /// which is safe only because the hardware never writes a leaf this crate
+    /// made (ledger 8299, A2): on x86-64 every leaf is written with its
+    /// accessed bit set, and a writable one with its dirty bit too
+    /// (`leaf_descriptor`), so the processor has neither to set; on AArch64
+    /// and ARMv7-A the access flag is set in every leaf and the kernel turns
+    /// on no hardware update of it or of a dirty state (`TCR_EL1.HA`/`HD`
+    /// clear), so neither is written there either. A caller holds whatever
+    /// lock keeps other software writers out.
+    ///
+    /// # Errors
+    ///
+    /// [`MapError::Misaligned`] for an address or length that is not page
+    /// aligned, and [`MapError::BlockInTheWay`] if the range would cut a
+    /// block mapping, which it then leaves as it was. Leaves before it in the
+    /// range were protected, and the caller flushes them as well.
+    pub fn write_protect_range(
+        &self,
+        memory: &mut impl PhysMem,
+        virt: VirtAddr,
+        len: u64,
+    ) -> Result<u64, MapError> {
+        if !virt.is_aligned_to(PAGE_SIZE) || !len.is_multiple_of(PAGE_SIZE) {
+            return Err(MapError::Misaligned);
+        }
+        let mut done = 0u64;
+        let mut protected = 0u64;
+        while done < len {
+            let at = virt.checked_add(done).ok_or(MapError::RangeOverflow)?;
+            match self.find_leaf(memory, at, None)? {
+                Found::Hole(level) => {
+                    let span = level.span();
+                    let next = (at.0 | (span - 1)).checked_add(1);
+                    done = next.map_or(len, |next| (next - virt.0).min(len));
+                }
+                Found::Leaf(slot, _, level) => {
+                    let span = level.span();
+                    if !at.is_aligned_to(span) || len - done < span {
+                        return Err(MapError::BlockInTheWay(at));
+                    }
+                    // Then the rest of this table's entries from `slot` on,
+                    // up to the table's end or the range's, while each is a
+                    // leaf of this level or a hole of its span. A pointer to
+                    // a table below, or a block the range would cut, sends
+                    // the walk back to the root for it.
+                    let entries = ((len - done) / span).min((ENTRIES - level.index(at)) as u64);
+                    let (stepped, count) = Self::protect_run(memory, slot, level, entries);
+                    done += stepped * span;
+                    protected += count;
+                }
+            }
+        }
+        Ok(protected)
     }
 
     /// Unlink every table in the `len` bytes at `virt` that maps nothing, and
@@ -1134,6 +1331,14 @@ impl Path {
     fn steps(&self) -> impl DoubleEndedIterator<Item = &Step> {
         self.steps.get(..self.depth).unwrap_or(&[]).iter()
     }
+}
+
+/// Whether `a` and `b` are translated through the same table at `level`:
+/// whether they differ only in the bits that table's index and the page
+/// offset cover.
+const fn same_table(a: VirtAddr, b: VirtAddr, level: Level) -> bool {
+    let table_span = level.span() * ENTRIES as u64;
+    a.0 / table_span == b.0 / table_span
 }
 
 /// True if every descriptor in `table` is absent.

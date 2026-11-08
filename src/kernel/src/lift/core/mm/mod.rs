@@ -219,6 +219,17 @@ pub fn share_frame(frame: Frame) -> Option<u32> {
     }
     with_frames(|frames| frames.share(frame).ok())?
 }
+/// The kernel's batched `share_frame` (R5), one at a time here: the lift has
+/// no interrupts to mask.
+pub(crate) fn share_frames<T>(batch: &[T], frame_of: impl Fn(&T) -> Frame) -> usize {
+    batch
+        .iter()
+        .take(SHARE_BATCH)
+        .take_while(|&item| share_frame(frame_of(item)).is_some())
+        .count()
+}
+/// As the kernel's.
+pub(crate) const SHARE_BATCH: usize = 128;
 pub fn release_frame(frame: Frame) -> bool {
     if is_foreign(frame) {
         return false;
@@ -493,6 +504,21 @@ pub fn copy_root_slot(from: u64, to: u64, slot: usize) -> bool {
 }
 pub fn root_slot_entry(root: u64, slot: usize) -> u64 {
     0
+}
+/// The kernel's write-protect of a fork's parent, which the lift does not
+/// carry: refused, so that `protect_copied_on_write` takes the region down
+/// through `unmap_in` as before, its kernel half included (R5).
+pub(crate) fn write_protect_in(
+    _root: u64,
+    _virt: u64,
+    _len: u64,
+) -> Result<u64, ferrix_paging::MapError> {
+    Err(ferrix_paging::MapError::Misaligned)
+}
+/// The kernel's in-place reuse of a sole holder's page, which the lift does
+/// not carry: refused, so the copy-on-write write takes the old path (R5).
+pub(crate) fn allow_write_in(_root: u64, _virt: u64) -> bool {
+    false
 }
 /// `unmap_in`, for a space that keeps its top tables: the shadow has no reader of them.
 pub fn unmap_in_keeping(

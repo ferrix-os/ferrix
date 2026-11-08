@@ -584,11 +584,6 @@
       "lines": 45,
       "recursive": false
     },
-    "user/space.rs::fault_private_file": {
-      "complexity": 15,
-      "lines": 53,
-      "recursive": false
-    },
     "user/space.rs::fork": {
       "complexity": 19,
       "lines": 72,

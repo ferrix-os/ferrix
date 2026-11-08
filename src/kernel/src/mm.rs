@@ -781,6 +781,32 @@ pub fn share_frame(frame: Frame) -> Option<u32> {
     with_frames(|frames| frames.share(frame).ok())?
 }
 
+/// Take one more reference to the frame `frame_of` names in each item of
+/// `batch`, in one hold of the allocator's lock, in order; how many were taken
+/// before the first refusal (which [`share_frame`] says is a kernel bug). For
+/// `Vmo::fork`, whose page count is a process's resident set: a lock and an
+/// interrupt mask per page cost it more than the references did
+/// (`docs/ROBUSTNESS.md` R5). At most [`SHARE_BATCH`] items are taken, so the
+/// mask is held for that many shares and no more.
+pub(crate) fn share_frames<T>(batch: &[T], frame_of: impl Fn(&T) -> Frame) -> usize {
+    debug_assert!(
+        batch.len() <= SHARE_BATCH,
+        "a batch longer than SHARE_BATCH"
+    );
+    with_frames(|frames| {
+        batch
+            .iter()
+            .take(SHARE_BATCH)
+            .take_while(|&item| frames.share(frame_of(item)).is_ok())
+            .count()
+    })
+    .unwrap_or(0)
+}
+
+/// The most frames [`share_frames`] takes in one hold of the allocator's lock:
+/// 128, so that `Vmo::fork`'s batch is 2 KiB of its stack.
+pub(crate) const SHARE_BATCH: usize = 128;
+
 /// Drop one reference to a frame, freeing it if it was the last.
 ///
 /// Returns true if the frame went back to the allocator. Anonymous memory is
@@ -2218,6 +2244,39 @@ pub(crate) fn unmap_in_keeping(
     flush.add_range(virt, len);
     let _ = unmapped?;
     Ok(())
+}
+
+/// Take the write permission away from every page mapped under `root` in
+/// the `len` bytes at `virt`, leaving each mapped (`ferrix_paging::Mapper::
+/// write_protect_range`); how many were writable. For `fork`'s parent, whose
+/// private pages the child now shares: the caller shoots the space's
+/// translations down before a write may count on reaching a fault.
+///
+/// No table is made or freed, so nothing is held for the shootdown.
+pub(crate) fn write_protect_in(
+    root: u64,
+    virt: u64,
+    len: u64,
+) -> Result<u64, ferrix_paging::MapError> {
+    let mapper: Mapper<crate::arch::PageEncoding> = Mapper::new(PhysAddr(root));
+    mapper.write_protect_range(
+        &mut KernelPhysMem,
+        VirtAddr(virt),
+        len.next_multiple_of(PAGE_SIZE),
+    )
+}
+
+/// Make the page mapped under `root` at `virt` writable where it is, its
+/// frame and every other bit kept (`ferrix_paging::Mapper::allow_write`);
+/// whether a page is mapped there for it to do so. For a copy-on-write fault
+/// whose writer holds the page alone: no shootdown is owed, since a processor
+/// holding the read-only entry only faults once more, and the caller
+/// invalidates this processor's own entry.
+pub(crate) fn allow_write_in(root: u64, virt: u64) -> bool {
+    let mapper: Mapper<crate::arch::PageEncoding> = Mapper::new(PhysAddr(root));
+    mapper
+        .allow_write(&mut KernelPhysMem, VirtAddr(virt))
+        .is_ok()
 }
 
 /// [`unmap_in_keeping`] for a window's leaves (`AddressSpace::unmap`, ledger 6421): holes

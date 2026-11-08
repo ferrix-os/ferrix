@@ -24,6 +24,8 @@ libc = "0.2"
 # Expect one thread more under /proc/self than the program has, so the test
 # can show its thread count fails on exactly that line.
 negative-control = []
+# Run only the stall-probe step (`cargo xtask stall-probe`, docs/ROBUSTNESS.md R5).
+stall-probe = []
 
 # ---------------------------------------------------------------------------
 # Lints
