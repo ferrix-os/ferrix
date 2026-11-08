@@ -131,6 +131,27 @@ impl Clock for Fixed {
     }
 }
 
+/// [`Fixed`]'s time and the milliseconds a test has moved it on by: for
+/// the pause between two reloads of a short volume.
+#[derive(Debug, Default)]
+struct Stepping(std::sync::atomic::AtomicU64);
+
+impl Stepping {
+    fn advance_ms(&self, ms: u64) {
+        let _ = self.0.fetch_add(ms, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+impl Clock for Stepping {
+    fn now(&self) -> Timespec {
+        let ms = self.0.load(std::sync::atomic::Ordering::Relaxed);
+        Timespec {
+            tv_sec: 1_790_000_000 + i64::try_from(ms / 1000).unwrap(),
+            tv_nsec: i64::try_from(ms % 1000).unwrap() * 1_000_000,
+        }
+    }
+}
+
 /// What mounts have said through their `notice`.
 static NOTICES: Mutex<Vec<std::string::String>> = Mutex::new(Vec::new());
 
@@ -786,6 +807,7 @@ fn an_aborted_volume_whose_last_commit_cannot_be_read_says_so_once() {
 fn a_reload_out_of_memory_is_tried_again_and_the_last_commit_reads_after() {
     let disk = Disk::new(BLANK);
     let (fail, starve) = (Arc::default(), Arc::default());
+    let clock = Arc::new(Stepping::default());
     let device = Failing {
         disk,
         fail: Arc::clone(&fail),
@@ -796,15 +818,19 @@ fn a_reload_out_of_memory_is_tried_again_and_the_last_commit_reads_after() {
         device,
         0x0800_0013,
         storage(),
-        Arc::new(Fixed),
+        Arc::clone(&clock) as Arc<dyn Clock>,
         &SpinParker,
         notice,
     )
     .unwrap();
     let root = fs.root();
     let kept = make_file(&root, b"kept-short", &[6u8; 50_000]);
+    drop(make_file(&root, b"cold-short", &[8u8; 50_000]));
     fs.sync().unwrap();
-    drop(make_file(&root, b"lost-short", &[7u8; 50_000]));
+    // Looked up again after its object went, and never read: none of its
+    // pages is in the cache, so a read of it has to go to the volume.
+    let cold = root.lookup(b"cold-short").unwrap();
+    let lost = make_file(&root, b"lost-short", &[7u8; 50_000]);
     let said = |what: &str| {
         NOTICES
             .lock()
@@ -819,19 +845,38 @@ fn a_reload_out_of_memory_is_tried_again_and_the_last_commit_reads_after() {
     starve.store(true, std::sync::atomic::Ordering::Relaxed);
     assert_eq!(fs.sync(), Err(Errno::EIO));
     fail.store(false, std::sync::atomic::Ordering::Relaxed);
+    // Short of memory, not of the disk: every answer is ENOMEM, which a
+    // page-in retries, never EIO, which is a SIGBUS (W3).
     for _ in 0..3 {
-        assert_eq!(root.lookup(b"kept-short").err(), Some(Errno::EIO));
+        assert_eq!(root.lookup(b"kept-short").err(), Some(Errno::ENOMEM));
     }
+    let mut page = vec![0u8; 4096];
+    assert_eq!(cold.read_at(0, &mut page).err(), Some(Errno::ENOMEM));
+    assert_eq!(
+        root.create(b"new-short", NewNode::Regular, 0o644).err(),
+        Some(Errno::ENOMEM)
+    );
+    // What was written before the abort is lost: an answer about it stays
+    // EIO, never an ENOMEM that says to try again (W3.1).
+    assert_eq!(lost.fsync(false).err(), Some(Errno::EIO));
+    assert_eq!(fs.sync().err(), Some(Errno::EIO));
     assert_eq!(said("could not be read again yet"), 1, "said once");
-    // Memory back: the next use reads the last commit, and so does every
-    // one after it.
+    assert_eq!(said("every answer ENOMEM (EIO for writes made before"), 1);
+    // Memory back, but within a quarter of a second of the last reload:
+    // none is tried, and the answer is still ENOMEM, at once.
     starve.store(false, std::sync::atomic::Ordering::Relaxed);
+    clock.advance_ms(249);
+    assert_eq!(root.lookup(b"kept-short").err(), Some(Errno::ENOMEM));
+    // Past it: the next use reads the last commit, and so does every one
+    // after it.
+    clock.advance_ms(1);
     assert_eq!(root.lookup(b"kept-short").map(|_| ()), Ok(()));
     assert!(
         root.lookup(b"lost-short").is_err(),
         "the aborted transaction"
     );
     assert_eq!(read_all(&kept), vec![6u8; 50_000]);
+    assert_eq!(read_all(&cold), vec![8u8; 50_000]);
     assert_eq!(
         root.create(b"new-short", NewNode::Regular, 0o644).err(),
         Some(Errno::EROFS)

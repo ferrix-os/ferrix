@@ -1156,12 +1156,17 @@ package FerrixBtrfsRequirements {
         }
         requirement <'L.btrfs.123'> aReloadShortOfMemoryIsTriedAgain : ItemLowLevel {
             attribute :>> statement = "A mount whose reload of the last commit ran out of memory
-                shall answer EIO until a later use reloads it, say so once, and then read the
-                last commit read-only.";
+                shall answer ENOMEM, not EIO, to an operation about itself until a later use
+                reloads it, and EIO to one about writes made before the abort; try the reload
+                at most once a quarter of a second; say so once; and then read the last commit
+                read-only.";
             attribute :>> criterion = "Through a mount, a commit whose device write fails,
-                with the device answering that memory ran out: three lookups answer EIO and the
-                notice is said once; with memory back, the next lookup finds the committed
-                file, its bytes read back, the aborted transaction's file is gone, and a create
+                with the device answering that memory ran out: three lookups answer ENOMEM, a
+                read of a file none of whose pages is cached answers ENOMEM, a create answers
+                ENOMEM, an fsync of a file written before the abort and a sync answer EIO, and
+                the notice is said once; with memory back, a lookup 249 ms after the last
+                reload still answers ENOMEM, and one at 250 ms finds the committed file, both
+                files' bytes read back, the aborted transaction's file is gone, and a create
                 answers EROFS. The retry is ferrix-btrfs-vfs's Shared::lock, load code that
                 cannot be a unit (check-traceability refuses it); the unit is the item's half,
                 the reload it calls again.";

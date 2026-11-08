@@ -129,10 +129,12 @@
 //!
 //! The reload reads the last commit's chunks, roots and free space again,
 //! and that takes memory. A reload that ran out of it is tried again at
-//! the next use, answering `EIO` until one works -- so while memory is
+//! the next use, answering `ENOMEM` until one works -- so while memory is
 //! short every use reads the chunk tree and the roots again, and fails --
 //! and only one that could not read the disk leaves the mount answering
-//! `EIO` for good. Reading what
+//! `EIO` for good. `ENOMEM`, not `EIO`, because a page-in answered `EIO`
+//! is a `SIGBUS`, while one answered `ENOMEM` goes to the fault's reclaim
+//! and OOM kill and is tried again. Reading what
 //! is committed never waits on the writer's state for longer than memory
 //! is short: on the N150 box a transaction aborted out of memory, its
 //! reload ran out too, and every page-in from the root answered `EIO`
@@ -167,7 +169,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::any::Any;
 use core::fmt;
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use ferrix_btrfs::BtrfsError;
 use ferrix_btrfs::items::Timespec as BtrfsTime;
@@ -199,7 +201,34 @@ pub trait WriteHandle: WriteDevice + Send + Sync + 'static {}
 
 impl<T: WriteDevice + Send + Sync + 'static> WriteHandle for T {}
 
+/// The least time between two reloads of an aborted volume that ran out of
+/// memory: a quarter of a second, no shorter than the machine-wide OOM
+/// kill's grace (`object::oom::KILL_GRACE_NANOS`, 250 ms). Every use of a
+/// short volume would otherwise reload it again under its lock, each
+/// reload's allocations reclaiming and killing, and a fault retried up to
+/// a thousand times would reload as often. Between two reloads every
+/// answer is `ENOMEM` at once (L.btrfs.123). The pause is measured on the
+/// mount's clock, which is the realtime clock: each step back of it by a
+/// privileged caller lets one more reload through, no worse than before
+/// the pause was kept (ledger 8268 M1).
+const RELOAD_PAUSE_NANOS: u64 = 250_000_000;
+
 /// What every inode of one writable mount shares.
+///
+/// # After an aborted transaction: four flags
+///
+/// | Flag | Set when | Cleared when |
+/// |---|---|---|
+/// | `read_only` | a reload of the last commit worked | never |
+/// | `short` | a reload ran out of memory | a reload works, or one cannot read the disk |
+/// | `reload_short` | a reload first ran out of memory (said once) | never |
+/// | `unreadable` | a reload could not read the disk | never |
+///
+/// While `short` is set (and so `unreadable` is not) the volume is still
+/// aborted, a reload is tried at most once per [`RELOAD_PAUSE_NANOS`], and
+/// what an operation answers about itself is `ENOMEM` ([`Shared::errno`]);
+/// what answers whether earlier writes reached the disk -- `fsync`, `sync`,
+/// a writeback -- stays `EIO`, since those writes are lost.
 struct Shared<D> {
     /// The volume, and with it the running transaction.
     volume: SleepLock<WriteVolume<D>>,
@@ -241,6 +270,15 @@ struct Shared<D> {
     /// Set once reloading an aborted volume ran out of memory, which is
     /// tried again at the next use: so that it is said once.
     reload_short: SpinLock<bool>,
+    /// Set while the last reload of an aborted volume ran out of memory and
+    /// none has worked since: an operation's answer about itself is then
+    /// `ENOMEM`, not `EIO` (L.btrfs.123, [`Shared::errno`]). Cleared by a
+    /// reload that works and by one that could not read the disk.
+    short: AtomicBool,
+    /// When the last reload of an aborted volume was tried, in nanoseconds
+    /// of the mount's clock: the next is tried no sooner than
+    /// [`RELOAD_PAUSE_NANOS`] after it while `short` is set.
+    reloaded_at: AtomicU64,
     /// Where the mount says that it went read-only, and why.
     notice: fn(fmt::Arguments<'_>),
     /// Where a writeback waits for the lock's waiters to have had their turn
@@ -315,6 +353,8 @@ impl<D: WriteHandle> RwBtrfs<D> {
             freed: SpinLock::new(false),
             unreadable: SpinLock::new(false),
             reload_short: SpinLock::new(false),
+            short: AtomicBool::new(false),
+            reloaded_at: AtomicU64::new(0),
             notice,
             turn: parker.new_parking(),
             arrived: AtomicU64::new(0),
@@ -405,10 +445,12 @@ impl<D: WriteHandle> Shared<D> {
         self.wake();
         if let Some(cause) = volume.aborted()
             && !*self.unreadable.lock()
+            && self.may_reload()
         {
             match volume.reload_read_only() {
                 Ok(()) => {
                     *self.read_only.lock() = true;
+                    self.short.store(false, Ordering::Relaxed);
                     let late = if *self.reload_short.lock() {
                         ", read again once memory came back"
                     } else {
@@ -421,23 +463,29 @@ impl<D: WriteHandle> Shared<D> {
                 }
                 // Out of memory says nothing about the disk: the reload goes
                 // again at the next use, and every answer until one works
-                // is EIO, said once (L.btrfs.123). A mount whose reload ran
-                // out was never read again, and every page-in from it
+                // is ENOMEM, said once (L.btrfs.123). A mount whose reload
+                // ran out was never read again, and every page-in from it
                 // answered EIO for good: on the N150 box that ended every
-                // program the root held (2026-11-08).
+                // program the root held (2026-11-08). Answering EIO while
+                // short still made each page-in a SIGBUS; ENOMEM sends it to
+                // the fault's reclaim and OOM kill, which retry it
+                // (`docs/BTRFS-PRESSURE.md`, "Against Linux's btrfs", W3).
                 Err(
                     error @ (WriteError::OutOfMemory | WriteError::Volume(BtrfsError::OutOfMemory)),
                 ) => {
+                    self.short.store(true, Ordering::Relaxed);
                     if !core::mem::replace(&mut *self.reload_short.lock(), true) {
                         (self.notice)(format_args!(
                             "a transaction was aborted ({cause}), and the last commit \
-                             could not be read again yet ({error}); tried again at the \
-                             next use, every answer EIO until then"
+                             could not be read again yet ({error}); tried again at a \
+                             later use, every answer ENOMEM (EIO for writes made before \
+                             the abort) until then"
                         ));
                     }
                 }
                 // Left aborted: every answer stays EIO, said once.
                 Err(error) => {
+                    self.short.store(false, Ordering::Relaxed);
                     *self.unreadable.lock() = true;
                     (self.notice)(format_args!(
                         "a transaction was aborted ({cause}), and the last commit \
@@ -448,6 +496,49 @@ impl<D: WriteHandle> Shared<D> {
             self.note_room(&volume);
         }
         volume
+    }
+
+    /// The answer to `error` from the volume: [`errno`]'s, except that a
+    /// volume left aborted by a reload that ran out of memory answers
+    /// `ENOMEM`, not `EIO`, until a reload works (L.btrfs.123). Memory says
+    /// nothing about the disk, and a page-in answered `ENOMEM` is retried
+    /// by the fault's reclaim and OOM kill, where `EIO` is a `SIGBUS`. One
+    /// whose reload could not read the disk, and every other abort, still
+    /// answers `EIO`.
+    ///
+    /// Only for an operation's answer about itself: a lookup, a read, a
+    /// page-in, a listing, a new edit. What answers for writes made before
+    /// the abort -- `fsync`, `sync`, a writeback -- keeps [`errno`]'s `EIO`:
+    /// those writes are lost, and `ENOMEM` would say to try again.
+    fn errno(&self, error: WriteError) -> Errno {
+        if matches!(error, WriteError::Aborted)
+            && self.short.load(Ordering::Relaxed)
+            && !*self.unreadable.lock()
+        {
+            Errno::ENOMEM
+        } else {
+            errno(error)
+        }
+    }
+
+    /// Whether an aborted volume's reload may be tried now: always, but
+    /// while the last one ran out of memory, only once
+    /// [`RELOAD_PAUSE_NANOS`] have passed since it was tried; and if so,
+    /// note the time. A clock that went back lets it be tried.
+    fn may_reload(&self) -> bool {
+        let now = self.clock.now();
+        let now = u64::try_from(now.tv_sec)
+            .unwrap_or(0)
+            .saturating_mul(1_000_000_000)
+            .saturating_add(u64::try_from(now.tv_nsec).unwrap_or(0));
+        if self.short.load(Ordering::Relaxed) {
+            let last = self.reloaded_at.load(Ordering::Relaxed);
+            if now >= last && now - last < RELOAD_PAUSE_NANOS {
+                return false;
+            }
+        }
+        self.reloaded_at.store(now, Ordering::Relaxed);
+        true
     }
 
     /// Remember what the volume can still take, after something used or
@@ -539,14 +630,15 @@ impl<D: WriteHandle> Shared<D> {
     ) -> Result<T> {
         let mut volume = self.lock();
         self.evict_queued(&mut volume)?;
-        op(&mut volume).map_err(errno)
+        op(&mut volume).map_err(|error| self.errno(error))
     }
 
     /// Delete the inodes queued by dropped objects with no names left.
     fn evict_queued(&self, volume: &mut WriteVolume<D>) -> Result<()> {
-        // A read-only volume deletes nothing; its orphans go at the next
-        // writable mount, as a crash's do.
-        if volume.is_read_only() {
+        // A read-only volume deletes nothing, nor an aborted one waiting
+        // for its reload; their orphans go at the next writable mount, as a
+        // crash's do.
+        if volume.is_read_only() || volume.aborted().is_some() {
             return Ok(());
         }
         let queued = core::mem::take(&mut *self.evictable.lock());
@@ -626,7 +718,9 @@ impl<D: WriteHandle> Shared<D> {
             let before = volume.data_room();
             *self.pending.lock() = 0;
             *self.structural.lock() = false;
-            let committed = volume.commit().map_err(errno);
+            // Durability: whether the writes since the last commit reached
+            // the disk, so EIO after an abort, never ENOMEM (W3.1).
+            let committed = volume.commit().map_err(durable_errno);
             self.note_room(&volume);
             // A commit refused after a writeback failed -- the failure
             // aborted the transaction -- answers what failed first.
@@ -928,7 +1022,12 @@ impl<D: WriteHandle> Node<D> {
     /// object knows win over the ones on the disk until the writeback makes
     /// them agree.
     fn refresh(&self, volume: &mut WriteVolume<D>) -> Result<()> {
-        let item = volume.inode(self.ino).map_err(errno)?.ok_or(Errno::EIO)?;
+        // After a writeback or an edit; the edit answered for itself, and a
+        // writeback answers for earlier writes (EIO after an abort).
+        let item = volume
+            .inode(self.ino)
+            .map_err(durable_errno)?
+            .ok_or(Errno::EIO)?;
         let sector = volume.sectorsize();
         let mut fresh = crate::metadata(self.ino, &item, sector)?;
         let mut meta = self.meta.lock();
@@ -1045,7 +1144,7 @@ impl<D: WriteHandle> Node<D> {
             buf.truncate(keep);
             volume
                 .write_file(self.ino, offset, &buf, size)
-                .map_err(|error| (errno(error), first))?;
+                .map_err(|error| (durable_errno(error), first))?;
         }
         Ok(())
     }
@@ -1119,7 +1218,7 @@ impl<D: WriteHandle> Node<D> {
     ) -> Result<T> {
         let mut volume = self.shared.lock();
         self.write_back(&mut volume)?;
-        let out = edit(&mut volume).map_err(errno)?;
+        let out = edit(&mut volume).map_err(|error| self.shared.errno(error))?;
         self.refresh(&mut volume)?;
         Ok(out)
     }
@@ -1570,7 +1669,7 @@ impl<D: WriteHandle> Inode for Node<D> {
             }
             Ok((moved, replaces_file))
         })()
-        .map_err(errno)?;
+        .map_err(|error| self.shared.errno(error))?;
         // A file renamed over another goes into the transaction with its
         // bytes: see "A file renamed over another takes its bytes along".
         if replaces_file {
@@ -1584,7 +1683,9 @@ impl<D: WriteHandle> Inode for Node<D> {
                 }
             }
         }
-        volume.rename(from, old, to, new, now).map_err(errno)?;
+        volume
+            .rename(from, old, to, new, now)
+            .map_err(|error| self.shared.errno(error))?;
         let moved = Some(moved);
         self.refresh(&mut volume)?;
         parent.refresh(&mut volume)?;
@@ -1663,10 +1764,11 @@ impl<D: WriteHandle> Inode for Node<D> {
         if *self.shared.structural.lock() {
             *self.shared.pending.lock() = 0;
             *self.shared.structural.lock() = false;
-            return volume.commit().map_err(errno);
+            // Durability: EIO after an abort, never ENOMEM (W3.1).
+            return volume.commit().map_err(durable_errno);
         }
-        volume.log_inode(self.ino).map_err(errno)?;
-        volume.commit_log().map_err(errno)
+        volume.log_inode(self.ino).map_err(durable_errno)?;
+        volume.commit_log().map_err(durable_errno)
     }
 
     /// Held from here, since a mapping may write without a word to the mount;
@@ -1714,7 +1816,7 @@ impl<D: WriteHandle> Node<D> {
             // Something still holds it: it keeps its orphan item until the
             // last reference goes.
             Some(node) => node.refresh(&mut volume),
-            None => volume.evict(gone).map_err(errno),
+            None => volume.evict(gone).map_err(|error| self.shared.errno(error)),
         }
     }
 }
@@ -1788,6 +1890,14 @@ fn errno(error: WriteError) -> Errno {
         // is no longer to be trusted, and every answer is EIO.
         _ => Errno::EIO,
     }
+}
+
+/// [`errno`], for an answer about writes made before it -- `fsync`, `sync`,
+/// a writeback -- which after an aborted transaction is `EIO` even while the
+/// reload is short of memory: those writes are lost, and `ENOMEM` would say
+/// to try again (W3.1, ledger 8248). [`Shared::errno`] is for the rest.
+fn durable_errno(error: WriteError) -> Errno {
+    errno(error) // W3.1: never ENOMEM
 }
 
 /// The error a writable mount reports for a volume it will not take.

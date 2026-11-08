@@ -857,6 +857,34 @@ and between commits by nothing the item sets; a job driving btrfs writes is
 charged for its pages, not for the transaction's nodes (V-05's "a btrfs
 transaction's changed nodes").
 
+**A reload short of memory (`L.btrfs.123`, 2026-11-08, ledger 8248).**
+After an abort, the load's `Shared::lock` reloads the last commit at the
+next use. One that runs out of memory leaves the volume aborted, and from
+then on the reload is tried at most once per `RELOAD_PAUSE_NANOS` (250 ms)
+per mount (`rw.rs`, `may_reload`); in between, an operation's answer about
+itself is `ENOMEM` at once, and one about writes made before the abort is
+`EIO`. A page-in answered `ENOMEM` goes to `object::oom::user_fault_own`,
+whose answers are at most `MOST_ANSWERS` (1024). Each answer is one fill --
+which takes the volume's lock and answers at once, except that at most one
+fill per 250 ms runs a reload -- and one of the fault path's own answers: a
+machine-wide reclaim, a 1 ms pause, or a kill. A reload is bounded by its
+own allocations, each of which the heap answers within L.mm.136-138's
+bounds (8 reclaims, then at most 1024 answers of the kill, about a second);
+while it runs, the mount's other users wait on its lock. So the worst time
+one fault spends in the short state is 1024 fills that answer at once and
+1024 fault answers, plus the reloads that start in that time, one per
+250 ms, each within its allocations' bounds; then the fault's refusal
+stands (SIGSEGV), as any fault's at an empty machine. The short state takes
+no more kills than the machine does otherwise: machine-wide kills are at
+least `KILL_GRACE_NANOS` (250 ms, `object::oom::in_grace`) apart, the same
+as the reload interval, so at most one falls between two reloads, however
+many tasks fault. Both bounds are on the mount's clock, the realtime
+clock, and hold while nobody sets it: each step back by a privileged
+caller lets one more reload through, which is no worse than before the
+pause was kept, when every use reloaded (ledger 8268 M1). That no `SIGBUS` comes of it rests on the kernel's
+existing code as read (`user/space.rs`, a fill's `ENOMEM` is
+`OutOfMemory`, only `EIO` is `Unreadable`), not on a check of its own.
+
 **The clean nodes' bound is per operation (finding F-99, 2026-10-30).**
 Until then `load` cleared the whole cache when it held 4,096 nodes, in the
 middle of a walk whose path still named the nodes it cleared, and a range

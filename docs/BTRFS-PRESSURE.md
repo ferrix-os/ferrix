@@ -205,7 +205,8 @@ consultant's review: OK IF BO.1-BO.12, ledger line 7988).**
   it reads the last commit, and can be called again after it failed.
 * `ferrix-btrfs-vfs`, L.btrfs.123: a reload that ran out of memory is
   tried again at the next use, answering `EIO` until then and saying so
-  once; only one that could not read the disk stays final.
+  once; only one that could not read the disk stays final. (Since W3,
+  below: `ENOMEM` rather than `EIO` until then.)
 A transaction can still abort when memory is truly gone -- nothing left to
 reclaim -- and the mount then goes read-only at its last commit, as Linux's
 does; reading what is committed keeps working once memory is back.
@@ -520,7 +521,22 @@ dirty nodes. Risk is how likely the gap is to stop play there.
    is). An abort then drops the dirty nodes and switches to it with no
    allocation and no disk read; `reload_read_only` becomes the fallback
    for a log replay. 8 points.
-3. **W3, ENOMEM is not EIO (high, small).** While a reload is short of
+3. **W3, ENOMEM is not EIO (high, small). Done (2026-11-08, branch
+   `bugfix/btrfs-reload-enomem`; the certification consultant's design
+   review: OK IF W3.1-W3.7, ledger line 8248).** While the reload is short
+   of memory an operation's answer about itself (a lookup, a read, a
+   page-in, a listing, a new edit) is `ENOMEM`; an answer about writes
+   made before the abort (`fsync`, `sync`, a writeback, and so an edit
+   that writes the file's dirty pages back first) stays `EIO`, since those
+   writes are lost (`rw.rs`, `Shared::errno` and `durable_errno`). The
+   reload is tried at most once per 250 ms per mount, no oftener than the
+   machine-wide kill's grace, and `ENOMEM` comes at once in between
+   (`docs/certification/MEMORY-AND-TIMING.md` §1.8 states the bound). That
+   a page-in then gets no `SIGBUS` rests on the kernel's existing fault
+   path as read, not on a check: `user/space.rs` turns a fill's `ENOMEM`
+   into `OutOfMemory`, which `object::oom` answers with reclaim and the
+   kill, and whose refusal after 1024 answers is `SIGSEGV`. The design as
+   first written: While a reload is short of
    memory (`reload_short`) answer `ENOMEM`, not `EIO`: a page-in then goes
    to the OOM path (`space.rs:2290`) and is retried or kills, instead of
    `SIGBUS` killing whatever touched an uncached text page (lode, hyprix,
