@@ -283,7 +283,7 @@ pub(crate) fn ipc_configuration(args: &Args, rounds: u32, alternate: Option<&str
         .init
         .as_deref()
         .map(|init| init.rsplit(['/', '\\']).next().unwrap_or(init).to_owned());
-    Value::object([
+    let mut configuration = Value::object([
         ("command", Value::str("bench-ipc")),
         ("release", Value::Bool(args.release)),
         (
@@ -309,7 +309,29 @@ pub(crate) fn ipc_configuration(args: &Args, rounds: u32, alternate: Option<&str
         ("rounds", Value::int(rounds)),
         ("alternate", alternate.map_or(Value::Null, Value::str)),
         ("against_sel4", Value::Bool(args.against_sel4)),
-    ])
+    ]);
+    set_build(&mut configuration, args);
+    configuration
+}
+
+/// The build a run was made with, where it is not the default one: the kernel
+/// profile and each `--set`, in order. Only then, so a run of the default
+/// build keeps its configuration, and its hash, as they were; and two runs of
+/// one tree with a flag set apart (the fast path on and off) are told apart.
+fn set_build(configuration: &mut Value, args: &Args) {
+    if let Value::Object(fields) = configuration {
+        if let Some(profile) = args.kernel_profile.as_deref() {
+            let _ = fields.insert("kernel_profile".to_owned(), Value::str(profile));
+        }
+        if !args.sets.is_empty() {
+            let sets = args
+                .sets
+                .iter()
+                .map(|(flag, value)| Value::Str(format!("{flag}={value}")))
+                .collect();
+            let _ = fields.insert("sets".to_owned(), Value::List(sets));
+        }
+    }
 }
 
 /// A board's run (`bench-ipc --board-log`): the board's name, and its
@@ -600,6 +622,30 @@ mod tests {
         assert_eq!(utc(0), "1970-01-01T00:00:00Z");
         assert_eq!(utc(951_782_400), "2000-02-29T00:00:00Z");
         assert_eq!(utc(1_791_283_454), "2026-10-06T10:44:14Z");
+    }
+
+    #[test]
+    fn a_set_flag_or_a_profile_is_in_the_configuration_and_the_default_build_is_as_it_was() {
+        let default = ipc_configuration(&Args::default(), 5, Some("main"));
+        let Value::Object(fields) = &default else {
+            panic!("a configuration is an object");
+        };
+        assert!(!fields.contains_key("kernel_profile") && !fields.contains_key("sets"));
+        let on = Args {
+            kernel_profile: Some("present".to_owned()),
+            sets: vec![("ipc_fastpath".to_owned(), "on".to_owned())],
+            ..Args::default()
+        };
+        let off = Args {
+            kernel_profile: Some("present".to_owned()),
+            ..Args::default()
+        };
+        let (on, off) = (
+            ipc_configuration(&on, 5, Some("main")),
+            ipc_configuration(&off, 5, Some("main")),
+        );
+        assert_ne!(super::super::hash(&on), super::super::hash(&off));
+        assert_ne!(super::super::hash(&off), super::super::hash(&default));
     }
 
     #[test]
