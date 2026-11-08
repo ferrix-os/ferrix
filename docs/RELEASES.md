@@ -113,12 +113,12 @@ New since v0.2.0:
 
 On v0.3.0's live ISO, in Try Ferrix's QEMU machine:
 
-![A program suspended with SUPER+Z: its window, a clock stopped at 23:52:12, at half opacity over ferrofetch, while a terminal reads its cgroup as frozen and the time as 23:52:48](https://raw.githubusercontent.com/ferrix-os/ferrix/v0.3.0/docs/brand/screenshots/suspend.png)
+![A program suspended with SUPER+Z: its window, a clock stopped at 23:52:12, at half opacity over ferrofetch, while a terminal reads its cgroup as frozen and the time as 23:52:48](https://raw.githubusercontent.com/ferrix-os/ferrix/589fcb09648ce4ab2cd67405b05021fe10569284/docs/brand/screenshots/suspend.png)
 
 *SUPER+Z froze the clock's terminal at 23:52:12: half opacity, `frozen 1`,
 and `date` 36 seconds later.*
 
-![A terminal reading uname as Ferrix 0.3.0, /proc/ferrix-mce with one corrected error on cpu2, the RAM scrubber standing down, and the resident set split by kind](https://raw.githubusercontent.com/ferrix-os/ferrix/v0.3.0/docs/brand/screenshots/machine-check.png)
+![A terminal reading uname as Ferrix 0.3.0, /proc/ferrix-mce with one corrected error on cpu2, the RAM scrubber standing down, and the resident set split by kind](https://raw.githubusercontent.com/ferrix-os/ferrix/589fcb09648ce4ab2cd67405b05021fe10569284/docs/brand/screenshots/machine-check.png)
 
 *A corrected memory error injected on processor 2 through QEMU's monitor,
 logged and counted; the scrubber stands down in a virtual machine.*
