@@ -26,6 +26,8 @@ const QUERY_EXTENSION: u8 = 98;
 /// master device.
 const XI_SELECT_EVENTS: u8 = 46;
 const XI_QUERY_VERSION: u8 = 47;
+const XI_RAW_BUTTON_PRESS: u16 = 15;
+const XI_RAW_BUTTON_RELEASE: u16 = 16;
 const XI_RAW_MOTION: u16 = 17;
 const XI_ALL_MASTER_DEVICES: u16 = 1;
 
@@ -39,11 +41,15 @@ const PRESENT_COMPLETE_MASK: u32 = 2;
 /// Core events by their code.
 const GENERIC_EVENT: u8 = 35;
 const MAP_NOTIFY: u8 = 19;
+const BUTTON_PRESS: u8 = 4;
+const BUTTON_RELEASE: u8 = 5;
 const MOTION_NOTIFY: u8 = 6;
 const CONFIGURE_NOTIFY: u8 = 22;
 
-/// `GrabPointer`'s `PointerMotion` event mask bit.
-const POINTER_MOTION_MASK: u16 = 1 << 6;
+/// `GrabPointer`'s event mask: `ButtonPress`, `ButtonRelease` and
+/// `PointerMotion`, the mask Wine grabs a clipped cursor with
+/// (`grab_clipping_window`).
+const GRAB_MASK: u16 = (1 << 2) | (1 << 3) | (1 << 6);
 
 /// Four bytes at `at`, little-endian.
 pub(crate) fn word(bytes: &[u8], at: usize) -> Option<u32> {
@@ -142,6 +148,21 @@ pub(crate) enum Packet {
     /// `XInput2` raw motion, and its X time in milliseconds: the server's
     /// time for the input, which yserver takes from the device's stamp.
     RawMotion { time: u32 },
+    /// `XInput2` raw button press or release: its button, its device and
+    /// its source.
+    RawButton {
+        pressed: bool,
+        detail: u32,
+        deviceid: u16,
+        sourceid: u16,
+    },
+    /// A core button press or release: its button and the window it is
+    /// reported to.
+    Button {
+        pressed: bool,
+        detail: u8,
+        window: u32,
+    },
     /// Present's completion of the pixmap with `serial`.
     Complete {
         serial: u32,
@@ -179,6 +200,16 @@ pub(crate) fn packet(bytes: &[u8], opcodes: Opcodes) -> Packet {
         Some(code) if code & 0x7f == GENERIC_EVENT => {
             let extension = bytes.get(1).copied();
             let kind = half(bytes, 8);
+            if extension == Some(opcodes.xi)
+                && let Some(kind @ (XI_RAW_BUTTON_PRESS | XI_RAW_BUTTON_RELEASE)) = kind
+            {
+                return Packet::RawButton {
+                    pressed: kind == XI_RAW_BUTTON_PRESS,
+                    deviceid: half(bytes, 10).unwrap_or(0),
+                    detail: word(bytes, 16).unwrap_or(0),
+                    sourceid: half(bytes, 20).unwrap_or(0),
+                };
+            }
             if extension == Some(opcodes.xi) && kind == Some(XI_RAW_MOTION) {
                 return Packet::RawMotion {
                     time: word(bytes, 12).unwrap_or(0),
@@ -193,6 +224,13 @@ pub(crate) fn packet(bytes: &[u8], opcodes: Opcodes) -> Packet {
                 };
             }
             Packet::Other
+        }
+        Some(code) if code & 0x7f == BUTTON_PRESS || code & 0x7f == BUTTON_RELEASE => {
+            Packet::Button {
+                pressed: code & 0x7f == BUTTON_PRESS,
+                detail: bytes.get(1).copied().unwrap_or(0),
+                window: word(bytes, 12).unwrap_or(0),
+            }
         }
         Some(code) if code & 0x7f == MAP_NOTIFY => Packet::Mapped,
         Some(code) if code & 0x7f == MOTION_NOTIFY => Packet::Motion {
@@ -362,8 +400,9 @@ impl Display {
     }
 
     /// A window the size of the screen, black, named `name`, telling of its
-    /// mapping, with `XInput2`'s raw motion selected on the root (as SDL does
-    /// for a relative mouse) and Present's completions on the window.
+    /// mapping, with `XInput2`'s raw motion and raw buttons selected on the
+    /// root (as SDL does for a relative mouse, and Wine's desktop thread for
+    /// `WM_INPUT`) and Present's completions on the window.
     pub(crate) fn window(&mut self, name: &str) -> Result<u32, String> {
         let window = self.id();
         let screen = self.screen;
@@ -383,7 +422,9 @@ impl Display {
             body.extend_from_slice(text.as_bytes());
             self.send(&request(CHANGE_PROPERTY, 0, &body))?;
         }
-        let mask = 1_u32 << XI_RAW_MOTION;
+        let mask = (1_u32 << XI_RAW_MOTION)
+            | (1_u32 << XI_RAW_BUTTON_PRESS)
+            | (1_u32 << XI_RAW_BUTTON_RELEASE);
         let mut body = words(&[screen.root]);
         body.extend_from_slice(&1_u16.to_le_bytes());
         body.extend_from_slice(&[0, 0]);
@@ -450,7 +491,7 @@ impl Display {
     /// status, 0 for `Success`.
     pub(crate) fn grab_pointer(&mut self, window: u32, cursor: u32) -> Result<u8, String> {
         let mut body = words(&[window]);
-        body.extend_from_slice(&POINTER_MOTION_MASK.to_le_bytes());
+        body.extend_from_slice(&GRAB_MASK.to_le_bytes());
         // Both modes asynchronous (1).
         body.extend_from_slice(&[1, 1]);
         body.extend_from_slice(&words(&[window, cursor, 0]));
@@ -579,9 +620,52 @@ mod tests {
     }
 
     #[test]
+    fn buttons_are_read_from_their_core_and_raw_events() {
+        let opcodes = Opcodes {
+            xi: 131,
+            present: 0,
+        };
+        let mut press = vec![BUTTON_PRESS, 1];
+        press.resize(12, 0);
+        press.extend_from_slice(&0x20_0001_u32.to_le_bytes());
+        press.resize(32, 0);
+        assert_eq!(
+            packet(&press, opcodes),
+            Packet::Button {
+                pressed: true,
+                detail: 1,
+                window: 0x20_0001
+            }
+        );
+        let mut release = press.clone();
+        release[0] = BUTTON_RELEASE | 0x80;
+        assert!(matches!(
+            packet(&release, opcodes),
+            Packet::Button { pressed: false, .. }
+        ));
+        let mut raw = vec![GENERIC_EVENT, 131, 0, 0, 2, 0, 0, 0];
+        raw.extend_from_slice(&XI_RAW_BUTTON_RELEASE.to_le_bytes());
+        raw.extend_from_slice(&2_u16.to_le_bytes());
+        raw.extend_from_slice(&5_u32.to_le_bytes());
+        raw.extend_from_slice(&1_u32.to_le_bytes());
+        raw.extend_from_slice(&9_u16.to_le_bytes());
+        raw.resize(40, 0);
+        assert_eq!(length_of(&raw), Some(40));
+        assert_eq!(
+            packet(&raw, opcodes),
+            Packet::RawButton {
+                pressed: false,
+                detail: 1,
+                deviceid: 2,
+                sourceid: 9
+            }
+        );
+    }
+
+    #[test]
     fn grab_warp_and_cursor_requests_have_their_lengths() {
         let mut body = words(&[0x20_0001]);
-        body.extend_from_slice(&POINTER_MOTION_MASK.to_le_bytes());
+        body.extend_from_slice(&GRAB_MASK.to_le_bytes());
         body.extend_from_slice(&[1, 1]);
         body.extend_from_slice(&words(&[0x20_0001, 0x20_0009, 0]));
         assert_eq!(request(GRAB_POINTER, 0, &body).len(), 24);

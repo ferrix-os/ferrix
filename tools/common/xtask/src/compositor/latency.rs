@@ -37,7 +37,11 @@
 //! must have exactly one for each motion it read: raw events come only from
 //! the device, so the game's own warps make none (Xorg's `miPointerMove`
 //! passes `POINTER_NORAW`). A yserver that sends a raw motion for each warp
-//! (as before fork commit ac2485ea) is failed on [`WARP_RAW`].
+//! (as before fork commit ac2485ea) is failed on [`WARP_RAW`]. Then `vptr
+//! press` clicks [`GRAB_CLICKS`] times with no motion, and the game must
+//! have each press and release both as the core event its grab reports
+//! (Wine's `WM_LBUTTONDOWN`) and as the master pointer's raw event (Wine's
+//! `WM_INPUT`): a game's click under its pointer lock.
 
 use std::time::{Duration, Instant};
 
@@ -99,6 +103,7 @@ until grep -q 'xlatency: grab ready' /tmp/grab.txt || [ $waited -ge 20 ]; do
     waited=$((waited + 1))
 done
 /bin/vptr 20 6 9 2>&1 | sed 's/^/xlatency: grab /'
+/bin/vptr press 3 2>&1 | sed 's/^/xlatency: grab /'
 wait $grab
 cat /tmp/grab.txt
 grep -E 'holds the pointer|the pointer on window|pointer lock on window|pointer_constraints|POINTER_LOCK' /tmp/yserver.log | head -n 12 | sed 's/^/xlatency: yserver-lock: /'
@@ -117,6 +122,10 @@ const GRAB_STEP: u64 = 9;
 
 /// The motions `vptr` sends in the grab phase: 20 a second for 6 seconds.
 const GRAB_SENT: u64 = 120;
+
+/// The left-button clicks `vptr press` makes in the grab phase, with no
+/// motion, as a locked game is clicked.
+const GRAB_CLICKS: u64 = 3;
 
 /// The tablet's coordinate for pixel `at` of `across`.
 pub(super) fn tablet(at: usize, across: usize) -> i32 {
@@ -403,6 +412,43 @@ fn judge_grab(arch: Arch, lines: &[String]) -> Result<()> {
         "  {arch}: a game's grab and warps: {as_mouse} of {motions} motions read as the \
          mouse's {GRAB_STEP} pixels, {raw} raw, of {GRAB_SENT} sent"
     );
+    judge_grab_clicks(arch, lines)
+}
+
+/// Pass when the grabbing game had every click of `vptr press` as core
+/// presses and releases on its window and as raw ones of the master
+/// pointer, and no core button event went to another window.
+fn judge_grab_clicks(arch: Arch, lines: &[String]) -> Result<()> {
+    let Some(line) = lines
+        .iter()
+        .find(|line| line.contains("xlatency: grab buttons "))
+    else {
+        return Err(Error::new(format!(
+            "{arch}: the grabbing game said nothing of the buttons (xlatency grab)"
+        )));
+    };
+    let counts: Vec<u64> = line
+        .split("buttons ")
+        .nth(1)
+        .unwrap_or_default()
+        .split_whitespace()
+        .filter_map(|word| word.parse().ok())
+        .collect();
+    let [core_down, core_up, raw_down, raw_up, elsewhere] = counts.as_slice() else {
+        return Err(Error::new(format!("{arch}: cannot read {line:?}")));
+    };
+    let wanted = [GRAB_CLICKS; 4];
+    if [*core_down, *core_up, *raw_down, *raw_up] != wanted || *elsewhere != 0 {
+        return Err(Error::new(format!(
+            "{arch}: a click under the game's grab: {GRAB_CLICKS} clicks sent, the game had \
+             {core_down} core presses and {core_up} releases on its window, {raw_down} raw \
+             presses and {raw_up} releases, {elsewhere} core button events elsewhere"
+        )));
+    }
+    println!(
+        "  {arch}: a click under the game's grab: {GRAB_CLICKS} of {GRAB_CLICKS} as core \
+         presses and releases on its window and as raw ones of the master pointer"
+    );
     Ok(())
 }
 
@@ -525,7 +571,8 @@ mod tests {
 
     #[test]
     fn a_grab_passes_only_when_the_game_reads_the_mouses_step() {
-        let grab = |line: &str| judge_grab(Arch::X86_64, &[line.to_owned()]);
+        let clicked = "xlatency: grab buttons core 3 3 raw 3 3 elsewhere 0 order C+,R+";
+        let grab = |line: &str| judge_grab(Arch::X86_64, &[line.to_owned(), clicked.to_owned()]);
         assert!(
             grab("xlatency: grab motions 118 raw 118 as-the-mouse 116 step 9 echoes 119").is_ok()
         );
@@ -545,6 +592,18 @@ mod tests {
         assert!(grab("xlatency: grab motions 20 raw 20 as-the-mouse 20 step 9").is_err());
         assert!(grab("xlatency: grab motions 120 raw 3 as-the-mouse 120 step 9").is_err());
         assert!(judge_grab(Arch::X86_64, &[]).is_err());
+    }
+
+    #[test]
+    fn a_click_under_the_grab_passes_only_when_both_forms_came_each_time() {
+        let clicks = |line: &str| judge_grab_clicks(Arch::X86_64, &[line.to_owned()]);
+        assert!(clicks("xlatency: grab buttons core 3 3 raw 3 3 elsewhere 0 order C+,R+").is_ok());
+        assert!(clicks("xlatency: grab buttons core 0 0 raw 3 3 elsewhere 0 order R+").is_err());
+        assert!(clicks("xlatency: grab buttons core 3 3 raw 0 0 elsewhere 0 order C+").is_err());
+        assert!(clicks("xlatency: grab buttons core 3 2 raw 3 3 elsewhere 0 order C+").is_err());
+        assert!(clicks("xlatency: grab buttons core 3 3 raw 3 3 elsewhere 2 order C+").is_err());
+        assert!(clicks("xlatency: grab buttons core 3 3 raw").is_err());
+        assert!(judge_grab_clicks(Arch::X86_64, &[]).is_err());
     }
 
     #[test]
@@ -577,6 +636,11 @@ mod tests {
             "xlatency: grab motions 118 raw 118 as-the-mouse 115 step 9 echoes 118 first 9,0"
                 .to_owned(),
         );
+        assert!(
+            judge(Arch::X86_64, &lines, &timed).is_err(),
+            "no buttons line"
+        );
+        lines.push("xlatency: grab buttons core 3 3 raw 3 3 elsewhere 0 order C+,R+".to_owned());
         assert!(judge(Arch::X86_64, &lines, &timed).is_ok());
         let stuck: Vec<String> = lines
             .iter()

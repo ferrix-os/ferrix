@@ -16,6 +16,11 @@
 //! through the compositor's seat, so the window under the point gets the
 //! click where it is shown. xdotool's clicks go to X's positions, which are
 //! not where hyprix shows an X window (docs/WINE.md §10).
+//!
+//! `vptr press <count> [<hold-ms>]`: press and release the left button
+//! `count` times where the pointer is, with no motion, each held `hold-ms`
+//! (120 by default) -- a mouse clicked without being moved, which is how a
+//! game whose pointer is locked is clicked.
 
 use std::io::Write as _;
 use std::process::ExitCode;
@@ -43,8 +48,8 @@ const GLOBAL: &[ArgType] = &[
     ArgType::Uint,
 ];
 
-const USAGE: &str =
-    "usage: vptr <hz> <seconds> [<pixels>] [--log FILE] | vptr click <x> <y> <width> <height>";
+const USAGE: &str = "usage: vptr <hz> <seconds> [<pixels>] [--log FILE] \
+    | vptr click <x> <y> <width> <height> | vptr press <count> [<hold-ms>]";
 
 /// Linux's `BTN_LEFT`, the button a click presses.
 const BTN_LEFT: u32 = 0x110;
@@ -104,6 +109,45 @@ fn click_options(args: &[String]) -> Result<[u32; 4], String> {
     }
 }
 
+/// `press`'s count and hold.
+fn press_options(args: &[String]) -> Result<(u32, u64), String> {
+    let number = |at: usize, default: u64| -> Result<u64, String> {
+        args.get(at).map_or(Ok(default), |text| {
+            text.parse().map_err(|_| USAGE.to_owned())
+        })
+    };
+    if args.is_empty() || args.len() > 2 {
+        return Err(USAGE.to_owned());
+    }
+    let count = u32::try_from(number(0, 1)?).map_err(|_| USAGE.to_owned())?;
+    Ok((count, number(1, 120)?))
+}
+
+/// Press and release the left button `count` times, held `hold` milliseconds
+/// each, with no motion.
+fn press(count: u32, hold: u64) -> Result<(), String> {
+    let mut writer = Writer::new();
+    let mut connection = connect(&mut writer)?;
+    let began = Instant::now();
+    let time = || u32::try_from(began.elapsed().as_millis()).unwrap_or(0);
+    for _ in 0..count {
+        for (state, pause) in [(1, hold), (0, 400)] {
+            write(
+                &mut writer,
+                POINTER,
+                pointer::request::BUTTON,
+                &[ArgType::Uint; 3],
+                &[Arg::Uint(time()), Arg::Uint(BTN_LEFT), Arg::Uint(state)],
+            )?;
+            write(&mut writer, POINTER, pointer::request::FRAME, &[], &[])?;
+            send(&mut connection, &mut writer)?;
+            std::thread::sleep(Duration::from_millis(pause));
+        }
+    }
+    let _ = connection.receive();
+    Ok(())
+}
+
 /// Move to the point, then press and release the left button, each with
 /// its frame.
 fn click(at: [u32; 4]) -> Result<(), String> {
@@ -158,6 +202,19 @@ fn main() -> ExitCode {
         return match click_options(rest).and_then(click) {
             Ok(()) => {
                 say(&format!("vptr: clicked at {}", rest.join(" ")));
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                say(&format!("vptr: failed: {error}"));
+                ExitCode::FAILURE
+            }
+        };
+    }
+    if args.first().map(String::as_str) == Some("press") {
+        let rest = args.get(1..).unwrap_or_default();
+        return match press_options(rest).and_then(|(count, hold)| press(count, hold)) {
+            Ok(()) => {
+                say(&format!("vptr: pressed {}", rest.join(" ")));
                 ExitCode::SUCCESS
             }
             Err(error) => {
@@ -430,6 +487,15 @@ mod tests {
         assert_eq!(options(&[]).map(|o| (o.hz, o.seconds)), Ok((500, 10)));
         assert!(options(&strings(&["--log"])).is_err());
         assert!(options(&strings(&["x"])).is_err());
+    }
+
+    #[test]
+    fn a_press_is_a_count_and_a_hold() {
+        assert_eq!(press_options(&strings(&["3"])), Ok((3, 120)));
+        assert_eq!(press_options(&strings(&["2", "600"])), Ok((2, 600)));
+        assert!(press_options(&strings(&[])).is_err());
+        assert!(press_options(&strings(&["x"])).is_err());
+        assert!(press_options(&strings(&["1", "2", "3"])).is_err());
     }
 
     #[test]

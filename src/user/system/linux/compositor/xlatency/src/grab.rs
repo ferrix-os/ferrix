@@ -20,6 +20,17 @@
 //! the motions read away from the centre, the raw motions, how many of the
 //! first read exactly `P` across and 0 down, the motions at the centre
 //! (each warp's own), and the first few offsets read.
+//!
+//! It takes the left button as a game does under that grab, both ways Wine
+//! does: the core `ButtonPress` and `ButtonRelease` the grab reports to the
+//! window (Wine's `WM_LBUTTONDOWN`), and `XInput2`'s raw button events on
+//! the root (Wine's `WM_INPUT`). It says, after the line above,
+//!
+//! `xlatency: grab buttons core <p> <r> raw <p> <r> elsewhere <e> order <o>`
+//!
+//! the core presses and releases on the window, the raw ones of the master
+//! pointer, the core ones reported to any other window, and the order of
+//! the first few (`C+`, `C-`, `R+`, `R-`).
 
 use std::time::{Duration, Instant};
 
@@ -69,7 +80,75 @@ pub(crate) struct Reading {
     as_mouse: usize,
     echoes: usize,
     first: Vec<(i16, i16)>,
+    buttons: Buttons,
 }
+
+/// The buttons the game was told of.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Buttons {
+    core: (usize, usize),
+    raw: (usize, usize),
+    elsewhere: usize,
+    order: Vec<&'static str>,
+}
+
+/// How many button events the order lists.
+const ORDER: usize = 16;
+
+impl Buttons {
+    /// A core press or release reported to `window`; the game's is `ours`.
+    fn core(&mut self, pressed: bool, window: u32, ours: u32) {
+        if window != ours {
+            self.elsewhere += 1;
+            return;
+        }
+        if pressed {
+            self.core.0 += 1;
+        } else {
+            self.core.1 += 1;
+        }
+        self.note(if pressed { "C+" } else { "C-" });
+    }
+
+    /// A raw press or release of device `deviceid`: the master pointer's
+    /// (2) is the one Wine reads.
+    fn raw(&mut self, pressed: bool, deviceid: u16) {
+        if deviceid != MASTER_POINTER {
+            return;
+        }
+        if pressed {
+            self.raw.0 += 1;
+        } else {
+            self.raw.1 += 1;
+        }
+        self.note(if pressed { "R+" } else { "R-" });
+    }
+
+    fn note(&mut self, what: &'static str) {
+        if self.order.len() < ORDER {
+            self.order.push(what);
+        }
+    }
+
+    fn line(&self) -> String {
+        format!(
+            "xlatency: grab buttons core {} {} raw {} {} elsewhere {} order {}",
+            self.core.0,
+            self.core.1,
+            self.raw.0,
+            self.raw.1,
+            self.elsewhere,
+            if self.order.is_empty() {
+                "-".to_owned()
+            } else {
+                self.order.join(",")
+            }
+        )
+    }
+}
+
+/// The core pointer's device id.
+const MASTER_POINTER: u16 = 2;
 
 impl Reading {
     fn new(step: i16) -> Self {
@@ -182,6 +261,23 @@ pub(crate) fn run(options: Options) -> Result<(), String> {
                 last = Some(Instant::now());
                 reading.raw += 1;
             }
+            Some(Packet::Button {
+                pressed,
+                detail: 1,
+                window: reported,
+            }) => {
+                last = Some(Instant::now());
+                reading.buttons.core(pressed, reported, window);
+            }
+            Some(Packet::RawButton {
+                pressed,
+                detail: 1,
+                deviceid,
+                ..
+            }) => {
+                last = Some(Instant::now());
+                reading.buttons.raw(pressed, deviceid);
+            }
             Some(Packet::Configured { width, height }) => {
                 reading.sized(width, height);
                 x.warp_pointer(window, reading.centre.0, reading.centre.1)?;
@@ -195,6 +291,7 @@ pub(crate) fn run(options: Options) -> Result<(), String> {
         }
     }
     say(&reading.line());
+    say(&reading.buttons.line());
     Ok(())
 }
 
@@ -218,6 +315,21 @@ mod tests {
             reading.line(),
             "xlatency: grab motions 3 raw 0 as-the-mouse 2 step 9 echoes 1 \
              first 9,0 -9,0 120,-10"
+        );
+    }
+
+    #[test]
+    fn the_buttons_are_counted_on_the_window_and_the_master() {
+        let mut buttons = Buttons::default();
+        buttons.raw(true, MASTER_POINTER);
+        buttons.raw(true, 9);
+        buttons.core(true, 7, 7);
+        buttons.core(false, 8, 7);
+        buttons.raw(false, MASTER_POINTER);
+        buttons.core(false, 7, 7);
+        assert_eq!(
+            buttons.line(),
+            "xlatency: grab buttons core 1 1 raw 1 1 elsewhere 1 order R+,C+,R-,C-"
         );
     }
 
