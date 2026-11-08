@@ -17,7 +17,8 @@
 //! and length, whose `wchan` names the pipe and whose `stack` is a line per
 //! frame, the reader's own `syscall` `running`, a uid 1000 child refused all
 //! but `wchan`, which reads `0`, and `environ` the program's own environment
-//! block, a byte changed in place read back changed. It
+//! block, a byte changed in place read back changed; and `minflt` in
+//! `stat` and `getrusage` rising by the 64 pages a step writes. It
 //! prints a line per step and `procfs: all ok`, and exits 0; this requires
 //! every one of those lines, in order, and the status.
 //!
@@ -42,6 +43,7 @@ const STEPS: &[&str] = &[
     "procfs: memfd ok",
     "procfs: inodes ok",
     "procfs: mincore ok",
+    "procfs: faults ok",
     "procfs: debug ok",
     "procfs: all ok",
 ];
@@ -68,7 +70,7 @@ const NEGATIVE: &[(&str, &str, &str)] = &[
 
 /// The test on every architecture asked for.
 ///
-/// Verifies: L.sched.86, H.SCHED.15
+/// Verifies: L.sched.86, H.SCHED.15, L.object.372
 pub(crate) fn test_procfs(args: &Args) -> Result<()> {
     for arch in args.arches()? {
         let log = paths::build_dir(arch).join("serial.log");

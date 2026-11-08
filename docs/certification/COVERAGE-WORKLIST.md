@@ -17,7 +17,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`sched`](#sched) | 156 | 2 | 2 | 11 |
 | [`syscall`](#syscall) | 115 | 10 | 10 | 3 |
 | [`iommu`](#iommu) | 99 | - | 1 | 2 |
-| [`user`](#user) | 72 | - | 1 | 3 |
+| [`user`](#user) | 69 | - | 1 | 3 |
 | [`main`](#main) | 65 | 6 | 4 | 1 |
 | [`object`](#object) | 51 | 12 | 33 | 8 |
 | [`console`](#console) | 40 | 6 | 7 | 6 |
@@ -37,7 +37,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`audit`](#audit) | 1 | - | - | 1 |
 | [`signal_frame`](#signal_frame) | - | - | 1 | 1 |
 | [`timer`](#timer) | - | - | 1 | 1 |
-| **Total** | **1244** | **162** | **215** | 76 |
+| **Total** | **1241** | **162** | **215** | 76 |
 
 ---
 
@@ -197,7 +197,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
 | `user/vmo.rs` | `core` | 48 | 0 | 1 | 0 | - |
-| `user/space.rs` | `core` | 23 | 0 | 0 | 0 | - |
+| `user/space.rs` | `core` | 20 | 0 | 0 | 0 | - |
 | `user/cache.rs` | `core` | 1 | - | - | 1 | 123 |
 
 ---
@@ -266,7 +266,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `mm.rs` | `core` | 7 | 1 | 3 | 1 | 1808 |
+| `mm.rs` | `core` | 7 | 1 | 3 | 1 | 1848 |
 
 ---
 

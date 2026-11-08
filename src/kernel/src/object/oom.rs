@@ -101,6 +101,20 @@ pub const MACHINE_RECLAIMS: u32 = 16;
 // CHECKS-ONLY: object/quota_check.rs, besides `out_of_memory_at` here.
 pub const MOST_ANSWERS: u32 = 1024;
 
+/// The most answers to one fault that wait for other faults' spare frames
+/// to go back before a reclaim or a kill (`out_of_memory_at`): a spare is
+/// held for a fault's commit, microseconds, so a few pauses see every one
+/// that was held when the limit refused go back, and a machine faulting
+/// without pause still reaches its kill.
+pub(crate) const SPARE_WAITS: u32 = 16;
+
+/// Whether the answer to a fault's `attempt` is a pause for the `held`
+/// spare frames to go back, rather than a reclaim or a kill
+/// (`L.user.228`): while any is held, for the first [`SPARE_WAITS`].
+pub(crate) const fn waits_for_spares(attempt: u32, held: u64) -> bool {
+    attempt < SPARE_WAITS && held != 0
+}
+
 /// Set while one fault chooses and kills, as Linux's `oom_lock` is held:
 /// two faults at one full limit kill one process, not two. A flag, not a
 /// lock, since a kill wakes tasks and must hold no spin lock
@@ -167,6 +181,7 @@ pub fn user_fault(space: &AddressSpace, address: u64, access: Access) -> Result<
 /// [`user_fault`], charging the task's own job.
 fn user_fault_own(space: &AddressSpace, address: u64, access: Access) -> Result<(), SpaceError> {
     quota::count(crate::sched::running_group(), Counter::Faults, 1);
+    let _counted = TaskFault::begin();
     // Retried here rather than by running the instruction again, so that the
     // answers one fault takes are counted ([`out_of_memory_at`]).
     let mut attempt = 0_u32;
@@ -185,6 +200,25 @@ fn user_fault_own(space: &AddressSpace, address: u64, access: Access) -> Result<
             }
             done => return done,
         }
+    }
+}
+
+/// One fault of the running task, counted in its `minflt` or `majflt` when
+/// it ends, however it ends (`L.object.372`): the task's own counts, beside
+/// its job's `Counter::Faults`.
+struct TaskFault;
+
+impl TaskFault {
+    /// The running task's fault begins.
+    fn begin() -> TaskFault {
+        let _ = crate::sched::with_current(crate::sched::Task::begin_fault);
+        TaskFault
+    }
+}
+
+impl Drop for TaskFault {
+    fn drop(&mut self) {
+        let _ = crate::sched::with_current(crate::sched::Task::note_fault);
     }
 }
 
@@ -207,6 +241,7 @@ pub fn fault(space: &AddressSpace, address: u64, access: Access) -> Result<(), S
 /// [`fault`], charging the task's own job.
 fn fault_own(space: &AddressSpace, address: u64, access: Access) -> Result<(), SpaceError> {
     quota::count(crate::sched::running_group(), Counter::Faults, 1);
+    let _counted = TaskFault::begin();
     let mut attempt = 0_u32;
     loop {
         match space.fault(address, access) {
@@ -267,6 +302,15 @@ pub fn out_of_memory(space: &AddressSpace) -> Answer {
 pub fn out_of_memory_at(space: &AddressSpace, attempt: u32) -> Answer {
     if attempt >= MOST_ANSWERS {
         return Answer::Refused;
+    }
+    // Another fault's spare frame may be what filled the limit: charged, and
+    // given back within its fault, which never waits holding it. So before
+    // anything is reclaimed or killed for this refusal, wait for those to go
+    // back, a pause at a time, a few times at most (`L.user.224`): a kill
+    // for a frame nobody touched would take a process for nothing.
+    if waits_for_spares(attempt, crate::user::vmo::spares_in_flight()) {
+        crate::sched::sleep_for(PAUSE_NANOS);
+        return Answer::Retry;
     }
     let group = crate::sched::running_group();
     let Some(full) = quota::at_limit(group, Resource::Memory, PAGE_SIZE) else {

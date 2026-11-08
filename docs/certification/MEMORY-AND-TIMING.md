@@ -180,6 +180,11 @@ stable parts, in two kinds:
   handed out only for a request of its own class, so a wrong bound would let
   the allocation fail as it did before (a stop, FX-0008), and would corrupt
   nothing.
+  A page fault's commit (`Vmo::commit_with`, `Vmo::commit_within_with`)
+  takes and zeroes its frame before its section, with interrupts on, so its
+  section is the B-tree insert alone (since 2026-11-07, `L.user.220`,
+  `L.user.221`); a section it cannot enter gives the frame back, and the
+  job's memory and the frames held are as before the fault.
 
 Each caller turns `AllocError` into the answer its interface has:
 `NO_MEMORY` from a native call, `ENOMEM` from a Linux one (`mmap`, `mremap`,
@@ -282,8 +287,10 @@ guest (endfield-s3's control, `~/.local/share/ferrix/logs/queue/endfield-s3-ctl-
 Since then a program's frames, its runs of frames and its page tables are
 refused when taking them would leave fewer than the watermark free, decided
 in the same hold of the frame allocator's lock as the take
-(`mm::allocate_program_frames`); the kernel's own frames and the heap's
-pages are not. A refused program frame takes the path a machine out of
+(`mm::allocate_program_frames`; for a program's single frame with no
+reservation, `mm::allocate_owned_frame`, which records the frame's owner,
+`set_owner`, in that same hold, since 2026-11-07); the kernel's own frames
+and the heap's pages are not. A refused program frame takes the path a machine out of
 frames always took: clean cache reclaimed first, then the fault fails
 (`SIGSEGV`, `EFAULT`) or the call answers `ENOMEM`.
 
@@ -631,7 +638,8 @@ even for an instant, and a refused charge takes nothing.
 
 * **Memory** is charged when a frame of a program's memory is allocated
   (`mm::allocate_user_frame`: a fault's commit, a copy-on-write copy, the
-  page cache's fill) and when `map_in` builds a page table for a user
+  page cache's fill, and a write fault's spare, taken with no lock held and
+  given back in the same fault when unused, `L.user.224`) and when `map_in` builds a page table for a user
   space, to the job of the task that caused it. The frame record keeps the
   slot's index in the link an allocated frame does not use
   (`ferrix_frame::Frames::set_owner`), so `release_frame` and
@@ -644,6 +652,21 @@ even for an instant, and a refused charge takes nothing.
   the job chain where a page's free makes one, still with no lookup and no
   lock, under whatever lock the freer holds, F-36's deferred frees
   included.
+* **A write fault's spare** (`user::vmo::Spare`, since 2026-11-07) is one
+  frame per faulting task, taken and zeroed before the space's lock and
+  used by the commit or the copy under it, or given back as the round ends:
+  never held across the fill or the pager's ask a round may wait for
+  (`L.user.225`, FX-0975 in a checks build). It is taken only while the job
+  has 64 pages of room under its memory limit (`user::vmo::SPARE_ROOM`), so
+  near the limit a fault charges what it did before (`L.user.227`). The room
+  test and the take are not one step, so the spares in flight within those
+  64 pages are bounded only by the job's tasks between their take and their
+  resolve; past that, a refusal waits (`L.user.228`). So the charge it adds
+  is one page a task for the length of one hold of its space's lock, and the
+  spares held machine-wide are counted. A fault a limit refused waits for
+  those to go back, a 1 ms pause at a time and at most 16
+  (`object::oom::SPARE_WAITS`), before anything is reclaimed or killed for
+  it: a kill for a frame nobody touched would take a process for nothing.
 * **Kernel heap** the Linux personality and its libraries hold for a
   program is charged as memory too, against the same limit, as cgroup v2
   folds `kmem` into `memory.max` (F-37). A token from `src/lib/kernel/kmem` is made
