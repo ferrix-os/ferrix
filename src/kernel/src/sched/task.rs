@@ -432,6 +432,17 @@ pub struct Task {
 /// a change of either moves it at its processor's next decision (§9g).
 const DEADLINE_BITS: u32 = 1 << 20;
 
+/// `RtWord::is_fair` is `RtWord::params` being `None`, for each value the
+/// policy bits can take, with and without a priority.
+const _: () = {
+    let mut policy = 0;
+    while policy < 4 {
+        let word = RtWord(policy << 8 | 0x2a);
+        assert!(word.is_fair() == word.params().is_none());
+        policy += 1;
+    }
+};
+
 /// A task's policy word: the priority in the low byte, the policy above it,
 /// then the two flags.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -461,6 +472,15 @@ impl RtWord {
             policy,
             priority: (self.0 & 0xff) as u8,
         })
+    }
+
+    /// Whether it names no real-time policy: exactly when [`RtWord::params`]
+    /// is `None` (the policy bits both clear or both set, the assertion
+    /// below holds it for all four), read without a branch: what the round
+    /// trip asks of both ends of every direct switch.
+    #[must_use]
+    pub const fn is_fair(self) -> bool {
+        ((self.0 >> 8) ^ (self.0 >> 9)) & 1 == 0
     }
 
     /// Whether its children start `SCHED_OTHER`.
@@ -1087,7 +1107,11 @@ impl Task {
             return entity;
         }
         let word = self.rt_word();
-        if let Some(params) = word.params() {
+        // The branch-free test first (`RtWord::is_fair`), the decode only
+        // for a real-time word.
+        if !word.is_fair()
+            && let Some(params) = word.params()
+        {
             // A fair task, the commonest, takes the straight way.
             core::hint::cold_path();
             // The node is put in its cell before the policy is stored
@@ -1186,7 +1210,7 @@ impl Task {
 
     /// Whether it is scheduled by the fair class: `SCHED_OTHER`.
     pub(crate) fn is_fair(&self) -> bool {
-        self.rt_params().is_none()
+        self.rt_word().is_fair()
     }
 
     /// Whether its queue's entity was built with the policy and priority it

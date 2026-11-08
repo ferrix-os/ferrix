@@ -459,7 +459,10 @@ impl CpuQueue {
         if delta == 0 {
             return None;
         }
-        if let Some(task) = Stack::current(&self.stack) {
+        // The running task, read once for the charge's two uses: nothing
+        // between them changes the stack.
+        let current = Stack::current(&self.stack);
+        if let Some(task) = current {
             self.stats.busy_ns += delta;
             // Its job's `cpu.stat`, and its `cpu.max` (`object::quota`).
             crate::object::quota::charge_cpu(&mut self.pending, task.group(), now, delta, user);
@@ -472,7 +475,7 @@ impl CpuQueue {
             Stack::elapse(&mut self.stack, delta);
             return None;
         };
-        if let Some(task) = Stack::current(&self.stack) {
+        if let Some(task) = current {
             task.add_runtime(delta);
         }
         if Stack::charge(&mut self.stack, delta) {
