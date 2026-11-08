@@ -251,6 +251,8 @@ pub(crate) fn entered_space(root: u64) {
     }
     let cpu = this_cpu();
     let Some(last) = LAST_ROOT.get(cpu) else {
+        // As before, past the table; the hint keeps every switch's way straight.
+        core::hint::cold_path();
         return;
     };
     // Taken, not read: a root installed without `entering_space` before it,
@@ -344,6 +346,8 @@ pub(crate) fn restricted_ran() {
 pub(crate) fn restricted_left() {
     let cpu = this_cpu();
     let Some(ran) = RESTRICTED_RAN.get(cpu) else {
+        // As before, past the table; the hint keeps every switch's way straight.
+        core::hint::cold_path();
         return;
     };
     if !ran.load(Ordering::Relaxed) {

@@ -1415,16 +1415,22 @@ impl CpuMask {
     /// A processor past [`MAX_CPUS`] cannot be named, and the scheduler refuses
     /// to start on a machine that has one, so nothing runs a space there.
     pub(crate) fn join(&self, cpu: usize) {
-        if let Some(word) = self.words.get(cpu / 64) {
-            let _ = word.fetch_or(1 << (cpu % 64), Ordering::SeqCst);
-        }
+        let Some(word) = self.words.get(cpu / 64) else {
+            // Nothing, as before; the hint keeps every switch's way straight.
+            core::hint::cold_path();
+            return;
+        };
+        let _ = word.fetch_or(1 << (cpu % 64), Ordering::SeqCst);
     }
 
     /// Remove processor `cpu`.
     pub(crate) fn leave(&self, cpu: usize) {
-        if let Some(word) = self.words.get(cpu / 64) {
-            let _ = word.fetch_and(!(1 << (cpu % 64)), Ordering::SeqCst);
-        }
+        let Some(word) = self.words.get(cpu / 64) else {
+            // Nothing, as before; the hint keeps every switch's way straight.
+            core::hint::cold_path();
+            return;
+        };
+        let _ = word.fetch_and(!(1 << (cpu % 64)), Ordering::SeqCst);
     }
 
     /// The processors in the set at the moment of reading.

@@ -1088,6 +1088,8 @@ impl Task {
         }
         let word = self.rt_word();
         if let Some(params) = word.params() {
+            // A fair task, the commonest, takes the straight way.
+            core::hint::cold_path();
             // The node is put in its cell before the policy is stored
             // (`sched::set_policy`, `sched::prepare_user`), and only a queue
             // holding the task takes it, so a real-time policy with no node
@@ -1629,6 +1631,8 @@ impl Task {
     pub(crate) fn take_evicted(&self) -> bool {
         let evicted = self.evicted.load(Ordering::Relaxed);
         if evicted {
+            // A clear mark, every switch's case, falls straight through.
+            core::hint::cold_path();
             self.evicted.store(false, Ordering::Relaxed);
         }
         evicted

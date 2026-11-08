@@ -262,7 +262,8 @@ static PUSHING: [AtomicBool; MAX_CPUS] = [const { AtomicBool::new(false) }; MAX_
 /// For `choose_next` on processor `cpu`, whose lock it holds: whether
 /// `previous`, the task it runs, is runnable and outside its mask here, so
 /// that it leaves this queue with the switch instead of being queued here
-/// again; marked for `finish_switch` if so.
+/// again; marked for `finish_switch` if so. `cpu` is the calling processor,
+/// with interrupts masked: its mark has no other writer ([`take_pushing`]).
 pub(super) fn leaves_with_switch(queue: &CpuQueue, cpu: usize, previous: &Task) -> bool {
     // Not on a processor asked to park: `park_pick` queues the running task
     // again for the evacuation, which moves it.
@@ -277,11 +278,23 @@ pub(super) fn leaves_with_switch(queue: &CpuQueue, cpu: usize, previous: &Task) 
 }
 
 /// For `finish_switch`: whether the task processor `cpu` just switched away
-/// from is to be pushed off.
+/// from is to be pushed off, clearing the mark.
+///
+/// A load, and a store only when the mark was set, not a swap: only `cpu`
+/// itself writes its mark (`leaves_with_switch` and this, both on it with
+/// interrupts masked), so no read-modify-write is needed, and every switch's
+/// tail reads a clear mark without the locked exchange a swap costs (as
+/// `Task::take_evicted`; the round trip's cross-domain row).
 pub(super) fn take_pushing(cpu: usize) -> bool {
-    PUSHING
-        .get(cpu)
-        .is_some_and(|flag| flag.swap(false, Ordering::Relaxed))
+    PUSHING.get(cpu).is_some_and(|flag| {
+        let pushing = flag.load(Ordering::Relaxed);
+        if pushing {
+            // A clear mark, every switch's case, falls straight through.
+            core::hint::cold_path();
+            flag.store(false, Ordering::Relaxed);
+        }
+        pushing
+    })
 }
 
 /// Tasks moved off a processor their mask excludes: by the pick push, and

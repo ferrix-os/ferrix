@@ -259,10 +259,19 @@ pub(crate) fn moving_lost() -> usize {
 /// filed again for a later call. With no queue lock held. Skipped while a
 /// switch holds [`SWITCH`], whose own wait calls it again: called from a
 /// switch away from a task (`finish_switch`), it never waits for one.
+#[inline(always)]
 pub(crate) fn drain() {
-    if moving() == 0 {
-        return;
+    // Nothing filed is every switch's case: the one test, falling through,
+    // and the rest out of line (the round trip's cross-domain row).
+    if moving() != 0 {
+        drain_filed();
     }
+}
+
+/// [`drain`] once something is filed.
+#[cold]
+#[inline(never)]
+fn drain_filed() {
     let Some(_switch) = SWITCH.try_lock() else {
         return;
     };

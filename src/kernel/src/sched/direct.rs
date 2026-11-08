@@ -296,7 +296,9 @@ impl Direct {
         // tier above fair has no real-time task to ask about (a policy is
         // refused without one, L.sched.138), so `REALTIME` folds the two
         // reads away there (ledger 5684 B4, the round trip).
-        let plan = if !super::stack::REALTIME || (caller.is_fair() && peer.is_fair()) {
+        // Both read with no branch between them (`&`): `is_fair` is a pure
+        // read of the task's policy word, with no lock, panic or other effect.
+        let plan = if !super::stack::REALTIME || (caller.is_fair() & peer.is_fair()) {
             ferrix_sched_fair::plan_job_fold(joined, caller.group_word(), quota::NONE)
         } else {
             JobPlan::Separate

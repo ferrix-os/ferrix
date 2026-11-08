@@ -1224,7 +1224,9 @@ impl CpuQueue {
         // comes out of it into `between`: moved, not counted up and down.
         match Stack::hand_over(&mut self.stack, id, peer, entity, slice_after) {
             Ok(left) => {
-                if let Some(next) = Stack::current(&self.stack) {
+                // The pick, read once: marked queued here and answered below.
+                let next = Stack::current(&self.stack).cloned();
+                if let Some(next) = next.as_ref() {
                     next.set_queued(true);
                 }
                 if let Some((_, task, entity)) = left {
@@ -1242,15 +1244,15 @@ impl CpuQueue {
                     // go after the peer's weight was taken with it counted.
                     between(task);
                 }
+                next
             }
             Err(refused) => {
                 // A duplicate or a weight of zero, neither of which this
                 // kernel makes: as `insert` refuses.
                 refused.payload.keep_refused(refused.entity);
-                return None;
+                None
             }
         }
-        Stack::current(&self.stack).cloned()
     }
 
     /// Take `id` out of this processor's sleeper set, if it is in it.
@@ -1295,6 +1297,7 @@ impl CpuQueue {
     ///
     /// The number `arm_timer` decides on, so it is also the number that says
     /// whether this processor's timer needs to exist at all.
+    #[inline]
     pub(crate) fn waiting(&self) -> usize {
         // Derived over the whole stack (docs/SCHED-CLASSES.md §9d, F3):
         // everything queued less the running one, of any tier.

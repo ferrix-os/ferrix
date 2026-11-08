@@ -800,12 +800,16 @@ fn this_logical() -> usize {
 
 /// Add one to this processor's slot of `counters`.
 fn count(counters: &[AtomicU64; MAX_CPUS]) {
-    if let Some(counter) = counters.get(this_logical()) {
-        counter.store(
-            counter.load(Ordering::Relaxed).wrapping_add(1),
-            Ordering::Relaxed,
-        );
-    }
+    let Some(counter) = counters.get(this_logical()) else {
+        // A processor past the table counts nothing, as before; a hint only,
+        // so that the count, every switch's case, falls straight through.
+        core::hint::cold_path();
+        return;
+    };
+    counter.store(
+        counter.load(Ordering::Relaxed).wrapping_add(1),
+        Ordering::Relaxed,
+    );
 }
 
 /// This processor's fast resets so far that reset the x87, and that left it
