@@ -306,6 +306,11 @@ pub fn ticks() -> u64 {
 /// in 128 bits because the obvious 64-bit form overflows after about eighteen
 /// seconds at a 1 `GHz` counter, which is exactly long enough to pass every
 /// test and fail on a real machine.
+///
+/// Inlined always: the direct switch reads it once a direction, and as a call
+/// it cost the round trip on `present` a call and a return each way
+/// (ledger 5684 B4, measured with the call row's IBPB at every switch).
+#[inline(always)]
 pub fn now_nanos() -> u64 {
     let hz = arch::counter_hz();
     if hz == 0 {
