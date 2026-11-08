@@ -817,11 +817,15 @@ fn take_up<'s>(
             (parked.disk, parked.registration)
         }
         None => {
+            // No memory for the write reserve refuses the HELLO, as any
+            // other part of the ring's setup does (ledger 8275 W4.7).
+            let reserve = PayloadReserve::new(request_bytes(&device)).ok_or(Refusal::Device)?;
             let disk = Arc::new(RingDisk::new(
                 device,
                 name,
                 limits,
                 Arc::clone(&kernel_port),
+                reserve,
             ));
             let registration = publish_disk(start, &name, accepted.serial, &disk)?;
             (disk, registration)
@@ -1229,12 +1233,37 @@ impl RingMemory for Pages {
 /// queue wake each other for nothing, which costs a look and no more. At most
 /// 64, the bits of the mask [`answer`] returns.
 const WAKE_SLOTS: usize = 64;
+
+/// The most bytes one write request carries, whatever the driver's HELLO
+/// says it takes at once (L.device.86): a ring-3 driver's `max_sectors`
+/// decides how a write is split only below this, so it cannot make the
+/// kernel copy, or keep in reserve, more than this per request. 128 KiB,
+/// what the NVMe driver takes (`max_transfer_bytes`).
+const PAYLOAD_CAP: usize = 128 * 1024;
+
+/// Write payloads each disk keeps in reserve for a heap that refuses one
+/// (L.device.86): two, so that one writer's request and the next can both
+/// be in flight. Kernel memory charged to no job: at most
+/// `RESERVE_ELEMENTS * PAYLOAD_CAP`, 256 KiB, per disk.
+const RESERVE_ELEMENTS: usize = 2;
+
+/// How long a writer waits for a reserved payload to come back, when the
+/// heap and the reserve both refused it, before its write answers ENOMEM
+/// (L.device.86). Not ended by a kill: the write is the filesystem's, for
+/// everyone on the mount (see [`RingDisk::wait`]).
+const RESERVE_WAIT_NANOS: u64 = 1_000_000_000;
 const _: () = assert!(WAKE_SLOTS <= 64, "a wake mask is one u64");
 
 /// Requests that found the ring's task asleep and nudged it.
 pub(crate) static NUDGES_SENT: AtomicU64 = AtomicU64::new(0);
 /// Requests that found it awake, or nudged already, and did not.
 pub(crate) static NUDGES_SPARED: AtomicU64 = AtomicU64::new(0);
+/// Write requests whose heap copy was refused and that went to the reserve
+/// (L.device.86), for the check.
+pub(crate) static RESERVE_TAKEN: AtomicU64 = AtomicU64::new(0);
+/// Of those, the ones that found no element within [`RESERVE_WAIT_NANOS`]
+/// and answered ENOMEM.
+pub(crate) static RESERVE_REFUSED: AtomicU64 = AtomicU64::new(0);
 /// Nudges the task found missing on waking: something it could have
 /// dispatched was queued while it slept, and either nobody nudged it or the
 /// nudge claimed never reached its port. The driver check holds this at zero.
@@ -1255,12 +1284,94 @@ struct Landing {
     len: usize,
 }
 
+/// A write's bytes, as its caller gave them to the ring: copied into the
+/// heap, or, when the heap refused, into one of the disk's reserved
+/// payloads ([`PayloadReserve`]), the first `len` bytes of element `index`.
+/// No other way to a payload exists (ledger 8275 W4.1).
+#[derive(Debug)]
+enum Payload {
+    Heap(Vec<u8>),
+    Reserved { index: usize, len: usize },
+}
+
+impl Payload {
+    /// The reserved element it holds, if any.
+    const fn reserved(&self) -> Option<usize> {
+        match self {
+            Payload::Heap(_) => None,
+            Payload::Reserved { index, .. } => Some(*index),
+        }
+    }
+}
+
+/// The write payloads a disk keeps for a heap that refuses one
+/// (L.device.86): [`RESERVE_ELEMENTS`] buffers of the disk's request size,
+/// made with the disk, kept for its life -- across a driver's restart too,
+/// since the disk outlives its rings -- and lent one per request.
+///
+/// Which are lent is `DiskState::reserve_free`, under the disk's lock. An
+/// element is lent to a writer, which copies its chunk in holding no lock,
+/// submits it, and keeps it until its request leaves the requests map --
+/// answered and collected, abandoned and then answered, failed by the ring's
+/// end or by going offline, or refused at submit ([`DiskState::release`],
+/// called from each). So a hold is bounded by the ring's own bounds: the
+/// device completing it (and the requests before it, whose regions `fill`
+/// waits for), the read patience, or the disk going offline. Whoever holds
+/// one waits on nothing but that (ledger 8275 W4.3).
+struct PayloadReserve {
+    /// The elements, each `bytes` long. An element's lock is taken by the
+    /// writer it is lent to, holding no other, and by `fill`, under the
+    /// disk's lock: the disk's lock is never taken under an element's.
+    elements: alloc::boxed::Box<[SpinLock<Vec<u8>>]>,
+    /// What one request carries at most: the disk's request size.
+    bytes: usize,
+    /// Woken when an element is given back.
+    returned: WaitQueue,
+}
+
+impl PayloadReserve {
+    /// The reserve for a disk whose requests carry at most `bytes`:
+    /// `None` when there is no memory for it, and the HELLO is refused
+    /// (ledger 8275 W4.7).
+    fn new(bytes: usize) -> Option<PayloadReserve> {
+        let mut elements = Vec::new();
+        elements.try_reserve_exact(RESERVE_ELEMENTS).ok()?;
+        for _ in 0..RESERVE_ELEMENTS {
+            let element = crate::fallible::try_filled(0u8, bytes).ok()?;
+            // NOALLOC: into the capacity reserved above.
+            elements.push(SpinLock::new(element));
+        }
+        Some(PayloadReserve {
+            elements: elements.into_boxed_slice(),
+            bytes,
+            returned: WaitQueue::new(),
+        })
+    }
+}
+
+/// What one write request of a disk carries at most: what the device takes
+/// at once, as its HELLO said, but never above [`PAYLOAD_CAP`] (rounded
+/// down to whole blocks), and at least one block (ledger 8275 W4.2).
+fn request_bytes(device: &Device) -> usize {
+    let size = usize::try_from(device.block_size()).unwrap_or(1).max(1);
+    let most = usize::try_from(device.max_sectors())
+        .unwrap_or(usize::MAX)
+        .saturating_mul(size);
+    let cap = PAYLOAD_CAP - PAYLOAD_CAP % size;
+    most.min(cap).max(size)
+}
+
+/// Every element of the reserve, free: the mask `DiskState::reserve_free`
+/// starts at.
+const RESERVE_ALL: u8 = (1 << RESERVE_ELEMENTS) - 1;
+
 /// A request a caller is waiting on.
 #[derive(Debug)]
 struct Pending {
-    /// A write's bytes, until the ring's task copies them into the data
-    /// region it dispatches the command through.
-    payload: Option<Vec<u8>>,
+    /// A write's bytes, until the request leaves the requests map; the ring's
+    /// task copies them into the data region it dispatches the command
+    /// through.
+    payload: Option<Payload>,
     /// What came of it, once it has: where a read's bytes wait, or nothing
     /// for a write or a flush.
     result: Option<Result<Option<Landing>, Errno>>,
@@ -1318,6 +1429,9 @@ struct DiskState {
     held_back: bool,
     /// Where the ring's task is: see [`DiskState::claim_nudge`].
     task: TaskIs,
+    /// Which elements of the disk's [`PayloadReserve`] are not lent, one
+    /// bit each.
+    reserve_free: u8,
 }
 
 impl DiskState {
@@ -1364,6 +1478,56 @@ impl DiskState {
         }
         self.held_back = false;
         true
+    }
+
+    /// A request left the requests map: give back the reserved payload it
+    /// held, if any. Whether one was given back, so that the caller wakes
+    /// the reserve's waiters once it lets go of the lock. Every removal from
+    /// `reads` calls this, or [`DiskState::drop_abandoned`], which does.
+    fn release(&mut self, pending: &Pending) -> bool {
+        match pending.payload.as_ref().and_then(Payload::reserved) {
+            Some(index) => {
+                debug_assert!(
+                    self.reserve_free & (1 << index) == 0,
+                    "a reserved payload was given back while it was free"
+                );
+                self.reserve_free |= 1 << index;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Take out every abandoned request, giving back what they held:
+    /// whether a reserved payload came back.
+    fn drop_abandoned(&mut self) -> bool {
+        let DiskState {
+            reads,
+            reserve_free,
+            ..
+        } = self;
+        let mut returned = false;
+        reads.retain(|_, pending| {
+            if pending.abandoned
+                && let Some(index) = pending.payload.as_ref().and_then(Payload::reserved)
+            {
+                *reserve_free |= 1 << index;
+                returned = true;
+            }
+            !pending.abandoned
+        });
+        returned
+    }
+
+    /// Lend a free element of the reserve, if one is.
+    fn lend(&mut self) -> Option<usize> {
+        let free = self.reserve_free;
+        if free == 0 {
+            return None;
+        }
+        let index = free.trailing_zeros() as usize;
+        self.reserve_free &= !(1 << index);
+        Some(index)
     }
 
     /// Put `region` back on the free list.
@@ -1421,6 +1585,8 @@ pub(crate) struct RingDisk {
     /// The serving ring's completion port, nudged when a read is queued:
     /// the next ring's once a parked disk is taken up again.
     port: SpinLock<Arc<Port>>,
+    /// Write payloads kept for a heap that refuses one (L.device.86).
+    reserve: PayloadReserve,
 }
 
 impl fmt::Debug for RingDisk {
@@ -1433,7 +1599,13 @@ impl fmt::Debug for RingDisk {
 
 impl RingDisk {
     /// A disk for `device`, whose queue takes `limits`, nudging `port`.
-    fn new(device: Device, name: DiskName, limits: Limits, port: Arc<Port>) -> RingDisk {
+    fn new(
+        device: Device,
+        name: DiskName,
+        limits: Limits,
+        port: Arc<Port>,
+        reserve: PayloadReserve,
+    ) -> RingDisk {
         RingDisk {
             device,
             name,
@@ -1450,10 +1622,12 @@ impl RingDisk {
                 leases: Vec::new(),
                 held_back: false,
                 task: TaskIs::Awake,
+                reserve_free: RESERVE_ALL,
             }),
             done: (0..WAKE_SLOTS).map(|_| WaitQueue::new()).collect(),
             next_slot: AtomicUsize::new(0),
             port: SpinLock::new(port),
+            reserve,
         }
     }
 
@@ -1520,7 +1694,7 @@ impl RingDisk {
             let mut state = self.state.lock();
             state.ended = true;
             // A reader that gave up is not coming back for its answer.
-            state.reads.retain(|_, pending| !pending.abandoned);
+            let _ = state.drop_abandoned();
             for pending in state.reads.values_mut() {
                 if pending.result.is_none() {
                     pending.result = Some(Err(Errno::EIO));
@@ -1530,10 +1704,14 @@ impl RingDisk {
         for queue in &self.done {
             queue.wake_all();
         }
+        // A writer waiting for a reserved payload finds the ring over.
+        self.reserve.returned.wake_all();
     }
 
-    /// Wake the queues `mask` names, one bit each.
+    /// Wake the queues `mask` names, one bit each, and every writer waiting
+    /// for a reserved payload: an answer may have given one back.
     fn wake(&self, mask: u64) {
+        self.reserve.returned.wake_all();
         for (index, queue) in self.done.iter().enumerate() {
             if mask & (1 << index) != 0 {
                 queue.wake_all();
@@ -1571,13 +1749,40 @@ impl RingDisk {
     /// answer its id; the id in `request` is replaced by the disk's next one.
     /// `payload` is a write's bytes, which the ring's task copies into the
     /// data region when it dispatches the command.
+    ///
+    /// A refused request leaves nothing behind: no entry in the requests map
+    /// and nothing queued, and a reserved payload it was lent goes back
+    /// (L.device.87, ledger 8275 W4.5).
     fn submit(
         &self,
         request: Request,
-        payload: Option<Vec<u8>>,
+        payload: Option<Payload>,
         slot: usize,
     ) -> Result<u64, Errno> {
+        let lent = payload.as_ref().and_then(Payload::reserved);
         let mut state = self.state.lock();
+        let submitted = self.submit_held(&mut state, request, payload, slot);
+        if submitted.is_err()
+            && let Some(index) = lent
+        {
+            state.reserve_free |= 1 << index;
+            drop(state);
+            self.reserve.returned.wake_all();
+        }
+        submitted
+    }
+
+    /// [`RingDisk::submit`] under the disk's lock. The request's entry in
+    /// the requests map is made first, inside a reserved section
+    /// (`fallible::insert`, L.mm.63), so that a refused one is never
+    /// queued; one the queue then refuses is taken out again.
+    fn submit_held(
+        &self,
+        state: &mut DiskState,
+        request: Request,
+        payload: Option<Payload>,
+        slot: usize,
+    ) -> Result<u64, Errno> {
         let given_up = state
             .parked_at
             .is_some_and(|at| timer::now_nanos().saturating_sub(at) > PARK_PATIENCE_NANOS);
@@ -1585,16 +1790,12 @@ impl RingDisk {
             return Err(Errno::EIO);
         }
         let id = state.next_id;
-        state.next_id = id.wrapping_add(1);
         let request = Request {
             id: ferrix_block::RequestId(id),
             ..request
         };
-        state
-            .queue
-            .submit(ticks(), request)
-            .map_err(|_| Errno::EIO)?;
-        let _ = state.reads.insert(
+        let _ = crate::fallible::insert(
+            &mut state.reads,
             id,
             Pending {
                 payload,
@@ -1602,7 +1803,14 @@ impl RingDisk {
                 abandoned: false,
                 slot,
             },
-        );
+        )
+        .map_err(|_| Errno::ENOMEM)?;
+        if state.queue.submit(ticks(), request).is_err() {
+            // Its payload's element, if any, the caller gives back.
+            let _ = state.reads.remove(&id);
+            return Err(Errno::EIO);
+        }
+        state.next_id = id.wrapping_add(1);
         if let Some(queue) = self.done.get(slot) {
             sched::trip::queued(queue);
         }
@@ -1670,7 +1878,7 @@ impl RingDisk {
             // A reader that gave up is not coming back for its answer; the
             // others get theirs now. Bounded by the requests outstanding,
             // which the queue's limits bound.
-            state.reads.retain(|_, pending| !pending.abandoned);
+            let _ = state.drop_abandoned();
             for pending in state.reads.values_mut() {
                 if pending.result.is_none() {
                     pending.result = Some(Err(Errno::EIO));
@@ -1693,6 +1901,7 @@ impl RingDisk {
         for queue in &self.done {
             queue.wake_all();
         }
+        self.reserve.returned.wake_all();
     }
 
     /// Whether every request `ids` names has an answer, or the ring is over.
@@ -1716,6 +1925,7 @@ impl RingDisk {
     /// the caller's buffer, is made here, by the caller, holding no lock:
     /// the region is the caller's until it lets go of it below.
     fn collect(&self, id: u64, out: &mut [u8]) -> Result<(), Errno> {
+        let mut returned = false;
         let result = {
             let mut state = self.state.lock();
             match state.reads.get_mut(&id) {
@@ -1726,10 +1936,19 @@ impl RingDisk {
                     pending.abandoned = true;
                     return Err(Errno::EIO);
                 }
-                Some(_) => state.reads.remove(&id).and_then(|pending| pending.result),
+                Some(_) => {
+                    let pending = state.reads.remove(&id);
+                    returned = pending
+                        .as_ref()
+                        .is_some_and(|pending| state.release(pending));
+                    pending.and_then(|pending| pending.result)
+                }
                 None => None,
             }
         };
+        if returned {
+            self.reserve.returned.wake_all();
+        }
         match result {
             None => Err(Errno::EIO),
             Some(Err(errno)) => Err(errno),
@@ -1763,7 +1982,7 @@ impl RingDisk {
     fn request(
         &self,
         request: Request,
-        payload: Option<Vec<u8>>,
+        payload: Option<Payload>,
         out: &mut [u8],
     ) -> Result<(), Errno> {
         let slot = self.slot();
@@ -1772,8 +1991,75 @@ impl RingDisk {
         self.collect(id, out)
     }
 
+    /// `chunk` as a request's payload: copied into the heap if it gives the
+    /// room (L.device.86), and only when it refuses into an element of the
+    /// disk's reserve, waiting for one to come back while all are lent. The
+    /// wait sleeps on the reserve's queue, holding no lock, and ends with
+    /// ENOMEM [`RESERVE_WAIT_NANOS`] after it began, however often it is
+    /// woken to find the element taken again, or with EIO once the ring is
+    /// over or the disk offline. A kill does not end it (see
+    /// [`RingDisk::wait`]).
+    fn payload_for(&self, chunk: &[u8]) -> Result<Payload, Errno> {
+        self.payload_within(chunk, RESERVE_WAIT_NANOS)
+    }
+
+    /// [`RingDisk::payload_for`], waiting at most `wait` for an element: the
+    /// check's way to the same code with a wait it can afford.
+    fn payload_within(&self, chunk: &[u8], wait: u64) -> Result<Payload, Errno> {
+        if let Ok(copy) = crate::fallible::try_to_vec(chunk) {
+            return Ok(Payload::Heap(copy));
+        }
+        let _ = RESERVE_TAKEN.fetch_add(1, Ordering::Relaxed);
+        let deadline = timer::now_nanos().saturating_add(wait);
+        loop {
+            let lent = {
+                let mut state = self.state.lock();
+                let given_up = state
+                    .parked_at
+                    .is_some_and(|at| timer::now_nanos().saturating_sub(at) > PARK_PATIENCE_NANOS);
+                // What submit would answer at once, answered here at once.
+                if state.ended || state.offline || given_up {
+                    return Err(Errno::EIO);
+                }
+                state.lend()
+            };
+            if let Some(index) = lent {
+                let element = self.reserve.elements.get(index).ok_or(Errno::EIO)?;
+                let mut bytes = element.lock();
+                let Some(into) = bytes.get_mut(..chunk.len()) else {
+                    drop(bytes);
+                    self.state.lock().reserve_free |= 1 << index;
+                    return Err(Errno::EIO);
+                };
+                into.copy_from_slice(chunk);
+                return Ok(Payload::Reserved {
+                    index,
+                    len: chunk.len(),
+                });
+            }
+            if timer::now_nanos() >= deadline {
+                let _ = RESERVE_REFUSED.fetch_add(1, Ordering::Relaxed);
+                return Err(Errno::ENOMEM);
+            }
+            let _ = self.reserve.returned.wait_until_deadline(
+                || {
+                    let state = self.state.lock();
+                    state.reserve_free != 0 || state.ended || state.offline
+                },
+                deadline,
+            );
+        }
+    }
+
+    /// The reserve's elements lent and free, for the check (L.device.86):
+    /// together always [`RESERVE_ELEMENTS`].
+    pub(crate) fn reserve_counts(&self) -> (u32, u32) {
+        let free = self.state.lock().reserve_free.count_ones();
+        (RESERVE_ELEMENTS as u32 - free, free)
+    }
+
     /// Write `payload` — `count` whole sectors — at `sector`, as one request.
-    fn write_request(&self, sector: u64, count: u32, payload: Vec<u8>) -> Result<(), Errno> {
+    fn write_request(&self, sector: u64, count: u32, payload: Payload) -> Result<(), Errno> {
         self.request(
             Request::write(0, sector, count).sync(),
             Some(payload),
@@ -1855,9 +2141,20 @@ impl BlockDevice for RingDisk {
         self.state.lock().offline
     }
 
-    /// Write whole sectors, split like a read into what the device takes at
-    /// once. A disk the driver called read-only is refused here rather than
-    /// at the far end, so a mount learns why.
+    /// Write whole sectors, split into requests of what the device takes at
+    /// once and the kernel's [`PAYLOAD_CAP`]. A disk the driver called
+    /// read-only is refused here rather than at the far end, so a mount
+    /// learns why.
+    ///
+    /// Each request's bytes are copied into the heap, or, when it refuses,
+    /// into a reserved payload, waited for at most [`RESERVE_WAIT_NANOS`]
+    /// (L.device.86; [`RingDisk::payload_for`]). A write answering ENOMEM
+    /// after earlier requests of it went down has written those sectors and
+    /// no others, which its callers can take (ledger 8275 W4.6): btrfs's
+    /// writeback writes a run of dirty pages again whole, keeping them dirty
+    /// on a failure; its tree nodes are copied on write and named by nothing
+    /// on the disk until the superblock is written, and a superblock is one
+    /// sector, never split.
     fn write(&self, sector: u64, buf: &[u8]) -> Result<(), Errno> {
         if self.read_only() {
             return Err(Errno::EROFS);
@@ -1866,13 +2163,11 @@ impl BlockDevice for RingDisk {
         if size == 0 || buf.is_empty() || !buf.len().is_multiple_of(size) {
             return Err(Errno::EINVAL);
         }
-        let most = usize::try_from(self.device.max_sectors())
-            .unwrap_or(usize::MAX)
-            .saturating_mul(size);
         let mut at = sector;
-        for chunk in buf.chunks(most.max(size)) {
+        for chunk in buf.chunks(self.reserve.bytes) {
             let count = u32::try_from(chunk.len() / size).map_err(|_| Errno::EIO)?;
-            self.write_request(at, count, chunk.to_vec())?;
+            let payload = self.payload_for(chunk)?;
+            self.write_request(at, count, payload)?;
             at = at.checked_add(u64::from(count)).ok_or(Errno::EIO)?;
         }
         Ok(())
@@ -2035,16 +2330,28 @@ impl Serving<'_> {
         block: u64,
     ) -> bool {
         parts.iter().all(|&(id, at)| {
-            let bytes = state
+            let into = offset + at.saturating_sub(sector).saturating_mul(block);
+            match state
                 .reads
                 .get(&id)
-                .and_then(|pending| pending.payload.as_deref());
-            bytes.is_some_and(|bytes| {
-                self.regions.pages.copy_in(
-                    offset + at.saturating_sub(sector).saturating_mul(block),
-                    bytes,
-                )
-            })
+                .and_then(|pending| pending.payload.as_ref())
+            {
+                Some(Payload::Heap(bytes)) => self.regions.pages.copy_in(into, bytes),
+                // An element's lock under the disk's: the order every
+                // holder keeps ([`PayloadReserve`]).
+                Some(&Payload::Reserved { index, len }) => self
+                    .disk
+                    .reserve
+                    .elements
+                    .get(index)
+                    .is_some_and(|element| {
+                        element
+                            .lock()
+                            .get(..len)
+                            .is_some_and(|bytes| self.regions.pages.copy_in(into, bytes))
+                    }),
+                None => false,
+            }
         })
     }
 
@@ -2286,7 +2593,17 @@ fn answer(
             continue;
         };
         if pending.abandoned {
-            let _ = state.reads.remove(&part.id.0);
+            if let Some(gone) = state.reads.remove(&part.id.0)
+                && state.release(&gone)
+            {
+                // Its reserved payload is free from here, and a writer may
+                // be waiting for it: a bit of the answer's wake, so that
+                // the task wakes ([`RingDisk::wake`] wakes the reserve's
+                // waiters too) even when every part was abandoned. Its own
+                // caller's queue is woken for nothing, which costs a look
+                // (ledger 8328 WR.1).
+                wake |= 1 << (gone.slot % WAKE_SLOTS);
+            }
             continue;
         }
         // Answered already -- by going offline -- and never answered again:

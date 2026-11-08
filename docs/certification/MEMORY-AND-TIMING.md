@@ -3073,6 +3073,48 @@ The board was not written: the program went over the serial line with
 
 **The debug log under `personality=user` (L.device.84-85, BA.6).** `DEBUG_WRITE` copies one call's bound in, outside the console lock, and holds that lock for one line's output through the UART, as any kernel line does: its hold is a line's bytes at the port's rate, the same term the console already has, stated against HardRt. A process past its bytes a second is answered `SHOULD_WAIT` before any of that.
 
+### 2.2aj The block ring's write reserve (`interfaces::block_ring`, load ring, 2026-11-08)
+
+`L.device.86-87`, ledger 8275 (`docs/BTRFS-PRESSURE.md`, "Against Linux's
+btrfs", W4). `RingDisk::write` copied each request's bytes into the heap
+with an allocation that could not fail -- 128 KiB a request on NVMe, a block
+of order 5 -- a candidate for the N150's FX-0008 "memory allocation of
+131072 bytes failed" (record #7; the record has no trace, so not shown).
+
+**Memory.** A request carries at most what the device takes at once, as its
+HELLO said, and never more than `PAYLOAD_CAP`, 128 KiB, whole blocks
+(`request_bytes`): a ring-3 driver cannot make the kernel copy or keep more.
+Each disk keeps `RESERVE_ELEMENTS` (2) payloads of that size, made with the
+disk at its first HELLO -- no memory for them refuses that HELLO -- and kept
+for the disk's life, across its drivers' restarts, since a parked disk is
+taken up by the next driver with everything it holds. At most 256 KiB per
+disk, kernel memory charged to no job. A request's copy goes to the heap
+first, fallibly; only a refusal takes an element.
+
+**The hold.** An element is lent from the writer's copy until its request
+leaves the requests map: collected after its answer, abandoned and then
+answered, failed by the ring's end or the disk going offline, or refused at
+submit (`DiskState::release`, `drop_abandoned`; the check counts lent and
+free as always two). Its command is filled into a data region when one is
+free, which waits for the device to finish earlier commands, so a hold is
+bounded by the ring's own bounds: the device's completion, the read
+patience (30 s) and `offline_if_silent`. The writer holding one waits on
+nothing else.
+
+**The wait.** A writer that finds the heap and both elements refused sleeps
+on the reserve's queue, holding no lock, preemption on, and answers ENOMEM
+`RESERVE_WAIT_NANOS` (1 s, on `timer::now_nanos`) after it began, however
+often it is woken to find the element taken again; EIO at once if the ring
+is over or the disk offline. A kill does not end it: the write is the
+filesystem's, for everyone on the mount (`RingDisk::wait`).
+
+**Locks.** `fill` copies a reserved payload into its region under the disk's
+lock, with the element's lock taken inside it -- a copy of at most 128 KiB,
+as a heap payload's was; a writer takes an element's lock holding no other,
+so the disk's lock is never taken under an element's. The requests map's
+entry is made inside a reserved section before the request is queued
+(`fallible::insert`), so a refusal leaves nothing the ring could dispatch.
+
 ## 3. Why F-24 is not closed, and F-23 is
 
 A document that says "the property does not hold" is not a closed finding, and

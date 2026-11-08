@@ -1502,5 +1502,34 @@ package FerrixDeviceRequirements {
             attribute :>> parent = "H.DEV.11";
             attribute :>> unit = "device::DeviceNode::derived_rights";
         }
+        // docs/BTRFS-PRESSURE.md, "Against Linux's btrfs", W4 (ledger 8275).
+        requirement <'L.device.86'> aWriteHasAReserveAndABoundedWait : ItemLowLevel {
+            attribute :>> statement = "A block ring's write shall copy each request's bytes,
+                at most what the device takes at once and never above 128 KiB, into the heap
+                fallibly; when the heap refuses, into one of two payloads the disk keeps for
+                its life, lent until the request leaves its requests map; and when both are
+                lent, wait for one at most a bounded time, then answer ENOMEM.";
+            attribute :>> criterion = "block_ring::offline_check::reserve, on a disk no ring serves with
+                the heap's refusals injected on the writing task: a refused copy is served from
+                the reserve with the caller's bytes and queued; with both lent, a third answers
+                ENOMEM once its wait is over and within half a second of it; a collected write
+                and an abandoned one answered later each give their payload back, lent and free
+                always two. The ring's code is load code, which cannot be a unit
+                (check-traceability refuses it); the unit is the item's half, the deadline
+                wait it sleeps in.";
+            attribute :>> parent = "H.STORE.7";
+            attribute :>> unit = "sched::wait::WaitQueue::wait_until_deadline";
+        }
+        requirement <'L.device.87'> aRefusedRequestLeavesNothingQueued : ItemLowLevel {
+            attribute :>> statement = "A block ring request whose entry in the requests map
+                cannot be made shall be refused with ENOMEM before it is queued, leaving
+                nothing the ring could dispatch and giving back a reserved payload it held.";
+            attribute :>> criterion = "block_ring::offline_check::reserve: with the entry's allocation
+                refused, the submit answers ENOMEM, the queue and the map hold what they held
+                before, and the reserve is all free. The unit is the item's fallible insert
+                the entry is made with; the ring's code is load code.";
+            attribute :>> parent = "H.STORE.7";
+            attribute :>> unit = "fallible::insert";
+        }
     }
 }

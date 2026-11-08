@@ -15,16 +15,16 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 196 | 141 | 55 |
-| Low (`L.*`) | 1522 | 1241 | 281 |
+| Low (`L.*`) | 1524 | 1243 | 281 |
 
-3424 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+3425 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 3433 |
+| Named by a low-level requirement | 3434 |
 | Accessors, covered by the requirement they serve | 1470 |
 | Check code in a product file | 125 |
-| Named by none | 1166 |
+| Named by none | 1165 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `ferrix_boot_policy`, `ferrix_sha256`, `ferrix_sigverify`, `ferrix_slots`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -2100,6 +2100,8 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.device.85` | A process shall write at most its budget of bytes a second to the debug log, past which DEBUG_WRITE answers SHOULD_WAIT, so that a QM process cannot starve a safety partition's lines. | test-first-processes; the console lock's hold bound is in MEMORY-AND-TIMING. | H.DEV.13 | `object::process::Process::debug_budget_takes` | `tools/common/xtask/src/qemu.rs::test_first_processes` | xtask gate | xtask gate | xtask gate |
 | `L.device.79` | A node flagged needs_certified shall give its vector, I/O mapping and pin only to a process that passes K14's test. | object::grant_check on a made-up node. | H.DEV.11 | `syscall::native::certified_grant`, `syscall::native::takes_grant`, `iommu::would_translate`, `device::DeviceNode::wants_certified` | `src/kernel/src/object/grant_check.rs::run`, `tools/common/xtask/src/qemu.rs::test_first_processes_needs` | xtask gate | xtask gate | xtask gate |
 | `L.device.80` | What a needs_certified node's vector, I/O mapping and pin give shall carry no TRANSFER. | object::grant_check. | H.DEV.11 | `device::DeviceNode::derived_rights` | `src/kernel/src/object/grant_check.rs::run` | not built | not built | not built |
+| `L.device.86` | A block ring's write shall copy each request's bytes, at most what the device takes at once and never above 128 KiB, into the heap fallibly; when the heap refuses, into one of two payloads the disk keeps for its life, lent until the request leaves its requests map; and when both are lent, wait for one at most a bounded time, then answer ENOMEM. | block_ring::offline_check::reserve, on a disk no ring serves with the heap's refusals injected on the writing task: a refused copy is served from the reserve with the caller's bytes and queued; with both lent, a third answers ENOMEM once its wait is over and within half a second of it; a collected write and an abandoned one answered later each give their payload back, lent and free always two. The ring's code is load code, which cannot be a unit (check-traceability refuses it); the unit is the item's half, the deadline wait it sleeps in. | H.STORE.7 | `sched::wait::WaitQueue::wait_until_deadline` | `src/kernel/src/interfaces/block_ring/offline_check.rs::run` | not built | not built | not built |
+| `L.device.87` | A block ring request whose entry in the requests map cannot be made shall be refused with ENOMEM before it is queued, leaving nothing the ring could dispatch and giving back a reserved payload it held. | block_ring::offline_check::reserve: with the entry's allocation refused, the submit answers ENOMEM, the queue and the map hold what they held before, and the reserve is all free. The unit is the item's fallible insert the entry is made with; the ring's code is load code. | H.STORE.7 | `fallible::insert` | `src/kernel/src/interfaces/block_ring/offline_check.rs::run` | not built | not built | not built |
 
 ### Switch
 
@@ -2814,6 +2816,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/interfaces/block_ring/check.rs::refusals` | kernel | L.quiesce.1 |
 | `src/kernel/src/interfaces/block_ring/check.rs::round` | kernel | L.quiesce.2, H.DEV.2, H.DEV.4 |
 | `src/kernel/src/interfaces/block_ring/check.rs::run` | kernel | L.quiesce.3 |
+| `src/kernel/src/interfaces/block_ring/offline_check.rs::run` | kernel | L.device.86, L.device.87 |
 | `src/kernel/src/interfaces/chardev/check.rs::coherent_syscalls` | kernel | L.user.133 |
 | `src/kernel/src/interfaces/chardev/check.rs::combining_maps` | kernel | L.user.132, L.user.133 |
 | `src/kernel/src/interfaces/chardev/check.rs::dmabufs` | kernel | L.user.126 |

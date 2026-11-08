@@ -53,7 +53,7 @@
     "src/kernel/src/fs/timerfd.rs": 5,
     "src/kernel/src/interfaces/audio/mod.rs": 10,
     "src/kernel/src/interfaces/audio/pcm.rs": 8,
-    "src/kernel/src/interfaces/block_ring/mod.rs": 20,
+    "src/kernel/src/interfaces/block_ring/mod.rs": 19,
     "src/kernel/src/interfaces/chardev/dmabuf.rs": 1,
     "src/kernel/src/interfaces/chardev/mod.rs": 7,
     "src/kernel/src/interfaces/chardev/sync.rs": 1,

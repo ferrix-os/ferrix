@@ -148,6 +148,8 @@ pub fn run() -> Result<Report, &'static str> {
     super::tree_check::run()?;
     // Nor here: a disk of its own that no ring serves.
     super::offline_check::run()?;
+    // Nor here: another, for the write reserve (L.device.86-87).
+    super::offline_check::reserve::run()?;
     let (subject, passed_over) = subject()?;
     let Some(node) = subject else {
         return Ok(Report {
