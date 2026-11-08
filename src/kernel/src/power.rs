@@ -176,6 +176,7 @@ pub fn finish() -> ! {
             println!("  power    resetting, as {OPTION}={RESET} asks");
             // How the boot stopped, and what the next boot's loader reports,
             // out of caches a reset may discard (`console::pstore`).
+            crate::watchdog::stop_for_shutdown("a reset on init's exit");
             let _ = crate::console::pstore::stop(Stop::ExitReset);
             arch::reset()
         }
@@ -184,6 +185,7 @@ pub fn finish() -> ! {
             "init exited, and {OPTION}={PANIC} asks for a panic"
         ),
         _ => {
+            crate::watchdog::stop_for_shutdown("a power-off on init's exit");
             let _ = crate::console::pstore::stop(Stop::ExitPowerOff);
             arch::power_off()
         }

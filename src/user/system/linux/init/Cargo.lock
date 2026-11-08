@@ -29,15 +29,15 @@ version = "0.1.0"
 
 [[package]]
 name = "ferrix-bootinfo"
-version = "0.1.0"
+version = "0.3.0"
 
 [[package]]
 name = "ferrix-drvupdate-proto"
-version = "0.1.0"
+version = "0.3.0"
 
 [[package]]
 name = "ferrix-elf"
-version = "0.1.0"
+version = "0.3.0"
 
 [[package]]
 name = "ferrix-linux-abi"
@@ -49,7 +49,7 @@ version = "0.1.0"
 
 [[package]]
 name = "ferrix-native"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "ferrix-linux-abi",
  "ferrix-native-abi",
@@ -64,7 +64,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-process-builder"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "ferrix-bootinfo",
  "ferrix-elf",
@@ -78,7 +78,7 @@ version = "0.1.0"
 
 [[package]]
 name = "ferrix-settings-proto"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "ferrix-auth-proto",
 ]
@@ -92,7 +92,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-svc-proto"
-version = "0.1.0"
+version = "0.3.0"
 
 [[package]]
 name = "getty"

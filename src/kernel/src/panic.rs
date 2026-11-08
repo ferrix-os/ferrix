@@ -62,7 +62,7 @@ pub mod screen {
 
 use core::panic::PanicInfo;
 use core::ptr;
-use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
 
 use catalog::Explanation;
 
@@ -71,6 +71,10 @@ use crate::{arch, backtrace, smp};
 
 /// Whether a failure report has begun, on any processor.
 static REPORTING: AtomicBool = AtomicBool::new(false);
+
+/// The seconds within which the watchdog's hardware resets the machine, set
+/// as the first report begins; 0 when no timer stands behind it.
+static BACKSTOP_SECONDS: AtomicU64 = AtomicU64::new(0);
 
 /// The catalog entry the next panic is explained by, as [`fatal!`] recorded it.
 ///
@@ -211,6 +215,12 @@ pub(crate) fn begin_report(stop: ferrix_bootinfo::pstore::Stop) -> bool {
         // in the report can fault (`console::pstore`).
         console::pstore::panicked(stop);
         reset::reporting_here();
+        // The hardware's count cut short, before anything in the report can
+        // wait or fault: the reset no longer rests on the report reaching
+        // its end (`watchdog::on_report`).
+        if let Some(seconds) = crate::watchdog::on_report(reset::armed()) {
+            BACKSTOP_SECONDS.store(seconds, Ordering::Relaxed);
+        }
     }
     first
 }
@@ -266,6 +276,12 @@ pub(crate) fn conclude(entry: Option<&Explanation>) -> ! {
         ),
     }
     reset_check::fault_if_asked();
+    let backstop = BACKSTOP_SECONDS.load(Ordering::Relaxed);
+    if backstop != 0 {
+        println!(
+            "  watchdog  the TCO resets the machine within {backstop} s, whatever this report does"
+        );
+    }
     report_backtrace();
     if let Some(entry) = entry {
         report_explanation(entry);

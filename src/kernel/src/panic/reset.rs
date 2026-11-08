@@ -123,6 +123,11 @@ pub(crate) fn wait_then_reset() -> ! {
         let ticks = hz.saturating_mul(WAIT_SECONDS);
         let _ = waited(arch::counter_now, ticks, STUCK_READS);
     }
+    // The watchdog's count, which the report cut short, has done its part:
+    // from here `arch::reset` ends in a triple fault if nothing before it
+    // takes. A count left running would outlive the reset on a chipset that
+    // keeps it (QEMU's ICH9 does) and reset the next boot again.
+    crate::watchdog::before_reset();
     arch::reset()
 }
 

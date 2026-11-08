@@ -131,6 +131,20 @@
       "H.FAIL.1 and SAFETY-MANUAL 3 claim; any other value is said and taken",
       "as halt (ITEM.md 5, AoU-32)."
     ],
+    "watchdog": "off",
+    "watchdog_settings": [
+      "off",
+      "on"
+    ],
+    "watchdog_why": [
+      "`ferrix.watchdog=on` serves /dev/watchdog (docs/POSTMORTEM.md 6.11): a",
+      "deadline a privileged program arms and feeds, reported under FX-9008 when",
+      "no feed comes, and on x86-64 the chipset's TCO timer claimed, fed by the",
+      "same feeds and cut short at a panic report so the machine resets within",
+      "25 s. For the N150 box, outside the claim: `off`, the default and the",
+      "reference, serves no node and leaves the TCO untouched; any other value",
+      "is said and taken as off."
+    ],
     "vtd": "on",
     "vtd_settings": [
       "on",

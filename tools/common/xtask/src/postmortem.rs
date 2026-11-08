@@ -74,7 +74,7 @@ pub(crate) const TASKS: &[Task] = &[Task {
 }];
 
 /// The kernel's line once the region is attached.
-const MIRRORING: &str = "pstore   mirroring the log to ";
+pub(crate) const MIRRORING: &str = "pstore   mirroring the log to ";
 /// The panic report's line once the region is written back: unlogged, the
 /// last the report sends before the screen.
 const WRITTEN_BACK: &str = "pstore    written back for the next boot";
@@ -83,7 +83,7 @@ const GOES_TO: &str = "'s kernel log goes to ";
 const NONE: &str = "no region this boot";
 const LAST_REPORT: &str = "'s last report: panicked: ";
 /// The loader's banner, which a reset brings back.
-const LOADER_BANNER: &str = "Ferrix loader ";
+pub(crate) const LOADER_BANNER: &str = "Ferrix loader ";
 /// The report's line under `ferrix.panic=reset`, before the wait.
 const RESET_LINE: &str = "  reset     in 10 s, as ferrix.panic=reset asks";
 /// The report's `stopped` line under `ferrix.panic=reset`, and without it.
@@ -95,7 +95,7 @@ const STOPPED_HALTS: &str = "  stopped   this processor halts here";
 const RESET_WAIT_AT_LEAST: Duration = Duration::from_millis(9_500);
 const RESET_WAIT_AT_MOST: Duration = Duration::from_secs(60);
 /// How long each step waits.
-const PATIENCE: Duration = Duration::from_secs(120);
+pub(crate) const PATIENCE: Duration = Duration::from_secs(120);
 /// The longest quotation of a previous kernel's line the loader prints.
 const SHOWN: usize = 160;
 
@@ -836,7 +836,7 @@ struct Case {
 }
 
 /// The script's path, which `ferrix.init=` names.
-const STOP_SCRIPT: &str = "/etc/pm-stop";
+pub(crate) const STOP_SCRIPT: &str = "/etc/pm-stop";
 /// What the hang case's script says before it sleeps.
 const WAITING: &str = "pm-stop: waiting for the reset";
 /// Where the RESTART2 program goes: busybox has the name `reboot`.
@@ -969,7 +969,7 @@ fn stops(
 }
 
 /// The bytes of the file at `path`.
-fn read(path: &std::path::Path) -> Result<Vec<u8>> {
+pub(crate) fn read(path: &std::path::Path) -> Result<Vec<u8>> {
     std::fs::read(path).map_err(|error| Error::new(format!("reading {}: {error}", path.display())))
 }
 

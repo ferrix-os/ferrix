@@ -49,6 +49,8 @@ mod smp;
 pub(in crate::arch) mod speculation;
 pub mod switch;
 pub mod syscall;
+#[cfg(not(ferrix_personality = "user"))]
+pub mod tco;
 pub mod trap;
 
 pub use cpu::hardware_random;
