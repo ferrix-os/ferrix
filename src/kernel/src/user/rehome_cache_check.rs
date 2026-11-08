@@ -725,6 +725,32 @@ fn check_a_poisoned_read() -> Result<(), &'static str> {
     })
 }
 
+/// Room for the blocks [`hold_every_free_frame`] takes of `free` frames:
+/// one entry a largest block, and as many again of each smaller order and
+/// for the frames other processors free meanwhile. Sized by blocks, not
+/// frames: a list of every free frame was 64 MiB of heap on a 16 GiB
+/// machine, more than the heap's largest block, and the check stopped the
+/// boot on its own list (CI's "rustc on Ferrix", 2026-11-08).
+fn held_room(free: u64) -> usize {
+    let largest = free >> ferrix_frame::MAX_ORDER;
+    let spare = 1024 * (u64::from(ferrix_frame::MAX_ORDER) + 1);
+    usize::try_from(largest.saturating_mul(2).saturating_add(spare)).unwrap_or(usize::MAX / 32)
+}
+
+/// Take every free frame the allocator will give, largest blocks first, into
+/// `held` until it is full: each as `(frame, order)`, given back by
+/// [`mm::deallocate_frames`] at its order.
+fn hold_every_free_frame(held: &mut Vec<(u64, u8)>) {
+    for order in (0..=ferrix_frame::MAX_ORDER).rev() {
+        while held.len() < held.capacity() {
+            match mm::allocate_frames(order) {
+                Some(frame) => held.push((frame, order)),
+                None => break,
+            }
+        }
+    }
+}
+
 /// A page of kernel heap refused with every free frame held, and clean cache
 /// to give back, is answered by a reclaim and served (L.mm.136): the heap's
 /// count of refusals a reclaim let in grows. Another processor's allocation
@@ -739,29 +765,19 @@ fn check_a_refused_heap_allocation_reclaims() -> Result<(), &'static str> {
     let file = source_file(PAGES)?;
     let outcome = (|| {
         for _ in 0..3 {
-            let mut held: Vec<u64> = Vec::new();
-            held.try_reserve_exact(
-                usize::try_from(mm::free_frames())
-                    .unwrap_or(usize::MAX / 4)
-                    .saturating_mul(2)
-                    .saturating_add(1024),
-            )
-            .map_err(|_| "no room for the heap-reclaim check's list of frames")?;
+            let mut held: Vec<(u64, u8)> = Vec::new();
+            held.try_reserve_exact(held_room(mm::free_frames()))
+                .map_err(|_| "no room for the heap-reclaim check's list of frames")?;
             let before = mm::heap_reclaimed();
             let _ = mm::drain_caches();
-            while held.len() < held.capacity() {
-                match mm::allocate_frames(0) {
-                    Some(frame) => held.push(frame),
-                    None => break,
-                }
-            }
+            hold_every_free_frame(&mut held);
             // A page of heap: a block of its own, which no cached object serves.
             let mut page: Vec<u8> = Vec::new();
             let served = page.try_reserve_exact(PAGE_SIZE as usize).is_ok();
             let after = mm::heap_reclaimed();
             drop(page);
-            for frame in held.drain(..) {
-                mm::deallocate_frames(frame, 0);
+            for (frame, order) in held.drain(..) {
+                mm::deallocate_frames(frame, order);
             }
             if !served {
                 return Err(
