@@ -236,15 +236,23 @@ fn leave() {
 }
 
 /// A block for `request` from this processor's reserve, if a section is open
-/// here and the reserve holds one. Called by the global allocator when the
-/// heap has refused.
-pub(super) fn draw(request: Request) -> Option<u64> {
+/// here -- or, with `outside`, for the task killing for the kernel's heap
+/// (`object::oom::killing_for_the_heap`, L.mm.138), with none open -- and
+/// the reserve holds one. Called by the global allocator when the heap has
+/// refused.
+///
+/// A draw outside a section is as sound as one inside: the block is an
+/// ordinary heap object of the request's class, taken with interrupts
+/// masked on this processor, where no section can be open while a task
+/// that may block runs. It leaves the reserve not full, so the next section
+/// here fills it again first, or is refused with `ENOMEM`.
+pub(super) fn draw(request: Request, outside: impl FnOnce() -> bool) -> Option<u64> {
     let saved = <arch::Irq as IrqControl>::disable();
     let block = slot().and_then(|cell| {
         // SAFETY: (SHARED) as in `enter`, with interrupts masked just above. The
         // allocator calling this holds no reference to the slot.
         let here = unsafe { &mut *cell.get() };
-        if here.sections == 0 {
+        if here.sections == 0 && !outside() {
             return None;
         }
         let block = here.reserve.take(&KernelPages, request)?;

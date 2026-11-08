@@ -131,6 +131,13 @@ pub type Result<T> = core::result::Result<T, Errno>;
 /// # Errors
 ///
 /// `ENOMEM`.
+/// `bytes` copied into a box of their own, allocated once, or `ENOMEM`:
+/// what a name kept in a dentry or a walk is made with, where an empty heap
+/// must be an answer and not a stop.
+pub(crate) fn boxed_name(bytes: &[u8]) -> Result<alloc::boxed::Box<[u8]>> {
+    ferrix_fallible::try_boxed_slice(bytes).map_err(|_| Errno::ENOMEM)
+}
+
 pub(crate) fn charge(bytes: usize) -> Result<ferrix_kmem::Charge> {
     ferrix_kmem::Charge::bytes(bytes).map_err(|_| Errno::ENOMEM)
 }

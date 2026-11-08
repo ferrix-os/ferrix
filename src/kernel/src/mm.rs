@@ -1273,7 +1273,7 @@ unsafe impl GlobalAlloc for KernelAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let request = Request::new(layout.size(), layout.align());
         if reserve::bypassing_heap()
-            && let Some(address) = reserve::draw(request)
+            && let Some(address) = reserve::draw(request, || false)
         {
             return address as *mut u8;
         }
@@ -1307,8 +1307,9 @@ unsafe impl GlobalAlloc for KernelAllocator {
                     .or_else(|| heap_or_kill(request, injected))
             })
             // Refused even after the drain: inside a reserved section, the
-            // reserve serves it instead (`mm/reserve.rs`, finding F-23).
-            .or_else(|| reserve::draw(request));
+            // reserve serves it instead (`mm/reserve.rs`, finding F-23), and
+            // so it does for the task killing for the heap (L.mm.138).
+            .or_else(|| reserve::draw(request, crate::object::oom::killing_for_the_heap));
         // A null return is how `GlobalAlloc` reports failure. A fallible
         // caller -- `try_reserve`, `ferrix_fallible` -- turns it into an
         // error; an infallible one calls the allocation error handler, and

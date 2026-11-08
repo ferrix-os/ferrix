@@ -108,6 +108,27 @@ pub const MOST_ANSWERS: u32 = 1024;
 /// tries again.
 static CHOOSING: AtomicBool = AtomicBool::new(false);
 
+/// The task choosing and killing for the kernel's heap under [`CHOOSING`]
+/// ([`for_kernel_heap`]), zero for none: its allocations the heap refuses
+/// are served from its processor's allocation reserve
+/// ([`killing_for_the_heap`]).
+static HEAP_KILLER: AtomicU64 = AtomicU64::new(0);
+
+/// Whether the running task is the one choosing and killing for the
+/// kernel's heap (L.mm.138). The kill is called because the heap is empty
+/// -- no frame free, no clean cache to reclaim -- and the list of the live
+/// processes it chooses from, and what the kill itself allocates, would
+/// find it empty too: the kill then answered refused and the allocation it
+/// was asked for failed (test-btrfs-pressure's hog boot, 2026-11-08, "no
+/// list of the live processes" with 0 frames free). So the allocator serves
+/// this task's refused allocations from the processor's reserve
+/// (`mm::reserve::draw`), which the victim's freed memory fills again at
+/// the next section. Asked only on an allocation the heap refused.
+pub(crate) fn killing_for_the_heap() -> bool {
+    let killer = HEAP_KILLER.load(Ordering::Acquire);
+    killer != 0 && crate::sched::current_id() == Some(killer)
+}
+
 /// When the last machine-wide kill was made, in `timer::now_nanos`; zero
 /// for none.
 static LAST_MACHINE_KILL: AtomicU64 = AtomicU64::new(0);
@@ -419,11 +440,13 @@ pub(crate) fn for_kernel_heap() -> Answer {
         crate::sched::sleep_for(PAUSE_NANOS);
         return Answer::Retry;
     }
+    HEAP_KILLER.store(crate::sched::current_id().unwrap_or(0), Ordering::Release);
     let space = crate::sched::with_current(|task| task.address_space().cloned()).flatten();
     let (answer, pause) = match process::live() {
         Ok(live) => kill_in(space.as_deref(), Scope::Kernel, &live),
         Err(_) => (Answer::Refused, false),
     };
+    HEAP_KILLER.store(0, Ordering::Release);
     CHOOSING.store(false, Ordering::Release);
     if pause {
         crate::sched::sleep_for(PAUSE_NANOS);

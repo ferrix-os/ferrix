@@ -13,10 +13,18 @@
 //! walk carries on from the top of it. Recursion would put a program's choice
 //! of link depth onto a kernel stack sixteen kilobytes deep; the stack here is
 //! on the heap and bounded by [`MAX_SYMLINKS`] fragments.
+//!
+//! # Out of memory
+//!
+//! Every allocation a walk makes -- the copy of the path, a fragment pushed
+//! for a link, the last component's name -- reports failure as `ENOMEM`. A
+//! walk is what every path a program passes goes through, so one that
+//! stopped the machine on an empty heap would be a stop any program could
+//! drive (test-btrfs-pressure's hog boot, 2026-11-08: FX-0008 on the copy of
+//! a 204-byte name in `openat`).
 
 use alloc::boxed::Box;
 use alloc::sync::Arc;
-use alloc::vec;
 use alloc::vec::Vec;
 
 use ferrix_linux_abi::errno::Errno;
@@ -119,9 +127,10 @@ impl Fragment {
     }
 }
 
-/// One component, and what the walk needs to know about its position.
-struct Step {
-    component: Box<[u8]>,
+/// One component, and what the walk needs to know about its position. The
+/// component is borrowed from its fragment: a step allocates nothing.
+struct Step<'a> {
+    component: &'a [u8],
     is_last: bool,
     must_be_dir: bool,
 }
@@ -132,25 +141,28 @@ struct Steps {
 }
 
 impl Steps {
-    fn new(path: &[u8]) -> Steps {
-        Steps {
-            fragments: vec![Fragment {
-                bytes: path.to_vec(),
-                at: 0,
-                must_be_dir: false,
-            }],
-        }
+    fn new(path: &[u8]) -> Result<Steps> {
+        let mut steps = Steps {
+            fragments: Vec::new(),
+        };
+        steps.push(
+            ferrix_fallible::try_to_vec(path).map_err(|_| Errno::ENOMEM)?,
+            false,
+        )?;
+        Ok(steps)
     }
 
-    fn push(&mut self, target: Vec<u8>, must_be_dir: bool) {
+    fn push(&mut self, target: Vec<u8>, must_be_dir: bool) -> Result<()> {
+        self.fragments.try_reserve(1).map_err(|_| Errno::ENOMEM)?;
         self.fragments.push(Fragment {
             bytes: target,
             at: 0,
             must_be_dir,
         });
+        Ok(())
     }
 
-    fn next(&mut self) -> Option<Step> {
+    fn next(&mut self) -> Option<Step<'_>> {
         loop {
             let fragment = self.fragments.last_mut()?;
             let skip = fragment.rest().iter().take_while(|&&b| b == b'/').count();
@@ -161,15 +173,20 @@ impl Steps {
                 continue;
             }
             let len = rest.iter().position(|&b| b == b'/').unwrap_or(rest.len());
-            let component = Box::from(rest.get(..len).unwrap_or(&[]));
             let slash_follows = len < rest.len();
             let inherited = fragment.must_be_dir;
+            let start = fragment.at;
             fragment.at = fragment.at.saturating_add(len);
 
             let is_last = self
                 .fragments
                 .iter()
                 .all(|f| f.rest().iter().all(|&b| b == b'/'));
+            let component = self
+                .fragments
+                .last()
+                .and_then(|f| f.bytes.get(start..start.saturating_add(len)))
+                .unwrap_or(&[]);
             return Some(Step {
                 component,
                 is_last,
@@ -236,14 +253,15 @@ impl Namespace {
             must_be_dir: ends_with_slash(path),
             links: 0,
         };
-        let mut steps = Steps::new(path);
+        let mut steps = Steps::new(path)?;
 
         while let Some(step) = steps.next() {
             require_directory(&at.current)?;
             require_search(ctx, &at.current)?;
             at.must_be_dir = step.must_be_dir;
+            let must_be_dir = step.must_be_dir;
             if let Some(target) = self.advance(ctx, &mut at, &step, follow_last, resolve)? {
-                steps.push(target, step.must_be_dir);
+                steps.push(target, must_be_dir)?;
             }
         }
 
@@ -267,7 +285,7 @@ impl Namespace {
         &self,
         ctx: &Context,
         at: &mut Cursor,
-        step: &Step,
+        step: &Step<'_>,
         follow_last: bool,
         resolve: Resolve,
     ) -> Result<Option<Vec<u8>>> {
@@ -276,7 +294,7 @@ impl Namespace {
         let crosses = |from: &Location, to: &Location| {
             resolve.no_xdev && !Arc::ptr_eq(&from.mount, &to.mount)
         };
-        let name = match classify(&step.component) {
+        let name = match classify(step.component) {
             Component::Dot => {
                 at.parent = at.current.clone();
                 at.last = LastPart::Dot;
@@ -311,15 +329,17 @@ impl Namespace {
             if !step.is_last {
                 return Err(Errno::ENOENT);
             }
+            let last = LastPart::Name(crate::boxed_name(name)?);
             at.parent = core::mem::replace(&mut at.current, next);
-            at.last = LastPart::Name(Box::from(name));
+            at.last = last;
             return Ok(None);
         };
 
         let follow = !step.is_last || follow_last || step.must_be_dir;
         if !follow || inode.metadata().kind != FileType::Symlink {
+            let last = LastPart::Name(crate::boxed_name(name)?);
             at.parent = core::mem::replace(&mut at.current, next);
-            at.last = LastPart::Name(Box::from(name));
+            at.last = last;
             return Ok(None);
         }
 

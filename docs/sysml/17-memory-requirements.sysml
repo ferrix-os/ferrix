@@ -588,7 +588,8 @@ package FerrixMemoryRequirements {
                 fail when the allocating process is the one chosen or is ending, when nothing can
                 be killed, and when no list of the live processes can be made. Not for a refusal
                 the failure injection made, and what the kill itself allocates is never answered
-                by a reclaim or a kill.";
+                by a reclaim or a kill: a refusal of it is served from its processor's allocation
+                reserve, outside any section, while the reserve holds a block of its class.";
             attribute :>> criterion = "test-btrfs-pressure's hog boot: on a 768 MiB machine a
                 program holds all of MemAvailable but 16 MiB as anonymous memory, then 24576 names
                 made by the shell alone through a writable btrfs are all made and every 64th found
@@ -600,7 +601,8 @@ package FerrixMemoryRequirements {
                 failure, whichever the heap's refusal meets first.";
             attribute :>> parent = "H.MEM.11";
             attribute :>> unit = ("mm::heap_or_kill", "mm::while_killing",
-                "object::oom::for_kernel_heap", "object::oom::kernel_victim_held");
+                "object::oom::for_kernel_heap", "object::oom::kernel_victim_held",
+                "object::oom::killing_for_the_heap", "mm::reserve::draw");
         }
         // docs/RAM-RELEASE.md §2, R1 (consultant ledger 4971, 5022).
         requirement <'L.mm.99'> theArchivesPagesComeBack : ItemLowLevel {
