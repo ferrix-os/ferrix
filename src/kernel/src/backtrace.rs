@@ -130,7 +130,7 @@ pub(crate) fn in_image(address: u64) -> bool {
 /// image at its link address: what `sched::inspect` takes off each address so
 /// that it names the ELF's, as the panic report's `kaslr slide` line lets
 /// `xtask` do.
-pub(crate) fn slide() -> u64 {
+pub fn slide() -> u64 {
     image_start().wrapping_sub(ferrix_bootinfo::KERNEL_VIRT_BASE)
 }
 

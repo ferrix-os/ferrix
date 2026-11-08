@@ -1485,6 +1485,25 @@ pub fn live() -> Result<Vec<Arc<dyn Host>>, AllocError> {
 /// # Errors
 ///
 /// [`AllocError`].
+/// DIAG, never to land: every live host, or `None` when the table's lock is
+/// held for all of a few hundred tries.
+pub fn listed_try() -> Option<Vec<Arc<dyn Host>>> {
+    for _ in 0..200_000 {
+        if let Some(table) = TABLE.try_lock() {
+            let hosts: Vec<Arc<dyn Host>> = table
+                .live
+                .values()
+                .filter_map(|entry| entry.host.as_ref().and_then(Weak::upgrade))
+                .collect();
+            drop(table);
+            return Some(hosts);
+        }
+        core::hint::spin_loop();
+    }
+    None
+}
+
+/// As listed above.
 pub fn listed() -> Result<Vec<Arc<dyn Host>>, AllocError> {
     gather(true)
 }
