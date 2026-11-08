@@ -13,13 +13,13 @@
   "reservations": [
     {
       "ids": [
-        "L.mm.136",
+        "L.mm.136-137",
         "L.btrfs.122-123"
       ],
       "owner": "btrfs-oom",
       "branch": "bugfix/btrfs-abort-oom",
       "date": "2026-11-08",
-      "purpose": "N150 hangs of 2026-11-08: a kernel-heap allocation refused at the machine's floor is answered by a reclaim (L.mm.136); reload_read_only lets go of the aborted transaction before it reads the last commit (L.btrfs.122); a mount whose reload ran out of memory tries again at its next use (L.btrfs.123)"
+      "purpose": "N150 hangs of 2026-11-08: a kernel-heap allocation refused at the machine's floor is answered by a reclaim (L.mm.136); the kernel's headroom under the watermark refilled by the next allocation that may block (L.mm.137, ledger 7988 BO.1); reload_read_only lets go of the aborted transaction before it reads the last commit (L.btrfs.122); a mount whose reload ran out of memory tries again at its next use (L.btrfs.123)"
     },
     {
       "ids": [
