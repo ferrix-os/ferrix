@@ -137,9 +137,13 @@ impl Moving {
 /// The slot of `cpu`'s domain, as its word has it: [`LEAVING`] for a
 /// processor past the table.
 pub(crate) fn slot_of(cpu: usize) -> u8 {
-    DOMAIN_OF
-        .get(cpu)
-        .map_or(LEAVING, |slot| slot.load(Ordering::Acquire))
+    let Some(slot) = DOMAIN_OF.get(cpu) else {
+        // [`LEAVING`], as before: a hint only, so that every switch's
+        // lookup falls straight through.
+        core::hint::cold_path();
+        return LEAVING;
+    };
+    slot.load(Ordering::Acquire)
 }
 
 /// The domain a word names: its own slot while that domain exists, the boot

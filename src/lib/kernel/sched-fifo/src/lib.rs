@@ -166,6 +166,9 @@ impl<T> FifoQueue<T> {
     fn advance(&mut self, ns: u64) -> u64 {
         let at = self.period_at.saturating_add(ns);
         if at >= PERIOD_NS {
+            // A period's end, once a second: the charge within one falls
+            // straight through (the round trip on desktop).
+            core::hint::cold_path();
             self.period_at = at % PERIOD_NS;
             self.spent = 0;
             self.period_at
