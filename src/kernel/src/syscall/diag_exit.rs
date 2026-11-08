@@ -77,7 +77,7 @@ fn print_calls(tid: u32) {
             continue;
         }
         shown += 1;
-        if shown > 60 {
+        if shown > 40 {
             break;
         }
         fxlog!(
@@ -205,7 +205,7 @@ fn print_stack(process: &Process, from: u64, sp: u64) {
             let label = fmt_label(&mut label, at.abs_diff(sp) as usize, at < sp);
             print_where(process, label, value);
             shown += 1;
-            if shown >= 60 {
+            if shown >= 25 {
                 break;
             }
         }
@@ -262,7 +262,7 @@ pub(crate) fn exit_call(process: &Process, tid: u32, group: bool, status: i32, i
     }
     print_where(process, "ip", ip);
     print_calls(tid);
-    print_stack(process, sp.saturating_sub(32 * 1024), sp);
+    print_stack(process, sp.saturating_sub(16 * 1024), sp);
     print_stack(process, sp, sp);
 }
 
@@ -300,7 +300,11 @@ pub(crate) fn signal_to_thread(process: &Process, tid: u32, signal: u32, origin:
     if !(tid == process.pid() || watched(process)) {
         return;
     }
-    if !take(&SIGNALS) {
+    // A watched process's first thread has a budget of its own: what ends
+    // the game's leader must never be crowded out.
+    static LEADER_SIGNALS: AtomicU32 = AtomicU32::new(100);
+    let budget = if tid == process.pid() && watched(process) { &LEADER_SIGNALS } else { &SIGNALS };
+    if !take(budget) {
         return;
     }
     fxlog!(
@@ -383,7 +387,7 @@ pub(crate) fn efault(process: &Process, number: usize, args: &[u64; 6], ip: u64)
 /// Hang-ups and errors the wineserver's epoll reports: a thread whose request
 /// pipe it sees hung up is a thread it kills.
 pub(crate) fn epoll_event(process: &Process, events: u32, data: u64) {
-    static HUPS: AtomicU32 = AtomicU32::new(300);
+    static HUPS: AtomicU32 = AtomicU32::new(100);
     if events & (0x8 | 0x10 | 0x2000) == 0 {
         return;
     }
