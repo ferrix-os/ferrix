@@ -19,7 +19,12 @@
 //! * **file**: eight threads read then write their pages of a private mapping of a
 //!   file, and write their pages of a shared one; the private one shows the file and
 //!   then the thread's own write, the file keeps its words, and the shared writes are
-//!   in the file.
+//!   in the file;
+//! * **shared-fork**: eight threads write private anonymous, shared anonymous and
+//!   shared `memfd` pages, each generation read back, while the main thread forks;
+//!   each child checks its private copy, overwrites it, and answers in a page of
+//!   each shared mapping, which the parent must see, while the writers must never
+//!   see the child's private writes in their own pages.
 
 #![expect(
     unsafe_code,
@@ -389,6 +394,163 @@ fn file_round(fail: fn(&str) -> !) {
     }
 }
 
+/// A shared mapping of `pages` pages: anonymous when `fd` is -1, else of `fd`.
+fn shared_map(pages: usize, fd: i32, fail: fn(&str) -> !) -> usize {
+    let flags = if fd < 0 {
+        libc::MAP_SHARED | libc::MAP_ANONYMOUS
+    } else {
+        libc::MAP_SHARED
+    };
+    // SAFETY: a fresh address and this program's descriptor, or none.
+    let at = unsafe {
+        libc::mmap(
+            ptr::null_mut(),
+            pages * PAGE,
+            libc::PROT_READ | libc::PROT_WRITE,
+            flags,
+            fd,
+            0,
+        )
+    };
+    if at == libc::MAP_FAILED {
+        fail("fault-race: shared mmap");
+    }
+    at.addr()
+}
+
+/// A child's word, never a writer's: its high byte is 0xc0 plus the fork's number.
+fn child_tag(fork: usize, page: usize) -> u32 {
+    0xc000_0000 | ((fork as u32) << 20) | page as u32
+}
+
+/// The shared-fork step's child: its private copy is plausible, then it is its
+/// own to overwrite; then it answers in the mailboxes. Only memory, `_exit`.
+fn child_writes(private: usize, mailboxes: [usize; 2], fork: usize, generation: u32) -> ! {
+    for writer in 0..WRITERS {
+        for page in 0..SLICE {
+            let at = private + writer * SLICE * PAGE;
+            if !plausible(word(at, page), writer, page, generation) {
+                // SAFETY: ending the child.
+                unsafe { libc::_exit(3) };
+            }
+            put(at, page, child_tag(fork, page));
+        }
+    }
+    for writer in 0..WRITERS {
+        for page in 0..SLICE {
+            if word(private + writer * SLICE * PAGE, page) != child_tag(fork, page) {
+                // SAFETY: ending the child.
+                unsafe { libc::_exit(4) };
+            }
+        }
+    }
+    for mailbox in mailboxes {
+        // Word `fork` of the mailbox page.
+        put(mailbox + fork * 4, 0, child_tag(fork, 0));
+    }
+    // SAFETY: ending the child.
+    unsafe { libc::_exit(0) };
+}
+
+/// A writer's pass in the shared-fork step: its private, shared and `memfd`
+/// pages written with `generation`'s tag and read back; a child's word in any of
+/// them is reported, as is anything but the tag.
+fn write_three(slices: [usize; 3], writer: usize, generation: u32) {
+    for slice in slices {
+        for page in 0..SLICE {
+            put(slice, page, tag(writer, page, generation));
+        }
+    }
+    for slice in slices {
+        for page in 0..SLICE {
+            let wanted = tag(writer, page, generation);
+            if word(slice, page) != wanted {
+                report(writer, page, word(slice, page), wanted);
+            }
+        }
+    }
+}
+
+/// The shared-fork step.
+fn shared_fork_round(fail: fn(&str) -> !) {
+    const GENERATIONS: u32 = 24;
+    const SHARED_FORKS: usize = 12;
+    let pages = WRITERS * SLICE;
+    let private = anonymous(pages, fail).addr();
+    let shared = shared_map(pages + 1, -1, fail);
+    // SAFETY: a name the kernel copies.
+    let fd = unsafe { libc::memfd_create(c"fault-race-shared".as_ptr(), 0) };
+    // SAFETY: a descriptor just made, or -1, which fails.
+    if fd < 0 || unsafe { libc::ftruncate(fd, ((pages + 1) * PAGE) as libc::off_t) } != 0 {
+        fail("fault-race: memfd");
+    }
+    let memfd = shared_map(pages + 1, fd, fail);
+    let mailboxes = [shared + pages * PAGE, memfd + pages * PAGE];
+    let done = AtomicUsize::new(0);
+    let start = Barrier::new(WRITERS + 1);
+    std::thread::scope(|scope| {
+        for writer in 0..WRITERS {
+            let (start, done) = (&start, &done);
+            let _ = scope.spawn(move || {
+                let at = writer * SLICE * PAGE;
+                let _ = start.wait();
+                for generation in 1..=GENERATIONS {
+                    write_three([private + at, shared + at, memfd + at], writer, generation);
+                }
+                let _ = done.fetch_add(1, Ordering::AcqRel);
+            });
+        }
+        let _ = start.wait();
+        for fork in 0..SHARED_FORKS {
+            // SAFETY: the child only reads and writes memory and exits.
+            let pid = unsafe { libc::fork() };
+            if pid == 0 {
+                child_writes(private, mailboxes, fork, GENERATIONS);
+            }
+            if pid < 0 {
+                fail("fault-race: fork");
+            }
+            let mut status = 0_i32;
+            // SAFETY: `status` is this frame's.
+            if unsafe { libc::waitpid(pid, &raw mut status, 0) } != pid {
+                fail("fault-race: waitpid");
+            }
+            match (status & 0x7f, status >> 8 & 0xff) {
+                (0, 0) => {}
+                (0, 3) => fail("fault-race: a shared-fork child read a word nobody wrote"),
+                (0, 4) => fail("fault-race: a shared-fork child lost its own write"),
+                _ => fail("fault-race: a shared-fork child ended some other way"),
+            }
+            for mailbox in mailboxes {
+                if word(mailbox + fork * 4, 0) != child_tag(fork, 0) {
+                    report(0xfe, fork, word(mailbox + fork * 4, 0), child_tag(fork, 0));
+                }
+            }
+        }
+    });
+    if done.load(Ordering::Acquire) != WRITERS {
+        fail("fault-race: a shared-fork writer did not finish");
+    }
+    for writer in 0..WRITERS {
+        for page in 0..SLICE {
+            let wanted = tag(writer, page, GENERATIONS);
+            let at = writer * SLICE * PAGE;
+            for slice in [private, shared, memfd] {
+                if word(slice + at, page) != wanted {
+                    report(writer, page, word(slice + at, page), wanted);
+                }
+            }
+        }
+    }
+    // SAFETY: the step's mappings and descriptor, which every thread is done with.
+    unsafe {
+        let _ = libc::munmap(ptr::with_exposed_provenance_mut(private), pages * PAGE);
+        let _ = libc::munmap(ptr::with_exposed_provenance_mut(shared), (pages + 1) * PAGE);
+        let _ = libc::munmap(ptr::with_exposed_provenance_mut(memfd), (pages + 1) * PAGE);
+        let _ = libc::close(fd);
+    }
+}
+
 /// The step.
 pub fn check_fault_race(fail: fn(&str) -> !) {
     for generation in 1..=ROUNDS {
@@ -399,4 +561,6 @@ pub fn check_fault_race(fail: fn(&str) -> !) {
     check_reports("fork", fail);
     file_round(fail);
     check_reports("file", fail);
+    shared_fork_round(fail);
+    check_reports("shared-fork", fail);
 }
