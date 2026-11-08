@@ -30,7 +30,7 @@ commit = "4cd45a66a5848ba4daa404f38bf0dad4b1b622a8"
 [website]
 path = "docs/website"
 repo = "https://github.com/ferrix-os/ferrix-os.github.io"
-commit = "7de020e89022b6299648dda32e5a419b7a355ce0"
+commit = "1d3f1b304d2235adf16292ed473415e2156f540b"
 
 # Every program a person starts: Ferrix's own and those ported onto
 # ferrousli, one folder an app (docs/APPS.md).
