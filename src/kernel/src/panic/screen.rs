@@ -249,12 +249,15 @@ fn paint(surface: &mut Surface<'_>, text: &[u8], modules: &mut [u8], work: &mut 
         .saturating_add(MARGIN);
     let side = tall.min(inner.saturating_sub(text_wanted)).min(inner / 2);
     let report = report_start(text).and_then(|start| text.get(start..));
-    let code = report.and_then(|report| {
-        let right = MARGIN.saturating_add(inner);
-        draw_code(surface, right, top, side, report, modules, work)
-    });
-    let beside = code.map_or(0, |drawn| drawn.saturating_add(MARGIN));
-
+    // The text first, in the columns the code leaves, and the code after it:
+    // drawing the code takes seconds on a slow processor, and a machine that
+    // resets meanwhile (`ferrix.panic=reset`) should have shown the report's
+    // own lines -- its code, its processor -- before it goes.
+    let beside = if report.is_some() && side > 0 {
+        side.saturating_add(MARGIN)
+    } else {
+        0
+    };
     let body = Rect {
         x: MARGIN,
         y: top,
@@ -263,9 +266,9 @@ fn paint(surface: &mut Surface<'_>, text: &[u8], modules: &mut [u8], work: &mut 
     };
     let mut area = TextArea::new(surface, body, 1, LOG_TEXT, None);
     let shown = visible(text, area.rows(), area.columns());
-    let report = report_start(shown);
+    let report_at = report_start(shown);
     for (offset, &byte) in shown.iter().enumerate() {
-        if Some(offset) == report {
+        if Some(offset) == report_at {
             area.set_color(REPORT_TEXT);
         }
         match byte {
@@ -274,6 +277,11 @@ fn paint(surface: &mut Surface<'_>, text: &[u8], modules: &mut [u8], work: &mut 
             0x20..=0x7E => area.put_char(char::from(byte)),
             _ => area.put_char(char::REPLACEMENT_CHARACTER),
         }
+    }
+    crate::arch::drain_write_combining();
+    if let Some(report) = report {
+        let right = MARGIN.saturating_add(inner);
+        let _ = draw_code(surface, right, top, side, report, modules, work);
     }
 }
 
