@@ -781,6 +781,23 @@ pub fn share_frame(frame: Frame) -> Option<u32> {
     with_frames(|frames| frames.share(frame).ok())?
 }
 
+/// EXPERIMENT (r5): take one more reference to each of `batch`, in one hold
+/// of the allocator's lock; how many were shared, in order, before the first
+/// refusal.
+pub fn share_frames(batch: &[Frame]) -> usize {
+    with_frames(|frames| {
+        let mut shared = 0;
+        for &frame in batch {
+            if frames.share(frame).is_err() {
+                break;
+            }
+            shared += 1;
+        }
+        shared
+    })
+    .unwrap_or(0)
+}
+
 /// Drop one reference to a frame, freeing it if it was the last.
 ///
 /// Returns true if the frame went back to the allocator. Anonymous memory is

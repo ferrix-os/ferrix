@@ -1637,8 +1637,14 @@ fn scoped_request(wanted: u64, cpu: usize) -> Option<TlbPages> {
 /// `pages` holds go back to the allocator -- and not before, since until
 /// then a processor may still walk through one it cached (finding F-36).
 pub(crate) fn flush_tlb_pages(cpus: &CpuSet, pages: &mut TlbPages) {
+    let t0 = crate::timer::now_nanos();
     let late = invalidate_pages(cpus, pages);
+    let t1 = crate::timer::now_nanos();
     pages.tables.release();
+    let t2 = crate::timer::now_nanos();
+    if t2 - t0 > 20_000_000 {
+        crate::println!("r5: shoot invalidate {} us, tables {} us, everything {}", (t1 - t0) / 1000, (t2 - t1) / 1000, pages.is_everything());
+    }
     // Reported with the turn given back, never under it: see `report_late`.
     report_late(late, INVALIDATED);
 }

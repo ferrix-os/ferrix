@@ -1816,7 +1816,9 @@ impl AddressSpace {
     /// the parent a fault per page that then declines to copy anything,
     /// because the refcount says it is the only holder.
     pub fn fork(&self) -> Result<Arc<AddressSpace>, SpaceError> {
+        let t0 = crate::timer::now_nanos();
         let mut inner = self.inner.lock();
+        let t1 = crate::timer::now_nanos();
 
         // The child's root first, because it is the step most likely to fail
         // and the only one that fails without leaving a trace.
@@ -1861,6 +1863,7 @@ impl AddressSpace {
                 return Err(why);
             }
         }
+        let t2 = crate::timer::now_nanos();
         // And the tables the child inherits as they are, copied fallibly.
         let Ok((native, files)) = inherited(&inner) else {
             mm::deallocate_frames(root, 0);
@@ -1886,7 +1889,9 @@ impl AddressSpace {
             mm::deallocate_frames(root, 0);
             return Err(SpaceError::OutOfMemory);
         };
+        let t3 = crate::timer::now_nanos();
         let mut pages = self.unmap_copied_on_write(&inner.map);
+        let t4 = crate::timer::now_nanos();
 
         // Read before the lock goes, because the child inherits them. A
         // native object is shared, so the child names the same one.
@@ -1899,6 +1904,11 @@ impl AddressSpace {
         let cpus = self.begin_shootdown(&inner);
         drop(inner);
         self.shoot(&cpus, &mut pages);
+        let t5 = crate::timer::now_nanos();
+        if t5 - t0 > 20_000_000 {
+            crate::println!("r5: fork lock {} us, objects {} us, map {} us, unmap {} us, shoot {} us",
+                (t1 - t0) / 1000, (t2 - t1) / 1000, (t3 - t2) / 1000, (t4 - t3) / 1000, (t5 - t4) / 1000);
+        }
 
         let child = fallible::try_arc_cyclic(|me| {
             AddressSpace::assemble(

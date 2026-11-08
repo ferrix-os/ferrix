@@ -1267,29 +1267,65 @@ impl Vmo {
         let pages = self.pages.lock();
 
         let mut frames = BTreeMap::new();
-        for (&index, &frame) in &pages.frames {
-            let given = if pages.held.contains_key(&index) {
-                mm::allocate_user_frame().inspect(|&copy| mm::copy_frame(copy, frame))
-            } else {
-                mm::share_frame(frame).map(|_| frame)
-            };
-            // Recorded before it is counted as taken, so that the unwind below
-            // gives back exactly what the map holds.
-            let recorded = given.and_then(|given| {
-                crate::fallible::insert(&mut frames, index, given)
-                    .map_err(|_| {
-                        let _ = mm::release_frame(given);
-                    })
-                    .ok()
-            });
-            if recorded.is_none() {
-                // Unwind, or the pages this got through would be held by an
-                // object that is never built and never dropped.
-                for &taken in frames.values() {
-                    let _ = mm::release_frame(taken);
-                }
-                return Err(VmoError::OutOfMemory);
+        // EXPERIMENT (r5): the plain pages' references taken a batch at a
+        // time, in one hold of the allocator's lock each.
+        const BATCH: usize = 256;
+        let mut batch: [(u64, Frame); BATCH] = [(0, 0); BATCH];
+        let mut queued = 0;
+        let mut failed = false;
+        let mut flush = |batch: &[(u64, Frame)], frames: &mut BTreeMap<u64, Frame>| -> bool {
+            let mut plain: [Frame; BATCH] = [0; BATCH];
+            for (slot, &(_, frame)) in plain.iter_mut().zip(batch) {
+                *slot = frame;
             }
+            let shared = mm::share_frames(&plain[..batch.len()]);
+            let mut ok = shared == batch.len();
+            for (at, &(index, frame)) in batch.iter().enumerate() {
+                if at >= shared {
+                    break;
+                }
+                if crate::fallible::insert(frames, index, frame).is_err() {
+                    let _ = mm::release_frame(frame);
+                    ok = false;
+                }
+            }
+            ok
+        };
+        for (&index, &frame) in &pages.frames {
+            if pages.held.contains_key(&index) {
+                let copied = mm::allocate_user_frame().inspect(|&copy| mm::copy_frame(copy, frame));
+                let recorded = copied.and_then(|given| {
+                    crate::fallible::insert(&mut frames, index, given)
+                        .map_err(|_| {
+                            let _ = mm::release_frame(given);
+                        })
+                        .ok()
+                });
+                if recorded.is_none() {
+                    failed = true;
+                    break;
+                }
+                continue;
+            }
+            batch[queued] = (index, frame);
+            queued += 1;
+            if queued == BATCH {
+                if !flush(&batch[..queued], &mut frames) {
+                    failed = true;
+                    queued = 0;
+                    break;
+                }
+                queued = 0;
+            }
+        }
+        if !failed && queued > 0 && !flush(&batch[..queued], &mut frames) {
+            failed = true;
+        }
+        if failed {
+            for &taken in frames.values() {
+                let _ = mm::release_frame(taken);
+            }
+            return Err(VmoError::OutOfMemory);
         }
 
         // An object that cannot be allocated drops its frames as it goes,
