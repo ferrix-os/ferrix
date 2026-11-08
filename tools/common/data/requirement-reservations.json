@@ -13,15 +13,6 @@
   "reservations": [
     {
       "ids": [
-        "L.mm.138"
-      ],
-      "owner": "mem-pressure",
-      "branch": "bugfix/mem-pressure",
-      "date": "2026-11-08",
-      "purpose": "N150 out of memory during play, the half reclaim cannot answer: a kernel-heap allocation that may block, refused after its reclaims gave nothing back (no clean cache left), asks the machine-wide OOM kill and tries again while it answers retry, bounded, as Linux's GFP_KERNEL slow path calls out_of_memory, instead of failing (a btrfs transaction aborted beside a 644 MiB anonymous hog in test-btrfs-pressure's hog boot)"
-    },
-    {
-      "ids": [
         "L.mm.135"
       ],
       "owner": "ef-slow",

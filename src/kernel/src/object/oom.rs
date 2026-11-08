@@ -382,12 +382,67 @@ pub fn machine_answer(space: &AddressSpace, live: &[Arc<dyn Host>]) -> Answer {
         crate::sched::sleep_for(PAUSE_NANOS);
         return Answer::Retry;
     }
-    let (answer, pause) = kill_in(space, Scope::Machine, live);
+    let (answer, pause) = kill_in(Some(space), Scope::Machine, live);
     CHOOSING.store(false, Ordering::Release);
     if pause {
         crate::sched::sleep_for(PAUSE_NANOS);
     }
     answer
+}
+
+/// Answers one kernel-heap allocation takes from [`for_kernel_heap`] in
+/// all before its refusal stands: about a second of [`PAUSE_NANOS`] waits,
+/// as a fault's [`MOST_ANSWERS`] are.
+pub(crate) const KERNEL_HEAP_ANSWERS: u32 = MOST_ANSWERS;
+
+/// The machine out of memory for an allocation of the kernel's own heap
+/// that may block, whose reclaims gave nothing back or did not let it in
+/// (L.mm.138): no clean cache is left, and only a program's memory can
+/// make room. So the machine-wide kill runs as a fault's would once its
+/// progress test failed (`machine_answer`): the live process with the most
+/// resident memory, never pid 1 and never a kernel task, ended as
+/// `SIGKILL` does, with the same grace after a kill and the same wait for
+/// a victim still ending. Linux's slow path does the same for an
+/// allocation of its own that may not fail (`__alloc_pages_may_oom`).
+///
+/// [`Answer::Retry`]: try the heap again; [`Answer::Victim`]: the running
+/// process was chosen, or is ending, and the allocation fails so that it
+/// leaves; [`Answer::Refused`]: nothing to kill, the failure injection's
+/// refusal, or no memory to list the processes. Called with no spin lock
+/// held and marked inside a reclaim, so that what it allocates fails
+/// rather than reclaims again (`mm::heap_or_kill`).
+pub(crate) fn for_kernel_heap() -> Answer {
+    if crate::fallible::injecting_here() {
+        return Answer::Refused;
+    }
+    if CHOOSING.swap(true, Ordering::AcqRel) {
+        crate::sched::sleep_for(PAUSE_NANOS);
+        return Answer::Retry;
+    }
+    let space = crate::sched::with_current(|task| task.address_space().cloned()).flatten();
+    let (answer, pause) = match process::live() {
+        Ok(live) => kill_in(space.as_deref(), Scope::Kernel, &live),
+        Err(_) => (Answer::Refused, false),
+    };
+    CHOOSING.store(false, Ordering::Release);
+    if pause {
+        crate::sched::sleep_for(PAUSE_NANOS);
+    }
+    answer
+}
+
+/// The space of the last process [`for_kernel_heap`] killed, while it is
+/// still held: no other is killed for the kernel's heap until it is gone.
+static KERNEL_VICTIM: crate::sync::SpinLock<Option<alloc::sync::Weak<AddressSpace>>> =
+    crate::sync::SpinLock::new(None);
+
+/// Whether the space of the last process [`for_kernel_heap`] killed is
+/// still held by anyone.
+fn kernel_victim_held() -> bool {
+    KERNEL_VICTIM
+        .lock()
+        .as_ref()
+        .is_some_and(|space| space.strong_count() > 0)
 }
 
 /// Where an OOM kill chooses its victim.
@@ -397,6 +452,9 @@ enum Scope {
     Job(u32),
     /// Every process: the machine is out of frames.
     Machine,
+    /// Every process, as [`Scope::Machine`], for the kernel's own heap
+    /// (L.mm.138): no clean cache was left to reclaim for it.
+    Kernel,
 }
 
 /// The job at or above `job` whose quota slot is `full`, if there is one.
@@ -424,13 +482,18 @@ fn kill_within(space: &AddressSpace, full: u32) -> (Answer, bool) {
     let Ok(live) = process::live() else {
         return (Answer::Refused, false);
     };
-    kill_in(space, Scope::Job(full), &live)
+    kill_in(Some(space), Scope::Job(full), &live)
 }
 
-/// Choose among `live` in `scope_of` and kill, for a fault in `space`, and
-/// whether to pause before the fault is tried again: a victim is still
-/// ending. Under [`CHOOSING`].
-fn kill_in(space: &AddressSpace, scope_of: Scope, live: &[Arc<dyn Host>]) -> (Answer, bool) {
+/// Choose among `live` in `scope_of` and kill, for a fault in `space` --
+/// or, with `None`, for a kernel task's own allocation, which no process
+/// makes ([`for_kernel_heap`]) -- and whether to pause before the fault is
+/// tried again: a victim is still ending. Under [`CHOOSING`].
+fn kill_in(
+    space: Option<&AddressSpace>,
+    scope_of: Scope,
+    live: &[Arc<dyn Host>],
+) -> (Answer, bool) {
     let looked = match survey(space, scope_of, live) {
         Ok(looked) => looked,
         Err(answer) => return answer,
@@ -445,7 +508,15 @@ fn kill_in(space: &AddressSpace, scope_of: Scope, live: &[Arc<dyn Host>]) -> (An
     // back: a fault in that gap found nothing ending and killed again (a
     // driver, beside a 400 MiB program, in a 512 MiB guest). So no second
     // machine-wide kill within [`KILL_GRACE_NANOS`] of the last.
-    if scope_of == Scope::Machine && in_grace() {
+    if matches!(scope_of, Scope::Machine | Scope::Kernel) && in_grace() {
+        return (Answer::Retry, true);
+    }
+    // The last victim chosen for the kernel's heap still holds its space:
+    // its memory is not back yet, and another kill would take a second
+    // process for the room the first will give -- one 0.8 s after the first
+    // took the disk's driver (2026-11-08). The survey above has emptied it
+    // if it has ended; wait for it.
+    if scope_of == Scope::Kernel && kernel_victim_held() {
         return (Answer::Retry, true);
     }
     // Counted once a kill is asked for, not at each look while a victim
@@ -459,7 +530,7 @@ fn kill_in(space: &AddressSpace, scope_of: Scope, live: &[Arc<dyn Host>]) -> (An
         return (Answer::Refused, false);
     };
     kill_victim(scope_of, &scope, victim, resident);
-    if core::ptr::eq(Arc::as_ptr(victim.core().own_space()), space) {
+    if space.is_some_and(|space| core::ptr::eq(Arc::as_ptr(victim.core().own_space()), space)) {
         (Answer::Victim, false)
     } else {
         (Answer::Retry, false)
@@ -483,11 +554,13 @@ struct Survey<'a> {
 /// choose, or the answer at once when the faulting process itself has
 /// already ended or an ended one's space was emptied here.
 fn survey<'a>(
-    space: &AddressSpace,
+    space: Option<&AddressSpace>,
     scope_of: Scope,
     live: &'a [Arc<dyn Host>],
 ) -> Result<Survey<'a>, (Answer, bool)> {
-    let ours = |host: &Arc<dyn Host>| core::ptr::eq(Arc::as_ptr(host.core().own_space()), space);
+    let ours = |host: &Arc<dyn Host>| {
+        space.is_some_and(|space| core::ptr::eq(Arc::as_ptr(host.core().own_space()), space))
+    };
     // Whether a process not yet ended faults here: one that shares the
     // space with an ended one (`vfork`) is not that one.
     let living = live
@@ -502,7 +575,7 @@ fn survey<'a>(
         let core = host.core();
         let within = match scope_of {
             Scope::Job(full) => at_or_above(core.job(), full),
-            Scope::Machine => Some(core.job()),
+            Scope::Machine | Scope::Kernel => Some(core.job()),
         };
         let Some(within) = within else {
             continue;
@@ -578,12 +651,30 @@ fn kill_victim(scope_of: Scope, scope: &Job, victim: &Arc<dyn Host>, resident: u
             );
             0
         }
+        Scope::Kernel => {
+            println!(
+                "  oom      pid {} killed, {resident} pages resident, for the kernel's heap \
+                 with the machine out of memory ({} frames free, the watermark {})",
+                core.pid(),
+                crate::mm::free_frames(),
+                crate::mm::watermark()
+            );
+            0
+        }
     };
+    if scope_of == Scope::Kernel {
+        // The old one, if any, is dropped after the lock: a `Weak` holds no
+        // space, so nothing is torn down here.
+        let old = KERNEL_VICTIM
+            .lock()
+            .replace(Arc::downgrade(core.own_space()));
+        drop(old);
+    }
     victim.kill(KILLED_STATUS);
     crate::audit::oom_killed(core.pid(), limited, resident);
     core.job().count_oom(true);
     let _ = KILLS.fetch_add(1, Ordering::Relaxed);
-    if scope_of == Scope::Machine {
+    if matches!(scope_of, Scope::Machine | Scope::Kernel) {
         LAST_MACHINE_KILL.store(crate::timer::now_nanos().max(1), Ordering::Relaxed);
     }
 }

@@ -1304,6 +1304,7 @@ unsafe impl GlobalAlloc for KernelAllocator {
                 let injected = fallible::injected_failures();
                 heap_or_drain(|| allocate_through_caches(request))
                     .or_else(|| heap_or_reclaim(request, injected))
+                    .or_else(|| heap_or_kill(request, injected))
             })
             // Refused even after the drain: inside a reserved section, the
             // reserve serves it instead (`mm/reserve.rs`, finding F-23).
@@ -1567,6 +1568,51 @@ fn heap_or_reclaim(request: Request, injected: u64) -> Option<u64> {
         }
         if let Some(address) = heap_or_drain(|| allocate_through_caches(request)) {
             let _ = HEAP_RECLAIMED.fetch_add(1, Ordering::Relaxed);
+            return Some(address);
+        }
+    }
+    None
+}
+
+/// Run `kill` -- the machine-wide OOM kill for the kernel's heap -- marked
+/// inside a reclaim, so that a heap allocation it makes and the heap
+/// refuses fails as it stands rather than reclaim or kill again
+/// ([`heap_may_reclaim`]). The mark is put back to false, not to what it
+/// was: the only caller has just found it false ([`heap_may_reclaim`]).
+fn while_killing<R>(kill: impl FnOnce() -> R) -> R {
+    let marked = crate::sched::with_current(|task| task.swap_reclaiming(true)).is_some();
+    let answer = kill();
+    if marked {
+        let _ = crate::sched::with_current(|task| task.swap_reclaiming(false));
+    }
+    answer
+}
+
+/// A heap allocation of `request` that the drain and the reclaims
+/// ([`heap_or_reclaim`]) could not serve: no clean cache is left to give
+/// back. Where it may block, and never for the failure injection's refusal,
+/// the machine-wide OOM kill makes room (L.mm.138,
+/// [`crate::object::oom::for_kernel_heap`]) and the heap is tried again
+/// while it answers retry, at most
+/// [`crate::object::oom::KERNEL_HEAP_ANSWERS`] times; a running process
+/// that was chosen, nothing to kill, or the answers spent, and the refusal
+/// stands as before. Only while the free count is under the watermark: a
+/// refusal with frames free above it is the heap's own (a block larger
+/// than it serves, or no run of the order asked for), which no kill would
+/// answer.
+fn heap_or_kill(request: Request, injected: u64) -> Option<u64> {
+    use crate::object::oom::{self, Answer};
+    if injection_refused(injected) || !heap_may_reclaim() {
+        return None;
+    }
+    for _ in 0..oom::KERNEL_HEAP_ANSWERS {
+        if free_frames() >= watermark() {
+            return None;
+        }
+        if while_killing(oom::for_kernel_heap) != Answer::Retry {
+            return None;
+        }
+        if let Some(address) = heap_or_drain(|| allocate_through_caches(request)) {
             return Some(address);
         }
     }

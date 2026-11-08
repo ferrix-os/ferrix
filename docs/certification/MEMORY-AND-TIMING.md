@@ -96,6 +96,49 @@ before the second processor, interrupts masked), and never frees them:
 they are the log for the rest of the boot. A size that is no size, or no
 memory for it, is one console line, and the 128 KiB log is kept.
 
+**The kernel's heap with no clean cache left (2026-11-08, L.mm.138; ledger 8015).** A
+heap allocation that may block, refused after the drain and after
+L.mm.136's reclaims, with fewer frames free than the watermark, asks the
+machine-wide OOM kill (`object::oom::for_kernel_heap`) and tries again
+while it answers retry and the free count stays under the watermark, at
+most `KERNEL_HEAP_ANSWERS` (1024) answers. Each answer is one survey of the
+live processes (a `Vec` of them, fallible: no list, refused) and, while a
+victim ends or within the 250 ms grace after a kill, a 1 ms sleep: about a
+second at most beyond L.mm.136's bound. At most one kill per 250 ms
+grace, and no second kill for the heap while the space of the last
+process killed for it is still held (`KERNEL_VICTIM`, a `Weak` behind a
+spin lock taken for one load or one store, never across a call). That
+hold has no time bound: it ends only when the last strong reference to
+the victim's space goes, so a victim stuck on a sleep lock, or any other
+holder of its space, keeps every later kill for the heap from being made.
+It fails closed -- the refusal stands as before L.mm.138 -- and the fault
+path's kill is not affected; an `MMF_OOM_SKIP`-like bound, or ending the
+hold once the space is emptied, is a BACKLOG row (ledger 8043 MK.2).
+*The injection guard has no control* (ledger 8043 MK.3): under L.mm.98's
+check three guards answer in series -- `injection_refused`, then the floor
+test (the free count is far above the watermark there), then
+`for_kernel_heap`'s own `injecting_here` -- so removing any one alone
+cannot make the check fire. *Allocations on the kill path:*
+`process::live`'s list (fallible); `kill_victim`'s console line and audit
+record (the static log and audit ring); `Host::kill` and the end of the
+process, the same calls the fault path's machine-wide kill makes, held to
+the fallible-allocation gate where they are item code. *Locks:* it runs only
+where `may_block` holds, so no spin lock is held; the allocating task may
+hold sleep locks (a btrfs volume's), and the kill path takes none (TABLE
+and the space's inner lock are spin locks; `resident_pages` takes no
+`layout`). Two exposures it shares with the fault path: `Process::end`
+releases a victim with no live thread inline, closing its handles in the
+killer; and dropping the list may drop a reaped process's last reference.
+A victim blocked on a sleep lock the allocating task holds cannot end: the
+answers run out, about a second in which that lock's other users wait, and
+the refusal stands as before. *Recursion:* the kill runs marked inside a
+reclaim, so an allocation it makes is answered as it stands, never by a
+reclaim, a refill or a kill; an infallible one there would be FX-0008, and
+none is on the path. Not for the failure injection's refusal (L.mm.98
+unchanged). The order of a refusal is now drain, reclaim, kill, reserve.
+Victim choice is the fault path's (§1.6), unchanged; a refusal with frames
+free above the watermark kills nobody.
+
 ### 1.2 How failure is reported
 
 The obvious fix is unavailable. `#[alloc_error_handler]` is an unstable

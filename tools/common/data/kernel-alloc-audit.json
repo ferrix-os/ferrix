@@ -218,8 +218,8 @@
     },
     "object/oom.rs": {
       "bucket": "frames",
-      "what": "machine_answer: a frame to test the machine has none: no job, frees it at once",
-      "sites": 1
+      "what": "machine_answer and for_kernel_heap (L.mm.138): each asks fallible::injecting_here, which takes nothing; a frame to test the machine has none: no job, frees it at once",
+      "sites": 2
     },
     "object/pager.rs": {
       "bucket": "job",

@@ -576,6 +576,32 @@ package FerrixMemoryRequirements {
             attribute :>> parent = "H.MEM.11";
             attribute :>> unit = ("mm::refill_headroom", "mm::note_headroom");
         }
+        // docs/BTRFS-PRESSURE.md, "No clean cache left: the kill for the kernel's heap" (2026-11-08).
+        requirement <'L.mm.138'> theKernelsHeapIsGivenRoomByAKill : ItemLowLevel {
+            attribute :>> statement = "A heap allocation that may block, refused after the drain
+                and after its reclaims (L.mm.136), with fewer frames free than the watermark, shall
+                ask the machine-wide OOM kill -- the live process with the most resident pages,
+                never pid 1, never a kernel task, a victim still ending waited for, none within
+                250 ms of the last machine-wide kill and none while the space of the last process
+                killed for the heap is still held -- and try the heap again while the kill answers
+                retry and the free count stays under the watermark, at most 1024 answers. It shall
+                fail when the allocating process is the one chosen or is ending, when nothing can
+                be killed, and when no list of the live processes can be made. Not for a refusal
+                the failure injection made, and what the kill itself allocates is never answered
+                by a reclaim or a kill.";
+            attribute :>> criterion = "test-btrfs-pressure's hog boot: on a 768 MiB machine a
+                program holds all of MemAvailable but 16 MiB as anonymous memory, then 24576 names
+                made by the shell alone through a writable btrfs are all made and every 64th found
+                again, the sync succeeds, a file committed before them reads back whole, the
+                kernel never says that a transaction was aborted, and it says exactly once that it
+                killed a process for its heap; the floor, evict and commit boots say it never.
+                Control: heap_or_kill returning None at once -- the kernel says a transaction was
+                aborted (out of memory), or stops with FX-0008 on an allocation that cannot report
+                failure, whichever the heap's refusal meets first.";
+            attribute :>> parent = "H.MEM.11";
+            attribute :>> unit = ("mm::heap_or_kill", "mm::while_killing",
+                "object::oom::for_kernel_heap", "object::oom::kernel_victim_held");
+        }
         // docs/RAM-RELEASE.md §2, R1 (consultant ledger 4971, 5022).
         requirement <'L.mm.99'> theArchivesPagesComeBack : ItemLowLevel {
             attribute :>> statement = "Once the root is final, at most once a boot, the

@@ -313,6 +313,55 @@ echo "pressure: done"
 $B poweroff -f
 "#;
 
+/// How many names the hog boot makes, as the commit boot does.
+const HOG_NEW_NAMES: u64 = COMMIT_NEW_NAMES;
+
+/// What the hog leaves of `MemAvailable`, in KiB, when it takes the rest.
+const HOG_LEAVES_KIB: u64 = 16 * 1024;
+
+/// The hog boot's script (mem-pressure, 2026-11-08): a program holds all
+/// the memory a new workload could have but 16 MiB, as anonymous memory,
+/// which nothing can reclaim -- a `dd` with a buffer that large blocked on
+/// a pipe nobody reads -- and then the shell makes names on a writable
+/// btrfs as the commit boot does, so that the kernel's heap grows with no
+/// clean cache left to reclaim for it. Linux kills a process for a kernel
+/// allocation there (`out_of_memory`, the `GFP_KERNEL` slow path) rather
+/// than fail it; a btrfs whose edit is refused aborts its transaction.
+const HOG_GUEST: &str = r#"#!/bin/sh
+B=/bin/busybox
+say() { echo "pressure: $*"; }
+cs() { read u r < /proc/uptime; echo $(( ${u%.*} * 100 + 1${u#*.} - 100 )); }
+mem() { while read k v u; do [ "$k" = "$1:" ] && { echo $v; return; }; done < /proc/meminfo; }
+D=/data/c
+$B mkdir -p /tmp $D/n || { say "FAIL mkdir $D"; echo "pressure: done"; exit 1; }
+$B dd if=/dev/urandom of=$D/keep bs=65536 count=64 2>/tmp/dd.err || say "FAIL keep: $($B cat /tmp/dd.err)"
+$B sync
+sum=$($B md5sum < $D/keep)
+hog=$(( ($(mem MemAvailable) - @LEAVES@) / 1024 ))
+$B dd if=/dev/zero bs=${hog}M count=1 2>/dev/null | $B sleep 100000 &
+# Until the hog holds its buffer: MemAvailable stops falling.
+last=0; same=0; while [ $same -lt 5 ]; do
+  a=$(mem MemAvailable); [ $a = $last ] && same=$((same + 1)) || same=0; last=$a; $B usleep 200000
+done
+say "hog: ${hog} MiB held, MemFree $(mem MemFree) kB, MemAvailable $(mem MemAvailable) kB, Cached $(mem Cached) kB"
+name=n; k=0; while [ $k -lt 199 ]; do name=${name}x; k=$((k + 1)); done
+t0=$(cs); n=0
+while [ $n -lt @NEW@ ]; do
+  : > $D/n/$name$n || { say "FAIL create name $n"; break; }
+  n=$((n + 1))
+done
+t1=$(cs)
+say "hog: made $n names in $(( (t1 - t0) / 100 )) s, MemFree $(mem MemFree) kB"
+$B sync 2>/tmp/sync.err || say "FAIL sync: $($B cat /tmp/sync.err)"
+again=$($B md5sum < $D/keep 2>/tmp/md5.err) || say "FAIL reading the committed file back: $($B cat /tmp/md5.err)"
+[ "$again" = "$sum" ] || say "FAIL the committed file read back as '$again', not '$sum'"
+found=0; k=0
+while [ $k -lt $n ]; do [ -e $D/n/$name$k ] && found=$((found + 1)); k=$((k + 64)); done
+say "hog: made $n of @NEW@ names, $found of $(( (n + 63) / 64 )) looked up again; the committed file read back whole"
+echo "pressure: done"
+$B poweroff -f
+"#;
+
 /// The most of the cache the eviction boot may lose while it makes its small
 /// files, in percent of what was cached before: they take a few tens of
 /// megabytes, so losing half of a 600 MB cache is not reclaim's shortfall.
@@ -362,10 +411,18 @@ fn run(arch: Arch, args: &Args) -> Result<()> {
     // names `cgroup` (or says `all`): it fails on main and with this fix
     // alike, on defects of the memory.max path of their own
     // (docs/BTRFS-PRESSURE.md, "At memory.max"). The variable is a comma list
-    // of `floor`, `evict`, `commit` and `cgroup`.
-    let boots =
-        std::env::var("FERRIX_PRESSURE_BOOTS").unwrap_or_else(|_| "floor,evict,commit".to_owned());
-    for kind in [Kind::Floor, Kind::Evict, Kind::Commit, Kind::Cgroup] {
+    // of `floor`, `evict`, `commit`, `hog` and `cgroup`; the hog boot, the
+    // kernel's heap growing with no clean cache left, joined the gate on
+    // 2026-11-08 (mem-pressure).
+    let boots = std::env::var("FERRIX_PRESSURE_BOOTS")
+        .unwrap_or_else(|_| "floor,evict,commit,hog".to_owned());
+    for kind in [
+        Kind::Floor,
+        Kind::Evict,
+        Kind::Commit,
+        Kind::Hog,
+        Kind::Cgroup,
+    ] {
         if boots != "all" && !boots.split(',').any(|name| name.trim() == kind.name()) {
             continue;
         }
@@ -390,7 +447,36 @@ enum Kind {
     Floor,
     Evict,
     Commit,
+    Hog,
     Cgroup,
+}
+
+/// The guest's script for `kind` on `machine`.
+fn guest_script(kind: Kind, machine: &Args) -> String {
+    let cgroup = kind == Kind::Cgroup;
+    let memmax = u64::from(machine.memory) * 1024 * 1024 / 2;
+    if kind == Kind::Evict {
+        EVICT_GUEST
+            .replace("@FILES@", &evict_files(machine).to_string())
+            .replace("@NEW@", &EVICT_NEW_FILES.to_string())
+            .replace("@FILE_MIB@", &EVICT_FILE_MIB.to_string())
+    } else if kind == Kind::Hog {
+        HOG_GUEST
+            .replace("@LEAVES@", &HOG_LEAVES_KIB.to_string())
+            .replace("@NEW@", &HOG_NEW_NAMES.to_string())
+    } else if kind == Kind::Commit {
+        COMMIT_GUEST
+            .replace("@FILES@", &evict_files(machine).to_string())
+            .replace("@NEW@", &COMMIT_NEW_NAMES.to_string())
+            .replace("@FILE_MIB@", &EVICT_FILE_MIB.to_string())
+    } else {
+        GUEST
+            .replace("@WRITE_MIB@", &WRITE_MIB.to_string())
+            .replace("@MEMMAX@", &memmax.to_string())
+            .replace("@CGROUP@", if cgroup { "1" } else { "0" })
+            .replace("@WRITERS@", &WRITERS.to_string())
+            .replace("@READERS@", &READERS.to_string())
+    }
 }
 
 impl Kind {
@@ -400,6 +486,7 @@ impl Kind {
             Kind::Floor => "floor",
             Kind::Evict => "evict",
             Kind::Commit => "commit",
+            Kind::Hog => "hog",
             Kind::Cgroup => "cgroup",
         }
     }
@@ -416,24 +503,7 @@ fn boot(
     let arch = parts.arch;
     let cgroup = kind == Kind::Cgroup;
     let memmax = u64::from(machine.memory) * 1024 * 1024 / 2;
-    let script = if kind == Kind::Evict {
-        EVICT_GUEST
-            .replace("@FILES@", &evict_files(machine).to_string())
-            .replace("@NEW@", &EVICT_NEW_FILES.to_string())
-            .replace("@FILE_MIB@", &EVICT_FILE_MIB.to_string())
-    } else if kind == Kind::Commit {
-        COMMIT_GUEST
-            .replace("@FILES@", &evict_files(machine).to_string())
-            .replace("@NEW@", &COMMIT_NEW_NAMES.to_string())
-            .replace("@FILE_MIB@", &EVICT_FILE_MIB.to_string())
-    } else {
-        GUEST
-            .replace("@WRITE_MIB@", &WRITE_MIB.to_string())
-            .replace("@MEMMAX@", &memmax.to_string())
-            .replace("@CGROUP@", if cgroup { "1" } else { "0" })
-            .replace("@WRITERS@", &WRITERS.to_string())
-            .replace("@READERS@", &READERS.to_string())
-    };
+    let script = guest_script(kind, machine);
     let image = parts.image_with(
         shell_bytes,
         SCRIPT,
@@ -450,6 +520,13 @@ fn boot(
              then {EVICT_NEW_FILES} small files made",
             machine.memory,
             evict_files(&machine)
+        );
+    } else if kind == Kind::Hog {
+        println!(
+            "  {arch}: {} MiB of memory, a program holding all of MemAvailable but {} MiB, \
+             then {HOG_NEW_NAMES} names of 200 bytes made by the shell alone",
+            machine.memory,
+            HOG_LEAVES_KIB / 1024
         );
     } else if kind == Kind::Commit {
         println!(
@@ -491,12 +568,17 @@ fn boot(
     println!("  {arch}: the boot took {took} s");
     let judged = match kind {
         Kind::Evict => judge_evict(&ours),
+        Kind::Hog => {
+            let kernel: Vec<&str> = lines.iter().map(|l| l.trim()).collect();
+            judge_hog(&ours, &kernel)
+        }
         Kind::Commit => {
             let kernel: Vec<&str> = lines.iter().map(|l| l.trim()).collect();
             judge_commit(&ours, &kernel)
         }
         Kind::Floor | Kind::Cgroup => judge(&ours),
     };
+    let judged = judged.and_then(|()| judge_heap_kills(kind, &lines));
     judged.map_err(|why| Error::new(format!("{arch}: {why}")))
 }
 
@@ -600,6 +682,60 @@ fn judge_commit(ours: &[&str], kernel: &[&str]) -> std::result::Result<(), Strin
     Ok(())
 }
 
+/// What the kernel says when it kills for its own heap
+/// (`object::oom::for_kernel_heap`), not for a program's fault.
+const HOG_KILL: &str = "for the kernel's heap with the machine out of memory";
+
+/// A kill for the kernel's heap belongs to the hog boot alone, once: in any
+/// other, where clean cache is there to reclaim, it is a false kill (ledger
+/// 8015 MP.7).
+fn judge_heap_kills(kind: Kind, lines: &[String]) -> std::result::Result<(), String> {
+    match (kind, lines.iter().filter(|l| l.contains(HOG_KILL)).count()) {
+        (Kind::Hog, 1) | (Kind::Floor | Kind::Evict | Kind::Commit | Kind::Cgroup, 0) => Ok(()),
+        (_, n) => Err(format!(
+            "{n} kills for the kernel's heap (`{HOG_KILL}`) in the {} boot",
+            kind.name()
+        )),
+    }
+}
+
+/// Verifies: L.mm.138
+///
+/// Whether the hog boot finished, nothing failed, every name was made, the
+/// kernel never said that a transaction was aborted, and it killed a
+/// process for its own heap ([`HOG_KILL`]), not only for a fault: with
+/// nothing to reclaim, the kernel's heap is given room by a kill, as
+/// Linux's is.
+fn judge_hog(ours: &[&str], kernel: &[&str]) -> std::result::Result<(), String> {
+    if let Some(aborted) = kernel
+        .iter()
+        .find(|l| l.contains("a transaction was aborted"))
+    {
+        return Err(format!("the volume aborted a transaction: {aborted}"));
+    }
+    let kills = kernel.iter().filter(|l| l.contains(HOG_KILL)).count();
+    if kills != 1 {
+        return Err(format!(
+            "the kernel killed {kills} processes for its heap (`{HOG_KILL}`), not the hog alone"
+        ));
+    }
+    if !ours.contains(&DONE) {
+        return Err(format!("the guest never said `{DONE}`"));
+    }
+    if let Some(failed) = ours.iter().find(|l| l.starts_with("pressure: FAIL")) {
+        return Err(format!("a step failed: {failed}"));
+    }
+    let looked = HOG_NEW_NAMES.div_ceil(64);
+    let wanted = format!(
+        "pressure: hog: made {HOG_NEW_NAMES} of {HOG_NEW_NAMES} names, \
+         {looked} of {looked} looked up again"
+    );
+    if !ours.iter().any(|l| l.starts_with(&wanted)) {
+        return Err(format!("not every name was made and found (`{wanted}`)"));
+    }
+    Ok(())
+}
+
 /// A fresh sparse volume of [`VOLUME_GIB`] GiB, made by the host's
 /// `mkfs.btrfs` with its default profiles and no label.
 fn volume(arch: Arch) -> Result<PathBuf> {
@@ -675,6 +811,32 @@ mod tests {
         ];
         assert!(judge_evict(&stalled).is_err());
         assert!(judge_evict(&[DONE]).is_err());
+    }
+
+    #[test]
+    fn the_hog_boot_fails_on_an_abort_a_failed_step_or_a_name_short() {
+        let looked = HOG_NEW_NAMES.div_ceil(64);
+        let made = format!(
+            "pressure: hog: made {HOG_NEW_NAMES} of {HOG_NEW_NAMES} names, \
+             {looked} of {looked} looked up again; the committed file read back whole"
+        );
+        let good = [made.as_str(), DONE];
+        let killed = "oom      pid 815 killed, 165185 pages resident, for the kernel's heap with the machine out of memory";
+        assert_eq!(judge_hog(&good, &[killed]), Ok(()));
+        let by_fault = "oom      pid 815 killed, 165185 pages resident, for a fault with the machine out of memory";
+        assert!(judge_hog(&good, &[by_fault]).is_err());
+        let aborted = "btrfs    a transaction was aborted (out of memory); read-only from here, at the last commit";
+        assert!(judge_hog(&good, &[killed, aborted]).is_err());
+        let failed = ["pressure: FAIL create name 4151", made.as_str(), DONE];
+        assert!(judge_hog(&failed, &[killed]).is_err());
+        let short = [
+            "pressure: hog: made 4151 of 24576 names, 65 of 65 looked up again; the committed file read back whole",
+            DONE,
+        ];
+        assert!(judge_hog(&short, &[killed]).is_err());
+        assert!(judge_hog(&[made.as_str()], &[killed]).is_err());
+        let driver = "oom      pid 587 killed, 696 pages resident, for the kernel's heap with the machine out of memory";
+        assert!(judge_hog(&good, &[killed, driver]).is_err());
     }
 
     #[test]

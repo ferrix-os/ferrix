@@ -232,6 +232,103 @@ copies the whole directory from its cursor; `ferrix-btrfs-vfs`'s
 infallible allocations under spin locks; the writeback's run buffer
 halved instead of `ENOMEM`; and the box run of the fix.
 
+## No clean cache left: the kill for the kernel's heap (2026-11-08)
+
+`mem-pressure`'s half of the N150's out-of-memory hangs. L.mm.136-137
+reclaim clean cache for the kernel's heap; with none left they give
+nothing back, and the heap's refusal still aborts a btrfs transaction.
+
+**What the box holds during play.** `mp-sample.sh` (the whole
+`/proc/meminfo` every second, each process's `RssAnon`/`RssFile`/`RssShmem`
+every ten; `~/.local/share/ferrix/ef-load/runs/mp-play/`) on
+main-cfde84d79, Endfield in the world, uptime 1727 s, in MiB of 16036:
+
+| | MiB |
+|---|---:|
+| `MemFree` (at the floor: the watermark is 32 MiB) | 253 |
+| `Cached`, of it `Shmem` 252 | 5568 |
+| `Slab`, the kernel's heap, of it `SReclaimable` (btrfs clean nodes) 35 | 362 |
+| `RssAnon` of the 74 processes (Endfield 4141, the CEF browser processes about 1300, the Steam web helpers about 900, wineserver 28) | 6757 |
+| Not in any of these: memory objects no process maps -- most likely the GPU's buffers (textures uploaded by DXVK through the Intel driver), which Linux would count in `Shmem` | 3096 |
+
+`Dirty` stayed at 0, and `MemAvailable` at about 5.6 GB: the box plays at
+its floor with gigabytes of clean cache, the case L.mm.136-137 answer. The
+kernel's heap grows in bursts (a btrfs transaction holds up to 32 MiB of
+changed nodes, about twice that in heap) against a 32 MiB headroom. The
+early exits ~4 s after the embedded browser's fork (`es-dev-2`,
+`fp-fix-1`) are not memory's: `MemFree` was never below 7.6 GB in those
+runs, while every run that reached the world sat at the floor.
+
+**What the kernel does at the floor, against Linux.** Ferrix has one mark,
+the watermark (a 128th of memory, 1 to 32 MiB): a program's frame is
+refused below it and the program's fault reclaims clean cache, then, after
+16 reclaims with no room, kills the largest process (`object::oom`); the
+kernel's own frames go on to the last one. Linux has three marks per zone:
+kswapd wakes at `low` and reclaims in the background to `high`; an
+allocation below `min` reclaims directly; one that still finds nothing
+calls the OOM killer, except a `GFP_ATOMIC` one, which may dip under
+`min`. Ferrix has no background reclaim and no active/inactive lists (its
+reclaim is a clock with no accessed bits), no swap and no overcommit
+heuristic (pages are taken at first touch, so a program is refused at
+its fault, not its `mmap`). Dirty pages are written by the filesystem's
+periodic commit, not by reclaim.
+
+**The gap, shown.** The gate's `hog` boot: a `dd` holds all of
+`MemAvailable` but 16 MiB as anonymous memory (its 644 MiB buffer, blocked
+on a pipe nobody reads), then the shell makes 24576 names as the `commit`
+boot does. KVM, x86-64, debug kernel, 768 MiB; logs in
+`~/.local/share/ferrix/mem-pressure/`:
+
+| Kernel | Result | Log |
+|---|---|---|
+| bugfix/btrfs-abort-oom's tip (L.mm.136-137) | name 4151 `Out of memory`, then `a transaction was aborted (out of memory)`; no kill | `hog-before-1.log` |
+| with L.mm.138 (first form) | `oom pid 815 killed, 165185 pages resident`; 24576 of 24576 names, 384 of 384 found again, the committed file whole, no abort; 58 s | `hog-after-1.log` |
+| L.mm.138's kill alone off (gate.sh `mp-ctl-nokill`, ef4880252) | FIRED: `a transaction was aborted (out of memory)` | `~/.local/share/ferrix/logs/queue/mp-ctl-nokill.log` |
+| the first form, grace alone between kills (gate.sh `mp2-btp`, d45670ed5) | the hog killed, then the AHCI driver 0.8 s later (a false kill); the names all made | `~/.local/share/ferrix/logs/queue/mp2-btp.log` |
+| the kill waits while its last victim's space is held | one kill (`6 frames free, the watermark 1487`), 24576 of 24576 names, no abort | `hog-dbg-4.log` |
+
+**The fix (L.mm.138).** A heap allocation that may block, refused after
+the drain and L.mm.136's reclaims, asks the machine-wide OOM kill
+(`object::oom::for_kernel_heap`: the fault path's choice -- the most
+resident pages, never pid 1 or a kernel task -- its 250 ms grace and its
+wait for a victim still ending) and tries the heap again while it answers
+retry and the free count stays under the watermark, at most 1024
+answers, about a second (`mm::heap_or_kill`). A refusal with frames free
+above the watermark is the heap's own (a block larger than it serves, a
+run of an order fragmentation left none of) and kills nobody. Nor is a
+second process killed for the heap while the last one's space is still
+held: its memory comes back a while after the kill, and the first form,
+with only the 250 ms grace, killed the AHCI driver 0.8 s after the hog
+with 331 frames free of a 1487-frame watermark (gate.sh `mp2-btp`). The
+kill's console line says the free count and the watermark. That wait has
+no time bound: it fails closed (no kill, the refusal as before), the fault
+path's kill is not affected, and a bound is a BACKLOG row (ledger 8043). The kill runs marked inside a reclaim: what it
+allocates and the heap refuses fails, and the kill then answers refused.
+A running process the kill chose fails its allocation and leaves. A kill
+from L.mm.137's refill, when its reclaim found nothing, was tried and
+taken out (ledger 8015 B2): with it removed the hog boot still passed
+(gate.sh `mp-ctl-norefill`, DID NOT FIRE), and it would kill after an
+allocation that succeeded. This is Linux's `__alloc_pages_may_oom` for an
+allocation that may not fail, with the victim choice Ferrix already had;
+no new policy enters the kernel.
+
+**What it leaves** (BACKLOG rows, ledger 8015 MP.8). The process making
+the allocation may be the one chosen: its allocation fails so that it
+leaves, and a btrfs edit it was in still aborts the volume; Linux lets an
+OOM victim use reserves to finish (`ALLOC_OOM`). A victim blocked on a sleep lock the allocating task
+holds (a btrfs volume's) cannot end; the answers run out after about a
+second and the refusal stands as before, so the transaction aborts.
+`/proc/meminfo` counts the GPU's buffers nowhere (the 3 GB above). No
+background reclaim: every reclaim runs in the task that needs the frame,
+which is where the frame rate dips at the floor are likeliest to come
+from (not yet measured). The victim choice is the kernel's; a ring-3
+policy (`oom_score_adj`, a userspace killer on pressure) is not built.
+The FX-0008 report's trace goes to the port and screen only (KASLR), so
+an event-log record does not name the infallible caller. Each of these is
+a BACKLOG row (ledger 8015 MP.8, 8043 MK.2 and MK.5). The certification
+consultant's review: OK IF MK.1-MK.6, ledger line 8043, after NOT YET
+B1-B3 / OK IF MP.1-MP.10 at line 8015.
+
 ## The gate
 
 ```
@@ -270,9 +367,11 @@ the shell's own `: >`, no process started, then syncs, reads back a file
 committed before the fill and looks every 64th name up again (not a
 listing: a btrfs `getdents` copies the directory from its cursor, see
 `docs/BACKLOG.md`). It fails on a failed step, a name short, or a kernel
-line saying a transaction was aborted. `FERRIX_PRESSURE_BOOTS` is a comma
-list of `floor`, `evict`, `commit` and `cgroup`; the first three are the
-gate.
+line saying a transaction was aborted. A fourth boot, `hog` (since 2026-11-08), holds all of `MemAvailable` but
+16 MiB in a program's anonymous memory and then makes the same names, so
+that the heap grows with no clean cache to reclaim; it fails as `commit`
+does. `FERRIX_PRESSURE_BOOTS` is a comma list of `floor`, `evict`,
+`commit`, `hog` and `cgroup`; the first four are the gate.
 
 `--cpu-quota PCT` runs QEMU in a transient `systemd-run --user --scope`
 limited to that share of a processor (no root), and `--pin` adds `taskset`:
