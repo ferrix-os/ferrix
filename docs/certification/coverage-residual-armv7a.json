@@ -1203,7 +1203,7 @@
     "timer.rs": {
       "ring": "core",
       "lines": [
-        340
+        345
       ]
     },
     "arch/speculation.rs": {
@@ -1221,7 +1221,7 @@
     "sched/task.rs": {
       "ring": "core",
       "lines": [
-        1505
+        1511
       ]
     },
     "irq.rs": {

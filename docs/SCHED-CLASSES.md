@@ -122,9 +122,18 @@ pub trait SchedClass<T> {
     fn charge(queue: &mut Self::Queue, ran_ns: u64) -> bool;
     fn remaining_ns(queue: &Self::Queue) -> Option<u64>;
     fn steals_work(queue: &Self::Queue) -> bool;   // a function of the queue (S11)
+    fn dormant(queue: &Self::Queue) -> bool;       // required, no default (S11; ledger 8057)
     fn check(queue: &Self::Queue) -> Result<(), &'static str>;
 }
 ```
+
+`dormant` (2026-11-08, ledger 8057, SD.1 to SD.6) says a queue holds no
+entity, so that it is not ready, has nothing current, remaining or due, does
+not preempt and weighs nothing: what `Over` may leave unasked of an upper
+tier that does not run (`lower_alone`), while still telling it `elapse`.
+`FifoRr` answers it exactly when it holds nothing; every other class, `Empty`
+included, answers false, so their stacks ask everything as before. It is
+the cross-domain round trip's cut on `desktop` (§9e).
 
 `Back` hands a refused entity back whole with a `Refusal` (`Invalid`,
 `Duplicate`, `Unschedulable`, `NoSuchTier`); `Left` is a running entity
@@ -139,8 +148,9 @@ forwarding to `RunQueue`.
 design review), and the operations the core still makes on the fair queue
 directly (`core/src/sched/stack.rs` lists them): a task's weight, the
 picture `/proc` reads, the slice, the processor's load, the stealing
-choice. The trait has no provided methods yet, so S11's check of inherited
-defaults applies from the first one.
+choice. The trait still has no provided methods: `dormant`, the first
+candidate, was made required instead (ledger 8057, SD.2), so S11's check of
+inherited defaults applies from the first one.
 
 ## 5. How the kernel reaches it: a selection crate, chosen before the core
 
@@ -1325,6 +1335,18 @@ The audit of every other path that enqueues a task, by caller of
   so that no real-time task is stranded on a parked processor; never the
   running one.
 None puts a running task in a queue as a waiting one.
+
+**The round trip with the tier present (2026-11-08, ledger 8057, OK IF
+SD.1-SD.6).** `desktop`'s cross-domain `call` row ran 11 to 12% over
+develop's, all of it the stack's: every switch there follows an IBPB, so
+each test `Over` made of an empty FIFO tier -- its readiness three times a
+direction, its decision, its current -- was a cold branch. `Over` now asks
+`lower_alone` (the upper tier does not run and is `dormant`, two reads with
+no branch between them) and gives the lower tier's answer straight, in
+`hand_over`'s fused guard, `charge`, `decision_in_ns` and `should_preempt`;
+the upper tier's arms are marked cold. Every answer is the general one's
+(SD.3's equality test against a stack whose `dormant` is forced false), and
+`elapse` still reaches the upper tier, whose period clock runs empty.
 
 ## 9f. Step 5: a `SoftRt` domain made at run time (OK IF V1-V16, 2026-10-27)
 

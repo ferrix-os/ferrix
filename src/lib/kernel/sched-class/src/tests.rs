@@ -138,6 +138,9 @@ impl SchedClass<&'static str> for Fifo {
     fn steals_work(_: &FifoQueue) -> bool {
         false
     }
+    fn dormant(_: &FifoQueue) -> bool {
+        false
+    }
     fn check(q: &FifoQueue) -> Result<(), &'static str> {
         if q.quantum == 0 {
             Err("a zero quantum")
@@ -219,6 +222,9 @@ impl SchedClass<&'static str> for Lowly {
     }
     fn steals_work(_: &FifoQueue) -> bool {
         true
+    }
+    fn dormant(_: &FifoQueue) -> bool {
+        false
     }
     fn check(q: &FifoQueue) -> Result<(), &'static str> {
         Fifo::check(q)

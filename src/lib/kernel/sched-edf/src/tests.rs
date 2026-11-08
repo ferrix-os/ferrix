@@ -92,6 +92,9 @@ impl SchedClass<u64> for Below {
     fn steals_work(_: &BelowQueue) -> bool {
         true
     }
+    fn dormant(_: &BelowQueue) -> bool {
+        false
+    }
     fn check(_: &BelowQueue) -> Result<(), &'static str> {
         Ok(())
     }

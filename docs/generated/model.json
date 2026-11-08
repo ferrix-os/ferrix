@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "7f419192acdaea28a6d1551273248810195751e3cbeeebbdfaccd04c56cd389a",
+  "digest": "e8c2b4540c6f64763a7ea49a282e98406a7daf1043901d53faf5eebd04445953",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -113,7 +113,7 @@
   ],
   "summary": {
     "packages": 168,
-    "elements": 10409,
+    "elements": 10414,
     "maturity": {
       "implemented": 296,
       "inProgress": 23,
@@ -52405,6 +52405,63 @@
                       }
                     }
                   ]
+                },
+                {
+                  "name": "aDormantTierIsLeftUnasked",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::AppliedAffinity::aDormantTierIsLeftUnasked",
+                  "kind": "requirement",
+                  "shortName": "L.sched.186",
+                  "type": "ItemLowLevel",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 1542
+                  },
+                  "children": [
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::AppliedAffinity::aDormantTierIsLeftUnasked",
+                      "kind": "attribute",
+                      "redefines": "statement",
+                      "value": "\"A scheduling class shall answer dormant only when it holds no entity, and then its ready shall be false, its current, remaining_ns and decision_in_ns none, its should_preempt false and its load_weight zero; FifoRr shall answer dormant exactly when it holds nothing, and every other class false; and a stack whose upper tier does not run and is dormant shall give the lower tier's answers, as the stack that asks the upper tier everything gives them.\"",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 1548
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::AppliedAffinity::aDormantTierIsLeftUnasked",
+                      "kind": "attribute",
+                      "redefines": "criterion",
+                      "value": "\"ferrix-sched-fifo's host tests: dormant equals len() == 0 over an empty queue, a waiting-only, a running-only, a throttled one and a throttled empty one with its period clock running, each listed answer asserted when dormant; and a seeded walk of arrivals of both tiers, picks, charges across the quantum, the floor and the period, elapses, direct hand-overs, removals and yields, in which Over over FifoRr answers current, remaining_ns, decision_in_ns, should_preempt, ready both ways, load_weight, len and every charge as Over over FifoRr with dormant forced false (ledger 8057, SD.1 and SD.3).\"",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 1556
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::AppliedAffinity::aDormantTierIsLeftUnasked",
+                      "kind": "attribute",
+                      "redefines": "parent",
+                      "value": "\"H.SCHED.21\"",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 1557
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::AppliedAffinity::aDormantTierIsLeftUnasked",
+                      "kind": "attribute",
+                      "redefines": "unit",
+                      "value": "(\"sched::queue::CpuQueue::hand_over\", \"sched::queue::CpuQueue::account_with\", \"sched::queue::CpuQueue::should_preempt\", \"sched::queue::CpuQueue::arm_timer\")",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 1559
+                      }
+                    }
+                  ]
                 }
               ]
             },
@@ -52415,7 +52472,7 @@
               "doc": "The realtime tier in the core (docs/SCHED-CLASSES.md section 9e, step 4b; the consultant's OK IF R1-R15, container review 29 (not on record; ledger 5684)): the task's upper cell, the move between tiers, wakes, inheritance, the Linux calls, and the modes.",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 1544
+                "line": 1563
               },
               "children": [
                 {
@@ -52426,7 +52483,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1551
+                    "line": 1570
                   },
                   "children": [
                     {
@@ -52437,7 +52494,7 @@
                       "value": "\"A task's node of the tier above fair shall be allocated once, when it first asks for a real-time policy or is made by a real-time parent, outside every scheduler path; kept in its upper cell while no queue holds the task, taken and put only under the lock of its home queue or before any queue has seen it; and kept when the task returns to fair. A node given back while its cell holds one stops the machine, and so does a task queued with a real-time policy and an empty cell.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1559
+                        "line": 1578
                       }
                     },
                     {
@@ -52448,7 +52505,7 @@
                       "value": "\"The stage-5 move check: a fair task made SCHED_FIFO owns its node and policy, and given back to fair still owns its node; L.sched.134's and H.SCHED.21's checks, which queue every real-time task through its cell; and review of every take and put (Task::entity_with, keep_entity, keep_refused, give_upper_node).\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1564
+                        "line": 1583
                       }
                     },
                     {
@@ -52459,7 +52516,7 @@
                       "value": "\"H.SCHED.21\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1565
+                        "line": 1584
                       }
                     },
                     {
@@ -52470,7 +52527,7 @@
                       "value": "(\"sched::task::Task::entity_with\", \"sched::task::Task::keep_entity\", \"sched::task::Task::keep_refused\", \"sched::task::Task::give_upper_node\", \"sched::set_policy\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1568
+                        "line": 1587
                       }
                     }
                   ]
@@ -52483,7 +52540,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1570
+                    "line": 1589
                   },
                   "children": [
                     {
@@ -52494,7 +52551,7 @@
                       "value": "\"A weight set on a task while a tier above fair holds it shall be its fair record's, and the weight it is queued with when it returns to fair.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1573
+                        "line": 1592
                       }
                     },
                     {
@@ -52505,7 +52562,7 @@
                       "value": "\"The stage-5 move check: a weight set on a SCHED_FIFO task is its base weight after its return to fair, and its record's weight the one that base gives.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1576
+                        "line": 1595
                       }
                     },
                     {
@@ -52516,7 +52573,7 @@
                       "value": "\"H.SCHED.2\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1577
+                        "line": 1596
                       }
                     },
                     {
@@ -52527,7 +52584,7 @@
                       "value": "(\"sched::queue::CpuQueue::set_weight\", \"sched::task::Task::entity_with\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1579
+                        "line": 1598
                       }
                     }
                   ]
@@ -52540,7 +52597,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1581
+                    "line": 1600
                   },
                   "children": [
                     {
@@ -52551,7 +52608,7 @@
                       "value": "\"A wake, local or remote, shall ask the class stack whether the woken task should preempt the running one (Stack::should_preempt), and a yes shall have the processor decide at once: at its timer armed MIN_ARM_NS away, or on the way out of a system call.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1586
+                        "line": 1605
                       }
                     },
                     {
@@ -52562,7 +52619,7 @@
                       "value": "\"The stage-5 order check on desktop: a SCHED_FIFO task woken from another processor, and by a fair task on its own, runs within 100 ms while a fair task spins there tickless. The bound is an emulated processor's, and shows only that the preemption happens: without it the wait has no end, the fair task running tickless. It is not a latency claim; that is F-95's and the gate host's.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1593
+                        "line": 1612
                       }
                     },
                     {
@@ -52573,7 +52630,7 @@
                       "value": "\"H.SCHED.21\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1594
+                        "line": 1613
                       }
                     },
                     {
@@ -52584,7 +52641,7 @@
                       "value": "(\"sched::wake_at_home\", \"sched::kick_after_wake\", \"sched::queue::CpuQueue::should_preempt\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1596
+                        "line": 1615
                       }
                     }
                   ]
@@ -52597,7 +52654,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1598
+                    "line": 1617
                   },
                   "children": [
                     {
@@ -52608,7 +52665,7 @@
                       "value": "\"A real-time task shall be woken on the processor it last ran on: never pulled onto its waker's, placed on an idle one, or stolen; so a higher priority waits for its own processor even while another is idle.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1602
+                        "line": 1621
                       }
                     },
                     {
@@ -52619,7 +52676,7 @@
                       "value": "\"The stage-5 placement check on desktop, with three processors or more: a SCHED_FIFO task of any affinity woken from another processor while its own runs a fair task and a third is idle runs on its own; a fair task, the control, runs elsewhere.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1606
+                        "line": 1625
                       }
                     },
                     {
@@ -52630,7 +52687,7 @@
                       "value": "\"H.SCHED.21\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1607
+                        "line": 1626
                       }
                     },
                     {
@@ -52641,7 +52698,7 @@
                       "value": "(\"sched::place_on_idle\", \"sched::wake_onto\", \"sched::queue::CpuQueue::steal_candidate\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1609
+                        "line": 1628
                       }
                     }
                   ]
@@ -52654,7 +52711,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1611
+                    "line": 1630
                   },
                   "children": [
                     {
@@ -52665,7 +52722,7 @@
                       "value": "\"A change of a task's policy or real-time priority shall store the new policy at once and, under its home queue's lock, take a task that queue holds and does not run off its tier and enqueue it at the tail of its new place; the running task shall be moved so at its processor's next decision, before the pick, and that decision asked for at once; an unchanged policy moves nothing. Between the call and that decision the task's policy reads as the new one (sched_getscheduler) while it still runs in its old tier. A task a processor runs, until the switch away from it has saved its context, shall never be moved to another processor or picked by one other than its own: move_onto and pick_next stop the machine on one (FX-0540).\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1623
+                        "line": 1642
                       }
                     },
                     {
@@ -52676,7 +52733,7 @@
                       "value": "\"The stage-5 move check on desktop: a fair task made SCHED_FIFO while it spins beside another fair task takes the processor from it, and given back to fair shares it again; the flips check: an unpinned running task flipped between SCHED_FIFO and fair 200 times beside a waiting one, with processors idle to steal, ends fair with no stop; its control, the running task moved at the call with no decision asked for, stops the machine with FX-0540 (three boots of three); test-rtsched's chrt step reads each change back.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1632
+                        "line": 1651
                       }
                     },
                     {
@@ -52687,7 +52744,7 @@
                       "value": "\"H.SCHED.21\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1633
+                        "line": 1652
                       }
                     },
                     {
@@ -52698,7 +52755,7 @@
                       "value": "(\"sched::set_policy\", \"sched::queue::CpuQueue::set_policy\", \"sched::queue::CpuQueue::requeue_if_moved\", \"sched::queue::CpuQueue::release\", \"sched::queue::CpuQueue::pick_next\", \"sched::move_onto\", \"sched::task::Task::set_on_cpu\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1638
+                        "line": 1657
                       }
                     }
                   ]
@@ -52711,7 +52768,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1640
+                    "line": 1659
                   },
                   "children": [
                     {
@@ -52722,7 +52779,7 @@
                       "value": "\"prepare_user, the scheduler's one maker of user tasks, shall give each new task its maker's real-time policy and priority with a node of its own, unless the maker has reset-on-fork set, when it starts SCHED_OTHER; the new task's reset-on-fork flag starts clear.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1645
+                        "line": 1664
                       }
                     },
                     {
@@ -52733,7 +52790,7 @@
                       "value": "\"test-rtsched on desktop: a forked child and a thread of a SCHED_FIFO 10 parent read SCHED_FIFO 10, and with reset-on-fork a forked child reads SCHED_OTHER; its negative control, expecting the reset child to keep SCHED_FIFO, fails on that step. Review: prepare_user is the one maker of user tasks (syscall::process's prepare_thread and start_thread, which launch::load_native reaches through StartClaim::prepare).\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1652
+                        "line": 1671
                       }
                     },
                     {
@@ -52744,7 +52801,7 @@
                       "value": "\"H.SCHED.21\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1653
+                        "line": 1672
                       }
                     },
                     {
@@ -52755,7 +52812,7 @@
                       "value": "(\"sched::prepare_user\", \"sched::inherit_policy\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1654
+                        "line": 1673
                       }
                     }
                   ]
@@ -52768,7 +52825,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1656
+                    "line": 1675
                   },
                   "children": [
                     {
@@ -52779,7 +52836,7 @@
                       "value": "\"A task's run time shall be charged to its job's cpu.max whatever its tier, and a real-time task held by it as a fair one is.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1659
+                        "line": 1678
                       }
                     },
                     {
@@ -52790,7 +52847,7 @@
                       "value": "\"The stage-13 cpu checks on desktop: a program of two spinning threads made SCHED_FIFO in a cgroup with cpu.max 20000 100000 is held between a twelfth and two thirds of a processor.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1663
+                        "line": 1682
                       }
                     },
                     {
@@ -52801,7 +52858,7 @@
                       "value": "(\"H.SCHED.22\", \"H.QUOTA.4\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1664
+                        "line": 1683
                       }
                     },
                     {
@@ -52812,7 +52869,7 @@
                       "value": "(\"sched::queue::CpuQueue::account_with\", \"sched::queue::CpuQueue::arm_timer\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1666
+                        "line": 1685
                       }
                     }
                   ]
@@ -52825,7 +52882,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1668
+                    "line": 1687
                   },
                   "children": [
                     {
@@ -52836,7 +52893,7 @@
                       "value": "\"A scheduling domain shall be made only through make_domain, which refuses a mode whose tiers are not compiled in as ModeUnavailable, and makes a SoftRt domain where they are; a SoftRt domain is made at run time only (domains::create_soft).\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1672
+                        "line": 1691
                       }
                     },
                     {
@@ -52847,7 +52904,7 @@
                       "value": "\"The stage-5 modes check: on desktop a SoftRt domain is made with its mode, and on present it is refused ModeUnavailable.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1675
+                        "line": 1694
                       }
                     },
                     {
@@ -52858,7 +52915,7 @@
                       "value": "\"H.SCHED.20\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1676
+                        "line": 1695
                       }
                     },
                     {
@@ -52869,7 +52926,7 @@
                       "value": "(\"sched::make_domain\", \"sched::init\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1677
+                        "line": 1696
                       }
                     }
                   ]
@@ -52882,7 +52939,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1679
+                    "line": 1698
                   },
                   "children": [
                     {
@@ -52893,7 +52950,7 @@
                       "value": "\"In a build without the realtime tier, set_policy shall refuse every real-time policy as NoTier, before any allocation and changing nothing, and realtime_built shall answer false.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1683
+                        "line": 1702
                       }
                     },
                     {
@@ -52904,7 +52961,7 @@
                       "value": "\"test-rtsched on present, on every architecture: SCHED_FIFO and SCHED_RR are EINVAL by sched_setscheduler and sched_setattr, and the thread still reads SCHED_OTHER (the Linux layer's EINVAL, which reads realtime_built); the stage-5 modes check: set_policy answers NoTier and leaves the task fair.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1689
+                        "line": 1708
                       }
                     },
                     {
@@ -52915,7 +52972,7 @@
                       "value": "\"H.SCHED.20\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1690
+                        "line": 1709
                       }
                     },
                     {
@@ -52926,7 +52983,7 @@
                       "value": "(\"sched::set_policy\", \"sched::realtime_built\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1691
+                        "line": 1710
                       }
                     }
                   ]
@@ -52939,7 +52996,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1693
+                    "line": 1712
                   },
                   "children": [
                     {
@@ -52950,7 +53007,7 @@
                       "value": "\"A task shall be admitted to a processor only if it is exempt or the processor's domain, read through the live domains, is its own; a processor's word of no domain admits no other task. The pick, a move between queues and the direct switch's hand-over shall stop the machine (FX-0538) on a task not admitted where it is to run.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1699
+                        "line": 1718
                       }
                     },
                     {
@@ -52961,7 +53018,7 @@
                       "value": "\"The stage-5 domain check on desktop, every pick and move of which asks it; its controls (the re-home skipped, the admission not narrowing) stop the machine with FX-0538.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1702
+                        "line": 1721
                       }
                     },
                     {
@@ -52972,7 +53029,7 @@
                       "value": "\"H.SCHED.23\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1703
+                        "line": 1722
                       }
                     },
                     {
@@ -52983,7 +53040,7 @@
                       "value": "(\"sched::domains::admits\", \"sched::domains::slot_of\", \"sched::domains::effective\", \"sched::require_admitted\", \"sched::move_onto\", \"sched::direct::Direct::hand_over\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1706
+                        "line": 1725
                       }
                     }
                   ]
@@ -52996,7 +53053,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1708
+                    "line": 1727
                   },
                   "children": [
                     {
@@ -53007,7 +53064,7 @@
                       "value": "\"A placement, a steal, a pull, a wake onto the waker and the balance shall consider only processors of the task's domain and ask its admission again under the target's queue lock; only the boot domain's processors steal, pull or balance.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1712
+                        "line": 1731
                       }
                     },
                     {
@@ -53018,7 +53075,7 @@
                       "value": "\"The stage-5 domain check: with eight spinners crowding the boot domain's two processors and the SoftRt domain's idle, none runs on the SoftRt processors; the wake placement and wake-affine checks still pass beside it.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1716
+                        "line": 1735
                       }
                     },
                     {
@@ -53029,7 +53086,7 @@
                       "value": "\"H.SCHED.23\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1717
+                        "line": 1736
                       }
                     },
                     {
@@ -53040,7 +53097,7 @@
                       "value": "(\"sched::may_place\", \"sched::may_pull\", \"sched::idle_allowed\", \"sched::pull_target\", \"sched::wake_onto\", \"sched::place_on_idle\", \"sched::steal_work\", \"sched::balance\", \"sched::queue::CpuQueue::steal_candidate\", \"sched::domains::steals\", \"sched::domains::cpus_of\", \"sched::domains::count\", \"sched::spawn\", \"sched::online\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1723
+                        "line": 1742
                       }
                     }
                   ]
@@ -53053,7 +53110,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1725
+                    "line": 1744
                   },
                   "children": [
                     {
@@ -53064,7 +53121,7 @@
                       "value": "\"A SoftRt domain shall be made by marking its processors leaving under each one's queue lock, asking each for a decision at which it takes off every task waiting there that it no longer admits, waiting in a task that may sleep, bounded by one second, until each holds only tasks it admits and every task taken off is placed, and then marking the domain live before naming it in any processor's word; past the bound the processors are given back and the switch refused.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1733
+                        "line": 1752
                       }
                     },
                     {
@@ -53075,7 +53132,7 @@
                       "value": "\"The stage-5 domain check on desktop: the domain is made under eight running spinners and none runs on it after; its control, the re-home skipped, stops the machine with FX-0538.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1737
+                        "line": 1756
                       }
                     },
                     {
@@ -53086,7 +53143,7 @@
                       "value": "(\"H.SCHED.23\", \"H.SCHED.24\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1738
+                        "line": 1757
                       }
                     },
                     {
@@ -53097,7 +53154,7 @@
                       "value": "(\"sched::domains::create_soft\", \"sched::domains::wait_until_empty\", \"sched::domains::set_slots\", \"sched::rehome_waiting\", \"sched::choose_next\", \"sched::queue::CpuQueue::foreign_waiting\", \"sched::queue::CpuQueue::holds_only_admitted\", \"sched::holds_only_admitted\", \"sched::ask_decision\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1744
+                        "line": 1763
                       }
                     }
                   ]
@@ -53110,7 +53167,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1746
+                    "line": 1765
                   },
                   "children": [
                     {
@@ -53121,7 +53178,7 @@
                       "value": "\"A running task a processor no longer admits shall be taken off that processor at its next decision and placed in its domain only once the switch away from it has saved its context.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1750
+                        "line": 1769
                       }
                     },
                     {
@@ -53132,7 +53189,7 @@
                       "value": "\"The stage-5 domain check on desktop, whose spinners are running when the domain is made and when two of them are admitted; FX-0540 stops the machine on a task moved while a processor runs it.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1754
+                        "line": 1773
                       }
                     },
                     {
@@ -53143,7 +53200,7 @@
                       "value": "\"H.SCHED.23\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1755
+                        "line": 1774
                       }
                     },
                     {
@@ -53154,7 +53211,7 @@
                       "value": "(\"sched::depart\", \"sched::finish_switch\", \"sched::task::Task::set_evicted\", \"sched::task::Task::take_evicted\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1757
+                        "line": 1776
                       }
                     }
                   ]
@@ -53167,7 +53224,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1759
+                    "line": 1778
                   },
                   "children": [
                     {
@@ -53178,7 +53235,7 @@
                       "value": "\"A task taken off a queue for its domain shall be filed in its own run slot and placed, with no queue lock held, on the least loaded processor of its domain that its affinity allows, its admission asked again under that processor's lock and with every change of a slot excluded; one with none now waits for a later placement.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1765
+                        "line": 1784
                       }
                     },
                     {
@@ -53189,7 +53246,7 @@
                       "value": "\"The stage-5 domain check on desktop: at its end no task waits to be placed and none was lost.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1767
+                        "line": 1786
                       }
                     },
                     {
@@ -53200,7 +53257,7 @@
                       "value": "\"H.SCHED.23\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1768
+                        "line": 1787
                       }
                     },
                     {
@@ -53211,7 +53268,7 @@
                       "value": "(\"sched::domains::push_moving\", \"sched::domains::drain\", \"sched::domains::drain_held\", \"sched::domains::moving\", \"sched::domains::moving_lost\", \"sched::place_moving\", \"sched::enqueue\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1772
+                        "line": 1791
                       }
                     }
                   ]
@@ -53224,7 +53281,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1774
+                    "line": 1793
                   },
                   "children": [
                     {
@@ -53235,7 +53292,7 @@
                       "value": "\"A task woken, by a waker or by its sleep's end, on a processor that no longer admits it shall be placed in its domain rather than queued there, unless it is still that processor's running task or queued there, which the processor's decision moves.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1779
+                        "line": 1798
                       }
                     },
                     {
@@ -53246,7 +53303,7 @@
                       "value": "\"The stage-5 domain check on desktop, whose checker and spinners sleep and wake across the switch; review of wake_at_home and wake_sleepers_placing.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1782
+                        "line": 1801
                       }
                     },
                     {
@@ -53257,7 +53314,7 @@
                       "value": "\"H.SCHED.23\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1783
+                        "line": 1802
                       }
                     },
                     {
@@ -53268,7 +53325,7 @@
                       "value": "(\"sched::sent_to_domain\", \"sched::wake_at_home\", \"sched::end_wake\", \"sched::wake_sleepers_placing\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1785
+                        "line": 1804
                       }
                     }
                   ]
@@ -53281,7 +53338,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1787
+                    "line": 1806
                   },
                   "children": [
                     {
@@ -53292,7 +53349,7 @@
                       "value": "\"Admitting a job to the SoftRt domain shall put it and every job beneath it, made before or after, in the domain, and each task of its live processes, under its home queue's lock: a queued one taken off and placed, a running one moved at its processor's next decision; a member its affinity keeps off every processor of the domain refuses the admission before anything changes. A user task takes its job's domain as it is made and again as it is queued, under that queue's lock.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1795
+                        "line": 1814
                       }
                     },
                     {
@@ -53303,7 +53360,7 @@
                       "value": "\"The stage-5 domain check on desktop: a job of no processes admitted, and a job made beneath it after, are in the domain; two running kernel tasks admitted run only on its processors; its control, a queued member not taken off, stops the machine with FX-0538.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1800
+                        "line": 1819
                       }
                     },
                     {
@@ -53314,7 +53371,7 @@
                       "value": "\"H.SCHED.23\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1801
+                        "line": 1820
                       }
                     },
                     {
@@ -53325,7 +53382,7 @@
                       "value": "(\"sched::domains::admit\", \"object::job::Job::sched_word\", \"sched::domains::admit_tasks\", \"sched::domains::placeable\", \"sched::domains::settle_task\", \"sched::domains::members_of\", \"sched::domains::word\", \"sched::domains::soft_exists\", \"object::job::Job::sched_slot\", \"object::job::Job::set_sched_domain\", \"sched::prepare_user\", \"sched::domain_slot_of_word\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1807
+                        "line": 1826
                       }
                     }
                   ]
@@ -53338,7 +53395,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1809
+                    "line": 1828
                   },
                   "children": [
                     {
@@ -53349,7 +53406,7 @@
                       "value": "\"Dissolving the SoftRt domain shall first mark it not live, so that every processor and task naming it reads as the boot domain's at once, and a job admitted to it, by its generation, too; then put its processors' words right. Its members' slots are put right before another domain is made.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1814
+                        "line": 1833
                       }
                     },
                     {
@@ -53360,7 +53417,7 @@
                       "value": "\"The stage-5 domain check on desktop: after the dissolution the domain does not exist, a job beneath one admitted is in the boot domain, and the boot domain's tasks run on its former processors.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1818
+                        "line": 1837
                       }
                     },
                     {
@@ -53371,7 +53428,7 @@
                       "value": "\"H.SCHED.24\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1819
+                        "line": 1838
                       }
                     },
                     {
@@ -53382,7 +53439,7 @@
                       "value": "(\"sched::domains::dissolve\", \"sched::domains::sweep\", \"sched::domains::slot_of_word\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1821
+                        "line": 1840
                       }
                     }
                   ]
@@ -53395,7 +53452,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1823
+                    "line": 1842
                   },
                   "children": [
                     {
@@ -53406,7 +53463,7 @@
                       "value": "\"A kernel task confined to one processor, and a processor's adopted context, shall be marked exempt from the domains as it is made, and the mark never changed; every other task shall start in the boot domain.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1827
+                        "line": 1846
                       }
                     },
                     {
@@ -53417,7 +53474,7 @@
                       "value": "\"The stage-5 domain check on desktop: the idle tasks run on the SoftRt processors throughout, which the pick allows only for the exempt; review of Task::new and Task::adopt.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1830
+                        "line": 1849
                       }
                     },
                     {
@@ -53428,7 +53485,7 @@
                       "value": "\"H.SCHED.23\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1831
+                        "line": 1850
                       }
                     },
                     {
@@ -53439,7 +53496,7 @@
                       "value": "(\"sched::task::Task::new\", \"sched::task::Task::adopt\", \"sched::task::Task::is_exempt\", \"sched::task::Task::domain_slot\", \"sched::task::Task::set_domain_slot\", \"sched::task::Task::affinity\", \"sched::task::first_domain\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1835
+                        "line": 1854
                       }
                     }
                   ]
@@ -53452,7 +53509,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1837
+                    "line": 1856
                   },
                   "children": [
                     {
@@ -53463,7 +53520,7 @@
                       "value": "\"domains::create_soft shall refuse Unavailable in a build without the realtime tier, TooFew below four processors in service, Count for no processors or more than all but two of those in service, and Exists while a domain exists or is being made, each before anything changes; its processors are the highest-numbered in service, never the boot processor; and a processor of a SoftRt domain shall be refused removal from service.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1844
+                        "line": 1863
                       }
                     },
                     {
@@ -53474,7 +53531,7 @@
                       "value": "\"The stage-5 domain check: on desktop with four processors, a domain of none and of three refused Count and a second refused Exists, and the domain's processor refused removal from service; on present, Unavailable.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1848
+                        "line": 1867
                       }
                     },
                     {
@@ -53485,7 +53542,7 @@
                       "value": "\"H.SCHED.25\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1849
+                        "line": 1868
                       }
                     },
                     {
@@ -53496,7 +53553,7 @@
                       "value": "(\"sched::domains::create_soft\", \"sched::service_refusal\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1850
+                        "line": 1869
                       }
                     }
                   ]
@@ -53509,7 +53566,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1852
+                    "line": 1871
                   },
                   "children": [
                     {
@@ -53520,7 +53577,7 @@
                       "value": "\"The direct switch shall decline (T11) a parked peer its processor does not admit, which the ordinary wake then places in its domain.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1855
+                        "line": 1874
                       }
                     },
                     {
@@ -53531,7 +53588,7 @@
                       "value": "\"Review of direct::begin, whose decline is counted; L.sched.140's hand-over stop behind it.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1857
+                        "line": 1876
                       }
                     },
                     {
@@ -53542,7 +53599,7 @@
                       "value": "\"H.SCHED.23\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1858
+                        "line": 1877
                       }
                     },
                     {
@@ -53553,7 +53610,7 @@
                       "value": "\"sched::direct::begin\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1859
+                        "line": 1878
                       }
                     }
                   ]

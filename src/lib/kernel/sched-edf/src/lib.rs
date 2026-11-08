@@ -374,6 +374,10 @@ impl<T> SchedClass<T> for Edf {
     fn steals_work(_: &EdfQueue<T>) -> bool {
         false
     }
+    // Never: only FifoRr says it is dormant (ledger 8057, SD.1).
+    fn dormant(_: &EdfQueue<T>) -> bool {
+        false
+    }
 
     fn check(queue: &EdfQueue<T>) -> Result<(), &'static str> {
         let shares: u64 = queue

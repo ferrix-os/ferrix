@@ -605,6 +605,14 @@ impl<T> SchedClass<T> for FifoRr {
         false
     }
 
+    /// Nothing queued and nothing running: two reads, with no branch between
+    /// them. Empty, the class is neither ready nor due, as `decision_in_ns`
+    /// asks for something held before its period's end; its period clock
+    /// still runs, by `elapse`.
+    fn dormant(queue: &FifoQueue<T>) -> bool {
+        (queue.len_waiting == 0) & queue.running.is_none()
+    }
+
     #[inline(never)]
     fn check(queue: &FifoQueue<T>) -> Result<(), &'static str> {
         if audit(&queue.tree, None, None)? != queue.len_waiting {
@@ -651,5 +659,7 @@ impl<T> RealtimeClass<T> for FifoRr {
     }
 }
 
+#[cfg(test)]
+mod dormant_tests;
 #[cfg(test)]
 mod tests;

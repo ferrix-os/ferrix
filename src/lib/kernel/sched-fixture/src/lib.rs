@@ -216,6 +216,10 @@ impl<T> SchedClass<T> for Fixture {
     fn steals_work(_: &Queue<T>) -> bool {
         false
     }
+    // Never: only FifoRr says it is dormant (ledger 8057, SD.1).
+    fn dormant(_: &Queue<T>) -> bool {
+        false
+    }
 
     #[inline(never)]
     fn check(queue: &Queue<T>) -> Result<(), &'static str> {

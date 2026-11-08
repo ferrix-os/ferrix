@@ -1497,6 +1497,10 @@ impl<T> ferrix_sched_class::SchedClass<T> for Eevdf {
     fn steals_work(_: &RunQueue<T>) -> bool {
         true
     }
+    // Never: only FifoRr says it is dormant (ledger 8057, SD.1).
+    fn dormant(_: &RunQueue<T>) -> bool {
+        false
+    }
 
     // Out of line: a present fair class shows in the image as this
     // (SCHED-CLASSES.md S1).

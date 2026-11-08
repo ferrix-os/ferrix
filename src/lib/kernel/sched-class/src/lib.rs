@@ -228,6 +228,19 @@ pub trait SchedClass<T> {
     /// what it holds (S11).
     fn steals_work(queue: &Self::Queue) -> bool;
 
+    /// Whether the queue is dormant: it holds no entity, running or waiting
+    /// ([`SchedClass::len`] is zero), so that [`SchedClass::ready`] is false,
+    /// [`SchedClass::current`], [`SchedClass::remaining_ns`] and
+    /// [`SchedClass::decision_in_ns`] are `None`, [`SchedClass::should_preempt`]
+    /// is false and [`SchedClass::load_weight`] is zero. What a stack may then
+    /// leave unasked of it, as a tier that is not there: never what it is told
+    /// ([`SchedClass::elapse`] still is). A class may always answer false, as
+    /// [`Empty`] does; one answers true only where all of that holds, and
+    /// cheaply, a read or two. Required, with no default (S11): every
+    /// class says, and every class but `ferrix_sched_fifo::FifoRr` says
+    /// false (ledger 8057, SD.1).
+    fn dormant(queue: &Self::Queue) -> bool;
+
     /// The class's own invariants, for the boot checks and host tests.
     ///
     /// # Errors
@@ -413,6 +426,11 @@ impl<T> SchedClass<T> for Empty {
     fn steals_work((): &()) -> bool {
         false
     }
+    // Holds nothing, but says false as every class but FifoRr does (SD.1):
+    // an `Over` with an absent upper tier is folded by the build, not here.
+    fn dormant((): &()) -> bool {
+        false
+    }
     fn check((): &()) -> Result<(), &'static str> {
         Ok(())
     }
@@ -543,6 +561,20 @@ fn upper_ready<T, U: SchedClass<T>, L: SchedClass<T>>(queue: &Stacked<U::Queue, 
     U::ready(&queue.upper, L::len(&queue.lower) > 0)
 }
 
+/// Whether an [`Over`] stack's lower tier is all of it, now: the upper tier
+/// does not run, and is dormant ([`SchedClass::dormant`]). Then each of the
+/// stack's answers is the lower tier's, as the general one would give it
+/// (the upper tier holds nothing to be ready, current or due), and the stack
+/// asks the lower tier alone: one test where the general answer makes
+/// several, laid out so that the lower tier's way is the straight one (the
+/// round trip's cross-domain row, `docs/SCHED-CLASSES.md` §9e). Without a
+/// class that says it is dormant, false, and every answer the general one.
+#[inline(always)]
+fn lower_alone<T, U: SchedClass<T>, L: SchedClass<T>>(queue: &Stacked<U::Queue, L::Queue>) -> bool {
+    // Both read, with no branch between them: `&`, not `&&`.
+    !queue.running_upper & U::dormant(&queue.upper)
+}
+
 impl<T, U: SchedClass<T>, L: SchedClass<T>> SchedClass<T> for Over<U, L> {
     const NAME: &'static str = <Self as Named<T>>::JOINED.as_str();
     type Queue = Stacked<U::Queue, L::Queue>;
@@ -634,10 +666,12 @@ impl<T, U: SchedClass<T>, L: SchedClass<T>> SchedClass<T> for Over<U, L> {
 
     fn current(queue: &Self::Queue) -> Option<&T> {
         if queue.running_upper {
-            U::current(&queue.upper)
-        } else {
-            L::current(&queue.lower)
+            // The lower tier's running entity is the straight way: what a
+            // stack whose upper tier is seldom used runs (the round trip).
+            core::hint::cold_path();
+            return U::current(&queue.upper);
         }
+        L::current(&queue.lower)
     }
 
     fn hand_over(
@@ -649,8 +683,11 @@ impl<T, U: SchedClass<T>, L: SchedClass<T>> SchedClass<T> for Over<U, L> {
     ) -> Handed<T, Self::Entity> {
         // The fused step only within one tier, and only when nothing of the
         // other tier could be chosen instead; otherwise the general sequence.
+        // A dormant upper tier could not be ready, so it is not asked
+        // (`lower_alone`).
         match entity {
             Tier::Upper(entity) if queue.running_upper => {
+                core::hint::cold_path();
                 U::hand_over(&mut queue.upper, id, payload, entity, slice_after)
                     .map(|left| {
                         left.map(|(id, payload, entity)| (id, payload, Tier::Upper(entity)))
@@ -661,7 +698,10 @@ impl<T, U: SchedClass<T>, L: SchedClass<T>> SchedClass<T> for Over<U, L> {
                         reason: back.reason,
                     })
             }
-            Tier::Lower(entity) if !queue.running_upper && !upper_ready::<T, U, L>(queue) => {
+            Tier::Lower(entity)
+                if lower_alone::<T, U, L>(queue)
+                    || (!queue.running_upper && !upper_ready::<T, U, L>(queue)) =>
+            {
                 L::hand_over(&mut queue.lower, id, payload, entity, slice_after)
                     .map(|left| {
                         left.map(|(id, payload, entity)| (id, payload, Tier::Lower(entity)))
@@ -673,6 +713,7 @@ impl<T, U: SchedClass<T>, L: SchedClass<T>> SchedClass<T> for Over<U, L> {
                     })
             }
             entity => {
+                core::hint::cold_path();
                 Self::enqueue(queue, id, payload, entity)?;
                 let left = Self::remove_current(queue);
                 let _ = Self::pick(queue);
@@ -683,24 +724,35 @@ impl<T, U: SchedClass<T>, L: SchedClass<T>> SchedClass<T> for Over<U, L> {
 
     fn charge(queue: &mut Self::Queue, ran_ns: u64) -> bool {
         if queue.running_upper {
+            core::hint::cold_path();
             L::elapse(&mut queue.lower, ran_ns);
             U::charge(&mut queue.upper, ran_ns)
         } else {
             U::elapse(&mut queue.upper, ran_ns);
-            // Something of the upper class ready is a decision due too.
-            L::charge(&mut queue.lower, ran_ns) || upper_ready::<T, U, L>(queue)
+            let due = L::charge(&mut queue.lower, ran_ns);
+            // Something of the upper class ready is a decision due too; a
+            // dormant upper class has nothing ready, so it is not asked.
+            if U::dormant(&queue.upper) {
+                return due;
+            }
+            core::hint::cold_path();
+            due || upper_ready::<T, U, L>(queue)
         }
     }
 
     fn remaining_ns(queue: &Self::Queue) -> Option<u64> {
         if queue.running_upper {
-            U::remaining_ns(&queue.upper)
-        } else {
-            L::remaining_ns(&queue.lower)
+            core::hint::cold_path();
+            return U::remaining_ns(&queue.upper);
         }
+        L::remaining_ns(&queue.lower)
     }
 
     fn should_preempt(queue: &Self::Queue) -> bool {
+        if lower_alone::<T, U, L>(queue) {
+            return L::should_preempt(&queue.lower);
+        }
+        core::hint::cold_path();
         if queue.running_upper {
             U::should_preempt(&queue.upper)
         } else {
@@ -711,6 +763,11 @@ impl<T, U: SchedClass<T>, L: SchedClass<T>> SchedClass<T> for Over<U, L> {
     }
 
     fn decision_in_ns(queue: &Self::Queue) -> Option<u64> {
+        // A dormant upper tier is neither ready nor due: the lower's alone.
+        if lower_alone::<T, U, L>(queue) {
+            return L::decision_in_ns(&queue.lower);
+        }
+        core::hint::cold_path();
         if queue.running_upper {
             // Lower entities waiting cannot displace an upper one.
             U::decision_in_ns(&queue.upper)
@@ -757,6 +814,10 @@ impl<T, U: SchedClass<T>, L: SchedClass<T>> SchedClass<T> for Over<U, L> {
     fn elapse(queue: &mut Self::Queue, ns: u64) {
         U::elapse(&mut queue.upper, ns);
         L::elapse(&mut queue.lower, ns);
+    }
+
+    fn dormant(queue: &Self::Queue) -> bool {
+        lower_alone::<T, U, L>(queue) & L::dormant(&queue.lower)
     }
 
     fn steals_work(queue: &Self::Queue) -> bool {

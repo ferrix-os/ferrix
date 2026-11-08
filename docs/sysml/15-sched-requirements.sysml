@@ -1539,6 +1539,25 @@ package FerrixSchedRequirements {
             attribute :>> parent = "H.SCHED.28";
             attribute :>> unit = ("sched::make_domain");
         }
+        requirement <'L.sched.186'> aDormantTierIsLeftUnasked : ItemLowLevel {
+            attribute :>> statement = "A scheduling class shall answer dormant only when it holds no
+                entity, and then its ready shall be false, its current, remaining_ns and
+                decision_in_ns none, its should_preempt false and its load_weight zero; FifoRr shall
+                answer dormant exactly when it holds nothing, and every other class false; and a
+                stack whose upper tier does not run and is dormant shall give the lower tier's
+                answers, as the stack that asks the upper tier everything gives them.";
+            attribute :>> criterion = "ferrix-sched-fifo's host tests: dormant equals len() == 0 over
+                an empty queue, a waiting-only, a running-only, a throttled one and a throttled empty
+                one with its period clock running, each listed answer asserted when dormant; and a
+                seeded walk of arrivals of both tiers, picks, charges across the quantum, the floor
+                and the period, elapses, direct hand-overs, removals and yields, in which Over over
+                FifoRr answers current, remaining_ns, decision_in_ns, should_preempt, ready both ways,
+                load_weight, len and every charge as Over over FifoRr with dormant forced false
+                (ledger 8057, SD.1 and SD.3).";
+            attribute :>> parent = "H.SCHED.21";
+            attribute :>> unit = ("sched::queue::CpuQueue::hand_over", "sched::queue::CpuQueue::account_with",
+                "sched::queue::CpuQueue::should_preempt", "sched::queue::CpuQueue::arm_timer");
+        }
     }
 
     package Realtime {
