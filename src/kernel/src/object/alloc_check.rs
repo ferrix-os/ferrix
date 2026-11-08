@@ -112,6 +112,7 @@ pub fn run() -> Result<Report, &'static str> {
     mm::check::check_a_large_block_goes_back_with_the_section()?;
     mm::check::check_heap_caches()?;
     let drawn = drawn.saturating_add(check_a_library_insert_runs_in_a_section()?);
+    let drawn = drawn.saturating_add(mm::check::check_the_heap_killer_draws_outside_a_section()?);
     let mut report = check_the_native_calls_survive()?;
     report.drawn = drawn;
     report.torn_down = check_a_teardown_needs_no_memory()?;

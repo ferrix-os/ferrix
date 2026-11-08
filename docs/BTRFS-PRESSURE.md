@@ -307,7 +307,11 @@ with 331 frames free of a 1487-frame watermark (gate.sh `mp2-btp`). The
 kill's console line says the free count and the watermark. That wait has
 no time bound: it fails closed (no kill, the refusal as before), the fault
 path's kill is not affected, and a bound is a BACKLOG row (ledger 8043). The kill runs marked inside a reclaim: what it
-allocates and the heap refuses fails, and the kill then answers refused.
+allocates is never answered by a reclaim or a kill. A refusal of it is
+served from its processor's allocation reserve (L.mm.139, outside any
+section, while the reserve holds a block of its class), since the kill is
+asked exactly when the heap is empty; only with that spent too does it
+fail, and the kill then answers refused.
 A running process the kill chose fails its allocation and leaves. A kill
 from L.mm.137's refill, when its reclaim found nothing, was tried and
 taken out (ledger 8015 B2): with it removed the hog boot still passed
@@ -369,13 +373,25 @@ The fix of the first (bugfix/vfs-no-alloc-under-lock):
   path's copy, a link's fragment, the last component's name; a step
   borrows its component rather than copying it).
 
-The second is not fixed here. Serving the killing task's refused
-allocations from its processor's allocation reserve (branch
-`park/heap-kill-reserve`, a4bcc40e0) passed 8 of 8 hog boots on the
-branch's base, one of them killing with `0 frames free`; the certification
-consultant's review (ledger line 8172) wants it as a requirement of its own
-(L.mm.139, reserved first), L.mm.37 amended, and a deterministic boot check
-with two controls before it lands (a BACKLOG row).
+The second, by L.mm.139 (bugfix/heap-kill-reserve; consultant ledger
+8172): the task choosing and killing for the heap
+(`object::oom::HEAP_KILLER`, set under `CHOOSING`) has its refused
+allocations, outside interrupt context, served from its processor's
+allocation reserve outside any section (`killing_for_the_heap`,
+`mm::reserve::draw`), 16 objects of every size class; L.mm.37 says so.
+The list fits a class up to 85 processes (24-byte entries, the 2048-byte
+class); with more it is a block of pages the reserve does not hold, and
+the kill fails as before (a BACKLOG row). A draw leaves the reserve to be
+refilled by the next section on that processor, which is refused
+`ENOMEM` while the victim's memory has not come back (`reserve::draw`'s
+documentation). The boot check is the allocation check's
+`check_the_heap_killer_draws_outside_a_section`, with the heap made to
+refuse the checking task (`mm::refuse_heap_for`); before it, 8 of 8 hog
+boots on 90713ad5b with the change passed, one killing at `0 frames
+free`.
+
+The gate ends a boot at a stop's report (its `code` line) rather than wait
+out its 1800 s for `pressure: done`.
 
 ## Against Linux's btrfs (2026-11-08, btrfs-reference)
 

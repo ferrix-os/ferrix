@@ -236,15 +236,30 @@ fn leave() {
 }
 
 /// A block for `request` from this processor's reserve, if a section is open
-/// here and the reserve holds one. Called by the global allocator when the
-/// heap has refused.
-pub(super) fn draw(request: Request) -> Option<u64> {
+/// here -- or, with `outside`, for the task killing for the kernel's heap
+/// (`object::oom::killing_for_the_heap`, L.mm.139), with none open -- and
+/// the reserve holds one. Called by the global allocator when the heap has
+/// refused.
+///
+/// A draw outside a section is as sound as one inside: the block is an
+/// ordinary heap object of the request's class, taken with interrupts
+/// masked on this processor, where no section can be open while a task
+/// that may block runs. It leaves the reserve not full, so the next section
+/// here fills it again first, or is refused with `ENOMEM`.
+///
+/// What that costs: after a kill drew on it, the next section on that
+/// processor -- an `Arc`, a map insert, anyone's -- must refill the reserve
+/// before it opens, and is refused (`AllocError`, `ENOMEM` to its caller)
+/// while the victim's memory has not come back; so may sections the kill
+/// itself opens, which before the draw would have opened on the full
+/// reserve. A refusal there is an error its caller returns, not a stop.
+pub(super) fn draw(request: Request, outside: impl FnOnce() -> bool) -> Option<u64> {
     let saved = <arch::Irq as IrqControl>::disable();
     let block = slot().and_then(|cell| {
         // SAFETY: (SHARED) as in `enter`, with interrupts masked just above. The
         // allocator calling this holds no reference to the slot.
         let here = unsafe { &mut *cell.get() };
-        if here.sections == 0 {
+        if here.sections == 0 && !outside() {
             return None;
         }
         let block = here.reserve.take(&KernelPages, request)?;
@@ -256,6 +271,27 @@ pub(super) fn draw(request: Request) -> Option<u64> {
         let _ = DRAWN.fetch_add(1, Ordering::Relaxed);
     }
     block
+}
+
+/// The task whose allocations the heap refuses, as if it were empty, or 0:
+/// set by the reserve's check alone, so that what serves a refused
+/// allocation outside any section is the allocator's fallback and nothing
+/// else (L.mm.37, L.mm.139). Interrupt context is never refused by it.
+static REFUSE_HEAP_FOR: AtomicU64 = AtomicU64::new(0);
+
+/// Make the heap refuse every allocation of `task`, outside interrupt
+/// context, or stop with 0. For the reserve's boot check
+/// (`mm::check::check_the_heap_killer_draws_outside_a_section`), which
+/// allocates nothing else while it is set.
+pub(super) fn refuse_heap_for(task: u64) {
+    REFUSE_HEAP_FOR.store(task, Ordering::Release);
+}
+
+/// Whether the heap is to refuse the running task's allocation
+/// ([`refuse_heap_for`]): one load while no check has set it.
+pub(super) fn heap_refused_here() -> bool {
+    let task = REFUSE_HEAP_FOR.load(Ordering::Relaxed);
+    task != 0 && !crate::irq::in_interrupt() && crate::sched::current_id() == Some(task)
 }
 
 /// Whether the allocator should go to the reserve without asking the heap.

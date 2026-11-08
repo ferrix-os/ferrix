@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-3034 declarations in the core's files, 215 in the item's; 245 checks-only.
+3035 declarations in the core's files, 215 in the item's; 246 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2087,6 +2087,7 @@ checks above is `pub` for raised checks (F3).
 | `check_heap_caches` | fn | load (checks) | checks-only |
 | `check_pstore_never_free` | fn | bin |  |
 | `check_scrubber` | fn | bin (checks) | checks-only |
+| `check_the_heap_killer_draws_outside_a_section` | fn | load (checks) | checks-only |
 | `check_w_xor_x` | fn | bin |  |
 | `hole_in_ram` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `memory_check` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |

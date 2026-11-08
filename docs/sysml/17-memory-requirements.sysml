@@ -588,7 +588,8 @@ package FerrixMemoryRequirements {
                 fail when the allocating process is the one chosen or is ending, when nothing can
                 be killed, and when no list of the live processes can be made. Not for a refusal
                 the failure injection made, and what the kill itself allocates is never answered
-                by a reclaim or a kill.";
+                by a reclaim or a kill; the heap's refusal of it is answered by the reserve as
+                L.mm.139 says.";
             attribute :>> criterion = "test-btrfs-pressure's hog boot: on a 768 MiB machine a
                 program holds all of MemAvailable but 16 MiB as anonymous memory, then 24576 names
                 made by the shell alone through a writable btrfs are all made and every 64th found
@@ -601,6 +602,27 @@ package FerrixMemoryRequirements {
             attribute :>> parent = "H.MEM.11";
             attribute :>> unit = ("mm::heap_or_kill", "mm::while_killing",
                 "object::oom::for_kernel_heap", "object::oom::kernel_victim_held");
+        }
+        // docs/BTRFS-PRESSURE.md, "Two refusals the kill could not answer" (2026-11-08,
+        // consultant ledger 8172 B2).
+        requirement <'L.mm.139'> theHeapKillerDrawsOnTheReserve : ItemLowLevel {
+            attribute :>> statement = "An allocation the heap refused, made outside any reserved
+                section by the task choosing and killing for the kernel's heap (L.mm.138), outside
+                interrupt context, shall be served from that processor's allocation reserve while
+                the reserve holds a block of its class; the same allocation by any other task, or
+                in interrupt context, shall stay refused.";
+            attribute :>> criterion = "The allocation check (mm::check,
+                check_the_heap_killer_draws_outside_a_section), preemption off, the reserve
+                filled, the heap made to refuse the checking task's allocations: named the heap's
+                killer, a 200-byte allocation outside any section is served holding what was put
+                in it and the drawn count rises; with no killer named, and with another task
+                named, it is refused and the drawn count is unchanged; inside a section, no killer
+                named, it is served from the reserve. Controls: the fallback's
+                predicate false (the first fails), killing_for_the_heap true for every task (the
+                second fails).";
+            attribute :>> parent = "H.MEM.11";
+            attribute :>> unit = ("object::oom::killing_for_the_heap", "mm::reserve::draw",
+                "mm::KernelAllocator::alloc", "mm::reserve::heap_refused_here");
         }
         // docs/RAM-RELEASE.md §2, R1 (consultant ledger 4971, 5022).
         requirement <'L.mm.99'> theArchivesPagesComeBack : ItemLowLevel {
@@ -989,10 +1011,12 @@ package FerrixMemoryRequirements {
         }
         requirement <'L.mm.37'> theReserveServesOnlyItsSections : ItemLowLevel {
             attribute :>> statement = "draw shall serve an allocation from a reserve
-                only while a section is open on that processor.";
+                only while a section is open on that processor, but for the task killing
+                for the kernel's heap outside any section (L.mm.139).";
             attribute :>> criterion = "With the heap unable to take a page, an
-                allocation made outside any section is refused and the drawn count is
-                unchanged, while the same allocation inside a section is served.";
+                allocation made outside any section by a task that is not the heap's
+                killer is refused and the drawn count is unchanged, while the same
+                allocation inside a section is served.";
             attribute :>> parent = "H.MEM.11";
             attribute :>> unit = ("mm::reserve::draw", "mm::reserve::slot");
         }

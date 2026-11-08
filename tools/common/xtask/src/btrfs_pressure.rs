@@ -553,7 +553,12 @@ fn boot(
     let started = Instant::now();
     let deadline = started + Duration::from_secs(machine.timeout);
     let lines = qemu::watch_then(arch, &image, kernel, &machine, SUCCESS_MARKER, |at| {
-        let _ = at.read_more(deadline, |lines| lines.iter().any(|l| l.trim() == DONE))?;
+        // To the guest's last line, or through a stop's report to its
+        // catalogue code: a stopped guest says nothing more, and waiting for
+        // `DONE` held gate.sh `fr-pressure` on its halted guest for 40 min.
+        let _ = at.read_more(deadline, |lines| {
+            lines.iter().any(|l| l.trim() == DONE) || stopped(lines)
+        })?;
         Ok(())
     })?;
     let took = started.elapsed().as_secs();
@@ -579,7 +584,20 @@ fn boot(
         Kind::Floor | Kind::Cgroup => judge(&ours),
     };
     let judged = judged.and_then(|()| judge_heap_kills(kind, &lines));
+    let judged = match lines.iter().find(|l| l.contains(qemu::PANIC_MARKER)) {
+        Some(stop) => Err(format!("the kernel stopped: {}", stop.trim())),
+        None => judged,
+    };
     judged.map_err(|why| Error::new(format!("{arch}: {why}")))
+}
+
+/// Whether the kernel stopped and its report has reached its catalogue
+/// code, the line after which the guest has nothing more to say.
+fn stopped(lines: &[String]) -> bool {
+    lines
+        .iter()
+        .skip_while(|l| !l.contains(qemu::PANIC_MARKER))
+        .any(|l| l.contains("  code "))
 }
 
 /// Whether the guest finished, nothing failed, and no probe stalled long.
@@ -811,6 +829,21 @@ mod tests {
         ];
         assert!(judge_evict(&stalled).is_err());
         assert!(judge_evict(&[DONE]).is_err());
+    }
+
+    #[test]
+    fn a_stop_ends_the_boot_once_its_report_names_its_code() {
+        let lines = |text: &[&str]| text.iter().map(|l| (*l).to_owned()).collect::<Vec<_>>();
+        assert!(!stopped(&lines(&["pressure: hog: 643 MiB held"])));
+        assert!(!stopped(&lines(&[
+            "FERRIX-PANIC memory allocation of 204 bytes failed"
+        ])));
+        assert!(stopped(&lines(&[
+            "   28.62 | FERRIX-PANIC memory allocation of 204 bytes failed",
+            "   28.63 |   trace     #0  0xffffffffc54ebcda",
+            "   28.63 |   code      FX-0008  an allocation that cannot report failure",
+        ])));
+        assert!(!stopped(&lines(&["   10.0 |   code      before any stop"])));
     }
 
     #[test]

@@ -1273,7 +1273,7 @@ unsafe impl GlobalAlloc for KernelAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let request = Request::new(layout.size(), layout.align());
         if reserve::bypassing_heap()
-            && let Some(address) = reserve::draw(request)
+            && let Some(address) = reserve::draw(request, || false)
         {
             return address as *mut u8;
         }
@@ -1289,13 +1289,21 @@ unsafe impl GlobalAlloc for KernelAllocator {
         // K16: whoever the request is charged to, a call's ticket included.
         #[cfg(ferrix_kernel_memory = "retyped")]
         let entry = seal::route(seal::charged());
+        // The reserve's check makes the heap refuse its own task's
+        // allocations, so that the fallback below is what answers them
+        // (L.mm.37, L.mm.139; `reserve::refuse_heap_for`).
+        let heap_tried = !reserve::heap_refused_here();
         let address = reserved_heap(entry)
+            .filter(|_| heap_tried)
             .and_then(|heap| {
                 heap.lock()
                     .allocate(&mut ReservedPages(entry), request)
                     .ok()
             })
             .or_else(|| {
+                if !heap_tried {
+                    return None;
+                }
                 // After the seal the shared heap serves nobody (K16 §2, H.MEM.32).
                 #[cfg(ferrix_kernel_memory = "retyped")]
                 if seal::note_shared(request.size) {
@@ -1307,8 +1315,9 @@ unsafe impl GlobalAlloc for KernelAllocator {
                     .or_else(|| heap_or_kill(request, injected))
             })
             // Refused even after the drain: inside a reserved section, the
-            // reserve serves it instead (`mm/reserve.rs`, finding F-23).
-            .or_else(|| reserve::draw(request));
+            // reserve serves it instead (`mm/reserve.rs`, finding F-23), and
+            // so it does for the task killing for the heap (L.mm.139).
+            .or_else(|| reserve::draw(request, crate::object::oom::killing_for_the_heap));
         // A null return is how `GlobalAlloc` reports failure. A fallible
         // caller -- `try_reserve`, `ferrix_fallible` -- turns it into an
         // error; an infallible one calls the allocation error handler, and

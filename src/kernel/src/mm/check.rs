@@ -1579,6 +1579,56 @@ pub fn check_pstore_never_free() -> Result<(), &'static str> {
 }
 
 // CHECKS-ONLY: object/alloc_check.rs
+/// Outside any section, with the heap refusing this task's allocations
+/// (`mm::reserve::refuse_heap_for`): named the heap's killer, a 200-byte allocation
+/// is served from this processor's reserve and the drawn count rises; not
+/// named, or another task named, the same allocation is refused and the
+/// drawn count stays; and inside a section, no killer named, it is served
+/// from the reserve again. Preemption is off, so the reserve filled first
+/// is the one drawn on.
+///
+/// Verifies: L.mm.139, L.mm.37
+#[doc(hidden)]
+pub fn check_the_heap_killer_draws_outside_a_section() -> Result<u64, &'static str> {
+    let me = crate::sched::current_id().ok_or("the allocation check runs outside a task")?;
+    crate::sched::preempt_disable();
+    let filled = mm::fill_reserve();
+    // Whether the allocation was served holding what was put in it, and
+    // how many blocks the reserves gave meanwhile.
+    let attempt = |killer: u64, in_section: bool| {
+        crate::object::oom::name_heap_killer_for_check(killer);
+        super::reserve::refuse_heap_for(me);
+        let (before, _) = mm::reserve_counts();
+        let served = if in_section {
+            fallible::try_arc([0x5A_u8; 200]).is_ok_and(|made| made.iter().all(|&b| b == 0x5A))
+        } else {
+            ferrix_fallible::try_box([0x5A_u8; 200])
+                .is_ok_and(|made| made.iter().all(|&b| b == 0x5A))
+        };
+        let (after, _) = mm::reserve_counts();
+        super::reserve::refuse_heap_for(0);
+        crate::object::oom::name_heap_killer_for_check(0);
+        (served, after.saturating_sub(before))
+    };
+    let (served, drawn) = attempt(me, false);
+    let (unnamed, unnamed_drawn) = attempt(0, false);
+    let (other, other_drawn) = attempt(u64::MAX, false);
+    let (sectioned, section_drawn) = attempt(0, true);
+    crate::sched::preempt_enable();
+    filled.map_err(|_| "no memory to fill the reserve for the heap killer's check")?;
+    if !served || drawn == 0 {
+        return Err("the heap's killer was not served from the reserve outside a section");
+    }
+    if unnamed || unnamed_drawn != 0 || other || other_drawn != 0 {
+        return Err("the reserve served a task that is not the heap's killer outside a section");
+    }
+    if !sectioned || section_drawn == 0 {
+        return Err("the reserve did not serve a section with the heap refusing");
+    }
+    Ok(drawn.saturating_add(section_drawn))
+}
+
+// CHECKS-ONLY: object/alloc_check.rs
 /// A section entered for a large block and closed without using it gives the
 /// block back: while it is open the heap has the block's pages out, and once
 /// it has closed the heap's large pages and the free frames are where they
