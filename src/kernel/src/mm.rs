@@ -468,6 +468,9 @@ fn take_frames(order: u8, floor: reservation::Floor) -> Option<Frame> {
         if let reservation::Taking::Drawn(entry) = taking {
             reservation::drawn(entry, frame, n);
         }
+        if matches!(floor, reservation::Floor::Kernel) {
+            note_headroom(frames.free_frames(), watermark);
+        }
         Some(frame)
     })??;
     count(Route::Allocated, n);
@@ -1298,7 +1301,9 @@ unsafe impl GlobalAlloc for KernelAllocator {
                 if seal::note_shared(request.size) {
                     return None;
                 }
+                let injected = fallible::injected_failures();
                 heap_or_drain(|| allocate_through_caches(request))
+                    .or_else(|| heap_or_reclaim(request, injected))
             })
             // Refused even after the drain: inside a reserved section, the
             // reserve serves it instead (`mm/reserve.rs`, finding F-23).
@@ -1307,6 +1312,11 @@ unsafe impl GlobalAlloc for KernelAllocator {
         // caller -- `try_reserve`, `ferrix_fallible` -- turns it into an
         // error; an infallible one calls the allocation error handler, and
         // the count is how the panic that follows is recognised as that.
+        // The kernel's frames below half the watermark: an allocation that
+        // may block lifts them again, before one that cannot finds none.
+        if HEADROOM_SHORT.load(Ordering::Relaxed) {
+            refill_headroom();
+        }
         address.map_or_else(
             || {
                 let _ = REFUSALS.fetch_add(1, Ordering::Relaxed);
@@ -1433,6 +1443,145 @@ pub(crate) fn heap_or_drain<T>(mut attempt: impl FnMut() -> Option<T>) -> Option
         let _ = drain_caches();
         attempt()
     })
+}
+
+/// Reclaims one heap allocation refused after the drain makes before its
+/// refusal stands ([`heap_or_reclaim`]): as many as a page of the cache
+/// makes (`fs::pages`, `RECLAIMS`).
+const HEAP_RECLAIMS: u32 = 8;
+
+/// Pages one reclaim for the kernel's heap asks for at least -- a fill's
+/// run, as `object::oom` asks for a fault -- and at most, 64 MiB, as
+/// `object::oom::reclaim_for` bounds one round; and what the free count
+/// lacks of the watermark besides, in both.
+const HEAP_RECLAIM_LEAST: u64 = 32;
+const HEAP_RECLAIM_MOST: u64 = 16384;
+
+/// Set while the kernel's own frames have taken the free count below half
+/// the watermark ([`note_headroom`]), until a reclaim lifts it again
+/// ([`refill_headroom`]). Read on every heap allocation: one load.
+static HEADROOM_SHORT: AtomicBool = AtomicBool::new(false);
+
+/// Set while one task refills the headroom, so that two do not walk the
+/// cache for it at once.
+static REFILLING: AtomicBool = AtomicBool::new(false);
+
+/// When a refill of the headroom last gave nothing back, in
+/// `timer::now_nanos`; none is tried again within [`REFILL_PAUSE_NANOS`],
+/// so that a machine with no clean cache left does not walk the cache at
+/// every allocation.
+static REFILL_FOUND_NOTHING: AtomicU64 = AtomicU64::new(0);
+const REFILL_PAUSE_NANOS: u64 = 10_000_000;
+
+/// Note what a kernel frame left free, in the allocator's hold: below half
+/// the watermark, the next heap allocation that may block refills it
+/// (L.mm.136). A store only when it changes.
+fn note_headroom(left: u64, watermark: u64) {
+    let short = left < watermark / 2;
+    if HEADROOM_SHORT.load(Ordering::Relaxed) != short {
+        HEADROOM_SHORT.store(short, Ordering::Relaxed);
+    }
+}
+
+/// Whether a kernel-heap allocation made here may answer the machine's
+/// shortage with a reclaim (L.mm.136): only where it may block -- no spin
+/// lock held, interrupts on, not in interrupt context
+/// ([`crate::sched::may_block`]) -- since a reclaim must be begun with no
+/// spin lock held; and not inside a reclaim, which is never begun twice
+/// (FX-0973).
+fn heap_may_reclaim() -> bool {
+    crate::sched::may_block()
+        && !crate::irq::in_interrupt()
+        && crate::sched::with_current(crate::sched::Task::reclaiming) == Some(false)
+}
+
+/// Whether a refusal is, or may be, the failure injection's, and so is
+/// answered as it stands, as `heap_or_drain` answers it (L.mm.98): the
+/// injection's count moved since `injected`, read before the attempt, or
+/// this task is the one whose allocations it fails. The count is global:
+/// another task's injection in the same window keeps this refusal from its
+/// reclaim too, which fails closed.
+fn injection_refused(injected: u64) -> bool {
+    fallible::injected_failures() != injected || fallible::injecting_here()
+}
+
+/// One reclaim of clean cache anywhere and the heap the shrinker gives
+/// back ([`crate::user::cache::reclaim`]), for `pages` of the kernel's own
+/// and what the free count lacks of the watermark besides: whether it gave
+/// any back. Called only where [`heap_may_reclaim`] said yes.
+fn reclaim_for_kernel(pages: u64) -> bool {
+    let short = watermark().saturating_add(1).saturating_sub(free_frames());
+    let want = pages
+        .clamp(HEAP_RECLAIM_LEAST, HEAP_RECLAIM_MOST)
+        .saturating_add(short);
+    crate::user::cache::reclaim(crate::object::quota::NONE, want).gave()
+}
+
+/// Lift the free count back over the watermark after the kernel's own
+/// frames took it below half of it, where the allocation that saw so may
+/// block (L.mm.136): what Linux's reclaim at its low watermark does. The
+/// kernel's allocations go on below the watermark, programs' do not, and
+/// nothing else gave those frames back: at the floor the kernel lived on
+/// the watermark's frames alone however much clean cache the machine held,
+/// and a burst of them -- a btrfs transaction's tree nodes -- left none for
+/// what cannot wait, such as an insert under a spin lock
+/// (`docs/BTRFS-PRESSURE.md`, "The transaction aborted out of memory").
+fn refill_headroom() {
+    if !heap_may_reclaim() || fallible::injecting_here() || REFILLING.swap(true, Ordering::Acquire)
+    {
+        return;
+    }
+    let now = crate::timer::now_nanos();
+    let quiet = REFILL_FOUND_NOTHING.load(Ordering::Relaxed);
+    if quiet == 0 || now.saturating_sub(quiet) >= REFILL_PAUSE_NANOS {
+        if reclaim_for_kernel(HEAP_RECLAIM_LEAST) {
+            REFILL_FOUND_NOTHING.store(0, Ordering::Relaxed);
+        } else {
+            REFILL_FOUND_NOTHING.store(now.max(1), Ordering::Relaxed);
+        }
+    }
+    note_headroom(free_frames(), watermark());
+    REFILLING.store(false, Ordering::Release);
+}
+
+/// A heap allocation of `request` the heap refused even after every cache
+/// was drained, answered as a program's frame at the machine's floor is
+/// (L.mm.136): a reclaim ([`reclaim_for_kernel`]) and the heap tried again,
+/// while a reclaim gives some back and at most [`HEAP_RECLAIMS`] times.
+/// Only where [`heap_may_reclaim`] says so, and never for a refusal the
+/// injection made ([`injection_refused`]); anywhere else, and once a
+/// reclaim gives nothing back, the refusal stands as before.
+fn heap_or_reclaim(request: Request, injected: u64) -> Option<u64> {
+    if injection_refused(injected) || !heap_may_reclaim() {
+        return None;
+    }
+    // A size class is refilled a page at a time; a larger request is a
+    // block of its order.
+    let pages = match Heap::class_of(request) {
+        Some(_) => 1,
+        None => 1_u64 << Heap::order_of(request).ok()?,
+    };
+    for _ in 0..HEAP_RECLAIMS {
+        if !reclaim_for_kernel(pages) {
+            return None;
+        }
+        if let Some(address) = heap_or_drain(|| allocate_through_caches(request)) {
+            let _ = HEAP_RECLAIMED.fetch_add(1, Ordering::Relaxed);
+            return Some(address);
+        }
+    }
+    None
+}
+
+/// Refused heap allocations a reclaim let in ([`heap_or_reclaim`]).
+static HEAP_RECLAIMED: AtomicU64 = AtomicU64::new(0);
+
+// CHECKS-ONLY: user/rehome_cache_check.rs
+/// How many refused heap allocations a reclaim let in since boot: what the
+/// check of L.mm.136 reads, to tell a refusal answered by a reclaim from an
+/// allocation that found room without one.
+pub(crate) fn heap_reclaimed() -> u64 {
+    HEAP_RECLAIMED.load(Ordering::Relaxed)
 }
 
 /// The heap's own count of bytes out, the caches' objects included: what

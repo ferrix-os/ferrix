@@ -523,7 +523,7 @@ Done 2026-10-24 (kernel-flakes).
 
 | Item | Owner | Stage |
 |---|---|---|
-| **Open (2026-10-24, kernel-flakes).** Stage 13's cgroupfs check stopped an x86-64 TCG `test-boot` at host load 57 with "a program throttled by cpu.max 1000 1000000 waited out its period to die of SIGKILL" (`fs/cgroupfs/cpu_check.rs`) at 23.83 s (pool row `kf-boot-x86_64acceltcg`, on b11220ee9, a change that does not reach stage 13); the rerun passed (`kf2-boot-x86_64acceltcg`). After F-78's fix (fl-019); the sentence is the one `g4-ctl-cpu-kill` makes on purpose, so it is the check's window missing under a starved TCG host until shown otherwise. | flake owner | 13 |
+| **Open (2026-10-24, kernel-flakes).** Stage 13's cgroupfs check stopped an x86-64 TCG `test-boot` at host load 57 with "a program throttled by cpu.max 1000 1000000 waited out its period to die of SIGKILL" (`fs/cgroupfs/cpu_check.rs`) at 23.83 s (pool row `kf-boot-x86_64acceltcg`, on b11220ee9, a change that does not reach stage 13); the rerun passed (`kf2-boot-x86_64acceltcg`). After F-78's fix (fl-019); the sentence is the one `g4-ctl-cpu-kill` makes on purpose, so it is the check's window missing under a starved TCG host until shown otherwise. | flake owner **Sighting (2026-11-08, btrfs-oom):** the armv7a boot of `test-boot --arch all` on 4e998b33f (logs/queue/bo2-boot-all.log, copy in logs/btrfs-oom/), eight rows at once in the pool. | 13 |
 
 ### fl-080
 
@@ -584,7 +584,7 @@ Done 2026-10-24 (kernel-flakes).
 
 | Item | Owner | Stage |
 |---|---|---|
-| **Open (2026-11-04, mk-merge, filed for mk-base's batch).** `test-boot --arch aarch64`: the kernel never printed `FERRIX-BOOT-OK` within 120 s, batch 20261104T053606Z on 75ba515da, not landed in that form, load 13.69 at its start, `logs/queue/batch-20261104T053606Z-5.log`; passed on rerun. Not traced. | open |
+| **Open (2026-11-04, mk-merge, filed for mk-base's batch).** `test-boot --arch aarch64`: the kernel never printed `FERRIX-BOOT-OK` within 120 s, batch 20261104T053606Z on 75ba515da, not landed in that form, load 13.69 at its start, `logs/queue/batch-20261104T053606Z-5.log`; passed on rerun. Not traced. **Sighting (2026-11-08, btrfs-oom):** x86-64 under TCG, `test-boot --arch x86_64 --accel tcg` on 4e998b33f, at devmgr at 112.8 s, eight rows at once (logs/queue/bo2-boot-tcg.log, copy in logs/btrfs-oom/). | open |
 
 ### fl-090
 

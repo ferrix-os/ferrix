@@ -649,12 +649,17 @@ struct Failing {
     disk: Disk,
     fail: Arc<std::sync::atomic::AtomicBool>,
     fail_reads: Arc<std::sync::atomic::AtomicBool>,
+    /// Reads answer that memory ran out, as a device's buffer refused does.
+    starve_reads: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Device for Failing {
     fn read_at(&mut self, physical: u64, buf: &mut [u8], kind: ReadKind) -> Result<(), BtrfsError> {
         if self.fail_reads.load(std::sync::atomic::Ordering::Relaxed) {
             return Err(BtrfsError::DeviceRead { physical });
+        }
+        if self.starve_reads.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(BtrfsError::OutOfMemory);
         }
         self.disk.read_at(physical, buf, kind)
     }
@@ -682,6 +687,7 @@ fn an_aborted_transaction_leaves_the_mount_read_only_at_its_last_commit() {
         disk: disk.clone(),
         fail: Arc::clone(&fail),
         fail_reads: Arc::default(),
+        starve_reads: Arc::default(),
     };
     let fs = RwBtrfs::mount(
         device,
@@ -741,6 +747,7 @@ fn an_aborted_volume_whose_last_commit_cannot_be_read_says_so_once() {
         disk,
         fail: Arc::clone(&fail),
         fail_reads: Arc::clone(&fail_reads),
+        starve_reads: Arc::default(),
     };
     let fs = RwBtrfs::mount(
         device,
@@ -772,6 +779,64 @@ fn an_aborted_volume_whose_last_commit_cannot_be_read_says_so_once() {
         1,
         "said once, not at every use"
     );
+}
+
+/// Verifies: L.btrfs.123
+#[test]
+fn a_reload_out_of_memory_is_tried_again_and_the_last_commit_reads_after() {
+    let disk = Disk::new(BLANK);
+    let (fail, starve) = (Arc::default(), Arc::default());
+    let device = Failing {
+        disk,
+        fail: Arc::clone(&fail),
+        fail_reads: Arc::default(),
+        starve_reads: Arc::clone(&starve),
+    };
+    let fs = RwBtrfs::mount(
+        device,
+        0x0800_0013,
+        storage(),
+        Arc::new(Fixed),
+        &SpinParker,
+        notice,
+    )
+    .unwrap();
+    let root = fs.root();
+    let kept = make_file(&root, b"kept-short", &[6u8; 50_000]);
+    fs.sync().unwrap();
+    drop(make_file(&root, b"lost-short", &[7u8; 50_000]));
+    let said = |what: &str| {
+        NOTICES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .filter(|line| line.contains(what))
+            .count()
+    };
+    // The commit's write fails, which aborts; the reload then finds no
+    // memory to read the last commit with.
+    fail.store(true, std::sync::atomic::Ordering::Relaxed);
+    starve.store(true, std::sync::atomic::Ordering::Relaxed);
+    assert_eq!(fs.sync(), Err(Errno::EIO));
+    fail.store(false, std::sync::atomic::Ordering::Relaxed);
+    for _ in 0..3 {
+        assert_eq!(root.lookup(b"kept-short").err(), Some(Errno::EIO));
+    }
+    assert_eq!(said("could not be read again yet"), 1, "said once");
+    // Memory back: the next use reads the last commit, and so does every
+    // one after it.
+    starve.store(false, std::sync::atomic::Ordering::Relaxed);
+    assert_eq!(root.lookup(b"kept-short").map(|_| ()), Ok(()));
+    assert!(
+        root.lookup(b"lost-short").is_err(),
+        "the aborted transaction"
+    );
+    assert_eq!(read_all(&kept), vec![6u8; 50_000]);
+    assert_eq!(
+        root.create(b"new-short", NewNode::Regular, 0o644).err(),
+        Some(Errno::EROFS)
+    );
+    assert_eq!(said("read again once memory came back"), 1);
 }
 
 /// Verifies: L.btrfs.106

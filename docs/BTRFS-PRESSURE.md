@@ -1,5 +1,9 @@
 # btrfs under memory pressure (`test-btrfs-pressure`)
 
+**2026-11-08.** The N150's hangs during play: a btrfs transaction aborted
+out of memory at the floor and its reload ran out too; see "The
+transaction aborted out of memory" and the gate's `commit` boot.
+
 **Where it stands (2026-10-18).** Branch `pagecache-evict`, on `main` since 2026-10-18
 (edf7a8722, 0bb74a0c3): the page cache dropped whole under a burst of new files, the dentry cache's
 doing (F-90), and the gate's `evict` boot that shows it ("The page cache
@@ -121,6 +125,113 @@ no lock held and drops what it has no room for, as the queue did; unmount
 takes the mount's kept dentries out in one hold of the set's lock, after the
 queue's.
 
+## The transaction aborted out of memory (N150 box, 2026-11-08)
+
+Three hangs during Endfield play on 2026-11-08. The third left its kernel
+log in the loader's kept panic log
+(`~/.local/share/ferrix/bw-repro/catch1/LASTKERNEL-hang3.TXT`, lines about
+12087-12271, uptime 2126-2140 s; the lode store's copy is `hang3.txt`
+beside it):
+
+```
+btrfs    a transaction was aborted (out of memory), and the last commit cannot be read again (out of memory); every answer is EIO
+init     lode.service: reading /sbin/lode: I/O error (os error 5)
+signal   pid 31 is hyprix exe /bin/hyprix ... ended by signal 7 ... PageFault { execute: true, present: false }
+init     auth.service: execve failed: I/O error (os error 5)
+FERRIX-PANIC user space stopped feeding /dev/watchdog ... FX-9008
+```
+
+Every program whose next text page was not in the cache died of `SIGBUS`
+on the fault, init's loop stalled, and the watchdog reset the box. The two
+hangs before it were on images without the watchdog and went silent; their
+lode stores end without the notice, since lode wrote to the same root.
+
+**Three things went wrong, one after the other.**
+
+1. *The kernel let an allocation fail with gigabytes of clean cache.* In
+   every load run (`~/.local/share/ferrix/ef-load/runs/*/samples-world.txt.gz`)
+   the box plays at its floor: `MemFree` 33-460 MB, `Cached` about 5.9 GB,
+   `MemAvailable` about 5.8 GB, the processes' resident sets about 11.5 GB
+   (Endfield about 5 GB of it). A program's frame is refused at the
+   watermark (32 MiB on the box) and reclaims; the kernel's own go on below
+   it, and nothing gave those back: no kernel-heap allocation reclaimed,
+   and no reclaim ran to keep room under the watermark for the kernel. So
+   at the floor the kernel lived on 32 MiB, and a burst of kernel heap -- a
+   btrfs transaction holds up to `COMMIT_THRESHOLD` (32 MiB) of changed
+   tree nodes, about twice that in heap, and a commit writes each through a
+   16 KiB buffer -- ran out.
+2. *The writer aborted.* Every allocation of `ferrix-btrfs-write` is
+   fallible, and one failing inside an edit or a commit aborts the
+   transaction (`fallible.rs`, "What a failure does to a transaction"):
+   the edit cannot be undone half-way. The notice names the cause, out of
+   memory, not the site; which allocation it was is not recorded.
+3. *The abort poisoned the reads.* A writable mount reads everything,
+   committed data included, through the volume; after an abort the next
+   use reloads the last commit read-only (`WriteVolume::reload_read_only`),
+   which reads the chunk tree, the roots and the free-space tree into
+   memory again. It ran out at the same moment, while still holding the
+   whole aborted transaction, and the mount made that final (`unreadable`
+   in `rw.rs`): every later read answered `EIO`, for good.
+
+A fourth hang, about 4 min into play on main-cfde84d79 (develop
+589fcb096 and a diagnostic), went the same way: the notice, `SIGBUS` on
+text page-ins, `EIO` to lode and auth, FX-9008
+(`~/.local/share/ferrix/bw-repro/catch2/records.txt`, record 1; the notice
+at line 550, and no memory or allocation line before it: the kernel logs
+none).
+
+**The fix (branch `bugfix/btrfs-abort-oom`; the certification
+consultant's review: OK IF BO.1-BO.12, ledger line 7988).**
+
+* `mm.rs`, L.mm.136 and L.mm.137: a heap allocation made where it may
+  block (no spin lock, interrupts on, not inside a reclaim, not the
+  failure injection's) reclaims clean cache, anywhere, when the heap
+  refused it after the drain, and tries again while a reclaim gives some
+  back, at most eight times (`heap_or_reclaim`); and when a kernel frame
+  has left fewer than half the watermark free, each such allocation makes
+  one reclaim of a run and the shortfall, one task at a time
+  (`refill_headroom`), so
+  that what cannot wait -- an insert under a spin lock -- still finds
+  frames. That is Linux's direct reclaim and its reclaim at the low
+  watermark, in two calls of the reclaim the page cache already has; the
+  policy of what to take stays in `user::cache`. A reclaim that found
+  nothing is not tried again for 10 ms.
+* `ferrix-btrfs-write`, L.btrfs.122: `reload_read_only` lets go of the
+  aborted transaction's nodes, delayed references and clean nodes before
+  it reads the last commit, and can be called again after it failed.
+* `ferrix-btrfs-vfs`, L.btrfs.123: a reload that ran out of memory is
+  tried again at the next use, answering `EIO` until then and saying so
+  once; only one that could not read the disk stays final.
+A transaction can still abort when memory is truly gone -- nothing left to
+reclaim -- and the mount then goes read-only at its last commit, as Linux's
+does; reading what is committed keeps working once memory is back.
+
+**The `commit` boot** of the gate (below) shows it: the cache filled to the
+floor, then 24576 names of 200 bytes made by the shell alone, so that only
+the kernel's heap takes memory and no program's allocation reclaims for it.
+
+Local runs (nazuna, KVM, x86-64, debug kernel, 768 MiB; transcripts under
+the btrfs-oom session's scratch, the gate's own runs named in the landing's
+commit):
+
+| Kernel | Result |
+|---|---|
+| develop (the fix's three files as on develop) | FX-0008 "memory allocation of 16384 bytes failed" 0.25 s into the burst, in `Shared::write_back_in_slices`'s collect on the periodic sync; the guest never says done |
+| the refused-path reclaim alone (no refill) | FX-0008 "memory allocation of 192 bytes failed" in `Node::get`'s insert under the `nodes` spin lock |
+| the fix | 24576 of 24576 names, 384 of 384 found again, the committed file whole, no abort; the boot 42 s |
+| the fix, refill taken out | FX-0008 "memory allocation of 16384 bytes failed" |
+| the fix, refused-path reclaim taken out | passes: the refill alone keeps the headroom here, so L.mm.136's check is the page cache's self-check (`user::rehome_cache_check`, `check_a_refused_heap_allocation_reclaims`) instead |
+
+On develop the burst stopped the machine on an allocation that cannot fail
+before any edit could abort; on the box, with its 32 MiB watermark, the
+abort came first. Both are the kernel's heap empty at the floor with the
+cache full.
+
+Left over, as rows in `docs/BACKLOG.md`: a writable btrfs `getdents`
+copies the whole directory from its cursor; `ferrix-btrfs-vfs`'s
+infallible allocations under spin locks; the writeback's run buffer
+halved instead of `ENOMEM`; and the box run of the fix.
+
 ## The gate
 
 ```
@@ -151,8 +262,17 @@ one 64 MiB file per 64 MiB of memory, written, synced and read back, then
 makes 8192 one-page files in directories of 256 as fast as the shell can --
 twice the dentry cache -- with the probe running and `Cached` sampled every
 200 ms. It fails if `Cached` falls below half of what it was, or on a probe
-more than 5 s late. `FERRIX_PRESSURE_BOOTS` is a comma list of `floor`,
-`evict` and `cgroup`; the first two are the gate.
+more than 5 s late.
+
+A third boot, `commit` (since 2026-11-08), fills the cache the same way,
+then makes 24576 empty files with 200-byte names in one directory with
+the shell's own `: >`, no process started, then syncs, reads back a file
+committed before the fill and looks every 64th name up again (not a
+listing: a btrfs `getdents` copies the directory from its cursor, see
+`docs/BACKLOG.md`). It fails on a failed step, a name short, or a kernel
+line saying a transaction was aborted. `FERRIX_PRESSURE_BOOTS` is a comma
+list of `floor`, `evict`, `commit` and `cgroup`; the first three are the
+gate.
 
 `--cpu-quota PCT` runs QEMU in a transient `systemd-run --user --scope`
 limited to that share of a processor (no root), and `--pin` adds `taskset`:

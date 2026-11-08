@@ -125,7 +125,9 @@ stable parts, in two kinds:
   the one the caller reports; that drain runs with this processor's
   interrupts masked across every cache (§1.8). Inside the section, an
   allocation the heap refuses -- after a drain of its own -- is served from
-  the reserve. So the operation either never starts, or it
+  the reserve. Outside a section (which masks interrupts, so never
+  reclaims), the order of a refusal is drain, then reclaim where the
+  allocation may block (L.mm.136), then the reserve. So the operation either never starts, or it
   runs to the end on memory set aside for it. The depth argument: an `Arc` is
   one allocation of `arc_layout::<T>()`, and a B-tree insert is at most height
   + 2 nodes of at most `btree_node_bound`. The host tests measure both against
@@ -250,12 +252,43 @@ frames always took: clean cache reclaimed first, then the fault fails
 * **It is a count, not contiguity.** A kernel allocation of more than one
   frame can still fail with the watermark's frames free, if they are
   scattered.
-* **It bounds what programs take, not what the kernel takes for them.**
-  Heap-borne demand -- the load's lists, a job with no limit's descriptors
-  and sockets -- draws on the same frames below the watermark, and the
-  load's infallible allocations still stop the machine with FX-0008 once
-  those are gone too. What it buys is that page demand alone, a program's
-  memory and tables, cannot get there.
+* **It bounds what programs take; the kernel reclaims for itself where it
+  may block** (since 2026-11-08, L.mm.136-137, ledger 7988). Heap-borne
+  demand -- the load's lists, a btrfs transaction's tree nodes, a job with
+  no limit's descriptors and sockets -- draws on the same frames below the
+  watermark. A heap allocation made where it may block (`sched::may_block`:
+  no spin lock, interrupts on, not in interrupt context; not inside a
+  reclaim; not for a task the failure injection targets) answers a refusal
+  after the drain with a machine-wide reclaim and a retry
+  (`mm::heap_or_reclaim`), and, once a kernel frame has left fewer than
+  half the watermark free, refills that headroom (`mm::refill_headroom`).
+  What may not block -- an insert under a spin lock -- lives on the
+  refill's headroom, and the load's infallible allocations there still
+  stop the machine with FX-0008 once it is gone too (AoU-5). What the
+  watermark buys is that page demand alone, a program's memory and tables,
+  cannot get there. Without the reclaim the N150 box's writable btrfs ran
+  out in the middle of an edit with 5.8 GB of clean cache, aborted its
+  transaction and could not read its last commit again
+  (`docs/BTRFS-PRESSURE.md`).
+* **The kernel heap's reclaims** (L.mm.136-137). A refused allocation makes
+  at most `HEAP_RECLAIMS` (8) reclaims, each of at most
+  `HEAP_RECLAIM_MOST` (16384) pages and the shortfall to the watermark (at
+  most 8193), so at most 8 x 24577 pages, as a pin's; it stops at the first
+  that gives nothing back. While the headroom is short, each allocation
+  that may block and sees the flag makes one reclaim of `HEAP_RECLAIM_LEAST`
+  (32) pages and the shortfall, one task at a time (`REFILLING`), and none
+  within `REFILL_PAUSE_NANOS` (10 ms) of one that gave nothing back. The
+  lock argument: `reclaim` takes only spin locks (the cache list, the hand,
+  a file object's pages, a btrfs file's dirty and still sets, the dentry
+  cache, the shrinker's slot) and only `try_lock`s a btrfs volume, never a
+  sleeping lock the allocating task may hold; `may_block` excludes every
+  `crate::sync` and hooked spin lock, which raise the preemption count, and
+  every `IrqSpinLock`, which masks interrupts. The guards `may_block` and
+  "not inside a reclaim" have no negative control, since their failure is
+  a hang or a deadlock, not a fired check; FX-0973 (a reclaim begun inside
+  a reclaim) and the preemption check stand behind them. The injection's
+  count is global, so another task's injection in the same window can keep
+  this task's refusal from its reclaim: that fails closed.
 * **Routes left outside it**, each bounded otherwise: an address space's
   root table (one per space, spaces bounded by the job's task limit);
   kernel stacks (one per task, the same limit); a display client's
@@ -912,6 +945,12 @@ Real, and narrower than a WCET:
   the admission test valid at all.
 * **Bounded critical sections on the RT path**, by construction rather than by
   measurement.
+* **A kernel heap allocation may wait for a reclaim** (since 2026-11-08,
+  L.mm.136-137): where it may block, a refused allocation waits for up to
+  eight reclaims and their shootdowns, and while the kernel's headroom is
+  short each allocation that sees the flag pays for one reclaim of 32
+  pages and the shortfall (one task at a time; the rest pay one load and a
+  failed swap). An allocation that may not block never waits for one.
 * **Preemptible kernel**, so a long section delays rather than blocks --
   **except for the tasks that wait for it.** A task waiting for a kernel
   spin lock waits with its preemption count raised, so a long hold stops

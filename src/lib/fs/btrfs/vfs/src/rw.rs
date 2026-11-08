@@ -127,6 +127,18 @@
 //! answering reads; Linux turns a btrfs mount read-only on an abort too.
 //! What the aborted transaction held is lost, as on Linux.
 //!
+//! The reload reads the last commit's chunks, roots and free space again,
+//! and that takes memory. A reload that ran out of it is tried again at
+//! the next use, answering `EIO` until one works -- so while memory is
+//! short every use reads the chunk tree and the roots again, and fails --
+//! and only one that could not read the disk leaves the mount answering
+//! `EIO` for good. Reading what
+//! is committed never waits on the writer's state for longer than memory
+//! is short: on the N150 box a transaction aborted out of memory, its
+//! reload ran out too, and every page-in from the root answered `EIO`
+//! from then on, which ended every program it held (2026-11-08,
+//! `docs/BTRFS-PRESSURE.md`).
+//!
 //! # Clean tree nodes are given back between operations
 //!
 //! The volume keeps the tree nodes it read and did not change, a cache of
@@ -222,9 +234,13 @@ struct Shared<D> {
     /// unlink, a rename over a file, a truncation, an eviction -- whose room
     /// comes back only at the commit.
     freed: SpinLock<bool>,
-    /// Set once reloading an aborted volume failed: it stays aborted, every
-    /// answer `EIO`, and is not reread at every use.
+    /// Set once reloading an aborted volume failed for want of the disk: it
+    /// stays aborted, every answer `EIO`, and is not reread at every use.
+    /// One that ran out of memory is tried again (`reload_short`).
     unreadable: SpinLock<bool>,
+    /// Set once reloading an aborted volume ran out of memory, which is
+    /// tried again at the next use: so that it is said once.
+    reload_short: SpinLock<bool>,
     /// Where the mount says that it went read-only, and why.
     notice: fn(fmt::Arguments<'_>),
     /// Where a writeback waits for the lock's waiters to have had their turn
@@ -298,6 +314,7 @@ impl<D: WriteHandle> RwBtrfs<D> {
             read_only: SpinLock::new(false),
             freed: SpinLock::new(false),
             unreadable: SpinLock::new(false),
+            reload_short: SpinLock::new(false),
             notice,
             turn: parker.new_parking(),
             arrived: AtomicU64::new(0),
@@ -392,10 +409,32 @@ impl<D: WriteHandle> Shared<D> {
             match volume.reload_read_only() {
                 Ok(()) => {
                     *self.read_only.lock() = true;
+                    let late = if *self.reload_short.lock() {
+                        ", read again once memory came back"
+                    } else {
+                        ""
+                    };
                     (self.notice)(format_args!(
                         "a transaction was aborted ({cause}); read-only from here, \
-                         at the last commit"
+                         at the last commit{late}"
                     ));
+                }
+                // Out of memory says nothing about the disk: the reload goes
+                // again at the next use, and every answer until one works
+                // is EIO, said once (L.btrfs.123). A mount whose reload ran
+                // out was never read again, and every page-in from it
+                // answered EIO for good: on the N150 box that ended every
+                // program the root held (2026-11-08).
+                Err(
+                    error @ (WriteError::OutOfMemory | WriteError::Volume(BtrfsError::OutOfMemory)),
+                ) => {
+                    if !core::mem::replace(&mut *self.reload_short.lock(), true) {
+                        (self.notice)(format_args!(
+                            "a transaction was aborted ({cause}), and the last commit \
+                             could not be read again yet ({error}); tried again at the \
+                             next use, every answer EIO until then"
+                        ));
+                    }
                 }
                 // Left aborted: every answer stays EIO, said once.
                 Err(error) => {

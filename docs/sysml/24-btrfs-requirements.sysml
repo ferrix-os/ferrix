@@ -1141,6 +1141,33 @@ package FerrixBtrfsRequirements {
                 ("ferrix_btrfs_write::open::WriteVolume::reload_read_only",
                 "ferrix_btrfs_write::open::WriteVolume::abort");
         }
+        // docs/BTRFS-PRESSURE.md, "The transaction aborted out of memory" (2026-11-08).
+        requirement <'L.btrfs.122'> aReloadLetsTheAbortedTransactionGoFirst : ItemLowLevel {
+            attribute :>> statement = "reload_read_only shall let go of the aborted transaction's
+                nodes, delayed references and clean nodes before it reads the last commit, leave
+                the volume aborted when that read fails, and read it whole when called again.";
+            attribute :>> criterion = "With 64 creates in an aborted transaction and every
+                allocation failing, reload_read_only answers OutOfMemory with no dirty bytes, no
+                delayed references and no clean nodes held, the volume aborted and a read
+                answering Aborted; called again with memory back, it reads the last commit
+                read-only, and the volume checks clean.";
+            attribute :>> parent = "H.STORE.8";
+            attribute :>> unit = "ferrix_btrfs_write::open::WriteVolume::reload_read_only";
+        }
+        requirement <'L.btrfs.123'> aReloadShortOfMemoryIsTriedAgain : ItemLowLevel {
+            attribute :>> statement = "A mount whose reload of the last commit ran out of memory
+                shall answer EIO until a later use reloads it, say so once, and then read the
+                last commit read-only.";
+            attribute :>> criterion = "Through a mount, a commit whose device write fails,
+                with the device answering that memory ran out: three lookups answer EIO and the
+                notice is said once; with memory back, the next lookup finds the committed
+                file, its bytes read back, the aborted transaction's file is gone, and a create
+                answers EROFS. The retry is ferrix-btrfs-vfs's Shared::lock, load code that
+                cannot be a unit (check-traceability refuses it); the unit is the item's half,
+                the reload it calls again.";
+            attribute :>> parent = "H.STORE.8";
+            attribute :>> unit = "ferrix_btrfs_write::open::WriteVolume::reload_read_only";
+        }
         requirement <'L.btrfs.22'> allocationsAreFallible : ItemLowLevel {
             attribute :>> statement = "Every heap allocation of the btrfs crates' product
                 code shall be made through a helper that reports a refused allocation

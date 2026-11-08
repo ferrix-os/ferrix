@@ -165,15 +165,29 @@ impl<D: WriteDevice> WriteVolume<D> {
     /// transaction aborted, as Linux turns the volume read-only. Reads go
     /// on against the last commit; every edit answers [`Error::ReadOnly`].
     ///
+    /// The transaction's nodes, its delayed references and the clean nodes
+    /// are let go of first, the volume marked aborted while they are
+    /// (L.btrfs.122): what it changed is thrown away whatever the reload
+    /// says, and the reload's own memory is often what they held. An abort
+    /// for want of memory is when the reload needs it most: on the N150
+    /// box the reload of a transaction that ran out of memory ran out too,
+    /// holding all of it (2026-11-08).
+    ///
     /// # Errors
     ///
-    /// The committed state could not be read; the volume is left as it was.
+    /// The committed state could not be read; the volume is left aborted,
+    /// holding none of the transaction's nodes, and may be reloaded again.
     #[expect(
         clippy::unneeded_field_pattern,
         reason = "every field named, so one added later cannot be left \
                   holding the aborted transaction's state"
     )]
     pub fn reload_read_only(&mut self) -> Result<()> {
+        self.abort_with(Error::Aborted);
+        self.dirty = BTreeMap::new();
+        self.refs = DelayedRefs::default();
+        self.stale_roots = BTreeSet::new();
+        self.clean = CleanNodes::new();
         let WriteVolume {
             device: _,
             geometry,

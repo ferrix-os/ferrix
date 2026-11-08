@@ -257,6 +257,62 @@ echo "pressure: done"
 $B poweroff -f
 "#;
 
+/// How many names the commit boot makes: about 40 MiB of tree nodes in
+/// the kernel's heap at 200 bytes a name, more than a 768 MiB machine's
+/// watermark many times over and more than a transaction's
+/// `COMMIT_THRESHOLD` (32 MiB of nodes) once.
+const COMMIT_NEW_NAMES: u64 = 24576;
+
+/// The commit boot's script: the cache filled by reading, as the eviction
+/// boot fills it, then names made by the shell alone, as fast as it can --
+/// no process started and no page written, so that nothing but the
+/// kernel's own heap takes memory and no program's allocation reclaims for
+/// it -- then a file committed before them read back from the disk. On the
+/// N150 box (2026-11-08) a writable btrfs ran out of memory in the middle
+/// of an edit under Endfield, aborted its transaction, could not read its
+/// last commit again for the same reason, and answered EIO to every
+/// page-in from then on.
+const COMMIT_GUEST: &str = r#"#!/bin/sh
+B=/bin/busybox
+say() { echo "pressure: $*"; }
+cs() { read u r < /proc/uptime; echo $(( ${u%.*} * 100 + 1${u#*.} - 100 )); }
+free() { while read k v u; do [ "$k" = MemFree: ] && { echo $v; return; }; done < /proc/meminfo; }
+D=/data/c
+$B mkdir -p /tmp $D/n || { say "FAIL mkdir $D"; echo "pressure: done"; exit 1; }
+$B dd if=/dev/urandom of=$D/keep bs=65536 count=64 2>/tmp/dd.err || say "FAIL keep: $($B cat /tmp/dd.err)"
+$B sync
+sum=$($B md5sum < $D/keep)
+i=0; while [ $i -lt @FILES@ ]; do
+  $B dd if=/dev/zero of=$D/big$i bs=1048576 count=@FILE_MIB@ 2>/tmp/dd.err || say "FAIL fill big$i: $($B cat /tmp/dd.err)"
+  i=$((i + 1))
+done
+$B sync
+# Read them back: what the machine holds is clean cache, the keep file's
+# pages long gone from it.
+i=0; while [ $i -lt @FILES@ ]; do $B cat $D/big$i > /dev/null; i=$((i + 1)); done
+say "commit: cache filled, MemFree $(free) kB"
+name=n; k=0; while [ $k -lt 199 ]; do name=${name}x; k=$((k + 1)); done
+t0=$(cs); n=0
+while [ $n -lt @NEW@ ]; do
+  : > $D/n/$name$n || { say "FAIL create name $n"; break; }
+  n=$((n + 1))
+done
+t1=$(cs)
+say "commit: made $n names in $(( (t1 - t0) / 100 )) s, MemFree $(free) kB"
+$B sync 2>/tmp/sync.err || say "FAIL sync: $($B cat /tmp/sync.err)"
+again=$($B md5sum < $D/keep 2>/tmp/md5.err) || say "FAIL reading the committed file back: $($B cat /tmp/md5.err)"
+[ "$again" = "$sum" ] || say "FAIL the committed file read back as '$again', not '$sum'"
+$B cat $D/big0 > /dev/null 2>/tmp/cat.err || say "FAIL reading big0 back: $($B cat /tmp/cat.err)"
+# Every 64th name looked up again, and the last: not a listing, which
+# copies the whole directory from its cursor at every getdents call.
+found=0; k=0
+while [ $k -lt $n ]; do [ -e $D/n/$name$k ] && found=$((found + 1)); k=$((k + 64)); done
+last=$((n - 1)); [ -e $D/n/$name$last ] || say "FAIL the last name made, $last, is not there"
+say "commit: made $n of @NEW@ names, $found of $(( (n + 63) / 64 )) looked up again; the committed file read back whole"
+echo "pressure: done"
+$B poweroff -f
+"#;
+
 /// The most of the cache the eviction boot may lose while it makes its small
 /// files, in percent of what was cached before: they take a few tens of
 /// megabytes, so losing half of a 600 MB cache is not reclaim's shortfall.
@@ -301,13 +357,15 @@ fn run(arch: Arch, args: &Args) -> Result<()> {
     }
     let mut failures = Vec::new();
     // The machine's floor and the eviction under a burst of small files are
-    // the gate. The boot at `memory.max` is run when `FERRIX_PRESSURE_BOOTS`
+    // the gate, and so is the commit under a burst of names at the floor
+    // (2026-11-08). The boot at `memory.max` is run when `FERRIX_PRESSURE_BOOTS`
     // names `cgroup` (or says `all`): it fails on main and with this fix
     // alike, on defects of the memory.max path of their own
     // (docs/BTRFS-PRESSURE.md, "At memory.max"). The variable is a comma list
-    // of `floor`, `evict` and `cgroup`.
-    let boots = std::env::var("FERRIX_PRESSURE_BOOTS").unwrap_or_else(|_| "floor,evict".to_owned());
-    for kind in [Kind::Floor, Kind::Evict, Kind::Cgroup] {
+    // of `floor`, `evict`, `commit` and `cgroup`.
+    let boots =
+        std::env::var("FERRIX_PRESSURE_BOOTS").unwrap_or_else(|_| "floor,evict,commit".to_owned());
+    for kind in [Kind::Floor, Kind::Evict, Kind::Commit, Kind::Cgroup] {
         if boots != "all" && !boots.split(',').any(|name| name.trim() == kind.name()) {
             continue;
         }
@@ -324,11 +382,14 @@ fn run(arch: Arch, args: &Args) -> Result<()> {
 }
 
 /// Which boot: the writers at the machine's own floor, the cache filled and
-/// then a burst of small files, or the writers in a job at `memory.max`.
+/// then a burst of small files, the cache filled and then a burst of names
+/// that only the kernel's heap holds, or the writers in a job at
+/// `memory.max`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Kind {
     Floor,
     Evict,
+    Commit,
     Cgroup,
 }
 
@@ -338,6 +399,7 @@ impl Kind {
         match self {
             Kind::Floor => "floor",
             Kind::Evict => "evict",
+            Kind::Commit => "commit",
             Kind::Cgroup => "cgroup",
         }
     }
@@ -358,6 +420,11 @@ fn boot(
         EVICT_GUEST
             .replace("@FILES@", &evict_files(machine).to_string())
             .replace("@NEW@", &EVICT_NEW_FILES.to_string())
+            .replace("@FILE_MIB@", &EVICT_FILE_MIB.to_string())
+    } else if kind == Kind::Commit {
+        COMMIT_GUEST
+            .replace("@FILES@", &evict_files(machine).to_string())
+            .replace("@NEW@", &COMMIT_NEW_NAMES.to_string())
             .replace("@FILE_MIB@", &EVICT_FILE_MIB.to_string())
     } else {
         GUEST
@@ -381,6 +448,13 @@ fn boot(
         println!(
             "  {arch}: {} MiB of memory, the cache filled with {} files of {EVICT_FILE_MIB} MiB, \
              then {EVICT_NEW_FILES} small files made",
+            machine.memory,
+            evict_files(&machine)
+        );
+    } else if kind == Kind::Commit {
+        println!(
+            "  {arch}: {} MiB of memory, the cache filled with {} files of {EVICT_FILE_MIB} MiB, \
+             then {COMMIT_NEW_NAMES} names of 200 bytes made by the shell alone",
             machine.memory,
             evict_files(&machine)
         );
@@ -415,10 +489,13 @@ fn boot(
         println!("  {arch}: {line}");
     }
     println!("  {arch}: the boot took {took} s");
-    let judged = if kind == Kind::Evict {
-        judge_evict(&ours)
-    } else {
-        judge(&ours)
+    let judged = match kind {
+        Kind::Evict => judge_evict(&ours),
+        Kind::Commit => {
+            let kernel: Vec<&str> = lines.iter().map(|l| l.trim()).collect();
+            judge_commit(&ours, &kernel)
+        }
+        Kind::Floor | Kind::Cgroup => judge(&ours),
     };
     judged.map_err(|why| Error::new(format!("{arch}: {why}")))
 }
@@ -489,6 +566,36 @@ fn judge_evict(ours: &[&str]) -> std::result::Result<(), String> {
         return Err(format!(
             "a 100 ms sleep woke {stall} cs late ({line}); the limit is {STALL_LIMIT_CS}"
         ));
+    }
+    Ok(())
+}
+
+/// Verifies: L.mm.137
+///
+/// Whether the commit boot finished, nothing failed, every name was made,
+/// and the kernel never said that a transaction was aborted: what the
+/// writable mount says, through its notice, when an edit or a commit fails
+/// half-way (`ferrix_btrfs_vfs::rw`, "After an aborted transaction").
+fn judge_commit(ours: &[&str], kernel: &[&str]) -> std::result::Result<(), String> {
+    if let Some(aborted) = kernel
+        .iter()
+        .find(|l| l.contains("a transaction was aborted"))
+    {
+        return Err(format!("the volume aborted a transaction: {aborted}"));
+    }
+    if !ours.contains(&DONE) {
+        return Err(format!("the guest never said `{DONE}`"));
+    }
+    if let Some(failed) = ours.iter().find(|l| l.starts_with("pressure: FAIL")) {
+        return Err(format!("a step failed: {failed}"));
+    }
+    let looked = COMMIT_NEW_NAMES.div_ceil(64);
+    let wanted = format!(
+        "pressure: commit: made {COMMIT_NEW_NAMES} of {COMMIT_NEW_NAMES} names, \
+         {looked} of {looked} looked up again"
+    );
+    if !ours.iter().any(|l| l.starts_with(&wanted)) {
+        return Err(format!("not every name was made and found (`{wanted}`)"));
     }
     Ok(())
 }
@@ -568,5 +675,25 @@ mod tests {
         ];
         assert!(judge_evict(&stalled).is_err());
         assert!(judge_evict(&[DONE]).is_err());
+    }
+
+    #[test]
+    fn the_commit_boot_fails_on_an_abort_a_failed_step_or_a_name_short() {
+        let looked = COMMIT_NEW_NAMES.div_ceil(64);
+        let made = format!(
+            "pressure: commit: made {COMMIT_NEW_NAMES} of {COMMIT_NEW_NAMES} names, \
+             {looked} of {looked} looked up again; the committed file read back whole"
+        );
+        let good = [made.as_str(), DONE];
+        assert_eq!(judge_commit(&good, &good), Ok(()));
+        let aborted = "btrfs    a transaction was aborted (out of memory); read-only from here, at the last commit";
+        assert!(judge_commit(&good, &[aborted, DONE]).is_err());
+        let failed = ["pressure: FAIL create name 4000", made.as_str(), DONE];
+        assert!(judge_commit(&failed, &failed).is_err());
+        let short = [
+            "pressure: commit: made 4000 of 24576 names, 63 of 63 looked up again; the committed file read back whole",
+            DONE,
+        ];
+        assert!(judge_commit(&short, &short).is_err());
     }
 }

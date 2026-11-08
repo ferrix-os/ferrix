@@ -28,7 +28,7 @@ use crate::user::space::{Access, AddressSpace, FileMapping, FilePlace};
 use crate::user::vmo::{self, Filler, ReclaimHook, Vmo, VmoError};
 
 /// How many cases one run makes: the boot line's count.
-const CASES: u64 = 10;
+const CASES: u64 = 11;
 
 /// Run them, and answer how many cases they are. `Err` names the first thing
 /// that was not true.
@@ -54,7 +54,8 @@ fn cases() -> Result<(), &'static str> {
     check_totals()?;
     check_read_present_answers_poison()?;
     check_a_poisoned_page_is_dropped()?;
-    check_a_poisoned_read()
+    check_a_poisoned_read()?;
+    check_a_refused_heap_allocation_reclaims()
 }
 
 /// A disk file's source of the check's own: each byte is [`pattern`], one page
@@ -722,4 +723,58 @@ fn check_a_poisoned_read() -> Result<(), &'static str> {
         }
         Ok(())
     })
+}
+
+/// A page of kernel heap refused with every free frame held, and clean cache
+/// to give back, is answered by a reclaim and served (L.mm.136): the heap's
+/// count of refusals a reclaim let in grows. Another processor's allocation
+/// may refill the headroom (L.mm.137) between the hold and the request, and
+/// the request then finds room with no refusal: so up to three tries, of
+/// which one must show the reclaim, and a request not served at all fails
+/// at once.
+///
+/// Verifies: L.mm.136
+fn check_a_refused_heap_allocation_reclaims() -> Result<(), &'static str> {
+    const PAGES: u64 = 512;
+    let file = source_file(PAGES)?;
+    let outcome = (|| {
+        for _ in 0..3 {
+            let mut held: Vec<u64> = Vec::new();
+            held.try_reserve_exact(
+                usize::try_from(mm::free_frames())
+                    .unwrap_or(usize::MAX / 4)
+                    .saturating_mul(2)
+                    .saturating_add(1024),
+            )
+            .map_err(|_| "no room for the heap-reclaim check's list of frames")?;
+            let before = mm::heap_reclaimed();
+            let _ = mm::drain_caches();
+            while held.len() < held.capacity() {
+                match mm::allocate_frames(0) {
+                    Some(frame) => held.push(frame),
+                    None => break,
+                }
+            }
+            // A page of heap: a block of its own, which no cached object serves.
+            let mut page: Vec<u8> = Vec::new();
+            let served = page.try_reserve_exact(PAGE_SIZE as usize).is_ok();
+            let after = mm::heap_reclaimed();
+            drop(page);
+            for frame in held.drain(..) {
+                mm::deallocate_frames(frame, 0);
+            }
+            if !served {
+                return Err(
+                    "a page of heap refused at the floor, with clean cache to give back, \
+                     was not served after a reclaim",
+                );
+            }
+            if after > before {
+                return Ok(());
+            }
+        }
+        Err("a page of heap with every free frame held never reached the reclaim in three tries")
+    })();
+    drop(file);
+    outcome
 }

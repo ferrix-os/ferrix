@@ -544,6 +544,38 @@ package FerrixMemoryRequirements {
             attribute :>> parent = "H.MEM.11";
             attribute :>> unit = ("mm::heap_or_drain", "fallible::injected_failures");
         }
+        // docs/BTRFS-PRESSURE.md, "The transaction aborted out of memory" (2026-11-08).
+        requirement <'L.mm.136'> aRefusedHeapAllocationReclaims : ItemLowLevel {
+            attribute :>> statement = "A heap allocation the heap refused after the drain shall,
+                where it may block, reclaim clean cache and try again while a reclaim gives some
+                back, at most eight times; not where it may not block, not inside a reclaim, and
+                not for a refusal the failure injection made.";
+            attribute :>> criterion = "The page cache's self-check with kernel objects alone
+                (user::rehome_cache_check, check_a_refused_heap_allocation_reclaims): with a
+                512-page cached file of the check's own source and every free frame held, a
+                page of heap is served and the count of refused allocations a reclaim let in
+                grows, in at most three tries. Control: heap_or_reclaim answering None at
+                once -- the boot stops on the check's 'was not served after a reclaim'.";
+            attribute :>> parent = "H.MEM.11";
+            attribute :>> unit = ("mm::heap_or_reclaim", "mm::heap_may_reclaim",
+                "mm::injection_refused", "mm::reclaim_for_kernel");
+        }
+        requirement <'L.mm.137'> theKernelsHeadroomIsRefilled : ItemLowLevel {
+            attribute :>> statement = "When a kernel frame leaves fewer than half the watermark
+                free, each later heap allocation that may block shall make one reclaim of a
+                fill's run and what the free count lacks of the watermark, one task at a time,
+                none within 10 ms after one that gave nothing back, until a kernel frame or a
+                reclaim leaves at least half the watermark free.";
+            attribute :>> criterion = "test-btrfs-pressure's commit boot: on a 768 MiB machine
+                whose memory the page cache holds, 24576 names made by the shell alone through a
+                writable btrfs are all made and every 64th found again, the sync succeeds, a file
+                committed before them reads back whole, and the kernel never says that a
+                transaction was aborted. Control: refill_headroom returning at once -- FX-0008,
+                memory allocation of N bytes failed (204 and 16384 seen), and the guest never
+                says done.";
+            attribute :>> parent = "H.MEM.11";
+            attribute :>> unit = ("mm::refill_headroom", "mm::note_headroom");
+        }
         // docs/RAM-RELEASE.md §2, R1 (consultant ledger 4971, 5022).
         requirement <'L.mm.99'> theArchivesPagesComeBack : ItemLowLevel {
             attribute :>> statement = "Once the root is final, at most once a boot, the

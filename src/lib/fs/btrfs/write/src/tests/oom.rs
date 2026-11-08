@@ -604,3 +604,42 @@ fn a_node_read_out_of_memory_is_not_retried_from_the_other_copy() {
     volume.device.fail_at = 0;
     assert!(volume.get(FS_TREE_OBJECTID, &BtrfsKey::MIN).is_ok());
 }
+
+/// Verifies: L.btrfs.122
+#[test]
+fn a_reload_out_of_memory_lets_the_aborted_transaction_go_and_can_go_again() {
+    let mut volume = WriteVolume::open(MemDevice::new(BLANK)).unwrap();
+    let before = items(&mut volume, FS_TREE_OBJECTID);
+    for n in 0..64u32 {
+        let name = alloc::format!("f{n:0>200}");
+        let _ = volume
+            .create(ROOT, name.as_bytes(), &new(S_IFREG | 0o644))
+            .unwrap();
+    }
+    assert!(volume.dirty_bytes() > 0, "the creates changed nodes");
+    volume.abort_with(Error::OutOfMemory);
+    // Every allocation fails: the reload cannot read the last commit, and
+    // lets go of the aborted transaction all the same.
+    arm(1, true);
+    let reloaded = volume.reload_read_only();
+    let _ = disarm();
+    assert_eq!(reloaded, Err(Error::OutOfMemory));
+    assert_eq!(volume.dirty_bytes(), 0, "the aborted transaction's nodes");
+    assert!(volume.refs.is_empty(), "its delayed references");
+    assert_eq!(volume.clean.len(), 0, "the clean nodes");
+    assert!(volume.aborted().is_some(), "still aborted");
+    assert_eq!(
+        volume.get(FS_TREE_OBJECTID, &BtrfsKey::MIN).err(),
+        Some(Error::Aborted),
+        "nothing reads the thrown-away state"
+    );
+    // With memory back, the reload goes again and reads the last commit.
+    volume.reload_read_only().unwrap();
+    assert_eq!(volume.aborted(), None);
+    assert!(volume.is_read_only());
+    assert!(
+        items(&mut volume, FS_TREE_OBJECTID) == before,
+        "the last commit"
+    );
+    check(&volume.into_device());
+}
