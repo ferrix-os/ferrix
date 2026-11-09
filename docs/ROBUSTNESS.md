@@ -297,6 +297,508 @@ The evidence, on 1ceeac1d2 through `gate.sh control ... --expect-host
 * The `check` row passed: `run: PASSED`, with `ring0-alloc: 1382 ...
   baseline 1382` (`rob-r1-check.log`).
 
+### 2.6 R6's design: requests above a page from single frames
+
+R6 is the remedy ledger 8470 chose for W1.2 and for #7's 128 KiB stop. It
+answers RD.6 (a)-(e) and (g) (ledger 8222) and CR.4 (a)-(i) (ledger
+8474). R6's second half, the accounted reserve for allocations under a
+spin lock (RD.6 (f)), is split out as **R6b**, which owes its own design
+review before code (§7, ledger 8488 R6.6). CR.4 does not need it, and it
+generalizes `mm/reserve.rs`, which is a different change.
+
+The consultant reviewed the first version of this section: **OK IF
+R6.1-R6.13** (ledger 8481). This revision answers R6.1 (x86-64 keeps a
+freed block's frames until its shootdown), R6.2 (the lazy list is
+bounded by a kicked purge), R6.3 (no self-deadlock on `TABLES`), R6.4's
+order, R6.7 (the check) and R6.8 (five ids). Where it departs from a
+condition's letter it says so, marked **Departure**. The consultant read
+this revision before code: **OK IF R6F.1-R6F.9** (ledger 8503). It
+accepted the three departures, and this text carries R6F.3's alignment,
+R6F.4's descriptor stores and R6F.7's purge before a kill. The other
+conditions are checked at the code review.
+
+**What Linux does (v7.0, read, not copied).**
+
+* `mm/slub.c:__kvmalloc_node_noprof` (the `kvmalloc` body; `mm/util.c` no
+  longer holds it in v7.0) tries `kmalloc` first, with
+  `kmalloc_gfp_adjust`. For a request above `PAGE_SIZE` that function
+  clears `__GFP_DIRECT_RECLAIM` and `__GFP_NOFAIL` and adds
+  `__GFP_NOWARN`: one cheap try at a contiguous block, no reclaim. The
+  comment gives the reason: a contiguous block "is less likely to fragment
+  multiple larger blocks" over the long term than the vmalloc fallback.
+  Only then does it call `__vmalloc_node_range_noprof`. A sub-page request
+  never falls back. An alignment above what `kmalloc` guarantees is not
+  honoured.
+* `mm/vmalloc.c:__vmalloc_node_range_noprof` takes a `vmap_area`
+  (`alloc_vmap_area`, an augmented rbtree of free space) with a guard
+  page unless `VM_NO_GUARD` ("your top guard is someone else's bottom
+  guard"). `__vmalloc_area_node` then allocates the page array (bounded
+  recursion, its comment says), the pages through `vm_area_alloc_pages`,
+  and maps them with `__vmap_pages_range`. That last step **allocates
+  page tables**, which ignore the caller's gfp and are held to it only by
+  the scope API (`memalloc_apply_gfp_scope`).
+* `mm/vmalloc.c:vfree` frees each page at once (`__free_page`) after
+  `remove_vm_area` has unmapped the range with no flush
+  (`free_unmap_vmap_area` → `vunmap_range_noflush`). The address range is
+  put on a lazy list (`free_vmap_area_noflush`, counted in
+  `vmap_lazy_nr`). When the count passes `lazy_max_pages()` (32 MiB times
+  log2 of the processors) a worker runs `__purge_vmap_area_lazy`, which
+  does **one** `flush_tlb_kernel_range` over the span of every lazy area,
+  and only then makes the ranges free again. In interrupt context
+  `vfree` defers the whole free to a worker (`vfree_atomic`, a lock-free
+  `llist` through the freed memory).
+
+Ferrix takes the fallback policy, the guard and the lazy purge. It takes
+the free-the-frames-at-once order only where the architecture's own
+invalidation is broadcast (both Arm builds), since H.MEM.17 forbids it
+elsewhere (R6.1). It refuses allocating on the mapping path (CR.4 (b)),
+and a worker for the free itself (a free here needs no lock that
+interrupt context may not take, so it runs in place). Only the purge is
+handed to a task, as Linux's `drain_vmap_area_work` is (R6.2).
+
+**(f) Which requests, and alignment.** A request whose size is above
+`PAGE_SIZE` (4096) and at most `2^MAX_ORDER` pages (4 MiB, today's
+ceiling, unchanged), with an alignment of at most `PAGE_SIZE`. Requests
+of 2049 to 4096 bytes are not included: they are a single frame (order 0)
+on the buddy path already, and a single frame never needs a run. A larger
+alignment stays on the buddy path, as today. That is Linux's rule: it
+does not honour such alignments under `vmalloc` either. The block's base
+is page aligned, which honours every alignment the path accepts.
+
+**The policy is `kvmalloc`'s.** Every path that serves a heap request
+today tries it first, as now. Only if the buddy refuses (no run of the
+order) is the large path tried, with the same floor. So nothing changes
+while a run exists. The fast paths, the size classes and a large request
+that finds its run cost what they cost today. The large path is reached
+only where today's code returns null. The exact order (R6.4, L.mm.141):
+
+1. the reservation's heap (a heap scope's, or the job's), as today;
+2. the large path, `Floor::Drawn` from that same reservation;
+3. on x86-64, where lazy frames still hold that reservation drawn and the
+   caller may block: one purge, then 1 and 2 once more (R6.1 (b));
+4. a scoped request: the overrun, counted once per request, not per
+   frame (L.mm.140);
+5. the shared heap, through the caches and the drain, as today;
+6. the large path, `Floor::Kernel`;
+7. the reclaim (L.mm.136): after each reclaim, the shared heap and then
+   the large path, `Floor::Kernel`;
+8. the kill (L.mm.138): after each kill, the shared heap and then the
+   large path, `Floor::Kernel`;
+9. `reserve::draw` last (F-23, L.mm.139).
+
+A request with no reservation starts at 5. No kill is asked while the
+large path could serve: the large path runs at 6, before the reclaim and
+the kill, and `heap_or_kill`'s early return while free frames are at or
+above the watermark is kept, so a heap that is fragmented but has
+plenty of frames never kills. The retries at 7 and 8 run with the scope
+suspended, as today (L.mm.140). **Departure from R6.4's wording:** a
+retry's large path takes `Floor::Kernel`, not the job's reservation. That
+is what the retry's shared heap takes too (`KernelPages`), and nothing in
+a retry draws from any reservation today. Drawing the job's there would
+be a new rule the small heap does not follow. The reclaim at 7 asks for
+`2^order` pages for a request above a size class, as today. The large
+path needs `n` single frames, `n <= 2^order`, so the reclaim asks for at
+least what the large path needs.
+
+**The area.** At boot, right after `vmap::init`, one span is reserved from
+the arena for the large path and never given back. **Its base and its end
+are aligned to 2 MiB** (R6F.3), the span one page-level table maps on
+x86-64, AArch64 with a 4 KiB granule and LPAE. So no page-level table of
+the area is shared with an arena neighbour, whose free (`unmap_range`)
+would give back a table it empties. The alignment is asserted at boot, a
+`ferrix-paging` host test shows an unmap over an aligned range beside a
+populated, leafless one gives back none of its tables, and the boot check
+asserts at its end that every area table is still linked. It sits below the
+arena's top, which KASLR moves, so it moves with it. Its size is
+`clamp(RAM / 8, 64 MiB, 2 GiB)` on the 64-bit pair and
+`clamp(RAM / 4, 16 MiB, 128 MiB)` on ARMv7-A, rounded to 2 MiB. The
+boot report states it. If it cannot be set up (no frames for its tables at
+boot), the large path is off and the kernel behaves exactly as today.
+
+* **(b) Page tables are made at boot for the whole area** (CR.4 (b), the
+  first option). A new `ferrix_paging::Mapper::populate` makes every
+  table down to the page level over a range and writes no leaf. One
+  table per 2 MiB costs `area / 512`: 4 MiB for a 2 GiB area, 256 KiB for
+  ARMv7-A's 128 MiB. These tables are never pruned or freed. Their
+  top-level entries exist before the first process root copies the
+  kernel's slots (x86-64), and both Arm builds share them through `TTBR1`.
+* **Address space is a buddy over 8 KiB units, in fixed storage.** It
+  reuses `ferrix_frame::Frames`, the frame allocator's own buddy (host
+  tested, O(`MAX_ORDER`) per call), over unit numbers instead of frames.
+  A request of `n` pages takes `n + 1` pages of span (the guard is the top
+  page), rounded up to a power-of-two count of units. A block is aligned
+  to its size, and the guard above each block is the block above's
+  bottom guard. The entries (16 bytes per unit) and the lazy list's side
+  array (8 bytes per unit: the next lazy block and its order, and on
+  x86-64 the head of its kept frames' chain) are allocated once at boot
+  through `vmap::allocate`. For a 2 GiB area that is 6 MiB, so the total
+  overhead is about `RAM / 1600` including the tables. The boot report
+  prints the figures.
+* **Nothing is allocated on the mapping path.** A request takes its unit
+  block (one `IrqSpinLock` hold of the area's buddy, nothing taken inside
+  it). It then takes `n` single frames, one at a time, through the same
+  floor decision as the small heap, and writes their leaves into the
+  existing tables. That write goes through `Mapper::map_range` with a
+  pages-only mapper and a `PhysMem` whose `allocate_table` refuses, so a
+  missing table is a refusal, never an allocation. There is no recursion into the heap, and so no re-entry
+  (RD.6 (d)). The arena's `BTreeMap` is not touched after boot. A request
+  refused part way (a frame short, a leaf refused) gives back every frame
+  it took and puts its unit block on the lazy list, never straight back
+  into the address buddy (L.mm.144, L.mm.48's sibling): leaves it wrote
+  may be cached.
+* **No self-deadlock on `TABLES` (R6.3): the large path never takes
+  it.** `mm.rs`'s lock order permits a heap allocation while `TABLES` is
+  held, so a large path that took `TABLES` from inside `GlobalAlloc` (or
+  from `dealloc`) could spin on its own processor's hold. **Departure
+  from R6.3's letter, removing its cause:** the area's tables are the
+  large path's own. They are made at boot (above), never pruned and
+  never freed, and nothing but the large path writes a descriptor inside
+  the area: the arena reserved the span, so no `map_kernel`, unmap or
+  prune reaches it, and `share_kernel_slots` copies root entries only.
+  Each page-level leaf is written only by the owner of the unit block it
+  lies in, and the area's buddy hands a block to one owner at a time. So
+  a leaf write needs no lock: it is one aligned 64-bit store into a table
+  that cannot change shape, by the one owner of that leaf. A reader under
+  `TABLES` (`translate`, the sweeps) sees the leaf before or after the
+  store, as a walker does. The lock doc says so: the area's lock is a
+  leaf, taken alone, never with `FRAMES` or `TABLES`, and the large path
+  takes neither `TABLES` nor `HEAP`.
+
+  **Descriptor stores without a lock (R6F.4).** On x86-64 and AArch64 a
+  leaf is one aligned 64-bit store, and readers read at the same width.
+  On ARMv7-A, where a `u64` volatile store is not promised as one
+  single-copy-atomic access, the area writes a leaf as two 32-bit stores
+  in a fixed order: on a map the high word first, then the low word,
+  which holds the valid bit; on a clear the low word first. Each is
+  followed by the existing barrier. A walker therefore never sees a valid
+  descriptor with a half-written address. A leaf found present at a map,
+  or absent at `take_page`, means two owners of one block: it is counted
+  (L.mm.144), never served, and asserted 0 at the end of the boot check.
+  The check case R6.3 asked for stays,
+  with the opposite answer: a request above a page made inside a
+  `with_tables` body while the buddy refuses is **served** from the area,
+  and freed there, and the boot goes on. If the consultant prefers
+  R6.3's form (refuse when this processor holds `TABLES`), the owner word
+  is one store in `with_tables` and one compare here; the free would then
+  need the same refusal, which a free cannot give.
+* **Publishing a fresh mapping costs no flush.** A leaf goes from
+  invalid to valid. x86-64 caches no not-present translation. Arm caches
+  no translation-fault entry, and the walker needs the store to be
+  visible, so a new `arch::publish_tables()` issues `dsb ishst; isb` on
+  both Arm architectures (what `flush_tlb` does before its `tlbi`) and
+  nothing on x86-64. This is not `mm::map_kernel`, whose full
+  `flush_tlb` per call would be a broadcast `tlbi vmalle1is` per
+  allocation on Arm. The address range was purged (below) before it could
+  be handed out again, so no processor holds a stale translation of it.
+
+**(a) One entry choice, and (e) free routing.** The frames are taken by
+the decision `heap_entry` makes for the small heap (L.mm.81, L.mm.140):
+
+* in a heap scope, `take_frames(0, Floor::Drawn(scope))`, and past the
+  reservation's room, counted as an overrun (`scope_overrun`) and then
+  `Floor::Kernel`, unless the scope's check refuses the shared heap;
+* for a job with a reservation, in task context, `Floor::Drawn(job's)`,
+  then `Floor::Kernel`;
+* otherwise, and always in interrupt context, `Floor::Kernel`.
+
+`take_frames` tags each frame with the reservation it was drawn from, in
+the hold that takes it. **Each frame is then freed through
+`deallocate_frames(frame, 0)`, which gives it back to the reservation its
+tag names (L.mm.80).** So the large path needs no record of its own of
+where a frame came from, and a block that mixes drawn frames with
+overrun frames gives each back where it belongs. L.mm.140's statement is
+amended to say that a large allocation in a scope draws its frames
+there. In a `retyped` build (K16), which routes by charge, the large path
+is off. The seal's rules for it are K16's to write.
+
+`dealloc` recognises the area before `heap_drawn_from` with one compare
+against a constant: an address at or above `KERNEL_VMAP_BASE` on the
+64-bit pair, or below `physmap_base` on ARMv7-A. Those addresses are not
+in the direct map, and no other heap memory is outside it. Then it checks
+the address is inside the area. An address outside the area is never
+freed: it is counted and leaked.
+
+**(c) Contexts, and the deferred, batched shootdown.**
+
+* **Allocation is served in every context.** Interrupt context, with
+  interrupts masked, or under a spin lock: the path takes only
+  interrupt-masking spin locks (the area's and `FRAMES`), never
+  nests them, never sleeps, sends no interrupt and allocates nothing. In
+  interrupt context it uses `Floor::Kernel` only. One exception: when the
+  address space is exhausted *and* lazy ranges are waiting, only a
+  context that may block purges and tries again. Elsewhere the refusal
+  stands, and the request goes on as today (null, or the next
+  fallback).
+* **Free is served in every context, and begins no shootdown.** For each
+  page it clears the leaf, with no lock (R6.3 above; a new `Mapper::take_page`
+  clears one page-level leaf, returns its frame and prunes nothing), then
+  invalidates the entry (`flush_tlb_page`: `invlpg` on x86-64, local; the
+  broadcast `tlbi vaae1is` / `TLBIMVAAIS` on Arm, complete on every
+  processor at its `dsb ish`). What happens to the frame then is branched
+  on one constant, `arch::TLB_FLUSH_IS_BROADCAST`, in one code path
+  (R6.1):
+  * **Arm (broadcast):** no processor can still hold a translation of
+    the frame, so it goes back at once through `deallocate_frames(frame,
+    0)` to the reservation its tag names (L.mm.80). H.MEM.17 holds
+    literally.
+  * **x86-64 (local):** another processor may still hold a translation,
+    so the frame is **kept**. It is linked onto the block's chain through
+    its own first word, written through the direct map (the chain is
+    `vfree_atomic`'s `llist` through the freed memory, and needs no
+    storage). The block's record holds the chain's head. The frames go
+    back only after the purge's `flush_tlb_everywhere` has returned
+    (H.MEM.17, H.MEM.12, L.mm.29), each through `deallocate_frames(frame,
+    0)` to its tag's reservation.
+
+  Then the unit block goes on the **lazy list**: an intrusive list
+  through the fixed side array, one hold of the area's lock, O(1), with
+  no allocation. Its addresses are not reusable yet.
+* **The purge** detaches the whole lazy list under the area's lock, drops
+  the lock, makes **one** `smp::flush_tlb_everywhere()`, and only then
+  gives the kept frames back (x86-64) and the unit blocks to the address
+  buddy. It runs only where `sched::may_block()` holds: interrupts
+  enabled, preemption count 0, not in an interrupt. So it is never a
+  shootdown with interrupts masked or under a spin lock (RD.6 (c), and
+  that function's own rule). One purger at a time (an atomic flag). A
+  caller that finds the flag taken skips the purge; an allocation that
+  needed it gets the refusal and goes on to the next fallback. It is
+  started:
+  1. by a free that leaves more than `LAZY_MAX` units waiting, where the
+     free may block;
+  2. by an allocation that found no address space, where it may block;
+  3. at step 3 of the order above (x86-64, a scoped or job's draw short
+     while lazy frames hold its reservation drawn), where it may block;
+  4. by a reservation's unbind, where it may block: lazy frames keep a
+     reservation drawn, and L.mm.80 binds it again only once nothing is;
+  5. by **the reaper** (R6.2). A free past `LAZY_MAX` where it may not
+     block sets a purge-wanted flag, an atomic store and nothing else. It
+     allocates nothing and is safe in interrupt context.
+     `sched::leftovers::nudge`, which already runs at the end of every
+     interrupt anywhere in the machine, at the end of every switch and in
+     the idle loop's look, with no lock held, wakes the reaper task when
+     the flag is set, as it does for a task's leftovers. The reaper is a
+     task, so it may block, and it purges. This is Linux's
+     `drain_vmap_area_work`. It is an existing task; R5 step 2 does not
+     replace it (R6.9).
+
+  `LAZY_MAX` is an eighth of the area's units, about the same in each
+  build as Linux's 32 MiB per processor-log. The bound to write in
+  MEMORY-AND-TIMING: the purge holds the area's lock for the detach
+  (O(1)) and then once per block for its give-back (O(`MAX_ORDER`) each).
+  Its one shootdown is `flush_tlb_everywhere`'s existing bound, with
+  interrupts enabled. The lazy list holds at most `LAZY_MAX` units plus
+  what non-blocking frees add before the reaper runs. The reaper is woken
+  at the machine's next interrupt, switch or halt, the bound
+  `sched::leftovers` already states. The frames it holds on x86-64 are at
+  most the pages of those units, and the boot report prints the most
+  held (`large: ... most held`).
+* **What the lazy window leaves.** Nothing, on any architecture: no
+  address in the area is handed out again while any processor can hold a
+  translation of it, and no frame goes back to the allocator while any
+  processor can hold a translation of it (H.MEM.17). The cost on x86-64
+  is that a large free's frames come back at the next purge, not at the
+  free. Two consequences, both answered:
+  * Frame-delta checks: the large path runs only on a buddy refusal, so a
+    check on an unfragmented machine never makes a lazy block. A check
+    that does make one purges (`mm::purge_lazy`, where it may block)
+    before it reads `free_frames`.
+  * A W1 scope's promise: lazy frames keep it drawn. Step 3 of the order
+    purges before an overrun is counted, and an unbind purges.
+
+  Freeing at once on x86-64 stays possible later only as an H.MEM.17
+  amendment with a VULNERABILITY-ANALYSIS entry, decided by the customer.
+  It is not in this landing.
+* **Lazy frames are purged before any kill (R6F.7, x86-64).** The
+  watermark counts held frames as used, so a machine could kill a program
+  for frames a purge would give back. Where the caller may block, a purge
+  runs before step 7's reclaim counts a failure, before step 8's kill,
+  before the program-memory OOM kill and before the program floor's
+  refusal. MEMORY-AND-TIMING counts the lazily held frames in the
+  watermark argument.
+* **The chain fails closed (R6F.8).** A write through a stale
+  translation could overwrite a freed frame's first word, the chain's
+  link. The purge validates each link before it frees: a RAM frame, in
+  range, marked held by the large path (set at the free, cleared at the
+  give-back), and a block's frame count is kept in its side-array entry
+  for the chain to match. A bad link is counted, ends the chain, and its
+  frames are leaked, never freed (L.mm.143, asserted 0 at the end of the
+  boot check).
+
+**(d) Physical consumers (RD.6 (b)).** Audited over ring 0, the kernel's
+own files and every linked library: **nothing uses heap memory as
+physical memory.** Every ring, descriptor, IOMMU table, ITS table, page
+table, page-cache page and buffer shared with ring 3 or a device is built
+from `mm::allocate_frames`, `allocate_user_frame` or VMO frames, reached
+through `direct_map(frame * PAGE_SIZE)`. The heap only ever holds copies.
+The hardware drivers are ring 3. `ferrix-virtio` is linked as a layout
+library over frame addresses. The users of heap addresses as addresses
+are all inside `mm.rs`: `heap_drawn_from` and `dealloc`, which the
+routing above handles; `ReservedPages`, whose order-k first try stays
+direct-map; and `mm/reserve.rs`'s `hold_large`, whose reserved section
+keeps its direct-map block, since a reserved section is not routed
+through the large path. The page-walking readers (`read_kernel_word`,
+`backtrace::read_word`) walk the tables, so they work on the area too.
+`ram_behind`, `direct_map_ram` and the MCE copy take no heap pointer.
+**Decision: R6 stays inside `GlobalAlloc`**, and the opt-in is the other
+way round. A consumer that needs a run asks for frames
+(`mm::allocate_frames`, `allocate_frame_run`), as every current one
+already does. The audit list goes into the landing's commit and into
+§2.6's table of physical users.
+
+**(g) Cost.** It is measured in the boot check below, printed and cited
+in the commit: 1,000 rounds each of a 32 KiB allocation and free through
+the buddy (unfragmented) and through the large path (forced). The figures
+are from x86-64 under KVM and ARMv7-A under TCG, which is QEMU and not
+hardware (the DK1 needs the PO). The expected large path is about 8
+frame takes, 8 leaf writes, and on free 8 leaf clears with their local
+invalidations. That is a few microseconds against the buddy's few hundred
+nanoseconds, paid only where the buddy refused. Unchanged, and stated:
+the IPC fast path (it does not allocate) and the size classes (the large
+path is reached only from the buddy's refusal). `dealloc` gains one
+compare against a constant. `check-stack-depth` and `test-ring0-budget`
+deltas are named in the commit. `ferrix_kmem::footprint` still charges a
+large request as its power-of-two run, which overcharges an area block (by
+at most twice). That fails safe, and the text says so.
+
+**(h) ARMv7-A's kernel address space.** The vmap area is 512 MiB, and
+64 MiB of it is the fixed windows. The arena is 448 MiB, less up to an
+eighth for KASLR. The large area takes at most 128 MiB of it, about a
+quarter. That leaves the arena more than 260 MiB for stacks (32 KiB of
+span a task with ARMv7-A's three-page lower guard) and device windows.
+When the area's buddy has no block and there is nothing to purge, the
+answer is a refusal, which falls to the buddy path, and so to today's
+behaviour. It is never a panic.
+
+**(i) The check, and its controls.** `mm/large_check.rs`, at stage 9
+beside `object/reserve_check.rs`'s heap-scope check, prints its line
+first.
+
+**How the buddy is made to refuse (R6.7 (a)-(c)). Departure from CR.4
+(i)'s "fragmented by a check-made pattern", for the consultant to
+accept or refuse.** Holding every other frame at stage 9 opens a window
+in which every other order-above-0 frame request on the machine fails:
+secondaries, interrupt handlers and the tasks stages 5 to 8 started are
+all running by then. Showing that no infallible request among them can
+meet the window means auditing every `allocate_frames(k > 0)` caller,
+and the loop costs time on every boot of the row set (test time is
+priority one). So the check makes the buddy refuse **the checking task's
+runs alone**: a CHECKS-ONLY hook beside `refuse_shared_heap_for`
+(`mm::refuse_runs_for(task)`), read in `take_frames` only for an order
+above 0, makes every run that task asks for answer `None`, as a buddy
+with no free block above order 0 answers. That is the one input the
+large path depends on, and every other path on the machine is
+untouched. The check first asserts that `allocate_frames(1)` and a
+`take_frames` through the reservation's heap answer `None` for it. No
+frame is held, so there is no window and nothing to release on a failed
+exit. The hook is cleared by a guard on every exit, a failed assertion
+included. If this is refused, the fragmentation of the first version
+returns with R6.7 (a)-(c) answered: the loop runs before stage 5 starts
+the secondaries, and its time on each boot is in the commit.
+
+It does, in order:
+
+1. It measures (g), and R6.5's 4 MiB case (below).
+2. It binds a reservation of 64 frames and enters a heap scope on it.
+3. It makes the buddy refuse its runs (above), and asserts that it does.
+4. It allocates a `Vec<u8>` of 32 KiB, fallibly, and requires:
+   * the pointer lies in the area;
+   * all 8 of its pages translate to frames tagged with the scope's
+     reservation;
+   * the page above the block (its guard) does not translate;
+   * the reservation's usage rose by 8;
+   * no overrun was counted.
+5. With interrupts masked, it drops the Vec, and requires:
+   * `smp::shootdowns()` did not move;
+   * one block waits on the lazy list;
+   * on Arm, the reservation's usage is back where it was; on x86-64 it
+     is still up by 8 (R6.1).
+6. It purges in task context, and requires:
+   * on x86-64 with more than one processor, one shootdown begun;
+   * an empty lazy list;
+   * on x86-64, the reservation's usage back where it was.
+7. RD.6 (g)'s case: outside the scope, a 128 KiB request is served from
+   the area while the buddy refuses, and freed.
+8. R6.3's case: the same 32 KiB request made and freed inside a
+   `with_tables` body is served from the area, and the boot goes on.
+9. R6.2's case: with interrupts masked, enough 32 KiB blocks are made
+   and freed to pass `LAZY_MAX`. The purge-wanted flag is set, no
+   shootdown has begun, and once interrupts are enabled the reaper empties
+   the list within a bounded wait (a wait on the state, with a stated
+   timeout that fails loudly).
+10. It clears the hook and the scope, and requires a frame delta of 0
+    and an out-of-area `dealloc` count of 0 (R6.12 (b)).
+
+R6.5's figures come from step 1's 4 MiB case (`n = 1024`), measured on
+x86_64 kvm and aarch64 tcg and written into MEMORY-AND-TIMING: the
+interrupts-masked time per hold (one frame take, one leaf write), the
+total per allocation and per free (on Arm a masked free issues `n`
+broadcast invalidations), and the purge's give-back loop. If the
+interrupt-context figure is too long, a ceiling on the size served in
+interrupt context follows in the same landing.
+
+Controls through `gate.sh control`, all FIRED:
+
+* (C1) the large path removed from `GlobalAlloc`: on "the 32 KiB request
+  was not served while the buddy refused";
+* (C2) the large path taking `Floor::Kernel` whatever the scope: on "a
+  large block's frame was not drawn from the scope";
+* (C3) the free making its shootdown in place: on "a masked free began a
+  shootdown";
+* (C4) the purge giving unit blocks back before its shootdown: caught by
+  a host test of the area's state machine in `ferrix-frame` terms (a
+  lazy block is not allocatable until the flush callback has returned),
+  through `gate.sh control --expect-host`;
+* (C5) x86-64: frames freed at the free rather than at the purge: on
+  step 5's usage assertion;
+* (C6) `dealloc`'s area recognition removed: on the line or stop it
+  causes, named in the commit.
+
+Rows: check; test-boot on x86_64 kvm and tcg, aarch64, armv7a and armv7a
+`--smp 2`; test-btrfs; test-btrfs-pressure; test-threads;
+test-ring0-budget on the tip and on its base.
+
+**Ids (R6.8).** L.mm.141-145 are reserved first, in a docs-only landing
+with this revision:
+
+* .141, the path: its threshold, alignment and the order above;
+* .142, free routing: the area recognised in `dealloc` before
+  `heap_drawn_from`, each frame back to its tag's reservation (L.mm.80),
+  an out-of-area address counted and not freed;
+* .143, the shootdown order: no address handed out again, and on x86-64
+  no frame given back, before the shootdown covering it; the lazy list
+  bounded by the kicked purge (parents H.MEM.17 and H.MEM.12);
+* .144, no allocation on the mapping path, and the area's exhaustion
+  answer; a request refused part way keeps no frame and puts its unit
+  block on the lazy list, never straight back;
+* .145, the contexts: served in every context, the purge only where the
+  caller may block, the large path taking no `TABLES`.
+
+L.mm.81 **is** amended in both clauses: a large block in a reservation's
+scope is served by the large path's frames drawn from it, not by that
+reservation's heap's pages, and it is freed by the area's routing, not
+to "the heap its page's tag names". L.mm.140's statement and criterion
+gain the large case (step 4). The landing releases the reservation.
+
+**Landing order against r5-teardown (RD.0, CR.3, R6.9).** R6 changes
+`mm.rs` (`GlobalAlloc`, the shared heap's attempt, `take_frames`'s
+check hook, the lock doc), a new `mm/large.rs` and its check, `vmap.rs`
+(one reserved span, one `Kind`), `arch` (`publish_tables`),
+`sched/leftovers.rs` (`nudge` and the reaper's wait also look at the
+purge-wanted flag, a few lines) and `ferrix-paging` (`populate`,
+`take_page`, with host tests). It does not change `user/`, `user/vmo.rs`,
+the frame reference counts, the space lock or `smp.rs`. It only calls `flush_tlb_everywhere`, under that
+function's existing contract. R5 step 2 changes those other parts. The
+two share only `mm.rs`, in different functions. **Neither waits for the
+other.** Whichever lands second rebases. A conflict, or any change by R5
+step 2 to `flush_tlb_everywhere`'s calling contract, to
+`deallocate_frames` or to the reaper, means that landing re-gates, and
+this section's context argument is re-read against it. The purge task is
+`sched::leftovers`' reaper, an existing task that R5 step 2 does not own;
+if R5 step 2 changes it, R6 lands after R5 step 2. W1-c's widened claim
+(CR.2) lands after R6 and names its residual: a scoped large request can
+be refused for address space while its reservation still has frames
+(the area full, or lazy ranges seen by a caller that may not block).
+
 ## 3. Class B: kernel memory a program makes the kernel spend
 
 ### 3.1 Evidence
@@ -829,7 +1331,8 @@ The points are story points. The first five are the ones to start.
 | R3 | **The long-hold detector**, riding on S4a's tick, which lands first (§4.4 (2), §4.5). Debug and box images on, the reference configuration off. Also the spin-waiter measurement (§4.4 (3)). | C | 5 + S4a's rebase 3 | open |
 | R4 | **The staged watchdog**: the pre-timeout hang dump (stage 1), then the sacrifice set (stage 2), §5.3. The dump first, in its own landing. Designed in `WATCHDOG-STAGES.md` §6-§7; each needs its own design (ledger 8355: not yet). | D | 3 + 5 | watchdog-stages |
 | R5 | **Bounded teardown**: address space, VMO, descriptor table and `munmap` in steps of N with no lock held between them (§4.4 (1)). Its order comes from R3's list and fault-relanding's root cause. | C | 8 | step 1 r5-teardown (§4.6); step 2 open |
-| R6 | **No contiguous runs for requests above a page**: served through `vmap` from order-0 frames, fallibly. Plus a sized, accounted reserve for allocations under a spin lock, in place of today's implicit headroom (§2.2). | A | 5 | open |
+| R6 | **No contiguous runs for requests above a page**: served from order-0 frames mapped into a kernel area, fallibly, as `kvmalloc`'s fallback (§2.6). Design OK IF R6.1-R6.13 (ledger 8481). | A | 5 | r6-vmalloc |
+| R6b | **A sized, accounted reserve for allocations under a spin lock**, in place of today's implicit headroom (§2.2): `mm/reserve.rs`'s sections generalized, not a second reserve (RD.6 (f)). Split from R6 (ledger 8488 R6.6); owes its own design review before code. | A | 3 | open |
 | R7 | **Burn down class A by area**, highest exposure first: the allocations under a lock (tmpfs's maps and `move_child`, then R13's list), `syscall/`, `fs/socket.rs`, `fs/pipe.rs`, `ferrix-vfs` (`namespace`, `tmpfs`, `dentry`), `interfaces/render` and `display` (the GPU ioctls), `ferrix-net`. A crate at 0 gets clippy `disallowed-methods` and leaves the ratchet. Step 1 is a reachability map from the entry points. About 1 point per 40 sites. | A | ~35 | per area owner |
 | R8 | **OOM selection counts charged kernel memory and buffers**, plus init's typed `oom_protect` (§3.3 (3), (4)). | B | 5 | open |
 | R9 | **Charge the GPU's and the display's buffers to the client's job**, and add a "charged or argued" column to the ratchet (§3.3 (1), (2)). | B | 5 | open, with the intelgpu owner |
@@ -878,3 +1381,19 @@ The entry is at ledger line 8202.
   them true. It corrected four: the waiter change (A1, now §4.4 (3)), S4a's
   distance behind develop and its owed reviews (A2, §4.5), the place of
   MK.5 (A3), and the R2 to R13 range (A4).
+* **R6's design (§2.6): OK IF R6.1-R6.13** (ledger 8481, 2026-11-08). The
+  shape was accepted: `kvmalloc`'s fallback, tables made at boot, nothing
+  allocated on the mapping path, a fixed buddy over address units, a
+  batched purge only where the caller may block. R6.1 holds x86-64's
+  freed frames until their shootdown (H.MEM.17), R6.2 bounds the lazy
+  list, R6.3 closes the self-deadlock on `TABLES`, R6.8 asks for five
+  ids. §2.6's revision answers them, with two departures marked for the
+  consultant: the large path takes no `TABLES` at all (R6.3), and the
+  check makes the buddy refuse the checking task's runs instead of
+  fragmenting the machine (CR.4 (i), R6.7 (a)). R6b owes its own review.
+* **§2.6's revision: OK IF R6F.1-R6F.9** (ledger 8503, 2026-11-09). All
+  three departures accepted. R6F.3, R6F.4 and R6F.7 are in §2.6's text;
+  R6F.5 (one refusal decision at steps 5 and 6), R6F.6 (the hook's form,
+  the check counting its own purges, a lower threshold for step 9),
+  R6F.8 (the chain fails closed) and R6F.9 (the reaper's wait) are
+  checked at the code review.
