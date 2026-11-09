@@ -135,6 +135,13 @@ pub fn drawn_from(frame: Frame) -> Reservation {
 pub fn heap_drawn_from(address: u64) -> Reservation {
     0
 }
+/// The heap kernel's large-request area (`mm::large`, `docs/ROBUSTNESS.md`
+/// §2.6); the lift keeps no frames for a shootdown, so a purge gives nothing.
+pub mod large {
+    pub fn purge_held() -> bool {
+        false
+    }
+}
 
 pub const fn watermark_for(managed: u64) -> u64 {
     0

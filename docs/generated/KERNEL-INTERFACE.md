@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-3049 declarations in the core's files, 215 in the item's; 247 checks-only.
+3062 declarations in the core's files, 215 in the item's; 249 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2060,6 +2060,8 @@ checks above is `pub` for raised checks (F3).
 | `with_initrd` | fn | item, load |  |
 | `zero_frame` | fn | item, load |  |
 | `check` | mod | item, load, bin |  |
+| `large` | mod | bin |  |
+| `large_check` | mod | bin (checks) | pub for raised checks |
 | `scrub` | mod | item, load, bin |  |
 | `seal` | mod | item |  |
 | `seal_check` | mod | bin |  |
@@ -2111,6 +2113,27 @@ checks above is `pub` for raised checks (F3).
 | `WxReport` | struct | - |  |
 | `WxReport::executable` | field | item, load, bin |  |
 | `WxReport::leaves` | field | item, load, bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+
+### `mm::large`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `init` | fn | bin |  |
+
+### `mm::large_check`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `run` | fn | bin (checks) | checks-only |
+| `LargeReport` | struct | - | checks-only |
+| `LargeReport::buddy_nanos` | field | bin (checks) | pub for raised checks; type unobtainable from product API |
+| `LargeReport::bytes` | field | item, load, bin | pub for raised checks; type unobtainable from product API |
+| `LargeReport::large_nanos` | field | bin (checks) | pub for raised checks; type unobtainable from product API |
+| `LargeReport::largest_allocate_nanos` | field | bin (checks) | pub for raised checks; type unobtainable from product API |
+| `LargeReport::largest_free_nanos` | field | bin (checks) | pub for raised checks; type unobtainable from product API |
+| `LargeReport::largest_purge_nanos` | field | bin (checks) | pub for raised checks; type unobtainable from product API |
+| `LargeReport::most_kept` | field | bin (checks) | pub for raised checks; type unobtainable from product API |
+| `LargeReport::reaper_nanos` | field | bin (checks) | pub for raised checks; type unobtainable from product API |
 
 ### `mm::reservation`
 

@@ -31,21 +31,21 @@
     }
   },
   "rise": {
-    "ledger": 7973,
-    "why": "Ledger 7973 (bugfix/panic-reset-unconditional): one new check file, panic/reset_check.rs, the check-only ferrix.check.panic options; baseline unchanged. Before it: Develop's code since 7667's baseline, accepted as code, not compacted (ledger 7893, closing AF-RING0 of 7738): count A +576, count B +569, library files +7 in all six builds, library file counts unchanged (80/81/81/82/79/80). By max AArch64 count A, each window between gate runs: S4 of the crate split 3f9191c51 +59 (mkc6b-ring0 against mki5b-16 on 3f7e8c054); 3f9191c51..88cc1a881 +126, 9cdbe75e1 FX-0974 (its +7 library lines are ferrix-sync's guard hooks, the one ring-0 library changed), a156af89a fl-096 and 2096c7c65 (r199e-base-ring0b on 88cc1a881); the 1.99.1 series +21, already 7667's; fault-path 6175c9939..53ab14eec +391, its spare frames and per-task fault counts, the only kernel change after the 1.99.1 series (r199e-ring0 on 8d6870906 against batch-20261107T223544Z-b0-1 on c8479539e). Each landed with this row red; docs/BACKLOG.md's row says how that is stopped."
+    "ledger": 8583,
+    "why": "Ledger 8583 (r6-vmalloc, R6, docs/ROBUSTNESS.md 2.6): the large-request area, mm/large.rs and ferrix-frame's area.rs (one more library file in every build), and one new check file, mm/large_check.rs. R6's own rise, measured by test-ring0-budget on the landing tree and on its base e4950d169 (gate logs r6d-budget, r6d-budget-base): count A +612, count B +405, library files +207, in all six builds; accepted as code (8583 C5). Develop's drift from 7973's baseline to that base, W1-b/W1-c's included, recorded and not accepted: count A +267 on x86_64 and +259 on aarch64 in each set (user, fast, max), count B +148 and +139. This baseline takes the landing tree's figures. Before it: Ledger 7973 (bugfix/panic-reset-unconditional): one new check file, panic/reset_check.rs, the check-only ferrix.check.panic options; baseline unchanged. Before it: Develop's code since 7667's baseline, accepted as code, not compacted (ledger 7893, closing AF-RING0 of 7738): count A +576, count B +569, library files +7 in all six builds, library file counts unchanged (80/81/81/82/79/80). By max AArch64 count A, each window between gate runs: S4 of the crate split 3f9191c51 +59 (mkc6b-ring0 against mki5b-16 on 3f7e8c054); 3f9191c51..88cc1a881 +126, 9cdbe75e1 FX-0974 (its +7 library lines are ferrix-sync's guard hooks, the one ring-0 library changed), a156af89a fl-096 and 2096c7c65 (r199e-base-ring0b on 88cc1a881); the 1.99.1 series +21, already 7667's; fault-path 6175c9939..53ab14eec +391, its spare frames and per-task fault counts, the only kernel change after the 1.99.1 series (r199e-ring0 on 8d6870906 against batch-20261107T223544Z-b0-1 on c8479539e). Each landed with this row red; docs/BACKLOG.md's row says how that is stopped."
   },
   "baseline": {
     "user": {
-      "x86_64": {"a": 92658, "b": 65509},
-      "aarch64": {"a": 86769, "b": 59515}
+      "x86_64": {"a": 93537, "b": 66062},
+      "aarch64": {"a": 87640, "b": 60059}
     },
     "fast": {
-      "x86_64": {"a": 93457, "b": 65821},
-      "aarch64": {"a": 87359, "b": 59618}
+      "x86_64": {"a": 94336, "b": 66374},
+      "aarch64": {"a": 88230, "b": 60162}
     },
     "max": {
-      "x86_64": {"a": 92695, "b": 65578},
-      "aarch64": {"a": 86806, "b": 59584}
+      "x86_64": {"a": 93574, "b": 66131},
+      "aarch64": {"a": 87677, "b": 60128}
     }
   },
   "check_files": [
@@ -85,6 +85,7 @@
       "iommu/amdvi_check.rs",
       "iommu/check.rs",
       "mm/check.rs",
+      "mm/large_check.rs",
       "mm/seal_check.rs",
       "object/channel/check.rs",
       "object/rehome_check.rs",

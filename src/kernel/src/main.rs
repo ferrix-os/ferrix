@@ -262,12 +262,7 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // and while this is the only processor and interrupts are off.
     attach_pstore(view);
 
-    if let Err(problem) = vmap::init(view.raw().kaslr.vmap_end) {
-        fatal!(
-            catalog::VMAP_ARENA_BRING_UP,
-            "could not bring up the kernel address arena: {problem}"
-        );
-    }
+    bring_up_kernel_address_space(view);
     console::screen::milestone(5);
 
     // From here on each self-check runs only when `checks::run` says so; each
@@ -1873,6 +1868,21 @@ fn size_log(view: &BootView<'_>) {
         Err(problem) => {
             println!("  log      log_buf_len refused: {problem}; the log stays as it was");
         }
+    }
+}
+
+/// The kernel's dynamic address space: the vmap arena, and in it the
+/// large-request area (`docs/ROBUSTNESS.md` §2.6), before the first process.
+/// The area is off if it cannot be had, which the stage 9 check refuses.
+fn bring_up_kernel_address_space(view: &BootView<'_>) {
+    if let Err(problem) = vmap::init(view.raw().kaslr.vmap_end) {
+        fatal!(
+            catalog::VMAP_ARENA_BRING_UP,
+            "could not bring up the kernel address arena: {problem}"
+        );
+    }
+    if let Err(problem) = mm::large::init(mm::managed_frames()) {
+        println!("  large    the large-request area is off: {problem}");
     }
 }
 

@@ -208,6 +208,12 @@
       "reason": "Page table entries, through the direct map. The MMU walks them, which is why a write cannot be sunk; no device is involved."
     },
     {
+      "file": "src/kernel/src/mm/large.rs",
+      "kind": "memory",
+      "max_sites": 1,
+      "reason": "ARMv7-A's leaf stores in the large-request area, through the direct map, as two 32-bit stores in the order a table walker never sees half of (docs/ROBUSTNESS.md 2.6, ledger 8503 R6F.4): the high word before the valid bit on a map, the valid bit first on a clear. The MMU walks them; no device is involved."
+    },
+    {
       "file": "src/kernel/src/early.rs",
       "kind": "memory",
       "max_sites": 4,

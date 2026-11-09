@@ -166,6 +166,9 @@ pub(super) fn check_programs() {
 
     // K13: a pager's restart without its clients' loss.
     check_rebind();
+    // R6: heap requests above a page from single frames, when the buddy has
+    // no run (`docs/ROBUSTNESS.md` §2.6).
+    check_large_requests();
     // K12: a job's memory reservation, beside its limit.
     check_reservations();
 
@@ -1630,6 +1633,38 @@ pub(super) fn check_a_give_up() {
         "  give-up  a close {} drops deep in place with no memory gave up {given_up} object, \
          counted, and the kernel ran on",
         object::IN_PLACE_DEPTH
+    );
+}
+
+/// R6: a heap request above a page served from single frames mapped into
+/// the large-request area when the buddy has no run (`docs/ROBUSTNESS.md`
+/// §2.6, `L.mm.141`-`L.mm.145`), with its cost.
+///
+/// Halts rather than returning, as every other stage's check does.
+pub(super) fn check_large_requests() {
+    let start = timer::now_nanos();
+    let report = match mm::large_check::run() {
+        Ok(report) => report,
+        Err(problem) => fatal!(
+            catalog::STAGE9_ALLOCATION,
+            "large-request self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  large    {} MiB area: 32 KiB requests served from single frames while the buddy \
+         refused runs, a job's drawn from its reservation; two frees of what the area did not \
+         hand out counted and refused; a masked free began no shootdown, the reaper purged in \
+         {} us; a round {} ns from the buddy, {} ns from the area; 4 MiB masked {} us, freed {} \
+         us, purged {} us; at most {} frames held for a shootdown; {} ms in all",
+        report.bytes >> 20,
+        report.reaper_nanos / 1000,
+        report.buddy_nanos,
+        report.large_nanos,
+        report.largest_allocate_nanos / 1000,
+        report.largest_free_nanos / 1000,
+        report.largest_purge_nanos / 1000,
+        report.most_kept,
+        timer::now_nanos().saturating_sub(start) / 1_000_000,
     );
 }
 

@@ -18,7 +18,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`syscall`](#syscall) | 115 | 10 | 10 | 3 |
 | [`iommu`](#iommu) | 99 | - | 1 | 2 |
 | [`user`](#user) | 72 | - | 1 | 3 |
-| [`main`](#main) | 65 | 6 | 4 | 1 |
+| [`main`](#main) | 64 | 6 | 4 | 1 |
 | [`object`](#object) | 51 | 12 | 33 | 8 |
 | [`console`](#console) | 40 | 6 | 7 | 6 |
 | [`init`](#init) | 24 | 12 | 12 | 1 |
@@ -37,7 +37,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`audit`](#audit) | 1 | - | - | 1 |
 | [`signal_frame`](#signal_frame) | - | - | 1 | 1 |
 | [`timer`](#timer) | - | - | 1 | 1 |
-| **Total** | **1244** | **162** | **215** | 76 |
+| **Total** | **1243** | **162** | **215** | 76 |
 
 ---
 
@@ -122,7 +122,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 |---|---|---:|---:|---:|---:|---|
 | `arch/x86_64/powerctl.rs` | `core` | 93 | - | - | 93 | 132-133, 149, 177, 180-182, 191, 229, 253, 262, 266, 418, 439, 466, 510, 556, 563, 609, 614-615, 622, 641, 644, 652, 656, 658, 670-671, 673, 678, 682-685, 688, 697, 705, 710, 719, 743-745, 747, 751-755, 758, 760, 762, 768, 772, 774-775, 779, 783, 787-788, 790, 795-797, 805-806, 808, 820-823, 855-856, 866, 868, 876-877, 881, 885, 887-888, 897, 900, 902-903, 909-914, 917, 920 |
 | `arch/x86_64/msrlog.rs` | `core` | 65 | - | - | 65 | 79, 81, 92-93, 96, 100, 105, 109, 111, 115-116, 118, 123, 125, 127, 130, 133, 138-139, 149, 152-154, 159-160, 163, 165, 169-171, 174-175, 178-179, 182-183, 186, 188, 191, 194-195, 199, 203-206, 209, 222, 225, 231-232, 240, 243, 245, 247-249, 252-253, 255-256, 259, 266-268 |
-| `arch/x86_64/mod.rs` | `core` | 38 | - | - | 38 | 223, 278, 292, 294, 299, 307, 311, 319, 323, 327-328, 383, 386, 475-476, 487, 492, 1487, 1489, 1561, 1563-1564, 1592-1593, 1800-1801, 1805, 1959, 2141, 2154, 2164, 2328, 2375, 2454, 2456, 2459, 2461, 2532 |
+| `arch/x86_64/mod.rs` | `core` | 38 | - | - | 38 | 223, 278, 292, 294, 299, 307, 311, 319, 323, 327-328, 383, 386, 475-476, 487, 492, 1496, 1498, 1570, 1572-1573, 1601-1602, 1809-1810, 1814, 1968, 2150, 2163, 2173, 2337, 2384, 2463, 2465, 2468, 2470, 2541 |
 | `arch/x86_64/speculation.rs` | `core` | 30 | - | - | 30 | 253, 275, 342, 527, 549-550, 561-563, 565, 582-584, 586, 774-777, 899, 903, 918, 926, 1126, 1128, 1133, 1141, 1149, 1164, 1167, 1206 |
 | `arch/x86_64/clock.rs` | `core` | 28 | - | - | 28 | 280, 306, 407, 410, 413, 416, 498, 500-502, 511, 524-526, 529, 536, 563, 702, 715, 735, 745, 749-750, 776-777, 779-780, 823 |
 | `arch/x86_64/trap.rs` | `core` | 28 | - | - | 28 | 61-74, 77, 79, 84-88, 568-569, 571, 575, 692, 708, 743 |
@@ -206,7 +206,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `main.rs` | `item` | 65 | 6 | 4 | 3 | 433, 908, 1635 |
+| `main.rs` | `item` | 64 | 6 | 4 | 3 | 428, 903, 1630 |
 
 ---
 
@@ -266,7 +266,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `mm.rs` | `core` | 7 | 1 | 3 | 1 | 2073 |
+| `mm.rs` | `core` | 7 | 1 | 3 | 1 | 2151 |
 
 ---
 
@@ -290,7 +290,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `vmap.rs` | `core` | 2 | 2 | 4 | 2 | 430, 432 |
+| `vmap.rs` | `core` | 2 | 2 | 4 | 2 | 464, 466 |
 
 ---
 
@@ -306,7 +306,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `arch/armv7a/mod.rs` | `core` | - | - | 1 | 1 | 1381 |
+| `arch/armv7a/mod.rs` | `core` | - | - | 1 | 1 | 1392 |
 | `arch/armv7a/speculation.rs` | `core` | - | - | 1 | 1 | 99 |
 
 ---

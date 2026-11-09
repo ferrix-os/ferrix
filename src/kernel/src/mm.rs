@@ -37,6 +37,12 @@
 //! * [`FRAMES`] is the buddy allocator, and the innermost lock in the kernel:
 //!   nothing is taken while it is held.
 //!
+//! The large-request area's lock (`mm::large`) is a leaf as well, taken
+//! alone, never with any of these three: the large path takes neither
+//! `TABLES` nor `HEAP`, and takes `FRAMES` only with its own lock dropped. So
+//! a heap allocation or free made while `TABLES` is held may reach it
+//! (`docs/ROBUSTNESS.md` §2.6, R6.3).
+//!
 //! Interrupt-masking rather than plain, because the page fault handler maps
 //! pages and so reaches the first and the last: a handler that interrupted a
 //! CPU holding either would spin on its own CPU's lock. Masking interrupts does
@@ -64,6 +70,8 @@ use ferrix_sync::IrqSpinLock;
 use crate::fallible;
 
 pub mod check;
+pub mod large;
+pub mod large_check;
 mod reservation;
 mod reserve;
 pub mod scrub;
@@ -458,7 +466,7 @@ pub fn allocate_frames(order: u8) -> Option<Frame> {
 /// in the hold that takes them (`mm::reservation::take`), and counted against
 /// the reservation they are drawn from, if any, in that same hold.
 fn take_frames(order: u8, floor: reservation::Floor) -> Option<Frame> {
-    if fallible::frame_refused() {
+    if fallible::frame_refused() || (order > 0 && runs_refused_here()) {
         return None;
     }
     let watermark = WATERMARK.load(Ordering::Relaxed);
@@ -644,9 +652,40 @@ fn from_shared_heap(request: Request) -> Option<u64> {
         return None;
     }
     let injected = fallible::injected_failures();
-    heap_or_drain(|| allocate_through_caches(request))
+    shared_attempt(request, injected)
         .or_else(|| heap_or_reclaim(request, injected))
         .or_else(|| heap_or_kill(request, injected))
+}
+
+/// The shared heap's attempt at `request`: through the caches and the drain
+/// (`L.mm.95`), and where the buddy has no run of its order, the large path
+/// from the kernel's own frames (`L.mm.141`, `docs/ROBUSTNESS.md` §2.6) --
+/// unless the refusal was the failure injection's, which stands
+/// ([`injection_refused`]).
+fn shared_attempt(request: Request, injected: u64) -> Option<u64> {
+    heap_or_drain(|| allocate_through_caches(request)).or_else(|| {
+        (!injection_refused(injected))
+            .then(|| large::allocate(request, reservation::Floor::Kernel))
+            .flatten()
+    })
+}
+
+/// A reservation's attempt at `request` (`L.mm.81`, `L.mm.141`): its own
+/// heap, and where the buddy has no run of the order, the large path from
+/// frames drawn from it. On x86-64, where frames a large free keeps hold the
+/// reservation drawn until a purge, one purge and both once more, where the
+/// caller may block (R6.1).
+fn drawn_attempt(entry: Reservation, request: Request) -> Option<u64> {
+    let attempt = || {
+        reserved_heap(entry)
+            .and_then(|heap| {
+                heap.lock()
+                    .allocate(&mut ReservedPages(entry), request)
+                    .ok()
+            })
+            .or_else(|| large::allocate(request, reservation::Floor::Drawn(entry)))
+    };
+    attempt().or_else(|| large::purge_held().then(attempt).flatten())
 }
 
 /// A scoped allocation past reservation `entry`'s room, on its way to the
@@ -690,6 +729,26 @@ static REFUSE_SHARED_FOR: AtomicU64 = AtomicU64::new(0);
 /// Make the shared heap refuse `task`'s scoped allocations, or stop with 0.
 pub(crate) fn refuse_shared_heap_for(task: u64) {
     REFUSE_SHARED_FOR.store(task, Ordering::Release);
+}
+
+// CHECKS-ONLY: mm/large_check.rs
+/// The task whose runs of frames (order above 0) the buddy refuses, or 0:
+/// for the large path's check alone, which so meets a buddy with no free
+/// run without fragmenting the machine (ledger 8503 R6F.6). Read in
+/// [`take_frames`] for a run only, before the allocator's lock: one load.
+static REFUSE_RUNS_FOR: AtomicU64 = AtomicU64::new(0);
+
+// CHECKS-ONLY: mm/large_check.rs
+/// Make the buddy refuse `task`'s runs of frames, or stop with 0.
+pub(crate) fn refuse_runs_for(task: u64) {
+    REFUSE_RUNS_FOR.store(task, Ordering::Release);
+}
+
+/// Whether the running task's runs are refused ([`refuse_runs_for`]):
+/// never in interrupt context, whose current task is the one interrupted.
+fn runs_refused_here() -> bool {
+    let task = REFUSE_RUNS_FOR.load(Ordering::Relaxed);
+    task != 0 && !crate::irq::in_interrupt() && crate::sched::current_id() == Some(task)
 }
 
 fn shared_refused_here() -> bool {
@@ -738,6 +797,8 @@ pub fn reservation_resize(entry: Reservation, frames: u64) -> Result<(), Refused
 /// drains as its frames are freed (`L.object.225`).
 pub fn reservation_unbind(entry: Reservation) {
     let _ = with_frames(|_| reservation::unbind(entry));
+    // Frames a large free keeps hold it drawn until a purge (R6.1).
+    let _ = large::purge_held();
 }
 
 // CHECKS-ONLY: fs/btrfs_write_check/reserve_check.rs, user/rehome_cache_check.rs
@@ -1487,13 +1548,9 @@ unsafe impl GlobalAlloc for KernelAllocator {
         // allocations, so that the fallback below is what answers them
         // (L.mm.37, L.mm.139; `reserve::refuse_heap_for`).
         let heap_tried = !reserve::heap_refused_here();
-        let address = reserved_heap(entry)
-            .filter(|_| heap_tried)
-            .and_then(|heap| {
-                heap.lock()
-                    .allocate(&mut ReservedPages(entry), request)
-                    .ok()
-            })
+        let address = (heap_tried && entry != NO_RESERVATION)
+            .then(|| drawn_attempt(entry, request))
+            .flatten()
             .or_else(|| {
                 // A scoped allocation past its reservation's room is
                 // counted, and served by the shared heap as before
@@ -1526,6 +1583,12 @@ unsafe impl GlobalAlloc for KernelAllocator {
     unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
         let request = Request::new(layout.size(), layout.align());
         let address = pointer as u64;
+        // No heap memory but the large path's lies outside the direct map
+        // (`L.mm.142`): one compare with constants on every free.
+        if large::in_dynamic_space(address) {
+            large::free(address, layout.size());
+            return;
+        }
         let entry = heap_drawn_from(address);
         if let Some(heap) = reserved_heap(entry) {
             heap.lock()
@@ -1763,9 +1826,13 @@ fn heap_or_reclaim(request: Request, injected: u64) -> Option<u64> {
     };
     for _ in 0..HEAP_RECLAIMS {
         if !reclaim_for_kernel(pages) {
-            return None;
+            // Before the failure counts: frames a large free keeps for its
+            // shootdown are room a purge gives back (R6F.7).
+            return large::purge_held()
+                .then(|| shared_attempt(request, injected))
+                .flatten();
         }
-        if let Some(address) = heap_or_drain(|| allocate_through_caches(request)) {
+        if let Some(address) = shared_attempt(request, injected) {
             let _ = HEAP_RECLAIMED.fetch_add(1, Ordering::Relaxed);
             return Some(address);
         }
@@ -1807,6 +1874,12 @@ fn heap_or_kill(request: Request, injected: u64) -> Option<u64> {
     // Nor the kill's: its list of the living and what it frees go by the
     // shared heap (ledger 8448 A1, W1.3).
     let _suspended = heap_scope_suspended();
+    // No kill for frames a purge would give back (R6F.7).
+    if large::purge_held()
+        && let Some(address) = shared_attempt(request, injected)
+    {
+        return Some(address);
+    }
     for _ in 0..oom::KERNEL_HEAP_ANSWERS {
         if free_frames() >= watermark() {
             return None;
@@ -1814,7 +1887,7 @@ fn heap_or_kill(request: Request, injected: u64) -> Option<u64> {
         if while_killing(oom::for_kernel_heap) != Answer::Retry {
             return None;
         }
-        if let Some(address) = heap_or_drain(|| allocate_through_caches(request)) {
+        if let Some(address) = shared_attempt(request, injected) {
             return Some(address);
         }
     }
@@ -1861,6 +1934,11 @@ pub fn reservation_grow(entry: Reservation, frames: u64) -> Result<(), Refused> 
         if answer.is_ok() {
             let _ = RESERVATION_RECLAIMED.fetch_add(1, Ordering::Relaxed);
         }
+    }
+    // No kill for frames a large free keeps for its shootdown: a purge gives
+    // them back (`L.mm.143`, ledger 8583 C3).
+    if matches!(answer, Err(Refused::Short(_))) && large::purge_held() {
+        answer = reservation_resize(entry, frames);
     }
     for _ in 0..oom::KERNEL_HEAP_ANSWERS {
         if !matches!(answer, Err(Refused::Short(_))) {

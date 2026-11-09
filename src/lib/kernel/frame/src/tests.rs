@@ -1072,3 +1072,190 @@ fn a_claim_leaves_another_block_of_its_order() {
     assert!(pair.another_free_block(0x210, 4));
     let _ = count2;
 }
+
+// ---------------------------------------------------------------------------
+// The large-request area's bookkeeping (`area`, docs/ROBUSTNESS.md §2.6)
+// ---------------------------------------------------------------------------
+
+mod large_area {
+    extern crate std;
+
+    use std::vec;
+    use std::vec::Vec;
+
+    use crate::area::{Area, Block, MOST_UNITS, UNIT_PAGES, order_for};
+    use crate::{FrameError, MAX_ORDER, PageEntry};
+
+    /// An area of `units` units, over side arrays of its own.
+    macro_rules! area {
+        ($entries:ident, $lazy:ident, $units:expr) => {
+            let mut $entries = vec![PageEntry::RESERVED; $units];
+            let mut $lazy = vec![7_u32; $units];
+            let mut $lazy = Area::new(&mut $entries, &mut $lazy, $units as u64).unwrap();
+        };
+    }
+
+    #[test]
+    fn a_request_takes_the_smallest_block_its_pages_and_a_guard_fit() {
+        assert_eq!(order_for(0), None);
+        // Two pages and a guard: two units.
+        assert_eq!(order_for(2), Some(1));
+        // Eight pages (32 KiB) and a guard: nine pages, five units, eight.
+        assert_eq!(order_for(8), Some(3));
+        // 128 KiB: 33 pages, 17 units, 32.
+        assert_eq!(order_for(32), Some(5));
+        // The largest request the heap serves, 4 MiB, and its guard.
+        assert_eq!(order_for(1 << MAX_ORDER), Some(MAX_ORDER));
+        assert_eq!(order_for((1 << MAX_ORDER) + UNIT_PAGES * 1024), None);
+        assert_eq!(order_for(u64::MAX), None);
+        for pages in 1..=(1 << MAX_ORDER) {
+            let block = Block {
+                unit: 0,
+                order: order_for(pages).unwrap(),
+            };
+            assert!(block.pages() > pages, "{pages} pages leave no guard");
+        }
+    }
+
+    #[test]
+    fn a_new_area_is_wholly_free_and_refuses_short_arrays() {
+        area!(entries, area, 64);
+        assert_eq!(area.units(), 64);
+        assert_eq!(area.free_units(), 64);
+        assert_eq!(area.lazy_units(), 0);
+        assert_eq!(area.take(64 * 2 - 1).map(|block| block.order), Some(6));
+        let mut entries = vec![PageEntry::RESERVED; 8];
+        let mut lazy = vec![0; 4];
+        assert!(Area::new(&mut entries, &mut lazy, 8).is_none());
+        assert!(Area::new(&mut entries, &mut lazy, MOST_UNITS + 1).is_none());
+    }
+
+    #[test]
+    fn blocks_are_disjoint_and_aligned_to_their_size() {
+        area!(entries, area, 256);
+        let mut taken: Vec<Block> = Vec::new();
+        while let Some(block) = area.take(8) {
+            assert_eq!(block.order, 3);
+            assert_eq!(block.unit % 8, 0);
+            assert!(taken.iter().all(|other| other.unit != block.unit));
+            taken.push(block);
+        }
+        assert_eq!(taken.len(), 32);
+        assert_eq!(area.free_units(), 0);
+    }
+
+    /// The shootdown order (`L.mm.143`): a freed block is handed out again
+    /// only once a purge has detached it and given it back, which the kernel
+    /// does only after the shootdown that covers it has returned.
+    #[test]
+    fn a_freed_block_is_not_handed_out_until_the_purge_gives_it_back() {
+        area!(entries, area, 8);
+        let block = area.take(8).unwrap();
+        assert_eq!(area.take(1), None, "the area is full");
+        area.retire(block).unwrap();
+        assert_eq!(area.lazy_units(), 8);
+        assert_eq!(area.take(1), None, "a lazy block is not free");
+        let mut detached = area.detach();
+        assert!(!detached.is_empty());
+        assert_eq!(area.lazy_units(), 0);
+        assert_eq!(
+            area.take(1),
+            None,
+            "a detached block is not free before it is given back"
+        );
+        assert_eq!(area.give_back(&mut detached), Some(block));
+        assert_eq!(area.give_back(&mut detached), None);
+        assert_eq!(area.free_units(), 8);
+        assert!(area.take(8).is_some());
+    }
+
+    #[test]
+    fn the_lazy_list_gives_back_every_block_once() {
+        area!(entries, area, 64);
+        let blocks: Vec<Block> = [2, 8, 3, 30]
+            .iter()
+            .map(|&pages| area.take(pages).unwrap())
+            .collect();
+        let used: u64 = blocks.iter().map(|block| 1 << block.order).sum();
+        for &block in &blocks {
+            area.retire(block).unwrap();
+        }
+        assert_eq!(area.lazy_units(), used);
+        let mut detached = area.detach();
+        let mut back = Vec::new();
+        while let Some(block) = area.give_back(&mut detached) {
+            back.push(block);
+        }
+        back.reverse();
+        assert_eq!(back, blocks);
+        assert_eq!(area.free_units(), 64);
+        assert!(area.detach().is_empty());
+    }
+
+    #[test]
+    fn a_block_is_retired_once_and_only_as_it_was_taken() {
+        area!(entries, area, 16);
+        let block = area.take(8).unwrap();
+        assert_eq!(
+            area.retire(Block {
+                unit: block.unit,
+                order: 2
+            }),
+            Err(FrameError::WrongOrder(block.unit))
+        );
+        assert_eq!(
+            area.retire(Block {
+                unit: block.unit + 8,
+                order: 3
+            }),
+            Err(FrameError::NotAllocated(block.unit + 8))
+        );
+        area.retire(block).unwrap();
+        assert_eq!(
+            area.retire(block),
+            Err(FrameError::NotAllocated(block.unit))
+        );
+        assert_eq!(area.lazy_units(), 8);
+    }
+
+    #[test]
+    fn only_a_live_head_of_its_order_is_live() {
+        area!(entries, area, 16);
+        let block = area.take(8).unwrap();
+        assert!(area.is_live(block));
+        assert!(!area.is_live(Block {
+            unit: block.unit + 1,
+            order: block.order
+        }));
+        assert!(!area.is_live(Block {
+            unit: block.unit,
+            order: 2
+        }));
+        assert!(!area.is_live(Block {
+            unit: block.unit + 8,
+            order: 3
+        }));
+        assert!(!area.is_live(Block {
+            unit: u64::MAX / 2,
+            order: 3
+        }));
+        area.retire(block).unwrap();
+        assert!(!area.is_live(block), "a lazy block is not live");
+    }
+
+    #[test]
+    fn kept_frames_go_with_the_detach() {
+        area!(entries, area, 16);
+        assert_eq!(area.kept(), None);
+        area.keep(0x100, 3);
+        area.keep(0x200, 2);
+        assert_eq!(area.kept(), Some(0x200));
+        assert_eq!(area.kept_count(), 5);
+        let detached = area.detach();
+        assert_eq!(detached.kept, Some(0x200));
+        assert_eq!(detached.kept_count, 5);
+        assert!(!detached.is_empty());
+        assert_eq!(area.kept(), None);
+        assert_eq!(area.kept_count(), 0);
+    }
+}

@@ -538,6 +538,15 @@ pub(crate) fn flush_tlb() {
 /// interrupt, which is what a TLB shootdown is.
 pub const TLB_FLUSH_IS_BROADCAST: bool = false;
 
+/// Make page table writes that only turn a not-present entry present
+/// visible to this processor's walker: nothing to do, since x86-64 caches no
+/// not-present translation and its walker sees stores in program order.
+/// What the Arm pair's barrier is for (`mm::large`, `docs/ROBUSTNESS.md`
+/// §2.6); a compiler fence keeps the leaf's store before the first access.
+pub(crate) fn publish_tables(_address: u64) {
+    core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+}
+
 /// Invalidate the translation of the page holding `address` — this
 /// processor's only, as [`flush_tlb`] is.
 pub(crate) fn flush_tlb_page(address: u64) {

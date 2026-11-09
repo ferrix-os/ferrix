@@ -204,6 +204,17 @@ pub(crate) fn flush_tlb() {
 /// needs interrupts for, this architecture does in hardware.
 pub const TLB_FLUSH_IS_BROADCAST: bool = true;
 
+/// Make page table writes that only turn invalid descriptors valid, for the
+/// pages from `address`, visible to every processor's table walker: the
+/// barriers of [`flush_tlb_page`], whose one broadcast invalidation of
+/// `address` drops nothing, since a translation fault is never cached. For the
+/// kernel's large-request area (`mm::large`, `docs/ROBUSTNESS.md` §2.6),
+/// whose leaves go from invalid to valid only; a barrier pair of its own
+/// would be new assembly (`docs/ASSEMBLY.md`) for one invalidation's saving.
+pub(crate) fn publish_tables(address: u64) {
+    flush_tlb_page(address);
+}
+
 /// Invalidate the translation of the page holding `address` — on every core,
 /// as [`flush_tlb`] does.
 pub(crate) fn flush_tlb_page(address: u64) {

@@ -350,6 +350,9 @@ pub fn reclaim_for(pages: u64) -> bool {
     let group = crate::sched::running_group();
     match quota::at_limit(group, Resource::Memory, PAGE_SIZE) {
         Some(full) => reclaim_within(full, run),
+        // A purge first, where frames a large free keeps would be room
+        // (`mm::large`, R6F.7).
+        None if crate::mm::large::purge_held() => true,
         None => {
             let short = crate::mm::watermark()
                 .saturating_add(1)
@@ -390,7 +393,9 @@ pub fn machine_out_of_memory_among<E>(
 ) -> Answer {
     let reclaimed =
         attempt < MACHINE_RECLAIMS && cache::reclaim(quota::NONE, machine_want()).gave();
-    if reclaimed {
+    // Frames a large free keeps for its shootdown are room a purge gives
+    // back, before anyone is killed for them (`mm::large`, R6F.7).
+    if reclaimed || crate::mm::large::purge_held() {
         return Answer::Retry;
     }
     let Ok(live) = live() else {

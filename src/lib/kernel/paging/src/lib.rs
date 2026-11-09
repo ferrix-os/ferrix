@@ -757,6 +757,24 @@ impl<E: Encoding> Mapper<E> {
         target: Level,
         flags: MapFlags,
     ) -> Result<(), MapError> {
+        let table = self.table_at(memory, virt, target, flags)?;
+        let slot = descriptor_address(table, target.index(virt));
+        if E::is_present(memory.read(slot)) {
+            return Err(MapError::AlreadyMapped(virt));
+        }
+        memory.write(slot, E::leaf_descriptor(phys, target, flags));
+        Ok(())
+    }
+
+    /// The table that holds `virt`'s descriptor at `target`, making every
+    /// table above it that is not there, with `flags`.
+    fn table_at(
+        &self,
+        memory: &mut impl PhysMem,
+        virt: VirtAddr,
+        target: Level,
+        flags: MapFlags,
+    ) -> Result<PhysAddr, MapError> {
         let mut table = self.root;
         let mut level = E::ROOT_LEVEL;
 
@@ -777,13 +795,71 @@ impl<E: Encoding> Mapper<E> {
 
             level = level.next().ok_or(MapError::BlockInTheWay(virt))?;
         }
+        Ok(table)
+    }
 
-        let slot = descriptor_address(table, target.index(virt));
-        if E::is_present(memory.read(slot)) {
-            return Err(MapError::AlreadyMapped(virt));
+    /// Make every table down to the page level over `len` bytes at `virt`,
+    /// with `flags`, and write no leaf: so that a later page-level
+    /// [`Mapper::map_range`] there needs no table, and can be made through a
+    /// [`PhysMem`] that allocates none (`docs/ROBUSTNESS.md` §2.6, the
+    /// kernel's large-request area). Tables already there are kept, so a
+    /// second call over the same range changes nothing.
+    ///
+    /// # Errors
+    ///
+    /// [`MapError::Misaligned`] for an address or length not page aligned,
+    /// [`MapError::RangeOverflow`] for a range that wraps,
+    /// [`MapError::BlockInTheWay`] where a block already maps part of the
+    /// range, and [`MapError::OutOfMemory`] when a table cannot be had: the
+    /// tables made before it stay, and nothing else is written.
+    pub fn populate(
+        &self,
+        memory: &mut impl PhysMem,
+        virt: VirtAddr,
+        len: u64,
+        flags: MapFlags,
+    ) -> Result<(), MapError> {
+        if !virt.is_aligned_to(PAGE_SIZE) || !len.is_multiple_of(PAGE_SIZE) {
+            return Err(MapError::Misaligned);
         }
-        memory.write(slot, E::leaf_descriptor(phys, target, flags));
+        let end = virt.0.checked_add(len).ok_or(MapError::RangeOverflow)?;
+        // One walk for each page-level table the range touches: the span one
+        // such table maps, the level above the page's.
+        let per_table = Level::PAGE.span() << 9;
+        let mut at = virt.0;
+        while at < end {
+            let _ = self.table_at(memory, VirtAddr(at), Level::PAGE, flags)?;
+            at = (at | (per_table - 1)).checked_add(1).unwrap_or(end);
+        }
         Ok(())
+    }
+
+    /// Clear the one page-level leaf that maps `virt`, and answer the frame it
+    /// mapped; `None`, writing nothing, where nothing is mapped. No table is
+    /// pruned or freed: for a range whose tables live for the system's life
+    /// ([`Mapper::populate`]).
+    ///
+    /// # Errors
+    ///
+    /// [`MapError::Misaligned`] for an address not page aligned, and
+    /// [`MapError::BlockInTheWay`] where a block maps `virt`, which is left
+    /// as it is.
+    pub fn take_page(
+        &self,
+        memory: &mut impl PhysMem,
+        virt: VirtAddr,
+    ) -> Result<Option<PhysAddr>, MapError> {
+        if !virt.is_aligned_to(PAGE_SIZE) {
+            return Err(MapError::Misaligned);
+        }
+        match self.find_leaf(memory, virt, None)? {
+            Found::Hole(_) => Ok(None),
+            Found::Leaf(_, _, level) if level != Level::PAGE => Err(MapError::BlockInTheWay(virt)),
+            Found::Leaf(slot, entry, _) => {
+                memory.write(slot, E::ABSENT);
+                Ok(Some(E::address(entry)))
+            }
+        }
     }
 
     /// Resolve `virt` the way the hardware would, or `None` if it is unmapped.

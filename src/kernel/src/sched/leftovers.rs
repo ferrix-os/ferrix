@@ -92,10 +92,17 @@ pub(super) fn hand_over(node: Box<Leftovers>) {
     }
 }
 
-/// Wake the reaper if a drop has left it anything. One load when not. With no
-/// lock held; see the module's head.
+/// Whether the reaper has anything to do: a drop's leftovers, or a purge of
+/// the large-request area that a free which could not block asked for
+/// (`mm::large`, `docs/ROBUSTNESS.md` §2.6, R6.2).
+fn wanted() -> bool {
+    !WAITING.load(Ordering::Acquire).is_null() || crate::mm::large::purge_wanted()
+}
+
+/// Wake the reaper if a drop has left it anything, or a purge is wanted. Two
+/// loads when not. With no lock held; see the module's head.
 pub(crate) fn nudge() {
-    if !WAITING.load(Ordering::Acquire).is_null() {
+    if wanted() {
         REAPER.wake_all();
     }
 }
@@ -103,7 +110,12 @@ pub(crate) fn nudge() {
 /// The reaper: a task, so that what it drops may sleep.
 pub(super) fn reaper(_: usize) {
     loop {
-        let _ = REAPER.wait_trusting(|| !WAITING.load(Ordering::Acquire).is_null());
+        let _ = REAPER.wait_trusting(wanted);
+        // The purge first: it frees and allocates nothing a leftover's drop
+        // needs, and a drop that blocks would hold it up.
+        if crate::mm::large::purge_wanted() {
+            let _ = crate::mm::large::purge();
+        }
         let head = WAITING.swap(core::ptr::null_mut(), Ordering::AcqRel);
         let mut node = head;
         while !node.is_null() {

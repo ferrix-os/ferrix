@@ -171,6 +171,11 @@
       "what": "the buddy: allocate_frames, _below, _run, user frames (charged), program frames (owner), page tables (the space's owner), the per-processor caches, and a restricted window's frames, charged to its job by their one caller, in a build with the flag on; and the heap's reclaim at the floor (L.mm.136-137), whose four new sites are the failure injection's tests (fallible::injected_failures, fallible::injecting_here), which allocate nothing (ledger 7988); and a reservation's growth for a heap scope (reservation_grow, W1-c, L.mm.146), whose one new site is the same injection test, allocating nothing",
       "sites": 43
     },
+    "mm/large.rs": {
+      "bucket": "frames",
+      "what": "the large-request area: single frames for a heap request the buddy has no run for, taken for the reservation the heap's entry names (a scope's or the job's) or the kernel's, so paid as the heap's own pages are (L.mm.141), and freed to their tags (L.mm.142); its span, tables and side arrays made once at boot",
+      "sites": 5
+    },
     "mm/reserve.rs": {
       "bucket": "frames",
       "what": "K12's reservations draw on the buddy",

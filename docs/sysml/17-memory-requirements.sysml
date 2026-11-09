@@ -665,8 +665,10 @@ package FerrixMemoryRequirements {
                 (mm::reservation_grow), refused for want of free frames, shall, where it may
                 block, reclaim clean cache and try the growth again while a reclaim gives some
                 back, at most eight times, with the scope suspended for the reclaim's own
-                allocations; not where it may not block and not under the failure injection; a
-                refusal for an entry not bound stands at once.";
+                allocations, and before its first kill purge the large-request area's kept
+                frames once and try the growth again (L.mm.143); not where it may not block and
+                not under the failure injection; a refusal for an entry not bound stands at
+                once.";
             attribute :>> criterion = "The page cache's self-check with kernel objects alone
                 (user::rehome_cache_check, check_a_refused_reservation_growth_reclaims): with a
                 512-page cached file of the check's own source and the free count held one
@@ -676,6 +678,113 @@ package FerrixMemoryRequirements {
                 check's 'was not admitted after a reclaim'.";
             attribute :>> parent = "H.MEM.11";
             attribute :>> unit = ("mm::reservation_grow", "mm::reclaim_for_kernel");
+        }
+        // docs/ROBUSTNESS.md §2.6, R6 (ledger 8481, 8503).
+        requirement <'L.mm.141'> aLargeRequestNeedsNoRun : ItemLowLevel {
+            attribute :>> statement = "A kernel heap request above a page and at most
+                2^MAX_ORDER pages, aligned to at most a page, that the buddy refuses as one run
+                shall be served from single frames mapped into the large-request area, in this
+                order: the reservation's heap (the job's, or a heap scope's for a request of at
+                most a page, so in practice the job's, L.mm.140), then the area from frames
+                drawn from that reservation, then on an architecture whose invalidation is local
+                one purge and both again where the caller may block, then the scope's overrun
+                counted once, then the shared heap, then the area from the kernel's frames, then
+                after each reclaim and each kill the shared heap and the area from the kernel's
+                frames, and the reserve last; the area tried only where the shared heap is
+                (the same refusal decision), and never in a retyped build. A request the buddy
+                serves is served as before.";
+            attribute :>> criterion = "At stage 9 (mm::large_check), with the buddy made to
+                refuse the checking task's runs: a 32 KiB request by a task of a job with a
+                reservation is served from the area, its 8 pages drawn from that reservation,
+                the page above it not mapped; a 128 KiB request with no reservation is served
+                from the area; 4 MiB with interrupts masked is served. Control: the large path
+                removed from the allocator (the 32 KiB request fails); the large path taking
+                the kernel's frames for a reservation's draw (its frame is not drawn from the
+                reservation).";
+            attribute :>> parent = "H.MEM.11";
+            attribute :>> unit = ("mm::KernelAllocator::alloc", "mm::drawn_attempt",
+                "mm::shared_attempt", "mm::from_shared_heap", "mm::heap_or_reclaim",
+                "mm::heap_or_kill", "mm::large::allocate", "mm::large::pages_for",
+                "mm::large::take_block", "mm::large::init", "mm::take_frames",
+                "mm::runs_refused_here");
+        }
+        requirement <'L.mm.142'> aLargeBlockIsFreedByTheArea : ItemLowLevel {
+            attribute :>> statement = "The free of an address in the kernel's dynamic space
+                shall be routed to the large-request area before any heap's tag is read; each
+                frame of a freed block shall go back to the reservation its tag names; an
+                address outside the area, or one that is not the base of a live block of the
+                request's order, shall be counted and change nothing: the test made under the
+                area's lock before any leaf is cleared.";
+            attribute :>> criterion = "At stage 9 the scope's 32 KiB block, freed and purged,
+                leaves the reservation's drawn count where it was before the request; a free of
+                a dynamic-space address outside the area, and one of an address inside a live
+                block that is not its base, are each counted, and the mapping and the block
+                they name still translate to their frames; no other such free is counted.
+                Controls: dealloc's area recognition removed (the block does not wait on the
+                lazy list); the ownership test removed (the free outside the area clears a
+                mapping it does not own).";
+            attribute :>> parent = ("H.MEM.9", "H.QUOTA.15");
+            attribute :>> unit = ("mm::KernelAllocator::dealloc", "mm::large::in_dynamic_space",
+                "mm::large::free", "mm::large::owns", "mm::large::release_pages");
+        }
+        requirement <'L.mm.143'> aLargeFreeWaitsForItsShootdown : ItemLowLevel {
+            attribute :>> statement = "A freed large block's addresses shall not be handed out
+                again, and on an architecture whose TLB invalidation is local its frames shall
+                not go back to the frame allocator, before one shootdown that covers them has
+                returned; a free shall begin no shootdown; the lazy list shall be purged by a
+                free or allocation that may block past its threshold, and otherwise by the
+                reaper, which a free that may not block asks for; the kept frames' chain shall
+                be checked link by link, and a bad link counted and its rest kept, never
+                freed. Between a free and the purge, on an architecture whose invalidation is
+                local, another processor may still translate the freed address; neither the
+                address nor its frame is anyone's meanwhile (finding F-108).";
+            attribute :>> criterion = "At stage 9 a scoped 32 KiB block freed with interrupts
+                masked begins no purge, waits on the lazy list, and on x86-64 keeps its frames
+                drawn; a purge in task context empties the list and gives them back; frees past
+                a lowered threshold made masked ask for a purge, which the reaper makes within
+                2 s; bad links 0. Host: a detached block is not handed out until it is given
+                back (ferrix-frame, large_area::a_freed_block_is_not_handed_out_until_the_purge_
+                gives_it_back). Controls: a purge allowed where the caller may not block (the
+                boot stops on 'a shootdown was requested with interrupts masked'); a retired
+                block given back at once (host: that test FAILED); x86-64 frames freed at the
+                free ('a masked free gave its frames back before their shootdown').";
+            attribute :>> parent = ("H.MEM.17", "H.MEM.12");
+            attribute :>> unit = ("mm::large::retire", "mm::large::purge",
+                "mm::large::purge_held", "mm::large::give_back_kept", "mm::large::link",
+                "mm::large::next_of", "mm::large::counts", "mm::reservation_unbind",
+                "sched::leftovers::nudge", "sched::leftovers::wanted",
+                "sched::leftovers::reaper");
+        }
+        requirement <'L.mm.144'> aLargeMappingAllocatesNothing : ItemLowLevel {
+            attribute :>> statement = "Mapping a large block shall allocate nothing: every
+                page-level table of the 2 MiB-aligned area made at boot, never pruned or freed,
+                a leaf written only by its block's owner, by a store a walker never sees half
+                of; a full area shall answer a refusal; a request refused part way shall keep
+                no frame and put its block on the lazy list; a leaf found present at a map or
+                absent at a free shall be counted and never served.";
+            attribute :>> criterion = "At stage 9 every page-level table of the area is still
+                linked at the check's end (populate over the whole area through memory that
+                gives no table succeeds: the R6F.3 check), and the two-owner count is 0. Host: a populated range maps through memory that gives no
+                table, a range with none answers OutOfMemory and writes nothing, and an unmap
+                beside a populated range gives back none of its tables (ferrix-paging).";
+            attribute :>> parent = ("H.MEM.11", "H.MEM.9");
+            attribute :>> unit = ("mm::large::AreaTables::write", "mm::large::AreaTables::allocate_table",
+                "mm::large::store_word",
+                "mm::large::mapper", "mm::large::area_bytes", "mm::large::side_array",
+                "vmap::set_aside", "vmap::insert_span");
+        }
+        requirement <'L.mm.145'> aLargeRequestIsServedInEveryContext : ItemLowLevel {
+            attribute :>> statement = "The large path shall serve an allocation and a free in
+                every context -- an interrupt, interrupts masked, a spin lock or TABLES held --
+                taking only the area's lock and the frame allocator's, never nested and never
+                TABLES or HEAP; it shall purge only where the caller may block, one purge at a
+                time; an interrupt's request shall take the kernel's frames only.";
+            attribute :>> criterion = "At stage 9 a 32 KiB request made and freed inside a
+                with_tables body is served from the area, and the 4 MiB request is served and
+                freed with interrupts masked.";
+            attribute :>> parent = "H.MEM.11";
+            attribute :>> unit = ("mm::large::with_area", "arch::x86_64::publish_tables",
+                "arch::aarch64::publish_tables", "arch::armv7a::publish_tables");
         }
         // docs/RAM-RELEASE.md §2, R1 (consultant ledger 4971, 5022).
         requirement <'L.mm.99'> theArchivesPagesComeBack : ItemLowLevel {
@@ -988,9 +1097,13 @@ package FerrixMemoryRequirements {
                 from a reservation, or by a task inside a heap scope on one
                 (L.mm.140), in task context, shall be served by that
                 reservation's own heap, whose pages are drawn from it alone,
+                or for a request above a page the buddy has no run for by the
+                large-request area from frames drawn from it alone (L.mm.141),
                 and by the shared heap only once it has no room; every other
                 allocation by the shared heap, whose pages are never drawn; a
-                heap object shall be freed to the heap its page's tag names;
+                heap object shall be freed to the heap its page's tag names,
+                and a large block by the area, each frame to its tag's
+                reservation (L.mm.142);
                 and a free entry's heap shall give back the empty pages it keeps
                 before the entry is bound again, so that a reservation of any
                 size is whole.";

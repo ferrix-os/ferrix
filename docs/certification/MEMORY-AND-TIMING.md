@@ -3260,6 +3260,84 @@ second (`L.mm.138`), all with the volume's sleep lock held, so the mount's
 other users wait that long, as they waited for the same reclaims and kill
 in the middle of an edit before W1. A refusal after them answers ENOMEM
 with nothing changed.
+### 2.2am The large-request area (`mm::large`, core, 2026-11-09)
+
+`L.mm.141`-`L.mm.145`, ledger 8481 and 8503 (`docs/ROBUSTNESS.md` §2.6,
+R6). A heap request above a page that the buddy refuses as one run is served
+from single frames mapped into an area set aside at boot.
+
+**Memory, at boot, never given back.** The area's span: an eighth of RAM
+between 64 MiB and 2 GiB on the 64-bit pair, a quarter between 16 MiB and
+128 MiB on ARMv7-A, a whole number of 2 MiB. Its page tables: one
+page-level table per 2 MiB and the few above them, `area / 512` bytes
+(128 KiB for 64 MiB, 4 MiB for 2 GiB). Its side arrays: 16 bytes of buddy
+entry and 4 bytes of lazy-list word per 8 KiB unit, `area / 410` bytes. The
+boot report's frame figures move by these.
+
+**Address space.** A request of `n` pages takes a block of the smallest power
+of two of 8 KiB units holding `n + 1` pages: at most twice its size, guard
+included. A full area answers a refusal, which goes on to the next fallback
+(today's answer), never a panic.
+
+**Interrupts-masked time.** The large path takes the area's lock (one
+O(`MAX_ORDER`) buddy operation, or an O(1) list operation) and the frame
+allocator's lock (one order-0 take or free), never nested and never inside
+`TABLES` or `HEAP`. Each hold is short; a request makes `n` frame takes and
+`n` leaf stores, a free `n` leaf clears with their invalidations. Measured at
+stage 9 for the largest request, 4 MiB (`n = 1024`), with interrupts masked
+around the whole request:
+
+| Build (gate log, on 35cf4afe6) | Allocation | Free | Purge after it |
+|---|---:|---:|---:|
+| x86_64, KVM, 4 processors (`r6d-x86`) | 593 us | 418 us | 502 us |
+| aarch64, TCG (`r6d-a64b`) | 2,610 us | 4,277 us | 89 us |
+| armv7a, TCG (`r6d-v7`) | 3,876 us | 11,021 us | 98 us |
+| armv7a, TCG, `--smp 2` (`r6d-v7s2`) | 2,330 us | 4,572 us | 47 us |
+
+The largest seen per build, over these rows and the earlier ones on
+beca80825 (`r6c-*`), is the bound to use: x86_64 618 / 440 / 532 us,
+aarch64 2,846 / 4,585 / 137 us, armv7a 3,876 / 11,021 / 98 us. TCG is QEMU
+and not hardware.
+
+On the Arm pair a masked free issues `n` broadcast invalidations, which is
+most of its time under TCG. A request in interrupt context is held to the
+same figures, linear in its pages: `n` frame takes and leaf stores to make,
+`n` leaf clears and invalidations to free. **Argued assumption, not
+checked:** no interrupt handler of the kernel asks the heap for more than a
+page today (read 2026-11-09). A new such site is caught by review of any
+heap allocation on an interrupt path, and once R13's run-time counter of
+allocations with the preemption count raised is built, by its list; until
+then this paragraph's figures are the bound such a site would meet.
+
+**The purge.** One at a time, only where the caller may block (interrupts
+enabled, preemption count 0, not in an interrupt): the area's lock for the
+detach (O(1)), one `smp::flush_tlb_everywhere` with interrupts enabled (its
+own bound, §2.2 of the shootdown), and then the area's lock once per block
+for its give-back (O(`MAX_ORDER`) each). The lazy list holds at most an
+eighth of the area's units, plus what frees that may not block add before
+the reaper's next pass, which `sched::leftovers::nudge` asks for at the end
+of every interrupt, every switch and the idle loop's look. The reaper's
+purge for a masked free was measured at 1.0 ms (x86_64 KVM) and 1.2 to 1.4 ms
+(the Arm pair under TCG).
+
+**Frames held by a purge (x86-64 only).** Where the TLB invalidation is
+local, a freed block's frames stay allocated until the purge's shootdown has
+returned (`H.MEM.17`); they count as used against the watermark meanwhile.
+At most they are the pages of the lazy units above, and the boot report
+prints the most ever held. A purge runs before a heap reclaim counts a
+failure, before the heap's kill, before the program-memory OOM kill and
+before a reclaim for a refused charge (R6F.7), so no program is killed for
+frames a purge gives back. On the Arm pair the frames go back at the free.
+
+**Cost elsewhere.** The heap's fast paths and size classes are unchanged:
+the large path is reached only where the buddy refused. `dealloc` gains one
+subtraction and one compare with constants on every free; `take_frames`
+gains one load for a run (the check's hook); `nudge` two loads instead of
+one. A 32 KiB allocation and free by the large path itself costs 9.7 to
+10.5 us on x86_64 KVM against 0.65 us through the buddy (the purges'
+shootdowns included; 59 us against 3.0 on aarch64 TCG, 75 to 120 us against
+3.4 to 5.4 on armv7a TCG), paid only where the buddy has no run. The stage 9
+check takes 14 ms on x86_64 KVM, 76 ms on aarch64, 92 to 153 ms on armv7a.
 
 ## 3. Why F-24 is not closed, and F-23 is
 

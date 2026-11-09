@@ -23,15 +23,6 @@
     },
     {
       "ids": [
-        "L.mm.141-145"
-      ],
-      "owner": "r6-vmalloc",
-      "branch": "r6-vmalloc",
-      "date": "2026-11-09",
-      "purpose": "R6 (docs/ROBUSTNESS.md 2.6): kernel heap requests above a page served from single frames mapped into a kernel area when the buddy has no run; its free routing, shootdown order, no allocation on the mapping path, and contexts (consultant ledger 8481 R6.8)"
-    },
-    {
-      "ids": [
         "L.mm.135"
       ],
       "owner": "ef-slow",

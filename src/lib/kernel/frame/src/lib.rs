@@ -41,6 +41,8 @@
 
 use core::fmt;
 
+pub mod area;
+
 /// Largest block the allocator will hand out, as a power of two frames.
 ///
 /// Ten means 1024 frames, which is 4 MiB at a 4 KiB page size. Above that the

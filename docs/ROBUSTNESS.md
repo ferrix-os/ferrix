@@ -619,10 +619,13 @@ freed: it is counted and leaked.
   translation could overwrite a freed frame's first word, the chain's
   link. The purge validates each link before it frees: a RAM frame, in
   range, marked held by the large path (set at the free, cleared at the
-  give-back), and a block's frame count is kept in its side-array entry
-  for the chain to match. A bad link is counted, ends the chain, and its
-  frames are leaked, never freed (L.mm.143, asserted 0 at the end of the
-  boot check).
+  give-back), and the chain's length must match the count of frames kept
+  into it. A bad link is counted, ends the chain, and its frames are
+  leaked, never freed (L.mm.143, asserted 0 at the end of the boot check).
+  **As built:** there is one kept chain for the whole area, not one per
+  block, so its count lives beside its head in the area's bookkeeping
+  rather than in each block's side-array word; a purge detaches both
+  together. A truncated or extended chain fails the same comparison.
 
 **(d) Physical consumers (RD.6 (b)).** Audited over ring 0, the kernel's
 own files and every linked library: **nothing uses heap memory as
@@ -647,7 +650,9 @@ already does. The audit list goes into the landing's commit and into
 
 **(g) Cost.** It is measured in the boot check below, printed and cited
 in the commit: 1,000 rounds each of a 32 KiB allocation and free through
-the buddy (unfragmented) and through the large path (forced). The figures
+the buddy (unfragmented) and through the large path itself (`large::allocate`
+and `large::free`, so that the drain of every processor's cache that
+precedes it inside the heap is not counted as its cost). The figures
 are from x86-64 under KVM and ARMv7-A under TCG, which is QEMU and not
 hardware (the DK1 needs the PO). The expected large path is about 8
 frame takes, 8 leaf writes, and on free 8 leaf clears with their local
@@ -725,8 +730,11 @@ It does, in order:
    shootdown has begun, and once interrupts are enabled the reaper empties
    the list within a bounded wait (a wait on the state, with a stated
    timeout that fails loudly).
-10. It clears the hook and the scope, and requires a frame delta of 0
-    and an out-of-area `dealloc` count of 0 (R6.12 (b)).
+10. It clears the hook and the scope, and requires no frame fewer free
+    than before (more is something else on the machine giving frames back,
+    printed as other checks print it), an out-of-area `dealloc` count of
+    0 (R6.12 (b)), no two owners, no bad link, no frame kept and an empty
+    lazy list, and every page-level table of the area still linked.
 
 R6.5's figures come from step 1's 4 MiB case (`n = 1024`), measured on
 x86_64 kvm and aarch64 tcg and written into MEMORY-AND-TIMING: the
@@ -778,6 +786,31 @@ scope is served by the large path's frames drawn from it, not by that
 reservation's heap's pages, and it is freed by the area's routing, not
 to "the heap its page's tag names". L.mm.140's statement and criterion
 gain the large case (step 4). The landing releases the reservation.
+
+**As built, and the code review (ledger 8583).** The code review found
+one blocker, B1: a free of an address the area did not hand out cleared
+leaves before it was refused. `large::free` now asks, under the area's
+lock and before any leaf is touched, whether the address is the base of
+a live block of the request's order (`owns`, `Area::is_live`); anything
+else is counted and changes nothing (L.mm.142). The stage 9 check makes
+two such frees, one outside the area and one inside a live block, and
+requires their mappings untouched. Three more changes from this text:
+
+* **W1-c landed first** (e4950d169). A heap scope now sends a request
+  above a page as outside it (L.mm.140, CR.1), so in practice step 1 of
+  the order is the job's reservation, not a scope's. The check's drawn
+  case therefore runs as a task of a job with a reservation (L.mm.81's
+  route) instead of in a scope. Widening the scope to large requests is
+  W1-c's follow-up (CR.2). `reservation_grow` (L.mm.146) purges before its
+  first kill (R6F.7, 8583 C3).
+* **C3's control** fires on smp's own guard, "a shootdown was requested
+  with interrupts masked", not on a line of this check: a purge allowed
+  where the caller may not block stops the machine there.
+* **F-108 is filed open, Minor** (8583 R4): on x86-64 a large free
+  returns while another processor may still translate the freed address
+  until the purge, against H.MEM.12's letter. Neither the address nor its
+  frame is anyone's meanwhile. Amending H.MEM.12 is the customer's
+  decision; the question is with the product owner.
 
 **Landing order against r5-teardown (RD.0, CR.3, R6.9).** R6 changes
 `mm.rs` (`GlobalAlloc`, the shared heap's attempt, `take_frames`'s
@@ -1331,7 +1364,7 @@ The points are story points. The first five are the ones to start.
 | R3 | **The long-hold detector**, riding on S4a's tick, which lands first (§4.4 (2), §4.5). Debug and box images on, the reference configuration off. Also the spin-waiter measurement (§4.4 (3)). | C | 5 + S4a's rebase 3 | open |
 | R4 | **The staged watchdog**: the pre-timeout hang dump (stage 1), then the sacrifice set (stage 2), §5.3. The dump first, in its own landing. Designed in `WATCHDOG-STAGES.md` §6-§7; each needs its own design (ledger 8355: not yet). | D | 3 + 5 | watchdog-stages |
 | R5 | **Bounded teardown**: address space, VMO, descriptor table and `munmap` in steps of N with no lock held between them (§4.4 (1)). Its order comes from R3's list and fault-relanding's root cause. | C | 8 | step 1 r5-teardown (§4.6); step 2 open |
-| R6 | **No contiguous runs for requests above a page**: served from order-0 frames mapped into a kernel area, fallibly, as `kvmalloc`'s fallback (§2.6). Design OK IF R6.1-R6.13 (ledger 8481). | A | 5 | r6-vmalloc |
+| R6 | **No contiguous runs for requests above a page**: served from order-0 frames mapped into a kernel area, fallibly, as `kvmalloc`'s fallback (§2.6). Design OK IF R6.1-R6.13 (ledger 8481), revision OK IF R6F.1-R6F.9 (8503); built in `mm::large` (L.mm.141-145). | A | 5 | r6-vmalloc |
 | R6b | **A sized, accounted reserve for allocations under a spin lock**, in place of today's implicit headroom (§2.2): `mm/reserve.rs`'s sections generalized, not a second reserve (RD.6 (f)). Split from R6 (ledger 8488 R6.6); owes its own design review before code. | A | 3 | open |
 | R7 | **Burn down class A by area**, highest exposure first: the allocations under a lock (tmpfs's maps and `move_child`, then R13's list), `syscall/`, `fs/socket.rs`, `fs/pipe.rs`, `ferrix-vfs` (`namespace`, `tmpfs`, `dentry`), `interfaces/render` and `display` (the GPU ioctls), `ferrix-net`. A crate at 0 gets clippy `disallowed-methods` and leaves the ratchet. Step 1 is a reachability map from the entry points. About 1 point per 40 sites. | A | ~35 | per area owner |
 | R8 | **OOM selection counts charged kernel memory and buffers**, plus init's typed `oom_protect` (§3.3 (3), (4)). | B | 5 | open |
@@ -1397,3 +1430,7 @@ The entry is at ledger line 8202.
   the check counting its own purges, a lower threshold for step 9),
   R6F.8 (the chain fails closed) and R6F.9 (the reaper's wait) are
   checked at the code review.
+* **R6's code review: NOT YET B1, then OK IF C1-C12** (ledger 8583,
+  2026-11-09). B1 (an out-of-area free cleared leaves before its refusal)
+  is fixed as above; all four departures of the build were accepted;
+  F-108 filed. The follow-up OK on the landing hash is owed.

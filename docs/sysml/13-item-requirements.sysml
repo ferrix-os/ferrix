@@ -176,6 +176,10 @@ package FerrixItemRequirements {
         }
         // Split out of H.MEM.7 and H.MEM.5 by W-8 step 4 (mm and user), so that
         // one check proves each.
+        // Note (ledger 8583, finding F-108): on x86-64 a large heap block's free
+        // (L.mm.143) returns while another processor may still translate the freed
+        // address until the area's purge; the address and its frame are nobody's
+        // meanwhile. The statement stands unchanged; narrowing it is the customer's.
         requirement <'H.MEM.12'> remapsAreSeenEverywhere : ItemHighLevel {
             attribute :>> statement = "Once a change to a kernel mapping returns,
                 every online processor shall translate the address as changed, and

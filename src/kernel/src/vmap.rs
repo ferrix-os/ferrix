@@ -309,14 +309,30 @@ fn reserve_below(len: u64, extra: u64, flags: VmaFlags, kind: Kind) -> Result<Ma
     let mut locked = ARENA.lock();
     let arena = locked.as_mut().ok_or(VmapError::NotReady)?;
 
-    let at = arena
-        .space
-        .find_free(span_bytes, PAGE_SIZE, None)
-        .ok_or(VmapError::NoAddressSpace(span_bytes))?;
-    let span = PageRange::from_len(at, span_bytes).map_err(|_| VmapError::BadLength(span_bytes))?;
     // Room first for the record of the allocation, so nothing is changed
     // unless all of it can be.
     let held = fallible::reserve().map_err(|_| VmapError::OutOfMemory)?;
+    let span = insert_span(arena, span_bytes, PAGE_SIZE, flags)?;
+    let at = span.start();
+
+    let base = at + GUARD_BYTES + extra;
+    let _ = fallible::insert_held(&held, &mut arena.live, base, Allocation { span, len, kind });
+    Ok(Mapping { base, len })
+}
+
+/// Find `bytes` of free address space aligned to `align`, and reserve it in
+/// the arena with `flags`.
+fn insert_span(
+    arena: &mut Arena,
+    bytes: u64,
+    align: u64,
+    flags: VmaFlags,
+) -> Result<PageRange, VmapError> {
+    let at = arena
+        .space
+        .find_free(bytes, align, None)
+        .ok_or(VmapError::NoAddressSpace(bytes))?;
+    let span = PageRange::from_len(at, bytes).map_err(|_| VmapError::BadLength(bytes))?;
     arena
         .space
         // Private, and offset by its own address: the convention `Backing`
@@ -329,12 +345,30 @@ fn reserve_below(len: u64, extra: u64, flags: VmaFlags, kind: Kind) -> Result<Ma
         .insert(span, flags, Backing::Anonymous { id: 0, offset: at })
         .map_err(|error| match error {
             VmaError::NoMemory => VmapError::OutOfMemory,
-            _ => VmapError::NoAddressSpace(span_bytes),
+            _ => VmapError::NoAddressSpace(bytes),
         })?;
+    Ok(span)
+}
 
-    let base = at + GUARD_BYTES + extra;
-    let _ = fallible::insert_held(&held, &mut arena.live, base, Allocation { span, len, kind });
-    Ok(Mapping { base, len })
+/// Set aside `len` bytes of the arena, aligned to `align`, for the life of
+/// the system, and answer where: the kernel's large-request area
+/// (`mm::large`, `docs/ROBUSTNESS.md` §2.6), which maps and unmaps inside it
+/// on its own. No guard is added: the allocations beside it keep theirs
+/// inside their own spans, and the area keeps one above each block. It is
+/// never freed, so it is no allocation of the live set, and nothing of it
+/// is a device window.
+///
+/// # Errors
+///
+/// [`VmapError::BadLength`] for a length or alignment that is not a whole
+/// number of pages, and [`reserve`]'s others.
+pub(crate) fn set_aside(len: u64, align: u64) -> Result<u64, VmapError> {
+    if len == 0 || !len.is_multiple_of(PAGE_SIZE) || align < PAGE_SIZE {
+        return Err(VmapError::BadLength(len));
+    }
+    let mut locked = ARENA.lock();
+    let arena = locked.as_mut().ok_or(VmapError::NotReady)?;
+    insert_span(arena, len, align, VmaFlags::READ_WRITE).map(PageRange::start)
 }
 
 /// Give a reservation back, and say what was behind it.

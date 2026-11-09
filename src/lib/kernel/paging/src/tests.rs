@@ -502,6 +502,247 @@ fn walk_properties<E: Encoding>() {
     the_walk_finds_every_leaf::<E>();
     the_walk_reports_canonical_addresses::<E>();
     the_walk_can_stop_early::<E>();
+    populating_makes_tables_and_no_leaf::<E>();
+    populating_refuses_over_a_block::<E>();
+    a_populated_range_maps_without_a_table::<E>();
+    taking_a_page_clears_one_leaf::<E>();
+    unmapping_beside_a_populated_range_keeps_its_tables::<E>();
+}
+
+/// An unmap over a 2 MiB-aligned range beside a populated, leafless one
+/// prunes its own emptied tables and none of its neighbour's: the kernel's
+/// large-request area, aligned to 2 MiB, keeps every table it made
+/// (`docs/ROBUSTNESS.md` §2.6, ledger 8503 R6F.3).
+fn unmapping_beside_a_populated_range_keeps_its_tables<E: Encoding>() {
+    let (mut memory, mapper) = Memory::with_root::<E>();
+    let area = high::<E>(0x4000_0000);
+    let neighbour = VirtAddr(area.0 + 0x20_0000);
+    mapper
+        .populate(&mut memory, area, 0x20_0000, MapFlags::KERNEL_DATA)
+        .unwrap();
+    mapper
+        .map_range(
+            &mut memory,
+            neighbour,
+            PhysAddr(0x8000_0000),
+            4 * PAGE_SIZE,
+            MapFlags::KERNEL_DATA,
+        )
+        .unwrap();
+    let mut tables = Vec::new();
+    let _ = mapper
+        .unmap_range(&mut memory, neighbour, 4 * PAGE_SIZE, |released| {
+            if let Released::Table { phys } = released {
+                tables.push(phys);
+            }
+        })
+        .unwrap();
+    assert_eq!(
+        tables.len(),
+        1,
+        "{}: the neighbour's own table went",
+        E::NAME
+    );
+    assert!(
+        mapper
+            .populate(
+                &mut NoTables(memory.clone()),
+                area,
+                0x20_0000,
+                MapFlags::KERNEL_DATA
+            )
+            .is_ok(),
+        "{}: the populated range's tables are all still linked",
+        E::NAME
+    );
+}
+
+/// A memory that refuses every table: what the kernel's large-request area
+/// maps through once its tables are made (`docs/ROBUSTNESS.md` §2.6).
+#[derive(Debug)]
+struct NoTables(Memory);
+
+// SAFETY: `Memory`'s, and no table is ever handed out.
+unsafe impl PhysMem for NoTables {
+    fn read(&self, at: PhysAddr) -> u64 {
+        self.0.read(at)
+    }
+    fn write(&mut self, at: PhysAddr, value: u64) {
+        self.0.write(at, value);
+    }
+    fn allocate_table(&mut self) -> Option<PhysAddr> {
+        None
+    }
+}
+
+/// `populate` makes one page-level table per 2 MiB the range touches, and the
+/// tables above them, writes no leaf, and changes nothing when called again.
+fn populating_makes_tables_and_no_leaf<E: Encoding>() {
+    let (mut memory, mapper) = Memory::with_root::<E>();
+    // From 1 MiB below a 2 MiB boundary to 1 MiB above the next: three
+    // page-level tables, under one table at each level above.
+    let at = high::<E>(0x1000_0000 + 0x10_0000);
+    let len = 4 * 0x10_0000;
+    mapper
+        .populate(&mut memory, at, len, MapFlags::KERNEL_DATA)
+        .unwrap();
+    let made = memory.tables_allocated();
+    assert_eq!(made, 1 + (levels::<E>() - 2) + 3, "{}", E::NAME);
+    let mut page = 0;
+    while page < len {
+        assert_eq!(mapper.translate(&memory, VirtAddr(at.0 + page)), None);
+        page += PAGE_SIZE;
+    }
+    mapper
+        .populate(&mut memory, at, len, MapFlags::KERNEL_DATA)
+        .unwrap();
+    assert_eq!(memory.tables_allocated(), made, "{}: idempotent", E::NAME);
+    assert_eq!(
+        mapper.populate(
+            &mut memory,
+            VirtAddr(at.0 + 1),
+            PAGE_SIZE,
+            MapFlags::KERNEL_DATA
+        ),
+        Err(MapError::Misaligned)
+    );
+}
+
+/// `populate` refuses a range a block already maps, and writes nothing there.
+fn populating_refuses_over_a_block<E: Encoding>() {
+    if !E::supports_block(Level::MEGABYTE) {
+        return;
+    }
+    let (mut memory, mapper) = Memory::with_root::<E>();
+    let at = high::<E>(0x2000_0000);
+    mapper
+        .map_range(
+            &mut memory,
+            at,
+            PhysAddr(0x4000_0000),
+            0x20_0000,
+            MapFlags::KERNEL_DATA,
+        )
+        .unwrap();
+    let before = memory.tables_allocated();
+    assert_eq!(
+        mapper.populate(&mut memory, at, PAGE_SIZE, MapFlags::KERNEL_DATA),
+        Err(MapError::BlockInTheWay(at))
+    );
+    assert_eq!(memory.tables_allocated(), before);
+    assert_eq!(mapper.translate(&memory, at), Some(PhysAddr(0x4000_0000)));
+}
+
+/// Through a memory that allocates no table, a page maps into a populated
+/// range, and a range with no table answers `OutOfMemory` and writes nothing.
+fn a_populated_range_maps_without_a_table<E: Encoding>() {
+    let (mut memory, mut mapper) = Memory::with_root::<E>();
+    mapper.pages_only();
+    let at = high::<E>(0x3000_0000);
+    mapper
+        .populate(&mut memory, at, 0x20_0000, MapFlags::KERNEL_DATA)
+        .unwrap();
+    let mut refusing = NoTables(memory);
+    mapper
+        .map_range(
+            &mut refusing,
+            at,
+            PhysAddr(0x7000_0000),
+            2 * PAGE_SIZE,
+            MapFlags::KERNEL_DATA,
+        )
+        .unwrap();
+    assert_eq!(mapper.translate(&refusing, at), Some(PhysAddr(0x7000_0000)));
+    let cells = refusing.0.cells.clone();
+    let elsewhere = high::<E>(0x3000_0000 + 0x20_0000);
+    assert_eq!(
+        mapper.map_range(
+            &mut refusing,
+            elsewhere,
+            PhysAddr(0x7000_0000),
+            PAGE_SIZE,
+            MapFlags::KERNEL_DATA
+        ),
+        Err(MapError::OutOfMemory)
+    );
+    assert_eq!(
+        refusing.0.cells,
+        cells,
+        "{}: a refused map wrote nothing",
+        E::NAME
+    );
+}
+
+/// `take_page` clears exactly the leaf at its address, answers its frame,
+/// frees no table, and refuses a block and answers `None` for a hole.
+fn taking_a_page_clears_one_leaf<E: Encoding>() {
+    let (mut memory, mapper) = Memory::with_root::<E>();
+    let at = high::<E>(0x5000_0000);
+    mapper
+        .map_range(
+            &mut memory,
+            at,
+            PhysAddr(0x9000_0000),
+            2 * PAGE_SIZE,
+            MapFlags::KERNEL_DATA,
+        )
+        .unwrap();
+    let tables = memory.tables_allocated();
+    assert_eq!(
+        mapper.take_page(&mut memory, at),
+        Ok(Some(PhysAddr(0x9000_0000)))
+    );
+    assert_eq!(mapper.translate(&memory, at), None);
+    let next = VirtAddr(at.0 + PAGE_SIZE);
+    assert_eq!(mapper.translate(&memory, next), Some(PhysAddr(0x9000_1000)));
+    assert_eq!(
+        mapper.take_page(&mut memory, at),
+        Ok(None),
+        "{}: a hole",
+        E::NAME
+    );
+    assert_eq!(
+        mapper.take_page(&mut memory, next),
+        Ok(Some(PhysAddr(0x9000_1000)))
+    );
+    // Both leaves gone, and the now empty table still there: nothing pruned,
+    // so a page maps there again with no table to make.
+    assert_eq!(memory.tables_allocated(), tables);
+    assert!(
+        mapper
+            .map_range(
+                &mut NoTables(memory.clone()),
+                at,
+                PhysAddr(0x9000_0000),
+                PAGE_SIZE,
+                MapFlags::KERNEL_DATA
+            )
+            .is_ok()
+    );
+    assert_eq!(
+        mapper.take_page(&mut memory, VirtAddr(at.0 + 1)),
+        Err(MapError::Misaligned)
+    );
+    if E::supports_block(Level::MEGABYTE) {
+        let block = high::<E>(0x6000_0000);
+        mapper
+            .map_range(
+                &mut memory,
+                block,
+                PhysAddr(0x4000_0000),
+                0x20_0000,
+                MapFlags::KERNEL_DATA,
+            )
+            .unwrap();
+        assert_eq!(
+            mapper.take_page(&mut memory, block),
+            Err(MapError::BlockInTheWay(block))
+        );
+        assert_eq!(
+            mapper.translate(&memory, block),
+            Some(PhysAddr(0x4000_0000))
+        );
+    }
 }
 
 /// `unmap_range` clears descriptors and says which frames came out.
