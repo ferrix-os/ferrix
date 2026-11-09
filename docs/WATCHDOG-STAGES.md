@@ -709,9 +709,9 @@ Three cases for the shipped services, each with a control
 | *auth* | `kill -STOP` of authd | `auth.service: watchdog timeout (limit 20000 ms)` with its thread, authd started again under a new pid, no report | `WatchdogSec=` removed from `auth.service`: "auth was never ended by its watchdog" |
 | `test-compositor --boot watchdog` | hyprix stopped for 20 s by a script it started, then continued | the timeout with hyprix's threads, "left running", "answers its watchdog again", no stop or restart of the unit, no kernel stop | `WatchdogSec=` 0 in xtask's `HYPRIX_WATCHDOG`: "never reported by its watchdog" |
 
-W5 moved to the stage 1 review (E7). A boot case for a native service's
-WATCHDOG on its channel is owed: the host test covers the state machine,
-and lode, the first native service to ping, brings the program (§5.5).
+W5 moved to the stage 1 review (E7). The *lode* case is the boot case for
+a native service's WATCHDOG on its channel (WC.3): lode is `Type=native`
+and pings on its channel from serve's loop (§5.5).
 
 ## 9. Order
 
