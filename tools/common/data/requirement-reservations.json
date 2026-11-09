@@ -13,6 +13,16 @@
   "reservations": [
     {
       "ids": [
+        "L.user.230-234",
+        "L.object.373"
+      ],
+      "owner": "r5-teardown",
+      "branch": "r5-teardown",
+      "date": "2026-11-09",
+      "purpose": "R5 step 2a (docs/ROBUSTNESS.md 4.6): an unmap stepped by a layout holder, a stepped last drop, an object's take-down reaching a draining range, a last drop handed to the reaper, every teardown step at preemption count 0, descriptors and handles closed in steps (consultant ledger 8522, TD.11)"
+    },
+    {
+      "ids": [
         "L.mm.141-145"
       ],
       "owner": "r6-vmalloc",
