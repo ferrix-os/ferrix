@@ -591,6 +591,15 @@ default, is systemd's behaviour. A stuck compositor is then the person's
 to see and the report's to explain, and hyprix's own "not responding" for
 clients (§3, 3 and 4) is still to do.
 
+This is a named exception to the customer's rule (2026-11-08: a hung
+program is killed and restarted by its own watchdog; the system is reset
+only for a kernel stall). hyprix keeps the rule's first half -- its hang
+never resets the system -- but not its second: a stuck compositor stays
+stuck, reported, until the person acts. The exception ends with BACKLOG's
+row for a compositor restart that keeps its clients, when
+`hyprix.service` goes back to `WatchdogAction=kill` (consultant ledger
+8501's advisory).
+
 ## 6. Stage 1: the pre-timeout hang dump (R4 stage 1, kernel, core)
 
 **Not yet** (ledger 8355, C-B1 to C-B4): this section is a sketch and needs
@@ -741,13 +750,16 @@ carried, the commit citing both entries, this section). Its follow-up on
 their watchdogs from their loops (§5.5), hyprix report-only (§5.6),
 with the *lode*, *auth* and compositor *watchdog* cases and their controls
 (§8). Outside the item (ferrix-svc, init, lode, authd, hyprix, sessiond,
-xtask), so no review is owed unless the consultant classifies otherwise.
+xtask): ledger 8501, **OK**, no review owed (d52db0145 classified at
+8477). Ledger 8500 confirms 3c89961b3's post-landing verdict, **OK**, no
+conditions: inside the item by FX-9008's text alone. The lode case is
+test-watchdog's native case (WC.3): lode is `Type=native`.
 
 Steps 1 and 2 (§4, §5) are built on this branch, with W1 to W4 passing on
-x86-64 KVM and case 7 on AArch64 and ARMv7-A `--smp 2`. Owed: test-watchdog's
-native case, with lode's landing (WC.3); stage 1's and stage 2's
-designs; each service's ping by its owner (§5.5); hyprix's "not
-responding" (§3, 3 and 4); the loop's blocking sites (§4, BACKLOG).
+x86-64 KVM and case 7 on AArch64 and ARMv7-A `--smp 2`. Owed: stage 1's
+and stage 2's designs; hyprix restarted with its clients kept, ending
+§5.6's exception; hyprix's "not responding" (§3, 3 and 4); the loop's
+blocking sites (§4, BACKLOG).
 
 [win-hung]: https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-ishungappwindow
 [win-sc]: https://learn.microsoft.com/en-us/windows/win32/msi/msiserviceconfigfailureactions-table
