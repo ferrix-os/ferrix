@@ -106,9 +106,6 @@ fn problem(said: &[String]) -> Option<String> {
     if let Some(line) = said.iter().find(|line| line.contains("FERRIX-PANIC")) {
         return Some(format!("the kernel stopped: {}", line.trim()));
     }
-    if at(PINGS).is_none() {
-        return Some(format!("hyprix never said `{PINGS}`"));
-    }
     let Some(stop) = at("wd-hyprix: stopping the compositor") else {
         return Some(String::from("the script never stopped the compositor"));
     };
@@ -117,6 +114,9 @@ fn problem(said: &[String]) -> Option<String> {
             "the stopped compositor was never reported by its watchdog",
         ));
     };
+    if at(PINGS).is_none() {
+        return Some(format!("hyprix never said `{PINGS}`"));
+    }
     if timeout < stop {
         return Some(String::from(
             "a watchdog timeout came before the compositor was stopped",
