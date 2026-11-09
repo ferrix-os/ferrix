@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "8b89128559712987d059898d72c07216cf589cd3b21c8e0b3b27327c6b7d4280",
+  "digest": "2058debea9ff5e256cc5c3bd33391c3f06f0a76b5aaba74c36789fb54873b3cb",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -113,9 +113,9 @@
   ],
   "summary": {
     "packages": 168,
-    "elements": 10325,
+    "elements": 10345,
     "maturity": {
-      "implemented": 295,
+      "implemented": 296,
       "inProgress": 23,
       "writtenAhead": 1,
       "planned": 24
@@ -15291,6 +15291,50 @@
           },
           "children": [
             {
+              "name": "acpi",
+              "qualifiedName": "FerrixDrivers::DeviceEnumeration::acpi",
+              "kind": "part",
+              "modifiers": [
+                "ref"
+              ],
+              "type": "AcpiAccess",
+              "multiplicity": "0..1",
+              "doc": "The MCFG, on ACPI machines.",
+              "source": {
+                "file": "docs/sysml/08-drivers.sysml",
+                "line": 95
+              }
+            },
+            {
+              "name": "fdt",
+              "qualifiedName": "FerrixDrivers::DeviceEnumeration::fdt",
+              "kind": "part",
+              "modifiers": [
+                "ref"
+              ],
+              "type": "FdtAccess",
+              "multiplicity": "0..1",
+              "doc": "pci-host-ecam-generic and virtio,mmio nodes, on tree machines.",
+              "source": {
+                "file": "docs/sysml/08-drivers.sysml",
+                "line": 98
+              }
+            },
+            {
+              "name": "ecam",
+              "qualifiedName": "FerrixDrivers::DeviceEnumeration::ecam",
+              "kind": "part",
+              "modifiers": [
+                "ref"
+              ],
+              "type": "MmioWindows",
+              "doc": "Configuration space, a bus at a time.",
+              "source": {
+                "file": "docs/sysml/08-drivers.sysml",
+                "line": 101
+              }
+            },
+            {
               "name": "nodes",
               "qualifiedName": "FerrixDrivers::DeviceEnumeration::nodes",
               "kind": "part",
@@ -15298,7 +15342,7 @@
               "multiplicity": "0..*",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 95
+                "line": 104
               }
             },
             {
@@ -15307,7 +15351,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 96
+                "line": 105
               }
             }
           ]
@@ -15322,7 +15366,7 @@
           "doc": "Scoped to one device: the device addresses a DMA VMO gets come from here, so a driver cannot DMA over the kernel or over another driver. src/kernel/src/iommu.rs's Domain, one per device node, made the first time it is asked for: a pin gives each page a device address and an unpin takes them back. A translated domain maps each pinned page at its own physical address and nothing else; an untranslated one, where no unit translates, hands out physical addresses.",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 99
+            "line": 108
           },
           "children": [
             {
@@ -15335,7 +15379,7 @@
               "type": "DeviceNode",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 109
+                "line": 118
               }
             },
             {
@@ -15344,7 +15388,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 110
+                "line": 119
               }
             },
             {
@@ -15353,7 +15397,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 111
+                "line": 120
               }
             }
           ]
@@ -15365,7 +15409,7 @@
           "definition": true,
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 114
+            "line": 123
           },
           "children": [
             {
@@ -15374,7 +15418,7 @@
               "kind": "enum-literal",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 115
+                "line": 124
               }
             },
             {
@@ -15383,7 +15427,7 @@
               "kind": "enum-literal",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 116
+                "line": 125
               }
             }
           ]
@@ -15398,7 +15442,7 @@
           "doc": "Where the hardware is: src/lib/platform/acpi's dmar module (VT-d units and their device scopes) and iort module (root complex to SMMUv3 stream IDs), tested against QEMU's own table builders, and the device tree's arm,smmu-v3 nodes and iommu-map. src/kernel/src/iommu.rs places every PCI function behind a unit before any is programmed, counting what it cannot follow as unresolved rather than bypassing. VT-d on x86-64 and the SMMUv3 under ACPI on AArch64 translate from before PCI enumeration, and a deliberate out-of-domain write faults on both in every boot test. ARMv7-A stays in degraded trusted mode, announced at boot. AMD-Vi is not driven.",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 119
+            "line": 128
           },
           "children": [
             {
@@ -15408,7 +15452,37 @@
               "type": "IommuMode",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 132
+                "line": 141
+              }
+            },
+            {
+              "name": "acpi",
+              "qualifiedName": "FerrixDrivers::IommuDomains::acpi",
+              "kind": "part",
+              "modifiers": [
+                "ref"
+              ],
+              "type": "AcpiAccess",
+              "multiplicity": "0..1",
+              "doc": "The DMAR (VT-d) and the IORT (SMMUv3).",
+              "source": {
+                "file": "docs/sysml/08-drivers.sysml",
+                "line": 142
+              }
+            },
+            {
+              "name": "fdt",
+              "qualifiedName": "FerrixDrivers::IommuDomains::fdt",
+              "kind": "part",
+              "modifiers": [
+                "ref"
+              ],
+              "type": "FdtAccess",
+              "multiplicity": "0..1",
+              "doc": "arm,smmu-v3 nodes and iommu-map.",
+              "source": {
+                "file": "docs/sysml/08-drivers.sysml",
+                "line": 145
               }
             },
             {
@@ -15419,7 +15493,7 @@
               "multiplicity": "0..*",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 133
+                "line": 148
               }
             }
           ]
@@ -15434,9 +15508,37 @@
           "doc": "An ordinary user process in its own Job, holding exactly the capabilities devmgr gave it. A driver fault is a process fault; a wedged driver is a Job kill. Twelve exist, native programs on src/user/system/native/rt under /lib/drivers: virtio-blk, stm32-sdmmc, nvme, virtio-net, virtio-gpu, stm32-ltdc, gc400, virtio-input, usbhid, usbdev, virtio-snd and vport, each a thin layer of handles over its src/lib/ crates.",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 136
+            "line": 151
           },
           "children": [
+            {
+              "name": "device",
+              "qualifiedName": "FerrixDrivers::DriverProcess::device",
+              "kind": "part",
+              "modifiers": [
+                "ref"
+              ],
+              "type": "DeviceNode",
+              "doc": "The one node devmgr handed it: every aperture and vector it holds is minted from this node.",
+              "source": {
+                "file": "docs/sysml/08-drivers.sysml",
+                "line": 160
+              }
+            },
+            {
+              "name": "domain",
+              "qualifiedName": "FerrixDrivers::DriverProcess::domain",
+              "kind": "part",
+              "modifiers": [
+                "ref"
+              ],
+              "type": "IommuDomain",
+              "doc": "The device's domain, which gives dmaBuffers their device addresses.",
+              "source": {
+                "file": "docs/sysml/08-drivers.sysml",
+                "line": 164
+              }
+            },
             {
               "name": "job",
               "qualifiedName": "FerrixDrivers::DriverProcess::job",
@@ -15447,7 +15549,7 @@
               "type": "Job",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 145
+                "line": 168
               }
             },
             {
@@ -15459,7 +15561,7 @@
               "doc": "One per BAR or MMIO window, and nothing outside it.",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 146
+                "line": 169
               }
             },
             {
@@ -15471,7 +15573,7 @@
               "doc": "One per vector, bound to a Port.",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 149
+                "line": 172
               }
             },
             {
@@ -15481,7 +15583,7 @@
               "type": "Port",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 152
+                "line": 175
               }
             },
             {
@@ -15496,7 +15598,7 @@
               "doc": "Device addresses from the device's IOMMU domain.",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 153
+                "line": 176
               }
             },
             {
@@ -15507,7 +15609,7 @@
               "doc": "To the kernel subsystem it serves: block, display, net, input.",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 156
+                "line": 179
               }
             },
             {
@@ -15517,7 +15619,7 @@
               "type": "SharedRing",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 159
+                "line": 182
               }
             }
           ]
@@ -15532,7 +15634,7 @@
           "doc": "The data path is not per-request IPC: driver and kernel share a descriptor ring in a VMO and ring a doorbell; requests batch. The same shape virtio and NVMe already use. src/lib/drivers/virtio's split virtqueue (driver and device halves, over abstract shared memory) is the first of these. Between kernel and driver: src/lib/proto/blkring (docs/BLOCK-RING.md) and src/lib/proto/netring (docs/NET-RING.md), with src/kernel/src/interfaces/block_ring and src/kernel/extensions/device/net-ring/src/interfaces/net_ring as the kernel's ends and doorbells as port packets. The display and input drivers need none: frames do not move, and their control channels carry the rest.",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 162
+            "line": 185
           },
           "children": [
             {
@@ -15545,7 +15647,7 @@
               "type": "Vmo",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 174
+                "line": 197
               }
             },
             {
@@ -15554,7 +15656,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 175
+                "line": 198
               }
             },
             {
@@ -15563,7 +15665,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 176
+                "line": 199
               }
             },
             {
@@ -15572,7 +15674,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 177
+                "line": 200
               }
             }
           ]
@@ -15587,16 +15689,61 @@
           "doc": "A native program on src/user/system/native/rt, not a musl binary: src/user/system/native/devmgr, /sbin/devmgr. Receives a handle per device node, matches a driver, spawns it in its own Job with the four resources above. The kernel starts it from stage 10's boot check with DEVICES messages holding a job, every device node twice and every image /lib/drivers/MANIFEST lists -- the drivers, and drvupdated in the images that carry it (DrvUpdated below) -- (src/kernel/src/discovery/devmgr.rs, src/lib/proto/devmgr-proto); it matches virtio-blk, virtio-net, virtio-gpu, virtio-input and the virtio-serial port by a table of its own, starts each driver with START, waits for every one but the port driver to be PUBLISHED before the next, and REPORTs. docs/DEVMGR.md.",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 180
+            "line": 203
           },
           "children": [
+            {
+              "name": "nodes",
+              "qualifiedName": "FerrixDrivers::DevMgr::nodes",
+              "kind": "part",
+              "modifiers": [
+                "ref"
+              ],
+              "type": "DeviceNode",
+              "multiplicity": "0..*",
+              "doc": "A handle per node, from the kernel's DEVICES messages.",
+              "source": {
+                "file": "docs/sysml/08-drivers.sysml",
+                "line": 217
+              }
+            },
+            {
+              "name": "drivers",
+              "qualifiedName": "FerrixDrivers::DevMgr::drivers",
+              "kind": "part",
+              "modifiers": [
+                "ref"
+              ],
+              "type": "DriverProcess",
+              "multiplicity": "0..*",
+              "doc": "Each started in a Job devmgr made, on one of nodes.",
+              "source": {
+                "file": "docs/sysml/08-drivers.sysml",
+                "line": 220
+              }
+            },
+            {
+              "name": "updater",
+              "qualifiedName": "FerrixDrivers::DevMgr::updater",
+              "kind": "part",
+              "modifiers": [
+                "ref"
+              ],
+              "type": "DrvUpdated",
+              "multiplicity": "0..1",
+              "doc": "Started from /lib/drivers when the image carries it.",
+              "source": {
+                "file": "docs/sysml/08-drivers.sysml",
+                "line": 223
+              }
+            },
             {
               "name": "match",
               "qualifiedName": "FerrixDrivers::DevMgr::match",
               "kind": "action",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 194
+                "line": 226
               }
             },
             {
@@ -15605,7 +15752,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 195
+                "line": 227
               }
             },
             {
@@ -15616,7 +15763,7 @@
               "doc": "device_quiesce after a driver's TERMINATED: the kernel waits for the block, display and render cores to let the device go (src/kernel/src/claim.rs), then DIED.",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 196
+                "line": 228
               }
             },
             {
@@ -15627,7 +15774,7 @@
               "doc": "An image root sent through drvupdated put on a device that a restartDriver kind drives: devmgr copies it, proves it loads with process_create in a scratch job, stops and quiesces the running driver, starts the copy and gives it 15 s to publish, or starts the image the device had again. The display kind is gated by test-restart --update; the other kinds and the image's signature (D3) are owed. docs/DEVMGR.md section 4.1.",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 201
+                "line": 233
               }
             },
             {
@@ -15638,7 +15785,7 @@
               "doc": "A display driver that died is started again on a duplicate of devmgr's kept device handle, at most eight times a device; its card returns as the number it had. RESTARTED tells the kernel. docs/DEVMGR.md section 4.",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 211
+                "line": 243
               }
             }
           ]
@@ -15653,8 +15800,24 @@
           "doc": "src/user/system/native/drvupdated: the helper through which a new driver image reaches DevMgr, which reads no files and waits on one port. Started by devmgr from /lib/drivers when the image carries it -- only test-restart --update's do (SAFETY-MANUAL AoU-26) -- it takes root's connections on the abstract socket ferrix.devmgr.update, refuses any other peer and any header past 8 MiB before it makes a VMO, and hands devmgr the request and the image's VMO on a channel. /bin/drvupdate is its client. docs/DEVMGR.md section 4.1.",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 219
-          }
+            "line": 251
+          },
+          "children": [
+            {
+              "name": "devmgr",
+              "qualifiedName": "FerrixDrivers::DrvUpdated::devmgr",
+              "kind": "part",
+              "modifiers": [
+                "ref"
+              ],
+              "type": "DevMgr",
+              "doc": "The one peer it hands a request and an image VMO to.",
+              "source": {
+                "file": "docs/sysml/08-drivers.sysml",
+                "line": 262
+              }
+            }
+          ]
         },
         {
           "name": "VirtioBlkDriver",
@@ -15667,7 +15830,7 @@
           "doc": "The first driver: virtio-blk as a user process. Exit test: a sector read through ring 3 with the IOMMU on, and a deliberate out-of-domain DMA attempt faulting. src/user/system/native/drivers/block/virtio-blk over src/lib/drivers/block/virtio-blk and src/lib/drivers/block/blkserve; the exit is met in the boot test, with VT-d translating on x86-64 and the SMMUv3 on AArch64, and ARMv7-A in degraded trusted mode.",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 232
+            "line": 267
           }
         },
         {
@@ -15680,7 +15843,7 @@
           "doc": "src/user/system/native/drivers/net/virtio-net over src/lib/drivers/net/virtio-net and src/lib/drivers/net/netserve, speaking the net ring; cargo xtask test-net is its gate.",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 242
+            "line": 277
           }
         },
         {
@@ -15694,7 +15857,7 @@
           "doc": "src/user/system/native/drivers/display/virtio-gpu over src/lib/drivers/display/virtio-gpu: the display core's card0 over displayctl, and since stage 19 the render core's renderD128 over renderctl, turning its messages into virtio-gpu's 3D commands. cargo xtask test-display is its gate. The one driver devmgr starts again after it dies (restartDriver).",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 247
+            "line": 282
           }
         },
         {
@@ -15708,7 +15871,7 @@
           "doc": "src/user/system/native/drivers/input/virtio-input over src/lib/drivers/input/virtio-input, feeding the input core's /dev/input/eventN over inputctl; cargo xtask test-input is its gate.",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 256
+            "line": 291
           }
         },
         {
@@ -15722,7 +15885,7 @@
           "doc": "src/user/system/native/drivers/usb/usbhid over src/lib/drivers/usb/usb-host: the STM32MP157's EHCI controller, its hubs, and HID keyboards, mice and media keys read by their report descriptors, each served to the input core over a control channel of its own, keyboards' LEDs lit by the core's STATUS. devmgr starts it as a bus host and does not wait for it; its memory is pinned PIN_COHERENT. No QEMU machine has the device, so no boot test exercises it: its gates are src/lib/drivers/usb/usb-host's tests against a model of EHCI and the board's bus, and it ran on the DK1 on 2026-09-23 (docs/INPUT.md §7). Since 2026-10-10 it also drives a PC's xHCI controller, picked by what START names (docs/XHCI.md; a bulk-only disk is read and not yet served to the block core), gated under QEMU by cargo xtask test-usb; a USB keyboard worked on the N150 box on 2026-10-15. Since 2026-10-25 a tablet's absolute axes reach the input core as ABS_X, ABS_Y and ABS_WHEEL with the HID field's range (test-usb attaches a usb-tablet and requires two places); and the boot word ferrix.usbhid.reports, or the file /run/usbhid-reports, makes it log each interrupt report of the functions named at debug (docs/XHCI.md section 13).",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 263
+            "line": 298
           }
         },
         {
@@ -15736,7 +15899,7 @@
           "doc": "src/user/system/native/drivers/gpu/gc400 over src/lib/drivers/gpu/gc400: the STM32MP157's Vivante GC400T, the G2 step of the board's gears (docs/GPU.md §6.3). It prints the core's identity, soft-resets and initialises it as etnaviv does, starts the front end on a WAIT/LINK loop in one page pinned PIN_COHERENT, splices in two blocks that each raise an event, and takes each as the interrupt. devmgr starts it as an engine, which serves no kernel subsystem yet, and does not wait for it. No QEMU machine has the core; its gates are src/lib/drivers/gpu/gc400's tests against models of the host interface and the front end, and on the board, on 2026-09-24, both events arrived by interrupt (G2 done). Drawing is G3 to G5.",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 288
+            "line": 323
           }
         },
         {
@@ -15750,7 +15913,7 @@
           "doc": "src/user/system/native/drivers/block/stm32-sdmmc over src/lib/drivers/block/stm32-sdmmc: the STM32MP157's SDMMC1 as a disk behind the block ring, so the kernel's GPT scan publishes the card's partitions and btrfs mounts from one (docs/CHROME.md 10.1). The kernel publishes the controller as a device tree node and writes none of its registers: U-Boot left it running. The driver moves every word through the FIFO with hardware flow control and never turns the internal DMA on, and serves a write only inside a partition named ferrix-*. Its gates are the library's host tests against a model of the controller and a card, and the boot check of the one tree disk; no emulator has the controller, and it has not run on the board (2026-10-08).",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 303
+            "line": 338
           }
         },
         {
@@ -15764,7 +15927,7 @@
           "doc": "src/user/system/native/drivers/block/nvme over src/lib/drivers/block/nvme: an NVM Express controller's first namespace as a disk behind the block ring (docs/NVME.md), the first driver for a disk a PC has. devmgr starts it on any function of class code 01:08:02; the kernel is not changed. It resets and enables the controller, transfers straight into the ring's data region through PRP lists, lends a drive without DRAM its host memory buffer, aborts and resets on a command that does not come back, and notifies the controller before it disables it. Its gates are the library's host tests against a model of a controller, and cargo xtask test-nvme on QEMU's emulated one, with / on a drive below a PCIe switch. It has since driven a real WD SN720 through VFIO and installed Ferrix onto it (the customer's word, 2026-10-21).",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 319
+            "line": 354
           }
         },
         {
@@ -15778,7 +15941,7 @@
           "doc": "src/user/system/native/drivers/block/ahci over src/lib/drivers/block/ahci: a SATA disk behind an AHCI controller as a disk behind the block ring (docs/AHCI.md), for the customer's N150 box. devmgr starts it on class code 01:06:01 of any vendor. The controller is brought up polled (COMRESET of a link firmware left down, a busy device waited for, a refused IDENTIFY said), and each block-ring request is carried out whole by one transfer. A controller with no ATA disk is nothing to serve, not a failed driver. Its gates are the library's tests against a model HBA and cargo xtask test-n150-sata on QEMU's q35 controller; it served the box's drive on 2026-10-15.",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 337
+            "line": 372
           }
         },
         {
@@ -15792,7 +15955,7 @@
           "doc": "src/user/system/native/drivers/net/yt6801 over src/lib/drivers/net/yt6801 and src/lib/drivers/net/dwmac: the Motorcomm YT6801, the N150 box's gigabit port (networking page), speaking the net ring under ferrix-netserve's loop. devmgr starts it on 1F0A:6801. The kernel holds the function's MSI-X off and grants its table page (L.device.35-37). Its gates are the libraries' tests against models of the chip and the DesignWare core, and a QEMU e1000e for the kernel change; on the box on 2026-10-15 the link came up at one gigabit, and the driver polls every millisecond until its one MSI arrives, which it does rarely (docs/BACKLOG.md).",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 353
+            "line": 388
           }
         },
         {
@@ -15806,7 +15969,7 @@
           "doc": "src/user/system/native/drivers/net/rtl8169 over src/lib/drivers/net/rtl8169: Realtek's RTL8111H (8168H, XID 0x541), nazuna's onboard gigabit port (networking page), speaking the net ring under ferrix-netserve's loop. devmgr starts it on 10EC:8168 and the driver refuses any other XID. No kernel change: registers in BAR 2, MSI-X table in BAR 4. Its gates are the library's tests against a model of the chip and cargo xtask check; QEMU models no 8168. On 2026-10-24 it drove the real chip through vfio in a KVM guest: link at one gigabit, DHCP, ping, TCP at 235 to 405 Mbit/s.",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 368
+            "line": 403
           }
         },
         {
@@ -15820,7 +15983,7 @@
           "doc": "src/user/system/native/drivers/display/efifb: the firmware's framebuffer as the display core's card0, for a PC whose GPU has no driver (docs/DISPLAY.md section 8). Under the kernel option ferrix.efifb the last finder lends the framebuffer to a node of its own, write-combining from its first map, and the driver copies each flushed rectangle onto it; hyprix composites into dumb buffers as on virtio-gpu. Its gate is cargo xtask test-compositor --boot firmware-screen; hyprix drew on the N150 box's framebuffer on 2026-10-15.",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 382
+            "line": 417
           }
         },
         {
@@ -15834,8 +15997,107 @@
           "doc": "src/user/system/native/drivers/gpu/intel over src/lib/drivers/gpu/intel-xelp: a render driver for the N150's Xe-LP graphics (docs/INTEL-GPU.md), following i915 file by file. The library is the i915 uAPI front end over a back end, the GT's bring-up, execlists, the PPGTT and the power management a host does, all host-tested; the process serves a render-only chardev node and is started on ferrix.intelgpu. The kernel lends it the screen by identity and maps its buffers write-combining. On the box, M1 (the device answers) and M2 (the first GPU commands) ran on 2026-10-20; M3, the render node over the GT back end, is wired and not shown on the box.",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 395
+            "line": 430
           }
+        },
+        {
+          "name": "DeviceStack",
+          "qualifiedName": "FerrixDrivers::DeviceStack",
+          "kind": "part",
+          "definition": true,
+          "maturity": "implemented",
+          "stage": 10,
+          "doc": "The drivers package as one whole. In the kernel: the firmware tables and MMIO, the enumeration that turns them into device nodes, and the IOMMU domains each node's DMA goes through. In user space: devmgr, which gets a handle per node and starts one driver process per matched node, and drvupdated, which brings it new driver images. Each driver talks to the kernel subsystem it serves over its channel and, for block and net, a shared ring.",
+          "source": {
+            "file": "docs/sysml/08-drivers.sysml",
+            "line": 450
+          },
+          "children": [
+            {
+              "name": "acpi",
+              "qualifiedName": "FerrixDrivers::DeviceStack::acpi",
+              "kind": "part",
+              "type": "AcpiAccess",
+              "multiplicity": "0..1",
+              "source": {
+                "file": "docs/sysml/08-drivers.sysml",
+                "line": 460
+              }
+            },
+            {
+              "name": "fdt",
+              "qualifiedName": "FerrixDrivers::DeviceStack::fdt",
+              "kind": "part",
+              "type": "FdtAccess",
+              "multiplicity": "0..1",
+              "source": {
+                "file": "docs/sysml/08-drivers.sysml",
+                "line": 461
+              }
+            },
+            {
+              "name": "mmio",
+              "qualifiedName": "FerrixDrivers::DeviceStack::mmio",
+              "kind": "part",
+              "type": "MmioWindows",
+              "source": {
+                "file": "docs/sysml/08-drivers.sysml",
+                "line": 462
+              }
+            },
+            {
+              "name": "enumeration",
+              "qualifiedName": "FerrixDrivers::DeviceStack::enumeration",
+              "kind": "part",
+              "type": "DeviceEnumeration",
+              "source": {
+                "file": "docs/sysml/08-drivers.sysml",
+                "line": 463
+              }
+            },
+            {
+              "name": "iommu",
+              "qualifiedName": "FerrixDrivers::DeviceStack::iommu",
+              "kind": "part",
+              "type": "IommuDomains",
+              "source": {
+                "file": "docs/sysml/08-drivers.sysml",
+                "line": 464
+              }
+            },
+            {
+              "name": "devmgr",
+              "qualifiedName": "FerrixDrivers::DeviceStack::devmgr",
+              "kind": "part",
+              "type": "DevMgr",
+              "source": {
+                "file": "docs/sysml/08-drivers.sysml",
+                "line": 465
+              }
+            },
+            {
+              "name": "drvupdated",
+              "qualifiedName": "FerrixDrivers::DeviceStack::drvupdated",
+              "kind": "part",
+              "type": "DrvUpdated",
+              "multiplicity": "0..1",
+              "source": {
+                "file": "docs/sysml/08-drivers.sysml",
+                "line": 466
+              }
+            },
+            {
+              "name": "drivers",
+              "qualifiedName": "FerrixDrivers::DeviceStack::drivers",
+              "kind": "part",
+              "type": "DriverProcess",
+              "multiplicity": "0..*",
+              "source": {
+                "file": "docs/sysml/08-drivers.sysml",
+                "line": 467
+              }
+            }
+          ]
         },
         {
           "name": "DriverBootstrap",
@@ -15894,7 +16156,7 @@
           ],
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 411
+            "line": 470
           },
           "children": [
             {
@@ -15906,7 +16168,7 @@
               ],
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 425
+                "line": 484
               }
             },
             {
@@ -15918,7 +16180,7 @@
               ],
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 426
+                "line": 485
               }
             },
             {
@@ -15930,7 +16192,7 @@
               ],
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 427
+                "line": 486
               }
             },
             {
@@ -15942,7 +16204,7 @@
               ],
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 428
+                "line": 487
               }
             },
             {
@@ -15954,7 +16216,7 @@
               ],
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 429
+                "line": 488
               }
             },
             {
@@ -15966,7 +16228,7 @@
               ],
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 430
+                "line": 489
               }
             }
           ]

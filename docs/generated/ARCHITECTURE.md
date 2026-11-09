@@ -123,11 +123,11 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 | `FerrixSigningRequirements` | `26-signing-requirements.sysml` | docs/SIGNING.md is the design (the certification consultant's OK IF at ledger lines 3667 and 3738; the customer's decisions at 3731). Slice S1 builds the verify-only crate `ferrix-sigverify` (src/lib/crypto/sigverify) and the hash it rests on, `ferrix-sha256` (src/lib/crypto/sha256), both in the item ring (certification-item.json's crates). What the UEFI loader, init's configuration verifier and devmgr do with the verifier's answer is theirs, and gets ids in their own slices (S4, S8, S9). |
 
-27 files, 168 packages, 10325 elements, 220 relations. Model digest `8b89128559712987`.
+27 files, 168 packages, 10345 elements, 220 relations. Model digest `2058debea9ff5e25`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
-| `#implemented` | 295 | The code exists and the QEMU boot test exercises it on every architecture it applies to. |
+| `#implemented` | 296 | The code exists and the QEMU boot test exercises it on every architecture it applies to. |
 | `#inProgress` | 23 | The owning stage has started; part of the element runs. |
 | `#writtenAhead` | 1 | A src/lib/ crate exists and passes its host tests, but nothing in src/kernel/ calls it yet. |
 | `#planned` | 24 | Only the design exists, in docs/ARCHITECTURE.md. Nothing stands in for it. |
@@ -451,8 +451,13 @@ kernel : Kernel
   seccomp : Seccomp  [implemented]
     interpreter : ClassicBpfInterpreter
   devices : DeviceEnumeration  [implemented]
+    acpi : AcpiAccess
+    fdt : FdtAccess
+    ecam : MmioWindows
     nodes : DeviceNode
   iommu : IommuDomains  [implemented]
+    acpi : AcpiAccess
+    fdt : FdtAccess
     domains : IommuDomain
       device : DeviceNode
 initramfs : Initramfs  [implemented]
@@ -473,6 +478,9 @@ userland : Userland  [in progress]
   notifyd : UserProcess  [implemented]
   portald : UserProcess  [implemented]
   drivers : DriverProcess  [implemented]
+    device : DeviceNode
+    domain : IommuDomain
+      device : DeviceNode
     job : Job
       processes : Process
       children : Job
@@ -2285,7 +2293,7 @@ docs/ARCHITECTURE.md §7. The kernel enumerates buses because that needs ACPI or
 
 ```mermaid
 flowchart TB
-  n0_FerrixDrivers_DriverProcess["DriverProcess<br>stage 10<br>part job<br>part ioMappings<br>part interrupts<br>part eventPort<br>part dmaBuffers<br>part channel"]
+  n0_FerrixDrivers_DriverProcess["DriverProcess<br>stage 10<br>part device<br>part domain<br>part job<br>part ioMappings<br>part interrupts<br>part eventPort"]
   n1_FerrixDrivers_VirtioBlkDriver["VirtioBlkDriver<br>stage 10"]
   n2_FerrixDrivers_VirtioNetDriver["VirtioNetDriver"]
   n3_FerrixDrivers_VirtioGpuDriver["VirtioGpuDriver<br>stage 17"]
@@ -2401,6 +2409,9 @@ ACPI on x86-64 and AArch64 under EDK2, device tree on ARMv7-A and where AArch64 
 
 | Feature | Kind | Type | Maturity | Note |
 | --- | --- | --- | --- | --- |
+| `acpi` | part | `AcpiAccess` |  | The MCFG, on ACPI machines. |
+| `fdt` | part | `FdtAccess` |  | pci-host-ecam-generic and virtio,mmio nodes, on tree machines. |
+| `ecam` | part | `MmioWindows` |  | Configuration space, a bus at a time. |
 | `nodes` | part | `DeviceNode` |  |  |
 | `enumerate` | action |  |  |  |
 
@@ -2427,6 +2438,8 @@ Where the hardware is: src/lib/platform/acpi's dmar module (VT-d units and their
 | Feature | Kind | Type | Maturity | Note |
 | --- | --- | --- | --- | --- |
 | `mode` | attribute | `IommuMode` |  |  |
+| `acpi` | part | `AcpiAccess` |  | The DMAR (VT-d) and the IORT (SMMUv3). |
+| `fdt` | part | `FdtAccess` |  | arm,smmu-v3 nodes and iommu-map. |
 | `domains` | part | `IommuDomain` |  |  |
 
 #### DriverProcess
@@ -2437,6 +2450,8 @@ An ordinary user process in its own Job, holding exactly the capabilities devmgr
 
 | Feature | Kind | Type | Maturity | Note |
 | --- | --- | --- | --- | --- |
+| `device` | part | `DeviceNode` |  | The one node devmgr handed it: every aperture and vector it holds is minted from this node. |
+| `domain` | part | `IommuDomain` |  | The device's domain, which gives dmaBuffers their device addresses. |
 | `job` | part | `Job` |  |  |
 | `ioMappings` | part | `IoMapping` |  | One per BAR or MMIO window, and nothing outside it. |
 | `interrupts` | part | `Interrupt` |  | One per vector, bound to a Port. |
@@ -2466,6 +2481,9 @@ A native program on src/user/system/native/rt, not a musl binary: src/user/syste
 
 | Feature | Kind | Type | Maturity | Note |
 | --- | --- | --- | --- | --- |
+| `nodes` | part | `DeviceNode` |  | A handle per node, from the kernel's DEVICES messages. |
+| `drivers` | part | `DriverProcess` |  | Each started in a Job devmgr made, on one of nodes. |
+| `updater` | part | `DrvUpdated` |  | Started from /lib/drivers when the image carries it. |
 | `match` | action |  |  |  |
 | `spawnDriver` | action |  |  |  |
 | `quiesceOnDeath` | action |  | `#implemented` | device_quiesce after a driver's TERMINATED: the kernel waits for the block, display and render cores to let the device go (src/kernel/src/claim.rs), then DIED. |
@@ -2477,6 +2495,10 @@ A native program on src/user/system/native/rt, not a musl binary: src/user/syste
 `#inProgress`  ·  stage 10
 
 src/user/system/native/drvupdated: the helper through which a new driver image reaches DevMgr, which reads no files and waits on one port. Started by devmgr from /lib/drivers when the image carries it -- only test-restart --update's do (SAFETY-MANUAL AoU-26) -- it takes root's connections on the abstract socket ferrix.devmgr.update, refuses any other peer and any header past 8 MiB before it makes a VMO, and hands devmgr the request and the image's VMO on a channel. /bin/drvupdate is its client. docs/DEVMGR.md section 4.1.
+
+| Feature | Kind | Type | Maturity | Note |
+| --- | --- | --- | --- | --- |
+| `devmgr` | part | `DevMgr` |  | The one peer it hands a request and an image VMO to. |
 
 #### VirtioBlkDriver
 
@@ -2555,6 +2577,23 @@ src/user/system/native/drivers/display/efifb: the firmware's framebuffer as the 
 `#inProgress`  ·  stage 21  ·  specialises `DriverProcess`
 
 src/user/system/native/drivers/gpu/intel over src/lib/drivers/gpu/intel-xelp: a render driver for the N150's Xe-LP graphics (docs/INTEL-GPU.md), following i915 file by file. The library is the i915 uAPI front end over a back end, the GT's bring-up, execlists, the PPGTT and the power management a host does, all host-tested; the process serves a render-only chardev node and is started on ferrix.intelgpu. The kernel lends it the screen by identity and maps its buffers write-combining. On the box, M1 (the device answers) and M2 (the first GPU commands) ran on 2026-10-20; M3, the render node over the GT back end, is wired and not shown on the box.
+
+#### DeviceStack
+
+`#implemented`  ·  stage 10
+
+The drivers package as one whole. In the kernel: the firmware tables and MMIO, the enumeration that turns them into device nodes, and the IOMMU domains each node's DMA goes through. In user space: devmgr, which gets a handle per node and starts one driver process per matched node, and drvupdated, which brings it new driver images. Each driver talks to the kernel subsystem it serves over its channel and, for block and net, a shared ring.
+
+| Feature | Kind | Type | Maturity | Note |
+| --- | --- | --- | --- | --- |
+| `acpi` | part | `AcpiAccess` |  |  |
+| `fdt` | part | `FdtAccess` |  |  |
+| `mmio` | part | `MmioWindows` |  |  |
+| `enumeration` | part | `DeviceEnumeration` |  |  |
+| `iommu` | part | `IommuDomains` |  |  |
+| `devmgr` | part | `DevMgr` |  |  |
+| `drvupdated` | part | `DrvUpdated` |  |  |
+| `drivers` | part | `DriverProcess` |  |  |
 
 #### DriverBootstrap
 
@@ -5674,6 +5713,7 @@ Every element carrying @stage, which names the roadmap stage that owns it. An el
 | 10 | `FerrixDrivers::AhciDriver` | part | `#inProgress` |
 | 10 | `FerrixDrivers::Yt6801Driver` | part | `#inProgress` |
 | 10 | `FerrixDrivers::Rtl8169Driver` | part | `#inProgress` |
+| 10 | `FerrixDrivers::DeviceStack` | part | `#implemented` |
 | 10 | `FerrixDrivers::DriverBootstrap` | action | `#implemented` |
 | 10 | `FerrixAssurance::RestartTest` | verification | `#implemented` |
 | 11 | `FerrixStructure::Workspace::btrfs` | part | `#implemented` |
@@ -5731,7 +5771,7 @@ Every element carrying @stage, which names the roadmap stage that owns it. An el
 | 21 | `FerrixDrivers::EfifbDriver` | part | `#inProgress` |
 | 21 | `FerrixDrivers::IntelGpuDriver` | part | `#inProgress` |
 
-194 elements across 19 stages.
+195 elements across 19 stages.
 
 ## Figures
 

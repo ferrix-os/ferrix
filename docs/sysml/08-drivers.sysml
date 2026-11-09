@@ -92,6 +92,15 @@ package FerrixDrivers {
              * Owed after the exit: trusting a BAR firmware placed but left
              * decoding off, of which only the device tree's host-bridge
              * windows are read so far. */
+        ref part acpi : AcpiAccess[0..1] {
+            doc /* The MCFG, on ACPI machines. */
+        }
+        ref part fdt : FdtAccess[0..1] {
+            doc /* pci-host-ecam-generic and virtio,mmio nodes, on tree machines. */
+        }
+        ref part ecam : MmioWindows {
+            doc /* Configuration space, a bus at a time. */
+        }
         part nodes : DeviceNode[0..*];
         action enumerate;
     }
@@ -130,6 +139,12 @@ package FerrixDrivers {
              * both in every boot test. ARMv7-A stays in degraded trusted
              * mode, announced at boot. AMD-Vi is not driven. */
         attribute mode : IommuMode;
+        ref part acpi : AcpiAccess[0..1] {
+            doc /* The DMAR (VT-d) and the IORT (SMMUv3). */
+        }
+        ref part fdt : FdtAccess[0..1] {
+            doc /* arm,smmu-v3 nodes and iommu-map. */
+        }
         part domains : IommuDomain[0..*];
     }
 
@@ -142,6 +157,14 @@ package FerrixDrivers {
              * stm32-sdmmc, nvme, virtio-net, virtio-gpu, stm32-ltdc, gc400,
              * virtio-input, usbhid, usbdev, virtio-snd and vport, each a thin
              * layer of handles over its src/lib/ crates. */
+        ref part device : DeviceNode {
+            doc /* The one node devmgr handed it: every aperture and vector it
+                 * holds is minted from this node. */
+        }
+        ref part domain : IommuDomain {
+            doc /* The device's domain, which gives dmaBuffers their device
+                 * addresses. */
+        }
         ref part job : Job;
         part ioMappings : IoMapping[0..*] {
             doc /* One per BAR or MMIO window, and nothing outside it. */
@@ -191,6 +214,15 @@ package FerrixDrivers {
              * virtio-serial port by a table of its own, starts each driver
              * with START, waits for every one but the port driver to be
              * PUBLISHED before the next, and REPORTs. docs/DEVMGR.md. */
+        ref part nodes : DeviceNode[0..*] {
+            doc /* A handle per node, from the kernel's DEVICES messages. */
+        }
+        ref part drivers : DriverProcess[0..*] {
+            doc /* Each started in a Job devmgr made, on one of nodes. */
+        }
+        ref part updater : DrvUpdated[0..1] {
+            doc /* Started from /lib/drivers when the image carries it. */
+        }
         action match;
         action spawnDriver;
         #implemented action quiesceOnDeath {
@@ -227,6 +259,9 @@ package FerrixDrivers {
              * 8 MiB before it makes a VMO, and hands devmgr the request and
              * the image's VMO on a channel. /bin/drvupdate is its client.
              * docs/DEVMGR.md section 4.1. */
+        ref part devmgr : DevMgr {
+            doc /* The one peer it hands a request and an image VMO to. */
+        }
     }
 
     #implemented part def VirtioBlkDriver :> DriverProcess {
@@ -406,6 +441,30 @@ package FerrixDrivers {
              * and M2 (the first GPU commands) ran on 2026-10-20; M3, the
              * render node over the GT back end, is wired and not shown on
              * the box. */
+    }
+
+    // -----------------------------------------------------------------------
+    // How the pieces fit
+    // -----------------------------------------------------------------------
+
+    #implemented part def DeviceStack {
+        @stage { number = 10; }
+        doc /* The drivers package as one whole. In the kernel: the firmware
+             * tables and MMIO, the enumeration that turns them into device
+             * nodes, and the IOMMU domains each node's DMA goes through. In
+             * user space: devmgr, which gets a handle per node and starts one
+             * driver process per matched node, and drvupdated, which brings
+             * it new driver images. Each driver talks to the kernel subsystem
+             * it serves over its channel and, for block and net, a shared
+             * ring. */
+        part acpi : AcpiAccess[0..1];
+        part fdt : FdtAccess[0..1];
+        part mmio : MmioWindows;
+        part enumeration : DeviceEnumeration;
+        part iommu : IommuDomains;
+        part devmgr : DevMgr;
+        part drvupdated : DrvUpdated[0..1];
+        part drivers : DriverProcess[0..*];
     }
 
     #implemented action def DriverBootstrap {
