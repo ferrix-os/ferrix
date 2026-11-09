@@ -1,5 +1,10 @@
 # btrfs under memory pressure (`test-btrfs-pressure`)
 
+**2026-11-09, W1.** A btrfs edit or commit is admitted for its memory
+before its first change and runs inside a reservation of the mount's: short
+of memory it answers ENOMEM with nothing changed, never an abort, for its
+allocations of at most a page. See W1's "Where it stands".
+
 **2026-11-08, against Linux.** Ferrix's btrfs failure paths read against
 Linux v7.0's `fs/btrfs`: see "Against Linux's btrfs", and its work items
 W1-W7 in `docs/BACKLOG.md`.
@@ -541,6 +546,63 @@ dirty nodes. Risk is how likely the gap is to stop play there.
      abort as today, and the requirement says no more. An overrun is
      counted, and every check asserts it is nought.
    13 points in all.
+
+   **Where it stands (2026-11-09).** W1-a landed 3a0155b55 (ledger 8448,
+   8466). W1-b and W1-c land together on branch
+   `feature/btrfs-edit-reserve`, two commits, each with its code review
+   (ledger 8544, OK IF O1-O3):
+   * W1-b: `fs::btrfs::MountReserve` binds a K12 entry per writable mount
+     and hands the writer `ferrix_btrfs_write::Reserve` (grow to, drawn,
+     most, run within, shrink); none free, the mount runs as before and
+     says so once; dropped with the volume after its last operation, it
+     unbinds; a reload read-only shrinks it (L.object.225 amended, its
+     stage-12 check `reserve_check::mounted`/`unmounted`/
+     `mount_with_none_free`). R_MAX is `reserve_most`, min(64 MiB, a 64th
+     of the frames managed). A resize that adds nothing to the promise is
+     admitted even under the floor (L.mm.76 amended), so a mount gives its
+     promise back after every operation whatever memory is left. The
+     disk's reads, writes and flush suspend the scope (W1.3).
+   * W1-c: `WriteVolume::reserved`, from `guarded_with`,
+     `operation_with` and `alloc_data`, asks the reservation once at the
+     outermost operation, after the disk-space admission and before any
+     change, for `drawn + min(need, most)` frames: `Need::frames`,
+     `node_frames(nodesize)` (twice the node's pages, a page for its list,
+     a page for its share of the maps) a node and `OPERATION_FRAMES` (32);
+     a commit `commit_frames`. A refusal answers OutOfMemory, unaborted,
+     the transaction unchanged (L.btrfs.124: 17 operations checked one by
+     one). The operation runs inside the reservation and gives the promise
+     back after (L.btrfs.125); the mount commits first when a commit would
+     need more than R_MAX (`commit_due` in `commit_if_heavy`). The bound
+     is measured through a model of the kernel's heap with its real size
+     classes (`tests/reserve_bound.rs`, at 4, 16 and 64 KiB nodes: the
+     worst leaf 3, 9 and 32 frames against 4, 10 and 34). A node read
+     from disk now makes its item list at its length (`from_node`), which
+     a list grown by doubling had not. Requests above a page go as outside
+     the scope (L.mm.140 amended; CR.1), named and sized in
+     MEMORY-AND-TIMING §2.2am. The admission's growth, refused for want of
+     frames, reclaims (L.mm.146, its own stage-6 check) and then kills
+     (L.mm.138 amended) as a refused heap allocation does. **A difference
+     from Linux (ledger 8544 O1):** the kill is asked while the free frames
+     are under the watermark, the outstanding promise and the growth, so a
+     program can be killed with up to the growth (at most R_MAX) free above
+     the watermark, for a worst case the operation may never draw (the hog
+     boot: 1679 frames free, watermark 1487); Linux kills only once a real
+     allocation failed. The bound is claimed only where it fits within
+     R_MAX: from 168 MiB managed for an edit and 328 MiB for a commit at
+     16 KiB nodes (72/136 MiB at 4 KiB, 552/1096 MiB at 64 KiB;
+     MEMORY-AND-TIMING §2.2am); below that the operation is admitted for
+     R_MAX and the rest runs as before W1.
+     `test-btrfs-pressure` fails any boot whose kernel says an operation
+     ran past its reservation.
+   * Found on the way: a commit refused for memory, now possible without
+     an abort, cleared the mount's "the shape changed" mark before it
+     failed, so the next `fsync` would log one inode and leave the names
+     made before it out of the disk; the mark is put back
+     (`Shared::commit_refused`; host test
+     `a_commit_refused_for_memory_leaves_the_next_fsync_committing_the_names`,
+     which fails without it).
+   * Left: R6 widens the claim to requests above a page (ledger 8472
+     CR.2); W2, W5, W6 and W7 are rows of their own.
 2. **W2, going read-only without memory (high).** Keep what reading the
    last commit needs beside the running transaction, as Linux keeps
    `root->commit_root`: each tree's committed root (bytenr, level,

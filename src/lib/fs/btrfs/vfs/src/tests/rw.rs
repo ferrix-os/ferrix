@@ -1523,3 +1523,57 @@ fn clean_nodes_go_between_operations_only() {
     assert!(fs.clean_bytes() > 0, "the lookup's nodes are counted clean");
     assert!(fs.drop_clean(u64::MAX) > 0);
 }
+
+/// A mount's memory reservation that grants every growth until it is told
+/// to refuse (`ferrix_btrfs_write::Reserve`, W1-c).
+#[derive(Debug)]
+struct Refusing(Arc<core::sync::atomic::AtomicBool>);
+
+impl ferrix_btrfs_write::Reserve for Refusing {
+    fn grow_to(&self, _frames: u64) -> bool {
+        !self.0.load(core::sync::atomic::Ordering::Relaxed)
+    }
+    fn drawn(&self) -> u64 {
+        0
+    }
+    fn most(&self) -> u64 {
+        u64::MAX
+    }
+    fn within(&self, body: &mut dyn FnMut()) {
+        body();
+    }
+    fn shrink(&self) {}
+}
+
+#[test]
+fn a_commit_refused_for_memory_leaves_the_next_fsync_committing_the_names() {
+    // The commit an fsync asks for is refused for memory before its first
+    // change (W1-c): ENOMEM, and the transaction kept, the new name with
+    // it. The next fsync must commit, not log the one inode: a log carries
+    // no names, and the name would be lost to a power cut after an fsync
+    // that answered success.
+    let disk = Disk::new(BLANK);
+    let refuse = Arc::new(core::sync::atomic::AtomicBool::new(false));
+    let fs = RwBtrfs::mount_reserved(
+        disk.clone(),
+        0x0800_0014,
+        storage(),
+        Arc::new(Fixed),
+        &SpinParker,
+        notice,
+        Some(Box::new(Refusing(Arc::clone(&refuse)))),
+    )
+    .unwrap();
+    let root = fs.root();
+    fs.sync().unwrap();
+    let file = make_file(&root, b"named", &[]);
+    refuse.store(true, core::sync::atomic::Ordering::Relaxed);
+    assert_eq!(file.fsync(false), Err(Errno::ENOMEM));
+    refuse.store(false, core::sync::atomic::Ordering::Relaxed);
+    file.fsync(false).unwrap();
+    let after = mount(&power_cut(&disk));
+    assert!(
+        after.root().lookup(b"named").is_ok(),
+        "the name made before a refused commit was lost to a cut after the next fsync"
+    );
+}

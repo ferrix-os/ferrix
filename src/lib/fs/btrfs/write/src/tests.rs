@@ -36,6 +36,7 @@ mod inodes;
 mod log;
 mod oom;
 mod powerfail;
+mod reserve;
 
 const BLOCK: usize = 4096;
 /// Every fixture is 128 MiB.

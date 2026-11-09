@@ -1173,6 +1173,68 @@ package FerrixBtrfsRequirements {
             attribute :>> parent = "H.STORE.8";
             attribute :>> unit = "ferrix_btrfs_write::open::WriteVolume::reload_read_only";
         }
+        // docs/BTRFS-PRESSURE.md, "Against Linux's btrfs", W1-c (ledger 8337, 8470).
+        requirement <'L.btrfs.124'> anOperationIsAdmittedForItsMemoryFirst : ItemLowLevel {
+            attribute :>> statement = "An outermost operation or commit of a volume handed a
+                memory reservation shall, before its first change, ask the reservation once to
+                grow to what is drawn from it and the operation's bound -- node_frames for each
+                node its need counts and OPERATION_FRAMES besides, at most the reservation's
+                most -- and an operation it calls shall not ask again; a refusal shall answer
+                OutOfMemory with the trees' nodes, the delayed references, the roots, the space,
+                the count of edits and the transaction unchanged and nothing aborted. A commit
+                with nothing to write asks nothing. The bound is claimed for the allocations of
+                at most a page; a larger one stays fallible and outside it, and its failure
+                aborts as before.";
+            attribute :>> criterion = "ferrix-btrfs-write's host test
+                a_refused_admission_answers_out_of_memory_and_changes_nothing: for each of 17
+                operations (create, link, unlink, rename, evict, set_symlink, drop_extents,
+                write_file, truncate, insert, put, update, delete, alloc_data, log_inode, commit,
+                commit_log) on a volume with a committed tree and a pending name, a refusing
+                reservation is asked exactly once, the operation answers OutOfMemory, nothing
+                runs inside the reservation, the transaction is not aborted and its state is
+                unchanged; granted, the same operation runs inside it once. Control: the
+                refusal ignored (create answers Ok).";
+            attribute :>> parent = "H.STORE.7";
+            attribute :>> unit = ("ferrix_btrfs_write::volume::WriteVolume::reserved",
+                "ferrix_btrfs_write::volume::WriteVolume::guarded_with",
+                "ferrix_btrfs_write::volume::WriteVolume::operation_with",
+                "ferrix_btrfs_write::volume::WriteVolume::alloc_data",
+                "ferrix_btrfs_write::volume::WriteVolume::commit_frames",
+                "ferrix_btrfs_write::volume::Need::frames",
+                "ferrix_btrfs_write::reserve::node_frames");
+        }
+        requirement <'L.btrfs.125'> anAdmittedOperationRunsInsideItsReservation : ItemLowLevel {
+            attribute :>> statement = "An admitted operation or commit shall run inside the
+                volume's reservation, so that its allocations of at most a page are drawn from
+                it, and, when its bound is at most the reservation's most, none runs past what
+                it was admitted for (at 16 KiB nodes from 168 MiB managed for an edit and 328
+                MiB for a commit; 72 and 136 MiB at 4 KiB, 552 and 1096 MiB at 64 KiB; below
+                that it is admitted for the most and the rest runs as before W1, counted); once
+                it returns, the reservation shall promise nothing beyond what is drawn. A volume whose commit would need
+                more than the reservation's most shall say a commit is due before its next
+                operation.";
+            attribute :>> criterion = "ferrix-btrfs-write's host test
+                every_kind_of_edit_runs_within_its_admission, over a model of the kernel's
+                reserved heap (its size classes and slabs, ferrix-heap): 600 creates whose
+                names split leaves, a 3 MiB write, commits, unlinks and evictions, a rename and
+                a truncation draw frames from the reservation and none of their allocations of
+                at most a page finds it without room; and, in
+                a_commit_past_the_most_is_due_first, with a reservation that may promise 960
+                frames, 4000 creates of 200-byte names find a commit due, and committed when it
+                is, none runs past. Supported in the kernel at stage 12
+                (fs::btrfs_write_check, reserve_check::drawn): after vdc's writable mount made
+                its tree and synced it, frames are drawn from the mount's reservation, its count
+                of scoped allocations past the reservation is what it was at the mount, and the
+                outstanding promise is what it was before the mount. Controls: the scope not
+                entered (nothing drawn), the admission's growth refused nothing and granted
+                nothing (an allocation past the reservation).";
+            attribute :>> parent = "H.STORE.7";
+            attribute :>> unit = ("ferrix_btrfs_write::volume::WriteVolume::reserved",
+                "ferrix_btrfs_write::volume::WriteVolume::commit_due",
+                "ferrix_btrfs_write::reserve::Reserved::take",
+                "ferrix_btrfs_write::reserve::Reserved::put",
+                "ferrix_btrfs_write::reserve::Reserved::shrink");
+        }
         requirement <'L.btrfs.22'> allocationsAreFallible : ItemLowLevel {
             attribute :>> statement = "Every heap allocation of the btrfs crates' product
                 code shall be made through a helper that reports a refused allocation

@@ -19,6 +19,7 @@ use crate::clean::CleanNodes;
 use crate::extent::Backref;
 use crate::node::{Body, TreeNode};
 use crate::refs::DelayedRefs;
+use crate::reserve::{OPERATION_FRAMES, Reserved, node_frames};
 use crate::space::{Kind, Space};
 use crate::{Error, Result, WriteDevice, fallible};
 
@@ -97,6 +98,15 @@ impl Need {
             freeing: false,
         }
     }
+
+    /// The frames of kernel heap the operation may take, on a volume with
+    /// `nodesize` nodes (`L.btrfs.124`): each node it may make or load, and
+    /// what it builds beside them.
+    pub(crate) const fn frames(self, nodesize: u32) -> u64 {
+        self.nodes
+            .saturating_mul(node_frames(nodesize))
+            .saturating_add(OPERATION_FRAMES)
+    }
 }
 
 /// A btrfs volume opened for writing.
@@ -149,6 +159,9 @@ pub struct WriteVolume<D> {
     /// while the volume is being opened, whose log replay and orphan cleanup
     /// must run on a volume however full.
     pub(crate) admitting: bool,
+    /// The memory the mount reserves for its operations, if any
+    /// (`crate::reserve`): kept across a reload read-only, which shrinks it.
+    pub(crate) reserve: Reserved,
 }
 
 impl<D: WriteDevice> WriteVolume<D> {
@@ -192,6 +205,19 @@ impl<D: WriteDevice> WriteVolume<D> {
     /// The device, for a caller that must reach it directly.
     pub fn device_mut(&mut self) -> &mut D {
         &mut self.device
+    }
+
+    /// Keep `reserve` for the volume's operations (`crate::reserve`, W1),
+    /// for as long as the volume lives: dropped with it, after its last
+    /// operation.
+    pub fn set_reserve(&mut self, reserve: alloc::boxed::Box<dyn crate::Reserve>) {
+        self.reserve = Reserved::of(reserve);
+    }
+
+    /// Whether the volume was handed a reservation.
+    #[must_use]
+    pub const fn is_reserved(&self) -> bool {
+        self.reserve.is_some()
     }
 
     /// Give the device back, dropping everything uncommitted.
@@ -265,24 +291,31 @@ impl<D: WriteDevice> WriteVolume<D> {
         if let Some(need) = need {
             self.admit(need)?;
         }
-        // A chunk the reserve cannot have is not this edit's failure: the
-        // admission measured the room, and a group too fragmented to grow
-        // still has what it measured.
-        match self.ensure_space(EDIT_RESERVE) {
-            Ok(()) | Err(Error::NoSpace) => {}
-            Err(error) => return Err(error),
-        }
-        self.depth = self.depth.saturating_add(1);
-        let result = edit(self);
-        self.depth = self.depth.saturating_sub(1);
-        match result {
-            Ok(_) => self.edits = self.edits.wrapping_add(1),
-            // An answer about the key, given before anything changed: the
-            // path was copied, which keeps the tree whole, and nothing else.
-            Err(Error::Exists | Error::NotFound) => {}
-            Err(error) => self.abort_with(error),
-        }
-        result
+        let frames = need.map_or_else(
+            || self.commit_frames(),
+            |need| need.frames(self.geometry.nodesize),
+        );
+        self.reserved(frames, |volume| {
+            // A chunk the reserve cannot have is not this edit's failure:
+            // the admission measured the room, and a group too fragmented to
+            // grow still has what it measured.
+            match volume.ensure_space(EDIT_RESERVE) {
+                Ok(()) | Err(Error::NoSpace) => {}
+                Err(error) => return Err(error),
+            }
+            volume.depth = volume.depth.saturating_add(1);
+            let result = edit(volume);
+            volume.depth = volume.depth.saturating_sub(1);
+            match result {
+                Ok(_) => volume.edits = volume.edits.wrapping_add(1),
+                // An answer about the key, given before anything changed:
+                // the path was copied, which keeps the tree whole, and
+                // nothing else.
+                Err(Error::Exists | Error::NotFound) => {}
+                Err(error) => volume.abort_with(error),
+            }
+            result
+        })
     }
 
     /// Run an operation made of several edits, marking the transaction
@@ -301,16 +334,89 @@ impl<D: WriteDevice> WriteVolume<D> {
     ) -> Result<T> {
         self.check_writable()?;
         self.admit(need)?;
-        let before = self.edits;
-        self.depth = self.depth.saturating_add(1);
-        let result = op(self);
-        self.depth = self.depth.saturating_sub(1);
-        if let Err(error) = result
-            && self.edits != before
-        {
-            self.abort_with(error);
+        self.reserved(need.frames(self.geometry.nodesize), |volume| {
+            let before = volume.edits;
+            volume.depth = volume.depth.saturating_add(1);
+            let result = op(volume);
+            volume.depth = volume.depth.saturating_sub(1);
+            if let Err(error) = result
+                && volume.edits != before
+            {
+                volume.abort_with(error);
+            }
+            result
+        })
+    }
+
+    /// Run `body` inside the volume's reservation, admitted against `frames`
+    /// of it first, when this is the outermost operation and the volume
+    /// holds one (`L.btrfs.124`, `L.btrfs.125`; `crate::reserve`): the
+    /// reservation is grown to what is drawn from it already and `frames`
+    /// beside, at most its most, and a refusal answers
+    /// [`Error::OutOfMemory`] before `body` has changed anything. Inside,
+    /// the task's allocations of at most a page draw from it; after, it
+    /// promises nothing more. A nested operation, and a volume with no
+    /// reservation, runs `body` as it stands.
+    pub(crate) fn reserved<T>(
+        &mut self,
+        frames: u64,
+        body: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        if !self.admitting || frames == 0 {
+            return body(self);
         }
-        result
+        let Some(reserve) = self.reserve.take() else {
+            return body(self);
+        };
+        let want = reserve.drawn().saturating_add(frames.min(reserve.most()));
+        if !reserve.grow_to(want) {
+            self.reserve.put(reserve);
+            return Err(Error::OutOfMemory);
+        }
+        let mut body = Some(body);
+        let mut answer = None;
+        reserve.within(&mut || {
+            if let Some(body) = body.take() {
+                answer = Some(body(self));
+            }
+        });
+        reserve.shrink();
+        self.reserve.put(reserve);
+        answer.unwrap_or(Err(Error::Inconsistent("a reserved operation was not run")))
+    }
+
+    /// The frames of kernel heap committing the running transaction may
+    /// take: a node's for each of [`WriteVolume::commit_reserve`]'s, and
+    /// what the commit builds beside them (`L.btrfs.124`); nothing for a
+    /// commit with nothing to write.
+    pub(crate) fn commit_frames(&self) -> u64 {
+        if !self.is_dirty() && !self.chunks_changed && !self.has_log() {
+            return 0;
+        }
+        self.commit_reserve()
+            .saturating_mul(node_frames(self.geometry.nodesize))
+            .saturating_add(OPERATION_FRAMES)
+    }
+
+    /// Whether the running transaction should be committed before the
+    /// next operation (W1-c): once one more edit would leave its commit
+    /// needing more than the volume's reservation may promise, as
+    /// [`WriteVolume::dirty_bytes`] past a threshold does for its size.
+    /// Never for a volume with no reservation.
+    #[must_use]
+    pub fn commit_due(&self) -> bool {
+        let Some(most) = self.reserve.most() else {
+            return false;
+        };
+        let after = (self.dirty.len() as u64)
+            .saturating_add(EDIT_RESERVE)
+            .div_ceil(16)
+            .saturating_add(2 * EDIT_RESERVE);
+        self.is_dirty()
+            && after
+                .saturating_mul(node_frames(self.geometry.nodesize))
+                .saturating_add(OPERATION_FRAMES)
+                > most
     }
 
     /// Refuse an operation the trees have no room for, before it changes
@@ -384,9 +490,16 @@ impl<D: WriteDevice> WriteVolume<D> {
     /// [`Error::NoSpace`] when neither a group nor the device has room, with
     /// nothing changed, so it aborts nothing.
     pub fn alloc_data(&mut self, want: u64, min: u64) -> Result<(u64, u64)> {
-        let sector = u64::from(self.geometry.sectorsize);
         self.check_writable()?;
         self.admit(Need::EDIT)?;
+        self.reserved(Need::EDIT.frames(self.geometry.nodesize), |volume| {
+            volume.alloc_data_admitted(want, min)
+        })
+    }
+
+    /// [`WriteVolume::alloc_data`], admitted.
+    fn alloc_data_admitted(&mut self, want: u64, min: u64) -> Result<(u64, u64)> {
+        let sector = u64::from(self.geometry.sectorsize);
         match self.ensure_space(EDIT_RESERVE) {
             Ok(()) | Err(Error::NoSpace) => {}
             Err(error) => return Err(error),

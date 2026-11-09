@@ -589,19 +589,26 @@ package FerrixMemoryRequirements {
                 be killed, and when no list of the live processes can be made. Not for a refusal
                 the failure injection made, and what the kill itself allocates is never answered
                 by a reclaim or a kill; the heap's refusal of it is answered by the reserve as
-                L.mm.139 says.";
+                L.mm.139 says. A reservation's growth for a heap scope (mm::reservation_grow)
+                still refused after its reclaims (L.mm.146), for want of free frames over the
+                watermark, the outstanding promise and the growth, shall ask the same kill and
+                try the growth again on the same terms: so with up to the growth free above the
+                watermark, unlike Linux, which kills only once an allocation failed (ledger 8544
+                O1; MEMORY-AND-TIMING 2.2am).";
             attribute :>> criterion = "test-btrfs-pressure's hog boot: on a 768 MiB machine a
                 program holds all of MemAvailable but 16 MiB as anonymous memory, then 24576 names
                 made by the shell alone through a writable btrfs are all made and every 64th found
                 again, the sync succeeds, a file committed before them reads back whole, the
                 kernel never says that a transaction was aborted, and it says exactly once that it
                 killed a process for its heap; the floor, evict and commit boots say it never.
-                Control: heap_or_kill returning None at once -- the kernel says a transaction was
-                aborted (out of memory), or stops with FX-0008 on an allocation that cannot report
-                failure, whichever the heap's refusal meets first.";
+                Control: heap_or_kill returning None at once and reservation_grow asking no kill
+                -- the kernel says a transaction was aborted (out of memory), stops with FX-0008
+                on an allocation that cannot report failure, or a create answers ENOMEM, whichever
+                the refusal meets first.";
             attribute :>> parent = "H.MEM.11";
             attribute :>> unit = ("mm::heap_or_kill", "mm::while_killing",
-                "object::oom::for_kernel_heap", "object::oom::kernel_victim_held");
+                "object::oom::for_kernel_heap", "object::oom::kernel_victim_held",
+                "mm::reservation_grow");
         }
         // docs/BTRFS-PRESSURE.md, "Two refusals the kill could not answer" (2026-11-08,
         // consultant ledger 8172 B2).
@@ -627,27 +634,48 @@ package FerrixMemoryRequirements {
         // docs/BTRFS-PRESSURE.md, "Against Linux's btrfs", W1-a (ledger 8337).
         requirement <'L.mm.140'> aHeapScopeDrawsFromItsReservation : ItemLowLevel {
             attribute :>> statement = "While a task holds a heap scope on a bound reservation,
-                its task-context kernel-heap allocations shall be served by that reservation's
-                heap first, whatever its job's reservation, and by the shared heap only past the
-                reservation's room, each such counted; never in interrupt context; not while
-                the scope is suspended; and from the guard's drop on as before the scope. A
-                scope is refused in a retyped build, in interrupt context, and on a reservation
-                not bound.";
+                its task-context kernel-heap allocations of at most a page shall be served by
+                that reservation's heap first, whatever its job's reservation, and by the shared
+                heap only past the reservation's room, each such counted; a larger one, a run of
+                frames a count of frames cannot promise, as outside the scope and not counted;
+                never in interrupt context; not while the scope is suspended; and from the
+                guard's drop on as before the scope. A scope is refused in a retyped build, in
+                interrupt context, and on a reservation not bound.";
             attribute :>> criterion = "At stage 9 (object::reserve_check, check_the_heap_scope):
                 a reservation of 16 frames and a scope on it, the shared heap made to refuse the
                 checking task's scoped allocations: an object of each of the eight size classes
                 and then 2048-byte objects until one is refused all lie on pages drawn from the
                 reservation, no more than 16 frames drawn, the refusal counted; an allocation in
                 interrupt context, one with the scope suspended and one after the guard is
-                dropped lie on shared pages, one after the suspension on a drawn page; freed,
-                the reservation's heap holds nothing. Controls: the allocator not reading the
-                scope (the first fails), the guard not putting the task's scope back (the last
-                fails).";
+                dropped lie on shared pages, one after the suspension on a drawn page, and a
+                request of two pages in the scope on shared pages with the count unchanged;
+                freed, the reservation's heap holds nothing. Controls: the allocator not reading
+                the scope (the first fails), the guard not putting the task's scope back (the
+                last fails), a request above a page routed to the scope (the two pages are
+                counted).";
             attribute :>> parent = "H.QUOTA.15";
             attribute :>> unit = ("mm::heap_scope", "mm::heap_scope_suspended",
                 "mm::HeapScope::drop", "mm::scoped_here", "mm::heap_entry",
                 "mm::scope_overrun", "mm::note_scope_overrun", "mm::shared_refused_here",
                 "mm::KernelAllocator::alloc");
+        }
+        // docs/BTRFS-PRESSURE.md, "Against Linux's btrfs", W1-c (ledger 8337 W1.8).
+        requirement <'L.mm.146'> aRefusedReservationGrowthReclaims : ItemLowLevel {
+            attribute :>> statement = "A reservation's growth for a heap scope
+                (mm::reservation_grow), refused for want of free frames, shall, where it may
+                block, reclaim clean cache and try the growth again while a reclaim gives some
+                back, at most eight times, with the scope suspended for the reclaim's own
+                allocations; not where it may not block and not under the failure injection; a
+                refusal for an entry not bound stands at once.";
+            attribute :>> criterion = "The page cache's self-check with kernel objects alone
+                (user::rehome_cache_check, check_a_refused_reservation_growth_reclaims): with a
+                512-page cached file of the check's own source and the free count held one
+                under what a growth of 16 frames needs, the resize alone is refused, the growth
+                is admitted, and the count of growths a reclaim let in grows, in at most three
+                tries. Control: reservation_grow's reclaims removed -- the boot stops on the
+                check's 'was not admitted after a reclaim'.";
+            attribute :>> parent = "H.MEM.11";
+            attribute :>> unit = ("mm::reservation_grow", "mm::reclaim_for_kernel");
         }
         // docs/RAM-RELEASE.md §2, R1 (consultant ledger 4971, 5022).
         requirement <'L.mm.99'> theArchivesPagesComeBack : ItemLowLevel {
@@ -883,11 +911,13 @@ package FerrixMemoryRequirements {
             attribute :>> statement = "A reservation's growth by d frames of
                 promise shall be admitted in one hold of the frame allocator's
                 lock only if F - d >= W + O, raising O by d; a refusal shall
-                answer the shortfall and change nothing; a shrink shall always
-                be admitted.";
+                answer the shortfall and change nothing; a shrink, to below what
+                is drawn as well, shall always be admitted, whatever F.";
             attribute :>> criterion = "At stage 2 a reservation of F - W - O + 1
                 frames is refused with O unchanged, and one of 64 frames raises O
-                by exactly 64.";
+                by exactly 64; with the free count at O, under W + O, and all 64
+                frames drawn, a shrink to 63 and back to 64 is admitted with O
+                unchanged.";
             attribute :>> parent = "H.QUOTA.16";
             attribute :>> unit = ("mm::reservation::resize", "mm::reservation_resize",
                 "mm::reservation::bind", "mm::reservation_bind");

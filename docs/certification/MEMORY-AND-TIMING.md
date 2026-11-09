@@ -3173,6 +3173,94 @@ promise its reservation already holds (`L.mm.76`-`L.mm.80`), a count of
 frames, not runs. Which reservation, and how large, is its user's (W1-b,
 W1-c), and so is the bound stated there.
 
+### 2.2am A writable btrfs mount's edit reservation (`fs::btrfs`, `ferrix-btrfs-write`, 2026-11-09)
+
+`L.object.225`, `L.btrfs.124`, `L.btrfs.125`, `L.mm.146`, `L.mm.138`; ledger
+8337 (`docs/BTRFS-PRESSURE.md`, "Against Linux's btrfs", W1-b and W1-c),
+8470 (CR.1). Each writable mount binds one K12 reservation as it is
+mounted (none free: the mount runs as before W1 and says so once). Its
+outermost operation or commit grows it, before its first change, to what is
+drawn and the operation's bound, runs inside it as a heap scope (§2.2ak),
+and gives the promise back when it returns.
+
+**The promise.** At most R_MAX beyond what is drawn: 64 MiB or a 64th of
+the frames the allocator manages, whichever is less
+(`fs::btrfs::reserve_most`; about 12 MiB on the gates' 768 MiB machine, 64 MiB
+from 4 GiB up; `certification-item.json`, `btrfs_edit_reserve_most`). It is
+promised only while an operation of that mount runs, and one runs at a time
+(the volume's lock), so the worst outstanding promise is R_MAX for each
+writable mount with an operation in flight; between operations it is
+nothing. Every promised frame raises every unreserved program's floor
+(`L.mm.77`) for that time.
+
+**The bound.** An operation is admitted for its need's nodes at
+`node_frames(nodesize)` each -- twice the node's pages for its payloads
+rounded to their size classes, a page for its list of items or pointers, a
+page for its share of the maps that hold it -- and `OPERATION_FRAMES` (32)
+besides: an edit's 64 nodes are 288 frames (1.1 MiB) at 4 KiB nodes, 672
+(2.6 MiB) at 16 KiB, 2208 (8.6 MiB) at 64 KiB. A commit is admitted for
+`commit_reserve` nodes (a sixteenth of the dirty set and 128) the same
+way, and the mount commits first (`commit_due`, then `commit_if_heavy`)
+once that would pass R_MAX. Measured through a model of the kernel's heap
+(`ferrix-btrfs-write`'s `tests/reserve_bound.rs`, the real `ferrix-heap`
+size classes and slabs): the worst leaf of one payload size takes 3, 9 and
+32 frames against bounds of 4, 10 and 34 at 4, 16 and 64 KiB; 64 worst
+16 KiB leaves take 375 frames of an edit's 672; scripts of every kind of
+edit run with no allocation past the reservation.
+
+**Where the bound fits (ledger 8544 O2).** The admission asks for
+`min(bound, R_MAX)` beyond what is drawn, so "none past the reservation"
+holds only for an operation whose bound is at most R_MAX. R_MAX is a 64th
+of the frames managed below 4 GiB, so the bound fits from these amounts of
+managed memory up:
+
+| Node size | An edit (64 nodes) | From | A commit (at least 128 nodes) | From |
+|---|---|---|---|---|
+| 4 KiB | 288 frames | 72 MiB | 544 frames | 136 MiB |
+| 16 KiB | 672 frames | 168 MiB | 1312 frames | 328 MiB |
+| 64 KiB | 2208 frames | 552 MiB | 4384 frames | 1096 MiB |
+
+A commit's bound grows with the dirty set (a sixteenth of it), and the
+mount commits before an operation once the commit would pass R_MAX
+(`commit_due`), so above these amounts every commit fits too. Below them
+the operation is admitted for R_MAX alone: what it takes past that falls to
+the shared heap, counted and said ("ran past its memory reservation"), and
+a refusal there aborts the transaction as before W1; below the commit's
+threshold `commit_due` holds whenever anything is dirty, so a commit comes
+before every operation. A 64 KiB-node volume on the gates' 768 MiB machine
+is such a case. The reference configuration is 16 KiB nodes (`mkfs.btrfs`'s
+default) with at least 328 MiB managed (`certification-item.json`,
+`btrfs_edit_reserve_reference`).
+
+**Outside the bound** (`L.mm.140`, CR.1). A request above a page is a run of
+frames, which a count of frames cannot promise: in a scope it goes as
+outside one, fallible, and its refusal aborts the transaction as before W1.
+Named and measured by the same test: a full leaf's item list
+(`Vec<LeafItem>`, 48 bytes an item: 7632 bytes at 4 KiB, 31248 at 16 KiB,
+125616 at 64 KiB), a full internal node's pointers (`Vec<KeyPtr>`, 40 bytes
+each: 4840, 19720, 79280), an item's payload up to the node's body (16258
+at 16 KiB, 65410 at 64 KiB; under a page at 4 KiB), and the commit's node
+buffer. R6 widens the claim to them (ledger 8472 CR.2). The disk's own
+reads, writes and flush suspend the scope (W1.3).
+
+**The kill's margin (ledger 8544 O1).** The growth asks the kill while the
+free frames are under the watermark, the outstanding promise and the
+growth together, so a program can be killed with up to the growth -- at
+most R_MAX -- free above the watermark, for a worst case the operation may
+never draw: in the hog boot the kill came at 1679 frames free against a
+watermark of 1487 (w1bc-pressure). Linux kills only when a real allocation
+has failed. The trade is taken over answering ENOMEM to every btrfs
+operation at the floor.
+
+**Time.** The admission is one resize under the frame allocator's lock.
+Refused for want of free frames, it is answered as a refused heap
+allocation is: at most eight reclaims of clean cache (`L.mm.146`), then the
+machine-wide kill while it answers retry, at most 1024 answers, about a
+second (`L.mm.138`), all with the volume's sleep lock held, so the mount's
+other users wait that long, as they waited for the same reclaims and kill
+in the middle of an edit before W1. A refusal after them answers ENOMEM
+with nothing changed.
+
 ## 3. Why F-24 is not closed, and F-23 is
 
 A document that says "the property does not hold" is not a closed finding, and

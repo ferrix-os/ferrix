@@ -1188,10 +1188,21 @@ package FerrixObjectRequirements {
         requirement <'L.object.225'> aReservationEndsWithItsSlot : ItemLowLevel {
             attribute :>> statement = "A slot claimed beneath a reserved job shall
                 draw from its reservation, and a reserved job's slot, as its last
-                hold goes, shall unbind its reservation.";
+                hold goes, shall unbind its reservation. A writable btrfs mount,
+                the other owner of a reservation, shall bind one as it is mounted,
+                promising nothing until an operation asks, and unbind it when its
+                volume is dropped, after its last operation; a mount that finds
+                none free shall be mounted without one and say so.";
             attribute :>> criterion = "At stage 9 a job made beneath a reserved one
                 draws from its reservation, and once the tree is gone the promise
-                is what it was before and every slot is given back.";
+                is what it was before and every slot is given back. At stage 12
+                (fs::btrfs_write_check, reserve_check) the writable mount's
+                reservation is bound and promises nothing between operations,
+                the outstanding promise as before the mount; with every other
+                entry bound a second mount of the disk is made without one; once
+                unmounted and dropped, the mount's entry is unbound and the promise
+                as before. Control: the mount's handle not unbinding in its drop
+                (the entry stays bound).";
             attribute :>> parent = "H.QUOTA.15";
             attribute :>> unit = ("object::quota::claim", "object::quota::release",
                 "object::quota::reservation_of");

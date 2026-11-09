@@ -176,6 +176,25 @@
       "carries the helper (native::refuse_updater). `test` is those images",
       "alone, and no claim is made of them (ITEM.md 5, SAFETY-MANUAL AoU-26;",
       "the certification consultant's C1, 2026-10-07)."
+    ],
+    "btrfs_edit_reserve_most": "min(64 MiB, managed/64)",
+    "btrfs_edit_reserve_most_why": [
+      "A writable btrfs mount binds one of the kernel's memory reservations",
+      "(K12) and promises its operations' worst case from it before their first",
+      "change (docs/BTRFS-PRESSURE.md W1, ledger 8337/8338 (b)): never more than",
+      "this beyond what is drawn, 64 MiB or a 64th of the memory the frame",
+      "allocator manages, whichever is less (src/kernel/src/fs/btrfs.rs,",
+      "`reserve_most`). Every promised frame raises every unreserved program's",
+      "floor (L.mm.77), so the worst outstanding promise is this once per",
+      "writable mount (MEMORY-AND-TIMING.md 2.2am)."
+    ],
+    "btrfs_edit_reserve_reference": "nodesize 16 KiB, at least 328 MiB managed",
+    "btrfs_edit_reserve_reference_why": [
+      "The bound an operation is admitted for fits within the most above only",
+      "from a memory size that grows with the node size: at 16 KiB nodes, the",
+      "default of mkfs.btrfs, from 168 MiB managed for an edit and 328 MiB for",
+      "a commit (MEMORY-AND-TIMING.md 2.2am, ledger 8544 O2). Below it an",
+      "operation is admitted for the most and the rest runs as before W1."
     ]
   },
   "build_flags": {
@@ -1242,7 +1261,7 @@
     "syscall/credentials.rs": 2,
     "syscall/linux.rs": 3,
     "syscall/userns.rs": 1,
-    "fs/btrfs_write_check.rs": 7,
+    "fs/btrfs_write_check.rs": 8,
     "fs/cgroupfs.rs": 13,
     "fs/devfs.rs": 1,
     "fs/mod.rs": 25,

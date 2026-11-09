@@ -408,6 +408,9 @@ const SCOPE_FRAMES: u64 = 16;
 /// * an allocation in interrupt context, during the scope, on a shared page;
 /// * one with the scope suspended on a shared page, and one after the
 ///   suspension on a reserved page again;
+/// * a request above a page, a run of frames a count of frames cannot
+///   promise (ledger 8470, CR.1), on shared pages and no overrun, as if
+///   outside the scope;
 /// * once the scope's guard is gone, the next allocation on a shared page;
 /// * every object freed, nothing of the reservation's heap held.
 ///
@@ -454,6 +457,9 @@ fn check_the_heap_scope() -> Result<(), &'static str> {
             crate::fallible::try_with_capacity::<u8>(64).ok()
         };
         let resumed = crate::fallible::try_with_capacity::<u8>(64).ok();
+        let counted_before_large = mm::heap_scope_overruns(entry);
+        let large = crate::fallible::try_with_capacity::<u8>(2 * PAGE_SIZE as usize).ok();
+        let large_counted = mm::heap_scope_overruns(entry) != counted_before_large;
         drop(scope);
         let after = crate::fallible::try_with_capacity::<u8>(64).ok();
         let (_, drawn) = mm::reservation_usage(entry);
@@ -473,12 +479,14 @@ fn check_the_heap_scope() -> Result<(), &'static str> {
             Err("an allocation with the heap scope suspended was drawn from its reservation")
         } else if resumed.as_ref().map(on) != Some(entry) {
             Err("an allocation after the scope's suspension was not drawn from its reservation")
+        } else if !shared(&large) || large_counted {
+            Err("a scoped request above a page was drawn from its reservation or counted")
         } else if !shared(&after) {
             Err("an allocation after the heap scope's end was drawn from its reservation")
         } else {
             Ok(())
         };
-        drop((held, interrupted, suspended, resumed, after));
+        drop((held, interrupted, suspended, resumed, large, after));
         if result.is_ok() && mm::reserved_heap_bytes(entry) != 0 {
             return Err(
                 "the heap scope's objects, freed, left the reservation's heap holding some",

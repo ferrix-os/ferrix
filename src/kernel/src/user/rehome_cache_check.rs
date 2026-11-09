@@ -28,7 +28,7 @@ use crate::user::space::{Access, AddressSpace, FileMapping, FilePlace};
 use crate::user::vmo::{self, Filler, ReclaimHook, Vmo, VmoError};
 
 /// How many cases one run makes: the boot line's count.
-const CASES: u64 = 11;
+const CASES: u64 = 12;
 
 /// Run them, and answer how many cases they are. `Err` names the first thing
 /// that was not true.
@@ -55,7 +55,8 @@ fn cases() -> Result<(), &'static str> {
     check_read_present_answers_poison()?;
     check_a_poisoned_page_is_dropped()?;
     check_a_poisoned_read()?;
-    check_a_refused_heap_allocation_reclaims()
+    check_a_refused_heap_allocation_reclaims()?;
+    check_a_refused_reservation_growth_reclaims()
 }
 
 /// A disk file's source of the check's own: each byte is [`pattern`], one page
@@ -791,6 +792,85 @@ fn check_a_refused_heap_allocation_reclaims() -> Result<(), &'static str> {
         }
         Err("a page of heap with every free frame held never reached the reclaim in three tries")
     })();
+    drop(file);
+    outcome
+}
+
+/// Frames the reservation growth's check asks for.
+const GROWTH: u64 = 16;
+
+/// Take frames, largest blocks first, into `held` until the free count is
+/// one under `least`: each as `(frame, order)`, given back by
+/// [`mm::deallocate_frames`] at its order. A block is taken only while the
+/// count stays at `least - 1` or over, so the last are single frames.
+fn hold_free_frames_down_to(held: &mut Vec<(u64, u8)>, least: u64) {
+    for order in (0..=ferrix_frame::MAX_ORDER).rev() {
+        let size = 1_u64 << order;
+        while held.len() < held.capacity() && mm::free_frames() >= least.saturating_add(size - 1) {
+            match mm::allocate_frames(order) {
+                Some(frame) => held.push((frame, order)),
+                None => break,
+            }
+        }
+    }
+}
+
+/// A reservation's growth refused for want of free frames, with clean cache
+/// to give back, is answered by a reclaim and admitted (L.mm.146): the free
+/// count is held one under what a growth of [`GROWTH`] frames needs (the
+/// watermark, the outstanding promise and the growth), so that the resize
+/// alone is refused, and `mm::reservation_grow` must reclaim the check's
+/// own cached file to admit it; its count of growths a reclaim let in
+/// grows. Another processor may free frames between the hold and the
+/// growth, which is then admitted with no refusal: so up to three tries, of
+/// which one must show the reclaim, and a growth refused at all fails at
+/// once. A writable btrfs mount grows its reservation so before every
+/// operation (`docs/BTRFS-PRESSURE.md` W1-c).
+///
+/// Its negative control: `reservation_grow` without its reclaims (the
+/// growth stays refused).
+///
+/// Verifies: L.mm.146
+fn check_a_refused_reservation_growth_reclaims() -> Result<(), &'static str> {
+    const PAGES: u64 = 512;
+    let file = source_file(PAGES)?;
+    let entry = mm::reservation_bind().ok_or("no reservation was free for the growth's check")?;
+    let outcome = (|| {
+        for _ in 0..3 {
+            let mut held: Vec<(u64, u8)> = Vec::new();
+            held.try_reserve_exact(held_room(mm::free_frames()))
+                .map_err(|_| "no room for the growth check's list of frames")?;
+            let before = mm::reservation_reclaimed();
+            let _ = mm::drain_caches();
+            let least = mm::watermark()
+                .saturating_add(mm::outstanding_promise())
+                .saturating_add(GROWTH);
+            hold_free_frames_down_to(&mut held, least);
+            let short = mm::reservation_resize(entry, GROWTH).is_err();
+            let grown = short && mm::reservation_grow(entry, GROWTH).is_ok();
+            let after = mm::reservation_reclaimed();
+            // Give the promise back before the frames: a shrink is always
+            // admitted (L.mm.76).
+            let _ = mm::reservation_resize(entry, 0);
+            for (frame, order) in held.drain(..) {
+                mm::deallocate_frames(frame, order);
+            }
+            if short && !grown {
+                return Err(
+                    "a reservation's growth refused at the floor, with clean cache to give \
+                     back, was not admitted after a reclaim",
+                );
+            }
+            if short && after > before {
+                return Ok(());
+            }
+        }
+        Err(
+            "a reservation's growth with the free count held under its need never reached the \
+             reclaim in three tries",
+        )
+    })();
+    mm::reservation_unbind(entry);
     drop(file);
     outcome
 }

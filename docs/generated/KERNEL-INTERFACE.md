@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-3035 declarations in the core's files, 215 in the item's; 246 checks-only.
+3049 declarations in the core's files, 215 in the item's; 247 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2024,6 +2024,9 @@ checks above is `pub` for raised checks (F3).
 | `free_frames` | fn | item, load, bin |  |
 | `give_back_initrd` | fn | item, load |  |
 | `heap_pages` | fn | load |  |
+| `heap_scope` | fn | load |  |
+| `heap_scope_overruns` | fn | load |  |
+| `heap_scope_suspended` | fn | load |  |
 | `held_frames` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `hold_table_for_check` | fn | load (checks) | checks-only |
 | `init` | fn | bin |  |
@@ -2033,10 +2036,16 @@ checks above is `pub` for raised checks (F3).
 | `is_retired` | fn | load (checks) | checks-only |
 | `keep_initrd` | fn | item, load |  |
 | `managed_frames` | fn | load, bin |  |
+| `outstanding_promise` | fn | load (checks) | checks-only |
 | `print_frame_delta` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `program_floor` | fn | load |  |
 | `reclaim_boot_memory` | fn | bin |  |
 | `release_frame` | fn | load |  |
+| `reservation_bind` | fn | load |  |
+| `reservation_grow` | fn | load |  |
+| `reservation_resize` | fn | load |  |
+| `reservation_unbind` | fn | load |  |
+| `reservation_usage` | fn | load |  |
 | `reserved_in` | fn | load (checks) | checks-only |
 | `retired_for_check` | fn | load (checks) | checks-only |
 | `retired_frames` | fn | load |  |
@@ -2054,12 +2063,15 @@ checks above is `pub` for raised checks (F3).
 | `scrub` | mod | item, load, bin |  |
 | `seal` | mod | item |  |
 | `seal_check` | mod | bin |  |
+| `Refused` | re-export | item, load |  |
+| `Reservation` | re-export | load |  |
 | `bypass_heap_in_sections` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `fill_reserve` | re-export | bin |  |
 | `refuse_reserve_fills` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `reserve_counts` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `FrameWindow` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `GivenBack` | struct | load |  |
+| `HeapScope` | struct | - |  |
 | `OutsideDirectMap` | struct | load |  |
 | `Reclaimed` | struct | - |  |
 | `Stats` | struct | bin |  |
@@ -2099,6 +2111,13 @@ checks above is `pub` for raised checks (F3).
 | `WxReport` | struct | - |  |
 | `WxReport::executable` | field | item, load, bin |  |
 | `WxReport::leaves` | field | item, load, bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+
+### `mm::reservation`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `Refused` | enum | item, load |  |
+| `Entry` | type | load |  |
 
 ### `mm::reserve`
 
@@ -2699,7 +2718,7 @@ checks above is `pub` for raised checks (F3).
 | `Report` | struct | item, load, bin |  |
 | `Report::heap_pages` | field | load, bin |  |
 | `Report::interrupts` | field | load, bin |  |
-| `Report::promise` | field | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Report::promise` | field | load, bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Report::reserved` | field | item, load, bin |  |
 | `Report::rules` | field | load, bin |  |
 

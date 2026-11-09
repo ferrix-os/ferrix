@@ -2322,14 +2322,16 @@ fn the_scrubber_leaves_a_promise_alone() -> Result<(), &'static str> {
 /// beyond the promise; the kernel's own frames then until refused, which must
 /// be at the promise itself. Frames drawn from the reservation are then given
 /// below both, each tagged with it and the promise falling one for one to
-/// nothing, and the next is refused. Everything goes back: every tag clear,
+/// nothing, and the next is refused; there, the free count under the
+/// watermark and the promise, a shrink to below what is drawn and back is
+/// admitted with the promise unchanged. Everything goes back: every tag clear,
 /// the promise whole again, then gone with the reservation, and the window
 /// closed on the count it opened at.
 ///
 /// Its negative controls: the program's floor without the promise (a program
 /// takes a promised frame), the kernel's floor removed (a kernel frame is
-/// taken from the promise), admission without its test, and a free that
-/// credits nothing back.
+/// taken from the promise), admission without its test, a free that
+/// credits nothing back, and a shrink tested as a growth (W1-b).
 ///
 /// Verifies: H.QUOTA.15
 /// Verifies: H.QUOTA.16
@@ -2475,6 +2477,18 @@ fn reservation_floors(
     if let Some(frame) = super::take_frames(0, super::reservation::Floor::Program(entry)) {
         drawn.push(frame);
         return Err("a frame past its reservation's size was drawn");
+    }
+    // A resize that adds nothing to the promise is admitted with the free
+    // count under the watermark and the promise: a shrink to below what is
+    // drawn, and back to what is drawn, the promise unchanged (L.mm.76; a
+    // writable mount gives its promise back after every operation, W1).
+    let shrunk = mm::reservation_resize(entry, PROMISED - 1)
+        .and_then(|()| mm::reservation_resize(entry, PROMISED));
+    if shrunk.is_err() {
+        return Err("a shrink was refused with the free count under the floor");
+    }
+    if super::reservation::outstanding() != before {
+        return Err("a shrink below what is drawn changed the promise");
     }
     let taken = programs.len + kernels.len + drawn.len;
     Ok((first.ok_or("nothing was drawn")?, taken))

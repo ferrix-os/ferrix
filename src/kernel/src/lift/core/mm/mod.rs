@@ -110,6 +110,22 @@ pub fn reservation_resize(entry: Reservation, frames: u64) -> Result<(), Refused
     Err(Refused::Unbound)
 }
 pub fn reservation_unbind(entry: Reservation) {}
+pub fn reservation_grow(entry: Reservation, frames: u64) -> Result<(), Refused> {
+    Err(Refused::Unbound)
+}
+/// The shim's heap scope: linuxd binds no reservation, so there is none to
+/// enter (`mm::heap_scope`, L.mm.140).
+#[derive(Debug)]
+pub struct HeapScope;
+pub fn heap_scope(entry: Reservation) -> Option<HeapScope> {
+    None
+}
+pub fn heap_scope_suspended() -> Option<HeapScope> {
+    None
+}
+pub fn heap_scope_overruns(entry: Reservation) -> u64 {
+    0
+}
 pub fn reservation_usage(entry: Reservation) -> (u64, u64) {
     (0, 0)
 }

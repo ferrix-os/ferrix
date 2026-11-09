@@ -69,7 +69,8 @@ mod reserve;
 pub mod scrub;
 mod unlinked;
 
-pub(crate) use reservation::{Entry as Reservation, Refused, drawn_from};
+pub(crate) use reservation::drawn_from;
+pub use reservation::{Entry as Reservation, Refused};
 
 /// No reservation: what a job that draws from none draws from.
 pub const NO_RESERVATION: Reservation = reservation::NONE;
@@ -543,7 +544,8 @@ fn reservation_for(owner: u32) -> Reservation {
 /// `Sync`, since its drop writes the current task's mark; one forgotten
 /// (`mem::forget`) leaves the mark set for the task's life.
 #[must_use = "the scope lasts as long as its guard"]
-pub(crate) struct HeapScope {
+#[derive(Debug)]
+pub struct HeapScope {
     previous: Reservation,
     _task_bound: core::marker::PhantomData<*const ()>,
 }
@@ -558,7 +560,7 @@ impl Drop for HeapScope {
 /// with no task to mark, in interrupt context, for no reservation, for one
 /// not bound, and in a `retyped` build, whose heap is routed by the charge
 /// (`seal::route`, K16) and has no scope.
-pub(crate) fn heap_scope(entry: Reservation) -> Option<HeapScope> {
+pub fn heap_scope(entry: Reservation) -> Option<HeapScope> {
     if cfg!(ferrix_kernel_memory = "retyped")
         || entry == NO_RESERVATION
         || crate::irq::in_interrupt()
@@ -576,7 +578,7 @@ pub(crate) fn heap_scope(entry: Reservation) -> Option<HeapScope> {
 /// Suspend the current task's heap scope while the guard lives: what it
 /// allocates meanwhile is its job's again, as outside any scope. For what a
 /// scoped writer does that is not its own: a device's I/O, the heap's kill.
-pub(crate) fn heap_scope_suspended() -> Option<HeapScope> {
+pub fn heap_scope_suspended() -> Option<HeapScope> {
     let previous = crate::sched::with_current(|task| task.swap_heap_scope(NO_RESERVATION))?;
     Some(HeapScope {
         previous,
@@ -594,17 +596,22 @@ fn scoped_here() -> Reservation {
     crate::sched::with_current(crate::sched::Task::heap_scope).unwrap_or(NO_RESERVATION)
 }
 
-/// The reservation whose heap serves an allocation made here first, and
-/// whether a heap scope chose it: a task inside a heap scope draws from the
-/// scope's reservation, whatever its job's (`L.mm.140`, [`heap_scope`]);
-/// else a job with a reservation, in task context, from its own
-/// (`L.mm.81`); interrupt context never draws (`reservation_for`). K16's
-/// build routes by whoever the request is charged to, a call's ticket
-/// included, and has no scope.
+/// The reservation whose heap serves an allocation of `request` made here
+/// first, and whether a heap scope chose it: a task inside a heap scope
+/// draws from the scope's reservation, whatever its job's, for a request of
+/// at most a page (`L.mm.140`, [`heap_scope`]); else a job with a
+/// reservation, in task context, from its own (`L.mm.81`); interrupt
+/// context never draws (`reservation_for`). K16's build routes by whoever
+/// the request is charged to, a call's ticket included, and has no scope.
+///
+/// A larger request is a run of frames, which a reservation's count of
+/// frames cannot promise to find whole (ledger 8470, CR.1): in a scope it
+/// goes as outside one, and is no overrun.
 #[inline]
-fn heap_entry() -> (Reservation, bool) {
+fn heap_entry(request: Request) -> (Reservation, bool) {
     #[cfg(ferrix_kernel_memory = "retyped")]
     {
+        let _ = request;
         (seal::route(seal::charged()), false)
     }
     #[cfg(not(ferrix_kernel_memory = "retyped"))]
@@ -614,6 +621,9 @@ fn heap_entry() -> (Reservation, bool) {
         }
         match scoped_here() {
             NO_RESERVATION => (reservation_for(crate::sched::running_group()), false),
+            _ if request.effective_size() > PAGE_SIZE as usize => {
+                (reservation_for(crate::sched::running_group()), false)
+            }
             scoped => {
                 debug_assert!(
                     reservation::is_bound(usize::from(scoped) - 1),
@@ -663,7 +673,7 @@ fn note_scope_overrun(entry: Reservation) {
 
 /// How many scoped allocations ran past reservation `entry`'s room since
 /// boot: what a writer's checks require to stay nought.
-pub(crate) fn heap_scope_overruns(entry: Reservation) -> u64 {
+pub fn heap_scope_overruns(entry: Reservation) -> u64 {
     usize::from(entry)
         .checked_sub(1)
         .and_then(|at| SCOPE_OVERRUNS.get(at))
@@ -689,7 +699,7 @@ fn shared_refused_here() -> bool {
 
 /// Bind a free reservation, promising nothing yet, for a job's slot. `None`
 /// when every one is bound or still draining.
-pub(crate) fn reservation_bind() -> Option<Reservation> {
+pub fn reservation_bind() -> Option<Reservation> {
     // An idle reservation's heap gives back the pages it keeps, before the frame
     // allocator's lock, which is taken inside a heap's and never around one. An
     // unbound entry's heap is reached by no task, so nothing comes back meanwhile
@@ -718,7 +728,7 @@ pub(crate) fn reserved_heap_bytes(entry: Reservation) -> usize {
 ///
 /// [`Refused::Short`], with how many frames more were needed;
 /// [`Refused::Unbound`] for an entry not bound.
-pub(crate) fn reservation_resize(entry: Reservation, frames: u64) -> Result<(), Refused> {
+pub fn reservation_resize(entry: Reservation, frames: u64) -> Result<(), Refused> {
     let watermark = WATERMARK.load(Ordering::Relaxed);
     with_frames(|all| reservation::resize(entry, frames, all.free_frames(), watermark))
         .unwrap_or(Err(Refused::Unbound))
@@ -726,17 +736,18 @@ pub(crate) fn reservation_resize(entry: Reservation, frames: u64) -> Result<(), 
 
 /// Unbind `entry` as its job's slot goes: it promises nothing more, and
 /// drains as its frames are freed (`L.object.225`).
-pub(crate) fn reservation_unbind(entry: Reservation) {
+pub fn reservation_unbind(entry: Reservation) {
     let _ = with_frames(|_| reservation::unbind(entry));
 }
 
+// CHECKS-ONLY: fs/btrfs_write_check/reserve_check.rs, user/rehome_cache_check.rs
 /// The outstanding promise: free frames that belong to a reservation.
-pub(crate) fn outstanding_promise() -> u64 {
+pub fn outstanding_promise() -> u64 {
     reservation::outstanding()
 }
 
 /// A reservation's size and what is drawn from it, in frames.
-pub(crate) fn reservation_usage(entry: Reservation) -> (u64, u64) {
+pub fn reservation_usage(entry: Reservation) -> (u64, u64) {
     reservation::usage(entry)
 }
 
@@ -1471,7 +1482,7 @@ unsafe impl GlobalAlloc for KernelAllocator {
         // A job with a reservation, in task context, is served by its own
         // heap while the reservation has room, and by the shared heap after
         // (`L.mm.81`); interrupt context never draws (`reservation_for`).
-        let (entry, scoped) = heap_entry();
+        let (entry, scoped) = heap_entry(request);
         // The reserve's check makes the heap refuse its own task's
         // allocations, so that the fallback below is what answers them
         // (L.mm.37, L.mm.139; `reserve::refuse_heap_for`).
@@ -1810,8 +1821,71 @@ fn heap_or_kill(request: Request, injected: u64) -> Option<u64> {
     None
 }
 
+/// Grow reservation `entry` to `frames` for the kernel heap a scoped writer
+/// is about to draw (W1): refused as [`reservation_resize`] refuses, and
+/// then, where it may block and for no failure injection's sake, answered
+/// as the heap answers its own refusal -- reclaims of clean cache while one
+/// gives some back, at most [`HEAP_RECLAIMS`] (`L.mm.146`, as `L.mm.136`
+/// for the heap), then the machine-wide kill while it answers retry, at
+/// most `oom::KERNEL_HEAP_ANSWERS` (`L.mm.138`) -- with the resize tried
+/// again after each. The kill is asked only while the growth is refused for
+/// want of free frames: free frames under the watermark, the outstanding
+/// promise and the growth together, with no clean cache left to give them. The promise is the heap the operation would otherwise take
+/// as it went, so it is made room for the same way, before the operation's
+/// first change rather than in its middle. The caller holds no spin lock
+/// and is in no heap scope's draw: the scope is suspended for the
+/// reclaims' and the kill's own allocations.
+///
+/// # Errors
+///
+/// What the last resize answered: [`Refused::Short`] when nothing made
+/// room, [`Refused::Unbound`] for an entry not bound.
+pub fn reservation_grow(entry: Reservation, frames: u64) -> Result<(), Refused> {
+    use crate::object::oom::{self, Answer};
+    let mut answer = reservation_resize(entry, frames);
+    if !matches!(answer, Err(Refused::Short(_)))
+        || !heap_may_reclaim()
+        || fallible::injecting_here()
+    {
+        return answer;
+    }
+    let _suspended = heap_scope_suspended();
+    for _ in 0..HEAP_RECLAIMS {
+        let Err(Refused::Short(short)) = answer else {
+            return answer;
+        };
+        if !reclaim_for_kernel(short) {
+            break;
+        }
+        answer = reservation_resize(entry, frames);
+        if answer.is_ok() {
+            let _ = RESERVATION_RECLAIMED.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    for _ in 0..oom::KERNEL_HEAP_ANSWERS {
+        if !matches!(answer, Err(Refused::Short(_))) {
+            return answer;
+        }
+        if while_killing(oom::for_kernel_heap) != Answer::Retry {
+            break;
+        }
+        answer = reservation_resize(entry, frames);
+    }
+    answer
+}
+
 /// Refused heap allocations a reclaim let in ([`heap_or_reclaim`]).
 static HEAP_RECLAIMED: AtomicU64 = AtomicU64::new(0);
+
+/// Refused reservation growths a reclaim let in ([`reservation_grow`]).
+static RESERVATION_RECLAIMED: AtomicU64 = AtomicU64::new(0);
+
+// CHECKS-ONLY: user/rehome_cache_check.rs
+/// How many refused reservation growths a reclaim let in since boot: what
+/// the check of L.mm.146 reads, as [`heap_reclaimed`] for L.mm.136.
+pub(crate) fn reservation_reclaimed() -> u64 {
+    RESERVATION_RECLAIMED.load(Ordering::Relaxed)
+}
 
 // CHECKS-ONLY: user/rehome_cache_check.rs
 /// How many refused heap allocations a reclaim let in since boot: what the

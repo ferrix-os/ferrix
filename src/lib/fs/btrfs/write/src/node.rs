@@ -92,15 +92,31 @@ impl TreeNode {
         if header.flags & HEADER_FLAG_RELOC != 0 {
             return Err(Error::Unsupported(Unsupported::SharedBlock));
         }
+        // Each list is made at its length, never grown: a list grown by
+        // doubling takes up to twice its length, and leaves each smaller
+        // size class it passed through a partly used page (the bound an
+        // admission counts, `crate::reserve::node_frames`). `parse` checked
+        // every slot lies inside the node.
+        let count = node.nritems() as usize;
         let body = if node.is_leaf() {
-            Body::Leaf(fallible::collect_ok(node.items().map(|item| {
-                Ok(LeafItem {
-                    key: item.key,
-                    data: fallible::copy(item.data)?,
-                })
-            }))?)
+            let mut items = fallible::with_capacity(count)?;
+            for item in node.items() {
+                let data = fallible::copy(item.data)?;
+                fallible::push(
+                    &mut items,
+                    LeafItem {
+                        key: item.key,
+                        data,
+                    },
+                )?;
+            }
+            Body::Leaf(items)
         } else {
-            Body::Internal(fallible::collect(node.key_ptrs())?)
+            let mut ptrs = fallible::with_capacity(count)?;
+            for ptr in node.key_ptrs() {
+                fallible::push(&mut ptrs, ptr)?;
+            }
+            Body::Internal(ptrs)
         };
         Ok(TreeNode {
             bytenr: header.bytenr,

@@ -46,6 +46,9 @@ mod poison_check;
 mod reclaim_check;
 #[cfg(not(ferrix_load_built = "lift"))]
 #[cfg(not(ferrix_fs = "server"))]
+mod reserve_check;
+#[cfg(not(ferrix_load_built = "lift"))]
+#[cfg(not(ferrix_fs = "server"))]
 mod stuck_check;
 
 /// Where the writable disk is mounted.
@@ -405,6 +408,15 @@ pub fn run() -> Result<Report, &'static str> {
             .map_err(|_| "the volume could not be synced before the stuck-file check")?;
         ns.unmount(&place)
             .map_err(|_| "the volume could not be unmounted before the stuck-file check")?;
+        drop(place);
+        // The mount's memory reservation (W1-b, W1-c), with the disk to
+        // itself as the stuck-file check has it.
+        let drawn = reserve_check::run(rdev)?;
+        crate::console::println!(
+            "  btrfs-rw vdc's memory reservation bound at the mount, {drawn} frames left drawn \
+             by its edits and commits with none past it, nothing promised between operations, \
+             unbound once unmounted; mounted again with none free, without one"
+        );
         stuck_check::run(rdev)?;
         let back = fs::btrfs::mount_rw(rdev)
             .map_err(|_| "the volume would not mount again after the stuck-file check")?;

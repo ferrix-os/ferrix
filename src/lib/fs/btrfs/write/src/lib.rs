@@ -86,11 +86,13 @@ pub mod node;
 mod open;
 pub mod ranges;
 pub mod refs;
+mod reserve;
 pub mod space;
 mod tree;
 mod volume;
 
 pub use fs::NewInode;
+pub use reserve::{OPERATION_FRAMES, Reserve, node_frames};
 pub use volume::{TreeId, WriteVolume};
 
 /// A device a volume can be written to, as well as read from.

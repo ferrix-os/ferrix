@@ -32,6 +32,7 @@ use crate::extent::{
 };
 use crate::ranges::RangeSet;
 use crate::refs::DelayedRefs;
+use crate::reserve::Reserved;
 use crate::space::{BlockGroup, Space};
 use crate::volume::{Geometry, Root};
 use crate::{Error, Result, Unsupported, WriteDevice, WriteVolume, fallible};
@@ -117,6 +118,7 @@ impl<D: WriteDevice> WriteVolume<D> {
             depth: 0,
             admitting: false,
             edits: 0,
+            reserve: Reserved::none(),
         };
         let _ = fallible::insert(
             &mut volume.roots,
@@ -156,8 +158,15 @@ impl<D: WriteDevice> WriteVolume<D> {
     /// Nothing the transaction did reached the disk in a form the superblock
     /// names — nodes it wrote went to space the committed trees do not use —
     /// so the last commit is intact and reopening from it is complete.
+    ///
+    /// The reservation the volume was handed goes with the reopened one.
     pub fn abort(self) -> Result<Self> {
-        Self::open(self.device)
+        let WriteVolume {
+            device, reserve, ..
+        } = self;
+        let mut volume = Self::open(device)?;
+        volume.reserve = reserve;
+        Ok(volume)
     }
 
     /// Throw the running transaction away, as [`WriteVolume::abort`] does,
@@ -210,6 +219,7 @@ impl<D: WriteDevice> WriteVolume<D> {
             edits,
             depth,
             admitting: _,
+            reserve: _,
         } = WriteVolume::open_committed(Borrowed(&mut self.device))?;
         // A log the reload replayed, whose replay itself failed: the
         // volume stays as it was, aborted.
@@ -235,6 +245,10 @@ impl<D: WriteDevice> WriteVolume<D> {
         self.read_only = true;
         self.edits = edits;
         self.depth = depth;
+        // A volume that takes no edit needs no memory promised for one: the
+        // reservation the mount handed it is kept, promising nothing
+        // (W1-b, ledger 8337 W1.7).
+        self.reserve.shrink();
         Ok(())
     }
 

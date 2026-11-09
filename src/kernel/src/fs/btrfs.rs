@@ -30,6 +30,20 @@
 //! given back between operations"). What they hold is counted for
 //! `/proc/meminfo` ([`clean_bytes`]).
 //!
+//! # Memory reserved for an edit
+//!
+//! A writable mount binds one of the kernel's memory reservations (K12,
+//! `mm::reservation_bind`) and hands the writer a [`MountReserve`] on it, the
+//! [`Reserve`] its operations are admitted against and run inside
+//! (`docs/BTRFS-PRESSURE.md`, W1; ledger 8337 W1.7). It promises nothing until
+//! an operation asks, and never more than [`reserve_most`] beyond what is
+//! drawn. The reservations are shared with jobs, 64 in all, so a mount never
+//! fails for want of one: with none free it runs as before W1, and says so
+//! once. The reservation is unbound when the volume is dropped, after its last
+//! operation, and drains as a job's does; a reload read-only after an aborted
+//! transaction shrinks it to nothing. The disk's own reads and writes are not
+//! the operation's, and never draw from it ([`Disk`], W1.3).
+//!
 //! # The device outlives its registration
 //!
 //! The registry hands out an `Arc`, and the mount keeps it for its life. A
@@ -37,6 +51,7 @@
 //! mount then answers `EIO` to every read of a file — never a hang and never
 //! a panic — until it is unmounted.
 
+use alloc::boxed::Box;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::fmt;
@@ -45,17 +60,27 @@ use ferrix_btrfs::BtrfsError;
 use ferrix_btrfs::volume::{Device, ReadKind};
 use ferrix_btrfs_vfs::Btrfs;
 use ferrix_btrfs_vfs::rw::RwBtrfs;
-use ferrix_btrfs_write::{Error as WriteError, WriteDevice};
+use ferrix_btrfs_write::{Error as WriteError, Reserve, WriteDevice};
 use ferrix_vfs::{Errno, FileSystem};
 
 use super::block::BlockDevice;
 use super::devfs;
 use super::pages::VmoStorage;
 use crate::fallible;
+use crate::mm;
 use crate::sync::SpinLock;
 
-/// Every writable mount, weakly: those [`drop_clean`] asks.
-static WRITABLE: SpinLock<Vec<Weak<RwBtrfs<Disk>>>> = SpinLock::new(Vec::new());
+/// Every writable mount, weakly: those [`drop_clean`] asks, each with the
+/// reservation it draws from, if it found one.
+static WRITABLE: SpinLock<Vec<Listed>> = SpinLock::new(Vec::new());
+
+/// A writable mount as [`WRITABLE`] lists it: the volume, weakly, and the
+/// reservation it draws from, if it found one.
+type Listed = (Weak<RwBtrfs<Disk>>, Option<mm::Reservation>);
+
+/// A mount's reservation as [`MountReserve::bind`] answers it: the entry,
+/// and the writer's handle on it.
+type Bound = (mm::Reservation, Box<dyn Reserve>);
 
 /// A registered disk as a btrfs volume reads it: bytes at physical offsets,
 /// fetched in whole sectors.
@@ -115,6 +140,9 @@ impl Device for Disk {
         if buf.is_empty() {
             return Ok(());
         }
+        // The disk's memory is not the operation's: the block ring's payload
+        // and the driver's draw nothing from a mount's reservation (W1.3).
+        let _suspended = mm::heap_scope_suspended();
         let len = buf.len() as u64;
         let end = physical.checked_add(len).ok_or(failed)?;
         let first = physical / self.sector;
@@ -146,6 +174,8 @@ impl WriteDevice for Disk {
         if data.is_empty() {
             return Ok(());
         }
+        // As a read: never the mount's reservation (W1.3).
+        let _suspended = mm::heap_scope_suspended();
         let len = data.len() as u64;
         let end = physical.checked_add(len).ok_or(failed)?;
         let first = physical / self.sector;
@@ -165,6 +195,7 @@ impl WriteDevice for Disk {
     /// Everything written is durable when this returns: the driver's flush,
     /// which the commit puts between its nodes and its superblock.
     fn flush(&mut self) -> Result<(), WriteError> {
+        let _suspended = mm::heap_scope_suspended();
         self.device.flush().map_err(|_| WriteError::Flush)
     }
 }
@@ -227,16 +258,139 @@ pub(crate) fn mount_rw(rdev: u64) -> Result<Arc<dyn FileSystem>, Errno> {
         return Err(Errno::EROFS);
     }
     let disk = Disk::new(device)?;
-    let volume = RwBtrfs::mount(
+    // NOALLOC: `Option::unzip`, the pair taken apart, no heap.
+    let (entry, reserve) = MountReserve::bind(rdev)?.unzip();
+    let volume = RwBtrfs::mount_reserved(
         disk,
         rdev,
         Arc::new(VmoStorage),
         super::clock(),
         &crate::sync::SchedParker,
         |why| crate::console::println!("  btrfs    {why}"),
+        reserve,
     )?;
-    list_writable(&volume)?;
+    list_writable(&volume, entry)?;
     Ok(volume as Arc<dyn FileSystem>)
+}
+
+/// The most a writable mount's reservation promises beyond what is drawn,
+/// in frames: `R_MAX`, 64 MiB or a 64th of the memory managed, whichever is
+/// less (ledger 8338 (b); its reference value is in
+/// `tools/common/data/certification-item.json`). Every frame promised is one
+/// no unreserved program may take (`L.mm.77`), so the worst outstanding
+/// promise is this for each writable mount (`docs/certification/
+/// MEMORY-AND-TIMING.md` §2.2am).
+pub(crate) fn reserve_most() -> u64 {
+    /// 64 MiB in frames.
+    const MOST: u64 = (64 * 1024 * 1024) / ferrix_bootinfo::PAGE_SIZE;
+    MOST.min(mm::managed_frames() / 64)
+}
+
+/// A writable mount's memory reservation (W1-b): one K12 entry, bound when
+/// the volume is mounted and unbound when it is dropped
+/// (`L.object.225`). The writer is its only user: it grows it before an
+/// operation's first change and runs the operation inside it
+/// ([`Reserve::within`], a heap scope, `L.mm.140`).
+///
+/// The volume holds it, and the volume is reached only under its lock, so
+/// no scope on it outlives the binding: the last [`Reserve::within`] has
+/// returned before the volume, and this with it, is dropped (ledger 8448
+/// A3).
+#[derive(Debug)]
+struct MountReserve {
+    entry: mm::Reservation,
+    /// The disk, for the notice.
+    rdev: u64,
+    /// Whether an operation ran past the reservation (`L.mm.140`'s count
+    /// moved), said once.
+    overran: core::sync::atomic::AtomicBool,
+}
+
+impl MountReserve {
+    /// Bind a reservation for the mount of the disk numbered `rdev`: `None`,
+    /// and a notice, when every entry is taken, in which case the mount runs
+    /// as before W1 (W1.7: a mount never fails for want of one).
+    ///
+    /// # Errors
+    ///
+    /// `ENOMEM` when the writer's handle could not be made; the entry is
+    /// unbound again.
+    fn bind(rdev: u64) -> Result<Option<Bound>, Errno> {
+        let Some(entry) = mm::reservation_bind() else {
+            crate::console::println!(
+                "  btrfs    disk {rdev:#x}: no memory reservation free; its edits are \
+                 admitted against nothing, as before W1"
+            );
+            return Ok(None);
+        };
+        // The handle unbinds the entry in its drop, the refused box's too.
+        let reserve = ferrix_fallible::try_box(MountReserve {
+            entry,
+            rdev,
+            overran: core::sync::atomic::AtomicBool::new(false),
+        })
+        .map_err(|_| Errno::ENOMEM)?;
+        Ok(Some((entry, reserve)))
+    }
+}
+
+impl Reserve for MountReserve {
+    /// Made room for as a refused heap allocation is: reclaims, then the
+    /// machine-wide kill (`mm::reservation_grow`).
+    fn grow_to(&self, frames: u64) -> bool {
+        mm::reservation_grow(self.entry, frames).is_ok()
+    }
+
+    fn drawn(&self) -> u64 {
+        mm::reservation_usage(self.entry).1
+    }
+
+    fn most(&self) -> u64 {
+        reserve_most()
+    }
+
+    fn within(&self, body: &mut dyn FnMut()) {
+        use core::sync::atomic::Ordering;
+        let before = mm::heap_scope_overruns(self.entry);
+        {
+            // None in a retyped build or in interrupt context: the body
+            // runs against the shared heap, as before W1.
+            let _scope = mm::heap_scope(self.entry);
+            body();
+        }
+        // An allocation of at most a page past what the operation was
+        // admitted for: a bound too small, which every check requires never
+        // to happen (W1.5). Said once a mount.
+        let overruns = mm::heap_scope_overruns(self.entry).saturating_sub(before);
+        if overruns > 0 && !self.overran.swap(true, Ordering::Relaxed) {
+            crate::console::println!(
+                "  btrfs    disk {:#x}: an operation ran past its memory reservation \
+                 ({overruns} allocations served by the shared heap)",
+                self.rdev
+            );
+        }
+    }
+
+    fn shrink(&self) {
+        // A shrink is always admitted (`L.mm.76`).
+        let _ = mm::reservation_resize(self.entry, 0);
+    }
+}
+
+impl Drop for MountReserve {
+    fn drop(&mut self) {
+        mm::reservation_unbind(self.entry);
+    }
+}
+
+/// The reservation the writable mount `filesystem` draws from, for the
+/// checks: `None` for one that found none free, or is not listed.
+pub(crate) fn reservation_of(filesystem: &Arc<dyn FileSystem>) -> Option<mm::Reservation> {
+    let listed = WRITABLE.lock();
+    listed
+        .iter()
+        .find(|(entry, _)| core::ptr::addr_eq(entry.as_ptr(), Arc::as_ptr(filesystem)))
+        .and_then(|&(_, reservation)| reservation)
 }
 
 /// List `volume` for [`drop_clean`] and [`clean_bytes`], dropping the
@@ -246,10 +400,10 @@ pub(crate) fn mount_rw(rdev: u64) -> Result<Arc<dyn FileSystem>, Errno> {
 ///
 /// `ENOMEM` when the list cannot grow: the mount is refused rather than
 /// left with a cache no reclaim reaches.
-fn list_writable(volume: &Arc<RwBtrfs<Disk>>) -> Result<(), Errno> {
+fn list_writable(volume: &Arc<RwBtrfs<Disk>>, entry: Option<mm::Reservation>) -> Result<(), Errno> {
     let mut listed = WRITABLE.lock();
-    listed.retain(|entry| entry.strong_count() > 0);
-    fallible::try_push(&mut listed, Arc::downgrade(volume)).map_err(|_| Errno::ENOMEM)
+    listed.retain(|(volume, _)| volume.strong_count() > 0);
+    fallible::try_push(&mut listed, (Arc::downgrade(volume), entry)).map_err(|_| Errno::ENOMEM)
 }
 
 /// The writable mounts alive now, or none with no memory to list them. The
@@ -259,7 +413,7 @@ fn writable() -> Vec<Arc<RwBtrfs<Disk>>> {
     let Ok(mut out) = fallible::try_with_capacity(listed.len()) else {
         return Vec::new();
     };
-    for entry in listed.iter() {
+    for (entry, _) in listed.iter() {
         if let Some(volume) = entry.upgrade() {
             // The room was had above.
             let _ = fallible::push_within(&mut out, volume);

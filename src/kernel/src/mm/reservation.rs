@@ -84,7 +84,7 @@ static OUTSTANDING: AtomicU64 = AtomicU64::new(0);
 static TAGS: Once<(&'static [AtomicU8], Frame)> = Once::new();
 
 /// A bound or draining entry: its index plus one, so that [`NONE`] is none.
-pub(crate) type Entry = u8;
+pub type Entry = u8;
 
 /// The entry's slot.
 fn slot(entry: Entry) -> Option<&'static Slot> {
@@ -292,7 +292,7 @@ pub(super) fn unbind(entry: Entry) {
 
 /// Why a resize was refused.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Refused {
+pub enum Refused {
     /// The free frames could not cover it: how many more it needed.
     Short(u64),
     /// The entry is not bound.
@@ -311,7 +311,11 @@ pub(super) fn resize(entry: Entry, frames: u64, free: u64, watermark: u64) -> Re
     let least = watermark
         .saturating_add(outstanding())
         .saturating_add(grows);
-    if free < least {
+    // A resize that adds nothing to the promise -- a shrink, to below what
+    // is drawn as well -- is always admitted (`L.mm.76`), even with the free
+    // count under the watermark: giving a promise back must not wait for
+    // room (a writable mount's, after each operation, W1).
+    if grows > 0 && free < least {
         return Err(Refused::Short(least - free));
     }
     adjust(slot, |slot| slot.size.store(frames, Ordering::Relaxed));

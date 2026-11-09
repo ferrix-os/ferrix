@@ -381,7 +381,7 @@
     },
     "src/lib/fs/btrfs/write/src/open.rs::open_committed": {
       "complexity": 20,
-      "lines": 67,
+      "lines": 68,
       "recursive": false
     },
     "src/lib/fs/btrfs/write/src/tree.rs::fixup": {

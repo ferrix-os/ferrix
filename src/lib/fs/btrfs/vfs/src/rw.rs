@@ -174,7 +174,7 @@ use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use ferrix_btrfs::BtrfsError;
 use ferrix_btrfs::items::Timespec as BtrfsTime;
 use ferrix_btrfs_write::fs::NewInode;
-use ferrix_btrfs_write::{Error as WriteError, Unsupported, WriteDevice, WriteVolume};
+use ferrix_btrfs_write::{Error as WriteError, Reserve, Unsupported, WriteDevice, WriteVolume};
 use ferrix_sync::{Parker, Parking, SleepLock, SleepLockGuard};
 use ferrix_vfs::tmpfs::{PAGE_SIZE, PageSource, Pages, Storage};
 use ferrix_vfs::{
@@ -335,7 +335,26 @@ impl<D: WriteHandle> RwBtrfs<D> {
         parker: &dyn Parker,
         notice: fn(fmt::Arguments<'_>),
     ) -> Result<Arc<RwBtrfs<D>>> {
-        let volume = WriteVolume::open(device).map_err(mount_errno)?;
+        Self::mount_reserved(device, dev_no, storage, clock, parker, notice, None)
+    }
+
+    /// [`RwBtrfs::mount`], handing the volume `reserve`, the memory its
+    /// operations are admitted against (`ferrix_btrfs_write::Reserve`, W1):
+    /// the volume keeps it until it is dropped, after its last operation.
+    /// With none it runs as before.
+    pub fn mount_reserved(
+        device: D,
+        dev_no: u64,
+        storage: Arc<dyn Storage>,
+        clock: Arc<dyn Clock>,
+        parker: &dyn Parker,
+        notice: fn(fmt::Arguments<'_>),
+        reserve: Option<Box<dyn Reserve>>,
+    ) -> Result<Arc<RwBtrfs<D>>> {
+        let mut volume = WriteVolume::open(device).map_err(mount_errno)?;
+        if let Some(reserve) = reserve {
+            volume.set_reserve(reserve);
+        }
         let room = volume.data_room();
         let shared = Arc::new(Shared {
             volume: SleepLock::new(volume, parker),
@@ -716,11 +735,14 @@ impl<D: WriteHandle> Shared<D> {
                 }
             }
             let before = volume.data_room();
-            *self.pending.lock() = 0;
+            let pending = core::mem::take(&mut *self.pending.lock());
             *self.structural.lock() = false;
             // Durability: whether the writes since the last commit reached
             // the disk, so EIO after an abort, never ENOMEM (W3.1).
             let committed = volume.commit().map_err(durable_errno);
+            if committed.is_err() {
+                self.commit_refused(pending);
+            }
             self.note_room(&volume);
             // A commit refused after a writeback failed -- the failure
             // aborted the transaction -- answers what failed first.
@@ -744,11 +766,32 @@ impl<D: WriteHandle> Shared<D> {
         *self.structural.lock() = true;
     }
 
+    /// A commit that did not happen: refused before its first change for
+    /// want of memory (W1-c, `WriteVolume::commit`), the transaction kept
+    /// whole. What it was to make durable is still to be committed, so the
+    /// next `fsync` commits rather than log one inode and leave the names
+    /// made since the last commit out (`structural`). After an aborted
+    /// transaction it changes nothing: nothing is committed any more.
+    /// `pending`, the bytes written since the last commit that were zeroed
+    /// for it, comes back too, so the next write's threshold still counts
+    /// them.
+    fn commit_refused(&self, pending: u64) {
+        self.shape_changed();
+        let mut now = self.pending.lock();
+        *now = now.saturating_add(pending);
+    }
+
     /// Commit first if the running transaction holds more tree nodes than
     /// [`COMMIT_THRESHOLD`]: before a change to the tree's shape, so what a
     /// loop of them holds in memory stays within the threshold and one more.
+    /// Or if its commit would need more memory than the volume's
+    /// reservation may promise (`WriteVolume::commit_due`, W1-c): past it,
+    /// the commit would run partly unreserved.
     fn commit_if_heavy(&self) -> Result<()> {
-        let heavy = self.lock().dirty_bytes() >= COMMIT_THRESHOLD;
+        let heavy = {
+            let volume = self.lock();
+            volume.dirty_bytes() >= COMMIT_THRESHOLD || volume.commit_due()
+        };
         if heavy { self.sync_all() } else { Ok(()) }
     }
 }
@@ -1762,10 +1805,14 @@ impl<D: WriteHandle> Inode for Node<D> {
         let mut volume = self.shared.lock();
         self.write_back(&mut volume)?;
         if *self.shared.structural.lock() {
-            *self.shared.pending.lock() = 0;
+            let pending = core::mem::take(&mut *self.shared.pending.lock());
             *self.shared.structural.lock() = false;
             // Durability: EIO after an abort, never ENOMEM (W3.1).
-            return volume.commit().map_err(durable_errno);
+            let committed = volume.commit().map_err(durable_errno);
+            if committed.is_err() {
+                self.shared.commit_refused(pending);
+            }
+            return committed;
         }
         volume.log_inode(self.ino).map_err(durable_errno)?;
         volume.commit_log().map_err(durable_errno)
@@ -1896,8 +1943,10 @@ fn errno(error: WriteError) -> Errno {
 /// a writeback -- which after an aborted transaction is `EIO` even while the
 /// reload is short of memory: those writes are lost, and `ENOMEM` would say
 /// to try again (W3.1, ledger 8248). [`Shared::errno`] is for the rest.
+/// A commit refused for memory before its first change (W1-c) is no abort:
+/// nothing is lost, and its `ENOMEM` rightly says to try again.
 fn durable_errno(error: WriteError) -> Errno {
-    errno(error) // W3.1: never ENOMEM
+    errno(error) // W3.1: never ENOMEM for an abort
 }
 
 /// The error a writable mount reports for a volume it will not take.

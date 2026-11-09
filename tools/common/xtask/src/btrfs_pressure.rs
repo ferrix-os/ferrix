@@ -584,6 +584,7 @@ fn boot(
         Kind::Floor | Kind::Cgroup => judge(&ours),
     };
     let judged = judged.and_then(|()| judge_heap_kills(kind, &lines));
+    let judged = judged.and_then(|()| judge_reserve(&lines));
     let judged = match lines.iter().find(|l| l.contains(qemu::PANIC_MARKER)) {
         Some(stop) => Err(format!("the kernel stopped: {}", stop.trim())),
         None => judged,
@@ -698,6 +699,25 @@ fn judge_commit(ours: &[&str], kernel: &[&str]) -> std::result::Result<(), Strin
         return Err(format!("not every name was made and found (`{wanted}`)"));
     }
     Ok(())
+}
+
+/// What the kernel says when a btrfs operation's allocations of at most a
+/// page ran past what it was admitted for (`fs::btrfs::MountReserve`): a
+/// bound too small (`docs/BTRFS-PRESSURE.md` W1, ledger 8337 W1.5).
+const RESERVE_OVERRUN: &str = "ran past its memory reservation";
+
+/// Whether every btrfs operation of the boot stayed inside what it was
+/// admitted for: the kernel never said that one ran past its mount's
+/// reservation (L.btrfs.125's bound, under load). In every kind of boot,
+/// the hog's above all, whose heap has nothing to fall back on.
+fn judge_reserve(lines: &[String]) -> std::result::Result<(), String> {
+    match lines.iter().find(|l| l.contains(RESERVE_OVERRUN)) {
+        Some(line) => Err(format!(
+            "an operation ran past its memory reservation: {}",
+            line.trim()
+        )),
+        None => Ok(()),
+    }
 }
 
 /// What the kernel says when it kills for its own heap
@@ -870,6 +890,18 @@ mod tests {
         assert!(judge_hog(&[made.as_str()], &[killed]).is_err());
         let driver = "oom      pid 587 killed, 696 pages resident, for the kernel's heap with the machine out of memory";
         assert!(judge_hog(&good, &[killed, driver]).is_err());
+    }
+
+    #[test]
+    fn any_boot_fails_on_an_operation_past_its_reservation() {
+        let quiet = vec!["  btrfs    disk 0x1: mounted".to_owned()];
+        assert!(judge_reserve(&quiet).is_ok());
+        let overran = vec![
+            "  btrfs    disk 0x1: an operation ran past its memory reservation (3 allocations \
+             served by the shared heap)"
+                .to_owned(),
+        ];
+        assert!(judge_reserve(&overran).is_err());
     }
 
     #[test]
