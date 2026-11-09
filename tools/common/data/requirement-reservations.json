@@ -251,6 +251,13 @@
       "branch": "feature/btrfs-edit-reserve-mm",
       "date": "2026-11-08",
       "purpose": "W1 (docs/BTRFS-PRESSURE.md, ledger 8337 W1.11; L.mm.140 written by W1-a): L.btrfs.124 admission reserves an operation's bound before any change and a refusal changes nothing, L.btrfs.125 edits and commits run inside the handed reservation (W1-c)."
+    },
+    {
+      "ids": ["L.mm.146"],
+      "owner": "btrfs-reference",
+      "branch": "feature/btrfs-edit-reserve",
+      "date": "2026-11-09",
+      "purpose": "W1-c (docs/BTRFS-PRESSURE.md, ledger 8337 W1.8): L.mm.146 a reservation's growth for a heap scope, refused for want of free frames, reclaims clean cache and tries again, as a refused heap allocation does (L.mm.136). L.mm.141-145 are R6's (ledger 8475 R6.8), not yet reserved here."
     }
   ]
 }
