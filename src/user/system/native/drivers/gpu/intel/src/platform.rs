@@ -93,8 +93,23 @@ struct Pinned {
 impl Drop for Pinned {
     fn drop(&mut self) {
         let _ = ferrix_rt::linux::munmap(self.map, self.len);
+        let _ = LIVE_PINS.fetch_sub(1, core::sync::atomic::Ordering::Relaxed);
     }
 }
+
+impl Drop for Memory {
+    fn drop(&mut self) {
+        let _ = LIVE_MEMORIES.fetch_sub(1, core::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// GEM objects' memories alive, and how many of them are pinned: each holds
+/// one kernel handle, a pinned one three (its VMO, its pin, its table of
+/// addresses), of the process's 4096 (`object::HANDLE_LIMIT`). Said in the
+/// frequency log.
+static LIVE_MEMORIES: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+/// See [`LIVE_MEMORIES`].
+static LIVE_PINS: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
 
 impl AsVmo for Memory {
     fn vmo(&self) -> &Vmo<Kernel> {
@@ -221,7 +236,9 @@ impl<'a> Real<'a> {
         if !got.is_complete() {
             return Err(Error::NoMemory);
         }
-        let _ = memory.pinned.set(pinned);
+        if memory.pinned.set(pinned).is_ok() {
+            let _ = LIVE_PINS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        }
         Ok(())
     }
 }
@@ -377,6 +394,7 @@ impl Platform for Real<'_> {
             vmo.write(&tag.to_ne_bytes(), bytes as u64)
                 .map_err(|_| Error::NoMemory)?;
         }
+        let _ = LIVE_MEMORIES.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         Ok(Memory {
             vmo,
             pages: bytes / PAGE,
@@ -520,7 +538,7 @@ impl Platform for Real<'_> {
     fn frequency_report(&mut self, report: &FrequencyReport) {
         let sample = &report.sample;
         ferrix_rt::debug!(
-            "intel: freqlog: asked {} MHz{}, actual {} MHz (RPSTAT1 {:#010x}), limits {}, busy {}.{} %, ran {}.{} % in {} runs, bound {}/{}/{} MiB by 2M/64K/4K, RC6 {}.{} %, package {}.{:03} W, parks {}, boosts {}, waiters {}, memory {} MHz (SA_PERF_STATUS {:#010x})",
+            "intel: freqlog: asked {} MHz{}, actual {} MHz (RPSTAT1 {:#010x}), limits {}, busy {}.{} %, ran {}.{} % in {} runs, bound {}/{}/{} MiB by 2M/64K/4K, {} objects {} pinned, RC6 {}.{} %, package {}.{:03} W, parks {}, boosts {}, waiters {}, memory {} MHz (SA_PERF_STATUS {:#010x})",
             sample.requested_mhz,
             if report.pinned {
                 " (pinned)"
@@ -540,6 +558,8 @@ impl Platform for Real<'_> {
             report.bound[0] >> 20,
             report.bound[1] >> 20,
             report.bound[2] >> 20,
+            LIVE_MEMORIES.load(core::sync::atomic::Ordering::Relaxed),
+            LIVE_PINS.load(core::sync::atomic::Ordering::Relaxed),
             report.rc6_permille / 10,
             report.rc6_permille % 10,
             report.milliwatts / 1000,
