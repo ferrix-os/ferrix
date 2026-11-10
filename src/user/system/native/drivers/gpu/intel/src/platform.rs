@@ -520,7 +520,7 @@ impl Platform for Real<'_> {
     fn frequency_report(&mut self, report: &FrequencyReport) {
         let sample = &report.sample;
         ferrix_rt::debug!(
-            "intel: freqlog: asked {} MHz{}, actual {} MHz (RPSTAT1 {:#010x}), limits {}, busy {}.{} %, ran {}.{} %, RC6 {}.{} %, package {}.{:03} W, parks {}, boosts {}, waiters {}, memory {} MHz (SA_PERF_STATUS {:#010x})",
+            "intel: freqlog: asked {} MHz{}, actual {} MHz (RPSTAT1 {:#010x}), limits {}, busy {}.{} %, ran {}.{} %, bound {}/{}/{} MiB by 2M/64K/4K, RC6 {}.{} %, package {}.{:03} W, parks {}, boosts {}, waiters {}, memory {} MHz (SA_PERF_STATUS {:#010x})",
             sample.requested_mhz,
             if report.pinned {
                 " (pinned)"
@@ -536,6 +536,9 @@ impl Platform for Real<'_> {
             report.busy_permille % 10,
             report.ran_permille / 10,
             report.ran_permille % 10,
+            report.bound[0] >> 20,
+            report.bound[1] >> 20,
+            report.bound[2] >> 20,
             report.rc6_permille / 10,
             report.rc6_permille % 10,
             report.milliwatts / 1000,

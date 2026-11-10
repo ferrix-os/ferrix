@@ -205,6 +205,10 @@ pub struct FrequencyReport {
     /// view (in the ports) and also counts the time from a context's last
     /// request finishing to the driver seeing it.
     pub ran_permille: u64,
+    /// Bytes of GEM objects bound into a VM since the driver started, by
+    /// the GPU page size they were mapped with: 2 MiB, 64 KiB, 4 KiB
+    /// (`docs/INTEL-GPU.md` §14). Unbinds are not taken off.
+    pub bound: [u64; 3],
 }
 
 /// An engine as the uAPI names it (`I915_ENGINE_CLASS_*`, instance).
@@ -388,6 +392,8 @@ pub struct XelpBackend<P: Platform> {
     /// `rps->num_waiters`: requests in flight a program waits on; recounted
     /// at each service while not 0.
     waiters: u32,
+    /// Bytes bound so far by GPU page size ([`FrequencyReport::bound`]).
+    bound: [u64; 3],
     /// Requests boosted since the last frequency log line.
     boosts: u32,
     /// The poll's interval now ([`next_poll_ns`]), and whether the current
@@ -588,6 +594,7 @@ impl<P: Platform> XelpBackend<P> {
             held: false,
             parks: 0,
             waiters: 0,
+            bound: [0; 3],
             boosts: 0,
             poll_ns: POLL_NS,
             progressed: false,
@@ -856,7 +863,7 @@ impl<P: Platform> XelpBackend<P> {
             for (n, slot) in pages.iter_mut().take(count).enumerate() {
                 *slot = platform.memory_page(memory, at / 4096 + n as u64)?;
             }
-            let _ = ppgtt
+            let size = ppgtt
                 .insert_huge(
                     &mut *platform,
                     pages.get(..count).unwrap_or_default(),
@@ -864,6 +871,14 @@ impl<P: Platform> XelpBackend<P> {
                     u32::from(pat_index),
                 )
                 .map_err(ppgtt_error)?;
+            let class = match size {
+                crate::ppgtt::PAGE_2M => 0,
+                crate::ppgtt::PAGE_64K => 1,
+                _ => 2,
+            };
+            if let Some(total) = self.bound.get_mut(class) {
+                *total = total.saturating_add(len);
+            }
             at += len;
         }
         Ok(())
@@ -1937,6 +1952,7 @@ impl<P: Platform> XelpBackend<P> {
                 boosts: self.boosts,
                 waiters: self.waiters,
                 ran_permille,
+                bound: self.bound,
             });
         self.parks = 0;
         self.boosts = 0;
