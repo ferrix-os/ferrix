@@ -199,6 +199,12 @@ pub struct FrequencyReport {
     pub boosts: u32,
     /// Requests a program waits on now (`num_waiters`).
     pub waiters: u32,
+    /// RCS0's share of the second with a context running on the hardware,
+    /// in tenths of a percent: the contexts' own `CTX_TIMESTAMP`s, which
+    /// count only while a context runs. `busy_permille` is the driver's
+    /// view (in the ports) and also counts the time from a context's last
+    /// request finishing to the driver seeing it.
+    pub ran_permille: u64,
 }
 
 /// An engine as the uAPI names it (`I915_ENGINE_CLASS_*`, instance).
@@ -268,6 +274,9 @@ struct Context {
     unsubmitted: bool,
     /// The last emitted request's `rq->tail`: what a submission runs to.
     last_tail: u32,
+    /// The context's `CTX_TIMESTAMP` when [`XelpBackend::ran_total`] last
+    /// read it.
+    ran_last: u32,
 }
 
 impl Context {
@@ -307,6 +316,9 @@ struct Engine {
     busy_ns: u64,
     seen_ns: u64,
     was_active: bool,
+    /// Its contexts' time running on the hardware so far, in
+    /// `CTX_TIMESTAMP` ticks ([`XelpBackend::ran_total`]).
+    ran_ticks: u64,
 }
 
 impl Engine {
@@ -414,6 +426,7 @@ struct Freqlog {
     sample: crate::power::Sample,
     at: u64,
     busy: [u64; crate::power::POLICY_ENGINES],
+    ran: u64,
 }
 
 /// How long nothing may be in flight before RPS parks (`intel_rps_park`,
@@ -421,6 +434,10 @@ struct Freqlog {
 /// [`crate::rps::IDLE_HOLD_NS`], one longest evaluation interval past the
 /// last retire.
 pub const PARK_NS: u64 = crate::rps::IDLE_HOLD_NS;
+
+/// `RING_CTX_TIMESTAMP`, from an engine's base: the running context's time
+/// on the hardware.
+const RING_CTX_TIMESTAMP: u32 = 0x3a8;
 
 /// The request id of the driver's own load ([`XelpBackend::load_start`]).
 const LOAD_ID: u64 = u64::MAX - 1;
@@ -690,6 +707,7 @@ impl<P: Platform> XelpBackend<P> {
                 busy_ns: 0,
                 seen_ns: 0,
                 was_active: false,
+                ran_ticks: 0,
             });
         }
         self.record_default(slot)
@@ -989,6 +1007,10 @@ impl<P: Platform> XelpBackend<P> {
                 return Err(error);
             }
         };
+        // A copied default carries the recorded context's timestamp.
+        let ran_last = lrc::reg_state(platform.words(image))
+            .and_then(|regs| regs.get(lrc::ctx::TIMESTAMP).copied())
+            .unwrap_or(0);
         drop(platform);
         let engine = self.engine_mut(slot)?;
         if let Some(entry) = engine.contexts.get_mut(index) {
@@ -1000,6 +1022,7 @@ impl<P: Platform> XelpBackend<P> {
                 inflight: [None; MAX_INFLIGHT],
                 unsubmitted: false,
                 last_tail: 0,
+                ran_last,
             });
         }
         Ok(index)
@@ -1869,6 +1892,7 @@ impl<P: Platform> XelpBackend<P> {
                 sample,
                 at: now_ns,
                 busy: self.busy_totals(now_ns),
+                ran: self.ran_total(),
             }),
             _ => None,
         };
@@ -1894,6 +1918,12 @@ impl<P: Platform> XelpBackend<P> {
             .max()
             .unwrap_or(0);
         let busy_permille = (busiest * 1000).checked_div(elapsed).unwrap_or(0).min(1000);
+        let ran = self.ran_total();
+        let hz = u64::from(self.facts.cs_timestamp_hz).max(1);
+        let ran_ns = u128::from(ran.saturating_sub(log.ran)) * 1_000_000_000 / u128::from(hz);
+        let ran_permille = u64::try_from(ran_ns * 1000 / u128::from(elapsed.max(1)))
+            .unwrap_or(1000)
+            .min(1000);
         self.platform
             .borrow_mut()
             .frequency_report(&FrequencyReport {
@@ -1906,6 +1936,7 @@ impl<P: Platform> XelpBackend<P> {
                 parks: self.parks,
                 boosts: self.boosts,
                 waiters: self.waiters,
+                ran_permille,
             });
         self.parks = 0;
         self.boosts = 0;
@@ -1914,7 +1945,37 @@ impl<P: Platform> XelpBackend<P> {
             sample: after,
             at: now_ns,
             busy,
+            ran,
         });
+    }
+
+    /// RCS0's contexts' time on the hardware so far, in `CTX_TIMESTAMP`
+    /// ticks (`lrc_update_runtime`): each context's timestamp as its image
+    /// saved it at its last switch out, the context in the ports from the
+    /// engine's live `RING_CTX_TIMESTAMP`. A context destroyed since the
+    /// last call takes its last part with it.
+    fn ran_total(&mut self) -> u64 {
+        let Some(engine) = self.engines.get_mut(0).and_then(Option::as_mut) else {
+            return 0;
+        };
+        let live = engine.info.mmio_base + RING_CTX_TIMESTAMP;
+        for (index, ctx) in engine.contexts.iter_mut().enumerate() {
+            let Some(ctx) = ctx else {
+                continue;
+            };
+            let now = if engine.active == Some(index) {
+                Regs(&self.platform).read32(live)
+            } else {
+                lrc::reg_state(self.platform.borrow_mut().words(ctx.image))
+                    .and_then(|regs| regs.get(lrc::ctx::TIMESTAMP).copied())
+                    .unwrap_or(ctx.ran_last)
+            };
+            engine.ran_ticks = engine
+                .ran_ticks
+                .saturating_add(u64::from(now.wrapping_sub(ctx.ran_last)));
+            ctx.ran_last = now;
+        }
+        engine.ran_ticks
     }
 
     /// Start the driver's own [`Load`] on RCS0.
