@@ -653,34 +653,48 @@ pub const fn default_context(file: u8, vm: u16, finalized: bool) -> Context {
 }
 
 /// `intel: uapi refused <ioctl> <errno> <reason>`, rate-limited, for an
-/// error from the ioctls whose failure Mesa takes for a lost device: an
-/// execbuffer (anv retries only EINTR, EAGAIN and ENOMEM) and the syncobj
-/// waits (ETIME is a timeout, EINTR and EAGAIN are called again).
+/// error from any ioctl. Mesa takes a failed execbuffer for a lost device
+/// (anv retries only EINTR, EAGAIN and ENOMEM), and a failed syncobj wait
+/// likewise (ETIME is a timeout, EINTR and EAGAIN are called again); a
+/// failed creation or mapping is `VK_ERROR_OUT_OF_DEVICE_MEMORY` or
+/// `VK_ERROR_MEMORY_MAP_FAILED` to a program that may end on it (Endfield,
+/// 2026-11-10: "vk result -2" with nothing in the log to say which call).
+/// The others are named by their number.
 fn say_refused<M, H: Host<M>>(state: &mut Tables<M>, host: &mut H, cmd: u32, status: i32) {
     let name = match ioc_nr(cmd) {
         number if number == DRM_COMMAND_BASE + nr::GEM_EXECBUFFER2 => {
             if ioc_dir(cmd) & IOC_READ != 0 {
-                "EXECBUFFER2_WR"
+                Some("EXECBUFFER2_WR")
             } else {
-                "EXECBUFFER2"
+                Some("EXECBUFFER2")
             }
         }
-        core_nr::SYNCOBJ_WAIT => "SYNCOBJ_WAIT",
-        core_nr::SYNCOBJ_TIMELINE_WAIT => "SYNCOBJ_TIMELINE_WAIT",
-        _ => return,
+        core_nr::SYNCOBJ_WAIT => Some("SYNCOBJ_WAIT"),
+        core_nr::SYNCOBJ_TIMELINE_WAIT => Some("SYNCOBJ_TIMELINE_WAIT"),
+        _ => None,
     };
     if !state.refusals.allow(host.now_ns()) {
         return;
     }
     let quiet = core::mem::take(&mut state.refusals.quiet);
     let why = if state.why.is_empty() { "-" } else { state.why };
-    host.say(
-        Level::Err,
-        format_args!(
-            "intel: uapi refused {name} {} {why} ({quiet} not said before it)",
-            errno_name(-status)
+    match name {
+        Some(name) => host.say(
+            Level::Err,
+            format_args!(
+                "intel: uapi refused {name} {} {why} ({quiet} not said before it)",
+                errno_name(-status)
+            ),
         ),
-    );
+        None => host.say(
+            Level::Notice,
+            format_args!(
+                "intel: uapi refused ioctl nr {:#04x} {} {why} ({quiet} not said before it)",
+                ioc_nr(cmd),
+                errno_name(-status)
+            ),
+        ),
+    }
 }
 
 /// An errno's name, for the refusal line.
