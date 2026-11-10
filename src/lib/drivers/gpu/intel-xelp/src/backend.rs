@@ -209,6 +209,10 @@ pub struct FrequencyReport {
     /// the GPU page size they were mapped with: 2 MiB, 64 KiB, 4 KiB
     /// (`docs/INTEL-GPU.md` §14). Unbinds are not taken off.
     pub bound: [u64; 3],
+    /// How often RCS0's ports emptied in the second, as the driver saw it:
+    /// each is a stretch the engine stood still, from its last request's end
+    /// until a program's next one reached the ports.
+    pub idles: u64,
 }
 
 /// An engine as the uAPI names it (`I915_ENGINE_CLASS_*`, instance).
@@ -323,6 +327,8 @@ struct Engine {
     /// Its contexts' time running on the hardware so far, in
     /// `CTX_TIMESTAMP` ticks ([`XelpBackend::ran_total`]).
     ran_ticks: u64,
+    /// How often the driver saw the ports empty after a context left them.
+    idles: u64,
 }
 
 impl Engine {
@@ -433,6 +439,7 @@ struct Freqlog {
     at: u64,
     busy: [u64; crate::power::POLICY_ENGINES],
     ran: u64,
+    idles: u64,
 }
 
 /// How long nothing may be in flight before RPS parks (`intel_rps_park`,
@@ -715,6 +722,7 @@ impl<P: Platform> XelpBackend<P> {
                 seen_ns: 0,
                 was_active: false,
                 ran_ticks: 0,
+                idles: 0,
             });
         }
         self.record_default(slot)
@@ -1250,6 +1258,7 @@ impl<P: Platform> XelpBackend<P> {
         };
         let mut left = [None; 12];
         let mut n = 0;
+        let was_active = engine.active.is_some();
         let report = engine.state.process_csb(
             &mut Regs(&self.platform),
             &mut Status {
@@ -1273,6 +1282,9 @@ impl<P: Platform> XelpBackend<P> {
         }
         if engine.state.execlists.active().is_none() && !engine.state.execlists.is_pending() {
             engine.active = None;
+        }
+        if was_active && engine.active.is_none() {
+            engine.idles += 1;
         }
         // ERROR_CSB: i915 resets the engine; the watch below does when the
         // running request then stalls.
@@ -1908,6 +1920,7 @@ impl<P: Platform> XelpBackend<P> {
                 at: now_ns,
                 busy: self.busy_totals(now_ns),
                 ran: self.ran_total(),
+                idles: self.idles_total(),
             }),
             _ => None,
         };
@@ -1934,6 +1947,7 @@ impl<P: Platform> XelpBackend<P> {
             .unwrap_or(0);
         let busy_permille = (busiest * 1000).checked_div(elapsed).unwrap_or(0).min(1000);
         let ran = self.ran_total();
+        let idles = self.idles_total();
         let hz = u64::from(self.facts.cs_timestamp_hz).max(1);
         let ran_ns = u128::from(ran.saturating_sub(log.ran)) * 1_000_000_000 / u128::from(hz);
         let ran_permille = u64::try_from(ran_ns * 1000 / u128::from(elapsed.max(1)))
@@ -1953,6 +1967,7 @@ impl<P: Platform> XelpBackend<P> {
                 waiters: self.waiters,
                 ran_permille,
                 bound: self.bound,
+                idles: idles.saturating_sub(log.idles),
             });
         self.parks = 0;
         self.boosts = 0;
@@ -1962,7 +1977,16 @@ impl<P: Platform> XelpBackend<P> {
             at: now_ns,
             busy,
             ran,
+            idles,
         });
+    }
+
+    /// RCS0's count of emptied ports so far.
+    fn idles_total(&self) -> u64 {
+        self.engines
+            .first()
+            .and_then(Option::as_ref)
+            .map_or(0, |engine| engine.idles)
     }
 
     /// RCS0's contexts' time on the hardware so far, in `CTX_TIMESTAMP`
