@@ -213,6 +213,10 @@ pub struct FrequencyReport {
     /// each is a stretch the engine stood still, from its last request's end
     /// until a program's next one reached the ports.
     pub idles: u64,
+    /// The GT's interrupts the driver was woken by in the second
+    /// ([`XelpBackend::service`] with `interrupt`): none on a machine whose
+    /// vector fell silent, where every completion is the poll's.
+    pub interrupts: u64,
 }
 
 /// An engine as the uAPI names it (`I915_ENGINE_CLASS_*`, instance).
@@ -400,6 +404,9 @@ pub struct XelpBackend<P: Platform> {
     waiters: u32,
     /// Bytes bound so far by GPU page size ([`FrequencyReport::bound`]).
     bound: [u64; 3],
+    /// Calls of [`XelpBackend::service`] an interrupt made, so far
+    /// ([`FrequencyReport::interrupts`]).
+    interrupts: u64,
     /// Requests boosted since the last frequency log line.
     boosts: u32,
     /// The poll's interval now ([`next_poll_ns`]), and whether the current
@@ -440,6 +447,7 @@ struct Freqlog {
     busy: [u64; crate::power::POLICY_ENGINES],
     ran: u64,
     idles: u64,
+    interrupts: u64,
 }
 
 /// How long nothing may be in flight before RPS parks (`intel_rps_park`,
@@ -602,6 +610,7 @@ impl<P: Platform> XelpBackend<P> {
             parks: 0,
             waiters: 0,
             bound: [0; 3],
+            interrupts: 0,
             boosts: 0,
             poll_ns: POLL_NS,
             progressed: false,
@@ -1211,20 +1220,41 @@ impl<P: Platform> XelpBackend<P> {
         engine.account(now_ns);
     }
 
-    /// Let the GPU's state machines run: after an interrupt (`interrupt`,
-    /// the GT's handler run here; the caller acknowledges the vector) or at
-    /// a deadline. Drains each engine's status buffer, retires what its
-    /// seqno passed, resets an engine whose running request stalled, and
-    /// submits what is waiting.
+    /// Let the GPU's state machines run: after an interrupt (`interrupt`)
+    /// or at a deadline. Runs the GT's interrupt handler, acknowledges the
+    /// vector after an interrupt, drains each engine's status buffer,
+    /// retires what its seqno passed, resets an engine whose running
+    /// request stalled, and submits what is waiting.
+    ///
+    /// # The handler, three times over
+    ///
+    /// The GT's master interrupt is a level, and a message-signalled vector
+    /// sends one message as that level rises. The handler's master off and
+    /// on makes it rise again while a bank is still set, which is how the
+    /// next message comes. A message sent before the vector's
+    /// acknowledgement is not delivered again: the kernel folds it into the
+    /// delivery being answered, or the vector is masked and the device
+    /// never sends it. The master then stands raised with nothing left to
+    /// make it rise, and no interrupt comes for the rest of the boot: every
+    /// completion and every refill of the ports waits for the poll (the
+    /// N150: 18 interrupts in a boot, the engine standing still about 50
+    /// times a second for most of a millisecond each).
+    ///
+    /// So the handler runs before the acknowledgement, which quiets a line
+    /// the controller holds before it is unmasked (it would fire again at
+    /// once, as gc400's does), and once more after it: what that pass finds
+    /// raised it serves, and its master on sends a message the vector now
+    /// takes. And it runs at every deadline too, so that a message lost any
+    /// other way costs one poll interval and not the rest of the boot.
     pub fn service(&mut self, now_ns: u64, interrupt: bool) {
         self.last_service_ns = now_ns;
         self.progressed = interrupt;
         self.freqlog_due(now_ns);
+        let _ = irq::gen11_irq_handler(&mut Regs(&self.platform), &mut Time(&self.platform));
         if interrupt {
-            let _ = irq::gen11_irq_handler(&mut Regs(&self.platform), &mut Time(&self.platform));
-            // Reading acknowledges the GT; the vector after, or a level
-            // interrupt would fire again at once (as gc400 does).
+            self.interrupts = self.interrupts.saturating_add(1);
             self.platform.borrow_mut().interrupt_serviced();
+            let _ = irq::gen11_irq_handler(&mut Regs(&self.platform), &mut Time(&self.platform));
         }
         for slot in 0..MAX_ENGINES {
             if self.engines.get(slot).and_then(Option::as_ref).is_none() {
@@ -1921,6 +1951,7 @@ impl<P: Platform> XelpBackend<P> {
                 busy: self.busy_totals(now_ns),
                 ran: self.ran_total(),
                 idles: self.idles_total(),
+                interrupts: self.interrupts,
             }),
             _ => None,
         };
@@ -1968,6 +1999,7 @@ impl<P: Platform> XelpBackend<P> {
                 ran_permille,
                 bound: self.bound,
                 idles: idles.saturating_sub(log.idles),
+                interrupts: self.interrupts.saturating_sub(log.interrupts),
             });
         self.parks = 0;
         self.boosts = 0;
@@ -1978,6 +2010,7 @@ impl<P: Platform> XelpBackend<P> {
             busy,
             ran,
             idles,
+            interrupts: self.interrupts,
         });
     }
 
