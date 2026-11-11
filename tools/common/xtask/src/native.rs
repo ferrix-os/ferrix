@@ -184,6 +184,13 @@ pub(crate) const PROGRAMS: &[Program] = &[
         binary: "memscrub",
         directory: DIRECTORY,
     },
+    // memkeep, free memory kept above a mark (docs/MEMKEEP.md): a service
+    // init starts, which asks a slice's memory.reclaim for clean cache.
+    Program {
+        package: "ferrix-memkeep",
+        binary: "memkeep",
+        directory: DIRECTORY,
+    },
     // Not a driver: the helper `devmgr` publishes drivers' deaths and
     // restarts through (docs/DESKTOP.md §4.2), handed to it as an image
     // the way drvupdated is, and named by no table entry.

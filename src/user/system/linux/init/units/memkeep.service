@@ -1,0 +1,15 @@
+# memkeep, free memory kept above a mark (docs/MEMKEEP.md): while MemFree is
+# under its low mark, the top-level slice with the most clean file cache is
+# asked for a chunk of it through memory.reclaim, one ask a second at most.
+# A native program in a sealed job beside memscrub; a pacer, not a promise:
+# nothing in the kernel rests on it. Its marks: /etc/ferrix/memkeep.conf.
+[Unit]
+Description=Keep free memory above a mark
+DefaultDependencies=no
+
+[Service]
+Type=native
+ExecStart=/sbin/memkeep
+Slice=drivers.slice
+Restart=always
+RestartSec=10s

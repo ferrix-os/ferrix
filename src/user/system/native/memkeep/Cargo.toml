@@ -1,0 +1,21 @@
+[package]
+name = "ferrix-memkeep"
+description = "Free memory kept above a mark (docs/MEMKEEP.md): a top-level slice's clean file cache asked back through memory.reclaim, once a second at most"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "memkeep"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+ferrix-rt.workspace = true
+ferrix-native-abi.workspace = true
+
+[lints]
+workspace = true
