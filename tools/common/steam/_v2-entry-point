@@ -8,10 +8,25 @@
 # STEAM_RUNTIME_STEAMRT. Owner of the real fix: namespaces N2-N6.
 while [ $# -gt 0 ] && [ "$1" != "--" ]; do shift; done
 [ "${1-}" = "--" ] && shift
-# The platform's libraries, with the soname links client.sh gives them.
+# The platform's libraries, with the soname links client.sh gives them: of
+# the platform VERSIONS.txt names. A client update unpacks a new platform
+# beside the old one and leaves the old one's directory behind, partly
+# emptied; the first directory that matched was then that one, and
+# steamwebhelper found none of the runtime's libraries (the N150 box,
+# 2026-11-11: "libXdamage.so.1: cannot open shared object file", Steam at
+# "Steamwebhelper is not responding" and no game started).
+depot=/data/steam/steamrt64/pv-runtime/steam-runtime-steamrt
+named=
+if [ -r "$depot/VERSIONS.txt" ]; then
+    while read -r name version _; do
+        case $name in
+        steamrt*) named=${name}_platform_$version ;;
+        esac
+    done < "$depot/VERSIONS.txt"
+fi
 runtime=
-for files in /data/steam/steamrt64/pv-runtime/steam-runtime-steamrt/steamrt*_platform_*/files; do
-    [ -d "$files" ] && runtime=$files && break
+for files in "$depot/$named/files" "$depot"/steamrt*_platform_*/files; do
+    [ -d "$files/lib/x86_64-linux-gnu" ] && runtime=$files && break
 done
 [ -n "$runtime" ] || echo "steam-window: steamrt stand-in finds no Steam Linux Runtime" >&2
 export LD_LIBRARY_PATH=/data/steam/ubuntu12_64:/usr/lib/x86_64-linux-gnu:$runtime/lib/x86_64-linux-gnu:$runtime/lib
