@@ -685,7 +685,20 @@ M1 and M2, without the box.
    §3.10) is the way back.
 3. **MSI on the box** has never arrived for any driver (`docs/N150.md`
    §13). The driver polls, at a bounded rate, until it does. Frames still
-   work, at some cost in latency and power.
+   work, at some cost in latency and power. Corrected 2026-11-11: the
+   GPU's MSI did arrive, about 18 times a boot, and then never again. The
+   master interrupt is a level and the vector takes a message as it rises;
+   the handler's master off and on is what makes it rise again. The driver
+   ran the handler and then acknowledged the vector, so a message the
+   master-on sent before the acknowledgement was folded into the delivery
+   being answered (`object/interrupt.rs`), and the master stood raised for
+   the rest of the boot. Every completion and every refill of the ports
+   then waited for the 1 ms poll: with Endfield the engine stood still
+   about 50 times a second for 0.8 ms each, 4 % of its time (`ran` 96 %
+   where Linux's is 99 %). `XelpBackend::service` now runs the handler,
+   acknowledges, and runs the handler again, and runs it at every deadline
+   too; the box then takes about 100 interrupts a second under the game
+   and `ran` reads 99.9 % in a steady second.
 4. **Mesa's corners.** anv on i915 may use an ioctl path no grep found:
    `CONTEXT_IMAGE`, TR-TT register writes for sparse, OA. Each one meets a
    loud refusal that names the ioctl and parameter (`intel: unserved …`).
@@ -956,6 +969,12 @@ What changed:
   package's watts since the last sample.
 * **freqlog** now also says the limit reasons, the busiest engine's share
   and whether the request is pinned or parked.
+* **freqlog** since 2026-11-10 also says `ran`, RCS0's share of the second
+  on the hardware by its contexts' `CTX_TIMESTAMP` (a game's frame costs
+  `ran` x 1000 / fps milliseconds of GPU); `in N runs`, how often RCS0's
+  ports emptied; `N interrupts`, the GT's interrupts the driver was woken
+  by; the bytes bound so far by GPU page size; and the GEM objects alive
+  and pinned.
 
 How to read the next box run: if RP0 under load reaches well above 350 MHz
 with `limits none`, the idle GT was the cause, and the policy is what a
