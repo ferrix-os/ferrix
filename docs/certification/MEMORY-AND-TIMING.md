@@ -2373,6 +2373,13 @@ KVM, 4 processors, a 320 MiB, 40-thread process):
   L.user.229). Single-page shootdowns over 5 ms after the probe's forks
   went from 2,853 to 415. The rest are true copies, made while a child
   still holds the page.
+* **A copy-on-write write to a page with no translation**, held alone, is
+  one walk and one map, with no walk of the space's regions and no
+  shootdown (L.user.235, ledger 8634, since 2026-11-11). Before, its cost
+  grew with the number of regions. On the N150 box, 2026-11-11, with a
+  game running beside the test program: 11.2 microseconds a page beside
+  4000 other regions and 3.7 beside none (image main-423cc6d75), against
+  2.2 to 2.6 and 2.1 to 2.3 with it (image main-bdd07bf88, two runs).
 
 **The dead, freed on a busy machine** (L.sched.95, since 2026-10-24). A dead
 task's stack, and the address space and mapper entries its last reference

@@ -2318,6 +2318,23 @@ package FerrixMemoryRequirements {
                 "user::space::AddressSpace::write_shadow_copy_on_write",
                 "user::space::reusable_in_place", "mm::allow_write_in");
         }
+        requirement <'L.user.235'> aSoleHoldersWriteToAnUnmappedPageMapsIt : ItemLowLevel {
+            attribute :>> statement = "A copy-on-write write fault to a page its
+                space holds alone, with no translation at the faulting address,
+                shall map the page writable on the frame the object names,
+                beginning no shootdown.";
+            attribute :>> criterion = "In a reserve made writable by protect, the
+                first write fault to a page leaves it translated, writable, at 1
+                holder, with shootdowns_begun unchanged, and a write through the
+                space's own address, made with the space installed, reaches the
+                frame; after protect to read-only and back to writable, which
+                leaves no translation, the next write fault leaves the same frame
+                translated, writable, at 1 holder, with shootdowns_begun
+                unchanged, and a write through the address reaches it; 0 frames
+                kept.";
+            attribute :>> parent = ("H.MEM.8", "H.MEM.9");
+            attribute :>> unit = "user::space::AddressSpace::write_copy_on_write";
+        }
         requirement <'L.user.59'> aKernelWriteToAnOwnPageTakesNothingDown : ItemLowLevel {
             attribute :>> statement = "with_page shall let a write go straight through
                 to a copy-on-write page this space alone holds, taking no translation

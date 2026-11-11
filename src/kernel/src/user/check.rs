@@ -95,6 +95,7 @@ pub fn run() -> Result<Report, &'static str> {
     check_a_shared_region_survives_fork_as_one_object()?;
     let copied = check_fork_shares_pages_and_a_write_copies_one()?;
     check_a_sole_holders_write_reuses_the_page()?;
+    check_a_sole_holders_write_to_an_unmapped_page_maps_it()?;
     check_a_page_made_writable_after_fork_is_copied()?;
     let swapped = check_two_tasks_keep_their_own_address_spaces()?;
     let refused = crate::user::edge_check::run()?;
@@ -1399,6 +1400,130 @@ fn check_a_sole_holders_write_reuses_the_page() -> Result<(), &'static str> {
         }
     }
     expect_frames(before, "reusing a sole holder's page leaked frames")
+}
+
+/// [`fault_and_write_installed`] for a page with no translation: the write
+/// fault first, with nothing read through the address before it (a read of
+/// an unmapped page from ring 0 is a fault of the kernel's own), then the
+/// write through the user address the handler has just mapped.
+fn fault_unmapped_and_write_installed(
+    space: &AddressSpace,
+    at: u64,
+    value: u64,
+) -> Result<(), &'static str> {
+    // Interrupts masked for `install`'s reason: the scheduler does not know
+    // about address spaces yet.
+    let state = <arch::Irq as IrqControl>::disable();
+
+    // SAFETY: (TRANSLATE) `space` is borrowed across the whole window so its tables
+    // outlive the installation, interrupts are masked, and it is uninstalled
+    // below before anything else can want a user address.
+    unsafe { space.install(None) };
+
+    // As in `walk_through_installed`: reaching a user linear address from ring
+    // 0 is the point of the check, and SMAP refuses it without `EFLAGS.AC`.
+    arch::permit_user_access();
+
+    let resolved = space.fault(at, Access::WRITE);
+    if resolved.is_ok() {
+        let through = at as *mut u64;
+        // SAFETY: (PROBE) the handler above has just mapped this page writable in the
+        // tables of the space installed on this processor.
+        unsafe { through.write_volatile(value) };
+    }
+
+    arch::forbid_user_access();
+    // SAFETY: (TRANSLATE) nothing after this wants a user address.
+    unsafe { space.uninstall() };
+    <arch::Irq as IrqControl>::restore(state);
+
+    resolved.map_err(|_| "a write to an unmapped copy-on-write page was not resolved")
+}
+
+/// A write to a copy-on-write region's page that the space holds alone and
+/// that has no translation at the faulting address is mapped as a first
+/// touch is: writable, on the page's own frame, beginning no shootdown. Two
+/// ways there, both a Wine process's every day: a page the fault itself
+/// commits, in a reserve that `mprotect` made writable (which marks the
+/// region copy-on-write); and a committed page whose translation a later
+/// protection change took down. The write is made through the user address
+/// with the space installed, so a translation that was not put in, or put in
+/// read-only, faults in the kernel and the check fails loudly.
+///
+/// Before 2026-11-11 each such write walked every region of the space for
+/// other translations of the page and shot down a translation that was never
+/// there (`docs/ROBUSTNESS.md` R5, §4.6).
+///
+/// Verifies: L.user.235
+fn check_a_sole_holders_write_to_an_unmapped_page_maps_it() -> Result<(), &'static str> {
+    let before = quiet_frames()?;
+    {
+        let base = 0x6200_0000;
+        let space = AddressSpace::new().map_err(|_| "unmapped: could not make an address space")?;
+        let _ = space
+            .map_anonymous(base, PAGE_SIZE, VmaFlags::NONE)
+            .map_err(|_| "unmapped: reserving a page was refused")?;
+        space
+            .protect(base, PAGE_SIZE, VmaFlags::READ_WRITE)
+            .map_err(|_| "unmapped: mprotect of a reserve to writable was refused")?;
+        if mm::translate_in(space.root_table(), base).is_some() {
+            return Err("unmapped: a reserve made writable maps before anything touched it");
+        }
+
+        // The page the fault commits.
+        let begun = space.shootdowns_begun();
+        fault_unmapped_and_write_installed(&space, base, PARENT_MARK)?;
+        let frame = mm::translate_in(space.root_table(), base)
+            .ok_or("unmapped: a first write to a committed reserve does not map")?;
+        if !mm::flags_in(space.root_table(), base).is_some_and(|flags| flags.write) {
+            return Err("unmapped: a first write to a committed reserve left its page read-only");
+        }
+        if mm::frame_references(frame / PAGE_SIZE) != 1 {
+            return Err("unmapped: a first write to a committed reserve left its page held twice");
+        }
+        if space.shootdowns_begun() != begun {
+            return Err("unmapped: a first write to a committed reserve began a shootdown");
+        }
+        if peek(frame) != PARENT_MARK {
+            return Err("unmapped: a first write to a committed reserve did not reach its page");
+        }
+
+        // The same page after a protection change took its translation down.
+        space
+            .protect(base, PAGE_SIZE, VmaFlags::READ)
+            .map_err(|_| "unmapped: mprotect of a written page to read-only was refused")?;
+        space
+            .protect(base, PAGE_SIZE, VmaFlags::READ_WRITE)
+            .map_err(|_| "unmapped: mprotect of a written page back to writable was refused")?;
+        if mm::translate_in(space.root_table(), base).is_some() {
+            return Err(
+                "unmapped: a protection change left the page mapped, and the second half's premise with it",
+            );
+        }
+        let begun = space.shootdowns_begun();
+        fault_unmapped_and_write_installed(&space, base, CHILD_MARK)?;
+        if mm::translate_in(space.root_table(), base) != Some(frame) {
+            return Err(
+                "unmapped: a write after a protection change moved the page to another frame",
+            );
+        }
+        if !mm::flags_in(space.root_table(), base).is_some_and(|flags| flags.write) {
+            return Err("unmapped: a write after a protection change left its page read-only");
+        }
+        if mm::frame_references(frame / PAGE_SIZE) != 1 {
+            return Err("unmapped: a write after a protection change changed its page's holders");
+        }
+        if space.shootdowns_begun() != begun {
+            return Err("unmapped: a write after a protection change began a shootdown");
+        }
+        if peek(frame) != CHILD_MARK {
+            return Err("unmapped: a write after a protection change did not reach its page");
+        }
+    }
+    expect_frames(
+        before,
+        "a write to an unmapped copy-on-write page leaked frames",
+    )
 }
 
 /// Fork shares every private page, and the first write to one copies it.

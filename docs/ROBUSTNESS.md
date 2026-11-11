@@ -1131,6 +1131,59 @@ lock and no order:
    less the write permission: a user page with the region's execute
    permission, on normal memory, not global (`reusable_in_place`). Anything
    else takes the old path. It is L.user.229.
+5. *An unmapped page is mapped* (since 2026-11-11, L.user.235, ledger
+   8634). A copy-on-write write whose writer holds the page alone and whose
+   page has no translation at the faulting address maps it there, writable,
+   as any first touch is mapped, and as `write_shadow_copy_on_write` already
+   maps a shadow page held alone with no translation (`install_page` with
+   no `replace`). That is every page a reserve commits after `mprotect`
+   made it writable, which marks the region copy-on-write, and every
+   committed page after a protection change, which takes the range's
+   translations down. Before, each of these took the old path: a walk of
+   every region of the space for other translations of the object's page
+   (`forget_in`), then a shootdown of a translation that was never there.
+   A Wine process commits all its memory through `mprotect` and holds
+   thousands of regions.
+
+   Measured on the N150 box on 2026-11-11 with a static test program
+   (`mmap(PROT_NONE)`, `mprotect`, first write; and a written page after
+   `mprotect` to read-only and back), Arknights: Endfield running beside
+   it, microseconds a page beside 0 and beside 4000 other regions. Before
+   (image main-423cc6d75): 3.7 and 11.2 for the reserve, 2.8 and 9.5 for
+   the written page. With this step (image main-bdd07bf88, two runs): 2.1
+   to 2.3 and 2.2 to 2.6; 1.2 to 1.6 and 1.3 to 1.5. A plain first write
+   costs 2.1 to 2.7 there. The game's render thread spent up to 1.9 s at a
+   time in these faults in the minute after entering its world (a
+   never-land sampler: 60 % of its kernel samples outside a system call in
+   `forget_in`). In 180 s from entering the world, one run before: 3
+   frames of 500 ms or more, the worst 1.8 s, 12 of 250 ms or more. Two
+   runs with this step: none of 500 ms or more, 1 and 2 of 250 ms or more,
+   the worst 0.28 and 0.47 s. Frames of 100 to 250 ms are still there (3
+   and 42 in the two runs, 24 before); their cause is not this path's.
+
+   Its TLB argument. Nothing is replaced, so nothing is taken down. No
+   processor holds a translation of the faulting page that the new one
+   could disagree with. An absent entry is never cached. Whatever took the
+   page's last translation down counted a shootdown begun and pending
+   under the lock hold that took it down, and that shootdown reaches the
+   page whether or not it is mapped again meanwhile; until it returns, the
+   frame the old entry reaches is kept. A space that is not current on a
+   processor flushes what it kept under its PCID when it next runs there,
+   by the count begun. On AArch64 and ARMv7-A a permission fault does not
+   drop the entry that faulted. A processor that faulted through a stale
+   read-only entry while that shootdown is still pending therefore retries
+   into it after this step has mapped the page: its second fault finds the
+   leaf present and writable and ends in the reuse in place (item 4),
+   whose invalidation is broadcast, unless the pending shootdown got there
+   before it. That happens once and cannot loop. Every other translation
+   of the same object page in this space still reaches the frame the
+   object names, because the fault did not change that frame (a copy does,
+   and takes the old path), so none has to come down.
+
+   What this rests on, for whoever changes the neighbours: every take-down
+   of a leaf in `space.rs` counts a shootdown begun and pending under the
+   same lock hold. R5 step 2a and an in-place `mprotect` must keep that or
+   re-argue this item.
 
 **Step 1's TLB argument (ledger 8299, A4).** In the reuse the frame does not
 change and nothing is given back. This space is the page's only holder, so

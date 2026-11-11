@@ -2233,6 +2233,57 @@ impl AddressSpace {
             return Ok(());
         }
 
+        // Held alone and not mapped at `page` at all: a page this fault
+        // has just committed, or one whose translation came down earlier
+        // (an `mprotect` takes a range's translations down and leaves the
+        // pages to fault back in). Mapped as any first touch is, and as
+        // `write_shadow_copy_on_write` already maps a shadow page held
+        // alone with no translation (`install_page` with no `replace`):
+        // nothing is replaced, so there is nothing to take down and
+        // nobody to tell (L.user.235; ledger 8634).
+        //
+        // No processor holds a translation of `page` that this could
+        // disagree with. An absent entry is never cached. Whatever took
+        // the page's last translation down counted a shootdown begun and
+        // pending under the lock hold that took it down, and that
+        // shootdown reaches the page whether or not it is mapped again
+        // meanwhile; until it returns the frame the old entry reaches is
+        // kept. A space that is not current on a processor flushes what
+        // it kept under its PCID when it next runs there, by the count
+        // begun. On AArch64 and ARMv7-A a permission fault does not drop
+        // the entry that faulted, so a processor that faulted through a
+        // stale read-only entry while that shootdown is still pending
+        // retries into it after this has mapped the page: its second
+        // fault finds the leaf present and writable and ends in the
+        // branch above, whose invalidation is broadcast, unless the
+        // pending shootdown got there before it. Once, no loop.
+        //
+        // Every other translation of this object page in this space
+        // still reaches this same frame, since the object did not change
+        // the frame it names (a copy does, and takes the path below), and
+        // so stays where it is.
+        //
+        // Without this, every such write walked every region of the space
+        // for other translations (`forget_in`) and shot down a
+        // translation that was never there, on a space of thousands of
+        // regions as a Wine process is: Wine commits all its memory by
+        // `mprotect` of a reserve. The figures are in
+        // `docs/ROBUSTNESS.md` R5, step 1, item 5.
+        if retired.is_none() && master_translate!(self, self.root * PAGE_SIZE, page).is_none() {
+            let mapped = mm::map_in(
+                self.root * PAGE_SIZE,
+                page,
+                frame * PAGE_SIZE,
+                PAGE_SIZE,
+                MapFlags {
+                    execute: region.flags.execute,
+                    ..MapFlags::USER_DATA
+                },
+            );
+            drop(inner);
+            return mapped.map_err(|_| SpaceError::OutOfMemory);
+        }
+
         // `map_in` refuses to overwrite a live mapping, deliberately, so
         // the read-only entry comes down before the writable one goes in
         // -- and so does every other translation of this object page in
