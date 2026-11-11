@@ -166,6 +166,7 @@ mod mce_copy;
 mod mce_driver;
 mod mce_pagecache;
 mod mce_restart;
+mod memkeep;
 mod msync;
 mod n150;
 mod native;
@@ -619,6 +620,7 @@ const TASKS: &[&[Task]] = &[
     powerctl::TASKS,
     quarantine::TASKS,
     scrub::TASKS,
+    memkeep::TASKS,
     driver_model::TASKS,
     n150::TASKS,
     netboot::TASKS,

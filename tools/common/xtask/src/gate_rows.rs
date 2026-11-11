@@ -200,6 +200,21 @@ fn reaches_scrub(path: &str) -> bool {
         || path.starts_with("src/user/system/native/memscrub/")
 }
 
+/// memkeep's row (`docs/MEMKEEP.md`): the boot where a disk file's cache
+/// fills the machine and the service lifts free memory back to its low mark,
+/// and the same boot without the unit, whose free memory must stay under it.
+const TEST_MEMKEEP: &[&str] = &["test-memkeep --arch x86_64 --accel kvm"];
+
+/// Whether `path` reaches memkeep: the service, its unit, or the gate.
+fn reaches_memkeep(path: &str) -> bool {
+    [
+        "src/user/system/linux/init/units/memkeep.service",
+        "tools/common/xtask/src/memkeep.rs",
+    ]
+    .contains(&path)
+        || path.starts_with("src/user/system/native/memkeep/")
+}
+
 /// The machine check at a system call's copy (`docs/MACHINE-CHECK-COPY.md`
 /// §6, ledger 5216): the recovery under both accelerators and at two
 /// processors, and every mode that must stop or leave it alone.
@@ -711,6 +726,13 @@ fn area_rows(path: &str, rows: &mut Rows) {
             "the RAM scrubber's code: test-scrub on every architecture",
         );
     }
+    if reaches_memkeep(path) {
+        rows.add(TEST_MEMKEEP);
+        reason(
+            rows,
+            "memkeep, the free-memory pacer: test-memkeep and its control",
+        );
+    }
     if GPU_RESTARTED.iter().any(|prefix| under(prefix)) {
         rows.add(TEST_GPU_RESTART);
         reason(
@@ -1106,6 +1128,20 @@ mod tests {
         }
         let rows = rows_of(&["src/kernel/src/main.rs"]);
         assert!(!rows.commands.iter().any(|c| c == TEST_SCRUB[0]));
+    }
+
+    #[test]
+    fn memkeep_adds_its_row_and_memscrub_does_not() {
+        for path in [
+            "src/user/system/native/memkeep/src/main.rs",
+            "src/user/system/linux/init/units/memkeep.service",
+            "tools/common/xtask/src/memkeep.rs",
+        ] {
+            let rows = rows_of(&[path]);
+            assert!(rows.commands.iter().any(|c| c == TEST_MEMKEEP[0]), "{path}");
+        }
+        let rows = rows_of(&["src/user/system/native/memscrub/src/main.rs"]);
+        assert!(!rows.commands.iter().any(|c| c == TEST_MEMKEEP[0]));
     }
 
     #[test]
