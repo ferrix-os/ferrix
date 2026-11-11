@@ -56,9 +56,11 @@ configurable) -- the one whose `memory.stat` `file` figure is largest *and*
 at least twice `chunk`, and writes `chunk` to its `memory.reclaim`. One ask a
 second at most; with no slice that qualifies it does nothing.
 
-**No-progress back-off.** If an ask lifted `MemFree` by less than a quarter
-of `chunk`, or the write was refused, that slice is not asked again for
-10 s. The first box version of the stand-in asked every slice in turn: asks
+**No-progress back-off.** If the write was refused, or an ask was taken
+and left `MemFree` where it was (it rose by less than a quarter of `chunk`
+and did not fall), that slice is not asked again for 10 s. An ask after
+which `MemFree` is lower than before is not counted: something took more
+than the ask gave, and that is when the next ask matters most. The first box version of the stand-in asked every slice in turn: asks
 of slices with no file cache took 20 to 50 s each, emptied the dentry and
 inode caches through the shrinker (§10 of CGROUPS.md: a reclaim that finds
 too few pages asks the filesystem for the rest), and stalled the game to

@@ -5,8 +5,9 @@
 //! `/etc/ferrix/memkeep.conf`, then once a second reads `MemFree`; while it
 //! is under `low`, it asks the top-level slice holding the most clean file
 //! cache for `chunk` bytes of it through that slice's `memory.reclaim`, one
-//! ask a second at most. A slice whose ask lifted free memory by less than a
-//! quarter of `chunk` is left alone for ten seconds. The reclaim, and every
+//! ask a second at most. A slice whose ask left free memory where it was
+//! (it rose by less than a quarter of `chunk` and did not fall) is left
+//! alone for ten seconds. The reclaim, and every
 //! bound on it, is the kernel's; only the pace is this program's. It is a
 //! pacer, not a promise: nothing in the kernel rests on it. When init closes
 //! the channel it exits 0; any other status names the step that went wrong.
@@ -197,7 +198,13 @@ fn keep(config: &Config, quiet_until: &mut [u64; 4], tally: &mut Tally) {
     if !given {
         tally.refused += 1;
     }
-    if !given || rose < config.chunk / 4 {
+    // An ask the kernel took while `MemFree` fell is not one without
+    // progress: something took more than the ask gave, which is when the
+    // next ask matters most (a game entering its world took 256 MiB in a
+    // second on the N150). Without progress is an ask that was taken and
+    // left `MemFree` where it was.
+    let fell = after < free;
+    if !given || (!fell && rose < config.chunk / 4) {
         tally.slow += u64::from(given);
         if let Some(until) = quiet_until.get_mut(at) {
             *until = now_ns().saturating_add(QUIET_NS);
