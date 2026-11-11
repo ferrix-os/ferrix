@@ -137,7 +137,7 @@ x86_64 --accel kvm`.
 
 ## 7. Where it stands (2026-11-11)
 
-* Built on `feature/memkeep`: the service, its unit, enabled with
+* Landed 2026-11-11 (develop 8d9278864): the service, its unit, enabled with
   `basic.target` wherever `memscrub` is (the desktop image's
   `init::desktop_files`), the gate and its control.
 * Outside the certified item; no consultant review owed for the landing
@@ -151,6 +151,13 @@ x86_64 --accel kvm`.
   lifted from the floor to the low mark; the clean exit on init's close is
   not shown by a boot; this document stands for the section in
   BTRFS-PRESSURE.md).
-* Owed: AArch64 and ARMv7-A runs of the gate (not tried); the box run with
-  the stand-in `ef-keep-free.service` removed and the defaults measured
-  (frame time, refaults, kills over a dozen launches); the narrower grant.
+* On the box (2026-11-11, image main-423cc6d75 = this service on develop
+  751912658, the stand-in `ef-keep-free.service` removed): started with
+  `basic.target`, `low` 2052691 kB and `chunk` 262742016 bytes by its
+  defaults; 14 asks of `system.slice` through one entry into Endfield's
+  world, none without progress or refused, `MemFree` between 1.6 and
+  2.3 GB; the game stayed, at 28.5 frames a second from world entry (least
+  26.3) and 28.6 settled. One launch.
+* Owed: AArch64 and ARMv7-A runs of the gate (not tried); a dozen launches
+  on the box with kills, frame time and refaults recorded; the narrower
+  grant.
