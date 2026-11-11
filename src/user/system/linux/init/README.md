@@ -41,8 +41,9 @@ everything around it that makes system calls:
   (`docs/DEVMGR.md` §4.1).
 * `units/` -- the targets, `getty@.service`, `rescue.service`,
   `devmgr.service`, and the services of `lode` (`lode.service`,
-  `lode-crashd.service`, `lode-pstore.service`, `lode-upload.service`) and
-  of the RAM scrubber (`memscrub.service`), installed in
+  `lode-crashd.service`, `lode-pstore.service`, `lode-upload.service`), of
+  the RAM scrubber (`memscrub.service`) and of the free-memory pacer
+  (`memkeep.service`, `docs/MEMKEEP.md`), installed in
   `/lib/ferrix/units`.
 
 It is a workspace of its own, as zinc and the compositor are, because these
