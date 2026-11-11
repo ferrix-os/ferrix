@@ -13,6 +13,15 @@
   "reservations": [
     {
       "ids": [
+        "L.user.235"
+      ],
+      "owner": "ef-30fps",
+      "branch": "fix/cow-fault-unmapped",
+      "date": "2026-11-11",
+      "purpose": "A copy-on-write write fault to a page its space holds alone and that has no translation at the faulting address: mapped as a first touch, with no walk of the space's regions and no shootdown (the N150's Endfield stalls after world entry; beside L.user.229)"
+    },
+    {
+      "ids": [
         "L.user.230-234",
         "L.object.373"
       ],
