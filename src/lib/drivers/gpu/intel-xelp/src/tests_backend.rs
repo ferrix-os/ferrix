@@ -29,6 +29,9 @@ pub(crate) struct Model {
     hwsp_given: bool,
     now: u64,
     next_page: u64,
+    /// The GT's master interrupt switched on and the vector acknowledged, in
+    /// the order the back end did them.
+    irq_log: Vec<&'static str>,
 }
 
 impl Model {
@@ -40,6 +43,7 @@ impl Model {
             hwsp_given: false,
             now: 0,
             next_page: 0x4000_0000,
+            irq_log: Vec::new(),
         }
     }
 }
@@ -50,6 +54,11 @@ impl Mmio for Model {
     }
 
     fn write32(&mut self, offset: u32, value: u32) {
+        if offset == crate::generated::i915_reg::GEN11_GFX_MSTR_IRQ.offset()
+            && value == crate::generated::i915_reg::GEN11_MASTER_IRQ
+        {
+            self.irq_log.push("master on");
+        }
         self.gpu.write32(offset, value);
     }
 }
@@ -139,6 +148,10 @@ impl Platform for Model {
     fn frequency_report(&mut self, report: &crate::backend::FrequencyReport) {
         self.reports.push(*report);
     }
+
+    fn interrupt_serviced(&mut self) {
+        self.irq_log.push("acknowledged");
+    }
 }
 
 pub(crate) const RENDER: UapiEngine = UapiEngine {
@@ -190,6 +203,24 @@ fn step(be: &mut XelpBackend<Model>, now: u64) -> Vec<(u64, Completion)> {
     let mut done = Vec::new();
     be.completed(&mut |id, how| done.push((id, how)));
     done
+}
+
+/// The master interrupt is switched on once more after the vector's
+/// acknowledgement, and a deadline's service runs the handler too: a
+/// message the master sent before the acknowledgement would otherwise be
+/// the device's last ([`XelpBackend::service`]).
+#[test]
+fn the_master_rises_again_after_the_acknowledgement_and_at_a_deadline() {
+    let mut be = backend();
+    be.platform().irq_log.clear();
+    be.service(1_000_000, true);
+    assert_eq!(
+        be.platform().irq_log,
+        ["master on", "acknowledged", "master on"]
+    );
+    be.platform().irq_log.clear();
+    be.service(2_000_000, false);
+    assert_eq!(be.platform().irq_log, ["master on"]);
 }
 
 #[test]
