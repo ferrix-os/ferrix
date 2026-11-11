@@ -836,8 +836,9 @@ pub(crate) fn desktop_files(
     files.extend([crate::lode::enabled(), crate::lode::crashd_enabled()]);
     files.push(crate::lode::pstore_enabled());
     files.extend(crate::lode::desktop_settings());
-    // And tests its free memory while it idles (docs/RAM-SCRUBBER.md §5).
-    files.push(crate::scrub::enabled());
+    // And tests its free memory while it idles (docs/RAM-SCRUBBER.md §5),
+    // and keeps it above a mark while the cache fills (docs/MEMKEEP.md).
+    files.extend([crate::scrub::enabled(), crate::memkeep::enabled()]);
     // And can send it on (docs/LOGGING.md §10.2): `lode-upload`, which runs
     // when `/etc/ferrix/lode-upload.conf` names a collector and the unit is
     // enabled (`lode-receive pair` says how).
