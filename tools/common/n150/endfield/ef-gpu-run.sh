@@ -35,25 +35,32 @@ title=${EF_TITLE:-Endfield}
 say() { echo "$*"; echo "$*" >> $out; }
 
 # The pids whose program is $1: comm first (Wine names the process after
-# the exe), else argv[0]'s last path element (Wine's Windows path).
+# the exe), else, for a process still named after Wine's loader, argv[0]'s
+# last path element (Wine's Windows path). With the shell's own `read`, no
+# process a step: the report line used to start about 5000 busybox
+# processes over 12 s, every EF_EVERY seconds, which took a whole processor
+# 12 s of every 27 and raised the game's kernel time fivefold on the N150
+# (2026-11-11).
 pids_of() {
     for p in /proc/[0-9]*; do
-        c=$($bb cat $p/comm 2>/dev/null) || continue
+        read -r c 2>/dev/null < $p/comm || continue
         if [ "$c" = "$1" ]; then echo ${p#/proc/}; continue; fi
-        a=$( { $bb tr '\0' '\n' < $p/cmdline; } 2>/dev/null | $bb head -n 1)
+        case "$c" in wine*|*preloader|start.exe) ;; *) continue ;; esac
+        a=
+        IFS= read -r -d '' a 2>/dev/null < $p/cmdline
         case "$a" in *\\"$1"|*/"$1"|"$1") echo ${p#/proc/} ;; esac
     done
 }
 
-# "pid:comm" of every process that holds a render node open.
+# "pid:comm" of every process that holds a render node open: one listing of
+# every process's descriptors, read by one awk.
 render_holders() {
-    for p in /proc/[0-9]*; do
-        for f in $p/fd/*; do
-            case "$($bb readlink $f 2>/dev/null)" in
-            /dev/dri/renderD*) echo "${p#/proc/}:$($bb cat $p/comm 2>/dev/null)"; break ;;
-            esac
-        done
-    done | $bb tr '\n' ' '
+    $bb ls -l /proc/[0-9]*/fd 2>/dev/null | $bb awk '
+        /^\/proc\// { pid = $0; sub(/^\/proc\//, "", pid); sub(/\/fd:$/, "", pid); seen = 0; next }
+        !seen && / -> \/dev\/dri\/renderD/ {
+            c = ""; f = "/proc/" pid "/comm"; getline c < f; close(f)
+            printf "%s:%s ", pid, c; seen = 1
+        }'
 }
 
 # The device DXVK chose in one log: the "Found device" lines not followed
