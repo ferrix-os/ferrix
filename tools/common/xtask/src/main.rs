@@ -962,7 +962,11 @@ fn test_shell(args: &Args) -> Result<()> {
         // initramfs where the kernel and the linker will look.
         let carried = shell::carried_for(arch, &program, args)?;
         let initramfs = initramfs::build(None, &natives, None, &carried)?;
-        let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, None)?;
+        // `--kernel-option` and the other words `image_cmdline` writes, so a
+        // program measured as init can be measured with `ferrix.checks=skip`
+        // as the box boots.
+        let cmdline = image_cmdline(args);
+        let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, cmdline.as_deref())?;
         qemu::test_shell(arch, &image, &kernel, args)?;
         // The same shell and script again, started from files by
         // `ferrix.init=`; and under busybox, `reboot(2)`'s commit.
