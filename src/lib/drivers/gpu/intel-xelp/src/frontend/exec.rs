@@ -159,7 +159,7 @@ fn execute<B: Backend, H: Host<B::Memory>>(
     // program's memory, which another of its threads may be rewriting.
     for index in 0..count {
         let entry = exec_entry(&frontend.state, index)?;
-        bind(frontend, vm_slot, entry, retry)?;
+        bind(frontend, vm_slot, count, index, entry, retry)?;
     }
     let mut request = Request {
         id: 0,
@@ -543,13 +543,43 @@ fn validate<B: Backend, H: Host<B::Memory>>(
     Ok((address, reserved))
 }
 
-/// Bind the entry's object at its pinned address in VM `vm_slot`, unless it
-/// is bound there already: idle bindings in the way are unbound (i915 evicts
-/// them); for a busy one, `retry` is set to its last request and the call is
-/// held until that finishes.
+/// Whether `binding` is one the execbuffer's other entries pin for the call
+/// (i915's `__EXEC_OBJECT_HAS_PIN`): the binding an entry before `index`
+/// placed, or one an entry after it will use as it is, its object at that
+/// entry's address. Looked for only when something is in the way, which a
+/// correct program's execbuffer never has but for idle bindings of objects
+/// it no longer lists.
+fn pinned_by_call<M>(
+    state: &Tables<M>,
+    vm_slot: u16,
+    count: usize,
+    index: usize,
+    binding: &Binding,
+) -> bool {
+    state
+        .exec
+        .iter()
+        .take(count)
+        .enumerate()
+        .any(|(other, entry)| {
+            other != index
+                && entry.object() == binding.object
+                && Binding::key_of(vm_slot, entry.address()) == binding.key
+        })
+}
+
+/// Bind entry `index`'s object at its pinned address in VM `vm_slot`, unless
+/// it is bound there already: idle bindings in the way are unbound (i915
+/// evicts them); for a busy one, `retry` is set to its last request and the
+/// call is held until that finishes. One the call's other entries pin
+/// ([`pinned_by_call`]) is never evicted: the call is refused `ENOSPC`, as
+/// `i915_gem_evict_for_node` refuses a pinned vma and `eb_reserve` gives up
+/// with it, before anything in the way is unbound.
 fn bind<B: Backend>(
     frontend: &mut Frontend<B>,
     vm_slot: u16,
+    count: usize,
+    index: usize,
     entry: ExecEntry,
     retry: &mut Option<FenceRef>,
 ) -> Result<(), Errno> {
@@ -569,6 +599,23 @@ fn bind<B: Backend>(
         return Ok(());
     }
     // What is in the way. `validate` kept the range inside the VM.
+    let range = state
+        .bindings
+        .overlapping(key, reserved)
+        .ok_or(Errno::EINVAL)?;
+    if state
+        .bindings
+        .as_slice()
+        .get(range)
+        .unwrap_or_default()
+        .iter()
+        .any(|other| pinned_by_call(state, vm_slot, count, index, other))
+    {
+        return Err(state.refuse(
+            "overlaps another object of the same execbuffer",
+            Errno::ENOSPC,
+        ));
+    }
     loop {
         let range = state
             .bindings

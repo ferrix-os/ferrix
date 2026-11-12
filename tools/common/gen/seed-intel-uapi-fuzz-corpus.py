@@ -626,6 +626,18 @@ def seeds():
     # the end of the run. Every VM past the first 64 outlived the release
     # (`vm::free_idle`; `release_frees_more_than_64_contexts_and_vms`).
     yield "regression-vms-outlive-release", bytes([0xE4, 0xF0, 0xF9, 0x00])
+    # The input the target found after the hardening fixes (2026-11-12): one
+    # execbuffer lists the batch object at 0x1000 (BATCH_FIRST), another
+    # object at 0x3000 and the batch object again at 0, five pages each.
+    # Each later entry evicted the binding an earlier one had just made, and
+    # the batch was submitted with no binding ("batch 0x1000+0x5000 not
+    # inside a binding of VM 5"). Now ENOSPC, as i915.
+    yield "regression-exec-objects-evict-each-other", bytes.fromhex(
+        "0002020d05000002000d01000002000d01000002000d0100000b0003000000010100"
+        "0100010303000101000103030001020000000700010100030001ffffffffffffff00"
+        "000002000d02000002000d0200ffffff9b00bf0700010100000b0001000100010200"
+        "00000700010100b7010100000400000000001c0003011d0101"
+    )
 
 
 def main():

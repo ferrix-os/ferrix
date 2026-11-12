@@ -2078,6 +2078,65 @@ fn a_full_backend_keeps_order() {
     });
 }
 
+/// An execbuffer whose objects overlap each other is refused `ENOSPC`, as
+/// i915 refuses it (`i915_gem_evict_for_node` will not evict a vma the call
+/// pinned): a binding the call placed, or one an entry of it uses as it is,
+/// is never evicted by a later entry. Before, the later entry evicted it,
+/// and the batch could be submitted with no binding at all (the fuzz
+/// target's input: the batch at 0x1000, another object at 0x3000, the batch
+/// object again at 0). Nothing in the way is unbound for a refused entry.
+#[test]
+fn objects_of_one_execbuffer_never_evict_each_other() {
+    big(|| {
+        let mut rig = Rig::new();
+        rig.frontend.backend.hold = true;
+        let batch = rig.create(5 * 4096);
+        let other = rig.create(5 * 4096);
+        let (status, _) = rig.exec(
+            ioctl::GEM_EXECBUFFER2,
+            &[
+                (batch, 0x1000, PINNED),
+                (other, 0x3000, PINNED),
+                (batch, 0, PINNED),
+            ],
+            exec::BATCH_FIRST,
+            &[],
+            0,
+        );
+        assert_eq!(status, -28, "ENOSPC");
+        let backend = &rig.frontend.backend;
+        assert!(
+            backend.submits.is_empty(),
+            "submitted: {:?}",
+            backend.submits
+        );
+        assert!(backend.unbinds.is_empty(), "evicted: {:?}", backend.unbinds);
+        // The batch object stays bound where the first entry put it, whole
+        // and idle, as i915 leaves an unpinned vma after a refused call.
+        let bound: Vec<u64> = rig
+            .frontend
+            .state
+            .bindings
+            .as_slice()
+            .iter()
+            .map(objects::Binding::address)
+            .collect();
+        assert_eq!(bound, [0x1000]);
+        // An idle binding of an object the call does not list is evicted
+        // as before.
+        let third = rig.create(4096);
+        let (status, _) = rig.exec(
+            ioctl::GEM_EXECBUFFER2,
+            &[(third, 0x2000, PINNED), (other, 0x10000, PINNED)],
+            0,
+            &[],
+            0,
+        );
+        assert_eq!(status, 0);
+        assert_eq!(rig.frontend.backend.unbinds.len(), 1);
+    });
+}
+
 /// An engine map whose pointer wraps past the top of the address space is
 /// `EFAULT`, as Linux's `copy_from_user` of `&user->engines[n]` answers:
 /// its first engine sits 8 bytes in, past `extensions`, so a value within 8
