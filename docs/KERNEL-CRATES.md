@@ -816,10 +816,13 @@ flag is the configuration record of it (3558 addendum (a)).
      `src/lib` included (3934 (2), (3)): no file defines a `__ferrix_`
      symbol by name -- `no_mangle`, `export_name` or an assembly `.globl` --
      and none but the seam's own list and macro names one.
-   * **The ELF is the dependency evidence of record** (3623 (R1)): Cargo
-     lists the crate in every build, since it has no way to make a
-     dependency conditional on a build-script `--cfg` without a feature,
-     which (10) excludes; whether a profile's binary depends on it is
+   * **The ELF is the dependency evidence of record** (3623 (R1), amended
+     by 9361): Cargo lists the crate in every build that holds the load, by
+     the binary's table keyed on personality=kernel
+     (`microkernel/CORE-WITHOUT-EXTENSIONS.md` E1); within those it is not
+     keyed on runtime_settings, so the ELF stays the dependency evidence of
+     record for that flag; a build without the load does not compile it,
+     which the cargo tree check of that design is to show; whether a profile's binary depends on it is
      defined by the root's cfgs, checked statically per profile above, and
      proved by the linked ELF. `check-removable-symbols.py --elf K --crate
      C --value V` (four self-test cases) reads `nm --demangle`: no symbol

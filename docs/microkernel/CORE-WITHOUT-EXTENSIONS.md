@@ -59,8 +59,8 @@ Cargo feature. Cargo has a table for exactly that:
 # what this crate is built from under every flag
 ferrix-kernel-core.workspace = true
 
-# The Linux personality: only where the kernel offers the Linux ABI.
-[target.'cfg(ferrix_linux_abi = "on")'.dependencies]
+# The Linux personality built into ring 0: only a personality=kernel build.
+[target.'cfg(ferrix_personality = "kernel")'.dependencies]
 ferrix-kernel-load.workspace = true
 ferrix-kernel-raised-checks.workspace = true
 ```
@@ -88,6 +88,16 @@ is given, and does not without. So:
 
 No `cfg(feature = ...)` enters the kernel; `kernel_cargo_features` stays 0.
 
+**Two flags, two keys** (ledger 9361 K1). The parts are keyed on
+`ferrix_personality = "kernel"`, not on `linux_abi`: the load is in ring 0
+exactly there, which is what `build.rs` derives `ferrix_load_built = "ring0"`
+from, so the kernels built without an extension are `personality=user`
+(`fast`, `max`) and `personality=none`. The core's and the item's Linux
+libraries (E6) are another matter: they are needed wherever `linux_abi=on`,
+`personality=user` included, so their tables are keyed on
+`ferrix_linux_abi = "on"`. That is why xtask gives both flags to rustc, and
+`build.rs` holds both to the flags it was handed.
+
 ## 3. The steps
 
 Each is a landing with a design or diff check of its own. E1 is small and
@@ -96,7 +106,7 @@ code that makes it true for the libraries; E6 is the manifests.
 
 | Step | What | Touches | Size (guess) |
 |---|---|---|---|
-| **E1** | The transport (§2). The binary's five Linux parts (`ferrix-kernel-load`, `-raised-checks`, `-settings`, `-logctl`, `-net-ring`) move to the `linux_abi = "on"` table; `main.rs`'s glob and the load's flag words go under `cfg(ferrix_linux_abi = "on")`, with the item's glob and words under `off`. A check: an `off` build's `cargo tree` names no package under the parts' place but the board glue, with a control. | xtask, `build.rs`, `src/kernel/Cargo.toml`, `main.rs` (item, the composition root), the workspace manifest | 3 |
+| **E1** | The transport (§2). The binary's five Linux parts (`ferrix-kernel-load`, `-raised-checks`, `-settings`, `-logctl`, `-net-ring`) move to the `personality = "kernel"` table; `main.rs`'s glob of the raised checks' crate and the load's flag word go under `cfg(ferrix_load_built = "ring0")`, with the item's glob otherwise. A check: a `personality=user` and a `personality=none` build's `cargo tree` names no package under the parts' place but the board glue, with a control. | xtask, `build.rs`, `src/kernel/Cargo.toml`, `main.rs` (item, the composition root), the workspace manifest | 3 |
 | E1b | The board glue (`board/stm32mp1`, `board/gs201-usb`): an `off` kernel installs it today. A flag of its own, or the two keyed by `target_arch` (they are Arm's), is a question (§5 Q1). | as E1 | 2 |
 | **E2** | `Errno` out of the Linux crate: a crate of its own with no dependency, `ferrix-errno`, holding the struct and its constants as they are; `ferrix-linux-abi::errno` and `ferrix-vfs` re-export it, so no caller's type changes. The core and the item name `ferrix_errno::Errno`. | about 30 `use` sites, no body | 3 |
 | **E3** | The architecture's Linux code under the flag: the signal frames, the Linux system call numbers of the three entries, TLS descriptors, hwcap, the vDSO and `counter_nanos`. Where `off` already answers `ENOSYS` (`NoLinux`), the entry needs no Linux number; where the trap path hands a signal number to `fault_signal`, it hands a fault kind and the personality picks the number. | `arch/*`, `trap.rs`, `timer.rs`; core ring, three architectures | 13, the uncertain one |
@@ -129,6 +139,18 @@ code that makes it true for the libraries; E6 is the manifests.
 
 ## Where it stands
 
-Design written 2026-11-12 (mk-crates7, the bridge session). Not yet reviewed.
+Design reviewed **OK IF, ledger 9212** (M1-M7, E1.1-E1.8; Q1: a flag
+`board_glue`; Q2: `ferrix-errno` re-exported; E3 needs a design note, N1-N12,
+and five landings; E6 goes library by library).
+
+**E1 is on develop ahead of its review** (49bd1ae9e, 2026-11-12): the customer
+ordered it there at once. It made `check` and `test-ring0-budget` red, and was
+fixed forward the same evening on the consultant's ruling (ledger 9361: the
+key on personality accepted, K1; 3623 (R1) amended, S1-S3; the budget's rise,
+B1-B3). What is built: the transport, the binary's five Linux parts in the
+keyed table, `main.rs`'s globs. What is owed is 9212's conditions as 9361 K1
+reads them and the diff check (BACKLOG); nothing further of §3 lands before
+that verdict.
+
 The comment-only grouping of the core's manifest landed as c29cca330 and is
 replaced by E6's tables.

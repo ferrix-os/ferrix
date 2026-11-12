@@ -277,11 +277,21 @@ fn build_flags() -> Result<Vec<(String, String)>, Box<dyn Error>> {
     {
         return Err(format!("FERRIX_BUILD_FLAGS gives no value for `{missing}`").into());
     }
-    // The flags a manifest keys a dependency table on reach rustc's command
-    // line too, since Cargo decides such a table from there (xtask's
-    // `MANIFEST_FLAGS`; docs/microkernel/CORE-WITHOUT-EXTENSIONS.md §2). A
-    // build where Cargo saw another value than this script was handed would
-    // link one kernel and compile another: refused.
+    manifest_flags_agree(&flags)?;
+    let personality = flags
+        .iter()
+        .find(|(name, _)| name == "personality")
+        .map_or("", |(_, value)| value.as_str());
+    load_built(personality)?;
+    Ok(flags)
+}
+
+/// The flags a manifest keys a dependency table on reach rustc's command
+/// line too, since Cargo decides such a table from there (xtask's
+/// `MANIFEST_FLAGS`; docs/microkernel/CORE-WITHOUT-EXTENSIONS.md §2). A
+/// build where Cargo saw another value than this script was handed would
+/// link one kernel and compile another: refused.
+fn manifest_flags_agree(flags: &[(String, String)]) -> Result<(), Box<dyn Error>> {
     for flag in ["personality", "linux_abi"] {
         let handed = flags
             .iter()
@@ -298,12 +308,7 @@ fn build_flags() -> Result<Vec<(String, String)>, Box<dyn Error>> {
             .into());
         }
     }
-    let personality = flags
-        .iter()
-        .find(|(name, _)| name == "personality")
-        .map_or("", |(_, value)| value.as_str());
-    load_built(personality)?;
-    Ok(flags)
+    Ok(())
 }
 
 /// Where this crate finds the load, derived here alone: never a flag, never

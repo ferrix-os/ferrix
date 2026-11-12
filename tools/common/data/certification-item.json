@@ -684,7 +684,14 @@
       "the crate calls). `calls` are the load files that call through the",
       "interface, `fields` its entries. check-item-boundary.py's removable_problems",
       "holds the root, the manifests and every profile to this record, and",
-      "check-removable-symbols.py the linked ELFs (cargo xtask test-removable)."
+      "check-removable-symbols.py the linked ELFs (cargo xtask test-removable).",
+      "Since E1 of docs/microkernel/CORE-WITHOUT-EXTENSIONS.md (ledger 9212, 9361 S1, S2;",
+      "3623 (R1) as amended) the crate is present where the load is built into ring 0",
+      "(personality=kernel) and the flag has `present_when`'s value: the binary lists it",
+      "in the table keyed cfg(ferrix_personality = \"kernel\") or in [dependencies], in no",
+      "other table, and a build without the load does not compile it. One thing changed",
+      "with that: a personality=user binary under runtime_settings=live no longer names",
+      "SETTINGS_FLAG_WORD, the root's assert of it being under ferrix_load_built = \"ring0\"."
     ],
     "removable": {
       "ferrix-kernel-settings": {

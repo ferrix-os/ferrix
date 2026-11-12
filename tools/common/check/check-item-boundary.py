@@ -1453,8 +1453,12 @@ def removable_problems(removable: dict, read, crate_files: dict[str, list[str]],
             if named is not None and not renamed and other != "ferrix-kernel":
                 problems.append(f"{directory}: {other} depends on {package}; only the binary may")
         binary = packages.get("ferrix-kernel")
-        if binary is not None and package not in binary[1].get("dependencies", {}):
-            problems.append(f"src/kernel: the binary's manifest does not list {package} (it is compiled in every build, ledger 3623 (R1))")
+        # Listed plainly, or in the table of the builds that hold the load, on
+        # which the crate depends (docs/microkernel/CORE-WITHOUT-EXTENSIONS.md
+        # E1): it is compiled in every build that could link it.
+        with_load = binary[1].get("target", {}).get(_LOAD_TABLE, {}).get("dependencies", {}) if binary else {}
+        if binary is not None and package not in binary[1].get("dependencies", {}) and package not in with_load:
+            problems.append(f"src/kernel: the binary's manifest does not list {package} (it is compiled in every build that holds the load, ledger 3623 (R1))")
         # No kernel file outside the root names the crate.
         for rel in sorted(crate_files.get("kernel", [])):
             if rel == root or rel in crate_files.get(package, []):
@@ -1634,6 +1638,18 @@ def _removable_self_test() -> list[str]:
     ]:
         found = run(**args)
         if not any(expect in problem for problem in found):
+            failures.append(f"removable: {what} passed ({found})")
+    # Where the binary lists the crate (3623 (R1) as amended, ledger 9361 S1):
+    # plainly or in the load's table, and in no table of another key.
+    def binary_with(cargo):
+        return {**_REMOVABLE_PACKAGES, "ferrix-kernel": ("src/kernel", cargo)}
+    in_table = lambda key: {"dependencies": {}, "target": {key: {"dependencies": {"pkg-x": {}}}}}
+    if any("does not list" in problem for problem in run(packages=binary_with(in_table(_LOAD_TABLE)))):
+        failures.append("removable: the crate listed in the load's table was refused")
+    for what, cargo in [("the crate listed nowhere", {"dependencies": {}}),
+                        ("the crate listed in a table of another key", in_table('cfg(ferrix_f = "on")'))]:
+        found = run(packages=binary_with(cargo))
+        if not any("does not list" in problem for problem in found):
             failures.append(f"removable: {what} passed ({found})")
     # The scans over the linked crates (3934 (2), (3)).
     clean = {"src/kernel/src/hooks.rs": hooks, "src/kernel/src/user.rs": "fn u() { crate::hooks::a() }\n"}
@@ -2998,6 +3014,10 @@ def judge_profile(name: str, profile: dict, flags: dict, manifest: dict) -> tupl
 _SEAM_DEFINERS = re.compile(r"no_mangle\s*\)?\s*\]\s*(?:pub\s+)?(?:extern\s+\"[^\"]*\"\s+)?fn\s+__ferrix_")
 # Read in the unmasked text, since a mask blanks the strings they are in.
 _SEAM_STRING_DEFINERS = re.compile(r"export_name\s*=\s*\"__ferrix_|\.glob(?:a)?l\s+__ferrix_")
+
+
+# The binary's table for what only a kernel holding the load depends on.
+_LOAD_TABLE = 'cfg(ferrix_personality = "kernel")'
 
 
 def seam_scan_problems(removable: dict, linked: dict[str, str], seam_file: str) -> list[str]:

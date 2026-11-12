@@ -53,10 +53,9 @@ use ferrix_kernel_item::*;
 use ferrix_kernel_raised_checks::*;
 // Named, not only reached through the glob above, so that each crate's word
 // is named by the binary (`kernel-interface.py`).
-#[cfg(not(ferrix_load_built = "ring0"))]
 use ferrix_kernel_item::{CORE_FLAG_WORD, ITEM_FLAG_WORD};
 #[cfg(ferrix_load_built = "ring0")]
-use ferrix_kernel_load::{CORE_FLAG_WORD, ITEM_FLAG_WORD, LOAD_FLAG_WORD};
+use ferrix_kernel_load::LOAD_FLAG_WORD;
 
 // The four crates compiled with one set of build flags (ledger line 3282,
 // (K4)): the build line is the item's `cfg`s, and the binary's, the core's
