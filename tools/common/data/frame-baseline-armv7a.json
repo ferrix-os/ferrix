@@ -60,7 +60,7 @@
    "kind": "check",
    "stack": "task"
   },
-  "<ferrix_kernel_load::object::pager_check::Served>::supply": {
+  "<ferrix_kernel_raised_checks::object::pager_check::Served>::supply": {
    "frame": 4248,
    "kind": "check",
    "stack": "task"
@@ -262,7 +262,7 @@
    "kind": "check",
    "stack": "task"
   },
-  "<ferrix_kernel_load::object::pager_check::Served>::supply": {
+  "<ferrix_kernel_raised_checks::object::pager_check::Served>::supply": {
    "frame": 4208,
    "kind": "check",
    "stack": "task"
@@ -283,7 +283,7 @@
    "stack": "task"
   },
   "ferrix_kernel::kmain": {
-   "frame": 12232,
+   "frame": 12240,
    "kind": "product",
    "stack": "boot"
   },
@@ -484,7 +484,7 @@
    "kind": "check",
    "stack": "task"
   },
-  "<ferrix_kernel_load::object::pager_check::Served>::supply": {
+  "<ferrix_kernel_raised_checks::object::pager_check::Served>::supply": {
    "frame": 4248,
    "kind": "check",
    "stack": "task"
@@ -686,7 +686,7 @@
    "kind": "check",
    "stack": "task"
   },
-  "<ferrix_kernel_load::object::pager_check::Served>::supply": {
+  "<ferrix_kernel_raised_checks::object::pager_check::Served>::supply": {
    "frame": 4208,
    "kind": "check",
    "stack": "task"
@@ -707,7 +707,7 @@
    "stack": "task"
   },
   "ferrix_kernel::kmain": {
-   "frame": 12232,
+   "frame": 12240,
    "kind": "product",
    "stack": "boot"
   },
