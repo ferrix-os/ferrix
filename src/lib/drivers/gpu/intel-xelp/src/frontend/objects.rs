@@ -368,10 +368,20 @@ impl Binding {
         self.key & ((1 << 48) - 1)
     }
 
-    /// The key one past its end.
+    /// The key one past its end; `None` where that wraps, which no binding
+    /// in the table does ([`Bindings::insert`] refuses it).
     #[must_use]
-    pub const fn end(&self) -> u64 {
-        self.key + self.size
+    pub const fn end(&self) -> Option<u64> {
+        self.key.checked_add(self.size)
+    }
+}
+
+/// Whether `size` bytes from `key` stay inside the 48 bits of the key's VM,
+/// without wrapping: what every binding's range must do.
+const fn inside_its_vm(key: u64, size: u64) -> bool {
+    match (key & ((1 << 48) - 1)).checked_add(size) {
+        Some(end) => end <= 1 << 48,
+        None => false,
     }
 }
 
@@ -420,17 +430,22 @@ impl Bindings {
         self.entries.get_mut(..self.len)?.get_mut(index)
     }
 
-    /// The bindings that overlap `[key, key + size)`, as an index range.
+    /// The bindings that overlap `[key, key + size)`, as an index range;
+    /// `None` for a range that wraps or leaves its VM's 48 bits, which no
+    /// binding can have.
     #[must_use]
-    pub fn overlapping(&self, key: u64, size: u64) -> core::ops::Range<usize> {
-        let end = key + size;
+    pub fn overlapping(&self, key: u64, size: u64) -> Option<core::ops::Range<usize>> {
+        if !inside_its_vm(key, size) {
+            return None;
+        }
+        let end = key.checked_add(size)?;
         let slice = self.as_slice();
         let mut first = match self.search(key) {
             Ok(index) | Err(index) => index,
         };
         while first > 0
             && let Some(before) = slice.get(first - 1)
-            && before.end() > key
+            && before.end().is_some_and(|before_end| before_end > key)
         {
             first -= 1;
         }
@@ -445,16 +460,17 @@ impl Bindings {
         // binary search's own index can be one that ends before `key`.
         while first < last
             && let Some(entry) = slice.get(first)
-            && entry.end() <= key
+            && entry.end().is_some_and(|entry_end| entry_end <= key)
         {
             first += 1;
         }
-        first..last
+        Some(first..last)
     }
 
-    /// Add `binding`; `false` when the table is full.
+    /// Add `binding`; `false` when the table is full, or for a range that
+    /// wraps or leaves its VM's 48 bits.
     pub fn insert(&mut self, binding: Binding) -> bool {
-        if self.len == limits::BINDINGS {
+        if self.len == limits::BINDINGS || !inside_its_vm(binding.key, binding.size) {
             return false;
         }
         let at = match self.search(binding.key) {
@@ -489,6 +505,67 @@ impl core::fmt::Debug for Bindings {
 impl Default for Bindings {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// One exec object of the execbuffer being handled, as the one read of the
+/// program's list found and checked it (`exec::validate_all`): what every
+/// later pass of the call uses, so that a second thread rewriting the list
+/// meanwhile changes nothing the driver does. Sixteen bytes: the address
+/// (48 bits) and the object's slot in one word, the reserved size (a
+/// multiple of 4 KiB) and two flags in the other.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct ExecEntry {
+    at: u64,
+    span: u64,
+}
+
+impl ExecEntry {
+    const ADDRESS: u64 = (1 << 48) - 1;
+    const WRITE: u64 = 1 << 0;
+    const ASYNC: u64 = 1 << 1;
+
+    /// Object slot `object` at `address` (inside 48 bits), reserving
+    /// `reserved` bytes (a multiple of 4 KiB), written or not, with or
+    /// without implicit sync.
+    #[must_use]
+    pub const fn new(object: u16, address: u64, reserved: u64, write: bool, sync: bool) -> Self {
+        Self {
+            at: (address & Self::ADDRESS) | ((object as u64) << 48),
+            span: (reserved & !0xfff) | (write as u64) | ((!sync as u64) << 1),
+        }
+    }
+
+    /// The object's slot.
+    #[must_use]
+    pub const fn object(self) -> u16 {
+        (self.at >> 48) as u16
+    }
+
+    /// The address it is pinned at.
+    #[must_use]
+    pub const fn address(self) -> u64 {
+        self.at & Self::ADDRESS
+    }
+
+    /// The bytes its binding reserves: its size, or more by
+    /// `EXEC_OBJECT_PAD_TO_SIZE`.
+    #[must_use]
+    pub const fn reserved(self) -> u64 {
+        self.span & !0xfff
+    }
+
+    /// `EXEC_OBJECT_WRITE`.
+    #[must_use]
+    pub const fn write(self) -> bool {
+        self.span & Self::WRITE != 0
+    }
+
+    /// Whether the request waits for the object's fences: not
+    /// `EXEC_OBJECT_ASYNC`.
+    #[must_use]
+    pub const fn sync(self) -> bool {
+        self.span & Self::ASYNC == 0
     }
 }
 
@@ -861,6 +938,9 @@ pub struct Tables<M> {
     pub refusals: Refusals,
     /// The driver's own requests.
     pub driver: DriverRequests,
+    /// The exec objects of the execbuffer being handled, read once
+    /// ([`ExecEntry`]).
+    pub exec: [ExecEntry; limits::EXEC_OBJECTS],
 }
 
 /// The `intel: uapi refused` lines' rate limit: [`Refusals::BURST`] a
@@ -922,6 +1002,7 @@ impl<M> Tables<M> {
                 quiet: 0,
             },
             driver: DriverRequests::new(),
+            exec: [ExecEntry { at: 0, span: 0 }; limits::EXEC_OBJECTS],
         }
     }
 
@@ -1107,6 +1188,41 @@ mod slab_tests {
             }
         }
         assert_eq!(slab.len(), model.len());
+    }
+
+    /// A binding range that wraps, or runs past its VM's 48 bits into the
+    /// next VM's keys, is refused by the table and never searched for, in
+    /// release builds too; one that ends at the edge is taken.
+    #[test]
+    fn a_wrapped_binding_range_is_refused() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                use super::{Binding, Bindings};
+                let mut bindings = std::boxed::Box::new(Bindings::new());
+                let near = Binding::key_of(3, (1 << 48) - 0x1000);
+                let binding = |key, size| Binding {
+                    key,
+                    size,
+                    object: 1,
+                    last_use: 0,
+                };
+                assert_eq!(bindings.overlapping(near, 0x2000), None);
+                assert_eq!(bindings.overlapping(u64::MAX - 0xfff, 0x2000), None);
+                assert!(!bindings.insert(binding(near, 0x2000)));
+                assert!(!bindings.insert(binding(u64::MAX - 0xfff, 0x2000)));
+                assert!(bindings.insert(binding(near, 0x1000)));
+                assert_eq!(bindings.overlapping(near, 0x1000), Some(0..1));
+                assert_eq!(
+                    bindings.overlapping(Binding::key_of(4, 0), 0x1000),
+                    Some(1..1)
+                );
+                assert_eq!(binding(u64::MAX, 1).end(), None);
+                assert_eq!(binding(near, 0x1000).end(), Some(Binding::key_of(4, 0)));
+            })
+            .expect("thread")
+            .join()
+            .expect("test");
     }
 
     /// The first and the last slot, and both sides of a word's edge.

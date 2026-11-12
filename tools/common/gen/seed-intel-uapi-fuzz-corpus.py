@@ -158,16 +158,23 @@ class Program:
         fence_in=None,
         fence_array=None,
         timeline=None,
+        race=None,
     ):
         """objects: (handle selector, page, write); the last is the batch.
         A page given as a list is `Input::gpu_address`'s bytes as they are.
         fence_array: (syncobj selector, FENCE_WAIT or FENCE_SIGNAL).
-        timeline: (syncobj selector, flags, point)."""
+        timeline: (syncobj selector, flags, point).
+        race: the rewrite's bytes, when `FAULT_RACE_EXEC` is armed: the
+        entry's index, what changes (0 handle, 1 address, 2 pad, 3 flags)
+        and its new value, then the reads before it (0: after the first)."""
         self.add(EXECBUFFER, file, len(objects))
         for handle, page, write in objects:
             # handle, its flag bits (1: WRITE), address (selector 1: page x 4 KiB)
             self.add(handle, 1 if write else 0, page if isinstance(page, list) else [1, page])
-        self.add(VALID, ring)
+        self.add(VALID)
+        if race is not None:
+            self.add(*race)
+        self.add(ring)
         bits = 0
         if fence_out:
             bits |= 0x02
@@ -329,7 +336,7 @@ class Program:
 
 
 # The model's failures (`fault`).
-FAULT_BIND_PARTWAY, FAULT_PT_ALLOC = 1 << 11, 1 << 12
+FAULT_BIND_PARTWAY, FAULT_PT_ALLOC, FAULT_RACE_EXEC = 1 << 11, 1 << 12, 1 << 13
 
 # The two files every run starts with: A in process 0, B in process 1.
 A, B = 0, 1
@@ -536,6 +543,28 @@ def seeds():
         .context_destroy(A, own(0))
         .service()
         .release(A)
+    )
+    # An exec-object list another thread rewrites between the driver's reads
+    # (D3): the written object's handle swapped for another after the first
+    # read, its address moved to the top of the VM, a pad of 2^48 bytes
+    # after the second. The driver reads the list once; what it checked is
+    # what it binds, waits for and marks.
+    yield "exec-list-rewritten", (
+        Program()
+        .create(A, 1)
+        .create(A, 1)
+        .create(A, 2)
+        .faults(FAULT_RACE_EXEC)
+        .execbuffer(A, [(own(0), 1, True), (own(1), 2, False)], race=[0, 0, own(2), 0])
+        .faults(FAULT_RACE_EXEC)
+        .execbuffer(A, [(own(2), 4, False), (own(1), 2, False)], race=[0, 1, 13, 0])
+        .faults(FAULT_RACE_EXEC)
+        .execbuffer(A, [(own(2), 4, False), (own(1), 2, False)], race=[0, 2, 12, 1])
+        .close(A, own(0))
+        .close(A, own(2))
+        .service()
+        .complete(count=3)
+        .service()
     )
     yield "limit-files", Program().repeat(41, lambda p: p.open(0))
     yield "limit-held-waits", (

@@ -84,7 +84,8 @@ const BASE: u64 = 0x10_0000;
 /// The most program memory one run builds.
 const ARENA_MAX: usize = 1 << 20;
 /// Copies one call may make: an execbuffer of every handle reads its list
-/// four times in chunks of 32, plus fences, extensions and points.
+/// once in chunks of 32 (four times before D3), plus fences, extensions and
+/// points; the slack is a held execbuffer or two run again in the call.
 const MAX_COPIES: u64 = 4 * (limits::EXEC_OBJECTS as u64 / 32 + 1) + 4096;
 /// Bytes one call may copy.
 const MAX_COPIED: u64 = 4 * limits::EXEC_OBJECTS as u64 * 56 + (1 << 20);
@@ -297,6 +298,10 @@ mod fault {
     pub const BIND_PARTWAY: u32 = 1 << 11;
     /// The next page-table page cannot be had.
     pub const PT_ALLOC: u32 = 1 << 12;
+    /// Another thread of the program rewrites an entry of the next
+    /// execbuffer's list after the driver's first, second, third or fourth
+    /// read of it.
+    pub const RACE_EXEC: u32 = 1 << 13;
 }
 
 /// The largest binding the model maps through its page tables; larger ones
@@ -850,6 +855,24 @@ struct FakeHost {
     copies: u64,
     copied: u64,
     said: u64,
+    /// The exec-object list of the execbuffer op being run, and how many of
+    /// its bytes the driver has read in the op (D3: each at most once).
+    list: Option<(u64, u64)>,
+    list_read: u64,
+    /// A second thread of the program, rewriting the list between the
+    /// driver's reads (`fault::RACE_EXEC`).
+    race: Option<Race>,
+}
+
+/// A rewrite of an exec-object list by another thread of its program.
+struct Race {
+    /// The list.
+    list: (u64, u64),
+    /// Reads of the list to let through before rewriting it.
+    after: u32,
+    /// Where, and what.
+    at: u64,
+    bytes: Vec<u8>,
 }
 
 impl FakeHost {
@@ -902,6 +925,23 @@ impl Host<Memory> for FakeHost {
         }
         let range = self.range(address, out.len()).ok_or(Errno::EFAULT)?;
         out.copy_from_slice(&self.arena[range]);
+        let end = address + out.len() as u64;
+        if let Some((list, length)) = self.list {
+            let (from, to) = (address.max(list), end.min(list + length));
+            self.list_read += to.saturating_sub(from);
+        }
+        if let Some(race) = &mut self.race
+            && address < race.list.0 + race.list.1
+            && race.list.0 < end
+        {
+            race.after = race.after.saturating_sub(1);
+            if race.after == 0
+                && let Some(race) = self.race.take()
+                && let Some(range) = self.range(race.at, race.bytes.len())
+            {
+                self.arena[range].copy_from_slice(&race.bytes);
+            }
+        }
         Ok(())
     }
 
@@ -1174,6 +1214,9 @@ impl Rig {
                 copies: 0,
                 copied: 0,
                 said: 0,
+                list: None,
+                list_read: 0,
+                race: None,
             },
             faults,
             files: Vec::new(),
@@ -2162,6 +2205,30 @@ fn execbuffer(rig: &mut Rig, input: &mut Input<'_>) {
     }
     let list = rig.host.alloc(&objects);
     let buffers_ptr = rig.ptr(input, list, objects.len());
+    rig.host.race = None;
+    if count > 0 && fire(&rig.faults, fault::RACE_EXEC) {
+        // Only now are its bytes read, so that inputs without the fault
+        // read as they did before it.
+        let index = input.pick(count);
+        let at = index * ExecObject2::SIZE;
+        let mut entry =
+            ExecObject2::from_bytes(&objects[at..at + ExecObject2::SIZE]).expect("an exec object");
+        match input.u8() % 4 {
+            0 => entry.handle = rig.name(input, Kind::Gem, file.0),
+            1 => entry.offset = input.gpu_address(),
+            2 => {
+                entry.flags |= uapi::exec::OBJECT_PAD_TO_SIZE;
+                entry.rsvd1 = input.size();
+            }
+            _ => entry.flags ^= u64::from(input.u8()) << (input.u8() % 64),
+        }
+        rig.host.race = Some(Race {
+            list: (list, objects.len() as u64),
+            after: u32::from(input.u8() % 4) + 1,
+            at: list + at as u64,
+            bytes: entry.to_bytes().to_vec(),
+        });
+    }
 
     let mut flags = uapi::exec::NO_RELOC | uapi::exec::HANDLE_LUT;
     flags |= match input.u8() % 8 {
@@ -2303,7 +2370,19 @@ fn execbuffer(rig: &mut Rig, input: &mut Input<'_>) {
     } else {
         ioctl::GEM_EXECBUFFER2
     };
+    rig.host.list = Some((list, objects.len() as u64));
+    rig.host.list_read = 0;
     let (status, _) = rig.ioctl(input, file, cmd, &args.to_bytes());
+    // D3: the list is read once, into the driver's own copy, which every
+    // pass after the checks uses.
+    assert!(
+        rig.host.list_read <= objects.len() as u64,
+        "an execbuffer read {} bytes of its {}-byte object list",
+        rig.host.list_read,
+        objects.len()
+    );
+    rig.host.list = None;
+    rig.host.race = None;
     if status == Some(0) {
         rig.named(file.0, Kind::Context, context);
         for handle in handles {
@@ -2865,7 +2944,7 @@ fn check(rig: &Rig) {
     for binding in state.bindings.as_slice() {
         if let Some(before) = previous {
             assert!(
-                before.end() <= binding.key,
+                before.end().is_some_and(|end| end <= binding.key),
                 "bindings {before:?} and {binding:?} overlap"
             );
         }

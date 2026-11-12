@@ -357,6 +357,9 @@ struct FakeHost {
     privileged: bool,
     /// Requests their programs gave up on: the core refuses their copies.
     abandoned: Vec<u64>,
+    /// A second thread of the program: once a copy is read from the
+    /// address, these bytes are written there, for the driver's next read.
+    rewrite: Option<(u64, Vec<u8>)>,
 }
 
 impl FakeHost {
@@ -398,6 +401,12 @@ impl Host<Memory> for FakeHost {
         }
         let range = self.range(address, out.len())?;
         out.copy_from_slice(&self.memory[range]);
+        if self.rewrite.as_ref().is_some_and(|(at, _)| *at == address)
+            && let Some((at, bytes)) = self.rewrite.take()
+        {
+            let range = self.range(at, bytes.len())?;
+            self.memory[range].copy_from_slice(&bytes);
+        }
         Ok(())
     }
 
@@ -2170,6 +2179,94 @@ fn overlapping_bindings() {
             !rig.host.lines.iter().any(|line| line.contains("EAGAIN")),
             "no refusal said: {:?}",
             rig.host.lines
+        );
+    });
+}
+
+/// The exec-object list is read once: a second thread of the program that
+/// rewrites it after the driver checked it changes nothing the driver
+/// does. Before, the bind, dependency and marking passes each read the
+/// list again: a handle swapped after the checks left the object the batch
+/// was checked with unbound and unfenced (free to be closed and freed under
+/// it), and an address moved after them was bound unchecked.
+#[test]
+fn the_exec_object_list_is_read_once() {
+    big(|| {
+        let mut rig = Rig::new();
+        rig.frontend.backend.hold = true;
+        let written = rig.create(4096);
+        let other = rig.create(4096);
+        let batch = rig.create(4096);
+        // An execbuffer of `list`, whose first entry becomes `swapped` once
+        // the driver has read it.
+        let run = |rig: &mut Rig, list: [ExecObject2; 2], swapped: ExecObject2| -> i32 {
+            let mut bytes = Vec::new();
+            for entry in &list {
+                bytes.extend_from_slice(&entry.to_bytes());
+            }
+            let buffers_ptr = rig.host.alloc(&bytes);
+            rig.host.rewrite = Some((buffers_ptr, swapped.to_bytes().to_vec()));
+            let mut args = Execbuffer2 {
+                buffers_ptr,
+                buffer_count: 2,
+                flags: exec::NO_RELOC | exec::HANDLE_LUT,
+                ..Default::default()
+            }
+            .to_bytes();
+            rig.ioctl(ioctl::GEM_EXECBUFFER2, &mut args)
+        };
+        let entry = |handle: u32, offset: u64, flags: u64| ExecObject2 {
+            handle,
+            offset,
+            flags: PINNED | flags,
+            ..Default::default()
+        };
+        let busy = |rig: &mut Rig, handle: u32| -> u32 {
+            let mut args = GemBusy { handle, busy: 0 }.to_bytes();
+            assert_eq!(rig.ioctl(ioctl::GEM_BUSY, &mut args), 0);
+            GemBusy::from_bytes(&args).expect("busy").busy
+        };
+        // The handle swapped: the object checked is the one bound, waited
+        // for and marked written.
+        let status = run(
+            &mut rig,
+            [
+                entry(written, 0x10000, exec::OBJECT_WRITE),
+                entry(batch, 0x20000, 0),
+            ],
+            entry(other, 0x10000, exec::OBJECT_WRITE),
+        );
+        assert_eq!(status, 0);
+        assert_eq!(busy(&mut rig, written), 0x1_0001, "the written object");
+        assert_eq!(busy(&mut rig, other), 0, "the swapped-in object");
+        // The address moved to the end of the VM after the checks: the
+        // object is bound where it was checked, and nowhere else.
+        let status = run(
+            &mut rig,
+            [entry(other, 0x30000, 0), entry(batch, 0x20000, 0)],
+            ExecObject2 {
+                rsvd1: 1 << 47,
+                ..entry(other, (1 << 48) - 0x1000, exec::OBJECT_PAD_TO_SIZE)
+            },
+        );
+        assert_eq!(status, 0);
+        let backend = &rig.frontend.backend;
+        assert!(
+            backend
+                .binds
+                .iter()
+                .all(|(_, address, _, bytes)| *address < 0x40000 && *bytes == 4096),
+            "bound: {:?}",
+            backend.binds
+        );
+        assert!(
+            rig.frontend
+                .state
+                .bindings
+                .as_slice()
+                .iter()
+                .all(|binding| binding.size == 4096),
+            "a binding's reservation unchecked"
         );
     });
 }

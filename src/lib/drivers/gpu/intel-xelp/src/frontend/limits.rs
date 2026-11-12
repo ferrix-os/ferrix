@@ -34,11 +34,14 @@ pub const WAITS: usize = 64;
 pub const WAIT_HANDLES: usize = 64;
 /// Kernel fences (sync files and dmabuf slots) not yet signalled.
 pub const KERNEL_FENCES: usize = 2048;
-/// Exec objects one execbuffer may list.
-/// No table is sized by it: as many as a file can have handles. anv lists
-/// every buffer object a device has in each execbuffer (about 4,000 for
-/// Endfield at its world load), and i915 allows `INT_MAX / sizeof(vma)`.
-pub const EXEC_OBJECTS: usize = HANDLES;
+/// Exec objects one execbuffer may list: as many objects as there can be.
+/// anv lists every buffer object a device has in each execbuffer (about
+/// 4,000 for Endfield at its world load), each once, and i915 allows
+/// `INT_MAX / sizeof(vma)`. A file's handles name distinct objects (an
+/// import gives back the handle it has), so a longer list repeats one,
+/// which no Mesa driver sends. The execbuffer's copy of the list
+/// (`Tables::exec`, 16 bytes an entry) is sized by it.
+pub const EXEC_OBJECTS: usize = OBJECTS;
 /// Fences one execbuffer may name.
 pub const EXEC_FENCES: usize = 256;
 /// The read fences one object keeps apart; older ones are merged.

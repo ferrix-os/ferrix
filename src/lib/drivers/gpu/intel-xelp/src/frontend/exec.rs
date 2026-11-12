@@ -25,7 +25,7 @@ use ferrix_linux_abi::kmsg::Level;
 use super::backend::Engine;
 use super::drm::{Call, Outcome, put, unserved};
 use super::fence::{self, Hold, WaitKind};
-use super::objects::{Binding, FenceRef, Request, RequestState, SyncFence, Tables};
+use super::objects::{Binding, ExecEntry, FenceRef, Request, RequestState, SyncFence, Tables};
 use super::{Backend, Frontend, Host, gem, limits, syncobj, vm};
 use crate::uapi::{ExecFence, ExecObject2, Execbuffer2, ExecbufferExtTimelineFences, exec, query};
 
@@ -154,10 +154,12 @@ fn execute<B: Backend, H: Host<B::Memory>>(
         *retry = Some(FenceRef::Request(frontend.state.requests.retired + 1));
         return Err(Errno::EAGAIN);
     }
-    each_object(host, call, args.buffers_ptr, count, &mut |_, _, entry| {
-        let object = gem::lookup(&frontend.state, call.file, entry.handle)?;
-        bind(frontend, vm_slot, entry, object, retry)
-    })?;
+    // From here on the list is the copy `validate_all` made, never the
+    // program's memory, which another of its threads may be rewriting.
+    for index in 0..count {
+        let entry = exec_entry(&frontend.state, index)?;
+        bind(frontend, vm_slot, entry, retry)?;
+    }
     let mut request = Request {
         id: 0,
         state: RequestState::Queued,
@@ -177,21 +179,20 @@ fn execute<B: Backend, H: Host<B::Memory>>(
     if let Some(fence) = in_fence {
         add_dep(&mut request, fence);
     }
-    each_object(host, call, args.buffers_ptr, count, &mut |_, _, entry| {
-        if entry.flags & exec::OBJECT_ASYNC != 0 {
-            return Ok(());
+    for index in 0..count {
+        let entry = exec_entry(&frontend.state, index)?;
+        if !entry.sync() {
+            continue;
         }
-        let object = gem::lookup(&frontend.state, call.file, entry.handle)?;
-        if let Some(object) = frontend.state.objects.get(usize::from(object)) {
+        if let Some(object) = frontend.state.objects.get(usize::from(entry.object())) {
             add_dep(&mut request, object.write);
-            if entry.flags & exec::OBJECT_WRITE != 0 {
+            if entry.write() {
                 for read in object.reads {
                     add_dep(&mut request, read);
                 }
             }
         }
-        Ok(())
-    })?;
+    }
     let id = frontend
         .state
         .requests
@@ -204,16 +205,11 @@ fn execute<B: Backend, H: Host<B::Memory>>(
     // so, so that no point it was to signal is left without a fence while a
     // `WAIT_FOR_SUBMIT` waiter waits for it, as i915 signals the fence
     // array of every request it added.
-    let marked = each_object(
-        host,
-        call,
-        args.buffers_ptr,
-        count,
-        &mut |host, _, entry| {
-            let object = gem::lookup(&frontend.state, call.file, entry.handle)?;
-            mark_used(frontend, host, vm_slot, entry, object, id)
-        },
-    );
+    let mut marked = Ok(());
+    for index in 0..count {
+        let entry = exec_entry(&frontend.state, index)?;
+        marked = marked.and(mark_used(frontend, host, vm_slot, entry, id));
+    }
     let signalled = signal(frontend, host, call, args, &fences, id);
     marked
         .and(signalled)
@@ -292,8 +288,18 @@ fn select<B: Backend>(
     Ok((context_slot, context.vm, engine, engine_slot))
 }
 
+/// Exec object `index` of the call, as [`validate_all`] read and checked it.
+fn exec_entry<M>(state: &Tables<M>, index: usize) -> Result<ExecEntry, Errno> {
+    state.exec.get(index).copied().ok_or(Errno::EINVAL)
+}
+
 /// `eb_lookup_vmas`, `eb_validate_vma` and the batch checks of `eb_add_vma`:
 /// the batch's address and length, and how many objects are shared.
+///
+/// The one read of the program's list: each entry is checked and kept, as
+/// it was checked, in [`Tables::exec`], which the binds, the dependencies
+/// and the marks after it use (i915 copies the list into the kernel once,
+/// `i915_gem_execbuffer2_ioctl`'s `copy_from_user`, for the same reason).
 fn validate_all<B: Backend, H: Host<B::Memory>>(
     frontend: &mut Frontend<B>,
     host: &mut H,
@@ -315,10 +321,18 @@ fn validate_all<B: Backend, H: Host<B::Memory>>(
         count,
         &mut |host, index, entry| {
             let object = gem::lookup(&frontend.state, call.file, entry.handle)?;
-            let size = validate(frontend, host, call, entry, object)?;
+            let (address, size) = validate(frontend, host, call, entry, object)?;
             if index == batch_index {
                 batch = Some(batch_of(args, entry, size)?);
             }
+            let kept = frontend.state.exec.get_mut(index).ok_or(Errno::ENOMEM)?;
+            *kept = ExecEntry::new(
+                object,
+                address,
+                size,
+                entry.flags & exec::OBJECT_WRITE != 0,
+                entry.flags & exec::OBJECT_ASYNC == 0,
+            );
             if frontend
                 .state
                 .objects
@@ -464,14 +478,15 @@ fn each_object<M, H: Host<M>>(
 }
 
 /// `eb_validate_vma` with the softpin placement checks of `eb_reserve_vma`:
-/// the reservation's size.
+/// the address, inside 48 bits, and the reservation's size, which ends
+/// inside the VM.
 fn validate<B: Backend, H: Host<B::Memory>>(
     frontend: &mut Frontend<B>,
     host: &mut H,
     call: &Call,
     entry: &ExecObject2,
     object: u16,
-) -> Result<u64, Errno> {
+) -> Result<(u64, u64), Errno> {
     if entry.relocation_count != 0 {
         return Err(Errno::EINVAL);
     }
@@ -522,32 +537,26 @@ fn validate<B: Backend, H: Host<B::Memory>>(
     if entry.alignment > 1 && !address.is_multiple_of(entry.alignment) {
         return Err(Errno::EINVAL);
     }
-    Ok(reserved)
+    Ok((address, reserved))
 }
 
-/// Bind `object` at its pinned address in VM `vm_slot`, unless it is bound
-/// there already: idle bindings in the way are unbound (i915 evicts them);
-/// for a busy one, `retry` is set to its last request and the call is held
-/// until that finishes.
+/// Bind the entry's object at its pinned address in VM `vm_slot`, unless it
+/// is bound there already: idle bindings in the way are unbound (i915 evicts
+/// them); for a busy one, `retry` is set to its last request and the call is
+/// held until that finishes.
 fn bind<B: Backend>(
     frontend: &mut Frontend<B>,
     vm_slot: u16,
-    entry: &ExecObject2,
-    object: u16,
+    entry: ExecEntry,
     retry: &mut Option<FenceRef>,
 ) -> Result<(), Errno> {
-    let address = entry.offset & ((1 << 48) - 1);
+    let (object, address, reserved) = (entry.object(), entry.address(), entry.reserved());
     let state = &mut frontend.state;
     let (size, pat) = state
         .objects
         .get(usize::from(object))
         .map(|entry| (entry.size, entry.pat_index))
         .ok_or(Errno::ENOENT)?;
-    let reserved = if entry.flags & exec::OBJECT_PAD_TO_SIZE != 0 {
-        size.max(entry.rsvd1)
-    } else {
-        size
-    };
     let key = Binding::key_of(vm_slot, address);
     if let Some(index) = state.bindings.at(key)
         && let Some(existing) = state.bindings.as_slice().get(index)
@@ -556,9 +565,12 @@ fn bind<B: Backend>(
     {
         return Ok(());
     }
-    // What is in the way.
+    // What is in the way. `validate` kept the range inside the VM.
     loop {
-        let range = state.bindings.overlapping(key, reserved);
+        let range = state
+            .bindings
+            .overlapping(key, reserved)
+            .ok_or(Errno::EINVAL)?;
         if range.is_empty() {
             break;
         }
@@ -618,13 +630,13 @@ fn mark_used<B: Backend, H: Host<B::Memory>>(
     frontend: &mut Frontend<B>,
     host: &mut H,
     vm_slot: u16,
-    entry: &ExecObject2,
-    object: u16,
+    entry: ExecEntry,
     id: u64,
 ) -> Result<(), Errno> {
     let done = FenceRef::Request(id);
+    let object = entry.object();
     let state = &mut frontend.state;
-    let key = Binding::key_of(vm_slot, entry.offset & ((1 << 48) - 1));
+    let key = Binding::key_of(vm_slot, entry.address());
     if let Some(index) = state.bindings.at(key)
         && let Some(binding) = state.bindings.get_mut(index)
     {
@@ -634,7 +646,7 @@ fn mark_used<B: Backend, H: Host<B::Memory>>(
     let Some(owner) = state.objects.get_mut(usize::from(object)) else {
         return Ok(());
     };
-    if entry.flags & exec::OBJECT_WRITE != 0 {
+    if entry.write() {
         owner.write = done;
     } else {
         gem::add_read(owner, done);
@@ -643,7 +655,7 @@ fn mark_used<B: Backend, H: Host<B::Memory>>(
     // Ever exported, not only while its dmabuf lives: a card still shows
     // an object whose descriptor its exporter closed (vtest's scanout
     // buffers on the N150, 2026-10-28).
-    if owner.shared && entry.flags & exec::OBJECT_WRITE != 0 {
+    if owner.shared && entry.write() {
         super::note_shared_write();
     }
     if shared {
