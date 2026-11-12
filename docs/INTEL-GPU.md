@@ -485,7 +485,10 @@ allocate, and the box is reached over ssh (`fx.sh`).
   request, dmabufs and sync files through the core's calls, no reach into a
   process that is not waiting (V-10 in `VULNERABILITY-ANALYSIS.md`). The
   node is 0666 like NVIDIA's, so V-11's parser-surface argument applies to
-  this driver's front end too, and its parsers are fuzzed.
+  this driver's front end too, and its parsers are fuzzed: `intel_uapi`
+  in `src/tests/fuzz` sends the front end sequences of calls from several
+  files in two processes against a model GPU that checks the back end's
+  promises (§6).
 * **Interrupts.** The `Gpu` kind's isolated-interrupts mark requires every
   unit to remap (`L.device.27`). That needs `vtd-n150` slice 1 on the box,
   so the driver's first boots poll (§3.4) until it lands.
@@ -625,7 +628,9 @@ AMD iGPU). So:
   the workaround list with masks, MOCS and PAT. The ELSQ/CSB state machine
   through the submission model, with traces of the CSB events that M2
   records on the box replayed. Every uAPI parser, its layout pinned against
-  Appendix A's probe, fuzzed.
+  Appendix A's probe, fuzzed by `intel_uapi` (since 2026-11-12): every
+  ioctl, mmap, release and dmabuf event, in sequences, with each file's
+  names kept from the others and everything freed with the last client.
 * **A fake back end in QEMU** (`test-intel-uapi`, x86-64 KVM): the same
   driver with its GT replaced by a back end that completes every batch at
   once and runs nothing. It answers as `8086:46d4` on a fake node and
@@ -1544,7 +1549,7 @@ innocent context.
   the box run (§12.8) measures it. A frame or two at 60 Hz is the aim.
 * **The keeper is the front end.** A parser bug kills the keeper and every
   client's device with it (§11). The parsers are host-tested and fuzzed
-  (§4.4), and the keeper has no GT code.
+  (§4.4, `intel_uapi`), and the keeper has no GT code.
 
 ### 12.6 Why no reconnect library in the client
 

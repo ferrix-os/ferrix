@@ -44,6 +44,7 @@ ferrix-sndctl = { path = "../../lib/proto/sndctl" }
 ferrix-virtio-blk = { path = "../../lib/drivers/block/virtio-blk" }
 ferrix-virtio-net = { path = "../../lib/drivers/net/virtio-net" }
 ferrix-virtio-gpu = { path = "../../lib/drivers/display/virtio-gpu" }
+ferrix-intel-xelp = { path = "../../lib/drivers/gpu/intel-xelp" }
 ferrix-virtio-input = { path = "../../lib/drivers/input/virtio-input" }
 ferrix-netwire = { path = "../../lib/network/netwire" }
 ferrix-nettcp = { path = "../../lib/network/nettcp" }
@@ -373,6 +374,13 @@ bench = false
 [[bin]]
 name = "fsproto_serve"
 path = "fuzz_targets/fsproto_serve.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "intel_uapi"
+path = "fuzz_targets/intel_uapi.rs"
 test = false
 doc = false
 bench = false

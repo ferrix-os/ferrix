@@ -94,7 +94,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-elf"
-version = "0.1.0"
+version = "0.3.0"
 
 [[package]]
 name = "ferrix-fallible"
@@ -113,11 +113,11 @@ version = "0.1.0"
 
 [[package]]
 name = "ferrix-frame"
-version = "0.1.0"
+version = "0.3.0"
 
 [[package]]
 name = "ferrix-fsproto"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "ferrix-linux-abi",
  "ferrix-vfs",
@@ -145,6 +145,7 @@ dependencies = [
  "ferrix-frame",
  "ferrix-fsproto",
  "ferrix-inputctl",
+ "ferrix-intel-xelp",
  "ferrix-linux-abi",
  "ferrix-native-abi",
  "ferrix-net",
@@ -175,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-heap"
-version = "0.1.0"
+version = "0.3.0"
 
 [[package]]
 name = "ferrix-inputctl"
@@ -183,6 +184,13 @@ version = "0.1.0"
 dependencies = [
  "ferrix-linux-abi",
  "ferrix-native-abi",
+]
+
+[[package]]
+name = "ferrix-intel-xelp"
+version = "0.1.0"
+dependencies = [
+ "ferrix-linux-abi",
 ]
 
 [[package]]
@@ -222,7 +230,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-netswitch"
-version = "0.1.0"
+version = "0.3.0"
 
 [[package]]
 name = "ferrix-nettcp"
@@ -247,7 +255,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-partition-desc"
-version = "0.1.0"
+version = "0.3.0"
 
 [[package]]
 name = "ferrix-pci"
@@ -296,7 +304,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-svc-proto"
-version = "0.1.0"
+version = "0.3.0"
 
 [[package]]
 name = "ferrix-sync"
@@ -318,6 +326,7 @@ name = "ferrix-vfs"
 version = "0.1.0"
 dependencies = [
  "ferrix-cpio",
+ "ferrix-fallible",
  "ferrix-kmem",
  "ferrix-linux-abi",
  "ferrix-sync",
