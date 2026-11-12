@@ -351,7 +351,7 @@ fn unmap_from_the_middle(_: u64) -> Result<(), Refusal> {
         "unmapping what was left was refused",
     )?;
     let anywhere = space(
-        space_.map_anywhere(None, 2 * P, VmaFlags::READ_WRITE),
+        crate::user::space::map_anywhere_for_check(&space_, None, 2 * P, VmaFlags::READ_WRITE),
         "a region placed anywhere was refused",
     )?;
     space(

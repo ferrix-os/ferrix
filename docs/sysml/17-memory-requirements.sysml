@@ -3584,6 +3584,100 @@ package FerrixMemoryRequirements {
             attribute :>> parent = "H.QUOTA.12";
             attribute :>> unit = "user::cache::here";
         }
+        // docs/ANON-MERGE.md §5.1 (consultant ledger 9131, 9155, 9183): the
+        // term the two below use, defined first. ferrix_vma's split and merge
+        // keep the line too (try_merge_at, contiguous_backing,
+        // Backing::advanced_by); they are a library no ring classifies yet
+        // (F-76), so the analysis names them and the units below do not.
+        requirement <'L.user.244'> ownAnonymousObjectsAreOnOneLine : ItemLowLevel {
+            attribute :>> statement = "For each own private anonymous object X of a
+                space (one no handle, file or shadow of the space names, named only
+                by private anonymous regions) there shall be a base b(X) such that
+                every region of the space naming X names offset v - b(X) at each of
+                its addresses v; so no two addresses of the space name one page of
+                X.";
+            attribute :>> criterion = "By analysis (docs/ANON-MERGE.md §5.1, each
+                path named: map_anonymous and map_anywhere at offset 0, the reuse on
+                its neighbour's line, splits by Backing::advanced_by, ferrix_vma's
+                merge keeping the left offset, abandon_region and the remap undo
+                paths removing a region whole, a private mremap moving into a new
+                object, fork copying by id). With kernel objects alone, on every
+                profile (the `core anm` line), every own private anonymous object of
+                each case's space, after every step, is named only by private
+                anonymous regions and on one line
+                (user::space::own_lines_for_check); a negative control letting a
+                shared mapping join a private object fails it.";
+            attribute :>> parent = "H.MEM.1";
+            attribute :>> unit = ("user::space::AddressSpace::map_fresh",
+                "user::space::AddressSpace::place_beside",
+                "user::space::beside_of",
+                "user::space::moved_object",
+                "user::space::carry_apart");
+        }
+        // docs/ANON-MERGE.md §5.3 (consultant ledger 9131 A5, 9155, 9183
+        // A15): which neighbour, and every reason to decline.
+        requirement <'L.user.242'> anonymousMappingsJoinTheirNeighbour : ItemLowLevel {
+            attribute :>> statement = "A private anonymous mapping made by mmap
+                (MAP_FIXED or not) or brk shall be made in the object of its left
+                neighbour if that neighbour qualifies, else of its right neighbour
+                if that one qualifies, else in a new object. A neighbour qualifies
+                when its object is own private anonymous (L.user.244), the region
+                and the new mapping are private, the new range is free (no region
+                of the space reaches into it), the offset is not negative, the
+                space is not marked as being emptied and is not a window or region
+                space, the object is plain (not sealed, pager-backed, coherent or
+                combining, no kernel view, one mapper) and the region is not the
+                exec stack's or a guard of it. The mapping is made at the left
+                neighbour's offset plus its length, or the right's offset less the
+                new length, when the object holds no held page there; otherwise in
+                a new object, with no try of the other side.";
+            attribute :>> criterion = "With kernel objects alone, on every profile
+                (the `core anm` line): Wine's pattern of views mapped, decommitted
+                and released MAP_FIXED into one reserve, each taking the reserve's
+                object, and one region once an mprotect makes the protections
+                equal (ferrix_vma's merge joining what has equal flags); brk's
+                steps one region and one object; a right neighbour with room
+                taken; declined, each with a new object: a right neighbour at
+                offset 0, a shared neighbour, a shared mapping beside a private
+                one, an object mapped by handle, private memory allocated by
+                handle, a region kept apart as exec keeps
+                its stack and guards, a space being emptied, a window holding a
+                held page; a heap step asked over a mapped, written page (brk's way,
+                no unmap first) refused, taking nothing; 4,000 views in one reserve
+                on one object unmapped whole. Negative controls: the reuse off, the
+                right neighbour's room check, the handle test, the emptier's mark,
+                the kept-apart mark and the free-range test each left out.";
+            attribute :>> parent = ("H.MEM.1", "H.MEM.9");
+            attribute :>> unit = ("user::space::Layout::map_anonymous_beside",
+                "user::space::Layout::map_anywhere_beside",
+                "user::space::AddressSpace::place_beside",
+                "user::space::range_free",
+                "user::space::own_line",
+                "user::space::AddressSpace::keep_apart",
+                "user::space::AddressSpace::mark_emptying",
+                "user::vmo::Vmo::join_window");
+        }
+        // docs/ANON-MERGE.md §5.4 (consultant ledger 9155 A9 (i), A11, 9183
+        // A16): a reused window reads as a new object's would.
+        requirement <'L.user.243'> anonymousMappingsReadZero : ItemLowLevel {
+            attribute :>> statement = "Each page of a private anonymous mapping
+                shall read as zero until written, whether it was made in a
+                neighbour's object or a new one.";
+            attribute :>> criterion = "With kernel objects alone, on every profile
+                (the `core anm` line), every page of the mapping read: a window
+                whose written page an unmap kept for a second reference, mapped
+                again in the same object (its page taken back); a window whose
+                written page is held, declined and mapped in a new object; a window
+                written, unmapped and mapped again; a region moved out by mremap
+                and its window mapped again; Wine's released views holding no page;
+                a heap step asked over a mapped, written page (brk's way, no unmap
+                first) refused, the page keeping its frame and byte. Negative
+                controls: the held-page check, the take-back and the free-range
+                test each left out, each on its window with a non-zero page.";
+            attribute :>> parent = "H.MEM.1";
+            attribute :>> unit = ("user::vmo::Vmo::join_window",
+                "user::space::AddressSpace::retire_window");
+        }
         // F-112 (consultant ledger 9098, 9112 E6): the sorts on the unmap
         // path, whose length is a program's number of regions.
         requirement <'L.user.245'> anUnmapSortsWithoutRecursion : ItemLowLevel {

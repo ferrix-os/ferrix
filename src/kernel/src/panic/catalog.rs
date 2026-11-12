@@ -210,6 +210,33 @@ pub(crate) static CACHE_COUNT_BROKEN: Explanation = Explanation {
           docs/RSS-COUNTS.md §9",
 };
 
+// CHECKS-ONLY: stages_check.rs
+/// For `user::anon_merge_check`, the core self-check of anonymous mappings
+/// made in a neighbour's object: what it found other than `L.user.242` to
+/// `L.user.244` have it.
+pub static ANON_MERGE_BROKEN: Explanation = Explanation {
+    code: "FX-0979",
+    title: "an anonymous mapping made beside another was not as required",
+    meaning: "A private anonymous mapping made by `mmap` or `brk` beside a region of the space's \
+              own private anonymous memory is made in that region's object, at the offsets the \
+              object's addresses continue to, when the object holds no held page there \
+              (`docs/ANON-MERGE.md`, `L.user.242` to `L.user.244`). The core self-check \
+              (`user::anon_merge_check::run`) builds spaces of its own, makes Wine's and \
+              `brk`'s patterns and each case that must decline, and found a mapping in the \
+              wrong object, a window that did not read zero, an object off its line, or \
+              resident counts other than a recount.",
+    causes: &[
+        "The reuse took a neighbour that does not qualify: shared, mapped by handle, a file's, \
+         kept apart (exec's stack or its guards), in a space being emptied, or not plain.",
+        "The window's check or its take-back was skipped, so the new mapping met a page left \
+         by an earlier one.",
+        "A path named an own anonymous object at an offset off its line, or by a shared \
+         region.",
+    ],
+    see: "src/kernel/src/user/space.rs AddressSpace::place_beside; src/kernel/src/user/vmo.rs \
+          Vmo::join_window; docs/ANON-MERGE.md",
+};
+
 /// For `register_load` in `main.rs`, when the load ring did not register
 /// what the certified item reaches it through.
 pub static LOAD_REGISTRATION: Explanation = Explanation {
@@ -4547,6 +4574,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &STAGE8_RSS_KEPT,
     &RSS_COUNT_BROKEN,
     &CACHE_COUNT_BROKEN,
+    &ANON_MERGE_BROKEN,
     &STAGE10_PCI,
     &STAGE10_DEVICES,
     &STAGE10_IOMMU,

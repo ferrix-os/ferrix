@@ -13,15 +13,6 @@
   "reservations": [
     {
       "ids": [
-        "L.user.242-244"
-      ],
-      "owner": "ef-30fps",
-      "branch": "rss/anon-merge",
-      "date": "2026-11-12",
-      "purpose": "a private anonymous mapping made in its neighbour's object at the offsets that object's addresses continue to, so that the two regions merge (docs/ANON-MERGE.md): the reuse itself, a fresh mapping reading zero, and one line of offsets per own anonymous object"
-    },
-    {
-      "ids": [
         "L.user.230-234",
         "L.object.373"
       ],

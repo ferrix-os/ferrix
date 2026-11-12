@@ -179,6 +179,14 @@ of an own private anonymous object, and the lock it runs under:
 * `vmo_write`, `vmo_hold` and the other handle calls reach no such id, since
   a handle's id is in `native`.
 
+No other `Vmo` method commits or takes pages of such an object: the page
+cache's (`fill_one_page`, `take_clean_range`, the dirty states) work on
+filled objects, which no anonymous mapping names; the pager's
+(`put_supplied`, `take_for_supply`) on pager-backed ones, which are not
+plain; the seal and the device calls (`seal`, `make_combining`,
+`take_kernel_view`, `adopt_pages` into a ring) on objects reached by handle
+or kernel view, which are not own private anonymous.
+
 ### 5.3 Placement
 
 The reuse runs in a new entry, `map_anonymous_beside` and
@@ -192,15 +200,25 @@ self-checks.
 Under the space's lock, before a new object is made:
 
 1. Unless the space is marked as being emptied (section 5.4) or is a window
-   or region space (`is_window`, `is_region`): find the region ending at the
-   new range's start (the left neighbour) and the one starting at its end
-   (the right neighbour), two lookups in the map, O(log regions).
+   or region space (`is_window`, `is_region`), and only if the new range is
+   free -- no region of the map reaches into it, one binary search -- find
+   the region ending at the new range's start (the left neighbour) and the
+   one starting at its end (the right neighbour), two lookups in the map,
+   O(log regions). A range not free is declined before any page is touched,
+   and the new object's insert then refuses the overlap as before: `brk`
+   unmaps nothing before it asks, and plain `MAP_FIXED` goes on past an
+   unmap that failed, so both can ask over what is mapped, where a window
+   check made first would have taken a live page (ledger 9307 B1).
 2. Take the left neighbour if it qualifies, else the right; never the right
    after the left qualified and its window was declined. A neighbour
    qualifies when its object is own private anonymous (5.1), it and the new
-   mapping are private, it is not the exec stack's region (the stack's id,
-   which exec records in the space and a private `mremap` of it carries to
-   the new object; `fork` copies it), and the offsets its line gives the new
+   mapping are private, it is not the exec stack's region or a guard of it
+   (their three ids, which exec records in the space with `keep_apart`, a
+   private `mremap` of one carries to its new object, and `fork` copies; four
+   slots, so a second move of a moved stack or guard finds none free and its
+   new object is joinable: a region joined then, not a page shared, since
+   the window rules still hold), and
+   the offsets its line gives the new
    range are not negative: the left's offset plus its length, or the right's
    offset less the new length. Equal flags are not required: a later
    `mprotect` merges what the flags kept apart. The ELF loader's anonymous
@@ -243,7 +261,7 @@ with the object's pages there (phase three), in one of three ways:
 * the only reference, but `take_range` is refused: `decommit_range` by
   offset after the lock, which reaches every mapper, this space included;
 * another reference exists (a `madvise` holds one through its retire, a
-  fault holds one while it waits), or there is no room to note the range:
+  hold through `Vmo::hold` holds one), or there is no room to note the range:
   the pages are kept, and stay in the object until it is dropped.
 
 **The hazard is phase three.** A reuse inserted between an unmap's phase one
@@ -255,8 +273,16 @@ Linux-process map change holds for its whole call (`mmap`, `munmap`,
 `mremap`, `brk`, `shmat`, `shmdt`, and the native map calls in `native.rs`,
 the lift core's `space_unmap` among them at 5217): no other change's phase
 three can then be pending. `AddressSpace::layout` returns a guard that names
-its space; `map_*_beside` compares it with `self` and, for another space's
-guard, declines in a release build and stops a check build.
+its space, and the two `_beside` entries are that guard's own methods: a
+mapping is made beside another only through a space's own held layout, and
+no other space's guard can be passed.
+
+The lift build (`ferrix_load_built = "lift"`, the Linux load in ring 3)
+compiles this `space.rs`, `sys_mmap` and `set_break` unchanged, so the
+reuse runs there too, under the same layout lock taken at the same places
+(`memory.rs` 196 is not cfg'd); its `write_ahead` (`space.rs` 3723) commits
+only through `resolve`, under the space lock, so section 5.2 holds there as
+well.
 
 The unmaps that take no layout lock:
 
@@ -278,10 +304,13 @@ region and its pages with it. With reuse, the object stays named (Wine's
 reserve, the heap, jemalloc's reserve with its purges running beside), and
 kept pages would stay until the space goes: mapped nowhere, under no cover
 (so in no resident figure), charged to the job, and the window refused by
-every later reuse. So the reuse takes them back itself (step 3): no
-translation of them is left in this space, because the unmap that left them
-finished its phase two under a layout lock this reuse now holds and no
-region has named the window since; no other space has any, as
+every later reuse. So the reuse takes them back itself (step 3), and takes
+no live page doing it: the new range is first tested free (section 5.3 step
+1, `range_free`), so no region of this space sits on its addresses, and by
+`L.user.244`'s line no other address of the space names the window's
+offsets, so no region names the window at all. No translation of the pages
+taken is left in this space either: the unmap that left them finished its
+phase two under a layout lock this reuse now holds; no other space has any, as
 `mapper_count() == 1`; no kernel view exists. The retire's skipping this
 space is then right. A held page still declines. Wine maps every released
 or decommitted view again with `PROT_NONE` at once (`unmap_area`,
@@ -297,8 +326,8 @@ with any other address (`L.user.244`), as a new object's would.
 `unmap`, `give_back`, `Named::of`, `resident_pages`, `all_still_named` and
 `room_to_count_out` are not touched: the count-out of a region naming a
 reused object is the same `counting` and `lower` as any region's.
-`fix/exit-unmap-sort` (ledger 9112, F-112) is making those four sort without
-recursion, and the exit path's design, an exit teardown that takes no room
+`fix/exit-unmap-sort` (ledger 9112, F-112) has made those four sort without
+recursion (develop 914a9634b, F-112 closed), and the exit path's design, an exit teardown that takes no room
 it can be refused, is its design (d): it owns the exit, and this change
 leaves it to that branch. What reuse does to today's reservation there,
 given to (d) as an input (ledger 9155 A10): k regions that named k objects
@@ -355,15 +384,17 @@ defines the term the others use:
 * `L.user.242`: A private anonymous mapping made by `mmap` (`MAP_FIXED` or
   not) or `brk` shall be made in the object of its left neighbour if that
   neighbour qualifies, else of its right neighbour if that one qualifies,
-  else in a new object; a neighbour qualifies when its object is own private
-  anonymous (`L.user.244`), the region and the new mapping are private, the
-  offset is not negative, the space is not marked as being emptied, the
-  object is plain (not sealed, pager-backed, coherent or combining, no
-  kernel view, one mapper) and the region is not the exec stack's. It is
-  made at the left neighbour's offset plus its length, or the right's offset
-  less the new length, when the object holds no held page there; otherwise
-  in a new object, with no fallback to the other side. Criterion: the `anm`
-  check's cases, and the regions merging through `ferrix_vma`'s merge
+  else in a new object. A neighbour qualifies when its object is own
+  private anonymous (`L.user.244`), the region and the new mapping are
+  private, the new range is free (no region of the space reaches into it),
+  the offset is not negative, the space is not marked as being
+  emptied and is not a window or region space, the object is plain (not
+  sealed, pager-backed, coherent or combining, no kernel view, one mapper)
+  and the region is not the exec stack's or a guard of it. The mapping is
+  made at the left neighbour's offset plus its length, or the right's
+  offset less the new length, when the object holds no held page there;
+  otherwise in a new object, with no try of the other side. Criterion: the
+  `anm` check's cases, and the regions merging through `ferrix_vma`'s merge
   whenever their flags are equal.
 * `L.user.243`: Each page of a private anonymous mapping shall read as zero
   until written, whether it was made in a neighbour's object or a new one.
@@ -380,59 +411,116 @@ words (true with the reuse).
 ## 7. Checks
 
 A core self-check, `user/anon_merge_check.rs` (every profile, the `core anm`
-line), on a space of its own, validating I1 over every own private
-anonymous object of the space and its resident counts against `user::rss`'s
-walk after every step:
+line, FX-0979 on a failure), each case on a space of its own; after every
+step, `space::own_lines_for_check` asserts section 5.1's claim over
+the whole map (every id outside `native`, `files` and `shadows` named only
+by `Backing::Anonymous` regions with one value of `shared`, on one line:
+`L.user.244`) and the resident counts equal `user::rss`'s recount:
 
-* Wine's pattern: a reserve, views mapped `MAP_FIXED` into it, some
-  decommitted and released the same way: each mapping takes the reserve's
-  object, the regions are as many as the protections' changes, and an
-  `mprotect` that makes them equal leaves one region;
-* `brk`'s pattern, mapping after mapping at the end: one region, one object;
-* a right neighbour with room below its offset (made by unmapping its
-  front): taken;
-* declined, each with a new object: a window holding a held page; a
-  neighbour mapped by handle; a shared neighbour; a shared new mapping; a
-  private file mapping's region as the neighbour; a right neighbour at
-  offset 0; a marked space; another space's guard (a check build stops, so
-  this case runs the release path's decline through a test seam);
-* a window that kept a page across its unmap (a second reference held
-  across it, as a `madvise` holds one): mapped again, the page is taken
-  back, and every page of the mapping reads zero;
-* a window written, unmapped and mapped again reads zero; a region moved
-  out by `mremap` and its vacated window mapped again reads zero;
-* `fork`, then a reuse beside a copy-on-write region: the merged region
-  keeps copy-on-write, the parent's write to the new part stays its own and
-  the child's pages are unchanged;
-* a 4,000-view reserve on one object counted out by a whole-space unmap,
-  the resident counts equal to the walk after.
+* Wine's pattern: a reserve, views mapped `MAP_FIXED` into it, parts
+  decommitted and views released the same way: each mapping takes the
+  reserve's object, released views hold no page, and an `mprotect` making
+  the protections equal leaves one region;
+* `brk`'s pattern, sixteen steps each at the end of the last: one region,
+  one object;
+* a right neighbour with room below its offset (its front unmapped): taken;
+* declined, each with a new object: a right neighbour at offset 0; a shared
+  neighbour; a shared mapping beside a private one; an object mapped by
+  handle (`map_object`, in `native`, its region made shared); private
+  memory allocated by handle (`allocate_by_handle`, in `native`, its region
+  private, so only the handle test declines it); a region kept apart with
+  `keep_apart`, as exec keeps its stack and guards; a space marked as being
+  emptied;
+* the windows (`L.user.243`), every page read: one whose written page an
+  unmap kept for a second reference (an `Arc` of the object held across the
+  unmap, as a `madvise` holds one), mapped again in the same object, its
+  page taken back; one whose written page is held (`Vmo::hold`), declined
+  and mapped in a new object; one written, unmapped and mapped again; one an
+  `mremap` moved out of, mapped again;
+* after `fork`, a mapping beside the copy-on-write region: taken; the
+  parent's writes there and to the old page stay its own, and the child's
+  page keeps its byte;
+* 4,000 views in one reserve, every second one writable and touched: one
+  object, unmapped whole with the counts equal to a recount after.
 
-The exec stack's case needs an exec'd process: a stage 7 or procfs check,
-`MAP_FIXED` read-write at the stack's top, which must make a new object and
-leave `[stack]` and `VmStk` as they were.
+Exec's own recording of its stack and guards is by analysis: `exec.rs`
+passes each id `map_anonymous` answers to `keep_apart`, so a `MAP_FIXED`
+read-write mapping at the stack's top meets the stack on its left and the
+upper guard on its right, both kept apart, and makes a new object; `[stack]`
+and `VmStk` are left as they were. A private file mapping as the neighbour
+is declined by the `files` test, which the handle case's control stands for
+(both are the same table look-up); it has no case of its own, as a file
+mapping needs a file the core check does not make.
 
-Negative controls (`gate.sh control --expect`, each FIRED with a panic, on
-the tree): the held-page window check left out (built on the kept-page
-window, `--expect` the zero-read line); the take-back left out (the same
-read); the right neighbour's room check left out; the native test left out;
-the offset off by one page (`L.user.244`'s validation); the emptier's mark
-not read; the stack's mark not read; the reuse off altogether (the region
-count). No control for the plain-object declines: no own private anonymous
-object can be sealed (only `memfd`'s are), pager-backed, coherent or
-combining (a handle's or a driver's, in `native`), or take a kernel view (a
-ring's or a buffer's, by handle); the decline is a guard, argued here.
+Negative controls (`gate.sh control --expect`, each FIRED (panic) with its
+tree; run on 4bfaa69e8, tree ba576b228f32, `test-boot --arch x86_64 --accel
+kvm`, tags `am3-c1` to `am3-c10` in the order below, logs in
+`~/.local/share/ferrix/logs/queue/` with their sha256 in the landing's
+message; ledger 9465 R2):
 
-## 8. Figures owed
+* the window check's held-page test left out (`Vmo::join_window`): on the
+  held window, whose page was written non-zero before the unmap and which
+  `take_range` leaves, the new mapping reads that page; expects the
+  zero-read line;
+* the take-back left out (`Vmo::join_window` taking nothing): on the kept
+  window, an unheld page written non-zero and kept by the second reference,
+  the new mapping reads it; expects the zero-read line;
+* the right neighbour's room check left out; the handle test left out; the
+  emptier's mark not read; the kept-apart mark not read; the reuse off
+  altogether: each expects its case's line;
+* a shared mapping allowed to join a private object: the line check of
+  section 5.1 fails (`L.user.244`'s validation);
+* the offset one page off: the line check fails;
+* the free-range test left out (ledger 9307 B1): the heap step over a
+  mapped, written page takes that page; expects "a mapping refused over a
+  mapped range took its pages".
 
-`regionbench` and `statusbench` after the change, taken as section 3's,
-both logs cited, release builds with `ferrix.checks=skip` beside Linux 7.0
-in the same guest. A row with 60,000 regions made in one reused object
-(`MAP_FIXED` views with alternating protections inside one reserve):
-`fix/exit-unmap-sort`'s `test-exit-regions` in that variant once it lands,
-or regionbench's exit part at that size before then, PASSED on x86-64 KVM
-release, the job's memory back to its figure before the child after
-`waitpid`, the teardown time beside 9112 E8's. Then the game's `maps` and
-its `mmap` costs on the box, by the coordinator.
+The case behind that control: a heap extended by a fixed mapping in its
+object, that page written and split off by an `mprotect`, then a heap step
+over it asked as `brk` asks (no unmap first): refused, and the page keeps
+its frame and its byte. The lift build has no `core anm` line: the check is
+left out of it, as `rss_check` is.
+
+No control for the plain-object declines: no own private anonymous object
+can be sealed (only `memfd`'s are), pager-backed, coherent or combining (a
+handle's or a driver's, in `native`), or take a kernel view (a ring's or a
+buffer's, by handle); the decline is a guard, argued here.
+
+## 8. Figures, and the row owed
+
+`regionbench` (source sha256 2ce945a9..., binary a749b0cd...) and
+`statusbench` (binary f0158e95...), release builds in the same KVM guest as
+section 3's, Ferrix booted with `ferrix.checks=skip`; before on `land/ef-code`
+8fe2b2e7e, after on this change's tree (60800230c), each run with the host
+under the same pool load (logs in `~/.local/share/ferrix/logs/rss/`:
+`regionbench-release-skip-8fe2b2e7e-2.serial.log` sha256 4b42fec6...,
+`statusbench-release-skip-8fe2b2e7e-2.serial.log` cd7ff67c...,
+`regionbench-release-skip-60800230c.serial.log` f40a8222...,
+`statusbench-release-skip-60800230c.serial.log` 80983a88...; Linux 7.0's as
+section 3):
+
+| | Linux 7.0 | before | after |
+|---|---|---|---|
+| maps lines, Wine's pattern, 4,000 views | 3,999 | 5,332 | 3,999 |
+| maps lines, 500 `brk` steps | 1 | 501 | 1 |
+| maps lines, 2,000 top-down `mmap`s (section 9.1) | 0 | 2,000 | 2,000 |
+| a view mapped, us | 0.8 | 4.9 | 2.4 |
+| a part decommitted, us | 1.4 | 8.9 | 1.8 |
+| a view released, us | 1.5 | 127.4 | 5.6 |
+| exit of a child holding the views, ms | 1.7 | 111.4 | 6.9 |
+| `status`, `stat`, `meminfo` read, us (medians, 15,015 regions) | 3.8, 2.3, 3.2 | 11.8, 6.9, 6.0 | 11.9, 7.0, 6.1 |
+
+`statusbench`'s regions are one reserve under alternating protections, which
+neither system can merge: it is unchanged, as it should be. Owed (ledger
+9307 R7): a gate row with 60,000 regions made in one reused object, run:
+PASSED on x86-64 KVM release on the landing tree, the job's memory back to
+its figure before the child after `waitpid`, the teardown time beside 9112
+E8's: `fix/exit-unmap-sort`'s `test-exit-regions` in that variant, which is
+owed now: that branch is on develop (914a9634b). The case (one view
+reached by 60,000 regions) is F-112's input, and the BACKLOG row "the exit
+of 60,000 regions made in one reused object" names it (done in this
+landing's commit, ledger 9386 D2). Then the game's `maps` and its `mmap`
+costs on the box, by the product owner.
 
 ## 9. Left out
 
@@ -456,6 +544,20 @@ id in every region naming it: Linux does not do that either, unless the two
 
 ## 10. Where it stands
 
-Design reviewed 2026-11-12: OK IF A1-A8, consultant ledger line 9131, and
-OK IF A1-A11, line 9155 (A9 (i) chosen: the reuse takes a window's kept
-pages back, section 5.4; its text is to come back before code).
+Design reviewed 2026-11-12: OK IF A1-A8, consultant ledger line 9131; OK IF
+A1-A11, line 9155 (A9 (i) chosen: the reuse takes a window's kept pages
+back, section 5.4); and the rewritten text, OK IF A8 and A12-A17, line 9183
+(A9 (i) accepted, code begun). Code reviewed: NOT YET, line 9307, for B1 (a
+window's pages were taken before the range was known free, so `brk` over a
+mapped page could free it), fixed by declining any range not free before a
+page is touched, with its case and control. Built on branch
+`rss/anon-merge` (`L.user.242`-`244`). Owed after it lands (9307 R7): the
+60,000-region exit row in one reused object, `fix/exit-unmap-sort`'s
+`test-exit-regions` in that variant, owed now that the branch is on develop
+(914a9634b; the BACKLOG row names it, owner the product owner). Re-picked
+over that landing and checked: OK IF N1-N9, line 9561. The fix reviewed: OK IF
+R1-R9, line 9386. Rebased onto develop ca03c0f2e and reviewed again: OK IF
+T1-T7, line 9465 (a sixteenth case, private memory allocated by handle, for
+the handle test's control; `AddressSpace::map_anywhere` made `pub(crate)`,
+with a checks-only wrapper for the checks above the core; the ring-0 rise
++285 on both counts).

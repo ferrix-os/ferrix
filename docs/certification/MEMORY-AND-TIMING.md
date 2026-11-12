@@ -3454,6 +3454,29 @@ gate and a boot check say so: no allocation in the item's product code is
 fatal except at bring-up. What it did not describe, a bound, stays unclaimed,
 and says so in §1.5.
 
+### 2.2an An anonymous mapping made beside another (`AddressSpace::place_beside`, 2026-11-12)
+
+`docs/ANON-MERGE.md`, `L.user.242`-`244`. A private anonymous `mmap` or `brk`
+step, under its space's layout lock and then its space lock, tests that the
+new range is free (one binary search) and looks up its two neighbours in the
+map (two more, O(log regions)) and, for the one it takes, holds that
+object's pages lock once (`Vmo::join_window`): a probe of the held pages and
+of the frames over the window and the k pages present there taken out, O(log
+pages + k), into a list allocated fallibly (none, the window declined and a
+new object made as before), and the object's length raised.
+That is a new site of a pages lock under the space lock, the order every
+fault already takes. The pages taken are retired after the space lock goes,
+as `give_back`'s are. Nothing else is allocated: a reuse saves the object,
+its `Objects` charge, its mapper record and its table entry.
+
+What it moves elsewhere: an object now covers what were many objects (Wine's
+reserve, a `brk` heap), so a walk of one whole object under its pages lock
+(`Vmo::fork`'s copy, the OOM reaper's take) covers more pages at once,
+bounded by the same pages as the many walks before it; and a whole-space or
+large unmap reaching k regions of that object asks its one cover for 2k + 1
+runs in one list (`docs/ANON-MERGE.md` §5.5, about 3 MB at k = 60,000),
+which `fix/exit-unmap-sort`'s design (d) owns at the exit.
+
 ### 2.2ai A processor's reservations (`schedule=edf`, 2026-11-05)
 
 `ferrix-sched-edf`, under the queue's lock, with interrupts masked: a pick, a refill's look and each of the

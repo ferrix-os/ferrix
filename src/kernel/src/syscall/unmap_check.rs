@@ -28,7 +28,7 @@ use ferrix_vma::VmaFlags;
 use crate::sync::SpinLock;
 use crate::syscall::process;
 use crate::syscall::uaccess;
-use crate::user::space::{Access, AddressSpace};
+use crate::user::space::{self, Access, AddressSpace};
 
 /// What the page holds, so the copy can tell it read the page it held.
 const PATTERN: u8 = 0x5C;
@@ -78,8 +78,7 @@ pub fn check_an_unmap_waits_for_a_copy_holding_its_page() -> Result<bool, &'stat
     let process =
         process::new_for_check().map_err(|_| "could not make a process for the unmap check")?;
     let space = Arc::clone(process.space());
-    let page = space
-        .map_anywhere(None, PAGE_SIZE, VmaFlags::READ_WRITE)
+    let page = space::map_anywhere_for_check(&space, None, PAGE_SIZE, VmaFlags::READ_WRITE)
         .map_err(|_| "the unmap check's page was refused")?;
     uaccess::copy_to_user(&space, page, &[PATTERN])
         .map_err(|_| "could not write the unmap check's page")?;

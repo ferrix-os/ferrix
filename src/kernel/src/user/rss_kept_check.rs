@@ -26,7 +26,7 @@ use crate::syscall::memory::{self, MmapRequest, OffsetUnit};
 use crate::syscall::process::{self, Process};
 use crate::syscall::{fd, uaccess};
 use crate::user::rss_check;
-use crate::user::space::AddressSpace;
+use crate::user::space::{self, AddressSpace};
 use crate::user::vmo::Vmo;
 
 /// Regions of the Wine-pattern reserve.
@@ -201,8 +201,7 @@ fn check_fork_and_exit(process: &Process, compared: &mut u32) -> Result<(), &'st
             shared: true,
             ..ferrix_vma::VmaFlags::READ_WRITE
         };
-        let own = child
-            .map_anywhere(None, 2 * PAGE_SIZE, flags)
+        let own = space::map_anywhere_for_check(&child, None, 2 * PAGE_SIZE, flags)
             .map_err(|_| "the child refused a shared mapping of its own")?;
         let _ = child.unmap(own, 2 * PAGE_SIZE);
         let id = child

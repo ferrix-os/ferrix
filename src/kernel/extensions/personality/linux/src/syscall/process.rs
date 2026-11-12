@@ -915,7 +915,7 @@ impl Process {
         let _heap = self.heap_lock.lock();
         // The heap grows into whatever no mapping holds, which another
         // thread's `mmap` may be choosing at the same moment.
-        let _layout = self.space().layout();
+        let layout = self.space().layout();
         let mut state = self.state.lock();
 
         let heap = match state.heap {
@@ -951,9 +951,9 @@ impl Process {
         if page_end > heap.mapped_to {
             // Growing. Reserve the new pages; they cost nothing until touched.
             let len = page_end - heap.mapped_to;
-            if self
-                .space()
-                .map_anonymous(heap.mapped_to, len, VmaFlags::READ_WRITE)
+            // In the heap's own object where it continues it (`L.user.242`).
+            if layout
+                .map_anonymous_beside(heap.mapped_to, len, VmaFlags::READ_WRITE)
                 .is_err()
             {
                 return heap.brk;

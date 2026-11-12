@@ -39,6 +39,7 @@ use crate::smp;
 use crate::syscall::process::{self, Process, Startup};
 use crate::syscall::system::{self, RELEASE, SYSNAME, VERSION};
 use crate::syscall::{fd, path, registry, uaccess};
+use crate::user::space::map_anywhere_for_check;
 
 /// What the checks measured, for the boot log.
 #[derive(Debug, Clone, Copy)]
@@ -505,12 +506,9 @@ fn lay_out(process: &Process) -> Result<Layout, &'static str> {
     }
     let heap = process.heap_range().ok_or("the heap went away")?;
 
-    let stack = space
-        .map_anywhere(None, 8 * PAGE_SIZE, VmaFlags::READ_WRITE)
+    let stack = map_anywhere_for_check(space, None, 8 * PAGE_SIZE, VmaFlags::READ_WRITE)
         .map_err(refused)?;
-    let _ = space
-        .map_anywhere(None, PAGE_SIZE, VmaFlags::NONE)
-        .map_err(refused)?;
+    let _ = map_anywhere_for_check(space, None, PAGE_SIZE, VmaFlags::NONE).map_err(refused)?;
     let top = stack + 8 * PAGE_SIZE;
     // The stack pointer a program would have been handed is what names
     // `[stack]`. Nothing ever enters at `IMAGE`: the check task's entry is a
@@ -628,17 +626,16 @@ fn check_resident(
     if anon[1] != before[1] + 2 * page_kib || anon[2] != before[2] || anon[3] != before[3] {
         return Err("two stack pages written did not add two pages to RssAnon alone");
     }
-    let shared = process
-        .space()
-        .map_anywhere(
-            None,
-            2 * PAGE_SIZE,
-            VmaFlags {
-                shared: true,
-                ..VmaFlags::READ_WRITE
-            },
-        )
-        .map_err(|_| "the check process's space refused a shared mapping")?;
+    let shared = map_anywhere_for_check(
+        process.space(),
+        None,
+        2 * PAGE_SIZE,
+        VmaFlags {
+            shared: true,
+            ..VmaFlags::READ_WRITE
+        },
+    )
+    .map_err(|_| "the check process's space refused a shared mapping")?;
     uaccess::copy_to_user(process.space(), shared, &[1])
         .map_err(|_| "could not write the shared mapping")?;
     let after = resident_lines(ns, ctx)?;
@@ -674,19 +671,18 @@ fn check_region_totals(process: &Process) -> Result<(), &'static str> {
     };
     same("the check process as it is")?;
     let len = 6 * PAGE_SIZE;
-    let private = space
-        .map_anywhere(None, len, VmaFlags::READ_WRITE)
+    let private = map_anywhere_for_check(space, None, len, VmaFlags::READ_WRITE)
         .map_err(|_| "the space refused a mapping for the region totals")?;
-    let shared = space
-        .map_anywhere(
-            None,
-            len,
-            VmaFlags {
-                shared: true,
-                ..VmaFlags::READ_WRITE
-            },
-        )
-        .map_err(|_| "the space refused a shared mapping for the region totals");
+    let shared = map_anywhere_for_check(
+        space,
+        None,
+        len,
+        VmaFlags {
+            shared: true,
+            ..VmaFlags::READ_WRITE
+        },
+    )
+    .map_err(|_| "the space refused a shared mapping for the region totals");
     let outcome = (|| {
         let shared = shared?;
         same("a private and a shared mapping")?;
@@ -717,8 +713,7 @@ const TIMED_PAGES: u64 = 4096;
 fn time_resident_count(process: &Process) -> Result<(), &'static str> {
     let space = process.space();
     let len = TIMED_PAGES * PAGE_SIZE;
-    let at = space
-        .map_anywhere(None, len, VmaFlags::READ_WRITE)
+    let at = map_anywhere_for_check(space, None, len, VmaFlags::READ_WRITE)
         .map_err(|_| "the space refused the timed mapping")?;
     let touched = (0..TIMED_PAGES)
         .try_for_each(|page| uaccess::copy_to_user(space, at + page * PAGE_SIZE, &[1]).map(|_| ()));
@@ -1782,9 +1777,7 @@ fn check_maps(
     let count = file
         .read(&mut first)
         .map_err(|_| "/proc/self/maps could not be read")?;
-    let _ = process
-        .space()
-        .map_anywhere(None, PAGE_SIZE, VmaFlags::READ)
+    let _ = map_anywhere_for_check(process.space(), None, PAGE_SIZE, VmaFlags::READ)
         .map_err(|_| "the check process's address space refused a region")?;
     let text = read_rest(&file, 7, first.get(..count).unwrap_or_default().to_vec())?;
 

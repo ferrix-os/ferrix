@@ -586,7 +586,7 @@
     },
     "user/space.rs::fork": {
       "complexity": 19,
-      "lines": 76,
+      "lines": 77,
       "recursive": false
     },
     "user/space.rs::map_by_handle": {
@@ -606,7 +606,7 @@
     },
     "user/space.rs::remap": {
       "complexity": 19,
-      "lines": 80,
+      "lines": 82,
       "recursive": false
     },
     "user/space.rs::resolve": {

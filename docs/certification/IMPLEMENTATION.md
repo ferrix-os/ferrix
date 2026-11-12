@@ -1690,8 +1690,10 @@ above:
   move of a new native process into its job is checked against the task
   limit (`Process::move_new_to`); a move by `cgroup.procs` is not.
 * **Objects** are charged by `Vmo::new_anonymous` and `Vmo::fork`, so each
-  anonymous or private mapping a Linux program makes counts as one; a page
-  cache object is the file's and is not. cgroupfs has no file for the object
+  anonymous or private mapping a Linux program makes in an object of its own
+  counts as one; one made in its neighbour's object (`L.user.242`,
+  `docs/ANON-MERGE.md`) makes none and counts nothing, as Linux counts no
+  mapping; a page cache object is the file's and is not. cgroupfs has no file for the object
   limit, which only a job handle sets.
 * **A task follows its process to a new job** at its next trap from user
   mode or system call (`sched::regroup_current`): one per-processor word is

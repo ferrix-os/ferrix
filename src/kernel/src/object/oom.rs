@@ -883,6 +883,9 @@ fn empty(space: &Arc<AddressSpace>) {
     let top = |space: &AddressSpace| {
         space.with_regions(|regions| regions.last().map(|region| (region.start, region.end)))
     };
+    // Its unmaps take no layout lock, so no mapping is made in a neighbour's
+    // object from here on (`L.user.242`, `docs/ANON-MERGE.md` §5.4).
+    space.mark_emptying();
     loop {
         if space.oom_emptying_given_up() || !in_slot(space) {
             return;

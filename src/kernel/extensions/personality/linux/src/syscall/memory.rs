@@ -193,7 +193,7 @@ pub fn sys_mmap(process: &Process, request: &MmapRequest) -> Result<usize, Errno
     }
 
     // From here the call looks at the map and changes it, perhaps twice.
-    let _layout = process.space().layout();
+    let layout = process.space().layout();
     if flags & MAP_ANONYMOUS == 0 {
         let offset = (page_offset as u64)
             .checked_mul(PAGE_SIZE)
@@ -205,15 +205,15 @@ pub fn sys_mmap(process: &Process, request: &MmapRequest) -> Result<usize, Errno
     // offset is whole pages, so a program passing a real fd with
     // `MAP_ANONYMOUS` gets zeroes there and must get them here.
     let _ = fd;
+    // Made in a neighbour's object where one qualifies (`L.user.242`):
+    // Wine's views in its reserve, jemalloc's in its.
     match place(process, addr, len, flags)? {
-        FilePlace::Anywhere(hint) => process
-            .space()
-            .map_anywhere(hint, len, vma)
+        FilePlace::Anywhere(hint) => layout
+            .map_anywhere_beside(hint, len, vma)
             .map(usize_of)
             .map_err(refused),
-        FilePlace::Fixed(at) => process
-            .space()
-            .map_anonymous(at, len, vma)
+        FilePlace::Fixed(at) => layout
+            .map_anonymous_beside(at, len, vma)
             .map(|_| usize_of(at))
             .map_err(refused),
     }

@@ -453,21 +453,26 @@ pub(crate) fn load_into(
     // The stack region. Reserved whole; paid for a page at a time.
     let top = stack_top(loaded.abi);
     let low = top - STACK_SIZE;
-    let _ = space
+    // The stack and its guards are kept apart: no mapping beside them is
+    // made in their objects (`L.user.242`, `docs/ANON-MERGE.md` §5.3).
+    let stack = space
         .map_anonymous(low, STACK_SIZE, VmaFlags::READ_WRITE)
         .map_err(ExecError::Space)?;
+    space.keep_apart(stack);
 
     // Guard regions either side of the stack, with no access at all. Not
     // decoration: the first busybox run's first `mmap` landed at
     // 0x7FFFFFFFF000, the page this leaves unmapped above the stack, because
     // the free-space search runs top-down and that page was the highest hole.
-    let _ = space
+    let above = space
         .map_anonymous(top, load::user_end(loaded.abi) - top, VmaFlags::NONE)
         .map_err(ExecError::Space)?;
+    space.keep_apart(above);
     if let Some(guard_low) = low.checked_sub(STACK_GUARD) {
-        let _ = space
+        let below = space
             .map_anonymous(guard_low, STACK_GUARD, VmaFlags::NONE)
             .map_err(ExecError::Space)?;
+        space.keep_apart(below);
     }
     Ok(Image {
         loaded,

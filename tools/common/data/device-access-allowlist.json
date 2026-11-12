@@ -172,6 +172,12 @@
       "reason": "The boot checks' probes: demand paging and the kernel image's own bytes. Ordinary RAM, read for real because that is what is being proven."
     },
     {
+      "file": "src/kernel/src/user/anon_merge_check.rs",
+      "kind": "memory",
+      "max_sites": 3,
+      "reason": "The anonymous mapping check (docs/ANON-MERGE.md, L.user.243): a page of its own space's object written and read through the direct map, to see a reused window reads zero; ordinary RAM, no device."
+    },
+    {
       "file": "src/kernel/src/mm/seal_check.rs",
       "kind": "memory",
       "max_sites": 2,

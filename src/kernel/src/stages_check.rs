@@ -230,6 +230,7 @@ pub(super) fn check_dirty() {
     // The kept resident counts next, with kernel objects alone too, and the
     // page cache's kept counts.
     check_rss_core();
+    check_anon_merge_core();
     check_cache_kept();
 }
 
@@ -251,6 +252,25 @@ fn check_cache_kept() {
         } else {
             "one processor, no record of another to check"
         },
+    );
+}
+
+/// Anonymous mappings made in a neighbour's object, with kernel objects
+/// alone, on every profile (`user::anon_merge_check`, `L.user.242` to
+/// `L.user.244`).
+fn check_anon_merge_core() {
+    let report = match user::anon_merge_check::run() {
+        Ok(report) => report,
+        Err(problem) => fatal!(
+            catalog::ANON_MERGE_BROKEN,
+            "the anonymous mappings' core self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  core anm {} cases, {} comparisons of own objects' lines and resident counts, all as \
+         required; Wine's reserve ended as {} regions of one object, {} views of one object \
+         unmapped whole",
+        report.cases, report.compared, report.wine_regions, report.large_regions,
     );
 }
 

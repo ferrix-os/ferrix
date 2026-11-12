@@ -142,6 +142,7 @@ Causes are listed most likely first.
 | [FX-0976](#fx-0976) | the kept resident counts failed their self-check |
 | [FX-0977](#fx-0977) | a kept resident count would go wrong |
 | [FX-0978](#fx-0978) | a kept page-cache count would go wrong |
+| [FX-0979](#fx-0979) | an anonymous mapping made beside another was not as required |
 | [FX-1001](#fx-1001) | PCI enumeration failed its self-check |
 | [FX-1002](#fx-1002) | a device node handed out memory or an interrupt it does not have |
 | [FX-1003](#fx-1003) | an IOMMU domain gave a device the wrong addresses |
@@ -3422,6 +3423,30 @@ the change says.
 
 See: src/kernel/src/user/cache.rs Share; src/kernel/src/user/vmo.rs PagesGuard;
 docs/RSS-COUNTS.md §9.
+
+<a id="fx-0979"></a>
+
+## FX-0979 — an anonymous mapping made beside another was not as required
+
+A private anonymous mapping made by `mmap` or `brk` beside a region of the
+space's own private anonymous memory is made in that region's object, at the
+offsets the object's addresses continue to, when the object holds no held page
+there (`docs/ANON-MERGE.md`, `L.user.242` to `L.user.244`). The core self-check
+(`user::anon_merge_check::run`) builds spaces of its own, makes Wine's and
+`brk`'s patterns and each case that must decline, and found a mapping in the
+wrong object, a window that did not read zero, an object off its line, or
+resident counts other than a recount.
+
+1. The reuse took a neighbour that does not qualify: shared, mapped by handle, a
+   file's, kept apart (exec's stack or its guards), in a space being emptied, or
+   not plain.
+2. The window's check or its take-back was skipped, so the new mapping met a
+   page left by an earlier one.
+3. A path named an own anonymous object at an offset off its line, or by a
+   shared region.
+
+See: src/kernel/src/user/space.rs AddressSpace::place_beside;
+src/kernel/src/user/vmo.rs Vmo::join_window; docs/ANON-MERGE.md.
 
 <a id="fx-1001"></a>
 

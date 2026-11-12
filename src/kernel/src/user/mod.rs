@@ -6,6 +6,8 @@
 //! code it does not trust.
 
 pub mod address_wait;
+#[cfg(not(ferrix_load_built = "lift"))]
+pub mod anon_merge_check;
 pub mod cache;
 #[cfg(not(ferrix_load_built = "lift"))]
 pub mod cache_kept_check;

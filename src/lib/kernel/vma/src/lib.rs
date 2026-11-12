@@ -429,10 +429,11 @@ fn mergeable(left: &Vma, right: &Vma) -> bool {
 ///
 /// Every kind has to line up, or merging would make the second half of the
 /// region read from the wrong part of the object. Anonymous memory included,
-/// since it grew an identity -- and the convention that private memory's
-/// offset is its own start address is what keeps two adjacent private regions
-/// contiguous, so they merge exactly as they did when the variant carried
-/// nothing.
+/// since it grew an identity: a new anonymous object starts at offset 0, so
+/// two regions of anonymous memory merge only when they name one object at
+/// contiguous offsets -- the pieces of one mapping, or a mapping the kernel
+/// made in its neighbour's object at the offsets that object's addresses
+/// continue to (`docs/ANON-MERGE.md`).
 fn contiguous_backing(left: Backing, right: Backing, left_len: u64) -> bool {
     match (left, right) {
         (

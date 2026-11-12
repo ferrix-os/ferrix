@@ -1205,6 +1205,12 @@ impl Vmo {
         true
     }
 
+    /// Whether a kernel core reads or writes the object through the direct
+    /// map ([`Vmo::take_kernel_view`]).
+    pub(crate) fn has_kernel_view(&self) -> bool {
+        self.kernel_view.load(Ordering::Acquire)
+    }
+
     /// Mark the object as one a kernel core reads or writes through the direct
     /// map for as long as it lives, so that it is never made write-combining:
     /// what a block or net ring's take-up, an audio buffer and a display
@@ -2485,6 +2491,43 @@ impl Vmo {
     /// As [`Vmo::take_range`].
     pub(crate) fn take_clean_range(&self, first: u64, pages: u64) -> Result<Retired, AllocError> {
         self.take_range_if(first, pages, true)
+    }
+
+    /// Make pages `first..first + pages` of this object ready for a private
+    /// anonymous mapping made beside one of its regions (`L.user.242`,
+    /// `docs/ANON-MERGE.md` §5.3 step 3), all in one hold of the pages
+    /// lock: the object plain (not sealed, pager-backed, coherent or
+    /// combining, and no kernel view), no page of the window held, every
+    /// other page there taken out, and the object grown to cover the
+    /// window. The pages taken come back for the caller to retire once its
+    /// space lock is let go (`L.user.243`: the window then reads zero).
+    ///
+    /// `None`, with nothing changed, when the object is not plain, a page of
+    /// the window is held, or there is no room to list the pages taken. The
+    /// caller has found the object named by its space alone
+    /// (`mapper_count() == 1`) under that space's lock, which no other
+    /// space can change for an object no handle names.
+    pub(crate) fn join_window(&self, first: u64, pages: u64) -> Option<Retired> {
+        let end = first.checked_add(pages)?;
+        // SEAL: refused
+        let mut state = self.pages.lock();
+        let plain = !state.sealed
+            && !self.is_pager_backed()
+            && !self.is_coherent()
+            && !self.is_combining()
+            && !self.kernel_view.load(Ordering::Acquire);
+        if !plain || state.held.range(first..end).next().is_some() {
+            return None;
+        }
+        let count = state.frames.range(first..end).count();
+        let mut frames = crate::fallible::try_filled((0, 0), count).ok()?;
+        let (taken, _) = state.take_into(first, end, &mut frames);
+        frames.truncate(taken);
+        let _ = self.len.fetch_max(end, Ordering::Relaxed);
+        Some(Retired {
+            frames,
+            release: true,
+        })
     }
 
     /// [`Vmo::take_range`], taking nothing when `clean` and a shared mapping

@@ -349,12 +349,12 @@
     "user/space.rs": {
       "bucket": "job",
       "what": "regions and tables: the space's owner; fork's copies the forker's",
-      "sites": 74
+      "sites": 76
     },
     "user/vmo.rs": {
       "bucket": "job",
       "what": "the object's payer or charge_target",
-      "sites": 51
+      "sites": 52
     },
     "vmap.rs": {
       "bucket": "pool",

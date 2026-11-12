@@ -9438,9 +9438,10 @@ fn call_past_the_heap_lock(
     HEAP_STARTED.store(false, Ordering::SeqCst);
     *HEAP_ANSWER.lock() = None;
     *HEAP_SUBJECT.lock() = Some((Arc::clone(process), call, want));
+    // The layout's guard or the heap lock's, whichever the call waits on.
     let held = match call {
-        HeapCall::Map => process.space().layout(),
-        HeapCall::Shrink | HeapCall::Fork => process.hold_heap_for_check(),
+        HeapCall::Map => (Some(process.space().layout()), None),
+        HeapCall::Shrink | HeapCall::Fork => (None, Some(process.hold_heap_for_check())),
     };
     let task = crate::sched::spawn("heap-lock", heap_caller, 0, ferrix_sched::NICE_0_WEIGHT)?;
 

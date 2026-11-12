@@ -686,12 +686,12 @@
     "user/space.rs": {
       "ring": "core",
       "lines": [
-        608,
-        1568,
-        2780,
-        4429,
-        4433,
-        4434
+        876,
+        1856,
+        3140,
+        4794,
+        4798,
+        4799
       ]
     },
     "object/oom.rs": {
@@ -864,7 +864,7 @@
     "user/vmo.rs": {
       "ring": "core",
       "lines": [
-        3198
+        3241
       ]
     },
     "arch/aarch64/signal.rs": {

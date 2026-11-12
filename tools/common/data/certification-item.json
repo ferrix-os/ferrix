@@ -1267,7 +1267,7 @@
     "src/kernel/extensions/personality/linux/src/syscall/flock.rs": 1,
     "src/kernel/extensions/personality/linux/src/syscall/registry.rs": 1,
     "src/kernel/extensions/personality/linux/src/syscall/seccomp.rs": 1,
-    "user/mod.rs": 7,
+    "user/mod.rs": 8,
     "user/space.rs": 15,
     "user/vmo.rs": 3,
     "object/mod.rs": 2,

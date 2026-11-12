@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-3104 declarations in the core's files, 215 in the item's; 274 checks-only.
+3116 declarations in the core's files, 215 in the item's; 278 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2835,6 +2835,7 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `ANON_MERGE_BROKEN` | static | bin (checks) | checks-only |
 | `AUDIT_STORE` | static | bin |  |
 | `BOOT_CHECK_WORKER` | static | bin (checks) | checks-only |
 | `BOOT_OUT_OF_MEMORY` | static | bin |  |
@@ -3537,6 +3538,7 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `address_wait` | mod | item, load, bin |  |
+| `anon_merge_check` | mod | bin (checks) | pub for raised checks |
 | `cache` | mod | load |  |
 | `cache_kept_check` | mod | load, bin (checks) | pub for raised checks |
 | `check` | mod | bin (checks) | pub for raised checks |
@@ -3584,6 +3586,17 @@ checks above is `pub` for raised checks (F3).
 | `requeue_without_moving` | fn | load |  |
 | `StaleEntry` | struct | load |  |
 | `StaleEntry::remove` | method | item, load |  |
+
+### `user::anon_merge_check`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `run` | fn | bin (checks) | checks-only |
+| `AnonFound` | struct | - | checks-only |
+| `AnonFound::cases` | field | item, load, bin | pub for raised checks; type unobtainable from product API |
+| `AnonFound::compared` | field | load, bin (checks) | pub for raised checks; type unobtainable from product API |
+| `AnonFound::large_regions` | field | bin (checks) | pub for raised checks; type unobtainable from product API |
+| `AnonFound::wine_regions` | field | bin (checks) | pub for raised checks; type unobtainable from product API |
 
 ### `user::cache`
 
@@ -3705,11 +3718,13 @@ checks above is `pub` for raised checks (F3).
 | `ProtectRefused` | enum | item, load |  |
 | `SpaceError` | enum | item, load |  |
 | `coherent_touches` | fn | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `map_anywhere_for_check` | fn | load (checks) | checks-only |
 | `certified` | mod | item, load |  |
 | `window_check` | mod | bin |  |
 | `Access` | struct | item, load |  |
 | `AddressSpace` | struct | item, load |  |
 | `FileMapping` | struct | load |  |
+| `Layout` | struct | - |  |
 | `Region` | struct | load |  |
 | `Resident` | struct | - |  |
 | `WindowPages` | struct | load |  |
@@ -3733,9 +3748,9 @@ checks above is `pub` for raised checks (F3).
 | `AddressSpace::is_measured` | method | item, load |  |
 | `AddressSpace::is_region` | method | item |  |
 | `AddressSpace::is_window` | method | item |  |
+| `AddressSpace::keep_apart` | method | load |  |
 | `AddressSpace::layout` | method | item, load |  |
 | `AddressSpace::map_anonymous` | method | item, load |  |
-| `AddressSpace::map_anywhere` | method | load |  |
 | `AddressSpace::map_by_handle` | method | item, load |  |
 | `AddressSpace::map_code_page` | method | load |  |
 | `AddressSpace::map_file` | method | load |  |
@@ -3782,6 +3797,8 @@ checks above is `pub` for raised checks (F3).
 | `AddressSpace::with_regions` | method | item, load |  |
 | `FileMapping::file` | field | item, load, bin |  |
 | `FileMapping::may_write` | field | load |  |
+| `Layout::map_anonymous_beside` | method | load |  |
+| `Layout::map_anywhere_beside` | method | load |  |
 | `Region::end` | field | item, load, bin |  |
 | `Region::file` | field | item, load, bin |  |
 | `Region::flags` | field | item, load |  |

@@ -262,6 +262,269 @@ pub(super) struct Inner {
     /// lock (`docs/microkernel/K14.md` §4). What ran stays recorded: an unmap
     /// leaves it, a clone copies it.
     images: Option<Box<Images>>,
+    /// The ids of exec's stack and its two guards, whose regions a mapping
+    /// beside them never joins (`L.user.242`, `docs/ANON-MERGE.md` §5.3):
+    /// a mapping at the stack's top joins neither the stack, as Linux's
+    /// `VM_GROWSDOWN` keeps it apart, nor the guard above it.
+    apart: [Option<u64>; APART],
+}
+
+/// How many ids [`Inner::apart`] holds: exec's stack and its two guards, and
+/// one more for a stack a private `mremap` moved into an object of its own.
+const APART: usize = 4;
+
+/// [`AddressSpace::layout`]'s guard: the layout lock of the space it names,
+/// held. A mapping is made in a neighbour's object only under its own
+/// space's (`L.user.242`, `docs/ANON-MERGE.md` §5.4).
+pub struct Layout<'a> {
+    /// Whose layout.
+    space: &'a AddressSpace,
+    /// The lock, held until the guard goes.
+    _held: SleepLockGuard<'a, ()>,
+}
+
+impl fmt::Debug for Layout<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Layout").finish_non_exhaustive()
+    }
+}
+
+impl Layout<'_> {
+    /// [`AddressSpace::map_anonymous`] for a Linux process's `mmap` or
+    /// `brk`, under this layout: made in a neighbour's object where one
+    /// qualifies (`L.user.242`, `docs/ANON-MERGE.md` §5.3), else in a new
+    /// one. Answers the id of the object the mapping names.
+    ///
+    /// # Errors
+    ///
+    /// As [`AddressSpace::map_anonymous`].
+    pub fn map_anonymous_beside(
+        &self,
+        at: u64,
+        len: u64,
+        flags: VmaFlags,
+    ) -> Result<u64, SpaceError> {
+        let space = self.space;
+        if !is_user_address(at) || at.checked_add(len).is_none_or(|end| end > USER_VIRT_END) {
+            return Err(SpaceError::NotUserRange(at));
+        }
+        let range = PageRange::from_len(at, len).map_err(|_| SpaceError::BadRange)?;
+        let mut inner = space.inner.lock();
+        match space.place_beside(&mut inner, range, flags) {
+            Some((vmo, placed, retired)) => {
+                drop(inner);
+                space.retire_window(&vmo, retired);
+                placed
+            }
+            None => space.map_fresh(&mut inner, range, flags),
+        }
+    }
+
+    /// [`AddressSpace::map_anywhere`] for a Linux process's `mmap`, under
+    /// this layout: made in a neighbour's object where one qualifies
+    /// (`L.user.242`), else in a new one. Answers where.
+    ///
+    /// # Errors
+    ///
+    /// As [`AddressSpace::map_anywhere`].
+    pub fn map_anywhere_beside(
+        &self,
+        hint: Option<u64>,
+        len: u64,
+        flags: VmaFlags,
+    ) -> Result<u64, SpaceError> {
+        let space = self.space;
+        if len == 0 {
+            return Err(SpaceError::BadRange);
+        }
+        let mut inner = space.inner.lock();
+        let at = inner
+            .map
+            .find_free(len, PAGE_SIZE, hint)
+            .ok_or(SpaceError::OutOfMemory)?;
+        if !is_user_address(at) || at.checked_add(len).is_none_or(|end| end > USER_VIRT_END) {
+            return Err(SpaceError::NotUserRange(at));
+        }
+        let range = PageRange::from_len(at, len).map_err(|_| SpaceError::BadRange)?;
+        match space.place_beside(&mut inner, range, flags) {
+            Some((vmo, placed, retired)) => {
+                drop(inner);
+                space.retire_window(&vmo, retired);
+                placed.map(|_| at)
+            }
+            None => space.map_fresh(&mut inner, range, flags).map(|_| at),
+        }
+    }
+}
+
+// CHECKS-ONLY: fs/procfs/check.rs, syscall/unmap_check.rs, user/alloc_check.rs, user/rss_kept_check.rs
+/// [`AddressSpace::map_anywhere`] for a check above the core: a new object
+/// wherever there is room, never a neighbour's (a process's `mmap` goes
+/// through [`Layout::map_anywhere_beside`]). Answers where.
+///
+/// # Errors
+///
+/// As [`AddressSpace::map_anywhere`].
+pub fn map_anywhere_for_check(
+    space: &AddressSpace,
+    hint: Option<u64>,
+    len: u64,
+    flags: VmaFlags,
+) -> Result<u64, SpaceError> {
+    space.map_anywhere(hint, len, flags)
+}
+
+// CHECKS-ONLY: user/anon_merge_check.rs; home: user::space
+/// Every own private anonymous object of `space` on one line, and named only
+/// by private anonymous regions (`L.user.244`, `docs/ANON-MERGE.md` §5.1):
+/// for each id no handle, file or shadow names, every region naming it is
+/// `Backing::Anonymous`, has one value of `shared`, and names offset `v - b`
+/// at each address `v` for one `b`. Answers how many private ones there are.
+///
+/// # Errors
+///
+/// Which of those failed, for the first id it failed for.
+pub(crate) fn own_lines_for_check(space: &AddressSpace) -> Result<usize, &'static str> {
+    let inner = space.inner.lock();
+    // (shared, base) per own id met.
+    let mut seen: BTreeMap<u64, (bool, u64)> = BTreeMap::new();
+    for region in inner.map.iter() {
+        let Some((id, offset, anonymous)) = unhandled(&inner, region) else {
+            continue;
+        };
+        if !anonymous {
+            return Err("an id no handle, file or shadow names was named by a file's region");
+        }
+        let here = (
+            region.flags.shared,
+            region.range.start().wrapping_sub(offset),
+        );
+        match seen.get(&id) {
+            Some(&(shared, _)) if shared != here.0 => {
+                return Err(
+                    "an own anonymous object was named by a private region and a shared one",
+                );
+            }
+            Some(&(_, line)) if line != here.1 => {
+                return Err("an own private anonymous object's regions were not on one line");
+            }
+            Some(_) => {}
+            None => {
+                let _ = fallible::insert(&mut seen, id, here)
+                    .map_err(|_| "no room to note an own anonymous object")?;
+            }
+        }
+    }
+    Ok(seen.values().filter(|&&(shared, _)| !shared).count())
+}
+
+/// `region`'s id, offset and whether it is anonymous, when no handle, file
+/// or shadow of the space whose tables are `inner` names the id.
+fn unhandled(inner: &Inner, region: &Vma) -> Option<(u64, u64, bool)> {
+    let (id, offset, anonymous) = match region.backing {
+        Backing::Anonymous { id, offset } => (id, offset, true),
+        Backing::File { id, offset } => (id, offset, false),
+        Backing::Device { .. } => return None,
+    };
+    let named = inner.native.contains_key(&id)
+        || inner.files.contains_key(&id)
+        || inner.shadows.contains_key(&id);
+    (!named).then_some((id, offset, anonymous))
+}
+
+// CHECKS-ONLY: user/anon_merge_check.rs; home: user::space
+/// The frame the page at `at` in `space` reads from, if its region's object
+/// holds one: what the reuse check reads a window through (`L.user.243`).
+pub(crate) fn frame_at_for_check(space: &AddressSpace, at: u64) -> Option<Frame> {
+    let inner = space.inner.lock();
+    let region = inner.map.find(at)?;
+    let (id, offset) = match region.backing {
+        Backing::Anonymous { id, offset } | Backing::File { id, offset } => (id, offset),
+        Backing::Device { .. } => return None,
+    };
+    let index = (offset + (at - region.range.start())) / PAGE_SIZE;
+    inner.objects.get(&id)?.page(index)
+}
+
+/// Whether no region of the space whose tables are `inner` reaches into
+/// `range`: one binary search, O(log regions).
+fn range_free(inner: &Inner, range: PageRange) -> bool {
+    let regions = inner.map.iter().as_slice();
+    let first = regions.partition_point(|region| region.range.end() <= range.start());
+    regions
+        .get(first)
+        .is_none_or(|region| region.range.start() >= range.end())
+}
+
+/// The neighbour of `range` a mapping there is made in, in the space whose
+/// tables are `inner`, as its id and the offset its line gives `range`
+/// (`L.user.242`): the left neighbour if it qualifies, else the right.
+fn beside_of(inner: &Inner, range: PageRange) -> Option<(u64, u64)> {
+    let left = range
+        .start()
+        .checked_sub(1)
+        .and_then(|last| inner.map.find(last))
+        .filter(|region| region.range.end() == range.start())
+        .and_then(|region| {
+            let (id, offset) = own_line(inner, region)?;
+            Some((id, offset.checked_add(region.range.bytes())?))
+        });
+    left.or_else(|| {
+        let region = inner
+            .map
+            .find(range.end())
+            .filter(|region| region.range.start() == range.end())?;
+        let (id, offset) = own_line(inner, region)?;
+        Some((id, offset.checked_sub(range.bytes())?))
+    })
+}
+
+/// The object an `mremap` placed a region of `id` in, when it moved it into
+/// one of its own (`backing` naming another id).
+fn moved_object(backing: &Result<Backing, SpaceError>, id: u64) -> Option<u64> {
+    match backing {
+        Ok(Backing::Anonymous { id: to, .. }) if *to != id => Some(*to),
+        _ => None,
+    }
+}
+
+/// A kept-apart region of `from` moved by an `mremap` into object `to`:
+/// `to` kept apart too (`L.user.242`, `docs/ANON-MERGE.md` §5.3).
+fn carry_apart(inner: &mut Inner, from: u64, to: Option<u64>) {
+    if let Some(to) = to
+        && inner.apart.contains(&Some(from))
+        && let Some(slot) = inner.apart.iter_mut().find(|slot| slot.is_none())
+    {
+        *slot = Some(to);
+    }
+}
+
+/// The id and offset of `region`, if it may be joined by a mapping beside
+/// it (`L.user.242`, `L.user.244`): a private anonymous region of an own
+/// private anonymous object of the space whose tables are `inner` -- one no
+/// handle, file or shadow names, so named only by private anonymous regions
+/// on one line (`docs/ANON-MERGE.md` §5.1) -- that is not exec's stack or a
+/// guard of it, and whose object is plain and named by this space alone.
+fn own_line(inner: &Inner, region: &Vma) -> Option<(u64, u64)> {
+    let Backing::Anonymous { id, offset } = region.backing else {
+        return None;
+    };
+    if region.flags.shared
+        || inner.native.contains_key(&id)
+        || inner.files.contains_key(&id)
+        || inner.shadows.contains_key(&id)
+        || inner.apart.contains(&Some(id))
+    {
+        return None;
+    }
+    let vmo = inner.objects.get(&id)?;
+    let plain = vmo.mapper_count() == 1
+        && !vmo.is_sealed()
+        && !vmo.is_pager_backed()
+        && !vmo.is_coherent()
+        && !vmo.is_combining()
+        && !vmo.has_kernel_view();
+    plain.then_some((id, offset))
 }
 
 /// [`AddressSpace::reach`]'s bits.
@@ -502,6 +765,11 @@ pub struct AddressSpace {
     /// Whether the OOM kill gave up waiting for this space's emptying
     /// (`object::oom`, `L.object.375`): set once, never cleared.
     oom_given_up: AtomicBool,
+    /// Whether the OOM kill's emptier has begun unmapping this space without
+    /// its layout lock (`object::oom`): a marked space never makes a mapping
+    /// in a neighbour's object (`L.user.242`, `docs/ANON-MERGE.md` §5.4).
+    /// Set once, never cleared.
+    emptying: AtomicBool,
 }
 
 /// A restricted space's normal root: the kernel's half, the same restricted
@@ -623,6 +891,7 @@ impl AddressSpace {
                     next_id: 1,
                     native: BTreeMap::new(),
                     images: None,
+                    apart: [None; APART],
                 },
                 rss,
             )
@@ -868,6 +1137,7 @@ impl AddressSpace {
             layout: SleepLock::new((), &crate::sync::SchedParker),
             handles: AtomicU64::new(0),
             oom_given_up: AtomicBool::new(false),
+            emptying: AtomicBool::new(false),
             inner: SpinLock::new(inner),
             measured: AtomicBool::new(false),
             reach: AtomicU8::new(0),
@@ -1404,6 +1674,24 @@ impl AddressSpace {
     pub(crate) fn oom_emptying_given_up(&self) -> bool {
         self.oom_given_up.load(Ordering::Acquire)
     }
+
+    /// Mark the space as being emptied without its layout lock: what the
+    /// OOM kill's emptier stores before its first unmap, so that no mapping
+    /// is made in a neighbour's object while its unmaps run (`L.user.242`,
+    /// `docs/ANON-MERGE.md` §5.4). Stored before that unmap takes the
+    /// space's lock, and read under it.
+    pub(crate) fn mark_emptying(&self) {
+        self.emptying.store(true, Ordering::Release);
+    }
+
+    /// Record `id`, exec's stack's or one of its guards', as never joined
+    /// by a mapping beside it (`L.user.242`, `docs/ANON-MERGE.md` §5.3).
+    pub fn keep_apart(&self, id: u64) {
+        let mut inner = self.inner.lock();
+        if let Some(slot) = inner.apart.iter_mut().find(|slot| slot.is_none()) {
+            *slot = Some(id);
+        }
+    }
 }
 
 impl AddressSpace {
@@ -1880,15 +2168,40 @@ impl AddressSpace {
             return Err(SpaceError::NotUserRange(at));
         }
         let range = PageRange::from_len(at, len).map_err(|_| SpaceError::BadRange)?;
-
         let mut inner = self.inner.lock();
+        self.map_fresh(&mut inner, range, flags)
+    }
+
+    /// Give back the pages [`AddressSpace::place_beside`] took out of `vmo`'s window,
+    /// with this space's lock let go: no translation of them is left here
+    /// (the unmap that left them finished its shootdown under the layout
+    /// lock the join held, and no region has named the window since), and
+    /// no other space names the object, so the retire skips this space
+    /// (`L.user.243`, `docs/ANON-MERGE.md` §5.4).
+    fn retire_window(&self, vmo: &Vmo, retired: Retired) {
+        vmo.retire(
+            retired,
+            Some(Own {
+                space: self,
+                shootdown: None,
+            }),
+        );
+    }
+
+    /// Map `range` with `flags` to a new anonymous object at offset 0, under
+    /// this space's lock (`inner`), and return the object's id.
+    fn map_fresh(
+        &self,
+        inner: &mut Inner,
+        range: PageRange,
+        flags: VmaFlags,
+    ) -> Result<u64, SpaceError> {
         let id = inner.next_id;
         inner.next_id = inner.next_id.saturating_add(1);
-
-        let pages = len.div_ceil(PAGE_SIZE);
+        let pages = range.bytes().div_ceil(PAGE_SIZE);
         let vmo = Vmo::new_anonymous(pages).map_err(|_| SpaceError::OutOfMemory)?;
         self.add_region(
-            &mut inner,
+            inner,
             NewRegion {
                 id,
                 range,
@@ -1899,6 +2212,52 @@ impl AddressSpace {
             vmo,
         )?;
         Ok(id)
+    }
+
+    /// Make a private anonymous mapping of `range` with `flags` in a
+    /// neighbour's object (`L.user.242`, `docs/ANON-MERGE.md` §5.3), under
+    /// this space's lock (`inner`) and its layout lock, which only
+    /// [`Layout`]'s methods, holding it, call this with.
+    ///
+    /// The left neighbour if it qualifies, else the right; `None`, nothing
+    /// changed, when neither does or the chosen one's window is declined
+    /// ([`Vmo::join_window`]), with no try of the other side. Otherwise the
+    /// object, the mapping's outcome as its id, and the pages taken out of
+    /// the window, which the caller retires once this lock is let go: a
+    /// refused count-in or insert leaves them taken all the same.
+    fn place_beside(
+        &self,
+        inner: &mut Inner,
+        range: PageRange,
+        flags: VmaFlags,
+    ) -> Option<(Arc<Vmo>, Result<u64, SpaceError>, Retired)> {
+        if flags.shared || self.emptying.load(Ordering::Acquire) || self.is_region() {
+            return None;
+        }
+        #[cfg(ferrix_personality = "user")]
+        if self.is_window() {
+            return None;
+        }
+        // Only a free range: a page of the window is taken before the map's
+        // insert would refuse an overlap, and `brk` and a `MAP_FIXED` whose
+        // unmap failed ask over what is mapped (ledger 9307 B1).
+        if !range_free(inner, range) {
+            return None;
+        }
+        let len = range.bytes();
+        let (id, offset) = beside_of(inner, range)?;
+        let vmo = Arc::clone(inner.objects.get(&id)?);
+        let retired = vmo.join_window(offset / PAGE_SIZE, len / PAGE_SIZE)?;
+        let backing = Backing::Anonymous { id, offset };
+        let placed = self.count_in(inner, range, backing, flags).and_then(|()| {
+            // FALLIBLE: the map's insert refuses with `VmaError::NoMemory`.
+            let inserted = inner.map.insert(range, flags, backing).map_err(map_error);
+            if inserted.is_err() {
+                self.count_out(inner, range, backing, flags);
+            }
+            inserted.map(|()| id)
+        });
+        Some((vmo, placed, retired))
     }
 
     /// The resident set, split as Linux's `RssAnon`, `RssFile` and
@@ -2220,7 +2579,7 @@ impl AddressSpace {
 
         // Read before the lock goes, because the child inherits them. A
         // native object is shared, so the child names the same one.
-        let next_id = inner.next_id;
+        let (next_id, apart) = (inner.next_id, inner.apart);
 
         // The parent's writable translations to the shared pages are out of
         // its tables, but may still be in the TLB of a processor in its set —
@@ -2250,6 +2609,7 @@ impl AddressSpace {
                     next_id,
                     native,
                     images,
+                    apart,
                 },
                 rss,
             )
@@ -3122,8 +3482,11 @@ impl AddressSpace {
     /// taken before any spin lock, and after `Process`'s heap lock.
     ///
     /// [`unmap`]: AddressSpace::unmap
-    pub fn layout(&self) -> SleepLockGuard<'_, ()> {
-        self.layout.lock()
+    pub fn layout(&self) -> Layout<'_> {
+        Layout {
+            space: self,
+            _held: self.layout.lock(),
+        }
     }
 
     /// Unmap `len` bytes at `at`, giving back the pages and the tables.
@@ -4049,6 +4412,7 @@ impl AddressSpace {
             let (backing, moved) =
                 self.remap_backing(&mut inner, &vmo, resize, cleared, fresh, &mut freeing);
 
+            let moved_to = moved_object(&backing, id);
             let placed = backing.and_then(|backing| {
                 inner
                     .map
@@ -4061,6 +4425,7 @@ impl AddressSpace {
                     .map_err(|_| SpaceError::BadRange)
             });
             self.count_out_unplaced(&inner, placement, cleared, placed);
+            carry_apart(&mut inner, id, moved_to.filter(|_| placed.is_ok()));
             let cpus = self.begin_shootdown(&inner);
             (placed, cpus, moved.map(|retired| (vmo, retired)))
         };
@@ -4842,7 +5207,7 @@ impl AddressSpace {
     ///
     /// [`SpaceError::BadRange`] if the length is malformed, and
     /// [`SpaceError::OutOfMemory`] if there is no hole big enough.
-    pub fn map_anywhere(
+    pub(crate) fn map_anywhere(
         &self,
         hint: Option<u64>,
         len: u64,
@@ -4861,22 +5226,7 @@ impl AddressSpace {
             return Err(SpaceError::NotUserRange(at));
         }
         let range = PageRange::from_len(at, len).map_err(|_| SpaceError::BadRange)?;
-
-        let id = inner.next_id;
-        inner.next_id = inner.next_id.saturating_add(1);
-        let vmo =
-            Vmo::new_anonymous(len.div_ceil(PAGE_SIZE)).map_err(|_| SpaceError::OutOfMemory)?;
-        self.add_region(
-            &mut inner,
-            NewRegion {
-                id,
-                range,
-                flags,
-                backing: Backing::Anonymous { id, offset: 0 },
-                sharing: sharing_of(flags),
-            },
-            vmo,
-        )?;
+        let _ = self.map_fresh(&mut inner, range, flags)?;
         Ok(at)
     }
 
