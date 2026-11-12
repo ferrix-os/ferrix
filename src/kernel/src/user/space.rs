@@ -1973,7 +1973,10 @@ impl AddressSpace {
         {
             fallible::try_push(&mut reached, counting).map_err(oom)?;
         }
-        reached.sort_unstable_by_key(Counting::view_order);
+        // Not core's `sort_unstable`, which recurses: one entry per region
+        // reached, and on an exit's unmap that is every region the process
+        // has (F-112, `L.user.245`).
+        ferrix_fallible::sort_flat_by_key(&mut reached, Counting::view_order);
         for group in reached.chunk_by(|one, other| one.view_order() == other.view_order()) {
             if let Some(counting) = group.first() {
                 counting.reserve_lower(group.len())?;
@@ -3224,7 +3227,16 @@ impl AddressSpace {
     /// so when all of them are still named there is nothing to drop and the
     /// tables are not walked: a `MAP_FIXED` into a reservation, Wine's way of
     /// allocating, removes a piece of one region thousands of times.
-    fn give_back(&self, mut freeing: Vec<Freeing>, touched: Option<Vec<(u64, bool)>>) {
+    fn give_back(&self, mut freeing: Vec<Freeing>, mut touched: Option<Vec<(u64, bool)>>) {
+        // The ids in order, each once, for `all_still_named`'s binary search:
+        // sorted here, before the lock, since they are this call's own list.
+        // Not with core's `sort_unstable`, which recurses: one id per region
+        // removed, and on an exit's unmap that is every region the process
+        // had (F-112, `L.user.245`).
+        if let Some(ids) = touched.as_mut() {
+            ferrix_fallible::sort_flat_by_key(ids, |&id| id);
+            ids.dedup();
+        }
         // What each sole range's object gave up, in the order of `freeing`:
         // taken out under the lock, or -- with no memory to list the pages --
         // decommitted after it.
@@ -6071,10 +6083,9 @@ fn touched_ids(removed: &[Unmapping]) -> Option<Vec<(u64, bool)>> {
 /// Whether every id in `ids` is still named by a region of `map`: one pass of
 /// the map with a binary search per region, so n log k for n regions and k ids,
 /// under the space's lock, stopping when each has been found. Not a pass per id,
-/// which is what [`Named`] was made to end.
+/// which is what [`Named`] was made to end. `ids` is sorted by id, each once:
+/// [`AddressSpace::give_back`] sorts it before it takes the lock.
 fn all_still_named(map: &ferrix_vma::AddressSpace, mut ids: Vec<(u64, bool)>) -> bool {
-    ids.sort_unstable();
-    ids.dedup();
     let mut left = ids.len();
     if left == 0 {
         return true;

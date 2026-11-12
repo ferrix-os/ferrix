@@ -3584,6 +3584,35 @@ package FerrixMemoryRequirements {
             attribute :>> parent = "H.QUOTA.12";
             attribute :>> unit = "user::cache::here";
         }
+        // F-112 (consultant ledger 9098, 9112 E6): the sorts on the unmap
+        // path, whose length is a program's number of regions.
+        requirement <'L.user.245'> anUnmapSortsWithoutRecursion : ItemLowLevel {
+            attribute :>> statement = "An unmap, an exit's whole-space unmap
+                included, shall order the regions it removes, and the ids and
+                views they name, without recursion, in a stack of the same size
+                at any number of regions.";
+            attribute :>> criterion = "test-exit-regions: a process of 60,000
+                regions ended by _exit, by SIGKILL and by SIGPIPE is given back and
+                the kernel stays up (x86-64 KVM release; AArch64 and ARMv7-A as
+                the row sets); control: core's sort put back in give_back: on
+                four-page stacks it stopped the kernel with FX-9004 at 60,000
+                regions; on five pages a paint of the stack under it (x86-64
+                release, KVM, 60,020 ids) reads it within 1,800 bytes of the
+                guard, against at most 512 bytes for sort_flat_by_key.
+                ferrix-fallible's host
+                tests hold sort_flat_by_key's result in order and a permutation of
+                its input at lengths 0 to 60,000, ascending, descending, equal and
+                random, for a pair and a tuple key.";
+            attribute :>> parent = "H.MEM.9";
+            // The sort itself is ferrix-fallible's (sort_flat_by_key, sift_down,
+            // larger), a crate the manifest does not list as a member (F-56),
+            // so its functions cannot be units here; its host tests are in
+            // the criterion.
+            attribute :>> unit = ("user::space::all_still_named",
+                "user::space::AddressSpace::give_back",
+                "user::space::AddressSpace::room_to_count_out",
+                "user::space::Named::of");
+        }
         // docs/RAM-RELEASE.md §3: the clean btrfs nodes, reclaimable heap.
         requirement <'L.user.175'> cleanBtrfsNodesAreAvailable : ItemLowLevel {
             attribute :>> statement = "/proc/meminfo's SReclaimable shall be the bytes the

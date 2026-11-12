@@ -696,6 +696,10 @@ the kernel's part of the item has and they do not:
   the core already links. Neither is classified, and the item's unsafe,
   panic and complexity gates do not read them, though both are `unsafe` code
   the core's soundness rests on (9 and 50 lines naming `unsafe`, by grep).
+  Since F-112's fix, `ferrix-fallible`'s `sort.rs` (`sort_flat_by_key`,
+  `sift_down`, `larger`) is item code on the unmap path (`L.user.245`) in a
+  crate the manifest does not list: its units, coverage and traceability
+  come with this finding's close (ledger 9327 G2).
 
 *Closes when* the crates' coverage under their tests is measured, committed
 and ratcheted with the residual argued (TODO.md §4.7 item 3); every
@@ -719,6 +723,10 @@ and `ferrix-sync` are classified `core` and read by the gates, or argued out.
 A process's whole-space unmap at its end (`deliver::return_to_user` -> `leave_current` -> `end_thread` -> `Process::release` -> `AddressSpace::unmap` -> `give_back` -> `all_still_named`) sorted one id per region with `core`'s `sort_unstable`, a quicksort recursing about 2 log2 n levels; in the release kernel a sort of 40,000 ids took 10,440 bytes, and at 36,864 regions (a hog program) and 60,000 (`test-exit-regions`, `SIGKILL`) the stack ran into its guard: FX-9004. `room_to_count_out` (since 4120b4def) sorted one 56-byte entry per region on the same path, `Named::of` on a munmap's, and `resident_pages` on the OOM survey's. Sighted 2026-11-12 on the N150 box, reported by the product owner, which reset with no report kept when the lode log reader (about 11 GB in 256 KiB chunks, `SIGPIPE`) and a game (`SIGKILL`) ended; reproduced in KVM by silent-reset. Moderate: the guard stopped it with a report (FM-9), as F-101. Why the box kept no report of the stop is open (ledger 9125 E11).
 
 `check-stack-depth` counts a recursion once, so F-107's close does not show this gone: its way-out line (`deliver::return_to_user`) reads the chain with each sort's frames once.
+
+*Fix (branch `fix/exit-unmap-sort`, ledger 9112):* every sort in `user/space.rs` whose length a program decides -- `give_back`'s of the ids its removed regions named, now made before the space's lock is taken, `room_to_count_out`'s of its countings, `Named::of`'s of the ids the map still names, and `resident_pages`'s of a space's objects -- is `ferrix_fallible::sort_flat_by_key`, a heapsort: no allocation, no recursion, the same frame at any length (L.user.245). Measured by a paint of the stack under the sort (release, KVM): `core`'s sort of 40,000 `(u64, bool)` used 10,440 bytes on 1118eb194; `room_to_count_out`'s of 60,020 countings 5,400 to 5,816 bytes, and the heapsort's no more than the 512 the paint leaves below the stack pointer. `test-exit-regions` ends a process of 60,000 regions (40,000 on the Arm pair, whose guests refuse more: AArch64's region map stops growing at the largest heap request, 4 MiB, at 47,083 regions) by `_exit`, `SIGKILL` and `SIGPIPE`, and requires the kernel up and the status 0; `core`'s sort put back in `give_back` stopped the kernel with FX-9004 on four-page stacks (control `sr2-sort-exit2`, FIRED, on b2a37cffe); on five pages (a6e6add2f) it no longer reaches the guard at 60,000 regions (`sr3-sort-exit`, did not fire), and the paint reads it 11,304 bytes deep with 1,800 bytes of the painted stack untouched below, less than a timer's interrupt takes, against the heapsort's 512 at most.
+
+Why the box kept no report of the stop -- nothing on its screen, in the pstore region or in the log, where the guest prints `FERRIX-PANIC double fault` and writes its region back before it resets -- is `docs/BACKLOG.md`'s row "why the N150 kept no report of the FX-9004 stop" (owner ef-30fps), to be answered by `fix/report-never-silent` and a death on the box on the never-landing image `diag/silent-reset-markers`.
 
 *Closes when* fix/exit-unmap-sort lands the unmap path's sorts without recursion, with a case at that region count and its control, and the recursion row's gate (branch `f107/stack-recursion`) lists no recursive sort on the unmap path, or one with an argued bound.
 

@@ -86,6 +86,7 @@ mod check;
 mod chrome;
 mod claude_code;
 mod components;
+mod exit_regions;
 // A Unix socket is the clipboard port's far end.
 #[cfg(unix)]
 mod clipboard;
@@ -578,6 +579,7 @@ const TASKS: &[&[Task]] = &[
     box_log::TASKS,
     btrfs_check::TASKS,
     btrfs_pressure::TASKS,
+    exit_regions::TASKS,
     builds::TASKS,
     busybox::TASKS,
     bwrap::TASKS,

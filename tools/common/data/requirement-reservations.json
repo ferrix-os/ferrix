@@ -13,15 +13,6 @@
   "reservations": [
     {
       "ids": [
-        "L.user.245"
-      ],
-      "owner": "silent-reset",
-      "branch": "fix/exit-unmap-sort",
-      "date": "2026-11-12",
-      "purpose": "F-112: an unmap, an exit's whole-space unmap included, orders what it removes without recursion, in a stack of one size at any number of regions (consultant ledger 9112 E6)"
-    },
-    {
-      "ids": [
         "L.user.242-244"
       ],
       "owner": "ef-30fps",

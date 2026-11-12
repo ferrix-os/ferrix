@@ -11,6 +11,11 @@
 //! `alloc`, and `Box::from_raw` over memory allocated with `Layout::new`.
 //! Everything here is built out of those.
 //!
+//! Beside them, one sort that neither allocates nor recurses
+//! ([`sort_flat_by_key`]), for a slice whose length a program decides: the
+//! kernel's stack, like its heap, must not run out on a path a program
+//! drives (F-112).
+//!
 //! # What this covers, and what it cannot
 //!
 //! A `Box`, `Vec`, `VecDeque` or `String` made or grown through this crate
@@ -53,8 +58,10 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use ferrix_sync::Once;
 
 mod chunks;
+mod sort;
 
 pub use chunks::{BLOCK, Chunks, Meter};
+pub use sort::sort_flat_by_key;
 
 /// An allocation could not be made.
 ///

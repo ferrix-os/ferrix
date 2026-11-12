@@ -71,6 +71,23 @@ const TEST_CONTAINER: &str = "test-container --arch all";
 const TEST_BTRFS_PRESSURE: &str = "test-btrfs-pressure --arch x86_64 --accel kvm \
      --init ~/.local/share/ferrix/busybox/{arch}/bin/busybox.static";
 
+/// The large exit's row (F-112, consultant ledger 9112 E5): a process of
+/// 60,000 regions ended by `_exit`, `SIGKILL` and `SIGPIPE`, about 2.5 min.
+const TEST_EXIT_REGIONS: &str = "test-exit-regions --arch x86_64 --release --accel kvm";
+
+/// What asks for [`TEST_EXIT_REGIONS`]: the address space and its objects,
+/// whose unmap an exit runs over every region, and the sort it orders them
+/// with.
+const UNMAPPED: &[&str] = &[
+    "src/kernel/src/user/space.rs",
+    "src/kernel/src/user/vmo.rs",
+    "src/kernel/src/user/rss.rs",
+    "src/lib/kernel/fallible/src/sort.rs",
+    "src/lib/kernel/vma/",
+    "src/tests/exit-regions/",
+    "tools/common/xtask/src/exit_regions.rs",
+];
+
 /// What asks for [`TEST_BTRFS_PRESSURE`]: the page cache and its reclaim,
 /// the frame allocator and its watermark, btrfs, and the job's memory charge.
 const PRESSURED: &[&str] = &[
@@ -699,6 +716,14 @@ fn area_rows(path: &str, rows: &mut Rows) {
             rows,
             "the page cache, reclaim, the frame allocator, btrfs or the memory charge: \
              test-btrfs-pressure (docs/BTRFS-PRESSURE.md)",
+        );
+    }
+    if UNMAPPED.iter().any(|prefix| under(prefix)) {
+        rows.add(&[TEST_EXIT_REGIONS]);
+        reason(
+            rows,
+            "an address space's unmap, which an exit runs over every region: \
+             test-exit-regions (F-112)",
         );
     }
     if reaches_mce_restart(path) {

@@ -349,7 +349,7 @@
     "user/space.rs": {
       "bucket": "job",
       "what": "regions and tables: the space's owner; fork's copies the forker's",
-      "sites": 70
+      "sites": 72
     },
     "user/vmo.rs": {
       "bucket": "job",

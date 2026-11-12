@@ -237,10 +237,20 @@ Three paths were rebuilt so that they need no memory at all:
   when the task is made. `src/lib/kernel/sched/tests/no_allocation.rs` counts the
   allocations of a queue and a timeline at work under a counting global
   allocator, and requires none.
-* **An unmap's look at the objects it may have let go.** It holds the space's
-  lock for a sort of the k ids its removed regions named and one pass of the n
-  regions with a binary search per region, n log k. It replaces no bound, and with
-  no memory for the list the unmap walks the tables as before, n log n.
+* **An unmap's look at the objects it may have let go.** It sorts the k ids
+  its removed regions named before it takes the space's lock, then holds the
+  lock for one pass of the n regions with a binary search per region, n log k.
+  The sort is a heapsort (`ferrix_fallible::sort_flat_by_key`, L.user.245):
+  k log k comparisons, no allocation and no recursion, so its stack is the
+  same at any k; core's recursive sort ran an exit of tens of thousands of
+  regions into the kernel stack's guard (F-112). An exit's whole-space unmap
+  of 60,000 regions took 3.1 to 4.0 s to `waitpid`'s return on the branch
+  and 3.4 to 3.5 s on develop (release, KVM, `test-exit-regions`, three
+  runs each), the teardown's own cost, which is not this look's. It
+  replaces no bound, and with no memory for the list the unmap walks the
+  tables as before, n log n. The room for counting the removed regions out
+  (`room_to_count_out`, under the lock) sorts one entry per region the same
+  way, and so does `Named::of` when an object has left.
 * **Taking pages out of an object** (munmap, madvise, truncation, mremap,
   copy-on-write). The frames go into a list whose room is had before the
   first frame leaves the object, so a frame is never out of one list and not
