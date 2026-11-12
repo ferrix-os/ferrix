@@ -2137,6 +2137,56 @@ fn objects_of_one_execbuffer_never_evict_each_other() {
     });
 }
 
+/// The same handle twice in one list: i915 v7.0 has no check for it
+/// (`eb_lookup_vmas` looks each handle up, `eb_add_vma` takes the same vma
+/// again), and anv (`anv_execbuf_add_bo`) and iris (`find_exec_index`)
+/// never list a buffer twice. At the same address it is one binding, used
+/// twice, as one vma pinned twice; overlapping its own other placement it
+/// is `ENOSPC` by the rule above. At a separate address it is a second
+/// binding of the object, where i915 would move its one vma and leave the
+/// first entry's address unmapped.
+#[test]
+fn a_handle_listed_twice() {
+    big(|| {
+        let mut rig = Rig::new();
+        let object = rig.create(2 * 4096);
+        let batch = rig.create(4096);
+        let run = |rig: &mut Rig, list: &[(u32, u64, u64)]| {
+            rig.exec(ioctl::GEM_EXECBUFFER2, list, 0, &[], 0).0
+        };
+        let at = |rig: &Rig| -> Vec<u64> {
+            rig.frontend
+                .state
+                .bindings
+                .as_slice()
+                .iter()
+                .map(objects::Binding::address)
+                .collect()
+        };
+        let same = [
+            (object, 0x10000, PINNED),
+            (object, 0x10000, PINNED | exec::OBJECT_WRITE),
+            (batch, 0x20000, PINNED),
+        ];
+        assert_eq!(run(&mut rig, &same), 0);
+        assert_eq!(at(&rig), [0x10000, 0x20000]);
+        let overlapping = [
+            (object, 0x10000, PINNED),
+            (object, 0x11000, PINNED),
+            (batch, 0x20000, PINNED),
+        ];
+        assert_eq!(run(&mut rig, &overlapping), -28);
+        assert_eq!(at(&rig), [0x10000, 0x20000]);
+        let apart = [
+            (object, 0x10000, PINNED),
+            (object, 0x30000, PINNED),
+            (batch, 0x20000, PINNED),
+        ];
+        assert_eq!(run(&mut rig, &apart), 0);
+        assert_eq!(at(&rig), [0x10000, 0x20000, 0x30000]);
+    });
+}
+
 /// An engine map whose pointer wraps past the top of the address space is
 /// `EFAULT`, as Linux's `copy_from_user` of `&user->engines[n]` answers:
 /// its first engine sits 8 bytes in, past `extensions`, so a value within 8

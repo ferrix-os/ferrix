@@ -610,6 +610,18 @@ def seeds():
         .context_create(A)
         .context_param(A, own(0), True, ENGINES_WRAP_PARAM)
     )
+    # The same handle twice in one list: at the same address (one binding,
+    # used twice), overlapping its own other placement (ENOSPC), and apart
+    # (two bindings). Neither anv nor iris sends it; i915 does not check.
+    yield "exec-handle-listed-twice", (
+        Program()
+        .create(A, 2)
+        .create(A, 1)
+        .execbuffer(A, [(own(0), 1, False), (own(0), 1, True), (own(1), 4, False)])
+        .execbuffer(A, [(own(0), 1, False), (own(0), 2, False), (own(1), 4, False)])
+        .execbuffer(A, [(own(0), 1, False), (own(0), 8, False), (own(1), 4, False)])
+        .complete(count=3)
+    )
     yield "limit-files", Program().repeat(41, lambda p: p.open(0))
     yield "limit-held-waits", (
         Program()
