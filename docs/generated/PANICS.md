@@ -3068,8 +3068,8 @@ See: src/kernel/src/object/rehome_check.rs; docs/microkernel/B5.md.
 `user::rehome_cache_check::run` drives `user::cache` over objects with a source
 of its own, in jobs made for it, with no file system or process: reclaim's scope
 and its hand, `reclaim_asked`, the shrinker's slot, a written page kept, a
-mapping made at the take, `totals`, `resident`, and poison in a cached page. The
-sentence names the case that was not true.
+mapping made at the take, `totals`, `resident`, poison, no heap reclaim in an
+interrupt's service. The sentence names the case that was not true.
 
 1. `user/cache.rs`, `user/vmo.rs` or `object/quota.rs` changed what reclaim
    takes or what the cache counts: the sentence names which, and the requirement

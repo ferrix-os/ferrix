@@ -134,7 +134,10 @@ pub(crate) const TASKS: &[Task] = &[
             "check-stack-depth",
             "              a kernel stack's worst named paths against its pages, for --arch",
         ],
+        // Every architecture is walked and printed before the row fails, so that
+        // a red row shows all three (F-107, F-110).
         run: |_, args| {
+            let mut failed = None;
             for arch in args.arches()? {
                 let kernel = cargo::build_kernel(arch, args.release)?;
                 let mut command = Command::new("python3");
@@ -143,9 +146,11 @@ pub(crate) const TASKS: &[Task] = &[
                     .arg("tools/common/check/check-stack-depth.py")
                     .arg(&kernel.elf)
                     .arg(arch.to_string());
-                cargo::run(command, "tools/common/check/check-stack-depth.py")?;
+                if let Err(error) = cargo::run(command, "tools/common/check/check-stack-depth.py") {
+                    let _ = failed.get_or_insert(error);
+                }
             }
-            Ok(())
+            failed.map_or(Ok(()), Err)
         },
     },
     Task {

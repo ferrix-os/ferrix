@@ -28,7 +28,7 @@ use crate::user::space::{Access, AddressSpace, FileMapping, FilePlace};
 use crate::user::vmo::{self, Filler, ReclaimHook, Vmo, VmoError};
 
 /// How many cases one run makes: the boot line's count.
-const CASES: u64 = 12;
+const CASES: u64 = 13;
 
 /// Run them, and answer how many cases they are. `Err` names the first thing
 /// that was not true.
@@ -55,6 +55,7 @@ fn cases() -> Result<(), &'static str> {
     check_read_present_answers_poison()?;
     check_a_poisoned_page_is_dropped()?;
     check_a_poisoned_read()?;
+    check_no_heap_reclaim_in_interrupt_service()?;
     check_a_refused_heap_allocation_reclaims()?;
     check_a_refused_reservation_growth_reclaims()
 }
@@ -750,6 +751,25 @@ fn hold_every_free_frame(held: &mut Vec<(u64, u8)>) {
             }
         }
     }
+}
+
+/// The kernel heap's reclaim and kill are never begun in interrupt service
+/// (L.mm.136, L.mm.138): `mm::heap_may_reclaim`, which both ask first, says
+/// yes in this task, with interrupts on and nothing held, and no for the same
+/// task marked as servicing an interrupt ([`crate::irq::serviced`]), where
+/// only its interrupt test can say so. `check-stack-depth` leaves the kill
+/// out of what a timer's interrupt reaches on this guard (`INTERRUPT_CANNOT`,
+/// F-107); this is the check that fires when its interrupt test goes.
+///
+/// Verifies: L.mm.136, L.mm.138
+fn check_no_heap_reclaim_in_interrupt_service() -> Result<(), &'static str> {
+    if !mm::heap_may_reclaim() {
+        return Err("a task with interrupts on and nothing held may not reclaim for the heap");
+    }
+    if crate::irq::serviced(mm::heap_may_reclaim) {
+        return Err("the kernel heap may reclaim or kill inside interrupt service");
+    }
+    Ok(())
 }
 
 /// A page of kernel heap refused with every free frame held, and clean cache

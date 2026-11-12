@@ -826,9 +826,11 @@ requires their mappings untouched. Three more changes from this text:
   lets its job's last slot go and with it the job's reservation, where
   nothing may sleep, and `check-stack-depth` reads any direct way from
   that drop to a shootdown as F-104's line whatever test stands before the
-  call: the row was red from 0ec0a3931 on AArch64, the one image whose walk
-  reaches the allocator from that drop (F-110; the units are one source for
-  the three architectures). F-104 itself stayed closed: `purge` refused
+  call: the row was red from 0ec0a3931 on AArch64, then the one image whose
+  walk reached the allocator from that drop (F-110: since the walk follows
+  x86-64's calls through the GOT and through registers loaded from it, and
+  ARMv7-A's calls with their immediate, all three reach it and read no way
+  to a shootdown; the units are one source for the three). F-104 itself stayed closed: `purge` refused
   there by its own test. Both now only set
   the purge-wanted flag (`mm::large::retire`, `mm::large::ask_purge_held`),
   and the reaper purges at the machine's next interrupt, switch or halt.

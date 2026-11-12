@@ -555,7 +555,12 @@ package FerrixMemoryRequirements {
                 512-page cached file of the check's own source and every free frame held, a
                 page of heap is served and the count of refused allocations a reclaim let in
                 grows, in at most three tries. Control: heap_or_reclaim answering None at
-                once -- the boot stops on the check's 'was not served after a reclaim'.";
+                once -- the boot stops on the check's 'was not served after a reclaim'. Not in
+                interrupt service (check_no_heap_reclaim_in_interrupt_service): heap_may_reclaim
+                answers yes in the check's task, with interrupts on and nothing held, and no for
+                the same task inside irq::serviced, where only its interrupt test can say no.
+                Control: the interrupt test removed -- the boot stops on 'the kernel heap may
+                reclaim or kill inside interrupt service' (f107-irq-c1).";
             attribute :>> parent = "H.MEM.11";
             attribute :>> unit = ("mm::heap_or_reclaim", "mm::heap_may_reclaim",
                 "mm::injection_refused", "mm::reclaim_for_kernel");
@@ -604,7 +609,10 @@ package FerrixMemoryRequirements {
                 Control: heap_or_kill returning None at once and reservation_grow asking no kill
                 -- the kernel says a transaction was aborted (out of memory), stops with FX-0008
                 on an allocation that cannot report failure, or a create answers ENOMEM, whichever
-                the refusal meets first.";
+                the refusal meets first. Never in interrupt service: L.mm.136's case of
+                heap_may_reclaim, which the kill's callers ask first (f107-irq-c1);
+                check-stack-depth leaves the kill out of a timer's interrupt on that guard
+                (INTERRUPT_CANNOT, F-107).";
             attribute :>> parent = "H.MEM.11";
             attribute :>> unit = ("mm::heap_or_kill", "mm::while_killing",
                 "object::oom::for_kernel_heap", "object::oom::kernel_victim_held",
@@ -756,9 +764,11 @@ package FerrixMemoryRequirements {
                 Host: a detached
                 block is not handed out until it is given back (ferrix-frame, large_area::
                 a_freed_block_is_not_handed_out_until_the_purge_gives_it_back). By analysis:
-                check-stack-depth finds no direct way from a task's last drop to a shootdown
-                on AArch64, the one image whose walk reaches the allocator from that drop
-                (finding F-110); the units are one source for the three architectures.
+                check-stack-depth finds no way from a task's last drop to a shootdown on any
+                of the three architectures, by direct calls, x86-64's calls through the GOT and
+                through a register loaded from it, and ARMv7-A's calls with their immediate
+                (F-110); each walk reaches the heap's free from that drop; the units are one
+                source for the three.
                 Controls: a purge allowed where the caller may not block (the boot stops on 'a
                 shootdown was requested with interrupts masked'); a retired block given back
                 at once (host: that test FAILED); x86-64 frames freed at the free ('a masked

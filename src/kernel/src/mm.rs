@@ -1750,8 +1750,10 @@ fn note_headroom(left: u64, watermark: u64) {
 /// lock held, interrupts on, not in interrupt context
 /// ([`crate::sched::may_block`]) -- since a reclaim must be begun with no
 /// spin lock held; and not inside a reclaim, which is never begun twice
-/// (FX-0973).
-fn heap_may_reclaim() -> bool {
+/// (FX-0973). It is what `check-stack-depth` leaves the kill out of a
+/// timer's interrupt by (`INTERRUPT_CANNOT`).
+// CHECKS-ONLY: user/rehome_cache_check.rs
+pub(crate) fn heap_may_reclaim() -> bool {
     crate::sched::may_block()
         && !crate::irq::in_interrupt()
         && crate::sched::with_current(crate::sched::Task::reclaiming) == Some(false)

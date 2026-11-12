@@ -1578,8 +1578,8 @@ pub static STAGE6_REHOMED_CACHE: Explanation = Explanation {
     meaning: "`user::rehome_cache_check::run` drives `user::cache` over objects with a source of \
               its own, in jobs made for it, with no file system or process: reclaim's scope and \
               its hand, `reclaim_asked`, the shrinker's slot, a written page kept, a mapping made \
-              at the take, `totals`, `resident`, and poison in a cached page. The sentence names \
-              the case that was not true.",
+              at the take, `totals`, `resident`, poison, no heap reclaim in an interrupt's service. \
+              The sentence names the case that was not true.",
     causes: &[
         "`user/cache.rs`, `user/vmo.rs` or `object/quota.rs` changed what reclaim takes or what \
          the cache counts: the sentence names which, and the requirement it verifies is in the \
