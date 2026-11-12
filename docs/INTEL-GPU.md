@@ -456,8 +456,15 @@ allocate, and the box is reached over ssh (`fx.sh`).
   its stolen memory exactly: GSM (8 MiB, the GGTT) and DSM (60 MiB, the
   scan-out and whatever else firmware put there), where the kernel keeps
   nothing. By design the GPU then reaches the driver's pins and that
-  region, nothing else -- shown on QEMU for the kernel's tables only, the
-  box run owed (BACKLOG P1, intel-k2; ledger 2392 (5)) -- and counts as
+  region, nothing else -- shown on QEMU for the kernel's tables; on the box
+  a boot of 2026-11-12 (headless, `ferrix.checks=skip`, a later develop
+  image, not made for this purpose) printed dmar0 `translating (four-level)`
+  and the RMRR identity-mapped for 00:02.0, 0 faults at the end of boot,
+  before the driver started, and Endfield drew through the driver from about
+  160 s to 950 s; no plane was lit, so nothing scanned out of the RMRR and no
+  fault record was read after the driver started, but the screen lit after TE and the
+  loader-map region of the RMRR are still owed (BACKLOG P1, intel-k2;
+  ledger 2392 (5)) -- and counts as
   translated, so (a) lets the chardev core accept its
   client minors under `ferrix.intelgpu`. The framebuffer the display
   engine scans out, and the GGTT entries that map it, are in the RMRR
