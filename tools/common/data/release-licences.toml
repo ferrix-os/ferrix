@@ -191,6 +191,10 @@ paths = [
     "bin/dmesg",
     "bin/settingsctl",
     "bin/lode-upload",
+    # The boot splash (docs/SPLASH.md), and the event log's reader
+    # (xtask's eventlog.rs), on every desktop.
+    "bin/splash",
+    "bin/ferrix-eventlog",
 ]
 
 # Third-party material inside Ferrix's own sources, built into its programs.
