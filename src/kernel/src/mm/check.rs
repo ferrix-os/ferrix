@@ -1583,8 +1583,8 @@ pub fn check_pstore_never_free() -> Result<(), &'static str> {
 /// (`mm::reserve::refuse_heap_for`): named the heap's killer, a 200-byte allocation
 /// is served from this processor's reserve and the drawn count rises; not
 /// named, or another task named, the same allocation is refused and the
-/// drawn count stays; and inside a section, no killer named, it is served
-/// from the reserve again. Preemption is off, so the reserve filled first
+/// drawn count stays; inside a section, no killer named, it is served
+/// from the reserve again; and named the OOM kill's emptier, it is served. Preemption is off, so the reserve filled first
 /// is the one drawn on.
 ///
 /// Verifies: L.mm.139, L.mm.37
@@ -1614,6 +1614,10 @@ pub fn check_the_heap_killer_draws_outside_a_section() -> Result<u64, &'static s
     let (unnamed, unnamed_drawn) = attempt(0, false);
     let (other, other_drawn) = attempt(u64::MAX, false);
     let (sectioned, section_drawn) = attempt(0, true);
+    // And named the OOM kill's emptier, which is served as the killer is.
+    let emptier = crate::object::oom::name_emptier_for_check(me);
+    let (emptied, emptier_drawn) = attempt(0, false);
+    let _ = crate::object::oom::name_emptier_for_check(emptier);
     crate::sched::preempt_enable();
     filled.map_err(|_| "no memory to fill the reserve for the heap killer's check")?;
     if !served || drawn == 0 {
@@ -1621,6 +1625,9 @@ pub fn check_the_heap_killer_draws_outside_a_section() -> Result<u64, &'static s
     }
     if unnamed || unnamed_drawn != 0 || other || other_drawn != 0 {
         return Err("the reserve served a task that is not the heap's killer outside a section");
+    }
+    if !emptied || emptier_drawn == 0 {
+        return Err("the OOM kill's emptier was not served from the reserve outside a section");
     }
     if !sectioned || section_drawn == 0 {
         return Err("the reserve did not serve a section with the heap refusing");

@@ -112,6 +112,35 @@ HANDED_OVER = re.compile(
 )
 # What sleeps, or waits on another processor. A way to any of these from what is left is F-104 again.
 MAY_SLEEP = re.compile(r"WaitQueue>::wait|sched::block|sched::schedule|sched::sleep|flush_tlb_everywhere|flush_tlb_pages")
+# L.object.374 (F-107's B, docs/OOM-REAPER.md, ledger 8784, 8814): no OOM kill unmaps a space where
+# it was asked -- the emptier does, a task of its own -- and the hand-off allocates nothing. Each rule:
+# where the walk starts, what it must not reach, and what reaching it would mean.
+EMPTIES_NOTHING = (
+    (
+        "ferrix_kernel_core::object::oom::kill_in",
+        re.compile(r"user::space::AddressSpace>::unmap$"),
+        "unmaps a space where it was asked",
+    ),
+    (
+        "ferrix_kernel_core::object::oom::hand_over",
+        re.compile(r"^__rustc::__rust_alloc$|^__rustc::__rust_realloc$|GlobalAlloc>::alloc$|GlobalAlloc>::realloc$"),
+        "allocates in its hand-off",
+    ),
+)
+# What those walks do not follow, each for its reason (ledger 8856 A5):
+# * a failure path (a panic stops the machine);
+# * a switch (`schedule`, a block, a wait, a sleep): what runs after a switch belongs to another task;
+# * a task's last reference let go (`Arc<Task>`'s `drop_slow`): in the hand-off's wake,
+#   `EMPTIER_WAIT`'s only waiter is the emptier, a kernel task that never ends, so its reference is
+#   never the last; anywhere else on `kill_in`'s walk, a task's last drop is what `drop_rest`'s row
+#   walks and bounds (F-104, L.mm.143).
+EMPTIES_NOTHING_STOPS = re.compile(
+    r"panic|rust_begin_unwind|unwrap_failed|expect_failed|slice_.*fail|alloc_error"
+    r"|sched::schedule$|sched::schedule_from|sched::block|WaitQueue>::wait|sched::sleep"
+    r"|Arc<ferrix_kernel_core::sched::task::Task>>::drop_slow"
+)
+# The emptier's own row: its chunk under a timer's interrupt, on a kernel task's stack (8784 C6).
+EMPTIER = "ferrix_kernel_core::object::oom::emptier"
 # The stack `ferrix_stack_stop` says its one line on: `trap::STACK_STOP_SIZE`.
 STOP_STACK = 4096
 LEAVE_OUT = re.compile(
@@ -447,6 +476,33 @@ def drop_rest(frames, calls, problems):
     return walk.depth(start)
 
 
+def empties_nothing(frames, calls, problems):
+    """L.object.374's walks: from each rule's start by the calls the walk follows, the functions
+    reached, and a problem for each way to what it must not reach. Answers a line's text, or None for
+    an image with no OOM kill."""
+    if not any(start in frames for start, _, _ in EMPTIES_NOTHING):
+        return None
+    counts = []
+    for start, target, what in EMPTIES_NOTHING:
+        if start not in frames:
+            problems.append(f"no function `{start}`: L.object.374's walk was renamed, walk it again")
+            continue
+        found, seen, todo = set(), {start}, [start]
+        while todo:
+            name = todo.pop()
+            for callee in calls.get(name, ()):
+                if callee not in frames or EMPTIES_NOTHING_STOPS.search(callee):
+                    continue
+                if target.search(callee):
+                    found.add(f"the OOM kill {what}: `{callee[:80]}` by way of `{name[:70]}` (L.object.374)")
+                elif callee not in seen:
+                    seen.add(callee)
+                    todo.append(callee)
+        problems.extend(sorted(found))
+        counts.append(f"`{start.rsplit('::', 1)[-1]}` reaches {len(seen)}")
+    return ", ".join(counts)
+
+
 def not_judged(arch, calls, unresolved):
     """Why this image's figures judge nothing, or None: a call through a thunk or veneer, or through a
     GOT slot that resolved to no function, is a call the walk cannot follow (F-110). The row fails on
@@ -492,6 +548,12 @@ def judge(frames, calls, arch, stack_bytes, unresolved=0, show_chains=False, unf
     above = next((n for n in sorted(frames) if TIMER_ABOVE in n), None)
     rest = drop_rest(frames, calls, problems)
     lines.append(f"stack-depth: {arch}: what a task's last drop leaves, under an interrupt: {rest}{remark}")
+    kill = empties_nothing(frames, calls, problems)
+    if kill:
+        lines.append(
+            f"stack-depth: {arch}: the OOM kill unmaps nothing where it was asked, and its hand-off "
+            f"allocates nothing (L.object.374): {kill}"
+        )
     lines.append(
         f"stack-depth: {arch}: calls and jumps through a register or memory not followed: {unfollowed} "
         "(what makes the row a lower bound)"
@@ -554,6 +616,20 @@ def judge(frames, calls, arch, stack_bytes, unresolved=0, show_chains=False, unf
             if worst > stack_bytes - floor:
                 problems.append(
                     f"{arch}: clone by every direct call reaches {worst} of {stack_bytes} bytes, {floor} to be left"
+                )
+        # The OOM kill's emptier, a kernel task: its chunk under a timer's interrupt (L.object.376).
+        if EMPTIER in frames:
+            depth = plain.depth(EMPTIER)
+            worst = depth + frame["interrupt"] + deep_timer
+            lines.append(
+                f"stack-depth: {arch}: the OOM emptier: {depth} + {frame['interrupt']} + {deep_timer} the "
+                f"timer's = {worst} of {stack_bytes}, a lower bound{remark}"
+            )
+            chain_line("the OOM emptier", plain.chain(EMPTIER))
+            if worst > stack_bytes - floor:
+                problems.append(
+                    f"{arch}: the OOM emptier under a timer's interrupt reaches {worst} of {stack_bytes} bytes, "
+                    f"{floor} to be left"
                 )
         # The report of an overflow, on its emergency stack of the same size, with the machine stopping.
         overflow = next((name for name in sorted(frames) if "trap::stack_overflow" in name), None)
@@ -699,6 +775,21 @@ def self_test():
     assert not_judged("x86_64", {"f": []}, 0) is None
     _, refused = judge({"f": 8}, {"f": ["__ARMv7ABSLongThunk_g"]}, "armv7a", 16384)
     assert any("not judged" in problem for problem in refused), refused
+    # L.object.374: the kill reaching an unmap, or its hand-off the allocator, is a problem; a way
+    # through a switch or a task's last drop in a wake is not followed.
+    kill, hand = EMPTIES_NOTHING[0][0], EMPTIES_NOTHING[1][0]
+    unmap = "<ferrix_kernel_core::user::space::AddressSpace>::unmap"
+    alloc = "__rustc::__rust_alloc"
+    switch, last = "ferrix_kernel_core::sched::schedule", "<alloc::sync::Arc<ferrix_kernel_core::sched::task::Task>>::drop_slow"
+    weights = {name: 8 for name in (kill, hand, unmap, alloc, switch, last, "ended", "wake")}
+    clean = {kill: ["ended"], "ended": [hand], hand: ["wake"], "wake": [switch, last], switch: [alloc], last: [alloc, unmap]}
+    found = []
+    assert empties_nothing(weights, clean, found) and not found, found
+    dirty = dict(clean, ended=[hand, unmap], wake=[switch, last, alloc])
+    found = []
+    empties_nothing(weights, dirty, found)
+    assert len(found) == 2 and any("unmaps a space" in f for f in found) and any("allocates" in f for f in found), found
+    assert empties_nothing({"x": 8}, {}, []) is None, "an image with no OOM kill has no such line"
     problems = []
     assert named(frames, "nothing", problems) is None and problems
     assert stack_bytes("aarch64", "pub(crate) const KERNEL_STACK_PAGES: u64 = 6;") == 6 * PAGE, "read"

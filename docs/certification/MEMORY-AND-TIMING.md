@@ -106,14 +106,48 @@ live processes (a `Vec` of them, fallible: no list, refused) and, while a
 victim ends or within the 250 ms grace after a kill, a 1 ms sleep: about a
 second at most beyond L.mm.136's bound. At most one kill per 250 ms
 grace, and no second kill for the heap while the space of the last
-process killed for it is still held (`KERNEL_VICTIM`, a `Weak` behind a
-spin lock taken for one load or one store, never across a call). That
-hold has no time bound: it ends only when the last strong reference to
-the victim's space goes, so a victim stuck on a sleep lock, or any other
-holder of its space, keeps every later kill for the heap from being made.
-It fails closed -- the refusal stands as before L.mm.138 -- and the fault
-path's kill is not affected; an `MMF_OOM_SKIP`-like bound, or ending the
-hold once the space is emptied, is a BACKLOG row (ledger 8043 MK.2).
+process killed for it is held and the kill still waits for it
+(`KERNEL_VICTIM`, a `Weak` and a done flag behind a leaf spin lock taken
+for one load or one store, never across a call, never with `EMPTYING`'s):
+the hold ends when the emptier has emptied the space, when its emptying is
+given up (below), or when its last strong reference goes. A victim that
+never closes everything is never handed, so for it the hold is as
+unbounded as before: a victim stuck on a sleep lock keeps every later kill
+for the heap from being made. That fails closed -- the refusal stands as
+before L.mm.138 -- and is the half of the BACKLOG row left open (ledger
+8043 MK.2, narrowed by 8784 C4).
+
+**The OOM kill's emptier (2026-11-12, F-107's B, L.object.103 and
+L.object.374-376; ledger 8784, 8814; `docs/OOM-REAPER.md`).** No OOM kill
+empties a space where it was asked: the look hands an ended victim's space
+to `oom-emptier`, a task of its own, inside a reclaim for its life and
+served from its processor's reserve (L.mm.139). The hand-off is a `Weak`
+put in one slot (`EMPTYING`, a leaf spin lock, never taken in interrupt
+context, nothing taken under it), a store of the progress clock, a flag
+and a wake, allocating nothing; the asker then sleeps 1 ms and looks again.
+*Its wait is an upper bound, unchanged:* at most `KERNEL_HEAP_ANSWERS` (1024)
+answers for the heap's allocation and `MOST_ANSWERS` (1024) for a fault,
+each a look and a 1 ms sleep, about a second; then the refusal stands. *The
+way on:* a hand-off with no chunk emptied for `EMPTY_PATIENCE_NANOS`
+(500 ms), counted from the hand-off or the last chunk, is given up: marked
+on the space, said once, passed over by every later look, holding back no
+kill. An emptier kept off the processors by load for the whole patience
+makes no progress and is given up the same way: bounded, at the cost of a
+second kill. An emptying whose chunks keep coming is never given up.
+*Holds:* a chunk is the highest region's top 128 pages (512 KiB), so the
+space's spin lock is held for at most 128 leaves' take-down at a time,
+where the old whole-range unmap held it for the whole space; a 6 GB victim
+is about 12,000 chunks, each with its own (usually empty) shootdown. *What
+a chunk allocates:* one `Unmapping`, a one-entry `Vec<Freeing>`, the
+touched ids, `give_back`'s list, and `Vmo::take_range`'s list of the
+chunk's frames, at most 2,048 bytes, the heap's largest class: each within
+a class the reserve holds. A chunk whose allocations the reserve too
+refuses keeps its pages with their objects (`RANGES_KEPT`) until the
+space's drop, as any unmap does. *One slot for the machine:* a job's fault
+may wait behind another scope's emptying, within the bounds above. *A displaced space:* a stalled space given up while
+another takes the slot is marked at its own next look or the emptier's next
+wake; until then no second space takes the slot and the look waits, within
+the same bound (argued, not run).
 *The injection guard has no control* (ledger 8043 MK.3): under L.mm.98's
 check three guards answer in series -- `injection_refused`, then the floor
 test (the free count is far above the watermark there), then

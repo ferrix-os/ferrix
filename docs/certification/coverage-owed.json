@@ -642,6 +642,16 @@
       ],
       "dropped": "new code; no coverage run has measured it yet.",
       "what": "watchdog.rs (core) and fs/watchdog.rs (load) run only under ferrix.watchdog=on, which no coverage boot gives, so every coverage run leaves them unreached but read_option's absent arm and start's early return. Reached by cargo xtask test-watchdog on x86-64 under KVM, case by case: read_option's on and not-understood arms and start (every case; case 8, ferrix.watchdog=On); open, arm, feed, set_timeout through the feeder's writes and WDIOC_SETTIMEOUT (cases 1-4, 6); look_forever and expired (cases 1-3); release with and without the magic V (cases 3, 4); disable through WDIOS_DISABLECARD and a feed that does not arm (case 5); stop_for_shutdown (case 6, reboot(2)'s halt); the EBUSY and EINVAL refusals (cases 4, 5). Owed: a coverage boot with ferrix.watchdog=on and a feeder, or these lines argued residual naming the case."
+    },
+    {
+     "landing": "ef-30fps, F-107's B: the OOM kill's emptier, a task of its own (docs/OOM-REAPER.md; consultant ledger 8784, 8814, 8856, 8881 G3), owner ef-30fps",
+     "architectures": [
+      "x86_64",
+      "aarch64",
+      "armv7a"
+     ],
+     "dropped": "new code; no coverage run has measured it yet.",
+     "what": "object/oom.rs: hand_over, emptier, empty, let_go, in_slot, through_gate, victim_done and the checks' accessors are reached by the quota check's check_the_emptier (object::quota_check) and the two OOM cases beside it on every boot. Argued, not run (no case makes two victims stall in turn): hand_over's wait while an unmarked given-up space holds the slot (`unmarked`), its Earlier branch (a stalled space displaced, kept as a Weak in `given_up`), its given_up branch (a displaced space marked at its own look), and the emptier's marking of `given_up` at its wake. The argument is docs/OOM-REAPER.md 2.6a; filed in COVERAGE-RESIDUAL at the next measure."
     }
   ]
 }

@@ -1711,16 +1711,93 @@ package FerrixObjectRequirements {
             attribute :>> statement = "A victim that has ended and closed
                 everything, whose address space no live process shares and still
                 holds pages -- which a release that unmapped it leaves none of
-                (F-91) -- shall have that space emptied by the next fault at its
-                full limit rather than at its parent's wait, and a fault that finds
-                a victim still ending shall wait and retry, killing no second
-                process.";
+                (F-91) -- shall have that space handed by the next look at its
+                full limit to the emptier (L.object.376), one space at a time,
+                and emptied by it rather than at its parent's wait; a look that
+                finds a victim still ending, or handed and not yet emptied, shall
+                wait and retry, killing no second process, until it is emptied or
+                its emptying is given up (L.object.375).";
             attribute :>> criterion = "Two faults at one full limit while the first
-                victim is ending kill 1 process, and the job's memory use falls by
-                the victim's resident pages before its parent waits.";
+                victim is ending kill 1 process, and after the victim lets go the
+                next fault retries and the job's memory use falls by the victim's
+                resident pages, within a wait on that use of twice the emptier's
+                patience, before its parent waits; the machine-wide kill's case
+                the same (object::quota_check). Control: the emptier returning at
+                once -- 'an ended victim's memory was not given back by the
+                emptier before its parent's wait' (f107b3-c2).";
             attribute :>> parent = "H.QUOTA.6";
             attribute :>> unit = ("object::oom::kill_within",
-                "object::oom::shared_with_the_living");
+                "object::oom::shared_with_the_living", "object::oom::ended");
+        }
+        // docs/OOM-REAPER.md section 2 (F-107's B; consultant ledger 8784, 8814).
+        requirement <'L.object.374'> noKillEmptiesWhereAsked : ItemLowLevel {
+            attribute :>> statement = "No OOM kill -- scoped, machine-wide or for
+                the kernel's heap -- shall unmap a space where it was asked: the
+                look shall hand an ended victim's space to the emptier, allocating
+                nothing, a Weak in a slot behind a leaf lock and a wake.";
+            attribute :>> criterion = "check-stack-depth, on all three
+                architectures: no way by the calls the walk follows from
+                object::oom::kill_in to AddressSpace::unmap, nor from
+                object::oom::hand_over to the kernel allocator's alloc or
+                realloc, leaving out, each named in EMPTIES_NOTHING_STOPS with its
+                reason: failure paths (a panic stops the machine); a switch (what
+                runs after it belongs to another task); and a task's last reference
+                let go (in the hand-off's wake the only waiter is the emptier, which
+                never ends; anywhere else on the kill's walk a task's last drop is
+                what drop_rest's row walks and bounds, F-104, L.mm.143). The tool's
+                self-test has a case of each way. Control: ended's unmap put back
+                -- the row's 'the OOM kill unmaps a space where it was asked' line
+                (f107b-c1).";
+            attribute :>> parent = "H.QUOTA.6";
+            attribute :>> unit = ("object::oom::hand_over");
+        }
+        requirement <'L.object.375'> aStalledEmptyingIsGivenUp : ItemLowLevel {
+            attribute :>> statement = "A space handed to the emptier shall be given
+                up once EMPTY_PATIENCE_NANOS (500 ms) pass with no chunk of it
+                emptied, counted from its hand-off or its last chunk: marked on
+                the space, said once on the console, passed over by every later
+                look and holding back no later kill; an emptying whose chunks keep
+                coming is never given up. A space given up while another takes the
+                slot shall be marked at its own next look or the emptier's next
+                wake, and no second space shall take the slot before it is.";
+            attribute :>> criterion = "The emptier's case (object::quota_check,
+                check_the_emptier), its gate shut: a victim handed and not emptied
+                is waited for, and after the patience the look marks it given up
+                and kills the next process in the job, 3 kills in all; its gate
+                opened one chunk at a time, each after 300 ms, three chunks over
+                more than the patience, the look waits at each and kills nobody
+                else. Controls: the patience test removed -- 'a victim whose
+                emptying did not come still held the kill past its patience'
+                (f107b3-c3); progress never stamped, the patience counted from the
+                hand-off -- 'an emptying giving pages back was given up'
+                (f107b3-c4). The displacement path -- a stalled space given up
+                while another takes the slot, marked at its own next look or the
+                emptier's next wake -- is argued, not run (COVERAGE-RESIDUAL).";
+            attribute :>> parent = "H.QUOTA.6";
+            attribute :>> unit = ("object::oom::hand_over", "object::oom::victim_done",
+                "user::space::AddressSpace::give_up_oom_emptying",
+                "user::space::AddressSpace::oom_emptying_given_up");
+        }
+        requirement <'L.object.376'> theEmptierIsATaskOfItsOwn : ItemLowLevel {
+            attribute :>> statement = "The emptier shall be a kernel task of its
+                own, inside a reclaim for its whole life, so that no allocation it
+                makes is answered by a reclaim or a kill; it shall empty a handed
+                space a chunk at a time from the top -- the highest region's top
+                EMPTY_CHUNK_PAGES (128) pages, splitting no region -- stamping
+                progress only when a chunk lowered the highest region's end, and
+                ending the space's emptying at a chunk that failed or lowered
+                nothing, or once the space is given up or no longer handed.";
+            attribute :>> criterion = "The emptier's case: after each chunk let
+                through its gate the highest region's end has fallen and the count
+                of regions has not risen, and after three the space has no region
+                and the slot holds nothing; every chunk the emptier made was made
+                inside a reclaim. Control: the reclaim mark not set at the
+                emptier's start -- 'the emptier ran outside a reclaim'
+                (f107b3-c5). check-stack-depth prints the emptier's row.";
+            attribute :>> parent = "H.QUOTA.6";
+            attribute :>> unit = ("object::oom::emptier", "object::oom::empty",
+                "object::oom::let_go", "object::oom::in_slot",
+                "object::oom::through_gate", "sched::start_reaper");
         }
         requirement <'L.object.106'> cpuIsChargedUp : ItemLowLevel {
             attribute :>> statement = "charge_cpu shall charge the time a task ran

@@ -23,10 +23,15 @@
 //! A killed process gives its memory back when its last reference goes,
 //! which for a zombie is its parent's `wait4`; Linux gives it back at exit.
 //! So a victim that has let go of everything else, and whose address space
-//! no live process shares, has that space emptied here, as Linux's OOM
-//! reaper empties a victim's (`mm/oom_kill.c`). A fault that finds a victim
-//! of its job still ending waits for it a moment and tries again, as
-//! Linux's selection aborts while a victim is still exiting.
+//! no live process shares, has that space handed to the emptier, a task of
+//! its own, as Linux's OOM reaper is a kernel thread (`mm/oom_kill.c`,
+//! `oom_reaper`): never emptied where the kill was asked, which for the
+//! kernel's heap is under an allocation's stack (F-107, `docs/OOM-REAPER.md`).
+//! A fault that finds a victim of its job still ending, or handed and not
+//! yet emptied, waits for it a moment and tries again, as Linux's selection
+//! aborts while a victim is still exiting; one whose emptying makes no
+//! progress for [`EMPTY_PATIENCE_NANOS`] is given up and passed over, as
+//! Linux's `MMF_OOM_SKIP`.
 //!
 //! With nothing killable in the job, the fault fails as it did before: a
 //! `SIGSEGV` for the program's own, `EFAULT` for a page a system call touched
@@ -56,18 +61,18 @@
 //! `memory.oom.group` and `oom_score_adj` are not built: a victim is one
 //! process, chosen by its resident pages alone.
 
-use alloc::sync::Arc;
+use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 
-use ferrix_bootinfo::{PAGE_SIZE, USER_VIRT_END};
+use ferrix_bootinfo::PAGE_SIZE;
 
 use super::job::{Job, KILLED_STATUS};
 use super::process::{self, Host};
 use super::quota::{self, Counter, Resource};
 use crate::console::println;
 use crate::user::cache;
-use crate::user::space::{Access, AddressSpace, MMAP_MIN_ADDR, SpaceError};
+use crate::user::space::{Access, AddressSpace, SpaceError};
 use crate::user::vmo::VmoError;
 
 /// What a fault the scoped OOM kill answered does next.
@@ -126,9 +131,23 @@ static HEAP_KILLER: AtomicU64 = AtomicU64::new(0);
 /// this task's refused allocations from the processor's reserve
 /// (`mm::reserve::draw`), which the victim's freed memory fills again at
 /// the next section. Asked only on an allocation the heap refused.
+///
+/// The emptier ([`emptier`]) is served the same way: it empties what a kill
+/// handed it with the machine as short as the kill found it.
 pub(crate) fn killing_for_the_heap() -> bool {
     let killer = HEAP_KILLER.load(Ordering::Acquire);
-    killer != 0 && !crate::irq::in_interrupt() && crate::sched::current_id() == Some(killer)
+    let emptier = EMPTIER.load(Ordering::Acquire);
+    (killer != 0 || emptier != 0)
+        && !crate::irq::in_interrupt()
+        && crate::sched::current_id().is_some_and(|me| me == killer || me == emptier)
+}
+
+// CHECKS-ONLY: mm/check.rs
+/// Name `task` as the OOM kill's emptier, as [`emptier`] names itself, for
+/// the reserve's check alone (L.mm.139): answers who was named before, for
+/// the check to put back.
+pub(crate) fn name_emptier_for_check(task: u64) -> u64 {
+    EMPTIER.swap(task, Ordering::AcqRel)
 }
 
 // CHECKS-ONLY: mm/check.rs
@@ -469,18 +488,31 @@ pub(crate) fn for_kernel_heap() -> Answer {
     answer
 }
 
-/// The space of the last process [`for_kernel_heap`] killed, while it is
-/// still held: no other is killed for the kernel's heap until it is gone.
-static KERNEL_VICTIM: crate::sync::SpinLock<Option<alloc::sync::Weak<AddressSpace>>> =
+/// The space of the last process [`for_kernel_heap`] killed, and whether the
+/// kill is done waiting for it -- the emptier emptied it, or its emptying
+/// was given up: no other is killed for the kernel's heap until then, or
+/// until it is gone. A leaf lock, never taken with [`EMPTYING`]'s.
+static KERNEL_VICTIM: crate::sync::SpinLock<Option<(Weak<AddressSpace>, bool)>> =
     crate::sync::SpinLock::new(None);
 
 /// Whether the space of the last process [`for_kernel_heap`] killed is
-/// still held by anyone.
+/// still held by anyone and the kill still waits for it: not emptied, not
+/// given up (L.mm.138). Reads counts and a flag; upgrades nothing, so no
+/// last reference is ever dropped here.
 fn kernel_victim_held() -> bool {
     KERNEL_VICTIM
         .lock()
         .as_ref()
-        .is_some_and(|space| space.strong_count() > 0)
+        .is_some_and(|(space, done)| !done && space.strong_count() > 0)
+}
+
+/// The kill is done waiting for the space at `space`: emptied or given up.
+fn victim_done(space: *const AddressSpace) {
+    if let Some((victim, done)) = KERNEL_VICTIM.lock().as_mut()
+        && Weak::as_ptr(victim) == space
+    {
+        *done = true;
+    }
 }
 
 /// Where an OOM kill chooses its victim.
@@ -552,8 +584,8 @@ fn kill_in(
     // The last victim chosen for the kernel's heap still holds its space:
     // its memory is not back yet, and another kill would take a second
     // process for the room the first will give -- one 0.8 s after the first
-    // took the disk's driver (2026-11-08). The survey above has emptied it
-    // if it has ended; wait for it.
+    // took the disk's driver (2026-11-08). The survey above has handed it
+    // to the emptier if it has ended; wait for it to be emptied or given up.
     if scope_of == Scope::Kernel && kernel_victim_held() {
         return (Answer::Retry, true);
     }
@@ -590,7 +622,7 @@ struct Survey<'a> {
 
 /// Look over `live` in `scope_of` for a fault in `space`: the victim to
 /// choose, or the answer at once when the faulting process itself has
-/// already ended or an ended one's space was emptied here.
+/// already ended or an ended one's space was handed to the emptier here.
 fn survey<'a>(
     space: Option<&AddressSpace>,
     scope_of: Scope,
@@ -632,7 +664,7 @@ fn survey<'a>(
         }
         match ended(host, resident, live) {
             Ended::Gone => {}
-            Ended::Emptied => return Err((Answer::Retry, false)),
+            Ended::Handed => return Err((Answer::Retry, true)),
             Ended::Ending => looked.ending = true,
         }
     }
@@ -641,30 +673,321 @@ fn survey<'a>(
 
 /// What [`kill_in`] makes of a process that has ended.
 enum Ended {
-    /// Nothing of its memory to wait for: none resident, or shared with
-    /// the living.
+    /// Nothing of its memory to wait for: none resident, shared with the
+    /// living, or its emptying given up.
     Gone,
-    /// Its space was emptied here.
-    Emptied,
-    /// Still ending, its memory still held.
+    /// Its space is the emptier's, handed now or before and not yet emptied.
+    Handed,
+    /// Still ending, its memory still held; or another space is the
+    /// emptier's.
     Ending,
 }
 
-/// An ended process `host` with `resident` pages, among `live`: empty its
-/// space if nothing of it runs and nobody else maps what it held, as Linux's
-/// OOM reaper does, rather than at its parent's `wait4`.
+/// An ended process `host` with `resident` pages, among `live`: hand its
+/// space to the emptier if nothing of it runs and nobody else maps what it
+/// held, as Linux's OOM reaper is handed a victim, rather than wait for its
+/// parent's `wait4` (L.object.103). Never emptied here (L.object.374).
 fn ended(host: &Arc<dyn Host>, resident: u64, live: &[Arc<dyn Host>]) -> Ended {
     let core = host.core();
-    if resident == 0 || shared_with_the_living(core.own_space(), live) {
+    let space = core.own_space();
+    if resident == 0 || space.oom_emptying_given_up() || shared_with_the_living(space, live) {
         return Ended::Gone;
     }
-    if core.exit().is_closed() {
-        let _ = core
-            .own_space()
-            .unmap(MMAP_MIN_ADDR, USER_VIRT_END - MMAP_MIN_ADDR);
-        return Ended::Emptied;
+    if !core.exit().is_closed() {
+        return Ended::Ending;
     }
-    Ended::Ending
+    let (answer, gave_up) = hand_over(space);
+    let whose = match gave_up {
+        GaveUp::Nothing => return answer,
+        GaveUp::This => "its",
+        GaveUp::Earlier => "an earlier victim's",
+    };
+    println!(
+        "  oom      pid {}: {whose} space was not emptied, no progress in {} ms; the kill moves \
+         on",
+        core.pid(),
+        EMPTY_PATIENCE_NANOS / 1_000_000
+    );
+    answer
+}
+
+/// Whose emptying a hand-off gave up.
+enum GaveUp {
+    /// Nobody's.
+    Nothing,
+    /// The space handed now, handed before and stalled.
+    This,
+    /// The stalled space the slot held, which then took this one.
+    Earlier,
+}
+
+// CHECKS-ONLY: object/quota_check.rs
+/// How long a handed space may go with no chunk emptied, from its hand-off
+/// or its last chunk, before the kill gives it up (L.object.375): half of
+/// what an allocation or a fault waits in all, so that the one that waited
+/// can still see the next kill.
+pub const EMPTY_PATIENCE_NANOS: u64 = 500_000_000;
+
+// CHECKS-ONLY: object/quota_check.rs
+/// The pages one chunk of an emptying takes, from the top of the highest
+/// region (L.object.376): the space's lock is held for this many leaves at
+/// most, and `Vmo::take_range`'s list of them, 16 bytes a page, fits the
+/// heap's largest size class, which the reserve holds.
+pub const EMPTY_CHUNK_PAGES: u64 = 128;
+
+/// The emptier's slot. A leaf lock: nothing is taken under it, never in
+/// interrupt context, and what it held is dropped after it. Only `Weak`s:
+/// nothing here upgrades one, so no last reference to a space is dropped
+/// on a kill's way.
+static EMPTYING: crate::sync::SpinLock<Slot> = crate::sync::SpinLock::new(Slot {
+    handed: None,
+    given_up: None,
+});
+
+/// What [`EMPTYING`] holds.
+struct Slot {
+    /// The space handed to the emptier, until it is gone, emptied or given up.
+    handed: Option<Weak<AddressSpace>>,
+    /// The last space whose emptying was given up while another took the
+    /// slot: marked as such at its own next look ([`ended`]), which holds it.
+    given_up: Option<Weak<AddressSpace>>,
+}
+
+/// When the space in [`EMPTYING`] was handed, or last had a chunk emptied,
+/// in `timer::now_nanos`.
+static EMPTY_PROGRESS: AtomicU64 = AtomicU64::new(0);
+
+/// Whether the emptier is asked to look at [`EMPTYING`]: what it waits on,
+/// so that its wait takes no lock but its queue's.
+static EMPTY_ASKED: AtomicBool = AtomicBool::new(false);
+
+/// Where the emptier waits.
+static EMPTIER_WAIT: crate::sched::WaitQueue = crate::sched::WaitQueue::new();
+
+/// The emptier's task id, zero before it starts.
+static EMPTIER: AtomicU64 = AtomicU64::new(0);
+
+/// Chunks the emptier has emptied, and of those how many outside a reclaim
+/// (none, L.object.376): what the OOM check reads.
+static CHUNKS: AtomicU64 = AtomicU64::new(0);
+static CHUNKS_OUTSIDE_RECLAIM: AtomicU64 = AtomicU64::new(0);
+
+/// The OOM check's gate on the emptier, read before each chunk: below zero
+/// open; zero shut; above zero, that many chunks let through.
+// CHECKS-ONLY: object/quota_check.rs
+static EMPTY_GATE: AtomicI64 = AtomicI64::new(-1);
+
+/// Hand `space` to the emptier (L.object.103, L.object.374), allocating
+/// nothing: a `Weak`, three stores and a wake. Answers what the look makes
+/// of it, and whose emptying was given up now: `space` itself, once it made
+/// no progress in [`EMPTY_PATIENCE_NANOS`], or the one the slot held, which
+/// then lets the slot go to `space`.
+#[inline(never)]
+fn hand_over(space: &Arc<AddressSpace>) -> (Ended, GaveUp) {
+    let now = crate::timer::now_nanos();
+    let stalled =
+        now.saturating_sub(EMPTY_PROGRESS.load(Ordering::Acquire)) >= EMPTY_PATIENCE_NANOS;
+    let me = Arc::as_ptr(space);
+    let (answer, gave_up, done, dropped) = {
+        let mut slot = EMPTYING.lock();
+        let handed = slot.handed.as_ref().map(Weak::as_ptr);
+        if slot.given_up.as_ref().map(Weak::as_ptr) == Some(me) {
+            // Given up while another took the slot: marked now, said then.
+            let _ = space.give_up_oom_emptying();
+            (Ended::Gone, GaveUp::Nothing, None, slot.given_up.take())
+        } else if handed == Some(me) {
+            if stalled {
+                let first = !space.give_up_oom_emptying();
+                let gave = if first { GaveUp::This } else { GaveUp::Nothing };
+                (Ended::Gone, gave, Some(me), slot.handed.take())
+            } else {
+                (Ended::Handed, GaveUp::Nothing, None, None)
+            }
+        } else {
+            let busy = slot
+                .handed
+                .as_ref()
+                .is_some_and(|other| other.strong_count() > 0);
+            // A space given up while another took the slot, and not marked
+            // yet, is never let go unmarked: no second displacement until it
+            // is (by its own look, or the emptier's next wake), or it is gone.
+            let unmarked = slot
+                .given_up
+                .as_ref()
+                .is_some_and(|given| given.strong_count() > 0);
+            if busy && (!stalled || unmarked) {
+                (Ended::Ending, GaveUp::Nothing, None, None)
+            } else {
+                let earlier = slot.handed.replace(Arc::downgrade(space));
+                EMPTY_PROGRESS.store(now.max(1), Ordering::Release);
+                if busy {
+                    let earlier_at = earlier.as_ref().map(Weak::as_ptr);
+                    let old = core::mem::replace(&mut slot.given_up, earlier);
+                    (Ended::Handed, GaveUp::Earlier, earlier_at, old)
+                } else {
+                    (Ended::Handed, GaveUp::Nothing, None, earlier)
+                }
+            }
+        }
+    };
+    drop(dropped);
+    if let Some(done) = done {
+        victim_done(done);
+    }
+    if matches!(answer, Ended::Handed) {
+        EMPTY_ASKED.store(true, Ordering::Release);
+        EMPTIER_WAIT.wake_all();
+    }
+    (answer, gave_up)
+}
+
+/// The emptier: a task of its own, as Linux's `oom_reaper` is a kernel
+/// thread (L.object.376). Inside a reclaim for its whole life, so that no
+/// allocation it makes is answered by a reclaim or a kill -- it never waits
+/// on a kill, its own hand-off's included -- and served from its
+/// processor's reserve where the heap refuses ([`killing_for_the_heap`]).
+pub(crate) fn emptier(_: usize) {
+    let _ = crate::sched::with_current(|task| task.swap_reclaiming(true));
+    EMPTIER.store(crate::sched::current_id().unwrap_or(0), Ordering::Release);
+    loop {
+        let _ = EMPTIER_WAIT.wait_trusting(|| EMPTY_ASKED.load(Ordering::Acquire));
+        EMPTY_ASKED.store(false, Ordering::Release);
+        // A space given up while another took the slot is marked here, where
+        // an upgrade's last reference may be dropped, if its own look has not
+        // marked it yet (L.object.375).
+        let given_up = EMPTYING.lock().given_up.take();
+        if let Some(space) = given_up.and_then(|space| space.upgrade()) {
+            let _ = space.give_up_oom_emptying();
+        }
+        // The `Weak` is cloned under the lock and upgraded after it, so that
+        // a last reference is never dropped under it.
+        let handed = EMPTYING.lock().handed.clone();
+        if let Some(space) = handed.and_then(|space| space.upgrade()) {
+            empty(&space);
+        }
+    }
+}
+
+/// Empty `space` a chunk at a time from the top: the highest region's top
+/// [`EMPTY_CHUNK_PAGES`] pages, so that no chunk splits a region, until no
+/// region is left, then let the slot go. Progress is stamped only when a
+/// chunk moved the highest region's end down; a chunk that failed or moved
+/// nothing ends this emptying, which the patience then gives up. A space
+/// given up, or no longer the slot's, is left at the next chunk's boundary.
+fn empty(space: &Arc<AddressSpace>) {
+    let top = |space: &AddressSpace| {
+        space.with_regions(|regions| regions.last().map(|region| (region.start, region.end)))
+    };
+    loop {
+        if space.oom_emptying_given_up() || !in_slot(space) {
+            return;
+        }
+        let Some((start, end)) = top(space) else {
+            let_go(space);
+            return;
+        };
+        if !through_gate(space) {
+            return;
+        }
+        let from = start.max(end.saturating_sub(EMPTY_CHUNK_PAGES * PAGE_SIZE));
+        let _ = CHUNKS.fetch_add(1, Ordering::Relaxed);
+        if crate::sched::with_current(crate::sched::Task::reclaiming) != Some(true) {
+            let _ = CHUNKS_OUTSIDE_RECLAIM.fetch_add(1, Ordering::Relaxed);
+        }
+        if space.unmap(from, end - from).is_err() {
+            return;
+        }
+        match top(space) {
+            Some((_, now)) if now >= end => return,
+            Some(_) => EMPTY_PROGRESS.store(crate::timer::now_nanos().max(1), Ordering::Release),
+            None => {
+                let_go(space);
+                return;
+            }
+        }
+    }
+}
+
+/// Let the slot go, emptied, if it still holds `space`; the `Weak` taken out
+/// is dropped after the lock.
+fn let_go(space: &Arc<AddressSpace>) {
+    let done = {
+        let mut slot = EMPTYING.lock();
+        if slot.handed.as_ref().map(Weak::as_ptr) == Some(Arc::as_ptr(space)) {
+            slot.handed.take()
+        } else {
+            None
+        }
+    };
+    drop(done);
+    victim_done(Arc::as_ptr(space));
+}
+
+/// Whether `space` is still the one handed to the emptier.
+fn in_slot(space: &Arc<AddressSpace>) -> bool {
+    EMPTYING.lock().handed.as_ref().map(Weak::as_ptr) == Some(Arc::as_ptr(space))
+}
+
+/// The OOM check's gate ([`EMPTY_GATE`]): whether the next chunk may go,
+/// waiting while it is shut and `space` is not given up.
+fn through_gate(space: &AddressSpace) -> bool {
+    loop {
+        let gate = EMPTY_GATE.load(Ordering::Acquire);
+        if gate < 0 {
+            return true;
+        }
+        if gate > 0
+            && EMPTY_GATE
+                .compare_exchange(gate, gate - 1, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+        {
+            return true;
+        }
+        if space.oom_emptying_given_up() {
+            return false;
+        }
+        crate::sched::sleep_for(PAUSE_NANOS);
+    }
+}
+
+// CHECKS-ONLY: object/quota_check.rs
+/// Set the emptier's gate for the OOM check: below zero open, zero shut,
+/// above zero that many chunks. Answers what it was.
+#[doc(hidden)]
+pub fn gate_emptier_for_check(gate: i64) -> i64 {
+    EMPTY_GATE.swap(gate, Ordering::AcqRel)
+}
+
+// CHECKS-ONLY: object/quota_check.rs
+/// The gate as it stands, for the check to wait on a chunk let through.
+#[doc(hidden)]
+pub fn emptier_gate_for_check() -> i64 {
+    EMPTY_GATE.load(Ordering::Acquire)
+}
+
+// CHECKS-ONLY: object/quota_check.rs
+/// Whether nothing is handed to the emptier: the last space it held was
+/// emptied, given up or gone.
+#[doc(hidden)]
+pub fn emptier_holds_nothing() -> bool {
+    EMPTYING.lock().handed.is_none()
+}
+
+// CHECKS-ONLY: object/quota_check.rs
+/// Whether the OOM kill gave up waiting for `space`'s emptying.
+#[doc(hidden)]
+pub fn emptying_given_up(space: &AddressSpace) -> bool {
+    space.oom_emptying_given_up()
+}
+
+// CHECKS-ONLY: object/quota_check.rs
+/// Chunks emptied since boot, and of those how many outside a reclaim.
+#[doc(hidden)]
+pub fn emptier_chunks() -> (u64, u64) {
+    (
+        CHUNKS.load(Ordering::Relaxed),
+        CHUNKS_OUTSIDE_RECLAIM.load(Ordering::Relaxed),
+    )
 }
 
 /// Kill `victim`, with `resident` pages, chosen in `scope` for `scope_of`:
@@ -705,7 +1028,7 @@ fn kill_victim(scope_of: Scope, scope: &Job, victim: &Arc<dyn Host>, resident: u
         // space, so nothing is torn down here.
         let old = KERNEL_VICTIM
             .lock()
-            .replace(Arc::downgrade(core.own_space()));
+            .replace((Arc::downgrade(core.own_space()), false));
         drop(old);
     }
     victim.kill(KILLED_STATUS);

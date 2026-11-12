@@ -489,6 +489,9 @@ pub struct AddressSpace {
     /// ([`AddressSpace::raises_refused`], `L.object.309`). `process_space` is
     /// refused after the start, so for a started process this only falls.
     handles: AtomicU64,
+    /// Whether the OOM kill gave up waiting for this space's emptying
+    /// (`object::oom`, `L.object.375`): set once, never cleared.
+    oom_given_up: AtomicBool,
 }
 
 /// A restricted space's normal root: the kernel's half, the same restricted
@@ -848,6 +851,7 @@ impl AddressSpace {
             flushes: Flushes::new(),
             layout: SleepLock::new((), &crate::sync::SchedParker),
             handles: AtomicU64::new(0),
+            oom_given_up: AtomicBool::new(false),
             inner: SpinLock::new(inner),
             measured: AtomicBool::new(false),
             reach: AtomicU8::new(0),
@@ -1372,6 +1376,17 @@ impl AddressSpace {
     /// names this space (`L.object.309`, ledger 5727 (1), 6256).
     pub fn raises_refused(&self) -> bool {
         self.handles.load(Ordering::SeqCst) != 0
+    }
+
+    /// Mark the OOM kill's wait for this space's emptying given up
+    /// (`object::oom`, `L.object.375`): whether it was already.
+    pub(crate) fn give_up_oom_emptying(&self) -> bool {
+        self.oom_given_up.swap(true, Ordering::AcqRel)
+    }
+
+    /// Whether the OOM kill gave up waiting for this space's emptying.
+    pub(crate) fn oom_emptying_given_up(&self) -> bool {
+        self.oom_given_up.load(Ordering::Acquire)
     }
 }
 

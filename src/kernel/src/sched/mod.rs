@@ -763,8 +763,12 @@ pub(crate) fn started() -> bool {
 /// # Errors
 ///
 /// If there is no room for it: the boot stops by name.
+///
+/// And the OOM kill's emptier beside it (`object::oom::emptier`,
+/// L.object.376): a task of its own, as Linux's `oom_reaper` is.
 pub fn start_reaper() -> Result<(), &'static str> {
-    spawn("reaper", leftovers::reaper, 0, NICE_0_WEIGHT).map(|_| ())
+    let _ = spawn("reaper", leftovers::reaper, 0, NICE_0_WEIGHT)?;
+    spawn("oom-emptier", crate::object::oom::emptier, 0, NICE_0_WEIGHT).map(|_| ())
 }
 
 /// What a boot's last drops came to: for a line, with no criterion.

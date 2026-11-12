@@ -64,6 +64,7 @@ pub fn run() -> Result<Report, &'static str> {
         report.alone_share = check_the_processor(&tree)?;
         check_the_weight(&tree)?;
         check_an_ended_victim_is_emptied(&tree)?;
+        check_the_emptier(&tree)?;
         check_the_machine_wide_kill(&tree)?;
         check_a_move_settles_the_pending_charge(&tree)?;
         if Resource::ALL
@@ -446,9 +447,24 @@ fn check_the_weight(tree: &Arc<Job>) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// Whether `done` came true within twice the emptier's patience, looking
+/// every millisecond: the emptier is a task, so what it gives back comes a
+/// scheduling latency after the look that handed it over.
+fn waited_for(mut done: impl FnMut() -> bool) -> bool {
+    let start = crate::timer::now_nanos();
+    while !done() {
+        if crate::timer::now_nanos().saturating_sub(start) > 2 * oom::EMPTY_PATIENCE_NANOS {
+            return false;
+        }
+        sched::sleep_for(1_000_000);
+    }
+    true
+}
+
 /// A fault at a full memory limit whose victim is still ending waits and
 /// kills nobody else, and once the victim has let go of everything, the next
-/// fault empties its space -- before any parent's wait -- and goes in.
+/// fault hands its space to the emptier, which empties it -- before any
+/// parent's wait -- and the fault goes in.
 ///
 /// Driven a step at a time through [`oom::out_of_memory`], as a fault's
 /// retries drive it: the victim is a process of the check's own, kept
@@ -513,8 +529,13 @@ fn check_an_ended_victim_is_emptied(tree: &Arc<Job>) -> Result<(), &'static str>
         if !refused() || oom::out_of_memory(faulter.space()) != oom::Answer::Retry {
             return Err("a fault after the victim let go did not retry");
         }
-        if used(&job).saturating_add(VICTIM_PAGES * PAGE_SIZE) > full {
-            return Err("an ended victim's memory was not given back before its parent's wait");
+        // The look handed the space to the emptier (L.object.374), which
+        // empties it before any parent's wait.
+        if !waited_for(|| used(&job).saturating_add(VICTIM_PAGES * PAGE_SIZE) <= full) {
+            return Err(
+                "an ended victim's memory was not given back by the emptier before its \
+                 parent's wait",
+            );
         }
         faulter
             .space()
@@ -529,6 +550,204 @@ fn check_an_ended_victim_is_emptied(tree: &Arc<Job>) -> Result<(), &'static str>
     checked?;
     if used(&job) != 0 {
         return Err("the OOM check's processes gone and their memory still charged");
+    }
+    Ok(())
+}
+
+/// The emptier, stepped through the check's gate (`oom::gate_emptier_for_check`).
+///
+/// An emptying that gives pages back is never given up, however long it
+/// takes: a victim of three chunks, each let through after a pause shorter
+/// than the patience, all of them together longer, is waited for at every
+/// look with no second kill; after each chunk the highest region's end has
+/// fallen and the count of regions has not risen; and the victim's memory is
+/// back once the last chunk is through (L.object.376). An emptying that does
+/// not come is given up once the patience passes with no chunk: the look
+/// marks the space, passes it over and kills the next process
+/// (L.object.375). And every chunk was emptied inside a reclaim
+/// (L.object.376).
+///
+/// The gate is shut at the start, opened on every way out, and asserted
+/// open after.
+///
+/// Verifies: L.object.375, L.object.376
+fn check_the_emptier(tree: &Arc<Job>) -> Result<(), &'static str> {
+    const STALLED_PAGES: u64 = 32;
+    const BYSTANDER_PAGES: u64 = 8;
+    let job = tree.new_child().map_err(|_| "a job refused a child")?;
+    let stepped = member_of(&job)?;
+    let stalled = member_of(&job)?;
+    let bystander = member_of(&job)?;
+    let faulter = member_of(&job)?;
+    let (chunks, outside) = oom::emptier_chunks();
+    let was = oom::gate_emptier_for_check(0);
+    let (checked, _) = as_task_of(&job, || -> Result<(), &'static str> {
+        fault_in_for_the_emptier(&stepped, EMPTIER_STEPS * oom::EMPTY_CHUNK_PAGES)?;
+        fault_in_for_the_emptier(&stalled, STALLED_PAGES)?;
+        fault_in_for_the_emptier(&bystander, BYSTANDER_PAGES)?;
+        let _ = faulter
+            .space()
+            .map_anonymous(EMPTIER_BASE, PAGE_SIZE, VmaFlags::READ_WRITE)
+            .map_err(|_| "no mapping for the emptier's check's faulter")?;
+        for process in [&stepped, &stalled, &bystander] {
+            process.thread_starting();
+            process.keep_space_at_release();
+        }
+        let kills = oom::kills();
+        emptier_steps(&job, &faulter, &stepped, kills)?;
+        emptier_gives_up(&job, &faulter, &stalled, &bystander, kills)
+    });
+    let _ = oom::gate_emptier_for_check(was);
+    for process in [&stepped, &stalled, &bystander, &faulter] {
+        process::kill(process, KILLED_STATUS);
+    }
+    drop((stepped, stalled, bystander, faulter));
+    checked?;
+    if was != -1 || oom::emptier_gate_for_check() != -1 {
+        return Err("the emptier's gate was not open around its check");
+    }
+    let (chunks_now, outside_now) = oom::emptier_chunks();
+    if chunks_now.saturating_sub(chunks) < EMPTIER_STEPS {
+        return Err("the emptier's check counted fewer chunks than it let through");
+    }
+    if outside_now != outside {
+        return Err("the emptier ran outside a reclaim");
+    }
+    Ok(())
+}
+
+/// Where the emptier's check maps its processes' memory.
+const EMPTIER_BASE: u64 = 0x40_0000;
+
+/// The chunks the emptier's check lets through one at a time.
+const EMPTIER_STEPS: u64 = 3;
+
+/// Map `pages` at [`EMPTIER_BASE`] in `process` and fault them in.
+fn fault_in_for_the_emptier(process: &Process, pages: u64) -> Result<(), &'static str> {
+    let _ = process
+        .space()
+        .map_anonymous(EMPTIER_BASE, pages * PAGE_SIZE, VmaFlags::READ_WRITE)
+        .map_err(|_| "no mapping for the emptier's check")?;
+    for page in 0..pages {
+        process
+            .space()
+            .fault(EMPTIER_BASE + page * PAGE_SIZE, Access::WRITE)
+            .map_err(|_| "the emptier's check could not fault its memory in")?;
+    }
+    Ok(())
+}
+
+/// Whether the faulter's first page is refused at its job's limit.
+fn emptier_fault_refused(faulter: &Process) -> bool {
+    faulter
+        .space()
+        .fault(EMPTIER_BASE, Access::WRITE)
+        .is_err_and(|error| oom::is_charge_refusal(&error))
+}
+
+/// The count of `space`'s regions and the highest one's end.
+fn emptier_top(space: &AddressSpace) -> (u64, u64) {
+    space.with_regions(|regions| {
+        let mut count = 0_u64;
+        let mut end = 0;
+        for region in regions {
+            count += 1;
+            end = region.end;
+        }
+        (count, end)
+    })
+}
+
+/// The job's memory in use.
+fn emptier_used(job: &Job) -> u64 {
+    job.usage(Resource::Memory).map_or(0, |usage| usage.used)
+}
+
+/// [`check_the_emptier`]'s progress half: `stepped`, the largest, killed, let
+/// go and handed over, then emptied a chunk at a time through the gate, each
+/// after a pause shorter than the patience, and waited for at every look.
+fn emptier_steps(
+    job: &Job,
+    faulter: &Process,
+    stepped: &Process,
+    kills: u64,
+) -> Result<(), &'static str> {
+    let pause = oom::EMPTY_PATIENCE_NANOS * 3 / 5;
+    let _ = job.set_limit(Resource::Memory, emptier_used(job));
+    if !emptier_fault_refused(faulter) || oom::out_of_memory(faulter.space()) != oom::Answer::Retry
+    {
+        return Err("the emptier's check: a fault at a full limit did not kill");
+    }
+    if !stepped.is_terminated() || oom::kills().wrapping_sub(kills) != 1 {
+        return Err("the emptier's check: the largest process was not the one killed");
+    }
+    stepped.thread_gone(true);
+    let (mut regions, mut end) = emptier_top(stepped.space());
+    for _ in 0..EMPTIER_STEPS {
+        sched::sleep_for(pause);
+        // Full again, at what the chunks before left: the look goes to the
+        // survey, not to the room a chunk gave back.
+        let _ = job.set_limit(Resource::Memory, emptier_used(job));
+        if !emptier_fault_refused(faulter)
+            || oom::out_of_memory(faulter.space()) != oom::Answer::Retry
+            || oom::kills().wrapping_sub(kills) != 1
+        {
+            return Err("an emptying giving pages back was given up");
+        }
+        let _ = oom::gate_emptier_for_check(1);
+        if !waited_for(|| {
+            oom::emptier_gate_for_check() == 0 && emptier_top(stepped.space()).1 < end
+        }) {
+            return Err(
+                "a chunk let through the emptier's gate did not lower the highest region's end",
+            );
+        }
+        let (now_regions, now_end) = emptier_top(stepped.space());
+        if now_regions > regions {
+            return Err("a chunk of the emptier's split a region");
+        }
+        (regions, end) = (now_regions, now_end);
+    }
+    if regions != 0 || oom::emptying_given_up(stepped.space()) {
+        return Err("the emptier's chunks did not empty the stepped victim's space");
+    }
+    if !waited_for(oom::emptier_holds_nothing) {
+        return Err("the emptier kept an emptied space handed");
+    }
+    Ok(())
+}
+
+/// [`check_the_emptier`]'s give-up half: `stalled` killed, let go and handed
+/// over with the gate shut; after the patience the look marks it given up
+/// and kills `bystander`, the next in the job.
+fn emptier_gives_up(
+    job: &Job,
+    faulter: &Process,
+    stalled: &Process,
+    bystander: &Process,
+    kills: u64,
+) -> Result<(), &'static str> {
+    let _ = job.set_limit(Resource::Memory, emptier_used(job));
+    if !emptier_fault_refused(faulter) || oom::out_of_memory(faulter.space()) != oom::Answer::Retry
+    {
+        return Err("the emptier's check: a second fault at a full limit did not kill");
+    }
+    if !stalled.is_terminated() || bystander.is_terminated() {
+        return Err("the emptier's check: the second kill did not choose the largest left");
+    }
+    stalled.thread_gone(true);
+    if oom::out_of_memory(faulter.space()) != oom::Answer::Retry
+        || oom::kills().wrapping_sub(kills) != 2
+    {
+        return Err("a handed victim's emptying was not waited for");
+    }
+    sched::sleep_for(oom::EMPTY_PATIENCE_NANOS + oom::EMPTY_PATIENCE_NANOS / 5);
+    let _ = oom::out_of_memory(faulter.space());
+    if !oom::emptying_given_up(stalled.space())
+        || !bystander.is_terminated()
+        || oom::kills().wrapping_sub(kills) != 3
+    {
+        return Err("a victim whose emptying did not come still held the kill past its patience");
     }
     Ok(())
 }
@@ -630,11 +849,11 @@ fn check_the_machine_wide_kill(tree: &Arc<Job>) -> Result<(), &'static str> {
         }
         large.thread_gone(true);
         if oom::machine_answer(faulter.space(), &live) != oom::Answer::Retry
-            || used(&right).saturating_add(LARGE_PAGES * PAGE_SIZE) > full
+            || !waited_for(|| used(&right).saturating_add(LARGE_PAGES * PAGE_SIZE) <= full)
         {
             return Err(
-                "an ended machine-wide victim's memory was not given back before its \
-                        parent's wait",
+                "an ended machine-wide victim's memory was not given back by the emptier \
+                        before its parent's wait",
             );
         }
 

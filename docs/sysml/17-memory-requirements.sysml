@@ -588,7 +588,9 @@ package FerrixMemoryRequirements {
                 ask the machine-wide OOM kill -- the live process with the most resident pages,
                 never pid 1, never a kernel task, a victim still ending waited for, none within
                 250 ms of the last machine-wide kill and none while the space of the last process
-                killed for the heap is still held -- and try the heap again while the kill answers
+                killed for the heap is held and the kill still waits for it, neither emptied by
+                the emptier nor given up (L.object.375), the kill itself emptying nothing where it
+                is asked (L.object.374) -- and try the heap again while the kill answers
                 retry and the free count stays under the watermark, at most 1024 answers. It shall
                 fail when the allocating process is the one chosen or is ending, when nothing can
                 be killed, and when no list of the live processes can be made. Not for a refusal
@@ -612,7 +614,8 @@ package FerrixMemoryRequirements {
                 the refusal meets first. Never in interrupt service: L.mm.136's case of
                 heap_may_reclaim, which the kill's callers ask first (f107-irq-c1);
                 check-stack-depth leaves the kill out of a timer's interrupt on that guard
-                (INTERRUPT_CANNOT, F-107).";
+                (INTERRUPT_CANNOT, F-107). The hold's end and the kill's hand-off are
+                L.object.375's and L.object.374's cases.";
             attribute :>> parent = "H.MEM.11";
             attribute :>> unit = ("mm::heap_or_kill", "mm::while_killing",
                 "object::oom::for_kernel_heap", "object::oom::kernel_victim_held",
@@ -622,17 +625,19 @@ package FerrixMemoryRequirements {
         // consultant ledger 8172 B2).
         requirement <'L.mm.139'> theHeapKillerDrawsOnTheReserve : ItemLowLevel {
             attribute :>> statement = "An allocation the heap refused, made outside any reserved
-                section by the task choosing and killing for the kernel's heap (L.mm.138), outside
-                interrupt context, shall be served from that processor's allocation reserve while
-                the reserve holds a block of its class; the same allocation by any other task, or
-                in interrupt context, shall stay refused.";
+                section by the task choosing and killing for the kernel's heap (L.mm.138), or by
+                the OOM kill's emptier (L.object.376), outside interrupt context, shall be served
+                from that processor's allocation reserve while the reserve holds a block of its
+                class; the same allocation by any other task, or in interrupt context, shall stay
+                refused.";
             attribute :>> criterion = "The allocation check (mm::check,
                 check_the_heap_killer_draws_outside_a_section), preemption off, the reserve
                 filled, the heap made to refuse the checking task's allocations: named the heap's
                 killer, a 200-byte allocation outside any section is served holding what was put
                 in it and the drawn count rises; with no killer named, and with another task
                 named, it is refused and the drawn count is unchanged; inside a section, no killer
-                named, it is served from the reserve. Controls: the fallback's
+                named, it is served from the reserve; named the OOM kill's emptier, it is served.
+                Controls: the fallback's
                 predicate false (the first fails), killing_for_the_heap true for every task (the
                 second fails).";
             attribute :>> parent = "H.MEM.11";

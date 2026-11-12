@@ -13,15 +13,6 @@
   "reservations": [
     {
       "ids": [
-        "L.object.374-376"
-      ],
-      "owner": "ef-30fps",
-      "branch": "f107/oom-reaper",
-      "date": "2026-11-12",
-      "purpose": "F-107's B (docs/OOM-REAPER.md): no OOM kill empties a space where it was asked, the hand-off allocating nothing; a hand-off given up after 500 ms with no chunk emptied; a dedicated emptier task, inside a reclaim for life, emptying in 128-page chunks from the top (consultant ledger 8784, 8814)"
-    },
-    {
-      "ids": [
         "L.user.236-240"
       ],
       "owner": "ef-30fps",

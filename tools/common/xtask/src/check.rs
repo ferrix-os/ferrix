@@ -134,24 +134,7 @@ pub(crate) const TASKS: &[Task] = &[
             "check-stack-depth",
             "              a kernel stack's worst named paths against its pages, for --arch",
         ],
-        // Every architecture is walked and printed before the row fails, so that
-        // a red row shows all three (F-107, F-110).
-        run: |_, args| {
-            let mut failed = None;
-            for arch in args.arches()? {
-                let kernel = cargo::build_kernel(arch, args.release)?;
-                let mut command = Command::new("python3");
-                let _ = command
-                    .current_dir(paths::workspace_root())
-                    .arg("tools/common/check/check-stack-depth.py")
-                    .arg(&kernel.elf)
-                    .arg(arch.to_string());
-                if let Err(error) = cargo::run(command, "tools/common/check/check-stack-depth.py") {
-                    let _ = failed.get_or_insert(error);
-                }
-            }
-            failed.map_or(Ok(()), Err)
-        },
+        run: check_stack_depth,
     },
     Task {
         name: "check-frames",
@@ -208,6 +191,29 @@ pub(crate) const TASKS: &[Task] = &[
         run: command,
     },
 ];
+
+/// `cargo xtask check-stack-depth`: `tools/common/check/check-stack-depth.py` on each
+/// architecture's kernel. Every architecture is walked and printed before the row fails, so
+/// that a red row shows all three (F-107, F-110). Among its walks, L.object.374's: no OOM kill
+/// unmaps a space where it was asked, and its hand-off allocates nothing.
+///
+/// Verifies: L.object.374
+fn check_stack_depth(_: &str, args: &Args) -> Result<()> {
+    let mut failed = None;
+    for arch in args.arches()? {
+        let kernel = cargo::build_kernel(arch, args.release)?;
+        let mut command = Command::new("python3");
+        let _ = command
+            .current_dir(paths::workspace_root())
+            .arg("tools/common/check/check-stack-depth.py")
+            .arg(&kernel.elf)
+            .arg(arch.to_string());
+        if let Err(error) = cargo::run(command, "tools/common/check/check-stack-depth.py") {
+            let _ = failed.get_or_insert(error);
+        }
+    }
+    failed.map_or(Ok(()), Err)
+}
 
 /// `check`, or one of its steps run alone, by the command's name
 /// (the names [`TASKS`] gives it).
