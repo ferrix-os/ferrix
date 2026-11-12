@@ -564,6 +564,7 @@ dependencies = [
  "ferrix-elf",
  "ferrix-kernel-board-gs201-usb",
  "ferrix-kernel-board-stm32mp1",
+ "ferrix-kernel-item",
  "ferrix-kernel-load",
  "ferrix-kernel-logctl",
  "ferrix-kernel-net-ring",

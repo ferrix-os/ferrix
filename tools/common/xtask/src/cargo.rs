@@ -111,6 +111,37 @@ pub(crate) fn flag_environment(resolved: &crate::flags::Resolved) -> [(&'static 
     ]
 }
 
+/// The flags a kernel manifest keys a dependency table on
+/// (`[target.'cfg(ferrix_personality = "kernel")'.dependencies]`;
+/// `docs/microkernel/CORE-WITHOUT-EXTENSIONS.md` §2). Cargo decides such a
+/// table from the `cfg`s on rustc's command line, never from what a build
+/// script prints, so these alone are given there too; `src/kernel/build.rs`
+/// holds its own copy of the list and refuses a build where the two differ.
+pub(crate) const MANIFEST_FLAGS: [&str; 2] = ["personality", "linux_abi"];
+
+/// `--config` values that add [`MANIFEST_FLAGS`]' `cfg`s to every kernel
+/// target's `rustflags`. `--config` joins the array in `.cargo/config.toml`,
+/// where `RUSTFLAGS` would replace it ([`refuse_inherited_rustflags`]).
+pub(crate) fn manifest_cfg_configs(resolved: &crate::flags::Resolved) -> Vec<String> {
+    let words: Vec<String> = MANIFEST_FLAGS
+        .iter()
+        .filter_map(|flag| {
+            let value = resolved.value(flag)?;
+            Some(format!(r#""--cfg","ferrix_{flag}=\"{value}\"""#))
+        })
+        .collect();
+    Arch::ALL
+        .iter()
+        .map(|arch| {
+            format!(
+                "target.{}.rustflags=[{}]",
+                arch.kernel_target(),
+                words.join(",")
+            )
+        })
+        .collect()
+}
+
 /// The cargo profile a kernel is built in, and so the directory cargo puts
 /// it in: `iterate` only for a release kernel with `--iterate`, and
 /// `coverage` for a debug kernel whose boots a TCG plugin traces.
@@ -197,6 +228,9 @@ fn kernel(arch: Arch, release: bool) -> Result<(Build, PathBuf)> {
     }
     for (key, value) in flag_environment(flags) {
         build = build.env(key, value);
+    }
+    for config in manifest_cfg_configs(flags) {
+        build = build.args(["--config", &config]);
     }
     if flags.profile == "none" {
         println!(
@@ -364,6 +398,9 @@ pub(crate) fn build_ahead(arches: &[Arch], release: bool) -> Result<()> {
     let flags = crate::flags::this_run()?;
     let mut kernel = ahead("ferrix-kernel", &kernels);
     let _ = kernel.envs(flag_environment(flags));
+    for config in manifest_cfg_configs(flags) {
+        let _ = kernel.args(["--config", &config]);
+    }
     match kernel_profile(release) {
         "iterate" => {
             let _ = kernel.args(["--profile", "iterate"]);
@@ -453,6 +490,9 @@ pub(crate) fn build_native(
     if package == crate::native::LINUXD.package {
         for (key, value) in flag_environment(crate::flags::this_run()?) {
             build = build.env(key, value);
+        }
+        for config in manifest_cfg_configs(crate::flags::this_run()?) {
+            build = build.args(["--config", &config]);
         }
     }
     // The settings writer's part in lode (ledger 3623 (R18)).

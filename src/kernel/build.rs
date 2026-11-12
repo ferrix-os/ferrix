@@ -277,6 +277,27 @@ fn build_flags() -> Result<Vec<(String, String)>, Box<dyn Error>> {
     {
         return Err(format!("FERRIX_BUILD_FLAGS gives no value for `{missing}`").into());
     }
+    // The flags a manifest keys a dependency table on reach rustc's command
+    // line too, since Cargo decides such a table from there (xtask's
+    // `MANIFEST_FLAGS`; docs/microkernel/CORE-WITHOUT-EXTENSIONS.md §2). A
+    // build where Cargo saw another value than this script was handed would
+    // link one kernel and compile another: refused.
+    for flag in ["personality", "linux_abi"] {
+        let handed = flags
+            .iter()
+            .find(|(name, _)| name == flag)
+            .map_or("", |(_, value)| value.as_str());
+        let variable = format!("CARGO_CFG_FERRIX_{}", flag.to_uppercase());
+        let seen = std::env::var(&variable).unwrap_or_default();
+        if seen != handed {
+            return Err(format!(
+                "{flag}={handed} in FERRIX_BUILD_FLAGS, but cargo was given `{seen}` for \
+                 cfg(ferrix_{flag}): the kernel's manifests would follow another value than \
+                 its code (docs/microkernel/CORE-WITHOUT-EXTENSIONS.md)"
+            )
+            .into());
+        }
+    }
     let personality = flags
         .iter()
         .find(|(name, _)| name == "personality")

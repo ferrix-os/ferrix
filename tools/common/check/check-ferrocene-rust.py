@@ -87,6 +87,9 @@ KERNEL_TARGETS = (
     "aarch64-unknown-none-softfloat",
     "armv7a-none-eabi",
 )
+# The flags a kernel manifest keys a dependency table on: xtask's cargo.rs
+# MANIFEST_FLAGS and build.rs's list, by name.
+MANIFEST_FLAGS = ("personality", "linux_abi")
 
 # What would make the build use another compiler, other flags or nightly
 # features than the ones this gate means.
@@ -248,6 +251,16 @@ def main() -> int:
         arguments += ["-p", name]
     for target in KERNEL_TARGETS:
         arguments += ["--target", target]
+    # The flags a kernel manifest keys a dependency table on, as rustc's cfgs
+    # (docs/microkernel/CORE-WITHOUT-EXTENSIONS.md section 2; xtask's
+    # cargo.rs gives its own builds the same): src/kernel/build.rs refuses a
+    # build where they differ from FERRIX_BUILD_FLAGS.
+    chosen_flags = dict(word.split("=", 1) for word in os.environ.get("FERRIX_BUILD_FLAGS", "").split())
+    cfgs = ",".join(f'"--cfg","ferrix_{flag}=\\"{chosen_flags[flag]}\\""'
+                    for flag in MANIFEST_FLAGS if flag in chosen_flags)
+    if cfgs:
+        for target in KERNEL_TARGETS:
+            arguments += ["--config", f"target.{target}.rustflags=[{cfgs}]"]
     process = subprocess.Popen(arguments, cwd=ROOT, env=env, stdin=subprocess.DEVNULL,
                                stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
     errors: dict[tuple[str, str], int] = {}

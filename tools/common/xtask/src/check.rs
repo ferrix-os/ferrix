@@ -2833,6 +2833,11 @@ fn kernel_clippy_every_build() -> Result<()> {
     for config in &configs {
         without.extend(["--config", config]);
     }
+    // The flags a manifest keys a table on, as rustc's `cfg`s (cargo.rs).
+    let off_cfgs = cargo::manifest_cfg_configs(&off);
+    for config in &off_cfgs {
+        without.extend(["--config", config]);
+    }
     without.extend(["--target-dir", &directory]);
     let lint_dirs: Vec<String> = builds
         .iter()
@@ -2971,6 +2976,11 @@ fn lint_one_setting(
 ) -> (String, Result<()>) {
     let mut arguments = every_arch.to_vec();
     arguments.extend(["--target-dir", lint_dir]);
+    // The flags a manifest keys a table on, as rustc's `cfg`s (cargo.rs).
+    let configs = cargo::manifest_cfg_configs(resolved);
+    for config in &configs {
+        arguments.extend(["--config", config.as_str()]);
+    }
     let mut environment = cargo::flag_environment(resolved).to_vec();
     environment.push(("CARGO_INCREMENTAL", "0".to_owned()));
     clippy_captured(&arguments, &environment)

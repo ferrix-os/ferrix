@@ -11,21 +11,10 @@ publish.workspace = true
 name = "ferrix-kernel"
 path = "src/main.rs"
 
+# What the binary is built from under every flag: the item, which re-exports
+# the core, and the libraries its own code names.
 [dependencies]
-ferrix-kernel-load.workspace = true
-# The raised checks (docs/microkernel/CRATE-SPLIT.md S5): only the binary
-# names them.
-ferrix-kernel-raised-checks.workspace = true
-# The removable run-time setting entries: always compiled, linked only when
-# the composition root names them, under runtime_settings=live
-# (docs/KERNEL-CRATES.md §6; ledger 3558 (10), 3623 (R1)).
-ferrix-kernel-settings.workspace = true
-# The board glue, installed by the composition root (docs/microkernel/
-# CRATE-SPLIT.md S2).
-ferrix-kernel-board-gs201-usb.workspace = true
-ferrix-kernel-board-stm32mp1.workspace = true
-ferrix-kernel-logctl.workspace = true
-ferrix-kernel-net-ring.workspace = true
+ferrix-kernel-item.workspace = true
 ferrix-linux-abi.workspace = true
 ferrix-bootinfo.workspace = true
 ferrix-crng.workspace = true
@@ -35,6 +24,29 @@ ferrix-sched.workspace = true
 ferrix-smbios.workspace = true
 ferrix-sync.workspace = true
 ferrix-ustack.workspace = true
+# The board glue, installed by the composition root (docs/microkernel/
+# CRATE-SPLIT.md S2): parts that need the core and the item alone, which a
+# kernel without the Linux personality installs too.
+ferrix-kernel-board-gs201-usb.workspace = true
+ferrix-kernel-board-stm32mp1.workspace = true
+
+# The Linux personality built into ring 0, and the parts that need it: only a
+# personality=kernel build depends on them, so a personality=user or =none
+# kernel is built without compiling one (docs/microkernel/
+# CORE-WITHOUT-EXTENSIONS.md). The table is keyed by the flag's own cfg, which
+# xtask gives rustc on its command line for Cargo to see; a flag is never a
+# Cargo feature (docs/BUILD-FLAGS.md rule 1).
+[target.'cfg(ferrix_personality = "kernel")'.dependencies]
+ferrix-kernel-load.workspace = true
+# The raised checks (docs/microkernel/CRATE-SPLIT.md S5): only the binary
+# names them.
+ferrix-kernel-raised-checks.workspace = true
+# The removable run-time setting entries: compiled with the load, linked only
+# when the composition root names them, under runtime_settings=live
+# (docs/KERNEL-CRATES.md §6; ledger 3558 (10), 3623 (R1)).
+ferrix-kernel-settings.workspace = true
+ferrix-kernel-logctl.workspace = true
+ferrix-kernel-net-ring.workspace = true
 
 [lints]
 workspace = true

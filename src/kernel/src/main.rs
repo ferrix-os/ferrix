@@ -43,9 +43,19 @@
 
 extern crate alloc;
 
+// The kernel's tree: through the raised checks' crate, which re-exports the
+// load's, the item's and the core's, where the Linux personality is built
+// into ring 0; the item's and the core's alone in a kernel built without it,
+// which depends on no extension (`docs/microkernel/CORE-WITHOUT-EXTENSIONS.md`).
+#[cfg(not(ferrix_load_built = "ring0"))]
+use ferrix_kernel_item::*;
+#[cfg(ferrix_load_built = "ring0")]
 use ferrix_kernel_raised_checks::*;
 // Named, not only reached through the glob above, so that each crate's word
 // is named by the binary (`kernel-interface.py`).
+#[cfg(not(ferrix_load_built = "ring0"))]
+use ferrix_kernel_item::{CORE_FLAG_WORD, ITEM_FLAG_WORD};
+#[cfg(ferrix_load_built = "ring0")]
 use ferrix_kernel_load::{CORE_FLAG_WORD, ITEM_FLAG_WORD, LOAD_FLAG_WORD};
 
 // The four crates compiled with one set of build flags (ledger line 3282,
@@ -61,11 +71,12 @@ const _: () = assert!(
     ITEM_FLAG_WORD == BINARY_FLAG_WORD,
     "ferrix-kernel-item was compiled with other build flags than the binary"
 );
+#[cfg(ferrix_load_built = "ring0")]
 const _: () = assert!(
     LOAD_FLAG_WORD == BINARY_FLAG_WORD,
     "ferrix-kernel-load was compiled with other build flags than the binary"
 );
-#[cfg(ferrix_runtime_settings = "live")]
+#[cfg(all(ferrix_load_built = "ring0", ferrix_runtime_settings = "live"))]
 const _: () = assert!(
     ferrix_kernel_settings::SETTINGS_FLAG_WORD == BINARY_FLAG_WORD,
     "ferrix-kernel-settings was compiled with other build flags than the binary"
