@@ -2412,8 +2412,9 @@ ruling on the kernel's half of 1 is ledger line 8946.
    group. It is no platform's concern: Mesa opens the node as that user.
    What runs a game in a container (Steam's runtime) must keep the group;
    that is checked on the box in R3. It is a change to the chardev core,
-   which sets the mode, with its own design to the consultant (N1-N6);
-   NVIDIA's nodes stay 0666 until the customer says otherwise.
+   which sets the mode, with its own design to the consultant (N1-N6).
+   NVIDIA's nodes get the same (the customer, 2026-11-12: "same for
+   all"), in that one design; N3 is answered.
 3. **The order stands**: H2 to H4, then H8. Both are done.
 
 ## Appendix A: the probe that printed the numbers
