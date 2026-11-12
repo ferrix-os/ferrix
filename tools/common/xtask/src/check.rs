@@ -318,6 +318,7 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
                 "--self-test",
             ],
             &["tools/common/check/check-stack-depth.py", "--self-test"],
+            &["tools/common/check/check-native-stacks.py", "--self-test"],
         ],
     ),
     // Product signing's verifier is proved by host tests: their statement

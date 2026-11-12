@@ -69,17 +69,29 @@ use crate::task::Task;
 use crate::{Error, Result, busybox, cargo, fat, initramfs, qemu, rustc, shell, zinc};
 
 /// This module's `cargo xtask` commands (`crate::task`).
-pub(crate) const TASKS: &[Task] = &[Task {
-    name: "test-intel-uapi",
-    help_at: 625,
-    help: &[
-        "test-intel-uapi",
-        "              Boot the Intel driver's render node over its fake back end on a QEMU stand-in for ADL-N's GPU, and",
-        "              require Mesa's anv (vulkaninfo) and iris (eglinfo) to find it (tools/common/fetch/fetch-intel-uapi.sh;",
-        "              a QEMU with tools/common/data/qemu/0006; x86_64)",
-    ],
-    run: |_, args| test_intel_uapi(args),
-}];
+pub(crate) const TASKS: &[Task] = &[
+    Task {
+        name: "test-intel-uapi",
+        help_at: 625,
+        help: &[
+            "test-intel-uapi",
+            "              Boot the Intel driver's render node over its fake back end on a QEMU stand-in for ADL-N's GPU, and",
+            "              require Mesa's anv (vulkaninfo) and iris (eglinfo) to find it (tools/common/fetch/fetch-intel-uapi.sh;",
+            "              a QEMU with tools/common/data/qemu/0006; x86_64)",
+        ],
+        run: |_, args| test_intel_uapi(args),
+    },
+    Task {
+        name: "check-native-stacks",
+        help_at: 1063,
+        help: &[
+            "check-native-stacks",
+            "              the Intel driver's programs (the GT's, the keeper, the fake and its worker), built for",
+            "              x86_64 as --release says, each deepest chain against a quarter of its 8 MiB stack",
+        ],
+        run: |_, args| check_native_stacks(args),
+    },
+];
 
 /// The stand-in: a `pci-testdev` answering as ADL-N's integrated GPU at
 /// 00:02.0, where every Intel integrated GPU sits and the kernel looks for
@@ -169,6 +181,10 @@ const STATUS: &str = "17";
 
 /// The fake back end's line with the device's facts.
 const FACTS: &str = "intel-fake: ";
+/// The line each of the Intel driver's programs says once its front end is
+/// built in pages of its own, off its stack (`serve::Placed`, the driver's
+/// `PLACED`): the construction the GT's driver takes, booted here.
+pub(crate) const PLACED: &str = "intel: front end placed: ";
 /// The driver's line when the kernel published the node.
 const PUBLISHED: &str = "intel: render node published";
 /// The driver's line when the kernel refused it.
@@ -252,8 +268,80 @@ pub(crate) fn use_fake(natives: &mut [Built], arch: Arch, release: bool) -> Resu
         .iter_mut()
         .find(|built| built.name == "intel")
         .ok_or_else(|| Error::new("the native programs carry no intel driver to replace"))?;
+    stacks_fit(arch, &[("intel", &slot.bytes), (FAKE.binary, &fake.bytes)])?;
     slot.bytes = fake.bytes;
     Ok(())
+}
+
+/// The Intel driver's programs, the GT's own among them, held to their
+/// stack by `tools/common/check/check-native-stacks.py` before an image
+/// boots them in its place: QEMU has no Intel GPU, so no boot reaches the
+/// GT's driver's step 23, where on 2026-11-12 it built its front end's
+/// tables on its stack and faulted on the N150 while every row passed.
+/// Each program is `(its binary's name, its bytes)`.
+///
+/// # Errors
+///
+/// A program's deepest chain over its budget, or the script not run.
+pub(crate) fn stacks_fit(arch: Arch, programs: &[(&str, &[u8])]) -> Result<()> {
+    let dir = paths::build_dir(arch).join("native-stacks");
+    std::fs::create_dir_all(&dir)
+        .map_err(|error| Error::new(format!("making {}: {error}", dir.display())))?;
+    let mut command = Command::new("python3");
+    let _ = command
+        .current_dir(paths::workspace_root())
+        .arg(STACKS_SCRIPT);
+    for (name, bytes) in programs {
+        let path = dir.join(name);
+        std::fs::write(&path, bytes)
+            .map_err(|error| Error::new(format!("writing {}: {error}", path.display())))?;
+        let _ = command.arg(&path);
+    }
+    cargo::run(command, STACKS_SCRIPT)
+}
+
+/// The native programs' stack check.
+pub(crate) const STACKS_SCRIPT: &str = "tools/common/check/check-native-stacks.py";
+
+/// The Intel driver's programs, by package and binary: the GT's driver,
+/// the keeper, the fake and the fake as the keeper's worker.
+pub(crate) const PROGRAMS: [Program; 4] = [
+    Program {
+        package: "ferrix-intel-driver",
+        binary: "intel",
+        directory: native::DRIVERS,
+    },
+    KEEPER,
+    FAKE,
+    FAKE_WORKER,
+];
+
+/// `cargo xtask check-native-stacks`: [`PROGRAMS`] built for x86-64 as
+/// `--release` says, and held to their stacks.
+///
+/// # Errors
+///
+/// A build failing, or a program over its budget.
+pub(crate) fn check_native_stacks(args: &Args) -> Result<()> {
+    let arch = Arch::X86_64;
+    let mut built = Vec::new();
+    for program in &PROGRAMS {
+        let path = cargo::build_native(
+            arch,
+            args.release,
+            program.package,
+            program.binary,
+            &paths::target_dir(),
+        )?;
+        let bytes = std::fs::read(&path)
+            .map_err(|error| Error::new(format!("reading {}: {error}", path.display())))?;
+        built.push((program.binary, bytes));
+    }
+    let named: Vec<(&str, &[u8])> = built
+        .iter()
+        .map(|(name, bytes)| (*name, bytes.as_slice()))
+        .collect();
+    stacks_fit(arch, &named)
 }
 
 /// The keeper (`docs/INTEL-GPU.md` §12.3), a product program, built
@@ -289,6 +377,14 @@ pub(crate) fn use_keeper_over_fake(
         .iter_mut()
         .find(|built| built.name == "intel")
         .ok_or_else(|| Error::new("the native programs carry no intel driver to replace"))?;
+    stacks_fit(
+        arch,
+        &[
+            ("intel", &slot.bytes),
+            (KEEPER.binary, &keeper.bytes),
+            (FAKE_WORKER.binary, &worker.bytes),
+        ],
+    )?;
     slot.bytes = keeper.bytes;
     natives.push(Built {
         name: WORKER,
@@ -451,9 +547,12 @@ fn judge(lines: &[String]) -> std::result::Result<(), String> {
             line.trim()
         ));
     }
-    let wants: [Want<'_>; 10] = [
+    let wants: [Want<'_>; 11] = [
         ("the fake back end's facts", &|line| {
             line.contains(FACTS) && line.contains("24 EUs")
+        }),
+        ("the front end placed off the stack", &|line| {
+            line.contains(PLACED) && line.contains(" KiB of its own, off the stack")
         }),
         ("the render node published", &|line| {
             line.contains(PUBLISHED)
@@ -574,6 +673,7 @@ mod tests {
 
     const GOOD: &str = "\
   1.0 | intel-fake: 0x00000010 8086:46d4 rev 0: facts 24 EUs, DSS 0x3, CS 19200000 Hz; every batch completes at once, nothing runs
+  1.05 | intel: front end placed: 3048 KiB of its own, off the stack
   1.1 | intel: render node published (1 node)
   2.0 | intel-uapi-gate: /dev/dri/renderD128 is there after 0s
   2.9 | wine-suspend: 58053 rounds, 188670 suspends (mean 396 us, max 3257 us), 0 lost, 0 late, 0 bad contexts, 0 errors (0 EINTR), 0 early: PASS
@@ -604,6 +704,7 @@ mod tests {
     fn each_missing_line_fails_by_name() {
         for (gone, why) in [
             ("intel-fake:", "facts"),
+            ("front end placed", "off the stack"),
             ("render node published", "published"),
             ("deviceName", "anv's device"),
             ("driverID", "driver id"),

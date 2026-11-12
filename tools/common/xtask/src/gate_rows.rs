@@ -95,6 +95,10 @@ const TEST_GPU_RESTART: &[&str] = &[
     "test-restart --boot intel",
     "test-restart --boot intel-keeper",
     "test-intel-uapi",
+    // The release build the box boots: the rows above hold their dev
+    // builds to their stacks, and no boot reaches the GT's driver's
+    // front end (2026-11-12).
+    "check-native-stacks --release",
 ];
 
 /// What asks for [`TEST_GPU_RESTART`]: the Intel driver, its fake and its
@@ -108,6 +112,7 @@ const GPU_RESTARTED: &[&str] = &[
     "src/user/system/linux/drivers/nvrm/test/vk-survive.c",
     "tools/common/xtask/src/restart/intel.rs",
     "tools/common/xtask/src/intel_uapi.rs",
+    "tools/common/check/check-native-stacks.py",
 ];
 
 /// The table's image row: anything the image contains, and the default.

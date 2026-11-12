@@ -291,6 +291,12 @@ fn find(
         .ok_or_else(|| format!("no line showed {what}, in order"))
 }
 
+/// A keeper's front end built in pages of its own, off its stack
+/// (`serve::Placed`, which the GT's driver builds its own in too).
+fn placed(line: &str) -> bool {
+    line.contains(intel_uapi::PLACED) && line.contains(" KiB of its own, off the stack")
+}
+
 /// The script's end, as the judge reads it.
 fn ended(lines: &[String]) -> std::result::Result<(), String> {
     let exited = lines
@@ -352,9 +358,15 @@ pub(crate) fn judge(lines: &[String], victim: Victim) -> std::result::Result<(),
         "root's move of the worker out of its driver job refused",
         &|line| line.contains("out of its driver job was refused"),
     )?;
-    let mut at = find(lines, 0, "the first worker up at boot", &|line| {
+    let up = find(lines, 0, "the first worker up at boot", &|line| {
         line.contains(&format!("{UP}1{UP_TAIL}"))
     })?;
+    let mut at = find(
+        lines,
+        up,
+        "the keeper's front end placed off the stack",
+        &placed,
+    )?;
     for round in 1..=2_u32 {
         at = judge_round(lines, at, victim, round)?;
     }
@@ -420,11 +432,17 @@ fn judge_round(
                 &format!("a new keeper in round {round}"),
                 &|line| line.contains(KEEPER),
             )?;
-            let _ = find(
+            let up = find(
                 lines,
                 keeper,
                 &format!("the new keeper's first worker up in round {round}"),
                 &|line| line.contains(&format!("{UP}1{UP_TAIL}")),
+            )?;
+            let _ = find(
+                lines,
+                up,
+                &format!("the new keeper's front end placed off the stack in round {round}"),
+                &placed,
             )?;
         }
     }
@@ -468,6 +486,7 @@ mod tests {
   0.8 | intel: 0x00000010 8086:46d4 rev 0: the keeper; the GT is driven by worker processes it starts and replaces (docs/INTEL-GPU.md §12)
   0.9 | intel-fake: worker 1: 0x00000010 8086:46d4 rev 0: facts 24 EUs, DSS 0x3, CS 19200000 Hz; every batch completes at once, nothing runs
   0.9 | intel: the GT's worker 1 is up: 2 engines, 24 EUs, CS 19200000 Hz
+  0.95 | intel: front end placed: 3048 KiB of its own, off the stack
   1.0 | gpu-restart-gate: S1: root's move of worker 434 out of its driver job was refused: sh: write error: Operation not permitted";
 
     const WORKER_ROUND: &str = "\
@@ -488,6 +507,7 @@ mod tests {
   @.2 | intel: 0x00000010 8086:46d4 rev 0: the keeper; the GT is driven by worker processes it starts and replaces (docs/INTEL-GPU.md §12)
   @.2 | intel-fake: worker 1: 0x00000010 8086:46d4 rev 0: facts 24 EUs; every batch completes at once, nothing runs
   @.2 | intel: the GT's worker 1 is up: 2 engines, 24 EUs, CS 19200000 Hz
+  @.25 | intel: front end placed: 3048 KiB of its own, off the stack
   @.3 |   devmgr   the driver of 0x00000010 was started again and published (restart @)
   @.4 | gpu-restart-gate: round @: intel 41 is up again after 1s
   @.6 | gpu-restart-gate: round @: vk-survive: device lost at round 77: vkQueueSubmit answered VK_ERROR_DEVICE_LOST
@@ -517,6 +537,7 @@ mod tests {
     fn each_missing_worker_line_fails_by_name() {
         for (gone, why) in [
             ("killing intel-gt", "kill"),
+            ("front end placed", "front end placed off the stack"),
             ("is replaced (Died)", "replacing worker"),
             ("intel-fake: worker 3:", "worker 3's facts"),
             ("worker 3 is up", "worker 3 up"),
@@ -536,6 +557,7 @@ mod tests {
     fn each_missing_keeper_line_fails_by_name() {
         for (gone, why) in [
             ("killing intel ", "kill"),
+            ("front end placed", "front end placed off the stack"),
             ("ended with status 137", "DIED"),
             ("every process in its job", "job tree"),
             ("published (restart 2)", "restart 2"),
@@ -600,6 +622,15 @@ mod tests {
             "round 1: vk-survive hung",
         );
         assert!(judge(&lines(&hung), Victim::Keeper).is_err_and(|error| error.contains("hung")));
+        // The new keeper of round 2 with its front end not placed.
+        let unplaced = run(KEEPER_ROUND).replace(
+            "  2.25 | intel: front end placed: 3048 KiB of its own, off the stack\n",
+            "",
+        );
+        assert!(
+            judge(&lines(&unplaced), Victim::Keeper)
+                .is_err_and(|error| error.contains("placed off the stack in round 2"))
+        );
         let outlived = run(KEEPER_ROUND).replace(
             "  1.4 | gpu-restart-gate: round 1: intel 41 is up again after 1s",
             "  1.4 | gpu-restart-gate: round 1: intel 41 is up again after 1s\n  1.4 | gpu-restart-gate: round 1: the dead keeper's worker 8 outlived it",
