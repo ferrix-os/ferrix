@@ -2370,6 +2370,24 @@ Already planned, and the largest:
 3. **H8's place**: before or after H2 to H4. This plan puts it after,
    since D1 to D4 are reachable today and small.
 
+**Decided (the customer, 2026-11-12): "the most secure ones, while keeping
+hardware support to all platforms open".** Read as follows; the consultant
+rules on the kernel's half of 1.
+
+1. **H6 is built, with a door kept.** Under `ferrix.intelgpu` alone the
+   kernel refuses the hand-over while the GPU's unit does not translate.
+   A machine with no VT-d, or whose RMRR the kernel refuses, can still be
+   brought up by saying `ferrix.unisolated` as well, the switch an
+   explicit bind already asks for: DEGRADED is announced, a release
+   image's command line does not carry it, and client nodes stay refused
+   as §4.4 (a) has them. No machine loses what it has today except the
+   silent case.
+2. **The node is narrowed to a group**, mode 0660, the seat's user in the
+   group. It is no platform's concern: Mesa opens the node as that user.
+   What runs a game in a container (Steam's runtime) must keep the group;
+   that is checked on the box in R3.
+3. **The order stands**: H2 to H4, then H8. Both are done.
+
 ## Appendix A: the probe that printed the numbers
 
 Compiled on nazuna against Linux 7.0's UAPI headers, run once, and kept out
