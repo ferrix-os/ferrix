@@ -6134,7 +6134,9 @@ impl<'a> Named<'a> {
         };
         // NOALLOC: room for one id per region was had above.
         ids.extend(map.iter().filter_map(naming));
-        ids.sort_unstable();
+        // Not core's `sort_unstable`, which recurses: one id per region the
+        // map holds, tens of thousands in a large process (F-112).
+        ferrix_fallible::sort_flat_by_key(&mut ids, |&id| id);
         ids.dedup();
         Named::Sorted(ids)
     }
@@ -6324,7 +6326,10 @@ impl AddressSpace {
     pub fn resident_pages(&self) -> Result<u64, fallible::AllocError> {
         let inner = self.inner.lock();
         let mut objects = fallible::try_collect(inner.objects.values())?;
-        objects.sort_unstable_by_key(|vmo| Arc::as_ptr(vmo));
+        // Not core's `sort_unstable_by_key`, which recurses: one entry per
+        // object, and the OOM kill's survey asks this of every process on
+        // the stack of the task that faulted (F-112).
+        ferrix_fallible::sort_flat_by_key(&mut objects, |vmo| Arc::as_ptr(vmo));
         objects.dedup_by_key(|vmo| Arc::as_ptr(vmo));
         Ok(objects.iter().map(|vmo| vmo.committed() as u64).sum())
     }
