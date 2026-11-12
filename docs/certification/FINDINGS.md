@@ -712,8 +712,10 @@ and `ferrix-sync` are classified `core` and read by the gates, or argued out.
 
 * At 6e9d229ea with `--arch aarch64` (gate.sh `r5t-stack-develop`), "clone by every direct call" reads 1,840 + 19,776 + 896 + 3,808 = 26,320 of 24,576 bytes. That is past the stack itself, before the 4,096 bytes the row wants left. "A process made" reads 17,664 in the same run.
 * With `--arch all`, "a process made" reads 4,320 + 14,400 + 896 + 3,808 = 23,424 at 6e9d229ea (`r5t-stack-dev3`, whose timer term read 9,712 there, 29,328 in all) and at 9b339e738 (`r5t-stack-dev2`), past the 20,480 allowed. The row stops at that first failure.
-* So the same commit read 8,640 and 14,400 for the subtree of a process made in two gate builds. The inlining, and with it the frames, differ between builds.
+* So the same commit read 8,640 and 14,400 for the subtree of a process made in two gate builds. That is the walk, not the builds (2026-11-12, ef-30fps, ledger 8665): `deepest` memoises under its cycle cut, and it takes a function's callees in Python's set order over strings, which the hash seed sets for each run. One AArch64 dev kernel (sha256 347248e901d4111b...) read, by `PYTHONHASHSEED`: 0, a process made 4,320 + 14,400 + 896 + 9,712 = 29,328; 1, 4,320 + 14,304 + 896 + 3,808 = 23,328; 7, a process made 4,320 + 8,544 + 896 + 3,808 = 17,568 and then clone by every direct call 26,320.
 * The deepest path read from a local build runs from `Process::new`'s allocation through `mm::while_killing`, `oom::kill_in`, `AddressSpace::unmap`, `give_back`, `Vmo::decommit_range`, `retire_runs` and `ShadowCopies::finish` into the B-tree's removal. That is the kill the kernel's heap draws on since L.mm.139.
+
+* 2026-11-12 (ef-30fps, ledger 8665): the row's other line on develop since 0ec0a3931, F-104's "a task's last drop reaches `smp::flush_tlb_everywhere` by way of `mm::large::purge`", is answered (L.mm.143: neither a large free nor a reservation's unbind purges). This finding's lines are what keeps the row red. Two landings put work below every kernel-heap allocation: 414134529, the heap's kill, which empties an ended process's space where it stands (about 4.7 KiB below `oom::kill_in`), and 0ec0a3931, `large::allocate`'s purge with its shootdown's late report and the console's wake (about 2.5 KiB below `alloc`). With `kill_in`'s call of `unmap` taken out of the graph, clone by every direct call still reads 1,840 + 15,104 + 896 + 4,944 = 22,784 against 20,480. The row judges AArch64 alone: F-110, reserved.
 
 *Closes when* both AArch64 rows hold their 4,096 bytes on develop's gate builds, in two runs each, with the variance between builds named.
 
@@ -4173,6 +4175,14 @@ is not forbidden: `throttle_current` leaves masked at the end of a trap, holding
 judges the context and not the path, so any holder runs it; the window on a real timer's path was not forced. Evidence of the
 old behaviour: the case with the fix undone (`mkiu-t1`). A boot prints how many there were, `reaper`: 337, 226 and 228 on three
 gate boots, so a last drop where sleeping is forbidden is met on every boot, by whichever holder.
+
+*Since (2026-11-12, ef-30fps, ledger 8665):* R6 (0ec0a3931) gave the drop that is left a direct way to a shootdown by the
+call graph: its free through `mm::large::retire` and its job's last slot through `mm::reservation_unbind`, each to
+`mm::large::purge`. The finding did not come back: `purge` refuses where it may not block, and with that test removed the
+boot stops on "a shootdown was requested with interrupts masked" (`ef30-red3-c1`). The row's refusal fired all the same, on
+AArch64, and develop was red on it. Neither a free nor an unbind purges now; both ask the reaper, and the next allocation
+that may block purges (L.mm.143). With either purge put back the row says "a task's last drop reaches" again
+(`ef30-red2-c2`, `ef30-red2-c3`).
 
 ### F-101 — an ordinary native call overflowed the kernel stack
 **Found 2026-11-04, closed 2026-11-05, on the paths walked** (reserved by the certification consultant, ledger 6623, filed and closed by mk-merge, ledger 6974, 6981).
