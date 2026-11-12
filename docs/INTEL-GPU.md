@@ -2230,6 +2230,146 @@ rows on the landing hash (an AMD-Vi boot among them, since `take_down`
 serves every translation) and the seven controls FIRED, the rebase's
 reservation conflict resolved to the removal alone, and this line.
 
+## 15. Hardening the driver: a plan (2026-11-12)
+
+Asked for by the customer on 2026-11-12. A plan with no code; the fuzz
+target of §15.3 H1 is being written beside it on branch `intel-uapi-fuzz`.
+Nothing here is reviewed by the consultant yet.
+
+### 15.1 What the driver is trusted with, and by whom
+
+The node is mode 0666 (§4.4), so every local program reaches the front
+end. A program that breaks the driver gains one ring-3 process holding
+`MANAGE` on `00:02.0`: every client's buffers and frames, and the GPU. With
+dmar0 translating (K2) it does not gain the kernel or other devices. So the
+plan has three aims, in this order: one client must not reach another's
+memory through the driver; one client must not stop the others; and a
+broken driver must hold as little as it can.
+
+### 15.2 The audit (2026-11-12, `origin/develop` 1aea9a223, read only)
+
+A code reading by an agent, sixteen questions, nothing run. Three of its
+findings (D1, D3, D4) were read again in the code by the session that
+wrote this; the rest stand on the audit alone. None is demonstrated by a
+program, and how often a freed frame is pinned again for another client is
+not measured.
+
+**Shown by the code:**
+
+* A new object's memory is zero: the kernel zeroes each frame when a VMO
+  page is committed (H.MEM.6, `L.mm.16`). The driver keeps no pool of
+  freed objects or pages for clients, and a page-table page is refilled
+  with scratch entries before it is used again.
+* Unmapped PPGTT ranges point at a scratch page of the VM's own.
+* Every handle lookup checks the owning file. Global names (`FLINK`,
+  `OPEN`) are refused. A dmabuf or sync file is imported only from a
+  descriptor the caller holds.
+* Client batches always start in the PPGTT address space; `EXEC_SECURE`
+  is refused; rings, context images and status pages are mapped in the
+  driver's GGTT window only.
+* No wait in the driver's thread is unbounded on client input.
+* All 51 `unsafe` uses in the process carry a SAFETY comment (19 MMIO, 7
+  cache flushes, 16 over the driver's own mappings, 6 over card0 buffers
+  shared with a client, 2 syscalls, 1 `static mut`). The library has none.
+
+**Defects and gaps, most serious first:**
+
+| # | What | Where | In the item |
+|---|---|---|---|
+| D1 | **A bind that fails part-way leaves its page-table entries.** `bind` maps one 2 MiB window at a time and returns the error without clearing the windows already written; the front end records no binding, so the entries outlive the object. Device addresses are physical addresses, so a frame pinned later for another client is reachable from the stale VM. D4 lets a client force the failure | `intel-xelp` `backend.rs` (`bind`), `frontend/exec.rs` | no |
+| D2 | **No GPU TLB invalidation before an unbound object's pages go back.** An unbind waits only for requests that listed the object; a softpin batch still running in the same VM may hold a TLB entry for an address it did not list. The class of Linux's CVE-2022-4139 | `frontend/backend.rs`, `gem.rs` (`free_idle`), `exec.rs` | no |
+| D3 | **execbuffer reads the client's object array four times and checks it once.** A second thread of the client can change a handle, offset or pad size between the checked read and the bind. A wrapped binding range then overlaps another VM's keys (release builds do not check overflow) | `frontend/exec.rs`, `objects.rs` | no |
+| D4 | **Destroying a VM leaks its page tables.** The bindings are dropped without an unbind, and the PPGTT's destroy frees only the top table and the scratch pages. One client can empty the page-table pool for all | `frontend/vm.rs`, `ppgtt.rs` | no |
+| D5 | **No limit is per client.** Objects, handles, VMs, contexts, held waits, requests, kernel fences, the pin budget and the driver's 4096 kernel handles are counted for the device only; about 4,000 objects from one client starve the rest | `frontend/limits.rs`, `objects.rs` | no |
+| D6 | **No timeslice and no ban of a client.** A context keeps its engine while it has work. A hang costs every client 2 s, a recoverable context (the default) is not banned in the front end, and a new context is not limited | `backend.rs`, `frontend/fence.rs` | no |
+| D7 | **VT-d faults are not seen after boot.** The fault event is masked and the records are read once, at the end of boot (consultant ledger 8913) | `iommu.rs`, `iommu/vtd.rs` | **yes** |
+| D8 | **An untranslated GPU is still handed over under `ferrix.intelgpu`.** Client nodes are refused then (§4.4 (a)), the device is not. devmgr starts the driver as an engine, so its GPU hand-over checks (`L.device.56`) are not applied | `syscall/native.rs`, `device.rs`; devmgr | **yes** (devmgr's half no) |
+| D9 | **The driver runs as root** and opens `/proc/cmdline` and `/proc/meminfo`; a debug option calls `reboot`. No syscall policy bounds a driver's job | devmgr's start, `steps.rs` | no |
+
+**Not settled:** whether each whitelisted register is saved in the context
+image (`HAS_CONTEXT_ISOLATION` is answered 1 and only that constant is
+tested); that the hardware refuses GGTT addressing from a non-privileged
+batch (relied on, as Linux does); how long a first bind of a budget-sized
+object holds the driver's thread; whether the driver can fork or open a
+socket; whether a client can shrink a card0 buffer's VMO after attach,
+which would fault the driver's read.
+
+### 15.3 The work, in order
+
+Outside the item, no box needed:
+
+* **H1. Fuzz the front end.** One target driving sequences of ioctls from
+  several clients against the model back end, with the invariants "no
+  handle of one client resolves for another" and "nothing is left when
+  the last client closes". §4.4 and §6 say the parsers are fuzzed; no
+  target did so before this one.
+* **H2. D1 to D4**, one branch after H1 so that its target is the
+  regression. D1: clear what was written on a failed bind. D2: keep the
+  object's memory until every request of that VM in flight at the unbind
+  has completed, or invalidate and wait. D3: read the object array once
+  into the driver's memory. D4: unbind every binding of a destroyed VM.
+  Each with a host test that fails before the fix.
+* **H3. D5 and D6.** Per-file counters for every table and for pinned
+  pages; a client whose contexts hang repeatedly waits before its next
+  context runs. A timeslice between contexts is a larger change to the
+  submission and is sized apart.
+* **H4. D9 and the unsettled questions.** The options and the memory size
+  handed over in START instead of read from `/proc`; the driver started
+  without root if devmgr can give it another identity; the `reboot`
+  option removed from product images. A test of context isolation that
+  writes each whitelisted register in one context and reads it in
+  another.
+
+Inside the item, each a design to the consultant first:
+
+* **H5. A reader of the fault records while the system runs (D7).** A
+  timer or a call on request drains the records through the path
+  `audit_faults` already uses and prints one rate-limited line a fault
+  with the function and the page. The checks' own provoked faults stay
+  theirs (`L.iommu.43`, `.54`, `.64`, `.65`, `.70`, `.72` sit around the
+  code). The backlog carries it as a wish (ledger 8913).
+* **H6. No hand-over without translation (D8).** The kernel refuses
+  `MANAGE` on the Intel GPU while its unit does not translate, and devmgr
+  hands it over as a GPU. §4.4's rule that M1 and M2 may run untranslated
+  goes; the chardev check that forces an untranslated node stays, since
+  it uses the forced switch. **The customer's decision** (§15.5).
+
+After H5:
+
+* **H7. A negative step.** A new M2 step after the hang: the driver
+  writes a PPGTT entry over a device address it never pinned and runs a
+  store through it. Passed means H5's fault line for `00:02.0` at that
+  address and the page unchanged. Off unless its option is said, and not
+  in a release image's command line.
+
+Already planned, and the largest:
+
+* **H8. The keeper and the worker (§12).** Step 1 is on develop; the
+  product is still one process. Step 2 is ten unlanded commits on
+  `gpu-opaque-2`. With it the process that drives the GT holds no client
+  memory, and D9's rights fall to the keeper alone.
+
+### 15.4 What needs the N150 box
+
+| Run | Needs first | With a monitor | About |
+|---|---|---|---|
+| R1. K2's owed boot: the lit screen photographed after TE, that boot's fault line, the loader-map region of the RMRR (BACKLOG, intel-k2; ledger 8913) | nothing; better with H5, whose reader also speaks for the time after boot | **yes** | 15 min |
+| R2. H7's negative step: the fault line and the unchanged page | H5, H7 landed | no | 20 min |
+| R3. H2 and H3 under Endfield: frames a second and GPU time a frame against develop's, since D2's wait and D3's copy are on the execbuffer path (§13) | H2, H3 gated | no | 30 min |
+| R4. The keeper and worker's run (§12.8, BACKLOG gpu-opaque) | H8 | no | as its row says |
+
+### 15.5 For the customer to decide
+
+1. **H6**: may the untranslated mode go, now that the box translates?
+   It removes the one mode in which the driver is trusted like the kernel
+   (V-03), and with it the way to bring the driver up on a machine whose
+   firmware's RMRR the kernel refuses.
+2. **The node's mode**: 0666 lets every local program reach the front
+   end (V-11, accepted by design). A group for the seat's user would
+   narrow it; Mesa needs nothing else.
+3. **H8's place**: before or after H2 to H4. This plan puts it after,
+   since D1 to D4 are reachable today and small.
+
 ## Appendix A: the probe that printed the numbers
 
 Compiled on nazuna against Linux 7.0's UAPI headers, run once, and kept out
