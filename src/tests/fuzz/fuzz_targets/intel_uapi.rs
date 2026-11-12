@@ -2732,7 +2732,7 @@ fn syncobj_wait(rig: &mut Rig, input: &mut Input<'_>) {
     let flags = u32::from(input.u8() % 16) | if input.u8() == 0xff { input.u32() } else { 0 };
     let timeout = match input.u8() % 4 {
         0 => 0,
-        1 => i64::try_from(rig.host.now + 1_000_000).unwrap_or(i64::MAX),
+        1 => i64::try_from(rig.host.now.saturating_add(1_000_000)).unwrap_or(i64::MAX),
         _ => input.timeout(),
     };
     let (cmd, args) = if input.bool() {
