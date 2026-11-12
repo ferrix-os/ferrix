@@ -622,7 +622,7 @@ kernel's; both are fixed:
   succeeded. A static glibc program run as init with the network showed it
   on 2026-10-13 (`~/.local/share/ferrix/endfield/probe/addrconfig.c`): both
   names failed with flags 0 and resolved with `AI_ADDRCONFIG`. Both calls
-  are now in the kernel (`src/kernel/src/syscall/sockets.rs`, on
+  are now in the kernel (`src/kernel/extensions/personality/linux/src/syscall/sockets.rs`, on
   `sendmsg` and `recvmsg` as Linux's `net/socket.c` builds them, with a
   boot check beside the other socket checks), and the same probe resolves
   both names with flags 0 (`~/.local/share/ferrix/logs/endfield-mmsg/probe-addrconfig.log`).

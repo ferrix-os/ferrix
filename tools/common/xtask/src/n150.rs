@@ -96,7 +96,7 @@ const MIB_SECTORS: u64 = (1 << 20) / SECTOR;
 /// size every vendor sells as "512 GB". `--disk-bytes` gives the real one,
 /// `blockdev --getsize64` on the box.
 const DEFAULT_DISK_BYTES: u64 = 1_000_215_216 * SECTOR;
-/// The label the kernel finds its root by (`src/kernel/src/fs/root_disk.rs`).
+/// The label the kernel finds its root by (the Linux personality's `fs/root_disk.rs`).
 const ROOT_LABEL: &str = "ferrix-root";
 /// The features asked of `mkfs.btrfs`, named so the log and the doc can say
 /// them: btrfs-progs 6.x's defaults, which every volume Ferrix has mounted

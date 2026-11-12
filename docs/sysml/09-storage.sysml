@@ -23,7 +23,7 @@ package FerrixStorage {
              * ring (src/kernel/src/interfaces/block_ring, src/lib/proto/blkring): one kernel task
              * per ring moves requests onto it and copies payloads through
              * the ring's data VMO, and publishes the disk in devfs's
-             * registry as a BlockDevice (src/kernel/src/fs/block.rs) that
+             * registry as a BlockDevice (src/kernel/extensions/personality/linux/src/fs/block.rs) that
              * reads, writes and flushes whole sectors. No per-cgroup
              * bandwidth: cgroups are stage 13's. */
         part queues : RequestQueue[0..*];
@@ -104,7 +104,7 @@ package FerrixStorage {
     #implemented part def PageCache {
         @stage { number = 8; }
         doc /* Unified with VMOs: not a separate cache but the set of file
-             * VMOs, subject to reclaim's LRU. src/kernel/src/fs/pages.rs: each
+             * VMOs, subject to reclaim's LRU. src/kernel/extensions/personality/linux/src/fs/pages.rs: each
              * file's VMO, filled from a disk filesystem's PageSource in runs
              * of at most 32 missing pages with no lock held, and by a fault
              * through a mapping as by a read. A read fills to its own last
@@ -138,7 +138,7 @@ package FerrixStorage {
     }
     #implemented part def Devfs :> Filesystem {
         @stage { number = 8; }
-        doc /* src/kernel/src/fs/devfs.rs: null, zero, full, random, urandom,
+        doc /* src/kernel/extensions/personality/linux/src/fs/devfs.rs: null, zero, full, random, urandom,
              * tty and console, numbered as Linux numbers them, ptmx and the
              * dri, input and pts directories since stages 17 and 18, and
              * the disks a driver's kernel side registers. It calls itself
@@ -147,7 +147,7 @@ package FerrixStorage {
     #implemented part def Procfs :> Filesystem {
         @stage { number = 8; }
         doc /* self/maps, self/exe, self/fd backed by the real VM and fd
-             * table; cpuinfo, meminfo. src/kernel/src/fs/procfs.rs over
+             * table; cpuinfo, meminfo. src/kernel/extensions/personality/linux/src/fs/procfs.rs over
              * src/lib/fs/common/procfs's text, rendered at open: each /proc/<pid> with
              * its fd, status, comm, cmdline, stat, maps, exe, cwd, root,
              * task and mounts, and /proc's mounts, stat, partitions,
@@ -155,7 +155,7 @@ package FerrixStorage {
              * beside them. */
     }
     #implemented part def Sysfs :> Filesystem {
-        doc /* src/kernel/src/fs/sysfs.rs over src/lib/fs/common/sysfs's text, a view that
+        doc /* src/kernel/extensions/personality/linux/src/fs/sysfs.rs over src/lib/fs/common/sysfs's text, a view that
              * stores nothing, fed by the services that own each fact
              * (docs/SYSFS.md): enumeration's device nodes under
              * devices/pci and platform, the disks, interfaces, cards,
@@ -194,7 +194,7 @@ package FerrixStorage {
         @stage { number = 11; }
         doc /* The real filesystem, read and write, single device, no RAID
              * 5/6. The largest single piece of work in the project.
-             * src/kernel/src/fs/btrfs.rs mounts it from a block node, read-only
+             * src/kernel/extensions/personality/linux/src/fs/btrfs.rs mounts it from a block node, read-only
              * over src/lib/fs/btrfs/vfs or writable over src/lib/fs/btrfs/write, one
              * inode object per inode so two names share one page cache. `/`
              * is a btrfs volume under cargo xtask run, and test-rustc's

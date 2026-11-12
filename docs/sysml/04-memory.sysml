@@ -406,7 +406,7 @@ package FerrixMemory {
         }
         #implemented action mmap {
             @stage { number = 7; }
-            doc /* src/kernel/src/syscall/memory.rs decodes the arguments -- mmap2
+            doc /* src/kernel/extensions/personality/linux/src/syscall/memory.rs decodes the arguments -- mmap2
                  * counting its offset in pages on ARMv7-A -- and the space
                  * does the rest: anonymous memory, a file mapped shared onto
                  * its own VMO pages or privately through a shadow object,
@@ -529,7 +529,7 @@ package FerrixMemory {
 
     #implemented part def UserElfLoader {
         @stage { number = 6; }
-        doc /* src/kernel/src/syscall/load.rs over src/lib/platform/elf. Each PT_LOAD is mapped
+        doc /* src/kernel/extensions/personality/linux/src/syscall/load.rs over src/lib/platform/elf. Each PT_LOAD is mapped
              * as anonymous memory and its bytes copied in through the user copy
              * layer, with permissions computed per page so two segments sharing
              * a page get their union, and a union that is writable and

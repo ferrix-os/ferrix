@@ -2084,7 +2084,7 @@ Linux's `prctl(PR_SET_SYSCALL_USER_DISPATCH)`, for Proton's Wine
 (stage 23, E5.3). The design and its review are in the certification
 consultant's ledger, line 2323 (OK IF (1) to (12)); the design document
 is `~/.local/share/ferrix/n150-linux/sud-design.md` on the gate host.
-Code: `src/kernel/src/syscall/seccomp/user_dispatch.rs` (load ring), its
+Code: `src/kernel/extensions/personality/linux/src/syscall/seccomp/user_dispatch.rs` (load ring), its
 boot check `user_dispatch_check.rs`, and the guest program `src/tests/sud`
 (`cargo xtask test-sud`).
 

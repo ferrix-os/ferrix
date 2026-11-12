@@ -312,7 +312,7 @@ package FerrixStructure {
              * shell since 2026-09-18 is zinc. What breaks the cycle "the root
              * filesystem needs a block driver that lives on the root
              * filesystem"; a btrfs root, on a boot that has one, is installed
-             * from the same archive (src/kernel/src/fs/root_disk.rs). */
+             * from the same archive (src/kernel/extensions/personality/linux/src/fs/root_disk.rs). */
         part devmgr : UserBinary {
             attribute :>> staticMusl = false;
             doc /* /sbin/devmgr, a native program on src/user/system/native/rt. */

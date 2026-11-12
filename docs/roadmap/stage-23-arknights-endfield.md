@@ -641,11 +641,11 @@ Checked on `main` 557b939ed; what this page says follows the tree.
 
 * It lists seccomp filters with `SECCOMP_RET_TRAP` as present. They are not:
   the filters landed (S3), and `TRAP` is "not built until `SIGSYS` is
-  delivered" (`src/kernel/src/syscall/seccomp_filters_check.rs`; S4 in
+  delivered" (`src/kernel/extensions/personality/linux/src/syscall/seccomp_filters_check.rs`; S4 in
   `docs/roadmap/status.md`'s stage 13 row).
 * It calls `SCM_CREDENTIALS` unclear. The file's header says it is refused,
   and the code takes it on an `AF_UNIX` socket and refuses it elsewhere
-  (`src/kernel/src/syscall/sockets.rs`); the header is stale.
+  (`src/kernel/extensions/personality/linux/src/syscall/sockets.rs`); the header is stale.
 * It says the word `fsgsbase` appears nowhere under `arch/x86_64`. It
   appears in three comments there, each saying that `FSGSBASE` stays off for
   programs; the finding stands and the search did not.

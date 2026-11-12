@@ -184,7 +184,7 @@ wayland-egl: display does not support prime` first.
 which with the virgl driver loaded calls a screen hook only Zink has, a
 null pointer. Ferrix's render node answers `DRM_IOCTL_GET_CAP` for the
 sync-object capabilities alone, `EINVAL` for everything else
-(`src/kernel/src/interfaces/render/node.rs`, `get_cap`), although it
+(`src/kernel/extensions/personality/linux/src/interfaces/render/node.rs`, `get_cap`), although it
 implements both PRIME calls (`export`, `import`, the same file).
 
 **Shown.** An `LD_PRELOAD` shim that answers `DRM_CAP_PRIME` with
@@ -265,7 +265,7 @@ drop capabilities: Invalid argument"*. A probe program on Ferrix:
 
 **Why.** libcap-ng's `capng_change_id`, which dbus-daemon uses to become
 `messagebus`, starts with `prctl(PR_SET_KEEPCAPS, 1)`. `sys_prctl`
-(`src/kernel/src/syscall/attributes.rs`) knows the bounding-set options and
+(`src/kernel/extensions/personality/linux/src/syscall/attributes.rs`) knows the bounding-set options and
 nothing else of capabilities. polkitd, accountsservice, NetworkManager and
 every other system service that drops root the libcap-ng way will stop at
 the same place.
@@ -358,7 +358,7 @@ tag, or `ID_INPUT_KEYBOARD` and the rest that libinput needs before it
 will open a node. Debian's `systemd-udevd` starts on Ferrix; `udevadm
 trigger` then fails on every device with *"Failed to write 'add' to
 '.../uevent': Permission denied"*: the `uevent` files are read-only, and
-the kernel sends no uevents (`src/kernel/src/net/netlink/mod.rs` has none).
+the kernel sends no uevents (`src/kernel/extensions/personality/linux/src/net/netlink/mod.rs` has none).
 
 **Two ways.** (a) A ring-3 writer of the udev database from what `devmgr`
 already knows, for the devices present at boot -- 3 points, no hotplug.

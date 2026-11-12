@@ -11,10 +11,10 @@
   "files": {
     "boot_authority.rs": 1,
     "discovery/first_image.rs": 1,
-    "syscall/exec.rs": 13,
-    "syscall/launch.rs": 1,
-    "syscall/load.rs": 16,
-    "syscall/process.rs": 11
+    "src/kernel/extensions/personality/linux/src/syscall/exec.rs": 13,
+    "src/kernel/extensions/personality/linux/src/syscall/launch.rs": 1,
+    "src/kernel/extensions/personality/linux/src/syscall/load.rs": 16,
+    "src/kernel/extensions/personality/linux/src/syscall/process.rs": 11
   },
   "//crates": [
     "The item's library crates (certification-item.json, crates),",

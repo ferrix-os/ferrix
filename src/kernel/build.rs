@@ -66,10 +66,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // binary links. Any other package naming this script is refused.
     match std::env::var("CARGO_PKG_NAME")?.as_str() {
         "ferrix-kernel" => {}
-        "ferrix-kernel-core"
-        | "ferrix-kernel-item"
-        | "ferrix-kernel-load"
-        | "ferrix-kernel-raised-checks" => {
+        "ferrix-kernel-core" | "ferrix-kernel-item" | "ferrix-kernel-raised-checks" => {
             let _ = build_flags()?;
             println!("cargo::rerun-if-changed=../build.rs");
             return Ok(());
@@ -77,14 +74,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         // The load's root built for linuxd, and the shim under it
         // (docs/microkernel/M5-LIFT.md §1); an optional part under
         // src/kernel/extensions/<name>/ (docs/microkernel/CRATE-SPLIT.md §2.1).
-        "ferrix-lift-core" | "ferrix-lift-item" | "ferrix-lift-load" | "ferrix-kernel-settings" => {
+        "ferrix-lift-core" | "ferrix-lift-item" | "ferrix-kernel-settings" => {
             let _ = build_flags()?;
             println!("cargo::rerun-if-changed=../../build.rs");
             return Ok(());
         }
         // An optional part's lift twin, in the part's own lift/ directory, and
         // a part one group deeper (`board/<name>/`).
+        // The Linux personality is a part of that depth too
+        // (`personality/linux/`, S5 of the crate split).
         "ferrix-lift-settings"
+        | "ferrix-kernel-load"
         | "ferrix-kernel-board-stm32mp1"
         | "ferrix-kernel-board-gs201-usb"
         | "ferrix-kernel-logctl"
@@ -94,7 +94,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             return Ok(());
         }
         // A twin one group deeper (`device/<name>/lift/`).
-        "ferrix-lift-logctl" | "ferrix-lift-net-ring" => {
+        "ferrix-lift-logctl" | "ferrix-lift-net-ring" | "ferrix-lift-load" => {
             let _ = build_flags()?;
             println!("cargo::rerun-if-changed=../../../../build.rs");
             return Ok(());

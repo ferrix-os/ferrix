@@ -96,7 +96,7 @@ and compares it with the last one. What to do with what it shows:
 
 **The kernel's boot self-checks.** 111 `*check*.rs` files, 87,445 of the
 kernel's 243,365 lines (35%), are compiled into the kernel and run at every
-boot. `src/kernel/src/syscall/check.rs` (12,489 lines, 60% fixes) is the
+boot. `src/kernel/extensions/personality/linux/src/syscall/check.rs` (12,489 lines, 60% fixes) is the
 first hotspot, and `stages_check.rs` (60%) and `object/check.rs` (41%) are in
 the top ten. 23 of the 52 open flakes are boot self-checks, and 26 record a
 host load of 10 or more: many count frames, so they assume a quiet host.

@@ -132,7 +132,7 @@ It presents those software frames to yserver with MIT-SHM: Chromium's
 `XShmImagePool` makes a System V segment (`shmget(IPC_PRIVATE, size,
 IPC_CREAT | 0600)`), attaches it, hands yserver its id, and removes it
 while both still have it attached. The kernel answers those calls since
-2026-10-02 (the customer's decision; `src/kernel/src/syscall/shm.rs`,
+2026-10-02 (the customer's decision; `src/kernel/extensions/personality/linux/src/syscall/shm.rs`,
 `cargo xtask test-shm`, branch `steam-sysv-shm`); before, they were
 `ENOSYS`, and every frame went through the socket as a core `PutImage`.
 
@@ -270,7 +270,7 @@ copy, device-type ones stay `EFAULT`.
 `render`, the desktop's user in it, not 0666. Before the mode changes: what
 a user can allocate through the node bounded, and an audit of its calls.
 What the reading found: the node's metadata is `Renderer::metadata`
-(`src/kernel/src/interfaces/render/mod.rs`), gid 0 like every device node so
+(`src/kernel/extensions/personality/linux/src/interfaces/render/mod.rs`), gid 0 like every device node so
 far; `/etc/group` is written in four places in xtask (`initramfs.rs`,
 `init.rs`, `auth.rs`, and `compositor/apps.rs` to check), gid 90 is taken.
 The renderer's session limits, 16 contexts and 256 objects

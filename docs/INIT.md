@@ -45,7 +45,7 @@ works unchanged:
 |---|---|---|
 | C1 | `mount -t cgroup2` at `/sys/fs/cgroup`, with `mkdir` and `rmdir` making and removing cgroups. The mount point is sysfs's `fs/cgroup` (`docs/SYSFS.md`), which the kernel mounts on `/sys` at boot | the tree of slices and services (§5.1) |
 | C2 | `cgroup.procs`: read to list members, write to move one; `fork` and `clone` put the child in the parent's cgroup | membership, and a service's forked children staying its own |
-| C3 | `clone3` with `CLONE_INTO_CGROUP`, which answers `ENOSYS` today (`src/kernel/src/syscall/family.rs`) | starting a service already inside its cgroup, with no window outside it (§5.2) |
+| C3 | `clone3` with `CLONE_INTO_CGROUP`, which answers `ENOSYS` today (`src/kernel/extensions/personality/linux/src/syscall/family.rs`) | starting a service already inside its cgroup, with no window outside it (§5.2) |
 | C4 | `cgroup.events`, with `populated` and `frozen`, waking `poll`/`epoll` with `POLLPRI` when it changes (there is no `inotify`) | knowing a service has ended, all of it |
 | C5 | `cgroup.kill` | ending a service whose processes do not stop when asked |
 | C6 | `cgroup.subtree_control` and the controllers' files: `memory.max`, `memory.high`, `memory.events` (with `oom_kill`), `pids.max`, `cpu.weight`, `cpu.max`, `io.weight` | the resource keys of §5.5 |
@@ -1771,7 +1771,7 @@ path. A Linux program makes each with `syscall(number, ...)`; a failure is
   the port, so it outlives the handle.
 
 The check is one boot line, `initcall`, and one catalogue entry, FX-1502
-(`src/kernel/src/syscall/init_calls_check.rs`), on all three architectures. It
+(`src/kernel/extensions/personality/linux/src/syscall/init_calls_check.rs`), on all three architectures. It
 reads init's hello through `process_bootstrap` and `channel_read` by number,
 and has a ring-3 program take the channel and close it; drives every give
 and refusal between a process and forks of it, then has a fork given a

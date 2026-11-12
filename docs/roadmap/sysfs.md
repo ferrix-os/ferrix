@@ -21,7 +21,7 @@ back.
   and fuzzed (`sysfs_names`): PCI identifiers, `modalias` and `uevent`,
   processor lists, input bitmaps in words of the kernel's `long`, connector
   names, kernfs's relative links, and the name a `bind` write gives.
-* The view, `src/kernel/src/fs/sysfs.rs`: `devices` with PCI roots, functions
+* The view, `src/kernel/extensions/personality/linux/src/fs/sysfs.rs`: `devices` with PCI roots, functions
   nested behind their bridges, `platform` for device tree nodes, `system/cpu`
   and `virtual`; `bus/pci` and `bus/platform` with `devmgr`'s drivers;
   `class` for block, drm, input, mem, net and tty; `dev/char` and

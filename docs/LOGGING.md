@@ -121,7 +121,7 @@ What exists and is reused:
 * **The audit record** (`docs/certification/AUDIT.md`): the kernel's FAU
   rings, read by init into `/var/log/audit/<id>.bin`. It stays as it is
   (§15).
-* **The kernel's Unix sockets** (`src/kernel/src/fs/socket.rs`): stream,
+* **The kernel's Unix sockets** (`src/kernel/extensions/personality/linux/src/fs/socket.rs`): stream,
   datagram, `SCM_RIGHTS`, `SCM_CREDENTIALS` checked against the sender
   (`EPERM` unless root, as `scm_check_creds`), `SO_PASSCRED`,
   `SO_PEERCRED`, a datagram socket `connect`ed to a bound path. **Not
@@ -1597,7 +1597,7 @@ The Linux front (§5; `front.rs`), made while lode is still root:
 * `/run/systemd/journal/dev-log`, syslog datagrams, and `/dev/log`, a link
   to it in devfs's fixed table beside `fd`, `stdin`, `stdout` and `stderr`
   -- the one kernel change of the log so far, two lines in
-  `src/kernel/src/fs/devfs.rs` (load ring; `fs` exists only under
+  `src/kernel/extensions/personality/linux/src/fs/devfs.rs` (load ring; `fs` exists only under
   `linux_abi=on`) and the devfs boot check's expected names. Without lode
   the link dangles and `syslog()` is refused at once, as on Linux without
   journald. RFC 5424 when a datagram says `1 `, RFC 3164 read leniently.

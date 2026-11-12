@@ -16,7 +16,7 @@ every test (`src/kernel/build.rs` embeds nothing):
   `init::run`'s order unchanged.
 - `src/kernel/src/init_check.rs`: the `inputs` boot check (FX-1503), the
   verifier of `L.init.2`, `L.init.3`, `H.BOOT.15`.
-- `src/kernel/src/fs/mod.rs` hands the archive's `.ferrix` entries to
+- `src/kernel/extensions/personality/linux/src/fs/mod.rs` hands the archive's `.ferrix` entries to
   `set_inputs` (an empty set when there is no initrd) and refuses a root where
   `/.ferrix` exists after the unpack; `fs/root_disk.rs` refuses the same on the
   volume.

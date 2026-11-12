@@ -43,7 +43,7 @@ pub const COMRESET_LINK_TIMEOUT: u64 = 1_000_000_000;
 /// (`worth_retrying`), as Linux's libata retries a command its error
 /// handler recovered the link for. A second [`COMMAND_TIMEOUT`] ends it
 /// sooner, so a hung drive is answered in about 20 s, inside the 30 s the
-/// kernel waits for a request (`src/kernel/src/interfaces/block_ring`).
+/// kernel waits for a request (`src/kernel/extensions/personality/linux/src/interfaces/block_ring`).
 pub const ATTEMPTS: u32 = 3;
 
 /// One piece of a transfer's buffer.

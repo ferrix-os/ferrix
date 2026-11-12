@@ -1,35 +1,36 @@
 [package]
-name = "ferrix-kernel-load"
-description = "The Ferrix kernel's load ring: what the kernel runs and does not vouch for"
+name = "ferrix-lift-load"
+description = "The load's one source built for linuxd: the same root as ferrix-kernel-load, against the shim"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
-# The one build script of the kernel's crates: the build flags as cfgs
-# (docs/BUILD-FLAGS.md rule 6 b, docs/KERNEL-CRATES.md).
-build = "../build.rs"
+build = "../../../../build.rs"
 
-# The crate root sits beside the binary's main.rs, so that its modules are
-# found where every kernel file is today (docs/KERNEL-CRATES.md).
 [lib]
-path = "../src/kernel_load.rs"
+name = "ferrix_kernel_load"
+path = "../src/lib.rs"
 
 [dependencies]
-ferrix-kernel-core.workspace = true
-ferrix-kernel-item.workspace = true
+ferrix-kernel-core = { package = "ferrix-lift-core", path = "../../../../lift/core" }
+ferrix-kernel-item = { package = "ferrix-lift-item", path = "../../../../lift/item" }
 ferrix-audit.workspace = true
 ferrix-blkring.workspace = true
 ferrix-block.workspace = true
 ferrix-bootinfo.workspace = true
 ferrix-btrfs.workspace = true
 ferrix-btrfs-vfs.workspace = true
+ferrix-fsproto.workspace = true
+ferrix-native.workspace = true
+ferrix-rt.workspace = true
 ferrix-btrfs-write.workspace = true
 ferrix-cgroupfs.workspace = true
 ferrix-chardevctl.workspace = true
 ferrix-displayctl.workspace = true
 ferrix-elf.workspace = true
 ferrix-fallible.workspace = true
+ferrix-fdt.workspace = true
 ferrix-frame.workspace = true
 ferrix-inputctl.workspace = true
 ferrix-kmem.workspace = true
@@ -39,6 +40,7 @@ ferrix-net.workspace = true
 ferrix-netlink.workspace = true
 ferrix-nettcp.workspace = true
 ferrix-netwire.workspace = true
+ferrix-paging.workspace = true
 ferrix-partition.workspace = true
 ferrix-pci.workspace = true
 ferrix-procfs.workspace = true
@@ -53,6 +55,7 @@ ferrix-ustack.workspace = true
 ferrix-vdso.workspace = true
 ferrix-vfs.workspace = true
 ferrix-vma.workspace = true
+
 
 [lints]
 workspace = true

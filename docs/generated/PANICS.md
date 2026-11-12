@@ -1191,8 +1191,8 @@ until something else brought the task back through the kernel.
    write, so a look between the write and the post took it for a missing post.
 
 See: src/kernel/src/sched/work.rs; src/kernel/src/trap.rs attention_due;
-src/kernel/src/syscall/deliver.rs needs_attention; docs/OPAQUE-KERNEL.md §9.8
-2c.
+src/kernel/extensions/personality/linux/src/syscall/deliver.rs needs_attention;
+docs/OPAQUE-KERNEL.md §9.8 2c.
 
 <a id="fx-0530"></a>
 
@@ -1451,8 +1451,9 @@ would pass every host test and answer a program's `write` with a different call.
    the orphan's parent before the new parent's list holds it, or keeps a reaper
    that has ended (the `orphan` messages).
 
-See: src/kernel/src/syscall/check.rs run; src/kernel/src/syscall/mod.rs
-dispatch; src/lib/proto/linux-abi; docs/ROADMAP.md stage 7.
+See: src/kernel/extensions/personality/linux/src/syscall/check.rs run;
+src/kernel/src/syscall/mod.rs dispatch; src/lib/proto/linux-abi; docs/ROADMAP.md
+stage 7.
 
 <a id="fx-0702"></a>
 
@@ -1484,8 +1485,9 @@ while a sibling makes one, and every set the check made must be gone.
 5. `encode_semid` writes a field at an offset another layout uses.
 6. `create` counts the sets of every job, or of none, against the per-job bound.
 
-See: src/kernel/src/syscall/sem_check.rs; src/kernel/src/syscall/sem.rs;
-src/kernel/src/syscall/process.rs Process::release.
+See: src/kernel/extensions/personality/linux/src/syscall/sem_check.rs;
+src/kernel/extensions/personality/linux/src/syscall/sem.rs;
+src/kernel/extensions/personality/linux/src/syscall/process.rs Process::release.
 
 <a id="fx-0703"></a>
 
@@ -1514,7 +1516,8 @@ must be gone with its charge.
    against the per-job bounds.
 5. A search by key or id looks in another namespace's table than the caller's.
 
-See: src/kernel/src/syscall/shm_check.rs; src/kernel/src/syscall/shm.rs.
+See: src/kernel/extensions/personality/linux/src/syscall/shm_check.rs;
+src/kernel/extensions/personality/linux/src/syscall/shm.rs.
 
 <a id="fx-0801"></a>
 
@@ -1534,9 +1537,9 @@ The archive is read through the direct map from memory the loader reserved as
 3. An entry could not be created: tmpfs refused it, or memory for file contents
    ran out.
 
-See: src/kernel/src/fs/mod.rs init; src/lib/fs/common/vfs/src/initramfs.rs;
-tools/common/xtask/src/initramfs.rs; src/boot/common/uefi/src/main.rs
-load_initrd; docs/ROADMAP.md stage 8.
+See: src/kernel/extensions/personality/linux/src/fs/mod.rs init;
+src/lib/fs/common/vfs/src/initramfs.rs; tools/common/xtask/src/initramfs.rs;
+src/boot/common/uefi/src/main.rs load_initrd; docs/ROADMAP.md stage 8.
 
 <a id="fx-0802"></a>
 
@@ -1549,14 +1552,15 @@ a file there to read back across page boundaries, to read zeros past a
 truncation rather than the bytes it cut off, to survive a rename, and to give
 every frame back once it is gone.
 
-1. The marker in `src/kernel/src/fs/check.rs` and the one in
-   `tools/common/xtask/src/initramfs.rs` have drifted apart.
+1. The marker in `src/kernel/extensions/personality/linux/src/fs/check.rs` and
+   the one in `tools/common/xtask/src/initramfs.rs` have drifted apart.
 2. The VMO page store copies through the wrong frame or offset, or
    `Vmo::decommit_from` does not release what a truncation discards.
 3. The dentry cache keeps an unlinked file's inode alive, so its pages outlive
    it and show up as leaked frames.
 
-See: src/kernel/src/fs/check.rs run; src/kernel/src/fs/pages.rs;
+See: src/kernel/extensions/personality/linux/src/fs/check.rs run;
+src/kernel/extensions/personality/linux/src/fs/pages.rs;
 src/kernel/src/user/vmo.rs decommit_from;
 src/lib/fs/common/vfs/src/namespace.rs; docs/ROADMAP.md stage 8.
 
@@ -1573,13 +1577,15 @@ condition to report to one: a process created without them would have its first
 of memory for the table is not this: it is reported, and process_create answers
 NO_MEMORY.
 
-1. The console inode in `src/kernel/src/fs/console.rs` started refusing to be
-   opened, or `OpenFile::new` gained a check the console does not pass.
+1. The console inode in
+   `src/kernel/extensions/personality/linux/src/fs/console.rs` started refusing
+   to be opened, or `OpenFile::new` gained a check the console does not pass.
 2. A new descriptor table no longer starts empty or with room for three
    descriptors, so installing them failed with EMFILE.
 
-See: src/kernel/src/syscall/fd.rs standard_streams; src/kernel/src/fs/console.rs
-open_console; src/lib/fs/common/vfs/src/fd.rs; docs/ROADMAP.md stage 8.
+See: src/kernel/extensions/personality/linux/src/syscall/fd.rs standard_streams;
+src/kernel/extensions/personality/linux/src/fs/console.rs open_console;
+src/lib/fs/common/vfs/src/fd.rs; docs/ROADMAP.md stage 8.
 
 <a id="fx-0820"></a>
 
@@ -1616,8 +1622,10 @@ record, must rise by exactly that many times the processors.
    `devfs::open_char_device` matches numbers in a different encoding from the
    one `mknodat` stores.
 
-See: src/kernel/src/syscall/check.rs run_paths; src/kernel/src/syscall/path.rs;
-src/kernel/src/fs/devfs.rs; src/kernel/src/syscall/stat.rs;
+See: src/kernel/extensions/personality/linux/src/syscall/check.rs run_paths;
+src/kernel/extensions/personality/linux/src/syscall/path.rs;
+src/kernel/extensions/personality/linux/src/fs/devfs.rs;
+src/kernel/extensions/personality/linux/src/syscall/stat.rs;
 src/lib/fs/common/vfs; docs/ROADMAP.md stage 8.
 
 <a id="fx-0830"></a>
@@ -1671,11 +1679,14 @@ fails here hands them wrong numbers without an error.
    doing: an ended process not as a zombie, a stopped one not as stopped, or its
    reader not as running.
 
-See: src/kernel/src/fs/procfs/check.rs run; src/kernel/src/fs/procfs.rs;
-src/kernel/src/fs/devfs.rs; src/kernel/src/fs/devfs/check.rs;
-src/kernel/src/fs/block.rs; src/lib/fs/common/procfs/src/maps.rs;
-src/lib/fs/common/procfs/src/kstat.rs; src/kernel/src/fs/procfs/render.rs
-state_of; src/kernel/src/sched/queue.rs time_spent; docs/ROADMAP.md stage 8.
+See: src/kernel/extensions/personality/linux/src/fs/procfs/check.rs run;
+src/kernel/extensions/personality/linux/src/fs/procfs.rs;
+src/kernel/extensions/personality/linux/src/fs/devfs.rs;
+src/kernel/extensions/personality/linux/src/fs/devfs/check.rs;
+src/kernel/extensions/personality/linux/src/fs/block.rs;
+src/lib/fs/common/procfs/src/maps.rs; src/lib/fs/common/procfs/src/kstat.rs;
+src/kernel/extensions/personality/linux/src/fs/procfs/render.rs state_of;
+src/kernel/src/sched/queue.rs time_spent; docs/ROADMAP.md stage 8.
 
 <a id="fx-0850"></a>
 
@@ -1690,7 +1701,8 @@ write system call that carried the request.
 1. A program wrote `c` to /proc/sysrq-trigger: from the shell, `echo c >
    /proc/sysrq-trigger`.
 
-See: src/kernel/src/fs/procfs.rs sysrq_trigger; docs/RELIABILITY.md.
+See: src/kernel/extensions/personality/linux/src/fs/procfs.rs sysrq_trigger;
+docs/RELIABILITY.md.
 
 <a id="fx-0860"></a>
 
@@ -1730,16 +1742,18 @@ waits trust their queues, and have no recheck to end a wait a waker forgot.
    not where a program reads it.
 4. tmpfs's `grow_to` shrinks a file, or `sendfile` stopped putting its offset
    back.
-5. `splice` or `copy_file_range` in `src/kernel/src/syscall/pipe.rs` moved the
-   wrong bytes or offset, or `fs::pipe::splice_pipes` lost bytes between two
-   pipes.
+5. `splice` or `copy_file_range` in
+   `src/kernel/extensions/personality/linux/src/syscall/pipe.rs` moved the wrong
+   bytes or offset, or `fs::pipe::splice_pipes` lost bytes between two pipes.
 6. A pipe waker no longer wakes the queue its wait is on (`write_stream`,
    `took`, `wake_both`, `unread_stream`, `splice_pipes`), or a new waker of a
    pipe wait is missing from the list beside `End::wait_to_read`; the `pipewake
    <waker>` line names it.
 
-See: src/kernel/src/fs/check.rs run_calls; src/kernel/src/fs/pipe.rs;
-src/kernel/src/syscall/pipe.rs; src/kernel/src/syscall/fsctl.rs;
+See: src/kernel/extensions/personality/linux/src/fs/check.rs run_calls;
+src/kernel/extensions/personality/linux/src/fs/pipe.rs;
+src/kernel/extensions/personality/linux/src/syscall/pipe.rs;
+src/kernel/extensions/personality/linux/src/syscall/fsctl.rs;
 src/lib/fs/common/vfs/src/pipe.rs; src/lib/fs/common/vfs/src/statfs.rs;
 docs/ROADMAP.md stage 8.
 
@@ -1771,9 +1785,11 @@ twice and must leave no frame behind.
 4. `give_back` decommits a file mapping's pages on munmap, which takes them away
    from the file itself.
 
-See: src/kernel/src/fs/mmap_check.rs; src/kernel/src/syscall/memory.rs sys_mmap,
+See: src/kernel/extensions/personality/linux/src/fs/mmap_check.rs;
+src/kernel/extensions/personality/linux/src/syscall/memory.rs sys_mmap,
 sys_msync; src/kernel/src/user/space.rs map_file, fault;
-src/kernel/src/fs/pages.rs; docs/ROADMAP.md stage 8.
+src/kernel/extensions/personality/linux/src/fs/pages.rs; docs/ROADMAP.md stage
+8.
 
 <a id="fx-0871"></a>
 
@@ -1801,9 +1817,12 @@ it to its status; /proc/<pid>/exe must read as the path with (deleted) after it.
    /proc/self/exe is ENOENT; or procfs's `link_location` is not answered, so the
    link is followed as text to a name that is gone.
 
-See: src/kernel/src/fs/exec_check.rs; src/kernel/src/syscall/load.rs;
-src/kernel/src/syscall/program.rs; src/kernel/src/syscall/exec.rs;
-src/kernel/src/fs/procfs.rs; src/lib/fs/common/vfs/src/walk.rs; docs/CHROME.md.
+See: src/kernel/extensions/personality/linux/src/fs/exec_check.rs;
+src/kernel/extensions/personality/linux/src/syscall/load.rs;
+src/kernel/src/syscall/program.rs;
+src/kernel/extensions/personality/linux/src/syscall/exec.rs;
+src/kernel/extensions/personality/linux/src/fs/procfs.rs;
+src/lib/fs/common/vfs/src/walk.rs; docs/CHROME.md.
 
 <a id="fx-0872"></a>
 
@@ -1835,8 +1854,8 @@ done twice and must leave no frame behind.
    before the advice and the alignment.
 
 See: src/kernel/src/user/madvise_check.rs; src/kernel/src/user/space.rs advise;
-src/kernel/src/syscall/memory.rs sys_madvise; src/kernel/src/user/vmo.rs
-take_range, retire.
+src/kernel/extensions/personality/linux/src/syscall/memory.rs sys_madvise;
+src/kernel/src/user/vmo.rs take_range, retire.
 
 <a id="fx-0880"></a>
 
@@ -1874,11 +1893,13 @@ was made under. The whole run is done twice and must leave no frame behind.
 5. `sys_memfd_create`'s `sanitize_flags` does not apply vm.memfd_noexec, or
    tmpfs's set_attributes or add_seals does not honour F_SEAL_EXEC.
 
-See: src/kernel/src/fs/memfd_check.rs; src/kernel/src/syscall/memfd.rs;
-src/kernel/src/syscall/fd.rs sys_fcntl; src/kernel/src/syscall/memory.rs
-map_file; src/kernel/src/user/space.rs map_file, protect;
+See: src/kernel/extensions/personality/linux/src/fs/memfd_check.rs;
+src/kernel/extensions/personality/linux/src/syscall/memfd.rs;
+src/kernel/extensions/personality/linux/src/syscall/fd.rs sys_fcntl;
+src/kernel/extensions/personality/linux/src/syscall/memory.rs map_file;
+src/kernel/src/user/space.rs map_file, protect;
 src/lib/fs/common/vfs/src/tmpfs.rs add_seals, set_attributes;
-src/kernel/src/syscall/pidns.rs memfd_noexec.
+src/kernel/extensions/personality/linux/src/syscall/pidns.rs memfd_noexec.
 
 <a id="fx-0881"></a>
 
@@ -1919,8 +1940,10 @@ found its ready list full still wakes a wait afterwards.
    the depth above or below one set too many or too few.
 6. `sys_epoll_ctl` or the wait checks in a different order from Linux's.
 
-See: src/kernel/src/fs/epoll_check.rs; src/kernel/src/fs/epoll.rs;
-src/kernel/src/fs/anon.rs; src/kernel/src/syscall/epoll.rs;
+See: src/kernel/extensions/personality/linux/src/fs/epoll_check.rs;
+src/kernel/extensions/personality/linux/src/fs/epoll.rs;
+src/kernel/extensions/personality/linux/src/fs/anon.rs;
+src/kernel/extensions/personality/linux/src/syscall/epoll.rs;
 src/kernel/src/sched/wait.rs; src/lib/fs/common/vfs/src/node.rs poll_changes.
 
 <a id="fx-0882"></a>
@@ -1959,9 +1982,12 @@ must leave no frame behind.
    races the write and can end the wait first. One stop spoils one attempt, and
    the attempt lines say which wait each time.
 
-See: src/kernel/src/fs/eventfd_check.rs; src/kernel/src/fs/eventfd.rs;
-src/kernel/src/fs/wake.rs; src/kernel/src/sched/wait.rs;
-src/kernel/src/syscall/eventfd.rs; src/kernel/src/fs/anon.rs.
+See: src/kernel/extensions/personality/linux/src/fs/eventfd_check.rs;
+src/kernel/extensions/personality/linux/src/fs/eventfd.rs;
+src/kernel/extensions/personality/linux/src/fs/wake.rs;
+src/kernel/src/sched/wait.rs;
+src/kernel/extensions/personality/linux/src/syscall/eventfd.rs;
+src/kernel/extensions/personality/linux/src/fs/anon.rs.
 
 <a id="fx-0883"></a>
 
@@ -2000,9 +2026,12 @@ the thread's stack included.
 6. The thread does not exit once nothing is armed, or a timer closed does not
    tell it, so its stack is counted against the frame window.
 
-See: src/kernel/src/fs/timerfd_check.rs; src/kernel/src/fs/timerfd.rs;
-src/kernel/src/syscall/timerfd.rs; src/kernel/src/syscall/time.rs;
-src/kernel/src/fs/wake.rs; src/kernel/src/sched/wait.rs.
+See: src/kernel/extensions/personality/linux/src/fs/timerfd_check.rs;
+src/kernel/extensions/personality/linux/src/fs/timerfd.rs;
+src/kernel/extensions/personality/linux/src/syscall/timerfd.rs;
+src/kernel/extensions/personality/linux/src/syscall/time.rs;
+src/kernel/extensions/personality/linux/src/fs/wake.rs;
+src/kernel/src/sched/wait.rs.
 
 <a id="fx-0884"></a>
 
@@ -2037,9 +2066,12 @@ and must leave no frame behind.
    comes back as late as the stop was long. One stop spoils one attempt, and the
    attempt lines show the lateness each time.
 
-See: src/kernel/src/fs/signalfd_check.rs; src/kernel/src/fs/signalfd.rs;
-src/kernel/src/syscall/signalfd.rs; src/kernel/src/syscall/signal.rs;
-src/kernel/src/syscall/process.rs notify_signal; src/kernel/src/fs/wake.rs.
+See: src/kernel/extensions/personality/linux/src/fs/signalfd_check.rs;
+src/kernel/extensions/personality/linux/src/fs/signalfd.rs;
+src/kernel/extensions/personality/linux/src/syscall/signalfd.rs;
+src/kernel/extensions/personality/linux/src/syscall/signal.rs;
+src/kernel/extensions/personality/linux/src/syscall/process.rs notify_signal;
+src/kernel/extensions/personality/linux/src/fs/wake.rs.
 
 <a id="fx-0885"></a>
 
@@ -2071,8 +2103,10 @@ does.
 5. `render::mountinfo` prints the mount point from a different root than
    `/proc/<pid>/fd` does, or `MountFlags::options` misorders the options.
 
-See: src/kernel/src/fs/mount_check.rs; src/kernel/src/syscall/fsctl.rs;
-src/lib/fs/common/vfs/src/namespace.rs; src/kernel/src/fs/procfs/render.rs.
+See: src/kernel/extensions/personality/linux/src/fs/mount_check.rs;
+src/kernel/extensions/personality/linux/src/syscall/fsctl.rs;
+src/lib/fs/common/vfs/src/namespace.rs;
+src/kernel/extensions/personality/linux/src/fs/procfs/render.rs.
 
 <a id="fx-0886"></a>
 
@@ -2103,7 +2137,8 @@ a bind from it EINVAL.
 5. `sys_mount` in `syscall/fsctl.rs` takes the operations in another order than
    Linux's `path_mount`.
 
-See: src/kernel/src/fs/bind_check.rs; src/kernel/src/syscall/fsctl.rs;
+See: src/kernel/extensions/personality/linux/src/fs/bind_check.rs;
+src/kernel/extensions/personality/linux/src/syscall/fsctl.rs;
 src/lib/fs/common/vfs/src/namespace.rs.
 
 <a id="fx-0887"></a>
@@ -2142,8 +2177,10 @@ A native child the second process makes must be in its namespace and root
    rather than its creator's context, or in the first UTS, IPC and cgroup
    namespaces rather than its creator's.
 
-See: src/kernel/src/fs/namespace_check.rs; src/kernel/src/syscall/namespace.rs;
-src/kernel/src/syscall/fsctl.rs; src/kernel/src/syscall/launch.rs;
+See: src/kernel/extensions/personality/linux/src/fs/namespace_check.rs;
+src/kernel/extensions/personality/linux/src/syscall/namespace.rs;
+src/kernel/extensions/personality/linux/src/syscall/fsctl.rs;
+src/kernel/extensions/personality/linux/src/syscall/launch.rs;
 src/lib/fs/common/vfs/src/namespace.rs.
 
 <a id="fx-0888"></a>
@@ -2174,8 +2211,10 @@ read-only bind of /proc/sys must refuse a write with EROFS (docs/NAMESPACES.md
 5. `Credentials::exec` honours a set-id bit, or gives the sets to a process that
    is not its namespace's root.
 
-See: src/kernel/src/fs/userns_check.rs; src/kernel/src/syscall/userns.rs;
-src/kernel/src/syscall/credentials.rs; src/kernel/src/syscall/namespace.rs.
+See: src/kernel/extensions/personality/linux/src/fs/userns_check.rs;
+src/kernel/extensions/personality/linux/src/syscall/userns.rs;
+src/kernel/extensions/personality/linux/src/syscall/credentials.rs;
+src/kernel/extensions/personality/linux/src/syscall/namespace.rs.
 
 <a id="fx-0890"></a>
 
@@ -2198,7 +2237,8 @@ opened for writing, mkdir and unlink are refused as kernfs refuses them, statfs
 says SYSFS_MAGIC, and cgroup2 mounts on fs/cgroup.
 
 1. A directory lists a name its lookup does not find, or the other way round:
-   `entries` in src/kernel/src/fs/sysfs.rs and a core's list disagree.
+   `entries` in src/kernel/extensions/personality/linux/src/fs/sysfs.rs and a
+   core's list disagree.
 2. A link's target is spelt wrongly: `path_of` and the directories disagree
    about where something is, or src/lib/fs/common/sysfs's `path::relative`
    climbs to the wrong ancestor.
@@ -2208,7 +2248,8 @@ says SYSFS_MAGIC, and cgroup2 mounts on fs/cgroup.
 4. A format in src/lib/fs/common/sysfs changed; its host tests pin each against
    Linux's.
 
-See: src/kernel/src/fs/sysfs.rs; src/kernel/src/fs/sysfs/check.rs;
+See: src/kernel/extensions/personality/linux/src/fs/sysfs.rs;
+src/kernel/extensions/personality/linux/src/fs/sysfs/check.rs;
 src/lib/fs/common/sysfs; docs/SYSFS.md.
 
 <a id="fx-0891"></a>
@@ -2248,9 +2289,11 @@ namespace; and a namespace whose first fork failed must take no later fork
 8. `launch::load_native` leaves a native child out of its creator's namespace,
    or `Numbers::drop` leaves a namespace open after its pid 1 went.
 
-See: src/kernel/src/fs/pidns_check.rs; src/kernel/src/syscall/pidns.rs;
-src/kernel/src/syscall/family.rs; src/kernel/src/syscall/kill.rs;
-src/kernel/src/fs/procfs.rs.
+See: src/kernel/extensions/personality/linux/src/fs/pidns_check.rs;
+src/kernel/extensions/personality/linux/src/syscall/pidns.rs;
+src/kernel/extensions/personality/linux/src/syscall/family.rs;
+src/kernel/extensions/personality/linux/src/syscall/kill.rs;
+src/kernel/extensions/personality/linux/src/fs/procfs.rs.
 
 <a id="fx-0892"></a>
 
@@ -2288,10 +2331,13 @@ thread with a new namespace are EINVAL (docs/NAMESPACES.md §12).
 6. `namespace::sys_setns` skips a capability, type or ownership test, or leaves
    the caller's root and working directory behind.
 
-See: src/kernel/src/fs/smallns_check.rs; src/kernel/src/syscall/nsproxy.rs;
-src/kernel/src/fs/nsfs.rs; src/kernel/src/syscall/namespace.rs;
-src/kernel/src/syscall/system.rs; src/kernel/src/syscall/sem.rs;
-src/kernel/src/fs/cgroupfs.rs.
+See: src/kernel/extensions/personality/linux/src/fs/smallns_check.rs;
+src/kernel/extensions/personality/linux/src/syscall/nsproxy.rs;
+src/kernel/extensions/personality/linux/src/fs/nsfs.rs;
+src/kernel/extensions/personality/linux/src/syscall/namespace.rs;
+src/kernel/extensions/personality/linux/src/syscall/system.rs;
+src/kernel/extensions/personality/linux/src/syscall/sem.rs;
+src/kernel/extensions/personality/linux/src/fs/cgroupfs.rs.
 
 <a id="fx-0893"></a>
 
@@ -2325,9 +2371,11 @@ section 8, NN1 to NN17).
 5. `sockname` keys abstract names without the network namespace, or `/proc/net`
    reads the first namespace.
 
-See: src/kernel/src/fs/netns_check.rs; src/kernel/src/net/namespace.rs;
-src/kernel/src/net/veth.rs; src/kernel/src/net/device.rs;
-src/kernel/src/net/netlink/link.rs; docs/NETNS.md.
+See: src/kernel/extensions/personality/linux/src/fs/netns_check.rs;
+src/kernel/extensions/personality/linux/src/net/namespace.rs;
+src/kernel/extensions/personality/linux/src/net/veth.rs;
+src/kernel/extensions/personality/linux/src/net/device.rs;
+src/kernel/extensions/personality/linux/src/net/netlink/link.rs; docs/NETNS.md.
 
 <a id="fx-0894"></a>
 
@@ -2355,8 +2403,9 @@ proc_pid_stack asks CAP_SYS_ADMIN.
 4. `attributes::credentials_changed` is not called when a process changes the
    ids it acts as, so the process stays dumpable.
 
-See: src/kernel/src/fs/procaccess_check.rs; src/kernel/src/fs/procfs.rs;
-src/kernel/src/syscall/credentials.rs.
+See: src/kernel/extensions/personality/linux/src/fs/procaccess_check.rs;
+src/kernel/extensions/personality/linux/src/fs/procfs.rs;
+src/kernel/extensions/personality/linux/src/syscall/credentials.rs.
 
 <a id="fx-0895"></a>
 
@@ -2381,8 +2430,10 @@ statements).
    held thread as a stop, which SIGCONT undoes.
 4. The host stopped the emulator for longer than the check's one-second margin.
 
-See: src/kernel/src/fs/crashes.rs; src/kernel/src/syscall/deliver/hold_check.rs;
-src/kernel/src/syscall/deliver.rs; src/kernel/src/syscall/process.rs.
+See: src/kernel/extensions/personality/linux/src/fs/crashes.rs;
+src/kernel/extensions/personality/linux/src/syscall/deliver/hold_check.rs;
+src/kernel/extensions/personality/linux/src/syscall/deliver.rs;
+src/kernel/extensions/personality/linux/src/syscall/process.rs.
 
 <a id="fx-0900"></a>
 
@@ -2409,8 +2460,10 @@ removed by the first namespace.
 4. `Namespace::busy` counts a mount of another namespace as a pin, or
    `detach_elsewhere` leaves it on a name that is gone.
 
-See: src/kernel/src/fs/mountperm_check.rs; src/kernel/src/syscall/fsctl.rs;
-src/kernel/src/syscall/namespace.rs; src/lib/fs/common/vfs/src/namespace.rs.
+See: src/kernel/extensions/personality/linux/src/fs/mountperm_check.rs;
+src/kernel/extensions/personality/linux/src/syscall/fsctl.rs;
+src/kernel/extensions/personality/linux/src/syscall/namespace.rs;
+src/lib/fs/common/vfs/src/namespace.rs.
 
 <a id="fx-0901"></a>
 
@@ -2591,8 +2644,9 @@ path its memory limit does not see (certification finding F-37, T.EXHAUST).
 4. The kernel's account was not installed as the first job was made
    (`quota::install_kernel_heap`), so nothing was charged at all.
 
-See: src/kernel/src/fs/kmem_check.rs; src/lib/kernel/kmem/src/lib.rs;
-src/kernel/src/object/quota.rs; docs/certification/IMPLEMENTATION.md W-15.
+See: src/kernel/extensions/personality/linux/src/fs/kmem_check.rs;
+src/lib/kernel/kmem/src/lib.rs; src/kernel/src/object/quota.rs;
+docs/certification/IMPLEMENTATION.md W-15.
 
 <a id="fx-0907"></a>
 
@@ -2645,7 +2699,8 @@ check and the hook, if one still is.
 See: src/kernel/src/arch/speculation.rs CheckHook, forget_root;
 src/kernel/src/object/domain_check.rs; src/kernel/src/main.rs;
 docs/OPAQUE-KERNEL.md §9.7; src/kernel/src/sched/work.rs hook_armed_by;
-src/kernel/src/user/vmo.rs ReclaimHook; src/kernel/src/fs/btrfs_write_check.rs.
+src/kernel/src/user/vmo.rs ReclaimHook;
+src/kernel/extensions/personality/linux/src/fs/btrfs_write_check.rs.
 
 <a id="fx-0909"></a>
 
@@ -2702,9 +2757,11 @@ alone (docs/NAMESPACES.md §12.1).
 5. `family::retarget_vdso` does not swap the view, or swaps a space the child
    shares.
 
-See: src/kernel/src/fs/timens_check.rs; src/kernel/src/syscall/timens.rs;
-src/kernel/src/syscall/time.rs; src/kernel/src/syscall/vdso.rs;
-src/kernel/src/syscall/namespace.rs.
+See: src/kernel/extensions/personality/linux/src/fs/timens_check.rs;
+src/kernel/extensions/personality/linux/src/syscall/timens.rs;
+src/kernel/extensions/personality/linux/src/syscall/time.rs;
+src/kernel/extensions/personality/linux/src/syscall/vdso.rs;
+src/kernel/extensions/personality/linux/src/syscall/namespace.rs.
 
 <a id="fx-0911"></a>
 
@@ -3017,9 +3074,11 @@ a stop. The message names the case.
 
 1. `process_make` or `process_run` in src/kernel/src/syscall/native.rs stopped
    asking a right, or `in_user_space` a bound.
-2. `start_native` in src/kernel/src/syscall/launch.rs did not set the entry
-   under the claim.
-3. `ids_it_may_raise` in src/kernel/src/syscall/exec.rs stopped asking
+2. `start_native` in
+   src/kernel/extensions/personality/linux/src/syscall/launch.rs did not set the
+   entry under the claim.
+3. `ids_it_may_raise` in
+   src/kernel/extensions/personality/linux/src/syscall/exec.rs stopped asking
    `AddressSpace::handles`.
 4. `load` in src/kernel/src/discovery/first_image.rs took an image it should
    refuse, or left a segment's permissions unapplied.
@@ -3491,9 +3550,9 @@ nothing here; a request on the ring is the ring-3 driver's check.
 6. The second round did not give every frame back: the ring's VMO holds, its
    task's stack or the registry leak.
 
-See: src/kernel/src/interfaces/block_ring/mod.rs;
-src/kernel/src/interfaces/block_ring/check.rs; docs/BLOCK-RING.md;
-docs/ROADMAP.md stage 10.
+See: src/kernel/extensions/personality/linux/src/interfaces/block_ring/mod.rs;
+src/kernel/extensions/personality/linux/src/interfaces/block_ring/check.rs;
+docs/BLOCK-RING.md; docs/ROADMAP.md stage 10.
 
 <a id="fx-1005"></a>
 
@@ -3523,7 +3582,8 @@ running.
 4. The initramfs carries no `/sbin/blk`: `tools/common/xtask/src/native.rs` no
    longer lists it.
 
-See: src/kernel/src/interfaces/block_ring/driver_check.rs;
+See:
+src/kernel/extensions/personality/linux/src/interfaces/block_ring/driver_check.rs;
 src/user/system/native/drivers/block/virtio-blk/src/main.rs; docs/BLOCK-RING.md;
 docs/ROADMAP.md stage 10.
 
@@ -3768,9 +3828,9 @@ program woken with ENODEV when its driver goes.
    `admit` stopped counting queued requests against `MAX_OUTSTANDING` (F-63).
 6. A program never woke when its driver went: `finish` did not answer the table.
 
-See: src/kernel/src/interfaces/chardev/mod.rs;
-src/kernel/src/interfaces/chardev/check.rs; docs/NVIDIA.md section 4.4;
-docs/certification/FINDINGS.md F-63.
+See: src/kernel/extensions/personality/linux/src/interfaces/chardev/mod.rs;
+src/kernel/extensions/personality/linux/src/interfaces/chardev/check.rs;
+docs/NVIDIA.md section 4.4; docs/certification/FINDINGS.md F-63.
 
 <a id="fx-1014"></a>
 
@@ -3789,8 +3849,10 @@ and never `WRITE`.
    publication.
 2. `Ready::card_rights` gained `WRITE`, or lost `MAP` for a driver that copies.
 
-See: src/kernel/src/interfaces/display/mod.rs may_copy;
-src/kernel/src/interfaces/display/check.rs; docs/DISPLAY.md section 8.
+See: src/kernel/extensions/personality/linux/src/interfaces/display/mod.rs
+may_copy;
+src/kernel/extensions/personality/linux/src/interfaces/display/check.rs;
+docs/DISPLAY.md section 8.
 
 <a id="fx-1015"></a>
 
@@ -3809,7 +3871,7 @@ modes to be refused.
 2. The session's page checks (`Session::receive` of MODE_LIST) stopped counting
    preferred entries or tracking the page order.
 
-See: src/kernel/src/interfaces/display/check.rs;
+See: src/kernel/extensions/personality/linux/src/interfaces/display/check.rs;
 src/lib/proto/displayctl/src/listed.rs; src/lib/proto/displayctl/src/session.rs;
 docs/DISPLAY.md section 9.
 
@@ -3835,9 +3897,9 @@ printed before the report.
 3. A directory or a link is missing or of the wrong kind: lookup, readdir or
    readlink in src/lib/fs/btrfs/vfs changed what it answers.
 
-See: src/kernel/src/fs/btrfs_check.rs; src/kernel/src/fs/btrfs.rs;
-src/lib/fs/btrfs/vfs; tools/common/xtask/src/btrfs_disk.rs; docs/ROADMAP.md
-stage 11.
+See: src/kernel/extensions/personality/linux/src/fs/btrfs_check.rs;
+src/kernel/extensions/personality/linux/src/fs/btrfs.rs; src/lib/fs/btrfs/vfs;
+tools/common/xtask/src/btrfs_disk.rs; docs/ROADMAP.md stage 11.
 
 <a id="fx-1150"></a>
 
@@ -3872,8 +3934,9 @@ first, must be EADDRINUSE though both set SO_REUSEADDR.
    been refused: the listener lookup in `src/lib/network/net`'s TCP input, or
    the reset it sends a segment with nowhere to go.
 
-See: src/kernel/src/net/check.rs; src/kernel/src/net/mod.rs;
-src/lib/network/net; src/lib/network/nettcp; docs/ROADMAP.md.
+See: src/kernel/extensions/personality/linux/src/net/check.rs;
+src/kernel/extensions/personality/linux/src/net/mod.rs; src/lib/network/net;
+src/lib/network/nettcp; docs/ROADMAP.md.
 
 <a id="fx-1151"></a>
 
@@ -3932,14 +3995,15 @@ before it believes any of it.
    stayed: the handler read the wrong attribute, or acted on a different
    interface from the one the message named.
 4. A refusal came back as something else: the order of the checks in
-   `src/kernel/src/net/netlink/route.rs` changed, so an unknown type is answered
-   before it is refused.
+   `src/kernel/extensions/personality/linux/src/net/netlink/route.rs` changed,
+   so an unknown type is answered before it is refused.
 5. A reply was addressed to another port or another sequence number: the
    socket's port identifier is not what `getsockname` reports, or a reply no
    longer echoes the request's sequence number -- which is silent breakage,
    because a program filters those replies out and then waits for ever.
 
-See: src/kernel/src/net/netlink/check.rs; src/kernel/src/net/netlink/route.rs;
+See: src/kernel/extensions/personality/linux/src/net/netlink/check.rs;
+src/kernel/extensions/personality/linux/src/net/netlink/route.rs;
 src/lib/network/netlink; docs/ROADMAP.md.
 
 <a id="fx-1201"></a>
@@ -3980,11 +4044,11 @@ was made durable is checked against that trailer.
    under newer stat data. src/lib/fs/btrfs/write's powerfail tests reproduce
    this on the host, faster.
 
-See: src/kernel/src/fs/btrfs_write_check.rs;
-src/kernel/src/fs/btrfs_powerfail.rs; src/kernel/src/fs/btrfs.rs;
-src/lib/fs/btrfs/vfs rw; src/lib/fs/btrfs/write;
-tools/common/xtask/src/btrfs_disk.rs; tools/common/xtask/src/powerfail.rs;
-docs/ROADMAP.md stage 12.
+See: src/kernel/extensions/personality/linux/src/fs/btrfs_write_check.rs;
+src/kernel/extensions/personality/linux/src/fs/btrfs_powerfail.rs;
+src/kernel/extensions/personality/linux/src/fs/btrfs.rs; src/lib/fs/btrfs/vfs
+rw; src/lib/fs/btrfs/write; tools/common/xtask/src/btrfs_disk.rs;
+tools/common/xtask/src/powerfail.rs; docs/ROADMAP.md stage 12.
 
 <a id="fx-1202"></a>
 
@@ -3997,13 +4061,13 @@ directory onto it, under pid 1's filesystem lock. After the switch pid 1's root
 and working directory must be the volume's, and a fork of pid 1 must see the
 volume as /.
 
-1. `switch_to` in src/kernel/src/fs/root_disk.rs published the root without
-   moving pid 1, or moved another process.
+1. `switch_to` in src/kernel/extensions/personality/linux/src/fs/root_disk.rs
+   published the root without moving pid 1, or moved another process.
 2. A fork does not copy its parent's root (`Process::forked` in
-   src/kernel/src/syscall/process.rs).
+   src/kernel/extensions/personality/linux/src/syscall/process.rs).
 
-See: src/kernel/src/fs/root_disk.rs; docs/INIT.md §7.3;
-docs/certification/ITEM.md.
+See: src/kernel/extensions/personality/linux/src/fs/root_disk.rs; docs/INIT.md
+§7.3; docs/certification/ITEM.md.
 
 <a id="fx-1203"></a>
 
@@ -4019,14 +4083,15 @@ new count, the archive answering nothing, pid 1's inputs unchanged and outside
 the released pages, and after a switch no other name of the archive left and a
 file held open and mapped across the release reading as before.
 
-1. `release` in src/kernel/src/fs/mod.rs or `give_back_initrd` in
-   src/kernel/src/mm.rs gave back other frames than the archive's whole pages,
-   or left the watermark as it was.
+1. `release` in src/kernel/extensions/personality/linux/src/fs/mod.rs or
+   `give_back_initrd` in src/kernel/src/mm.rs gave back other frames than the
+   archive's whole pages, or left the watermark as it was.
 2. `init::set_inputs` kept a slice of the archive instead of a copy.
 3. `ferrix_vfs::initramfs::remove` left a name of the archive, or removed a
    spared one.
 
-See: src/kernel/src/fs/release_check.rs; docs/RAM-RELEASE.md §2.
+See: src/kernel/extensions/personality/linux/src/fs/release_check.rs;
+docs/RAM-RELEASE.md §2.
 
 <a id="fx-1301"></a>
 
@@ -4076,27 +4141,32 @@ its own memory.max, pids.max and cpu.weight for writing; still read 16 MiB; and
 accept a limit on a job the delegatee made with job_create.
 
 1. `job_set_limit` in src/kernel/src/syscall/native.rs asks for MANAGE rather
-   than SET_LIMIT, or `job_for_cgroup` in src/kernel/src/fs/cgroupfs.rs grants
-   SET_LIMIT without judging the limit files' write permission
-   (`limit_metadata`), so whoever may fill a delegated cgroup may also lift its
-   limits.
-2. `load_native` in src/kernel/src/syscall/launch.rs did not take the creator's
-   credentials, or `process_create` in src/kernel/src/syscall/native.rs did not
-   pass the caller as the creator, so a native process started as root
-   (`Credentials::root()`, what `Process::new` gives) whoever made it.
-3. `forked_into` in src/kernel/src/syscall/process.rs or
-   `clone_with`/`cgroup_target` in src/kernel/src/syscall/family.rs put the
-   child in its parent's job, or `cgroupfs::clone_target` did not recognise a
-   cgroupfs directory.
-4. `attach_permissions` in src/kernel/src/fs/cgroupfs.rs did not find the common
-   ancestor, or judged the move as someone other than the file's opener; or
-   `set_node`/`node` lost an owner, so a lookup reports root's.
+   than SET_LIMIT, or `job_for_cgroup` in
+   src/kernel/extensions/personality/linux/src/fs/cgroupfs.rs grants SET_LIMIT
+   without judging the limit files' write permission (`limit_metadata`), so
+   whoever may fill a delegated cgroup may also lift its limits.
+2. `load_native` in
+   src/kernel/extensions/personality/linux/src/syscall/launch.rs did not take
+   the creator's credentials, or `process_create` in
+   src/kernel/src/syscall/native.rs did not pass the caller as the creator, so a
+   native process started as root (`Credentials::root()`, what `Process::new`
+   gives) whoever made it.
+3. `forked_into` in
+   src/kernel/extensions/personality/linux/src/syscall/process.rs or
+   `clone_with`/`cgroup_target` in
+   src/kernel/extensions/personality/linux/src/syscall/family.rs put the child
+   in its parent's job, or `cgroupfs::clone_target` did not recognise a cgroupfs
+   directory.
+4. `attach_permissions` in
+   src/kernel/extensions/personality/linux/src/fs/cgroupfs.rs did not find the
+   common ancestor, or judged the move as someone other than the file's opener;
+   or `set_node`/`node` lost an owner, so a lookup reports root's.
 5. `Job::remove_named_child` did not mark the job removed, or `count_in_checked`
    and `new_named_child` did not look.
-6. `EventsFile` in src/kernel/src/fs/cgroupfs.rs does not name the job's
-   `events` queue in `poll_queues`, or does not compare the queue's wake count
-   with the one it last rendered at; or `job::notify` did not wake the queue at
-   the flip.
+6. `EventsFile` in src/kernel/extensions/personality/linux/src/fs/cgroupfs.rs
+   does not name the job's `events` queue in `poll_queues`, or does not compare
+   the queue's wake count with the one it last rendered at; or `job::notify` did
+   not wake the queue at the flip.
 7. `poll::revents`, `poll::select_sets` or epoll's `bits` lost
    `Readiness::priority`.
 8. `Job::new_named_child`, `remove_named_child` or `children` in
@@ -4114,8 +4184,8 @@ accept a limit on a job the delegatee made with job_create.
 12. A write's text is parsed differently from Linux's:
     src/lib/fs/common/cgroupfs, whose host tests pin each parse.
 
-See: src/kernel/src/fs/cgroupfs.rs; src/kernel/src/object/job.rs;
-src/lib/fs/common/cgroupfs; docs/CGROUPS.md.
+See: src/kernel/extensions/personality/linux/src/fs/cgroupfs.rs;
+src/kernel/src/object/job.rs; src/lib/fs/common/cgroupfs; docs/CGROUPS.md.
 
 <a id="fx-1302"></a>
 
@@ -4145,7 +4215,8 @@ one allowing that token by name does not.
 4. The entry builds `SyscallArgs::ip` from another register than the saved
    program counter.
 
-See: src/kernel/src/syscall/seccomp_check.rs; src/kernel/src/syscall/seccomp.rs;
+See: src/kernel/extensions/personality/linux/src/syscall/seccomp_check.rs;
+src/kernel/extensions/personality/linux/src/syscall/seccomp.rs;
 src/kernel/src/trap.rs filter_system_call; docs/SECCOMP.md §3.2, §3.3.
 
 <a id="fx-1303"></a>
@@ -4191,9 +4262,11 @@ looked for at a call once the thread it was installed on has gone.
    filter killed back in filter mode (the consultant's B1 on S5, docs/SECCOMP.md
    §3.7).
 
-See: src/kernel/src/syscall/seccomp_filters_check.rs;
-src/kernel/src/syscall/seccomp.rs; src/kernel/src/syscall/thread.rs;
-docs/SECCOMP.md §3.4 to §3.7.
+See:
+src/kernel/extensions/personality/linux/src/syscall/seccomp_filters_check.rs;
+src/kernel/extensions/personality/linux/src/syscall/seccomp.rs;
+src/kernel/extensions/personality/linux/src/syscall/thread.rs; docs/SECCOMP.md
+§3.4 to §3.7.
 
 <a id="fx-1304"></a>
 
@@ -4227,9 +4300,11 @@ must be refused with EINVAL, as Linux refuses it there.
    or the verdict is not `Verdict::Trap`, so the call's number is lost from its
    registers.
 
-See: src/kernel/src/syscall/seccomp/user_dispatch.rs;
-src/kernel/src/syscall/seccomp/user_dispatch_check.rs;
-src/kernel/src/syscall/seccomp.rs check; docs/SECCOMP.md §13.
+See:
+src/kernel/extensions/personality/linux/src/syscall/seccomp/user_dispatch.rs;
+src/kernel/extensions/personality/linux/src/syscall/seccomp/user_dispatch_check.rs;
+src/kernel/extensions/personality/linux/src/syscall/seccomp.rs check;
+docs/SECCOMP.md §13.
 
 <a id="fx-1501"></a>
 
@@ -4308,11 +4383,12 @@ EBADF (247).
    calls by the numbers `src/lib/proto/native-abi` gives, or the dispatcher does
    not route a native number from a Linux program.
 
-See: src/kernel/src/syscall/init_calls_check.rs; src/kernel/src/init.rs;
-src/kernel/src/syscall/native.rs; src/kernel/src/syscall/launch.rs;
+See: src/kernel/extensions/personality/linux/src/syscall/init_calls_check.rs;
+src/kernel/src/init.rs; src/kernel/src/syscall/native.rs;
+src/kernel/extensions/personality/linux/src/syscall/launch.rs;
 src/kernel/src/object/process.rs; src/lib/proto/native-abi/src/nr.rs;
-src/kernel/src/fs/portfd.rs; src/lib/proto/native-abi/src/bootstrap.rs;
-docs/INIT.md §6, §9, §11, §16.
+src/kernel/extensions/personality/linux/src/fs/portfd.rs;
+src/lib/proto/native-abi/src/bootstrap.rs; docs/INIT.md §6, §9, §11, §16.
 
 <a id="fx-1503"></a>
 
@@ -4332,7 +4408,8 @@ A second `set_inputs` must be refused and leave pid 1's inputs as they were.
    the boot archive was read.
 
 See: src/kernel/src/init.rs set_inputs; src/kernel/src/init.rs check;
-src/kernel/src/fs/mod.rs init; docs/certification/ITEM.md section 2.
+src/kernel/extensions/personality/linux/src/fs/mod.rs init;
+docs/certification/ITEM.md section 2.
 
 <a id="fx-9001"></a>
 
@@ -4510,5 +4587,6 @@ kernel it waits on. The machine resets after this report only under
 3. A timeout shorter than the feeder's period, or than a long synchronous step
    it takes (a disk sync, a large exec).
 
-See: src/kernel/src/watchdog.rs; src/kernel/src/fs/watchdog.rs;
-docs/POSTMORTEM.md 6.11.
+See: src/kernel/src/watchdog.rs;
+src/kernel/extensions/personality/linux/src/fs/watchdog.rs; docs/POSTMORTEM.md
+6.11.

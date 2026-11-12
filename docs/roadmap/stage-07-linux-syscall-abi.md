@@ -233,13 +233,13 @@ how every wake was keyed before, has been shown to find nobody:
 
 **inotify and pidfds, and real-time futex deadlines (ferrix-e4,
 2026-09-27).** A black-box pass found `inotify_init`, `inotify_init1` and
-`pidfd_open` answering `ENOSYS`. inotify (`src/kernel/src/fs/inotify.rs`) has
+`pidfd_open` answering `ENOSYS`. inotify (`src/kernel/extensions/personality/linux/src/fs/inotify.rs`) has
 its four calls on all three architectures, a watch naming a node by device
 and inode number, directory watches hearing their entries' events by name,
 rename cookies, `IN_DELETE_SELF` with `IN_IGNORED`, the one-shot and mask
 flags, merged repeats, `IN_Q_OVERFLOW`, poll, epoll and `FIONREAD`; nothing
 it adds to a call costs anything until a watch exists. A pidfd
-(`src/kernel/src/fs/pidfd.rs`) is readable once its process has ended, and
+(`src/kernel/extensions/personality/linux/src/fs/pidfd.rs`) is readable once its process has ended, and
 takes `pidfd_send_signal` and `waitid(P_PIDFD)`. A 59-check program run
 first on the host's Linux passes on Ferrix. Left: a `siginfo_t` for
 `pidfd_send_signal`, `CLONE_PIDFD`, `IN_UNMOUNT`, the per-user limits and

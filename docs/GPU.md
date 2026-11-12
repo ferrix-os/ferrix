@@ -341,8 +341,8 @@ The pieces, each landable on its own:
    by the core (like the card's one big VMO but per resource), attached to
    the device with `ResourceAttachBacking` (the driver already pins for the
    display's `attach`). The node's `MAP` returns an mmap offset into that
-   VMO exactly as `map_dumb` does (`src/kernel/src/interfaces/display/drm.rs:789`, and
-   `devfs::mapping` at `src/kernel/src/fs/devfs.rs:938` is the hook — the render
+   VMO exactly as `map_dumb` does (`src/kernel/extensions/personality/linux/src/interfaces/display/drm.rs:789`, and
+   `devfs::mapping` at `src/kernel/extensions/personality/linux/src/fs/devfs.rs:938` is the hook — the render
    inode needs its own `mapping()` returning the object's VMO). Testable:
    a program creates a resource, maps it, writes a byte, reads it back.
 

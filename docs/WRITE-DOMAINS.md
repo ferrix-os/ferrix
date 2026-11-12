@@ -87,13 +87,13 @@ because the user granted the authority. §4's undo is the answer there.
 |---|---|---|
 | The only file check is the uid/gid check | `src/lib/fs/common/vfs/src/namespace.rs:1006-1017` (Linux's `may_open`), `access.rs:98-114` | No check by program |
 | uid 0 passes every read and write check | `src/lib/fs/common/vfs/src/access.rs:110-113` | Any check this design adds must not be the uid/gid check |
-| The identity a check is made as | `Context { root, cwd, who, ns }`, `namespace.rs:419-431`; built in `src/kernel/src/syscall/path.rs:185-193` | The domain goes in the same place as `who` |
+| The identity a check is made as | `Context { root, cwd, who, ns }`, `namespace.rs:419-431`; built in `src/kernel/extensions/personality/linux/src/syscall/path.rs:185-193` | The domain goes in the same place as `who` |
 | The desktop and every program it starts run as root | `docs/AUTH.md` §6.1; `hyprix.service` has no `User=` (`tools/common/xtask/src/init.rs:487-497`) | Today every GUI app can rewrite every file |
 | Landlock | `ENOSYS` (`docs/CHROME.md:638`) | No program can restrict itself |
 | seccomp | No filter can be installed yet, and a filter never sees a path (`docs/SECCOMP.md` §3.2) | Cannot say "only under this folder" |
 | init's sandboxing keys | `NoNewPrivileges=`, `PrivateTmp=` and `ProtectSystem=` carried out since L13a (`docs/INIT.md` §4.5); the rest warned about and ignored (`src/lib/init/svc/src/kind/sandbox.rs`, `NOT_BUILT`) | `ProtectHome=`, `ReadOnlyPaths=` and `ReadWritePaths=` do nothing yet |
 | `app.toml` | Declares files, not permissions (`docs/APPS.md` §3) | No place to say what an app may write |
-| Extended attributes | No filesystem keeps them: get is `ENODATA`, set is `EOPNOTSUPP` (`src/kernel/src/syscall/fsctl.rs:101-106`) | Nowhere to store a per-file tag (§10, Q3) |
+| Extended attributes | No filesystem keeps them: get is `ENODATA`, set is `EOPNOTSUPP` (`src/kernel/extensions/personality/linux/src/syscall/fsctl.rs:101-106`) | Nowhere to store a per-file tag (§10, Q3) |
 | btrfs snapshots | The writer refuses a volume with any (`src/lib/fs/btrfs/write/src/lib.rs:42-51`); planned as Stage C (`docs/ARCHITECTURE.md`, `BtrfsSubvolumes` in `docs/sysml/09-storage.sysml`) | No undo |
 | Virtual keyboard and pointer | hyprix serves `zwp_virtual_keyboard_v1` and `zwlr_virtual_pointer_v1` to any client (`src/user/system/linux/compositor/hyprix/src/state.rs:353`, `:5514`) | Any client can type and click into another client's window (§3.4) |
 
@@ -102,9 +102,9 @@ What already helps:
 * **An open descriptor is a capability.** Write permission is checked once,
   at open, and after that only the descriptor's mode is checked. A shared
   writable mapping needs a descriptor opened for writing
-  (`src/kernel/src/syscall/memory.rs:273`).
+  (`src/kernel/extensions/personality/linux/src/syscall/memory.rs:273`).
 * **Descriptors can be passed** over a Unix socket with `SCM_RIGHTS`
-  (`src/kernel/src/fs/socket.rs:34-40`).
+  (`src/kernel/extensions/personality/linux/src/fs/socket.rs:34-40`).
 * **Mount namespaces** (N1 to N3, `docs/NAMESPACES.md`) give a service a
   private `/tmp`.
 * **`Location::parent`** (`namespace.rs:332`) walks up across mounts to the
@@ -182,10 +182,10 @@ they test.
 | `link` | `namespace.rs:1170` | `MAKE_*` on the new parent, then W-R6 |
 | `unlink`, `rmdir` | `namespace.rs:1203`, `:1231` | `REMOVE_FILE`, `REMOVE_DIR` on the parent |
 | `rename` | `namespace.rs:1264` | `REMOVE_*` on the source's parent, `MAKE_*` on the destination's, `REMOVE_*` for a name it replaces, W-R6 across folders; `RENAME_EXCHANGE` both ways |
-| `truncate` | The system call layer, `src/kernel/src/syscall/fsctl.rs:410-422` (`Namespace::truncate` takes no `Context`, `namespace.rs:1364`) | `TRUNCATE` |
-| `chmod`, `chown`, `utimes` | `set` in `src/kernel/src/syscall/path.rs:719-725` | `SET_ATTR` (launcher domains only) |
+| `truncate` | The system call layer, `src/kernel/extensions/personality/linux/src/syscall/fsctl.rs:410-422` (`Namespace::truncate` takes no `Context`, `namespace.rs:1364`) | `TRUNCATE` |
+| `chmod`, `chown`, `utimes` | `set` in `src/kernel/extensions/personality/linux/src/syscall/path.rs:719-725` | `SET_ATTR` (launcher domains only) |
 | `write`, `pwrite`, `writev`, `copy_file_range`, `sendfile`, `fallocate`, shared writable mappings | None: the descriptor's mode was decided at open (`memory.rs:273` for mappings) | — |
-| `ftruncate` | `src/kernel/src/syscall/fd.rs:608` reads W-R7's bit | — |
+| `ftruncate` | `src/kernel/extensions/personality/linux/src/syscall/fd.rs:608` reads W-R7's bit | — |
 | `setxattr` and friends | None today: no filesystem keeps attributes (`fsctl.rs:101-106`). When one does, here | `SET_ATTR` |
 | `mount`, `umount2`, `pivot_root` | `fsctl.rs:550`, `:668`, `:726` | Refused under any domain (W-R5) |
 
@@ -330,7 +330,7 @@ program gets through before the user notices:
 
 * **The counter.** Count, per process, the distinct existing files it
   truncates, renames over or deletes outside its own folders, over a sliding
-  window. inotify carries no process (`src/kernel/src/fs/inotify.rs`), so the
+  window. inotify carries no process (`src/kernel/extensions/personality/linux/src/fs/inotify.rs`), so the
   counter lives in the same VFS hooks as §3.2.
 * **The action.** Past a threshold, stop the process with `SIGSTOP` and ask
   the user through a notification whether to let it continue or end it.

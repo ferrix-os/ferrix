@@ -247,7 +247,7 @@ device in devfs. **That is no longer the plan, and none of it will be built.**
 The reason is a property of this kernel that the first draft did not know.
 Every process gets all three of a native handle table, a POSIX file
 descriptor table and a VFS namespace -- `Process::with_pid` in
-`src/kernel/src/syscall/process.rs` builds them for every process there is, not
+`src/kernel/extensions/personality/linux/src/syscall/process.rs` builds them for every process there is, not
 for Linux ones only. And the system call dispatcher takes the native ABI
 **by number range, before any Linux table is asked**
 (`src/kernel/src/syscall/mod.rs`, `dispatch`). So the two ABIs are not two kinds

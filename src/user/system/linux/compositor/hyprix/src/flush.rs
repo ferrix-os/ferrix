@@ -27,7 +27,7 @@
 //! own buffers or to a client's, a `DIRTYFB` of a buffer the host copies --
 //! goes to a [`FlipThread`]. On Ferrix the kernel answers `PAGE_FLIP` and
 //! `DIRTYFB` only once the driver has shown the frame, up to five seconds
-//! (`src/kernel/src/interfaces/display/drm.rs`): the Intel driver copies the
+//! (`src/kernel/extensions/personality/linux/src/interfaces/display/drm.rs`): the Intel driver copies the
 //! frame in pipe A's vertical blank and answers then, 7 to 17 ms later, and
 //! a stuck one not at all until the kernel gives up with `ETIMEDOUT`. Made
 //! on the loop, that was the loop's time: the pointer, the keys and every

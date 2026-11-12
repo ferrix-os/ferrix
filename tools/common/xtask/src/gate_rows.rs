@@ -74,15 +74,17 @@ const TEST_BTRFS_PRESSURE: &str = "test-btrfs-pressure --arch x86_64 --accel kvm
 /// What asks for [`TEST_BTRFS_PRESSURE`]: the page cache and its reclaim,
 /// the frame allocator and its watermark, btrfs, and the job's memory charge.
 const PRESSURED: &[&str] = &[
-    "src/kernel/src/fs/pages.rs",
     "src/kernel/src/user/cache.rs",
     "src/kernel/src/user/vmo.rs",
     "src/kernel/src/mm.rs",
     "src/kernel/src/mm/",
-    "src/kernel/src/fs/btrfs",
     "src/lib/fs/btrfs/",
     "src/kernel/src/object/quota.rs",
 ];
+
+/// [`PRESSURED`]'s files of the Linux personality, by their path beneath its
+/// part (`docs/microkernel/CRATE-SPLIT.md` S5): the page cache and btrfs.
+const PRESSURED_LINUX: &[&str] = &["fs/pages.rs", "fs/btrfs"];
 
 /// The Intel GPU's restart row (`docs/BACKLOG.md`, *What a landing runs*;
 /// `docs/INTEL-GPU.md` §11, §12.8): its worker killed twice under a running
@@ -103,7 +105,6 @@ const GPU_RESTARTED: &[&str] = &[
     "src/user/system/native/drivers/gpu/intel-fake/",
     "src/lib/drivers/gpu/intel-xelp/",
     "src/user/system/native/devmgr/",
-    "src/kernel/src/interfaces/chardev/",
     "src/user/system/linux/drivers/nvrm/test/vk-survive.c",
     "tools/common/xtask/src/restart/intel.rs",
     "tools/common/xtask/src/intel_uapi.rs",
@@ -157,7 +158,6 @@ fn reaches_quarantine(path: &str) -> bool {
         "src/kernel/src/iommu/remapping.rs",
         "src/kernel/src/iommu/vtd.rs",
         "src/kernel/src/iommu/amdvi.rs",
-        "src/kernel/src/fs/sysfs.rs",
         "src/kernel/src/init.rs",
         "src/lib/log/lode/src/quarantine.rs",
         "src/user/system/native/lode/src/quarantine.rs",
@@ -169,6 +169,7 @@ fn reaches_quarantine(path: &str) -> bool {
         // constant.
         || path.strip_prefix(crate::workspace::KERNEL_PARTS_PLACE)
             == Some("/settings/src/settings/cpu_online.rs")
+        || crate::workspace::linux_part_file(path) == Some("fs/sysfs.rs")
         || path.starts_with("src/tests/quarantine/")
 }
 
@@ -268,13 +269,15 @@ fn reaches_mce_pagecache(path: &str) -> bool {
     [
         "src/kernel/src/user/cache.rs",
         "src/kernel/src/user/vmo.rs",
-        "src/kernel/src/fs/pages.rs",
         "src/kernel/src/arch/x86_64/mce.rs",
         "src/kernel/src/trap.rs",
-        "src/kernel/src/fs/btrfs_write_check/poison_check.rs",
         "tools/common/xtask/src/mce_pagecache.rs",
     ]
     .contains(&path)
+        || matches!(
+            crate::workspace::linux_part_file(path),
+            Some("fs/pages.rs" | "fs/btrfs_write_check/poison_check.rs")
+        )
         || path.starts_with("src/tests/mce-pagecache/")
 }
 
@@ -573,7 +576,7 @@ fn rows_for(path: &str, image_crates: &BTreeSet<String>, rows: &mut Rows) {
     if under("src/user/system/native/btrfsd/")
         || under("src/lib/fs/fsproto/")
         || under("src/lib/fs/blkclient/")
-        || path.ends_with("src/kernel/src/fs/served.rs")
+        || crate::workspace::linux_part_file(path) == Some("fs/served.rs")
     {
         rows.add(&[
             "test-btrfsd --personality user --set fs=server",
@@ -682,7 +685,10 @@ fn rows_for(path: &str, image_crates: &BTreeSet<String>, rows: &mut Rows) {
 fn area_rows(path: &str, rows: &mut Rows) {
     let under = |prefix: &str| path.starts_with(prefix);
     let reason = |rows: &mut Rows, why: &str| rows.reasons.push(format!("{path}: {why}"));
-    if PRESSURED.iter().any(|prefix| under(prefix)) {
+    let linux = crate::workspace::linux_part_file(path);
+    if PRESSURED.iter().any(|prefix| under(prefix))
+        || linux.is_some_and(|rel| PRESSURED_LINUX.iter().any(|prefix| rel.starts_with(prefix)))
+    {
         rows.add(&[TEST_BTRFS_PRESSURE]);
         reason(
             rows,
@@ -733,7 +739,9 @@ fn area_rows(path: &str, rows: &mut Rows) {
             "memkeep, the free-memory pacer: test-memkeep and its control",
         );
     }
-    if GPU_RESTARTED.iter().any(|prefix| under(prefix)) {
+    if GPU_RESTARTED.iter().any(|prefix| under(prefix))
+        || linux.is_some_and(|rel| rel.starts_with("interfaces/chardev/"))
+    {
         rows.add(TEST_GPU_RESTART);
         reason(
             rows,
@@ -1075,10 +1083,10 @@ mod tests {
     #[test]
     fn the_page_cache_and_btrfs_add_the_pressure_row_and_other_kernel_code_does_not() {
         for path in [
-            "src/kernel/src/fs/pages.rs",
+            &crate::workspace::linux_part_path("fs/pages.rs"),
             "src/kernel/src/user/cache.rs",
             "src/kernel/src/mm.rs",
-            "src/kernel/src/fs/btrfs_write_check.rs",
+            &crate::workspace::linux_part_path("fs/btrfs_write_check.rs"),
             "src/lib/fs/btrfs/vfs/src/rw.rs",
             "src/kernel/src/object/quota.rs",
         ] {
@@ -1150,7 +1158,7 @@ mod tests {
             "src/user/system/native/drivers/gpu/intel/src/main.rs",
             "src/lib/drivers/gpu/intel-xelp/src/backend.rs",
             "src/user/system/native/devmgr/src/main.rs",
-            "src/kernel/src/interfaces/chardev/mod.rs",
+            &crate::workspace::linux_part_path("interfaces/chardev/mod.rs"),
             "tools/common/xtask/src/restart/intel.rs",
         ] {
             let rows = rows_of(&[path]);

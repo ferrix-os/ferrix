@@ -2,7 +2,7 @@
  * The layout of a program of a shared process's region: native.ld at the region's
  * window (docs/microkernel/K11.md §2.1), which is otherwise the same.
  *
- * What the kernel's ELF loader (src/kernel/src/syscall/load.rs) requires:
+ * What the kernel's ELF loader (src/kernel/extensions/personality/linux/src/syscall/load.rs) requires:
  *
  *   - ET_EXEC at a fixed address. A position-independent image is refused
  *     by name, because nothing applies relocations to a program yet; the

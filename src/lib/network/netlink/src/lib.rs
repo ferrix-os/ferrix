@@ -25,7 +25,7 @@
 //! writes into a buffer the caller already owns and answers how many bytes it
 //! took. That is what lets the kernel encode a reply inside the lock that
 //! holds the net core, where an allocation would be a bug: `src/lib/network/net` and its
-//! lock are `src/kernel/src/net`'s, and nothing that could sleep may happen while
+//! lock are `src/kernel/extensions/personality/linux/src/net`'s, and nothing that could sleep may happen while
 //! it is held.
 //!
 //! ```

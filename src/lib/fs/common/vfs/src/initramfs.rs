@@ -19,7 +19,7 @@
 //!   the archive's entry takes the name and nothing in the directory is
 //!   lost. Only an unpack onto a filesystem that already holds files meets
 //!   it: the kernel's install onto a btrfs root a user has written to
-//!   (`src/kernel/src/fs/root_disk.rs`). [`unpack_over`] names each one.
+//!   (`src/kernel/extensions/personality/linux/src/fs/root_disk.rs`). [`unpack_over`] names each one.
 //! * **Hard links.** newc gives every name of a multiply-linked file the same
 //!   inode number and puts the data on one of them, conventionally the last.
 //!   The first name creates the file; later names link to it, and any that
@@ -286,7 +286,7 @@ pub struct Removed {
 /// the namespace refuses to remove (`ENOTEMPTY`), as it refuses one with a
 /// filesystem mounted on it (`EBUSY`). Pid 1's inputs, which nothing
 /// unpacked, are passed over. What the kernel gives the tmpfs root's pages
-/// back with once `/` is on a disk (`src/kernel/src/fs/mod.rs`); a file
+/// back with once `/` is on a disk (`src/kernel/extensions/personality/linux/src/fs/mod.rs`); a file
 /// still open or mapped lives on as any removed file does.
 ///
 /// # Errors

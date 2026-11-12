@@ -21,7 +21,7 @@ the plan for (5) to (12).
 |---|---|---|---|
 | `ferrix-kernel-core` | `src/kernel/src/kernel_core.rs` | the core ring's files (104k lines) | the libraries it uses today |
 | `ferrix-kernel-item` | `src/kernel/src/kernel_item.rs` | the item ring's files but `main.rs` (14k lines) | core |
-| `ferrix-kernel-load` | `src/kernel/src/kernel_load.rs` | the load ring's files (122k lines) | core, item |
+| `ferrix-kernel-load` | `src/kernel/extensions/personality/linux/src/lib.rs` | the load ring's files (122k lines) | core, item |
 | `ferrix-kernel-raised-checks` | `src/kernel/src/kernel_raised.rs` | the check files of §3 (3), raised above their ring (since S5 of the crate split, `microkernel/CRATE-SPLIT.md` §2.6 item 5; before it the load's) | core, item, load |
 | `ferrix-kernel` (the binary) | `src/kernel/src/main.rs` | the composition root, as today, and `stages_check.rs` | core, item, load, raised checks |
 
@@ -30,8 +30,12 @@ the traceability anchors (`path::function` under `src/kernel/src`), the
 coverage evidence and its residual, and the panic catalog's `see` lines; none
 of them changes. The three new root files sit beside `main.rs` and are classed
 in `certification-item.json` with their ring. The packages' manifests are in
-`src/kernel/core/`, `src/kernel/item/` and `src/kernel/load/`, each naming its
+`src/kernel/core/` and `src/kernel/item/`, each naming its
 root with Cargo's `[lib] path` (a manifest key, not a `#[path]` attribute).
+Since S5 of the crate split (`docs/microkernel/CRATE-SPLIT.md`) the load is a
+part, `src/kernel/extensions/personality/linux/`, holding its manifest, its
+root `src/lib.rs` (`kernel_load.rs` until then, and so named below where the
+split's history is told) and every load file at the module path it had.
 `build.rs` stays with the binary: it emits only link arguments for binaries,
 and the one `env!` is in `main.rs`.
 

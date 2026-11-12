@@ -74,7 +74,7 @@ zeros past it, and never asks the source for what it cut:
   tmpfs    4 pages written through a VMO and read back, 52 filled from a page source in runs and cut, 0 frames leaked
 ```
 
-**Done — the calls that take a path.** `src/kernel/src/syscall/path.rs` and
+**Done — the calls that take a path.** `src/kernel/extensions/personality/linux/src/syscall/path.rs` and
 `stat.rs`: `mkdirat`, `mknodat` (regular files, pipes, socket names, and
 character and block device nodes), `unlinkat`, `renameat2` with
 `RENAME_NOREPLACE`, `symlinkat`, `linkat`, `readlinkat`, `chdir`, `fchdir`,

@@ -2138,7 +2138,7 @@ it by design and no gate reads the console.
 ### F-53 — init's read-only remount at shutdown was refused, and the docs said it happened
 **Found and closed 2026-09-28** (found by the certification consultant's
 review of `docs/NAMESPACES.md`, reading `docs/INIT.md` §8.2 against
-`src/kernel/src/syscall/fsctl.rs`; closed by that design's landing N1).
+`src/kernel/extensions/personality/linux/src/syscall/fsctl.rs`; closed by that design's landing N1).
 
 *Was:* **Minor** (the consultant's "low"). `docs/INIT.md` §8.2, step 2, says
 init "calls `sync`, remounts `/` and `/data` read-only" before `reboot(2)`.
@@ -2501,7 +2501,7 @@ review).
 and `TRACEABILITY.md` reads a requirement as reached on an architecture
 when its verifier's lines are there. Most of those lines are in load-ring
 check files. The devtty landing (5dddc1981, 2026-10-03) put 54 lines into
-`src/kernel/src/syscall/check.rs`, and console-revoke (0f94a6d1a,
+`src/kernel/extensions/personality/linux/src/syscall/check.rs`, and console-revoke (0f94a6d1a,
 2026-10-04) another 147; both touched no core or item file, and neither
 carried the evidence. Netns's carry onto `main` (61135f4ba) then took its
 base from a tree after both, which `carry-coverage.py` allowed, so the

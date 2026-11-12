@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "8d08c7054b1c9fb7b87760f86898d79aed4d13fd3badecdcc8037fa82015a53e",
+  "digest": "81548f87ee699ad43a1ef283c5a94bd8a7b512c04f9bdf8671e9cfa14732b5d3",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -1902,7 +1902,7 @@
           "definition": true,
           "maturity": "implemented",
           "stage": 8,
-          "doc": "A cpio \"newc\" archive xtask writes and the loader reads from FERRIX/INITRD.IMG into memory nothing reclaims; the kernel unpacks it into the tmpfs root through the same VFS calls a program makes. It holds /sbin/devmgr, the drivers devmgr starts under /lib/drivers with a MANIFEST naming them, and /bin, whose shell since 2026-09-18 is zinc. What breaks the cycle \"the root filesystem needs a block driver that lives on the root filesystem\"; a btrfs root, on a boot that has one, is installed from the same archive (src/kernel/src/fs/root_disk.rs).",
+          "doc": "A cpio \"newc\" archive xtask writes and the loader reads from FERRIX/INITRD.IMG into memory nothing reclaims; the kernel unpacks it into the tmpfs root through the same VFS calls a program makes. It holds /sbin/devmgr, the drivers devmgr starts under /lib/drivers with a MANIFEST naming them, and /bin, whose shell since 2026-09-18 is zinc. What breaks the cycle \"the root filesystem needs a block driver that lives on the root filesystem\"; a btrfs root, on a boot that has one, is installed from the same archive (src/kernel/extensions/personality/linux/src/fs/root_disk.rs).",
           "source": {
             "file": "docs/sysml/02-structure.sysml",
             "line": 305
@@ -10915,7 +10915,7 @@
               "kind": "action",
               "maturity": "implemented",
               "stage": 7,
-              "doc": "src/kernel/src/syscall/memory.rs decodes the arguments -- mmap2 counting its offset in pages on ARMv7-A -- and the space does the rest: anonymous memory, a file mapped shared onto its own VMO pages or privately through a shadow object, MAP_FIXED clearing its range only once every check has passed. mremap and msync beside it.",
+              "doc": "src/kernel/extensions/personality/linux/src/syscall/memory.rs decodes the arguments -- mmap2 counting its offset in pages on ARMv7-A -- and the space does the rest: anonymous memory, a file mapped shared onto its own VMO pages or privately through a shadow object, MAP_FIXED clearing its range only once every check has passed. mremap and msync beside it.",
               "source": {
                 "file": "docs/sysml/04-memory.sysml",
                 "line": 407
@@ -11213,7 +11213,7 @@
           "definition": true,
           "maturity": "implemented",
           "stage": 6,
-          "doc": "src/kernel/src/syscall/load.rs over src/lib/platform/elf. Each PT_LOAD is mapped as anonymous memory and its bytes copied in through the user copy layer, with permissions computed per page so two segments sharing a page get their union, and a union that is writable and executable refused. ET_EXEC; a static PIE, ET_DYN with no interpreter, placed at two thirds of the user half to relocate itself; and since dynamic linking a program whose PT_INTERP names a linker, loaded beside it at INTERP_BASE, which is entered with AT_BASE. Segments are still copied in rather than mapped from the file's VMO, though stage 8's page cache now exists.",
+          "doc": "src/kernel/extensions/personality/linux/src/syscall/load.rs over src/lib/platform/elf. Each PT_LOAD is mapped as anonymous memory and its bytes copied in through the user copy layer, with permissions computed per page so two segments sharing a page get their union, and a union that is writable and executable refused. ET_EXEC; a static PIE, ET_DYN with no interpreter, placed at two thirds of the user half to relocate itself; and since dynamic linking a program whose PT_INTERP names a linker, loaded beside it at INTERP_BASE, which is entered with AT_BASE. Segments are still copied in rather than mapped from the file's VMO, though stage 8's page cache now exists.",
           "source": {
             "file": "docs/sysml/04-memory.sysml",
             "line": 530
@@ -13131,7 +13131,7 @@
               "kind": "action",
               "maturity": "inProgress",
               "stage": 7,
-              "doc": "Linux sched_setscheduler: SCHED_FIFO/RR to the soft-RT classes, SCHED_DEADLINE to EDF, SCHED_OTHER/BATCH/IDLE to fair. src/kernel/src/syscall/limits.rs answers it today with the one policy there is a class for: SCHED_OTHER at priority zero is accepted and every other policy is EINVAL, refused rather than accepted and ignored, until stage 14 brings the classes. The nice value is the fair class's weight already.",
+              "doc": "Linux sched_setscheduler: SCHED_FIFO/RR to the soft-RT classes, SCHED_DEADLINE to EDF, SCHED_OTHER/BATCH/IDLE to fair. src/kernel/extensions/personality/linux/src/syscall/limits.rs answers it today with the one policy there is a class for: SCHED_OTHER at priority zero is accepted and every other policy is EINVAL, refused rather than accepted and ignored, until stage 14 brings the classes. The nice value is the fair class's weight already.",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
                 "line": 533
@@ -13221,7 +13221,7 @@
           "definition": true,
           "maturity": "implemented",
           "stage": 7,
-          "doc": "src/kernel/src/syscall/futex.rs: wait, wake and requeue, plain and with a bitset, with the word read and the waiter listed under one table lock so no wake is lost, and the read under it never faulting. One table. A private futex is keyed by address space and user address; one without FUTEX_PRIVATE_FLAG on a word in a shared region, by the VMO behind it and the word's offset there, so a word two processes map shared is one futex, as on Linux. A thread that ends clears its clear_child_tid word and wakes whoever waits on it. The robust list's head is recorded and never walked, and the priority-inheritance operations and FUTEX_WAKE_OP are ENOSYS. futex_waitv (449; x86-64, i386, AArch64) sleeps on up to 128 words, one table entry per word, and answers the index of the word woken; a wake does not count a stale entry of a vector waiter already woken through another word, a difference from Linux on purpose. Proton's fsync waits through it (docs/WINE.md 11).",
+          "doc": "src/kernel/extensions/personality/linux/src/syscall/futex.rs: wait, wake and requeue, plain and with a bitset, with the word read and the waiter listed under one table lock so no wake is lost, and the read under it never faulting. One table. A private futex is keyed by address space and user address; one without FUTEX_PRIVATE_FLAG on a word in a shared region, by the VMO behind it and the word's offset there, so a word two processes map shared is one futex, as on Linux. A thread that ends clears its clear_child_tid word and wakes whoever waits on it. The robust list's head is recorded and never walked, and the priority-inheritance operations and FUTEX_WAKE_OP are ENOSYS. futex_waitv (449; x86-64, i386, AArch64) sleeps on up to 128 words, one table entry per word, and answers the index of the word woken; a wake does not count a stale entry of a vector waiter already woken through another word, a difference from Linux on purpose. Proton's fsync waits through it (docs/WINE.md 11).",
           "source": {
             "file": "docs/sysml/05-scheduling.sysml",
             "line": 566
@@ -13567,7 +13567,7 @@
           "specializes": "Process",
           "maturity": "implemented",
           "stage": 6,
-          "doc": "A group of threads sharing an address space, fd table, fs context and signal dispositions. Precisely a particular sharing arrangement of independently shareable objects, composed by clone flags as Linux composes them, within what Clone below refuses. src/kernel/src/syscall/process.rs, in the uncertified load ring: it contains the core Process and derefs to it, and decides how a process ends -- descriptors closed, orphans handed on, the parent told. No namespace set until stage 13: every process shares the one of everything.",
+          "doc": "A group of threads sharing an address space, fd table, fs context and signal dispositions. Precisely a particular sharing arrangement of independently shareable objects, composed by clone flags as Linux composes them, within what Clone below refuses. src/kernel/extensions/personality/linux/src/syscall/process.rs, in the uncertified load ring: it contains the core Process and derefs to it, and decides how a process ends -- descriptors closed, orphans handed on, the parent told. No namespace set until stage 13: every process shares the one of everything.",
           "source": {
             "file": "docs/sysml/06-objects.sysml",
             "line": 99
@@ -13656,7 +13656,7 @@
           "specializes": "FerrixScheduling::UserThread",
           "maturity": "implemented",
           "stage": 7,
-          "doc": "One line of execution through a PosixProcess: src/kernel/src/syscall/thread.rs. Its thread id from the pid space, its own signal mask and queue, the address to clear when it ends. The task that runs it holds it only as a UserThread, and the personality has it back by downcast.",
+          "doc": "One line of execution through a PosixProcess: src/kernel/extensions/personality/linux/src/syscall/thread.rs. Its thread id from the pid space, its own signal mask and queue, the address to clear when it ends. The task that runs it holds it only as a UserThread, and the personality has it back by downcast.",
           "source": {
             "file": "docs/sysml/06-objects.sysml",
             "line": 118
@@ -14013,7 +14013,7 @@
           "definition": true,
           "maturity": "implemented",
           "stage": 7,
-          "doc": "clone: each Shareable is shared or copied independently. CLONE_THREAD|CLONE_VM|CLONE_SETTLS is a thread; none of them is fork, which marks both address spaces copy-on-write. src/kernel/src/syscall/family.rs, with clone3 through the same path. What Linux allows between a thread and a process is refused with ENOSYS: memory shared between processes without CLONE_VFORK, handlers shared between processes, and a thread with a descriptor table or directories of its own. vfork copies rather than lends, and the parent still waits.",
+          "doc": "clone: each Shareable is shared or copied independently. CLONE_THREAD|CLONE_VM|CLONE_SETTLS is a thread; none of them is fork, which marks both address spaces copy-on-write. src/kernel/extensions/personality/linux/src/syscall/family.rs, with clone3 through the same path. What Linux allows between a thread and a process is refused with ENOSYS: memory shared between processes without CLONE_VFORK, handlers shared between processes, and a thread with a descriptor table or directories of its own. vfork copies rather than lends, and the parent still waits.",
           "source": {
             "file": "docs/sysml/06-objects.sysml",
             "line": 204
@@ -14199,7 +14199,7 @@
           "definition": true,
           "maturity": "implemented",
           "stage": 7,
-          "doc": "src/kernel/src/syscall/signal.rs keeps each disposition, the blocked mask and the alternate stack, split between thread and process as Linux splits them; deliver.rs delivers on every return to user mode, onto each architecture's own Linux frame, and rt_sigreturn unwinds it. Stop and continue, SIGPIPE, SIGALRM, and a user-mode fault as SIGSEGV, SIGILL, SIGBUS, SIGFPE or SIGTRAP, which is what rustc's stack-overflow guard needs. An interrupted call restarts or is EINTR as Linux's arch_do_signal_or_restart decides. No vDSO, so a handler needs SA_RESTORER, and only ITIMER_REAL arms.",
+          "doc": "src/kernel/extensions/personality/linux/src/syscall/signal.rs keeps each disposition, the blocked mask and the alternate stack, split between thread and process as Linux splits them; deliver.rs delivers on every return to user mode, onto each architecture's own Linux frame, and rt_sigreturn unwinds it. Stop and continue, SIGPIPE, SIGALRM, and a user-mode fault as SIGSEGV, SIGILL, SIGBUS, SIGFPE or SIGTRAP, which is what rustc's stack-overflow guard needs. An interrupted call restarts or is EINTR as Linux's arch_do_signal_or_restart decides. No vDSO, so a handler needs SA_RESTORER, and only ITIMER_REAL arms.",
           "source": {
             "file": "docs/sysml/06-objects.sysml",
             "line": 283
@@ -14232,7 +14232,7 @@
           "definition": true,
           "maturity": "implemented",
           "stage": 15,
-          "doc": "Pipes, ttys and job control: what an interactive shell needs. Pipes and FIFOs are stage 8's (src/kernel/src/fs/pipe.rs), the console a terminal with a line discipline since stage 7 (fs/terminal.rs) and pseudo-terminals stage 18's (fs/pty.rs), and every call job control is made of has been answered since stage 7; zinc uses them. System V semaphores and shared memory are answered (syscall/sem.rs, syscall/shm.rs, for Steam); its message queues are ENOSYS.",
+          "doc": "Pipes, ttys and job control: what an interactive shell needs. Pipes and FIFOs are stage 8's (src/kernel/extensions/personality/linux/src/fs/pipe.rs), the console a terminal with a line discipline since stage 7 (fs/terminal.rs) and pseudo-terminals stage 18's (fs/pty.rs), and every call job control is made of has been answered since stage 7; zinc uses them. System V semaphores and shared memory are answered (syscall/sem.rs, syscall/shm.rs, for Steam); its message queues are ENOSYS.",
           "source": {
             "file": "docs/sysml/06-objects.sysml",
             "line": 299
@@ -14996,7 +14996,7 @@
           "definition": true,
           "maturity": "implemented",
           "stage": 7,
-          "doc": "Unix: uid, gid, supplementary groups, POSIX capability sets, no-new-privs. They sit on top of the handle system rather than beside it.\n\nsrc/kernel/src/syscall/credentials.rs: Linux's four user ids and four group ids and the supplementary groups on every Process, copied by fork, kept by execve with the saved and filesystem ids made the effective ones, and changed by the set*id calls under kernel/sys.c's rules. They are enforced: the VFS checks file permissions against the filesystem ids, and the calls only root may make, and those that reach another user's processes, refuse anyone else. A set-user-id program runs as its file's owner unless PR_SET_NO_NEW_PRIVS forbade it.",
+          "doc": "Unix: uid, gid, supplementary groups, POSIX capability sets, no-new-privs. They sit on top of the handle system rather than beside it.\n\nsrc/kernel/extensions/personality/linux/src/syscall/credentials.rs: Linux's four user ids and four group ids and the supplementary groups on every Process, copied by fork, kept by execve with the saved and filesystem ids made the effective ones, and changed by the set*id calls under kernel/sys.c's rules. They are enforced: the VFS checks file permissions against the filesystem ids, and the calls only root may make, and those that reach another user's processes, refuse anyone else. A set-user-id program runs as its file's owner unless PR_SET_NO_NEW_PRIVS forbade it.",
           "source": {
             "file": "docs/sysml/07-isolation.sysml",
             "line": 115
@@ -16106,7 +16106,7 @@
           "definition": true,
           "maturity": "implemented",
           "stage": 10,
-          "doc": "The loader places an initramfs in RAM holding devmgr, the drivers and init. The kernel unpacks it into a tmpfs root and starts devmgr from stage 10's boot check, and devmgr starts the drivers; on a boot with a btrfs root disk the kernel then mounts it and moves every process after onto it, as Linux's switch_root does (src/kernel/src/fs/root_disk.rs), and starts init last, after the boot marker. Linux's answer, for the same reason. The test boots keep the tmpfs root, so only cargo xtask run mounts a root disk and moves onto it. pivot_root itself, so the tmpfs can be unmounted from under the new root, is an init's work, which stage 15 owes.",
+          "doc": "The loader places an initramfs in RAM holding devmgr, the drivers and init. The kernel unpacks it into a tmpfs root and starts devmgr from stage 10's boot check, and devmgr starts the drivers; on a boot with a btrfs root disk the kernel then mounts it and moves every process after onto it, as Linux's switch_root does (src/kernel/extensions/personality/linux/src/fs/root_disk.rs), and starts init last, after the boot marker. Linux's answer, for the same reason. The test boots keep the tmpfs root, so only cargo xtask run mounts a root disk and moves onto it. pivot_root itself, so the tmpfs can be unmounted from under the new root, is an init's work, which stage 15 owes.",
           "flow": [
             "start",
             "mountInitramfsAsRoot",
@@ -16251,7 +16251,7 @@
           "definition": true,
           "maturity": "implemented",
           "stage": 11,
-          "doc": "Request queues, merging, an I/O scheduler with per-cgroup bandwidth, and the ring protocol to userspace block drivers. A read into a page-cache page fills the VMO the cache already holds. The queue itself (merging, flush and FUA barriers, deadline scheduling) is src/lib/fs/common/block, in front of every block ring (src/kernel/src/interfaces/block_ring, src/lib/proto/blkring): one kernel task per ring moves requests onto it and copies payloads through the ring's data VMO, and publishes the disk in devfs's registry as a BlockDevice (src/kernel/src/fs/block.rs) that reads, writes and flushes whole sectors. No per-cgroup bandwidth: cgroups are stage 13's.",
+          "doc": "Request queues, merging, an I/O scheduler with per-cgroup bandwidth, and the ring protocol to userspace block drivers. A read into a page-cache page fills the VMO the cache already holds. The queue itself (merging, flush and FUA barriers, deadline scheduling) is src/lib/fs/common/block, in front of every block ring (src/kernel/src/interfaces/block_ring, src/lib/proto/blkring): one kernel task per ring moves requests onto it and copies payloads through the ring's data VMO, and publishes the disk in devfs's registry as a BlockDevice (src/kernel/extensions/personality/linux/src/fs/block.rs) that reads, writes and flushes whole sectors. No per-cgroup bandwidth: cgroups are stage 13's.",
           "source": {
             "file": "docs/sysml/09-storage.sysml",
             "line": 16
@@ -16547,7 +16547,7 @@
           "definition": true,
           "maturity": "implemented",
           "stage": 8,
-          "doc": "Unified with VMOs: not a separate cache but the set of file VMOs, subject to reclaim's LRU. src/kernel/src/fs/pages.rs: each file's VMO, filled from a disk filesystem's PageSource in runs of at most 32 missing pages with no lock held, and by a fault through a mapping as by a read. A read fills to its own last page; on a sequential stream (it begins where the last read ended, in a later page) at least MAX_FILL_RUN pages from its first, never past the end of the file, and to its own last page again if that run fails; a fault fills a run, as before. Reclaim is stage 13's and not built, and no page is marked dirty, so a page written through MAP_SHARED reaches a btrfs disk only if write writes it too.",
+          "doc": "Unified with VMOs: not a separate cache but the set of file VMOs, subject to reclaim's LRU. src/kernel/extensions/personality/linux/src/fs/pages.rs: each file's VMO, filled from a disk filesystem's PageSource in runs of at most 32 missing pages with no lock held, and by a fault through a mapping as by a read. A read fills to its own last page; on a sequential stream (it begins where the last read ended, in a later page) at least MAX_FILL_RUN pages from its first, never past the end of the file, and to its own last page again if that run fails; a fault fills a run, as before. Reclaim is stage 13's and not built, and no page is marked dirty, so a page written through MAP_SHARED reaches a btrfs disk only if write writes it too.",
           "source": {
             "file": "docs/sysml/09-storage.sysml",
             "line": 104
@@ -16644,7 +16644,7 @@
           "specializes": "Filesystem",
           "maturity": "implemented",
           "stage": 8,
-          "doc": "src/kernel/src/fs/devfs.rs: null, zero, full, random, urandom, tty and console, numbered as Linux numbers them, ptmx and the dri, input and pts directories since stages 17 and 18, and the disks a driver's kernel side registers. It calls itself devtmpfs, the name init scripts look for.",
+          "doc": "src/kernel/extensions/personality/linux/src/fs/devfs.rs: null, zero, full, random, urandom, tty and console, numbered as Linux numbers them, ptmx and the dri, input and pts directories since stages 17 and 18, and the disks a driver's kernel side registers. It calls itself devtmpfs, the name init scripts look for.",
           "source": {
             "file": "docs/sysml/09-storage.sysml",
             "line": 139
@@ -16658,7 +16658,7 @@
           "specializes": "Filesystem",
           "maturity": "implemented",
           "stage": 8,
-          "doc": "self/maps, self/exe, self/fd backed by the real VM and fd table; cpuinfo, meminfo. src/kernel/src/fs/procfs.rs over src/lib/fs/common/procfs's text, rendered at open: each /proc/<pid> with its fd, status, comm, cmdline, stat, maps, exe, cwd, root, task and mounts, and /proc's mounts, stat, partitions, filesystems, uptime, version, sys, sysrq-trigger and net beside them.",
+          "doc": "self/maps, self/exe, self/fd backed by the real VM and fd table; cpuinfo, meminfo. src/kernel/extensions/personality/linux/src/fs/procfs.rs over src/lib/fs/common/procfs's text, rendered at open: each /proc/<pid> with its fd, status, comm, cmdline, stat, maps, exe, cwd, root, task and mounts, and /proc's mounts, stat, partitions, filesystems, uptime, version, sys, sysrq-trigger and net beside them.",
           "source": {
             "file": "docs/sysml/09-storage.sysml",
             "line": 147
@@ -16671,7 +16671,7 @@
           "definition": true,
           "specializes": "Filesystem",
           "maturity": "implemented",
-          "doc": "src/kernel/src/fs/sysfs.rs over src/lib/fs/common/sysfs's text, a view that stores nothing, fed by the services that own each fact (docs/SYSFS.md): enumeration's device nodes under devices/pci and platform, the disks, interfaces, cards, render nodes and input devices the ring-3 drivers published, each inside the node its driver serves, and devmgr's word on which driver drives which device. A write to a driver's bind or unbind is sent to devmgr to decide. Mounted on /sys at boot; cgroup2 mounts on its fs/cgroup.",
+          "doc": "src/kernel/extensions/personality/linux/src/fs/sysfs.rs over src/lib/fs/common/sysfs's text, a view that stores nothing, fed by the services that own each fact (docs/SYSFS.md): enumeration's device nodes under devices/pci and platform, the disks, interfaces, cards, render nodes and input devices the ring-3 drivers published, each inside the node its driver serves, and devmgr's word on which driver drives which device. A write to a driver's bind or unbind is sent to devmgr to decide. Mounted on /sys at boot; cgroup2 mounts on its fs/cgroup.",
           "source": {
             "file": "docs/sysml/09-storage.sysml",
             "line": 157
@@ -16725,7 +16725,7 @@
           "specializes": "Filesystem",
           "maturity": "implemented",
           "stage": 11,
-          "doc": "The real filesystem, read and write, single device, no RAID 5/6. The largest single piece of work in the project. src/kernel/src/fs/btrfs.rs mounts it from a block node, read-only over src/lib/fs/btrfs/vfs or writable over src/lib/fs/btrfs/write, one inode object per inode so two names share one page cache. `/` is a btrfs volume under cargo xtask run, and test-rustc's sysroot is one at /data.",
+          "doc": "The real filesystem, read and write, single device, no RAID 5/6. The largest single piece of work in the project. src/kernel/extensions/personality/linux/src/fs/btrfs.rs mounts it from a block node, read-only over src/lib/fs/btrfs/vfs or writable over src/lib/fs/btrfs/write, one inode object per inode so two names share one page cache. `/` is a btrfs volume under cargo xtask run, and test-rustc's sysroot is one at /data.",
           "source": {
             "file": "docs/sysml/09-storage.sysml",
             "line": 193
@@ -108997,7 +108997,7 @@
           "name": "Watchdog",
           "qualifiedName": "FerrixConsoleRequirements::Watchdog",
           "kind": "package",
-          "doc": "`ferrix.watchdog=on` (src/kernel/src/watchdog.rs, the core; /dev/watchdog in src/kernel/src/fs/watchdog.rs, the load): a deadline a privileged program arms and feeds, and a report when no feed comes (docs/POSTMORTEM.md §6.11; consultant ledger lines 7925 and 8078). Software only: the chipset's TCO timer and the lockup detector are parked, so a kernel that stops is not detected, and a report resets only under ferrix.panic=reset.",
+          "doc": "`ferrix.watchdog=on` (src/kernel/src/watchdog.rs, the core; /dev/watchdog in src/kernel/extensions/personality/linux/src/fs/watchdog.rs, the load): a deadline a privileged program arms and feeds, and a report when no feed comes (docs/POSTMORTEM.md §6.11; consultant ledger lines 7925 and 8078). Software only: the chipset's TCO timer and the lockup detector are parked, so a kernel that stops is not detected, and a report resets only under ferrix.panic=reset.",
           "source": {
             "file": "docs/sysml/23-console-requirements.sysml",
             "line": 916

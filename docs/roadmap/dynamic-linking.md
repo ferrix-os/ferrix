@@ -5,7 +5,7 @@ nothing on the path to `rustc` needs it, since Rust's `std` targets static
 musl. What needs it is the promise `docs/ARCHITECTURE.md` §2 makes — that
 somebody else's Linux binary runs unchanged — which today holds only for a
 static, fixed-address executable. Nearly every binary a distribution ships is a position-independent executable
-that asks for glibc's `ld-linux`. `src/kernel/src/syscall/load.rs` used to refuse
+that asks for glibc's `ld-linux`. `src/kernel/extensions/personality/linux/src/syscall/load.rs` used to refuse
 `PT_INTERP` by name; since 2026-09-20 it loads the linker the program asks for
 and enters it, which is the first bullet below. Since the same day there is a
 linker to name — `src/user/system/linux/ferrousli/ld`, the second bullet — and since 2026-09-21 it

@@ -118,7 +118,7 @@ impl Symbolizer {
 }
 
 /// The address on a `stack` line, which the kernel writes as `[<0>] 0x...`
-/// (`src/kernel/src/fs/procfs/debug.rs`).
+/// (the Linux personality's `fs/procfs/debug.rs`).
 fn stack_address(line: &str) -> Option<u64> {
     let digits = line.trim().strip_prefix("[<0>] 0x")?;
     u64::from_str_radix(digits.split_whitespace().next()?, 16).ok()

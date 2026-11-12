@@ -1031,7 +1031,7 @@ number waits for the root cause.
 off unless `ferrix.watchdog=on`, which the reference configuration does not
 give (H.FAIL.14, L.lockup.6-9; SAFETY-MANUAL AoU-48):
 
-* `/dev/watchdog`, 10:130, 0600, Linux's interface (`src/kernel/src/fs/watchdog.rs`,
+* `/dev/watchdog`, 10:130, 0600, Linux's interface (`src/kernel/extensions/personality/linux/src/fs/watchdog.rs`,
   the load; S4c's file from `s4-lockup`): an open by a privileged program arms
   with the timeout set (60 s until `WDIOC_SETTIMEOUT`, 1 to 600 s), one
   opener at a time (`EBUSY`); a write or `WDIOC_KEEPALIVE` feeds; the magic

@@ -14,7 +14,7 @@ path = "../src/lib.rs"
 
 [dependencies]
 ferrix-kernel-core = { package = "ferrix-lift-core", path = "../../../../lift/core" }
-ferrix-kernel-load = { package = "ferrix-lift-load", path = "../../../../lift/load" }
+ferrix-kernel-load = { package = "ferrix-lift-load", path = "../../../personality/linux/lift" }
 ferrix-blkring.workspace = true
 ferrix-bootinfo.workspace = true
 ferrix-linux-abi.workspace = true

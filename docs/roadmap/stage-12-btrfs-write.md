@@ -149,7 +149,7 @@ promised, and a crash between the two replayed the wrong file.
 
 **Done — the power-fail test (8 points, 2026-09-21). The exit is met.**
 `cargo xtask test-powerfail --seeds N` boots with `ferrix.btrfs=churn`: the
-guest (`src/kernel/src/fs/btrfs_powerfail.rs`) rewrites four files on a blank
+guest (`src/kernel/extensions/personality/linux/src/fs/btrfs_powerfail.rs`) rewrites four files on a blank
 volume and makes each durable — the body with `fsync`, then a 32-byte
 trailer naming the body's length and CRC-32C with a second `fsync`, and a
 whole `sync` every eighth pass — until xtask kills QEMU at a moment the seed
@@ -199,7 +199,7 @@ was called done.
 
 **Since the exit — `/` on btrfs.** `cargo xtask run` and `run-compositor`
 attach `build/root.img`, a 1 GiB volume made from the `root` fixture the
-first time and kept after that. The kernel (`src/kernel/src/fs/root_disk.rs`)
+first time and kept after that. The kernel (`src/kernel/extensions/personality/linux/src/fs/root_disk.rs`)
 starts on the initramfs, and once its disk driver is serving the volume it
 does what Linux's `switch_root` does: mounts it, installs the initramfs onto
 it when the archive differs from the one it last got, mounts `/dev`, `/proc`

@@ -4,7 +4,7 @@
 //! `/proc/<pid>/stat`'s seventh field, `tty_nr`, is the controlling
 //! terminal's device number as Linux encodes it. Ferrix gives the console's,
 //! 5:1, to a process whose session holds the console, and 0 to every other,
-//! a pseudo-terminal's session among them (`src/kernel/src/fs/procfs/render.rs`).
+//! a pseudo-terminal's session among them (`src/kernel/extensions/personality/linux/src/fs/procfs/render.rs`).
 //! Anything else -- no file, a pid gone, a field that does not parse -- is
 //! not the console.
 

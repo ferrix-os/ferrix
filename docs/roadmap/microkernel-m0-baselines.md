@@ -153,8 +153,8 @@ The scripts that run them are `m0b-controls.sh` and `m0b-wall.sh` beside
 
 | Control | The edit | Known delay | Rows it must fail |
 |---|---|---|---|
-| C1, in the kernel | `src/kernel/src/syscall/linux.rs`: 200 ns of busy wait on the kernel's clock before `getppid` answers | 200 ns a call | `null-getppid`, `getppid-mean` |
-| C2, in the kernel | `src/kernel/src/interfaces/block_ring/hop_check.rs`: 30 us of busy wait after `let started` in each timed read | 30 us a read | `block-read-4K` |
+| C1, in the kernel | `src/kernel/extensions/personality/linux/src/syscall/linux.rs`: 200 ns of busy wait on the kernel's clock before `getppid` answers | 200 ns a call | `null-getppid`, `getppid-mean` |
+| C2, in the kernel | `src/kernel/extensions/personality/linux/src/interfaces/block_ring/hop_check.rs`: 30 us of busy wait after `let started` in each timed read | 30 us a read | `block-read-4K` |
 | C3, in the program | `linux-rows`' `INJECT` line: 150 us for `fork-exec-wait`, 1 us each for `mmap-touch-munmap-4K`, `signal-self` and `futex-thread-pingpong`, 40 us for `pagecache-miss-4K`, inside each timed sample; the `LB inject` lines are the marker | as given | those five, each named in the one failure line |
 | C4 | `test-rustc`'s script: `sleep 2;` before the first `rustc hello.rs` | 2 s | `cold-rustc-hello`, `cold-test-rustc` |
 | C5 | `test-rustc`'s script: `sleep 1;` before the `warmed` stamp | 200 ms a compile | `warm-rustc-hello` |

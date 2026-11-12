@@ -102,7 +102,7 @@ package FerrixObjects {
              * context and signal dispositions. Precisely a particular sharing
              * arrangement of independently shareable objects, composed by
              * clone flags as Linux composes them, within what Clone below
-             * refuses. src/kernel/src/syscall/process.rs, in the uncertified
+             * refuses. src/kernel/extensions/personality/linux/src/syscall/process.rs, in the uncertified
              * load ring: it contains the core Process and derefs to it, and
              * decides how a process ends -- descriptors closed, orphans
              * handed on, the parent told. No namespace set until stage 13:
@@ -118,7 +118,7 @@ package FerrixObjects {
     #implemented part def Thread :> FerrixScheduling::UserThread {
         @stage { number = 7; }
         doc /* One line of execution through a PosixProcess:
-             * src/kernel/src/syscall/thread.rs. Its thread id from the pid space,
+             * src/kernel/extensions/personality/linux/src/syscall/thread.rs. Its thread id from the pid space,
              * its own signal mask and queue, the address to clear when it
              * ends. The task that runs it holds it only as a UserThread, and
              * the personality has it back by downcast. */
@@ -206,7 +206,7 @@ package FerrixObjects {
         doc /* clone: each Shareable is shared or copied independently.
              * CLONE_THREAD|CLONE_VM|CLONE_SETTLS is a thread; none of them is
              * fork, which marks both address spaces copy-on-write.
-             * src/kernel/src/syscall/family.rs, with clone3 through the same
+             * src/kernel/extensions/personality/linux/src/syscall/family.rs, with clone3 through the same
              * path. What Linux allows between a thread and a process is
              * refused with ENOSYS: memory shared between processes without
              * CLONE_VFORK, handlers shared between processes, and a thread
@@ -282,7 +282,7 @@ package FerrixObjects {
 
     #implemented part def Signals {
         @stage { number = 7; }
-        doc /* src/kernel/src/syscall/signal.rs keeps each disposition, the
+        doc /* src/kernel/extensions/personality/linux/src/syscall/signal.rs keeps each disposition, the
              * blocked mask and the alternate stack, split between thread and
              * process as Linux splits them; deliver.rs delivers on every
              * return to user mode, onto each architecture's own Linux frame,
@@ -299,7 +299,7 @@ package FerrixObjects {
     #implemented part def PosixIpc {
         @stage { number = 15; }
         doc /* Pipes, ttys and job control: what an interactive shell needs.
-             * Pipes and FIFOs are stage 8's (src/kernel/src/fs/pipe.rs), the
+             * Pipes and FIFOs are stage 8's (src/kernel/extensions/personality/linux/src/fs/pipe.rs), the
              * console a terminal with a line discipline since stage 7
              * (fs/terminal.rs) and pseudo-terminals stage 18's (fs/pty.rs),
              * and every call job control is made of has been answered since

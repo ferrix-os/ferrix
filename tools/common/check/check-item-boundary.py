@@ -148,6 +148,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+import posixpath
 import re
 import subprocess
 import sys
@@ -3014,7 +3015,10 @@ def seam_scan_problems(removable: dict, linked: dict[str, str], seam_file: str) 
         for start in sorted(found):
             line = text.count("\n", 0, start) + 1
             problems.append(f"{rel}:{line}: defines a __ferrix_ symbol by name; only a seam's binding macro may (3934 (3))")
-        if any(rel.endswith("/" + listed) or rel == listed for listed in lists if listed) or rel.endswith(seam_file):
+        # A crate's walk names a part's file through `..` (`src/kernel/item/../extensions/...`);
+        # the record names it by its repository path (S5 of the crate split).
+        named = posixpath.normpath(rel)
+        if any(named.endswith("/" + listed) or named == listed for listed in lists if listed) or rel.endswith(seam_file):
             continue
         for match in re.finditer(r"\b__ferrix_[a-z0-9_]+", masked):
             line = text.count("\n", 0, match.start()) + 1

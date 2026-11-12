@@ -22,16 +22,16 @@ deleted, through the consultant as any item change.
 ## 1. The shape
 
 The lift is **one source built twice**. `ferrix-kernel-load`'s root
-(`src/kernel/src/kernel_load.rs`) and every file under it stay where they are.
+(`src/kernel/extensions/personality/linux/src/lib.rs`) and every file under it stay where they are.
 A new package compiles the same root as a user-space library, against a shim
 in place of the core and the item:
 
 | Package | Root | What | Depends on |
 |---|---|---|---|
-| `ferrix-kernel-load` | `src/kernel/src/kernel_load.rs` | as today, in the hybrid kernel | core, item |
+| `ferrix-kernel-load` | `src/kernel/extensions/personality/linux/src/lib.rs` | as today, in the hybrid kernel | core, item |
 | `ferrix-lift-core`, renamed `ferrix_kernel_core` | `src/kernel/src/lift_core.rs` | the shim: the core's interface as the load names it | `ferrix-rt`'s native layer, native-abi |
 | `ferrix-lift-item`, renamed `ferrix_kernel_item` | `src/kernel/src/lift_item.rs` | the item's interface: `syscall::{Personality, native, program, ...}`, `discovery::devmgr`, `init` | lift-core |
-| `ferrix-lift-load`, lib name `ferrix_kernel_load` | `src/kernel/src/kernel_load.rs`, **the same file** | the load, built with `ferrix_load_built="lift"` | lift-core, lift-item, the same libraries |
+| `ferrix-lift-load`, lib name `ferrix_kernel_load` | `src/kernel/extensions/personality/linux/src/lib.rs`, **the same file** | the load, built with `ferrix_load_built="lift"` | lift-core, lift-item, the same libraries |
 | `linuxd` | `src/user/system/native/linuxd/src/main.rs` | the program: entry, boot (§6), the restricted loop (§4.2), the global allocator | lift-load |
 
 * **`crate::` paths keep working** in load files, as KERNEL-CRATES §1's rule

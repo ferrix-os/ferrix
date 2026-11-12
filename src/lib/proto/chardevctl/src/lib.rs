@@ -1,5 +1,5 @@
 //! The chardev control protocol: what the kernel's forwarding core
-//! (`src/kernel/src/interfaces/chardev`) and a ring-3 driver whose device
+//! (`src/kernel/extensions/personality/linux/src/interfaces/chardev`) and a ring-3 driver whose device
 //! files it forwards say to each other over their control channel
 //! (`docs/NVIDIA.md` §4.4, N1e).
 //!

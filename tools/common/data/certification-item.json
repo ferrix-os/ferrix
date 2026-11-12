@@ -183,7 +183,7 @@
       "(K12) and promises its operations' worst case from it before their first",
       "change (docs/BTRFS-PRESSURE.md W1, ledger 8337/8338 (b)): never more than",
       "this beyond what is drawn, 64 MiB or a 64th of the memory the frame",
-      "allocator manages, whichever is less (src/kernel/src/fs/btrfs.rs,",
+      "allocator manages, whichever is less (src/kernel/extensions/personality/linux/src/fs/btrfs.rs,",
       "`reserve_most`). Every promised frame raises every unreserved program's",
       "floor (L.mm.77), so the worst outstanding promise is this once per",
       "writable mount (MEMORY-AND-TIMING.md 2.2am)."
@@ -218,7 +218,7 @@
     "check.rs",
     "checks.rs",
     "*_check.rs",
-    "fs/btrfs_powerfail.rs"
+    "src/kernel/extensions/personality/linux/src/fs/btrfs_powerfail.rs"
   ],
   "//test_file_patterns": [
     "In-kernel self-tests: the code behind 'every boot proves its own claims'.",
@@ -385,75 +385,12 @@
         "over ~40,000 is a claim that can be."
       ],
       "members": [
-        "fs/**",
-        "interfaces/**",
-        "net/**",
+        "kernel_raised.rs",
+        "src/kernel/extensions/personality/linux/**",
         "src/kernel/extensions/board/gs201-usb/**",
         "src/kernel/extensions/board/stm32mp1/**",
         "src/kernel/extensions/device/logctl/**",
         "src/kernel/extensions/device/net-ring/**",
-        "syscall/attributes.rs",
-        "syscall/check.rs",
-        "syscall/compat.rs",
-        "syscall/credentials.rs",
-        "syscall/deliver.rs",
-        "syscall/deliver/**",
-        "syscall/epoll.rs",
-        "syscall/eventfd.rs",
-        "syscall/exec.rs",
-        "syscall/family.rs",
-        "syscall/fd.rs",
-        "syscall/file.rs",
-        "syscall/flock.rs",
-        "syscall/flock/**",
-        "syscall/fsctl.rs",
-        "syscall/futex.rs",
-        "syscall/image.rs",
-        "syscall/init_calls_check.rs",
-        "syscall/kill.rs",
-        "syscall/launch.rs",
-        "syscall/limits.rs",
-        "syscall/linux.rs",
-        "syscall/load.rs",
-        "syscall/memfd.rs",
-        "syscall/memory.rs",
-        "syscall/namespace.rs",
-        "syscall/nsproxy.rs",
-        "syscall/path.rs",
-        "syscall/pidns.rs",
-        "syscall/pipe.rs",
-        "syscall/poll.rs",
-        "syscall/process.rs",
-        "syscall/registry.rs",
-        "syscall/sem.rs",
-        "syscall/sem_check.rs",
-        "syscall/shm.rs",
-        "syscall/shm_check.rs",
-        "syscall/side_check.rs",
-        "syscall/seccomp.rs",
-        "syscall/seccomp_check.rs",
-        "syscall/seccomp_filters_check.rs",
-        "syscall/seccomp/user_dispatch.rs",
-        "syscall/seccomp/user_dispatch_check.rs",
-        "syscall/signal.rs",
-        "syscall/signalfd.rs",
-        "syscall/sigpage.rs",
-        "syscall/sockets.rs",
-        "syscall/stat.rs",
-        "syscall/system.rs",
-        "syscall/thread.rs",
-        "syscall/thread_area.rs",
-        "syscall/time.rs",
-        "syscall/timens.rs",
-        "syscall/timerfd.rs",
-        "syscall/tty.rs",
-        "syscall/userns.rs",
-        "syscall/vdso.rs",
-        "syscall/vdso_check.rs",
-        "kernel_load.rs",
-        "kernel_raised.rs",
-        "seam.rs",
-        "setters.rs",
         "src/kernel/extensions/settings/**"
       ]
     }
@@ -517,8 +454,8 @@
         "in_ring0_when": [
           "fs=kernel"
         ],
-        "below": "the `Device` trait (ferrix_btrfs::volume::Device): sector reads the kernel's block layer answers (src/kernel/src/fs/btrfs.rs, `Disk`); and caller-lent memory, `ExtentBuffers` and `ChunkStorage`",
-        "above": "`Volume` and the on-disk format types it returns (superblock, chunk map, keys, items, the fs and compress modules' readers), called by ferrix-btrfs-write, ferrix-btrfs-vfs and src/kernel/src/fs/btrfs*.rs"
+        "below": "the `Device` trait (ferrix_btrfs::volume::Device): sector reads the kernel's block layer answers (src/kernel/extensions/personality/linux/src/fs/btrfs.rs, `Disk`); and caller-lent memory, `ExtentBuffers` and `ChunkStorage`",
+        "above": "`Volume` and the on-disk format types it returns (superblock, chunk map, keys, items, the fs and compress modules' readers), called by ferrix-btrfs-write, ferrix-btrfs-vfs and src/kernel/extensions/personality/linux/src/fs/btrfs*.rs"
       },
       "ferrix-btrfs-write": {
         "ring": "item",
@@ -527,7 +464,7 @@
           "fs=kernel"
         ],
         "below": "the `WriteDevice` trait (ferrix_btrfs_write::WriteDevice, a `Device` that also writes and flushes), implemented by the kernel's `Disk`; and ferrix-btrfs, item",
-        "above": "`WriteVolume` and its transaction, inode and extent operations, called by ferrix-btrfs-vfs and src/kernel/src/fs/btrfs*.rs"
+        "above": "`WriteVolume` and its transaction, inode and extent operations, called by ferrix-btrfs-vfs and src/kernel/extensions/personality/linux/src/fs/btrfs*.rs"
       },
       "ferrix-sha256": {
         "ring": "core",
@@ -754,7 +691,7 @@
         "flag": "runtime_settings",
         "present_when": "live",
         "interface": "setters::Setters",
-        "defined_in": "setters.rs",
+        "defined_in": "src/kernel/extensions/personality/linux/src/setters.rs",
         "absent": "setters::Absent",
         "binding": {
           "live": "ferrix_kernel_settings::Live",
@@ -792,13 +729,13 @@
           "__ferrix_setters_cpu_online"
         ],
         "calls": [
-          "fs/memfd_check.rs",
-          "fs/procfs.rs",
-          "fs/procfs/render.rs",
-          "fs/sysfs.rs",
-          "syscall/check.rs",
-          "syscall/system.rs",
-          "syscall/time.rs"
+          "src/kernel/extensions/personality/linux/src/fs/memfd_check.rs",
+          "src/kernel/extensions/personality/linux/src/fs/procfs.rs",
+          "src/kernel/extensions/personality/linux/src/fs/procfs/render.rs",
+          "src/kernel/extensions/personality/linux/src/fs/sysfs.rs",
+          "src/kernel/extensions/personality/linux/src/syscall/check.rs",
+          "src/kernel/extensions/personality/linux/src/syscall/system.rs",
+          "src/kernel/extensions/personality/linux/src/syscall/time.rs"
         ],
         "lint_expect": "unused_crate_dependencies",
         "symbol": "ferrix_kernel_settings",
@@ -851,7 +788,8 @@
       "src/kernel/extensions/board/stm32mp1/src",
       "src/kernel/extensions/board/gs201-usb/src",
       "src/kernel/extensions/device/logctl/src",
-      "src/kernel/extensions/device/net-ring/src"
+      "src/kernel/extensions/device/net-ring/src",
+      "src/kernel/extensions/personality/linux/src"
     ]
   },
   "kernel_crates": {
@@ -939,8 +877,8 @@
       }
     },
     "ferrix-kernel-load": {
-      "path": "src/kernel/load",
-      "root": "kernel_load.rs",
+      "path": "src/kernel/extensions/personality/linux",
+      "root": "src/kernel/extensions/personality/linux/src/lib.rs",
       "rings": [
         "load"
       ]
@@ -1225,7 +1163,7 @@
     ],
     "elf_parse": [
       "discovery/first_image.rs",
-      "syscall/load.rs",
+      "src/kernel/extensions/personality/linux/src/syscall/load.rs",
       "syscall/program.rs"
     ],
     "first_image_load": [
@@ -1277,43 +1215,43 @@
   },
   "lift_cfg_sites": {
     "//": "ferrix_load_built sites in a load file: a ceiling, lowered as they go (ledger 5714 (9)).",
-    "syscall/credentials.rs": 2,
-    "syscall/linux.rs": 3,
-    "syscall/userns.rs": 1,
-    "fs/btrfs_write_check.rs": 8,
-    "fs/cgroupfs.rs": 13,
-    "fs/devfs.rs": 1,
-    "fs/mod.rs": 25,
+    "src/kernel/extensions/personality/linux/src/syscall/credentials.rs": 2,
+    "src/kernel/extensions/personality/linux/src/syscall/linux.rs": 3,
+    "src/kernel/extensions/personality/linux/src/syscall/userns.rs": 1,
+    "src/kernel/extensions/personality/linux/src/fs/btrfs_write_check.rs": 8,
+    "src/kernel/extensions/personality/linux/src/fs/cgroupfs.rs": 13,
+    "src/kernel/extensions/personality/linux/src/fs/devfs.rs": 1,
+    "src/kernel/extensions/personality/linux/src/fs/mod.rs": 25,
     "syscall/rehome_check.rs": 3,
     "user/rehome_check.rs": 2,
-    "fs/procfs.rs": 1,
-    "fs/sysfs.rs": 1,
-    "interfaces/block_ring/mod.rs": 8,
-    "interfaces/chardev/mod.rs": 1,
-    "interfaces/display/mod.rs": 1,
+    "src/kernel/extensions/personality/linux/src/fs/procfs.rs": 1,
+    "src/kernel/extensions/personality/linux/src/fs/sysfs.rs": 1,
+    "src/kernel/extensions/personality/linux/src/interfaces/block_ring/mod.rs": 8,
+    "src/kernel/extensions/personality/linux/src/interfaces/chardev/mod.rs": 1,
+    "src/kernel/extensions/personality/linux/src/interfaces/display/mod.rs": 1,
     "src/kernel/extensions/device/logctl/src/interfaces/logctl/mod.rs": 1,
     "src/kernel/extensions/device/net-ring/src/interfaces/net_ring/mod.rs": 1,
-    "net/mod.rs": 1,
-    "net/netlink/mod.rs": 1,
+    "src/kernel/extensions/personality/linux/src/net/mod.rs": 1,
+    "src/kernel/extensions/personality/linux/src/net/netlink/mod.rs": 1,
     "object/channel.rs": 1, "syscall/mod.rs": 3,
-    "syscall/deliver.rs": 4,
-    "syscall/flock.rs": 1,
-    "syscall/registry.rs": 1,
-    "syscall/seccomp.rs": 1,
+    "src/kernel/extensions/personality/linux/src/syscall/deliver.rs": 4,
+    "src/kernel/extensions/personality/linux/src/syscall/flock.rs": 1,
+    "src/kernel/extensions/personality/linux/src/syscall/registry.rs": 1,
+    "src/kernel/extensions/personality/linux/src/syscall/seccomp.rs": 1,
     "user/mod.rs": 6,
     "user/space.rs": 15,
     "user/vmo.rs": 3,
     "object/mod.rs": 2,
     "syscall/uaccess.rs": 1,
     "object/job.rs": 3,
-    "syscall/memory.rs": 1,
+    "src/kernel/extensions/personality/linux/src/syscall/memory.rs": 1,
     "arch/mod.rs": 3,
     "arch/aarch64/trap.rs": 1,
     "arch/armv7a/trap.rs": 1
   },
   "lift_check_exceptions": {
     "//": "A ratchet: one entry, to a userland test (BACKLOG, ledger 6268 E).",
-    "fs/btrfs_write_check.rs": "test-btrfs reads its result; no id gains evidence from it"
+    "src/kernel/extensions/personality/linux/src/fs/btrfs_write_check.rs": "test-btrfs reads its result; no id gains evidence from it"
   },
   "lift_packages": [
     "ferrix-lift-core",

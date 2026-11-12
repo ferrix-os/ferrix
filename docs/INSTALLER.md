@@ -63,7 +63,7 @@ Ferrix has half an installer already, and none of the other half.
 
 * Every `run` boot *installs* already: the kernel starts on the initramfs
   in tmpfs, finds a btrfs volume labelled `ferrix-root`, unpacks the
-  initramfs onto it, and switches `/` there (`src/kernel/src/fs/root_disk.rs`,
+  initramfs onto it, and switches `/` there (`src/kernel/extensions/personality/linux/src/fs/root_disk.rs`,
   `docs/GUIDE.md` §Getting started). An installed system is exactly that volume
   plus something that boots it.
 * `ferrix.root=tmpfs` (and `--tmpfs-root`) is a live session: `/` in memory,
@@ -86,7 +86,7 @@ Ferrix has half an installer already, and none of the other half.
 
 | Gap | Where it shows |
 |---|---|
-| Userland cannot open a disk | `src/kernel/src/fs/devfs.rs:1355`: every block device is `ENXIO` on open |
+| Userland cannot open a disk | `src/kernel/extensions/personality/linux/src/fs/devfs.rs:1355`: every block device is `ENXIO` on open |
 | No partition tables | root is found by label on a *whole* virtio disk, and only `vdd`..`vdg` (`root_disk.rs:78`) |
 | No mkfs for btrfs | every volume is unpacked from a host fixture |
 | No FAT in the running system | the ESP can be written on the host only |
@@ -333,7 +333,7 @@ limited to its range, as on Linux (I2). Like Linux without `O_EXCL`, opening
 a disk with something mounted from it is allowed, and not coherent with the
 mount; the engine refuses such a disk itself (I5).
 
-*Built (I1, 2026-09-28):* `src/kernel/src/fs/disk_file.rs`. Reads and writes of
+*Built (I1, 2026-09-28):* `src/kernel/extensions/personality/linux/src/fs/disk_file.rs`. Reads and writes of
 any byte range, with a read-modify-write for a sector covered in part;
 `EACCES` for writing a read-only disk; `ENOSPC` for a write at the end;
 `fsync` as the disk's flush; `BLKGETSIZE64`, `BLKGETSIZE`, `BLKSSZGET`,

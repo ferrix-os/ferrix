@@ -93,7 +93,7 @@ header and then failed to link, or ran and got the wrong answer.
 the kernel (setuid(2), "C library/kernel differences"). POSIX requires every
 thread of a process to share them, and glibc's and musl's `set*id` wrappers
 emulate that by making every thread repeat the call. Ferrix's kernel keeps
-`Credentials` on the `Process` (`src/kernel/src/syscall/process.rs`), which is what
+`Credentials` on the `Process` (`src/kernel/extensions/personality/linux/src/syscall/process.rs`), which is what
 POSIX requires, so on Ferrix one thread's `setuid` changes them all without the
 broadcast. The product owner's ruling of 2026-09-14 is to keep it: no kernel
 change. What follows from it:

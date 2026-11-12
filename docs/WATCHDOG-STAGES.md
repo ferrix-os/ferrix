@@ -364,7 +364,7 @@ feeds and no longer bounds its `epoll_wait` by the feed.
 * read two atomics the main loop writes (below);
 * `write(2)` a line formatted into a fixed array on its own stack to
   `/dev/kmsg`, opened before it started. `/dev/kmsg`'s write goes to
-  `console::write_record` (`src/kernel/src/fs/kmsg.rs`) and never waits on
+  `console::write_record` (`src/kernel/extensions/personality/linux/src/fs/kmsg.rs`) and never waits on
   a terminal; a refused write is dropped. Each turn feeds first, then
   reports (A2).
 
@@ -422,7 +422,7 @@ A loop that turns again before that is fed again. Both options are init's;
 **`say` cannot block on the console.** Ruling R-1 asked that a person's
 Ctrl-S on the console never become a reset. On Ferrix's console, flow
 control is stored and reported but changes nothing
-(`src/kernel/src/fs/terminal.rs`'s module comment: "On the console, flow
+(`src/kernel/extensions/personality/linux/src/fs/terminal.rs`'s module comment: "On the console, flow
 control (`IXON`) and the baud rate are stored and reported but change
 nothing"), so `say`'s write to the console cannot be stopped by XOFF. It is
 a synchronous UART write, bounded by the line's length. Only a

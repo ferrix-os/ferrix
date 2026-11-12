@@ -739,7 +739,7 @@ pub trait Inode: Send + Sync + fmt::Debug {
     /// fault fills an absent page from the source as a read does: a page the
     /// source has not filled yet would otherwise be mapped as zeros, and a
     /// private mapping's first write would copy them over the file's data.
-    /// The kernel's page cache does (`src/kernel/src/fs/pages.rs`, whose object
+    /// The kernel's page cache does (`src/kernel/extensions/personality/linux/src/fs/pages.rs`, whose object
     /// carries the source into the fault); tmpfs's stores have no source.
     fn mapping(&self) -> Option<Arc<dyn Any + Send + Sync>> {
         None

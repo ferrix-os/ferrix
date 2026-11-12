@@ -16,7 +16,7 @@
 //! # What goes where
 //!
 //! Every page of the image is one of two things, as in the Linux loader
-//! (`src/kernel/src/syscall/load.rs`):
+//! (`src/kernel/extensions/personality/linux/src/syscall/load.rs`):
 //!
 //! * **Mapped from the image's VMO**, shared: a page of one non-writable
 //!   segment's file contents, in no other segment, whose file offset and

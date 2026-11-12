@@ -129,12 +129,12 @@ directory in `/proc`.
   each architecture's frames, re-exported through the facade.
 * `src/kernel/src/sched/task.rs` (core): `Task::in_call()`, a read-only
   accessor. `backtrace.rs` (core): `in_image`, `slide` and `image_len`.
-* `src/kernel/src/fs/procfs.rs` and `fs/procfs/debug.rs` (load): the four
+* `src/kernel/extensions/personality/linux/src/fs/procfs.rs` and `fs/procfs/debug.rs` (load): the four
   files, who may open them (`guard_of`, `may_open`), and `wchan`'s naming.
   The naming needs the descriptor table and the call names
   (`ferrix_linux_abi::nr::Syscall`, `ferrix_native_abi::nr::NativeCall`),
   which the item does not.
-* `src/kernel/src/syscall/exec.rs` and `syscall/process.rs` (load):
+* `src/kernel/extensions/personality/linux/src/syscall/exec.rs` and `syscall/process.rs` (load):
   `execve` keeps `env_start` and `env_end`, which `ferrix_ustack::build`
   already computes, and the program's ABI, beside the argument vector.
   `fork` copies them with the rest of the identity. A process that no

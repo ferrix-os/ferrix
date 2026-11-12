@@ -4,7 +4,7 @@
 //!
 //! Ferrix's `/proc/<pid>/task/<tid>/wchan` names the call a thread is
 //! blocked in, with its descriptor's target for one on a descriptor
-//! (`src/kernel/src/fs/procfs/debug.rs`, `wchan_text`), or `0` for one that
+//! (`src/kernel/extensions/personality/linux/src/fs/procfs/debug.rs`, `wchan_text`), or `0` for one that
 //! runs. These files are rendered from the kernel's own record of the task:
 //! reading them takes no lock the hung program holds and reads no disk.
 

@@ -216,7 +216,7 @@ been pacing of a kind; at 0.06 ms the loop drew one for every report the
 mouse sent, and a frame is not only drawing. On a card it ends in a page
 flip, and Ferrix's virtio-gpu answers a flip by setting the scanout and
 sending the **whole** framebuffer to the host, waited for (`show` in
-`src/kernel/src/interfaces/display/drm.rs`). A guest with one processor spent it doing
+`src/kernel/extensions/personality/linux/src/interfaces/display/drm.rs`). A guest with one processor spent it doing
 that.
 
 * `hyprix::pace`: a change is owed a frame, and the frame is the next one
@@ -369,7 +369,7 @@ Ferrix answered `poll` on a listening Unix socket as hung up: a stream
 socket with no peer is `POLLHUP`, and a listener never has one. Linux's
 `unix_poll` answers a listener as readable while a connection waits and
 nothing else, which is what the kernel answers now
-(`src/kernel/src/fs/socket.rs`, `readiness`), with the boot check holding a
+(`src/kernel/extensions/personality/linux/src/fs/socket.rs`, `readiness`), with the boot check holding a
 listener to both halves. The compositor was right; every turn of its loop
 paid for the kernel's answer, and so did anything else sleeping in `poll`
 on a listener, sshdt among them.

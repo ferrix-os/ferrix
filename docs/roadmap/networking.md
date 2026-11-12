@@ -49,7 +49,7 @@ the `virtio_net` fuzz target. The kernel calls all of it now, below.
 **Done — the net core, and `AF_INET` and `AF_INET6` sockets.** `src/kernel/src/net`
 is `src/lib/network/net` behind one lock and a task that drives it. Nothing sleeps inside
 that lock: every call takes what it needs into a kernel buffer, drops it, and
-only then touches the program's memory, which is `src/kernel/src/fs/socket.rs`'s
+only then touches the program's memory, which is `src/kernel/extensions/personality/linux/src/fs/socket.rs`'s
 rule and the same reason. Sockets have no wait queue of their own -- they all
 wait on one, woken whenever the stack moved, and each waiter re-checks its own
 condition; that is a thundering herd in the textbook sense and the right trade
@@ -304,7 +304,7 @@ sleep" until the device interrupts. A test pins both.
 specifies, which every program that names an interface goes through, and which
 musl implements as `ioctl(SIOCGIFINDEX)` over an `AF_UNIX` socket — had nothing
 to talk to, so `ip` could not find a device that was right there.
-`src/kernel/src/net/ifreq.rs` is the index, the flags, the address, the mask, the
+`src/kernel/extensions/personality/linux/src/net/ifreq.rs` is the index, the flags, the address, the mask, the
 broadcast and peer addresses, the MTU, the hardware address, the queue length
 and `SIOCGIFCONF`. `sys_ioctl` sends what a socket's own family did not know to
 it whatever the family, as Linux's `sock_ioctl` passes it to `dev_ioctl`, so
@@ -329,7 +329,7 @@ the answer; and `/proc/net/dev` and `arp -n` show what the traffic left behind.
 **Done — `AF_UNIX` names.** `bind`, `listen`, `connect` and `accept` on a
 local socket, over both namespaces Linux has. A pathname is a node in the
 filesystem: `bind` creates an `S_IFSOCK` node exactly as `mknod` would, and
-`src/kernel/src/fs/sockname.rs` maps that node — its device and inode numbers, not
+`src/kernel/extensions/personality/linux/src/fs/sockname.rs` maps that node — its device and inode numbers, not
 the path, because two paths can name one node — to the socket. `connect` walks
 the path like any other, which is what makes the permissions on the
 directories above it mean something. An abstract name, a `sun_path` starting

@@ -101,7 +101,7 @@ after the pivot, as it does `/proc` and `/dev`.
 
 ## 4. The kernel's half
 
-`src/kernel/src/fs/sysfs.rs` is the view: a directory is a `Dir`, its names are
+`src/kernel/extensions/personality/linux/src/fs/sysfs.rs` is the view: a directory is a `Dir`, its names are
 computed by `entries`, a file is rendered at open by `render`, and a link's
 target is `path_of` the directory it names. `src/lib/fs/common/sysfs` holds every format
 and every parse, pure, host-tested and fuzzed: the identifiers, the processor
@@ -164,7 +164,7 @@ the net, input and serial cores do not yet, so a bind there may answer `EIO`.
 * **uevents.** The `uevent` files say what an event would carry; none is sent.
   A `NETLINK_KOBJECT_UEVENT` socket opens and joins its group since
   2026-09-30, so libudev's monitor is made, but nothing is ever queued on it
-  (`src/kernel/src/net/netlink/mod.rs`). A write to `uevent` is refused
+  (`src/kernel/extensions/personality/linux/src/net/netlink/mod.rs`). A write to `uevent` is refused
   rather than accepted and dropped. Sending one on each BOUND, UNBOUND and
   publication is a broadcast to those sockets and a few lines per core,
   3 points. One rule for it (os-9f, 2026-09-30): a program's send must never
@@ -200,7 +200,7 @@ the net, input and serial cores do not yet, so a bind there may answer `EIO`.
 * **`src/tests/fuzz/fuzz_targets/sysfs_names.rs`**: every parse round-trips, a written
   name stays inside what was written, and a link never climbs above its mount.
 * **The boot check**, the last one, after `devmgr` has started its drivers
-  (`src/kernel/src/fs/sysfs/check.rs`, FX-0890): a sysfs under `/tmp` walked whole,
+  (`src/kernel/extensions/personality/linux/src/fs/sysfs/check.rs`, FX-0890): a sysfs under `/tmp` walked whole,
   three names a listing so every listing resumes; every name looks up as the
   kind and number listed, every file reads, every link leads to a directory in
   the mount; then every device node is on its bus with enumeration's ids, every

@@ -631,7 +631,7 @@ const PERMISSIONS_UNDER_UUTILS: Expect = Expect::Shaped(&[
     // and the file is not this user's, and busybox says so. uutils says
     // "Permission denied". What the row is for holds either way -- the removal
     // was refused -- and the errno the kernel returns is checked where it is
-    // decided, in `src/kernel/src/fs`.
+    // decided, in the Linux personality's `fs`.
     "rm: cannot remove '/tmp/dac-private': Permission denied",
     // Two of uutils' messages name no file, and read as a Rust error rather
     // than a C one. Recorded as they are rather than tidied with a `*`, so
@@ -1504,7 +1504,7 @@ pub(crate) fn utilities(utilities: Utilities) -> &'static [Command] {
 }
 
 /// What crosses the seam, read last so it counts every command above: the
-/// kernel's counters from boot (`src/kernel/src/fs/seam.rs`), for the second
+/// kernel's counters from boot (the Linux personality's `fs/seam.rs`), for the second
 /// "seam measured" row of `docs/BACKLOG.md` (`docs/OPAQUE-KERNEL.md`, S0).
 pub(crate) const SEAM: &[Command] = &[Command {
     argv: &["cat", "/proc/ferrix-seam"],

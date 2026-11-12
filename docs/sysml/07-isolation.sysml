@@ -118,7 +118,7 @@ package FerrixIsolation {
              * no-new-privs. They sit on top of the handle system rather than
              * beside it.
              *
-             * src/kernel/src/syscall/credentials.rs: Linux's four user ids and
+             * src/kernel/extensions/personality/linux/src/syscall/credentials.rs: Linux's four user ids and
              * four group ids and the supplementary groups on every Process,
              * copied by fork, kept by execve with the saved and filesystem
              * ids made the effective ones, and changed by the set*id calls

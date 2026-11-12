@@ -1,7 +1,7 @@
 //! Stage 12's exit: boot, write a tree on a blank btrfs volume, and let host
 //! `btrfs check` judge what was written.
 //!
-//! The guest's half is `src/kernel/src/fs/btrfs_write_check.rs`, which builds a
+//! The guest's half is the Linux personality's `fs/btrfs_write_check.rs`, which builds a
 //! tree on the third disk, unmounts, mounts again and reads it all back; it
 //! proves the bytes survive a round trip through Ferrix. It cannot prove the
 //! trees are the ones btrfs would have written — a writer can be

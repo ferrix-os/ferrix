@@ -1023,7 +1023,7 @@ symbolic link (`fs::read_file_beneath`, `openat2`'s `RESOLVE_NO_SYMLINKS`),
 so a link planted there is `ELOOP`. Linux's loader is laxer on both; the
 certification consultant asked for it (2026-09-26), since the bytes are
 handed to every program that opens the card. Stage 8's boot check holds
-the kernel half. `src/kernel/src/interfaces/display/edid.rs` reads the option
+the kernel half. `src/kernel/extensions/personality/linux/src/interfaces/display/edid.rs` reads the option
 from the loader's command line when a driver's HELLO is accepted, before
 READY, once per card: that is Linux's connector probe. The connector is
 named as Linux names one, `Virtual-1` or `HDMI-A-1`, numbered per card

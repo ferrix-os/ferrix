@@ -13,7 +13,7 @@
 //!    part of a consistent volume and not a fault.
 //! 3. `ferrix.btrfs=replay`: the guest mounts the disk again, which replays
 //!    the log, checks every file whose trailer says its body was promised
-//!    (`src/kernel/src/fs/btrfs_powerfail.rs` says why that is a sound thing to
+//!    (the Linux personality's `fs/btrfs_powerfail.rs` says why that is a sound thing to
 //!    ask), and unmounts.
 //! 4. Host `btrfs check` again, which must find nothing.
 //!

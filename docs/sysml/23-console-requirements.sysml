@@ -915,7 +915,7 @@ package FerrixConsoleRequirements {
 
     package Watchdog {
         doc /* `ferrix.watchdog=on` (src/kernel/src/watchdog.rs, the core;
-             * /dev/watchdog in src/kernel/src/fs/watchdog.rs, the load):
+             * /dev/watchdog in src/kernel/extensions/personality/linux/src/fs/watchdog.rs, the load):
              * a deadline a privileged program arms and feeds, and a report
              * when no feed comes (docs/POSTMORTEM.md §6.11; consultant
              * ledger lines 7925 and 8078). Software only: the chipset's TCO

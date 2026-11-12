@@ -25,7 +25,7 @@ device. Two `Stack` values are therefore two complete, isolated hosts with no
 change to the library's shape; a network namespace is a `Stack` plus what the
 kernel adds around one.
 
-What the kernel adds is `net::NetCore` (`src/kernel/src/net/mod.rs`), and it is
+What the kernel adds is `net::NetCore` (`src/kernel/extensions/personality/linux/src/net/mod.rs`), and it is
 a **single global**:
 
 | Global | Where | What |

@@ -43,7 +43,7 @@
     "src/kernel/src/iommu/",
     "src/kernel/src/discovery/pci/",
     "src/kernel/src/mmio.rs",
-    "src/kernel/src/interfaces/block_ring/",
+    "src/kernel/extensions/personality/linux/src/interfaces/block_ring/",
     "src/kernel/extensions/device/net-ring/src/interfaces/net_ring/",
     "src/kernel/src/early.rs",
     "src/kernel/src/panic/screen.rs"
@@ -148,7 +148,7 @@
       "reason": "The GICv3 ITS's command queue and the LPI property table, in RAM the ITS and the redistributor read themselves. As smmuv3.rs: volatile because the interrupt controller observes the write, not because the address is a register."
     },
     {
-      "file": "src/kernel/src/interfaces/block_ring/mod.rs",
+      "file": "src/kernel/extensions/personality/linux/src/interfaces/block_ring/mod.rs",
       "kind": "shared",
       "max_sites": 4,
       "reason": "The block ring's pages, which the ring-3 driver maps too. The protocol gives each byte one writer; volatile says the other side's writes are real. This is the seam working as designed, not a breach of it."

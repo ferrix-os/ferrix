@@ -78,7 +78,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
-# `src/kernel/src/syscall/image.rs:` -- objdump groups the line table by source
+# the Linux personality's `syscall/image.rs:` -- objdump groups the line table by source
 # file and prints the path, relative to the compilation directory, as a header.
 #
 # Some headers carry no directory at all (`mod.rs:`), which names a file this

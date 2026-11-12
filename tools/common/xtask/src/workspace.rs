@@ -33,6 +33,24 @@ const KERNEL_PLACE: &str = "src/kernel";
 /// B.3), so a rename is that value and this one.
 pub(crate) const KERNEL_PARTS_PLACE: &str = "src/kernel/extensions";
 
+/// The Linux personality's part beneath [`KERNEL_PARTS_PLACE`], down to its
+/// `src/` (`docs/microkernel/CRATE-SPLIT.md` S5): the load's files keep the
+/// module path they had beneath it.
+const LINUX_PART_SRC: &str = "/personality/linux/src/";
+
+/// The path a changed file of the Linux personality has beneath its part's
+/// `src/` (`fs/pages.rs`), or nothing for any other file.
+pub(crate) fn linux_part_file(path: &str) -> Option<&str> {
+    path.strip_prefix(KERNEL_PARTS_PLACE)?
+        .strip_prefix(LINUX_PART_SRC)
+}
+
+/// The repository path of the Linux personality's file `rel`.
+#[cfg(test)]
+pub(crate) fn linux_part_path(rel: &str) -> String {
+    format!("{KERNEL_PARTS_PLACE}{LINUX_PART_SRC}{rel}")
+}
+
 /// The directory freestanding native programs live under.
 const NATIVE_PLACE: &str = "src/user/system/native/";
 

@@ -47,7 +47,7 @@ Blaster protocol what OpenOCD's `usb_blaster` speaks; neither was copied.
 
 ## 2. How a program reaches it
 
-`/dev` is a fixed table (`src/kernel/src/fs/devfs.rs`) and the kernel's one
+`/dev` is a fixed table (`src/kernel/extensions/personality/linux/src/fs/devfs.rs`) and the kernel's one
 forwarding of a character device to a ring-3 driver serves NVIDIA's major
 alone, so `usbserial` serves its port through a pseudoterminal: it holds the
 master and links the slave as `/tmp/ttyUSB<N>`. Bytes the chip receives are
@@ -133,7 +133,7 @@ the host after Quartus's `jtagd`; it waits for the customer's replug), and
 The consultant's ruling (ledger 4317): no USB in the kernel, no class
 table in `device.rs`; every item in the load ring, carried as numbered load
 statements, each with its check and a negative control run through
-`fleet/gate.sh control`. The checks are in `src/kernel/src/fs/pty_check.rs`,
+`fleet/gate.sh control`. The checks are in `src/kernel/extensions/personality/linux/src/fs/pty_check.rs`,
 run from `syscall::check`'s handler checks on every `test-boot`.
 
 1. **serial-1** (K3, numeric speeds): a pseudoterminal keeps a `BOTHER`

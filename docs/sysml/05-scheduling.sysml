@@ -534,7 +534,7 @@ package FerrixScheduling {
             @stage { number = 7; }
             doc /* Linux sched_setscheduler: SCHED_FIFO/RR to the soft-RT
                  * classes, SCHED_DEADLINE to EDF, SCHED_OTHER/BATCH/IDLE to
-                 * fair. src/kernel/src/syscall/limits.rs answers it today with
+                 * fair. src/kernel/extensions/personality/linux/src/syscall/limits.rs answers it today with
                  * the one policy there is a class for: SCHED_OTHER at
                  * priority zero is accepted and every other policy is EINVAL,
                  * refused rather than accepted and ignored, until stage 14
@@ -565,7 +565,7 @@ package FerrixScheduling {
 
     #implemented part def Futex {
         @stage { number = 7; }
-        doc /* src/kernel/src/syscall/futex.rs: wait, wake and requeue, plain and
+        doc /* src/kernel/extensions/personality/linux/src/syscall/futex.rs: wait, wake and requeue, plain and
              * with a bitset, with the word read and the waiter listed under
              * one table lock so no wake is lost, and the read under it
              * never faulting. One table. A private futex is keyed by

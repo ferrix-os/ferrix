@@ -143,6 +143,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import kernel_roots  # noqa: E402  (the parts' place, CRATE-SPLIT.md S0)
 import rustlex  # noqa: E402  (after the path insert)
 
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
@@ -179,13 +180,16 @@ PATTERNS = (CONSTRUCTORS, MACROS, METHODS)
 # Scanned as the item is. `Signals::default` in the first was F-23's hole.
 # The last three are `process_create`'s load: the `Processes::load` hook,
 # then the ELF loader it runs (consultant ledger 5546, answer A, 2026-10-31).
+# The Linux personality's part (docs/microkernel/CRATE-SPLIT.md S5): its files
+# are named by their repository path, the place read from the one record.
+_LINUX = kernel_roots.parts_place() + "/personality/linux/src/"
 REACHED = {
-    "syscall/signal.rs": "a process's and a thread's signal state",
-    "syscall/thread.rs": "a process's first thread",
-    "syscall/process.rs": "the process process_create loads and process_start starts",
-    "syscall/launch.rs": "the Processes::load and ::start hooks, load_native and start_native",
-    "syscall/exec.rs": "load_native_in and populate, which build the process from its image",
-    "syscall/load.rs": "the ELF image's headers, segments and mapping plan",
+    _LINUX + "syscall/signal.rs": "a process's and a thread's signal state",
+    _LINUX + "syscall/thread.rs": "a process's first thread",
+    _LINUX + "syscall/process.rs": "the process process_create loads and process_start starts",
+    _LINUX + "syscall/launch.rs": "the Processes::load and ::start hooks, load_native and start_native",
+    _LINUX + "syscall/exec.rs": "load_native_in and populate, which build the process from its image",
+    _LINUX + "syscall/load.rs": "the ELF image's headers, segments and mapping plan",
 }
 
 # A derive list, what it is on, and the start of its body.

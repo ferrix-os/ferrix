@@ -152,7 +152,7 @@ the file and reads its first page -- a script's `#!` line, or an ELF file's
 header and program header table, read on to the table's end if that is
 further -- and maps the segments from the file's page cache, the same object
 an `mmap` of the file maps (`src/kernel/src/syscall/program.rs`,
-`src/kernel/src/syscall/load.rs`). Every page wholly inside one segment's file
+`src/kernel/extensions/personality/linux/src/syscall/load.rs`). Every page wholly inside one segment's file
 contents is a private mapping of the file: read from the disk the first time
 the program touches it, shared by every process running the same program,
 and copied into the process's own object the first time it is written, so a
@@ -164,7 +164,7 @@ the kernel, are still copied, a piece at a time rather than whole. The linker
 limit, since `mmap` of a file always mapped its object. What is left of a
 limit is memory for page tables.
 
-The boot check (`src/kernel/src/fs/exec_check.rs`, FX-0871) loads a 72 MiB
+The boot check (`src/kernel/extensions/personality/linux/src/fs/exec_check.rs`, FX-0871) loads a 72 MiB
 program whose file is served by a page source that counts what it is asked
 for, as btrfs serves its page cache from disk. On every boot it reports
 `a 72 MiB program was loaded reading 3 of its 18437 pages, 67 by the time it
@@ -225,7 +225,7 @@ followed as their text.
 What follows is how it stood before.
 
 `execve` reads the whole file through `fs::read_file`, whose `READ_FILE_LIMIT`
-is 64 MiB (`src/kernel/src/fs/mod.rs`), and `load.rs` maps the segments and copies
+is 64 MiB (`src/kernel/extensions/personality/linux/src/fs/mod.rs`), and `load.rs` maps the segments and copies
 the image in. There is no demand-paged, file-backed executable mapping and no
 page cache behind `execve`. Chrome's binary with its resources is 180 to 250
 MiB.
@@ -253,7 +253,7 @@ back.
 
 Chrome's zygote wants user, pid and mount namespaces and a seccomp-bpf filter.
 Ferrix has neither: `unshare` refuses everything it cannot honour
-(`src/kernel/src/syscall/namespace.rs`), and there is no `seccomp` or `bpf` number
+(`src/kernel/extensions/personality/linux/src/syscall/namespace.rs`), and there is no `seccomp` or `bpf` number
 at all. Running `--no-sandbox` is the honest first target; stage 13 is the
 other answer.
 
@@ -265,7 +265,7 @@ what the state was, and why it mattered.
 But `clone` and `clone3` did not check the `CLONE_NEW*` flags at all.
 `src/lib/proto/linux-abi` defines them -- `CLONE_NEWNS`, `CLONE_NEWUSER`, `CLONE_NEWPID`
 and `CLONE_NEWNET` are all in `types.rs` -- and no line of
-`src/kernel/src/syscall/family.rs` ever tested one: `clone_with` checked the
+`src/kernel/extensions/personality/linux/src/syscall/family.rs` ever tested one: `clone_with` checked the
 `CLONE_THREAD`, `CLONE_SIGHAND` and `CLONE_VM` combinations and `CLONE_PIDFD`,
 and nothing else. So `clone(CLONE_NEWUSER|CLONE_NEWPID|SIGCHLD)` succeeded and
 handed back an ordinary child in the one namespace there is. A program that
@@ -287,7 +287,7 @@ that a program which asks for isolation now finds out it cannot have it.
   program now gets Linux's shape of vDSO, `linux-vdso.so.1` with
   `__vdso_clock_gettime`, `__vdso_gettimeofday` and `__vdso_time` at
   `LINUX_2.6`, over a data page holding the TSC's frequency and the
-  real-time offset (`src/lib/kernel/vdso`, `src/kernel/src/syscall/vdso.rs`). Under an
+  real-time offset (`src/lib/kernel/vdso`, `src/kernel/extensions/personality/linux/src/syscall/vdso.rs`). Under an
   emulator, whose clock is the HPET, the functions make the system call.
   AArch64 and ARMv7-A have none yet.
 * ~~**No `madvise`.**~~ **Done, 2026-09-24.** The number decoded and nothing
@@ -558,9 +558,9 @@ the two prerequisites in §4. Chromium's own requirements were taken from
 Alpine's `community/chromium` APKBUILD and its musl patch set, which is the
 only evidence that a Chromium against a musl-shaped C library builds at all.
 
-Read again on 2026-09-19, for the re-check at the top: `src/kernel/src/fs/devfs.rs`
+Read again on 2026-09-19, for the re-check at the top: `src/kernel/extensions/personality/linux/src/fs/devfs.rs`
 and `src/lib/fs/common/vfs`'s dentry cache, for what `/dev/shm` actually costs;
-`src/kernel/src/syscall/family.rs` again; and, for §4, that no loader has appeared
+`src/kernel/extensions/personality/linux/src/syscall/family.rs` again; and, for §4, that no loader has appeared
 (`DT_NEEDED` and `JUMP_SLOT` are still in no Rust in the tree), that
 `src/lib/fs/btrfs/vfs` still answers `EROFS`, and that `madvise`, `AT_SYSINFO_EHDR`,
 `timerfd` and `signalfd` are all still where §3 left them.
@@ -795,7 +795,7 @@ tmpfs root, because on the desktop's btrfs root Chrome stopped after its
 first Wayland requests or before them, with its profile in `/dev/shm` as
 well as in `/tmp`. It was not btrfs's. When the kernel moves `/` onto the
 btrfs volume it mounts a fresh devfs, `/proc`, `/sys` and a tmpfs `/tmp`
-inside it (`src/kernel/src/fs/root_disk.rs`), but not the tmpfs `fs::init`
+inside it (`src/kernel/extensions/personality/linux/src/fs/root_disk.rs`), but not the tmpfs `fs::init`
 mounts over `/dev/shm` on the initramfs's root; so on a btrfs root
 `/dev/shm` was devfs's bare directory, where nothing can be made. Chrome
 ended at once, crashpad unable to make its database and `PathService` with
@@ -1013,7 +1013,7 @@ a holder's virtual processor can also be descheduled by the host, and
 every other caller then spins until it runs again.
 
 The table is now 256 buckets with a lock each, as Linux's is
-(`src/kernel/src/syscall/futex.rs`). A boot check requeues a waiter across two
+(`src/kernel/extensions/personality/linux/src/syscall/futex.rs`). A boot check requeues a waiter across two
 buckets, with a negative control. Three runs of each, alternated one at a
 time on glibc under KVM, the host at a load of 25–39 throughout (38.6,
 28.3 and 39.5 at the before runs' starts, 37.1, 25.4 and 38.0 at the

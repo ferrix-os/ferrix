@@ -1,7 +1,7 @@
 /*
  * The layout of a Ferrix native program, on all three architectures.
  *
- * What the kernel's ELF loader (src/kernel/src/syscall/load.rs) requires:
+ * What the kernel's ELF loader (src/kernel/extensions/personality/linux/src/syscall/load.rs) requires:
  *
  *   - ET_EXEC at a fixed address. A position-independent image is refused
  *     by name, because nothing applies relocations to a program yet; the

@@ -40,7 +40,6 @@ ROOTS = {
     "main.rs",
     "kernel_core.rs",
     "kernel_item.rs",
-    "kernel_load.rs",
     "kernel_raised.rs",
     "lift_core.rs",
     "lift_item.rs",
@@ -220,7 +219,9 @@ def main() -> int:
     }
     names = set(lift_packages)
     kernel_cargos = [ROOT / "src" / "kernel" / "Cargo.toml"] + [
-        ROOT / "src" / "kernel" / ring / "Cargo.toml" for ring in ("core", "item", "load")
+        # The load is a part since S5 of the crate split (personality/linux),
+        # read with the parts below; the raised checks' crate beside the rings'.
+        ROOT / "src" / "kernel" / ring / "Cargo.toml" for ring in ("core", "item", "checks")
     ] + [part / "Cargo.toml" for part in part_dirs()]
     for cargo in kernel_cargos:
         if not cargo.is_file():

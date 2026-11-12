@@ -1046,7 +1046,7 @@ comparison below alternates its two sides edit by edit and also gives the
 processor time (`user`) and the bytes written (`/usr/bin/time %O`), which
 the load does not move. The edit is `~/ferrix-logs/bs-a/scripts/edit.sh`:
 a new `let _ = core::hint::black_box(N_u32);` in `sys_eventfd`
-(`src/kernel/src/syscall/eventfd.rs`, load ring), clean for rustfmt and
+(`src/kernel/extensions/personality/linux/src/syscall/eventfd.rs`, load ring), clean for rustfmt and
 clippy; logs and scripts in `~/ferrix-logs/bs-a/`.
 
 ### Where an edit's compile goes (x86-64, debug)

@@ -149,7 +149,7 @@ files, with no edge left behind.
 
 The obvious reading of F-01 is "move `Process` to `src/kernel/src/object/
 process.rs`". **That is the wrong change and it would make the item worse.**
-`Process` is not a clean core type. Read `src/kernel/src/syscall/process.rs:65` —
+`Process` is not a clean core type. Read `src/kernel/extensions/personality/linux/src/syscall/process.rs:65` —
 its fields include:
 
 | Field | Belongs to |

@@ -2,7 +2,7 @@
 //! (`docs/BACKLOG.md`, "the seam measured, 1"; `docs/OPAQUE-KERNEL.md`, S0).
 //!
 //! Ferrix's boot measures a 4 KiB read of the pattern disk through the block
-//! ring and its ring-3 driver, at depths 1 and 32 (`src/kernel/src/interfaces/block_ring/
+//! ring and its ring-3 driver, at depths 1 and 32 (the Linux personality's `interfaces/block_ring/
 //! hop_check.rs`, the `seam` boot line). This boots a stock Linux kernel --
 //! Debian 13's cloud kernel, fetched and pinned by
 //! `tools/common/fetch/fetch-linux-reference.sh`, its driver in ring 0 -- on the

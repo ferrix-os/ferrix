@@ -168,8 +168,8 @@ listed in the landing message (`net_ring` needs 5, `logctl` 4, plus the
 load items they name); every core or item file edited this way is named
 and `kernel-interface --check` runs. A part that linuxd builds has its lift
 twin **in its own directory**, `lift/Cargo.toml`, naming the same
-`src/lib.rs` (M5-LIFT §1's precedent: `ferrix-lift-load` names
-`kernel_load.rs`), so one directory holds everything of a part. Every part's
+`src/lib.rs` (M5-LIFT §1's precedent: `ferrix-lift-load` named
+`kernel_load.rs`, the load's root until S5), so one directory holds everything of a part. Every part's
 manifest names the one build script, `src/kernel/build.rs` (ledger 3282
 (K1)), and is a workspace member.
 
@@ -543,7 +543,7 @@ their owners.
 | S3 | **Landed** (see *Where it stands*). `logctl` to `device/logctl/`, with its lift twin | 2 | `interfaces/logctl/`, `interfaces/mod.rs`, `main.rs`; about 30 min | S0 |
 | S4a | **Landed** (see *Where it stands*). `PLACED` and `node_of` from `net_ring` into the load's `net::device` (§2.6 item 4a); a code change, reviewed, no move | 2 | none | S0 |
 | S4 | **Landed** (see *Where it stands*). `net_ring` to `device/net-ring/`, with its lift twin | 2 | as S3, plus `stages_check.rs`'s one call and `sysfs.rs`'s five | S3, S4a |
-| S5 | S5a: the raised-checks crate (§2.6 item 5; the record's "26" comment fixed), with the fixes for the three edges it found (E1-E3, §2.6 item 5); then S5b: the whole load to `personality/linux/`, name kept, its lift twin moved with it. After S5, `src/kernel/src` holds only core, item, the shim and crate roots | 5 | every load file: the longest, about 60 min; announced a day ahead | S0, S4 |
+| S5 | **Landed** (see *Where it stands*). S5a: the raised-checks crate (§2.6 item 5; the record's "26" comment fixed), with the fixes for the three edges it found (E1-E3, §2.6 item 5); then S5b: the whole load to `personality/linux/`, name kept, its lift twin moved with it. After S5, `src/kernel/src` holds only core, item, the shim and crate roots | 5 | every load file: the longest, about 60 min; announced a day ahead | S0, S4 |
 | P1 | `fs::DiskFilesystem` seam (no freeze), then btrfs as a part | 5 | `fs/btrfs*` and their callers' lines | S5; seam design review |
 | P2 | `block_ring`'s shared helpers down (no freeze); `fd::DeviceFiles` and `devfs::DeviceNodes` seams (no freeze); then input, audio, block ring as parts | 8 | per part | P1; seam design review |
 | P3 | `procfs::Kernel` down; then the GPU group, the pseudo-filesystems, the net stack, one seam and one part per landing | 20 (a guess, like M5's) | per part | P2; seam design reviews |
@@ -736,4 +736,28 @@ count rises by the re-exports' nine source lines on x86-64 and ten on AArch64, w
 x86-64, so the product bodies are shown by a second build with `checks=off` in place of
 `kmain` instruction by instruction (U.2); after a conflict in the evidence files a commit
 is given develop's evidence files before `carry-coverage.py` runs (U.8). `side_check.rs`
-is unmeasured until the next coverage run (BACKLOG). Next: S5b.
+is unmeasured until the next coverage run (BACKLOG).
+
+**S5b landed** (2026-11-12, mk-crates7, with S5a in one push under one hold of the landing
+lock; the customer ordered the freeze for that day; diff check ledger 9167, OK IF X.1-X.7,
+met as the landing's message says). The Linux personality, whole, is the part
+`personality/linux/` (`ferrix-kernel-load`, its name kept): 184 files moved by
+`move-kernel-part.py`, 183 of them `R100` at the module path they had (`fs/`, `interfaces/`,
+`net/`, the load's files of `syscall/`, `seam.rs`, `setters.rs`), the root `kernel_load.rs` as
+the part's `src/lib.rs`, its manifest from `src/kernel/load/` and its lift twin
+`ferrix-lift-load` from `src/kernel/lift/load/` to the part's `lift/`. One moved file changes a
+line: `fs/btrfs_check.rs`'s `include_str!` of the btrfs fixtures' manifest is a path relative
+to the file, three directories deeper now. The 14 core and item files of `syscall/` and the
+raised checks' root and its 41 files stay in `src/kernel/src`, in their rings by path: after
+S5, `src/kernel/src` holds the core's and the item's files, the shim and the crate roots, and
+nothing optional sits in it, which is what the customer asked for. The record: the root
+`src/kernel/extensions/personality/linux/src`, the load ring's members as the one part line
+beside `kernel_raised.rs` and the earlier parts', `kernel_crates`' path and root, and every
+entry that named a load file relative to `src/kernel/src` by its repository path. What the
+move found in the tools: `gate_rows.rs` asked for rows by path prefixes into the moved
+directories (`fs/btrfs`, `interfaces/chardev/`) that the mover's per-file rewrite cannot see,
+now through `workspace.rs`'s `linux_part_file`; `check-fallible-alloc.py`'s six reached load
+files and `check-lift.py`'s list of kernel manifests named the old places;
+`check-item-boundary.py`'s seam rule compared a path walked through `..` with the record's;
+`check-kernel-shape.py`'s `LEFT_CRATES` names the raised checks' crate too (9066 V.5).
+Next: P1 (the `fs::DiskFilesystem` seam, then btrfs as a part), after its design review.

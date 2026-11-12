@@ -48,7 +48,7 @@ const MTIME_AT: usize = 6 + 5 * 8;
 pub(crate) const MARKER_PATH: &str = "etc/ferrix/initramfs";
 
 /// The marker's contents. The kernel's self-check compares them byte for byte,
-/// and `src/kernel/src/fs/check.rs` carries the same string.
+/// and the Linux personality's `fs/check.rs` carries the same string.
 pub(crate) const MARKER: &[u8] =
     b"unpacked by the kernel from a cpio archive the loader handed it\n";
 
@@ -255,7 +255,7 @@ impl Newc {
 /// on every machine. Other names give another time, as a directory's mtime
 /// moves on Linux when an entry is added, removed or renamed. That is what
 /// fontconfig keys its caches on: the kernel unpacks the archive over a
-/// disk's `/` at every boot (`src/kernel/src/fs/root_disk.rs`), and with one
+/// disk's `/` at every boot (the Linux personality's `fs/root_disk.rs`), and with one
 /// fixed time a `/usr/share/fonts` whose fonts changed kept the time of the
 /// one before, so a cache in `/var/cache/fontconfig` from an older image went
 /// on saying it held no fonts. Steam's browser then found none at all and
@@ -1119,7 +1119,7 @@ fn build_with_shell(
         // by DHCP and a guest configured by hand agree.
         archive.file("etc/resolv.conf", 0o644, b"nameserver 10.0.2.3\n")?;
         // What is mounted, for the programs that read it. Ferrix mounts `/`
-        // and `/data` itself, from the command line (`src/kernel/src/fs/root_disk.rs`,
+        // and `/data` itself, from the command line (the Linux personality's `fs/root_disk.rs`,
         // `data_disk.rs`), and nothing here mounts from this file. But every
         // Linux has one, and btop reads its list of disks from it by default:
         // with none, its memory panel's collection failed every time on the

@@ -114,7 +114,7 @@ This is for iteration 2, not this one, and most of it is already there:
 `memfd_create` with seals, `MAP_SHARED` of a memfd, `eventfd`, `timerfd`,
 `signalfd`, `epoll`, futexes, `clock_nanosleep`, `SCM_RIGHTS`,
 `SCM_CREDENTIALS`, `SO_PEERCRED` and `SO_PASSCRED` all exist. What does not:
-`sched_setscheduler` accepts only `SCHED_OTHER` (`src/kernel/src/syscall/limits.rs`,
+`sched_setscheduler` accepts only `SCHED_OTHER` (`src/kernel/extensions/personality/linux/src/syscall/limits.rs`,
 the policy check), and `RLIMIT_RTPRIO` is stored but enforces nothing. A
 server asks for `SCHED_FIFO` and runs without it when refused, so the gap is
 latency under load rather than a failure. Stage 14 (real-time domains) is
@@ -680,7 +680,7 @@ and AArch64:
   `audio    card0 virtio-snd: playback 48000 Hz, 2 channels, S16_LE, 1
   stream left out`.
 * **L6.** devfs has `/dev/snd/controlC0` (116:0) and `pcmC0D0p` (116:16)
-  while a card is published. `src/kernel/src/interfaces/audio/pcm.rs` answers §3.4's
+  while a card is published. `src/kernel/extensions/personality/linux/src/interfaces/audio/pcm.rs` answers §3.4's
   subset over `ferrix-sndctl`'s stream. `WRITEI_FRAMES` copies from the
   program with no lock held and then submits, and a non-blocking descriptor
   gets a short count or `EAGAIN`. Every message the stream asks the driver

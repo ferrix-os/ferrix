@@ -99,7 +99,7 @@
         "src/kernel/src/syscall/uaccess.rs"
       ],
       "demonstrated_by": [
-        "src/kernel/src/syscall/check.rs"
+        "src/kernel/extensions/personality/linux/src/syscall/check.rs"
       ]
     },
     {
@@ -381,7 +381,7 @@
       "argued_by": [
         "src/kernel/src/syscall/uaccess.rs::copy_from_user",
         "src/kernel/src/syscall/uaccess.rs::copy_to_user",
-        "src/kernel/src/syscall/check.rs"
+        "src/kernel/extensions/personality/linux/src/syscall/check.rs"
       ]
     },
     {

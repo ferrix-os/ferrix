@@ -49,11 +49,12 @@ Only `src/boot/*` and `src/kernel/` are freestanding;
 ## `src/kernel/`
 
 The kernel, as four crates along the certified item's rings
-(`docs/KERNEL-CRATES.md`): `ferrix-kernel-core`, `ferrix-kernel-item` and
-`ferrix-kernel-load`, whose manifests are in `core/`, `item/` and `load/` and
-whose roots are `src/kernel_core.rs`, `src/kernel_item.rs` and
-`src/kernel_load.rs`, beside the binary's `src/main.rs`; every file is in
-`src/` whichever crate builds it. `checks/` is `ferrix-kernel-raised-checks`'s
+(`docs/KERNEL-CRATES.md`): `ferrix-kernel-core` and `ferrix-kernel-item`,
+whose manifests are in `core/` and `item/` and whose roots are
+`src/kernel_core.rs` and `src/kernel_item.rs`, beside the binary's
+`src/main.rs`, and `ferrix-kernel-load`, the Linux personality, a part of its
+own in `extensions/personality/linux/` since S5 of the crate split; `src/`
+holds the core's and the item's files, the shim and the crate roots. `checks/` is `ferrix-kernel-raised-checks`'s
 manifest, root `src/kernel_raised.rs`: the core and item check files that need
 the load, which only the binary links (`docs/microkernel/CRATE-SPLIT.md` S5). Its source paths are load-bearing: the certification
 evidence (`docs/certification/coverage-*.json`) and the baselines in

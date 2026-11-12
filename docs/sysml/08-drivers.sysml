@@ -474,7 +474,7 @@ package FerrixDrivers {
              * starts devmgr from stage 10's boot check, and devmgr starts the
              * drivers; on a boot with a btrfs root disk the kernel then
              * mounts it and moves every process after onto it, as Linux's
-             * switch_root does (src/kernel/src/fs/root_disk.rs), and starts init
+             * switch_root does (src/kernel/extensions/personality/linux/src/fs/root_disk.rs), and starts init
              * last, after the boot marker. Linux's answer, for the same
              * reason. The test boots keep the tmpfs root, so only cargo
              * xtask run mounts a root disk and moves onto it. pivot_root

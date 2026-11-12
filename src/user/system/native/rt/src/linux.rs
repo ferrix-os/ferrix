@@ -2,7 +2,7 @@
 //!
 //! A native program is not a POSIX one and has no libc, no descriptors of its
 //! own and no `std`. But the kernel gives *every* process a descriptor table
-//! and a namespace (`Process::with_pid` in `src/kernel/src/syscall/process.rs`),
+//! and a namespace (`Process::with_pid` in `src/kernel/extensions/personality/linux/src/syscall/process.rs`),
 //! and `dispatch` picks the ABI by the number's range and by nothing else --
 //! so a native program that wants a socket may simply ask for one. This
 //! module is that: the handful of calls `src/user/system/native/drivers/console/vport` needs to put a virtio

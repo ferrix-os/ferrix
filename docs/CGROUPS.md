@@ -53,7 +53,7 @@ root of its own, becomes a child of the root named `drivers.slice`, the name
 `Process` gains `membership: SpinLock<Arc<Job>>`, held strongly: a process
 keeps its job alive, as a Linux task keeps its `css_set`. `fork` reads the
 parent's job under the parent's membership lock and joins the child to it
-before the child is published (`src/kernel/src/syscall/family.rs`, before the
+before the child is published (`src/kernel/extensions/personality/linux/src/syscall/family.rs`, before the
 `processes` insert in `clone_with`). So a fork and a move of its parent are
 ordered: the child lands in the job the parent was in when the fork took the
 lock, and never half in one and half in the other. `process_create` joins the
@@ -129,8 +129,8 @@ locks are taken (FX-0503's rule, `crate::sync::SpinLock`).
 
 ## 3. cgroupfs
 
-A new in-kernel filesystem, `src/kernel/src/fs/cgroupfs.rs`, registered as
-`cgroup2` in `filesystem_named` (`src/kernel/src/syscall/fsctl.rs`, where the
+A new in-kernel filesystem, `src/kernel/extensions/personality/linux/src/fs/cgroupfs.rs`, registered as
+`cgroup2` in `filesystem_named` (`src/kernel/extensions/personality/linux/src/syscall/fsctl.rs`, where the
 comment already says it joins that match) and listed in `/proc/filesystems`.
 Every text it reads or writes is parsed and rendered by a new
 `src/lib/fs/common/cgroupfs`, a pure crate with host tests and a fuzzer. That covers
@@ -304,7 +304,7 @@ the delegatee limits what it makes. **A child's limit is a number, not a
 guarantee**: it may be set above its parent's, and binds nothing beyond it,
 because every job's use is charged to each of its ancestors
 (`object::quota`) and the tightest limit on the way up refuses first. The
-check is `src/kernel/src/fs/cgroupfs/limits_check.rs`, the `limits` boot line.
+check is `src/kernel/extensions/personality/linux/src/fs/cgroupfs/limits_check.rs`, the `limits` boot line.
 
 ## 6. Where each thing is charged
 
@@ -338,7 +338,7 @@ and still over. That is the scoped OOM kill of stage 13's exit, and the one
 ## 7. The landings
 
 In story points, each landing gated by what it names. The kernel's in-boot
-checks are the pattern `src/kernel/src/syscall/check.rs` sets; a user-level
+checks are the pattern `src/kernel/extensions/personality/linux/src/syscall/check.rs` sets; a user-level
 check runs in `test-shell` with zinc and uutils. The G landings are what
 `docs/INIT.md` needs before init boots.
 
@@ -467,7 +467,7 @@ killed), and `memory.events` polling the wrong queue (the wait ended by
 its recheck) each fail by the check's own message.
 
 **G3, as built (3 points).** §4 says what it is. The `cgroups` boot check
-(`src/kernel/src/fs/cgroupfs/events_check.rs`) gives a cgroup two members, reads
+(`src/kernel/extensions/personality/linux/src/fs/cgroupfs/events_check.rs`) gives a cgroup two members, reads
 its `cgroup.events`, and puts it in an epoll set asking `EPOLLPRI`; a task
 waits on the set as `epoll_wait` does. The first member's release must leave
 the waiter asleep, the last must wake it with `EPOLLPRI` and its cookie, by
@@ -478,7 +478,7 @@ negative control, `EventsFile::poll_queues` naming no queue, fails by the
 check's own message ("ended by its recheck, not by the release's wake").
 
 **G4, as built (5 points).** §3.1 and §3.2 say what it is. Its checks are
-under the `cgroups` boot line (`src/kernel/src/fs/cgroupfs/delegation_check.rs`):
+under the `cgroups` boot line (`src/kernel/extensions/personality/linux/src/fs/cgroupfs/delegation_check.rs`):
 a program, `arch::USER_INTO_CGROUP_PROGRAM` on all three architectures,
 starts a child with `CLONE_INTO_CGROUP` that reads `0::/check-g` from
 `/proc/self/cgroup` first thing, and gets `EBADF` for a descriptor not open
@@ -509,7 +509,7 @@ waiting for `TERMINATED`, so one for `EMPTY` waits on for the members to
 end. `job_for_cgroup` judges the caller, not whoever opened the
 descriptor, since it makes a new capability rather than using the file:
 `DUPLICATE`, `TRANSFER` and `WAIT` to a reader of `cgroup.procs`, and
-`MANAGE` too to a writer. The check (`src/kernel/src/fs/cgroupfs/native_check.rs`,
+`MANAGE` too to a writer. The check (`src/kernel/extensions/personality/linux/src/fs/cgroupfs/native_check.rs`,
 under the `cgroups` boot line) drives it through the native dispatch; its
 negative control, `notify` firing no registration, fails by the check's own
 message ("the last member's release fired no EMPTY packet with its key").
@@ -519,7 +519,7 @@ there.
 **What the next session does first, and where each starts.**
 
 * **P1, `pids`** (3 points), done as written below but for the charge's
-  place, which is the core's `Process::new`. `BUILT` in `src/kernel/src/fs/cgroupfs.rs` gains
+  place, which is the core's `Process::new`. `BUILT` in `src/kernel/extensions/personality/linux/src/fs/cgroupfs.rs` gains
   `pids`, and `src/lib/fs/common/cgroupfs`'s `files` a table of controller files beside
   the base ones (`pids.max`, `pids.current`, `pids.events`), each listed
   only where the parent's `subtree_control` enables it. The charge is per
@@ -871,7 +871,7 @@ set (`cpu_check::walks_only_under_a_quota`).
 
 ## 13. The `io` controller (B1, 2026-09-30)
 
-`src/kernel/src/fs/blkio.rs`. The disk the block ring registers is wrapped, so
+`src/kernel/extensions/personality/linux/src/fs/blkio.rs`. The disk the block ring registers is wrapped, so
 a mount's fill, a write-back and a raw read of the node are charged, to the
 job of the task that submits them and each job above, and to the machine (the
 root's `io.stat`). A partition is not wrapped: its reads reach the disk it is

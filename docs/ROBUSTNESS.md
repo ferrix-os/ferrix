@@ -278,7 +278,7 @@ count that moves, and it is answered by changing the count. This one asks
 only whether a failure can be reported.
 
 **Negative controls.** These hand runs are diagnosis, not evidence: a
-planted `Box::new` in `src/kernel/src/fs/pipe.rs` failed the gate with
+planted `Box::new` in `src/kernel/extensions/personality/linux/src/fs/pipe.rs` failed the gate with
 "pipe.rs: 10 -> 11", exit 1, and a `vec!` planted in `ferrix-btrfs-vfs`
 `rw.rs` failed it too. The `gate.sh control` runs that count as evidence
 are cited in the landing's commit. The self-test covers the dependency
@@ -289,7 +289,7 @@ The evidence, on 1ceeac1d2 through `gate.sh control ... --expect-host
 ... -- check`, with each edit undone afterwards:
 
 * (a) `const _: fn() -> Box<u8> = || Box::new(1);` in `fs/pipe.rs` gave
-  `control: FIRED (host): src/kernel/src/fs/pipe.rs: 10 -> 11`
+  `control: FIRED (host): src/kernel/extensions/personality/linux/src/fs/pipe.rs: 10 -> 11`
   (`~/.local/share/ferrix/logs/queue/rob-r1-ctl-pipe.log`).
 * (b) the same with `vec![1]` in `ferrix-btrfs-vfs`'s `rw.rs` gave
   `control: FIRED (host): src/lib/fs/btrfs/vfs/src/rw.rs: 28 -> 29`

@@ -62,7 +62,11 @@ LEFT = (
 )
 
 # Crates no ring-0 crate of this shape may link.
-LEFT_CRATES = ("ferrix_kernel_load", "ferrix_kernel_settings", "ferrix_kernel_board_stm32mp1",
+# The raised checks' crate is the load's checks of the core and the item: it
+# depends on the load, and is named so that a symbol of it is refused by its
+# own name too (ledger 9066 V.5).
+LEFT_CRATES = ("ferrix_kernel_load", "ferrix_kernel_raised_checks",
+               "ferrix_kernel_settings", "ferrix_kernel_board_stm32mp1",
                "ferrix_kernel_board_gs201_usb", "ferrix_kernel_logctl",
                "ferrix_kernel_net_ring", "ferrix_fbtext", "ferrix_qr")
 

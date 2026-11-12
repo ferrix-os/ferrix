@@ -1,4 +1,4 @@
-//! `/dev/kmsg`'s records, read (`src/kernel/src/fs/kmsg.rs` writes them).
+//! `/dev/kmsg`'s records, read (`src/kernel/extensions/personality/linux/src/fs/kmsg.rs` writes them).
 //!
 //! A read is one record: `prio,seq,usec,flags[,...];text`, a newline, and
 //! then any `KEY=value` continuation lines, each beginning with a space,

@@ -279,7 +279,7 @@ both in `item`:
 
 | Crate | Below it | Above it |
 |---|---|---|
-| `ferrix-btrfs`, the reader | the `Device` trait (`ferrix_btrfs::volume::Device`): sector reads, answered by the kernel's block layer through `Disk` in `src/kernel/src/fs/btrfs.rs`; and memory its caller lends, `ExtentBuffers` and `ChunkStorage` -- the crate allocates little of its own | `Volume`, and the format types it hands out: superblock, chunk map, keys, items, the readers of `fs` and `compress` |
+| `ferrix-btrfs`, the reader | the `Device` trait (`ferrix_btrfs::volume::Device`): sector reads, answered by the kernel's block layer through `Disk` in `src/kernel/extensions/personality/linux/src/fs/btrfs.rs`; and memory its caller lends, `ExtentBuffers` and `ChunkStorage` -- the crate allocates little of its own | `Volume`, and the format types it hands out: superblock, chunk map, keys, items, the readers of `fs` and `compress` |
 | `ferrix-btrfs-write`, the write path | the `WriteDevice` trait (`ferrix_btrfs_write::WriteDevice`, a `Device` that also writes and flushes), implemented by the same `Disk`; and `ferrix-btrfs` | `WriteVolume`: its transactions and its inode, directory and extent operations |
 
 **What stays load, and why.** `ferrix-btrfs-vfs` and `src/kernel/src/fs/btrfs*.rs`
@@ -425,7 +425,7 @@ It is `forbid(unsafe_code)`, `no_std` without `alloc`, and denies
 `arithmetic_side_effects` as well as the workspace's panic lints, so every
 function is total over any bytes firmware wrote. What it hands sysfs, the
 `/sys/class/dmi/id` and `/sys/firmware/dmi/tables` files, is shown by
-`src/kernel/src/fs/sysfs.rs`, which stays load: the files' modes and their
+`src/kernel/extensions/personality/linux/src/fs/sysfs.rs`, which stays load: the files' modes and their
 refusal to anyone but root are a claim about the configuration, not the
 item (VULNERABILITY-ANALYSIS.md, T.IDENTIFY).
 

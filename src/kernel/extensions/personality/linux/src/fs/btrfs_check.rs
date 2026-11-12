@@ -37,7 +37,7 @@ use crate::syscall::memory::{self, MmapRequest, OffsetUnit};
 use crate::syscall::{fd, process, uaccess};
 
 /// The fixture's manifest: `kind hex(path) size crc32c` per line.
-const MANIFEST: &str = include_str!("../../../lib/fs/btrfs/format/testdata/manifest.txt");
+const MANIFEST: &str = include_str!("../../../../../../lib/fs/btrfs/format/testdata/manifest.txt");
 
 /// Where the disk is mounted.
 const MOUNT_POINT: &[u8] = b"/mnt";

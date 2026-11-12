@@ -329,7 +329,7 @@ Poll must not cost a channel round trip per `poll()`. So the driver
 |---|---|---|
 | READ/WRITE/LLSEEK/FLUSH/FSYNC requests, readiness, windows, `follow`, the fast path | `src/kernel/src/interfaces/chardev/` | load |
 | The generic name rule; node set in the grant; HELLO version 3 | `src/lib/proto/chardevctl` | none |
-| Publishing under nested names | `src/kernel/src/fs/devfs.rs` | load |
+| Publishing under nested names | `src/kernel/extensions/personality/linux/src/fs/devfs.rs` | load |
 | The grant as a restricted channel end; `ChardevControlCreate` spending it; the kernel-end table | `src/kernel/src/interfaces/chardev/` | load |
 | New call numbers (`chardev_window_follow`, `chardev_ready`, a grant mint for devmgr) | appended to `ferrix_native_abi::nr`; their SERVED rows, dispatch arms and audit arm in `syscall/native.rs` | **item**, but no new function, so no L id (ledger 316, B13) |
 | The root grant in DEVICES | `discovery/devmgr.rs`, through a hook the load ring registers | **item**: `L.discovery.7` |
