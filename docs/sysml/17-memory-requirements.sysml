@@ -3762,7 +3762,9 @@ package FerrixMemoryRequirements {
             attribute :>> parent = ("H.OBJ.20", "H.QUOTA.2");
             attribute :>> unit = ("user::address_wait::new_sleeper",
                 "user::address_wait::cost", "user::address_wait::grow",
-                "user::address_wait::shrink", "user::address_wait::move_into");
+                "user::address_wait::shrink", "user::address_wait::move_into",
+                "user::address_wait::shrink_due", "user::address_wait::shrink_if",
+                "user::address_wait::source_shrink_due");
         }
         // docs/BLOCK-AND-WAKE.md W1: a futex wait blocks on no queue, so the
         // order of the wake and the block is the fence pair's (ledger 9027, WF6).

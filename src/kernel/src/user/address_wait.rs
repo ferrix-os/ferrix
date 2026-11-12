@@ -467,6 +467,31 @@ fn move_into(table: &mut Vec<Entry>, fresh: &mut Vec<Entry>) {
     }
 }
 
+/// Whether a bucket whose lock is held has room to give back by [`shrink`]'s
+/// own test: more than [`MIN_ROOM`] and more than four times its entries.
+/// Made under the hold that took entries out, so that a wake, a leave or a
+/// requeue that leaves the bucket within that bound takes its lock no second
+/// time; [`shrink`] makes the test again under its own.
+fn shrink_due(table: &Vec<Entry>) -> bool {
+    table.capacity() > MIN_ROOM && table.len().saturating_mul(4) < table.capacity()
+}
+
+/// [`shrink`] bucket `index` if a held lock found it [`shrink_due`].
+fn shrink_if(due: bool, index: usize) {
+    if due {
+        shrink(index);
+    }
+}
+
+/// [`shrink_due`] for a requeue's source bucket, under its two locks: the
+/// first, the lower bucket's, unless `source_higher` and there is a second.
+fn source_shrink_due(first: &Vec<Entry>, second: Option<&Vec<Entry>>, source_higher: bool) -> bool {
+    match second {
+        Some(higher) if source_higher => shrink_due(higher),
+        _ => shrink_due(first),
+    }
+}
+
 /// Give back room bucket `index` holds beyond four times its entries, down to
 /// [`MIN_ROOM`]: a smaller vector is allocated with nothing held and swapped
 /// in under the lock if the bucket is still that empty; the larger is freed
@@ -693,9 +718,10 @@ fn leave(sleeper: &Arc<Sleeper>, slot: usize) {
             .iter()
             .position(|entry| Arc::ptr_eq(&entry.sleeper, sleeper) && entry.slot == slot)
             .map(|index| table.remove(index));
+        let due = shrink_due(&table);
         drop(table);
         drop(mine);
-        shrink(bucket);
+        shrink_if(due, bucket);
         return;
     }
 }
@@ -730,7 +756,7 @@ fn rouse(keys: &[Key], limit: usize, bitset: u32, with: With) -> usize {
         {
             continue;
         }
-        loop {
+        let due = loop {
             let mut taken: [Option<Entry>; ROUND] = core::array::from_fn(|_| None);
             let mut full = false;
             let mut table = bucket_lock(bucket).lock();
@@ -754,13 +780,14 @@ fn rouse(keys: &[Key], limit: usize, bitset: u32, with: With) -> usize {
                 *place = Some(entry);
                 held += 1;
             }
+            let due = shrink_due(&table);
             drop(table);
             drop(taken);
             if !full {
-                break;
+                break due;
             }
-        }
-        shrink(bucket);
+        };
+        shrink_if(due, bucket);
     }
     counted
 }
@@ -827,11 +854,12 @@ pub fn requeue(
             to_bucket,
             (&mut replaced, &mut gone),
         );
+        let due = source_shrink_due(&first, second.as_deref(), from_bucket > to_bucket);
         drop(second);
         drop(first);
         drop(replaced);
         drop(gone);
-        shrink(from_bucket);
+        shrink_if(due, from_bucket);
         return Ok(taken);
     }
 }
