@@ -2463,6 +2463,36 @@ owe. R1 is recorded but for the loader-map region (BACKLOG, intel-k2;
 ledger 9053). Consultant: OK IF P1-P8 (ledger 9079); an internal review,
 not independent verification.
 
+**H2 broke the driver on the box, for 50 minutes of develop (2920d7b5c,
+21:35, to this landing).** On the N150 the real `intel` died at step 23
+with signal 11 in `Tables::new`'s stack probe, four starts, then
+quarantined: no card0, the desktop did not start
+(`~/.local/share/ferrix/logs/ih1/dmesg-stuck.txt`). A native program's
+stack is 8 MiB. The release driver's deepest chain, `serve_gpu` holding
+the front end by value and `Tables::new` under it, was 8,304,056 bytes
+before H2, 84,552 to spare; D3's list copy took it to 8,435,128 and D2's
+fields to 8,635,832. Nothing caught it: the host test measured the
+tables' size and no frame; QEMU has no Intel GPU, so `test-intel-uapi`
+and both restart rows run `intel-fake` and the keeper, which stayed
+under 8 MiB; and the rows boot dev builds, whose frames are smaller.
+
+Fixed by `serve::Placed`: the front end is built in pages of its own, the
+empty tables copied there from a constant, never through a stack frame.
+The release driver's deepest chain is 888,248 bytes, the keeper's
+112,616. On the box an image of the fix (341c3f721, 2026-11-12 22:24,
+`logs/ih1/fix-dmesg.txt`) printed `intel: front end placed: 3512 KiB of
+its own, off the stack`, card0 and the render node published, no signal,
+hyprix on the monitor. The check that was missing is
+`tools/common/check/check-native-stacks.py`: the deepest chain of
+`intel`, the keeper and both fakes against a quarter of the stack, read
+from the binaries' own probes; `cargo xtask check-native-stacks
+[--release]`, its self-test in `check`, and the three Intel boot rows now
+run it on the real `intel` their image was built with before they boot.
+It fails on 2920d7b5c's binaries (controls in `logs/queue/`,
+`intel-stack-control-*.log`). Still true: under QEMU the real driver
+never reaches step 23; its start is judged from the binary, and on the
+box.
+
 ## Appendix A: the probe that printed the numbers
 
 Compiled on nazuna against Linux 7.0's UAPI headers, run once, and kept out
