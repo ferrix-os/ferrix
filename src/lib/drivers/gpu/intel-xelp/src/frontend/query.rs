@@ -12,6 +12,7 @@
 use ferrix_linux_abi::errno::Errno;
 
 use super::drm::Call;
+use super::host::user_at;
 use super::{Backend, Frontend, Host};
 use crate::sseu::{TOPOLOGY_LEN, fill_topology_info};
 use crate::uapi::{
@@ -31,7 +32,7 @@ pub fn query<B: Backend, H: Host<B::Memory>>(
         return Err(Errno::EINVAL);
     }
     for index in 0..u64::from(args.num_items) {
-        let at = args.items_ptr + index * QueryItem::SIZE as u64;
+        let at = user_at(args.items_ptr, index, QueryItem::SIZE as u64)?;
         let mut raw = [0_u8; QueryItem::SIZE];
         host.copy_in(call.request, at, &mut raw)
             .map_err(|_| Errno::EFAULT)?;
@@ -54,7 +55,8 @@ pub fn query<B: Backend, H: Host<B::Memory>>(
             Err(errno) => -i32::from(errno.0),
         };
         if length != item.length {
-            host.copy_out(call.request, at + 8, &length.to_le_bytes())
+            // `length`, after the 8-byte `query_id`.
+            host.copy_out(call.request, user_at(at, 1, 8)?, &length.to_le_bytes())
                 .map_err(|_| Errno::EFAULT)?;
         }
     }
@@ -135,7 +137,8 @@ fn engines<B: Backend, H: Host<B::Memory>>(
         };
         host.copy_out(
             call.request,
-            item.data_ptr + (QueryEngineInfo::SIZE + index * EngineInfo::SIZE) as u64,
+            user_at(item.data_ptr, 1, QueryEngineInfo::SIZE as u64)
+                .and_then(|engines| user_at(engines, index as u64, EngineInfo::SIZE as u64))?,
             &info.to_bytes(),
         )
         .map_err(|_| Errno::EFAULT)?;
@@ -178,7 +181,7 @@ fn memory_regions<B: Backend, H: Host<B::Memory>>(
     };
     host.copy_out(
         call.request,
-        item.data_ptr + QueryMemoryRegions::SIZE as u64,
+        user_at(item.data_ptr, 1, QueryMemoryRegions::SIZE as u64)?,
         &info.to_bytes(),
     )
     .map_err(|_| Errno::EFAULT)?;

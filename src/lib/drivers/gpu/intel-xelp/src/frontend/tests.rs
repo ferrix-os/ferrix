@@ -2078,6 +2078,50 @@ fn a_full_backend_keeps_order() {
     });
 }
 
+/// An engine map whose pointer wraps past the top of the address space is
+/// `EFAULT`, as Linux's `copy_from_user` of `&user->engines[n]` answers:
+/// its first engine sits 8 bytes in, past `extensions`, so a value within 8
+/// of `u64::MAX` wrapped, a panic where overflow is checked and, where it is
+/// not, a read of the program's own low memory.
+#[test]
+fn an_engine_map_that_wraps_is_efault() {
+    big(|| {
+        let mut rig = Rig::new();
+        let mut create = ContextCreateExt::default().to_bytes();
+        assert_eq!(rig.ioctl(ioctl::GEM_CONTEXT_CREATE_EXT, &mut create), 0);
+        let ctx_id = ContextCreateExt::from_bytes(&create)
+            .expect("context")
+            .ctx_id;
+        for value in [u64::MAX - 7, u64::MAX - 3, u64::MAX] {
+            let mut args = ContextParam {
+                ctx_id,
+                size: 8 + 4,
+                param: context::PARAM_ENGINES,
+                value,
+            }
+            .to_bytes();
+            assert_eq!(
+                rig.ioctl(ioctl::GEM_CONTEXT_SETPARAM, &mut args),
+                -14,
+                "{value:#x}"
+            );
+        }
+    });
+}
+
+/// `user_at`, the address of an element of a program's array, is `EFAULT`
+/// wherever the sum or the product wraps, and the address otherwise.
+#[test]
+fn user_addresses_that_wrap_are_efault() {
+    use super::host::user_at;
+    assert_eq!(user_at(0x1000, 3, 8), Ok(0x1018));
+    assert_eq!(user_at(u64::MAX - 8, 1, 8), Ok(u64::MAX));
+    assert_eq!(user_at(u64::MAX - 7, 1, 8), Err(Errno::EFAULT));
+    assert_eq!(user_at(u64::MAX, 0, 8), Ok(u64::MAX));
+    assert_eq!(user_at(0, u64::MAX, 2), Err(Errno::EFAULT));
+    assert_eq!(user_at(8, u64::MAX / 8, 8), Err(Errno::EFAULT));
+}
+
 /// A held wait whose syncobj is destroyed never reads the syncobj that takes
 /// its slot next, another file's: Linux's wait holds a reference to its
 /// syncobj, whose fence nothing changes once its handle is gone. An entry

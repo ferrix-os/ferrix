@@ -14,6 +14,7 @@ use ferrix_linux_abi::errno::Errno;
 
 use super::drm::{Call, put, unserved};
 use super::fence::{Hold, WaitKind};
+use super::host::user_at;
 use super::objects::{FenceRef, Handle, Object, Tables};
 use super::{Backend, ETIME, Frontend, Host, limits};
 use crate::uapi::{
@@ -936,7 +937,11 @@ pub fn check_placements<M, H: Host<M>>(host: &mut H, call: &Call, at: u64) -> Re
         let mut raw = [0_u8; MemoryClassInstance::SIZE];
         host.copy_in(
             call.request,
-            ext.regions + u64::from(index) * MemoryClassInstance::SIZE as u64,
+            user_at(
+                ext.regions,
+                u64::from(index),
+                MemoryClassInstance::SIZE as u64,
+            )?,
             &mut raw,
         )
         .map_err(|_| Errno::EFAULT)?;

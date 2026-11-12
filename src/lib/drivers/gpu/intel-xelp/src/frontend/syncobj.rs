@@ -13,6 +13,7 @@ use ferrix_linux_abi::errno::Errno;
 
 use super::drm::{Call, put, unserved_as};
 use super::fence::{self, Hold, WaitKind};
+use super::host::user_at;
 use super::objects::{FenceRef, Requests, SyncFence, Syncobj, Tables};
 use super::{Backend, ETIME, Frontend, Host, limits};
 use crate::uapi::{
@@ -491,7 +492,7 @@ fn find_array<M, H: Host<M>>(
     }
     for (index, cell) in out.iter_mut().enumerate().take(count) {
         let mut raw = [0_u8; 4];
-        host.copy_in(call.request, address + 4 * index as u64, &mut raw)
+        host.copy_in(call.request, user_at(address, index as u64, 4)?, &mut raw)
             .map_err(|_| Errno::EFAULT)?;
         let slot = find(state, call.file, u32::from_le_bytes(raw))?;
         *cell = u16::try_from(slot).map_err(|_| Errno::ENOENT)?;
@@ -568,7 +569,7 @@ fn points_in<M, H: Host<M>>(
     }
     for (index, cell) in out.iter_mut().enumerate().take(count) {
         let mut raw = [0_u8; 8];
-        host.copy_in(call.request, address + 8 * index as u64, &mut raw)
+        host.copy_in(call.request, user_at(address, index as u64, 8)?, &mut raw)
             .map_err(|_| Errno::EFAULT)?;
         *cell = u64::from_le_bytes(raw);
     }
@@ -637,7 +638,7 @@ pub fn query<B: Backend, H: Host<B::Memory>>(
             .map_or(0, |sync| sync.fence.query(last, &state.requests));
         host.copy_out(
             call.request,
-            args.points + 8 * index as u64,
+            user_at(args.points, index as u64, 8)?,
             &point.to_le_bytes(),
         )
         .map_err(|_| Errno::EFAULT)?;

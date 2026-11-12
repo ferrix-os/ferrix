@@ -10,6 +10,7 @@ use ferrix_linux_abi::errno::Errno;
 
 use super::backend::{Engine, VmId};
 use super::drm::{Call, default_context, put, unserved};
+use super::host::user_at;
 use super::objects::{Binding, Tables, Vm, VmName};
 use super::{Backend, Frontend, Host, limits};
 use crate::uapi::{
@@ -590,12 +591,11 @@ fn set_engines<B: Backend, H: Host<B::Memory>>(
     let engines = frontend.backend.facts().engines;
     for (index, cell) in map.iter_mut().enumerate().take(count) {
         let mut raw = [0_u8; 4];
-        host.copy_in(
-            call.request,
-            args.value + 8 + (index * entry) as u64,
-            &mut raw,
-        )
-        .map_err(|_| Errno::EFAULT)?;
+        // `engines[index]`, after the 8-byte `extensions`.
+        let at = user_at(args.value, 1, 8)
+            .and_then(|engines| user_at(engines, index as u64, entry as u64))?;
+        host.copy_in(call.request, at, &mut raw)
+            .map_err(|_| Errno::EFAULT)?;
         let ci = EngineClassInstance::from_bytes(&raw).ok_or(Errno::EFAULT)?;
         if ci.engine_class == query::ENGINE_CLASS_INVALID
             && ci.engine_instance == query::ENGINE_CLASS_INVALID_NONE

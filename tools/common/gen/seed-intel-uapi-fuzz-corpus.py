@@ -344,6 +344,7 @@ CHIPSET_ID, HAS_EXEC_SOFTPIN = 4, 37
 CAP_SYNCOBJ = 19
 VM_PARAM = [0, 0, 0, 1]  # PARAM_VM: the file's first VM id, as told
 ENGINES_PARAM = [2, 2, 1, 0, 3, 0, 0, 1]  # PARAM_ENGINES: render, copy
+ENGINES_WRAP_PARAM = [2, 2, 1, 0, 3, 14, 1]  # the same at u64::MAX - 3
 PRIORITY_PARAM = [4, 0]  # PARAM_PRIORITY 0
 VM_GETPARAM = [0, 7, 0, 1]  # PARAM_VM of the default context's (id 0)
 
@@ -599,6 +600,15 @@ def seeds():
         .syncobj(B, signalled=True)
         .service()
         .service(2)
+    )
+    # An engine map 4 bytes short of the top of the address space (D11):
+    # its first engine, 8 bytes in, wraps. EFAULT, at creation and on a
+    # proto context's SETPARAM.
+    yield "engine-map-wraps", (
+        Program()
+        .context_create(A, [ENGINES_WRAP_PARAM])
+        .context_create(A)
+        .context_param(A, own(0), True, ENGINES_WRAP_PARAM)
     )
     yield "limit-files", Program().repeat(41, lambda p: p.open(0))
     yield "limit-held-waits", (

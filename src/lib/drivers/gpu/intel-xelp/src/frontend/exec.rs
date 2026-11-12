@@ -25,6 +25,7 @@ use ferrix_linux_abi::kmsg::Level;
 use super::backend::Engine;
 use super::drm::{Call, Outcome, put, unserved};
 use super::fence::{self, Hold, WaitKind};
+use super::host::user_at;
 use super::objects::{Binding, ExecEntry, FenceRef, Request, RequestState, SyncFence, Tables};
 use super::{Backend, Frontend, Host, gem, limits, syncobj, vm};
 use crate::uapi::{ExecFence, ExecObject2, Execbuffer2, ExecbufferExtTimelineFences, exec, query};
@@ -445,12 +446,9 @@ fn read_objects<M, H: Host<M>>(
     let bytes = raw
         .get_mut(..out.len() * ExecObject2::SIZE)
         .ok_or(Errno::EFAULT)?;
-    host.copy_in(
-        call.request,
-        base + (start * ExecObject2::SIZE) as u64,
-        bytes,
-    )
-    .map_err(|_| Errno::EFAULT)?;
+    let at = user_at(base, start as u64, ExecObject2::SIZE as u64)?;
+    host.copy_in(call.request, at, bytes)
+        .map_err(|_| Errno::EFAULT)?;
     for (entry, source) in out
         .iter_mut()
         .zip(bytes.as_chunks::<{ ExecObject2::SIZE }>().0)
@@ -737,18 +735,16 @@ fn add_timeline_fences<M, H: Host<M>>(
     }
     for index in 0..count {
         let mut raw = [0_u8; ExecFence::SIZE];
-        host.copy_in(
-            call.request,
-            ext.handles_ptr + (index * ExecFence::SIZE) as u64,
-            &mut raw,
-        )
-        .map_err(|_| Errno::EFAULT)?;
+        let at = user_at(ext.handles_ptr, index as u64, ExecFence::SIZE as u64)?;
+        host.copy_in(call.request, at, &mut raw)
+            .map_err(|_| Errno::EFAULT)?;
         let user = ExecFence::from_bytes(&raw).ok_or(Errno::EFAULT)?;
         if user.flags & exec::FENCE_UNKNOWN_FLAGS != 0 {
             return Err(Errno::EINVAL);
         }
         let mut raw = [0_u8; 8];
-        host.copy_in(call.request, ext.values_ptr + 8 * index as u64, &mut raw)
+        let at = user_at(ext.values_ptr, index as u64, 8)?;
+        host.copy_in(call.request, at, &mut raw)
             .map_err(|_| Errno::EFAULT)?;
         let point = u64::from_le_bytes(raw);
         let slot = state
@@ -807,12 +803,9 @@ fn add_fence_array<B: Backend, H: Host<B::Memory>>(
     let state = &frontend.state;
     for index in 0..count {
         let mut raw = [0_u8; ExecFence::SIZE];
-        host.copy_in(
-            call.request,
-            args.cliprects_ptr + (index * ExecFence::SIZE) as u64,
-            &mut raw,
-        )
-        .map_err(|_| Errno::EFAULT)?;
+        let at = user_at(args.cliprects_ptr, index as u64, ExecFence::SIZE as u64)?;
+        host.copy_in(call.request, at, &mut raw)
+            .map_err(|_| Errno::EFAULT)?;
         let user = ExecFence::from_bytes(&raw).ok_or(Errno::EFAULT)?;
         if user.flags & exec::FENCE_UNKNOWN_FLAGS != 0 {
             return Err(Errno::EINVAL);

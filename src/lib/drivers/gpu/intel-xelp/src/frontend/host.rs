@@ -7,6 +7,25 @@ use core::fmt;
 use ferrix_linux_abi::errno::Errno;
 pub use ferrix_linux_abi::kmsg::Level;
 
+/// The address of element `index`, `size` bytes each, of an array the
+/// program put at `base`.
+///
+/// # Errors
+///
+/// `EFAULT` where that wraps: past the address space, as Linux's
+/// `copy_from_user` and `copy_to_user` refuse such a range (`access_ok`).
+/// Computed with `+` it would panic where overflow is checked and, where it
+/// is not, wrap to an address the program may have mapped.
+pub const fn user_at(base: u64, index: u64, size: u64) -> Result<u64, Errno> {
+    match index.checked_mul(size) {
+        Some(offset) => match base.checked_add(offset) {
+            Some(address) => Ok(address),
+            None => Err(Errno::EFAULT),
+        },
+        None => Err(Errno::EFAULT),
+    }
+}
+
 /// What a dmabuf install answered.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Installed {
