@@ -11,6 +11,9 @@ machine that has just stopped.
 Validated before anything is written, and failing either way:
 
   * every code is `FX-` and four digits, and no two entries share one;
+  * no code in `WITHDRAWN` is given to any entry but the one that published
+    it: a code once printed by a release keeps its meaning for good, so a
+    reader's search for it never lands on another failure;
   * every `pub` or `pub(crate)` static of type `Explanation` is listed in `ALL`, once,
     and `ALL` names nothing else and is in code order;
   * every title and meaning says something, and every entry has a cause;
@@ -24,6 +27,7 @@ compares, in the manner of `tools/common/gen/gen-arch-doc.py`.
 Usage:
     python3 tools/common/gen/gen-panic-catalog.py            # write the document
     python3 tools/common/gen/gen-panic-catalog.py --check    # fail if it is stale
+    python3 tools/common/gen/gen-panic-catalog.py --self-test  # the rules fire
 """
 
 from __future__ import annotations
@@ -53,6 +57,17 @@ CAUSES = re.compile(r"\bcauses\s*:\s*&\[(.*?)\]\s*,", re.DOTALL)
 LITERAL = re.compile(STRING, re.DOTALL)
 
 WIDTH = 80
+
+# Codes published and since taken out of the catalog, with the entry that
+# published them and why they went. Such a code may come back only under the
+# same name, with its old meaning (a re-landing); never under another.
+WITHDRAWN: dict[str, tuple[str, str]] = {
+    "FX-0975": (
+        "SPARE_ACROSS_A_WAIT",
+        "the fault path's (8116d9dad), reverted in c52dd5326; docs/BACKLOG.md's fault-path "
+        "row, ledger 7908: withdrawn and never reused for another meaning",
+    ),
+}
 
 
 class CatalogError(Exception):
@@ -135,6 +150,12 @@ def validate(entries: list[dict], names: list[str], root: pathlib.Path) -> list[
             problems.append(f"{where}: code {code!r} is not FX- and four digits")
         if code in seen_codes:
             problems.append(f"{where}: code {code} is already {seen_codes[code]}'s")
+        if code in WITHDRAWN and WITHDRAWN[code][0] != entry["name"]:
+            owner, why = WITHDRAWN[code]
+            problems.append(
+                f"{where}: code {code} is withdrawn ({owner}'s: {why}); give "
+                f"{entry['name']} a new code"
+            )
         seen_codes.setdefault(code, entry["name"])
         if not entry["title"].strip():
             problems.append(f"{where}: empty title")
@@ -236,6 +257,29 @@ def render(entries: list[dict], names: list[str]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def self_test(root: pathlib.Path) -> int:
+    """The withdrawn-code rule fires on another name and lets the owner back."""
+    entry = {
+        "where": f"{SOURCE}:1",
+        "title": "t",
+        "meaning": "m",
+        "causes": ["c"],
+        "see": "",
+    }
+    failures = []
+    for name, wanted in (("ANOTHER_MEANING", True), ("SPARE_ACROSS_A_WAIT", False)):
+        problems = validate([dict(entry, name=name, code="FX-0975")], [name], root)
+        fired = any("is withdrawn" in problem for problem in problems)
+        if fired != wanted:
+            failures.append(f"FX-0975 under {name}: withdrawn rule fired={fired}, wanted {wanted}")
+    for failure in failures:
+        print(f"gen-panic-catalog --self-test: {failure}", file=sys.stderr)
+    if failures:
+        return 1
+    print("gen-panic-catalog --self-test: the withdrawn-code rule fires and lets the owner back")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=f"Render {SOURCE} into {OUTPUT}.",
@@ -245,9 +289,16 @@ def main() -> int:
         action="store_true",
         help="do not write; exit 1 if the committed document is stale",
     )
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="check that the validation's rules fire, and exit",
+    )
     arguments = parser.parse_args()
 
     root = repository_root()
+    if arguments.self_test:
+        return self_test(root)
     source_path = root / SOURCE
     try:
         source = source_path.read_text(encoding="utf-8")

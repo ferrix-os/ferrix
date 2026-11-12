@@ -589,7 +589,10 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
     // goes stale the moment an entry changes without it.
     (
         "panic catalog",
-        &[&["tools/common/gen/gen-panic-catalog.py", "--check"]],
+        &[
+            &["tools/common/gen/gen-panic-catalog.py", "--check"],
+            &["tools/common/gen/gen-panic-catalog.py", "--self-test"],
+        ],
     ),
     // The kernel's crates meet through their `pub` items, and since nothing
     // in the kernel was `pub` before the split, those items are the
