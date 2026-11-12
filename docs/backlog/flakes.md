@@ -491,7 +491,7 @@ Done; removed from the backlog on 2026-10-20.
 
 | Item | Owner | Stage |
 |---|---|---|
-| **Open (2026-10-23).** The quota self-check stopped a `test-boot --arch x86_64 --accel tcg` of `linux-abi-off` 6064977d5 (a change that leaves the `on` image's code as `main`'s) with FX "quota self-check failed: a job with many spinning tasks took more than its share from another job" (`src/kernel/src/object/quota_check.rs`), at 50 s, while another boot ran beside it in the gate pool; the rerun on the same hash passed (`lao-x86tcg2`). Log kept: `~/.local/share/ferrix/logs/lao-x86tcg-quota-flake-2026-10-23.log`. The same line stopped an armv7a TCG boot on 2026-10-15 (`bsa-lo-st-a32-12`, dbe733179). A share measured over a window TCG's time slicing can stretch: look at the window and the margin the check allows under emulation. | unowned | 13 |
+| **Open (2026-10-23).** The quota self-check stopped a `test-boot --arch x86_64 --accel tcg` of `linux-abi-off` 6064977d5 (a change that leaves the `on` image's code as `main`'s) with FX "quota self-check failed: a job with many spinning tasks took more than its share from another job" (`src/kernel/src/object/quota_check.rs`), at 50 s, while another boot ran beside it in the gate pool; the rerun on the same hash passed (`lao-x86tcg2`). Log kept: `~/.local/share/ferrix/logs/lao-x86tcg-quota-flake-2026-10-23.log`. The same line stopped an armv7a TCG boot on 2026-10-15 (`bsa-lo-st-a32-12`, dbe733179). A share measured over a window TCG's time slicing can stretch: look at the window and the margin the check allows under emulation. **Seen again 2026-11-12 (mk-crates7), under KVM:** `test-net --arch x86_64 --accel kvm` of the crate split's S5a f61696e91 at 50.89 s, host load 17.6/26.3/28.1 with seven gate slots busy (`logs/queue/mkc7b-net-kvm.log`, kept as `po-2026-11-03/notes/mkc7/mkc7b-net-kvm.first.log`); the rerun on the same hash passed (`mkc7c-net-kvm`), and the hash before it, which differs in no product line, passed (`mkc7a-net-kvm`). So the stretch is not TCG's alone. | unowned | 13 |
 
 ### fl-075
 
@@ -722,3 +722,9 @@ A timeout of the same row, not a stop (2026-11-06, mk-issues; ledger 7602): `mki
 | Item | Owner | Stage |
 |---|---|---|
 | **Open (2026-11-09, r6-vmalloc; ledger 8583 C9).** `test-btrfs-pressure`'s x86-64 boot (KVM) panicked at 12.12 s: `FERRIX-PANIC stage 8 /dev and /proc self-check failed: a name /proc listed cannot be walked to` (FX-0830), gate `r6c-press` on beca80825 (`logs/queue/r6c-press.log`); `r6c-press2` on the same hash passed. Stage 8 runs before R6's own stage-9 check; whether the large-request area served anything before stage 9 in that boot is not known. Reading, not shown: a process listed in /proc ended between the listing and the walk. Owed: the case told apart from a kernel defect, or the race shown. | open | 8 |
+
+### fl-113
+
+| Item | Owner | Stage |
+|---|---|---|
+| **Open (2026-11-12, mk-crates7).** `test-linuxd --arch aarch64 --kernel-profile fast` (TCG) panicked at 36.80 s on the crate split's S5a f61696e91: `FERRIX-PANIC edf self-check failed: edf: the earlier deadline did not get its 40%` (FX-0970, `main.rs:2245`), after three watched windows of 400 ms read 68/219/109, 101/251/48 and 87/243/74 ms and `130 throttles, 130 refills, 0 ppm left`; host load 19.4/27.2/28.5 with seven gate slots busy (`logs/queue/mkc7b-linuxd.log`, kept as `po-2026-11-03/notes/mkc7/mkc7b-linuxd.first.log`). The rerun on the same hash passed (`mkc7c-linuxd`), and so did the hash before it, which differs in no product line (`mkc7a-linuxd`). Reading, not shown: a share judged over 400 ms of guest time that TCG's slicing stretches at this load, as fl-074's. Owed: the window and margin under emulation looked at, or the case shown to be a defect. | open | 5 |
