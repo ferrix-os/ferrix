@@ -15,32 +15,60 @@ build = "../build.rs"
 [lib]
 path = "../src/kernel_core.rs"
 
+# What the core links, by what it is to the core. None of these is an optional
+# part: the parts are the crates under src/kernel/extensions/, and they depend
+# on this crate, never the other way (docs/microkernel/CRATE-SPLIT.md 2.3).
+# The grouping is by use; the rings are tools/common/data/certification-item.json's,
+# which the comments name where it classes a crate. Every crate it does not
+# class is open debt there (`unclassified_deps`, finding F-76).
 [dependencies]
-ferrix-acpi.workspace = true
-ferrix-audit.workspace = true
-ferrix-bootinfo.workspace = true
-ferrix-cgroupfs.workspace = true
-ferrix-description.workspace = true
+# The certified item's own crates (the record's item ring): the ELF reader,
+# SHA-256, the EDF scheduler's arithmetic.
 ferrix-elf.workspace = true
+ferrix-sched-edf.workspace = true
+ferrix-sha256.workspace = true
+
+# Infrastructure the record allowlists for the item: fallible allocation, the
+# scheduler's queues, the locks.
 ferrix-fallible.workspace = true
-ferrix-fbtext.workspace = true
-ferrix-fdt.workspace = true
+ferrix-sched.workspace = true
+ferrix-sync.workspace = true
+
+# The core's own mechanisms. Memory: frames, the heap, memory accounting, page
+# tables, address ranges. Objects and the native ABI they are named through.
+# The loader's handoff and the audit record.
 ferrix-frame.workspace = true
 ferrix-heap.workspace = true
 ferrix-kmem.workspace = true
-ferrix-sha256.workspace = true
-ferrix-linux-abi.workspace = true
-ferrix-native-abi.workspace = true
-ferrix-objects.workspace = true
 ferrix-paging.workspace = true
+ferrix-vma.workspace = true
+ferrix-objects.workspace = true
+ferrix-native-abi.workspace = true
+ferrix-bootinfo.workspace = true
+ferrix-audit.workspace = true
+
+# Finding the machine: ACPI, the device tree, PCI, and the choice of which
+# of the first two a machine is read by.
+ferrix-acpi.workspace = true
+ferrix-fdt.workspace = true
 ferrix-pci.workspace = true
-ferrix-qr.workspace = true
-ferrix-sched.workspace = true
-ferrix-sched-edf.workspace = true
-ferrix-sync.workspace = true
+ferrix-description.workspace = true
+
+# What the core carries for the Linux personality, which itself is the part
+# src/kernel/extensions/personality/linux/: Linux's numbers and types where
+# the architecture's entry, signal frames and traps meet them, the vDSO's
+# image, and the VFS's and cgroupfs's types a few of the core's files name
+# (user/, object/, panic/). The core's debt to the personality, not parts.
+ferrix-linux-abi.workspace = true
 ferrix-vdso.workspace = true
 ferrix-vfs.workspace = true
-ferrix-vma.workspace = true
+ferrix-cgroupfs.workspace = true
+
+# The screen: text on the framebuffer for the console and the panic screen,
+# and the panic's QR code. A personality=user kernel links neither
+# (check-kernel-shape.py's LEFT_CRATES).
+ferrix-fbtext.workspace = true
+ferrix-qr.workspace = true
 
 [lints]
 workspace = true
