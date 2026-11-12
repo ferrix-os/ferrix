@@ -755,7 +755,7 @@ package FerrixMemoryRequirements {
                 masked begins no purge, waits on the lazy list, and on x86-64 keeps its frames
                 drawn; a purge in task context empties the list and gives them back; frees past
                 a lowered threshold made masked ask for a purge, which the reaper makes within
-                2 s, and a masked request that finds that purge wanted begins none (a masked
+                2 s (the count of purges past its value before the masked part, and the flag, seen set inside it, clear again: only a purge's start clears it), and a masked request that finds that purge wanted begins none (a masked
                 round in which the machine's count of purges moved, or the flag cleared, is
                 made again, up to three rounds: another processor's purge can fall inside
                 one, a purge begun here falls inside each, and the stage line says how many

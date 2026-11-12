@@ -441,8 +441,17 @@ fn reaper_purges(report: &mut LargeReport) -> Result<(), &'static str> {
     let (purges, made, wanted, unpurged) = seen;
     let start = crate::timer::now_nanos();
     let mut purged = false;
+    // Answered: the count of purges past the value read before the masked
+    // part, and the flag, seen set inside it, clear again -- only a purge's
+    // start clears it, so that is a purge begun after the asking -- not the
+    // list seen empty. On more than one processor another's purge (the
+    // reaper woken there) can begin inside the masked part, clear the flag
+    // and take the list before the masked request's own free; that block
+    // then stays on the list, under the threshold, and nobody is asked
+    // again, so an empty list is never seen (armv7a, four processors,
+    // sleep-s3-threads, 2026-11-12). The purge it waited for was made.
     while crate::timer::now_nanos().saturating_sub(start) < PATIENCE_NANOS {
-        if large::counts().lazy_units == 0 && large::counts().purges > purges {
+        if large::counts().purges > purges && !large::purge_wanted() {
             purged = true;
             break;
         }
