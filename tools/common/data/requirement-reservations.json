@@ -13,6 +13,15 @@
   "reservations": [
     {
       "ids": [
+        "L.user.236-240"
+      ],
+      "owner": "ef-30fps",
+      "branch": "rss/kept-counts",
+      "date": "2026-11-12",
+      "purpose": "the resident counts kept as pages come and go (docs/RSS-COUNTS.md): kept equals a full recount, a read is constant, the region totals of status and stat kept, /proc/meminfo's page-cache counts kept"
+    },
+    {
+      "ids": [
         "L.user.230-234",
         "L.object.373"
       ],
