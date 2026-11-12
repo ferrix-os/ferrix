@@ -29,7 +29,14 @@ for files in "$depot/$named/files" "$depot"/steamrt*_platform_*/files; do
     [ -d "$files/lib/x86_64-linux-gnu" ] && runtime=$files && break
 done
 [ -n "$runtime" ] || echo "steam-window: steamrt stand-in finds no Steam Linux Runtime" >&2
-export LD_LIBRARY_PATH=/data/steam/ubuntu12_64:/usr/lib/x86_64-linux-gnu:$runtime/lib/x86_64-linux-gnu:$runtime/lib
+# The helper's own directory first. Since the client keeps steamwebhelper and
+# its libcef.so in steamrt64, an older libcef.so that a client of the
+# earlier layout left in ubuntu12_64 was found before the helper's own, and
+# the helper stopped at every start with "libcef mismatch problem" (the
+# gate's guest, which installs the client afresh, 2026-11-12).
+helper=/data/steam/ubuntu12_64
+[ -e /data/steam/steamrt64/libcef.so ] && helper=/data/steam/steamrt64:$helper
+export LD_LIBRARY_PATH=$helper:/usr/lib/x86_64-linux-gnu:$runtime/lib/x86_64-linux-gnu:$runtime/lib
 export LIBGL_DRIVERS_PATH=/usr/lib/x86_64-linux-gnu/dri
 unset LD_PRELOAD WAYLAND_DISPLAY
 export SDL_VIDEO_DRIVER=x11
