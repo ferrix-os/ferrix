@@ -13,6 +13,33 @@
   "reservations": [
     {
       "ids": [
+        "L.user.246"
+      ],
+      "owner": "sleep-cost",
+      "branch": "sys/wake-futex",
+      "date": "2026-11-12",
+      "purpose": "A wake that marks a futex waiter woken and the waiter's block are ordered so that the wake finds the waiter blocked or the waiter's last look finds the mark (docs/BLOCK-AND-WAKE.md, W1; consultant ledger 9027, WF6)"
+    },
+    {
+      "ids": [
+        "L.user.245"
+      ],
+      "owner": "silent-reset",
+      "branch": "fix/exit-unmap-sort",
+      "date": "2026-11-12",
+      "purpose": "F-112: an unmap, an exit's whole-space unmap included, orders what it removes without recursion, in a stack of one size at any number of regions (consultant ledger 9112 E6)"
+    },
+    {
+      "ids": [
+        "L.user.242-244"
+      ],
+      "owner": "ef-30fps",
+      "branch": "rss/anon-merge",
+      "date": "2026-11-12",
+      "purpose": "a private anonymous mapping made in its neighbour's object at the offsets that object's addresses continue to, so that the two regions merge (docs/ANON-MERGE.md): the reuse itself, a fresh mapping reading zero, and one line of offsets per own anonymous object"
+    },
+    {
+      "ids": [
         "L.user.239-241"
       ],
       "owner": "ef-30fps",
