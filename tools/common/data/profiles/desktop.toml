@@ -44,6 +44,7 @@ runtime_settings = "live"
 "ferrix.amdvi" = ["on", "off"]
 "ferrix.fbcon" = true
 "ferrix.fbcon.small" = true
+"ferrix.splash" = true
 "ferrix.pstore" = ["on", "off"]
 "ferrix.efifb" = true
 "ferrix.intelgpu" = true

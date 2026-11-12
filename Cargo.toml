@@ -45,6 +45,7 @@ members = [
     "src/user/system/native/btrfsd",
     "src/user/system/native/blk-victim",
     "src/lib/proto/slots",
+    "src/lib/proto/splash",
     "src/lib/proto/eventlog",
     "src/lib/platform/description",
     "src/lib/platform/elf",
@@ -245,6 +246,7 @@ ferrix-elf = { path = "src/lib/platform/elf" }
 ferrix-fbtext = { path = "src/lib/kernel/fbtext" }
 ferrix-fdt = { path = "src/lib/platform/fdt" }
 ferrix-smbios = { path = "src/lib/platform/smbios" }
+ferrix-splash = { path = "src/lib/proto/splash" }
 ferrix-frame = { path = "src/lib/kernel/frame" }
 ferrix-fallible = { path = "src/lib/kernel/fallible" }
 ferrix-heap = { path = "src/lib/kernel/heap" }

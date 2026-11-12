@@ -381,6 +381,9 @@ pub(crate) fn run_compositor(args: &Args) -> Result<()> {
         None => DESKTOP_DEFAULTS.to_owned(),
     };
     let defaults = nazuna_defaults(args, defaults)?;
+    // The boot splash, on the desktop a person watches (`crate::splash`).
+    carried.ports.extend(crate::splash::carried(arch)?);
+    let defaults = crate::splash::with_word(&defaults);
     // The desktop a person watches boots as a board's does: with its
     // self-checks skipped, which only the `desktop` boot of the judged ones
     // is.
@@ -480,7 +483,10 @@ pub(crate) fn release_image(args: &Args) -> Result<()> {
     let size = args.size.unwrap_or(crate::wallpaper::SCREEN);
     // The screen follows the window it is shown in, as `run-compositor`'s
     // does: the run scripts' `xres` and `yres` are only where it starts.
-    let (config, carried) = desktop(arch, RUN_CONFIG.to_owned(), size, true, Backdrop::Any, args)?;
+    let (config, mut carried) =
+        desktop(arch, RUN_CONFIG.to_owned(), size, true, Backdrop::Any, args)?;
+    // The boot splash, as `run-compositor`'s desktop has it (`crate::splash`).
+    carried.ports.extend(crate::splash::carried(arch)?);
     // `build_desktop_image`'s two steps, apart, so the initramfs the image
     // carries can be kept beside it.
     let (loader, kernel, initramfs) = build_parts(arch, &programs, &config, carried, args)?;
@@ -490,7 +496,7 @@ pub(crate) fn release_image(args: &Args) -> Result<()> {
         &kernel,
         &initramfs,
         Some(&crate::init::command_line()),
-        Some(DESKTOP_DEFAULTS),
+        Some(&crate::splash::with_word(DESKTOP_DEFAULTS)),
     )?;
     let stage = std::path::Path::new(&stage);
     std::fs::create_dir_all(stage)

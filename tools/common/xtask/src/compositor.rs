@@ -524,6 +524,12 @@ pub(crate) fn reboot_program(arch: Arch) -> Result<PathBuf> {
     build(arch, "compositor-reboot", "reboot")
 }
 
+/// The boot splash for `arch` (`crate::splash`): `/bin/splash`, on card0
+/// until the compositor starts.
+pub(crate) fn splash_program(arch: Arch) -> Result<PathBuf> {
+    build(arch, "compositor-splash", "splash")
+}
+
 /// Build one of the compositor's programs for `arch`, and say where it is.
 fn build(arch: Arch, package: &str, binary: &str) -> Result<PathBuf> {
     build_with(arch, package, binary, true)

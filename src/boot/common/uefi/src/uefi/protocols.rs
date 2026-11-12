@@ -215,12 +215,39 @@ pub(crate) struct GraphicsMode {
     pub(crate) framebuffer_size: usize,
 }
 
+/// A pixel as `Blt` takes one, whatever the mode's own format is.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct BltPixel {
+    pub(crate) blue: u8,
+    pub(crate) green: u8,
+    pub(crate) red: u8,
+    pub(crate) reserved: u8,
+}
+
+/// `EfiBltVideoFill`: paint a rectangle of the screen with the buffer's
+/// first pixel.
+pub(crate) const BLT_VIDEO_FILL: u32 = 0;
+
 /// The display.
 #[repr(C)]
 pub(crate) struct GraphicsOutput {
     query_mode: usize,
     set_mode: usize,
-    blt: usize,
+    /// `Blt(this, buffer, operation, source x, source y, destination x,
+    /// destination y, width, height, delta)`.
+    pub(crate) blt: unsafe extern "efiapi" fn(
+        *mut GraphicsOutput,
+        *mut BltPixel,
+        u32,
+        usize,
+        usize,
+        usize,
+        usize,
+        usize,
+        usize,
+        usize,
+    ) -> Status,
     pub(crate) mode: *mut GraphicsMode,
 }
 

@@ -240,6 +240,10 @@ pub(crate) fn image(args: &Args) -> Result<(PathBuf, PathBuf)> {
     }
     let more = files(&carried.ports);
     carried.ports.extend(more);
+    // The boot splash's program and units (`crate::splash`), which run only
+    // where the command line has `ferrix.splash`: the box's words are its
+    // deploy's, and `ferrix.fbcon`, in [`BOX_OPTIONS`], draws over it.
+    carried.ports.extend(crate::splash::carried(arch)?);
     let mut options = BOX_OPTIONS.to_owned();
     for option in &args.kernel_options {
         options.push(' ');

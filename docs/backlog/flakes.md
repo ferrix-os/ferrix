@@ -728,3 +728,9 @@ A timeout of the same row, not a stop (2026-11-06, mk-issues; ledger 7602): `mki
 | Item | Owner | Stage |
 |---|---|---|
 | **Open (2026-11-12, mk-crates7).** `test-linuxd --arch aarch64 --kernel-profile fast` (TCG) panicked at 36.80 s on the crate split's S5a f61696e91: `FERRIX-PANIC edf self-check failed: edf: the earlier deadline did not get its 40%` (FX-0970, `main.rs:2245`), after three watched windows of 400 ms read 68/219/109, 101/251/48 and 87/243/74 ms and `130 throttles, 130 refills, 0 ppm left`; host load 19.4/27.2/28.5 with seven gate slots busy (`logs/queue/mkc7b-linuxd.log`, kept as `po-2026-11-03/notes/mkc7/mkc7b-linuxd.first.log`). The rerun on the same hash passed (`mkc7c-linuxd`), and so did the hash before it, which differs in no product line (`mkc7a-linuxd`). Reading, not shown: a share judged over 400 ms of guest time that TCG's slicing stretches at this load, as fl-074's. Owed: the window and margin under emulation looked at, or the case shown to be a defect. | open | 5 |
+
+### fl-114
+
+| Item | Owner | Stage |
+|---|---|---|
+| **Open (2026-11-12, splash; first sighting).** `test-mce-restart-off --arch x86_64 --accel tcg --kernel-profile desktop` panicked at 39.62 s: `FERRIX-PANIC large-request self-check failed: a purge in task context did not empty the lazy list`, in batch 20261112T174459Z on its tip c7a7bcc95 (develop 1118eb194 with a docs entry and the boot splash, which changes no kernel file; `logs/queue/batch-20261112T174459Z-16.log`, load 25.40 at its start). The rerun on the same tip passed (`batch-20261112T174459Z-c-3.log`). Not looked into: whether another task's free can put a block on the lazy list between the check's purge and its look. | open | 9 |

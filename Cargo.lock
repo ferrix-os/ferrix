@@ -169,6 +169,7 @@ dependencies = [
  "ferrix-paging",
  "ferrix-slots",
  "ferrix-smbios",
+ "ferrix-splash",
 ]
 
 [[package]]
@@ -1363,6 +1364,10 @@ dependencies = [
  "ferrix-sha256",
  "ferrix-sigverify",
 ]
+
+[[package]]
+name = "ferrix-splash"
+version = "0.1.0"
 
 [[package]]
 name = "ferrix-stm32-display"

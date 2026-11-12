@@ -204,6 +204,10 @@ struct Init {
 const DEVMGR_UNIT: &str = "devmgr.service";
 const DEVMGR_PROGRAM: &str = "/sbin/devmgr";
 
+/// The target started beside `devmgr.service`, before `/` is known, in an
+/// image that has one (§7.3).
+const EARLY_UNIT: &str = "early.target";
+
 /// lode's program, granted the processor service token at every start
 /// (`docs/CORE-QUARANTINE.md` §4).
 const LODE_PROGRAM: &str = "/sbin/lode";
@@ -357,6 +361,17 @@ impl Init {
         } else {
             Event::Boot
         };
+        // And what the image wants on before then (§7.3): `early.target`,
+        // where the image has one -- the boot splash's, which is on the
+        // screen while the drivers start (`docs/SPLASH.md`). Its units are
+        // the initramfs's, with `DefaultDependencies=no`.
+        let early = (awaiting_root && source.load(EARLY_UNIT).is_ok()).then(|| {
+            say("starting early.target with it");
+            Event::Request {
+                client: SIGNALLED,
+                request: Request::start(EARLY_UNIT),
+            }
+        });
         let mut init = Init {
             awaiting_root,
             audit: None,
@@ -367,7 +382,7 @@ impl Init {
             groups,
             reports: BTreeMap::new(),
             mounts: BTreeMap::new(),
-            queue: VecDeque::from([first]),
+            queue: [first].into_iter().chain(early).collect(),
             terminal,
             source,
             control,

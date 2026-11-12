@@ -356,6 +356,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "compositor-splash"
+version = "0.1.0"
+dependencies = [
+ "compositor-drm",
+ "compositor-evecho",
+ "ferrix-fbtext",
+ "ferrix-linux-abi",
+ "ferrix-splash",
+ "libc",
+]
+
+[[package]]
 name = "compositor-text"
 version = "0.1.0"
 dependencies = [
@@ -550,6 +562,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrix-splash"
+version = "0.1.0"
+
+[[package]]
 name = "ferrix-svc-proto"
 version = "0.3.0"
 
@@ -620,6 +636,7 @@ dependencies = [
  "compositor-shm",
  "compositor-shot",
  "compositor-socket",
+ "compositor-splash",
  "compositor-text",
  "compositor-virgl",
  "compositor-wire",
@@ -627,6 +644,7 @@ dependencies = [
  "ferrix-fbtext",
  "ferrix-linux-abi",
  "ferrix-lode-capture",
+ "ferrix-splash",
  "ferrix-svc-proto",
  "libc",
 ]

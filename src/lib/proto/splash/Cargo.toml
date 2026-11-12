@@ -1,0 +1,13 @@
+[package]
+name = "ferrix-splash"
+description = "The boot splash's picture: the FX mark and its slash at a level, as spans on a flat background"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

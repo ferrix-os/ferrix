@@ -781,6 +781,20 @@ const DIRECT_IDLE_FRAMES: u32 = 120;
 #[cfg(target_os = "linux")]
 const RETRY: std::time::Duration = std::time::Duration::from_millis(250);
 
+/// Whether the screens being opened are the compositor's first: a monitor
+/// plugged in later starts black, as it always has.
+#[cfg(target_os = "linux")]
+static STARTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether the boot splash had the screen until now: the compositor's first
+/// screens, on a boot whose command line has `ferrix.splash`.
+#[cfg(target_os = "linux")]
+fn after_splash() -> bool {
+    STARTING.load(std::sync::atomic::Ordering::Acquire)
+        && std::fs::read_to_string("/proc/cmdline")
+            .is_ok_and(|line| line.split_whitespace().any(|word| word == "ferrix.splash"))
+}
+
 /// Whether `error` is the card saying its driver has gone.
 #[cfg(target_os = "linux")]
 fn gone(error: &io::Error) -> bool {
@@ -798,7 +812,10 @@ impl Drm {
     pub fn open() -> io::Result<Self> {
         let card = std::rc::Rc::new(compositor_drm::Card::open()?);
         let plan = compositor_drm::plan(&card)?;
-        Self::on(card, plan)
+        STARTING.store(true, std::sync::atomic::Ordering::Release);
+        let screen = Self::on(card, plan);
+        STARTING.store(false, std::sync::atomic::Ordering::Release);
+        screen
     }
 
     /// Every screen the machine has: each connected connector of each card,
@@ -835,6 +852,7 @@ impl Drm {
         // The names are numbered across every card, so two cards with a
         // `Virtual-1` each become `Virtual-1` and `Virtual-2`.
         compositor_drm::rename(&mut plans);
+        STARTING.store(true, std::sync::atomic::Ordering::Release);
         let mut screens = Vec::new();
         for (card, mut plan) in cards.into_iter().zip(plans) {
             let description = plan
@@ -862,6 +880,7 @@ impl Drm {
                 screens.push(screen);
             }
         }
+        STARTING.store(false, std::sync::atomic::Ordering::Release);
         screens
     }
 
@@ -908,11 +927,26 @@ impl Drm {
     /// One screen: two buffers on `plan`'s connector, with its mode set.
     fn on(card: std::rc::Rc<compositor_drm::Card>, plan: compositor_drm::Plan) -> io::Result<Self> {
         let (width, height) = plan.size();
-        let first = compositor_drm::Dumb::new(&card, width, height)?;
+        let mut first = compositor_drm::Dumb::new(&card, width, height)?;
         let second = compositor_drm::Dumb::new(&card, width, height)?;
+        // After the boot splash the first buffer holds its last picture, not
+        // black, until the first frame is drawn (`docs/SPLASH.md` §4).
+        let splash = after_splash();
+        if splash {
+            let pitch = first.pitch;
+            if let Some(mut frame) =
+                compositor_splash::picture::Frame::new(first.pixels(), width, height, pitch)
+            {
+                compositor_splash::picture::splash(&mut frame, ferrix_splash::FULL, None);
+            }
+        }
         // A page flip needs a mode already set, so the first buffer is shown
         // the long way round.
         let _ = card.set_mode(&plan, &first)?;
+        if splash {
+            // A card that shows a copy takes this as the frame.
+            let _ = card.dirty(&first, &[(0, 0, width, height)]);
+        }
         // A card that will not say what it is is drawn on the way that is
         // right for every card.
         let copied = card.driver().is_ok_and(|driver| driver == "virtio_gpu");

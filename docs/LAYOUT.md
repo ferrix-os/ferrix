@@ -87,7 +87,7 @@ kernel or a loader. Each crate sits in exactly one group:
 
 | Group | Holds | Crates |
 |---|---|---|
-| `src/lib/proto/` | The interfaces between components: the ABIs the kernel offers, the rings and control protocols it shares with ring-3 drivers, the loader hand-off | `linux-abi` `native-abi` `native` `bootinfo` `devmgr-proto` `drvupdate-proto` `blkring` `netring` `displayctl` `renderctl` `inputctl` `sndctl` `logctl` `auth-proto` `pkg` |
+| `src/lib/proto/` | The interfaces between components: the ABIs the kernel offers, the rings and control protocols it shares with ring-3 drivers, the loader hand-off | `linux-abi` `native-abi` `native` `bootinfo` `devmgr-proto` `drvupdate-proto` `blkring` `netring` `displayctl` `renderctl` `inputctl` `sndctl` `logctl` `auth-proto` `pkg` `splash` |
 | `src/lib/kernel/` | Kernel-internal cores: memory, scheduling, synchronisation, objects, randomness, the process stack image, the vDSO, the panic screen | `frame` `heap` `kmem` `paging` `vma` `sched` `sync` `objects` `fallible` `crng` `seccomp` `ustack` `vdso` `qr` `fbtext` |
 | `src/lib/platform/` | Parsers for what firmware and the boot medium hand over, and which of the two descriptions a machine is read by | `acpi` `fdt` `description` `pci` `elf` |
 | `src/lib/fs/` | Storage and filesystems, including the text of the pseudo-filesystems, grouped: one directory per on-disk filesystem, and `common/` for what serves them all (see below) | `btrfs/` `common/` |
@@ -162,7 +162,7 @@ directory:
 
 | Path | What |
 |---|---|
-| `src/user/system/linux/compositor/` | hyprix, the terminal and every Wayland piece. |
+| `src/user/system/linux/compositor/` | hyprix, the terminal and every Wayland piece; and `splash`, the boot splash on card0 until hyprix starts (`docs/SPLASH.md`). |
 | `src/user/system/linux/init/` | `/sbin/init`, getty and the unit files. |
 | `src/user/system/linux/installer/` | `/sbin/ferrix-install`, which puts the live system on a disk (`docs/INSTALLER.md`), and `/sbin/bootctl`, which writes the idle system slot and arms a trial boot (`docs/AB-BOOT.md`); a library of what both share: GPT reading, the A/B layout, the control record's and a slot's file I/O over `ferrix-slots`. |
 | `src/user/system/linux/dhcp/` | `/bin/dhcpc`, the DHCPv4 client: a lease over an `AF_PACKET` socket, applied itself over rtnetlink (address, default route, `/etc/resolv.conf`), renewed at T1 and rebound at T2. In place of busybox's `udhcpc` and its lease script; `udhcpc`'s command line as far as Ferrix's callers use it. |

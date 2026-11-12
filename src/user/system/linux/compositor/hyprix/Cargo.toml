@@ -24,6 +24,10 @@ compositor-anim = { path = "../anim" }
 compositor-config = { path = "../config" }
 compositor-regex = { path = "../regex" }
 compositor-drm = { path = "../drm" }
+# The boot splash's picture, which the first buffer holds after a boot that
+# showed it (docs/SPLASH.md §4).
+compositor-splash = { path = "../splash" }
+ferrix-splash = { path = "../../../../../lib/proto/splash" }
 compositor-seat = { path = "../seat" }
 compositor-ipc = { path = "../ipc" }
 compositor-layout = { path = "../layout" }

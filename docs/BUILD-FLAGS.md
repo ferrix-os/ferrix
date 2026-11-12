@@ -263,7 +263,8 @@ Not flags, and why:
   (`interfaces/display/edid.rs`), `nokaslr`, `nosmp`, and `ferrix.devmgr`
   until M5; and, read since the design, `ferrix.fbcon.small`,
   `ferrix.pstore` (read by the loader, through
-  `ferrix_bootinfo::pstore::switch`), `ferrix.efifb`, `ferrix.apic`
+  `ferrix_bootinfo::pstore::switch`), `ferrix.splash` (read by the loader
+  alone, `desktop` only; `docs/SPLASH.md`), `ferrix.efifb`, `ferrix.apic`
   (x86-64), `ferrix.epp` (x86-64, the four names in `present`, any value
   in `desktop`; L.x86_64.182) and `ferrix.panic` (`halt` in every certified profile; `reset`,
   SAFETY-MANUAL AoU-32's stop-gap, in `desktop` alone). Beside the scan of

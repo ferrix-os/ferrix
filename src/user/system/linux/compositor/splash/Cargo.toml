@@ -1,0 +1,34 @@
+[package]
+name = "compositor-splash"
+description = "The boot splash on /dev/dri/card0, from the display driver's start to the compositor's"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "compositor_splash"
+path = "src/lib.rs"
+
+[[bin]]
+name = "splash"
+path = "src/main.rs"
+
+[dependencies]
+# Declarations only, as in the card: poll and signal are the C library std
+# already links.
+libc = "0.2.189"
+# The card, which `hyprix` drives through the same crate.
+compositor-drm = { path = "../drm" }
+# The keyboards: Esc and Enter.
+compositor-evecho = { path = "../evecho" }
+# The evdev numbers.
+ferrix-linux-abi = { path = "../../../../../lib/proto/linux-abi" }
+# The picture, which the loader draws first with the same crate.
+ferrix-splash = { path = "../../../../../lib/proto/splash" }
+# The notes and the log: the boot console's font, as in hyprix's overlay.
+ferrix-fbtext = { path = "../../../../../lib/kernel/fbtext" }
+
+[lints]
+workspace = true

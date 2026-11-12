@@ -31,6 +31,11 @@ mark in ASCII.
 | `wallpaper/ferrix-wallpaper-{1920x1080,2560x1440,3840x2160}.png` | the desktop's wallpaper: a dark blue-grey gradient with a soft light right of centre and the mark at 55% opacity; every desktop image shows it and every release attaches it (`gen-brand-images.py wallpaper`) |
 | `screenshots/` | real captures of Ferrix, each described in `screenshots/CAPTIONS.md` |
 
+The boot splash is the mark with its slash lit as the boot goes
+(`docs/SPLASH.md`); `splash/mockup.html` is the design it was chosen from,
+and `src/lib/proto/splash` holds the mark's corners a second time, as
+numbers a loader can draw.
+
 Change the copy and the logo in the generator's sources, not in an image
 editor. Its banners and social preview are drawn with the tree's own fonts.
 

@@ -31,6 +31,7 @@ mod report_url;
 mod services;
 mod slots;
 mod smbios;
+mod splash;
 mod stripes;
 mod uefi;
 
@@ -250,6 +251,7 @@ fn boot(image: Handle, system_table: *mut SystemTable) -> Result<Infallible> {
     // for its graphics outputs allocates, which changes the map.
     let framebuffer = report_framebuffer(services.framebuffer(&first_look));
     stripes::record(framebuffer.as_ref());
+    splash::read(cmdline_in(info_area, cmdline_len));
 
     write_boot_info(
         &services,
@@ -673,6 +675,8 @@ fn leave_and_record(
 ) {
     stripes::reached(stripes::Step::Printed);
     console::shutdown();
+    // Over firmware's text, which nothing writes any more.
+    splash::show(services);
     stripes::tick(stripes::Tick::ConsoleGone);
     let Ok(map) = leave_firmware(services, map_buffer) else {
         stripes::failed(stripes::Step::LeftFirmware);

@@ -19,6 +19,7 @@ ferrix-eventlog.workspace = true
 ferrix-paging.workspace = true
 ferrix-slots.workspace = true
 ferrix-smbios.workspace = true
+ferrix-splash.workspace = true
 
 [lints]
 workspace = true

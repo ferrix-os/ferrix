@@ -217,6 +217,7 @@ mod shm;
 mod signing;
 mod slot_image;
 mod smbios;
+mod splash;
 mod ssh;
 mod stall;
 mod start_page;

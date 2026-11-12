@@ -13,8 +13,12 @@
 //! step counted upwards, 12 pixels high: unlike the kernel's, which run the
 //! whole width at the top. A step that failed is painted red and the loader
 //! stops there rather than return to firmware that is no longer there.
+//!
+//! Under `ferrix.splash` the screen is the boot splash's (`crate::splash`):
+//! the bars of steps that went well stay off it ([`quiet`]), and the red one
+//! of a step that failed does not.
 
-use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use ferrix_bootinfo::{Framebuffer, PixelFormat};
 
@@ -28,6 +32,9 @@ static HEIGHT: AtomicU32 = AtomicU32::new(0);
 static STRIDE: AtomicU32 = AtomicU32::new(0);
 /// Whether red is the low byte of a pixel (`Rgbx8888`).
 static RGB: AtomicU32 = AtomicU32::new(0);
+
+/// Whether [`reached`] and [`tick`] paint nothing ([`quiet`]).
+static QUIET: AtomicBool = AtomicBool::new(false);
 
 /// The height of one bar, in pixels.
 const BAR: u32 = 12;
@@ -74,8 +81,18 @@ pub(crate) fn record(framebuffer: Option<&Framebuffer>) {
     PHYS.store(framebuffer.phys, Ordering::Release);
 }
 
+/// Keep the bars off the screen: the boot splash is on it (`crate::splash`),
+/// and a boot that goes well shows a person nothing else. A step that fails
+/// still paints its red bar.
+pub(crate) fn quiet() {
+    QUIET.store(true, Ordering::Release);
+}
+
 /// Paint `step`'s bar.
 pub(crate) fn reached(step: Step) {
+    if QUIET.load(Ordering::Acquire) {
+        return;
+    }
     let row = step as usize;
     paint(row as u32, COLOURS.get(row).copied().unwrap_or(RED));
 }
@@ -115,6 +132,9 @@ const TICK_COLOURS: [u32; 5] = [0xFF_FF_FF, 0x40_80_FF, 0x00_FF_00, 0xFF_FF_00, 
 
 /// Paint `tick`'s block in [`Step::LeftFirmware`]'s row.
 pub(crate) fn tick(tick: Tick) {
+    if QUIET.load(Ordering::Acquire) {
+        return;
+    }
     let n = tick as u32;
     let colour = TICK_COLOURS.get(n as usize).copied().unwrap_or(RED);
     let from = WIDTH.load(Ordering::Relaxed) / 2 + n * TICK_PITCH;

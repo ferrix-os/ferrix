@@ -40,6 +40,71 @@ fn rank(framebuffer: &ferrix_bootinfo::Framebuffer) -> u8 {
     }
 }
 
+/// A graphics output in its current mode, to paint on through `Blt`.
+pub(crate) struct Output {
+    /// Firmware's protocol for it.
+    graphics: *mut GraphicsOutput,
+    /// The mode's width in pixels.
+    pub(crate) width: u32,
+    /// Its height.
+    pub(crate) height: u32,
+}
+
+impl Output {
+    /// `graphics` with its mode's size, or `None` when it has no mode.
+    fn of(graphics: *mut GraphicsOutput) -> Option<Self> {
+        // SAFETY: firmware returned a live `GraphicsOutput`.
+        let mode = unsafe { (*graphics).mode };
+        if mode.is_null() {
+            return None;
+        }
+        // SAFETY: checked non-null just above, and firmware owns it.
+        let info = unsafe { (*mode).info };
+        if info.is_null() {
+            return None;
+        }
+        // SAFETY: as above, for the mode's info block.
+        let info = unsafe { *info };
+        Some(Self {
+            graphics,
+            width: info.horizontal_resolution,
+            height: info.vertical_resolution,
+        })
+    }
+
+    /// Paint the `width` by `height` rectangle at (`x`, `y`) in `rgb`
+    /// (`0xRRGGBB`); what firmware refuses is not painted.
+    pub(crate) fn fill(&self, (x, y): (u32, u32), (width, height): (u32, u32), rgb: u32) {
+        use crate::uefi::protocols::{BLT_VIDEO_FILL, BltPixel};
+        let [_, red, green, blue] = rgb.to_be_bytes();
+        let mut pixel = BltPixel {
+            blue,
+            green,
+            red,
+            reserved: 0,
+        };
+        // SAFETY: firmware returned a live `GraphicsOutput`.
+        let blt = unsafe { (*self.graphics).blt };
+        // SAFETY: boot services are up (`Services::graphics_outputs`); a
+        // video fill reads the one pixel passed and writes only the screen,
+        // and firmware checks the rectangle against its mode.
+        let _ = unsafe {
+            blt(
+                self.graphics,
+                &raw mut pixel,
+                BLT_VIDEO_FILL,
+                0,
+                0,
+                x as usize,
+                y as usize,
+                width as usize,
+                height as usize,
+                0,
+            )
+        };
+    }
+}
+
 /// The linear framebuffer behind a graphics output, if it has one.
 fn describe_output(graphics: *mut GraphicsOutput) -> Option<ferrix_bootinfo::Framebuffer> {
     // SAFETY: firmware returned a live `GraphicsOutput`.
@@ -908,6 +973,47 @@ impl Services {
         // SAFETY: firmware allocated `handles` from pool for us to free.
         let _ = unsafe { (self.boot().free_pool)(handles.cast::<u8>()) };
         (chosen, outputs)
+    }
+
+    /// Call `each` with every graphics output firmware offers, to paint on
+    /// through firmware's own `Blt`: the one way that reaches an output with
+    /// no linear framebuffer, such as a virtio-gpu's, as well as one with.
+    ///
+    /// Only while boot services are up, and before the final memory map is
+    /// taken: listing the outputs allocates.
+    pub(crate) fn graphics_outputs(&self, mut each: impl FnMut(&Output)) {
+        let mut count = 0usize;
+        let mut handles: *mut Handle = ptr::null_mut();
+        // SAFETY: all out-parameters are live locals; the GUID is a constant.
+        let status = unsafe {
+            (self.boot().locate_handle_buffer)(
+                BY_PROTOCOL,
+                &GRAPHICS_OUTPUT_GUID,
+                ptr::null_mut(),
+                &raw mut count,
+                &raw mut handles,
+            )
+        };
+        if !status.is_success() || handles.is_null() {
+            return;
+        }
+        for index in 0..count {
+            // SAFETY: `index` is below the count firmware wrote with the
+            // buffer, so the offset stays inside it.
+            let slot = unsafe { handles.add(index) };
+            // SAFETY: firmware filled every one of those `count` slots.
+            let handle = unsafe { *slot };
+            let Ok(graphics) =
+                self.protocol::<GraphicsOutput>(handle, &GRAPHICS_OUTPUT_GUID, "graphics output")
+            else {
+                continue;
+            };
+            if let Some(output) = Output::of(graphics) {
+                each(&output);
+            }
+        }
+        // SAFETY: firmware allocated `handles` from pool for us to free.
+        let _ = unsafe { (self.boot().free_pool)(handles.cast::<u8>()) };
     }
 
     /// The time of day from firmware's real-time clock, as nanoseconds since

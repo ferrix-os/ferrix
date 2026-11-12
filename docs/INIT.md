@@ -918,6 +918,14 @@ keeps the kernel's path.
   lets go of that process, and a job `job_create` made has no name to
   remove it by.
 
+**`early.target` (2026-11-12).** Under `ferrix.devmgr=init`, init starts
+only `devmgr.service` until the kernel says where `/` is. An image that has
+a unit named `early.target` gets it started in the same step, with what it
+wants: units from the initramfs with `DefaultDependencies=no`, which run
+while the drivers start. Init says `starting early.target with it`. An
+image without the unit boots as before, line for line. The one user is the
+boot splash (`docs/SPLASH.md`).
+
 ## 8. Boot and shutdown
 
 ### 8.1 Boot
