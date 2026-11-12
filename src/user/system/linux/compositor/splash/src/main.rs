@@ -35,7 +35,7 @@ mod program {
     use compositor_evecho::{Device, event_nodes};
     use compositor_splash::boot::{Boot, Note};
     use compositor_splash::picture::{self, Frame};
-    use compositor_splash::{LEFT, SOCKET};
+    use compositor_splash::{LEFT, SHOWN, SOCKET};
     use ferrix_linux_abi::input::{EV_KEY, Event, KEY_ESC};
     use ferrix_splash::LOADED;
 
@@ -75,6 +75,7 @@ mod program {
                 // The splash never writes: the read ends when its process
                 // does, and the card is closed with it.
                 let _ = stream.read(&mut [0_u8; 1]);
+                let _ = File::create(SHOWN);
             }
             Err(_) => {
                 let _ = File::create(LEFT);

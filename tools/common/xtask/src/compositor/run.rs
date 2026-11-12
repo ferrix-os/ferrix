@@ -382,7 +382,9 @@ pub(crate) fn run_compositor(args: &Args) -> Result<()> {
     };
     let defaults = nazuna_defaults(args, defaults)?;
     // The boot splash, on the desktop a person watches (`crate::splash`).
-    carried.ports.extend(crate::splash::carried(arch)?);
+    carried
+        .ports
+        .extend(crate::splash::carried(arch, crate::splash::When::Word)?);
     let defaults = crate::splash::with_word(&defaults);
     // The desktop a person watches boots as a board's does: with its
     // self-checks skipped, which only the `desktop` boot of the judged ones
@@ -486,7 +488,9 @@ pub(crate) fn release_image(args: &Args) -> Result<()> {
     let (config, mut carried) =
         desktop(arch, RUN_CONFIG.to_owned(), size, true, Backdrop::Any, args)?;
     // The boot splash, as `run-compositor`'s desktop has it (`crate::splash`).
-    carried.ports.extend(crate::splash::carried(arch)?);
+    carried
+        .ports
+        .extend(crate::splash::carried(arch, crate::splash::When::Word)?);
     // `build_desktop_image`'s two steps, apart, so the initramfs the image
     // carries can be kept beside it.
     let (loader, kernel, initramfs) = build_parts(arch, &programs, &config, carried, args)?;
@@ -563,7 +567,7 @@ pub(crate) const DESKTOP_DEFAULTS: &str = "ferrix.checks=skip\n";
 /// [`DESKTOP_DEFAULTS`] on a card, which also names `/sbin/init`: a QEMU
 /// image says so in its `CMDLINE.TXT`, and a card's `CMDLINE.TXT` is its
 /// owner's.
-const DESKTOP_BOARD_DEFAULTS: &str = "ferrix.checks=skip ferrix.init=/sbin/init\n";
+const DESKTOP_BOARD_DEFAULTS: &str = "ferrix.checks=skip ferrix.init=/sbin/init ferrix.splash\n";
 
 /// The screen a board's HDMI output runs: the DK1's LTDC scans out 720p60
 /// and nothing else (`docs/DISPLAY.md` §6).
@@ -701,6 +705,12 @@ pub(crate) fn board_files(arch: Arch, args: &Args) -> Result<crate::flash::Board
     } else {
         config
     };
+    // The boot splash (`crate::splash`), always: a card's U-Boot runs the
+    // loader, which reads the word below, but the Pixel 7's own loader has
+    // no `DEFAULTS.TXT` and its command line is the app's.
+    carried
+        .ports
+        .extend(crate::splash::carried(arch, crate::splash::When::Always)?);
     let (loader, kernel, initramfs) = build_parts(arch, &programs, &config, carried, args)?;
     Ok(crate::flash::BoardFiles {
         loader,

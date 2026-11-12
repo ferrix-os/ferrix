@@ -19,6 +19,10 @@ pub mod picture;
 /// connection asks it to leave, and its end says the card is free.
 pub const SOCKET: &[u8] = b"ferrix.splash";
 
+/// The file `splash --quit` leaves when a splash was listening and has
+/// left: the compositor's first buffer then starts from its picture.
+pub const SHOWN: &str = "/run/splash.shown";
+
 /// The file `splash --quit` leaves when no splash was listening, so that one
 /// still starting leaves the card alone.
 pub const LEFT: &str = "/run/splash.left";

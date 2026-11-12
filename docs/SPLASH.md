@@ -6,9 +6,11 @@ stands still in grey on the brand's ink; its rust stroke starts unlit and
 is lit from the foot up as the boot passes milestones. The screen says
 nothing else unless something needs saying.
 
-It is on for the desktop a person uses and off everywhere else: one word
-on the command line, `ferrix.splash`, which `run-compositor`'s desktop and
-the release image carry in `DEFAULTS.TXT`.
+It is on for every desktop a person boots (the customer, 2026-11-12) and
+off in the gates' images: `run-compositor`'s desktop, the release image,
+the live ISO and the system it installs, the N150 box's image, and the
+cards and images `flash --compositor` writes, which are the DK1's and the
+Pixel 7 app's. §5 says how each is switched.
 
 ## 1. Who draws, and when
 
@@ -113,11 +115,25 @@ plugged in later starts black as before.
 ## 5. What an image carries
 
 `tools/common/xtask/src/splash.rs`: `/bin/splash`; `splash.service`
-(`ConditionKernelCommandLine=ferrix.splash`, `DefaultDependencies=no`);
-`early.target` and its want; `sysinit.target`'s want; the drop-in; and the
-word in `DEFAULTS.TXT`. The gates' images carry none of it, and their
+(`DefaultDependencies=no`); `early.target` and its want; `sysinit.target`'s
+want; and the drop-in. The gates' images carry none of it, and their
 command lines are unchanged. `ferrix.splash` is declared in
 `build-flags.toml`'s registry and permitted by the `desktop` profile.
+
+| Image | The word | The unit runs |
+|---|---|---|
+| `run-compositor`, `release-image` | in `DEFAULTS.TXT` | under the word |
+| the live ISO, and what it installs | in the ISO's command line, which the installer keeps | under the word |
+| the N150 box (`n150-install`) | in `DEFAULTS.TXT`; the box's deploy scripts write the same | under the word |
+| `flash --compositor`: the DK1's card | in `DEFAULTS.TXT`, which U-Boot's loader reads | always |
+| `flash --compositor --stage`: the Pixel 7 app's `desktop.Image` | none: its loader is the phone's own and its command line the app's | always |
+
+The live ISO and the N150 box had `ferrix.fbcon` where the word is now.
+The two do not go together, since the console draws over the splash; a
+machine that stops before the desktop is booted with `ferrix.fbcon` in
+the word's place to read why. hyprix does not look at the command line:
+`splash --quit` leaves `/run/splash.shown` when a splash was there, and
+that is what makes hyprix's first buffer the splash's picture (§4).
 
 ## 6. Where it stands
 
@@ -166,12 +182,9 @@ Not done:
   that fails is marked. A machine that stops there without failing is
   booted without `ferrix.splash` to see where: the N150's hang in
   `ExitBootServices` was placed by those bars.
-* **The N150 box's deploys keep `ferrix.fbcon`**, which draws over the
-  splash: `box/tk/fast-boot.sh` writes it unless `FAST_SCREEN` names
-  another word. The box is a machine agents read boots from.
-* **The live ISO** keeps `ferrix.fbcon` and has no splash, for the same
-  reason on a stranger's machine: a boot that hangs in the kernel says
-  where.
+* **The Pixel 7 has no picture before `/bin/splash`**: its loader is not
+  the UEFI one and paints nothing. Neither the phone nor the DK1 has been
+  booted with the splash; both images build.
 * **No gate.** The boots above were driven by hand. `docs/BACKLOG.md` has
   the row.
 * **A log line with control characters shows them as the kernel log

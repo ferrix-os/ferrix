@@ -16,6 +16,17 @@ pub(crate) const WORD: &str = "ferrix.splash";
 /// Where the program goes.
 const PROGRAM: &str = "bin/splash";
 
+/// When `splash.service` runs.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum When {
+    /// Where the command line has [`WORD`]: an image whose words are
+    /// written somewhere else, as the N150 box's are by its deploy.
+    Word,
+    /// Always: an image whose command line is not the image's to write,
+    /// as the Pixel 7's is the app's.
+    Always,
+}
+
 /// The unit: started beside `devmgr`, before `/` is known, by init's
 /// `early.target` -- most of a boot's wait is the drivers and the root
 /// volume -- and with the first units where the kernel starts `devmgr`
@@ -25,8 +36,7 @@ const UNIT: &str = "\
 # The boot splash on card0 (docs/SPLASH.md).
 [Unit]
 Description=The boot splash
-ConditionKernelCommandLine=ferrix.splash
-DefaultDependencies=no
+@CONDITION@DefaultDependencies=no
 Conflicts=shutdown.target
 Before=shutdown.target
 
@@ -59,12 +69,23 @@ pub(crate) fn with_word(defaults: &str) -> String {
     format!("{} {WORD}\n", defaults.trim_end())
 }
 
-/// What a desktop carries for the splash on `arch`.
+/// [`UNIT`]'s text for `when`.
+fn unit(when: When) -> String {
+    UNIT.replace(
+        "@CONDITION@",
+        match when {
+            When::Word => "ConditionKernelCommandLine=ferrix.splash\n",
+            When::Always => "",
+        },
+    )
+}
+
+/// What a desktop carries for the splash on `arch`, its unit running `when`.
 ///
 /// # Errors
 ///
 /// A build that fails.
-pub(crate) fn carried(arch: Arch) -> Result<Vec<File>> {
+pub(crate) fn carried(arch: Arch, when: When) -> Result<Vec<File>> {
     let program = crate::compositor::splash_program(arch)?;
     let bytes = std::fs::read(&program)
         .map_err(|error| Error::new(format!("reading {}: {error}", program.display())))?;
@@ -84,7 +105,7 @@ pub(crate) fn carried(arch: Arch) -> Result<Vec<File>> {
             mode: 0o755,
             content: Content::Bytes(bytes),
         },
-        text("etc/ferrix/units/splash.service", UNIT),
+        text("etc/ferrix/units/splash.service", &unit(when)),
         text("etc/ferrix/units/early.target", EARLY),
         wanted_by("early.target"),
         wanted_by("sysinit.target"),
@@ -94,7 +115,7 @@ pub(crate) fn carried(arch: Arch) -> Result<Vec<File>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{DROP_IN, UNIT, WORD, with_word};
+    use super::{DROP_IN, WORD, When, unit, with_word};
 
     #[test]
     fn the_word_joins_the_defaults_on_their_one_line() {
@@ -107,7 +128,12 @@ mod tests {
 
     #[test]
     fn the_unit_runs_only_under_the_word_and_the_compositor_asks_it_to_leave() {
-        assert!(UNIT.contains(&format!("ConditionKernelCommandLine={WORD}\n")));
+        assert!(unit(When::Word).contains(&format!("ConditionKernelCommandLine={WORD}\n")));
+        assert!(!unit(When::Always).contains("Condition"));
+        assert!(
+            unit(When::Always)
+                .contains("[Unit]\nDescription=The boot splash\nDefaultDependencies=no\n")
+        );
         assert!(DROP_IN.contains("ExecStartPre=-/bin/splash --quit\n"));
     }
 }

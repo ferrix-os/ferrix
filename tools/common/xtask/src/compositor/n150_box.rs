@@ -3,9 +3,10 @@
 //! the one `test-n150-desktop` boots the way the box will.
 //!
 //! hyprix on the firmware's framebuffer (`ferrix.efifb`, H6: the box's Intel
-//! graphics have no driver), with the boot console drawn on that screen
-//! until hyprix takes it (`ferrix.fbcon`: the box has no serial port), and
-//! the self-checks skipped, as on every desktop a person switches on.
+//! graphics have no driver), with the boot splash on that screen until
+//! hyprix takes it (`ferrix.splash`, the customer, 2026-11-12; a deploy
+//! that wants the boot log there writes `ferrix.fbcon` in its place: the
+//! box has no serial port), and the self-checks skipped, as on every desktop a person switches on.
 //! yserver for X11, Wine's and Proton's links into the program tree at
 //! `/data`, and `gryphlink`, which starts GRYPHLINK, in fuzzel's list and
 //! a terminal away.
@@ -40,7 +41,7 @@ pub(crate) const VIDEO_HOST: &str = super::endfield::VIDEO_HOST;
 
 /// What the image's loader adds to the kernel's command line
 /// (`FERRIX/DEFAULTS.TXT`), before any `--kernel-option`.
-pub(crate) const BOX_OPTIONS: &str = "ferrix.checks=skip ferrix.efifb ferrix.fbcon";
+pub(crate) const BOX_OPTIONS: &str = "ferrix.checks=skip ferrix.efifb ferrix.splash";
 
 /// Where [`SCRIPT`] is in the image.
 const SCRIPT_PATH: &str = "etc/n150-desktop.sh";
@@ -240,10 +241,13 @@ pub(crate) fn image(args: &Args) -> Result<(PathBuf, PathBuf)> {
     }
     let more = files(&carried.ports);
     carried.ports.extend(more);
-    // The boot splash's program and units (`crate::splash`), which run only
-    // where the command line has `ferrix.splash`: the box's words are its
-    // deploy's, and `ferrix.fbcon`, in [`BOX_OPTIONS`], draws over it.
-    carried.ports.extend(crate::splash::carried(arch)?);
+    // The boot splash's program and units (`crate::splash`), which run
+    // where the command line has `ferrix.splash`, as [`BOX_OPTIONS`] does:
+    // a deploy that writes `ferrix.fbcon` in its place gets the boot log
+    // on the screen, and no splash under it.
+    carried
+        .ports
+        .extend(crate::splash::carried(arch, crate::splash::When::Word)?);
     let mut options = BOX_OPTIONS.to_owned();
     for option in &args.kernel_options {
         options.push(' ');

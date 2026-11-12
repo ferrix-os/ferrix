@@ -787,12 +787,11 @@ const RETRY: std::time::Duration = std::time::Duration::from_millis(250);
 static STARTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Whether the boot splash had the screen until now: the compositor's first
-/// screens, on a boot whose command line has `ferrix.splash`.
+/// screens, after a `splash --quit` that found a splash and saw it leave.
 #[cfg(target_os = "linux")]
 fn after_splash() -> bool {
     STARTING.load(std::sync::atomic::Ordering::Acquire)
-        && std::fs::read_to_string("/proc/cmdline")
-            .is_ok_and(|line| line.split_whitespace().any(|word| word == "ferrix.splash"))
+        && std::fs::exists(compositor_splash::SHOWN).unwrap_or(false)
 }
 
 /// Whether `error` is the card saying its driver has gone.

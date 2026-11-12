@@ -88,8 +88,10 @@ fn live_config() -> String {
 /// PC, and the display adapters of `VirtualBox` and `VMware` -- shows the desktop at the
 /// firmware's mode instead of the loader's last screen; where firmware's
 /// framebuffer is RAM, as virtio-gpu's in QEMU, it is not lent and nothing
-/// changes (`docs/DISPLAY.md` §8). `ferrix.fbcon` draws the boot log on that
-/// screen until then, which is the only log a person at a PC sees.
+/// changes (`docs/DISPLAY.md` §8). `ferrix.splash` puts the boot splash on
+/// that screen until then (the customer, 2026-11-12; before, `ferrix.fbcon`
+/// drew the boot log there). A PC that stops before the desktop is booted
+/// again with `ferrix.fbcon` typed in its place, for the log.
 ///
 /// `ferrix.unisolated` lets the live session drive a machine with no IOMMU
 /// -- the defaults of `VirtualBox` and `VMware`, a PC with VT-d or AMD-Vi
@@ -99,7 +101,7 @@ fn live_config() -> String {
 /// it with `ferrix.live` and keeps the rest. None of these is a
 /// configuration a claim is made of.
 const LIVE_WORDS: &str =
-    "ferrix.root=tmpfs ferrix.live ferrix.unisolated ferrix.efifb ferrix.fbcon";
+    "ferrix.root=tmpfs ferrix.live ferrix.unisolated ferrix.efifb ferrix.splash";
 
 /// What the kernel says at stage 10 when `ferrix.unisolated` is on.
 const UNISOLATED_SAID: &str = "ferrix.unisolated: devmgr may start drivers";
@@ -277,6 +279,10 @@ pub(crate) fn build(args: &Args) -> Result<Built> {
     )?;
     let config = crate::session::for_session(&config, &mut carried.ports, None);
     carried.ports.extend(installer_files(arch)?);
+    // The boot splash, under the word in [`LIVE_WORDS`] (`crate::splash`).
+    carried
+        .ports
+        .extend(crate::splash::carried(arch, crate::splash::When::Word)?);
     let (loader, kernel, initramfs) = build_parts(arch, &programs, &config, carried, args)?;
 
     let build = paths::build_dir(arch);
