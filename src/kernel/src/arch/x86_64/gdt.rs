@@ -195,8 +195,8 @@ const IST_STACKS: usize = 4;
 /// Bytes in each interrupt stack table stack.
 ///
 /// The same as a vmap stack, which is what a secondary processor's come from:
-/// four pages.
-const IST_STACK_SIZE: usize = 16 * 1024;
+/// five pages since F-107.
+const IST_STACK_SIZE: usize = 20 * 1024;
 
 /// Bytes left above each IST entry: one word counting the exceptions using the
 /// stack, and one to keep the entry sixteen-byte aligned. `trap.rs`'s paranoid

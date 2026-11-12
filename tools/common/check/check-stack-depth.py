@@ -141,6 +141,11 @@ EMPTIES_NOTHING_STOPS = re.compile(
 )
 # The emptier's own row: its chunk under a timer's interrupt, on a kernel task's stack (8784 C6).
 EMPTIER = "ferrix_kernel_core::object::oom::emptier"
+# The way out of a system call (F-107, the PO's 2026-11-12 order after a real overflow on x86-64's
+# exit with tens of thousands of regions): `deliver::return_to_user`, which builds a pending
+# signal's frame on the user stack, or ends the calling thread (`leave_current`) and with the last
+# one releases its process and unmaps the whole space, under the way in and a timer's interrupt.
+EXIT = "ferrix_kernel_load::syscall::deliver::return_to_user"
 # The stack `ferrix_stack_stop` says its one line on: `trap::STACK_STOP_SIZE`.
 STOP_STACK = 4096
 LEAVE_OUT = re.compile(
@@ -159,7 +164,7 @@ HEAD = re.compile(r"^([0-9a-f]+) <(.*)>:")
 # A direct call or tail call: x86-64's `callq`/`jmp`, Arm's `bl`/`blx`/`b`. ARMv7-A's objdump ends
 # the line with the immediate (`@ imm = #...`).
 CALL = re.compile(
-    r"\b(?:callq?|jmpq?|bl|blx|b)\s+(?:0x)?[0-9a-f]+ <(.*?)(?:\+0x[0-9a-f]+)?>(?:\s+@ imm = #-?(?:0x)?[0-9a-f]+)?$"
+    r"\b(callq?|jmpq?|bl|blx|b)\s+(?:0x)?[0-9a-f]+ <(.*?)(\+0x[0-9a-f]+)?>(?:\s+@ imm = #-?(?:0x)?[0-9a-f]+)?$"
 )
 # x86-64's call or tail call through a GOT slot, with the slot's address objdump works out.
 GOT_CALL = re.compile(r"\b(?:callq?|jmpq?)\s+\*-?0x[0-9a-f]+\(%rip\)\s+# 0x([0-9a-f]+)")
@@ -266,8 +271,11 @@ def read_frames(text, slots=None):
         if current is None:
             continue
         call = CALL.search(line)
-        callee = call.group(1) if call else None
-        # A branch inside the function is no call.
+        callee = call.group(2) if call else None
+        # A branch inside the function is no call; a call (not a jump) to its own start is a
+        # recursion, kept as an edge for `Walk.recursions` to name (a walk counts it once).
+        if callee == current and call.group(1) in ("call", "callq", "bl", "blx") and not call.group(3):
+            calls[current].add(callee)
         called = callee is not None and callee != current
         if callee is None and slots is not None:
             through = GOT_CALL.search(line)
@@ -344,9 +352,27 @@ class Walk:
         # name -> the regex of the only callees it keeps: a guard inside the function (`INTERRUPT_CANNOT`).
         self.inside = inside or {}
         self.best = {}  # name -> (depth, chain)
+        # Each strongly connected part with a cycle in it, as a sorted tuple of its functions: a
+        # recursion, whose depth this walk does not bound (it counts each function once).
+        self.cycles = {}  # name -> its part, for every function in a cyclic part
 
     def weight(self, name):
         return self.frames[name] + self.call_bytes
+
+    def recursions(self, start):
+        """The cyclic parts reachable from `start` by the calls this walk follows, each a sorted
+        tuple of its functions, in name order."""
+        self.read(start)
+        seen, todo, found = {start}, [start], set()
+        while todo:
+            name = todo.pop()
+            if name in self.cycles:
+                found.add(self.cycles[name])
+            for callee in self.callees(name):
+                if callee not in seen:
+                    seen.add(callee)
+                    todo.append(callee)
+        return sorted(found)
 
     def callees(self, name):
         kept = self.inside.get(name)
@@ -414,6 +440,10 @@ class Walk:
 
     def read_part(self, part):
         inside = set(part)
+        if len(part) > 1 or part[0] in self.calls.get(part[0], ()):
+            cycle = tuple(sorted(part))
+            for name in part:
+                self.cycles[name] = cycle
         out = {name: self.way_out(name, inside) for name in part}
         inner = {name: [c for c in self.callees(name) if c in inside] for name in part}
         chains = 0
@@ -515,6 +545,17 @@ def not_judged(arch, calls, unresolved):
     return NOT_JUDGED.get(arch)
 
 
+def rows_named(frames, user, problems):
+    """The way out's and the emptier's lines fail closed (ledger 9096 H1): in an image with the
+    syscall layer, a start the walk does not find is a problem, as `named` says one, not a line left
+    out. A user kernel has no load and is excepted."""
+    if user:
+        return
+    for start, what in ((EXIT, "the way out"), (EMPTIER, "the OOM emptier")):
+        if start not in frames:
+            problems.append(f"no function `{start}`: {what}'s line was renamed, walk it again")
+
+
 def judge(frames, calls, arch, stack_bytes, unresolved=0, show_chains=False, unfollowed=0):
     """Lines to print and the problems."""
     problems, lines = [], []
@@ -568,6 +609,7 @@ def judge(frames, calls, arch, stack_bytes, unresolved=0, show_chains=False, unf
         + (", ".join(cut) or "none in this image")
     )
     user = not any("ferrix_kernel_load::" in name for name in frames)
+    rows_named(frames, user, problems)
     paths = (
         (("a region's process made", way_in + USER_NATIVE, USER_SUBTREE),)
         if user
@@ -616,6 +658,23 @@ def judge(frames, calls, arch, stack_bytes, unresolved=0, show_chains=False, unf
             if worst > stack_bytes - floor:
                 problems.append(
                     f"{arch}: clone by every direct call reaches {worst} of {stack_bytes} bytes, {floor} to be left"
+                )
+        # The way out of a system call: a signal's frame, or a thread's end with its process
+        # released and its space unmapped, under the way in and a timer's interrupt.
+        if not user and EXIT in frames:
+            ways = [named(frames, part, problems) for part in way_in]
+            total = frame["entry"] + sum(frames[name] + each for name in ways if name)
+            depth = plain.depth(EXIT)
+            worst = total + depth + frame["interrupt"] + deep_timer
+            lines.append(
+                f"stack-depth: {arch}: the way out (a signal's frame, a thread's end): {total} + {depth} + {frame['interrupt']} + "
+                f"{deep_timer} the timer's = {worst} of {stack_bytes}, a lower bound{remark}"
+            )
+            chain_line("the way out", plain.chain(EXIT))
+            if worst > stack_bytes - floor:
+                problems.append(
+                    f"{arch}: the way out of a system call under a timer's interrupt reaches {worst} of "
+                    f"{stack_bytes} bytes, {floor} to be left"
                 )
         # The OOM kill's emptier, a kernel task: its chunk under a timer's interrupt (L.object.376).
         if EMPTIER in frames:
@@ -792,6 +851,20 @@ def self_test():
     assert empties_nothing({"x": 8}, {}, []) is None, "an image with no OOM kill has no such line"
     problems = []
     assert named(frames, "nothing", problems) is None and problems
+    # The way out and the emptier fail closed in an image with the syscall layer (ledger 9096 H1).
+    load = {"ferrix_kernel_load::x": 8, EXIT: 8, EMPTIER: 8}
+    problems = []
+    rows_named(load, False, problems)
+    assert not problems, problems
+    for gone in (EXIT, EMPTIER):
+        problems = []
+        rows_named({name: 8 for name in load if name != gone}, False, problems)
+        assert len(problems) == 1 and gone in problems[0] and "renamed" in problems[0], problems
+    problems = []
+    rows_named({"x": 8}, True, problems)
+    assert not problems, "a user kernel is excepted"
+    _, refused = judge({"ferrix_kernel_load::x": 8}, {}, "x86_64", 20480)
+    assert any(EXIT in problem for problem in refused) and any(EMPTIER in problem for problem in refused), refused
     assert stack_bytes("aarch64", "pub(crate) const KERNEL_STACK_PAGES: u64 = 6;") == 6 * PAGE, "read"
 
 

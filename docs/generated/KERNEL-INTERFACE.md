@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-3089 declarations in the core's files, 215 in the item's; 267 checks-only.
+3090 declarations in the core's files, 215 in the item's; 267 checks-only.
 
 ## ferrix-kernel-core
 
@@ -3083,6 +3083,7 @@ checks above is `pub` for raised checks (F3).
 | `CpuTime` | struct | load |  |
 | `PreparedTask` | struct | load |  |
 | `Summary` | struct | - |  |
+| `BoxedUserState` | type | load |  |
 | `CpuReport::worst_overrun` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `CpuTime::busy_ns` | field | load |  |
 | `CpuTime::idle_ns` | field | load |  |

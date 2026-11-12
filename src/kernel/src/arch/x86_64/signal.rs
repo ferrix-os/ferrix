@@ -606,6 +606,20 @@ pub fn setup_signal_frame(
     if request.abi == crate::trap::Abi::Compat {
         return compat::setup(space, context, request);
     }
+    setup_native(space, context, request)
+}
+
+/// [`setup_signal_frame`]'s 64-bit frame. Apart (F-107): the frame is built in
+/// a buffer on the stack before it is copied out, and in `setup_signal_frame`'s
+/// frame that buffer stood below the i386 frame's own, the two never both in
+/// use, on the deepest way out of a system call.
+#[cfg(not(ferrix_shape = "micro"))]
+#[inline(never)]
+fn setup_native(
+    space: &AddressSpace,
+    context: &mut UserContext,
+    request: &FrameRequest,
+) -> Result<(), BadFrame> {
     let (fpstate, frame_at) = place(request.stack)?;
     write_fp_area(space, fpstate)?;
 

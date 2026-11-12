@@ -540,12 +540,9 @@ fn clone_with(
 ) -> Result<usize, Errno> {
     let CloneRequest {
         flags,
-        stack,
-        parent_tid,
         child_tid,
-        tls,
-        thread_area,
         cgroup,
+        ..
     } = *request;
     // A namespace asked for is a namespace that has to exist. Ignoring the
     // flag would answer a sandbox's request for isolation with a child that
@@ -599,6 +596,10 @@ fn clone_with(
     // Its own copy of the namespace, before anything can see it: a refusal
     // goes with the child, unstarted.
     give_namespaces(parent, &child, flags)?;
+    // Its registers, on the heap before anything of the child can be seen: a
+    // refusal goes with the child, unstarted, as `ENOMEM`, which is what
+    // Linux's `copy_process` answers for its own allocations.
+    let state = captured_state()?;
     child.set_exit_signal((flags & CSIGNAL) as u32);
     // What glibc's `posix_spawn` asks for, so that its child need not reset
     // every handler itself before `execve`. Linux leaves the alternate stack
@@ -611,12 +612,7 @@ fn clone_with(
     // when it ends is recorded before it can run. It inherits the calling
     // thread's blocked mask and alternate stack.
     let caller = thread::current_of(parent);
-    let thread = match &caller {
-        Some(caller) => Thread::forked(&child, caller),
-        None => Thread::leader(&child),
-    }
-    .and_then(crate::fallible::try_arc)
-    .map_err(|_| Errno::ENOMEM)?;
+    let thread = child_thread(&child, caller.as_ref())?;
     if flags & CLONE_CHILD_CLEARTID != 0 {
         let _ = thread.set_clear_child_tid(child_tid);
     }
@@ -650,34 +646,94 @@ fn clone_with(
         process::kill(&child, job::KILLED_STATUS);
         return Err(Errno::ENOMEM);
     }
-    let seen = write_ids(parent, &child, flags, (parent_tid, child_tid));
+    start_child(
+        parent,
+        &child,
+        (thread, state),
+        caller.as_ref(),
+        request,
+        regs,
+    )
+}
 
-    // The child starts with its parent's registers as they are right now, in
-    // this system call: its thread pointer and floating-point state, and the
-    // saved frame with the return value made zero.
+/// The parent's registers as they are right now, in this system call -- its
+/// thread pointer and floating-point state -- for its child to start with, on
+/// the heap (`sched::BoxedUserState`). Out of line (F-107): the state is about
+/// a kilobyte on x86-64 and more on AArch64, built by value before it moves.
+///
+/// # Errors
+///
+/// `ENOMEM`, with no memory for the box.
+#[inline(never)]
+fn captured_state() -> Result<crate::sched::BoxedUserState, Errno> {
     // SAFETY: inside the parent's own system call, so the live user registers
     // are the parent's.
-    let mut state = unsafe { arch::UserState::capture() };
+    ferrix_fallible::try_box(core::cell::UnsafeCell::new(unsafe {
+        arch::UserState::capture()
+    }))
+    .map_err(|_| Errno::ENOMEM)
+}
+
+/// The child's one thread, in its `Arc`: the calling thread's copy, or a
+/// leader when the caller is no thread. Kept out of `clone_with`'s frame
+/// (F-107): a `Thread` is built by value before it moves to the heap, and
+/// there it stood below the rest of the fork.
+#[inline(never)]
+fn child_thread(child: &Arc<Process>, caller: Option<&Arc<Thread>>) -> Result<Arc<Thread>, Errno> {
+    match caller {
+        Some(caller) => Thread::forked(child, caller),
+        None => Thread::leader(child),
+    }
+    .and_then(crate::fallible::try_arc)
+    .map_err(|_| Errno::ENOMEM)
+}
+
+/// [`clone_with`]'s last step: the child's ids written, its registers and
+/// thread state set from the parent's, and the child started. Kept out of
+/// `clone_with`'s frame (F-107): the parent's captured user state is large
+/// (`arch::UserState`, the floating-point registers among it), and in that
+/// frame it stood below the whole fork, a new network namespace's first
+/// frames included, though it is made only here, after all of them.
+#[inline(never)]
+fn start_child(
+    parent: &Arc<Process>,
+    child: &Arc<Process>,
+    (thread, mut boxed): (Arc<Thread>, crate::sched::BoxedUserState),
+    caller: Option<&Arc<Thread>>,
+    request: &CloneRequest,
+    regs: &arch::UserRegs,
+) -> Result<usize, Errno> {
+    let CloneRequest {
+        flags,
+        stack,
+        parent_tid,
+        child_tid,
+        tls,
+        thread_area,
+        ..
+    } = *request;
+    let seen = write_ids(parent, child, flags, (parent_tid, child_tid));
+    let state = boxed.get_mut();
     if flags & CLONE_SETTLS != 0 {
-        give_thread_pointer(&mut state, tls, thread_area);
+        give_thread_pointer(state, tls, thread_area);
     }
     let mut child_regs = regs.for_child();
     if stack != 0 {
-        child_regs.set_stack(&mut state, stack);
+        child_regs.set_stack(state, stack);
     }
     thread.set_resume(child_regs);
 
-    parent.adopt(Arc::clone(&child));
-    if process::start_forked(thread, state).is_err() {
-        parent.disown(&child);
+    parent.adopt(Arc::clone(child));
+    if process::start_forked(thread, boxed).is_err() {
+        parent.disown(child);
         return Err(Errno::EAGAIN);
     }
     if flags & CLONE_VFORK != 0 {
-        if let Some(caller) = &caller {
+        if let Some(caller) = caller {
             caller.set_in_vfork(true);
         }
         child.wait_vfork_release(parent);
-        if let Some(caller) = &caller {
+        if let Some(caller) = caller {
             caller.set_in_vfork(false);
         }
     }
@@ -806,16 +862,20 @@ fn start_cloned_thread(
 ) -> Result<(), Errno> {
     // SAFETY: inside the caller's own system call, so the live user registers
     // are the caller's.
-    let mut state = unsafe { arch::UserState::capture() };
+    let mut boxed = ferrix_fallible::try_box(core::cell::UnsafeCell::new(unsafe {
+        arch::UserState::capture()
+    }))
+    .map_err(|_| Errno::ENOMEM)?;
+    let state = boxed.get_mut();
     if request.flags & CLONE_SETTLS != 0 {
-        give_thread_pointer(&mut state, request.tls, request.thread_area);
+        give_thread_pointer(state, request.tls, request.thread_area);
     }
     let mut thread_regs = regs.for_child();
     if request.stack != 0 {
-        thread_regs.set_stack(&mut state, request.stack);
+        thread_regs.set_stack(state, request.stack);
     }
     thread.set_resume(thread_regs);
-    let _task = process::start_thread(thread, caller, state).map_err(|_| Errno::EAGAIN)?;
+    let _task = process::start_thread(thread, caller, boxed).map_err(|_| Errno::EAGAIN)?;
     Ok(())
 }
 

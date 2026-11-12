@@ -89,6 +89,43 @@ pages on x86-64 and ARMv7-A is the customer's (ledger 8738 Q5); B is wanted
 whichever is chosen, since it takes about 4.6 KiB from under every
 kernel-heap allocation on every architecture.
 
+### 1a. The decision (2026-11-12) and what it came to
+
+The customer played on the box, called it playable and said "just fix the
+remaining issues", which left the stack row's choice with ef-30fps's
+session; the product owner's message of 2026-11-12 relays it: "the row goes
+green by trimming and stack pages now; the per-processor interrupt stack is
+a later improvement, not started", "trim first ... then stack pages, only
+as far as the trimmed figures need with 4,096 bytes left on every judged
+line", "AArch64 should stay at 6". The consultant's design line is ledger
+8953 (the earlier 8665 and 8738 had refused nine pages and left the count
+to the customer).
+
+Trimmed, each a large local taken off the deep path, not a cosmetic one:
+`ferrix_net`'s segment payload on the heap (`poll_transmit` 2,872 to 840
+bytes on x86-64); a fork's last step (`start_child`), its child's thread
+(`child_thread`) and the parent's captured registers (`captured_state`)
+out of the fork's frame (`sys_clone` 1,368 to 232); the user state boxed
+from its capture to its task (`sched::BoxedUserState`), never a by-value
+copy in every frame between; a network namespace built out of
+`namespace::create`'s frame (`made`); a process's core made before the
+`Process` is (`core_of`), and `with_context` inlined so that one copy of a
+`Process`, not two, stands under its move to the heap; and x86-64's 64-bit
+signal frame built out of `setup_signal_frame`'s frame (`setup_native`),
+since the row gained a line for the way out of a system call (a signal's
+frame, a thread's end, 15,304 / 16,640 / 12,904). The deepest
+sub-trees, develop to trimmed (x86-64 / AArch64 / ARMv7-A): a process made
+9,808 / 9,632 / 7,392 to 7,856 / 7,680 / 5,720; clone by every direct call
+15,384 / 15,136 / 11,432 to 10,216 / 10,288 / 8,240.
+
+Pages, the fewest the trimmed lines need: x86-64 five (at four, a process
+made, a fork and the emptier were over), AArch64 six, ARMv7-A five (at four,
+a fork was 56 bytes over; its deepest tails all end in `user/vmo.rs`'s
+`decommit_in_chunks` and `retire_runs`, 2,768 bytes together, which the
+resident-counts work owns: trimmed, ARMv7-A could go back to four, on a
+ledger line of its own). The per-processor interrupt stack (column (c)) is
+a BACKLOG row, a later improvement, not started.
+
 ## 2. B: the emptying is an emptier task's
 
 ### 2.1 What happens now

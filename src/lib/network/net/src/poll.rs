@@ -55,7 +55,18 @@ impl Stack {
 
     /// Take every segment one connection wants to send.
     fn pump_stream(&mut self, id: u32, now: Millis) {
-        let mut payload = [0_u8; SEGMENT_BUFFER];
+        // On the heap, as the segment below is: an array here was 2 KiB of a
+        // kernel stack under every frame `poll_transmit` reaches, a packet
+        // looped back into `receive` and a new connection's insert among them
+        // (F-107).
+        // With no room, nothing is sent this time; the connection's segment
+        // waits for the next poll.
+        let mut payload = Vec::new();
+        if payload.try_reserve_exact(SEGMENT_BUFFER).is_err() {
+            return;
+        }
+        // NOALLOC: room for all of it was had above.
+        payload.resize(SEGMENT_BUFFER, 0_u8);
         loop {
             // The socket comes out of the table while its segment is built,
             // because building it goes through the routing table and the

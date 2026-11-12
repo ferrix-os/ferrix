@@ -403,13 +403,9 @@ impl Process {
     pub(crate) fn new_shared(space: Arc<AddressSpace>) -> Result<Arc<Process>, AllocError> {
         let files = fallible::try_arc(SpinLock::new(fd::standard_streams(Reading::Never)?))?;
         let fs = fallible::try_arc(SpinLock::new(fs::root_disk::process_context()))?;
-        Process::shared_with_context(
-            space,
-            object::process::allocate().unwrap_or(0),
-            Arc::clone(job::root()),
-            files,
-            fs,
-        )
+        let pid = object::process::allocate().unwrap_or(0);
+        let core = Process::core_of(space, pid, Arc::clone(job::root()))?;
+        Process::shared_with_context(core, pid, files, fs)
     }
 
     /// [`Process::new`], with the console on its descriptors reading as
@@ -447,7 +443,23 @@ impl Process {
     ) -> Result<Process, AllocError> {
         let files = fallible::try_arc(SpinLock::new(fd::standard_streams(reading)?))?;
         let fs = fallible::try_arc(SpinLock::new(fs::root_disk::process_context()))?;
-        Process::with_context(space, pid, job, files, fs)
+        let core = Process::core_of(space, pid, job)?;
+        Process::with_context(core, pid, files, fs)
+    }
+
+    /// The process's core, in its `Arc`. Made by the caller of
+    /// [`Process::with_context`] and before it (F-107): the core's making
+    /// reaches deep -- the job's charge, the heap's allocation and what is
+    /// under it -- and in `with_context`'s frame, and the frame of
+    /// [`Process::shared_with_context`] above it, it stood below two
+    /// `Process`es of over a kilobyte each.
+    #[inline(never)]
+    fn core_of(
+        space: Arc<AddressSpace>,
+        pid: u32,
+        job: Arc<Job>,
+    ) -> Result<Arc<object::process::Process>, AllocError> {
+        fallible::try_arc(object::process::Process::new(space, pid, job)?)
     }
 
     /// [`Process::with_pid`] over a descriptor table and a directory context
@@ -455,15 +467,20 @@ impl Process {
     /// opening the console is among the deepest things a fork does, and a
     /// `Process` is over a kilobyte: built after them, it is not on the stack
     /// while they run. A kernel stack is four pages (`docs/PIDNS.md` §10).
+    ///
+    /// Inlined into its two callers (F-107): out of line, the `Process` it
+    /// built was in its frame and again in [`Process::shared_with_context`]'s,
+    /// which holds the result while it moves to the heap, two copies of over a
+    /// kilobyte under that move's allocation.
+    #[inline(always)]
     fn with_context(
-        space: Arc<AddressSpace>,
+        core: Arc<object::process::Process>,
         pid: u32,
-        job: Arc<Job>,
         files: Arc<SpinLock<FdTable<Arc<OpenFile>>>>,
         fs: Arc<SpinLock<Context>>,
     ) -> Result<Process, AllocError> {
         Ok(Process {
-            core: fallible::try_arc(object::process::Process::new(space, pid, job)?)?,
+            core,
             umask: AtomicU32::new(DEFAULT_UMASK),
             oom_score_adj: AtomicI32::new(0),
             identity: SpinLock::new(Identity::default()),
@@ -581,13 +598,9 @@ impl Process {
         } else {
             fallible::try_arc(SpinLock::new(parent.fs.lock().clone()))?
         };
-        let mut shared = Process::shared_with_context(
-            space,
-            object::process::allocate().unwrap_or(0),
-            job,
-            files,
-            fs,
-        )?;
+        let pid = object::process::allocate().unwrap_or(0);
+        let core = Process::core_of(space, pid, job)?;
+        let mut shared = Process::shared_with_context(core, pid, files, fs)?;
         let child = Arc::get_mut(&mut shared).ok_or(AllocError)?;
         // Born in its job's speculation domain only as the child of a member
         // in that same domain: a process that moved into a marked job, or
@@ -646,13 +659,12 @@ impl Process {
     /// builds is on the stack only while it moves to the heap.
     #[inline(never)]
     fn shared_with_context(
-        space: Arc<AddressSpace>,
+        core: Arc<object::process::Process>,
         pid: u32,
-        job: Arc<Job>,
         files: Arc<SpinLock<FdTable<Arc<OpenFile>>>>,
         fs: Arc<SpinLock<Context>>,
     ) -> Result<Arc<Process>, AllocError> {
-        match Process::with_context(space, pid, job, files, fs) {
+        match Process::with_context(core, pid, files, fs) {
             Ok(process) => fallible::try_arc(process),
             Err(error) => Err(error),
         }
@@ -2670,7 +2682,7 @@ impl StartClaim {
         self,
         thread: Arc<Thread>,
         cpu: Option<usize>,
-        state: Option<crate::arch::UserState>,
+        state: Option<sched::BoxedUserState>,
     ) -> Result<PreparedStart, &'static str> {
         self.process.add_thread(&thread);
         let task = sched::prepare_user("user", run_program, thread, cpu, state)?;
@@ -2742,7 +2754,7 @@ impl Drop for StartClaim {
 /// As [`start`].
 pub(crate) fn start_forked(
     thread: Arc<Thread>,
-    state: crate::arch::UserState,
+    state: sched::BoxedUserState,
 ) -> Result<Arc<Task>, &'static str> {
     let claim = take_claim(thread.process())?;
     Ok(claim.prepare_thread(thread, None, Some(state))?.launch())
@@ -2763,7 +2775,7 @@ pub(crate) fn start_forked(
 pub(crate) fn start_thread(
     thread: Arc<Thread>,
     creator: &Thread,
-    state: crate::arch::UserState,
+    state: sched::BoxedUserState,
 ) -> Result<Arc<Task>, &'static str> {
     let process = Arc::clone(thread.process());
     if process.is_terminated() || process.exec_thread.load(Ordering::Acquire) != 0 {

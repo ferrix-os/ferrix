@@ -702,10 +702,12 @@ const fn vma_flags(flags: MapFlags) -> VmaFlags {
 
 /// Pages in a kernel stack, not counting the guards.
 ///
-/// Sixteen kibibytes on two architectures. Linux uses that, and takes interrupts on
-/// a stack of their own; here an interrupt stands on the task's stack, and on AArch64
-/// that and its vector state are about 4 KiB, so 24 there (F-101): `check-stack-depth`
-/// wants 4 KiB left on what it walks. It is not generous: the trap path saves a frame, a nested interrupt saves
+/// Twenty kibibytes on x86-64 and ARMv7-A, 24 on AArch64. Linux uses 16, and
+/// takes interrupts on a stack of their own; here an interrupt stands on the task's
+/// stack, and on AArch64 that and its vector state are about 4 KiB, so 24 there
+/// (F-101). `check-stack-depth` wants 4 KiB left on what it walks, on all three
+/// architectures since F-110, and with a fork's and a process made's frames trimmed
+/// four pages still fell short on x86-64 and ARMv7-A: five there (F-107). It is not generous: the trap path saves a frame, a nested interrupt saves
 /// another, and formatting a line for the console is surprisingly deep. The
 /// guard page below is what turns "not generous" from a corruption into a
 /// fault, and only because each architecture's entry takes that fault somewhere

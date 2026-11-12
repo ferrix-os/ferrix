@@ -72,6 +72,11 @@ pub use preempt::counting as records_kept;
 pub use task::{SleepSlot, Task, TaskId, UserThread};
 pub use wait::{Mark, ReadyList, WaitQueue};
 
+/// A user task's register state on the heap, from where it is captured to the
+/// task that keeps it (F-107): by value it was a copy in every frame between,
+/// about a kilobyte on x86-64 and more on AArch64, under a fork's deepest calls.
+pub type BoxedUserState = alloc::boxed::Box<core::cell::UnsafeCell<arch::UserState>>;
+
 use crate::arch;
 use crate::fallible;
 
@@ -118,7 +123,7 @@ fn new_task(
     entry: fn(usize),
     argument: usize,
     thread: Option<Arc<dyn UserThread>>,
-    state: Option<arch::UserState>,
+    state: Option<BoxedUserState>,
 ) -> Result<Arc<Task>, &'static str> {
     let _ = MADE.fetch_add(1, Ordering::Relaxed);
     fallible::try_arc(Task {
@@ -154,7 +159,7 @@ fn new_task(
         mask: crate::sync::SpinLock::new(None),
         call: [const { AtomicU64::new(0) }; 9],
         bound_process: AtomicU64::new(0),
-        user_state: crate::sync::SpinLock::new(state),
+        user_state: crate::sync::SpinLock::new(state.map(|state| (*state).into_inner())),
         pending: crate::sync::SpinLock::new(None),
     })
     .map_err(|_| "no memory for a task")
@@ -289,7 +294,7 @@ pub fn spawn_user(
     entry: fn(usize),
     thread: Arc<dyn UserThread>,
     cpu: Option<usize>,
-    state: Option<arch::UserState>,
+    state: Option<BoxedUserState>,
 ) -> Result<Arc<Task>, &'static str> {
     Ok(prepare_user(name, entry, thread, cpu, state)?.launch())
 }
@@ -298,7 +303,7 @@ pub fn prepare_user(
     entry: fn(usize),
     thread: Arc<dyn UserThread>,
     cpu: Option<usize>,
-    state: Option<arch::UserState>,
+    state: Option<BoxedUserState>,
 ) -> Result<PreparedTask, &'static str> {
     let process = alloc::sync::Arc::clone(&thread);
     let task = new_task(name, entry, 0, Some(thread), state)?;

@@ -486,7 +486,7 @@ pub(crate) type TaskSlot = Slot<Arc<Task>>;
 )]
 fn user_parts(
     thread: Option<&Arc<dyn UserThread>>,
-    user_state: Option<arch::UserState>,
+    user_state: Option<super::BoxedUserState>,
 ) -> Result<
     (
         Option<Box<UnsafeCell<arch::UserState>>>,
@@ -494,11 +494,10 @@ fn user_parts(
     ),
     AllocError,
 > {
-    let user = match thread {
-        Some(_) => Some(fallible::try_box(UnsafeCell::new(
-            user_state.unwrap_or_else(arch::UserState::new),
-        ))?),
-        None => None,
+    let user = match (thread, user_state) {
+        (Some(_), Some(state)) => Some(state),
+        (Some(_), None) => Some(fallible::try_box(UnsafeCell::new(arch::UserState::new()))?),
+        (None, _) => None,
     };
     let core = thread.map(|thread| Arc::clone(thread.process().core_arc()));
     Ok((user, core))
@@ -690,8 +689,9 @@ const fn counted_of(word: u64) -> u32 {
 /// anything. An [`Arc<AddressSpace>`] is exactly such a resource: copying the
 /// descriptor would duplicate a reference without raising the count, and the
 /// page tables would be freed while a processor still had their root in its
-/// register. `Clone` stays, because cloning does raise it.
-#[derive(Clone, Debug)]
+/// register. Nor `Clone` since F-107: it carries the user state it was
+/// handed, on the heap, which only the task it makes may own.
+#[derive(Debug)]
 pub(crate) struct NewTask {
     /// Its identifier, never reused.
     pub(crate) id: TaskId,
@@ -719,7 +719,7 @@ pub(crate) struct NewTask {
     /// The user registers it starts with, for a task with a thread: `None`
     /// is a program's starting state, and a fork child passes a copy of its
     /// parent's.
-    pub(crate) user_state: Option<arch::UserState>,
+    pub(crate) user_state: Option<super::BoxedUserState>,
 }
 
 impl Task {

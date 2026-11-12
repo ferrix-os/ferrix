@@ -108,6 +108,11 @@ pub use task::{TaskId, UserThread};
 pub use wait::{LastLook, WaitQueue};
 pub use wait::{Mark, ReadyList};
 
+/// A user task's register state on the heap, from where it is captured to the
+/// task that keeps it (F-107): by value it was a copy in every frame between,
+/// about a kilobyte on x86-64 and more on AArch64, under a fork's deepest calls.
+pub type BoxedUserState = alloc::boxed::Box<core::cell::UnsafeCell<arch::UserState>>;
+
 /// One run queue per logical processor.
 static QUEUES: Once<Vec<SpinLock<CpuQueue>>> = Once::new();
 
@@ -1485,7 +1490,7 @@ pub fn spawn_user(
     entry: fn(usize),
     thread: Arc<dyn UserThread>,
     cpu: Option<usize>,
-    state: Option<arch::UserState>,
+    state: Option<BoxedUserState>,
 ) -> Result<Arc<Task>, &'static str> {
     prepare_user(name, entry, thread, cpu, state).map(PreparedTask::launch)
 }
@@ -1505,7 +1510,7 @@ pub fn prepare_user(
     entry: fn(usize),
     thread: Arc<dyn UserThread>,
     cpu: Option<usize>,
-    state: Option<arch::UserState>,
+    state: Option<BoxedUserState>,
 ) -> Result<PreparedTask, &'static str> {
     let here = this_cpu().ok_or("no processor to start a program on")?;
     let anywhere = *domain_cpus().ok_or("the scheduler has no domain")?;
@@ -1630,7 +1635,7 @@ fn spawn_task(
     affinity: CpuSet,
     address_space: Option<Arc<crate::user::space::AddressSpace>>,
     thread: Option<Arc<dyn UserThread>>,
-    user_state: Option<arch::UserState>,
+    user_state: Option<BoxedUserState>,
 ) -> Result<Arc<Task>, &'static str> {
     // The queue before the task: a task made for a processor that does not
     // exist would take a stack with it that nothing frees.
@@ -1700,7 +1705,7 @@ fn make_task(
     affinity: CpuSet,
     address_space: Option<Arc<crate::user::space::AddressSpace>>,
     thread: Option<Arc<dyn UserThread>>,
-    user_state: Option<arch::UserState>,
+    user_state: Option<BoxedUserState>,
 ) -> Result<Arc<Task>, &'static str> {
     let stack = crate::vmap::allocate_stack_of(stack_pages).map_err(|problem| {
         // The arena's own reason, because "no stack" has four of them and they

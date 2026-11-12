@@ -1597,7 +1597,7 @@ package FerrixX8664Requirements {
                 interrupted code's mode it is entered on an i386 frame and the check
                 fails by name.";
             attribute :>> parent = "H.TRAP.9";
-            attribute :>> unit = ("arch::x86_64::signal::setup_signal_frame",
+            attribute :>> unit = ("arch::x86_64::signal::setup_signal_frame", "arch::x86_64::signal::setup_native",
                 "arch::x86_64::signal::frame_is_buildable",
                 "arch::x86_64::signal::place",
                 "arch::x86_64::signal::write_fp_area",

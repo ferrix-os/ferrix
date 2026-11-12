@@ -1,7 +1,9 @@
 //! The x86-64 end of the kernel.
 
-/// Pages in a kernel stack, not counting the guards: `vmap::STACK_PAGES`.
-pub(crate) const KERNEL_STACK_PAGES: u64 = 4;
+/// Pages in a kernel stack, not counting the guards: `vmap::STACK_PAGES`. Five
+/// since F-107: four, with the frames trimmed, left a fork short of the 4,096
+/// bytes `check-stack-depth` wants left (`docs/OOM-REAPER.md` section 1).
+pub(crate) const KERNEL_STACK_PAGES: u64 = 5;
 /// Unmapped pages directly below a kernel stack: `vmap::STACK_LOWER_GUARD_PAGES`.
 pub(crate) const KERNEL_STACK_LOWER_GUARD_PAGES: u64 = 1;
 /// Whether each processor holds an emergency stack in its record (`H.FAIL.15`): x86-64's

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "81548f87ee699ad43a1ef283c5a94bd8a7b512c04f9bdf8671e9cfa14732b5d3",
+  "digest": "22b8b010f062c9c2bf5f1f33a62fea8fbea2e623a130ea058508577c9764da85",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -81140,7 +81140,7 @@
                   "qualifiedName": "FerrixX8664Requirements::SignalFrames::nativeSignalRoundTrip",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"arch::x86_64::signal::setup_signal_frame\", \"arch::x86_64::signal::frame_is_buildable\", \"arch::x86_64::signal::place\", \"arch::x86_64::signal::write_fp_area\", \"arch::x86_64::signal::UserContext::registers\", \"arch::x86_64::signal::UserContext::store_syscall\", \"arch::x86_64::signal::restore_signal_frame\", \"arch::x86_64::signal::restore_fpu\", \"arch::x86_64::signal::UserContext::set_registers\", \"arch::x86_64::signal::resume_context\")",
+                  "value": "(\"arch::x86_64::signal::setup_signal_frame\", \"arch::x86_64::signal::setup_native\", \"arch::x86_64::signal::frame_is_buildable\", \"arch::x86_64::signal::place\", \"arch::x86_64::signal::write_fp_area\", \"arch::x86_64::signal::UserContext::registers\", \"arch::x86_64::signal::UserContext::store_syscall\", \"arch::x86_64::signal::restore_signal_frame\", \"arch::x86_64::signal::restore_fpu\", \"arch::x86_64::signal::UserContext::set_registers\", \"arch::x86_64::signal::resume_context\")",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
                     "line": 1609

@@ -49,9 +49,9 @@
       "lines": 32,
       "recursive": false
     },
-    "arch/x86_64/signal.rs::setup_signal_frame": {
-      "complexity": 19,
-      "lines": 30,
+    "arch/x86_64/signal.rs::setup_native": {
+      "complexity": 17,
+      "lines": 27,
       "recursive": false
     },
     "arch/x86_64/trap.rs::vector_name": {

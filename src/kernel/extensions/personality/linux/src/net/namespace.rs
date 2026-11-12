@@ -113,19 +113,7 @@ pub(crate) fn acting() -> Arc<NetNamespace> {
 ///
 /// `ENOMEM` past the job's memory.
 pub(crate) fn create(owner: Arc<UserNamespace>) -> Result<Arc<NetNamespace>, Errno> {
-    let charge = Charge::bytes(arc_footprint::<NetNamespace>().saturating_add(BASE))
-        .map_err(|_| Errno::ENOMEM)?;
-    let tables = Charge::bytes(0).map_err(|_| Errno::ENOMEM)?;
-    let progress = crate::fallible::try_arc(WaitQueue::new()).map_err(|_| Errno::ENOMEM)?;
-    let core = NetCore::new(Stack::new_namespace(Config::default()), progress);
-    let namespace = crate::fallible::try_arc(NetNamespace {
-        id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
-        owner,
-        core,
-        tables: Some(SpinLock::new(tables)),
-        _charge: Some(charge),
-    })
-    .map_err(|_| Errno::ENOMEM)?;
+    let namespace = made(owner)?;
     namespace.fit(0)?;
     let mut live = LIVE.lock();
     if live.len().is_power_of_two() {
@@ -135,6 +123,28 @@ pub(crate) fn create(owner: Arc<UserNamespace>) -> Result<Arc<NetNamespace>, Err
     live.push(Arc::downgrade(&namespace));
     drop(live);
     Ok(namespace)
+}
+
+/// A new namespace in its `Arc`, charged, its tables not fitted yet. Kept out
+/// of [`create`]'s frame (F-107): the namespace is built by value -- its
+/// stack's state is over a kilobyte -- before it moves to the heap, and in
+/// that frame it stood below `fit`, which reaches a looped-back packet and a
+/// new connection's insert.
+#[inline(never)]
+fn made(owner: Arc<UserNamespace>) -> Result<Arc<NetNamespace>, Errno> {
+    let charge = Charge::bytes(arc_footprint::<NetNamespace>().saturating_add(BASE))
+        .map_err(|_| Errno::ENOMEM)?;
+    let tables = Charge::bytes(0).map_err(|_| Errno::ENOMEM)?;
+    let progress = crate::fallible::try_arc(WaitQueue::new()).map_err(|_| Errno::ENOMEM)?;
+    let core = NetCore::new(Stack::new_namespace(Config::default()), progress);
+    crate::fallible::try_arc(NetNamespace {
+        id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+        owner,
+        core,
+        tables: Some(SpinLock::new(tables)),
+        _charge: Some(charge),
+    })
+    .map_err(|_| Errno::ENOMEM)
 }
 
 /// Collect every live namespace, the first included, into `out`.
