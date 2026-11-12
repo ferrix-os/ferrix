@@ -462,7 +462,8 @@ allocate, and the box is reached over ssh (`fx.sh`).
   and the RMRR identity-mapped for 00:02.0, 0 faults at the end of boot,
   before the driver started, and Endfield drew through the driver from about
   160 s to 950 s; no plane was lit, so nothing scanned out of the RMRR and no
-  fault record was read after the driver started, but the screen lit after TE and the
+  fault record was read after the driver started. A second boot of that image the same day with a monitor (BACKLOG P1, intel-k2; ef-30fps's deploy at 17:59, `relaunch-1/deploy-538.log`, tied to the running command line by its nonce) printed the same two lines, `0 faults` at 24.13 s, and the driver's `pipe A plane 1 lit ... (page 0x7c800000)` at 24.21 s with card0 published: a plane lit inside the RMRR by its first entry, taken to be firmware's and lit since before TE at 17.35 s (inferred, not logged), with no fault recorded up to the reading.
+  The photograph of that screen and the
   loader-map region of the RMRR are still owed (BACKLOG P1, intel-k2;
   ledger 2392 (5)) -- and counts as
   translated, so (a) lets the chardev core accept its
