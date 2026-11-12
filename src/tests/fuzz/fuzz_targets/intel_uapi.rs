@@ -58,6 +58,7 @@ use ferrix_intel_xelp::frontend::{
     Backend, Completion, ContextParams, Engine, Facts, Frontend, Host, HwContext, Installed,
     RequestId, SubmitError, VmId, limits,
 };
+use ferrix_intel_xelp::ppgtt::{BindError, PAGE_2M, Ppgtt, PpgttError, PtMemory};
 use ferrix_intel_xelp::sseu::{Fuses, gen12_sseu_info_init};
 use ferrix_intel_xelp::uapi::{
     self, ContextCreateExt, ContextParam, ExecFence, ExecObject2, Execbuffer2, GemCreate,
@@ -291,6 +292,70 @@ mod fault {
     pub const SYNC_INSTALL: u32 = 1 << 8;
     pub const DMABUF_FENCE: u32 = 1 << 9;
     pub const REPLY_MAP: u32 = 1 << 10;
+    /// A bind's last page has no device address: the windows before it are
+    /// written by then.
+    pub const BIND_PARTWAY: u32 = 1 << 11;
+    /// The next page-table page cannot be had.
+    pub const PT_ALLOC: u32 = 1 << 12;
+}
+
+/// The largest binding the model maps through its page tables; larger ones
+/// (objects reach 8 TiB) are only recorded, so that a run stays fast.
+const MAPPED_MAX: u64 = 8 << 20;
+
+/// The model's page-table pages, each owned by the VM whose call made it:
+/// the PPGTT code the real back end runs (`ferrix_intel_xelp::ppgtt`) over
+/// memory that says whose every table is.
+struct PtFake {
+    tables: BTreeMap<u64, Box<[u64; 512]>>,
+    /// Each table's VM.
+    owner: BTreeMap<u64, u32>,
+    next: u64,
+    /// The VM the current call works on.
+    current: u32,
+    faults: Rc<Cell<u32>>,
+}
+
+impl PtFake {
+    /// How many tables `vm` has.
+    fn owned(&self, vm: u32) -> usize {
+        self.owner.values().filter(|&&owner| owner == vm).count()
+    }
+}
+
+impl PtMemory for PtFake {
+    fn alloc_pt(&mut self) -> Option<u64> {
+        if fire(&self.faults, fault::PT_ALLOC) {
+            return None;
+        }
+        self.next += 0x1000;
+        // Not zeroed: a table must be filled by whoever takes it.
+        let _ = self.tables.insert(self.next, Box::new([0xdead_beef; 512]));
+        let _ = self.owner.insert(self.next, self.current);
+        Some(self.next)
+    }
+
+    fn free_pt(&mut self, table: u64) {
+        assert!(
+            self.tables.remove(&table).is_some(),
+            "page table {table:#x} freed twice"
+        );
+        let _ = self.owner.remove(&table);
+    }
+
+    fn read_entry(&mut self, table: u64, index: usize) -> u64 {
+        self.tables.get(&table).expect("a live table")[index]
+    }
+
+    fn write_entry(&mut self, table: u64, index: usize, value: u64) {
+        self.tables.get_mut(&table).expect("a live table")[index] = value;
+    }
+}
+
+/// The device address of page `page` of memory `id`: each memory its own
+/// 4 GiB, 2 MiB-aligned, so a whole window maps as one 2 MiB entry.
+fn device_page(id: u32, page: u64) -> u64 {
+    (u64::from(id) << 32) | (page * 4096)
 }
 
 /// Take fault `bit` if armed.
@@ -323,7 +388,9 @@ struct Model {
     faults: Rc<Cell<u32>>,
     /// Complete each submission at once.
     auto: bool,
-    vms: BTreeSet<u32>,
+    /// Each live VM's page tables.
+    vms: BTreeMap<u32, Ppgtt>,
+    pt: PtFake,
     /// (VM, address) to (bytes, memory).
     binds: BTreeMap<(u32, u64), (u64, u32)>,
     contexts: BTreeMap<u32, HwState>,
@@ -339,9 +406,16 @@ impl Model {
             facts: facts(),
             next: 0,
             live: Rc::new(RefCell::new(BTreeSet::new())),
-            faults,
+            faults: faults.clone(),
             auto,
-            vms: BTreeSet::new(),
+            vms: BTreeMap::new(),
+            pt: PtFake {
+                tables: BTreeMap::new(),
+                owner: BTreeMap::new(),
+                next: 0,
+                current: 0,
+                faults,
+            },
             binds: BTreeMap::new(),
             contexts: BTreeMap::new(),
             in_flight: Vec::new(),
@@ -366,6 +440,75 @@ impl Model {
                     && address < run.batch + u64::from(run.length)
             })
             .map(|run| run.id)
+    }
+
+    /// Map `bytes` of memory `id` at `address` in `vm` through its page
+    /// tables, as the real back end does (`Ppgtt::bind_range`), its last
+    /// page refused when [`fault::BIND_PARTWAY`] is armed. A bind that fails
+    /// leaves no entry of its range and no table it made (D1): the front
+    /// end records no binding for it, and frees the memory.
+    fn map(
+        &mut self,
+        vm: u32,
+        address: u64,
+        id: u32,
+        bytes: u64,
+        pat_index: u8,
+    ) -> Result<(), Errno> {
+        let ppgtt = *self.vms.get(&vm).expect("a live VM");
+        let partway = fire(&self.faults, fault::BIND_PARTWAY);
+        let last = bytes / 4096 - 1;
+        self.pt.current = vm;
+        let tables = self.pt.owned(vm);
+        let result = ppgtt.bind_range(
+            &mut self.pt,
+            address,
+            bytes,
+            u32::from(pat_index),
+            &mut |_: &mut PtFake, page| {
+                if partway && page == last {
+                    Err(Errno::ENOMEM)
+                } else {
+                    Ok(device_page(id, page))
+                }
+            },
+        );
+        let windows = (address..address + bytes)
+            .step_by(PAGE_2M as usize)
+            .chain([address + bytes - 4096]);
+        match result {
+            Ok(_) => {
+                for at in windows {
+                    assert_eq!(
+                        ppgtt.translate(&mut self.pt, at),
+                        Some(device_page(id, (at - address) / 4096)),
+                        "{at:#x} of a bind at {address:#x}+{bytes:#x} maps the wrong page"
+                    );
+                }
+                Ok(())
+            }
+            Err(error) => {
+                for at in windows {
+                    assert_eq!(
+                        ppgtt.translate(&mut self.pt, at),
+                        None,
+                        "{at:#x} still mapped after a bind at {address:#x}+{bytes:#x} failed"
+                    );
+                }
+                assert_eq!(
+                    self.pt.owned(vm),
+                    tables,
+                    "a failed bind at {address:#x}+{bytes:#x} left page tables"
+                );
+                match error {
+                    BindError::Page(errno) => Err(errno),
+                    BindError::Table(PpgttError::NoMemory) => Err(Errno::ENOMEM),
+                    BindError::Table(other) => {
+                        panic!("bind at {address:#x}+{bytes:#x} refused: {other:?}")
+                    }
+                }
+            }
+        }
     }
 
     /// Finish `count` of `context`'s submitted requests, oldest first: all
@@ -434,17 +577,20 @@ impl Backend for Model {
             return Err(Errno::ENOMEM);
         }
         let id = self.id();
-        let _ = self.vms.insert(id);
+        self.pt.current = id;
+        // `Ppgtt::create` gives back what it took when a table fails.
+        let ppgtt = Ppgtt::create(&mut self.pt).map_err(|_| Errno::ENOMEM)?;
+        let _ = self.vms.insert(id, ppgtt);
         Ok(VmId(id))
     }
 
     fn vm_destroy(&mut self, vm: VmId) {
         self.calls += 1;
-        assert!(
-            self.vms.remove(&vm.0),
-            "VM {} destroyed while not alive",
-            vm.0
-        );
+        let Some(ppgtt) = self.vms.remove(&vm.0) else {
+            panic!("VM {} destroyed while not alive", vm.0);
+        };
+        self.pt.current = vm.0;
+        ppgtt.destroy(&mut self.pt);
         assert!(
             !self.contexts.values().any(|context| context.vm == vm.0),
             "VM {} destroyed under a live hardware context",
@@ -468,7 +614,7 @@ impl Backend for Model {
         pat_index: u8,
     ) -> Result<(), Errno> {
         self.calls += 1;
-        assert!(self.vms.contains(&vm.0), "bind into dead VM {}", vm.0);
+        assert!(self.vms.contains_key(&vm.0), "bind into dead VM {}", vm.0);
         assert!(
             self.live.borrow().contains(&memory.id),
             "bind of freed memory"
@@ -495,6 +641,9 @@ impl Backend for Model {
         if fire(&self.faults, fault::BIND) {
             return Err(Errno::ENOMEM);
         }
+        if bytes <= MAPPED_MAX {
+            self.map(vm.0, address, memory.id, bytes, pat_index)?;
+        }
         let _ = self.binds.insert((vm.0, address), (bytes, memory.id));
         Ok(())
     }
@@ -504,6 +653,17 @@ impl Backend for Model {
         let Some((bound, _)) = self.binds.remove(&(vm.0, address)) else {
             panic!("unbind of {address:#x} in VM {}, which is not bound", vm.0);
         };
+        if let Some(ppgtt) = self.vms.get(&vm.0).copied() {
+            self.pt.current = vm.0;
+            ppgtt
+                .clear_range(&mut self.pt, address, bytes)
+                .expect("an unbind inside 48 bits");
+            assert_eq!(
+                ppgtt.translate(&mut self.pt, address),
+                None,
+                "{address:#x} mapped after its unbind"
+            );
+        }
         assert!(
             bytes >= bound,
             "unbind of {bytes:#x} of a {bound:#x} binding"
@@ -526,7 +686,7 @@ impl Backend for Model {
         params: ContextParams,
     ) -> Result<HwContext, Errno> {
         self.calls += 1;
-        assert!(self.vms.contains(&vm.0), "context in dead VM {}", vm.0);
+        assert!(self.vms.contains_key(&vm.0), "context in dead VM {}", vm.0);
         assert!(ENGINES.contains(&engine), "context on {engine:?}");
         assert_eq!(params, ContextParams::DEFAULT);
         if fire(&self.faults, fault::CONTEXT_CREATE) {

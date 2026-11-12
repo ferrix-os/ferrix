@@ -339,6 +339,50 @@ fn no_page_for_a_table_is_no_memory() {
     assert_eq!(be.bind(vm, 0x40_0000_0000, &memory, 4 << 20, 0), Ok(()));
 }
 
+/// A bind that fails part-way leaves no entry of its range and no table it
+/// made: the front end records no binding for it and frees the memory, so
+/// an entry left would map freed pages into the program's VM. The bytes
+/// counted by page size are only those still bound.
+#[test]
+fn a_bind_that_fails_part_way_leaves_nothing_mapped() {
+    let mut be = backend();
+    let vm = be.vm_create().expect("vm");
+    let live = be.platform().gpu.tables.pages.len();
+    // Memory one window long, bound over two: the second window's first
+    // page is past its end. From a 2 MiB-aligned address the first window
+    // is one 2 MiB entry; from one page in, it is 511 4 KiB entries.
+    let memory = be.platform().create_memory(2 << 20).expect("memory");
+    for at in [0x40_0000_0000_u64, 0x40_0000_1000] {
+        assert_eq!(
+            be.bind(vm, at, &memory, 4 << 20, 0),
+            Err(Error::Invalid),
+            "{at:#x}"
+        );
+        for page in [at, at + 0x1000, at + (1 << 20), at + (2 << 20) - 0x1000] {
+            assert_eq!(be.translate(vm, page), None, "{at:#x}: {page:#x} mapped");
+        }
+        assert_eq!(
+            be.platform().gpu.tables.pages.len(),
+            live,
+            "{at:#x}: tables"
+        );
+    }
+    // No table for the second window: the first window's three are given
+    // back.
+    let long = be.platform().create_memory(4 << 20).expect("memory");
+    be.platform().gpu.tables.limit = Some(live + 3);
+    let at = 0x80_0000_1000;
+    assert_eq!(be.bind(vm, at, &long, 4 << 20, 0), Err(Error::NoMemory));
+    assert_eq!(be.translate(vm, at), None);
+    assert_eq!(be.platform().gpu.tables.pages.len(), live);
+    assert_eq!(be.bound(), [0; 3]);
+    // The same bind with room is whole.
+    be.platform().gpu.tables.limit = None;
+    assert_eq!(be.bind(vm, at, &long, 4 << 20, 0), Ok(()));
+    assert_eq!(be.translate(vm, at), Some(long[0]));
+    assert_eq!(be.bound(), [0, 0, 4 << 20]);
+}
+
 #[test]
 fn a_stalled_request_is_reset_hung_and_its_context_banned() {
     let mut be = backend();

@@ -867,36 +867,25 @@ impl<P: Platform> XelpBackend<P> {
             return Err(Error::Invalid);
         }
         // `gen8_ppgtt_insert_huge`, one 2 MiB window of GPU addresses at a
-        // time (`docs/INTEL-GPU.md` §14.2). No page for a table is i915's
-        // `-ENOMEM` from `alloc_pt_dma`, not a bad range: anv retries an
-        // execbuffer's ENOMEM and marks the device lost on EINVAL.
-        let window = crate::ppgtt::PAGE_2M;
-        let mut pages = [0_u64; (crate::ppgtt::PAGE_2M / 4096) as usize];
-        let mut at = 0;
-        while at < bytes {
-            let gpu = address + at;
-            let len = (window - gpu % window).min(bytes - at);
-            let count = (len / 4096) as usize;
-            for (n, slot) in pages.iter_mut().take(count).enumerate() {
-                *slot = platform.memory_page(memory, at / 4096 + n as u64)?;
-            }
-            let size = ppgtt
-                .insert_huge(
-                    &mut *platform,
-                    pages.get(..count).unwrap_or_default(),
-                    gpu,
-                    u32::from(pat_index),
-                )
-                .map_err(ppgtt_error)?;
-            let class = match size {
-                crate::ppgtt::PAGE_2M => 0,
-                crate::ppgtt::PAGE_64K => 1,
-                _ => 2,
-            };
-            if let Some(total) = self.bound.get_mut(class) {
-                *total = total.saturating_add(len);
-            }
-            at += len;
+        // time (`docs/INTEL-GPU.md` §14.2), all or nothing: the front end
+        // records no binding for a failed bind and may free the memory, so
+        // no entry of it may stay. No page for a table is i915's `-ENOMEM`
+        // from `alloc_pt_dma`, not a bad range: anv retries an execbuffer's
+        // ENOMEM and marks the device lost on EINVAL.
+        let bound = ppgtt
+            .bind_range(
+                &mut *platform,
+                address,
+                bytes,
+                u32::from(pat_index),
+                &mut |platform: &mut P, page| platform.memory_page(memory, page),
+            )
+            .map_err(|error| match error {
+                crate::ppgtt::BindError::Page(error) => error,
+                crate::ppgtt::BindError::Table(error) => ppgtt_error(error),
+            })?;
+        for (total, more) in self.bound.iter_mut().zip(bound) {
+            *total = total.saturating_add(more);
         }
         Ok(())
     }
@@ -2144,5 +2133,10 @@ impl<P: Platform> XelpBackend<P> {
     pub(crate) fn translate(&mut self, vm: usize, address: u64) -> Option<u64> {
         let ppgtt = self.vms.get(vm).copied().flatten()?;
         ppgtt.translate(self.platform.get_mut(), address)
+    }
+
+    /// Bytes bound so far by GPU page size ([`FrequencyReport::bound`]).
+    pub(crate) const fn bound(&self) -> [u64; 3] {
+        self.bound
     }
 }

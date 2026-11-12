@@ -119,6 +119,10 @@ class Program:
         # the extension's pointer, argument
         return self.add(GEM_CREATE_EXT, file, 13, pages, 1, 2, 1, 0, VALID, 1, 1, VALID, ARG)
 
+    def create_2m(self, file):
+        # file, size (7: 2 MiB, two windows from a page in), handle, argument
+        return self.add(GEM_CREATE, file, 7, word(0), ARG)
+
     def close(self, file, handle):
         return self.add(GEM_CLOSE, file, handle, 0, ARG)
 
@@ -307,6 +311,10 @@ class Program:
     def interrupt(self, held=0):
         return self.add(HELD, held, 1)
 
+    def faults(self, mask):
+        """Arm the model's failures (`fault` in the target), each once."""
+        return self.add(FAULTS, u32(mask)[:2])
+
     def repeat(self, times, build):
         """The op `build` adds, with the repeat bit: run `times` times (odd)."""
         at = len(self.bytes)
@@ -318,6 +326,9 @@ class Program:
     def data(self):
         return bytes(self.bytes)
 
+
+# The model's failures (`fault`).
+FAULT_BIND_PARTWAY, FAULT_PT_ALLOC = 1 << 11, 1 << 12
 
 # The two files every run starts with: A in process 0, B in process 1.
 A, B = 0, 1
@@ -490,6 +501,24 @@ def seeds():
         .syncobj_wait(A, [own(0)])
         .release(A)
         .complete()
+    )
+    # A bind that fails part-way (D1): a 2 MiB object one page into the VM
+    # spans two windows, the first written before the second fails, on its
+    # last page's address, then on a page table (the first window's table
+    # is there already, the page at 0's). Nothing of either may stay mapped.
+    yield "bind-fails-part-way", (
+        Program()
+        .create(A, 1)
+        .execbuffer(A, [(own(0), 0, False)])
+        .create_2m(A)
+        .faults(FAULT_BIND_PARTWAY)
+        .execbuffer(A, [(own(0), 0, False), (own(1), 1, False)])
+        .faults(FAULT_PT_ALLOC)
+        .execbuffer(A, [(own(0), 0, False), (own(1), 1, False)])
+        .execbuffer(A, [(own(0), 0, False), (own(1), 1, False)])
+        .complete(count=4)
+        .close(A, own(1))
+        .service()
     )
     yield "limit-files", Program().repeat(41, lambda p: p.open(0))
     yield "limit-held-waits", (

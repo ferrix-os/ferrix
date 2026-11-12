@@ -78,6 +78,15 @@ pub enum PpgttError {
     NotAllocated,
 }
 
+/// Why [`Ppgtt::bind_range`] failed.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BindError<E> {
+    /// A page's device address could not be had: the caller's error.
+    Page(E),
+    /// The tables refused.
+    Table(PpgttError),
+}
+
 /// `fill_page_dma`: every entry of `table` set to `value`.
 fn fill_px<M: PtMemory + ?Sized>(mem: &mut M, table: u64, value: u64) {
     for index in 0..GEN8_PDES as usize {
@@ -422,6 +431,83 @@ impl Ppgtt {
         let entry = mem.read_entry(pd, index);
         mem.write_entry(pd, index, entry | GEN8_PDE_IPS_64K);
         Ok(PAGE_64K)
+    }
+
+    /// A whole binding: `bytes` at GPU address `offset`, page `n` of it at
+    /// the device address `page(mem, n)`, mapped by [`Ppgtt::insert_huge`]
+    /// one 2 MiB window of GPU addresses at a time (`gen8_ppgtt_insert_huge`,
+    /// `docs/INTEL-GPU.md` §14.2). Returns the bytes mapped with each page
+    /// size: 2 MiB, 64 KiB, 4 KiB.
+    ///
+    /// All or nothing: when a page's address or a table cannot be had, the
+    /// windows already written and whatever the failing one allocated are
+    /// cleared again before the error is returned, so no entry of the range
+    /// outlives a bind its caller records as failed (and then frees the
+    /// memory of). The range is the caller's alone: no other binding
+    /// overlaps it.
+    ///
+    /// # Errors
+    ///
+    /// [`BindError::Page`] with what `page` returned; [`BindError::Table`]
+    /// as [`Ppgtt::insert_huge`], or [`PpgttError::Range`] for a range that
+    /// is empty, not page-aligned or past `vm->total`.
+    pub fn bind_range<M: PtMemory + ?Sized, E>(
+        &self,
+        mem: &mut M,
+        offset: u64,
+        bytes: u64,
+        pat_index: u32,
+        page: &mut dyn FnMut(&mut M, u64) -> Result<u64, E>,
+    ) -> Result<[u64; 3], BindError<E>> {
+        let _ = Self::pages(offset, bytes).map_err(BindError::Table)?;
+        let mut pages = [0_u64; (PAGE_2M / PT_BYTES) as usize];
+        let mut bound = [0_u64; 3];
+        let mut at = 0;
+        // Each window's own checks have passed `pages` above: `offset + at`
+        // stays inside 48 bits.
+        let failure = loop {
+            if at >= bytes {
+                break None;
+            }
+            let gpu = offset + at;
+            let len = (PAGE_2M - gpu % PAGE_2M).min(bytes - at);
+            let count = (len / PT_BYTES) as usize;
+            let mut missing = None;
+            for (n, slot) in pages.iter_mut().take(count).enumerate() {
+                match page(mem, at / PT_BYTES + n as u64) {
+                    Ok(address) => *slot = address,
+                    Err(error) => {
+                        missing = Some(error);
+                        break;
+                    }
+                }
+            }
+            if let Some(error) = missing {
+                break Some((BindError::Page(error), len));
+            }
+            match self.insert_huge(mem, pages.get(..count).unwrap_or_default(), gpu, pat_index) {
+                Ok(size) => {
+                    let class = match size {
+                        PAGE_2M => 0,
+                        PAGE_64K => 1,
+                        _ => 2,
+                    };
+                    if let Some(total) = bound.get_mut(class) {
+                        *total += len;
+                    }
+                    at += len;
+                }
+                Err(error) => break Some((BindError::Table(error), len)),
+            }
+        };
+        let Some((error, len)) = failure else {
+            return Ok(bound);
+        };
+        // The windows written, and the failing one: an `alloc_va_range` that
+        // ran out part-way leaves the tables it made, linked and all scratch,
+        // which the clear gives back.
+        let _ = self.clear_range(mem, offset, at + len);
+        Err(error)
     }
 
     /// One 2 MiB entry for the window at `offset`, from `addr`.
