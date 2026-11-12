@@ -1653,10 +1653,14 @@ pub(super) fn check_large_requests() {
     println!(
         "  large    {} MiB area: 32 KiB requests served from single frames while the buddy \
          refused runs, a job's drawn from its reservation; two frees of what the area did not \
-         hand out counted and refused; a masked free began no shootdown, the reaper purged in \
+         hand out counted and refused; a masked free began no shootdown (masked round {} of 3, \
+         {} made again for a purge elsewhere, {} for the flag cleared), the reaper purged in \
          {} us; a round {} ns from the buddy, {} ns from the area; 4 MiB masked {} us, freed {} \
          us, purged {} us; at most {} frames held for a shootdown; {} ms in all",
         report.bytes >> 20,
+        report.masked_rounds,
+        report.rounds_moved,
+        report.rounds_cleared,
         report.reaper_nanos / 1000,
         report.buddy_nanos,
         report.large_nanos,

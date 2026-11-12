@@ -54,6 +54,12 @@ pub struct LargeReport {
     pub largest_purge_nanos: u64,
     /// How long the reaper took to purge for a masked free, in nanoseconds.
     pub reaper_nanos: u64,
+    /// The masked rounds `reaper_purges` made, the last the one it judged.
+    pub masked_rounds: u32,
+    /// Rounds made again because the count of purges moved in them.
+    pub rounds_moved: u32,
+    /// Rounds made again because the purge-wanted flag was clear, the count unmoved.
+    pub rounds_cleared: u32,
     /// The most frames ever held for a shootdown at once.
     pub most_kept: u64,
 }
@@ -385,25 +391,54 @@ fn scoped(me: u64) -> Result<(), &'static str> {
 /// wanted; and the reaper purges once interrupts are on again, within a
 /// bounded wait.
 ///
+/// What the masked part reads, the purge-wanted flag and the count of
+/// purges, are the machine's: on more than one processor the reaper, woken
+/// by an interrupt's end on another, or an allocation there that may block,
+/// can purge inside the masked part, and the count moves or the flag clears
+/// with no purge begun here (armv7a `--smp 2`, 2026-11-12). So a round that
+/// saw either is made again, up to [`ROUNDS`] in all: another processor's
+/// purge has to fall inside each of them, while one begun here falls inside
+/// every one.
+///
 /// Verifies: L.mm.143
 fn reaper_purges(report: &mut LargeReport) -> Result<(), &'static str> {
     const LOW: u64 = 16;
     const PATIENCE_NANOS: u64 = 2_000_000_000;
+    const ROUNDS: u32 = 3;
     let threshold = large::set_lazy_max_for_check(LOW);
-    let purges = large::counts().purges;
     // Then, still masked, one more request: it finds the purge wanted where
     // it may not block, and is served or refused with none begun.
-    let (made, wanted, unpurged) = masked(|| {
-        for _ in 0..3 {
-            let Some(object) = take(SMALL) else {
-                return (false, false, false);
-            };
-            drop(object);
+    let round = || {
+        let purges = large::counts().purges;
+        let (made, wanted, unpurged) = masked(|| {
+            for _ in 0..3 {
+                let Some(object) = take(SMALL) else {
+                    return (false, false, false);
+                };
+                drop(object);
+            }
+            let wanted = large::purge_wanted();
+            drop(take(SMALL));
+            (true, wanted, large::counts().purges == purges)
+        });
+        (purges, made, wanted, unpurged)
+    };
+    let mut seen = round();
+    report.masked_rounds = 1;
+    for _ in 1..ROUNDS {
+        let (_, made, wanted, unpurged) = seen;
+        if !made || (wanted && unpurged) {
+            break;
         }
-        let wanted = large::purge_wanted();
-        drop(take(SMALL));
-        (true, wanted, large::counts().purges == purges)
-    });
+        if unpurged {
+            report.rounds_cleared += 1;
+        } else {
+            report.rounds_moved += 1;
+        }
+        seen = round();
+        report.masked_rounds += 1;
+    }
+    let (purges, made, wanted, unpurged) = seen;
     let start = crate::timer::now_nanos();
     let mut purged = false;
     while crate::timer::now_nanos().saturating_sub(start) < PATIENCE_NANOS {
@@ -418,11 +453,13 @@ fn reaper_purges(report: &mut LargeReport) -> Result<(), &'static str> {
     if !made {
         return Err("a masked 32 KiB request was refused while the buddy refused");
     }
-    if !wanted {
-        return Err("a masked free past the lazy threshold did not hand its purge to the reaper");
-    }
+    // A purge begun here also clears the flag: the count is read first, so
+    // that it is named as what it is.
     if !unpurged {
         return Err("a masked free or a masked request that found a purge wanted began one");
+    }
+    if !wanted {
+        return Err("a masked free past the lazy threshold did not hand its purge to the reaper");
     }
     if !purged {
         return Err("the reaper did not purge within two seconds of a masked free's asking");

@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-3062 declarations in the core's files, 215 in the item's; 249 checks-only.
+3065 declarations in the core's files, 215 in the item's; 249 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2132,8 +2132,11 @@ checks above is `pub` for raised checks (F3).
 | `LargeReport::largest_allocate_nanos` | field | bin (checks) | pub for raised checks; type unobtainable from product API |
 | `LargeReport::largest_free_nanos` | field | bin (checks) | pub for raised checks; type unobtainable from product API |
 | `LargeReport::largest_purge_nanos` | field | bin (checks) | pub for raised checks; type unobtainable from product API |
+| `LargeReport::masked_rounds` | field | bin (checks) | pub for raised checks; type unobtainable from product API |
 | `LargeReport::most_kept` | field | bin (checks) | pub for raised checks; type unobtainable from product API |
 | `LargeReport::reaper_nanos` | field | bin (checks) | pub for raised checks; type unobtainable from product API |
+| `LargeReport::rounds_cleared` | field | bin (checks) | pub for raised checks; type unobtainable from product API |
+| `LargeReport::rounds_moved` | field | bin (checks) | pub for raised checks; type unobtainable from product API |
 
 ### `mm::reservation`
 
