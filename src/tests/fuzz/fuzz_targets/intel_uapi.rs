@@ -2262,6 +2262,9 @@ fn execbuffer(rig: &mut Rig, input: &mut Input<'_>) {
     let bits = input.u8();
     let mut rsvd2 = 0_u64;
     let mut syncs = Vec::new();
+    // How many of `syncs` the call was told of: a call names only what it
+    // was told (`Rig::named`).
+    let mut syncs_told = usize::MAX;
     let (mut cliprects_ptr, mut num_cliprects) = (0_u64, 0_u32);
     if bits & 1 != 0 {
         flags |= uapi::exec::BATCH_FIRST;
@@ -2306,6 +2309,7 @@ fn execbuffer(rig: &mut Rig, input: &mut Input<'_>) {
         } else {
             fences as u32
         };
+        syncs_told = num_cliprects as usize;
     } else if bits & 0x18 == 0x10 {
         // The timeline-fences extension, as anv sends it.
         flags |= uapi::exec::USE_EXTENSIONS;
@@ -2352,6 +2356,7 @@ fn execbuffer(rig: &mut Rig, input: &mut Input<'_>) {
             handles_ptr: rig.ptr(input, handles_at, handles_bytes.len()),
             values_ptr: rig.ptr(input, values_at, values.len()),
         };
+        syncs_told = usize::try_from(ext.fence_count).unwrap_or(usize::MAX);
         let at = rig.host.alloc(&ext.to_bytes());
         cliprects_ptr = rig.ptr(input, at, uapi::ExecbufferExtTimelineFences::SIZE);
     } else if bits & 0x18 == 0x18 {
@@ -2407,10 +2412,10 @@ fn execbuffer(rig: &mut Rig, input: &mut Input<'_>) {
     rig.host.race = None;
     if status == Some(0) {
         rig.named(file.0, Kind::Context, context);
-        for handle in handles {
+        for handle in handles.into_iter().take(args.buffer_count as usize) {
             rig.named(file.0, Kind::Gem, handle);
         }
-        for handle in syncs {
+        for handle in syncs.into_iter().take(syncs_told) {
             rig.named(file.0, Kind::Sync, handle);
         }
     }
@@ -2709,7 +2714,7 @@ fn syncobj_array(rig: &mut Rig, input: &mut Input<'_>) {
     };
     let (status, _) = rig.ioctl(input, file, cmd, &args);
     if status == Some(0) {
-        for handle in handles {
+        for handle in handles.into_iter().take(count_handles as usize) {
             rig.named(file.0, Kind::Sync, handle);
         }
     }
@@ -2765,7 +2770,7 @@ fn syncobj_wait(rig: &mut Rig, input: &mut Input<'_>) {
     };
     let (status, _) = rig.ioctl(input, file, cmd, &args);
     if status == Some(0) {
-        for handle in handles {
+        for handle in handles.into_iter().take(count_handles as usize) {
             rig.named(file.0, Kind::Sync, handle);
         }
     }
