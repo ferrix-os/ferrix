@@ -2101,6 +2101,30 @@ fn release_frees_everything_when_idle() {
     });
 }
 
+/// A released file's contexts and VMs all go in the release, however many:
+/// the idle ones are freed 64 at a time, and a pass that found 64 is
+/// followed by another, since with the last client gone nothing may call
+/// again to free the rest. Found by the `intel_uapi` fuzz target: the
+/// sequence was 499 `GEM_VM_CREATE`s, then the release.
+#[test]
+fn release_frees_more_than_64_contexts_and_vms() {
+    big(|| {
+        let mut rig = Rig::new();
+        for _ in 0..100 {
+            let mut vm = [0_u8; 16];
+            assert_eq!(rig.ioctl(ioctl::GEM_VM_CREATE, &mut vm), 0);
+            let mut context = [0_u8; 16];
+            assert_eq!(rig.ioctl(ioctl::GEM_CONTEXT_CREATE_EXT, &mut context), 0);
+        }
+        assert_eq!(rig.frontend.state.contexts.len(), 101);
+        assert_eq!(rig.frontend.state.vms.len(), 201);
+        rig.frontend.release(&mut rig.host, 1);
+        assert_eq!(rig.frontend.state.contexts.len(), 0);
+        assert_eq!(rig.frontend.state.vms.len(), 0);
+        assert_eq!(rig.frontend.state.files.len(), 0);
+    });
+}
+
 /// A binding over one still in use holds the execbuffer until that one's
 /// request finishes, then runs it, never `EAGAIN` (i915 sleeps and evicts);
 /// over an idle one, the idle one is unbound first (i915 evicts it).

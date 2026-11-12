@@ -94,56 +94,69 @@ pub fn backend_vm<B: Backend>(
 }
 
 /// Free the contexts closed and idle, and the VMs nothing holds, with their
-/// bindings.
+/// bindings: all of them, 64 at a time, as `gem::free_idle` frees objects.
+/// A pass that found 64 is followed by another, since the release of the
+/// last client may be the last call there is: what one pass left would stay
+/// allocated, PPGTT and all, until some other program came.
 pub fn free_idle<B: Backend>(backend: &mut B, state: &mut Tables<B::Memory>) {
     let mut doomed = [usize::MAX; 64];
-    let mut count = 0;
-    for (slot, context) in state.contexts.iter() {
-        if context.closed && context.in_flight == 0 && count < doomed.len() {
-            if let Some(cell) = doomed.get_mut(count) {
-                *cell = slot;
+    loop {
+        let mut count = 0;
+        for (slot, context) in state.contexts.iter() {
+            if context.closed && context.in_flight == 0 && count < doomed.len() {
+                if let Some(cell) = doomed.get_mut(count) {
+                    *cell = slot;
+                }
+                count += 1;
             }
-            count += 1;
+        }
+        for slot in doomed.iter().take(count).copied() {
+            if let Some(context) = state.contexts.remove(slot) {
+                for hw in context.hw.iter().flatten() {
+                    backend.context_destroy(*hw);
+                }
+                put_vm(state, context.vm);
+            }
+        }
+        if count < doomed.len() {
+            break;
         }
     }
-    for slot in doomed.iter().take(count).copied() {
-        if let Some(context) = state.contexts.remove(slot) {
-            for hw in context.hw.iter().flatten() {
-                backend.context_destroy(*hw);
+    loop {
+        let mut count = 0;
+        for (slot, vm) in state.vms.iter() {
+            if vm.refs == 0 && count < doomed.len() {
+                if let Some(cell) = doomed.get_mut(count) {
+                    *cell = slot;
+                }
+                count += 1;
             }
-            put_vm(state, context.vm);
         }
-    }
-    let mut count = 0;
-    for (slot, vm) in state.vms.iter() {
-        if vm.refs == 0 && count < doomed.len() {
-            if let Some(cell) = doomed.get_mut(count) {
-                *cell = slot;
+        for slot in doomed.iter().take(count).copied() {
+            let Ok(vm_slot) = u16::try_from(slot) else {
+                continue;
+            };
+            // Every binding of the VM: idle, since no context of it is left.
+            let first = Binding::key_of(vm_slot, 0);
+            loop {
+                let range = state.bindings.overlapping(first, 1 << 48);
+                if range.is_empty() {
+                    break;
+                }
+                if let Some(binding) = state.bindings.remove(range.start)
+                    && let Some(object) = state.objects.get_mut(usize::from(binding.object))
+                {
+                    object.bindings = object.bindings.saturating_sub(1);
+                }
             }
-            count += 1;
-        }
-    }
-    for slot in doomed.iter().take(count).copied() {
-        let Ok(vm_slot) = u16::try_from(slot) else {
-            continue;
-        };
-        // Every binding of the VM: idle, since no context of it is left.
-        let first = Binding::key_of(vm_slot, 0);
-        loop {
-            let range = state.bindings.overlapping(first, 1 << 48);
-            if range.is_empty() {
-                break;
-            }
-            if let Some(binding) = state.bindings.remove(range.start)
-                && let Some(object) = state.objects.get_mut(usize::from(binding.object))
+            if let Some(vm) = state.vms.remove(slot)
+                && let Some(id) = vm.backend
             {
-                object.bindings = object.bindings.saturating_sub(1);
+                backend.vm_destroy(id);
             }
         }
-        if let Some(vm) = state.vms.remove(slot)
-            && let Some(id) = vm.backend
-        {
-            backend.vm_destroy(id);
+        if count < doomed.len() {
+            break;
         }
     }
 }
