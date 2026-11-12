@@ -2137,6 +2137,63 @@ fn objects_of_one_execbuffer_never_evict_each_other() {
     });
 }
 
+/// A batch is bounded by its object, never by `EXEC_OBJECT_PAD_TO_SIZE`'s
+/// reservation, as `eb_add_vma` checks it against `vma->size`: `batch_len`
+/// 0 runs the object's length, and a start or a length past the object is
+/// `EINVAL`. Before, a 4 KiB batch padded to 2 MiB ran 2 MiB, past its
+/// object into the unmapped pad.
+#[test]
+fn a_batch_is_bounded_by_its_object_not_its_pad() {
+    big(|| {
+        let mut rig = Rig::new();
+        let batch = rig.create(4096);
+        let run = |rig: &mut Rig, start: u32, len: u32| -> i32 {
+            let entry = ExecObject2 {
+                handle: batch,
+                offset: 0x20_0000,
+                flags: PINNED | exec::OBJECT_PAD_TO_SIZE,
+                rsvd1: 2 << 20,
+                ..Default::default()
+            };
+            let buffers_ptr = rig.host.alloc(&entry.to_bytes());
+            let mut args = Execbuffer2 {
+                buffers_ptr,
+                buffer_count: 1,
+                batch_start_offset: start,
+                batch_len: len,
+                flags: exec::NO_RELOC | exec::HANDLE_LUT,
+                ..Default::default()
+            }
+            .to_bytes();
+            rig.ioctl(ioctl::GEM_EXECBUFFER2, &mut args)
+        };
+        assert_eq!(run(&mut rig, 0, 0), 0);
+        let submitted: Vec<(u64, u32)> = rig
+            .frontend
+            .backend
+            .submits
+            .iter()
+            .map(|(_, at, length, _)| (*at, *length))
+            .collect();
+        assert_eq!(submitted, [(0x20_0000, 4096)]);
+        // The binding still reserves the pad.
+        assert_eq!(
+            rig.frontend
+                .state
+                .bindings
+                .as_slice()
+                .iter()
+                .map(|binding| binding.size)
+                .collect::<Vec<_>>(),
+            [2 << 20]
+        );
+        assert_eq!(run(&mut rig, 0, 8192), EINVAL);
+        assert_eq!(run(&mut rig, 4096, 0), EINVAL);
+        assert_eq!(run(&mut rig, 8, 4088), 0);
+        assert_eq!(rig.frontend.backend.submits.len(), 2);
+    });
+}
+
 /// The same handle twice in one list: i915 v7.0 has no check for it
 /// (`eb_lookup_vmas` looks each handle up, `eb_add_vma` takes the same vma
 /// again), and anv (`anv_execbuf_add_bo`) and iris (`find_exec_index`)

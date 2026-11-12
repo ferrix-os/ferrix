@@ -160,7 +160,8 @@ class Program:
         timeline=None,
         race=None,
     ):
-        """objects: (handle selector, page, write); the last is the batch.
+        """objects: (handle selector, page, write[, pad]); the last is the
+        batch.
         A page given as a list is `Input::gpu_address`'s bytes as they are.
         fence_array: (syncobj selector, FENCE_WAIT or FENCE_SIGNAL).
         timeline: (syncobj selector, flags, point).
@@ -168,9 +169,13 @@ class Program:
         entry's index, what changes (0 handle, 1 address, 2 pad, 3 flags)
         and its new value, then the reads before it (0: after the first)."""
         self.add(EXECBUFFER, file, len(objects))
-        for handle, page, write in objects:
-            # handle, its flag bits (1: WRITE), address (selector 1: page x 4 KiB)
-            self.add(handle, 1 if write else 0, page if isinstance(page, list) else [1, page])
+        for handle, page, write, *pad in objects:
+            # handle, its flag bits (1: WRITE, 4: PAD_TO_SIZE), address
+            # (selector 1: page x 4 KiB), the pad (`Input::size`'s bytes)
+            bits = (1 if write else 0) | (4 if pad else 0)
+            self.add(handle, bits, page if isinstance(page, list) else [1, page])
+            if pad:
+                self.add(pad[0])
         self.add(VALID)
         if race is not None:
             self.add(*race)
@@ -621,6 +626,14 @@ def seeds():
         .execbuffer(A, [(own(0), 1, False), (own(0), 2, False), (own(1), 4, False)])
         .execbuffer(A, [(own(0), 1, False), (own(0), 8, False), (own(1), 4, False)])
         .complete(count=3)
+    )
+    # A one-page batch padded to 2 MiB (EXEC_OBJECT_PAD_TO_SIZE): it runs
+    # its 4 KiB, never into the pad, which nothing maps.
+    yield "exec-batch-padded", (
+        Program()
+        .create(A, 1)
+        .execbuffer(A, [(own(0), [7, 0x20], False, [7])])
+        .complete()
     )
     yield "limit-files", Program().repeat(41, lambda p: p.open(0))
     yield "limit-held-waits", (

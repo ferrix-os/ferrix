@@ -327,15 +327,24 @@ fn validate_all<B: Backend, H: Host<B::Memory>>(
         count,
         &mut |host, index, entry| {
             let object = gem::lookup(&frontend.state, call.file, entry.handle)?;
-            let (address, size) = validate(frontend, host, call, entry, object)?;
+            let (address, reserved) = validate(frontend, host, call, entry, object)?;
             if index == batch_index {
+                // The object's own size, as `eb_add_vma` checks the batch
+                // against `vma->size`: `PAD_TO_SIZE` sizes the binding, and
+                // what it adds is not the batch's.
+                let size = frontend
+                    .state
+                    .objects
+                    .get(usize::from(object))
+                    .ok_or(Errno::ENOENT)?
+                    .size;
                 batch = Some(batch_of(args, entry, size)?);
             }
             let kept = frontend.state.exec.get_mut(index).ok_or(Errno::ENOMEM)?;
             *kept = ExecEntry::new(
                 object,
                 address,
-                size,
+                reserved,
                 entry.flags & exec::OBJECT_WRITE != 0,
                 entry.flags & exec::OBJECT_ASYNC == 0,
             );
@@ -353,8 +362,10 @@ fn validate_all<B: Backend, H: Host<B::Memory>>(
     Ok((batch.ok_or(Errno::EINVAL)?, shared))
 }
 
-/// The checks of the batch in `eb_add_vma`: not written, inside its object,
-/// not empty; its address and length.
+/// The checks of the batch in `eb_add_vma`: not written, inside its object
+/// of `size` bytes (`vma->size`, never the pad), not empty; its address and
+/// length, the rest of the object from the start offset when `batch_len` is
+/// 0.
 fn batch_of(args: &Execbuffer2, entry: &ExecObject2, size: u64) -> Result<(u64, u32), Errno> {
     if entry.flags & exec::OBJECT_WRITE != 0 {
         return Err(Errno::EINVAL);
