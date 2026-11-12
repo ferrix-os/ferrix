@@ -2653,28 +2653,41 @@ fn timer_slack_sleeps(
     let least = SLACK_MILLI + SLACK_CASE;
     slack_stage(process, page, TIME, &word_pair(0, SLACK_MILLI as usize))?;
     let start = now();
-    let _ = sys_nanosleep(thread, page + TIME, 0);
+    if sys_nanosleep(thread, page + TIME, 0) != Ok(0) {
+        return Err("nanosleep with nothing to end it did not sleep its whole time");
+    }
     slack_took(
         start,
         least,
         "nanosleep returned before its expiry plus the thread's slack",
     )?;
+    // Judged against the instant asked for, not the call's own start: the
+    // instant is read before the request is staged, so a stage that takes
+    // longer than the wake's latency (a preemption, TCG translating the copy
+    // for the first time) made a correct sleep look short. AArch64 under TCG
+    // did so once (batch-20261112T140054Z-3, docs/BACKLOG.md's P1 flakes).
     let at = now().saturating_add(SLACK_MILLI);
     let pair = word_pair((at / 1_000_000_000) as usize, (at % 1_000_000_000) as usize);
     slack_stage(process, page, TIME, &pair)?;
     let start = now();
     let request = [page + TIME, 0];
-    let _ = sys_clock_nanosleep(
+    let slept = sys_clock_nanosleep(
         thread,
         CLOCK_MONOTONIC as i32,
         1,
         request,
         TimeWidth::Native,
     );
+    if slept != Ok(0) {
+        return Err("an absolute clock_nanosleep with nothing to end it did not sleep to its time");
+    }
+    if now() < at.saturating_add(SLACK_CASE) {
+        return Err("an absolute clock_nanosleep returned before its expiry plus the slack");
+    }
     slack_took(
         start,
-        least,
-        "an absolute clock_nanosleep returned before its expiry plus the slack",
+        0,
+        "an absolute clock_nanosleep returned before it was made",
     )?;
     slack_stage(process, page, SET, &(1_u64 << (SIGUSR1 - 1)).to_le_bytes())?;
     slack_stage(process, page, TIME, &word_pair(0, SLACK_MILLI as usize))?;
