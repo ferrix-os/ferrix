@@ -271,8 +271,30 @@ when the box is free.
 
 - 2026-11-12: measured, and this design written for the design review.
 - 2026-11-12, the design review (ledger 9026; entries 9027, 9037 and 9044):
-  - `sys/wake-futex` is OK IF WF1-WF8, and is being built. `L.user.246` is
-    reserved on `reserve/wake-futex`.
+  - `sys/wake-futex` is OK IF WF1-WF8.
+- 2026-11-12 to 13: `sys/wake-futex` is built and lands with this entry
+  (code review ledger 9264; the rebases' diff checks 9293 and 9399). Three
+  changes: W1, a futex wait blocks on no queue and is ordered against its
+  wake by a fence pair, so the global `SLEEP` queue is gone (`L.user.246`);
+  W2, an address-wait bucket is shrunk only when its held lock shows room
+  to give; W3, the word is read under the bucket lock first and faulted in
+  only when its page is absent.
+  - W3's finding (ledger 9264, ruling (c)): "exactly once" is not true of
+    the faulting read. An untouched object page lists after the second
+    faulting read, as on `develop` before the change: an uncommitted object
+    page that is read stays uncommitted, so it gets no translation
+    (`L.user.137`'s design). That is not a defect, and the check's case says
+    "at least once".
+  - The figures, release guest under KVM, self-checks skipped, one
+    processor's futex round trip in µs (Linux 7.0 in the same guest:
+    1.17 to 1.43): W1 measured ABAB at host load 3 to 9, 2.12 to 2.03 and
+    2.13 against 2.07, about 0.07 µs; an epoll round trip reads 0.04 to
+    0.10 µs slower, within about the noise floor; W2 and W3 are within
+    noise. The gain in a guest is small. What W1 removes is a lock every
+    futex wait and wake on the machine took, which should show on the box
+    with the game's threads; that run is owed (`docs/BACKLOG.md`).
+  - Ring 0 grows by 29 lines of code for it (W1 +1, W2 +17, W3 +11, seven
+    of W3's a checks-only counter; ledger 9399).
   - `sys/wake-decision` is NOT YET: B1 and B2 come first, the reading of
     `should_preempt` against `choose_next`'s pick written down, then WD1-WD4.
   - `sys/epoll-always` is OK IF WE1-WE4. It is load ring.
