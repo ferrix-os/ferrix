@@ -25,11 +25,13 @@ use ferrix_vfs::OpenFile;
 
 use crate::fs;
 use crate::fs::epoll::{self, Event, Interest};
+use crate::object::process::Host;
 use crate::syscall::fd;
 use crate::syscall::poll;
 use crate::syscall::process::Process;
 use crate::syscall::thread::Thread;
 use crate::syscall::time::TimeWidth;
+use crate::syscall::time::slack::Slack;
 use crate::syscall::uaccess;
 
 /// Bytes in a `struct epoll_event`: packed to 12 on x86-64, 16 elsewhere.
@@ -144,10 +146,28 @@ pub(crate) fn sys_epoll_wait(
     maxevents: i32,
     timeout: i32,
 ) -> Result<usize, Errno> {
-    let deadline = u64::try_from(timeout)
+    wait_millis(
+        process,
+        [epfd, maxevents, timeout],
+        events,
+        Slack::of_caller(process.core()),
+    )
+}
+
+/// `epoll_wait`'s wait of `timeout` milliseconds, negative for no limit, late
+/// by `slack`'s estimate (`poll::sleeps_to`).
+fn wait_millis(
+    process: &Process,
+    [epfd, maxevents, timeout]: [i32; 3],
+    events: u64,
+    slack: Slack,
+) -> Result<usize, Errno> {
+    let limit = u64::try_from(timeout)
         .ok()
-        .map(|millis| now().saturating_add(millis.saturating_mul(NANOS_PER_MILLI)));
-    wait(process, epfd, events, maxevents, deadline)
+        .map(|millis| millis.saturating_mul(NANOS_PER_MILLI));
+    let deadline = limit.map(|nanos| now().saturating_add(nanos));
+    let late = poll::sleeps_to(deadline, limit, slack);
+    wait(process, epfd, events, maxevents, late)
 }
 
 /// `epoll_pwait`: as `epoll_wait`, under the signal mask at `sigmask` if
@@ -164,12 +184,11 @@ pub(crate) fn sys_epoll_pwait(
     let process = thread.process();
     let mask = poll::read_sigset(process, sigmask, sigsetsize)?;
     poll::with_sigmask(thread, mask, || {
-        sys_epoll_wait(
+        wait_millis(
             process,
-            fd::arg(epfd),
+            [fd::arg(epfd), fd::arg(maxevents), fd::arg(timeout)],
             events,
-            fd::arg(maxevents),
-            fd::arg(timeout),
+            Slack::of(thread),
         )
     })
 }
@@ -186,12 +205,13 @@ pub(crate) fn sys_epoll_pwait2(
     [epfd, events, maxevents, timeout, sigmask, sigsetsize]: [u64; 6],
 ) -> Result<usize, Errno> {
     let process = thread.process();
-    let deadline = if timeout == 0 {
+    let limit = if timeout == 0 {
         None
     } else {
-        let nanos = poll::read_timespec(process, timeout, TimeWidth::Wide)?;
-        Some(now().saturating_add(nanos))
+        Some(poll::read_timespec(process, timeout, TimeWidth::Wide)?)
     };
+    let deadline = limit.map(|nanos| now().saturating_add(nanos));
+    let deadline = poll::sleeps_to(deadline, limit, Slack::of(thread));
     let mask = poll::read_sigset(process, sigmask, sigsetsize)?;
     poll::with_sigmask(thread, mask, || {
         wait(process, fd::arg(epfd), events, fd::arg(maxevents), deadline)

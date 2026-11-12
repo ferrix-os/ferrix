@@ -221,7 +221,7 @@
    "stack": "task"
   },
   "ferrix_kernel_load::syscall::check::check_a_signal_is_judged_against_its_takers_mask": {
-   "frame": 4224,
+   "frame": 4288,
    "kind": "check",
    "stack": "task"
   },
@@ -645,7 +645,7 @@
    "stack": "task"
   },
   "ferrix_kernel_load::syscall::check::check_a_signal_is_judged_against_its_takers_mask": {
-   "frame": 4224,
+   "frame": 4288,
    "kind": "check",
    "stack": "task"
   },

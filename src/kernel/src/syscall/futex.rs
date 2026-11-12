@@ -46,6 +46,7 @@ use ferrix_linux_abi::types::{
 use crate::object::process::{Host, Process};
 use crate::syscall::signal::RestartBlock;
 use crate::syscall::time::TimeWidth;
+use crate::syscall::time::slack::Slack;
 use crate::syscall::uaccess;
 use crate::user::address_wait::{self, Key, MATCH_ANY, Place, WaitError, Word};
 use crate::user::space::AddressSpace;
@@ -109,7 +110,8 @@ pub(crate) fn sys_futex(
                 let relative = read_timespec(process, timeout, width)?;
                 Some(crate::timer::now_nanos().saturating_add(relative))
             };
-            wait(process, address, shared, value, MATCH_ANY, deadline)
+            let slack = Slack::of_caller(process.core()).sleep();
+            wait(process, address, shared, value, MATCH_ANY, deadline, slack)
         }
         FUTEX_WAIT_BITSET => {
             if value3 == 0 {
@@ -136,7 +138,8 @@ pub(crate) fn sys_futex(
                     })
                 })
             };
-            wait(process, address, shared, value, value3, deadline)
+            let slack = Slack::of_caller(process.core()).sleep();
+            wait(process, address, shared, value, value3, deadline, slack)
         }
         FUTEX_WAKE => {
             let key = key(process.core(), address, shared)?;
@@ -296,8 +299,10 @@ fn wait_on(process: &dyn Host, words: &[Word], deadline: Option<u64>) -> Result<
 }
 
 /// Sleep on `address` if it holds `expected`, until a wake whose bitset
-/// shares a bit with `bitset`, the caller is ended, or `deadline` passes.
-/// `shared` is whether the call left out `FUTEX_PRIVATE_FLAG`.
+/// shares a bit with `bitset`, the caller is ended, or `deadline` passes,
+/// late by `slack` (`docs/TIMER-SLACK.md`). `shared` is whether the call
+/// left out `FUTEX_PRIVATE_FLAG`. A restart keeps `deadline` and adds the
+/// slack again, as Linux's `futex_wait_restart` does.
 fn wait(
     process: &dyn Host,
     address: u64,
@@ -305,6 +310,7 @@ fn wait(
     expected: u32,
     bitset: u32,
     deadline: Option<u64>,
+    slack: u64,
 ) -> Result<usize, Errno> {
     let word = Word {
         place: Place::User(address),
@@ -312,7 +318,8 @@ fn wait(
         key: key(process.core(), address, shared)?,
         bitset,
     };
-    match wait_on(process, core::slice::from_ref(&word), deadline) {
+    let late = deadline.map(|deadline| crate::syscall::time::slack::late(deadline, slack));
+    match wait_on(process, core::slice::from_ref(&word), late) {
         Ok(_) => Ok(0),
         // With a timeout, a signal leaves a restart block, as Linux's
         // `futex_wait` does: a handler makes the call `EINTR` whatever
@@ -350,7 +357,8 @@ pub(crate) fn resume_wait(
     bitset: u32,
     deadline: u64,
 ) -> Result<usize, Errno> {
-    if crate::timer::now_nanos() >= deadline {
+    let slack = Slack::of(thread).sleep();
+    if crate::timer::now_nanos() >= crate::syscall::time::slack::late(deadline, slack) {
         return Err(Errno::ETIMEDOUT);
     }
     wait(
@@ -360,6 +368,7 @@ pub(crate) fn resume_wait(
         expected,
         bitset,
         Some(deadline),
+        slack,
     )
 }
 

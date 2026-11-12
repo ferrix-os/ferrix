@@ -469,6 +469,17 @@ pub(crate) fn sys_prctl(process: &Process, option: i32, args: [u64; 4]) -> Resul
             uaccess::copy_to_user(space, arg2, &name).map_err(|_| Errno::EFAULT)?;
             Ok(0)
         }
+        // On the calling thread, as the name (`docs/TIMER-SLACK.md`).
+        crate::syscall::time::slack::PR_SET_TIMERSLACK => crate::syscall::time::slack::prctl(
+            &*named_thread(process).ok_or(Errno::ESRCH)?,
+            true,
+            arg2,
+        ),
+        crate::syscall::time::slack::PR_GET_TIMERSLACK => crate::syscall::time::slack::prctl(
+            &*named_thread(process).ok_or(Errno::ESRCH)?,
+            false,
+            arg2,
+        ),
         option::PR_CAPBSET_READ if arg2 <= u64::from(CAP_LAST_CAP) => {
             Ok(usize::from(process.with_credentials(|held| {
                 held.caps.bounding >> arg2 & 1 != 0

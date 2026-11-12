@@ -30,6 +30,116 @@ use crate::trap::Abi;
 /// Nanoseconds in a second.
 const NANOS: u64 = 1_000_000_000;
 
+/// Timer slack: how late a thread's sleeping calls may be woken, Linux's
+/// `timer_slack_ns` (`docs/TIMER-SLACK.md`). Each call adds what [`Slack`]
+/// gives it to the deadline it computed and waits to that later instant; the
+/// waits themselves are unchanged.
+///
+/// [`Slack`]: slack::Slack
+pub(crate) mod slack {
+    use ferrix_linux_abi::errno::Errno;
+
+    use crate::object::process::Host;
+    use crate::syscall::thread::Thread;
+
+    /// A thread's slack until something sets it: Linux's `init_task`'s.
+    pub(crate) const DEFAULT_NS: u64 = 50_000;
+
+    /// The most a select-type call's estimate comes to: Linux's
+    /// `MAX_SLACK`, 100 ms (`fs/select.c`).
+    pub(crate) const MAX_ESTIMATE_NS: u64 = 100_000_000;
+
+    /// `prctl`'s `PR_SET_TIMERSLACK`.
+    pub(crate) const PR_SET_TIMERSLACK: i32 = 29;
+    /// `prctl`'s `PR_GET_TIMERSLACK`.
+    pub(crate) const PR_GET_TIMERSLACK: i32 = 30;
+
+    /// A calling thread's slack and nice value, which is all the rule reads.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(crate) struct Slack {
+        /// Its timer slack, in nanoseconds.
+        pub(crate) nanos: u64,
+        /// Its nice value: a nice thread's select-type calls scale by more.
+        pub(crate) nice: i32,
+    }
+
+    impl Slack {
+        /// `thread`'s.
+        pub(crate) fn of(thread: &Thread) -> Slack {
+            Slack {
+                nanos: thread.timer_slack(),
+                nice: thread.nice(),
+            }
+        }
+
+        /// The running task's thread's, when it is one of `process`'s: the
+        /// caller of a call that is handed only its process. Otherwise -- a
+        /// kernel task making the call for a check -- the default, at nice 0.
+        pub(crate) fn of_caller(process: &crate::object::process::Process) -> Slack {
+            crate::syscall::thread::with_current(|thread| Slack::of_running(Some(thread), process))
+                .unwrap_or_else(|| Slack::of_running(None, process))
+        }
+
+        /// [`Slack::of_caller`]'s choice, given the running task's thread:
+        /// that thread's when it is one of `process`'s, else the default at
+        /// nice 0.
+        pub(crate) fn of_running(
+            running: Option<&Thread>,
+            process: &crate::object::process::Process,
+        ) -> Slack {
+            running
+                .filter(|thread| core::ptr::eq(thread.process().core(), process))
+                .map_or(
+                    Slack {
+                        nanos: DEFAULT_NS,
+                        nice: 0,
+                    },
+                    Slack::of,
+                )
+        }
+
+        /// What a sleep-type call adds: `nanosleep`, `clock_nanosleep`
+        /// (relative and absolute), a timed futex wait, `rt_sigtimedwait`
+        /// with a nonzero timeout and `semtimedop`. The slack itself.
+        pub(crate) fn sleep(self) -> u64 {
+            self.nanos
+        }
+
+        /// What a select-type call with `left` nanoseconds to wait adds:
+        /// Linux's `select_estimate_accuracy`. Nothing for a thread with no
+        /// slack; otherwise a thousandth of the wait, a two-hundredth for a
+        /// nice thread, at most [`MAX_ESTIMATE_NS`], and never less than the
+        /// slack. A zero timeout does not sleep, and its caller asks nothing.
+        pub(crate) fn select(self, left: u64) -> u64 {
+            if self.nanos == 0 {
+                return 0;
+            }
+            let divisor = if self.nice > 0 { 200 } else { 1000 };
+            (left / divisor).min(MAX_ESTIMATE_NS).max(self.nanos)
+        }
+    }
+
+    /// `deadline`, `slack` later: saturating, as Linux's `ktime_add_safe`.
+    pub(crate) fn late(deadline: u64, slack: u64) -> u64 {
+        deadline.saturating_add(slack)
+    }
+
+    /// `PR_SET_TIMERSLACK` (`set`) and `PR_GET_TIMERSLACK` on `thread`, as
+    /// Linux's `kernel/sys.c` answers them: a set of zero goes back to the
+    /// thread's default, and a get is the slack, at most `ULONG_MAX`.
+    ///
+    /// # Errors
+    ///
+    /// None; the result type is `prctl`'s.
+    pub(crate) fn prctl(thread: &Thread, set: bool, arg2: u64) -> Result<usize, Errno> {
+        if set {
+            thread.set_timer_slack(arg2);
+            return Ok(0);
+        }
+        Ok(usize::try_from(thread.timer_slack()).unwrap_or(usize::MAX))
+    }
+}
+
 /// `CLOCK_REALTIME_ALARM`, `CLOCK_BOOTTIME_ALARM` and `CLOCK_TAI`, from
 /// `linux/time.h`: clocks Linux has that no call here sets. Of the three only
 /// `CLOCK_TAI` can be read, in [`sys_clock_gettime`].
@@ -538,7 +648,12 @@ pub(crate) fn sys_nanosleep_at_width(
 ) -> Result<usize, Errno> {
     let (seconds, nanos) = read_pair(thread.process(), req, width)?;
     let length = nanos_of(seconds, nanos)?;
-    let deadline = crate::timer::now_nanos().saturating_add(length);
+    // Late by the thread's slack, and `rem` and a restart count from there,
+    // as Linux's `hrtimer_nanosleep` counts them (`docs/TIMER-SLACK.md`).
+    let deadline = slack::late(
+        crate::timer::now_nanos().saturating_add(length),
+        slack::Slack::of(thread).sleep(),
+    );
     sleep_until(thread, deadline, rem, width)
 }
 
@@ -581,9 +696,11 @@ pub(crate) fn sys_clock_nanosleep(
     }
     let (seconds, nanos) = read_pair(thread.process(), req, width)?;
     let requested = nanos_of(seconds, nanos)?;
+    // Relative or absolute, late by the thread's slack, as `nanosleep`.
+    let late = slack::Slack::of(thread).sleep();
     if flags & TIMER_ABSTIME == 0 {
         let deadline = crate::timer::now_nanos().saturating_add(requested);
-        return sleep_until(thread, deadline, rem, width);
+        return sleep_until(thread, slack::late(deadline, late), rem, width);
     }
     let deadline = if clock == CLOCK_REALTIME {
         let counter = i128::from(requested) - i128::from(realtime_offset());
@@ -591,7 +708,7 @@ pub(crate) fn sys_clock_nanosleep(
     } else {
         host_from(thread.process(), clock, requested)
     };
-    sleep_until(thread, deadline, 0, width)
+    sleep_until(thread, slack::late(deadline, late), 0, width)
 }
 
 /// `USER_HZ`: the clock ticks per second `times` counts in, 100 on all three.

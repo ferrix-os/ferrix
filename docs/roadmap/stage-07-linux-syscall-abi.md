@@ -355,7 +355,10 @@ An interrupted blocking call is restarted when a handler with `SA_RESTART`
 runs or when no handler runs, and is `EINTR` otherwise, exactly as Linux's
 `arch_do_signal_or_restart` decides: reads, writes, `wait4`, pipe waits and
 futex waits restart, `poll`, `select` and `pselect6` never do, and `nanosleep`
-and `clock_nanosleep` resume through `restart_syscall` with the time left. A
+and `clock_nanosleep` resume through `restart_syscall` with the time left.
+Every sleeping call with a timeout is woken up to its thread's timer slack
+late, as on Linux, `prctl(PR_SET_TIMERSLACK)` sets it, and the select-type
+calls scale it by their timeout ([TIMER-SLACK.md](../TIMER-SLACK.md)). A
 default stop parks the process until `SIGCONT`, and a user-mode fault the fault
 path cannot resolve becomes `SIGSEGV`, `SIGILL`, `SIGBUS`, `SIGFPE` or
 `SIGTRAP` with Linux's codes rather than a kernel panic. The boot test runs a

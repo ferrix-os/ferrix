@@ -36,11 +36,13 @@ use ferrix_linux_abi::errno::Errno;
 use ferrix_vfs::Readiness;
 
 use crate::fs::wake::Sources;
+use crate::object::process::Host;
 use crate::syscall::fd;
 use crate::syscall::process::Process;
 use crate::syscall::signal;
 use crate::syscall::thread::Thread;
 use crate::syscall::time::TimeWidth;
+use crate::syscall::time::slack::Slack;
 use crate::syscall::uaccess;
 
 /// There is data to read.
@@ -89,10 +91,12 @@ pub(crate) fn sys_poll(
     nfds: u64,
     timeout: i32,
 ) -> Result<usize, Errno> {
-    let deadline = u64::try_from(timeout)
+    let limit = u64::try_from(timeout)
         .ok()
-        .map(|millis| now().saturating_add(millis.saturating_mul(NANOS_PER_MILLI)));
-    wait(process, fds, nfds, deadline)
+        .map(|millis| millis.saturating_mul(NANOS_PER_MILLI));
+    let deadline = limit.map(|nanos| now().saturating_add(nanos));
+    let late = sleeps_to(deadline, limit, Slack::of_caller(process.core()));
+    wait(process, fds, nfds, late)
 }
 
 /// `ppoll`: `timeout` a `struct timespec` of `width`, or null for no limit,
@@ -113,14 +117,15 @@ pub(crate) fn sys_ppoll(
     width: TimeWidth,
 ) -> Result<usize, Errno> {
     let process = thread.process();
-    let deadline = if timeout == 0 {
+    let limit = if timeout == 0 {
         None
     } else {
-        let nanos = read_timespec(process, timeout, width)?;
-        Some(now().saturating_add(nanos))
+        Some(read_timespec(process, timeout, width)?)
     };
+    let deadline = limit.map(|nanos| now().saturating_add(nanos));
+    let late = sleeps_to(deadline, limit, Slack::of(thread));
     let mask = read_sigset(process, sigmask, sigsetsize)?;
-    with_sigmask(thread, mask, || wait(process, fds, nfds, deadline))
+    with_sigmask(thread, mask, || wait(process, fds, nfds, late))
 }
 
 /// `select`, and ARMv7-A's `_newselect`: three sets of `nfds` descriptors, and
@@ -160,7 +165,10 @@ pub(crate) fn sys_select_at_width(
         Some(read_timeval(process, timeout, width)?)
     };
     let deadline = limit.map(|nanos| now().saturating_add(nanos));
-    let answer = select(process, nfds, sets, deadline, word);
+    let late = sleeps_to(deadline, limit, Slack::of_caller(process.core()));
+    let answer = select(process, nfds, sets, late, word);
+    // The time left is counted from the deadline asked for, not the late
+    // one, as Linux's `poll_select_finish` counts it.
     if let (Some(nanos), Some(deadline)) = (limit, deadline)
         && nanos != 0
     {
@@ -204,7 +212,8 @@ pub(crate) fn sys_pselect6(
         read_sigset(process, word_at(pair, 0, word), word_at(pair, word, word))?
     };
     let deadline = limit.map(|nanos| now().saturating_add(nanos));
-    let answer = with_sigmask(thread, mask, || select(process, nfds, sets, deadline, word));
+    let late = sleeps_to(deadline, limit, Slack::of(thread));
+    let answer = with_sigmask(thread, mask, || select(process, nfds, sets, late, word));
     if let (Some(nanos), Some(deadline)) = (limit, deadline)
         && nanos != 0
     {
@@ -358,6 +367,21 @@ fn word_at(bytes: &[u8], offset: usize, width: usize) -> u64 {
         *slot = *byte;
     }
     u64::from_le_bytes(eight)
+}
+
+/// The instant a select-type call -- `select`, `pselect6`, `poll`, `ppoll`,
+/// the `epoll_wait`s -- whose timeout of `limit` nanoseconds ends at
+/// `deadline` sleeps to: late by `slack`'s estimate (Linux's
+/// `select_estimate_accuracy`), but for a zero timeout, which does not sleep,
+/// and no timeout (`docs/TIMER-SLACK.md`).
+pub(crate) fn sleeps_to(deadline: Option<u64>, limit: Option<u64>, slack: Slack) -> Option<u64> {
+    match (deadline, limit) {
+        (Some(deadline), Some(nanos)) if nanos != 0 => Some(crate::syscall::time::slack::late(
+            deadline,
+            slack.select(nanos),
+        )),
+        _ => deadline,
+    }
 }
 
 /// The counter's reading, in nanoseconds.

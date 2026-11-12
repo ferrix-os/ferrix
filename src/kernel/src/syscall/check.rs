@@ -806,6 +806,7 @@ fn check_handlers(output: Output) -> Result<u64, &'static str> {
     check_uname_names_the_system(&process)?;
     check_poll_reports_ready_invalid_and_skipped(&process)?;
     check_select_answers_with_the_sets_that_are_ready(&process)?;
+    check_sleeping_calls_take_the_threads_timer_slack(&process)?;
     check_the_line_discipline_follows_its_settings()?;
     check_a_raw_read_waits_as_vmin_and_vtime_say()?;
     check_a_raw_read_waits_for_vmin()?;
@@ -2430,6 +2431,396 @@ fn pselect_answers(process: &Process, page: u64) -> Result<(), &'static str> {
         return Err("pselect6 did not put the caller's signal mask back");
     }
     Ok(())
+}
+
+/// A sleeping call's timer slack (`docs/TIMER-SLACK.md`): Linux's rule and
+/// arithmetic, a thread's slack from its start, its creator and `prctl`,
+/// and each call woken no earlier than its expiry plus the slack its rule
+/// gives -- the calling thread's for a call handed its thread, the
+/// default for one handed only a process that no running thread of it
+/// makes. Every timed case also has a ceiling of a second, so a slack in the
+/// wrong unit fails by name rather than hanging.
+fn check_sleeping_calls_take_the_threads_timer_slack(
+    process: &Process,
+) -> Result<(), &'static str> {
+    let page = map_rw(process, PAGE_SIZE)?;
+    let outcome = timer_slack_rule().and_then(|()| timer_slack_waits(process, page));
+    let _ = memory::sys_munmap(process, page, PAGE_SIZE);
+    outcome
+}
+
+/// The rule and its arithmetic, exactly: Linux's `select_estimate_accuracy`,
+/// `ktime_add_safe` and `PR_GET_TIMERSLACK`'s ceiling.
+fn timer_slack_rule() -> Result<(), &'static str> {
+    use crate::syscall::time::slack::{DEFAULT_NS, MAX_ESTIMATE_NS, Slack, late};
+
+    let normal = Slack {
+        nanos: DEFAULT_NS,
+        nice: 0,
+    };
+    let nice = Slack {
+        nanos: DEFAULT_NS,
+        nice: 5,
+    };
+    let cases = [
+        (
+            normal.select(1_000),
+            DEFAULT_NS,
+            "a short select-type wait's slack is not the thread's",
+        ),
+        (
+            normal.select(1_000_000_000),
+            1_000_000,
+            "a second's select-type wait is not late by a thousandth",
+        ),
+        (
+            nice.select(1_000_000_000),
+            5_000_000,
+            "a nice thread's second is not late by a two-hundredth",
+        ),
+        (
+            normal.select(1_000_000_000_000),
+            MAX_ESTIMATE_NS,
+            "a select-type estimate passed 100 ms",
+        ),
+        (
+            Slack { nanos: 0, nice: 0 }.select(1_000_000_000),
+            0,
+            "a thread with no slack was given an estimate",
+        ),
+        (
+            Slack {
+                nanos: u64::MAX,
+                nice: 0,
+            }
+            .select(1),
+            u64::MAX,
+            "a slack above the estimate's cap was cut",
+        ),
+        (
+            normal.sleep(),
+            DEFAULT_NS,
+            "a sleep-type call's slack is not the thread's",
+        ),
+        (
+            late(u64::MAX - 5, u64::MAX),
+            u64::MAX,
+            "a deadline plus its slack wrapped",
+        ),
+        (
+            late(10, 5),
+            15,
+            "a deadline plus its slack is not their sum",
+        ),
+    ];
+    for (got, expected, why) in cases {
+        if got != expected {
+            return Err(why);
+        }
+    }
+    Ok(())
+}
+
+/// Where [`timer_slack_waits`]' cases put their arguments in the page.
+mod slack_page {
+    pub(super) const TIME: u64 = 0;
+    pub(super) const WIDE_TIME: u64 = 32;
+    pub(super) const SET: u64 = 64;
+    pub(super) const WORD: u64 = 128;
+    pub(super) const EVENTS: u64 = 256;
+}
+
+/// A millisecond, the timed cases' timeout.
+const SLACK_MILLI: u64 = 1_000_000;
+/// The slack the timed cases set: large beside a wake's latency.
+const SLACK_CASE: u64 = 3 * SLACK_MILLI;
+
+/// Copy `bytes` to `offset` in the cases' `page`.
+fn slack_stage(
+    process: &Process,
+    page: u64,
+    offset: u64,
+    bytes: &[u8],
+) -> Result<(), &'static str> {
+    uaccess::copy_to_user(process.space(), page + offset, bytes)
+        .map_err(|_| "could not stage a timer-slack argument")
+}
+
+/// A call begun at `start` took no less than `least`, and less than a second.
+fn slack_took(start: u64, least: u64, early: &'static str) -> Result<(), &'static str> {
+    let took = crate::timer::now_nanos().saturating_sub(start);
+    if took < least {
+        return Err(early);
+    }
+    if took >= 1_000 * SLACK_MILLI {
+        return Err("a call with timer slack slept a second or more");
+    }
+    Ok(())
+}
+
+/// The thread's value, and every call's wait.
+fn timer_slack_waits(process: &Process, page: u64) -> Result<(), &'static str> {
+    let thread = check_thread(process)?;
+    timer_slack_value(process, &thread)?;
+    timer_slack_sleeps(process, page, &thread)?;
+    timer_slack_selects(process, page, &thread)?;
+    timer_slack_without_sleeping(page, &thread)?;
+    timer_slack_of_no_thread(process, page)
+}
+
+/// The default at the start, `prctl`'s, back to the default for zero, a
+/// made thread's from its creator as value and default, and a get's ceiling.
+fn timer_slack_value(
+    process: &Process,
+    thread: &crate::syscall::thread::Thread,
+) -> Result<(), &'static str> {
+    use crate::object::process::Host;
+    use crate::syscall::time::slack::{self, DEFAULT_NS};
+
+    if thread.timer_slack() != DEFAULT_NS {
+        return Err("a process's first thread did not start with 50,000 ns of timer slack");
+    }
+    if slack::prctl(thread, true, SLACK_CASE) != Ok(0)
+        || slack::prctl(thread, false, 0) != Ok(SLACK_CASE as usize)
+    {
+        return Err("PR_SET_TIMERSLACK did not set what PR_GET_TIMERSLACK reads");
+    }
+    let shared = crate::syscall::registry::find(process.pid())
+        .ok_or("a check's process was not findable by its pid")?;
+    let child = crate::syscall::thread::Thread::forked(&shared, thread)
+        .map_err(|_| "no memory for a made thread")?;
+    let _ = slack::prctl(thread, true, 0);
+    if thread.timer_slack() != DEFAULT_NS {
+        return Err("PR_SET_TIMERSLACK with zero did not go back to the default");
+    }
+    let _ = slack::prctl(&child, true, 7);
+    let _ = slack::prctl(&child, true, 0);
+    if child.timer_slack() != SLACK_CASE {
+        return Err("a made thread's slack, and its default, are not its creator's");
+    }
+    drop(child);
+    // A call handed only its process takes the running thread's slack when
+    // the thread is the process's, and the default otherwise.
+    let default = slack::Slack {
+        nanos: DEFAULT_NS,
+        nice: 0,
+    };
+    let other = process::new_for_check().map_err(|_| "could not make a process")?;
+    let stranger = crate::syscall::thread::Thread::leader(&other)
+        .map_err(|_| "no memory for a check's thread")?;
+    // Neither thread at the default, so a choice of the wrong one shows.
+    let _ = slack::prctl(thread, true, SLACK_CASE);
+    let _ = slack::prctl(&stranger, true, 7);
+    stranger.set_nice(2);
+    thread.set_nice(4);
+    let own = slack::Slack::of_running(Some(thread), process.core());
+    thread.set_nice(0);
+    if own
+        != (slack::Slack {
+            nanos: SLACK_CASE,
+            nice: 4,
+        })
+    {
+        return Err("a call handed its process did not take its running thread's slack and nice");
+    }
+    if slack::Slack::of_running(Some(&stranger), process.core()) != default
+        || slack::Slack::of_running(None, process.core()) != default
+    {
+        return Err("a call handed its process took the slack of a thread not its own");
+    }
+    drop(stranger);
+    let _ = slack::prctl(thread, true, u64::MAX);
+    if slack::prctl(thread, false, 0) != Ok(usize::MAX) {
+        return Err("PR_GET_TIMERSLACK did not answer at most ULONG_MAX");
+    }
+    let _ = slack::prctl(thread, true, SLACK_CASE);
+    Ok(())
+}
+
+/// The sleep-type calls handed their thread, late by its slack; a futex
+/// restart adds it again.
+fn timer_slack_sleeps(
+    process: &Process,
+    page: u64,
+    thread: &crate::syscall::thread::Thread,
+) -> Result<(), &'static str> {
+    use crate::syscall::time::{TimeWidth, sys_clock_nanosleep, sys_nanosleep};
+    use crate::syscall::{deliver, futex};
+    use ferrix_linux_abi::types::{CLOCK_MONOTONIC, SIGUSR1};
+    use slack_page::{SET, TIME, WORD};
+
+    let now = crate::timer::now_nanos;
+    let least = SLACK_MILLI + SLACK_CASE;
+    slack_stage(process, page, TIME, &word_pair(0, SLACK_MILLI as usize))?;
+    let start = now();
+    let _ = sys_nanosleep(thread, page + TIME, 0);
+    slack_took(
+        start,
+        least,
+        "nanosleep returned before its expiry plus the thread's slack",
+    )?;
+    let at = now().saturating_add(SLACK_MILLI);
+    let pair = word_pair((at / 1_000_000_000) as usize, (at % 1_000_000_000) as usize);
+    slack_stage(process, page, TIME, &pair)?;
+    let start = now();
+    let request = [page + TIME, 0];
+    let _ = sys_clock_nanosleep(
+        thread,
+        CLOCK_MONOTONIC as i32,
+        1,
+        request,
+        TimeWidth::Native,
+    );
+    slack_took(
+        start,
+        least,
+        "an absolute clock_nanosleep returned before its expiry plus the slack",
+    )?;
+    slack_stage(process, page, SET, &(1_u64 << (SIGUSR1 - 1)).to_le_bytes())?;
+    slack_stage(process, page, TIME, &word_pair(0, SLACK_MILLI as usize))?;
+    let start = now();
+    let timed =
+        deliver::sys_rt_sigtimedwait(thread, page + SET, 0, page + TIME, 8, TimeWidth::Native);
+    if timed != Err(Errno::EAGAIN) {
+        return Err("rt_sigtimedwait with nothing sent did not time out with EAGAIN");
+    }
+    slack_took(
+        start,
+        least,
+        "rt_sigtimedwait returned before its expiry plus the slack",
+    )?;
+    slack_stage(process, page, WORD, &0_u32.to_le_bytes())?;
+    let start = now();
+    let deadline = now().saturating_add(SLACK_MILLI);
+    let _ = futex::resume_wait(thread, page + WORD, false, 0, u32::MAX, deadline);
+    slack_took(
+        start,
+        least,
+        "a futex wait's restart did not add the slack again",
+    )
+}
+
+/// The select-type calls handed their thread, late by at least its slack;
+/// `pselect6`'s time left counted from the deadline asked for.
+fn timer_slack_selects(
+    process: &Process,
+    page: u64,
+    thread: &crate::syscall::thread::Thread,
+) -> Result<(), &'static str> {
+    use crate::syscall::time::TimeWidth;
+    use crate::syscall::{epoll, poll};
+    use slack_page::{EVENTS, TIME, WIDE_TIME};
+
+    let now = crate::timer::now_nanos;
+    let least = SLACK_MILLI + SLACK_CASE;
+    let word = size_of::<usize>();
+    slack_stage(process, page, TIME, &word_pair(0, SLACK_MILLI as usize))?;
+    let start = now();
+    let _ = poll::sys_pselect6(thread, 0, [0; 3], page + TIME, 0, TimeWidth::Native, word);
+    slack_took(
+        start,
+        least,
+        "pselect6 returned before its expiry plus the slack",
+    )?;
+    let mut left = [0_u8; 16];
+    uaccess::copy_from_user(process.space(), page + TIME, &mut left)
+        .map_err(|_| "could not read pselect6's time left back")?;
+    if left.iter().any(|&byte| byte != 0) {
+        return Err("pselect6 wrote back time left after its deadline");
+    }
+    slack_stage(process, page, TIME, &word_pair(0, SLACK_MILLI as usize))?;
+    let start = now();
+    let _ = poll::sys_ppoll(thread, 0, 0, page + TIME, 0, 8, TimeWidth::Native);
+    slack_took(
+        start,
+        least,
+        "ppoll returned before its expiry plus the slack",
+    )?;
+    let epfd = epoll::sys_epoll_create1(process, 0).map_err(|_| "no epoll set for the check")?;
+    let mut wide = [0_u8; 16];
+    wide[8..].copy_from_slice(&SLACK_MILLI.to_le_bytes());
+    slack_stage(process, page, WIDE_TIME, &wide)?;
+    let start = now();
+    let arguments = [epfd as u64, page + EVENTS, 1, page + WIDE_TIME, 0, 8];
+    let waited = epoll::sys_epoll_pwait2(thread, arguments);
+    let _ = fd::sys_close(process, epfd as i32);
+    if waited != Ok(0) {
+        return Err("epoll_pwait2 on an empty set did not time out with zero");
+    }
+    slack_took(
+        start,
+        least,
+        "epoll_pwait2 returned before its expiry plus the slack",
+    )
+}
+
+/// A zero timeout does not sleep, where a slack of 50 ms would show; a
+/// nanosleep's restart counts from the late end and adds nothing.
+fn timer_slack_without_sleeping(
+    page: u64,
+    thread: &crate::syscall::thread::Thread,
+) -> Result<(), &'static str> {
+    use crate::syscall::time::{TimeWidth, slack, sys_restart_syscall};
+    use crate::syscall::{deliver, poll};
+    use slack_page::{SET, TIME};
+
+    let now = crate::timer::now_nanos;
+    let long = 50 * SLACK_MILLI;
+    let _ = slack::prctl(thread, true, long);
+    let process = thread.process();
+    slack_stage(process, page, TIME, &word_pair(0, 0))?;
+    let start = now();
+    let word = size_of::<usize>();
+    let _ = poll::sys_pselect6(thread, 0, [0; 3], page + TIME, 0, TimeWidth::Native, word);
+    let _ = deliver::sys_rt_sigtimedwait(thread, page + SET, 0, page + TIME, 8, TimeWidth::Native);
+    if now().saturating_sub(start) >= long {
+        return Err("a zero-timeout pselect6 or rt_sigtimedwait slept its slack");
+    }
+    let deadline = now().saturating_add(SLACK_MILLI);
+    thread.with_own_signals(|signals| {
+        signals.set_restart_block(signal::RestartBlock::Sleep {
+            deadline,
+            rem: 0,
+            width: TimeWidth::Native,
+        });
+    });
+    let start = now();
+    let _ = sys_restart_syscall(thread);
+    if now().saturating_sub(start) >= long || now() < deadline {
+        return Err("a nanosleep's restart added the slack again or returned early");
+    }
+    Ok(())
+}
+
+/// Calls handed only a process, made from a kernel task, no thread of it:
+/// late by the default.
+fn timer_slack_of_no_thread(process: &Process, page: u64) -> Result<(), &'static str> {
+    use crate::syscall::time::TimeWidth;
+    use crate::syscall::time::slack::DEFAULT_NS;
+    use crate::syscall::{futex, poll};
+    use ferrix_linux_abi::types::FUTEX_WAIT;
+    use slack_page::{TIME, WORD};
+
+    let now = crate::timer::now_nanos;
+    let least = SLACK_MILLI + DEFAULT_NS;
+    let start = now();
+    let _ = poll::sys_poll(process, 0, 0, 1);
+    slack_took(
+        start,
+        least,
+        "poll from no thread of its process was not late by the default slack",
+    )?;
+    slack_stage(process, page, TIME, &word_pair(0, SLACK_MILLI as usize))?;
+    let a = [page + WORD, u64::from(FUTEX_WAIT), 0, page + TIME, 0, 0];
+    let start = now();
+    if futex::sys_futex(process, &a, TimeWidth::Native) != Err(Errno::ETIMEDOUT) {
+        return Err("FUTEX_WAIT on an unchanged word did not time out");
+    }
+    slack_took(
+        start,
+        least,
+        "FUTEX_WAIT returned before its expiry plus the default slack",
+    )
 }
 
 /// Two native words, little-endian, in the first bytes of sixteen: a

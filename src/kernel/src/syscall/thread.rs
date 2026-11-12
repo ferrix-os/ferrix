@@ -111,6 +111,20 @@ pub(crate) struct Thread {
     /// it and only `SCHED_RESET_ON_FORK`, which is refused here, resets it.
     /// `execve` keeps it.
     slice_request: AtomicU64,
+    /// Its timer slack, in nanoseconds: how late its sleeping calls may be
+    /// woken (`docs/TIMER-SLACK.md`, Linux's `timer_slack_ns`).
+    /// [`time::slack::DEFAULT_NS`] for a process's first thread, its creator's for a
+    /// thread made by `clone`, `fork` or `vfork`; `execve` keeps it.
+    ///
+    /// [`time::slack::DEFAULT_NS`]: crate::syscall::time::slack::DEFAULT_NS
+    timer_slack: AtomicU64,
+    /// What `PR_SET_TIMERSLACK` with zero sets [`Thread::timer_slack`] back
+    /// to: [`time::slack::DEFAULT_NS`] for a process's first thread, its creator's
+    /// slack at the making for any other (Linux's `default_timer_slack_ns`,
+    /// `copy_process`).
+    ///
+    /// [`time::slack::DEFAULT_NS`]: crate::syscall::time::slack::DEFAULT_NS
+    default_timer_slack: AtomicU64,
     /// The processors its task is made with (L.sched.101): its creator's
     /// task's mask at the moment of the `clone`, `fork` or `vfork`, as
     /// Linux's `dup_task_struct` copies `cpus_mask`; `None`, the whole
@@ -175,6 +189,7 @@ impl Thread {
         );
         *thread.name.get_mut() = parent.name();
         *thread.slice_request.get_mut() = parent.slice_request();
+        thread.inherit_timer_slack(parent);
         thread.start_affinity = creator_mask(parent);
         Ok(thread)
     }
@@ -224,6 +239,7 @@ impl Thread {
         *thread.name.get_mut() = caller.name();
         *thread.nice.get_mut() = caller.nice();
         *thread.slice_request.get_mut() = caller.slice_request();
+        thread.inherit_timer_slack(caller);
         thread.start_affinity = creator_mask(caller);
         Ok(thread)
     }
@@ -254,8 +270,33 @@ impl Thread {
             name: SpinLock::new(None),
             nice: AtomicI32::new(0),
             slice_request: AtomicU64::new(0),
+            timer_slack: AtomicU64::new(crate::syscall::time::slack::DEFAULT_NS),
+            default_timer_slack: AtomicU64::new(crate::syscall::time::slack::DEFAULT_NS),
             start_affinity: None,
         }
+    }
+
+    /// Its timer slack: see [`Thread::timer_slack`]'s field.
+    pub(crate) fn timer_slack(&self) -> u64 {
+        self.timer_slack.load(Ordering::Relaxed)
+    }
+
+    /// Set its timer slack; zero sets it back to its default, as
+    /// `PR_SET_TIMERSLACK` does.
+    pub(crate) fn set_timer_slack(&self, nanos: u64) {
+        let nanos = if nanos == 0 {
+            self.default_timer_slack.load(Ordering::Relaxed)
+        } else {
+            nanos
+        };
+        self.timer_slack.store(nanos, Ordering::Relaxed);
+    }
+
+    /// Start with `creator`'s timer slack, as its value and as its default.
+    fn inherit_timer_slack(&mut self, creator: &Thread) {
+        let slack = creator.timer_slack();
+        *self.timer_slack.get_mut() = slack;
+        *self.default_timer_slack.get_mut() = slack;
     }
 
     /// Its slice request: see [`Thread::slice_request`]'s field.

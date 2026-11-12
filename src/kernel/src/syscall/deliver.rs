@@ -752,10 +752,18 @@ pub(crate) fn sys_rt_sigtimedwait(
     }
     let process = thread.process();
     let set = read_sigset(process, set)? & !UNBLOCKABLE;
+    // A nonzero timeout is late by the thread's slack; a zero one polls, as
+    // Linux's `do_sigtimedwait` (`docs/TIMER-SLACK.md`).
     let deadline = if timeout == 0 {
         u64::MAX
     } else {
-        crate::timer::now_nanos().saturating_add(read_timespec(process, timeout, width)?)
+        let relative = read_timespec(process, timeout, width)?;
+        let slack = if relative == 0 {
+            0
+        } else {
+            crate::syscall::time::slack::Slack::of(thread).sleep()
+        };
+        crate::syscall::time::slack::late(crate::timer::now_nanos().saturating_add(relative), slack)
     };
     wait_for_signal(thread, deadline, || {
         thread.with_signals(|shared, own| (shared.pending() | own.pending()) & set != 0)

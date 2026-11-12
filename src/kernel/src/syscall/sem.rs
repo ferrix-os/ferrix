@@ -1579,10 +1579,17 @@ fn sys_semtimedop(
         return Err(Errno::E2BIG);
     }
     let sops = read_sops(process, at, count)?;
+    // Late by the caller's slack, as Linux's `semtimedop` sleeps
+    // (`docs/TIMER-SLACK.md`).
     let deadline = match timeout {
         Some((address, width)) if address != 0 => {
             let relative = crate::syscall::poll::read_timespec(process, address, width)?;
-            Some(crate::timer::now_nanos().saturating_add(relative))
+            let slack =
+                time::slack::Slack::of_caller(crate::object::process::Host::core(process)).sleep();
+            Some(time::slack::late(
+                crate::timer::now_nanos().saturating_add(relative),
+                slack,
+            ))
         }
         _ => None,
     };
