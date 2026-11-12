@@ -3764,6 +3764,21 @@ package FerrixMemoryRequirements {
                 "user::address_wait::cost", "user::address_wait::grow",
                 "user::address_wait::shrink", "user::address_wait::move_into");
         }
+        // docs/BLOCK-AND-WAKE.md W1: a futex wait blocks on no queue, so the
+        // order of the wake and the block is the fence pair's (ledger 9027, WF6).
+        requirement <'L.user.246'> aWakeFindsTheWaiterBlockedOrItsMark : ItemLowLevel {
+            attribute :>> statement = "A wake that marks a waiter woken and the
+                waiter's block shall be ordered so that the wake finds the waiter
+                blocked or the waiter's last look finds the mark.";
+            attribute :>> criterion = "Two racers on two processors hand a turn
+                back and forth 1,000 times through two words, each wait bounded at
+                200 ms, well under the 1 s recheck; no wait times out with its word
+                at the round and the other racer's wake for it made (the `addrwait`
+                line, case 14; a rouse that marks and does not wake fails it).";
+            attribute :>> parent = "H.OBJ.20";
+            attribute :>> unit = ("user::address_wait::Sleeper::rouse",
+                "user::address_wait::sleep", "sched::wait::WaitQueue::wait_on_any");
+        }
     }
 
     package SpacesByHandle {

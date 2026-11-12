@@ -48,6 +48,31 @@
 //! for any reason takes the lock before it returns. So a wake can never land
 //! after its waiter has gone on to sleep for something else.
 //!
+//! # The wake and the block (`L.user.246`)
+//!
+//! A waiter sleeps on no queue: nothing wakes a queue for it, since every way
+//! a wait ends wakes its task by name. What keeps a wake from being lost
+//! between the waiter's last look and its block is the order of four
+//! accesses, two on each side: the waiter marks its task blocked, then looks
+//! at its sleeper's `woken`; the waker marks `woken`, then reads the task's
+//! state as it wakes it. That is the store-buffering shape, and a `SeqCst`
+//! fence on each side between the two orders it: the waiter's in
+//! `WaitQueue::wait_on_any`, after the task is marked blocked and before the
+//! last look, and the waker's in [`Sleeper::rouse`], after the mark and
+//! before the wake. Either the wake finds the task blocked and makes it
+//! runnable, or the last look finds the mark and the wait does not block.
+//!
+//! Every waker of a sleeper, and what orders it against the block:
+//! - a wake, and a requeue's wake: the fence pair above;
+//! - a signal, a kill or an end, which the wait's `interrupted` looks for: the
+//!   signal lock, which the poster holds as it posts and before it wakes, and
+//!   the look takes after the task is marked blocked;
+//! - the deadline, the caller's or [`TRUSTED_RECHECK_NANOS`]: the run queue's
+//!   lock, under which the switch files it and the timer takes it out.
+//!
+//! The recheck stays as the defence it is: a wake lost to a fault in this
+//! argument costs a second, not a hang.
+//!
 //! # Buckets, and what is never done under their locks
 //!
 //! The table is [`BUCKETS`] buckets, each with its own lock, and a key's
@@ -94,7 +119,7 @@
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering, fence};
 
 use ferrix_bootinfo::PAGE_SIZE;
 use ferrix_kmem::Charge;
@@ -287,6 +312,9 @@ impl Sleeper {
         {
             return false;
         }
+        // The waker's half of the module's "The wake and the block": the mark
+        // above is ordered before the state `wake` reads.
+        fence(Ordering::SeqCst);
         if let Some(task) = &self.task {
             sched::wake(task);
         }
@@ -358,10 +386,6 @@ static TABLE: [SpinLock<Vec<Entry>>; BUCKETS] = [const { SpinLock::new(Vec::new(
 fn bucket_lock(index: usize) -> &'static SpinLock<Vec<Entry>> {
     TABLE.get(index).unwrap_or(&TABLE[0])
 }
-
-/// What waiters block on. Nobody wakes it as a whole: a wake rouses its
-/// waiters' tasks one by one, and this is only the blocking mechanism.
-static SLEEP: WaitQueue = WaitQueue::new();
 
 /// Read the word with nothing held, faulting or filling its page in.
 fn read_word(space: &AddressSpace, word: &Word) -> Result<u32, WaitError> {
@@ -477,10 +501,11 @@ fn shrink(index: usize) {
 ///
 /// Trusting its wakes, as `poll` trusts a file's queues: a wake rouses the
 /// sleeper's task by name, and a caller that must leave is woken by whatever
-/// made it so.
+/// made it so. On no queue, since nothing wakes one for it: the module's "The
+/// wake and the block".
 fn sleep(sleeper: &Sleeper, interrupted: &dyn Fn() -> bool, deadline: u64) {
     let _ = WaitQueue::wait_on_any(
-        &[&SLEEP],
+        &[],
         || sleeper.is_woken() || interrupted(),
         deadline,
         TRUSTED_RECHECK_NANOS,

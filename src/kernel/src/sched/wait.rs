@@ -924,6 +924,11 @@ impl WaitQueue {
             // wake that did not yet satisfy `ready` cost a recheck.
             let last_look = LastLook::hold();
             task.set_state(BLOCKED);
+            // The mark above before the look below, for a waker that marks its
+            // waiter and then reads this task's state with no lock of the
+            // waiter's between: the waiter's half of a store-buffering pair
+            // (`L.user.246`, `user::address_wait`'s "The wake and the block").
+            core::sync::atomic::fence(Ordering::SeqCst);
             // Not listed on a queue there is no memory to list it on, as in
             // `wait_until_deadline`: that queue's wake is missed and the
             // recheck finds what it would have said.

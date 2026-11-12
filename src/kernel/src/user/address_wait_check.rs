@@ -88,6 +88,37 @@ const LATE_NANOS: u64 = 900_000_000;
 /// The most waiters at once.
 const SLOTS: usize = 4;
 
+/// Case 14's hand-offs between its two racers.
+const RACE_ROUNDS: u32 = 1000;
+/// How long one of case 14's waits may sleep before it looks at why: well
+/// under the 1 s recheck, so that a lost wake is named here and never rescued
+/// by it.
+const RACE_WAIT_NANOS: u64 = 200_000_000;
+/// How long after the other racer's wake returned a wait may end and still
+/// count as woken by it: a wake that worked ends the wait in microseconds,
+/// and a wait that sleeps on to its deadline ends just under
+/// [`RACE_WAIT_NANOS`] after a wake made just after it began.
+const RACE_LATE_NANOS: u64 = 100_000_000;
+/// Case 14's process, for its racers.
+static RACE_PROCESS: SpinLock<Option<Arc<Process>>> = SpinLock::new(None);
+/// One side's cell of a race's two: side 0's for 0, side 1's for anything
+/// else (a side is only ever 0 or 1).
+fn race_side<T>(cells: &[T; 2], side: usize) -> &T {
+    let [first, second] = cells;
+    if side == 0 { first } else { second }
+}
+
+/// The last round whose wake each racer has made.
+static RACE_WOKE: [core::sync::atomic::AtomicU32; 2] =
+    [const { core::sync::atomic::AtomicU32::new(0) }; 2];
+/// When each racer's last wake returned, in nanoseconds of the clock.
+static RACE_WOKE_AT: [core::sync::atomic::AtomicU64; 2] =
+    [const { core::sync::atomic::AtomicU64::new(0) }; 2];
+/// Each racer's end: 0 running, 1 every round handed over, 2 a wake lost, 3
+/// out of patience, 4 a call refused, 5 stopped because the other failed.
+static RACE_END: [core::sync::atomic::AtomicU32; 2] =
+    [const { core::sync::atomic::AtomicU32::new(0) }; 2];
+
 /// One call a waiter makes.
 struct Call {
     /// On whose behalf.
@@ -233,6 +264,7 @@ pub fn run() -> Result<Report, &'static str> {
     an_ending_process_ends_its_wait(&mut report)?;
     a_wait_beyond_its_jobs_limit_is_refused(&mut report)?;
     the_calls_refuse_what_the_abi_refuses(&a, &mut report)?;
+    a_wake_racing_a_block_is_never_lost(&a)?;
     report.walk_ns = a_walk_is_measured_and_its_room_given_back(&a)?;
     for side in [&a, &b, &c] {
         side.close_everything();
@@ -1023,6 +1055,175 @@ fn a_walk_is_measured_and_its_room_given_back(a: &Side) -> Result<u64, &'static 
         return Err("addrwait: a bucket kept its room after its entries left");
     }
     Ok(took / ENTRIES as u64)
+}
+
+/// Case 14: two racers on two processors hand a turn back and forth
+/// [`RACE_ROUNDS`] times through two words, each waiting for its word to reach
+/// the round and then waking the other's, every wait bounded at
+/// [`RACE_WAIT_NANOS`]. A wait that ends, by its deadline or by a mark it
+/// found only then, [`RACE_LATE_NANOS`] or more after the other racer's wake
+/// for its round returned, with its word at the round, was a wake lost
+/// between the waiter's last look and its block: woken wins over a timeout
+/// in `wait_on`, so a lost wake whose mark was made comes back as woken, late.
+///
+/// Verifies: L.user.246
+fn a_wake_racing_a_block_is_never_lost(a: &Side) -> Result<(), &'static str> {
+    use core::sync::atomic::Ordering;
+    set(a, WORD_B, 0)?;
+    set(a, WORD_C, 0)?;
+    *RACE_PROCESS.lock() = Some(Arc::clone(&a.process));
+    let processors = crate::smp::count().max(1);
+    let mut racers = alloc::vec::Vec::new();
+    for side in 0..2 {
+        race_side(&RACE_WOKE, side).store(0, Ordering::SeqCst);
+        race_side(&RACE_END, side).store(0, Ordering::SeqCst);
+        let cpu = side % processors;
+        let only = ferrix_sched::CpuSet::of(cpu);
+        let task = sched::spawn_on(
+            "addrwait racer",
+            racer,
+            side,
+            ferrix_sched::NICE_0_WEIGHT,
+            cpu,
+            only,
+        )
+        .map_err(|_| "addrwait: could not start a racer")?;
+        crate::fallible::try_push(&mut racers, task)
+            .map_err(|_| "addrwait: no memory for the racers")?;
+    }
+    let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    let failed = || RACE_END.iter().any(|end| end.load(Ordering::SeqCst) > 1);
+    let ended = || failed() || RACE_END.iter().all(|end| end.load(Ordering::SeqCst) != 0);
+    while !ended() {
+        if crate::timer::now_nanos() >= deadline {
+            return Err("addrwait: the racers did not finish their hand-offs in time");
+        }
+        sched::sleep_for(1_000_000);
+    }
+    // A racer that failed stops the other at its next look; both gone before
+    // the process is let go.
+    let gone = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    while RACE_END.iter().any(|end| end.load(Ordering::SeqCst) == 0) {
+        if crate::timer::now_nanos() >= gone {
+            return Err("addrwait: a racer did not stop after the other failed");
+        }
+        sched::sleep_for(1_000_000);
+    }
+    drop(racers);
+    *RACE_PROCESS.lock() = None;
+    let mut ends = [
+        RACE_END[0].load(Ordering::SeqCst),
+        RACE_END[1].load(Ordering::SeqCst),
+    ];
+    ends.sort_unstable_by_key(|end| match end {
+        2 => 0,
+        3 => 1,
+        4 => 2,
+        _ => 3,
+    });
+    for end in ends {
+        match end {
+            1 | 5 => {}
+            2 => {
+                return Err(
+                    "addrwait: a wake racing a block was lost: its waiter slept with its word set and the wake made",
+                );
+            }
+            3 => return Err("addrwait: a racer ran out of patience waiting for the other"),
+            _ => return Err("addrwait: a racer's call was refused"),
+        }
+    }
+    Ok(())
+}
+
+/// A racer of case 14: `side` 0 starts each round by waking side 1's word,
+/// side 1 answers by waking side 0's. Its end goes to [`RACE_END`].
+fn racer(side: usize) {
+    use core::sync::atomic::Ordering;
+    let end = race(side).unwrap_or_else(|code| code);
+    race_side(&RACE_END, side).store(end, Ordering::SeqCst);
+}
+
+/// [`racer`]'s rounds: `Ok(1)`, or `Err` with the end's code.
+fn race(side: usize) -> Result<u32, u32> {
+    use core::sync::atomic::Ordering;
+    let process = RACE_PROCESS.lock().clone().ok_or(4_u32)?;
+    let (mine, theirs) = if side == 0 {
+        (WORD_B, WORD_C)
+    } else {
+        (WORD_C, WORD_B)
+    };
+    let deadline_at = DEADLINES + 8 * (SLOTS + side) as u64;
+    let read = |at: u64| -> Result<u32, u32> {
+        let mut bytes = [0_u8; 4];
+        crate::syscall::uaccess::copy_from_user(process.space(), at, &mut bytes)
+            .map_err(|_| 4_u32)?;
+        Ok(u32::from_ne_bytes(bytes))
+    };
+    let hand_over = |round: u32| -> Result<(), u32> {
+        crate::syscall::uaccess::copy_to_user(process.space(), theirs, &round.to_ne_bytes())
+            .map_err(|_| 4_u32)?;
+        let _ = dispatch(
+            &process,
+            nr::ADDRESS_WAKE,
+            [theirs, 1, u64::from(u32::MAX), 0, 0, 0],
+        )
+        .map_err(|_| 4_u32)?;
+        race_side(&RACE_WOKE_AT, side).store(crate::timer::now_nanos(), Ordering::SeqCst);
+        race_side(&RACE_WOKE, side).store(round, Ordering::SeqCst);
+        Ok(())
+    };
+    let patience = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    for round in 1..=RACE_ROUNDS {
+        if side == 0 {
+            hand_over(round)?;
+        }
+        loop {
+            if race_side(&RACE_END, 1 - side).load(Ordering::SeqCst) > 1 {
+                return Err(5);
+            }
+            let seen = read(mine)?;
+            if seen == round {
+                break;
+            }
+            let until = crate::timer::now_nanos().saturating_add(RACE_WAIT_NANOS);
+            crate::syscall::uaccess::copy_to_user(
+                process.space(),
+                deadline_at,
+                &until.to_ne_bytes(),
+            )
+            .map_err(|_| 4_u32)?;
+            let answer = dispatch(
+                &process,
+                nr::ADDRESS_WAIT,
+                [
+                    mine,
+                    u64::from(seen),
+                    u64::from(u32::MAX),
+                    0,
+                    deadline_at,
+                    0,
+                ],
+            );
+            let now = crate::timer::now_nanos();
+            let peer = 1 - side;
+            let lost = race_side(&RACE_WOKE, peer).load(Ordering::SeqCst) >= round
+                && now.saturating_sub(race_side(&RACE_WOKE_AT, peer).load(Ordering::SeqCst))
+                    >= RACE_LATE_NANOS
+                && read(mine)? == round;
+            match answer {
+                Ok(_) | Err(status::TIMED_OUT) if lost => return Err(2),
+                Ok(_) | Err(status::SHOULD_WAIT) => {}
+                Err(status::TIMED_OUT) if now >= patience => return Err(3),
+                Err(status::TIMED_OUT) => {}
+                Err(_) => return Err(4),
+            }
+        }
+        if side == 1 {
+            hand_over(round)?;
+        }
+    }
+    Ok(1)
 }
 
 /// Case 13 needs the sabotage hooks, which a kernel built `checks=off` has

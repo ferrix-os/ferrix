@@ -13,15 +13,6 @@
   "reservations": [
     {
       "ids": [
-        "L.user.246"
-      ],
-      "owner": "sleep-cost",
-      "branch": "sys/wake-futex",
-      "date": "2026-11-12",
-      "purpose": "A wake that marks a futex waiter woken and the waiter's block are ordered so that the wake finds the waiter blocked or the waiter's last look finds the mark (docs/BLOCK-AND-WAKE.md, W1; consultant ledger 9027, WF6)"
-    },
-    {
-      "ids": [
         "L.user.245"
       ],
       "owner": "silent-reset",
