@@ -35,7 +35,7 @@ mod steps;
 
 use ferrix_blkring::control::{Message as StartMessage, START_BYTES};
 use ferrix_intel_xelp::device_info;
-use ferrix_intel_xelp::frontend::{Backend, Frontend};
+use ferrix_intel_xelp::frontend::Backend;
 use ferrix_intel_xelp::remote::{Journal, RemoteBackend};
 use ferrix_native_abi::handle::Handle;
 use ferrix_native_abi::signals::Signals;
@@ -168,7 +168,10 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
         facts.sseu.eu_total,
         facts.cs_timestamp_hz
     );
-    let mut frontend = Frontend::new(backend);
+    let mut frontend = serve::Placed::new(backend).map_err(|error| {
+        ferrix_rt::err!("intel: the keeper has no pages for the front end's tables: {error:?}");
+        Step::Serve
+    })?;
     let mut host = serve::publish(&device, info.location).map_err(|_| Step::Serve)?;
     match serve::serve(&mut host, &port, &mut frontend, &mut |_, _, _| {}) {
         Ok(never) => match never {},

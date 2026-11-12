@@ -29,7 +29,7 @@ mod serve;
 
 use ferrix_blkring::control::{Message as StartMessage, START_BYTES};
 use ferrix_intel_xelp::device_info;
-use ferrix_intel_xelp::frontend::Frontend;
+
 use ferrix_linux_abi::errno::Errno;
 use ferrix_native_abi::handle::Handle;
 use ferrix_native_abi::signals::Signals;
@@ -129,12 +129,16 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
         fake::MARKER
     );
     let port = port::create(Kernel).map_err(|_| Step::Port)?;
-    let mut frontend = Frontend::new(fake::Fake::new(facts, |bytes| {
+    let mut frontend = serve::Placed::new(fake::Fake::new(facts, |bytes| {
         let bytes = usize::try_from(bytes).map_err(|_| Errno::ENOMEM)?;
         vmo::create(Kernel, bytes)
             .map(|vmo| Memory { vmo })
             .map_err(|_| Errno::ENOMEM)
-    }));
+    }))
+    .map_err(|error| {
+        ferrix_rt::err!("intel-fake: no pages for the front end's tables: {error:?}");
+        Step::Serve
+    })?;
     let mut host = serve::publish(&device, info.location).map_err(|_| Step::Serve)?;
     match serve::serve(&mut host, &port, &mut frontend, &mut |_, _, _| {}) {
         Ok(never) => match never {},

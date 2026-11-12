@@ -2804,11 +2804,14 @@ fn reg_read_reads_the_timestamp_alone() {
     });
 }
 
-/// The tables fit the 8 MiB stack a native process starts on with room to
-/// spare (`syscall/exec.rs`, `STACK_SIZE`): the driver builds its front end
-/// there.
+/// The tables stay under 3 MiB. This measures the type, not a frame: a
+/// driver builds its front end in pages of its own (`serve::Placed`), never
+/// on its 8 MiB stack, and what its stack holds is
+/// `tools/common/check/check-native-stacks.py`'s to judge, on the built
+/// program. On 2026-11-12 this passed while `intel`'s way to
+/// `Tables::new` took 8.24 MiB of stack and faulted.
 #[test]
-fn the_tables_fit_a_native_stack() {
+fn the_tables_stay_under_3_mib() {
     let bytes = size_of::<Frontend<FakeBackend>>();
     assert!(bytes < 3 << 20, "{bytes} bytes");
 }

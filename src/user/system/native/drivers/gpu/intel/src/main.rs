@@ -516,7 +516,6 @@ fn serve_gpu(
     steps: &Steps,
 ) -> Result<core::convert::Infallible, Step> {
     use ferrix_intel_xelp::backend::XelpBackend;
-    use ferrix_intel_xelp::frontend::Frontend;
     let M1Done {
         mut bar, firmware, ..
     } = done;
@@ -611,15 +610,29 @@ fn serve_gpu(
         uncore::fw_domains_put(backend.platform().bar(), &all, rest);
     }
     serving_power(&mut backend, steps, all);
-    let mut frontend = Frontend::new(backend);
+    let mut frontend = place_frontend(backend, steps)?;
+    let stat = steps.ioctlstat;
+    serve_nodes(device, location, firmware.plane, &port, &mut frontend, stat)
+}
+
+/// The front end over `backend`, built in pages of its own and never on
+/// the stack ([`serve::Placed`]: its tables are 3 MiB of an 8 MiB stack),
+/// tracing as `ferrix.intelgpu.uapitrace` asks.
+fn place_frontend<B: ferrix_intel_xelp::frontend::Backend>(
+    backend: B,
+    steps: &Steps,
+) -> Result<serve::Placed<B>, Step> {
+    let mut frontend = serve::Placed::new(backend).map_err(|error| {
+        ferrix_rt::err!("intel: no pages for the front end's tables: {error:?}");
+        Step::Backend
+    })?;
     frontend.set_trace(steps.uapitrace);
     if steps.uapitrace {
         ferrix_rt::notice!(
             "intel: uapitrace: held waits, their answers, failed ioctls, and a wait unanswered for 2 s (ferrix.intelgpu.uapitrace)"
         );
     }
-    let stat = steps.ioctlstat;
-    serve_nodes(device, location, firmware.plane, &port, &mut frontend, stat)
+    Ok(frontend)
 }
 
 /// The MSI, bound to the serving loop's port under

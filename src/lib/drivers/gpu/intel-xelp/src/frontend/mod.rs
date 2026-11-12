@@ -135,8 +135,11 @@ impl<B: Backend> core::fmt::Debug for Frontend<B> {
 
 impl<B: Backend> Frontend<B> {
     /// A front end over `backend`, with every table empty. The tables are
-    /// several megabytes: build this in place (a `static`, or a thread with
-    /// a large stack in a test), never on a small stack.
+    /// over 3 MiB and this returns them by value, through its frame and its
+    /// caller's: for a test, on a thread with a large stack. A driver builds
+    /// its front end where it lives instead, its two fields written in
+    /// place and the tables from the constant [`objects::Tables::new`]
+    /// (the Intel driver's `serve::Placed`), never on its stack.
     pub fn new(backend: B) -> Self {
         Self {
             backend,

@@ -523,6 +523,119 @@ pub(crate) fn publish(device: &Device<Kernel>, location: u32) -> Result<ChardevH
     }
 }
 
+/// A page: what [`Placed`]'s mapping is made of.
+const PAGE: usize = 4096;
+
+/// What [`Placed::new`] says once the front end is built, before its size:
+/// the line `test-intel-uapi` and `test-restart --boot intel` want.
+pub(crate) const PLACED: &str = "intel: front end placed: ";
+
+/// The front end, built where it lives -- pages of this process's own, a
+/// VMO mapped read-write for it alone -- and never on a stack.
+///
+/// A native program's stack is 8 MiB (`NATIVE_STACK_SIZE`) and the front
+/// end's tables are about 3 MiB (`ferrix_intel_xelp::frontend::limits`).
+/// `Frontend::new` returns them by value, through its own frame and its
+/// caller's: on 2026-11-12 `intel` needed 8.24 MiB of stack to reach the
+/// probe of `Tables::new`'s 4.5 MiB frame and faulted below its stack at
+/// step 23 on the N150, the execbuffer's copy of its object list
+/// (`Tables::exec`, 128 KiB) the change that took it past. Here the back
+/// end is moved into the mapping and the empty tables are written into it
+/// from their constant, so no frame holds them, and
+/// `tools/common/check/check-native-stacks.py` holds each driver's deepest
+/// path to its budget. All three drivers this file serves build their front
+/// end here, so `test-intel-uapi` and `test-restart --boot intel` boot the
+/// path the GT's driver takes.
+pub(crate) struct Placed<B: Backend> {
+    /// The front end, at the mapping's start.
+    frontend: core::ptr::NonNull<Frontend<B>>,
+    /// The mapping's length: whole pages.
+    bytes: usize,
+}
+
+impl<B: Backend> Placed<B> {
+    /// The front end over `backend`, every table empty, in a mapping of its
+    /// own.
+    ///
+    /// # Errors
+    ///
+    /// The VMO or its mapping refused (no memory, or no address space); the
+    /// back end is dropped.
+    pub(crate) fn new(backend: B) -> Result<Self, Error> {
+        const {
+            assert!(
+                align_of::<Frontend<B>>() <= PAGE,
+                "a mapping's start is only page-aligned"
+            );
+        }
+        let bytes = size_of::<Frontend<B>>().next_multiple_of(PAGE);
+        let vmo = ferrix_rt::native::vmo::create(Kernel, bytes)?;
+        // The mapping outlives the handle (`Vmo::map`).
+        let map = vmo.map(
+            None,
+            bytes,
+            ferrix_rt::native::pending::Protection::ReadWrite,
+            0,
+        )?;
+        let Some(frontend) =
+            core::ptr::NonNull::new(core::ptr::with_exposed_provenance_mut::<Frontend<B>>(map))
+        else {
+            return Err(Error::NoMemory);
+        };
+        let at = frontend.as_ptr();
+        // SAFETY: `at` is the start of `bytes` bytes, at least a
+        // `Frontend<B>`, of this process's own new read-write mapping,
+        // page-aligned and so aligned for it (asserted above), and nothing
+        // else refers to them. `&raw mut` names the field without making a
+        // reference to the value not yet written.
+        let backend_at = unsafe { &raw mut (*at).backend };
+        // SAFETY: `backend_at` is valid for a write and aligned, as above.
+        unsafe { backend_at.write(backend) };
+        // SAFETY: as for `backend_at`, the other field.
+        let state_at = unsafe { &raw mut (*at).state };
+        // SAFETY: `state_at` is valid for a write and aligned, as above. The
+        // value is a constant: written by a copy from the image, never built
+        // in a frame.
+        unsafe { state_at.write(const { ferrix_intel_xelp::frontend::objects::Tables::new() }) };
+        // Every field of `Frontend` is written above: this stops compiling
+        // when it gains one, which would be left unwritten.
+        let _every_field = |whole: &Frontend<B>| {
+            let Frontend { backend, state } = whole;
+            let _ = (backend, state);
+        };
+        ferrix_rt::info!("{PLACED}{} KiB of its own, off the stack", bytes >> 10);
+        Ok(Self { frontend, bytes })
+    }
+}
+
+impl<B: Backend> core::ops::Deref for Placed<B> {
+    type Target = Frontend<B>;
+
+    fn deref(&self) -> &Frontend<B> {
+        // SAFETY: written whole in `new`, alive until `drop`, and borrowed
+        // as `self` is.
+        unsafe { self.frontend.as_ref() }
+    }
+}
+
+impl<B: Backend> core::ops::DerefMut for Placed<B> {
+    fn deref_mut(&mut self) -> &mut Frontend<B> {
+        // SAFETY: as for `deref`, and `self` is borrowed mutably.
+        unsafe { self.frontend.as_mut() }
+    }
+}
+
+impl<B: Backend> Drop for Placed<B> {
+    /// Drop the front end, as one on a stack would be at its scope's end,
+    /// then give its pages back.
+    fn drop(&mut self) {
+        // SAFETY: written whole in `new` and dropped once, here; nothing
+        // refers to it after `self`.
+        unsafe { self.frontend.drop_in_place() };
+        let _ = ferrix_rt::linux::munmap(self.frontend.as_ptr().addr(), self.bytes);
+    }
+}
+
 /// What the Intel driver's display card reaches of the render node while
 /// both are served: the front end, for the card's own work on the GT, and
 /// the host its services answer through.
