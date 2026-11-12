@@ -643,13 +643,35 @@ impl Ppgtt {
         Some(table | (offset & (within - 1)))
     }
 
-    /// `gen8_ppgtt_cleanup` for a VM that [`Ppgtt::clear_range`] emptied:
-    /// the PML4 and the scratch tables given back. Whatever is still mapped
-    /// is the caller's to clear first; its tables would leak.
+    /// `gen8_ppgtt_cleanup`: every table of the tree given back
+    /// (`__gen8_ppgtt_cleanup`, from the PML4 down), then the PML4 and the
+    /// scratch tables. Whatever is still mapped goes with it: the front end
+    /// drops a destroyed VM's bindings without unbinding each, as i915's VM
+    /// release frees the tree whole.
     pub fn destroy<M: PtMemory + ?Sized>(self, mem: &mut M) {
+        self.free_below(mem, self.pml4, PPGTT_TOP_48);
         mem.free_pt(self.pml4);
         for page in self.scratch {
             mem.free_pt(page);
+        }
+    }
+
+    /// `__gen8_ppgtt_cleanup` of the tables below `table`, a directory at
+    /// level `lvl`: each entry that is not its level's scratch names a
+    /// table, freed after what is below it, except a 2 MiB page at level 1,
+    /// which is memory, not a table.
+    fn free_below<M: PtMemory + ?Sized>(&self, mem: &mut M, table: u64, lvl: u32) {
+        let scratch = self.scratch_at(lvl);
+        for index in 0..GEN8_PDES as usize {
+            let entry = mem.read_entry(table, index);
+            if entry == scratch || (lvl == 1 && entry & GEN8_PDE_PS_2M != 0) {
+                continue;
+            }
+            let below = entry & PTE_ADDR_MASK;
+            if lvl > 1 {
+                self.free_below(mem, below, lvl - 1);
+            }
+            mem.free_pt(below);
         }
     }
 }

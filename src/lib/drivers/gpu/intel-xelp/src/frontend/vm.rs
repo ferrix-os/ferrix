@@ -137,6 +137,8 @@ pub fn free_idle<B: Backend>(backend: &mut B, state: &mut Tables<B::Memory>) {
                 continue;
             };
             // Every binding of the VM: idle, since no context of it is left.
+            // None is unbound one by one: `Backend::vm_destroy` takes the
+            // mappings and every page table with the VM.
             let first = Binding::key_of(vm_slot, 0);
             loop {
                 let range = state.bindings.overlapping(first, 1 << 48);

@@ -383,6 +383,30 @@ fn a_bind_that_fails_part_way_leaves_nothing_mapped() {
     assert_eq!(be.bound(), [0, 0, 4 << 20]);
 }
 
+/// Destroying a VM gives back every page table it has, not only its PML4
+/// and scratch tables: the front end drops a destroyed VM's bindings
+/// without unbinding each, so tables left below the PML4 would leak from
+/// the pool for good (`gen8_ppgtt_cleanup` frees the tree whole).
+#[test]
+fn a_destroyed_vm_gives_back_every_table() {
+    let mut be = backend();
+    let before = be.platform().gpu.tables.pages.len();
+    let vm = be.vm_create().expect("vm");
+    let memory = be.platform().create_memory(4 << 20).expect("memory");
+    // Two 2 MiB entries (a PDP and a directory); 4 KiB entries in the next
+    // 512 GiB, over two leaf tables (a PDP, a directory, two leaves); one
+    // page alone in another directory of the first PDP (a directory and a
+    // leaf).
+    assert_eq!(be.bind(vm, 0x40_0000_0000, &memory, 4 << 20, 0), Ok(()));
+    assert_eq!(be.bind(vm, 0x80_0000_1000, &memory, 2 << 20, 0), Ok(()));
+    assert_eq!(be.bind(vm, 0x1000, &memory, 4096, 0), Ok(()));
+    let mapped = be.platform().gpu.tables.pages.len();
+    // The PML4 and four scratch, then 2 + 4 + 2 tables below.
+    assert_eq!(mapped, before + 5 + 8);
+    be.vm_destroy(vm);
+    assert_eq!(be.platform().gpu.tables.pages.len(), before);
+}
+
 #[test]
 fn a_stalled_request_is_reset_hung_and_its_context_banned() {
     let mut be = backend();

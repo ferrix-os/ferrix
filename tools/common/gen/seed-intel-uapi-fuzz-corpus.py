@@ -160,12 +160,13 @@ class Program:
         timeline=None,
     ):
         """objects: (handle selector, page, write); the last is the batch.
+        A page given as a list is `Input::gpu_address`'s bytes as they are.
         fence_array: (syncobj selector, FENCE_WAIT or FENCE_SIGNAL).
         timeline: (syncobj selector, flags, point)."""
         self.add(EXECBUFFER, file, len(objects))
         for handle, page, write in objects:
             # handle, its flag bits (1: WRITE), address (selector 1: page x 4 KiB)
-            self.add(handle, 1 if write else 0, 1, page)
+            self.add(handle, 1 if write else 0, page if isinstance(page, list) else [1, page])
         self.add(VALID, ring)
         bits = 0
         if fence_out:
@@ -519,6 +520,22 @@ def seeds():
         .complete(count=4)
         .close(A, own(1))
         .service()
+    )
+    # A VM destroyed with its bindings still mapped (D4): a 2 MiB entry at
+    # 2 MiB and a page at 4 GiB, two directories and a leaf table below
+    # the PML4, which go with the VM when its last context does.
+    yield "vm-destroyed-with-page-tables", (
+        Program()
+        .vm_create(A)
+        .context_create(A, [VM_PARAM])
+        .create(A, 1)
+        .create_2m(A)
+        .execbuffer(A, [(own(1), [7, 0x20], False), (own(0), [9], False)], context=own(0))
+        .complete()
+        .vm_destroy(A, own(0))
+        .context_destroy(A, own(0))
+        .service()
+        .release(A)
     )
     yield "limit-files", Program().repeat(41, lambda p: p.open(0))
     yield "limit-held-waits", (

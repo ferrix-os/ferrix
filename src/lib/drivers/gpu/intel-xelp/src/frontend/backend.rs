@@ -124,7 +124,9 @@ pub trait Backend {
     /// `ENOMEM`.
     fn vm_create(&mut self) -> Result<VmId, Errno>;
 
-    /// Destroy `vm`: no context and no binding uses it any more.
+    /// Destroy `vm`: no context uses it any more, so no request of it runs.
+    /// Its mappings go with it, every page table of them: the front end
+    /// drops a destroyed VM's bindings without unbinding each.
     fn vm_destroy(&mut self, vm: VmId);
 
     /// Map `bytes` of `memory` at `address` in `vm` with `pat_index`.

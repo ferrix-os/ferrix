@@ -591,6 +591,13 @@ impl Backend for Model {
         };
         self.pt.current = vm.0;
         ppgtt.destroy(&mut self.pt);
+        // Every table goes with it, whatever was still mapped (D4).
+        assert_eq!(
+            self.pt.owned(vm.0),
+            0,
+            "VM {} destroyed, its page tables left",
+            vm.0
+        );
         assert!(
             !self.contexts.values().any(|context| context.vm == vm.0),
             "VM {} destroyed under a live hardware context",
@@ -2959,6 +2966,12 @@ fn check(rig: &Rig) {
         "live memories"
     );
     assert_eq!(model.vms.len(), backed, "back-end VMs");
+    for (table, vm) in &model.pt.owner {
+        assert!(
+            model.vms.contains_key(vm),
+            "page table {table:#x} of destroyed VM {vm}"
+        );
+    }
     assert_eq!(model.contexts.len(), hw, "hardware contexts");
     assert_eq!(
         model.binds.len(),
@@ -3036,6 +3049,7 @@ fn teardown(rig: &mut Rig) {
     let model = &rig.frontend.backend;
     assert!(model.live.borrow().is_empty(), "memories left");
     assert!(model.vms.is_empty() && model.contexts.is_empty() && model.binds.is_empty());
+    assert!(model.pt.tables.is_empty(), "page tables left");
     for (fence, status) in &rig.host.fences {
         assert!(status.is_some(), "kernel fence {fence} never signalled");
     }
