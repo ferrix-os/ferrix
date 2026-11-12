@@ -508,13 +508,20 @@ CHECKS-ONLY file as the checks' oracle; no release build reaches it.
 `meminfobench` (`~/.local/share/ferrix/ef-30fps/faultbench/meminfobench.rs`,
 sha256 9ff6013a…; logs in `~/.local/share/ferrix/logs/rss/`): 200 reads of
 `/proc/meminfo` (open, read to the end, close) with a boot's few files, then
-with 10,000 more files of one written page each. Medians, µs a read:
+with 10,000 more files of one written page each. Medians, µs a read, Ferrix
+booted with `ferrix.checks=skip` (`meminfobench-release-skip-9f2fa4e46.serial.log`
+sha256 41944422…, `meminfobench-release-skip-3ddb22aa0.serial.log` db93c720…,
+`meminfobench-linux-7.0-kvm-guest.log` 57806ed4…):
 
 | Release build, KVM guest on nazuna (xtask's `-cpu`) | boot's files | 10,000 more |
 |---|---|---|
 | Linux 7.0 as the guest | 1.9 | 2.0 |
-| Ferrix, rss/kept-counts 9f2fa4e46 (the walk) | 8.8 | 289.4 |
-| Ferrix, rss/meminfo (kept) | 7.7 | 8.4 |
+| Ferrix, rss/kept-counts 9f2fa4e46 (the walk) | 6.2 | 211.4 |
+| Ferrix, rss/meminfo 3ddb22aa0 (kept) | 5.6 | 5.7 |
+
+The figures first given here (8.8 and 289.4 before, 7.7 and 8.4 after) were
+taken with every self-check running beside the bench; these are the same
+reads with the self-checks skipped.
 
 The read no longer grows with the cache; what is left is the cost of a
 procfs file's open, which renders it, against Linux's (the coordinator's
@@ -535,7 +542,7 @@ lock is let go and as its filesystem tells, never below zero and equal to
 those per-object figures whenever no change is under way; `L.user.240`, a
 read takes only the early counts and each processor's record, touching no
 cache object, list or lock; `L.user.241`, a settle adds to the record of the
-processor it runs on, or to the early counts before the records are kept.
+processor it runs on, or to the early counts before that record can be found.
 
 ## 10. Where it stands
 
