@@ -309,34 +309,240 @@ release build, against 2.0 µs in the Linux guest). It is not this change's.
 
 ## 9. `/proc/meminfo`
 
-What a read is made of today (`fs::procfs::render::meminfo`): free and managed
-frames (two loads under the frame allocator's lock), the heap's pages, the
-writable btrfs mounts' clean bytes (one per mount), and `user::cache::totals`,
-which walks the page cache's list: the list's lock while every entry's `Weak`
-is upgraded into a fresh `Vec` (the dead ones too, until a close-up), then per
-object its pages lock for `committed`, again for `dirty_pages`' page states,
-and its filler's `dirty_pages` and `reclaimable`. It grows with the number of
-cached files, live and dead, not with what one program holds: 33 µs in the
-guest with a boot's few files, 3.1 ms on the N150 with the game's.
+### 9.1 What a read is made of, and what it costs
 
-It is a different mechanism from the resident counts: machine-wide, not per
-space; moved by every page-cache event of every file, so one shared counter
-would be a contended line on every fault and read of the cache (Linux keeps
-`vmstat` per CPU and folds it); and two of its parts are not page-set
-changes at all: `Dirty` adds a filesystem's own count of pages written and not
-written back (`Filler::dirty_pages`) to the object's page states, and
-`MemAvailable` counts a reclaimable object's clean pages. So it is a second
-branch, `rss/meminfo`, on top of this one, with its own design review (K10):
-per-CPU counts of disk and memory-filesystem pages moved by the same `Frames`
-funnel for an object the cache registered (its class set at `register`, its
-pages counted in then), per-CPU counts of page states moved where `states`
-changes, the filesystems' dirty count kept by them, and `L.user.175`'s and
-`L.object.189`'s statements kept word for word.
+`fs::procfs::render::meminfo`: free and managed frames (two loads under the
+frame allocator's lock), the heap's pages, the writable btrfs mounts' clean
+bytes (`fs::btrfs::clean_bytes`, one load per mount: `L.user.175`), and
+`user::cache::totals`, which walks the page cache's list: under the list's
+lock every entry's `Weak` is upgraded into a fresh `Vec` (the dead entries
+too, until a close-up), then per object its pages lock for `committed`,
+again for `dirty_pages`' page states, its filler's `dirty_pages` (a btrfs
+writable file's: its dirty set's lock) and `reclaimable`. Per object:
+
+* a disk file's (`filler` some): `disk += pages`; `dirty += min(fs + states,
+  pages)`, with `fs` the filesystem's own count of pages written and not
+  written back (`Filler::dirty_pages`) and `states` the pages a shared
+  mapping wrote (`Pages::states`: Dirty or AwaitingClean); if the object is
+  `reclaimable`, `reclaimable += pages - that dirty`;
+* a memory filesystem's (tmpfs, the initramfs, `memfd`): `memory += pages`.
+
+`Cached = disk + memory`, `Shmem = memory`, `Dirty = dirty`, `MemAvailable =
+free + reclaimable + clean nodes` (`L.object.189`, `L.user.175`).
+
+The read grows with the number of cached files, live and dead, not with what
+anyone holds: release build, KVM guest, a boot's few files: 6.6 µs (develop
+1aea9a223), Linux 7.0 in the same guest 2.1 µs; on the N150 with the game,
+3.05 ms (3 to 4.6 ms).
+
+### 9.2 What Linux does
+
+`fs/proc/meminfo.c` reads `global_node_page_state` (`NR_FILE_PAGES`,
+`NR_SHMEM`, `NR_FILE_DIRTY`) and `si_mem_available`: counters kept in
+`vmstat` as pages enter and leave the page cache and as a folio's dirty flag
+is set and cleared (`__lruvec_stat_mod_folio`, `folio_account_dirtied`,
+`folio_account_cleaned`). Each processor adds into its own differential
+(`vm_node_stat_diff`) and folds it into the global atomic when it passes a
+threshold (`stat_threshold`, up to 125 pages); the reader reads the global
+atomics alone, so its figure lags by up to the threshold times the
+processors. Nothing a reader does grows with the files.
+
+### 9.3 The decision: the same figures, kept
+
+The figures do not change. `L.object.189`'s and `L.user.175`'s statements
+stand word for word, and so does every term of §9.1 -- including the cap
+`min(fs + states, pages)` per object, which a machine-wide count of dirty
+pages could not keep: the cap is a per-object fact (a page in both the
+dirty set and the page states, or a dirty mark for a page reclaim or a
+truncation has already taken, is counted once per object at most up to its
+pages). So the count is kept per object, as the resident counts are kept per
+view, and summed machine-wide as it moves.
+
+### 9.4 The mechanism
+
+**Each cache object's share.** `Pages` gains `share: Option<Share>`, set by
+`Vmo::new_filled` before the object is registered and on no other object
+(every other constructor of `Pages`, the fork's included, leaves it `None`):
+exactly the objects the walk counts. A `Share` holds what the object adds to
+the machine's counts now -- `given_pages`, `given_dirty` -- its class (disk
+or memory, and for a disk file whether it is `reclaimable`, fixed at
+creation: every source answers a constant, and the trait's documentation
+says so from now on) and `fs`, the filesystem's dirty count as last read,
+first read by `new_filled` itself, so that a source already dirty when its
+object is made is counted.
+
+**One settle, at every release of the pages lock.** `PagesGuard`'s `Drop`
+(no longer check builds only) settles inside its body, the lock still held:
+every change of `frames` and of `states` is made under that guard (the
+`Frames` funnel of §4 and the thirteen `states` sites alike), so no change
+site can be missed. It compares `(frames.len(), min(fs + states.len(),
+frames.len()))` with what the share gave, and if either moved adds the
+differences to the machine's counts and records them: O(1), no allocation,
+cannot fail. An object with no share pays one test of an `Option`. An
+object's drop (which reaches its pages with `get_mut`, no guard) takes back
+all its share gave, and in check builds stops if `reclaimable()` no longer
+answers the class fixed at its creation.
+
+**The filesystem's dirty count.** `Filler::dirty_pages` (and the vfs
+`PageSource::dirty_pages` it forwards to) answers from an atomic load: no
+lock, no blocking, no allocation, as the core calls it under the pages spin
+lock. A source whose count moves tells its store after the change, holding
+none of its own spin locks: `Pages::dirty_changed` (vfs; a no-op by
+default), which the kernel's store answers by taking the object's pages
+lock, reading `dirty_pages` into the share, and letting the settle move the
+counts. Because the store reads the count rather than being handed it, two
+tellings that race leave the last read, which comes after the last change:
+exact once the changes are done, in any order.
+
+btrfs's writable mount keeps its dirty set in a `DirtySet`, its set private
+behind its guard, so every change goes through the guard. The guard notes
+the set's length when taken; in its `Drop`, *before* the set's lock is let
+go, it stores a changed length in the atomic `dirty_pages` reads (stored
+after the unlock, an earlier holder's late store could overwrite a later
+one, and every later reading would be stale for good); then, the lock let
+go, it tells the store if the length changed. The store is the node's page
+cache, which the set holds weakly (the cache's source holds the set, so a
+strong hold would be a cycle), and is set under the node's slot lock as the
+cache is made, before any write can reach the set. So the tell is
+structural: the six places the set changes -- a write's marks, a
+truncation's cut, a writeback slice's take and its failed return, a full
+writeback's take and its failed return -- tell without a line of their own,
+and the places that only read it tell nothing. The read-only mounts', the
+served volumes' and tmpfs's count is a constant zero.
+
+**Lock order.** The tell takes a pages lock with none of btrfs's spin locks
+held: never under the dirty set's lock or the `still` lock, and no dirty
+set's lock is ever taken under a pages lock (the core reads the atomic
+instead). It may be taken under btrfs's volume lock, as `write_runs`' reads
+of the cache already are.
+
+**The machine's counts, per processor.** Four signed counts -- disk pages,
+memory pages, dirty, reclaimable -- live in each processor's `PerCpu` record
+(next to `syscalls`, the same idea; no offset read from assembly moves, and
+`irq_guards` stays last), plus an early set. A settle finds its record by
+`smp::this_cpu()`, and adds to the early set while that answers none: before
+`discover` installs the boot processor's record, which it takes from
+`topology().cpus()`, so a record a settle adds to is always one the reader
+sums. Parked threads run no settle. Today's boot makes its first cache
+object in stage 6, after stage 4's `discover`, so the early set covers a
+boot order Ferrix does not have today: a settle that ever runs that early is
+counted, not lost (its negative control cannot fire, and is recorded as not
+fired, for that reason). A settle runs under the pages spin lock with
+preemption held off, so the task cannot move between finding its record and
+adding; it adds with a relaxed `fetch_add` to that record: one line per
+processor, never one line every processor writes on every page of every file
+(K10). In the lift build (the core in ring 3, the QM profile) the thread can
+move between finding its record and adding, so the add may land on another
+processor's record: the sums stay exact, being sums of every record, and
+`L.user.241`'s own-record claim is the kernel builds'. `AtomicU64` is
+single-copy atomic on all three architectures (ARMv7-A by
+`ldrexd`/`strexd`), so a remote reader never sees half a word, which matters
+here because a processor's own sum goes below zero whenever pages it did not
+add leave on it (the counts are two's complement, summed wrapping).
+
+**The reader.** `totals()` sums the early set and every record of
+`topology().cpus()`, each field wrapping as `i64`, and clamps each sum at
+zero: no lock, no list, no cache object. A reader racing changes on two
+processors can see one and not the other; it is exact whenever the changes
+it is to see are done, as the walk's figure was. The walk (`walked_totals`,
+today's `totals` body unchanged, with `Vmo::dirty_pages`) moves to a
+CHECKS-ONLY file as the checks' oracle; no release build reaches it.
+
+### 9.5 Costs
+
+* A page entering or leaving a cache object: the settle's comparison and up
+  to three relaxed adds on this processor's line. A fault of a file page
+  already pays a pages lock, a frame and a fill. Every other release of a
+  pages lock: one test.
+* A btrfs change of a dirty set: one pages lock after it.
+* Memory: 32 bytes per processor record; every VMO's `Pages`, anonymous ones
+  included, grows by `size_of::<Option<Share>>()`, 32 bytes (two flags and
+  three counts; `None` takes a flag's spare values); no allocation
+  anywhere.
+* The reader: four loads per processor.
+
+### 9.6 Checks
+
+* `cache_kept_check` (core, every profile), with check sources -- a memory
+  filesystem's object, a reclaimable disk file's whose dirty count moves
+  and tells, a non-reclaimable one, and one dirty before its object is made
+  -- pages committed and decommitted, page states set Dirty, AwaitingClean
+  and Clean, the cap reached (a page counted by the filesystem and in the
+  page states), objects dropped holding pages, and 4,096 objects made and
+  dropped:
+  * each check object's share equals its own walked figures exactly;
+  * the machine-wide equality on a quiet reading only: the kept read
+    between two walks that agree, retried a bounded number of times, then a
+    failure, never a pass for running out;
+  * `L.user.240`: a check-build count of walks unchanged across `totals()`
+    with 4,096 live objects; the time against none reported;
+  * `L.user.241`: with preemption held off on a processor other than 0,
+    committing N pages to a check object moves that record's disk count by
+    exactly N (`--smp` 2 or more).
+* Stage 12 (`btrfs_write_check::reclaim_check::kept_cache_counts`, the
+  `pc-kept` line): the file's share and the machine's sum against the walk
+  on a real writable mount after a write of 260 pages, a sync (a slice's
+  take of 256, then the full writeback's), a page written again, a shared
+  mapping's write, a truncation's cut and the sync after it. The failed
+  returns of a writeback, which a healthy disk does not make, are the btrfs
+  host test `every_change_of_a_dirty_set_tells_its_store_the_count_after_it`'s:
+  a store that notes each telling, whose copy out is made to fail, sees the
+  slice's take (44 of 300 left) and its return (300), the full writeback's
+  take (0) and its return (300), the write's marks and the truncation's cut,
+  and nothing told by a read.
+* `L.object.189`'s criterion lines (`core pc`, test-btrfs `reclaim`) and
+  `L.user.175`'s keep their criterion text and must stay green; the `core
+  pc` check's source tells its store when its dirty count moves (its body
+  changes, its criterion does not).
+* Negative controls (`gate.sh control --expect`): a settle that skips the
+  dirty term; a `DirtySet` change that does not tell; a drop that does not
+  take back; a share set on an unregistered object; the per-processor sum
+  leaving one record out; the early counts left out; a disk object's pages
+  counted as memory; `new_filled` not reading the source's dirty count;
+  `totals` calling the walk; the settle adding to record 0; the creation
+  class assertion. The store-before-unlock order has no deterministic
+  control: it rests on the guard's structure, and code review.
+
+### 9.7 Figures
+
+`meminfobench` (`~/.local/share/ferrix/ef-30fps/faultbench/meminfobench.rs`,
+sha256 9ff6013a…; logs in `~/.local/share/ferrix/logs/rss/`): 200 reads of
+`/proc/meminfo` (open, read to the end, close) with a boot's few files, then
+with 10,000 more files of one written page each. Medians, µs a read:
+
+| Release build, KVM guest on nazuna (xtask's `-cpu`) | boot's files | 10,000 more |
+|---|---|---|
+| Linux 7.0 as the guest | 1.9 | 2.0 |
+| Ferrix, rss/kept-counts 9f2fa4e46 (the walk) | 8.8 | 289.4 |
+| Ferrix, rss/meminfo (kept) | 7.7 | 8.4 |
+
+The read no longer grows with the cache; what is left is the cost of a
+procfs file's open, which renders it, against Linux's (the coordinator's
+`readbench`: a procfs open and close 11.2 µs, a tmpfs one 2.3 µs against
+0.30), not of the figures.
+
+### 9.8 Requirements
+
+`L.object.189` and `L.user.175` keep statement and criterion word for word.
+`L.object.189`'s unit list names the code that now computes its figures:
+the settle, the drop's take-back, the dirty refresh, the per-processor sum
+and `cache::totals`, with `Totals::cached` and `Totals::available`.
+New (ledger 8919 M1): `L.user.239`, `totals` answers each figure as the sum
+over every live cache object of what it gives (its pages; its dirty count,
+the filesystem's last-read count and its page states, capped at its pages;
+for a reclaimable object its pages less that), kept as the object's pages
+lock is let go and as its filesystem tells, never below zero and equal to
+those per-object figures whenever no change is under way; `L.user.240`, a
+read takes only the early counts and each processor's record, touching no
+cache object, list or lock; `L.user.241`, a settle adds to the record of the
+processor it runs on, or to the early counts before the records are kept.
 
 ## 10. Where it stands
 
 Design reviewed 2026-11-12: OK IF K1-K11, consultant ledger line 8701
 (conditions 8705-8715); code reviewed the same day: OK IF R1-R9, ledger 8826.
 Built on branch `rss/kept-counts`: the resident counts kept (`L.user.236`,
-`L.user.237`) and the region totals kept (`L.user.238`). `/proc/meminfo` (§9) is not built:
-its design review and its branch are owed.
+`L.user.237`) and the region totals kept (`L.user.238`). `/proc/meminfo` (§9): design
+reviewed 2026-11-12, OK IF M1-M12, ledger line 8919 (conditions 8920-8931);
+built on branch `rss/meminfo` (`L.user.239`-`241`); code reviewed the same
+day: OK IF N1-N9, ledger line 8988 (conditions 8991-8999).

@@ -40,15 +40,6 @@
     },
     {
       "ids": [
-        "L.user.239-241"
-      ],
-      "owner": "ef-30fps",
-      "branch": "rss/meminfo",
-      "date": "2026-11-12",
-      "purpose": "/proc/meminfo's page-cache counts kept as pages come and go (docs/RSS-COUNTS.md section 9, consultant ledger 8919 M1): the kept sum equals each cache object's figures, a read touches no cache object, a settle adds to the record of the processor it runs on"
-    },
-    {
-      "ids": [
         "L.user.230-234",
         "L.object.373"
       ],

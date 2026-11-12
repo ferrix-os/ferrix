@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-3090 declarations in the core's files, 215 in the item's; 267 checks-only.
+3102 declarations in the core's files, 215 in the item's; 272 checks-only.
 
 ## ferrix-kernel-core
 
@@ -3538,6 +3538,7 @@ checks above is `pub` for raised checks (F3).
 |---|---|---|---|
 | `address_wait` | mod | item, load, bin |  |
 | `cache` | mod | load |  |
+| `cache_kept_check` | mod | load, bin (checks) | pub for raised checks |
 | `check` | mod | bin (checks) | pub for raised checks |
 | `dirty_check` | mod | load, bin (checks) | pub for raised checks |
 | `memory_type` | mod | item, load, bin |  |
@@ -3610,6 +3611,21 @@ checks above is `pub` for raised checks (F3).
 | `Totals::reclaimable` | field | item, load |  |
 | `Totals::available` | method | load |  |
 | `Totals::cached` | method | load |  |
+
+### `user::cache_kept_check`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `MANY` | const | bin (checks) | checks-only |
+| `READS` | const | bin (checks) | checks-only |
+| `agrees` | fn | load (checks) | checks-only |
+| `run_or_stop` | fn | bin (checks) | checks-only |
+| `KeptCounted` | struct | - | checks-only |
+| `KeptCounted::compared` | field | load, bin (checks) | pub for raised checks; type unobtainable from product API |
+| `KeptCounted::few_ns` | field | bin (checks) | pub for raised checks; type unobtainable from product API |
+| `KeptCounted::many_ns` | field | bin (checks) | pub for raised checks; type unobtainable from product API |
+| `KeptCounted::on_another` | field | bin (checks) | pub for raised checks; type unobtainable from product API |
+| `KeptCounted::retried` | field | bin (checks) | pub for raised checks; type unobtainable from product API |
 
 ### `user::check`
 
@@ -3833,6 +3849,7 @@ checks above is `pub` for raised checks (F3).
 | `Vmo::decommit_from` | method | load |  |
 | `Vmo::decommit_range` | method | load |  |
 | `Vmo::digest` | method | item, load, bin |  |
+| `Vmo::dirty_changed` | method | load |  |
 | `Vmo::dirty_range` | method | item |  |
 | `Vmo::dirty_runs` | method | item |  |
 | `Vmo::end_mapped_writes` | method | load |  |

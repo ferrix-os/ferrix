@@ -199,7 +199,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 |---|---|---:|---:|---:|---:|---|
 | `user/vmo.rs` | `core` | 46 | 0 | 1 | 0 | - |
 | `user/space.rs` | `core` | 23 | 0 | 0 | 0 | - |
-| `user/cache.rs` | `core` | 1 | - | - | 1 | 123 |
+| `user/cache.rs` | `core` | 1 | - | - | 1 | 125 |
 
 ---
 

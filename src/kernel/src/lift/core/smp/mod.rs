@@ -19,6 +19,8 @@ pub struct PerCpu {
     pub logical: usize,
     pub hardware_id: u64,
     pub syscalls: OwnCount,
+    /// The page cache's counts this processor moved: the kernel's own.
+    pub cache_counts: [AtomicU64; 4],
 }
 #[derive(Debug)]
 pub struct OwnCount {}
@@ -55,6 +57,7 @@ pub fn set_processors(processors: usize) {
                 logical,
                 hardware_id: logical as u64,
                 syscalls: OwnCount {},
+                cache_counts: [const { AtomicU64::new(0) }; 4],
             })
             .collect()
     });

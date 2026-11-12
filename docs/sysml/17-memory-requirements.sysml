@@ -3521,6 +3521,69 @@ package FerrixMemoryRequirements {
             attribute :>> parent = "H.MEM.9";
             attribute :>> unit = "user::space::AddressSpace::region_totals";
         }
+        // docs/RSS-COUNTS.md §9: /proc/meminfo's page-cache figures kept as
+        // pages come and go (consultant ledger 8919 M1). The parent is
+        // L.object.189's, whose figures these are.
+        requirement <'L.user.239'> theCacheFiguresAreKeptShares : ItemLowLevel {
+            attribute :>> statement = "totals shall answer each of L.object.189's
+                figures as the sum over every live cache object of what it gives:
+                its pages; its dirty count, its filesystem's count as last read and
+                its page states, at most its pages; and for a reclaimable object its
+                pages less that dirty count. The sum shall be kept as the object's
+                pages lock is let go and as its filesystem tells of a change, shall
+                never be below zero, and shall equal those per-object figures
+                whenever no change is under way.";
+            attribute :>> criterion = "With kernel objects alone, on every profile
+                (the `core pc-kept` line): over a memory filesystem's object, a
+                reclaimable disk file's, one reclaim may not take and one dirty
+                before its object was made, after pages committed, a source's dirty
+                count moved and told, page states set Dirty, awaiting clean and
+                Clean, the cap reached and pages decommitted, every object's share
+                equals the walk's figures for it and the machine's sum equals the
+                walk (user::cache_kept_check::walked_totals) on a reading two
+                agreeing walks bracket, and after the objects are dropped. On the
+                stage 12 writable mount (the `pc-kept` line), the same after a
+                write, a sync in slices, a page written again, a shared mapping's
+                write, a truncation and the sync after it. The btrfs host test
+                every_change_of_a_dirty_set_tells_its_store_the_count_after_it holds
+                every change of a dirty set, the failed returns of a writeback
+                included, to a telling of the count after it.";
+            attribute :>> parent = "H.QUOTA.12";
+            attribute :>> unit = ("user::cache::Share::settle",
+                "user::cache::Share::give", "user::cache::Share::take_back",
+                "user::cache::Share::read_fs", "user::vmo::Vmo::dirty_changed",
+                "user::vmo::PagesGuard::drop", "user::vmo::Vmo::drop",
+                "user::vmo::Vmo::new_filled");
+        }
+        // docs/RSS-COUNTS.md §9.4: what a read of them costs.
+        requirement <'L.user.240'> aReadOfTheCacheFiguresTouchesNoObject : ItemLowLevel {
+            attribute :>> statement = "A read of the page cache's kept figures shall
+                take only the early counts and each processor's record, touching no
+                cache object, list or lock.";
+            attribute :>> criterion = "By analysis: totals is totals_except(None),
+                four relaxed loads from the early counts and from each record of the
+                topology's processors. By test, with kernel objects alone on every
+                profile (the `core pc-kept` line): a check-build count of the lists
+                of live objects made is unchanged across 200 reads of totals with
+                4,096 cache objects more live; the time of those reads is reported
+                beside 200 with few.";
+            attribute :>> parent = "H.QUOTA.12";
+            attribute :>> unit = ("user::cache::totals", "user::cache::totals_except");
+        }
+        // docs/RSS-COUNTS.md §9.4, K10 of ledger 8701: no line every
+        // processor writes.
+        requirement <'L.user.241'> aSettleAddsToItsOwnProcessor : ItemLowLevel {
+            attribute :>> statement = "A settle of a cache object's share shall add
+                to the record of the processor it runs on, or to the early counts
+                before that record can be found.";
+            attribute :>> criterion = "With kernel objects alone, on every profile
+                with two processors or more (the `core pc-kept` line, run with
+                --smp 2 on ARMv7-A): a task on processor 1, preemption held off,
+                commits 8 pages to a check disk object, and processor 1's record's
+                disk count moves by exactly 8.";
+            attribute :>> parent = "H.QUOTA.12";
+            attribute :>> unit = "user::cache::here";
+        }
         // docs/RAM-RELEASE.md §3: the clean btrfs nodes, reclaimable heap.
         requirement <'L.user.175'> cleanBtrfsNodesAreAvailable : ItemLowLevel {
             attribute :>> statement = "/proc/meminfo's SReclaimable shall be the bytes the

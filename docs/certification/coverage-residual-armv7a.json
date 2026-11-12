@@ -1102,10 +1102,10 @@
     "smp.rs": {
       "ring": "core",
       "lines": [
-        1161,
-        1165,
-        1166,
-        1291
+        1168,
+        1172,
+        1173,
+        1298
       ]
     },
     "arch/armv7a/smp.rs": {
@@ -1151,8 +1151,8 @@
     "user/vmo.rs": {
       "ring": "core",
       "lines": [
-        2375,
-        3117
+        2456,
+        3198
       ]
     },
     "syscall/program.rs": {

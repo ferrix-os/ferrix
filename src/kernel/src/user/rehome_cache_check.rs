@@ -462,6 +462,8 @@ fn check_a_written_page_stays() -> Result<(), &'static str> {
     file.write_page(3, 40, WRITTEN)
         .map_err(|_| "a page of the cached file would not write")?;
     disk.written.store(3, Ordering::Relaxed);
+    // A source whose count moves tells its object (`Filler::dirty_pages`).
+    file.dirty_changed();
     let done = cache::reclaim(one.quota_index(), 64);
     if done.stolen != 7 || file.page(3).is_none() {
         return Err("reclaim took a page written and not yet written back");
@@ -558,6 +560,8 @@ fn check_totals() -> Result<(), &'static str> {
     let (file, disk) = cached_file(&one, 8)?;
     let _memory = memory_file(&sibling, 3)?;
     disk.written.store(2, Ordering::Relaxed);
+    // A source whose count moves tells its object (`Filler::dirty_pages`).
+    file.dirty_changed();
     let after = cache::totals();
     let _ = file;
     if after.disk != before.disk + 8 {
@@ -688,6 +692,8 @@ fn check_a_poisoned_page_is_dropped() -> Result<(), &'static str> {
         }
         let frame = vmo::frame_for_check(&file, 5).ok_or("page 5 is not in the object")?;
         disk.written.store(5, Ordering::Relaxed);
+        // A source whose count moves tells its object (`Filler::dirty_pages`).
+        file.dirty_changed();
         if cache::drop_poisoned_for_check(frame) != "NotClean" || file.page(5) != Some(frame) {
             return Err("a page written and not written back was dropped for poison");
         }
@@ -717,6 +723,8 @@ fn check_a_poisoned_read() -> Result<(), &'static str> {
         }
         let frame = vmo::frame_for_check(&file, 2).ok_or("page 2 is not in the object")?;
         disk.written.store(2, Ordering::Relaxed);
+        // A source whose count moves tells its object (`Filler::dirty_pages`).
+        file.dirty_changed();
         if cache::poisoned_read(&file, 2, frame) {
             return Err("a written page's poisoned read went round the fill again");
         }

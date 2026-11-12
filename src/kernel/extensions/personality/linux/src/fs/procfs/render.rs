@@ -225,7 +225,9 @@ pub(super) fn loadavg(_: &Kernel) -> Result<Vec<u8>> {
 /// pages being the same thing by another allocator. Of that heap, the clean
 /// tree nodes of writable btrfs mounts are what a reclaim of the machine
 /// gives back (`fs::btrfs`), so they are `SReclaimable`, and `MemAvailable`
-/// counts them as Linux counts reclaimable slab.
+/// counts them as Linux counts reclaimable slab. The cache's figures are
+/// counts kept as its objects' pages come and go, summed per processor:
+/// a read looks at no file's object (`docs/RSS-COUNTS.md` §9).
 pub(super) fn meminfo(_: &Kernel) -> Result<Vec<u8>> {
     let kib = |frames: u64| frames.saturating_mul(PAGE_SIZE / 1024);
     let free = mm::free_frames();

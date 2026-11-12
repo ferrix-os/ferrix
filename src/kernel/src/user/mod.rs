@@ -8,6 +8,8 @@
 pub mod address_wait;
 pub mod cache;
 #[cfg(not(ferrix_load_built = "lift"))]
+pub mod cache_kept_check;
+#[cfg(not(ferrix_load_built = "lift"))]
 pub mod check;
 #[cfg(not(ferrix_load_built = "lift"))]
 pub mod dirty_check;

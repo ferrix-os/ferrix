@@ -227,8 +227,31 @@ pub(super) fn check_dirty() {
         "  dirty    {pages} cases of a disk file's page: read-only until written, reported until \
          written back, taken by reclaim only when Clean"
     );
-    // The kept resident counts next, with kernel objects alone too.
+    // The kept resident counts next, with kernel objects alone too, and the
+    // page cache's kept counts.
     check_rss_core();
+    check_cache_kept();
+}
+
+/// The page cache's kept counts against a walk of the cache, after each
+/// change that moves them, on every profile (`user::cache_kept_check`,
+/// `L.user.239` to `L.user.241`).
+fn check_cache_kept() {
+    let checked = user::cache_kept_check::run_or_stop();
+    println!(
+        "  core pc-kept {} comparisons with the walk, all equal ({} readings retried); a read \
+         takes {} ns, {} ns with {} more objects live; {}",
+        checked.compared,
+        checked.retried,
+        checked.few_ns / u64::from(user::cache_kept_check::READS),
+        checked.many_ns / u64::from(user::cache_kept_check::READS),
+        user::cache_kept_check::MANY,
+        if checked.on_another {
+            "a settle on processor 1 moved its own record"
+        } else {
+            "one processor, no record of another to check"
+        },
+    );
 }
 
 /// The kept resident counts and region totals with kernel objects alone, on

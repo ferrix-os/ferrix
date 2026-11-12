@@ -151,6 +151,50 @@ pub fn frame_for_check(vmo: &Vmo, index: u64) -> Option<Frame> {
     vmo.pages.lock().frames.get(&index).copied()
 }
 
+// CHECKS-ONLY: user/cache_kept_check.rs; home: user::vmo
+/// How many of `vmo`'s pages its file has written and not yet written back
+/// ([`Filler::dirty_pages`]) and its page states hold; none for an object
+/// that is not a disk file's: what the cache's walk counted as an object's
+/// dirty pages, before the cap, until the counts were kept.
+pub(crate) fn dirty_pages_for_check(vmo: &Vmo) -> u64 {
+    // SEAL: read
+    let mapped = vmo.pages.lock().states.len() as u64;
+    vmo.filler()
+        .map_or(0, |filler| filler.dirty_pages().saturating_add(mapped))
+}
+
+// CHECKS-ONLY: user/cache_kept_check.rs; home: user::vmo
+/// What `vmo`'s share of the cache's counts gives now, as (pages, dirty):
+/// `None` for an object the cache does not list.
+pub(crate) fn share_for_check(vmo: &Vmo) -> Option<(u64, u64)> {
+    // SEAL: read
+    vmo.pages
+        .lock()
+        .share
+        .as_ref()
+        .map(crate::user::cache::Share::given)
+}
+
+// CHECKS-ONLY: user/cache_kept_check.rs; home: user::vmo
+/// `vmo`'s share of the cache's counts and the walk's figures for it, each
+/// as (pages, dirty), read under one hold of its pages lock with its
+/// source's dirty count read under it too, so that no change on another
+/// processor can fall between them (ledger 8988 N2): the share is `None`
+/// for an object the cache does not list.
+pub(crate) fn share_and_walked_for_check(vmo: &Vmo) -> (Option<(u64, u64)>, (u64, u64)) {
+    // SEAL: read
+    let pages = vmo.pages.lock();
+    let committed = pages.frames.len() as u64;
+    let dirty = vmo.filler().map_or(0, |filler| {
+        filler
+            .dirty_pages()
+            .saturating_add(pages.states.len() as u64)
+            .min(committed)
+    });
+    let share = pages.share.as_ref().map(crate::user::cache::Share::given);
+    (share, (committed, dirty))
+}
+
 /// What [`Vmo::take_poisoned`] did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PoisonTake {
@@ -264,7 +308,9 @@ pub trait Filler: Send + Sync + fmt::Debug {
     /// Whether pages this object holds may be dropped and filled again from
     /// the source, as they are: every page, for a read-only file; the clean
     /// ones, for a writable file, which [`Filler::reclaim_clean`] names.
-    /// False unless a source says so (`user::cache`).
+    /// False unless a source says so (`user::cache`). The same answer for
+    /// the source's whole life: the object's share of `/proc/meminfo`'s
+    /// counts takes it once, as the object is made (`user::cache::Share`).
     fn reclaimable(&self) -> bool {
         false
     }
@@ -293,6 +339,12 @@ pub trait Filler: Send + Sync + fmt::Debug {
 
     /// How many of the object's pages the file has written and not yet
     /// written back, for `/proc/meminfo`'s `Dirty`. None by default.
+    ///
+    /// From an atomic load: no lock, no blocking, no allocation, as the core
+    /// asks it under the object's pages spin lock. A source whose count
+    /// moves tells the object after the change, holding none of its own
+    /// spin locks ([`Vmo::dirty_changed`]), so that the object's share of
+    /// the counts reads it again (`docs/RSS-COUNTS.md` §9.4).
     fn dirty_pages(&self) -> u64 {
         0
     }
@@ -601,10 +653,17 @@ impl<G: core::ops::DerefMut<Target = Pages>> core::ops::DerefMut for PagesGuard<
     }
 }
 
-#[cfg(ferrix_checks = "on")]
 impl<G: core::ops::DerefMut<Target = Pages>> Drop for PagesGuard<G> {
+    /// Settle a cache object's share of `/proc/meminfo`'s counts while the
+    /// lock is still held (`L.user.239`): every change of its pages and their
+    /// states was made under this guard.
     fn drop(&mut self) {
+        let pages = &mut *self.guard;
+        if let Some(share) = pages.share.as_mut() {
+            share.settle(pages.frames.len() as u64, pages.states.len() as u64);
+        }
         // Counted out while still held, on the processor that counted it in.
+        #[cfg(ferrix_checks = "on")]
         if let Some(held) = pages_held() {
             let _ = held.fetch_sub(1, Ordering::Relaxed);
         }
@@ -630,6 +689,10 @@ struct Pages {
     /// `pages.lock()` in this file carries a tag saying which path it is, and
     /// `check-vmo-seal-tags.py` fails on one that carries none.
     sealed: bool,
+    /// A cache object's share of `/proc/meminfo`'s counts: set by
+    /// [`Vmo::new_filled`] alone, so on exactly the objects the cache lists,
+    /// and settled as this lock is let go ([`PagesGuard`]'s drop).
+    share: Option<crate::user::cache::Share>,
 }
 
 /// Frames phase one took out of an object's list, whose translations are still
@@ -844,8 +907,34 @@ impl Vmo {
             filler.map(Source::Kernel),
             Charge::none(Resource::Objects),
         ))?;
+        // Before it is listed, holding no page yet: the source's dirty count
+        // now, so that one dirty already is counted (ledger 8919 M3a).
+        let share =
+            vmo.filler()
+                .map_or(crate::user::cache::Share::new(false, false, 0), |filler| {
+                    crate::user::cache::Share::new(true, filler.reclaimable(), filler.dirty_pages())
+                });
+        // SEAL: read, an object made here: its share, no page
+        vmo.pages.lock().share = Some(share);
         crate::user::cache::register(&vmo)?;
         Ok(vmo)
+    }
+
+    /// The source's count of pages written and not written back moved: read
+    /// it again into the object's share of `/proc/meminfo`'s counts, which
+    /// the release of the lock settles ([`Filler::dirty_pages`]). Called by
+    /// the source after the change, holding none of its spin locks; two
+    /// that race leave the later reading, so the share is exact once the
+    /// changes are done.
+    pub fn dirty_changed(&self) {
+        let Some(filler) = self.filler() else {
+            return;
+        };
+        // SEAL: read, a count moved, no page
+        let mut pages = self.pages.lock();
+        if let Some(share) = pages.share.as_mut() {
+            share.read_fs(filler.dirty_pages());
+        }
     }
 
     /// A pager-backed object of `pages` pages (`pager_create_vmo`): its
@@ -924,16 +1013,6 @@ impl Vmo {
     /// so a write through one faults and is seen.
     pub fn tracks_dirty(&self) -> bool {
         self.source.is_some()
-    }
-
-    /// How many of this object's pages its file has written and not yet
-    /// written back ([`Filler::dirty_pages`]); none for an object that is not
-    /// a disk file's.
-    pub(crate) fn dirty_pages(&self) -> u64 {
-        // SEAL: read
-        let mapped = self.pages.lock().states.len() as u64;
-        self.filler()
-            .map_or(0, |filler| filler.dirty_pages().saturating_add(mapped))
     }
 
     /// Give back those of `picked` (page indices, lowest first) the source
@@ -1462,6 +1541,8 @@ impl Vmo {
                 states: BTreeMap::new(),
                 // A fork of a sealed object is an ordinary one, unmeasured.
                 sealed: false,
+                // A fork is in no cache list, whatever it was forked from.
+                share: None,
             }),
             writable_regions: AtomicU64::new(0),
             digest: SpinLock::new(None),
@@ -3394,6 +3475,19 @@ impl Drop for Vmo {
     /// it go, and every space takes its translations of an object down, and
     /// waits for their shootdown, before it does.
     fn drop(&mut self) {
+        #[cfg(ferrix_checks = "on")]
+        let reclaimable = self.reclaimable();
+        if let Some(share) = self.pages.get_mut().share.as_mut() {
+            // Made with its source's answer, which no source changes.
+            #[cfg(ferrix_checks = "on")]
+            if share.reclaimable() != reclaimable {
+                crate::panic::fatal!(
+                    crate::panic::catalog::CACHE_COUNT_BROKEN,
+                    "kept cache counts: a source's reclaimable answer changed in its object's life"
+                );
+            }
+            share.take_back();
+        }
         self.pages.get_mut().frames.dropping();
         for frame in self.pages.get_mut().frames.values() {
             let _ = mm::release_frame(*frame);

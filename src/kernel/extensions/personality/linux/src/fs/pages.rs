@@ -692,4 +692,8 @@ impl Pages for VmoPages {
             self.vmo.end_mapped_writes(failed_from);
         }
     }
+
+    fn dirty_changed(&self) {
+        self.vmo.dirty_changed();
+    }
 }

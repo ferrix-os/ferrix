@@ -2040,8 +2040,9 @@ package FerrixObjectRequirements {
                 tmpfs file's pages are in Cached and Shmem (the `reclaim` line of
                 test-btrfs). And with kernel objects alone, on every profile, the `core pc` line (user/rehome_cache_check.rs::check_totals).";
             attribute :>> parent = "H.QUOTA.12";
-            attribute :>> unit = ("user::cache::totals", "user::vmo::Vmo::dirty_pages",
-                "user::vmo::Vmo::committed",
+            attribute :>> unit = ("user::cache::totals", "user::cache::totals_except",
+                "user::cache::Share::settle", "user::vmo::Vmo::drop",
+                "user::vmo::Vmo::dirty_changed",
                 "user::cache::Totals::cached", "user::cache::Totals::available");
         }
         // The write's reclaim and retry (at most eight reclaims, then

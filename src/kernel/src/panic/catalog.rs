@@ -185,6 +185,31 @@ pub(crate) static RSS_COUNT_BROKEN: Explanation = Explanation {
     see: "src/kernel/src/user/rss.rs; src/kernel/src/user/vmo.rs PagesLock; docs/RSS-COUNTS.md",
 };
 
+/// For `user::cache`'s kept counts and their core self-check: a kept cache
+/// count would go wrong, or the self-check found one unequal. Check builds
+/// only.
+pub(crate) static CACHE_COUNT_BROKEN: Explanation = Explanation {
+    code: "FX-0978",
+    title: "a kept page-cache count would go wrong",
+    meaning: "`/proc/meminfo`'s page-cache figures are kept as each cache object's pages and page \
+              states change and as its filesystem tells of its dirty pages, in a share each \
+              object holds and counts kept per processor (`docs/RSS-COUNTS.md` §9, \
+              `L.user.239` to `L.user.241`). Check builds stop where the counts could no longer \
+              equal a walk of the cache: a source's reclaimable answer changed in its object's \
+              life, or the core self-check (`user::cache_kept_check::run`) found an object's \
+              share, the machine's sum or a processor's record other than the walk or the \
+              change says.",
+    causes: &[
+        "A source answers `reclaimable` differently over its life, which the share took once.",
+        "A source's dirty count moved and it did not tell its object (`Vmo::dirty_changed`), \
+         or its `dirty_pages` answers other than from the count it tells of.",
+        "A path changed an object's pages or page states outside its pages lock's guard, or a \
+         settle added to another processor's record.",
+    ],
+    see: "src/kernel/src/user/cache.rs Share; src/kernel/src/user/vmo.rs PagesGuard; \
+          docs/RSS-COUNTS.md §9",
+};
+
 /// For `register_load` in `main.rs`, when the load ring did not register
 /// what the certified item reaches it through.
 pub static LOAD_REGISTRATION: Explanation = Explanation {
@@ -4521,6 +4546,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     #[cfg(not(ferrix_shape = "micro"))]
     &STAGE8_RSS_KEPT,
     &RSS_COUNT_BROKEN,
+    &CACHE_COUNT_BROKEN,
     &STAGE10_PCI,
     &STAGE10_DEVICES,
     &STAGE10_IOMMU,

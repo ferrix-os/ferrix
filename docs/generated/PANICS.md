@@ -141,6 +141,7 @@ Causes are listed most likely first.
 | [FX-0974](#fx-0974) | a task tried to block holding an IrqSpinLock |
 | [FX-0976](#fx-0976) | the kept resident counts failed their self-check |
 | [FX-0977](#fx-0977) | a kept resident count would go wrong |
+| [FX-0978](#fx-0978) | a kept page-cache count would go wrong |
 | [FX-1001](#fx-1001) | PCI enumeration failed its self-check |
 | [FX-1002](#fx-1002) | a device node handed out memory or an interrupt it does not have |
 | [FX-1003](#fx-1003) | an IOMMU domain gave a device the wrong addresses |
@@ -3397,6 +3398,30 @@ shadow's file's inside the shadow's own.
 
 See: src/kernel/src/user/rss.rs; src/kernel/src/user/vmo.rs PagesLock;
 docs/RSS-COUNTS.md.
+
+<a id="fx-0978"></a>
+
+## FX-0978 — a kept page-cache count would go wrong
+
+`/proc/meminfo`'s page-cache figures are kept as each cache object's pages and
+page states change and as its filesystem tells of its dirty pages, in a share
+each object holds and counts kept per processor (`docs/RSS-COUNTS.md` §9,
+`L.user.239` to `L.user.241`). Check builds stop where the counts could no
+longer equal a walk of the cache: a source's reclaimable answer changed in its
+object's life, or the core self-check (`user::cache_kept_check::run`) found an
+object's share, the machine's sum or a processor's record other than the walk or
+the change says.
+
+1. A source answers `reclaimable` differently over its life, which the share
+   took once.
+2. A source's dirty count moved and it did not tell its object
+   (`Vmo::dirty_changed`), or its `dirty_pages` answers other than from the
+   count it tells of.
+3. A path changed an object's pages or page states outside its pages lock's
+   guard, or a settle added to another processor's record.
+
+See: src/kernel/src/user/cache.rs Share; src/kernel/src/user/vmo.rs PagesGuard;
+docs/RSS-COUNTS.md §9.
 
 <a id="fx-1001"></a>
 

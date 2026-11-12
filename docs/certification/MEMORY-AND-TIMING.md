@@ -2005,9 +2005,23 @@ Bounds of the locks the writable mount's reclaim adds (`L.object.188-190`):
   hand's object is found in the list of live objects with no lock held,
   O(objects), the cost the list itself already has. The `Weak` it replaces
   is dropped after the lock.
-* `user::cache::totals` takes each live cached object's pages lock once, for
-  its page count: O(objects) per read of `/proc/meminfo`, nothing allocated
-  but the list of live objects.
+* `user::cache::totals` (2026-11-12, `L.user.239`-`241`, `docs/RSS-COUNTS.md`
+  §9) takes no lock and walks no list: it sums four relaxed loads from the
+  early counts and from each processor's record, O(processors) per read of
+  `/proc/meminfo`, nothing allocated. What moves those counts is a cache
+  object's `Share`, settled in `PagesGuard`'s drop with the pages lock still
+  held: one comparison, and on a change up to three relaxed `fetch_add`s on
+  the running processor's record, O(1), no allocation, never failing. The
+  walk it replaced (O(objects), a pages lock each) is check code only now
+  (`user::cache_kept_check::walked_totals`).
+* `Vmo::dirty_changed` takes the object's pages lock once, for one atomic
+  load of its source's dirty count. The btrfs glue's `DirtySet` guard calls
+  it as it drops, after storing the set's new length (still under the set's
+  lock) and letting the set go: so it runs with none of the file's spin
+  locks held -- never under the dirty set's lock or `still` -- though it may
+  under the volume's sleeping lock, as `write_runs`' reads of the cache
+  already do; and no dirty set's lock is taken under a pages lock, the core
+  reading the stored length instead.
 * `Shared::give_way` and `Node::hold_still` (load) wait with no lock held:
   parked on the mount's `Parking` when it has one, and spinning without one
   (no memory for it at mount), which then needs the waiting task to be

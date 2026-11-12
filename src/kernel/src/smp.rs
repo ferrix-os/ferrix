@@ -151,6 +151,12 @@ pub struct PerCpu {
     /// Both Arm architectures: the stack pointer `ferrix_stack_hit` found
     /// unmapped, for the report. Written from assembly, once.
     pub(crate) overflow_sp: AtomicU64,
+    /// The page cache's counts this processor moved (`user::cache::Share`,
+    /// `L.user.241`): signed, two's complement, added to with a relaxed
+    /// `fetch_add` by a settle running here under a pages lock, and summed
+    /// over every record by `/proc/meminfo`'s reader (`L.user.240`), so that
+    /// no page of any file moves a line every processor writes.
+    pub(crate) cache_counts: [AtomicU64; 4],
     /// Development builds: the `IrqSpinLock` guards this processor holds,
     /// `sched::irq_guard_made`'s and `irq_guard_dropped`'s, which alone write
     /// it, always with interrupts masked on this processor (`L.sched.200`).
@@ -436,6 +442,7 @@ fn leak_records(numbered: impl Iterator<Item = (usize, u64)>) -> &'static [PerCp
             syscalls: OwnCount::new(),
             emergency_stack: AtomicU64::new(0),
             overflow_sp: AtomicU64::new(0),
+            cache_counts: [const { AtomicU64::new(0) }; 4],
             #[cfg(debug_assertions)]
             irq_guards: core::sync::atomic::AtomicU32::new(0),
         })

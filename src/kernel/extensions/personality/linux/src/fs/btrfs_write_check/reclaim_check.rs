@@ -60,6 +60,7 @@ pub(super) fn run() -> Result<Found, &'static str> {
     reclaim_beside_a_mapping()?;
     resident_of_a_disk_file()?;
     kept_through_a_reclaim()?;
+    kept_cache_counts()?;
     let stolen_at_max = write_reclaims_at_max()?;
     let stolen_by_fill = fill_reclaims_until_room()?;
     Ok(Found {
@@ -215,6 +216,85 @@ fn kept_through_a_reclaim() -> Result<(), &'static str> {
     let _ = space.unmap(shared, 8 * PAGE_SIZE);
     let _ = space.unmap(private, 2 * PAGE_SIZE);
     outcome
+}
+
+/// The file [`kept_cache_counts`] writes.
+const COUNTED_FILE: &[u8] = b"/mnt-rw/cache-counted";
+
+/// Pages it is written with: more than a writeback slice's 256, so that a
+/// sync takes a slice before the rest.
+const COUNTED_PAGES: usize = 260;
+
+/// The page cache's kept counts on a writable mount, after each change its
+/// dirty set and page states see: a write's marks, a sync's slice and full
+/// writeback, a page written again, a shared mapping's write, a truncation's
+/// cut and the sync after it -- each followed by the file's share against
+/// the walk's figures for it and the machine's sum against the walk
+/// (`docs/RSS-COUNTS.md` §9.6; the failed returns of a writeback are the
+/// host test `every_change_of_a_dirty_set_tells_its_store_the_count_after_it`'s).
+///
+/// Verifies: L.user.239
+fn kept_cache_counts() -> Result<(), &'static str> {
+    use crate::user::cache_kept_check::agrees;
+    let mut compared = 0;
+    let mut check = |object: &Arc<Vmo>, after: &'static str| {
+        agrees(&[object])
+            .map(|(made, _)| compared += made)
+            .inspect_err(|problem| {
+                crate::console::println!("  pc-kept  after {after}: {problem}");
+            })
+    };
+    write_file(COUNTED_FILE, &pattern(31, 0, COUNTED_PAGES * PAGE))?;
+    let object = object_of(COUNTED_FILE)?;
+    check(&object, "a write")?;
+    sync()?;
+    check(&object, "a sync")?;
+    write_at(COUNTED_FILE, 3 * PAGE_SIZE, &pattern(32, 0, PAGE))?;
+    check(&object, "a page written again")?;
+    let space = AddressSpace::new().map_err(|_| "no address space for the counts check")?;
+    let at = space
+        .map_file(
+            FilePlace::Anywhere(None),
+            4 * PAGE_SIZE,
+            VmaFlags {
+                shared: true,
+                ..VmaFlags::READ_WRITE
+            },
+            Arc::clone(&object),
+            0,
+            FileMapping {
+                file: Arc::new(()) as Arc<dyn Any + Send + Sync>,
+                may_write: true,
+            },
+        )
+        .map_err(|_| "the space refused a shared mapping for the counts check")?;
+    space
+        .with_page(at + PAGE_SIZE, Access::WRITE, |to| {
+            // SAFETY: `with_page` passes the direct-map address of the byte,
+            // translated under the space's lock, which it holds while this
+            // runs; the write fault made the page writable through the mapping.
+            unsafe { core::ptr::write(to as *mut u8, 0x3c) }
+        })
+        .map_err(|_| "could not write the shared mapping for the counts check")?;
+    check(&object, "a shared mapping's write")?;
+    let _ = space.unmap(at, 4 * PAGE_SIZE);
+    let ns = fs::namespace();
+    let ctx = ns.context();
+    ns.resolve(&ctx, None, COUNTED_FILE, true)
+        .map_err(|_| "the counted file is gone")?
+        .inode()
+        .map_err(|_| "the counted file has no inode")?
+        .set_len(2 * PAGE_SIZE)
+        .map_err(|_| "the counted file would not truncate")?;
+    check(&object, "a truncation")?;
+    sync()?;
+    check(&object, "the sync after it")?;
+    crate::console::println!(
+        "  pc-kept  a writable mount's file written, synced in slices, written again, written \
+         through a shared mapping and truncated: its share and the machine's sum equal the walk \
+         {compared} times over"
+    );
+    Ok(())
 }
 
 /// Sync the writable mount.

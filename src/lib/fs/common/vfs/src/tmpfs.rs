@@ -170,6 +170,11 @@ pub trait Pages: Send + Sync + fmt::Debug {
     fn mapped_writes_done(&self, failed_from: Option<u64>) {
         let _ = failed_from;
     }
+
+    /// The source's [`PageSource::dirty_pages`] moved: read it again for the
+    /// page cache's counts. Called by the source after the change, holding
+    /// none of its own spin locks; nothing by default.
+    fn dirty_changed(&self) {}
 }
 
 /// Where a file's pages come from when the cache does not have them.
@@ -237,7 +242,8 @@ pub trait PageSource: Send + Sync + fmt::Debug {
     /// every page; a writable one says so too, and answers page by page in
     /// [`PageSource::reclaim_clean`]. `false` unless a source says so;
     /// reclaim takes nothing from a file it cannot rely on (`docs/CGROUPS.md`
-    /// §10).
+    /// §10). The same answer for the source's whole life: the page cache
+    /// takes it once, as the file's store is made.
     fn reclaimable(&self) -> bool {
         false
     }
@@ -264,6 +270,11 @@ pub trait PageSource: Send + Sync + fmt::Debug {
     /// How many pages of the file are written and not yet written back,
     /// which the cache holds and reclaim leaves: `/proc/meminfo`'s `Dirty`.
     /// None unless a source says so.
+    ///
+    /// From an atomic load -- no lock, no blocking, no allocation -- as the
+    /// page cache asks it under its own spin lock; and a source whose count
+    /// moves calls its store's [`Pages::dirty_changed`] after the change,
+    /// holding none of its own spin locks.
     fn dirty_pages(&self) -> u64 {
         0
     }

@@ -1577,3 +1577,159 @@ fn a_commit_refused_for_memory_leaves_the_next_fsync_committing_the_names() {
         "the name made before a refused commit was lost to a cut after the next fsync"
     );
 }
+
+/// A store that notes, at every [`Pages::dirty_changed`], the count its
+/// source then answers, and whose reads can be made to fail as a writeback's
+/// copy out of it then does.
+#[derive(Debug, Default)]
+struct Telling {
+    heap: Option<HeapStorage>,
+    told: Arc<Mutex<Vec<u64>>>,
+    failing: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[derive(Debug)]
+struct TellingPages {
+    pages: Box<dyn ferrix_vfs::tmpfs::Pages>,
+    source: Option<Arc<dyn ferrix_vfs::tmpfs::PageSource>>,
+    told: Arc<Mutex<Vec<u64>>>,
+    failing: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl ferrix_vfs::tmpfs::Pages for TellingPages {
+    fn read(&self, offset: u64, buf: &mut [u8]) -> ferrix_vfs::Result<()> {
+        if self.failing.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(Errno::ENOMEM);
+        }
+        self.pages.read(offset, buf)
+    }
+    fn write(&self, offset: u64, data: &[u8]) -> ferrix_vfs::Result<()> {
+        self.pages.write(offset, data)
+    }
+    fn discard_from(&self, offset: u64) {
+        self.pages.discard_from(offset);
+    }
+    fn committed_bytes(&self) -> u64 {
+        self.pages.committed_bytes()
+    }
+    fn resize(&self, len: u64) {
+        self.pages.resize(len);
+    }
+    fn dirty_changed(&self) {
+        if let Some(source) = &self.source {
+            self.told.lock().unwrap().push(source.dirty_pages());
+        }
+    }
+}
+
+impl Storage for Telling {
+    fn allocate(&self) -> ferrix_vfs::Result<Box<dyn ferrix_vfs::tmpfs::Pages>> {
+        let pages = self.heap.as_ref().unwrap().allocate()?;
+        Ok(self.wrap(pages, None))
+    }
+    fn allocate_with(
+        &self,
+        source: Arc<dyn ferrix_vfs::tmpfs::PageSource>,
+    ) -> ferrix_vfs::Result<Box<dyn ferrix_vfs::tmpfs::Pages>> {
+        let pages = self
+            .heap
+            .as_ref()
+            .unwrap()
+            .allocate_with(Arc::clone(&source))?;
+        Ok(self.wrap(pages, Some(source)))
+    }
+    fn max_file_size(&self) -> u64 {
+        self.heap.as_ref().unwrap().max_file_size()
+    }
+}
+
+impl Telling {
+    fn wrap(
+        &self,
+        pages: Box<dyn ferrix_vfs::tmpfs::Pages>,
+        source: Option<Arc<dyn ferrix_vfs::tmpfs::PageSource>>,
+    ) -> Box<dyn ferrix_vfs::tmpfs::Pages> {
+        Box::new(TellingPages {
+            pages,
+            source,
+            told: Arc::clone(&self.told),
+            failing: Arc::clone(&self.failing),
+        })
+    }
+}
+
+/// Every change of a file's dirty set tells its store, after the change, the
+/// count its source answers then -- a write's marks, a writeback slice's take
+/// and its failed return, a full writeback's take and its failed return, and
+/// a truncation's cut -- and a read tells nothing (`docs/RSS-COUNTS.md` §9.4,
+/// ledger 8919 M6).
+///
+/// Verifies: L.user.239
+#[test]
+fn every_change_of_a_dirty_set_tells_its_store_the_count_after_it() {
+    let disk = Disk::new(BLANK);
+    let storage = Arc::new(Telling {
+        heap: Some(HeapStorage::new(1 << 30)),
+        ..Telling::default()
+    });
+    let fs = RwBtrfs::mount(
+        disk,
+        0x0800_0015,
+        Arc::clone(&storage) as Arc<dyn Storage>,
+        Arc::new(Fixed),
+        &SpinParker,
+        notice,
+    )
+    .unwrap();
+    let told = |storage: &Telling| storage.told.lock().unwrap().clone();
+    let page = 4096_usize;
+    // A write of 300 pages, more than a writeback slice's 256.
+    let file = make_file(&fs.root(), b"told", &vec![7u8; 300 * page]);
+    assert_eq!(
+        told(&storage).last(),
+        Some(&300),
+        "the write's marks: {:?}",
+        told(&storage)
+    );
+    // A read changes nothing and tells nothing.
+    let before = told(&storage).len();
+    let _ = read_all(&file);
+    assert_eq!(told(&storage).len(), before, "a read told");
+    // The writeback's copy fails: the slice's take, then its return; the full
+    // writeback's take, then its return.
+    storage.told.lock().unwrap().clear();
+    storage
+        .failing
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    assert!(file.fsync(false).is_err(), "the writeback's copy fails");
+    let failed = told(&storage);
+    assert!(failed.contains(&44), "a slice's take: {failed:?}");
+    assert!(failed.contains(&0), "a full writeback's take: {failed:?}");
+    assert_eq!(failed.last(), Some(&300), "the failed returns: {failed:?}");
+    assert!(
+        failed.windows(2).any(|pair| pair == [44, 300]),
+        "a failed slice's return: {failed:?}"
+    );
+    // Written back after all.
+    storage.told.lock().unwrap().clear();
+    storage
+        .failing
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    file.fsync(false).unwrap();
+    assert_eq!(
+        told(&storage).last(),
+        Some(&0),
+        "written back: {:?}",
+        told(&storage)
+    );
+    // A truncation's cut: three pages marked, two cut away.
+    assert_eq!(
+        file.write_at(0, &vec![9u8; 3 * page], false).unwrap().0,
+        3 * page
+    );
+    assert_eq!(told(&storage).last(), Some(&3));
+    file.set_len(page as u64).unwrap();
+    // The cut, then the writeback the truncation makes after it.
+    let cut = told(&storage);
+    assert!(cut.ends_with(&[3, 1, 0]), "the truncation's cut: {cut:?}");
+}

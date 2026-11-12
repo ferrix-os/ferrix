@@ -77,12 +77,14 @@
 //!
 //! [`totals`] counts every cached file's pages, whoever they are charged to:
 //! a disk file's, a memory filesystem's, and of the first those reclaim could
-//! give back now, for `Cached`, `Shmem` and `MemAvailable`. A count of each
-//! object's pages, not a walk of them, so a program polling the file costs
-//! the list and no more.
+//! give back now, for `Cached`, `Shmem` and `MemAvailable`. Each object keeps
+//! what it gives in its [`Share`], settled as its pages lock is let go, and
+//! the share moves counts kept per processor, so a read sums those and looks
+//! at no object (`docs/RSS-COUNTS.md` §9).
 
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 use super::vmo::{PoisonTake, Vmo};
 use ferrix_bootinfo::PAGE_SIZE;
@@ -180,8 +182,22 @@ impl Drop for Walk {
     }
 }
 
+/// The lists of the objects alive [`live`] has made, check builds only:
+/// `L.user.240`'s check, that a read of the counts makes none.
+#[cfg(ferrix_checks = "on")]
+static LISTED: AtomicU64 = AtomicU64::new(0);
+
+// CHECKS-ONLY: user/cache_kept_check.rs; home: user::cache
+/// The lists of the objects alive made so far, check builds only.
+#[cfg(ferrix_checks = "on")]
+pub(crate) fn listed_for_check() -> u64 {
+    LISTED.load(Ordering::Relaxed)
+}
+
 /// The objects alive now, or none with no memory to list them.
-fn live() -> Vec<Arc<Vmo>> {
+pub(crate) fn live() -> Vec<Arc<Vmo>> {
+    #[cfg(ferrix_checks = "on")]
+    let _ = LISTED.fetch_add(1, Ordering::Relaxed);
     let list = CACHE.lock();
     let Ok(mut out) = fallible::try_with_capacity(list.entries.len()) else {
         return Vec::new();
@@ -302,7 +318,7 @@ static QUIET: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::n
 // CHECKS-ONLY: fs/btrfs_write_check/poison_check.rs; home: user::cache
 /// Hold back, or let out again, the lines [`drop_poisoned`] says.
 pub fn quiet_for_check(quiet: bool) {
-    QUIET.store(quiet, core::sync::atomic::Ordering::Relaxed);
+    QUIET.store(quiet, Ordering::Relaxed);
 }
 
 /// Retire `frame` and say so: whether it is retired now (`L.object.259`).
@@ -313,7 +329,7 @@ fn retire(frame: Frame) -> bool {
         mm::Retired::Already => (true, "already retired"),
         mm::Retired::Full | mm::Retired::NotCovered => (false, "not retired"),
     };
-    if !QUIET.load(core::sync::atomic::Ordering::Relaxed) {
+    if !QUIET.load(Ordering::Relaxed) {
         crate::println!("mce: frame {:#x} {said}", frame * PAGE_SIZE);
     }
     retired
@@ -335,7 +351,7 @@ fn say(frame: Frame, dropped: Dropped) {
         Dropped::NotClean => "was a cached page that is not clean, kept",
         Dropped::NotRetired | Dropped::NotCache => return,
     };
-    if !QUIET.load(core::sync::atomic::Ordering::Relaxed) {
+    if !QUIET.load(Ordering::Relaxed) {
         crate::println!("mce: frame {:#x} {said}", frame * PAGE_SIZE);
     }
 }
@@ -715,22 +731,173 @@ impl Totals {
     }
 }
 
-/// What the page cache holds now, for `/proc/meminfo`: each live object's
-/// page count, which it keeps, rather than a walk of its pages.
-pub fn totals() -> Totals {
-    let mut out = Totals::default();
-    for vmo in live() {
-        let pages = vmo.committed() as u64;
-        if vmo.is_disk_file() {
-            let dirty = vmo.dirty_pages().min(pages);
-            out.disk += pages;
-            out.dirty += dirty;
-            if vmo.reclaimable() {
-                out.reclaimable += pages - dirty;
+/// Which of a set of counts ([`EARLY`], `PerCpu::cache_counts`) each
+/// figure is.
+const DISK: usize = 0;
+/// See [`DISK`].
+const MEMORY: usize = 1;
+/// See [`DISK`].
+const DIRTY: usize = 2;
+/// See [`DISK`].
+const RECLAIMABLE: usize = 3;
+
+/// The counts settles moved before this processor's record could be found
+/// (`L.user.241`).
+static EARLY: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
+
+/// The counts a settle running here adds to: this processor's record, or
+/// [`EARLY`] before there is one to find.
+fn here() -> &'static [AtomicU64; 4] {
+    crate::smp::this_cpu().map_or(&EARLY, |cpu| &cpu.cache_counts)
+}
+
+/// What one cache object gives the machine's counts now (`L.user.239`,
+/// `docs/RSS-COUNTS.md` §9.4): every object [`Vmo::new_filled`] makes holds
+/// one, in its pages, and no other object does. Settled at every release of
+/// the object's pages lock, under it, and given back whole as the object
+/// goes.
+#[derive(Debug)]
+pub(crate) struct Share {
+    /// A disk file's object, rather than a memory filesystem's.
+    disk: bool,
+    /// Whether reclaim may take its clean pages: its source's answer when
+    /// the object was made, which no source changes.
+    reclaimable: bool,
+    /// The source's count of pages written and not written back, as last
+    /// read under the pages lock.
+    fs: u64,
+    /// The pages it gives now.
+    pages: u64,
+    /// The dirty pages it gives now: none for a memory filesystem's.
+    dirty: u64,
+}
+
+impl Share {
+    /// An object's share, giving nothing yet: `disk` for a disk file's,
+    /// whether its source says it is `reclaimable`, and the source's dirty
+    /// count now.
+    pub(crate) const fn new(disk: bool, reclaimable: bool, fs: u64) -> Share {
+        Share {
+            disk,
+            reclaimable,
+            fs,
+            pages: 0,
+            dirty: 0,
+        }
+    }
+
+    /// Whether it was made reclaimable: the drop's check, check builds only.
+    #[cfg(ferrix_checks = "on")]
+    pub(crate) const fn reclaimable(&self) -> bool {
+        self.reclaimable
+    }
+
+    /// What it gives now, as (pages, dirty).
+    pub(crate) const fn given(&self) -> (u64, u64) {
+        (self.pages, self.dirty)
+    }
+
+    /// The source's dirty count is `fs` now; the next settle gives it.
+    pub(crate) fn read_fs(&mut self, fs: u64) {
+        self.fs = fs;
+    }
+
+    /// Give what an object of `pages` pages, `states` of them in a page
+    /// state, gives: the walk's figures for it ([`Totals`]), the dirty ones
+    /// at most its pages. Under the object's pages lock, so on the processor
+    /// whose counts it moves.
+    #[inline(always)]
+    pub(crate) fn settle(&mut self, pages: u64, states: u64) {
+        let dirty = if self.disk {
+            self.fs.saturating_add(states).min(pages)
+        } else {
+            0
+        };
+        if pages != self.pages || dirty != self.dirty {
+            self.give(pages, dirty);
+        }
+    }
+
+    /// Give everything back: the object goes.
+    pub(crate) fn take_back(&mut self) {
+        self.give(0, 0);
+    }
+
+    /// Move the counts from what it gave to `pages` and `dirty`.
+    #[inline(never)]
+    fn give(&mut self, pages: u64, dirty: u64) {
+        let counts = here();
+        let more = pages.wrapping_sub(self.pages);
+        let dirtier = dirty.wrapping_sub(self.dirty);
+        let add = |figure: usize, by: u64| {
+            if let Some(count) = counts.get(figure)
+                && by != 0
+            {
+                let _ = count.fetch_add(by, Ordering::Relaxed);
+            }
+        };
+        if self.disk {
+            add(DISK, more);
+            add(DIRTY, dirtier);
+            if self.reclaimable {
+                add(RECLAIMABLE, more.wrapping_sub(dirtier));
             }
         } else {
-            out.memory += pages;
+            add(MEMORY, more);
         }
+        self.pages = pages;
+        self.dirty = dirty;
+    }
+}
+
+/// What the page cache holds now, for `/proc/meminfo` (`L.object.189`,
+/// `L.user.239`, `L.user.240`): the counts every object's [`Share`] moved,
+/// summed over the early counts and every processor's record. No cache
+/// object, list or lock: O(processors). Exact whenever no change is under
+/// way, as the walk it replaced was; a read racing changes on two
+/// processors may see one and not the other, and a figure is never below
+/// zero.
+pub fn totals() -> Totals {
+    totals_except(None)
+}
+
+/// [`totals`], leaving out processor `leave_out`'s record, for the negative
+/// control of the check that requires the sum exact.
+pub(crate) fn totals_except(leave_out: Option<usize>) -> Totals {
+    let mut sum = [0_u64; 4];
+    let add = |sum: &mut [u64; 4], counts: &[AtomicU64; 4]| {
+        for (total, count) in sum.iter_mut().zip(counts) {
+            *total = total.wrapping_add(count.load(Ordering::Relaxed));
+        }
+    };
+    add(&mut sum, &EARLY);
+    let cpus = crate::smp::topology().map_or(&[][..], crate::smp::Topology::cpus);
+    for (cpu, record) in cpus.iter().enumerate() {
+        if Some(cpu) != leave_out {
+            add(&mut sum, &record.cache_counts);
+        }
+    }
+    // Two's complement: a sum caught mid-change can be below zero.
+    let figure = |at: usize| {
+        sum.get(at)
+            .map_or(0, |&total| u64::try_from(total as i64).unwrap_or(0))
+    };
+    Totals {
+        disk: figure(DISK),
+        memory: figure(MEMORY),
+        dirty: figure(DIRTY),
+        reclaimable: figure(RECLAIMABLE),
+    }
+}
+
+// CHECKS-ONLY: user/cache_kept_check.rs; home: user::cache
+/// This processor's own counts, for the check that a settle adds to the
+/// record of the processor it runs on (`L.user.241`).
+pub(crate) fn here_for_check() -> [u64; 4] {
+    let counts = here();
+    let mut out = [0; 4];
+    for (value, count) in out.iter_mut().zip(counts) {
+        *value = count.load(Ordering::Relaxed);
     }
     out
 }

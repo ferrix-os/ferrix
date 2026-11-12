@@ -184,6 +184,9 @@ use ferrix_vfs::{
 
 use crate::{BTRFS_SUPER_MAGIC, NAME_MAX, SpinLock};
 
+mod dirty;
+use dirty::DirtySet;
+
 /// Pages a writeback turns into extents at a time: 256, a mebibyte, which
 /// bounds the buffer it copies them through. More would be fewer, larger
 /// extents; a kernel heap of a few megabytes is what says no.
@@ -810,7 +813,7 @@ struct Node<D> {
     pages: SpinLock<Option<Arc<dyn Pages>>>,
     /// Pages written and not yet turned into extents. Shared with the page
     /// cache's source, which answers reclaim from it.
-    dirty: Arc<SpinLock<BTreeSet<u64>>>,
+    dirty: Arc<DirtySet>,
     /// The pages being written into, cut or written back, which reclaim
     /// leaves; see "Clean pages may be reclaimed". Taken after `dirty`, never
     /// around it.
@@ -919,7 +922,7 @@ impl<D: WriteHandle> Node<D> {
             kind: meta.kind,
             meta: SpinLock::new(meta),
             pages: SpinLock::new(None),
-            dirty: Arc::new(SpinLock::new(BTreeSet::new())),
+            dirty: Arc::new(DirtySet::new()),
             still: Arc::new(SpinLock::new(Still::default())),
             writers: ferrix_vfs::writers::new_count(),
         });
@@ -946,6 +949,9 @@ impl<D: WriteHandle> Node<D> {
         made.resize(self.meta.lock().size);
         let mut slot = self.pages.lock();
         let pages = Arc::clone(slot.get_or_insert_with(|| Arc::clone(&made)));
+        // Told of from here, before any write can reach the set: a write
+        // takes the store from this slot first.
+        self.dirty.tell(&pages);
         drop(slot);
         // A loser's store goes after the lock, which keeps its holder on its
         // processor and so runs no filesystem's or page cache's `Drop`.
@@ -1291,7 +1297,7 @@ struct Source<D> {
     ino: u64,
     /// The inode's dirty set and what it holds still, which say which pages
     /// reclaim may have.
-    dirty: Arc<SpinLock<BTreeSet<u64>>>,
+    dirty: Arc<DirtySet>,
     still: Arc<SpinLock<Still>>,
 }
 
@@ -1336,8 +1342,10 @@ impl<D: WriteHandle> PageSource for Source<D> {
         stolen
     }
 
+    /// The set's length as its last holder left it: no lock, as the page
+    /// cache asks under its own ([`DirtySet`]).
     fn dirty_pages(&self) -> u64 {
-        self.dirty.lock().len() as u64
+        self.dirty.len()
     }
 
     fn fill_range(&self, first: u64, pages: &mut [&mut [u8]]) -> Result<usize> {

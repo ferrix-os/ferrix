@@ -1048,28 +1048,28 @@
     },
     {
       "file": "smp.rs",
-      "lines": "1161, 1165-1166",
+      "lines": "1168, 1172-1173",
       "category": "failure-path",
       "match": "debug_assert!(",
       "why": "The failure arm of a `debug_assert!` and its message's arguments: a shootdown requested while holding a lock that disables preemption, which the assertion exists to stop on. It holds on every run of the suite."
     },
     {
       "file": "smp.rs",
-      "lines": "1187",
+      "lines": "1194",
       "category": "failure-path",
       "match": "debug_assert!(",
       "why": "The failure arm of a `debug_assert!`: a shootdown that has to wait for other processors requested with interrupts masked, which no other processor could answer. It holds on every run."
     },
     {
       "file": "smp.rs",
-      "lines": "1228",
+      "lines": "1235",
       "category": "failure-path",
       "match": "stood / 1_000_000",
       "why": "The millisecond count in the `fatal!` a processor raises when no shootdown turn started for the timeout while it waited, printed as the kernel stops."
     },
     {
       "file": "smp.rs",
-      "lines": "1291",
+      "lines": "1298",
       "category": "failure-path",
       "match": "waited / 1_000_000",
       "why": "The millisecond count in the `fatal!` raised when a processor never answered a shootdown or a grace period, printed as the kernel stops."
@@ -1251,7 +1251,7 @@
     },
     {
       "file": "user/vmo.rs",
-      "lines": "3117",
+      "lines": "3198",
       "category": "defensive",
       "match": "return Err(VmoError::OutOfMemory);",
       "why": "A page already held four billion times, whose count would wrap. Each hold is a pin a driver made and keeps a handle to, and a process may hold at most HANDLE_LIMIT (4,096) handles, so the count cannot approach the limit; the refusal is what keeps a wrapped count from freeing a page a device still reaches."
