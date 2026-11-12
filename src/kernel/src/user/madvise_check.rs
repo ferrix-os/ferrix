@@ -172,7 +172,7 @@ fn drop_and_count(
     for index in 0..PAGES {
         fill(space, at + index * PAGE_SIZE, pattern(index))?;
     }
-    let resident = space.resident_split().map_or(0, |split| split.total());
+    let resident = space.resident().total();
     let window = mm::FrameWindow::open();
     if advise(process, at + PAGE_SIZE, DROPPED * PAGE_SIZE, advice) != Ok(0) {
         return Err("madvise refused to drop pages of private anonymous memory");
@@ -188,7 +188,7 @@ fn drop_and_count(
             "madvise did not give the frames of the pages it dropped back to the allocator",
         );
     }
-    if resident.saturating_sub(space.resident_split().map_or(0, |split| split.total())) != DROPPED {
+    if resident.saturating_sub(space.resident().total()) != DROPPED {
         return Err("madvise dropped pages that were still counted resident");
     }
     counts.given_back += DROPPED;

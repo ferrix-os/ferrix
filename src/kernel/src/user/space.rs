@@ -93,7 +93,11 @@
 //!
 //! This space's lock, then a VMO's mapper list, then the VMO's pages. No VMO
 //! lock is ever held while a space's lock is taken, no two spaces' locks are
-//! ever held together, and no shootdown waits under any of them.
+//! ever held together, and no shootdown waits under any of them. Two VMOs'
+//! pages locks are held together only as a shadow's pages lock, then its
+//! file's (`Vmo::with_frames_nested`, the kept resident counts,
+//! `docs/RSS-COUNTS.md` §4): never a file's then a shadow's, never two
+//! otherwise; check builds stop on any other.
 
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
@@ -119,6 +123,7 @@ use crate::mm;
 use crate::object::pager::{Command, FaultMode, Refusal};
 use crate::smp::{self, CpuMask, TlbPages};
 use crate::user::memory_type::{self, MemoryType};
+use crate::user::rss::{Kind, Rss, ViewKey};
 use crate::user::vmo::{
     Commit, Kept, Own, PageState, Retired, ShadowCopies, Sharing, Vmo, VmoError,
 };
@@ -218,14 +223,15 @@ impl Access {
     };
 }
 
-/// The parts that the lock protects.
+/// The parts that the lock protects. The map, the objects and the shadows
+/// are read by the kept counts' recount too (`user::rss_check`).
 #[derive(Debug)]
-struct Inner {
+pub(super) struct Inner {
     /// What is mapped where.
-    map: ferrix_vma::AddressSpace,
+    pub(super) map: ferrix_vma::AddressSpace,
     /// The objects those regions name, by the id the region carries. Every id
     /// in here is attached to its object, and detached as it leaves.
-    objects: BTreeMap<u64, Arc<Vmo>>,
+    pub(super) objects: BTreeMap<u64, Arc<Vmo>>,
     /// For an id a file mapping names, the open file it was mapped through:
     /// what keeps the file alive for as long as the mapping is, as Linux's
     /// `vm_file` does, and what `/proc/<pid>/maps` names the region by. It
@@ -242,7 +248,7 @@ struct Inner {
     /// under the same id, attached shared, so a truncation of the file or a
     /// replacement in either object takes down whatever the region shows at
     /// that address, whichever object holds the page.
-    shadows: BTreeMap<u64, Arc<Vmo>>,
+    pub(super) shadows: BTreeMap<u64, Arc<Vmo>>,
     /// The next object id to hand out. Never zero, which `Backing` reserves
     /// for private memory with no named object.
     next_id: u64,
@@ -444,6 +450,10 @@ pub struct AddressSpace {
     id: u64,
     /// This space, as the objects it maps record it.
     me: Weak<AddressSpace>,
+    /// Its resident pages, kept by the objects it maps as their pages and
+    /// its regions come and go (`user::rss`, `L.user.236`): made with the
+    /// space, by [`AddressSpace::new`] and [`AddressSpace::fork`] alike.
+    rss: Arc<Rss>,
     /// The processors whose TLB may still hold this space's translations.
     cpus: CpuMask,
     /// Whether a processor holds this space's window (ledger 6998): written by its opener
@@ -456,7 +466,7 @@ pub struct AddressSpace {
     /// its first look at the map to its last change: see
     /// [`AddressSpace::layout`].
     layout: SleepLock<()>,
-    inner: SpinLock<Inner>,
+    pub(super) inner: SpinLock<Inner>,
     /// Whether its executable memory comes only from sealed, measured VMOs
     /// (`docs/microkernel/K14.md` §3). Set once, never cleared; read by the
     /// map calls with no job's lock taken (K14.7), and copied by a clone.
@@ -597,6 +607,10 @@ impl AddressSpace {
             SpaceError::BadRange
         })?;
 
+        let Ok(rss) = fallible::try_arc(Rss::new()) else {
+            mm::deallocate_frames(root, 0);
+            return Err(SpaceError::OutOfMemory);
+        };
         fallible::try_arc_cyclic(|me| {
             AddressSpace::assemble(
                 root,
@@ -610,6 +624,7 @@ impl AddressSpace {
                     native: BTreeMap::new(),
                     images: None,
                 },
+                rss,
             )
         })
         .map_err(|_| {
@@ -840,11 +855,12 @@ impl AddressSpace {
     /// What [`AddressSpace::new`] and [`AddressSpace::fork`] make alike: a
     /// space over `root` holding `inner`, on no processor, with no shootdown
     /// begun, and claimed by no speculation domain yet.
-    fn assemble(root: Frame, me: &Weak<AddressSpace>, inner: Inner) -> AddressSpace {
+    fn assemble(root: Frame, me: &Weak<AddressSpace>, inner: Inner, rss: Arc<Rss>) -> AddressSpace {
         AddressSpace {
             root,
             id: next_id(),
             me: me.clone(),
+            rss,
             cpus: CpuMask::new(),
             #[cfg(all(ferrix_restricted_window = "on", not(ferrix_load_built = "lift")))]
             window_held: AtomicBool::new(false),
@@ -1638,6 +1654,11 @@ fn attach_child(child: &Arc<AddressSpace>) -> Result<(), SpaceError> {
             .attach(Arc::downgrade(child), id, Sharing::Private)
             .map_err(|_| SpaceError::OutOfMemory)?;
     }
+    // Its resident counts, region by region: a refusal leaves views the
+    // child's drop forgets (`user::rss`).
+    for region in inner.map.iter() {
+        child.count_in(&inner, region.range, region.backing, region.flags)?;
+    }
     Ok(())
 }
 
@@ -1656,6 +1677,158 @@ fn sharing_of(flags: VmaFlags) -> Sharing {
     } else {
         Sharing::Private
     }
+}
+
+/// What one region counts in (`user::rss`): its object's view, and for a
+/// private file mapping its shadow's, over the page indexes it covers.
+struct Counting {
+    /// The region's object.
+    object: Arc<Vmo>,
+    /// A private file mapping's shadow.
+    shadow: Option<Arc<Vmo>>,
+    /// The object's view.
+    key: ViewKey,
+    /// The first page index the region covers.
+    first: u64,
+    /// One past its last.
+    end: u64,
+}
+
+/// What a region over `range` with `backing` and `flags` counts in, for a
+/// space whose counts are `rss`: `None` for a device's region, or an id with
+/// no object. Which count its object's pages go to: private memory is
+/// anonymous, shared anonymous memory and a memory filesystem's file shared
+/// memory, a disk file's pages a file's (`L.user.171`).
+fn counting_of(
+    rss: &Arc<Rss>,
+    object: &Arc<Vmo>,
+    shadow: Option<&Arc<Vmo>>,
+    (range, backing, flags): (PageRange, Backing, VmaFlags),
+) -> Option<Counting> {
+    let (id, offset, file) = match backing {
+        Backing::Anonymous { id, offset } => (id, offset, false),
+        Backing::File { id, offset } => (id, offset, true),
+        Backing::Device { .. } => return None,
+    };
+    let kind = if !file {
+        if flags.shared {
+            Kind::Shmem
+        } else {
+            Kind::Anon
+        }
+    } else if object.is_disk_file() {
+        Kind::File
+    } else {
+        Kind::Shmem
+    };
+    let first = offset / PAGE_SIZE;
+    Some(Counting {
+        object: Arc::clone(object),
+        shadow: shadow.filter(|_| file && !flags.shared).map(Arc::clone),
+        key: ViewKey {
+            rss: Arc::clone(rss),
+            id,
+            kind,
+        },
+        first,
+        end: first.saturating_add(range.bytes() / PAGE_SIZE),
+    })
+}
+
+/// [`counting_of`] for a region whose object, and shadow, are in `inner`'s
+/// tables.
+fn counting(
+    inner: &Inner,
+    rss: &Arc<Rss>,
+    range: PageRange,
+    backing: Backing,
+    flags: VmaFlags,
+) -> Option<Counting> {
+    let id = match backing {
+        Backing::Anonymous { id, .. } | Backing::File { id, .. } => id,
+        Backing::Device { .. } => return None,
+    };
+    let object = inner.objects.get(&id)?;
+    counting_of(rss, object, inner.shadows.get(&id), (range, backing, flags))
+}
+
+impl Counting {
+    /// The shadow's view: the same space and id, anonymous.
+    fn shadow_key(&self) -> ViewKey {
+        ViewKey {
+            kind: Kind::Anon,
+            ..self.key.clone()
+        }
+    }
+
+    /// Count the region in: the file's view linked to its shadow first, for
+    /// a private file mapping, then each view's cover raised.
+    fn raise(&self) -> Result<(), SpaceError> {
+        if let Some(shadow) = &self.shadow {
+            self.object
+                .link_shadow(shadow, &self.key)
+                .map_err(|_| SpaceError::OutOfMemory)?;
+        }
+        self.object
+            .cover(&self.key, self.first, self.end, true)
+            .map_err(|_| SpaceError::OutOfMemory)?;
+        if let Some(shadow) = &self.shadow
+            && shadow
+                .cover(&self.shadow_key(), self.first, self.end, true)
+                .is_err()
+        {
+            // The exact undo, in the room the raise had for it.
+            let _ = self.object.cover(&self.key, self.first, self.end, false);
+            return Err(SpaceError::OutOfMemory);
+        }
+        Ok(())
+    }
+
+    /// Count the region out: its room was had by [`Counting::reserve_lower`],
+    /// or by the raise it undoes.
+    fn lower(&self) {
+        let _lowered = self
+            .object
+            .cover(&self.key, self.first, self.end, false)
+            .and_then(|()| {
+                self.shadow.as_ref().map_or(Ok(()), |shadow| {
+                    shadow.cover(&self.shadow_key(), self.first, self.end, false)
+                })
+            });
+        #[cfg(ferrix_checks = "on")]
+        if let Err(error) = _lowered {
+            crate::panic::fatal!(
+                crate::panic::catalog::RSS_COUNT_BROKEN,
+                "kept resident counts: a region could not be counted out: {error:?}"
+            );
+        }
+    }
+
+    /// Which view this counts in, as a key to group by.
+    fn view_order(&self) -> (usize, u64, u8) {
+        let object = Arc::as_ptr(&self.object) as usize;
+        (object, self.key.id, self.key.kind as u8)
+    }
+
+    /// Room for `changes` lowers of parts of the region.
+    fn reserve_lower(&self, changes: usize) -> Result<(), SpaceError> {
+        self.object
+            .reserve_lowers(&self.key, changes)
+            .map_err(|_| SpaceError::OutOfMemory)?;
+        if let Some(shadow) = &self.shadow {
+            shadow
+                .reserve_lowers(&self.shadow_key(), changes)
+                .map_err(|_| SpaceError::OutOfMemory)?;
+        }
+        Ok(())
+    }
+}
+
+/// Whether a region with `backing` and `flags` is a private file mapping,
+/// which [`AddressSpace::add_region`] does not count: its shadow is not in
+/// the tables yet, and [`AddressSpace::map_file`] counts it once it is.
+fn counted_later(backing: Backing, flags: VmaFlags) -> bool {
+    matches!(backing, Backing::File { .. }) && !flags.shared
 }
 
 impl AddressSpace {
@@ -1728,6 +1901,87 @@ impl AddressSpace {
         Ok(id)
     }
 
+    /// The resident set, split as Linux's `RssAnon`, `RssFile` and
+    /// `RssShmem` split it (`L.user.171`), as the objects this space maps
+    /// keep it (`user::rss`, `L.user.236`): three loads, no lock taken and
+    /// nothing walked, whatever the regions and pages (`L.user.237`).
+    pub fn resident(&self) -> Resident {
+        self.rss.read()
+    }
+
+    /// Count the region over `range` in, under this space's lock (`inner`).
+    fn count_in(
+        &self,
+        inner: &Inner,
+        range: PageRange,
+        backing: Backing,
+        flags: VmaFlags,
+    ) -> Result<(), SpaceError> {
+        counting(inner, &self.rss, range, backing, flags)
+            .map_or(Ok(()), |counting| counting.raise())
+    }
+
+    /// Count the region over `range` out, under this space's lock: the room
+    /// for it had by [`AddressSpace::room_to_count_out`] or by its own raise.
+    fn count_out(&self, inner: &Inner, range: PageRange, backing: Backing, flags: VmaFlags) {
+        if let Some(counting) = counting(inner, &self.rss, range, backing, flags) {
+            counting.lower();
+        }
+    }
+
+    /// Count out every region `removed` names. Kept out of `unmap`'s frame,
+    /// which is on a task's deepest path (`check-stack-depth`).
+    #[inline(never)]
+    fn count_out_removed(&self, inner: &Inner, removed: &[Unmapping]) {
+        for unmapping in removed {
+            self.count_out(inner, unmapping.range, unmapping.backing, unmapping.flags);
+        }
+    }
+
+    /// Room for every region `ranges` reach to be counted out, in part or
+    /// whole, and for `placement`'s exact undo, before a removal from the
+    /// map that cannot be refused after it. A binary search for each range's
+    /// first region, then each region reached; the room is had once per view
+    /// for all of that view's lowers together (`Frames::reserve_lowers`).
+    #[inline(never)]
+    fn room_to_count_out(
+        &self,
+        inner: &Inner,
+        ranges: &[PageRange],
+        placement: Option<(PageRange, Backing, VmaFlags)>,
+    ) -> Result<(), SpaceError> {
+        let oom = |_| SpaceError::OutOfMemory;
+        let mut reached: Vec<Counting> = Vec::new();
+        let regions = inner.map.iter().as_slice();
+        for &range in ranges {
+            let from = regions.partition_point(|region| region.range.end() <= range.start());
+            for region in regions
+                .get(from..)
+                .unwrap_or_default()
+                .iter()
+                .take_while(|region| region.range.start() < range.end())
+            {
+                if let Some(counting) =
+                    counting(inner, &self.rss, region.range, region.backing, region.flags)
+                {
+                    fallible::try_push(&mut reached, counting).map_err(oom)?;
+                }
+            }
+        }
+        if let Some(counting) = placement
+            .and_then(|(range, backing, flags)| counting(inner, &self.rss, range, backing, flags))
+        {
+            fallible::try_push(&mut reached, counting).map_err(oom)?;
+        }
+        reached.sort_unstable_by_key(Counting::view_order);
+        for group in reached.chunk_by(|one, other| one.view_order() == other.view_order()) {
+            if let Some(counting) = group.first() {
+                counting.reserve_lower(group.len())?;
+            }
+        }
+        Ok(())
+    }
+
     /// Map `region`, naming `vmo` by its id: the region in the map, this
     /// space among the object's mappers, and the object in the table -- all
     /// three or, when memory runs out part-way, none (finding F-23).
@@ -1748,8 +2002,22 @@ impl AddressSpace {
         let held = fallible::reserve().map_err(|_| SpaceError::OutOfMemory)?;
         vmo.attach(self.me.clone(), id, sharing)
             .map_err(|_| SpaceError::OutOfMemory)?;
+        // Counted in before the map takes it, so that a refusal of either is
+        // undone exactly; a private file mapping is counted by `map_file`.
+        let counted = (!counted_later(backing, flags))
+            .then(|| counting_of(&self.rss, &vmo, None, (range, backing, flags)))
+            .flatten();
+        if let Some(counting) = &counted
+            && let Err(why) = counting.raise()
+        {
+            vmo.detach(self, id);
+            return Err(why);
+        }
         // FALLIBLE: the map's insert refuses with `VmaError::NoMemory`.
         if let Err(error) = inner.map.insert(range, flags, backing) {
+            if let Some(counting) = &counted {
+                counting.lower();
+            }
             vmo.detach(self, id);
             return Err(map_error(error));
         }
@@ -1762,7 +2030,27 @@ impl AddressSpace {
     /// object's mappers, out of the map. The region was just inserted whole,
     /// so taking it out splits nothing and needs no memory.
     fn abandon_region(&self, inner: &mut Inner, id: u64, range: PageRange) {
+        // Counted out as `add_region` counted it in, while the object is
+        // still in the table: its exact undo, in the room the raise had.
+        if let Some(region) = inner.map.find(range.start()).copied()
+            && !counted_later(region.backing, region.flags)
+        {
+            let into = range.start() - region.range.start();
+            let backing = match region.backing {
+                Backing::Anonymous { id, offset } => Backing::Anonymous {
+                    id,
+                    offset: offset.saturating_add(into),
+                },
+                Backing::File { id, offset } => Backing::File {
+                    id,
+                    offset: offset.saturating_add(into),
+                },
+                device @ Backing::Device { .. } => device,
+            };
+            self.count_out(inner, range, backing, region.flags);
+        }
         if let Some(vmo) = inner.objects.remove(&id) {
+            vmo.forget_views(&self.rss, Some(id));
             vmo.detach(self, id);
         }
         let _ = inner.native.remove(&id);
@@ -1939,6 +2227,9 @@ impl AddressSpace {
         drop(inner);
         self.shoot(&cpus, &mut pages);
 
+        let Ok(rss) = fallible::try_arc(Rss::new()) else {
+            return Err(unrooted(root));
+        };
         let child = fallible::try_arc_cyclic(|me| {
             AddressSpace::assemble(
                 root,
@@ -1957,6 +2248,7 @@ impl AddressSpace {
                     native,
                     images,
                 },
+                rss,
             )
         })
         // Refused before the closure ran, so nothing owns the root but this:
@@ -2865,7 +3157,10 @@ impl AddressSpace {
         let mut pages = TlbPages::new();
         let (cpus, touched) = {
             let mut inner = self.inner.lock();
+            // Room to count out whatever the removal cuts, before it.
+            self.room_to_count_out(&inner, &[range], None)?;
             let removed = inner.map.remove(range).map_err(map_error)?;
+            self.count_out_removed(&inner, &removed);
             self.take_down(&removed, &mut freeing, &mut pages);
             (self.begin_shootdown(&inner), touched_ids(&removed))
         };
@@ -3008,7 +3303,7 @@ impl AddressSpace {
         let gone = files.keys().filter(|&&id| !named.contains(id)).count();
         let Ok(mut unkept) = fallible::try_with_capacity(gone) else {
             let kept = |id: u64| named.contains(id) || files.contains_key(&id);
-            drop_objects(me, objects, shadows, native, kept);
+            drop_objects((me, &self.rss), objects, shadows, native, kept);
             return Vec::new();
         };
         // A mapping that may write its file stops counting as its id leaves,
@@ -3021,7 +3316,9 @@ impl AddressSpace {
                 vmo.lower_shared_may_write();
             }
         }
-        drop_objects(me, objects, shadows, native, |id| named.contains(id));
+        drop_objects((me, &self.rss), objects, shadows, native, |id| {
+            named.contains(id)
+        });
         files.retain(|&id, mapping| {
             let named = named.contains(id);
             if !named {
@@ -3548,7 +3845,7 @@ fn writable_ceiling(native: &BTreeMap<u64, Ceiling>, id: u64) -> bool {
 }
 
 fn drop_objects(
-    me: *const AddressSpace,
+    (me, rss): (*const AddressSpace, &Arc<Rss>),
     objects: &mut BTreeMap<u64, Arc<Vmo>>,
     shadows: &mut BTreeMap<u64, Arc<Vmo>>,
     native: &mut BTreeMap<u64, Ceiling>,
@@ -3562,6 +3859,7 @@ fn drop_objects(
             if writable_ceiling(native, id) {
                 vmo.lower_writable_region();
             }
+            vmo.forget_views(rss, Some(id));
             vmo.detach(me, id);
         }
         named
@@ -3570,6 +3868,7 @@ fn drop_objects(
     shadows.retain(|&id, shadow| {
         let named = kept(id);
         if !named {
+            shadow.forget_views(rss, Some(id));
             shadow.detach(me, id);
         }
         named
@@ -3699,19 +3998,31 @@ impl AddressSpace {
             // A private region's pages move to an object of their own, and the
             // move goes first, before the map changes, because it is the last
             // thing that can still be refused: a held page does not move.
-            let fresh = if shared {
+            let mut fresh = if shared {
                 None
             } else {
                 Some(self.move_private(&mut inner, &vmo, first, old_len.min(new_len), new_len)?)
             };
+
+            // The new placement counted in while a refusal can still be
+            // answered, with the room to count out what the clear removes:
+            // undone exactly, and the move with it, if either is refused
+            // (`user::rss`).
+            let fixed = matches!(destination, Destination::Fixed(_));
+            let placement = (
+                new_range,
+                placed_backing(fresh.as_ref(), id, first),
+                region.flags,
+            );
+            self.count_remap_in(&mut inner, placement, (fixed, old_range), &mut fresh)?;
 
             // Everything that can be refused has been. Whatever a fixed
             // destination covers goes, as `MAP_FIXED` would take it; then the
             // old range leaves the map and the tables, but not its pages.
             let cleared = self.clear_for_remap(
                 &mut inner,
-                matches!(destination, Destination::Fixed(_)),
-                new_range,
+                fixed,
+                placement,
                 old_range,
                 &mut freeing,
                 &mut pages,
@@ -3737,6 +4048,7 @@ impl AddressSpace {
                     .map(|()| at)
                     .map_err(|_| SpaceError::BadRange)
             });
+            self.count_out_unplaced(&inner, placement, cleared, placed);
             let cpus = self.begin_shootdown(&inner);
             (placed, cpus, moved.map(|retired| (vmo, retired)))
         };
@@ -3759,6 +4071,57 @@ impl AddressSpace {
         }
         self.give_back(freeing, None);
         placed
+    }
+
+    /// Undo [`AddressSpace::move_private`]'s move, `fresh`, for an `mremap`
+    /// refused after it: the new object forgets the pages, which the old one
+    /// never stopped naming, and leaves the tables.
+    fn undo_move(&self, inner: &mut Inner, fresh: Option<(u64, Arc<Vmo>, Retired)>) {
+        if let Some((fresh_id, fresh, _moved)) = fresh {
+            fresh.disown_pages();
+            self.drop_fresh(inner, fresh_id);
+        }
+    }
+
+    /// For an `mremap`: count the region's new placement (its range,
+    /// backing and flags) in, and have the room to count out what the clear
+    /// removes -- a `fixed` destination's regions and the old range --
+    /// before the map changes; with none, the placement counted out again,
+    /// the move (`fresh`) undone, and the refusal answered.
+    fn count_remap_in(
+        &self,
+        inner: &mut Inner,
+        (range, backing, flags): (PageRange, Backing, VmaFlags),
+        (fixed, old_range): (bool, PageRange),
+        fresh: &mut Option<(u64, Arc<Vmo>, Retired)>,
+    ) -> Result<(), SpaceError> {
+        let removed: &[PageRange] = if fixed {
+            &[range, old_range]
+        } else {
+            &[old_range]
+        };
+        let counted = self.count_in(inner, range, backing, flags).and_then(|()| {
+            self.room_to_count_out(inner, removed, Some((range, backing, flags)))
+                .inspect_err(|_| self.count_out(inner, range, backing, flags))
+        });
+        if counted.is_err() {
+            self.undo_move(inner, fresh.take());
+        }
+        counted
+    }
+
+    /// For an `mremap` whose old range was cleared and whose new placement
+    /// was then refused: the placement counted out again.
+    fn count_out_unplaced(
+        &self,
+        inner: &Inner,
+        (range, backing, flags): (PageRange, Backing, VmaFlags),
+        cleared: Result<(), SpaceError>,
+        placed: Result<u64, SpaceError>,
+    ) {
+        if cleared.is_ok() && placed.is_err() {
+            self.count_out(inner, range, backing, flags);
+        }
     }
 
     /// Move a private region's `moved` bytes of `vmo`, from byte `first`,
@@ -3825,6 +4188,7 @@ impl AddressSpace {
     /// Undo [`AddressSpace::add_fresh`] for an `mremap` that did not move.
     fn drop_fresh(&self, inner: &mut Inner, id: u64) {
         if let Some(fresh) = inner.objects.remove(&id) {
+            fresh.forget_views(&self.rss, Some(id));
             fresh.detach(self, id);
         }
     }
@@ -3906,18 +4270,53 @@ impl AddressSpace {
         &self,
         inner: &mut Inner,
         fixed: bool,
-        new_range: PageRange,
+        placement: (PageRange, Backing, VmaFlags),
+        old_range: PageRange,
+        freeing: &mut Vec<Freeing>,
+        pages: &mut TlbPages,
+    ) -> Result<(), SpaceError> {
+        let (new_range, backing, flags) = placement;
+        let cleared = self.clear_ranges(inner, (fixed, new_range), old_range, freeing, pages);
+        // The new placement, counted in before, counted out again when it
+        // will not be placed.
+        if cleared.is_err() {
+            self.count_out(inner, new_range, backing, flags);
+        }
+        cleared
+    }
+
+    /// [`AddressSpace::clear_for_remap`]'s removals: the destination if it
+    /// is `fixed`, then the old range, each counted out as it goes.
+    fn clear_ranges(
+        &self,
+        inner: &mut Inner,
+        (fixed, new_range): (bool, PageRange),
         old_range: PageRange,
         freeing: &mut Vec<Freeing>,
         pages: &mut TlbPages,
     ) -> Result<(), SpaceError> {
         if fixed {
             let removed = inner.map.remove(new_range).map_err(map_error)?;
+            self.count_out_removed(inner, &removed);
             self.take_down(&removed, freeing, pages);
         }
-        let _ = inner.map.remove(old_range).map_err(map_error)?;
+        let removed = inner.map.remove(old_range).map_err(map_error)?;
+        self.count_out_removed(inner, &removed);
         self.unmap_range(old_range, pages);
         Ok(())
+    }
+}
+
+/// The backing an `mremap`'s new placement names: the new object a private
+/// region's pages moved to, `fresh`, from its start, or the region's own
+/// object `id` from byte `first`.
+fn placed_backing(fresh: Option<&(u64, Arc<Vmo>, Retired)>, id: u64, first: u64) -> Backing {
+    match fresh {
+        Some(&(fresh_id, _, _)) => Backing::Anonymous {
+            id: fresh_id,
+            offset: 0,
+        },
+        None => Backing::Anonymous { id, offset: first },
     }
 }
 
@@ -4888,16 +5287,22 @@ impl AddressSpace {
             execute: true,
             ..shared
         };
-        // FALLIBLE: the map's insert refuses with `VmaError::NoMemory`.
-        let inserted = inner.map.insert(
-            code,
-            runnable,
-            Backing::Anonymous {
-                id,
-                offset: PAGE_SIZE,
-            },
-        );
+        let code_backing = Backing::Anonymous {
+            id,
+            offset: PAGE_SIZE,
+        };
+        // Counted in before the map takes it, as `add_region` counts.
+        let counted = self.count_in(&inner, code, code_backing, runnable);
+        let inserted = counted.and_then(|()| {
+            inner
+                .map
+                .insert(code, runnable, code_backing) // FALLIBLE: refuses with `NoMemory`.
+                .map_err(map_error)
+        });
         if inserted.is_err() || fallible::insert(&mut inner.native, id, Ceiling::Kernel).is_err() {
+            if counted.is_ok() {
+                self.count_out(&inner, code, code_backing, runnable);
+            }
             if inserted.is_ok() {
                 let _ = inner.map.remove_quietly(code);
             }
@@ -5000,6 +5405,22 @@ impl AddressSpace {
             drop(inner);
             drop(mapping);
             return Err(SpaceError::OutOfMemory);
+        }
+        // A private mapping is counted once its shadow is in the tables:
+        // the file's view masks what the shadow holds (`user::rss`).
+        if !flags.shared
+            && let Err(why) = self.count_in(&inner, range, Backing::File { id, offset }, flags)
+        {
+            let mapping = inner.files.remove(&id);
+            let shadow = inner.shadows.remove(&id);
+            if let Some(shadow) = &shadow {
+                shadow.forget_views(&self.rss, Some(id));
+                shadow.detach(self, id);
+            }
+            self.abandon_region(&mut inner, id, range);
+            drop(inner);
+            drop((mapping, shadow));
+            return Err(why);
         }
         if may_write {
             file.raise_shared_may_write();
@@ -5746,6 +6167,10 @@ impl Drop for AddressSpace {
                 region.range.bytes(),
             );
         }
+        // Nothing counted for this space moves again: its views go first.
+        for vmo in inner.objects.values().chain(inner.shadows.values()) {
+            vmo.forget_views(&self.rss, None);
+        }
         for (&id, vmo) in &inner.objects {
             if writable_ceiling(&inner.native, id) {
                 vmo.lower_writable_region();
@@ -5792,77 +6217,7 @@ impl Drop for AddressSpace {
     }
 }
 
-/// One object's pages in [`AddressSpace::resident_split`], from its
-/// regions, `group`, lowest first: for regions that do not overlap and are
-/// of one kind, the shorter walk -- the regions when they span fewer pages
-/// than the object holds (a file read with `read` and mapped in part), else
-/// its pages less those in the gaps between them, which normally hold none;
-/// otherwise each region over its own range. Then each private file
-/// mapping's copies, by walking its shadow.
-fn count_object(group: &[Counted], resident: &mut Resident) {
-    let Some(head) = group.first() else {
-        return;
-    };
-    let kind = head.kind();
-    let disjoint = group.windows(2).all(|pair| {
-        pair.first()
-            .zip(pair.get(1))
-            .is_some_and(|(low, high)| low.end <= high.first)
-    }) && group.iter().all(|counted| counted.kind() == kind);
-    let spans = group.iter().fold(0u64, |sum, counted| {
-        sum.saturating_add(counted.end.saturating_sub(counted.first))
-    });
-    let committed = head.vmo.committed() as u64;
-    if !disjoint || spans < committed {
-        for counted in group {
-            resident.add(
-                counted.kind(),
-                counted.vmo.committed_in(counted.first, counted.end),
-            );
-        }
-    } else {
-        let mut outside = 0u64;
-        let mut from = 0u64;
-        for counted in group {
-            outside = outside.saturating_add(head.vmo.committed_in(from, counted.first));
-            from = counted.end;
-        }
-        outside = outside.saturating_add(head.vmo.committed_in(from, u64::MAX));
-        let inside = committed.saturating_sub(outside);
-        resident.add(kind, inside);
-    }
-    // A private file mapping's copies: anonymous, and no longer its file's.
-    // Counted by walking the shadow, which holds only them.
-    for counted in group {
-        if let Some(shadow) = &counted.shadow {
-            let (first, end) = (counted.first, counted.end);
-            resident.add(Kind::Anon, shadow.committed_in(first, end));
-            resident.take(
-                counted.kind(),
-                shadow.committed_in_both(&counted.vmo, first, end),
-            );
-        }
-    }
-}
-
-/// One region's part of an object, as [`AddressSpace::resident_split`]
-/// lists it under the space's lock to count after.
-struct Counted {
-    /// The region's object.
-    vmo: Arc<Vmo>,
-    /// A private file mapping's shadow: the pages it has copied.
-    shadow: Option<Arc<Vmo>>,
-    /// The region's first page index in the object.
-    first: u64,
-    /// One past its last.
-    end: u64,
-    /// Whether it maps a file.
-    file: bool,
-    /// Whether the mapping is shared.
-    shared: bool,
-}
-
-/// A space's resident pages by kind: [`AddressSpace::resident_split`].
+/// A space's resident pages by kind: [`AddressSpace::resident`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Resident {
     /// Private memory, and private file mappings' copied pages.
@@ -5873,53 +6228,7 @@ pub struct Resident {
     pub shmem: u64,
 }
 
-/// Which of [`Resident`]'s counts a region's pages go to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Kind {
-    /// `RssAnon`.
-    Anon,
-    /// `RssFile`.
-    File,
-    /// `RssShmem`.
-    Shmem,
-}
-
-impl Counted {
-    /// Which count this region's own pages go to: private memory is
-    /// anonymous, shared anonymous memory and a memory filesystem's file
-    /// shared memory, a disk file's pages a file's.
-    fn kind(&self) -> Kind {
-        if !self.file {
-            if self.shared { Kind::Shmem } else { Kind::Anon }
-        } else if self.vmo.is_disk_file() {
-            Kind::File
-        } else {
-            Kind::Shmem
-        }
-    }
-}
-
 impl Resident {
-    /// Add `pages` to the count `kind` names.
-    fn add(&mut self, kind: Kind, pages: u64) {
-        let slot = match kind {
-            Kind::Anon => &mut self.anon,
-            Kind::File => &mut self.file,
-            Kind::Shmem => &mut self.shmem,
-        };
-        *slot = slot.saturating_add(pages);
-    }
-
-    /// Take `pages` off the count `kind` names.
-    fn take(&mut self, kind: Kind, pages: u64) {
-        let slot = match kind {
-            Kind::Anon => &mut self.anon,
-            Kind::File => &mut self.file,
-            Kind::Shmem => &mut self.shmem,
-        };
-        *slot = slot.saturating_sub(pages);
-    }
-
     /// All of it: `VmRSS`.
     #[must_use]
     pub const fn total(&self) -> u64 {
@@ -5972,88 +6281,6 @@ impl AddressSpace {
             },
         });
         visit(&mut regions)
-    }
-
-    /// The resident set split as Linux's `RssAnon`, `RssFile` and
-    /// `RssShmem` split it: each region's object's committed pages inside the
-    /// region's own range. Private memory, and the pages a private file
-    /// mapping has copied into its shadow, are anonymous; a disk file's pages
-    /// are a file's; a memory filesystem's file (tmpfs, `memfd`) and shared
-    /// anonymous memory are shared memory. A device region's pages are the
-    /// device's and counted in none. A page a private file mapping copied is
-    /// counted once, as anonymous: the mapping shows the copy, not the file's
-    /// page.
-    ///
-    /// Every region counts its own range, so an object mapped twice counts
-    /// twice, as Linux counts a page once per mapping of it.
-    ///
-    /// The space's lock is held only to list the regions' objects and
-    /// ranges, one entry per region; the pages are counted after it is let go,
-    /// a bounded number per hold of each object's own lock
-    /// ([`Vmo::committed_in`]). So a reader of another process's
-    /// `/proc/<pid>/status` holds that process's space lock for one pass over
-    /// its regions, as `/proc/<pid>/maps` does, and never for its pages.
-    ///
-    /// # Errors
-    ///
-    /// [`fallible::AllocError`] when there is no memory to list the regions
-    /// in.
-    pub fn resident_split(&self) -> Result<Resident, fallible::AllocError> {
-        let mut listed = self.list_counted()?;
-        // Each object's regions together, lowest first: an object whose
-        // regions do not overlap and are of one kind is counted the shorter
-        // way rather than page by page (`count_object`). A program of
-        // gigabytes reads its own `stat` often (Wine does), and walking every
-        // page on each read was most of its kernel time (the N150,
-        // 2026-10-30).
-        listed.sort_unstable_by_key(|counted| (Arc::as_ptr(&counted.vmo) as usize, counted.first));
-        let mut resident = Resident::default();
-        let mut start = 0;
-        while let Some(head) = listed.get(start) {
-            let object = Arc::as_ptr(&head.vmo);
-            let count = listed
-                .get(start..)
-                .unwrap_or_default()
-                .iter()
-                .take_while(|counted| Arc::as_ptr(&counted.vmo) == object)
-                .count();
-            let group = listed.get(start..start + count).unwrap_or_default();
-            start += count;
-            count_object(group, &mut resident);
-        }
-        Ok(resident)
-    }
-
-    /// [`AddressSpace::resident_split`]'s list: one entry per region that
-    /// maps an object, made under the space's lock and nothing counted.
-    fn list_counted(&self) -> Result<Vec<Counted>, fallible::AllocError> {
-        let inner = self.inner.lock();
-        let mut listed: Vec<Counted> = fallible::try_with_capacity(inner.map.iter().len())?;
-        for vma in inner.map.iter() {
-            let pages = (vma.range.end() - vma.range.start()) / PAGE_SIZE;
-            let (id, offset, file) = match vma.backing {
-                Backing::Anonymous { id, offset } => (id, offset, false),
-                Backing::File { id, offset } => (id, offset, true),
-                Backing::Device { .. } => continue,
-            };
-            let Some(vmo) = inner.objects.get(&id) else {
-                continue;
-            };
-            let first = offset / PAGE_SIZE;
-            let shadow = (file && !vma.flags.shared)
-                .then(|| inner.shadows.get(&id).cloned())
-                .flatten();
-            // NOALLOC: room for every region was had above.
-            listed.push(Counted {
-                vmo: Arc::clone(vmo),
-                shadow,
-                first,
-                end: first.saturating_add(pages),
-                file,
-                shared: vma.flags.shared,
-            });
-        }
-        Ok(listed)
     }
 
     /// Pages the objects this space maps have committed: its resident set.

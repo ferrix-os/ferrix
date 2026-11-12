@@ -1606,8 +1606,13 @@ under every free path at once. Charges do not move with a process (cgroup
 v2's rule). A frame shared by `fork` is charged once, to whoever allocated it.
 Refused: the allocation fails as if memory had run out, which F-23 made an
 answer everywhere -- `ENOMEM` from a call, the fault's signal from a fault,
-`NO_MEMORY` natively. *Not charged*, and argued: the kernel heap (V-05's
-residual; bounded per job below), kernel stacks (one per task, so bounded by
+`NO_MEMORY` natively. A space's kept resident counts (`docs/RSS-COUNTS.md`)
+add kernel heap per object it maps: a view of each id, in the mapper's
+`MAPPER_HEAP` charge; its cover's runs, charged to the job making the change
+as the region map's room is; and a private file mapping's mask, an entry per
+page its shadow has held, kept until the mapping goes, each charged at 32
+bytes to the job whose fault made it (ledger 8894 T1). *Not charged*, and argued: the
+kernel heap (V-05's residual; bounded per job below), kernel stacks (one per task, so bounded by
 the task limit), IOMMU tables and device memory (a driver's, from a device
 handle only a driver holds).
 

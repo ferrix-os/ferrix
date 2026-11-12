@@ -2496,33 +2496,55 @@ verdict of ledger line 3950.
   before, through compiler_builtins' `rep` path in this kernel built without
   SSE (seen in test-mce-copy's TCG `rip` histogram), so no figure is owed
   (ledger 5311 (6)).
-* **An address space's lock, then an object's pages lock**
-  (`AddressSpace::resident_split`, `Vmo::committed_in`,
-  `Vmo::committed_in_both`; L.user.171, L.user.172): whoever may read a
-  process's `/proc/<pid>/status` or `stat` -- `ps` and `top` read them for
-  every process -- holds that process's space lock for one pass over its
-  regions, one entry each, into a list allocated fallibly first: the pass
-  `/proc/<pid>/maps` already makes. The lock is let go before any page is
-  counted. What is still walked page by page: for an object whose regions
-  do not overlap and are of one kind, the shorter of its regions' spans and
-  the gaps between them -- the gaps (its committed pages, one count, less
-  them) when its regions span at least as many pages as it holds, its
-  regions when they span fewer, as a disk file read with `read` and mapped
-  in part does; every region of an object whose regions overlap or are of
-  more than one kind; and every private file mapping's shadow, which holds
-  only the mapping's copies. Each object's pages lock is held for at
-  most `COUNT_CHUNK` (256) entries of a range walk, and let go between chunks;
-  `committed_in_both` holds one object's for at most 64 entries, then the
-  other's for one lookup at a time, never both. A program's own page count
-  sets how many holds a read takes, never how long one is, so a fault on
-  the program's objects waits behind at most one chunk. The order, space
-  lock then pages lock, is `resident_pages`'s already; here the two are
-  never held together. Measured under KVM on nazuna (the procfs check's
-  line, 2026-10-30): 4,098 pages counted in 5 µs, where the walk page by
-  page took 164 µs. The worst case the review asks for -- an object of 1 GiB or
-  more mapped in part, `status` read in a loop, and the target's fault
-  latency meanwhile -- is not measured yet: a row of `docs/backlog/p2.md`.
-
+* **The resident counts, kept** (`user::rss`, L.user.171, L.user.236,
+  L.user.237, since 2026-11-12, `docs/RSS-COUNTS.md`; until then a read of
+  `status` or `stat` listed every region under the space's lock and counted
+  its object's pages a chunk at a time, 1.9 ms a read over 15,000 regions).
+  **A reader** -- `ps`, `top`, a program reading its own `status` -- takes no
+  lock and walks nothing: three relaxed loads (`Rss::read`), whatever the
+  regions and pages. What it may see is a change in progress partly done,
+  never off by more than the pages of the operations in flight, exact once
+  they end, never below zero (check builds stop on a decrement below zero),
+  as Linux's `task_mem` reads its per-CPU sums ("such snapshots can always be
+  inconsistent"). **The writers' holds:**
+  * *A page event* (`Frames`, under the object's pages lock, which the event
+    held already): one binary search of each view's cover and one atomic add
+    per view, a view being one space and id mapping the object, the mapper
+    list's length. So every walk that changes pages under one hold --
+    `take_range` (an `unmap`'s give-back, the census row above),
+    `decommit_in_chunks` (32 pages a hold), reclaim's take, a truncation's,
+    `Vmo::fork` (no views: the new object is viewed by nobody yet) -- now
+    holds the lock for pages × views such steps. Measured (stage 8's rss
+    check, KVM on nazuna, 2026-11-12, host load about 30): 20 ns a view a
+    page (4,096 pages written into a memfd, 1.36 µs a page with no mapping,
+    2.67 µs with 64). A desktop's libc, mapped by a few hundred processes,
+    costs a few µs a page of its cache's events; not measured on a desktop.
+  * *A region counted in or out* (`AddressSpace::count_in`, `count_out`,
+    under the space's lock, held across): the object's pages lock for at most
+    `COUNT_CHUNK` (256) committed pages a hold, let go between, the cover
+    changed over the same pages in the same hold. The space's lock is held
+    across every chunk, so an `mmap` of a file whose pages are all cached
+    holds it for all of them: 196 µs for 4,096 pages (48 ns a page), about
+    50 ms for a 4 GiB file. A new row for §2.2y's census: `count_in`'s walk
+    under the space's lock, growing with the cached pages of the range
+    mapped. A fault of the same space waits behind it, as it waits behind
+    `fork`'s copy; a reader no longer does.
+  * *The nesting* (L.user.236, K3 of ledger 8701): a shadow's page event
+    takes its file's pages lock inside its own (`Vmo::with_frames_nested`)
+    for one mask change, one search and one add. No other path holds two
+    pages locks, and none takes a shadow's inside a file's: every change to a
+    shadow is made with no file's pages lock held -- `insert_absent` at the
+    private-file fault (the file's page was read and its lock let go before),
+    `copy_shadow_page`'s `take_page` (a replacement, no mask change),
+    `give_back`'s and `advise`'s decommits, `cut_shadow` under
+    `forget_runs` (the space's lock, no object's), `Vmo::fork` of a shadow
+    (one lock, its own, and no link on the copy), and the space's or the
+    shadow's drop (no pages lock held; the mask's change takes the file's
+    alone). Check builds count each processor's pages locks held and stop
+    with FX-0977 on any other pair.
+  * *The recount* (`user::rss_check::recount`, check code) keeps the old
+    holds: the space's lock for one pass over the regions, each object's
+    pages lock for at most 256 entries, never two together.
 ### 2.2ac A fault's wait for its supervisors (`object::exception`, K4)
 
 A thread whose user-mode fault reaches a supervisor (`docs/microkernel/K4.md`

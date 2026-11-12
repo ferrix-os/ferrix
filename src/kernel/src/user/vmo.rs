@@ -84,6 +84,7 @@ use crate::mm;
 use crate::object::pager::PagerLink;
 use crate::object::quota::{Charge, Resource};
 use crate::smp::{self, TlbPages};
+use crate::user::rss::{Frames, Rss, View, ViewKey};
 use crate::user::space::AddressSpace;
 
 /// Why a VMO operation was refused.
@@ -310,13 +311,11 @@ pub(crate) enum Commit {
     Unfilled,
 }
 
-/// Committed pages a count looks at per hold of an object's pages lock
-/// ([`Vmo::committed_in`]): what a fault on the object may wait behind while
-/// `/proc/<pid>/status` counts it.
+/// Committed pages a region's count looks at per hold of an object's pages
+/// lock (`user::rss`, [`Vmo::cover`]): what a fault on the object may wait
+/// behind while a region of it is mapped or unmapped; and the recount's
+/// (`user::rss_check`).
 pub(crate) const COUNT_CHUNK: usize = 256;
-
-/// Pages [`Vmo::committed_in_both`] takes per hold, kept on the stack.
-const OVERLAP_CHUNK: usize = 64;
 
 /// A pageable memory object.
 ///
@@ -330,7 +329,7 @@ pub struct Vmo {
     #[cfg(ferrix_personality = "user")]
     placed: AtomicBool,
     /// Which pages hold a frame, and which of those are held in place.
-    pages: SpinLock<Pages>,
+    pages: PagesLock,
     /// The object's size in pages. Set at creation and only ever raised, by
     /// [`Vmo::grow_to`]: an index that was inside the object stays inside it.
     len: AtomicU64,
@@ -471,6 +470,7 @@ struct Mapper {
 /// B-tree nodes being at least half full. A shared mapping of a file makes
 /// no object for the object limit to count, so this is what bounds one.
 const MAPPER_HEAP: usize = 4 * size_of::<Mapper>()
+    + 2 * size_of::<View>()
     + 2 * size_of::<(u64, Arc<Vmo>)>()
     + 2 * size_of::<(u64, crate::user::space::FileMapping)>();
 
@@ -520,11 +520,105 @@ pub enum SealRefusal {
     NoMemory,
 }
 
-/// A VMO's pages, under one lock.
+/// A VMO's pages lock: the spin lock, and in check builds the count of
+/// pages locks each processor holds, which may be one, or two only when a
+/// shadow's change takes its file's ([`Vmo::with_frames_nested`],
+/// `docs/RSS-COUNTS.md` §4): a shadow's pages lock, then its file's, never
+/// a file's then a shadow's, never two otherwise.
+#[derive(Debug)]
+struct PagesLock(SpinLock<Pages>);
+
+/// Pages locks each processor holds, check builds only.
+#[cfg(ferrix_checks = "on")]
+static PAGES_HELD: [AtomicU32; ferrix_sched::MAX_CPUS] =
+    [const { AtomicU32::new(0) }; ferrix_sched::MAX_CPUS];
+
+/// This processor's count, once processors are known.
+#[cfg(ferrix_checks = "on")]
+fn pages_held() -> Option<&'static AtomicU32> {
+    smp::this_cpu().and_then(|cpu| PAGES_HELD.get(cpu.logical))
+}
+
+impl PagesLock {
+    /// Around `pages`.
+    const fn new(pages: Pages) -> PagesLock {
+        PagesLock(SpinLock::new(pages))
+    }
+
+    /// Take it, holding no other pages lock.
+    #[track_caller]
+    fn lock(&self) -> PagesGuard<impl core::ops::DerefMut<Target = Pages> + '_> {
+        self.take(false)
+    }
+
+    /// Take it inside a shadow's, as [`Vmo::with_frames_nested`] alone does.
+    #[track_caller]
+    fn lock_nested(&self) -> PagesGuard<impl core::ops::DerefMut<Target = Pages> + '_> {
+        self.take(true)
+    }
+
+    /// Take it, and count it held; `nested` says one other may be.
+    #[track_caller]
+    fn take(&self, _nested: bool) -> PagesGuard<impl core::ops::DerefMut<Target = Pages> + '_> {
+        let guard = self.0.lock();
+        #[cfg(ferrix_checks = "on")]
+        if let Some(held) = pages_held() {
+            let before = held.fetch_add(1, Ordering::Relaxed);
+            if before != u32::from(_nested) {
+                crate::panic::fatal!(
+                    crate::panic::catalog::RSS_COUNT_BROKEN,
+                    "kept resident counts: a VMO's pages lock was taken with {before} others held (nested: {_nested})"
+                );
+            }
+        }
+        PagesGuard { guard }
+    }
+
+    /// With nobody else able to reach it.
+    fn get_mut(&mut self) -> &mut Pages {
+        self.0.get_mut()
+    }
+}
+
+/// A held [`PagesLock`]: the spin lock's guard, `G`, which lets it go after
+/// this is counted out.
+struct PagesGuard<G: core::ops::DerefMut<Target = Pages>> {
+    /// The spin lock's guard.
+    guard: G,
+}
+
+impl<G: core::ops::DerefMut<Target = Pages>> core::ops::Deref for PagesGuard<G> {
+    type Target = Pages;
+
+    fn deref(&self) -> &Pages {
+        &self.guard
+    }
+}
+
+impl<G: core::ops::DerefMut<Target = Pages>> core::ops::DerefMut for PagesGuard<G> {
+    fn deref_mut(&mut self) -> &mut Pages {
+        &mut self.guard
+    }
+}
+
+#[cfg(ferrix_checks = "on")]
+impl<G: core::ops::DerefMut<Target = Pages>> Drop for PagesGuard<G> {
+    fn drop(&mut self) {
+        // Counted out while still held, on the processor that counted it in.
+        if let Some(held) = pages_held() {
+            let _ = held.fetch_sub(1, Ordering::Relaxed);
+        }
+    }
+}
+
+/// A VMO's pages, under one lock: a shadow's, then its file's, is the only
+/// pair of these locks ever held together, never a file's then a shadow's
+/// ([`PagesLock`]).
 #[derive(Debug, Default)]
 struct Pages {
-    /// Page index to the frame holding it. Absent means not yet committed.
-    frames: BTreeMap<u64, Frame>,
+    /// Page index to the frame holding it, and every space's view of the
+    /// object (`user::rss`). Absent means not yet committed.
+    frames: Frames,
     /// Page index to how many [`Held`] guards hold it. Absent means none.
     held: BTreeMap<u64, u32>,
     /// A pager-backed object's Dirty and awaiting-clean pages; every other
@@ -918,7 +1012,7 @@ impl Vmo {
         Vmo {
             #[cfg(ferrix_personality = "user")]
             placed: AtomicBool::new(false),
-            pages: SpinLock::new(Pages::default()),
+            pages: PagesLock::new(Pages::default()),
             writable_regions: AtomicU64::new(0),
             digest: SpinLock::new(None),
             len: AtomicU64::new(pages),
@@ -1080,72 +1174,119 @@ impl Vmo {
         self.pages.lock().frames.len()
     }
 
-    /// Pages committed in `first..end`, page indexes: what a mapping of that
-    /// part of the object shows. Counted [`COUNT_CHUNK`] entries at a time,
-    /// the pages lock let go between chunks, so a fault on this object waits
-    /// for at most one chunk however many pages it holds; pages committed or
-    /// taken while it counts may or may not be counted, as in any report.
-    pub(crate) fn committed_in(&self, first: u64, end: u64) -> u64 {
-        let mut counted = 0u64;
-        let mut from = first;
-        while from < end {
-            // SEAL: read
-            let pages = self.pages.lock();
-            let mut taken = 0usize;
-            let mut last = None;
-            for (&index, _) in pages.frames.range(from..end).take(COUNT_CHUNK) {
-                taken += 1;
-                last = Some(index);
-            }
-            drop(pages);
-            counted = counted.saturating_add(taken as u64);
-            match last {
-                Some(index) if taken == COUNT_CHUNK => from = index.saturating_add(1),
-                _ => break,
-            }
-        }
-        counted
-    }
-
-    /// Of the pages committed here in `first..end`, those `other` also holds
-    /// at the same index: a private file mapping's pages its shadow has
-    /// copied, which the mapping no longer shows from the file. Each chunk's
-    /// indexes are taken under this object's lock, then looked up in `other`
-    /// under its own, one lock at a time.
-    pub(crate) fn committed_in_both(&self, other: &Vmo, first: u64, end: u64) -> u64 {
-        let mut counted = 0u64;
-        let mut from = first;
-        let mut chunk = [0u64; OVERLAP_CHUNK];
-        while from < end {
-            // SEAL: read
-            let pages = self.pages.lock();
-            let mut taken = 0usize;
-            for (slot, (&index, _)) in chunk
-                .iter_mut()
-                .zip(pages.frames.range(from..end).take(OVERLAP_CHUNK))
-            {
-                *slot = index;
-                taken += 1;
-            }
-            drop(pages);
-            let indexes = chunk.get(..taken).unwrap_or_default();
-            let held = indexes
-                .iter()
-                .filter(|&&index| other.page(index).is_some())
-                .count();
-            counted = counted.saturating_add(held as u64);
-            match indexes.last() {
-                Some(&index) if taken == OVERLAP_CHUNK => from = index.saturating_add(1),
-                _ => break,
-            }
-        }
-        counted
-    }
-
     /// The frame holding page `index`, if it has been committed.
     pub fn page(&self, index: u64) -> Option<Frame> {
         // SEAL: read
         self.pages.lock().frames.get(&index).copied()
+    }
+
+    /// Run `change` on this object's page set under its pages lock, taken
+    /// inside a shadow's: the one place two pages locks are held at once, a
+    /// shadow's and then its file's (`docs/RSS-COUNTS.md` §4). What a
+    /// shadow's page change does to its file's view (`user::rss`); `change`
+    /// takes no lock.
+    pub(crate) fn with_frames_nested<R>(&self, change: impl FnOnce(&mut Frames) -> R) -> R {
+        // SEAL: read, a view's mask, not a page
+        let mut pages = self.pages.lock_nested();
+        change(&mut pages.frames)
+    }
+
+    /// [`Vmo::with_frames_nested`] holding no other pages lock: a shadow's
+    /// drop, which reaches its file's view with its own pages unlocked.
+    pub(crate) fn with_frames<R>(&self, change: impl FnOnce(&mut Frames) -> R) -> R {
+        // SEAL: read, a view's mask, not a page
+        let mut pages = self.pages.lock();
+        change(&mut pages.frames)
+    }
+
+    /// Raise (`raise`) or lower view `key`'s cover over pages `first..end`,
+    /// and its count by the committed pages there not masked: at most
+    /// [`COUNT_CHUNK`] committed pages a hold of the pages lock, the cover
+    /// changed over them in the same hold, so that every hold leaves the
+    /// count exact (`user::rss`). Called under the space's lock, which is
+    /// what keeps two changes of one view apart.
+    ///
+    /// # Errors
+    ///
+    /// [`ferrix_vma::CoverError`] from the first hold, with nothing changed:
+    /// no memory for the view or its room, or a lower of what is not
+    /// covered. A later hold refuses nothing, its room had in the first.
+    pub(crate) fn cover(
+        &self,
+        key: &ViewKey,
+        first: u64,
+        end: u64,
+        raise: bool,
+    ) -> Result<(), ferrix_vma::CoverError> {
+        let mut from = first;
+        let mut opening = true;
+        loop {
+            // SEAL: read, a view's cover, not a page
+            let step = self
+                .pages
+                .lock()
+                .frames
+                .cover_step(key, (from, end), raise, opening);
+            match step {
+                Ok(Some(next)) => {
+                    from = next;
+                    opening = false;
+                }
+                Ok(None) => return Ok(()),
+                Err(error) => {
+                    #[cfg(ferrix_checks = "on")]
+                    if !opening {
+                        crate::panic::fatal!(
+                            crate::panic::catalog::RSS_COUNT_BROKEN,
+                            "kept resident counts: a region's count stopped part-way: {error:?}"
+                        );
+                    }
+                    return Err(error);
+                }
+            }
+        }
+    }
+
+    /// Room in view `key` for `changes` lowers of one region's range each,
+    /// had before a map change that cannot be refused after it.
+    ///
+    /// # Errors
+    ///
+    /// [`AllocError`]; nothing changed.
+    pub(crate) fn reserve_lowers(&self, key: &ViewKey, changes: usize) -> Result<(), AllocError> {
+        // SEAL: read, a view's room, not a page
+        self.pages.lock().frames.reserve_lowers(key, changes)
+    }
+
+    /// This object, a file a space maps privately as `key`, viewed with the
+    /// pages of `shadow`, that mapping's copies, masked, and `shadow` linked
+    /// to that view so that its changes move the mask. Under the space's
+    /// lock, under which alone a shadow changes, so the copies cannot move
+    /// between the reads.
+    ///
+    /// # Errors
+    ///
+    /// [`AllocError`]; nothing the counts read changed.
+    pub(crate) fn link_shadow(
+        self: &Arc<Self>,
+        shadow: &Vmo,
+        key: &ViewKey,
+    ) -> Result<(), AllocError> {
+        // SEAL: read
+        let copies: Vec<u64> =
+            crate::fallible::try_collect(shadow.pages.lock().frames.keys().copied())?;
+        // SEAL: read, a view's mask, not a page
+        self.pages.lock().frames.masked_view(key, &copies)?;
+        // SEAL: read, the shadow's link, not a page
+        shadow.pages.lock().frames.link_to(self, &key.rss, key.id);
+        Ok(())
+    }
+
+    /// Every view of `rss`'s space gone as the space goes, or with `id` those
+    /// of that id, as it leaves the space's tables.
+    pub(crate) fn forget_views(&self, rss: &Arc<Rss>, id: Option<u64>) {
+        // SEAL: read, the views, not a page
+        self.pages.lock().frames.forget(rss, id);
     }
 
     /// Record that `space` names this object as `object`.
@@ -1275,7 +1416,7 @@ impl Vmo {
         let mut batch = [(0_u64, 0 as Frame); mm::SHARE_BATCH];
         let mut queued = 0;
         let mut complete = true;
-        for (&index, &frame) in &pages.frames {
+        for (&index, &frame) in pages.frames.iter() {
             if pages.held.contains_key(&index) {
                 let copied = mm::allocate_user_frame().inspect(|&copy| mm::copy_frame(copy, frame));
                 if !copied.is_some_and(|copy| record(&mut frames, index, copy)) {
@@ -1315,8 +1456,8 @@ impl Vmo {
         crate::fallible::try_arc(Vmo {
             #[cfg(ferrix_personality = "user")]
             placed: AtomicBool::new(false),
-            pages: SpinLock::new(Pages {
-                frames,
+            pages: PagesLock::new(Pages {
+                frames: Frames::from_map(frames),
                 held: BTreeMap::new(),
                 states: BTreeMap::new(),
                 // A fork of a sealed object is an ordinary one, unmeasured.
@@ -1381,7 +1522,7 @@ impl Vmo {
         // reach the frame (`L.user.133`); the flag is read under this lock,
         // which `make_combining` takes after setting it.
         self.flush_if_combining(frame, 1);
-        let _ = crate::fallible::insert_held(&held, &mut pages.frames, index, frame);
+        let _ = pages.frames.insert_held(&held, index, frame);
         Ok(frame)
     }
 
@@ -1406,7 +1547,7 @@ impl Vmo {
         let _ = pages.states.remove(&index);
         // With no memory to record it, it did not go in, and stays the
         // caller's, as when another fill won.
-        crate::fallible::insert(&mut pages.frames, index, frame).is_ok()
+        pages.frames.try_insert(index, frame).is_ok()
     }
 
     /// The file this object holds is now `len` bytes long: a fault through a
@@ -1586,7 +1727,7 @@ impl Vmo {
         let held = crate::fallible::reserve().map_err(|_| VmoError::OutOfMemory)?;
         let frame = mm::allocate_user_frame().ok_or(VmoError::OutOfMemory)?;
         mm::zero_frame(frame);
-        let _ = crate::fallible::insert_held(&held, &mut pages.frames, index, frame);
+        let _ = pages.frames.insert_held(&held, index, frame);
         Ok(Commit::Frame(frame))
     }
 
@@ -1859,7 +2000,7 @@ impl Vmo {
                 let held = crate::fallible::reserve().map_err(|_| VmoError::OutOfMemory)?;
                 let frame = mm::allocate_user_frame().ok_or(VmoError::OutOfMemory)?;
                 mm::zero_frame(frame);
-                let _ = crate::fallible::insert_held(&held, &mut pages.frames, index, frame);
+                let _ = pages.frames.insert_held(&held, index, frame);
                 frame
             }
         };
@@ -1954,10 +2095,12 @@ impl Vmo {
         if pages.sealed || pages.held.contains_key(&index) {
             return Err(Kept::Held);
         }
-        match pages.frames.get_mut(&index) {
-            Some(slot) => retired.record(index, core::mem::replace(slot, frame)),
+        match pages.frames.replace(index, frame) {
+            Some(old) => retired.record(index, old),
             None => {
-                let _ = crate::fallible::insert(&mut pages.frames, index, frame)
+                let _ = pages
+                    .frames
+                    .try_insert(index, frame)
                     .map_err(|_| Kept::NoMemory)?;
             }
         }
@@ -2669,8 +2812,8 @@ impl Vmo {
         // SEAL: sourced, the object just made here that nothing has sealed.
         let mut pages = self.pages.lock();
         for &(index, frame) in &moved {
-            if crate::fallible::insert(&mut pages.frames, index - first, frame).is_err() {
-                pages.frames.clear();
+            if pages.frames.try_insert(index - first, frame).is_err() {
+                drop(pages.frames.take_all());
                 return Err(Unmoved::NoMemory);
             }
         }
@@ -2686,7 +2829,7 @@ impl Vmo {
     pub(crate) fn release_moved(&self, moved: &Retired) {
         // SEAL: sourced, after `adopt_pages` refused a sealed `from`.
         let mut pages = self.pages.lock();
-        for (index, _) in &moved.frames {
+        for &(index, _) in &moved.frames {
             let _ = pages.frames.remove(index);
         }
     }
@@ -2696,7 +2839,7 @@ impl Vmo {
     /// since the object they came from still names every one.
     pub(crate) fn disown_pages(&self) {
         // SEAL: sourced, the object `adopt_pages` made.
-        let named = core::mem::take(&mut self.pages.lock().frames);
+        let named = self.pages.lock().frames.take_all();
         drop(named);
     }
 
@@ -3058,7 +3201,7 @@ impl Pages {
         // The section first, so that the frame is not had and then lost.
         let held = crate::fallible::reserve().map_err(|_| VmoError::OutOfMemory)?;
         let fresh = mm::allocate_user_frame().ok_or(VmoError::OutOfMemory)?;
-        match crate::fallible::insert_held(&held, &mut self.frames, index, fresh) {
+        match self.frames.insert_held(&held, index, fresh) {
             Some(shared) => {
                 mm::copy_frame(fresh, shared);
                 Ok((fresh, Some(shared)))
@@ -3079,16 +3222,14 @@ impl Pages {
             return Err(RunError::Committed);
         }
         let done = (0..pages)
-            .take_while(|&page| {
-                crate::fallible::insert(&mut self.frames, first + page, block + page).is_ok()
-            })
+            .take_while(|&page| self.frames.try_insert(first + page, block + page).is_ok())
             .count() as u64;
         if done == pages {
             return Ok(block);
         }
         // Under the same lock nobody has seen them: out again.
         for page in 0..done {
-            let _ = self.frames.remove(&(first + page));
+            let _ = self.frames.remove(first + page);
         }
         Err(RunError::OutOfMemory)
     }
@@ -3097,6 +3238,7 @@ impl Pages {
     /// run's `pages`, each page that still holds the run's frame and is not
     /// held, into `out` until it is full. How many were taken, and the page
     /// to go on from.
+    #[inline(always)]
     fn take_ours(
         &mut self,
         first: u64,
@@ -3111,7 +3253,7 @@ impl Pages {
             let ours =
                 self.frames.get(&index) == Some(&(block + page)) && !self.held.contains_key(&index);
             let frame = if ours {
-                self.frames.remove(&index)
+                self.frames.remove(index)
             } else {
                 None
             };
@@ -3127,7 +3269,9 @@ impl Pages {
     /// Take the committed pages of `first..end` that are not held out of
     /// this list, lowest first, into `out` until it is full: how many were
     /// taken, and the page to go on from if any are left. Allocates nothing:
-    /// a map's `remove` never does.
+    /// a map's `remove` never does. Inlined, as it was before the counts
+    /// were kept: it sits on a task's deepest path (`check-stack-depth`).
+    #[inline(always)]
     fn take_into(
         &mut self,
         first: u64,
@@ -3148,7 +3292,7 @@ impl Pages {
             let Some(slot) = out.get_mut(taken) else {
                 return (taken, Some(index));
             };
-            if let Some(frame) = self.frames.remove(&index) {
+            if let Some(frame) = self.frames.remove(index) {
                 let _ = self.states.remove(&index);
                 *slot = (index, frame);
                 taken += 1;
@@ -3162,6 +3306,7 @@ impl Pages {
     /// Dirty nor awaiting-clean. Looked at under the hold a write fault marks a
     /// page under, so one marked first stays, and one taken first faults in again
     /// from the file, as it holds it (K3b).
+    #[inline(always)]
     fn take_clean_into(
         &mut self,
         first: u64,
@@ -3182,7 +3327,7 @@ impl Pages {
             let Some(slot) = out.get_mut(taken) else {
                 return (taken, Some(index));
             };
-            if let Some(frame) = self.frames.remove(&index) {
+            if let Some(frame) = self.frames.remove(index) {
                 *slot = (index, frame);
                 taken += 1;
             }
@@ -3249,6 +3394,7 @@ impl Drop for Vmo {
     /// it go, and every space takes its translations of an object down, and
     /// waits for their shootdown, before it does.
     fn drop(&mut self) {
+        self.pages.get_mut().frames.dropping();
         for frame in self.pages.get_mut().frames.values() {
             let _ = mm::release_frame(*frame);
         }
@@ -3557,7 +3703,7 @@ impl Vmo {
             return Err(SupplyError::BadAux);
         }
         for &at in wanted {
-            if let Some(frame) = source.frames.remove(&(aux_first + at)) {
+            if let Some(frame) = source.frames.remove(aux_first + at) {
                 // NOALLOC: room for every wanted page.
                 let _ = crate::fallible::push_within(&mut moved, (aux_first + at, frame));
             }
@@ -3574,9 +3720,7 @@ impl Vmo {
         let mut pages = self.pages.lock();
         for (&(aux_index, frame), keep) in moved.iter().zip(kept.iter_mut()) {
             let index = aux_index.wrapping_add(shift);
-            if pages.frames.contains_key(&index)
-                || crate::fallible::insert(&mut pages.frames, index, frame).is_err()
-            {
+            if pages.frames.contains_key(&index) || pages.frames.try_insert(index, frame).is_err() {
                 continue;
             }
             // Clean, whatever a page once there was.
@@ -3687,7 +3831,7 @@ impl Vmo {
                     .map(|(&index, _)| index)
                     .find(|&index| clean(&pages, index));
                 let Some(index) = next else { break };
-                if let Some(frame) = pages.frames.remove(&index) {
+                if let Some(frame) = pages.frames.remove(index) {
                     retired.record(index, frame);
                 }
                 from = index + 1;

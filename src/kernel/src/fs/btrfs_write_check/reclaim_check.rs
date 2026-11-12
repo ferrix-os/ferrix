@@ -59,6 +59,7 @@ pub(super) fn run() -> Result<Found, &'static str> {
     let (given, dirty) = reclaim_written()?;
     reclaim_beside_a_mapping()?;
     resident_of_a_disk_file()?;
+    kept_through_a_reclaim()?;
     let stolen_at_max = write_reclaims_at_max()?;
     let stolen_by_fill = fill_reclaims_until_room()?;
     Ok(Found {
@@ -101,9 +102,7 @@ fn resident_of_a_disk_file() -> Result<(), &'static str> {
     };
     let part = map(VmaFlags::READ, 2, 4)
         .map_err(|_| "the space refused a mapping of part of a disk file")?;
-    let split = space
-        .resident_split()
-        .map_err(|_| "no memory to count the resident set")?;
+    let split = space.resident();
     if split.file != 4 || split.anon != 0 || split.shmem != 0 {
         return Err(
             "four pages of an eight-page disk file mapped did not count as four file pages",
@@ -118,17 +117,104 @@ fn resident_of_a_disk_file() -> Result<(), &'static str> {
         // the write fault gave the private mapping a copy of its own.
         unsafe { core::ptr::write(to as *mut u8, 0xa5) }
     });
-    let split = space.resident_split();
+    let split = space.resident();
     let _ = space.unmap(private, PAGE_SIZE);
     drop(space);
     wrote.map_err(|_| "could not write the private mapping of a disk file")?;
-    let split = split.map_err(|_| "no memory to count the resident set")?;
     if split.anon != 1 || split.file != 0 || split.shmem != 0 {
         return Err(
             "a disk page a private mapping wrote did not move from the file's count to anon",
         );
     }
     Ok(())
+}
+
+/// The disk file [`kept_through_a_reclaim`] maps.
+const KEPT_FILE: &[u8] = b"/mnt-rw/kept-check";
+
+/// A disk file's mapped pages taken by a reclaim of the whole cache, and
+/// filled again by faults: a space mapping it shared and private, with a copy
+/// the private mapping wrote, keeps counts equal to a recount after each
+/// (`docs/RSS-COUNTS.md` §7).
+///
+/// Verifies: L.user.236
+fn kept_through_a_reclaim() -> Result<(), &'static str> {
+    use crate::user::rss_check;
+    write_file(KEPT_FILE, &pattern(23, 0, 8 * PAGE))?;
+    sync()?;
+    let object = object_of(KEPT_FILE)?;
+    let space = AddressSpace::new().map_err(|_| "no address space for the kept check")?;
+    let map = |flags: VmaFlags, pages: u64| {
+        space.map_file(
+            FilePlace::Anywhere(None),
+            pages * PAGE_SIZE,
+            flags,
+            Arc::clone(&object),
+            0,
+            FileMapping {
+                file: Arc::new(()) as Arc<dyn Any + Send + Sync>,
+                may_write: false,
+            },
+        )
+    };
+    let same = |after: &'static str| {
+        rss_check::agrees(&space).map_err(|(kept, counted)| {
+            crate::console::println!(
+                "  rss      {after}: kept file {} anon {}, recounted file {} anon {}",
+                kept.file,
+                kept.anon,
+                counted.file,
+                counted.anon
+            );
+            "a space mapping a disk file kept counts that differ from a recount"
+        })
+    };
+    let shared = map(
+        VmaFlags {
+            shared: true,
+            ..VmaFlags::READ
+        },
+        8,
+    )
+    .map_err(|_| "the space refused a shared mapping of a disk file")?;
+    let private = map(VmaFlags::READ_WRITE, 2)
+        .map_err(|_| "the space refused a private mapping of a disk file")?;
+    let outcome = space
+        .with_page(private + PAGE_SIZE, Access::WRITE, |to| {
+            // SAFETY: `with_page` passes the direct-map address of the byte,
+            // translated under the space's lock, which it holds while this
+            // runs; the write fault gave the private mapping a copy of its own.
+            unsafe { core::ptr::write(to as *mut u8, 0x5a) }
+        })
+        .map_err(|_| "could not write the private mapping of a disk file")
+        .and_then(|()| same("a disk file mapped shared and private, one page copied"))
+        .and_then(|()| {
+            let held = object.committed();
+            // All of the cache, as `reclaim_written` asks, so that this
+            // file's turn comes.
+            let _ = cache::reclaim(crate::object::quota::NONE, cache::totals().disk);
+            let left = object.committed();
+            if left >= held {
+                return Err("a reclaim took none of a mapped disk file's clean pages");
+            }
+            crate::console::println!(
+                "  rss      a disk file mapped shared and private: the kept counts equal a \
+                 recount after a reclaim took {} of its {held} pages, and after their faults",
+                held - left
+            );
+            same("a reclaim of the mapped file's clean pages")
+        })
+        .and_then(|()| {
+            (0..8).try_for_each(|page| {
+                space
+                    .with_page(shared + page * PAGE_SIZE, Access::READ, |_| ())
+                    .map_err(|_| "a reclaimed page of a disk file would not fault back in")
+            })
+        })
+        .and_then(|()| same("the reclaimed pages faulted back in"));
+    let _ = space.unmap(shared, 8 * PAGE_SIZE);
+    let _ = space.unmap(private, 2 * PAGE_SIZE);
+    outcome
 }
 
 /// Sync the writable mount.

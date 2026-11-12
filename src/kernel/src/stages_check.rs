@@ -227,6 +227,28 @@ pub(super) fn check_dirty() {
         "  dirty    {pages} cases of a disk file's page: read-only until written, reported until \
          written back, taken by reclaim only when Clean"
     );
+    // The kept resident counts next, with kernel objects alone too.
+    check_rss_core();
+}
+
+/// The kept resident counts with kernel objects alone, on every profile
+/// (`user::rss_check`, `L.user.236`, `L.user.237`).
+fn check_rss_core() {
+    let report = match user::rss_check::run() {
+        Ok(report) => report,
+        Err(problem) => fatal!(
+            catalog::STAGE8_RSS_KEPT,
+            "the kept resident counts' core self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  core rss {} comparisons with a recount, all equal; a read takes {} ns over {} \
+         regions and {} ns over one",
+        report.compared,
+        report.large_ns / u64::from(user::rss_check::READS),
+        report.regions,
+        report.small_ns / u64::from(user::rss_check::READS),
+    );
 }
 
 pub(super) fn check_user_memory() {
@@ -717,6 +739,29 @@ pub(super) fn check_madvise() {
          pages read as zeros, a private file mapping as its file, a shared one as it was; {} \
          calls refused as Linux refuses them; {} frames leaked",
         checked.given_back, checked.refusals, checked.leaked,
+    );
+    // The kept resident counts next, over the same calls.
+    check_resident_counts();
+}
+
+/// The kept resident counts against a recount, after each change that moves
+/// them, and their read against the number of regions (`L.user.236`,
+/// `L.user.237`).
+fn check_resident_counts() {
+    let checked = match user::rss_kept_check::run() {
+        Ok(checked) => checked,
+        Err(problem) => fatal!(
+            catalog::STAGE8_RSS_KEPT,
+            "the kept resident counts' self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  rss      the kept resident counts equal a recount {} times over; a read takes {} ns over \
+         {} regions and {} ns over one",
+        checked.compared,
+        checked.large_ns / u64::from(user::rss_kept_check::READS_TIMED),
+        checked.regions,
+        checked.small_ns / u64::from(user::rss_kept_check::READS_TIMED),
     );
 }
 

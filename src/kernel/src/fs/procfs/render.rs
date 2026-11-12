@@ -1449,10 +1449,7 @@ fn status_of(process: &Process, tid: u32) -> Result<Vec<u8>> {
         )
     });
     let memory = Memory::of(process);
-    let resident = process
-        .space()
-        .resident_split()
-        .map_err(|_| Errno::ENOMEM)?;
+    let resident = process.space().resident();
     let seen = pids_shown(process, tid);
     let name = shown_name(process, tid);
     // The thread's own seccomp mode and filter count, as Linux keeps them per
@@ -1714,11 +1711,8 @@ fn stat_of(process: &Process, tid: u32, times: Times) -> Result<Vec<u8>> {
             process.started(),
         ) / (NANOS / CLOCK_TICKS),
         vsize: memory.size,
-        // With no memory to count them in, none: `stat` is still answered.
-        rss: process
-            .space()
-            .resident_split()
-            .map_or(0, |resident| resident.total()),
+        // Kept as the pages come and go (`user::rss`): three loads.
+        rss: process.space().resident().total(),
         // `RLIM_INFINITY`, as an `unsigned long`.
         rss_limit: usize::MAX as u64,
         // A copying loader keeps no record of where the text was put.

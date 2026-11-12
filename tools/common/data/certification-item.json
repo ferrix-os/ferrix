@@ -1198,6 +1198,11 @@
         "file": "user/rmap_check.rs",
         "file_ring": "core",
         "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "user/rss_kept_check.rs",
+        "file_ring": "core",
+        "crate": "ferrix-kernel-load"
       }
     ]
   },
@@ -1252,6 +1257,7 @@
     "user/cache.rs": "memory objects: same code on the arena (M5-LIFT §10)",
     "user/memory_type.rs": "memory objects: same code on the arena (M5-LIFT §10)",
     "user/mod.rs": "memory objects: same code on the arena (M5-LIFT §10)",
+    "user/rss.rs": "memory objects' kept resident counts: same code on the arena (M5-LIFT §10)",
     "user/space.rs": "memory objects: same code on the arena (M5-LIFT §10)",
     "user/vmo.rs": "memory objects: same code on the arena (M5-LIFT §10)",
     "arch/x86_64/vdso.rs": "the vDSO's image: its code is a program's, never run in linuxd"
@@ -1281,7 +1287,7 @@
     "syscall/flock.rs": 1,
     "syscall/registry.rs": 1,
     "syscall/seccomp.rs": 1,
-    "user/mod.rs": 5,
+    "user/mod.rs": 6,
     "user/space.rs": 15,
     "user/vmo.rs": 3,
     "object/mod.rs": 2,

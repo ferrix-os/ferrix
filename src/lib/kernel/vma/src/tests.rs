@@ -2045,3 +2045,201 @@ fn the_ceiling_moves_and_bounds_what_is_placed() {
     assert_eq!(space.set_high(LOW), Err(VmaError::ZeroLength));
     check(&space);
 }
+
+/// [`crate::Cover`]: every change against a count kept per index.
+mod cover {
+    use crate::cover::{Cover, CoverError, Run, UNDO_ROOM};
+    use alloc::vec;
+    use alloc::vec::Vec;
+    use ferrix_kmem::Charge;
+
+    /// The count at every index below `limit`, from the runs.
+    fn counts(cover: &Cover, limit: u64) -> Vec<u32> {
+        (0..limit).map(|index| cover.at(index)).collect()
+    }
+
+    fn canonical(cover: &Cover) -> bool {
+        cover
+            .runs()
+            .iter()
+            .all(|run| run.count > 0 && run.first < run.end)
+            && cover.runs().windows(2).all(|pair| {
+                pair[0].end <= pair[1].first
+                    && !(pair[0].end == pair[1].first && pair[0].count == pair[1].count)
+            })
+    }
+
+    fn apply(cover: &mut Cover, first: u64, end: u64, raise: bool) -> Result<(), CoverError> {
+        let extra = cover.room_for(first, end, raise);
+        cover.reserve(extra)?;
+        if raise {
+            cover.raise(first, end)
+        } else {
+            cover.lower(first, end)
+        }
+    }
+
+    #[test]
+    fn a_raise_then_its_lower_gives_the_form_back() {
+        let mut cover = Cover::new().unwrap();
+        apply(&mut cover, 10, 20, true).unwrap();
+        apply(&mut cover, 30, 40, true).unwrap();
+        let before = cover.runs().to_vec();
+        apply(&mut cover, 15, 35, true).unwrap();
+        assert_eq!(cover.at(17), 2);
+        assert_eq!(cover.at(25), 1);
+        let capacity = cover.runs.capacity();
+        cover.lower(15, 35).unwrap();
+        assert_eq!(cover.runs(), &before[..]);
+        assert_eq!(cover.runs.capacity(), capacity);
+    }
+
+    #[test]
+    fn an_undo_is_in_the_room_its_raise_had() {
+        // The raise joins the run to its left; its undo splits it again.
+        let mut cover = Cover::new().unwrap();
+        apply(&mut cover, 0, 10, true).unwrap();
+        apply(&mut cover, 0, 10, true).unwrap();
+        apply(&mut cover, 10, 20, true).unwrap();
+        let extra = cover.room_for(10, 20, true) + UNDO_ROOM;
+        cover.reserve(extra).unwrap();
+        cover.raise(10, 20).unwrap();
+        assert_eq!(
+            cover.runs(),
+            &[Run {
+                first: 0,
+                end: 20,
+                count: 2
+            }]
+        );
+        cover.lower(10, 20).unwrap();
+        assert_eq!(cover.at(5), 2);
+        assert_eq!(cover.at(15), 1);
+    }
+
+    /// What an `munmap` across many regions of one view asks: n lowers in a
+    /// row, each in its own steps, in the room `2n + 1` runs more had once.
+    #[test]
+    fn n_lowers_fit_the_room_had_for_them() {
+        for n in 1..12_u64 {
+            let mut cover = Cover::new().unwrap();
+            apply(&mut cover, 0, 100 * n, true).unwrap();
+            apply(&mut cover, 10, 20, true).unwrap();
+            let extra = usize::try_from(2 * n + 1).unwrap();
+            cover.reserve(extra).unwrap();
+            let capacity = cover.runs.capacity();
+            for lower in 0..n {
+                let first = 100 * lower + 40;
+                // In steps of one, the way a chunked lower goes.
+                for at in first..first + 20 {
+                    assert_eq!(cover.lower(at, at + 1), Ok(()), "lower {lower} at {at}");
+                }
+            }
+            assert_eq!(cover.runs.capacity(), capacity, "a lower allocated");
+            assert_eq!(cover.at(45), 0);
+            assert_eq!(cover.at(15), 2);
+        }
+    }
+
+    #[test]
+    fn a_lower_of_a_middle_needs_two_runs_at_most() {
+        let mut cover = Cover::new().unwrap();
+        apply(&mut cover, 0, 100, true).unwrap();
+        assert_eq!(cover.runs().len(), 1);
+        apply(&mut cover, 40, 60, false).unwrap();
+        assert_eq!(
+            cover.runs(),
+            &[
+                Run {
+                    first: 0,
+                    end: 40,
+                    count: 1
+                },
+                Run {
+                    first: 60,
+                    end: 100,
+                    count: 1
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn refusals_change_nothing() {
+        let mut cover = Cover::new().unwrap();
+        apply(&mut cover, 0, 10, true).unwrap();
+        let before = cover.runs().to_vec();
+        assert_eq!(cover.lower(5, 15), Err(CoverError::Bounds));
+        assert_eq!(cover.lower(5, 5), Err(CoverError::Empty));
+        assert_eq!(cover.runs(), &before[..]);
+        // No room: a cover with room for its one run alone refuses a split.
+        let mut tight = Cover {
+            runs: Vec::with_capacity(1),
+            room: Charge::bytes(0).unwrap(),
+        };
+        tight.raise(0, 10).unwrap();
+        if tight.runs.capacity() == 1 {
+            assert_eq!(tight.lower(3, 6), Err(CoverError::NoRoom));
+            assert_eq!(
+                tight.runs(),
+                &[Run {
+                    first: 0,
+                    end: 10,
+                    count: 1
+                }]
+            );
+        }
+    }
+
+    /// A deterministic sequence of changes, each checked against a count
+    /// kept per index, and against the canonical form; each change also made
+    /// in steps, checking the room bound holds for every first part.
+    #[test]
+    fn every_change_matches_a_count_per_index() {
+        const LIMIT: u64 = 64;
+        let mut cover = Cover::new().unwrap();
+        let mut model = vec![0u32; LIMIT as usize];
+        let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        for _ in 0..4000 {
+            let a = next() % LIMIT;
+            let b = next() % LIMIT;
+            let (first, end) = (a.min(b), a.max(b) + 1);
+            let raise = next() % 2 == 0;
+            let lowerable = (first..end).all(|index| model[index as usize] > 0);
+            if !raise && !lowerable {
+                assert_eq!(cover.lower(first, end), Err(CoverError::Bounds));
+                continue;
+            }
+            let extra = cover.room_for(first, end, raise);
+            let len = cover.runs().len();
+            cover.reserve(extra).unwrap();
+            // In steps, as a count made a chunk a hold makes it.
+            let mut at = first;
+            while at < end {
+                let step = (next() % 5 + 1).min(end - at);
+                if raise {
+                    cover.raise(at, at + step).unwrap();
+                } else {
+                    cover.lower(at, at + step).unwrap();
+                }
+                assert!(
+                    cover.runs().len() <= len + extra,
+                    "the room bound was passed"
+                );
+                assert!(canonical(&cover));
+                at += step;
+            }
+            for index in first..end {
+                let slot = &mut model[index as usize];
+                *slot = if raise { *slot + 1 } else { *slot - 1 };
+            }
+            assert_eq!(counts(&cover, LIMIT), model);
+        }
+    }
+}

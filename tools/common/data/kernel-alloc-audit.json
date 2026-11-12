@@ -341,15 +341,20 @@
       "what": "a type's frames, held at bring-up of the object: the device's",
       "sites": 2
     },
+    "user/rss.rs": {
+      "bucket": "job",
+      "what": "a view, its cover's runs and a mask entry: the job whose map, unmap, fork or fault makes them",
+      "sites": 7
+    },
     "user/space.rs": {
       "bucket": "job",
       "what": "regions and tables: the space's owner; fork's copies the forker's",
-      "sites": 69
+      "sites": 70
     },
     "user/vmo.rs": {
       "bucket": "job",
       "what": "the object's payer or charge_target",
-      "sites": 59
+      "sites": 51
     },
     "vmap.rs": {
       "bucket": "pool",

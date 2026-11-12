@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-3072 declarations in the core's files, 215 in the item's; 256 checks-only.
+3084 declarations in the core's files, 215 in the item's; 263 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2913,6 +2913,7 @@ checks above is `pub` for raised checks (F3).
 | `STAGE8_PROGRAM_FILES` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE8_PSEUDO_FILESYSTEMS` | static | bin |  |
 | `STAGE8_ROOT` | static | bin |  |
+| `STAGE8_RSS_KEPT` | static | bin (checks) | checks-only |
 | `STAGE8_SIGNALFD` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE8_TIMERFD` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE9_ADDRESS_WAIT` | static | bin (checks) | checks-only |
@@ -3527,6 +3528,7 @@ checks above is `pub` for raised checks (F3).
 | `memory_type` | mod | item, load, bin |  |
 | `rehome_cache_check` | mod | item (checks) | pub for raised checks |
 | `rehome_check` | mod | item (checks) | pub for raised checks |
+| `rss_check` | mod | load, bin (checks) | pub for raised checks |
 | `space` | mod | item, load, bin |  |
 | `vmo` | mod | item, load, bin |  |
 
@@ -3639,6 +3641,21 @@ checks above is `pub` for raised checks (F3).
 |---|---|---|---|
 | `run` | fn | item (checks) | checks-only |
 
+### `user::rss_check`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `READS` | const | bin (checks) | checks-only |
+| `agrees` | fn | load (checks) | checks-only |
+| `mask_held` | fn | load (checks) | checks-only |
+| `run` | fn | bin (checks) | checks-only |
+| `viewed` | fn | load (checks) | checks-only |
+| `KeptFound` | struct | - | checks-only |
+| `KeptFound::compared` | field | load, bin (checks) | pub for raised checks; type unobtainable from product API |
+| `KeptFound::large_ns` | field | load, bin (checks) | pub for raised checks; type unobtainable from product API |
+| `KeptFound::regions` | field | item, load, bin | pub for raised checks; type unobtainable from product API |
+| `KeptFound::small_ns` | field | load, bin (checks) | pub for raised checks; type unobtainable from product API |
+
 ### `user::space`
 
 | Item | Kind | Named by | Note |
@@ -3710,8 +3727,8 @@ checks above is `pub` for raised checks (F3).
 | `AddressSpace::regions` | method | item, load, bin |  |
 | `AddressSpace::remap` | method | load |  |
 | `AddressSpace::replace_shared_code` | method | load |  |
+| `AddressSpace::resident` | method | load |  |
 | `AddressSpace::resident_pages` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
-| `AddressSpace::resident_split` | method | load |  |
 | `AddressSpace::root_table` | method | item, load |  |
 | `AddressSpace::route` | method | load |  |
 | `AddressSpace::routed` | method | item |  |

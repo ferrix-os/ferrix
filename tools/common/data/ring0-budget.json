@@ -114,6 +114,7 @@
       "user/edge_check.rs",
       "user/rehome_cache_check.rs",
       "user/rehome_check.rs",
+    "user/rss_check.rs",
       "user/space/window_check.rs"
   ]
 }

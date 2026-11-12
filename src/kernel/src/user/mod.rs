@@ -18,5 +18,8 @@ pub mod memory_type;
 pub mod rehome_cache_check;
 #[cfg(not(ferrix_load_built = "lift"))]
 pub mod rehome_check;
+pub(crate) mod rss;
+#[cfg(not(ferrix_load_built = "lift"))]
+pub mod rss_check;
 pub mod space;
 pub mod vmo;

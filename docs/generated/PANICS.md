@@ -139,6 +139,8 @@ Causes are listed most likely first.
 | [FX-0972](#fx-0972) | a boot check on a worker did not run to its end |
 | [FX-0973](#fx-0973) | a reclaim began inside a reclaim |
 | [FX-0974](#fx-0974) | a task tried to block holding an IrqSpinLock |
+| [FX-0976](#fx-0976) | the kept resident counts failed their self-check |
+| [FX-0977](#fx-0977) | a kept resident count would go wrong |
 | [FX-1001](#fx-1001) | PCI enumeration failed its self-check |
 | [FX-1002](#fx-1002) | a device node handed out memory or an interrupt it does not have |
 | [FX-1003](#fx-1003) | an IOMMU domain gave a device the wrong addresses |
@@ -3287,6 +3289,55 @@ states.
 
 See: src/kernel/src/sched/mod.rs require_may_sleep;
 src/lib/kernel/sync/src/lib.rs IrqControl.
+
+<a id="fx-0976"></a>
+
+## FX-0976 — the kept resident counts failed their self-check
+
+`user::rss_kept_check::run` builds a process and, by system call, makes each
+kind of change that moves a space's resident pages: a first touch, an mprotect
+split and merge, an munmap of a middle, madvise(DONTNEED), a fork with
+copy-on-write writes in both spaces and shared memory both see, the child's
+exit, a memfd mapped shared twice and private once and written, a fork writing
+the private mapping's copies, a truncation under them, an mremap move, and 4,000
+regions in Wine's pattern. After each, the kept counts procfs reads must equal a
+recount of every region's object (`user::rss_check::recount`), no object may
+still count for a space that went, and a read of the counts over 4,000 regions
+must take no more than four times one over a single region and a millisecond
+(`L.user.236`, `L.user.237`).
+
+1. A path changed an object's pages without going through `user::rss::Frames`,
+   or a space's regions without moving their objects' covers (`user::space`'s
+   `count_in`, `count_out`).
+2. A shadow's page change did not move its file's mask, so a private file
+   mapping's copy is counted as its file's page too, or neither.
+3. A space's drop left its views on an object, which goes on counting for
+   nobody.
+4. The read walks the regions again.
+
+See: src/kernel/src/user/rss_kept_check.rs; src/kernel/src/user/rss.rs;
+src/kernel/src/user/rss_check.rs; docs/RSS-COUNTS.md.
+
+<a id="fx-0977"></a>
+
+## FX-0977 — a kept resident count would go wrong
+
+A space's resident counts are kept as pages come and go, in each object it maps,
+under the object's pages lock (`docs/RSS-COUNTS.md`, `L.user.236`). Check builds
+stop where a count could no longer equal a recount: a count falling below zero,
+a region's count stopping part-way though its room was had, a shadow gaining a
+page by a path that cannot refuse its mask's entry, an object dropped while a
+space still views it, or a pages lock taken with another held other than a
+shadow's file's inside the shadow's own.
+
+1. A path changed an object's pages, or a space's regions, without moving the
+   counts: the funnel in `user::rss::Frames` or a region change in `user::space`
+   was bypassed.
+2. Two VMOs' pages locks were nested other than a shadow's, then its file's,
+   which can deadlock against the shadow's own nesting.
+
+See: src/kernel/src/user/rss.rs; src/kernel/src/user/vmo.rs PagesLock;
+docs/RSS-COUNTS.md.
 
 <a id="fx-1001"></a>
 

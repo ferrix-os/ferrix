@@ -3365,15 +3365,10 @@ package FerrixMemoryRequirements {
                 private and then written, it moves 4 kB from RssShmem to RssAnon with
                 VmRSS unchanged; stat's field 24 times 4 kB is VmRSS.";
             attribute :>> parent = "H.MEM.9";
-            attribute :>> unit = ("user::space::AddressSpace::resident_split",
+            attribute :>> unit = ("user::space::AddressSpace::resident",
+                "user::rss::Rss::read",
                 "user::space::Resident::total",
-                "user::space::Resident::add",
-                "user::space::Resident::take",
-                "user::space::Counted::kind",
-                "user::space::AddressSpace::list_counted",
-                "user::space::count_object",
-                "user::vmo::Vmo::committed_in",
-                "user::vmo::Vmo::committed_in_both");
+                "user::space::counting_of");
         }
         // As L.user.171's, the parent is the frames a space holds.
         requirement <'L.user.172'> aDiskFilesMappedPagesAreItsRss : ItemLowLevel {
@@ -3385,8 +3380,124 @@ package FerrixMemoryRequirements {
                 file pages and no others; a private mapping of page 0, written,
                 counts 1 anonymous page and no file page. And with kernel objects alone, on every profile, the `core mem` line (user/rehome_check.rs::check_a_disk_file_counts_as_a_file).";
             attribute :>> parent = "H.MEM.9";
-            attribute :>> unit = ("user::space::AddressSpace::resident_split",
+            attribute :>> unit = ("user::space::AddressSpace::resident",
+                "user::space::counting_of",
                 "user::vmo::Vmo::is_disk_file");
+        }
+        // docs/RSS-COUNTS.md: the counts L.user.171 reports, kept where the
+        // regions and the pages meet instead of counted for every reader. The
+        // parent is the frames a space holds, as L.user.171's.
+        requirement <'L.user.236'> theKeptCountsAreTheRecount : ItemLowLevel {
+            attribute :>> statement = "A space's kept RssAnon, RssFile and RssShmem
+                shall each equal L.user.171's count whenever no operation changing
+                its regions or the pages of an object it maps is in progress.";
+            attribute :>> criterion = "With kernel objects alone, on every profile
+                (the `core rss` line), the kept counts equal a recount after a first
+                touch of eight pages, an mprotect split and merge, an unmap of a
+                middle, madvise(DONTNEED), a shared mapping touched, a fork in both
+                spaces, write faults in the child and the parent, the child's drop,
+                and about 4,000 regions over one reserve: 12 comparisons, all
+                equal. In the
+                rss check process (stage 8), the kept
+                counts equal a recount of every region's object after each of: a
+                new mapping; a first touch of eight pages; an mprotect split and
+                its merge; an munmap of a region's middle; madvise(DONTNEED); an
+                munmap of whole regions; a fork, in parent and child; a
+                copy-on-write write in the child and in the parent; a child's write
+                to shared anonymous memory, in both; the child's exit, after which
+                an object it alone mapped counts for nobody; a memfd mapped shared
+                twice and private once; the private mapping's write; a fork with
+                the private mapping's copies and a write to them in the child; a
+                truncation under the copies and the file grown back; an mremap
+                moving a private region over a fixed destination; shared anonymous
+                memory touched, grown by mremap, moved over a fixed destination and
+                shrunk (its placement is counted in while the old range still
+                covers the same pages, one id's index ranges overlapping for that
+                moment); 4,000 regions in Wine's pattern with a fixed mapping into
+                the reserve; a file of 4,096 cached pages mapped, and written beside
+                64 mappings; a private file mapping writing and dropping each of
+                1,024 pages, whose file view's mask then holds an entry for each,
+                every one charged; 34 comparisons, all equal. With the stage 12 disk, a
+                disk file mapped shared and private with one page copied, a reclaim
+                that took some of its clean pages, and the pages faulted back in:
+                equal after each. Not
+                reached by a check, and argued: a refused mremap move (the fresh
+                object's adopted pages leave it by disown_pages through the same
+                funnel before it is dropped), a pager's supply (put_supplied and
+                take_for_supply change pages only through the funnel).";
+            attribute :>> parent = "H.MEM.9";
+            attribute :>> unit = ("user::rss::Rss::slot",
+                "user::rss::Rss::add",
+                "user::rss::Rss::take",
+                "user::rss::Rss::shift",
+                "user::rss::ViewKey::names",
+                "user::rss::View::weight",
+                "user::rss::ShadowLink::mask",
+                "user::rss::ShadowLink::unmask",
+                "user::rss::Frames::counted",
+                "user::rss::Frames::insert_held",
+                "user::rss::Frames::try_insert",
+                "user::rss::Frames::replace",
+                "user::rss::Frames::remove",
+                "user::rss::Frames::take_all",
+                "user::rss::Frames::dropping",
+                "user::rss::Frames::mask_index",
+                "user::rss::Frames::unmask_index",
+                "user::rss::Frames::view_masking",
+                "user::rss::Mask::clear",
+                "user::rss::Frames::masked_view",
+                "user::rss::Frames::link_to",
+                "user::rss::Frames::reserve_lowers",
+                "user::rss::Frames::cover_step",
+                "user::rss::Frames::view_for",
+                "user::rss::View::room",
+                "user::rss::View::change",
+                "user::rss::unmasked_chunk",
+                "user::rss::Mask::new",
+                "user::rss::Mask::masked",
+                "user::rss::Mask::set",
+                "user::rss::Frames::forget",
+                "user::vmo::Vmo::with_frames_nested",
+                "user::vmo::Vmo::with_frames",
+                "user::vmo::Vmo::cover",
+                "user::vmo::Vmo::reserve_lowers",
+                "user::vmo::Vmo::link_shadow",
+                "user::vmo::Vmo::forget_views",
+                "user::vmo::PagesLock::take",
+                "user::vmo::PagesGuard::drop",
+                "user::space::counting",
+                "user::space::counted_later",
+                "user::space::Counting::raise",
+                "user::space::Counting::lower",
+                "user::space::Counting::reserve_lower",
+                "user::space::AddressSpace::count_in",
+                "user::space::AddressSpace::count_out",
+                "user::space::AddressSpace::count_out_removed",
+                "user::space::AddressSpace::room_to_count_out",
+                "user::space::Counting::view_order",
+                "user::space::AddressSpace::count_remap_in",
+                "user::space::AddressSpace::undo_move",
+                "user::space::AddressSpace::count_out_unplaced",
+                "user::space::AddressSpace::clear_ranges",
+                "user::space::placed_backing");
+        }
+        // docs/RSS-COUNTS.md §5: what a read of them costs. The parent is
+        // L.user.171's, as no high-level requirement states a report's cost.
+        requirement <'L.user.237'> aReadOfTheCountsIsConstant : ItemLowLevel {
+            attribute :>> statement = "Reading a space's resident counts shall take no
+                lock and do work independent of the number of its regions and of
+                its objects' pages.";
+            attribute :>> criterion = "By analysis: AddressSpace::resident is three
+                relaxed loads of the space's Rss (Rss::read), and procfs's status
+                and stat call it and nothing else for their resident figures. By
+                test, in the rss check process: 200 reads over a space of about
+                4,000 regions take no more than four times 200 over a space of one
+                region and a millisecond; a recount takes milliseconds a read at
+                that size; the same bound over about 4,000 regions made with kernel
+                objects alone, on every profile (the `core rss` line).";
+            attribute :>> parent = "H.MEM.9";
+            attribute :>> unit = ("user::space::AddressSpace::resident",
+                "user::rss::Rss::read");
         }
         // docs/RAM-RELEASE.md §3: the clean btrfs nodes, reclaimable heap.
         requirement <'L.user.175'> cleanBtrfsNodesAreAvailable : ItemLowLevel {

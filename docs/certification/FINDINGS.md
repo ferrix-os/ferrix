@@ -3519,6 +3519,12 @@ outside the list, the allowlist and the classified crates, and an entry
 the manifest or the crate's files no longer need; the list may shrink
 freely and grows only with a ledger line (ledger 1585, Q1).
 
+*Note, 2026-11-12 (ef-30fps, ledger 8701 K8):* `L.user.236`, the kept
+resident counts, rests on code in `ferrix-vma` (`src/lib/kernel/vma/src/
+cover.rs`, the cover a view keeps), one of these libraries, and `L.user.238`
+on its region totals; their units are named in the requirements only where
+they are the item's own, and `Cover` is verified by its host tests.
+
 *Closes when* every one of them is classified in a ring, or moved out of
 the core's and the item's dependencies, and `unclassified_deps` is gone --
 classifying is the customer's decision, since it decides what the item

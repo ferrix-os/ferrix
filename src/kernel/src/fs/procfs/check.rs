@@ -671,11 +671,10 @@ fn time_resident_count(process: &Process) -> Result<(), &'static str> {
     let touched = (0..TIMED_PAGES)
         .try_for_each(|page| uaccess::copy_to_user(space, at + page * PAGE_SIZE, &[1]).map(|_| ()));
     let start = crate::timer::now_nanos();
-    let split = space.resident_split();
+    let split = space.resident();
     let took = crate::timer::now_nanos().saturating_sub(start);
     let _ = space.unmap(at, len);
     touched.map_err(|_| "could not write the timed mapping")?;
-    let split = split.map_err(|_| "no memory to count the resident set")?;
     if split.anon < TIMED_PAGES {
         return Err("the timed mapping's pages were not counted");
     }

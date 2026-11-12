@@ -311,4 +311,6 @@ pub mod user {
     pub mod madvise_check;
     #[cfg(ferrix_load_built = "ring0")]
     pub mod rmap_check;
+    #[cfg(ferrix_load_built = "ring0")]
+    pub mod rss_kept_check;
 }

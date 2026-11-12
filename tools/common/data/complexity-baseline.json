@@ -160,8 +160,8 @@
       "recursive": false
     },
     "main.rs::kmain": {
-      "complexity": 11,
-      "lines": 90,
+      "complexity": 10,
+      "lines": 86,
       "recursive": false
     },
     "main.rs::start_scheduler": {
@@ -586,7 +586,7 @@
     },
     "user/space.rs::fork": {
       "complexity": 19,
-      "lines": 72,
+      "lines": 76,
       "recursive": false
     },
     "user/space.rs::map_by_handle": {
@@ -605,13 +605,13 @@
       "recursive": false
     },
     "user/space.rs::remap": {
-      "complexity": 18,
-      "lines": 72,
+      "complexity": 19,
+      "lines": 80,
       "recursive": false
     },
     "user/space.rs::resolve": {
-      "complexity": 20,
-      "lines": 80,
+      "complexity": 15,
+      "lines": 50,
       "recursive": false
     },
     "user/vmo.rs::commit_run": {

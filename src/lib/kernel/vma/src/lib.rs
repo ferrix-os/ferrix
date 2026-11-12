@@ -67,6 +67,9 @@ use core::fmt;
 
 use ferrix_kmem::{Charge, buffer_footprint};
 
+mod cover;
+pub use cover::{Cover, CoverError, Run, UNDO_ROOM};
+
 /// The page size every address and length in this crate is quantised to.
 pub const PAGE_SIZE: u64 = 4096;
 

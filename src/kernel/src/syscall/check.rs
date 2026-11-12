@@ -12454,15 +12454,11 @@ fn check_cacheflush_answers_as_linux_does(process: &Process) -> Result<(), &'sta
             uaccess::copy_to_user(process.space(), code + page * PAGE_SIZE + 8, &[0x1E; 4])
                 .map_err(|_| "could not write into the mapping")?;
         }
-        let resident = process
-            .space()
-            .resident_split()
-            .map_err(|_| "could not count the resident pages")?
-            .total();
+        let resident = process.space().resident().total();
         // From the middle of the first page to the middle of the last.
         let (start, end) = (code + 8, code + len - 8);
         let maintained = memory::cacheflush_pages(process, start, end, 0);
-        if process.space().resident_split().map(|split| split.total()) != Ok(resident) {
+        if process.space().resident().total() != resident {
             return Err("cacheflush committed a page the program never touched");
         }
         if maintained != Ok(2) {

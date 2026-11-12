@@ -496,9 +496,7 @@ fn check_a_disk_file_counts_as_a_file() -> Result<(), &'static str> {
             mapping(false),
         )
         .map_err(|_| "no read-only mapping of pages 2 to 5")?;
-    let counted = space
-        .resident_split()
-        .map_err(|_| "no memory to count a space")?;
+    let counted = space.resident();
     if counted.file != 4 || counted.anon != 0 || counted.shmem != 0 {
         return Err("a disk file's cached pages were not counted by the region's range, as file");
     }
@@ -516,9 +514,7 @@ fn check_a_disk_file_counts_as_a_file() -> Result<(), &'static str> {
         )
         .map_err(|_| "no private mapping of page 0")?;
     write(&space, private, 1).map_err(|_| "the private page to count would not write")?;
-    let counted = space
-        .resident_split()
-        .map_err(|_| "no memory to count a space")?;
+    let counted = space.resident();
     if counted.anon != 1 || counted.file != 0 {
         return Err("a disk file's page a private mapping wrote was not counted as anonymous");
     }
