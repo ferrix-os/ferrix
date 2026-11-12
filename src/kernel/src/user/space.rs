@@ -6267,6 +6267,23 @@ impl AddressSpace {
         self.with_regions(|regions| fallible::try_collect(regions))
     }
 
+    /// What the regions add up to, as the map keeps it (`L.user.238`), and
+    /// the region holding `address` if one does: one lookup under the lock,
+    /// no walk, whatever the regions.
+    pub fn region_totals(&self, address: u64) -> (ferrix_vma::Totals, Option<Region>) {
+        let inner = self.inner.lock();
+        let holder = inner.map.find(address).map(|vma| Region {
+            start: vma.range.start(),
+            end: vma.range.end(),
+            flags: vma.flags,
+            file: match vma.backing {
+                Backing::File { id, offset } => Some((id, offset)),
+                _ => None,
+            },
+        });
+        (inner.map.totals(), holder)
+    }
+
     /// Show `visit` every region, lowest first, under the space's lock: it
     /// must not wait, and nothing can change the map while it looks.
     pub fn with_regions<R>(&self, visit: impl FnOnce(&mut dyn Iterator<Item = Region>) -> R) -> R {

@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-3084 declarations in the core's files, 215 in the item's; 263 checks-only.
+3085 declarations in the core's files, 215 in the item's; 263 checks-only.
 
 ## ferrix-kernel-core
 
@@ -3724,6 +3724,7 @@ checks above is `pub` for raised checks (F3).
 | `AddressSpace::raises_refused` | method | load |  |
 | `AddressSpace::reached` | method | item, load |  |
 | `AddressSpace::region_count` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `AddressSpace::region_totals` | method | load |  |
 | `AddressSpace::regions` | method | item, load, bin |  |
 | `AddressSpace::remap` | method | load |  |
 | `AddressSpace::replace_shared_code` | method | load |  |

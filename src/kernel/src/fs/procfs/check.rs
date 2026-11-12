@@ -651,7 +651,59 @@ fn check_resident(
     }
     check_resident_memory_file(ns, ctx, process)?;
     check_stat_rss(ns, ctx)?;
+    check_region_totals(process)?;
     time_resident_count(process)
+}
+
+/// `status`'s and `stat`'s region figures -- `VmSize`, `VmLck`, `VmData`,
+/// `VmStk`, `vsize` -- from the totals the region map keeps equal a walk of
+/// every region, after a mapping, an `mprotect` splitting it, a shared
+/// mapping, an unmap of a middle and an unmap of the rest.
+///
+/// Verifies: L.user.238
+fn check_region_totals(process: &Process) -> Result<(), &'static str> {
+    use super::render::{Memory, walked_memory};
+    let space = process.space();
+    let same = |after: &'static str| {
+        let (kept, walked) = (Memory::of(process), walked_memory(process));
+        if kept == walked {
+            return Ok(());
+        }
+        crate::console::println!("  procfs   {after}: kept {kept:?}, walked {walked:?}");
+        Err("status's region figures from the kept totals differ from a walk of the regions")
+    };
+    same("the check process as it is")?;
+    let len = 6 * PAGE_SIZE;
+    let private = space
+        .map_anywhere(None, len, VmaFlags::READ_WRITE)
+        .map_err(|_| "the space refused a mapping for the region totals")?;
+    let shared = space
+        .map_anywhere(
+            None,
+            len,
+            VmaFlags {
+                shared: true,
+                ..VmaFlags::READ_WRITE
+            },
+        )
+        .map_err(|_| "the space refused a shared mapping for the region totals");
+    let outcome = (|| {
+        let shared = shared?;
+        same("a private and a shared mapping")?;
+        space
+            .protect(private + 2 * PAGE_SIZE, 2 * PAGE_SIZE, VmaFlags::READ)
+            .map_err(|_| "mprotect of a middle was refused")?;
+        same("an mprotect split")?;
+        space
+            .unmap(shared + PAGE_SIZE, PAGE_SIZE)
+            .map_err(|_| "an unmap of a middle was refused")?;
+        same("an unmap of a middle")?;
+        let _ = space.unmap(shared, len);
+        same("an unmap of the rest")
+    })();
+    let _ = space.unmap(private, len);
+    outcome?;
+    same("every mapping of the check gone")
 }
 
 /// Pages [`time_resident_count`] commits and counts.

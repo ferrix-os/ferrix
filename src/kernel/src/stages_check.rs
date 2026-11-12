@@ -231,8 +231,8 @@ pub(super) fn check_dirty() {
     check_rss_core();
 }
 
-/// The kept resident counts with kernel objects alone, on every profile
-/// (`user::rss_check`, `L.user.236`, `L.user.237`).
+/// The kept resident counts and region totals with kernel objects alone, on
+/// every profile (`user::rss_check`, `L.user.236` to `L.user.238`).
 fn check_rss_core() {
     let report = match user::rss_check::run() {
         Ok(report) => report,
@@ -242,7 +242,7 @@ fn check_rss_core() {
         ),
     };
     println!(
-        "  core rss {} comparisons with a recount, all equal; a read takes {} ns over {} \
+        "  core rss {} comparisons with a recount and a sum, all equal; a read takes {} ns over {} \
          regions and {} ns over one",
         report.compared,
         report.large_ns / u64::from(user::rss_check::READS),

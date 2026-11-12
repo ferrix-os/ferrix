@@ -311,22 +311,24 @@ pub const READS: u32 = 200;
 const PIECES: u64 = 4_000;
 
 // CHECKS-ONLY: stages_check.rs
-/// The kept counts with kernel objects alone, on every profile: a space's
-/// changes made through the space itself -- a first touch, an `mprotect`
-/// split and merge, an unmap of a middle, `madvise(DONTNEED)`, a fork with
-/// copy-on-write faults on both sides, a shared mapping both see, the
-/// child's drop -- each followed by the kept counts against [`recount`];
-/// then a reserve of about
-/// 4,000 regions, and the read timed over it and over a
+/// The kept counts and the kept region totals with kernel objects alone, on
+/// every profile: a space's changes made through the space itself -- a
+/// first touch, an `mprotect` split and merge, an unmap of a middle,
+/// `madvise(DONTNEED)`, a fork with copy-on-write faults on both sides, a
+/// shared mapping both see, the child's drop -- each followed by the kept
+/// counts against [`recount`] and the region map's kept totals against a sum
+/// over its regions; then a reserve of about 4,000 regions, and the read
+/// timed over it and over a
 /// space of one region (`docs/RSS-COUNTS.md` §7; the syscall-driven cases
 /// are `user::rss_kept_check`'s).
 ///
 /// Verifies: L.user.236
 /// Verifies: L.user.237
+/// Verifies: L.user.238
 ///
 /// # Errors
 ///
-/// What was not as `L.user.236` and `L.user.237` have it.
+/// What was not as `L.user.236` to `L.user.238` have it.
 pub fn run() -> Result<KeptFound, &'static str> {
     use crate::user::space::Advice;
     use ferrix_vma::VmaFlags;
@@ -391,10 +393,30 @@ pub fn run() -> Result<KeptFound, &'static str> {
     })
 }
 
-/// The kept counts of `space` against [`recount`], counted in `compared`.
+/// The kept counts of `space` against [`recount`], and its region map's
+/// kept totals against a sum over its regions, counted in `compared`.
 fn same(space: &AddressSpace, compared: &mut u32) -> Result<(), &'static str> {
     *compared += 1;
-    agrees(space).map_err(|_| "a space's kept resident counts differ from a recount")
+    agrees(space).map_err(|_| "a space's kept resident counts differ from a recount")?;
+    let (kept, _) = space.region_totals(0);
+    let mut summed = ferrix_vma::Totals::default();
+    space.with_regions(|regions| {
+        for region in regions {
+            let bytes = region.end - region.start;
+            summed.mapped += bytes;
+            if region.flags.locked {
+                summed.locked += bytes;
+            }
+            if region.flags.write && !region.flags.shared {
+                summed.private_writable += bytes;
+            }
+        }
+    });
+    if kept == summed {
+        Ok(())
+    } else {
+        Err("a space's kept region totals differ from a sum over its regions")
+    }
 }
 
 /// A write fault at `at` in `space`.

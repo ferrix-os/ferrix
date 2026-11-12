@@ -2545,6 +2545,13 @@ verdict of ledger line 3950.
   * *The recount* (`user::rss_check::recount`, check code) keeps the old
     holds: the space's lock for one pass over the regions, each object's
     pages lock for at most 256 entries, never two together.
+* **The region figures, kept** (`ferrix_vma::Totals`, L.user.238, since
+  2026-11-12): `VmSize`, `VmLck` and `VmData` are totals the region map keeps
+  on every insert, removal and protect, in the same hold of the space's lock
+  as the change, a few adds; a reader takes the space's lock for one lookup
+  of the region holding the start stack pointer (`region_totals`), where it
+  walked every region.
+
 ### 2.2ac A fault's wait for its supervisors (`object::exception`, K4)
 
 A thread whose user-mode fault reaches a supervisor (`docs/microkernel/K4.md`

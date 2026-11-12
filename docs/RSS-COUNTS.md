@@ -279,12 +279,33 @@ That bound is a property of the reader, stated here and in
 
 ## 8. The other figures of `status` and `stat`
 
-`VmSize`, `VmLck`, `VmData` and `stat`'s `vsize` walk every region too
+`VmSize`, `VmLck`, `VmData` and `stat`'s `vsize` walked every region too
 (`Memory::of`): with the counts kept, a `status` read over 15,000 regions
-still takes 31.8 µs (release build, KVM guest on nazuna), and a `stat` read
-25.7 µs, where develop took 522 and 511 (Linux 7.0 in the same guest: 2.5
-and 1.6). The next
-commit keeps them in the region map (`L.user.238`).
+still took 31.8 µs (release build, KVM guest). The region map keeps them now as running totals
+(`ferrix_vma::Totals`: every region, the `mlock`ed ones, the private writable
+ones) on every insert, removal and `protect`, as Linux's `vm_stat_account`
+does, and `VmStk` is the one region holding the start stack pointer, found by
+one lookup, which `VmData` leaves out as it always did (`L.user.238`). The
+walk stays as check code (`Memory::walked`), the procfs check holds the two
+equal, and the map's host tests hold the totals equal to a sum after every
+operation (`check_invariants`).
+
+`statusbench`, release build, KVM guest on nazuna with xtask's `-cpu`,
+2026-11-12 (`~/.local/share/ferrix/logs/rss/`; Linux under the same QEMU
+with the program as `/init`):
+
+| | `status` µs (mean) | `stat` | `/proc/meminfo` |
+|---|---|---|---|
+| Linux 7.0 as the guest | 2.5 | 1.6 | 2.1 |
+| develop 1aea9a223 | 522 | 511 | 6.6 |
+| counts kept (L.user.236) | 31.8 | 25.7 | 8.8 |
+| and region totals kept (L.user.238) | 15.5 | 9.3 | 8.8 |
+
+On the N150 with the game (a release image, run rss1): `status` 13.8-21.4
+ms to 0.8 ms a read. What is left grows with nothing a program holds: the
+cost of opening a procfs file, which Ferrix renders at `open` (an `open`,
+`read` and `close` of a small process's `status` about 12 µs on develop's
+release build, against 2.0 µs in the Linux guest). It is not this change's.
 
 ## 9. `/proc/meminfo`
 
@@ -317,5 +338,5 @@ changes, the filesystems' dirty count kept by them, and `L.user.175`'s and
 Design reviewed 2026-11-12: OK IF K1-K11, consultant ledger line 8701
 (conditions 8705-8715); code reviewed the same day: OK IF R1-R9, ledger 8826.
 Built on branch `rss/kept-counts`: the resident counts kept (`L.user.236`,
-`L.user.237`). `/proc/meminfo` (§9) is not built:
+`L.user.237`) and the region totals kept (`L.user.238`). `/proc/meminfo` (§9) is not built:
 its design review and its branch are owed.

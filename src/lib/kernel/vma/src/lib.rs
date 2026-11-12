@@ -550,6 +550,41 @@ pub struct AddressSpace {
     high: u64,
     /// The room `regions` holds, charged to the job that made the space.
     room: Room,
+    /// What the regions add up to, kept as they come, go and change.
+    totals: Totals,
+}
+
+/// Bytes the regions of a map add up to, kept as regions come, go and
+/// change, as Linux's `vm_stat_account` keeps `total_vm`, `locked_vm` and
+/// `data_vm`: what `/proc/<pid>/status` reads without a walk.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Totals {
+    /// Every region.
+    pub mapped: u64,
+    /// The `mlock`ed regions.
+    pub locked: u64,
+    /// The private, writable regions.
+    pub private_writable: u64,
+}
+
+impl Totals {
+    /// Count `bytes` of a region with `flags` in (`up`) or out.
+    fn count(&mut self, flags: VmaFlags, bytes: u64, up: bool) {
+        let shift = |total: &mut u64| {
+            *total = if up {
+                total.saturating_add(bytes)
+            } else {
+                total.saturating_sub(bytes)
+            };
+        };
+        shift(&mut self.mapped);
+        if flags.locked {
+            shift(&mut self.locked);
+        }
+        if flags.write && !flags.shared {
+            shift(&mut self.private_writable);
+        }
+    }
 }
 
 /// The heap an address space's regions hold, charged to the job of the task
@@ -601,6 +636,7 @@ impl AddressSpace {
             low,
             high,
             room: Room(Charge::bytes(0).map_err(|_| VmaError::NoMemory)?),
+            totals: Totals::default(),
         })
     }
 
@@ -696,14 +732,27 @@ impl AddressSpace {
         self.regions.is_empty()
     }
 
-    /// Total number of bytes mapped, across all regions.
+    /// Total number of bytes mapped, across all regions: kept, not summed.
     #[must_use]
     pub fn total_mapped(&self) -> u64 {
-        // The sum cannot exceed `high - low`, so the saturation is unreachable
-        // and is here only to keep the fold total.
-        self.regions.iter().fold(0, |total, region| {
-            total.saturating_add(region.range.bytes())
-        })
+        self.totals.mapped
+    }
+
+    /// What the regions add up to: kept, not summed.
+    #[must_use]
+    pub fn totals(&self) -> Totals {
+        self.totals
+    }
+
+    /// [`AddressSpace::totals`] summed afresh over the regions: what the
+    /// kept totals are held to.
+    #[must_use]
+    pub fn totals_summed(&self) -> Totals {
+        let mut totals = Totals::default();
+        for region in &self.regions {
+            totals.count(region.flags, region.range.bytes(), true);
+        }
+        totals
     }
 
     /// The regions, in ascending address order.
@@ -916,7 +965,9 @@ impl AddressSpace {
         self.split_at(range.end);
         let first = self.first_touching(range.start);
         let last = self.first_beyond(range.end);
+        let totals = &mut self.totals;
         for region in self.regions.get_mut(first..last).into_iter().flatten() {
+            totals.count(region.flags, region.range.bytes(), false);
             // `mprotect` changes what the pages permit and nothing else:
             // `MAP_SHARED`, a stack's growth and `mlock` are the mapping's,
             // as Linux's `mprotect_fixup` keeps them. Taking `flags` whole
@@ -941,6 +992,7 @@ impl AddressSpace {
             if needs_cow(region) {
                 region.cow = true;
             }
+            totals.count(region.flags, region.range.bytes(), true);
         }
         self.merge_span(first, last);
         Ok(())
@@ -1019,6 +1071,7 @@ impl AddressSpace {
             low: self.low,
             high: self.high,
             room: Room(room),
+            totals: self.totals,
         })
     }
 
@@ -1044,6 +1097,9 @@ impl AddressSpace {
                 }
             }
             previous = Some(region);
+        }
+        if self.totals != self.totals_summed() {
+            return Err("the kept totals differ from the regions summed");
         }
         Ok(())
     }
@@ -1131,6 +1187,7 @@ impl AddressSpace {
     /// whichever neighbours it now continues. The caller has reserved room
     /// for it.
     fn place(&mut self, region: Vma) {
+        self.totals.count(region.flags, region.range.bytes(), true);
         let index = self.first_touching(region.range.start);
         let index = index.min(self.regions.len());
         self.regions.insert(index, region);
@@ -1225,6 +1282,22 @@ impl AddressSpace {
     /// never leaves two mergeable neighbours behind, because everything it
     /// removes leaves a hole between what is left.
     fn carve(&mut self, range: PageRange, out: &mut dyn FnMut(Unmapping)) {
+        let mut gone = Totals::default();
+        let mut counted = |removed: Unmapping| {
+            gone.count(removed.flags, removed.range.bytes(), true);
+            out(removed);
+        };
+        self.carve_counted(range, &mut counted);
+        let totals = &mut self.totals;
+        totals.mapped = totals.mapped.saturating_sub(gone.mapped);
+        totals.locked = totals.locked.saturating_sub(gone.locked);
+        totals.private_writable = totals
+            .private_writable
+            .saturating_sub(gone.private_writable);
+    }
+
+    /// [`AddressSpace::carve`], with every piece removed reported to `out`.
+    fn carve_counted(&mut self, range: PageRange, out: &mut dyn FnMut(Unmapping)) {
         let first = self.first_touching(range.start);
         let last = self.first_beyond(range.end);
         if first >= last {

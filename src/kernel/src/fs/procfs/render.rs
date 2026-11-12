@@ -1229,7 +1229,8 @@ fn holds(region: &Region, address: u64) -> bool {
 }
 
 /// What `status` and `stat` say about a process's memory, in bytes.
-struct Memory {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Memory {
     /// Everything mapped.
     size: u64,
     /// The `mlock`ed part.
@@ -1241,35 +1242,53 @@ struct Memory {
 }
 
 impl Memory {
-    fn of(process: &Process) -> Memory {
+    /// From the totals the region map keeps and the one region holding the
+    /// stack pointer (`L.user.238`): no walk of the regions. The stack's
+    /// region counts as the stack and not as data, as [`Memory::walked`]
+    /// counts it.
+    pub(super) fn of(process: &Process) -> Memory {
         let stack_pointer = start_stack(process);
-        let mut memory = Memory {
-            size: 0,
-            locked: 0,
-            data: 0,
-            stack: 0,
-        };
-        process.space().with_regions(|regions| {
-            for region in regions {
-                memory.add(&region, stack_pointer);
-            }
-        });
-        memory
+        let (totals, holder) = process.space().region_totals(stack_pointer);
+        let stack = holder.filter(|region| holds(region, stack_pointer));
+        let bytes = |region: &Region| region.end.saturating_sub(region.start);
+        let stack_data = stack
+            .filter(|region| region.flags.write && !region.flags.shared)
+            .map_or(0, |region| bytes(&region));
+        Memory {
+            size: totals.mapped,
+            locked: totals.locked,
+            data: totals.private_writable.saturating_sub(stack_data),
+            stack: stack.map_or(0, |region| bytes(&region)),
+        }
     }
+}
 
-    /// Count `region` in.
-    fn add(&mut self, region: &Region, stack_pointer: u64) {
-        let bytes = region.end.saturating_sub(region.start);
-        self.size = self.size.saturating_add(bytes);
-        if region.flags.locked {
-            self.locked = self.locked.saturating_add(bytes);
+// CHECKS-ONLY: fs/procfs/check.rs
+/// [`Memory::of`] by a walk of every region, as every read made it
+/// before the map kept the totals: what those are held to.
+pub(super) fn walked_memory(process: &Process) -> Memory {
+    let stack_pointer = start_stack(process);
+    let mut memory = Memory {
+        size: 0,
+        locked: 0,
+        data: 0,
+        stack: 0,
+    };
+    process.space().with_regions(|regions| {
+        for region in regions {
+            let bytes = region.end.saturating_sub(region.start);
+            memory.size = memory.size.saturating_add(bytes);
+            if region.flags.locked {
+                memory.locked = memory.locked.saturating_add(bytes);
+            }
+            if holds(&region, stack_pointer) {
+                memory.stack = memory.stack.saturating_add(bytes);
+            } else if region.flags.write && !region.flags.shared {
+                memory.data = memory.data.saturating_add(bytes);
+            }
         }
-        if holds(region, stack_pointer) {
-            self.stack = self.stack.saturating_add(bytes);
-        } else if region.flags.write && !region.flags.shared {
-            self.data = self.data.saturating_add(bytes);
-        }
-    }
+    });
+    memory
 }
 
 /// What the thread numbered `tid` of `process` is doing, as Linux 7.0's

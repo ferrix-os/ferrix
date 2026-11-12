@@ -3499,6 +3499,28 @@ package FerrixMemoryRequirements {
             attribute :>> unit = ("user::space::AddressSpace::resident",
                 "user::rss::Rss::read");
         }
+        // docs/RSS-COUNTS.md §8: status's other figures, which walked every
+        // region too. The parent is L.user.171's, for the same reason.
+        requirement <'L.user.238'> theRegionFiguresAreKept : ItemLowLevel {
+            attribute :>> statement = "/proc/<pid>/status's VmSize, VmLck and VmData
+                and /proc/<pid>/stat's vsize shall be the region map's totals, kept
+                as regions are mapped, unmapped and protected, of every region, the
+                mlocked ones, and the private writable ones less the one holding the
+                start stack pointer; VmStk shall be that one region, found by one
+                lookup.";
+            attribute :>> criterion = "In the procfs check process, the figures from
+                the kept totals equal a walk of every region (Memory::walked) for
+                the process as it is, after a private and a shared mapping, an
+                mprotect splitting the private one, an unmap of the shared one's
+                middle, an unmap of its rest, and with every mapping of the check
+                gone. With kernel objects alone, on every profile (the `core rss`
+                line), the totals equal a sum over the regions after each of the
+                changes that line makes. The map's host tests hold the kept totals equal to a sum over
+                the regions after every insert, removal, MAP_FIXED, protect and
+                fork they make (check_invariants).";
+            attribute :>> parent = "H.MEM.9";
+            attribute :>> unit = "user::space::AddressSpace::region_totals";
+        }
         // docs/RAM-RELEASE.md §3: the clean btrfs nodes, reclaimable heap.
         requirement <'L.user.175'> cleanBtrfsNodesAreAvailable : ItemLowLevel {
             attribute :>> statement = "/proc/meminfo's SReclaimable shall be the bytes the
