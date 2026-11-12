@@ -2234,14 +2234,20 @@ reservation conflict resolved to the removal alone, and this line.
 
 Asked for by the customer on 2026-11-12. A plan with no code; the fuzz
 target of §15.3 H1 is being written beside it on branch `intel-uapi-fuzz`.
-Nothing here is reviewed by the consultant yet.
+The consultant's design review (2026-11-12, ledger lines 8936 and 8946):
+this section **OK IF T1-T14**, folded in here; H5 **OK IF H5.1-H5.12**; H6
+with the customer's door **OK IF H6.1'-H6.9'**; the node's mode **OK IF
+N1-N6**, as a design of its own before code; H7 **OK IF H7.1-H7.7**, after
+H5. An internal review, not independent verification (F-27).
 
 ### 15.1 What the driver is trusted with, and by whom
 
 The node is mode 0666 (§4.4), so every local program reaches the front
 end. A program that breaks the driver gains one ring-3 process holding
-`MANAGE` on `00:02.0`: every client's buffers and frames, and the GPU. With
-dmar0 translating (K2) it does not gain the kernel or other devices. So the
+`MANAGE` on `00:02.0`: every client's buffers and frames, and the GPU, and, through the chardev core, the
+memory of a program waiting in a call on its node (V-10). With dmar0
+translating (K2) it does not, by design, gain the kernel or other devices
+(shown on QEMU for the kernel's tables; the box run R1 is owed). So the
 plan has three aims, in this order: one client must not reach another's
 memory through the driver; one client must not stop the others; and a
 broken driver must hold as little as it can.
@@ -2254,10 +2260,10 @@ wrote this; the rest stand on the audit alone. None is demonstrated by a
 program, and how often a freed frame is pinned again for another client is
 not measured.
 
-**Shown by the code:**
+**Reported by the audit as shown by the code (not read again):**
 
 * A new object's memory is zero: the kernel zeroes each frame when a VMO
-  page is committed (H.MEM.6, `L.mm.16`). The driver keeps no pool of
+  page is committed (H.MEM.6, `L.user.2`). The driver keeps no pool of
   freed objects or pages for clients, and a page-table page is refilled
   with scratch entries before it is used again.
 * Unmapped PPGTT ranges point at a scratch page of the VM's own.
@@ -2282,8 +2288,8 @@ not measured.
 | D4 | **Destroying a VM leaks its page tables.** The bindings are dropped without an unbind, and the PPGTT's destroy frees only the top table and the scratch pages. One client can empty the page-table pool for all | `frontend/vm.rs`, `ppgtt.rs` | no |
 | D5 | **No limit is per client.** Objects, handles, VMs, contexts, held waits, requests, kernel fences, the pin budget and the driver's 4096 kernel handles are counted for the device only; about 4,000 objects from one client starve the rest | `frontend/limits.rs`, `objects.rs` | no |
 | D6 | **No timeslice and no ban of a client.** A context keeps its engine while it has work. A hang costs every client 2 s, a recoverable context (the default) is not banned in the front end, and a new context is not limited | `backend.rs`, `frontend/fence.rs` | no |
-| D7 | **VT-d faults are not seen after boot.** The fault event is masked and the records are read once, at the end of boot (consultant ledger 8913) | `iommu.rs`, `iommu/vtd.rs` | **yes** |
-| D8 | **An untranslated GPU is still handed over under `ferrix.intelgpu`.** Client nodes are refused then (§4.4 (a)), the device is not. devmgr starts the driver as an engine, so its GPU hand-over checks (`L.device.56`) are not applied | `syscall/native.rs`, `device.rs`; devmgr | **yes** (devmgr's half no) |
+| D7 | **VT-d faults are not seen after boot.** The fault event is masked and the records are read once, at the end of boot; the boot's one line is printed before the driver starts (ledger 8913) | `iommu.rs`, `iommu/vtd.rs` | **yes** |
+| D8 | **The kernel itself does not refuse an untranslated GPU under `ferrix.intelgpu`.** devmgr's admission refuses the engine unless the boot also carries `ferrix.unisolated` (and a `personality=user` kernel's bind refuses the same, `L.device.72`); in other personalities the kernel relies on devmgr, which is not certified (V-20). The engine's start does not pass the GPU hand-over's rule, which has no opt-out (`L.device.56`) | `syscall/native.rs`, `device.rs` | **yes** |
 | D9 | **The driver runs as root** and opens `/proc/cmdline` and `/proc/meminfo`; a debug option calls `reboot`. No syscall policy bounds a driver's job | devmgr's start, `steps.rs` | no |
 
 **Not settled:** whether each whitelisted register is saved in the context
@@ -2292,7 +2298,9 @@ tested); that the hardware refuses GGTT addressing from a non-privileged
 batch (relied on, as Linux does); how long a first bind of a budget-sized
 object holds the driver's thread; whether the driver can fork or open a
 socket; whether a client can shrink a card0 buffer's VMO after attach,
-which would fault the driver's read.
+which would fault the driver's read. That last one is the kernel's to
+answer, in the load ring's display interface, and is read in the code
+before H2 (ledger 8936).
 
 ### 15.3 The work, in order
 
@@ -2301,8 +2309,9 @@ Outside the item, no box needed:
 * **H1. Fuzz the front end.** One target driving sequences of ioctls from
   several clients against the model back end, with the invariants "no
   handle of one client resolves for another" and "nothing is left when
-  the last client closes". §4.4 and §6 say the parsers are fuzzed; no
-  target did so before this one.
+  the last client closes". §4.4, §6 and §12.5 said the parsers were fuzzed
+  until this plan; no target did so. "Fuzzed" is written again only once
+  the target runs in a gate (ledger 8936 V1).
 * **H2. D1 to D4**, one branch after H1 so that its target is the
   regression. D1: clear what was written on a failed bind. D2: keep the
   object's memory until every request of that VM in flight at the unbind
@@ -2318,45 +2327,59 @@ Outside the item, no box needed:
   without root if devmgr can give it another identity; the `reboot`
   option removed from product images. A test of context isolation that
   writes each whitelisted register in one context and reads it in
-  another.
+  another. Where `discovery/devmgr.rs` writes START, the change is
+  the item's and has its own review.
 
 Inside the item, each a design to the consultant first:
 
 * **H5. A reader of the fault records while the system runs (D7).** A
-  timer or a call on request drains the records through the path
+  timer drains (polled: the fault event stays masked, `L.iommu.70`; a
+  call on request would be a new interface and its own design) the
+  records through the path
   `audit_faults` already uses and prints one rate-limited line a fault
   with the function and the page. The checks' own provoked faults stay
   theirs (`L.iommu.43`, `.54`, `.64`, `.65`, `.70`, `.72` sit around the
-  code). The backlog carries it as a wish (ledger 8913).
+  code). The backlog carries it as a wish (ledger 8913). Conditions:
+  ledger 8936, H5.1-H5.12.
 * **H6. No hand-over without translation (D8).** The kernel refuses
-  `MANAGE` on the Intel GPU while its unit does not translate, and devmgr
-  hands it over as a GPU. §4.4's rule that M1 and M2 may run untranslated
-  goes; the chardev check that forces an untranslated node stays, since
-  it uses the forced switch. **The customer's decision** (§15.5).
+  every call needing `MANAGE` on the Intel GPU while its domain does not
+  translate, in every personality, unless the boot also says
+  `ferrix.unisolated` (`L.device.72`'s rule). `L.object.192` and its
+  chardev check stay as they are. devmgr's admission is unchanged.
+  Conditions: ledger 8946, H6.1'-H6.9'. §4.4's rule that M1 and M2 may run
+  untranslated under `ferrix.intelgpu` alone goes.
 
 After H5:
 
 * **H7. A negative step.** A new M2 step after the hang: the driver
-  writes a PPGTT entry over a device address it never pinned and runs a
-  store through it. Passed means H5's fault line for `00:02.0` at that
-  address and the page unchanged. Off unless its option is said, and not
+  writes a PPGTT entry over the address of a page of its own that it
+  pinned once to learn the address and then unpinned, and runs a store
+  through it; first, as a control, the same store with the page pinned
+  changes it. Passed means the kernel's H5 line for `00:02.0` at that
+  address, a write, within two periods; the driver's "unchanged" line
+  supports it. Conditions: ledger 8936, H7.1-H7.7. Off unless its option is said, and not
   in a release image's command line.
 
 Already planned, and the largest:
 
 * **H8. The keeper and the worker (§12).** Step 1 is on develop; the
   product is still one process. Step 2 is ten unlanded commits on
-  `gpu-opaque-2`. With it the process that drives the GT holds no client
+  `gpu-opaque-2`, which come to the consultant before any take. With it the process that drives the GT holds no client
   memory, and D9's rights fall to the keeper alone.
 
 ### 15.4 What needs the N150 box
 
 | Run | Needs first | With a monitor | About |
 |---|---|---|---|
-| R1. K2's owed boot: the lit screen photographed after TE, that boot's fault line, the loader-map region of the RMRR (BACKLOG, intel-k2; ledger 8913) | nothing; better with H5, whose reader also speaks for the time after boot | **yes** | 15 min |
+| R1. K2's owed boot: the lit screen photographed after TE, that boot's fault line, the loader-map region of the RMRR (BACKLOG, intel-k2; ledger 8913) | nothing (required, ledger 8914); with H5 in the image its totals are recorded too | **yes** | 15 min |
 | R2. H7's negative step: the fault line and the unchanged page | H5, H7 landed | no | 20 min |
-| R3. H2 and H3 under Endfield: frames a second and GPU time a frame against develop's, since D2's wait and D3's copy are on the execbuffer path (§13) | H2, H3 gated | no | 30 min |
+| R3. H2 and H3 under Endfield: frames a second and GPU time a frame against develop's, since D2's wait and D3's copy are on the execbuffer path (§13); Steam's runtime keeping the node's group (N5). Product evidence, never cited for the item | H2, H3 gated | no | 30 min |
 | R4. The keeper and worker's run (§12.8, BACKLOG gpu-opaque) | H8 | no | as its row says |
+| The screen hand-over's run (BACKLOG, intel-k4; ledger 2352 K4), open before this plan | as its row says | yes | as its row says |
+| The three paths QEMU cannot reach (BACKLOG, intel-k3; ledger 2356), open before this plan; its (b) is reworded to `ferrix.intelgpu ferrix.unisolated` with H6 | as its row says | no | as its row says |
+
+The consultant requires R1 and R2 (ledger 8936); they can be one visit
+once H5 and H7 are landed. R3 and R4 are not the consultant's.
 
 ### 15.5 For the customer to decide
 
@@ -2365,14 +2388,16 @@ Already planned, and the largest:
    (V-03), and with it the way to bring the driver up on a machine whose
    firmware's RMRR the kernel refuses.
 2. **The node's mode**: 0666 lets every local program reach the front
-   end (V-11, accepted by design). A group for the seat's user would
+   end (V-11's argument, which VULNERABILITY-ANALYSIS states for NVIDIA's
+   nodes only; its extension to this node is owed, ledger 8936 V1). A
+   group for the seat's user would
    narrow it; Mesa needs nothing else.
 3. **H8's place**: before or after H2 to H4. This plan puts it after,
    since D1 to D4 are reachable today and small.
 
 **Decided (the customer, 2026-11-12): "the most secure ones, while keeping
-hardware support to all platforms open".** Read as follows; the consultant
-rules on the kernel's half of 1.
+hardware support to all platforms open".** Read as follows; the consultant's
+ruling on the kernel's half of 1 is ledger line 8946.
 
 1. **H6 is built, with a door kept.** Under `ferrix.intelgpu` alone the
    kernel refuses the hand-over while the GPU's unit does not translate.
@@ -2380,12 +2405,15 @@ rules on the kernel's half of 1.
    brought up by saying `ferrix.unisolated` as well, the switch an
    explicit bind already asks for: DEGRADED is announced, a release
    image's command line does not carry it, and client nodes stay refused
-   as §4.4 (a) has them. No machine loses what it has today except the
-   silent case.
+   as §4.4 (a) has them. No machine loses what it has today: devmgr's
+   admission already asks for `ferrix.unisolated`; what changes is that
+   the kernel itself refuses, in every personality.
 2. **The node is narrowed to a group**, mode 0660, the seat's user in the
    group. It is no platform's concern: Mesa opens the node as that user.
    What runs a game in a container (Steam's runtime) must keep the group;
-   that is checked on the box in R3.
+   that is checked on the box in R3. It is a change to the chardev core,
+   which sets the mode, with its own design to the consultant (N1-N6);
+   NVIDIA's nodes stay 0666 until the customer says otherwise.
 3. **The order stands**: H2 to H4, then H8. Both are done.
 
 ## Appendix A: the probe that printed the numbers
