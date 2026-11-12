@@ -1041,7 +1041,7 @@
     },
     {
       "file": "sched/wait.rs",
-      "lines": "1080",
+      "lines": "1085",
       "category": "failure-path",
       "match": "debug_assert!(",
       "why": "The debug assertion's own row is its panic call: a sleeping lock taken where a task may not block. The condition runs on every sleeping-lock acquisition under another row."

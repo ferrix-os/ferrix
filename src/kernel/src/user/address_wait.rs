@@ -39,10 +39,11 @@
 //! The read under the lock never faults and never commits memory
 //! (`L.user.137`). Resolving a fault takes the space's lock and allocates a
 //! frame, and filling an object's page may read a disk, none of which a spin
-//! lock's holder may do. So the word is read first with nothing held,
-//! faulting or filling its page in, and read again under the lock only if the
-//! page is still there. If it went in between, the lock is let go and the
-//! whole read done again.
+//! lock's holder may do. So the word is read under the lock without a fault
+//! first, as Linux's `get_futex_value_locked`; only when its page is not
+//! there is the lock let go, the word read with nothing held, faulting or
+//! filling its page in, and the whole done again. The value compared is
+//! always the one read under the lock.
 //!
 //! A waker rouses a waiter while still holding the lock, and a waiter leaving
 //! for any reason takes the lock before it returns. So a wake can never land
@@ -387,6 +388,18 @@ fn bucket_lock(index: usize) -> &'static SpinLock<Vec<Entry>> {
     TABLE.get(index).unwrap_or(&TABLE[0])
 }
 
+// CHECKS-ONLY: user/address_wait_check.rs
+/// Reads of a waited word made with nothing held, faulting or filling its page
+/// in, by [`list`], in the space [`FAULTING_SPACE`] names: one for each word
+/// whose page was not there to be read under its bucket's lock.
+#[doc(hidden)]
+pub static FAULTING_READS: AtomicU64 = AtomicU64::new(0);
+// CHECKS-ONLY: user/address_wait_check.rs
+/// The address of the space whose faulting reads [`FAULTING_READS`] counts,
+/// or 0 for none: the check's own, so that no other wait's are counted.
+#[doc(hidden)]
+pub static FAULTING_SPACE: AtomicUsize = AtomicUsize::new(0);
+
 /// Read the word with nothing held, faulting or filling its page in.
 fn read_word(space: &AddressSpace, word: &Word) -> Result<u32, WaitError> {
     let mut bytes = [0_u8; 4];
@@ -650,9 +663,9 @@ pub fn wait_on(
 }
 
 /// List `sleeper`'s entry for `slot` on `word`, if the word still holds its
-/// value: read first with nothing held, then again under its bucket's lock
-/// without a fault, round again if the page went in between or the bucket
-/// had to grow.
+/// value: read under its bucket's lock without a fault; when its page is not
+/// there, read with nothing held, faulting it in, and round again, as when
+/// the bucket had to grow.
 ///
 /// # Errors
 ///
@@ -666,10 +679,20 @@ fn list(
     word: &Word,
 ) -> Result<(), WaitError> {
     let bucket = word.key.bucket();
+    // A word whose page is there, as nearly every waited one is, is read once,
+    // under the lock; one whose page is not is faulted in with nothing held and
+    // read again under the lock (the module's "The lost wake-up").
+    let mut fault_in = false;
     loop {
-        let _ = read_word(space, word)?;
+        if fault_in {
+            if core::ptr::from_ref(space) as usize == FAULTING_SPACE.load(Ordering::Relaxed) {
+                let _ = FAULTING_READS.fetch_add(1, Ordering::Relaxed);
+            }
+            let _ = read_word(space, word)?;
+        }
         let mut table = bucket_lock(bucket).lock();
         let Some(value) = read_present_word(space, word)? else {
+            fault_in = true;
             continue;
         };
         if value != word.expected {

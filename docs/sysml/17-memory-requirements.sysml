@@ -3665,10 +3665,14 @@ package FerrixMemoryRequirements {
                 it from shall read as zero and stay uncommitted.";
             attribute :>> criterion = "A wait by handle on a word in a VMO page never
                 committed reads zero and leaves the VMO's committed pages as they
-                were (the `addrwait` line).";
+                were; a wait on a word whose page is there makes no read with
+                nothing held, and a wait on a word whose page was never touched
+                reads it with nothing held, lists on a later round and is woken
+                (the `addrwait` line, case 15; a list that refuses a page not there
+                fails it).";
             attribute :>> parent = "H.OBJ.20";
             attribute :>> unit = ("user::address_wait::read_word",
-                "user::address_wait::read_present_word");
+                "user::address_wait::read_present_word", "user::address_wait::list");
         }
         requirement <'L.user.138'> aWakeTakesTheOldestByItsBitset : ItemLowLevel {
             attribute :>> statement = "wake shall rouse at most its limit of waiters

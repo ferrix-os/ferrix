@@ -68,6 +68,8 @@ const OFFSET_AT: u64 = SCRATCH + 0xB00;
 const MAPPED_A: u64 = 0x6000_0000;
 /// And in the second, elsewhere, so that a key by address could not match.
 const MAPPED_B: u64 = 0x6100_0000;
+/// Case 15's page, mapped and never touched before its wait.
+const MAPPED_C: u64 = 0x6200_0000;
 /// The shared word's offset in its VMO.
 const SHARED_OFFSET: u64 = 0x40;
 
@@ -265,6 +267,7 @@ pub fn run() -> Result<Report, &'static str> {
     a_wait_beyond_its_jobs_limit_is_refused(&mut report)?;
     the_calls_refuse_what_the_abi_refuses(&a, &mut report)?;
     a_wake_racing_a_block_is_never_lost(&a)?;
+    a_word_is_faulted_in_only_when_its_page_is_not_there(&a, &mut report)?;
     report.walk_ns = a_walk_is_measured_and_its_room_given_back(&a)?;
     for side in [&a, &b, &c] {
         side.close_everything();
@@ -1055,6 +1058,84 @@ fn a_walk_is_measured_and_its_room_given_back(a: &Side) -> Result<u64, &'static 
         return Err("addrwait: a bucket kept its room after its entries left");
     }
     Ok(took / ENTRIES as u64)
+}
+
+/// Case 15: a wait on a word whose page is there makes no read with nothing
+/// held; a wait on a word whose page was never touched faults it in with
+/// nothing held, lists on a later round and is woken.
+///
+/// Verifies: L.user.137
+fn a_word_is_faulted_in_only_when_its_page_is_not_there(
+    a: &Side,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    use core::sync::atomic::Ordering;
+    address_wait::FAULTING_SPACE.store(
+        core::ptr::from_ref(&**a.process.space()) as usize,
+        Ordering::SeqCst,
+    );
+    let reads = || address_wait::FAULTING_READS.load(Ordering::SeqCst);
+    // There: WORD's page was written by the cases before.
+    set(a, WORD, 3)?;
+    let before = reads();
+    let deadline = deadline_in(a, 0, PATIENCE_NANOS)?;
+    start(
+        0,
+        a,
+        nr::ADDRESS_WAIT,
+        [WORD, 3, u64::from(u32::MAX), 0, deadline, 0],
+    )?;
+    until_listed(&[private(a, WORD)], 1)?;
+    if reads() != before {
+        return Err("addrwait: a wait on a word whose page was there read it with nothing held");
+    }
+    let _ = a
+        .call(nr::ADDRESS_WAKE, &[WORD, 1, u64::from(u32::MAX), 0, 0, 0])
+        .map_err(|_| "addrwait: a wake was refused")?;
+    if !matches!(answer(0, PATIENCE_NANOS), Some(Ok(0))) {
+        return Err("addrwait: a wait on a word whose page was there was not woken");
+    }
+    report.woken += 1;
+    // Not there: a fresh object's page, mapped and never touched.
+    let vmo = a.handle(nr::VMO_CREATE, &[PAGE_SIZE], "addrwait: vmo_create failed")?;
+    a.put(OFFSET_AT, &0_u64.to_ne_bytes())?;
+    let both = u64::from(MAP_READ | MAP_WRITE);
+    let _ = a
+        .call(
+            nr::VMO_MAP,
+            &[reg(vmo), MAPPED_C, PAGE_SIZE, both, OFFSET_AT],
+        )
+        .map_err(|_| "addrwait: vmo_map failed")?;
+    let untouched = MAPPED_C + 0x10;
+    let before = reads();
+    let deadline = deadline_in(a, 0, PATIENCE_NANOS)?;
+    start(
+        0,
+        a,
+        nr::ADDRESS_WAIT,
+        [untouched, 0, u64::from(u32::MAX), 0, deadline, 0],
+    )?;
+    until_listed(&[private(a, untouched)], 1)
+        .map_err(|_| "addrwait: a wait on a word whose page was not there was never listed")?;
+    // At least once: on a page of an object never touched, the first read
+    // fault here leaves no translation, and the word lists after the second.
+    if reads() == before {
+        return Err(
+            "addrwait: a wait on a word whose page was not there listed without faulting it in",
+        );
+    }
+    let _ = a
+        .call(
+            nr::ADDRESS_WAKE,
+            &[untouched, 1, u64::from(u32::MAX), 0, 0, 0],
+        )
+        .map_err(|_| "addrwait: a wake was refused")?;
+    if !matches!(answer(0, PATIENCE_NANOS), Some(Ok(0))) {
+        return Err("addrwait: a wait on a word whose page was not there was not woken");
+    }
+    report.woken += 1;
+    address_wait::FAULTING_SPACE.store(0, Ordering::SeqCst);
+    Ok(())
 }
 
 /// Case 14: two racers on two processors hand a turn back and forth
