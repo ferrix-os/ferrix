@@ -249,6 +249,12 @@ pub(super) mod reserve {
     static WAITER_ANSWER: SpinLock<Option<(Result<Payload, Errno>, u64)>> = SpinLock::new(None);
     static WAITER_DONE: WaitQueue = WaitQueue::new();
 
+    /// The two requests' bytes the cases write. Statics, not locals: two
+    /// arrays of a request each made `run`'s frame 4504 bytes, over a page,
+    /// and ARMv7-A has no stack probes (F-100, `check-frames`).
+    static FIRST: [u8; CHUNK] = [0x5a; CHUNK];
+    static SECOND: [u8; CHUNK] = [0xa5; CHUNK];
+
     /// How long (vi)'s writer may wait for an element: the production wait,
     /// so that a wake that never comes is seen as an answer a second late.
     const WAITER_WAIT_NANOS: u64 = 1_000_000_000;
@@ -368,21 +374,21 @@ pub(super) mod reserve {
         }
 
         // (i) The heap refuses; the reserve serves, with the caller's bytes.
-        let first = [0x5a_u8; CHUNK];
-        let payload = refused_payload(&disk, &first, WAIT_NANOS).map_err(
+        let first = &FIRST;
+        let payload = refused_payload(&disk, first, WAIT_NANOS).map_err(
             |_| "reserve-check: a payload the heap refused did not come from the reserve",
         )?;
         let Payload::Reserved { index, len } = payload else {
             return Err("reserve-check: a payload the heap refused was not a reserved one");
         };
-        if len != CHUNK || !element_holds(&disk, index, &first) {
+        if len != CHUNK || !element_holds(&disk, index, first) {
             return Err("reserve-check: a reserved payload does not hold the caller's bytes");
         }
         let one = disk
             .submit(Request::write(0, 0, 4).sync(), Some(payload), 0)
             .map_err(|_| "reserve-check: a write with a reserved payload was not queued")?;
-        let second = [0xa5_u8; CHUNK];
-        let payload = refused_payload(&disk, &second, WAIT_NANOS)
+        let second = &SECOND;
+        let payload = refused_payload(&disk, second, WAIT_NANOS)
             .map_err(|_| "reserve-check: the second element was not lent")?;
         let two = disk
             .submit(Request::write(0, 16, 4).sync(), Some(payload), 0)
@@ -397,7 +403,7 @@ pub(super) mod reserve {
 
         // (ii) Both lent and held: the third waits out its wait, then ENOMEM.
         let began = timer::now_nanos();
-        let third = refused_payload(&disk, &first, WAIT_NANOS);
+        let third = refused_payload(&disk, first, WAIT_NANOS);
         let waited = timer::now_nanos().saturating_sub(began);
         if !matches!(third, Err(Errno::ENOMEM)) {
             return Err(
@@ -419,7 +425,7 @@ pub(super) mod reserve {
         if disk.reserve_counts() != (1, 1) {
             return Err("reserve-check: a collected write did not give its element back");
         }
-        let again = refused_payload(&disk, &second, WAIT_NANOS)
+        let again = refused_payload(&disk, second, WAIT_NANOS)
             .map_err(|_| "reserve-check: an element given back was not lent again")?;
 
         // (iv) Abandoned and then answered: the second's caller gives up first.
@@ -436,7 +442,7 @@ pub(super) mod reserve {
 
         // (vi) Both lent, a writer waiting, and the only completion an
         // abandoned write's (ledger 8328 WR.1).
-        abandoned_completion_serves_a_waiter(&disk, &second)?;
+        abandoned_completion_serves_a_waiter(&disk, second)?;
 
         // (v) No room in the requests map: refused, nothing queued, element back.
         let queued = disk.state.lock().queue.queued();
