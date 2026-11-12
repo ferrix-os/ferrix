@@ -466,6 +466,11 @@ pub(crate) const KERNEL_HEAP_ANSWERS: u32 = MOST_ANSWERS;
 /// refusal, or no memory to list the processes. Called with no spin lock
 /// held and marked inside a reclaim, so that what it allocates fails
 /// rather than reclaims again (`mm::heap_or_kill`).
+///
+/// Every caller must return first unless `mm::heap_may_reclaim()` holds and
+/// run it inside `mm::while_killing`, as `mm::heap_or_kill` and
+/// `mm::reservation_grow` do: that is the bound `check-stack-depth`'s
+/// recursion row argues for the kill allocating (ledger 9286 K7).
 pub(crate) fn for_kernel_heap() -> Answer {
     if crate::fallible::injecting_here() {
         return Answer::Refused;

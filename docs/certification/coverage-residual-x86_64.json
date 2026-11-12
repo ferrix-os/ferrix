@@ -2276,7 +2276,7 @@
     "object/oom.rs": {
       "ring": "core",
       "lines": [
-        554
+        559
       ]
     },
     "object/job.rs": {

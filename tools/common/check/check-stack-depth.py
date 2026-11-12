@@ -146,6 +146,184 @@ EMPTIER = "ferrix_kernel_core::object::oom::emptier"
 # signal's frame on the user stack, or ends the calling thread (`leave_current`) and with the last
 # one releases its process and unmaps the whole space, under the way in and a timer's interrupt.
 EXIT = "ferrix_kernel_load::syscall::deliver::return_to_user"
+# Recursions under a judged line (the product owner, 2026-11-12, after a real overflow on x86-64's
+# exit through a sort of tens of thousands of ids, F-112). A walk counts a function met twice on a
+# chain once, so no figure holds a recursion's depth. SAFETY-MANUAL.md's FM-9: recursion in the item
+# is listed, each with an argued bound or none. So every strongly connected part with a cycle that a
+# judged line reaches must be listed here, and the row fails on one that is not; and in an image with
+# the syscall layer, on an entry no part matches any more (renamed, or gone: take it off), as the way
+# out's line fails closed (ledger 9096 H1).
+#
+# An entry: its name; its functions, each a pattern; whether the part must be exactly those (every
+# pattern matches one of its functions and every function one pattern) or only hold one function the
+# first pattern matches (a part whose members vary by architecture and build, or one generic's many
+# instances); and its bound, argued from the code, or None, with what owns the work. Reviewed by the
+# certification consultant.
+RECURSIONS = (
+    (
+        "the scheduler's tree",
+        (r"^ferrix_sched::tree::(walk|find|insert|remove|remove_min)::",),
+        False,
+        "the run queue's and the timers' tree is AVL (ferrix_sched::tree, rebalanced at every insert "
+        "and remove): one level a node, at most 1.44 log2(n + 2) for n entities on one processor's queue",
+        None,
+    ),
+    (
+        "the kernel heap's reclaim and its OOM kill",
+        (r"^ferrix_kernel_core::(user::cache::reclaim|object::oom::for_kernel_heap)$",),
+        False,
+        "each begun once: a heap allocation reclaims or kills only while its task is not marked "
+        "reclaiming (mm::heap_may_reclaim, which also asks for a current task); cache::reclaim marks it "
+        "for its length, and a reclaim begun inside one stops the machine (FX-0973); "
+        "oom::for_kernel_heap's only callers, mm::heap_or_kill and mm::reservation_grow, each return "
+        "unless heap_may_reclaim() and run it inside mm::while_killing, which marks the task, so an "
+        "allocation the kill makes is refused as it stands (or served by the reserve, L.mm.139): "
+        "one level of each (ledger 9286)",
+        None,
+    ),
+    (
+        "a wake telling the epoll sets above it",
+        (r"<ferrix_kernel_core::sched::wait::WaitQueue>::wake_all_with$",
+         r"<ferrix_kernel_core::sched::wait::WaitQueue>::tell_marks$"),
+        True,
+        "a queue's marks are the registrations of epoll sets that watch it, and a mark told of a wake "
+        "wakes its own set's queue (Mark::tell), whose marks are the sets that hold that set: one level "
+        "a set up a chain, and epoll_ctl refuses a loop and a chain more than MAX_NESTS (4) below its "
+        "top with ELOOP, under one lock (epoll.rs, add of a set to a set): at most 5 wakes deep",
+        None,
+    ),
+    (
+        "a cut's shadow copies decommitted",
+        (r"<ferrix_kernel_core::user::vmo::Vmo>::retire_runs$",
+         r"<ferrix_kernel_core::user::vmo::Vmo>::retire$",
+         r"<ferrix_kernel_core::user::vmo::Vmo>::decommit_in_chunks$",
+         r"<ferrix_kernel_core::user::vmo::ShadowCopies>::finish$"),
+        True,
+        "retire_runs hands back ShadowCopies only with `cut` (a truncation, Vmo::cut_mappings: "
+        "AddressSpace::forget_runs finds copies only for the file it cuts), and finish gives them back "
+        "through decommit_from or retire, both of which call retire_runs with `cut` false, which finds "
+        "no copies: one level more, never two",
+        None,
+    ),
+    (
+        "a neighbour solicitation dispatched",
+        (r"<ferrix_net::stack::Stack>::dispatch$", r"<ferrix_net::stack::Stack>::neighbor_solicitation$"),
+        True,
+        "dispatch solicits a next hop it cannot resolve; the solicitation goes to the target's "
+        "solicited-node group, a multicast address, which dispatch's hardware_for answers at its first "
+        "test without asking: one level more, never two",
+        None,
+    ),
+    (
+        "a process's release telling and killing others",
+        (r"<ferrix_kernel_load::syscall::process::Process>::release$",
+         r"<ferrix_kernel_load::syscall::process::Process>::end$",
+         r"<ferrix_kernel_load::syscall::process::Process>::leave_stop$",
+         r"^ferrix_kernel_load::syscall::kill::send$",
+         r"^ferrix_kernel_load::syscall::kill::tell_parent$",
+         r"^ferrix_kernel_load::syscall::pidns::init_gone$",
+         r"^ferrix_kernel_load::syscall::process::kill$"),
+        True,
+        None,
+        "BACKLOG (owner ef-30fps): a release tells the parent (tell_parent -> send), and a namespace's "
+        "init kills its members (init_gone -> send); a fatal signal ends its target (kill -> end), "
+        "which releases it at once when no thread of it is live. Nested namespaces' inits are at most "
+        "pidns::MAX_LEVEL (32) deep, but a parent killed by its child's exit signal is bounded only by "
+        "the process tree",
+    ),
+    (
+        "core's quicksort of a space's ids",
+        (r"^core::slice::sort::(unstable::quicksort::quicksort|shared::pivot::median3_rec)::<u64, ",),
+        False,
+        None,
+        "F-112 (owner silent-reset): AddressSpace::give_back's sorts of the touched ids "
+        "(all_still_named, Named::of), about 2 log2 n levels; fix/exit-unmap-sort's heapsort takes "
+        "them out, and with them this entry",
+    ),
+    (
+        "core's quicksort of a space's ids and flags",
+        (r"^core::slice::sort::(unstable::quicksort::quicksort|shared::pivot::median3_rec)::<\(u64, bool\), ",),
+        False,
+        None,
+        "F-112 (owner silent-reset): AddressSpace::give_back's sort, about 2 log2 n levels; "
+        "fix/exit-unmap-sort's heapsort takes it out, and with it this entry",
+    ),
+    (
+        "core's quicksort of a space's region counts",
+        (r"^core::slice::sort::(unstable::quicksort::quicksort|shared::pivot::median3_rec)::"
+         r"<ferrix_kernel_core::user::space::Counting, ",),
+        False,
+        None,
+        "F-112 (owner silent-reset): AddressSpace::room_to_count_out's sort, one entry a region, about "
+        "2 log2 n levels; fix/exit-unmap-sort's heapsort takes it out, and with it this entry",
+    ),
+    (
+        "core's quicksort of a space's objects",
+        (r"^core::slice::sort::(unstable::quicksort::quicksort|shared::pivot::median3_rec)::"
+         r"<&alloc::sync::Arc<ferrix_kernel_core::user::vmo::Vmo>, ",),
+        False,
+        None,
+        "F-112 (owner silent-reset): AddressSpace::resident_pages' sort by object, read by the OOM "
+        "survey, about 2 log2 n levels; fix/exit-unmap-sort's heapsort takes it out, and with it this entry",
+    ),
+)
+
+
+def recursion_listed(part, entry, calls=None):
+    """Whether a cyclic part is `entry`'s: exactly its functions; or, for an anchor entry, one holding
+    a function its first pattern matches, that anchor cutting every cycle of the part (its other
+    functions, on the calls among them, hold none: ledger 9275 K1), since its bound is argued for
+    cycles through the anchor alone."""
+    _, patterns, whole, _, _ = entry
+    if whole:
+        return all(any(re.search(pattern, name) for name in part) for pattern in patterns) and all(
+            any(re.search(pattern, name) for pattern in patterns) for name in part
+        )
+    rest = {name for name in part if not re.search(patterns[0], name)}
+    if len(rest) == len(part):
+        return False
+    edges = {name: [callee for callee in (calls or {}).get(name, ()) if callee in rest] for name in rest}
+    # A cycle is left when peeling functions no other remaining one calls never empties the rest.
+    called = {name: 0 for name in rest}
+    for name in rest:
+        for callee in edges[name]:
+            called[callee] += 1
+    free = [name for name, count in called.items() if count == 0]
+    peeled = 0
+    while free:
+        name = free.pop()
+        peeled += 1
+        for callee in edges[name]:
+            called[callee] -= 1
+            if called[callee] == 0:
+                free.append(callee)
+    return peeled == len(rest)
+
+
+def judge_recursions(arch, frames, parts, user, lines, problems, listed=RECURSIONS, calls=None):
+    """Each cyclic part a judged line reaches, said with its entry's bound or owner, or a problem when
+    no entry is its; and, but in a user kernel, a problem for each entry no part is."""
+    met = set()
+    for part in parts:
+        largest = max(part, key=lambda name: (frames.get(name, 0), name))
+        about = f"`{largest[:100]}` ({len(part)} functions, its largest frame {frames.get(largest, 0)})"
+        entry = next((each for each in listed if recursion_listed(part, each, calls)), None)
+        if entry is None:
+            problems.append(f"{arch}: recursion on a judged path, not listed: {about}")
+            continue
+        met.add(entry[0])
+        name, _, _, bound, owner = entry
+        said = f"bound: {bound}" if bound else f"bound: none; {owner}"
+        lines.append(f"stack-depth: {arch}: recursion listed, {name}: {about}; {said}")
+    if not user:
+        for name, *_ in listed:
+            if name not in met:
+                problems.append(
+                    f"{arch}: listed recursion `{name}` is on no judged path: renamed or gone, "
+                    "walk it again or take it off the list"
+                )
+
+
 # The stack `ferrix_stack_stop` says its one line on: `trap::STACK_STOP_SIZE`.
 STOP_STACK = 4096
 LEAVE_OUT = re.compile(
@@ -705,6 +883,15 @@ def judge(frames, calls, arch, stack_bytes, unresolved=0, show_chains=False, unf
             )
             if depth > STOP_STACK:
                 problems.append(f"{arch}: an overflow's last line reaches {depth} of its stack's {STOP_STACK} bytes")
+        # Every recursion a judged line reaches: named, and refused unless listed (RECURSIONS).
+        roots = [
+            (plain, below_name) for below_name in (named(frames, sub, []) for _, _, sub in paths) if below_name
+        ]
+        roots += [(clone_walk, clone)] if clone else []
+        roots += [(under_irq, name) for name in (timer, above) if name]
+        roots += [(plain, name) for name in (EXIT, EMPTIER) if name in frames]
+        parts = sorted({part for walk, start in roots for part in walk.recursions(start)})
+        judge_recursions(arch, frames, parts, user, lines, problems, calls=calls)
     except CycleTooLarge as refused:
         problems.append(f"{arch}: {refused}")
     return lines, problems
@@ -849,6 +1036,59 @@ def self_test():
     empties_nothing(weights, dirty, found)
     assert len(found) == 2 and any("unmaps a space" in f for f in found) and any("allocates" in f for f in found), found
     assert empties_nothing({"x": 8}, {}, []) is None, "an image with no OOM kill has no such line"
+    # A recursion is recorded as a cyclic part, a function calling its own start (not a branch inside
+    # it, nor a jump to its start, a loop) included, and found below a root.
+    recursive = (
+        "0000 <top>:\n\tcallq\t0x40 <sorter>\n"
+        "0040 <sorter>:\n\tsubq\t$0x40, %rsp\n\tcallq\t0x40 <sorter>\n\tjmp\t0x48 <sorter+0x8>\n"
+        "0080 <looper>:\n\tsubq\t$0x10, %rsp\n\tjmp\t0x80 <looper>\n"
+    )
+    rframes, rcalls, _, _ = read_frames(recursive)
+    assert "sorter" in rcalls["sorter"] and "looper" not in rcalls["looper"], rcalls
+    rwalk = Walk(rframes, rcalls, lambda name: False)
+    assert rwalk.depth("top") == 64 and rwalk.recursions("top") == [("sorter",)], rwalk.recursions("top")
+    assert Walk(rframes, rcalls, lambda name: False).recursions("looper") == []
+    # The list (FM-9): a part listed is said with its bound or owner; one not listed fails; a listed
+    # part that loses or gains a function is not its entry; an entry no part is fails, but in a user
+    # kernel.
+    listed = (
+        ("one", (r"^one$",), False, "argued", None),
+        ("pair", (r"^p$", r"^q$"), True, None, "BACKLOG"),
+    )
+    weights = {"one": 8, "p": 16, "q": 24, "r": 4}
+    lines, found = [], []
+    judge_recursions("x86_64", weights, [("one",), ("p", "q")], False, lines, found, listed)
+    assert not found and len(lines) == 2 and "bound: argued" in lines[0] and "none; BACKLOG" in lines[1], lines
+    lines, found = [], []
+    judge_recursions("x86_64", weights, [("one",), ("p", "q", "r")], False, lines, found, listed)
+    assert len(found) == 2 and "not listed" in found[0] and "`pair` is on no judged path" in found[1], found
+    lines, found = [], []
+    judge_recursions("x86_64", weights, [("one",)], True, lines, found, listed)
+    assert not found, "a user kernel lacks the load's recursions"
+    lines, found = [], []
+    judge_recursions("x86_64", weights, [], False, lines, found, listed)
+    assert len(found) == 2, found
+    # An anchor entry's bound covers cycles through its anchor alone (ledger 9275 K1): a part whose
+    # other functions hold a cycle of their own is not its.
+    anchored = (("anchor", (r"^a$",), False, "argued", None),)
+    through = {"a": ["b"], "b": ["c"], "c": ["a"]}
+    beside = dict(through, b=["c"], c=["a", "b"])
+    lines, found = [], []
+    judge_recursions("x86_64", {}, [("a", "b", "c")], False, lines, found, anchored, through)
+    assert not found, found
+    lines, found = [], []
+    judge_recursions("x86_64", {}, [("a", "b", "c")], False, lines, found, anchored, beside)
+    assert len(found) == 2 and "not listed" in found[0], found
+    selfish = dict(through, b=["b", "c"])
+    assert not recursion_listed(("a", "b", "c"), anchored[0], selfish), "a self-call beside the anchor"
+    tree = next(each for each in RECURSIONS if each[0] == "the scheduler's tree")
+    assert recursion_listed(("ferrix_sched::tree::insert::<x>",), tree)
+    assert not any(
+        recursion_listed(("core::slice::sort::unstable::quicksort::quicksort::<(u64, bool), x>",), each)
+        for each in RECURSIONS
+        if each[0] != "core's quicksort of a space's ids and flags"
+    )
+    assert all(len(each) == 5 and (each[3] is None) != (each[4] is None) for each in RECURSIONS), "a bound or an owner"
     problems = []
     assert named(frames, "nothing", problems) is None and problems
     # The way out and the emptier fail closed in an image with the syscall layer (ledger 9096 H1).

@@ -1078,7 +1078,7 @@
     "object/oom.rs": {
       "ring": "core",
       "lines": [
-        662
+        667
       ]
     },
     "arch/armv7a/mod.rs": {

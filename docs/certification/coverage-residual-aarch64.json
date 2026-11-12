@@ -697,8 +697,8 @@
     "object/oom.rs": {
       "ring": "core",
       "lines": [
-        554,
-        662
+        559,
+        667
       ]
     },
     "arch/arm_common/gicv2.rs": {

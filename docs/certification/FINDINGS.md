@@ -1863,6 +1863,8 @@ Complexity is an approximation — branch tokens, not a control-flow graph — a
 the script's docstring says so, along with the two kinds of recursion it cannot
 see: mutual, and through a function pointer or trait object.
 
+Since 2026-11-12 `check-stack-depth`'s recursion row lists what this one cannot see on the paths it judges: every strongly connected part with a cycle, mutual ones and a library's (`core`'s sorts, `ferrix_sched`'s tree) among them, each with an argued bound or none (SAFETY-MANUAL.md FM-9; F-112; consultant ledger 9275).
+
 ### F-26 — `unsafe` is documented but not traced
 **Closed 2026-09-27** by W-16.
 
