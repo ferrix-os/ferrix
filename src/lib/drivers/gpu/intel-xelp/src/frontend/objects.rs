@@ -298,6 +298,23 @@ pub struct Object<M> {
     pub reads: [FenceRef; limits::OBJECT_READS],
     /// How many bindings it has.
     pub bindings: u32,
+    /// What its memory waits for before it goes back, once nothing holds
+    /// it: every request up to this id has retired (`FenceRef::UpTo`), 0
+    /// for none. It covers each request of a VM it was unbound from that
+    /// was in flight then (i915's `obj->mm.tlb`), which may hold a GPU TLB
+    /// entry for a page of it at an address it never listed: no TLB is
+    /// invalidated at an unbind, only at each request's start
+    /// ([`super::gem::note_unbind`]).
+    pub tlb: RequestId,
+}
+
+impl<M> Object<M> {
+    /// Whether its memory may go back: no request its unbinds wait for
+    /// is left ([`Object::tlb`]).
+    #[must_use]
+    pub fn unreached(&self, requests: &Requests) -> bool {
+        requests.status(FenceRef::UpTo(self.tlb)).is_some()
+    }
 }
 
 impl<M> core::fmt::Debug for Object<M> {
@@ -578,6 +595,9 @@ pub struct Vm {
     pub backend: Option<VmId>,
     /// Its ids and contexts.
     pub refs: u32,
+    /// The newest request made in it, or 0: what an unbind's memory waits
+    /// for ([`Object::tlb`]).
+    pub last_request: RequestId,
 }
 
 /// One VM id of one file.

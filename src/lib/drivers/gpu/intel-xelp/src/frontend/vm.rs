@@ -29,6 +29,7 @@ pub fn new_vm<M>(state: &mut Tables<M>, file: u8) -> Result<u16, Errno> {
             file,
             backend: None,
             refs: 0,
+            last_request: 0,
         })
         .ok_or(Errno::ENOMEM)?;
     u16::try_from(slot).map_err(|_| Errno::ENOMEM)

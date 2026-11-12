@@ -146,7 +146,10 @@ pub trait Backend {
 
     /// Unmap `bytes` at `address` in `vm`; every request that used it has
     /// completed. No TLB flush is asked: every request starts with i915's
-    /// unconditional invalidation.
+    /// unconditional invalidation, and a request of `vm` already running,
+    /// which may hold an entry for the memory at an address it never
+    /// listed, finishes before the front end lets the memory go
+    /// (`gem::note_unbind`; the class of Linux's CVE-2022-4139).
     fn unbind(&mut self, vm: VmId, address: u64, bytes: u64);
 
     /// A hardware context on `engine` in `vm`.

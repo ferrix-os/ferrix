@@ -201,6 +201,11 @@ fn execute<B: Backend, H: Host<B::Memory>>(
     if let Some(entry) = frontend.state.contexts.get_mut(usize::from(context_slot)) {
         entry.in_flight += 1;
     }
+    // What memory unbound from the VM from now on waits for (D2,
+    // `gem::note_unbind`): one store.
+    if let Some(vm) = frontend.state.vms.get_mut(usize::from(vm_slot)) {
+        vm.last_request = id;
+    }
     // From here the request runs whatever fails: its signals are made even
     // so, so that no point it was to signal is left without a fence while a
     // `WAIT_FOR_SUBMIT` waiter waits for it, as i915 signals the fence
@@ -593,6 +598,9 @@ fn bind<B: Backend>(
         {
             frontend.backend.unbind(vm, other.address(), other.size);
         }
+        // Its memory waits for the VM's requests in flight: one may hold
+        // a TLB entry for it at an address it never listed.
+        gem::note_unbind(state, vm_slot, other.object);
         let _ = state.bindings.remove(range.start);
         if let Some(owner) = state.objects.get_mut(usize::from(other.object)) {
             owner.bindings = owner.bindings.saturating_sub(1);
@@ -606,7 +614,10 @@ fn bind<B: Backend>(
         .ok_or(Errno::ENOENT)?
         .memory;
     if let Err(errno) = frontend.backend.bind(vm, address, memory, size, pat) {
-        // ENOMEM: no page for a table; EDQUOT: the GPU's pin budget.
+        // ENOMEM: no page for a table; EDQUOT: the GPU's pin budget. What
+        // it mapped before failing is cleared; a batch running in the VM
+        // may have seen it meanwhile.
+        gem::note_unbind(state, vm_slot, object);
         return Err(state.refuse("bind failed", errno));
     }
     if !state.bindings.insert(Binding {
@@ -616,6 +627,7 @@ fn bind<B: Backend>(
         last_use: 0,
     }) {
         frontend.backend.unbind(vm, address, size);
+        gem::note_unbind(state, vm_slot, object);
         return Err(state.refuse("binding table full", Errno::ENOMEM));
     }
     if let Some(owner) = state.objects.get_mut(usize::from(object)) {

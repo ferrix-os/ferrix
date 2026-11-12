@@ -566,6 +566,26 @@ def seeds():
         .complete(count=3)
         .service()
     )
+    # Memory unbound while a batch of its VM runs that never listed it
+    # (D2): one object closed, one evicted by a newer binding and then
+    # closed, while the second execbuffer's batch still runs. Neither may
+    # go back before that batch finishes: it may hold GPU TLB entries for
+    # them. A closed handle drops out of `own`'s order, hence the indices.
+    yield "unbound-under-a-running-batch", (
+        Program()
+        .create(A, 1)
+        .create(A, 1)
+        .create(A, 1)
+        .create(A, 1)
+        .execbuffer(A, [(own(0), 1, False), (own(1), 3, False), (own(3), 2, False)])
+        .complete()
+        .execbuffer(A, [(own(3), 2, False)])
+        .close(A, own(0))
+        .execbuffer(A, [(own(1), 3, False), (own(2), 2, False)])
+        .close(A, own(0))
+        .complete(count=3)
+        .service()
+    )
     yield "limit-files", Program().repeat(41, lambda p: p.open(0))
     yield "limit-held-waits", (
         Program()

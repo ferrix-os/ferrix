@@ -123,6 +123,7 @@ pub fn new_object<B: Backend>(
             write: FenceRef::Signalled(0),
             reads: [FenceRef::Signalled(0); limits::OBJECT_READS],
             bindings: 0,
+            tlb: 0,
         })
         .ok_or(Errno::ENOMEM)?;
     let object = u16::try_from(object).map_err(|_| Errno::ENOMEM)?;
@@ -274,15 +275,23 @@ pub fn release_file<M>(state: &mut Tables<M>, file: u8) {
     }
 }
 
-/// Free every object nothing holds, once idle: its bindings are unbound and
-/// its memory dropped (`i915_gem_free_object`).
+/// Free every object nothing holds, once idle: its bindings are unbound, and
+/// its memory dropped once no request that may still reach it through a
+/// stale GPU TLB entry runs (`i915_gem_free_object`, with the TLB
+/// invalidation i915 makes before an unbound object's pages go back:
+/// `vma_invalidate_tlb`, `flush_tlb_invalidate`; CVE-2022-4139).
 pub fn free_idle<B: Backend>(backend: &mut B, state: &mut Tables<B::Memory>) {
     let mut doomed = [u16::MAX; 64];
     loop {
         let mut count = 0;
         for (slot, object) in state.objects.iter() {
+            let status = |fence| state.requests.status(fence);
+            // One still bound is unbound now; one waiting only for its
+            // unbind's requests is left until they finish, so that a pass
+            // never finds it again.
             if object.orphaned()
-                && object.idle(|fence| state.requests.status(fence))
+                && object.idle(status)
+                && (object.bindings > 0 || object.unreached(&state.requests))
                 && let Some(cell) = doomed.get_mut(count)
             {
                 *cell = u16::try_from(slot).unwrap_or(u16::MAX);
@@ -291,11 +300,45 @@ pub fn free_idle<B: Backend>(backend: &mut B, state: &mut Tables<B::Memory>) {
         }
         for object in doomed.iter().take(count).copied() {
             unbind_all(backend, state, object);
-            free_object(state, object);
+            if state
+                .objects
+                .get(usize::from(object))
+                .is_some_and(|entry| entry.unreached(&state.requests))
+            {
+                free_object(state, object);
+            }
         }
         if count < doomed.len() {
             break;
         }
+    }
+}
+
+/// `object` was unbound from VM slot `vm`: its memory now waits for every
+/// request of the VM made so far (i915's `vma_invalidate_tlb`, which
+/// records the TLB invalidation the pages wait for).
+///
+/// A request invalidates the GPU's TLBs only as it starts
+/// (`engine_cs`'s `PIPE_CONTROL_TLB_INVALIDATE`, `MI_INVALIDATE_TLB`), and
+/// a softpinned batch may reach an address of its VM it never listed, so
+/// one that started before the unbind may still hold an entry for a page
+/// of the object. Device addresses are physical: freed and given to
+/// another client's object, that page would be read and written by this
+/// one's batch. Keeping the memory, and its pin, until those requests
+/// finish closes it without a TLB invalidation and its wait; a request
+/// made after the unbind starts with the entry gone. The cost is none on
+/// the execbuffer's path but [`super::objects::Vm::last_request`]'s store,
+/// and memory held a little longer.
+pub fn note_unbind<M>(state: &mut Tables<M>, vm: u16, object: u16) {
+    let last = state
+        .vms
+        .get(usize::from(vm))
+        .map_or(0, |entry| entry.last_request);
+    if state.requests.status(FenceRef::UpTo(last)).is_some() {
+        return;
+    }
+    if let Some(entry) = state.objects.get_mut(usize::from(object)) {
+        entry.tlb = entry.tlb.max(last);
     }
 }
 
@@ -321,6 +364,7 @@ fn unbind_all<B: Backend>(backend: &mut B, state: &mut Tables<B::Memory>, object
         {
             backend.unbind(vm, binding.address(), binding.size);
         }
+        note_unbind(state, binding.vm(), object);
         let _ = state.bindings.remove(index);
     }
     if let Some(entry) = state.objects.get_mut(usize::from(object)) {

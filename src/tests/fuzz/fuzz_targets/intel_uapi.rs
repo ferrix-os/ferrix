@@ -269,6 +269,8 @@ struct Memory {
     id: u32,
     size: u64,
     live: Rc<RefCell<BTreeSet<u32>>>,
+    /// Memories freed since the last check, which [`check`] holds to D2.
+    freed: Rc<RefCell<Vec<u32>>>,
 }
 
 impl Drop for Memory {
@@ -277,6 +279,7 @@ impl Drop for Memory {
             self.live.borrow_mut().remove(&self.id),
             "memory freed twice"
         );
+        self.freed.borrow_mut().push(self.id);
     }
 }
 
@@ -390,6 +393,11 @@ struct Model {
     facts: Facts,
     next: u32,
     live: Rc<RefCell<BTreeSet<u32>>>,
+    freed: Rc<RefCell<Vec<u32>>>,
+    /// For each memory unbound while requests of its VM ran, those
+    /// requests: any may hold a GPU TLB entry for it at an address it
+    /// never listed, so none may still run when it is freed (D2).
+    exposed: RefCell<BTreeMap<u32, BTreeSet<RequestId>>>,
     faults: Rc<Cell<u32>>,
     /// Complete each submission at once.
     auto: bool,
@@ -411,6 +419,8 @@ impl Model {
             facts: facts(),
             next: 0,
             live: Rc::new(RefCell::new(BTreeSet::new())),
+            freed: Rc::new(RefCell::new(Vec::new())),
+            exposed: RefCell::new(BTreeMap::new()),
             faults: faults.clone(),
             auto,
             vms: BTreeMap::new(),
@@ -564,6 +574,7 @@ impl Backend for Model {
             id,
             size: bytes,
             live: self.live.clone(),
+            freed: self.freed.clone(),
         })
     }
 
@@ -662,9 +673,18 @@ impl Backend for Model {
 
     fn unbind(&mut self, vm: VmId, address: u64, bytes: u64) {
         self.calls += 1;
-        let Some((bound, _)) = self.binds.remove(&(vm.0, address)) else {
+        let Some((bound, memory)) = self.binds.remove(&(vm.0, address)) else {
             panic!("unbind of {address:#x} in VM {}, which is not bound", vm.0);
         };
+        let running = self.in_flight.iter().filter(|run| run.vm == vm.0);
+        let exposed: Vec<RequestId> = running.map(|run| run.id).collect();
+        if !exposed.is_empty() {
+            self.exposed
+                .borrow_mut()
+                .entry(memory)
+                .or_default()
+                .extend(exposed);
+        }
         if let Some(ppgtt) = self.vms.get(&vm.0).copied() {
             self.pt.current = vm.0;
             ppgtt
@@ -2977,8 +2997,9 @@ fn check(rig: &Rig) {
             0,
             "object {slot} mappable by a closed file"
         );
+        let idle = object.orphaned() && object.idle(|fence| state.requests.status(fence));
         assert!(
-            !(object.orphaned() && object.idle(|fence| state.requests.status(fence))),
+            !(idle && (object.bindings > 0 || object.unreached(&state.requests))),
             "object {slot} unreferenced and idle, not freed"
         );
     }
@@ -3045,6 +3066,21 @@ fn check(rig: &Rig) {
         "live memories"
     );
     assert_eq!(model.vms.len(), backed, "back-end VMs");
+    // D2: memory goes back only once no request that could reach it
+    // through a stale TLB entry runs, and never while mapped.
+    for id in model.freed.borrow_mut().drain(..) {
+        assert!(
+            !model.binds.values().any(|&(_, memory)| memory == id),
+            "memory {id} freed while bound"
+        );
+        let exposed = model.exposed.borrow_mut().remove(&id);
+        for request in exposed.into_iter().flatten() {
+            assert!(
+                !model.in_flight.iter().any(|run| run.id == request),
+                "memory {id} freed while request {request}, running in a VM it was unbound from, may still reach it"
+            );
+        }
+    }
     for (table, vm) in &model.pt.owner {
         assert!(
             model.vms.contains_key(vm),

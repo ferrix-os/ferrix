@@ -2078,6 +2078,99 @@ fn a_full_backend_keeps_order() {
     });
 }
 
+/// An unbound object's memory is kept until every request of its VM that
+/// was in flight at the unbind has finished, though none of them listed
+/// it: a softpinned batch reaches any address of its VM, and a GPU TLB
+/// entry it took for the object's pages outlives the unbind (no TLB is
+/// invalidated there, only at each request's start). Freed at once, those
+/// pages could become another client's while the batch still writes
+/// them (the class of Linux's CVE-2022-4139). Both ways an object is
+/// unbound: freed once closed and idle, and evicted by another binding.
+#[test]
+fn an_unbound_objects_memory_waits_for_its_vms_requests() {
+    big(|| {
+        let mut rig = Rig::new();
+        rig.frontend.backend.hold = true;
+        let file = rig.frontend.state.file_slot(1).expect("file");
+        let object = rig.create(4096);
+        let evicted = rig.create(4096);
+        let newer = rig.create(4096);
+        let batch = rig.create(4096);
+        let slot = |rig: &Rig, handle| rig.frontend.state.object_of(file, handle).expect("slot");
+        let (object_slot, evicted_slot) = (slot(&rig, object), slot(&rig, evicted));
+        let run = |rig: &mut Rig, objects: &[(u32, u64, u64)]| {
+            assert_eq!(rig.exec(ioctl::GEM_EXECBUFFER2, objects, 0, &[], 0).0, 0);
+        };
+        let close = |rig: &mut Rig, handle| {
+            let mut args = GemClose { handle, pad: 0 }.to_bytes();
+            assert_eq!(rig.ioctl(ioctl::GEM_CLOSE, &mut args), 0);
+        };
+        let finish = |rig: &mut Rig| {
+            rig.frontend.backend.finish(Completion::Ok);
+            rig.frontend.service(&mut rig.host, true);
+        };
+        // Both used once and idle; then a batch of the VM that lists
+        // neither, still running.
+        run(
+            &mut rig,
+            &[
+                (object, 0x10000, PINNED),
+                (evicted, 0x30000, PINNED),
+                (batch, 0x20000, PINNED),
+            ],
+        );
+        finish(&mut rig);
+        run(&mut rig, &[(batch, 0x20000, PINNED)]);
+        // Closed: unbound at once, its memory kept while the batch runs.
+        close(&mut rig, object);
+        assert!(
+            rig.frontend
+                .backend
+                .unbinds
+                .iter()
+                .any(|(_, address, _)| *address == 0x10000)
+        );
+        assert!(
+            rig.frontend
+                .state
+                .objects
+                .get(usize::from(object_slot))
+                .is_some(),
+            "freed under a running batch of its VM"
+        );
+        // Evicted by a newer binding over it, then closed: the same.
+        run(
+            &mut rig,
+            &[(newer, 0x30000, PINNED), (batch, 0x20000, PINNED)],
+        );
+        close(&mut rig, evicted);
+        assert!(
+            rig.frontend
+                .state
+                .objects
+                .get(usize::from(evicted_slot))
+                .is_some(),
+            "an evicted object freed under a running batch of its VM"
+        );
+        // Once they finish, both go.
+        finish(&mut rig);
+        assert!(
+            rig.frontend
+                .state
+                .objects
+                .get(usize::from(object_slot))
+                .is_none()
+        );
+        assert!(
+            rig.frontend
+                .state
+                .objects
+                .get(usize::from(evicted_slot))
+                .is_none()
+        );
+    });
+}
+
 /// A released file's objects are unbound and freed once idle, its contexts
 /// destroyed, its VMs too.
 #[test]
