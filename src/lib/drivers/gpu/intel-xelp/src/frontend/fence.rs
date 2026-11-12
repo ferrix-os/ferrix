@@ -198,6 +198,31 @@ impl Waits {
         }
     }
 
+    /// Syncobj slot `slot` is gone (destroyed, or its file released): no
+    /// held wait names it any more, since the slot may be given to another
+    /// file's syncobj next, which no wait may read. An entry keeps the
+    /// fence it took, as Linux's wait keeps its reference to the syncobj
+    /// (`drm_syncobj_array_find`) and so its fence; one still waiting for a
+    /// submission gets none, as nothing submits to a destroyed syncobj.
+    pub fn forget_syncobj(&mut self, slot: usize) {
+        for (_, wait) in self.slots.iter_mut() {
+            let WaitKind::Syncobjs(sync) = &mut wait.kind else {
+                continue;
+            };
+            let count = usize::from(sync.count);
+            for cell in sync.slots.iter_mut().take(count) {
+                if usize::from(*cell) == slot {
+                    *cell = syncobj::GONE;
+                }
+            }
+        }
+    }
+
+    /// The held waits.
+    pub fn iter(&self) -> impl Iterator<Item = &Wait> {
+        self.slots.iter().map(|(_, wait)| wait)
+    }
+
     /// How many are held.
     #[must_use]
     pub fn len(&self) -> usize {

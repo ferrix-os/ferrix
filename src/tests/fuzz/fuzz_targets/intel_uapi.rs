@@ -53,7 +53,9 @@ use std::rc::Rc;
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::sync::{Mutex, OnceLock};
 
+use ferrix_intel_xelp::frontend::fence::WaitKind;
 use ferrix_intel_xelp::frontend::objects::{Binding, Tables};
+use ferrix_intel_xelp::frontend::syncobj;
 use ferrix_intel_xelp::frontend::{
     Backend, Completion, ContextParams, Engine, Facts, Frontend, Host, HwContext, Installed,
     RequestId, SubmitError, VmId, limits,
@@ -3044,6 +3046,26 @@ fn check(rig: &Rig) {
             "a syncobj of closed file slot {}",
             sync.file
         );
+    }
+    // D10: a held wait names only its own file's live syncobjs; one
+    // destroyed under it is forgotten, never read again, since its slot
+    // may be another file's next.
+    for wait in state.waits.iter() {
+        let WaitKind::Syncobjs(sync) = &wait.kind else {
+            continue;
+        };
+        for &slot in sync.slots.iter().take(usize::from(sync.count)) {
+            if slot == syncobj::GONE {
+                continue;
+            }
+            let owner = state.syncobjs.get(usize::from(slot)).map(|sync| sync.file);
+            assert_eq!(
+                owner,
+                Some(wait.file),
+                "a held wait of file slot {} names syncobj slot {slot}",
+                wait.file
+            );
+        }
     }
     for (_, kernel) in state.kernel_fences.iter() {
         assert_eq!(

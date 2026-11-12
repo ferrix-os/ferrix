@@ -586,6 +586,20 @@ def seeds():
         .complete(count=3)
         .service()
     )
+    # A syncobj destroyed under its own held wait (D10), the wait waiting
+    # for a submission (WAIT_ALL | WAIT_FOR_SUBMIT), then another file's
+    # signalled syncobjs: the wait forgets the slot, which may be given to
+    # another file's next, and is answered at its deadline.
+    yield "syncobj-destroyed-under-a-wait", (
+        Program()
+        .syncobj(A)
+        .syncobj_wait(A, [own(0)], flags=3)
+        .syncobj_destroy(A, own(0))
+        .syncobj(B, signalled=True)
+        .syncobj(B, signalled=True)
+        .service()
+        .service(2)
+    )
     yield "limit-files", Program().repeat(41, lambda p: p.open(0))
     yield "limit-held-waits", (
         Program()

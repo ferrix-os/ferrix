@@ -2078,6 +2078,64 @@ fn a_full_backend_keeps_order() {
     });
 }
 
+/// A held wait whose syncobj is destroyed never reads the syncobj that takes
+/// its slot next, another file's: Linux's wait holds a reference to its
+/// syncobj, whose fence nothing changes once its handle is gone. An entry
+/// waiting for a submission then waits until its deadline or a signal.
+#[test]
+fn a_held_wait_never_reads_a_syncobj_that_took_its_slot() {
+    big(|| {
+        let mut rig = Rig::new();
+        let gone = rig.syncobj(false);
+        let handles = rig.host.alloc(&gone.to_le_bytes());
+        let mut wait = SyncobjWait {
+            handles,
+            timeout_nsec: i64::MAX,
+            count_handles: 1,
+            flags: drm::SYNCOBJ_WAIT_FLAGS_WAIT_ALL | drm::SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT,
+            ..Default::default()
+        }
+        .to_bytes();
+        let Status::Held(held) = rig.ioctl_on(1, ioctl::SYNCOBJ_WAIT, &mut wait) else {
+            panic!("not held");
+        };
+        let mut destroy = SyncobjDestroy {
+            handle: gone,
+            pad: 0,
+        }
+        .to_bytes();
+        assert_eq!(rig.ioctl(ioctl::SYNCOBJ_DESTROY, &mut destroy), 0);
+        // Another program's file makes signalled syncobjs until one takes
+        // the slot.
+        assert_eq!(rig.open(2), 0);
+        let mut reused = false;
+        for _ in 0..limits::SYNCOBJS {
+            let mut create = SyncobjCreate {
+                handle: 0,
+                flags: drm::SYNCOBJ_CREATE_SIGNALED,
+            }
+            .to_bytes();
+            assert_eq!(
+                rig.ioctl_on(2, ioctl::SYNCOBJ_CREATE, &mut create),
+                Status::Done(0)
+            );
+            if SyncobjCreate::from_bytes(&create).expect("create").handle == gone {
+                reused = true;
+                break;
+            }
+        }
+        assert!(reused, "the slot was not given again");
+        rig.frontend.service(&mut rig.host, false);
+        assert_eq!(
+            rig.host.replies.get(&held),
+            None,
+            "answered by another file's syncobj"
+        );
+        rig.frontend.interrupt(&mut rig.host, held);
+        assert_eq!(rig.host.replies.get(&held), Some(&-512));
+    });
+}
+
 /// An unbound object's memory is kept until every request of its VM that
 /// was in flight at the unbind has finished, though none of them listed
 /// it: a softpinned batch reaches any address of its VM, and a GPU TLB

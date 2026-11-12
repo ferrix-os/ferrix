@@ -188,6 +188,11 @@ fn merge_lowest(points: &mut [(u64, FenceRef); limits::POINTS], len: &mut u8) {
     *len -= 1;
 }
 
+/// The slot a held wait's entry names once its syncobj is gone
+/// (`fence::Waits::forget_syncobj`): no table has it, so the entry is never
+/// looked up again.
+pub const GONE: u16 = u16::MAX;
+
 /// A held syncobj wait.
 #[derive(Clone, Copy, Debug)]
 pub struct SyncWait {
@@ -197,7 +202,7 @@ pub struct SyncWait {
     pub flags: u32,
     /// How many syncobjs.
     pub count: u8,
-    /// Their slots.
+    /// Their slots; [`GONE`] for one destroyed while the wait is held.
     pub slots: [u16; limits::WAIT_HANDLES],
     /// Their points.
     pub points: [u64; limits::WAIT_HANDLES],
@@ -262,7 +267,7 @@ pub fn release_file<M>(state: &mut Tables<M>, file: u8) {
             }
         }
         for slot in doomed.iter().take(count) {
-            let _ = state.syncobjs.remove(*slot);
+            remove(state, *slot);
         }
         if count < doomed.len() {
             break;
@@ -301,8 +306,16 @@ pub fn destroy<B: Backend>(
         return Err(Errno::EINVAL);
     }
     let slot = find(&frontend.state, call.file, args.handle)?;
-    let _ = frontend.state.syncobjs.remove(slot);
+    remove(&mut frontend.state, slot);
     Ok(())
+}
+
+/// Syncobj `slot` goes, and every held wait forgets it: the slot is free
+/// for another file's next syncobj, which a wait of this one's must never
+/// read.
+fn remove<M>(state: &mut Tables<M>, slot: usize) {
+    let _ = state.syncobjs.remove(slot);
+    state.waits.forget_syncobj(slot);
 }
 
 /// `drm_syncobj_handle_to_fd_ioctl`: with `EXPORT_SYNC_FILE`, a sync file
