@@ -93,8 +93,8 @@ pub(super) fn hand_over(node: Box<Leftovers>) {
 }
 
 /// Whether the reaper has anything to do: a drop's leftovers, or a purge of
-/// the large-request area that a free which could not block asked for
-/// (`mm::large`, `docs/ROBUSTNESS.md` §2.6, R6.2).
+/// the large-request area that a free past its threshold or a reservation's
+/// unbind asked for (`mm::large`, `docs/ROBUSTNESS.md` §2.6, R6.2).
 fn wanted() -> bool {
     !WAITING.load(Ordering::Acquire).is_null() || crate::mm::large::purge_wanted()
 }

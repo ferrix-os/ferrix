@@ -797,8 +797,10 @@ pub fn reservation_resize(entry: Reservation, frames: u64) -> Result<(), Refused
 /// drains as its frames are freed (`L.object.225`).
 pub fn reservation_unbind(entry: Reservation) {
     let _ = with_frames(|_| reservation::unbind(entry));
-    // Frames a large free keeps hold it drawn until a purge (R6.1).
-    let _ = large::purge_held();
+    // Frames a large free keeps hold it drawn until a purge (R6.1): the
+    // reaper's, asked for here. Not made here: a job's last slot goes at a
+    // task's last drop, where nothing may sleep (F-104).
+    large::ask_purge_held();
 }
 
 // CHECKS-ONLY: fs/btrfs_write_check/reserve_check.rs, user/rehome_cache_check.rs

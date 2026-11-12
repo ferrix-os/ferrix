@@ -563,16 +563,17 @@ freed: it is counted and leaked.
   caller that finds the flag taken skips the purge; an allocation that
   needed it gets the refusal and goes on to the next fallback. It is
   started:
-  1. by a free that leaves more than `LAZY_MAX` units waiting, where the
-     free may block;
-  2. by an allocation that found no address space, where it may block;
-  3. at step 3 of the order above (x86-64, a scoped or job's draw short
+  1. by an allocation, where it may block, that finds a purge wanted or
+     no address space;
+  2. at step 3 of the order above (x86-64, a scoped or job's draw short
      while lazy frames hold its reservation drawn), where it may block;
-  4. by a reservation's unbind, where it may block: lazy frames keep a
-     reservation drawn, and L.mm.80 binds it again only once nothing is;
-  5. by **the reaper** (R6.2). A free past `LAZY_MAX` where it may not
-     block sets a purge-wanted flag, an atomic store and nothing else. It
-     allocates nothing and is safe in interrupt context.
+  3. by **the reaper** (R6.2). A free that leaves more than `LAZY_MAX`
+     units waiting sets a purge-wanted flag, an atomic store and nothing
+     else, and so does a reservation's unbind while frames are kept: lazy
+     frames keep a reservation drawn, and L.mm.80 binds it again only
+     once nothing is. Neither purges itself, in any context (F-104, as
+     built below). The store allocates nothing and is safe in interrupt
+     context.
      `sched::leftovers::nudge`, which already runs at the end of every
      interrupt anywhere in the machine, at the end of every switch and in
      the idle loop's look, with no lock held, wakes the reaper task when
@@ -587,7 +588,7 @@ freed: it is counted and leaked.
   (O(1)) and then once per block for its give-back (O(`MAX_ORDER`) each).
   Its one shootdown is `flush_tlb_everywhere`'s existing bound, with
   interrupts enabled. The lazy list holds at most `LAZY_MAX` units plus
-  what non-blocking frees add before the reaper runs. The reaper is woken
+  what frees add before the reaper runs. The reaper is woken
   at the machine's next interrupt, switch or halt, the bound
   `sched::leftovers` already states. The frames it holds on x86-64 are at
   most the pages of those units, and the boot report prints the most
@@ -600,10 +601,11 @@ freed: it is counted and leaked.
   free. Two consequences, both answered:
   * Frame-delta checks: the large path runs only on a buddy refusal, so a
     check on an unfragmented machine never makes a lazy block. A check
-    that does make one purges (`mm::purge_lazy`, where it may block)
+    that does make one purges (`mm::large::purge`, where it may block)
     before it reads `free_frames`.
   * A W1 scope's promise: lazy frames keep it drawn. Step 3 of the order
-    purges before an overrun is counted, and an unbind purges.
+    purges before an overrun is counted, and an unbind asks the reaper
+    for a purge.
 
   Freeing at once on x86-64 stays possible later only as an H.MEM.17
   amendment with a VULNERABILITY-ANALYSIS entry, decided by the customer.
@@ -726,10 +728,20 @@ It does, in order:
 8. R6.3's case: the same 32 KiB request made and freed inside a
    `with_tables` body is served from the area, and the boot goes on.
 9. R6.2's case: with interrupts masked, enough 32 KiB blocks are made
-   and freed to pass `LAZY_MAX`. The purge-wanted flag is set, no
+   and freed to pass `LAZY_MAX`, and one more request is made, which
+   finds the purge wanted. The purge-wanted flag is set, no
    shootdown has begun, and once interrupts are enabled the reaper empties
    the list within a bounded wait (a wait on the state, with a stated
-   timeout that fails loudly).
+   timeout that fails loudly). Then the unbind's case (F-104, ledger
+   8665 D2): with interrupts masked, a 32 KiB block under the threshold
+   is made and freed and an entry is bound and unbound. No shootdown has
+   begun; on x86-64, where the free's frames are kept, the purge-wanted
+   flag is set and the reaper empties the list within the same bounded
+   wait; on the Arm pair the flag stays clear and the check purges. And
+   the allocation's case, made before step 1: with the threshold lowered
+   to 16 units, over 64 rounds of a 32 KiB block made and freed by the
+   large path in task context the lazy list never holds more than the
+   threshold and one block.
 10. It clears the hook and the scope, and requires no frame fewer free
     than before (more is something else on the machine giving frames back,
     printed as other checks print it), an out-of-area `dealloc` count of
@@ -805,7 +817,31 @@ requires their mappings untouched. Three more changes from this text:
   first kill (R6F.7, 8583 C3).
 * **C3's control** fires on smp's own guard, "a shootdown was requested
   with interrupts masked", not on a line of this check: a purge allowed
-  where the caller may not block stops the machine there.
+  where the caller may not block stops the machine there. Since frees
+  make no purge (below), what meets that guard is step 9's masked
+  request, which finds the purge wanted (`ef30-red3-c1`, ledger 8686 E1).
+* **Neither a free nor an unbind purges (F-104, 2026-11-12).** As first
+  built, a free past `LAZY_MAX` and a reservation's unbind purged where
+  they might block, by `purge`'s own test. A task's last drop frees, and
+  lets its job's last slot go and with it the job's reservation, where
+  nothing may sleep, and `check-stack-depth` reads any direct way from
+  that drop to a shootdown as F-104's line whatever test stands before the
+  call: the row was red from 0ec0a3931 on AArch64, the one image whose walk
+  reaches the allocator from that drop (F-110; the units are one source for
+  the three architectures). F-104 itself stayed closed: `purge` refused
+  there by its own test. Both now only set
+  the purge-wanted flag (`mm::large::retire`, `mm::large::ask_purge_held`),
+  and the reaper purges at the machine's next interrupt, switch or halt.
+  What it costs: a free in task context past the threshold no longer
+  bounds the list itself. An allocation that may block now purges first
+  when a purge is wanted (`take_block`), so a task that frees and
+  allocates keeps the list at the threshold and one block, as before;
+  frees with no allocation between them wait for the reaper, as a free
+  that could not block always did. Without that, the check's own 1,000
+  rounds left the area full of lazy blocks and its masked 4 MiB request
+  was refused in one boot of two. An unbound reservation's entry with
+  frames kept waits for the reaper or the next such allocation before
+  L.mm.80 binds it again, as it did after an unbind that could not block.
 * **F-108 is filed open, Minor** (8583 R4): on x86-64 a large free
   returns while another processor may still translate the freed address
   until the purge, against H.MEM.12's letter. Neither the address nor its

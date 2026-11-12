@@ -3320,10 +3320,18 @@ then this paragraph's figures are the bound such a site would meet.
 enabled, preemption count 0, not in an interrupt): the area's lock for the
 detach (O(1)), one `smp::flush_tlb_everywhere` with interrupts enabled (its
 own bound, §2.2 of the shootdown), and then the area's lock once per block
-for its give-back (O(`MAX_ORDER`) each). The lazy list holds at most an
-eighth of the area's units, plus what frees that may not block add before
-the reaper's next pass, which `sched::leftovers::nudge` asks for at the end
-of every interrupt, every switch and the idle loop's look. The reaper's
+for its give-back (O(`MAX_ORDER`) each). A free in any context and a
+reservation's unbind make no purge: past an eighth of the area's units a
+free asks the reaper for one, and an unbind does while frames are kept
+(F-104's gate, ledger 8665). An allocation that may block purges first when
+one is wanted, at the cost of one load. So the lazy list holds an eighth of
+the area's units plus what frees add before the next such allocation or the
+reaper's next pass, whichever is first, and its hard bound, and the kept
+frames', is the area: an allocation that finds no address space purges
+where it may block. `sched::leftovers::nudge` wakes the reaper
+at the end of every interrupt, every switch and the idle loop's look; its
+pass is then a fair task's turn at `NICE_0_WEIGHT`, not an interrupt's
+latency. The reaper's
 purge for a masked free was measured at 1.0 ms (x86_64 KVM) and 1.2 to 1.4 ms
 (the Arm pair under TCG).
 

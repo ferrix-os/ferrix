@@ -731,27 +731,49 @@ package FerrixMemoryRequirements {
             attribute :>> statement = "A freed large block's addresses shall not be handed out
                 again, and on an architecture whose TLB invalidation is local its frames shall
                 not go back to the frame allocator, before one shootdown that covers them has
-                returned; a free shall begin no shootdown; the lazy list shall be purged by a
-                free or allocation that may block past its threshold, and otherwise by the
-                reaper, which a free that may not block asks for; the kept frames' chain shall
-                be checked link by link, and a bad link counted and its rest kept, never
-                freed. Between a free and the purge, on an architecture whose invalidation is
-                local, another processor may still translate the freed address; neither the
-                address nor its frame is anyone's meanwhile (finding F-108).";
+                returned; neither a free nor a reservation's unbind shall begin a shootdown,
+                wherever it is made; the lazy list shall be purged, only where the caller may
+                block, by an allocation that finds a purge wanted or no address space, and
+                besides by the reaper, which a free past the list's threshold asks for, and a
+                reservation's unbind while frames are kept (the purges before a draw is
+                counted short, a reclaim's failure, a kill or a floor's refusal are L.mm.141's,
+                L.mm.146's and the kill's own, through mm::large::purge_held); the kept
+                frames' chain shall be checked link by link, and a bad link
+                counted and its rest kept, never freed. Between a free and the purge, on an
+                architecture whose invalidation is local, another processor may still translate
+                the freed address; neither the address nor its frame is anyone's meanwhile
+                (finding F-108).";
             attribute :>> criterion = "At stage 9 a scoped 32 KiB block freed with interrupts
                 masked begins no purge, waits on the lazy list, and on x86-64 keeps its frames
                 drawn; a purge in task context empties the list and gives them back; frees past
                 a lowered threshold made masked ask for a purge, which the reaper makes within
-                2 s; bad links 0. Host: a detached block is not handed out until it is given
-                back (ferrix-frame, large_area::a_freed_block_is_not_handed_out_until_the_purge_
-                gives_it_back). Controls: a purge allowed where the caller may not block (the
-                boot stops on 'a shootdown was requested with interrupts masked'); a retired
-                block given back at once (host: that test FAILED); x86-64 frames freed at the
-                free ('a masked free gave its frames back before their shootdown').";
+                2 s, and a masked request that finds that purge wanted begins none; an entry
+                bound and unbound masked after a masked free under the threshold
+                begins no purge, and asks for one on x86-64, where the free's frames are kept,
+                and for none on the Arm pair, where none are; over 64 rounds of a 32 KiB
+                block made and freed in task context with the threshold lowered to 16 units,
+                the lazy list never holds more than the threshold and one block; bad links 0.
+                Host: a detached
+                block is not handed out until it is given back (ferrix-frame, large_area::
+                a_freed_block_is_not_handed_out_until_the_purge_gives_it_back). By analysis:
+                check-stack-depth finds no direct way from a task's last drop to a shootdown
+                on AArch64, the one image whose walk reaches the allocator from that drop
+                (finding F-110); the units are one source for the three architectures.
+                Controls: a purge allowed where the caller may not block (the boot stops on 'a
+                shootdown was requested with interrupts masked'); a retired block given back
+                at once (host: that test FAILED); x86-64 frames freed at the free ('a masked
+                free gave its frames back before their shootdown'); a free past the threshold
+                that purges where it may block, and an unbind that purges where it may block
+                (check-stack-depth, each: 'a task's last drop reaches' smp::
+                flush_tlb_everywhere by way of mm::large::purge); an unbind that asks for
+                nothing ('a reservation's unbind while frames were kept did not ask the reaper
+                for a purge'); an allocation that makes no purge for one wanted ('frees past
+                the lazy threshold in task context were not purged by the next allocation').";
             attribute :>> parent = ("H.MEM.17", "H.MEM.12");
             attribute :>> unit = ("mm::large::retire", "mm::large::purge",
-                "mm::large::purge_held", "mm::large::give_back_kept", "mm::large::link",
-                "mm::large::next_of", "mm::large::counts", "mm::reservation_unbind",
+                "mm::large::purge_held", "mm::large::ask_purge_held", "mm::large::take_block",
+                "mm::large::give_back_kept", "mm::large::link", "mm::large::next_of",
+                "mm::large::counts", "mm::reservation_unbind",
                 "sched::leftovers::nudge", "sched::leftovers::wanted",
                 "sched::leftovers::reaper");
         }

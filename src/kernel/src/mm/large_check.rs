@@ -7,8 +7,10 @@
 //! machine meets a buddy short of runs. Then a heap scope's 32 KiB request is
 //! served from frames drawn from its reservation, freed with interrupts
 //! masked with no purge made, and purged; a 128 KiB request is served; a
-//! request made and freed while `TABLES` is held is served; and a free past
-//! the lazy threshold that cannot block hands its purge to the reaper.
+//! request made and freed while `TABLES` is held is served; a free past the
+//! lazy threshold that cannot block hands its purge to the reaper; so does
+//! a reservation's unbind while frames are kept; and frees past the
+//! threshold made where they may block are purged by the next allocation.
 
 use alloc::vec::Vec;
 
@@ -166,6 +168,9 @@ pub fn run() -> Result<LargeReport, &'static str> {
 ///
 /// Verifies: L.mm.141, L.mm.145
 fn cases(me: u64, report: &mut LargeReport) -> Result<(), &'static str> {
+    // First, so that its own line is what fails without the allocation's
+    // purge, which `measure`'s masked 4 MiB request needs as well.
+    an_allocation_purges_when_asked()?;
     measure(me, report)?;
     scoped(me)?;
     let _refused = RunsRefused;
@@ -191,7 +196,8 @@ fn cases(me: u64, report: &mut LargeReport) -> Result<(), &'static str> {
         return Err("a request made while TABLES was held was not served from the area");
     }
     let _ = large::purge();
-    reaper_purges(report)
+    reaper_purges(report)?;
+    an_unbind_asks()
 }
 
 /// The frees [`refused_frees`] makes, each counted.
@@ -375,7 +381,8 @@ fn scoped(me: u64) -> Result<(), &'static str> {
 }
 
 /// Step 9: frees past the lazy threshold made with interrupts masked begin no
-/// purge, and the reaper purges once interrupts are on again, within a
+/// purge, nor does a request made masked after them, which finds the purge
+/// wanted; and the reaper purges once interrupts are on again, within a
 /// bounded wait.
 ///
 /// Verifies: L.mm.143
@@ -384,17 +391,19 @@ fn reaper_purges(report: &mut LargeReport) -> Result<(), &'static str> {
     const PATIENCE_NANOS: u64 = 2_000_000_000;
     let threshold = large::set_lazy_max_for_check(LOW);
     let purges = large::counts().purges;
-    let made = masked(|| {
+    // Then, still masked, one more request: it finds the purge wanted where
+    // it may not block, and is served or refused with none begun.
+    let (made, wanted, unpurged) = masked(|| {
         for _ in 0..3 {
             let Some(object) = take(SMALL) else {
-                return false;
+                return (false, false, false);
             };
             drop(object);
         }
-        true
+        let wanted = large::purge_wanted();
+        drop(take(SMALL));
+        (true, wanted, large::counts().purges == purges)
     });
-    let wanted = large::purge_wanted();
-    let unpurged = large::counts().purges == purges;
     let start = crate::timer::now_nanos();
     let mut purged = false;
     while crate::timer::now_nanos().saturating_sub(start) < PATIENCE_NANOS {
@@ -409,11 +418,112 @@ fn reaper_purges(report: &mut LargeReport) -> Result<(), &'static str> {
     if !made {
         return Err("a masked 32 KiB request was refused while the buddy refused");
     }
-    if !wanted || !unpurged {
+    if !wanted {
         return Err("a masked free past the lazy threshold did not hand its purge to the reaper");
+    }
+    if !unpurged {
+        return Err("a masked free or a masked request that found a purge wanted began one");
     }
     if !purged {
         return Err("the reaper did not purge within two seconds of a masked free's asking");
+    }
+    Ok(())
+}
+
+/// Step 9a: a reservation's unbind while frames are kept asks the reaper for
+/// a purge and begins none (F-104). With interrupts masked, so that no purge
+/// comes between: a 32 KiB block made and freed, which keeps its frames
+/// where the invalidation is local and none where it is broadcast, and then
+/// an entry bound and unbound. The flag is set where frames are kept and
+/// stays clear where none are.
+///
+/// Verifies: L.mm.143
+fn an_unbind_asks() -> Result<(), &'static str> {
+    const PATIENCE_NANOS: u64 = 2_000_000_000;
+    let kept = !crate::arch::TLB_FLUSH_IS_BROADCAST;
+    let _ = large::purge();
+    let purges = large::counts().purges;
+    let seen = masked(|| {
+        drop(take(SMALL)?);
+        let before = large::purge_wanted();
+        let entry = super::reservation_bind()?;
+        super::reservation_unbind(entry);
+        Some((before, large::purge_wanted(), large::counts().purges))
+    });
+    // The block's addresses go back by the reaper where it was asked, and by
+    // this task where it was not.
+    let start = crate::timer::now_nanos();
+    while large::counts().lazy_units != 0
+        && crate::timer::now_nanos().saturating_sub(start) < PATIENCE_NANOS
+    {
+        if !kept {
+            let _ = large::purge();
+        }
+        crate::sched::sleep_for(1_000_000);
+    }
+    let Some((before, after, purges_after)) = seen else {
+        return Err("a masked 32 KiB request or a reservation was refused before an unbind");
+    };
+    if before {
+        return Err("a masked free under the lazy threshold asked for a purge");
+    }
+    if purges_after != purges {
+        return Err("a reservation's unbind began a shootdown");
+    }
+    if after != kept {
+        return Err(if kept {
+            "a reservation's unbind while frames were kept did not ask the reaper for a purge"
+        } else {
+            "a reservation's unbind with no frame kept asked for a purge"
+        });
+    }
+    if large::counts().lazy_units != 0 {
+        return Err("the reaper did not purge within two seconds of an unbind's asking");
+    }
+    Ok(())
+}
+
+/// Before step 1: a free past the lazy threshold made where it may block makes no
+/// purge itself, and the next allocation that may block makes it. Over
+/// rounds of a 32 KiB block made and freed by the large path in task
+/// context, with the threshold lowered, the lazy list never holds more than
+/// the threshold and one block: a list left to the reaper's turn alone
+/// would hold three blocks after the third round.
+///
+/// Verifies: L.mm.143
+fn an_allocation_purges_when_asked() -> Result<(), &'static str> {
+    const LOW: u64 = 16;
+    const BOUNDED_ROUNDS: u64 = 64;
+    let request = ferrix_heap::Request::new(SMALL, 8);
+    let round = || {
+        let address = large::allocate(request, super::reservation::Floor::Kernel)?;
+        large::free(address, SMALL);
+        Some(large::counts().lazy_units)
+    };
+    let _ = large::purge();
+    // What one block puts on the list.
+    let one = round();
+    let _ = large::purge();
+    let threshold = large::set_lazy_max_for_check(LOW);
+    let mut most = Some(0);
+    for _ in 0..BOUNDED_ROUNDS {
+        most = most.zip(round()).map(|(most, now)| most.max(now));
+        if most.is_none() {
+            break;
+        }
+    }
+    let _ = large::set_lazy_max_for_check(threshold);
+    let _ = large::purge();
+    let (Some(one), Some(most)) = (one, most) else {
+        return Err("a 32 KiB request in task context was refused by the large path");
+    };
+    if one == 0 {
+        return Err("a freed large block did not wait on the lazy list");
+    }
+    if most > LOW + one {
+        return Err(
+            "frees past the lazy threshold in task context were not purged by the next allocation",
+        );
     }
     Ok(())
 }

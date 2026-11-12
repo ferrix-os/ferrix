@@ -26,9 +26,14 @@
 //!   hold a translation, so the frames are kept, chained through their own
 //!   first word, until a purge's one shootdown has returned (`H.MEM.17`).
 //!   The block's addresses wait on the lazy list for that purge in every
-//!   build. The purge runs only where the caller may block: on a free or
-//!   an allocation that may, and otherwise in the reaper, which a free past
-//!   the lazy threshold asks for.
+//!   build. The purge runs only where the caller may block: on an
+//!   allocation that may, once one is wanted or no block is free, and
+//!   otherwise in the reaper. A free past the lazy threshold asks for one,
+//!   and a reservation's unbind while frames are kept. Neither a free nor
+//!   an unbind purges, whatever its context: a
+//!   task's last drop frees, and lets its job's last slot go, where it may
+//!   not sleep, and a way from that drop to a shootdown is finding F-104 to
+//!   `check-stack-depth` whatever test stands before the call.
 
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
@@ -53,7 +58,8 @@ static END: AtomicU64 = AtomicU64::new(0);
 /// Lazy units past which a free asks for a purge: an eighth of the area.
 static LAZY_MAX: AtomicU64 = AtomicU64::new(u64::MAX);
 
-/// Set by a free past [`LAZY_MAX`] that may not block, for the reaper.
+/// Set by a free past [`LAZY_MAX`], and by a reservation's unbind while
+/// frames are kept, for the reaper.
 static PURGE_WANTED: AtomicBool = AtomicBool::new(false);
 
 /// Set while one purge runs: one at a time.
@@ -269,9 +275,14 @@ pub(super) fn allocate(request: Request, floor: Floor) -> Option<u64> {
     Some(base)
 }
 
-/// A block for `pages`, purging once first where none is free, lazy blocks
-/// wait and the caller may block.
+/// A block for `pages`. Where the caller may block, a purge that is wanted
+/// is made first, so that frees in task context are bounded by the next
+/// allocation and not by the reaper's turn alone; and one is made where no
+/// block is free and lazy blocks wait.
 fn take_block(pages: u64) -> Option<Block> {
+    if PURGE_WANTED.load(Ordering::Relaxed) {
+        let _ = purge();
+    }
     let (block, lazy) = with_area(|area| (area.take(pages), area.lazy_units()))?;
     if block.is_some() || lazy == 0 || !purge() {
         return block;
@@ -377,8 +388,9 @@ fn next_of(frame: Frame) -> Option<Frame> {
 }
 
 /// Put `block` on the lazy list, with `chain`'s frames joined to the kept
-/// chain, and ask for a purge past the threshold: made here where this may
-/// block, else by the reaper.
+/// chain, and ask the reaper for a purge past the threshold. It is woken
+/// at an interrupt's end, a switch's end or the idle loop's look
+/// (`leftovers::nudge`); a system call's return does not nudge.
 fn retire(block: Block, chain: Chain) {
     let answer = with_area(|area| {
         if let (Some(head), Some(tail)) = (chain.head, chain.tail) {
@@ -401,7 +413,7 @@ fn retire(block: Block, chain: Chain) {
         let _ = TWO_OWNERS.fetch_add(1, Ordering::Relaxed);
     }
     let _ = MOST_KEPT.fetch_max(kept, Ordering::Relaxed);
-    if lazy > LAZY_MAX.load(Ordering::Relaxed) && !purge() {
+    if lazy > LAZY_MAX.load(Ordering::Relaxed) {
         PURGE_WANTED.store(true, Ordering::Release);
     }
 }
@@ -474,7 +486,20 @@ pub(crate) fn purge_held() -> bool {
     KEPT.load(Ordering::Relaxed) != 0 && purge()
 }
 
-/// Whether a free asked the reaper for a purge (`sched::leftovers`).
+/// Ask the reaper for a purge where frames are kept, and make none here: for
+/// a reservation's unbind, which a job's last slot reaches at a task's last
+/// drop, where nothing may sleep. [`purge`] would refuse there by its own
+/// test, but `check-stack-depth` reads any way from that drop to a shootdown
+/// as finding F-104 whatever test stands before the call. One load while
+/// nothing is kept, which is always on the Arm pair.
+pub(crate) fn ask_purge_held() {
+    if KEPT.load(Ordering::Relaxed) != 0 {
+        PURGE_WANTED.store(true, Ordering::Release);
+    }
+}
+
+/// Whether a free, or an unbind, asked the reaper for a purge
+/// (`sched::leftovers`).
 pub(crate) fn purge_wanted() -> bool {
     PURGE_WANTED.load(Ordering::Relaxed)
 }
