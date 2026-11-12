@@ -2232,8 +2232,8 @@ reservation conflict resolved to the removal alone, and this line.
 
 ## 15. Hardening the driver: a plan (2026-11-12)
 
-Asked for by the customer on 2026-11-12. A plan with no code; the fuzz
-target of §15.3 H1 is being written beside it on branch `intel-uapi-fuzz`.
+Asked for by the customer on 2026-11-12. The plan came first, with no
+code; H1 and H2 were then built the same day and land with it (§15.6).
 The consultant's design review (2026-11-12, ledger lines 8936 and 8946):
 this section **OK IF T1-T14**, folded in here; H5 **OK IF H5.1-H5.12**; H6
 with the customer's door **OK IF H6.1'-H6.9'**; the node's mode **OK IF
@@ -2310,8 +2310,8 @@ Outside the item, no box needed:
   several clients against the model back end, with the invariants "no
   handle of one client resolves for another" and "nothing is left when
   the last client closes". §4.4, §6 and §12.5 said the parsers were fuzzed
-  until this plan; no target did so. "Fuzzed" is written again only once
-  the target runs in a gate (ledger 8936 V1).
+  before any target did so; they now name the target, `intel_uapi`, which
+  CI's fuzz job runs (§15.6).
 * **H2. D1 to D4**, one branch after H1 so that its target is the
   regression. D1: clear what was written on a failed bind. D2: keep the
   object's memory until every request of that VM in flight at the unbind
@@ -2416,6 +2416,52 @@ ruling on the kernel's half of 1 is ledger line 8946.
    NVIDIA's nodes get the same (the customer, 2026-11-12: "same for
    all"), in that one design; N3 is answered.
 3. **The order stands**: H2 to H4, then H8. Both are done.
+
+### 15.6 Where it stands (2026-11-12)
+
+**H1, built.** The target `intel_uapi` (`src/tests/fuzz/fuzz_targets/`,
+28 seeds written by `tools/common/gen/seed-intel-uapi-fuzz-corpus.py`)
+sends the front end programs of calls from several files in two
+processes: every ioctl the driver serves, raw command numbers and bytes,
+mmap, release, descriptors passed and closed. A model back end maps
+bindings through the real PPGTT code and can fail a bind part-way, fail a
+table's allocation, hang, and rewrite the client's object list between
+the driver's reads. After every call it checks that no name of one file
+resolves for another, that bindings never overlap and are never unbound
+under a running batch, that no memory is freed while a request of its VM
+may reach it, and at the end that nothing is left. CI's `fuzz` job builds
+it, replays the corpus and searches 30 s; that job is in the needs of the
+required "CI result" check and runs on a promotion and nightly, not on
+each landing. The job has not run with this target before this landing;
+its first run on develop is recorded here. About 26 minutes of local search in all, one job. Not
+covered: the keeper and worker's protocol (`remote`), the real GT back
+end, the contents of batches, and table limits one input of 3000 calls
+cannot reach.
+
+**H2, built**, each with a host test that fails before the fix:
+
+| | What was wrong | Now |
+|---|---|---|
+| D1 | a bind failing part-way left entries and tables | `Ppgtt::bind_range` is all or nothing |
+| D2 | memory freed under a batch that could hold a TLB entry | an unbound object's memory waits for the newest request of its VM at the unbind; one 8-byte store an execbuffer, no invalidation |
+| D3 | the object list read four times, checked once | read once into the tables (16 bytes an entry); 56N bytes copied where 224N were; a range that wraps is refused |
+| D4 | a destroyed VM's tables leaked | `Ppgtt::destroy` frees the tree |
+| D10 | a held syncobj wait kept raw slot numbers, and could read another file's syncobj in a reused slot (found reading) | a removed syncobj is marked gone in every held wait |
+| D11 | a pointer plus an offset could wrap (`set_engines`; found reading) | every such sum is checked, EFAULT |
+| D12 | a release freed 64 contexts and 64 VMs and left the rest (the target's first finding) | it loops |
+| D13 | objects of one execbuffer evicted each other and the batch ran unbound (the target) | ENOSPC, as i915's pinned vma |
+| D14 | a batch was bounded by its padded size (the target) | by its object, as i915's `eb_add_vma` |
+
+D12 to D14 were on develop before this work. `limits::EXEC_OBJECTS` went
+from 16384 to 8192, the object table's size, so that the copy of D3 fits
+the tables' 3 MiB (3,132,800 bytes now): a longer list must name a handle
+twice, which neither anv nor iris does. A handle listed twice is left as
+it was and pinned by a test; i915 no longer refuses it either.
+
+**Open:** H3 to H8; the box run R3, which D2's held memory and D3's copy
+owe. R1 is recorded but for the loader-map region (BACKLOG, intel-k2;
+ledger 9053). Consultant: OK IF P1-P8 (ledger 9079); an internal review,
+not independent verification.
 
 ## Appendix A: the probe that printed the numbers
 
