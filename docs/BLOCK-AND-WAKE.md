@@ -509,49 +509,72 @@ The set keeps the rescan's due time in the clock's own counter ticks:
   the personality already reads in `syscall/time.rs`) and passes it to
   `take_marks`.
 - `take_marks` rescans when `overflowed || now >= rescan_due`, and then
-  sets `rescan_due = rescan_due_after(now)`.
+  sets `rescan_due = rescan_due_after(now, hz)`.
 - `may_report`'s last term becomes `arch::counter_now() >= rescan_due`.
 - `create` sets the first due time the same way from a counter reading.
 - `mirror` and `mirrors_agree` carry `rescan_due` in place of
   `rescanned_at`.
 
-The only arithmetic left is in `rescan_due_after`, made at a rescan, at most
-once a second and set, and at `create`:
+The only arithmetic left is in `rescan_due_after`. It runs at a rescan, at
+most once a second and set, and at `create`:
 
-    rescan_due_after(c0) = c0 + hz * (RESCAN_NANOS / 10^9) - (hz / 10^6 + 1)
+    rescan_due_after(c0, hz) = c0 + hz * (RESCAN_NANOS / 10^9) - (hz / 10^6 + 1)
 
-saturating at both ends. `RESCAN_NANOS` is a whole number of seconds, which
-a `const` assertion holds. `hz` is `arch::counter_hz()`, an atomic load.
-There is no division on any wait's path.
+It saturates at both ends. `RESCAN_NANOS` is a whole number of seconds, which
+a `const` assertion in `fs/epoll.rs` holds. `hz` is `arch::counter_hz()`,
+read only there: an atomic load on x86-64, and a read of `CNTFRQ` on AArch64
+and ARMv7-A. There is no division on any wait's path.
 
-**Why the due time is early by up to a microsecond, never late.** EB3 asks
-that the trusted recheck always finds the rescan due. The recheck's timer
-fires once `now_nanos` reaches the listing's reading plus 1 s. The listing
-comes after the rescan's take, so its reading is at least
-`n0 = floor(c0 * 10^9 / hz)`. The waiter's test then reads a counter `c`
-with `floor(c * 10^9 / hz) >= n0 + 10^9`. It follows that
-`c * 10^9 / hz > c0 * 10^9 / hz - 1 + 10^9`, so `c > c0 + hz - hz / 10^9`.
-The term is due at that `c` when the due time is at most `c0 + hz` less one
-nanosecond's ticks rounded up. For `hz` above 1 GHz (the box's TSC, the KVM
-guest's 4.32 GHz) that is up to five ticks: a due time of exactly
-`c0 + hz` would read not yet due at a recheck that falls in the last
-nanosecond, and the wait would sleep a second more. That is today's hazard
-made worse by a unit change, and the margin removes it. The margin used is
-one microsecond's ticks plus one, which covers a nanosecond's at any counter
-below 10^15 Hz. A rescan up to a microsecond early is one look sooner,
-which loses nothing. The argument assumes, as now, that the counter is one
-clock across processors: `now_nanos` is the same counter scaled, so a skew
-between processors would already move `rescanned_at`'s comparison by as
-much.
+**Why the due time is early by at most `hz / 10^6 + 1` ticks, never late.**
+EB3 asks that the trusted recheck always finds the rescan due. In the
+argument below the quotients are real numbers, and `floor` is the clock's
+rounding.
+1. `wait_on_any` files the recheck at its slice reading plus 1 s. The
+   scheduler wakes the sleeper at a clock reading no earlier than that.
+2. The slice is read after the waiter's own last take, the one whose
+   rescan set `rescan_due` from `c0`. So the slice reading is at least
+   `n0 = floor(c0 * 10^9 / hz)`.
+3. The woken test therefore reads a counter `c` with
+   `floor(c * 10^9 / hz) >= n0 + 10^9`. That gives
+   `c * 10^9 / hz > c0 * 10^9 / hz - 1 + 10^9`, so `c > c0 + hz - hz / 10^9`.
+4. The term is therefore due at that `c` whenever the due time is at most
+   `c0 + hz`, less one nanosecond's ticks rounded up.
+
+For `hz` above 1 GHz (the box's TSC, the KVM guest's 4.32 GHz) that is up
+to five ticks. A due time of exactly `c0 + hz` would read not yet due at a
+recheck that falls in the last nanosecond, and the wait would sleep a second
+more. The margin removes that. A margin of one microsecond's ticks plus one
+covers a nanosecond's at any counter below 10^15 Hz. A rescan that much
+early is one look sooner and loses nothing.
+
+A rescan made after the slice reading moves the due time past the recheck,
+and the recheck then finds nothing due. That rescan can be made by the last
+look's `ready(1)`, by another thread's wait, by `poll` on the set's
+descriptor, or by a parent set's look. That rescan looked at every
+registration itself, and only a change after it waits for the next one. It
+costs one more slice, as it does today. A change nothing woke then waits at
+most about 2 s.
+
+The argument assumes, as now, that the counter is one clock across
+processors. `now_nanos` is the same counter scaled, so a skew between
+processors would already move `rescanned_at`'s comparison by as much. The
+counter's rate cannot change under a due time: `COUNTER_HZ` is stored only
+at the clock's start on x86-64, and `CNTFRQ` is set by firmware.
 
 Edges:
-- **A counter of zero hertz** (before `timer` knows its rate, which is
-  before any program runs) makes every look due: `rescan_due_after(c0) =
-  c0`. That fails open into more looks. Today's nanoseconds read zero there,
-  and the rescan is then never due.
-- **Wrap.** The due time saturates, as `rescanned_at + RESCAN_NANOS` does.
-  The counter wraps no sooner than the nanoseconds made from it: they are
-  the same counter scaled down, so a wrap is not a new hazard.
+- **A counter of zero hertz** makes `rescan_due_after(c0, 0) = c0 - 1`:
+  every look is due. With the test always true, a wait would never sleep:
+  it would look, find nothing, and test again. That cannot happen once a
+  program runs, since the timer knows its rate before the first process,
+  check processes included. Today's nanoseconds read zero there, and the
+  rescan is then never due.
+- **Wrap and saturation.** The due time saturates, as
+  `rescanned_at + RESCAN_NANOS` does. The counter wraps no sooner than the
+  nanoseconds made from it, since they are the same counter scaled down. The
+  clock (`counter_nanos`) saturates past `u64::MAX / 10^9` seconds of
+  counter. Past that the nanosecond reasoning above no longer holds, though
+  the due time in ticks still follows the counter. That is an argued
+  residual: about 580 years at 19.2 MHz, more at any higher rate.
 - **The HPET as the counter** (an x86-64 machine without a usable TSC):
   `counter_now` is then three device reads, as `now_nanos`'s is today. Only
   the divisions go.
@@ -565,30 +588,50 @@ Nothing else changes:
 - The `look_meet` and `hold_meet` patience loops of the checks keep
   `now_nanos`.
 
-Expected: four clock reads' divisions less a blocking wait, a side. The ABAB
-in the release guest says how much: the guess is 0.05 to 0.15 µs a trip.
-The N150's cores divide more slowly than nazuna's Zen 5, so the share there
-may be larger.
+Expected: the divisions of four clock reads less a blocking wait, a side.
+What stays in the test that finds nothing:
+- a counter read (`rdtsc` on x86-64);
+- the four atomic loads of the bases, the flag and the due time;
+- the ready list's two counts;
+- `test_meet`'s two relaxed loads (ledger 9702 L2), which every
+  `may_report` makes in a release build.
 
-The case (`fs::epoll_check`, run in the check build on every architecture):
-`rescan_due_after` is a pure function of `c0` and `hz`. For `hz` in
-{19.2 MHz, 24 MHz, 62.5 MHz, 1 GHz, 2.1 GHz, 4.32 GHz, the machine's own}
-and for `c0` at 0, at 10^9 + 7, at the present counter and at `2^62 + 12345`,
-it requires, with `n(c) = counter_nanos(c, hz)`:
-- `n(due - 1) < n(c0) + RESCAN_NANOS`: never later than the recheck;
-- `n(due) >= n(c0) + RESCAN_NANOS - 2_000`: no more than 2 µs early.
+The ABAB in the release guest says how much this saves; the guess is 0.05 to
+0.15 µs a trip. The N150's cores divide more slowly than nazuna's Zen 5, so
+the share there may be larger.
 
-The case also requires that after a wait which rescanned (`rescans` moved),
-the set's `rescan_due` is later than the counter read before that wait. The
-existing rescan case (a trusted set's change nothing woke is found within
-1.5 s) runs on the ticks term.
+**The case** (`fs::epoll_check::the_rescan_due_time_is_never_late`, run in
+the check build on every architecture) calls the product's own
+`epoll::rescan_due_after`.
+- Rates: 19.2 MHz, 24 MHz, 62.5 MHz, 1 GHz, 14.31818 MHz (the PC's HPET),
+  100 MHz (QEMU's HPET), 2.1 GHz, 4.32 GHz, and the machine's own.
+- Readings `c0`: 0; 10^9 + 7; the present counter; and `2^62 + 12345`, or
+  for a rate below about 250 MHz, two seconds below the clock's saturation.
+- With `n(c) = counter_nanos(c, hz)` and `n(c0) + RESCAN_NANOS` added
+  checked, it requires:
+  - `n(due - 1) < n(c0) + RESCAN_NANOS`: never later than the recheck;
+  - `n(due) >= n(c0) + RESCAN_NANOS - 2_000`: no more than 2 µs early.
+- A rate of zero must leave the due time at or before its reading.
+- A failure prints the rate and the reading.
+- It runs once a boot, after the check's second run, and its boot line says
+  at how many readings and rates it held: "the rescan's due time in ticks
+  fell within 2 us before the recheck at N counter readings and rates".
 
-The control (`gate.sh control --expect`) leaves the margin out
-(`c0 + hz * s`). It fires on the first line at 2.1 GHz or 4.32 GHz, on
-every architecture, because the list is fixed and not the machine's.
+The rescan case (a trusted set's change that nothing woke is found within
+1.5 s) runs on the ticks term. It now also requires that the rescan which
+ended its wait set `rescan_due` past the counter read before the wait.
+
+The controls (`gate.sh control --expect`, FIRED (panic)):
+- (a) The margin left out (`c0 + hz * s`). At 2.1 GHz from 10^9 + 7, at
+  2.1 GHz from 2^62 + 12345 and at 4.32 GHz from 2^62 + 12345 the due time
+  is late, and the first of these fires. The list is fixed rather than taken
+  from the machine, so it fires the same on x86-64 under KVM and on AArch64.
+- (b) A late due time (`c0 + 2 * hz * s`), on x86-64 under KVM. It fires on
+  the rescan case's line, "a change nothing woke was not found by the rescan
+  of a sleeping wait". That shows the rescan case reaches the ticks term.
 
 No requirement (load ring; nothing a program sees changes); no ids. The
-rows are EB8's.
+rows are EB8's (ledger 9764, CK1-CK9).
 
 **The same read on the futex and timer-sleep paths (found, not in this
 cut).**
@@ -808,4 +851,7 @@ be walked). What is left is the base: 8.9 against 5.0 µs, §4.4.
     1c33a93ea7bf2f90412d6f6b3173cd5756f629681301e4819329ef4d84d3840c.
 - 2026-11-13: §4.4's cut 4, the rescan's due time in counter ticks
   (`sys/epoll-clock`), written for the design review, with what the same
-  read costs on the futex and timer-sleep paths.
+  read costs on the futex and timer-sleep paths. Design review: ledger
+  9764, OK IF CK1-CK9. `sys/wait-one-read` may be a later branch (ledger
+  9780, WR1-WR6). The `syscall/time.rs` clock may be a second commit here
+  (TN1-TN4).

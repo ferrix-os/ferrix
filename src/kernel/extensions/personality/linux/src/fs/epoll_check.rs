@@ -195,6 +195,7 @@ pub fn run() -> Result<Report, &'static str> {
     crate::console::println!(
         "  epoll    the rescan found a change nothing woke within its second (first run)"
     );
+    the_rescan_due_time_is_never_late()?;
     crate::sched::wait_until_reaper_quiet(crate::sched::REAPER_PATIENCE_NANOS)?;
     let leaked = window.kept();
     if leaked != 0 {
@@ -1985,12 +1986,18 @@ fn the_rescan_finds_a_change_nothing_woke(
     if !inner.trusted() {
         return Err("a trusted steered file left its set distrusted once hooked");
     }
+    let (before, due_before) = (crate::arch::counter_now(), inner.rescan_due());
     let (answer, took) = with_a_waiter(process, page, set, &inner, None, || {
         file.set(true, false);
         Ok(())
     })?;
     file.set(false, false);
     mirrored(&inner)?;
+    // The rescan that found it set the next due time from a later reading
+    // (ledger 9805 CR1).
+    let due = inner.rescan_due();
+    let moved =
+        due > due_before && due >= epoll::rescan_due_after(before, crate::arch::counter_hz());
     drop(inner);
     for opened in [set, fd] {
         closed(process, opened)?;
@@ -1998,7 +2005,88 @@ fn the_rescan_finds_a_change_nothing_woke(
     if answer != Some(Ok(1)) || took >= RESCAN_WITHIN_NANOS {
         return Err("a change nothing woke was not found by the rescan of a sleeping wait");
     }
+    if !moved {
+        return Err("a rescan left its set's next due time at or before the wait it ended");
+    }
     RESCAN_PASSED.store(true, Ordering::Release);
     counts.events += 1;
     Ok(())
+}
+
+/// Counter rates the rescan's due time is held to, whatever this machine's:
+/// the Arm boards' generic timers (19.2, 24 and 62.5 MHz, and Armv8.6's
+/// 1 GHz), the HPET's (the PC's 14.31818 MHz and QEMU's 100 MHz), and TSCs
+/// of 2.1 and 4.32 GHz, where a due time without its margin is late.
+const RESCAN_RATES: [u64; 8] = [
+    19_200_000,
+    24_000_000,
+    62_500_000,
+    1_000_000_000,
+    14_318_180,
+    100_000_000,
+    2_100_000_000,
+    4_320_000_000,
+];
+
+/// How much earlier than the trusted recheck the rescan may come due.
+const RESCAN_EARLY_NANOS: u64 = 2_000;
+
+/// The rescan's due time in counter ticks (`epoll::rescan_due_after`,
+/// `docs/BLOCK-AND-WAKE.md` §4.4 cut 4, ledger 9764 CK1-CK4) is never later
+/// than the trusted recheck that a change nothing woke waits for, and no
+/// more than [`RESCAN_EARLY_NANOS`] earlier: at every rate of
+/// [`RESCAN_RATES`] and this machine's, from a reading of zero, of
+/// `10^9 + 7`, of now, and of the highest below the clock's saturation by two
+/// seconds. With `n` the clock's scaling and `R` the period,
+/// `n(due - 1) < n(c0) + R` and `n(due) >= n(c0) + R - 2 us`. A rate of zero
+/// makes the due time no later than its reading.
+// Never inlined: its frame is not `kmain`'s to carry (F-100).
+#[inline(never)]
+fn the_rescan_due_time_is_never_late() -> Result<(), &'static str> {
+    let own = crate::arch::counter_hz();
+    let now = crate::arch::counter_now();
+    let mut held = 0;
+    for hz in RESCAN_RATES.into_iter().chain((own != 0).then_some(own)) {
+        // The clock saturates past `u64::MAX / 10^9` whole seconds.
+        let saturates = (u64::MAX / 1_000_000_000).saturating_mul(hz);
+        let high = (1_u64 << 62)
+            .wrapping_add(12_345)
+            .min(saturates.saturating_sub(hz.saturating_mul(2)));
+        // The present reading too, below this rate's ceiling (ledger 9805 CR2).
+        for c0 in [0, 1_000_000_007, now.min(high), high] {
+            if !rescan_due_holds(c0, hz) {
+                crate::console::println!(
+                    "  epoll    the rescan's due time from counter reading {c0} at {hz} Hz is \
+                     outside the recheck's bound"
+                );
+                return Err(
+                    "the rescan's due time in ticks is outside the trusted recheck's bound",
+                );
+            }
+            held += 1;
+        }
+    }
+    for c0 in [0, 1_000_000_007, now] {
+        if epoll::rescan_due_after(c0, 0) > c0 {
+            return Err("a counter of zero hertz left the rescan due after its reading");
+        }
+    }
+    crate::console::println!(
+        "  epoll    the rescan's due time in ticks fell within 2 us before the recheck at {held} \
+         counter readings and rates"
+    );
+    Ok(())
+}
+
+/// [`the_rescan_due_time_is_never_late`]'s two bounds at one reading and
+/// rate.
+fn rescan_due_holds(c0: u64, hz: u64) -> bool {
+    let nanos = |ticks: u64| ferrix_vdso::counter_nanos(ticks, hz);
+    let Some(recheck) = nanos(c0).checked_add(fs::wake::TRUSTED_RECHECK_NANOS) else {
+        return false;
+    };
+    let due = epoll::rescan_due_after(c0, hz);
+    due != 0
+        && nanos(due.saturating_sub(1)) < recheck
+        && nanos(due) >= recheck.saturating_sub(RESCAN_EARLY_NANOS)
 }

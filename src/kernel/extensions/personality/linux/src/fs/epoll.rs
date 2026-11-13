@@ -148,6 +148,7 @@ use ferrix_linux_abi::types::{
 };
 use ferrix_vfs::{Errno, Inode, Metadata, OpenFile, Readiness, WakeSource};
 
+use crate::arch;
 use crate::fallible;
 use crate::fs;
 use crate::sched::WaitQueue;
@@ -166,6 +167,44 @@ pub(crate) const MAX_HOOKS: usize = 8;
 /// How often a wait looks at every registration, whatever woke: see the
 /// module doc.
 const RESCAN_NANOS: u64 = fs::wake::TRUSTED_RECHECK_NANOS;
+
+/// [`RESCAN_NANOS`] in whole seconds, which is all [`rescan_due_after`]
+/// multiplies the counter's rate by: no division on any wait's path.
+const RESCAN_SECONDS: u64 = RESCAN_NANOS / NANOS_PER_SECOND;
+
+const _: () = assert!(
+    RESCAN_NANOS.is_multiple_of(NANOS_PER_SECOND) && RESCAN_SECONDS != 0,
+    "the rescan's period is a whole number of seconds, so its due time in ticks needs no division"
+);
+
+/// Nanoseconds in a second.
+const NANOS_PER_SECOND: u64 = 1_000_000_000;
+
+/// When the rescan after one made at counter reading `c0` is due, in ticks
+/// of a `hz` counter (`docs/BLOCK-AND-WAKE.md` §4.4, cut 4, ledger 9764):
+/// [`RESCAN_NANOS`] later, less `hz / 10^6 + 1` ticks, saturating at both
+/// ends.
+///
+/// **Early by at most that margin, never late.** The trusted recheck that
+/// finds a change nothing woke fires once the clock (`timer::now_nanos`,
+/// `floor(c * 10^9 / hz)`) reaches a reading made after `c0` plus
+/// [`RESCAN_NANOS`]. Any counter `c` it can then read has
+/// `c > c0 + hz * RESCAN_SECONDS - hz / 10^9` (real quotients), and the
+/// margin covers the `hz / 10^9`: at a counter above 1 GHz a due time of
+/// exactly `c0 + hz * RESCAN_SECONDS` reads not yet due at a recheck in the
+/// last nanosecond, and the wait sleeps a second more. A counter of zero
+/// hertz (before the timer knows its rate, before any program runs) makes
+/// the due time `c0 - 1`: every look rescans.
+pub(crate) const fn rescan_due_after(c0: u64, hz: u64) -> u64 {
+    c0.saturating_add(hz.saturating_mul(RESCAN_SECONDS))
+        .saturating_sub(hz / 1_000_000 + 1)
+}
+
+/// The counter's reading, in the ticks [`rescan_due_after`] counts: the
+/// counter `timer::now_nanos` scales, read without the scaling.
+fn counter() -> u64 {
+    arch::counter_now()
+}
 
 /// The room a hooked queue's list may hold for each mark on it, which a
 /// registration is charged for: `WaitQueue::unhook` gives room back once a
@@ -443,8 +482,9 @@ struct State {
     next_serial: u64,
     /// The number handed to the next wait that copies registrations out.
     next_look: u64,
-    /// When a wait last looked at every registration.
-    rescanned_at: u64,
+    /// When the next look at every registration is due, in counter ticks
+    /// ([`rescan_due_after`]).
+    rescan_due: u64,
     /// How many registrations are not `trusted`.
     distrusted: usize,
     /// How many registrations every wait looks at, pending or not
@@ -517,8 +557,10 @@ impl State {
         }
         taken.clear();
         self.taken = taken;
-        if overflowed || now >= self.rescanned_at.saturating_add(RESCAN_NANOS) {
-            self.rescanned_at = now;
+        if overflowed || now >= self.rescan_due {
+            // The rate read only here, once a second: on Arm it is a
+            // register read, `CNTFRQ`.
+            self.rescan_due = rescan_due_after(now, arch::counter_hz());
             self.rescans = self.rescans.wrapping_add(1);
             // Every mark cleared, not only those taken: a mark that found
             // the list full is not on it, and left marked it would never
@@ -770,8 +812,8 @@ struct Quick {
     listed: AtomicBool,
     /// No registration is distrusted: [`Epoll::trusted`].
     trusted: AtomicBool,
-    /// When a wait last looked at every registration.
-    rescanned_at: AtomicU64,
+    /// When the next look at every registration is due, in counter ticks.
+    rescan_due: AtomicU64,
     /// The set's queue's wake count, read before the last take of the ready
     /// list: a wake since moves it.
     wakes_base: AtomicU64,
@@ -808,7 +850,7 @@ pub(crate) fn create() -> Result<Arc<OpenFile>, Errno> {
         Charge::bytes(0).map_err(refused)?,
     );
     let ready = ReadyList::new().map_err(|_| Errno::ENOMEM)?;
-    let now = crate::timer::now_nanos();
+    let due = rescan_due_after(counter(), arch::counter_hz());
     let set = fallible::try_arc_cyclic(|this| Epoll {
         state: SpinLock::new(State {
             items: Items::new(),
@@ -817,7 +859,7 @@ pub(crate) fn create() -> Result<Arc<OpenFile>, Errno> {
             scratch: Vec::new(),
             next_serial: 0,
             next_look: 0,
-            rescanned_at: now,
+            rescan_due: due,
             distrusted: 0,
             always: 0,
             looks: 0,
@@ -835,7 +877,7 @@ pub(crate) fn create() -> Result<Arc<OpenFile>, Errno> {
         quick: Quick {
             listed: AtomicBool::new(false),
             trusted: AtomicBool::new(true),
-            rescanned_at: AtomicU64::new(now),
+            rescan_due: AtomicU64::new(due),
             wakes_base: AtomicU64::new(0),
             tells_base: AtomicU64::new(0),
         },
@@ -1407,6 +1449,11 @@ impl Epoll {
         self.state.lock().rescans
     }
 
+    /// When its next rescan is due, in counter ticks, for the checks.
+    pub(crate) fn rescan_due(&self) -> u64 {
+        self.state.lock().rescan_due
+    }
+
     /// How many queues its registrations have hooked, for the checks.
     pub(crate) fn hooked(&self) -> usize {
         self.state
@@ -1446,9 +1493,7 @@ impl Epoll {
         quick
             .trusted
             .store(state.distrusted == 0, Ordering::Release);
-        quick
-            .rescanned_at
-            .store(state.rescanned_at, Ordering::Release);
+        quick.rescan_due.store(state.rescan_due, Ordering::Release);
     }
 
     /// Whether the mirrors agree with the set's state, for the checks: true
@@ -1458,7 +1503,7 @@ impl Epoll {
         let quick = &self.quick;
         quick.listed.load(Ordering::Acquire) == (!state.pending.is_empty() || state.always != 0)
             && quick.trusted.load(Ordering::Acquire) == (state.distrusted == 0)
-            && quick.rescanned_at.load(Ordering::Acquire) == state.rescanned_at
+            && quick.rescan_due.load(Ordering::Acquire) == state.rescan_due
     }
 
     /// Whether a look at the set could find anything, asked with no lock:
@@ -1478,8 +1523,8 @@ impl Epoll {
         if self.ready.queue().wakes() != wakes_base || self.ready.tells() != tells_base {
             return true;
         }
-        let rescanned_at = quick.rescanned_at.load(Ordering::Acquire);
-        crate::timer::now_nanos() >= rescanned_at.saturating_add(RESCAN_NANOS)
+        // In counter ticks: a reading and a compare, no division (cut 4).
+        counter() >= quick.rescan_due.load(Ordering::Acquire)
     }
 
     /// The test a wait on the set sleeps until: a real look while `pending`
@@ -1559,7 +1604,7 @@ impl Epoll {
     /// Each is hooked on the queues its file names before its file is looked
     /// at, and the look is recorded by serial, with the set unlocked between.
     pub(crate) fn ready(&self, limit: usize) -> Vec<Event> {
-        let now = crate::timer::now_nanos();
+        let now = counter();
         let (ticket, mut samples) = {
             let mut state = self.state.lock();
             // Read before the take: a wake whose number the take misses
