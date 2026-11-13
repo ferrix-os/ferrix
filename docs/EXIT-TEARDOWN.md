@@ -173,6 +173,24 @@ region map's largest heap request).
 * Log: `p5-a64-enomem-serial.log`. The run's own FAILED line is the diag
   program's: the child, out of heap, died of SIGABRT.
 
+**On the N150, with F-112's fix (develop 914a9634b, 2026-11-13).** The
+product owner killed the game (Endfield.exe, about 5 GB resident, 12,000 to
+16,000 regions in earlier readings) with SIGKILL. The box did not reset (its
+uptime ran on), so F-112's fix holds on the machine. But the machine was
+unusable for about a minute:
+
+* ssh went unanswered at +12, +27, +42 and +59 s after the kill, and
+  answered again at +69 s;
+* MemFree was 10.1 GB at +69 s and 11.3 GB at +85 s, then steady (about
+  5 GB back).
+
+File: `~/.local/share/ferrix/ef-30fps/runs/relaunch2/after-kill.txt`
+(seconds since the kill, uptime, MemFree kB, steam and wine processes). It
+was not profiled on the box. By the profile above, a 5 GB exit of
+12,000-16,000 regions lies between the 4 GiB and 9 GiB rows (18 s and 223 s
+under KVM), whose time is the heap walk's. Why the whole machine slows, not
+only the exiting processor, is in 4.5.
+
 ## 3. Linux, read first (v7.0, `~/.local/share/ferrix/robustness-ref/linux-v7.0`; read, never copied)
 
 **What Linux does:**
@@ -350,6 +368,60 @@ The alternatives were weighed against that:
   where sleeping is forbidden (a raised preemption count) is handed to the
   reaper in a node made with the space, allocating nothing.
 
+### 4.5 What bounds another task's wait while a big process exits
+
+This is the box's minute. Three things make other tasks wait, measured or
+read in the code:
+
+1. **The heap's lock, on every processor.** `HEAP` (`mm.rs`) is one
+   `IrqSpinLock` for the machine's shared heap. Each walk of section 2 holds
+   it with interrupts masked: a mean of 0.12 ms at 60,000 regions, 0.82 ms
+   at 4 GiB and 4.55 ms at 9 GiB. The exiting task takes it again at the next
+   free. Any task on any processor whose allocation or free misses its
+   processor's cache (`HEAP-CACHES.md`: a refill or an overflow) waits for
+   the walk in progress, spinning with its own interrupts masked
+   (`IrqSpinLock::lock` masks, then takes its ticket). The lock is a ticket
+   lock, so a waiter gets its turn after that one walk, but it pays for it
+   again at its next miss. A network packet, a pipe write or an `ssh` login
+   each allocate in the kernel many times. This is why every processor is
+   slowed, not only the exiting one. How much of the box's minute this
+   explains, and how much the space's lock (2) does, was not profiled on the
+   box. D1's row on base and tip, with the canary below, is where that is
+   measured.
+2. **The space's lock, on the exiting processor.** Where the frees run inside
+   `drop_unnamed` (the 60,000-region shape: 3.2-3.3 s), they run under the
+   space's spin lock with preemption off. Nothing else runs on that
+   processor, and the processor's timer interrupts are masked during each
+   walk.
+3. **The exiting task's own run.** With the frees outside the space's lock
+   (the 256 KiB shapes), the exiting task is preemptible between frees but
+   runs for the whole teardown. That is fair work, not a stall.
+
+**The bounds once the plan has landed:**
+* D1 bounds (1): a free's hold of `HEAP` becomes at most one page's
+  objects (M&T §1.8, ET.2), microseconds, so another processor waits no
+  longer than one free.
+* D3 bounds (2): no spin lock across steps, a step point every 512 units,
+  and a free inside a step is D1's.
+* (3) is left to the scheduler. The exiting task is one fair task.
+
+**The measure the landings assert (D5, D1's row on base and tip).**
+`test-exit-regions` keeps its teardown time, and adds *another task's wait*:
+* one canary task pinned to each processor;
+* each makes a small round trip every 10 ms that allocates in the kernel
+  and so takes the heap (a pipe's write and read of one page, which takes
+  the pipe's buffer from the heap), and records its worst lateness against
+  the 10 ms;
+* the row asserts the worst over all processors and the whole teardown.
+
+Today's canary, a sleeper on another processor that allocates nothing in
+the kernel, saw 0.1-0.5 ms where the box saw a minute: it can see neither
+(1) nor (2). Expected before D1, by section 2's figures: a hold of
+milliseconds per walk, back to back. After D1 and D3: a bound stated from
+two hosts, dev and `--release` (CONVENTIONS), well under 10 ms. Control: the
+class-list walk put back (D1) and one hold for the whole emptying (D3), each
+FIRED on the canary's line.
+
 ## 5. Requirements and checks
 
 **New ids,** reserved before they are written:
@@ -385,8 +457,9 @@ times.
 * **4.2, the zombie.** The `enomem` phase also reads MemFree while the child
   is a zombie (`waitid` with `WNOWAIT`, before the reap) and the zombie's
   VmRSS, which must be 0.
-* **4.3, `test-exit-regions`' canary becomes one sleeper pinned to each
-  processor,** as R5 2a's stall-probe has (8426 C1). The present canary,
+* **4.3, `test-exit-regions`' canary becomes one task pinned to each
+  processor that takes the kernel heap every 10 ms (4.5),** as R5 2a's
+  stall-probe pins its tickers (8426 C1). The present canary,
   on another processor, cannot see a hold on the exiting one. The row's
   teardown time and worst lateness are then asserted (the row reports
   times; a boot check never does), with bounds stated from two hosts per
