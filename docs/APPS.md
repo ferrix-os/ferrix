@@ -276,6 +276,9 @@ What this leaves room for, and deliberately does not build yet:
 * **The system as packages.** Only once a broken install of init or the
   shell can be recovered from.
 
+The first four are designed and being built in [UPDATES.md](UPDATES.md)
+(2026-11-13): what of this list exists, the plan, and where it stands.
+
 ## 8. The phases
 
 1. **The mechanism**: `apps.rs`, `ferrix-pkg`, the SDK's `linux::call`,
@@ -388,6 +391,10 @@ lines that refusal should have printed. Every image a person runs carries
 What is left is §7's list: upgrades, a repository with a signed index,
 atomic transactions on btrfs, building on Ferrix, and the system as
 packages. None is started; each waits on the customer's order.
+
+2026-11-13: the customer asked for security updates and package management;
+upgrades from a repository, signatures and the transaction are
+[UPDATES.md](UPDATES.md)'s, with its inventory and where it stands.
 
 The root checkout's `main`, left at c1bd87fb on 2026-09-30 because another
 session had staged changes there, has since been moved past the rename.
