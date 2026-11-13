@@ -566,7 +566,13 @@ so nothing is adjacent and anon-merge joins none. It gains a variant with
 60,000 regions inside one reserve: `MAP_FIXED` views with alternating
 protections, so that one object is reached by tens of thousands of regions.
 That is the shape anon-merge makes of Wine's reserves, and the one whose
-counting, `forget_in` and page-list frees per object are largest.
+counting, `forget_in` and page-list frees per object are largest. It is
+the `reused` phase since `exit/reused-object` (`docs/ANON-MERGE.md` §8):
+on x86-64 KVM its exit took 20 ms where the plain shape's took 3,039 ms in
+the same boot, for the same 937 MiB of touched pages, and on the Arm pair
+97 and 157 ms beside 4,882 and 1,814. In this guest nearly all of the
+plain shape's teardown grows with objects, not pages. A measure of the
+guest, not of the box.
 
 ## 8. Not in this design
 

@@ -10,15 +10,22 @@
 //! with a recursive sort, which overflowed the stack into its guard page at
 //! about 36,000 regions (`docs/certification/FINDINGS.md`).
 //!
-//! This program makes the shape twice, each time in a child it forks:
+//! This program makes the shape three times, each time in a child it forks:
 //! [`REGIONS`] anonymous regions of [`REGION_BYTES`], every page touched,
 //! each asked for a page past the last one's end, so that no two can be one
-//! region. Then:
+//! region and each names its own object. Then:
 //!
 //! * **exit**: the child calls `_exit(0)`;
 //! * **kill**: the child waits in `pause`, and is sent `SIGKILL`;
 //! * **sigpipe**: the child is blocked writing to a pipe whose reader then
 //!   goes, and `SIGPIPE` ends it on its way out of the write.
+//! * **reused**: the same count of regions made in one reused object
+//!   (ledger 9561 N8): one `PROT_NONE` reserve and `MAP_FIXED` views of
+//!   [`REGION_BYTES`] laid in it, writable and read-only in turn, every page
+//!   touched, so that anon-merge makes each in its neighbour's object and one
+//!   object is reached by every region; the child shows that from
+//!   `/proc/self/maps` and calls `_exit(0)`, and MemFree must be back to its
+//!   figure before the child at `waitpid`'s return.
 //! * **enomem**: a child maps regions until `mmap` refuses it, and exits. Its
 //!   memory must be back while it is a zombie (`waitid` with `WNOWAIT`) and
 //!   at `waitpid`'s return, within the larger of 16 MiB and 2% of MemFree
@@ -52,6 +59,24 @@ const REGIONS: usize = if cfg!(target_arch = "x86_64") {
 };
 /// Bytes in each region: four pages, every one touched.
 const REGION_BYTES: usize = 16 * 1024;
+/// The reused-object variant's phase (ledger 9561 N8): its child's regions
+/// are [`REUSED_REGIONS`] `MAP_FIXED` views inside one reserve, so that with
+/// anon-merge (`docs/ANON-MERGE.md`) one object is reached by all of them.
+const REUSED: &str = "reused";
+/// Views the reused-object child lays in its reserve: as many regions as
+/// the plain phases', 40,000 on the Arm pair for the same reason. Asked for
+/// 80,000 there, AArch64 made 47,085 views and ARMv7-A 45,038 and each
+/// refused the next, where the plain shape, an object to each region,
+/// stopped at 47,083 and 45,036: the bound is the region count, not the
+/// objects or the guest's memory (ARMv7-A had about 450 MiB free at the
+/// refusal), so the variant holds what the plain shape holds and no more.
+const REUSED_REGIONS: usize = REGIONS;
+/// Bytes of the reserve past its last view: the reserve's own region stays
+/// in the map beside its views, as a Wine reserve's rest does.
+const RESERVE_TAIL: usize = 16 * PAGE;
+/// Views the reused-object child makes writable beside their writable
+/// neighbours to show that each three are one object at continuing offsets.
+const PROBES: usize = 16;
 /// A page.
 const PAGE: usize = 4096;
 /// How long the canary sleeps.
@@ -101,9 +126,10 @@ fn main() {
             }
         })
     };
-    let result = phase("exit", End::Exit, &canary)
-        .and_then(|()| phase("kill", End::Kill, &canary))
-        .and_then(|()| phase("sigpipe", End::Pipe, &canary))
+    let result = phase("exit", End::Exit, REGIONS, &canary)
+        .and_then(|()| phase("kill", End::Kill, REGIONS, &canary))
+        .and_then(|()| phase("sigpipe", End::Pipe, REGIONS, &canary))
+        .and_then(|()| reused(&canary))
         .and_then(|()| enomem());
     canary.stop.store(true, Ordering::Relaxed);
     let _ = sleeper.join();
@@ -210,6 +236,156 @@ fn fill() -> Result<usize, String> {
     Ok(REGIONS * REGION_BYTES)
 }
 
+/// Lay view `index` of the reserve at `at` with `MAP_FIXED`, writable if
+/// `writable` and else read-only, and touch every page of it: a write, or
+/// a read of a read-only one, which commits a page all the same.
+fn view(index: usize, at: usize, writable: bool) {
+    let protection = if writable {
+        libc::PROT_READ | libc::PROT_WRITE
+    } else {
+        libc::PROT_READ
+    };
+    // SAFETY: an anonymous private mapping over a part of this process's
+    // own reserve, which nothing of ours uses; no other memory is named.
+    let got = unsafe {
+        libc::mmap(
+            at as *mut libc::c_void,
+            REGION_BYTES,
+            protection,
+            libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_FIXED,
+            -1,
+            0,
+        )
+    };
+    if got == libc::MAP_FAILED || got as usize != at {
+        let code = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+        say_unallocated(b"exitregions: FAILED mmap of view ", index, code);
+        // SAFETY: ends this process, with nothing of it to unwind.
+        unsafe { libc::_exit(3) }
+    }
+    let base = got.cast::<u8>();
+    for offset in (0..REGION_BYTES).step_by(PAGE) {
+        if writable {
+            // SAFETY: inside the view just made, writable and ours alone.
+            unsafe { base.add(offset).write_volatile(1) };
+        } else {
+            // SAFETY: inside the view just made, readable and ours alone.
+            let _ = unsafe { base.add(offset).read_volatile() };
+        }
+    }
+}
+
+/// Set `protection` on view `index` of the reserve at `base`.
+fn protect_view(base: usize, index: usize, protection: i32) -> Result<(), String> {
+    let at = base + index * REGION_BYTES;
+    // SAFETY: a view of this process's own reserve, made by `view`.
+    if unsafe { libc::mprotect(at as *mut libc::c_void, REGION_BYTES, protection) } != 0 {
+        return Err(format!("mprotect of view {index}: {}", errno()));
+    }
+    Ok(())
+}
+
+/// The lines of `/proc/self/maps` that start inside `base..base + length`.
+fn reserve_lines(base: usize, length: usize) -> Result<usize, String> {
+    let maps = std::fs::read_to_string("/proc/self/maps")
+        .map_err(|error| format!("/proc/self/maps: {error}"))?;
+    let mut inside = 0;
+    for line in maps.lines() {
+        let start = line
+            .split('-')
+            .next()
+            .and_then(|start| usize::from_str_radix(start, 16).ok())
+            .ok_or_else(|| format!("a maps line with no start: `{line}`"))?;
+        if (base..base + length).contains(&start) {
+            inside += 1;
+        }
+    }
+    Ok(inside)
+}
+
+/// The odd views the probe makes writable: [`PROBES`] of them, spread from
+/// the second view to the third from last, each between two writable
+/// views and none beside another.
+fn probe_views() -> impl Iterator<Item = usize> {
+    let pairs = REUSED_REGIONS / 2 - 2;
+    (0..PROBES).map(move |probe| 1 + 2 * (probe * pairs / (PROBES - 1)))
+}
+
+/// Make the reused-object variant's regions in the calling process: one
+/// `PROT_NONE` reserve, and [`REUSED_REGIONS`] `MAP_FIXED` views of
+/// [`REGION_BYTES`] laid in it from its start, writable and read-only in
+/// turn, every page touched, so that no two views merge and, with
+/// anon-merge, each is made in its left neighbour's object, the first in
+/// the reserve's: one object reached by every view and the reserve's rest.
+/// Then show it from `/proc/self/maps`: the reserve shows one line per view
+/// and one for its rest, and each of [`PROBES`] read-only views made
+/// writable merges with both its neighbours, which only regions naming one
+/// object at continuing offsets do (`ferrix_vma`'s `mergeable`), and is
+/// made read-only again. Answers the bytes the views hold.
+fn fill_reused(name: &str) -> Result<usize, String> {
+    let length = REUSED_REGIONS * REGION_BYTES + RESERVE_TAIL;
+    // SAFETY: an anonymous private mapping the kernel places, at the hint
+    // if it is free; no memory of ours is named.
+    let reserve = unsafe {
+        libc::mmap(
+            FIRST_HINT as *mut libc::c_void,
+            length,
+            libc::PROT_NONE,
+            libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE,
+            -1,
+            0,
+        )
+    };
+    if reserve == libc::MAP_FAILED {
+        return Err(format!("mmap of the reserve: {}", errno()));
+    }
+    let base = reserve as usize;
+    for index in 0..REUSED_REGIONS {
+        view(index, base + index * REGION_BYTES, index % 2 == 0);
+    }
+    let apart = REUSED_REGIONS + 1;
+    let lines = reserve_lines(base, length)?;
+    for index in probe_views() {
+        protect_view(base, index, libc::PROT_READ | libc::PROT_WRITE)?;
+    }
+    let joined = reserve_lines(base, length)?;
+    for index in probe_views() {
+        protect_view(base, index, libc::PROT_READ)?;
+    }
+    let restored = reserve_lines(base, length)?;
+    let status = std::fs::read_to_string("/proc/self/status")
+        .map_err(|error| format!("/proc/self/status: {error}"))?;
+    let rss = kb_read(&status, "VmRSS:").ok_or("/proc/self/status has no VmRSS line")?;
+    let free = meminfo_needed(name, "MemFree:")?;
+    println!(
+        "exitregions: {name}: the reserve shows {lines} maps lines, {REUSED_REGIONS} views and its rest; \
+         {joined} with {PROBES} read-only views made writable, {restored} after; VmRSS {rss} kB, \
+         MemFree {free} kB"
+    );
+    let _ = std::io::stdout().flush();
+    if lines != apart || restored != apart {
+        return Err(format!(
+            "the reserve shows {lines} maps lines and {restored} after the probe, not {apart}"
+        ));
+    }
+    if joined != apart - 2 * PROBES {
+        return Err(format!(
+            "{joined} maps lines with {PROBES} views made writable, not {}: the views do not \
+             name one object at continuing offsets",
+            apart - 2 * PROBES
+        ));
+    }
+    // Every touched page resident, or the memory the parent sees come back
+    // was never taken.
+    let views_kb = u64::try_from(REUSED_REGIONS * REGION_BYTES / 1024).unwrap_or(u64::MAX);
+    if rss < views_kb {
+        return Err(format!(
+            "VmRSS {rss} kB with the views made, below their {views_kb} kB"
+        ));
+    }
+    Ok(REUSED_REGIONS * REGION_BYTES)
+}
+
 /// Map regions of [`REGION_BYTES`], every page touched, each a page past
 /// the last, until `mmap` refuses one; say where on standard output and on
 /// `ready`, from buffers on the stack, since the heap may be refused too, and
@@ -268,6 +444,40 @@ fn meminfo_needed(name: &str, field: &str) -> Result<u64, String> {
     let text = std::fs::read_to_string("/proc/meminfo")
         .map_err(|error| format!("{name}: /proc/meminfo: {error}"))?;
     kb_read(&text, field).ok_or_else(|| format!("{name}: /proc/meminfo has no {field} figure"))
+}
+
+/// The reused-object phase (ledger 9561 N8, 9155 A10): a child of
+/// [`REUSED_REGIONS`] views in one reserve, all one object's (`fill_reused`),
+/// ended by `_exit`, its teardown timed as the plain phases' are; MemFree
+/// at `waitpid`'s return must be back to its figure before the child,
+/// within the larger of 16 MiB and 2% of it, as the enomem phase's is.
+///
+/// Only `_exit` ends it: `SIGKILL` and `SIGPIPE` reach the same release of
+/// the space (`Process::release`, `AddressSpace::empty_for_exit`) from a
+/// signal's delivery, which the plain phases already take, and the
+/// region's shape changes nothing of that delivery.
+fn reused(canary: &Canary) -> Result<(), String> {
+    let name = REUSED;
+    let before = meminfo_needed(name, "MemFree:")?;
+    let total = meminfo_needed(name, "MemTotal:")?;
+    phase(name, End::Exit, REUSED_REGIONS, canary)?;
+    let after = meminfo_needed(name, "MemFree:")?;
+    let margin = (16 * 1024).max(before / 50);
+    let short = before.saturating_sub(after);
+    println!(
+        "exitregions: {name} guest {} MiB MemFree before {before} kB at return {after} kB margin \
+         {margin} kB short {short} kB",
+        total >> 10
+    );
+    if short > margin {
+        return Err(format!(
+            "{name}: the child's memory was not back at waitpid's return: {short} kB short, \
+             margin {margin} kB"
+        ));
+    }
+    println!("exitregions: {name} ok");
+    let _ = std::io::stdout().flush();
+    Ok(())
 }
 
 /// The enomem phase: a child maps until refused and exits; its memory must
@@ -375,7 +585,12 @@ fn child(name: &str, end: End, ready: i32, data: i32) -> ! {
     if end == End::Enomem {
         fill_until_refused(ready);
     }
-    match fill() {
+    let made = if name == REUSED {
+        fill_reused(name)
+    } else {
+        fill()
+    };
+    match made {
         Ok(_) => {
             let maps = std::fs::read_to_string("/proc/self/maps").unwrap_or_default();
             println!(
@@ -535,9 +750,9 @@ fn close(fd: i32) {
     let _ = unsafe { libc::close(fd) };
 }
 
-/// One phase: a child of [`REGIONS`] regions, ended as `end` says, and the
+/// One phase: a child of `regions` regions, ended as `end` says, and the
 /// teardown timed from the end to `waitpid`'s return.
-fn phase(name: &str, end: End, canary: &Canary) -> Result<(), String> {
+fn phase(name: &str, end: End, regions: usize, canary: &Canary) -> Result<(), String> {
     println!("exitregions: {name}: before, {}", memory());
     let (ready_read, ready_write) = pipe(name)?;
     let (data_read, data_write) = pipe(name)?;
@@ -596,8 +811,8 @@ fn phase(name: &str, end: End, canary: &Canary) -> Result<(), String> {
     }
     let worst = canary.worst_us.load(Ordering::Relaxed);
     println!(
-        "exitregions: {name} regions {REGIONS} MiB {} teardown {} ms canary worst {}.{:02} ms late",
-        (REGIONS * REGION_BYTES) >> 20,
+        "exitregions: {name} regions {regions} MiB {} teardown {} ms canary worst {}.{:02} ms late",
+        (regions * REGION_BYTES) >> 20,
         took.as_millis(),
         worst / 1000,
         worst % 1000 / 10

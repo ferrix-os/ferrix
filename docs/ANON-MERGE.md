@@ -511,16 +511,36 @@ section 3):
 | `status`, `stat`, `meminfo` read, us (medians, 15,015 regions) | 3.8, 2.3, 3.2 | 11.8, 6.9, 6.0 | 11.9, 7.0, 6.1 |
 
 `statusbench`'s regions are one reserve under alternating protections, which
-neither system can merge: it is unchanged, as it should be. Owed (ledger
-9307 R7): a gate row with 60,000 regions made in one reused object, run:
-PASSED on x86-64 KVM release on the landing tree, the job's memory back to
-its figure before the child after `waitpid`, the teardown time beside 9112
-E8's: `fix/exit-unmap-sort`'s `test-exit-regions` in that variant, which is
-owed now: that branch is on develop (914a9634b). The case (one view
-reached by 60,000 regions) is F-112's input, and the BACKLOG row "the exit
-of 60,000 regions made in one reused object" names it (done in this
-landing's commit, ledger 9386 D2). Then the game's `maps` and its `mmap`
-costs on the box, by the product owner.
+neither system can merge: it is unchanged, as it should be.
+
+The row owed by ledger 9307 R7 (and 9561 N8), the exit of 60,000 regions
+made in one reused object, is `test-exit-regions`' `reused` phase: one
+`PROT_NONE` reserve and 60,000 `MAP_FIXED` views of 16 KiB laid in it,
+writable and read-only in turn, every page touched, the child ended by
+`_exit`. The child shows the join from `/proc/self/maps`: the reserve
+shows one line per view and one for its rest, and 16 read-only views made
+writable each merge with both neighbours, which only regions of one object
+at continuing offsets do. Gate rows on 316f5de66 (logs in
+`~/.local/share/ferrix/logs/queue/`), each run: PASSED:
+
+| | x86-64 KVM | AArch64 | ARMv7-A, 2 processors |
+|---|---|---|---|
+| views | 60,000 | 40,000 | 40,000 |
+| reserve's maps lines, with the 16 probes | 60,001, 59,969 | 40,001, 39,969 | 40,001, 39,969 |
+| VmRSS with the views made, kB | 960,784 | 640,736 | 640,704 |
+| MemFree short at `waitpid`'s return, kB (margin) | 24 (39,449) | 60 (39,506) | 28 (24,220) |
+| exit teardown in one reused object, ms | 20 | 97 | 157 |
+| plain exit in the same boot, an object a region, ms | 3,039 | 4,882 | 1,814 |
+
+(`xro-x86` sha256 97d22112..., `xro-a64` 0cc953fb..., `xro-v7`
+c23a33e6...; 9112 E8's x86-64 exit was 3,259 to 4,024 ms.) Asked for
+80,000 views in a local run, the Arm guests refused the view after 47,085
+and 45,038, where the plain shape stops: their bound is the region count,
+not the objects, so 40,000 stays. The exit empties the space without the
+cover's one request of section 5.5 (`empty_for_exit`, F-114), so nothing
+was refused. Its control, the memory comparison read as if the child's
+views were still out, FIRED (`xro-ctl`, sha256 f6a13d36...). Next: the
+game's `maps` and its `mmap` costs on the box, by the product owner.
 
 ## 9. Left out
 
@@ -551,11 +571,12 @@ back, section 5.4); and the rewritten text, OK IF A8 and A12-A17, line 9183
 window's pages were taken before the range was known free, so `brk` over a
 mapped page could free it), fixed by declining any range not free before a
 page is touched, with its case and control. Built on branch
-`rss/anon-merge` (`L.user.242`-`244`). Owed after it lands (9307 R7): the
-60,000-region exit row in one reused object, `fix/exit-unmap-sort`'s
-`test-exit-regions` in that variant, owed now that the branch is on develop
-(914a9634b; the BACKLOG row names it, owner the product owner). Re-picked
-over that landing and checked: OK IF N1-N9, line 9561. The fix reviewed: OK IF
+`rss/anon-merge` (`L.user.242`-`244`). Re-picked over
+`fix/exit-unmap-sort` and checked: OK IF N1-N9, line 9561. The row owed
+after it landed (9307 R7, 9561 N8), the 60,000-region exit in one reused
+object, is `test-exit-regions`' `reused` phase, PASSED on all three
+architectures (section 8; branch `exit/reused-object`); OK IF RO1-RO4,
+line 9854. The fix reviewed: OK IF
 R1-R9, line 9386. Rebased onto develop ca03c0f2e and reviewed again: OK IF
 T1-T7, line 9465 (a sixteenth case, private memory allocated by handle, for
 the handle test's control; `AddressSpace::map_anywhere` made `pub(crate)`,
