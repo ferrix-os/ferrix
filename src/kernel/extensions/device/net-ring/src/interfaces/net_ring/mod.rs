@@ -872,11 +872,16 @@ impl Serving {
         if !matches!(self.side.prepare_to_sleep(&mut self.ring), Ok(Wait::Sleep)) {
             return;
         }
+        // Trusting the port, as `port_wait` does (backlog p2-138): the
+        // driver's bell and the control channel's observer both queue a
+        // packet and then wake this queue, so the wait sleeps to
+        // [`RECHECK_NANOS`] rather than looking again every 5 ms, as
+        // `wait_until_deadline` did whatever the deadline.
         let deadline = timer::now_nanos().saturating_add(RECHECK_NANOS);
         let _ = self
             .kernel_port
             .waiters()
-            .wait_until_deadline(|| !self.kernel_port.is_empty(), deadline);
+            .wait_trusting_until(|| !self.kernel_port.is_empty(), deadline);
         while self.kernel_port.take().is_some() {}
         self.side.woke(&mut self.ring);
     }

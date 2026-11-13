@@ -214,7 +214,11 @@ fn wait(control: &Endpoint, reading: bool) -> bool {
     }
     let patience = if reading { POLL_NANOS } else { IDLE_NANOS };
     let deadline = timer::now_nanos().saturating_add(patience);
-    let _ = control.waiters().wait_until_deadline(
+    // Trusting the channel, as `channel_write_read` does: a message and the
+    // driver's close both wake its queue, so the task sleeps the patience
+    // above and no less. `wait_until_deadline` looked again every 5 ms
+    // whatever the patience, 200 times a second with no READ outstanding.
+    let _ = control.waiters().wait_trusting_until(
         || {
             control
                 .signals()

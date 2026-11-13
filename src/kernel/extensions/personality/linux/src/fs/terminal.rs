@@ -878,6 +878,9 @@ pub(crate) fn read(buf: &mut [u8], nonblock: bool, opened: Option<u64>) -> Resul
     start_pumping();
     let mut timer = ReadTimer::new(now());
     loop {
+        // Before the pump: a byte the receive interrupt adds after this
+        // reading moves the count, and the wait below then ends at once.
+        let seen = console::input::waiters().wakes();
         pump();
         // Asked under the terminal's lock, which [`hang_up`] counts under:
         // a hangup is either before this step, and nothing is taken, or
@@ -895,11 +898,10 @@ pub(crate) fn read(buf: &mut [u8], nonblock: bool, opened: Option<u64>) -> Resul
         let Some(step) = step else {
             return Err(Errno::EIO);
         };
-        // The console has no receive interrupt to wake it, so it looks again
-        // every `POLL_NANOS` whatever the deadline says.
-        if let ReadStep::Took(count) = step {
-            return Ok(count);
-        }
+        let deadline = match step {
+            ReadStep::Took(count) => return Ok(count),
+            ReadStep::Wait(deadline) => deadline,
+        };
         if nonblock {
             return Err(Errno::EAGAIN);
         }
@@ -918,8 +920,36 @@ pub(crate) fn read(buf: &mut [u8], nonblock: bool, opened: Option<u64>) -> Resul
                 return Err(Errno::ERESTARTSYS);
             }
         }
-        crate::sched::sleep_for(POLL_NANOS);
+        wait_for_input(seen, deadline);
     }
+}
+
+/// Sleep until the console's input may have changed since the receive
+/// interrupt's wake count read `seen`, or until `deadline`.
+///
+/// With a receive interrupt, on its queue, as a `poll` of the console does:
+/// a byte added to the ring, a hangup ([`hang_up`]), a signal and a kill all
+/// wake the task, and the queue's own one-second recheck bounds a wake that
+/// is missed. Without one -- polled input wakes nobody -- every
+/// [`POLL_NANOS`] as before. The look every 2 ms cost an idle shell at the
+/// console 500 wakes a second, and the machine as many timer interrupts.
+fn wait_for_input(seen: u64, deadline: u64) {
+    if !console::input::interrupt_driven() {
+        crate::sched::sleep_for(POLL_NANOS);
+        return;
+    }
+    let caller = crate::syscall::process::current();
+    let _ = super::wake::wait_on(
+        console::input::waiters(),
+        || {
+            console::input::waiters().wakes() != seen
+                || caller
+                    .as_ref()
+                    .is_some_and(|process| process.is_terminated() || process.signal_pending())
+        },
+        deadline,
+        true,
+    );
 }
 
 /// Start the `console` thread if it is not running. A failure to start one
@@ -937,8 +967,22 @@ fn start_pumping() {
 /// raising what it asks for, forever.
 fn run_pump(_argument: usize) {
     loop {
+        if !console::input::interrupt_driven() {
+            pump();
+            crate::sched::sleep_for(PUMP_NANOS);
+            continue;
+        }
+        // With a receive interrupt, asleep until a byte arrives rather than
+        // looking every [`PUMP_NANOS`]: the count is read before the pump,
+        // so a byte that comes after it ends the sleep at once.
+        let seen = console::input::waiters().wakes();
         pump();
-        crate::sched::sleep_for(PUMP_NANOS);
+        let _ = super::wake::wait_on(
+            console::input::waiters(),
+            || console::input::waiters().wakes() != seen,
+            u64::MAX,
+            true,
+        );
     }
 }
 

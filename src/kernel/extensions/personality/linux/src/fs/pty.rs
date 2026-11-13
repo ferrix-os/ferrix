@@ -604,10 +604,12 @@ impl Pty {
                 .is_some_and(|process| process.signal_pending())
         };
         let due = || crate::timer::now_nanos() >= deadline;
+        // Trusting `changed` as a `poll` of the pair does (`poll_queues`
+        // says every change wakes it): its one-second recheck, not the 5 ms
+        // of `wait_until_deadline`, which woke every shell waiting at a
+        // terminal's prompt 200 times a second.
         while !ready() && !killed() && !due() {
-            let _ = self
-                .changed
-                .wait_until_deadline(|| ready() || killed(), deadline);
+            let _ = super::wake::wait_on(&self.changed, || ready() || killed(), deadline, true);
         }
         // As before the deadline: not ready and not due is a signal, or a
         // wake that lost its input to another reader, and restarts.

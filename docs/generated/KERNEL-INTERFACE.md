@@ -3304,7 +3304,7 @@ checks above is `pub` for raised checks (F3).
 | `WaitQueue::unhook` | method | load |  |
 | `WaitQueue::wait_on_any` | method | load |  |
 | `WaitQueue::wait_trusting` | method | item, load |  |
-| `WaitQueue::wait_trusting_until` | method | item |  |
+| `WaitQueue::wait_trusting_until` | method | item, load |  |
 | `WaitQueue::wait_until_deadline` | method | item, load |  |
 | `WaitQueue::waits_ended_by_a_wake` | method | load |  |
 | `WaitQueue::wake_all` | method | item, load |  |

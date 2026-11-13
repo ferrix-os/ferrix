@@ -2509,11 +2509,18 @@ impl Serving<'_> {
             );
             self.watching = observer.is_ok_and(|observer| self.control.observe(observer).is_ok());
         }
+        // Trusting the port, as `port_wait` does (backlog p2-138): every
+        // path that queues a packet -- the driver's bell, a reader's nudge,
+        // the control channel's observer -- pushes under the port's lock and
+        // then wakes this queue, so the wait sleeps to [`RECHECK_NANOS`] and
+        // no further. `wait_until_deadline` looked again every 5 ms whatever
+        // the deadline, which woke every disk's task 200 times a second on
+        // an idle machine.
         let deadline = timer::now_nanos().saturating_add(RECHECK_NANOS);
         let port = &self.kernel_port;
         let _ = port
             .waiters()
-            .wait_until_deadline(|| !port.is_empty(), deadline);
+            .wait_trusting_until(|| !port.is_empty(), deadline);
         // Whichever reader is traced: the task serves them all.
         self.disk.each(u64::MAX, sched::trip::ring_running);
         let mut nudged = false;

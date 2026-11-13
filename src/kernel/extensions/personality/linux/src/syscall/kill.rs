@@ -430,7 +430,10 @@ fn run_alarm_clock(_argument: usize) {
             }
             continue;
         }
-        let _ = ALARMS.wait_until_deadline(|| ALARMS_CHANGED.swap(false, Ordering::AcqRel), next);
+        // Trusting the queue: every change sets the flag and then wakes it
+        // (`alarms_changed`), so the thread sleeps to the next deadline
+        // rather than looking every 5 ms while any `ITIMER_REAL` is armed.
+        let _ = ALARMS.wait_trusting_until(|| ALARMS_CHANGED.swap(false, Ordering::AcqRel), next);
     }
 }
 

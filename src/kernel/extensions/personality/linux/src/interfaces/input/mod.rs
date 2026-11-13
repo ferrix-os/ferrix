@@ -605,7 +605,11 @@ fn serve(device: &InputDevice) {
                 if device.control.signals().intersects(Signals::PEER_CLOSED) {
                     break;
                 }
-                let _ = device.control.waiters().wait_until_deadline(
+                // Trusting the channel, as `channel_write_read` does: a
+                // message and the driver's close both wake its queue, so
+                // the task sleeps to [`RECHECK_NANOS`] rather than looking
+                // again every 5 ms.
+                let _ = device.control.waiters().wait_trusting_until(
                     || {
                         device
                             .control
