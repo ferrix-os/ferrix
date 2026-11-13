@@ -1,10 +1,173 @@
 # Where it stands, in full
 
-*reviewed 2026-11-02, to `main` e51fc67fd: the first section holds the
-landings of 2026-10-21 to -31 and the second those since 2026-10-09 (reviewed
+*reviewed 2026-11-13, to `develop` 2e54146d5: the first section holds the
+landings of 2026-11-05 to -13, the second those of 2026-10-21 to -31 (reviewed
+to `main` e51fc67fd on 2026-11-02, and the microkernel run's landings of
+2026-11-04 and -05 in its entry) and the third those since 2026-10-09 (reviewed
 to `main` 2ba25d12a on 2026-10-21); the older sections are corrected where
-`main` has overtaken them. Dates are the day a commit reached `main`.* The short
+`main` has overtaken them. Dates are the day a commit reached `develop` (`main` before 2026-10-24).* The short
 version is on the [overview](README.md).
+
+## Landed 2026-11-05 to 2026-11-13 (`develop` 2e54146d5)
+
+378 commits since c9e8900d9, the last time this page was reconciled. Landings
+go to `develop`; `origin/main` stood at 9b339e738 (2026-11-08) when this was
+written, so the promotion has not carried any of what follows past that
+commit. Each entry names the commit, the design document that holds the
+detail and the consultant's ledger lines where the document gives them. Work
+on a branch is not listed.
+
+* **The microkernel run's last landings (2026-11-05).** K1's fast path with
+  every cold branch counted (931b6ab5e, 2332d1869: the program keeps its
+  `FS`, and a fast crossing is not stamped), `restricted-check` with a host on
+  a user kernel (75521b4cb), M6's list of what a `personality=user` kernel
+  leaves out and the gate that holds it to the list (341e4731b; a user kernel
+  plays no driver at stage 10, 94d024f13; `docs/microkernel/M6.md`), K16's seal of the
+  shared heap after boot (c430f1f39), `would_translate` deciding as
+  `domain_placed`, SMMUv3 and a unit that only remaps (6b3b468cf), the shim's
+  AArch64 half, with `linuxd` building and running Linux programs there
+  (efb6c2465), and `schedule=edf`, partitioned EDF with a hard CBS and
+  `THREAD_RESERVE` (b33c7d740, `test-reserve`; stage 14's row). The ordinary
+  path under `linuxd` fell from 1,010 to 840 ns (610f8d2e2, a figure of its
+  own and not a baseline; `docs/microkernel/RESTRICTED-EXIT.md`).
+* **`fast` builds on AArch64** (4d8242298, ledger 7363, 7485,
+  `docs/microkernel/FLIP.md`): its six values (`personality=user`,
+  `fs=server`, `partition_speculation=partition`, `restricted_fastpath=on`,
+  `schedule=edf`, `fault_ahead=on`) are `built`, at level `none` held to sc2.
+  x86-64 is still refused, by `personality=user` alone (`built_on` lists
+  AArch64 only: `test-net`'s paced fetch failed one run in four there); `max`
+  is refused by `exit`, `off`, `retyped` and `windows`. The profiles carry a
+  target and a `built_on` (fe93fb26a).
+* **Boot checks and the stack.** The checks wait on the state they read
+  (08e3051dc, fe08c27e3), `test-boot` says a boot's time and holds a plain one
+  to a ratchet (4411fb8a0), and `test-ring0-budget` holds ring 0's size to
+  figures (19d996767, `docs/microkernel/TINY-KERNEL.md`). An overflow of a
+  kernel stack stops with a report and writes nothing below the guard (F-103,
+  82ed4463e); every frame is measured against the guard (F-100, F-101,
+  82d5627f5); a task's last reference dropped where sleeping is forbidden goes
+  to the reaper (F-104, ed534de8d). F-107 followed on 2026-11-12: `check-stack-depth`
+  reads one figure a kernel and follows x86-64's and ARMv7-A's calls
+  (babb669bc), and a kernel stack holds its deepest path with a page left
+  after the deepest locals were trimmed (76037146d): five pages on x86-64
+  (20,480 bytes, and 20 KiB interrupt stacks) and on ARMv7-A, six on AArch64
+  (24,576); `check-stack-depth` and `check-frames` are green on all three.
+  The row lists every recursion under a judged line with its bound (fa6f58e8f).
+* **The crate split** (`docs/microkernel/CRATE-SPLIT.md`, the customer's place
+  `src/kernel/extensions/`, 2026-11-05). S0 (the kernel checks read one record
+  of the roots, 5399b6e8e), S1 (`ferrix-kernel-settings`, d34d7a278), S2 (the
+  board glue, two parts, 3a165648f), S3 (`logctl`, 1bfc49b15), S4a and S4
+  (`net_ring`, f69c9069a, 3f9191c51) and S5 (a crate of the raised checks,
+  26cc56c33, then the Linux personality, every load file, to
+  `src/kernel/extensions/personality/linux/`, 7c8b87c99, 2026-11-12) are
+  landed. After S5 `src/kernel/src` holds the core, the item, the shim and
+  the crate roots. Open branches rewrite their paths with the sed script
+  CRATE-SPLIT.md §4.1 names.
+* **The core without its extensions** (`docs/microkernel/CORE-WITHOUT-EXTENSIONS.md`,
+  ledger 9212). E1, the binary's five Linux parts in a table keyed on the
+  flag, went in on the customer's order ahead of its gates (49bd1ae9e, red
+  `check` and ring-0 budget fixed forward in a9751d012, ledger 9361) and its
+  debt landed in 9f98c414f (the manifest rules, `build.rs`'s refusal,
+  `check-core-without-extensions`; the diff check 9510, OK IF V1-V7, met). E1b,
+  `board_glue=on|off` (f1b316fc1, ledger 9647): a boot of `board_glue=off`
+  on the DK1 is owed. E2, `ferrix-errno` (f905979de, ledger 9784) and E4,
+  `ferrix-cgroup-model` (3710a973d, ledger 9824) are crates of their own.
+  E3 (the architecture's Linux code), E5, E6, E6b and E7 are not built.
+* **Memory under pressure** (`docs/ROBUSTNESS.md`, `docs/BTRFS-PRESSURE.md`;
+  the N150's hangs of 2026-11-08 were one chain: the kernel heap emptied at
+  the floor, a btrfs transaction aborted out of memory, every read EIO). The
+  heap reclaims at the floor and an abort no longer poisons reads (197835013);
+  the heap asks the OOM kill for room when no clean cache is left, L.mm.138
+  (414134529), drawing on the reserve, L.mm.139 (8ccdab764); a task's heap
+  scope draws on a reservation and an edit is admitted for its memory, W1
+  (3a0155b55, e4950d169); the block ring's write payload is copied fallibly,
+  W4 (128716d03); the dentry cache allocates before its locks (44cb219e1); a
+  reload short of memory answers ENOMEM (ff715c9b3); a heap request above a
+  page falls back to single frames, R6 (0ec0a3931); a big fork write-protects
+  in place and unmap is linear, R5 step 1 (bcd323db3). `memkeep`, a ring-3
+  service that keeps free memory above a mark, is enabled with `basic.target`
+  on the desktop image (574b44f63, f3d890596; `docs/MEMKEEP.md`; its first run
+  on the box is in the document).
+* **A hung program is not a reset** (`docs/WATCHDOG-STAGES.md`, the customer,
+  2026-11-08). `/dev/watchdog` fed by init (0b94112a1), init's feed from a
+  thread of its own and per-service watchdogs (3c89961b3), lode, auth and the
+  compositor ping from their own loops (02897d421). The stages after those
+  two are not built (the document's §6 and §7 need designs).
+* **The page-fault path landed and was reverted.** The fault path
+  (80b23d9ee to 354b58c3c, 2026-11-07) was taken out whole on 2026-11-08
+  (c52dd5326, ledger 7908): Endfield exited after its first fork in 2 of 6
+  fresh-boot runs on the N150, the cause not found, and the load-time gain was
+  not shown. Its ids are held for a re-landing. FX-0975 is withdrawn.
+* **Rust 1.99.1** replaces 1.97.1 (2ce25a724, 2026-11-06), with the lint fixes
+  it brings and the components re-pinned. **v0.3.0** is tagged on 589fcb096
+  (2026-11-08, `docs/RELEASES.md`); the workspace's version and `uname` read
+  0.3.0 (182712930).
+* **Exit and release** (`docs/EXIT-TEARDOWN.md`, `docs/HEAP-SLAB-GIVE-BACK.md`).
+  An exit's unmap orders its regions without recursion (557f73b11, c9b98d27a,
+  41950ec38: F-112 closed); a release reached from another runs after it, not
+  inside it (765406b6d, F-113 closed, `test-release-chain`); a process's end
+  empties its space with nothing a refusal can stop (900f2809d, D2, F-114
+  closed, L.user.247 and L.object.377); the heap gives an emptied slab page
+  back without walking its class's list (2f21d64db, D1, L.mm.147). A
+  60,000-region exit that took 3.4 s takes 48 to 58 ms in the batch, and the
+  box's 156 s unanswered after a kill is answered after 2 s (HEAP-SLAB-GIVE-BACK.md).
+  `test-exit-regions` is a row (76c1c3ea1 adds the reused-object variant).
+  EXIT-TEARDOWN's D3 to D5 are open.
+* **Resident counts and `/proc/meminfo`** (`docs/RSS-COUNTS.md`,
+  `docs/ANON-MERGE.md`). A space's resident counts and its region totals are
+  kept where regions and objects' pages meet (4120b4def, 30f870ea1, L.user.236
+  to 238), `/proc/meminfo`'s page-cache figures are kept per object and per
+  processor (0b912e245, L.user.239 to 241), and a private anonymous mapping is
+  made in its neighbour's object where it continues it (cf9a3c0cf, L.user.242
+  to 244: Wine's views and `brk` merge as on Linux).
+* **Wait and wake** (`docs/BLOCK-AND-WAKE.md`). A futex wait blocks on no queue
+  and the global `SLEEP` queue is gone (d673f4d31, L.user.246); an address
+  wait's bucket shrinks only when its lock shows room (844189f4d) and reads
+  its word under the lock first (2398bfd9d). An epoll wait walks its
+  registrations only while one needs every wait (119245fed, 45893b49b), asks
+  with no lock whether a look could find anything (c0c66578c), keeps its
+  rescan due time in counter ticks (35be7f31c) and the system-call clock is
+  the kernel's own, without a 128-bit division (caff40b32). Linux calls that
+  sleep are woken up to their thread's timer slack late, as on Linux
+  (23f896cd6). The gain on a guest is small; the box run of the futex change
+  is owed (BLOCK-AND-WAKE.md §7). `sys/wake-decision` is NOT YET.
+* **The Intel GPU on the N150** (`docs/INTEL-GPU.md` §15). The GT's interrupt
+  handler runs again after the vector's acknowledgement (3caf1f825; the
+  driver had seen 18 interrupts in a boot and waited for its 1 ms poll),
+  `freqlog` reports the share of the second RCS0 ran and its objects
+  (04fc44057 to 841d3adc6), and every refused ioctl is said (fa30b3f9f). The
+  hardening plan (5d7152085, the customer's three decisions, the consultant's
+  review) is landed as `intel_uapi`, a fuzz target of the front end's ioctls in
+  sequences (61f89fd5f), and nine fixes in `intel-xelp` (D1 to D4 and D10 to
+  D14 of §15.6). H2's first landing broke the real driver on the box for about
+  50 minutes (a front end on an 8 MiB stack, 2920d7b5c); `serve::Placed` builds
+  it in pages of its own (ebd73b860) and `check-native-stacks` holds the
+  Intel programs to a quarter of their stack (fb2c8ba1a). H3 to H8 are open.
+  K2 ran on the box with a monitor, its plane lit in the RMRR (eb2e1e2db).
+* **Page cache** (`docs/certification/FINDINGS.md`). A file of a writable
+  btrfs mount cut and written again read zeros once its pages were written
+  back and reclaimed; a truncation now tells the page store that the volume
+  holds the cut (c4740e3bb, F-116, Major, closed). The page store's bound is
+  read without its lock, so a fault beside a fill of the same file no longer
+  takes the two locks in both orders (258618066, F-117, closed). F-115, a
+  carried coverage anchor slid onto a new function's closing line, is open.
+  The register's count is the findings document's own.
+* **The boot splash** (`docs/SPLASH.md`). The FX mark, its slash lit as the
+  boot passes its milestones, is painted by the UEFI loader and by
+  `/bin/splash` (b2a37cffe), and on every desktop a person boots (7f2c7f9b5).
+  `ferrix-eventlog` is in every image with a shell and lode reads the box's
+  ESP (2fec00ad1). The panic screen draws its text before its QR code
+  (a79931bb4) and a panic report resets whatever it meets on its way
+  (b5e954473).
+* **Smaller.** Miri runs over btrfs's reader as CI's part 4 (5f40c2168); a
+  copy-on-write write to a page with no translation is mapped as a first
+  touch (d31c892b0); `msync(MS_SYNC)` brings each shared file mapping in its
+  range to the disk (F-106, 7e800eca9); yserver is pinned at
+  `ferrix-rootless` 496bf8e6 (da9ef16cd), then at its xi-fix and stale-fix
+  commits for Endfield (2f49c8749, 88cc1a881), and the floor of a Linux
+  system call is measured and designed, not built (a6e6add2f,
+  `docs/SYSCALL-FLOOR.md`); `test-steam-window` went red with Steam's client
+  update and the stand-in's two fixes (d8e42f1e1, d6ddb3b8e) closed the row
+  (BACKLOG, 2026-11-12).
 
 ## Landed 2026-10-21 to 2026-10-31 (`main` e51fc67fd)
 
@@ -227,7 +390,7 @@ before 2026-10-24). What is still on a branch is at the end of this section.
   is the same line; `feature/hyprix-gpu-backend` (hyprix's `hyprix:gpu`
   option and the helper's environment lines), `land/hyprix-gpu-backend`
   (`test-compositor --boot helper-desktop`), `feature/csd-decorations`,
-  `feature/mk/*` (the microkernel's M1, unchanged since 2026-10-21; its rebase and the rest of the 2026-11-03 run's work are on local `feature/mk-*` branches, unlanded),
+  `feature/mk/*` (the microkernel's M1, unchanged since 2026-10-21; most of the 2026-11-03 run's work landed on `develop` on 2026-11-04 and -05, see the first section; what stays on `feature/mk-*` branches was not checked on 2026-11-13),
   `park/f95-option-a` (F-95's landing 2 conditions), `wip/stability-try`
   (the nightly stability workflow) and `docs/intel-display` (a design paused
   by 3h). `docs/roadmap/open-branches.md` has the 2026-11-02 count.

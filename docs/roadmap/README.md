@@ -8,7 +8,7 @@ stage has its own page, and the details are linked at the end.
 
 The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
 
-## Where it stands (2026-11-02)
+## Where it stands (2026-11-13)
 
 **Done**
 
@@ -93,11 +93,19 @@ The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
   profiles, the load ratchet and a Ferrocene-version type-check are on
   `main`; so are the two fixes `smt=off` waited on (F-73, F-64) and the
   tooling for the performance baselines, which are not measured yet; M1's
-  designs (K5, K6, K7, K10, K12) are reviewed, with their code on branches
-  ([its page](microkernel-m0.md)); the overnight run of 2026-11-03 landed B5's
-  orphan step, and its other work (K2 to K4 and the rest of M1, K13, K15, K1,
-  K11, `linuxd` booting Linux programs, K8, K14, `btrfsd`) is on unlanded local
-  branches, not gated.
+  designs (K5, K6, K7, K10, K12) are reviewed ([its page](microkernel-m0.md));
+  the overnight run of 2026-11-03 landed B5's orphan step and, by 2026-11-05,
+  most of its other work (K1 to K7, K10 to K17, `linuxd` booting
+  Linux programs, K8, K14, `btrfsd`, M6). `fast` builds on AArch64 since
+  2026-11-05, x86-64 and `max` are still refused
+  (`docs/microkernel/FLIP.md`). The kernel's optional parts are crates under
+  `src/kernel/extensions/` (the crate split's S0 to S5b, 2026-11-06 to -12),
+  and a kernel with none of them builds with `board_glue=off` (`docs/microkernel/CORE-WITHOUT-EXTENSIONS.md` E1 to E4; E3, E5
+  and E6 are not built).
+- **Stage 14 (real-time):** one scheduler class, partitioned EDF with a hard
+  CBS behind `schedule=edf`, is on `develop` since 2026-11-05 (`THREAD_RESERVE`,
+  `test-reserve`); the other classes were on pull requests #38 and #40 on 2026-11-03, and `HardRt` and the
+  stage's exit test are not built.
 - **Chrome** runs headless and in a window, on glibc and on ferrousli, Ferrix's
   own C library. On ARMv7-A, Debian's armhf Chromium runs headless in 512 MiB
   under QEMU, and the DK1's SD card has a driver; neither has run on the board.
@@ -154,6 +162,19 @@ The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
   first four slices of product signing (the loader verifies a slot's signed
   manifest; `present` keeps it off until a release key exists).
 
+- **Since 2026-11-05** (details in [Where it stands](where-it-stands.md)):
+  v0.3.0 (tagged 2026-11-08) and Rust 1.99.1; memory under pressure (the heap
+  reclaims at the floor and asks the OOM kill for room, a btrfs abort no longer
+  poisons reads, `memkeep` keeps free memory above a mark), a hung program
+  restarted rather than the machine reset, kernel stacks of five, six and five
+  pages with a check that holds the deepest path, an exit that is never refused,
+  `/proc/meminfo` and resident counts kept rather than walked, a futex wait on
+  no queue and an epoll wait that does not walk its registrations, fixes and a
+  fuzz target for the Intel GPU's front end, and the boot splash. The
+  page-fault path of 2026-11-07 was reverted on 2026-11-08 (Endfield exited
+  after its first fork). `origin/main` is at 9b339e738 (2026-11-08); the rest
+  is on `develop`.
+
 **Next:** cutting test and gate run time, the customer's priority one
 (`docs/TEST-TIME.md`), then Steam's workarounds and the namespaces under
 them; what is red, parked and waiting is in
@@ -161,7 +182,8 @@ them; what is red, parked and waiting is in
 
 **Not started**
 
-- Stage 14 (real-time).
+- Nothing is wholly unstarted; stage 14's `HardRt` and exit test are the
+  nearest.
 
 **Under way, but outside the list above:** stage 21, NVIDIA's own driver on the
 RTX 3060 (`docs/NVIDIA.md`): N0, the kernel prerequisites, and N1, the GSP
