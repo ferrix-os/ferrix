@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 ferrix-argon2.workspace = true
+ferrix-sha256.workspace = true
 
 [lints]
 workspace = true

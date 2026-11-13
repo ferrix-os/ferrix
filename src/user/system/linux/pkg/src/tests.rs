@@ -413,3 +413,294 @@ fn walk(root: &Path) -> Vec<PathBuf> {
     }
     out
 }
+
+mod repository {
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    use ferrix_pkg::index::{self, Index};
+
+    use super::{Made, install, names, package_at, read, read_all, root};
+    use crate::repo::{self, ACCEPTED, INDEX, Updated};
+    use crate::{installed, this_arch};
+
+    /// A package of `name` and `version` whose one program says so.
+    fn made(name: &str, version: &str, depends: &[&str]) -> Vec<u8> {
+        let says: &'static [u8] = Box::leak(format!("{name} {version}\n").into_bytes().into());
+        let program: &'static str = Box::leak(format!("bin/{name}").into_boxed_str());
+        package_at(
+            name,
+            version,
+            depends,
+            &[(program, Made::File(says))],
+            this_arch(),
+            None,
+        )
+    }
+
+    /// A repository at `dir` holding `packages`, its index of `sequence`
+    /// with `security` marking those versions, by `name version`. Returns
+    /// the index's bytes.
+    fn publish(dir: &Path, sequence: u64, packages: &[Vec<u8>], security: &[&str]) -> Vec<u8> {
+        let arch_dir = dir.join(this_arch());
+        fs::create_dir_all(&arch_dir).unwrap();
+        let mut entries = Vec::new();
+        for bytes in packages {
+            let record = read(bytes).unwrap().record;
+            let mut entry = index::entry_of(&record, bytes);
+            let named = format!("{} {}", entry.name, entry.version);
+            if security.contains(&named.as_str()) {
+                entry.security = true;
+                entry.advisory = Some(format!("FXSA-2026-9: {named} fixes a fault"));
+            }
+            fs::write(arch_dir.join(&entry.file), bytes).unwrap();
+            entries.push(entry);
+        }
+        let text = index::render(&Index {
+            arch: this_arch().to_owned(),
+            sequence,
+            entries,
+        });
+        fs::write(arch_dir.join(INDEX), &text).unwrap();
+        text.into_bytes()
+    }
+
+    fn file_of(dir: &Path, name: &str, version: &str) -> PathBuf {
+        dir.join(this_arch())
+            .join(format!("{name}-{version}-{}.fxpkg", this_arch()))
+    }
+
+    fn version_of(root: &Path, name: &str) -> String {
+        installed(root)
+            .unwrap()
+            .into_iter()
+            .find(|r| r.package.name == name)
+            .map(|r| r.package.version.as_str().to_owned())
+            .unwrap_or_default()
+    }
+
+    fn refused<T: std::fmt::Debug>(result: Result<T, crate::Error>, why: &str) {
+        let error = result.expect_err(why);
+        assert!(error.0.contains(why), "{error} does not say {why:?}");
+    }
+
+    #[test]
+    fn an_upgrade_from_a_repository_brings_the_security_fix() {
+        let root = root("repo-upgrade");
+        let repository = root.join("srv");
+        let _ = install(&root, read_all(&[made("base", "1.0", &[])])).unwrap();
+        let _ = install(&root, read_all(&[made("app", "1.0", &["base"])])).unwrap();
+        refused(
+            repo::newer_lines(&root),
+            "no index accepted yet: run pkg update",
+        );
+        let _ = publish(
+            &repository,
+            1,
+            &[
+                made("base", "1.0", &[]),
+                made("base", "1.1", &[]),
+                made("base", "1.2", &[]),
+                made("app", "2.0", &["base >= 1.2", "lib"]),
+                made("lib", "1.0", &[]),
+            ],
+            &["base 1.1"],
+        );
+        let updated = repo::update(&root, &repository).unwrap();
+        assert!(matches!(updated, Updated::Accepted(ref i, None) if i.sequence == 1));
+        assert!(fs::read(root.join(ACCEPTED)).is_ok());
+        assert!(matches!(
+            repo::update(&root, &repository).unwrap(),
+            Updated::Same(_)
+        ));
+        let lines = repo::newer_lines(&root).unwrap();
+        assert_eq!(
+            lines,
+            [
+                "app 1.0 -> 2.0",
+                "base 1.0 -> 1.2  (security)",
+                "  security fix in 1.1: FXSA-2026-9: base 1.1 fixes a fault",
+                "pkg: 2 package(s) have a newer version, 1 with a security fix (index 1)",
+            ]
+        );
+        // base alone, by name.
+        let done = repo::upgrade(&root, &repository, &["base".to_owned()]).unwrap();
+        assert_eq!(done.len(), 1);
+        assert_eq!(version_of(&root, "base"), "1.2");
+        assert_eq!(fs::read(root.join("bin/base")).unwrap(), b"base 1.2\n");
+        // The rest: app 2.0, and lib, which it needs and was not installed.
+        let done = repo::upgrade(&root, &repository, &[]).unwrap();
+        let went: Vec<String> = done
+            .iter()
+            .map(|(r, old)| format!("{} {}", r.package.name, old.is_some()))
+            .collect();
+        assert_eq!(went, ["lib false", "app true"]);
+        assert_eq!(names(&root), ["app", "base", "lib"]);
+        assert!(repo::upgrade(&root, &repository, &[]).unwrap().is_empty());
+        assert_eq!(
+            repo::newer_lines(&root).unwrap(),
+            ["pkg: every package is the newest of index 1"]
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_index_older_than_the_accepted_one_is_refused() {
+        let root = root("repo-older");
+        let repository = root.join("srv");
+        let base = made("base", "1.0", &[]);
+        let first = publish(&repository, 5, std::slice::from_ref(&base), &[]);
+        assert!(matches!(
+            repo::update(&root, &repository).unwrap(),
+            Updated::Accepted(_, None)
+        ));
+        // Older: refused, and the accepted index stays.
+        let _ = publish(&repository, 4, std::slice::from_ref(&base), &[]);
+        refused(
+            repo::update(&root, &repository),
+            "the repository's index 4 is older than the one accepted, 5: refused",
+        );
+        assert_eq!(fs::read(root.join(ACCEPTED)).unwrap(), first);
+        // The same sequence, other contents: refused.
+        let _ = publish(
+            &repository,
+            5,
+            &[base.clone(), made("lib", "1.0", &[])],
+            &[],
+        );
+        refused(
+            repo::update(&root, &repository),
+            "the repository's index 5 is not the index 5 accepted before: refused",
+        );
+        // Newer: accepted, naming the one it replaced.
+        let _ = publish(&repository, 6, &[base], &[]);
+        assert!(matches!(
+            repo::update(&root, &repository).unwrap(),
+            Updated::Accepted(ref i, Some(5)) if i.sequence == 6
+        ));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_file_unlike_the_index_is_refused_before_anything_is_written() {
+        let root = root("repo-digest");
+        let repository = root.join("srv");
+        let _ = install(&root, read_all(&[made("base", "1.0", &[])])).unwrap();
+        let _ = publish(&repository, 1, &[made("base", "2.0", &[])], &[]);
+        let _ = repo::update(&root, &repository).unwrap();
+        let file = file_of(&repository, "base", "2.0");
+        let good = fs::read(&file).unwrap();
+        // One byte changed, the length kept: the digest refuses it.
+        let mut changed = good.clone();
+        let last = changed.len() - 1;
+        changed[last] ^= 1;
+        fs::write(&file, &changed).unwrap();
+        refused(
+            repo::upgrade(&root, &repository, &[]),
+            "base 2.0: base-2.0-",
+        );
+        refused(
+            repo::upgrade(&root, &repository, &[]),
+            "is not the file the index names (its SHA-256 differs): refused",
+        );
+        // A byte more: the size refuses it.
+        let mut longer = good.clone();
+        longer.push(0);
+        fs::write(&file, &longer).unwrap();
+        refused(
+            repo::upgrade(&root, &repository, &[]),
+            &format!("bytes, and the index says {}", good.len()),
+        );
+        // Another package in its place, with the index made for it: the
+        // digest is right, the package is not the one the index names.
+        let other = made("base", "3.0", &[]);
+        let text = fs::read_to_string(repository.join(this_arch()).join(INDEX)).unwrap();
+        let text = text
+            .replace(
+                &index::hex(&index::sha256(&good)),
+                &index::hex(&index::sha256(&other)),
+            )
+            .replace(
+                &format!("size = \"{}\"", good.len()),
+                &format!("size = \"{}\"", other.len()),
+            )
+            .replace("sequence = \"1\"", "sequence = \"2\"");
+        fs::write(repository.join(this_arch()).join(INDEX), text).unwrap();
+        fs::write(&file, &other).unwrap();
+        let _ = repo::update(&root, &repository).unwrap();
+        refused(
+            repo::upgrade(&root, &repository, &[]),
+            "holds base 3.0, which is not the package the index names: refused",
+        );
+        // Nothing of any of them went in.
+        assert_eq!(version_of(&root, "base"), "1.0");
+        assert_eq!(fs::read(root.join("bin/base")).unwrap(), b"base 1.0\n");
+        // The control: the right file goes in.
+        fs::write(&file, &good).unwrap();
+        let _ = publish(&repository, 3, &[made("base", "2.0", &[])], &[]);
+        let _ = repo::update(&root, &repository).unwrap();
+        assert_eq!(repo::upgrade(&root, &repository, &[]).unwrap().len(), 1);
+        assert_eq!(version_of(&root, "base"), "2.0");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_dependency_nobody_has_is_refused() {
+        let root = root("repo-missing");
+        let repository = root.join("srv");
+        let _ = install(&root, read_all(&[made("app", "1.0", &[])])).unwrap();
+        let _ = publish(&repository, 1, &[made("app", "2.0", &["gone"])], &[]);
+        let _ = repo::update(&root, &repository).unwrap();
+        refused(
+            repo::upgrade(&root, &repository, &[]),
+            "app 2.0 needs gone, which neither this root nor the repository has",
+        );
+        refused(
+            repo::upgrade(&root, &repository, &["other".to_owned()]),
+            "other is not installed",
+        );
+        assert_eq!(version_of(&root, "app"), "1.0");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_repository_is_named_or_configured() {
+        let root = root("repo-named");
+        refused(
+            repo::repository(&root, None),
+            "no repository: name one with --repo",
+        );
+        refused(
+            repo::repository(&root, Some("https://example.org/ferrix")),
+            "fetching over HTTP is not built yet",
+        );
+        assert_eq!(
+            repo::repository(&root, Some("file:///srv/ferrix")).unwrap(),
+            PathBuf::from("/srv/ferrix")
+        );
+        fs::create_dir_all(root.join("etc/pkg")).unwrap();
+        fs::write(root.join(repo::REPOSITORY), "/srv/pkgs\n# a comment line\n").unwrap();
+        assert_eq!(
+            repo::repository(&root, None).unwrap(),
+            PathBuf::from("/srv/pkgs")
+        );
+        // An index for another architecture.
+        let repository = root.join("srv");
+        fs::create_dir_all(repository.join(this_arch())).unwrap();
+        let other = if this_arch() == "x86_64" {
+            "aarch64"
+        } else {
+            "x86_64"
+        };
+        fs::write(
+            repository.join(this_arch()).join(INDEX),
+            format!("[index]\narch = \"{other}\"\nsequence = \"1\"\n"),
+        )
+        .unwrap();
+        refused(
+            repo::update(&root, &repository),
+            &format!("the repository's the index is for {other}"),
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+}

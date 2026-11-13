@@ -15,7 +15,12 @@ name = "ferrix-pkg"
 version = "0.1.0"
 dependencies = [
  "ferrix-argon2",
+ "ferrix-sha256",
 ]
+
+[[package]]
+name = "ferrix-sha256"
+version = "0.1.0"
 
 [[package]]
 name = "pkg"

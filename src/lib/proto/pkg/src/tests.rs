@@ -8,6 +8,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use alloc::{format, vec};
 
+use crate::index;
 use crate::manifest::{self, Abi, Build, Dependency, Source, Version};
 use crate::plan::plan;
 use crate::record::{self, Installed, Record};
@@ -464,5 +465,285 @@ fn the_plan_refuses_a_set_that_does_not_install() {
     plan_refuses(
         &[package("a", "1", &["a"], &["bin/a"])],
         "depends on itself",
+    );
+}
+
+/// An index of `entries`, each `(name, version, depends, security)`, with a
+/// file, size and digest made up from the name and version.
+fn index_of(sequence: u64, entries: &[(&str, &str, &[&str], bool)]) -> index::Index {
+    index::Index {
+        arch: "x86_64".to_owned(),
+        sequence,
+        entries: entries
+            .iter()
+            .map(|(name, version, depends, security)| index::Entry {
+                name: (*name).to_owned(),
+                version: Version::parse(version).expect("a version"),
+                file: format!("{name}-{version}-x86_64.fxpkg"),
+                size: 10,
+                sha256: index::sha256(format!("{name} {version}").as_bytes()),
+                depends: depends
+                    .iter()
+                    .map(|d| Dependency::parse(d).expect("a dependency"))
+                    .collect(),
+                security: *security,
+                advisory: security.then(|| format!("FXSA-2026-1: {name} {version}")),
+            })
+            .collect(),
+    }
+}
+
+#[test]
+fn an_index_reads_back_as_written() {
+    let index = index_of(
+        7,
+        &[
+            ("statd", "1.0", &[], false),
+            ("statd", "1.1", &["base >= 1.0"], true),
+            ("base", "1.0", &[], false),
+        ],
+    );
+    let text = index::render(&index);
+    assert_eq!(index::parse(&text), Ok(index));
+    assert!(text.contains("security = true\nadvisory = \"FXSA-2026-1: statd 1.1\""));
+    // SHA-256 is FIPS 180-4's: "abc".
+    assert_eq!(
+        index::hex(&index::sha256(b"abc")),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+}
+
+/// `text`, an index, is refused with an error that mentions `why`.
+fn index_refuses(text: &str, why: &str) {
+    let error = index::parse(text).expect_err(why);
+    assert!(error.0.contains(why), "{error} does not say {why:?}");
+}
+
+#[test]
+fn an_index_refuses_what_it_does_not_write() {
+    let good = index::render(&index_of(3, &[("statd", "1.1", &[], true)]));
+    assert!(index::parse(&good).is_ok());
+    let digest = index::hex(&index::sha256(b"statd 1.1"));
+    for (from, to, why) in [
+        ("arch = \"x86_64\"", "arch = \"sparc\"", "is not one of"),
+        ("sequence = \"3\"", "sequence = \"-3\"", "is not a number"),
+        ("sequence = \"3\"", "sequence = \"\"", "is not a number"),
+        (
+            "name = \"statd\"",
+            "name = \"Statd\"",
+            "is not a package name",
+        ),
+        ("version = \"1.1\"", "version = \"1.x\"", "is not a version"),
+        (
+            "statd-1.1-x86_64.fxpkg",
+            "../statd-1.1-x86_64.fxpkg",
+            "is not a package file's name",
+        ),
+        (
+            "statd-1.1-x86_64.fxpkg",
+            "statd.tar",
+            "is not a package file's name",
+        ),
+        ("size = \"10\"", "size = \"ten\"", "is not a number"),
+        (
+            digest.as_str(),
+            digest.get(2..).expect("hex"),
+            "is not 32 bytes",
+        ),
+        (
+            "security = true\n",
+            "",
+            "an advisory on a version that is not",
+        ),
+        (
+            "advisory = \"FXSA-2026-1: statd 1.1\"\n",
+            "",
+            "a security fix without an advisory",
+        ),
+        ("FXSA-2026-1: statd 1.1", "", "an advisory is one line"),
+        (
+            "FXSA-2026-1: statd 1.1",
+            "two\\nlines",
+            "an advisory is one line",
+        ),
+        (
+            "security = true",
+            "security = \"yes\"",
+            "security is true or false",
+        ),
+        (
+            "depends = []",
+            "depends = [\"Base\"]",
+            "is not a dependency",
+        ),
+        ("[index]", "[repository]", "is not in an index"),
+        (
+            "sequence = \"3\"",
+            "sequence = \"3\"\nmirror = \"x\"",
+            "has no key `mirror`",
+        ),
+    ] {
+        assert!(good.contains(from), "{from}");
+        index_refuses(&good.replacen(from, to, 1), why);
+    }
+    let long = "x".repeat(index::ADVISORY_MAX + 1);
+    index_refuses(
+        &good.replacen("FXSA-2026-1: statd 1.1", &long, 1),
+        "an advisory is one line",
+    );
+    let twice = index::render(&index_of(
+        3,
+        &[("statd", "1.1", &[], false), ("statd", "1.1", &[], false)],
+    ));
+    index_refuses(&twice, "statd 1.1 is in the index twice");
+    index_refuses("", "an index has no [index]");
+}
+
+#[test]
+fn newer_names_each_version_waiting_and_the_security_fixes_it_brings() {
+    let index = index_of(
+        5,
+        &[
+            ("statd", "1.0", &[], false),
+            ("statd", "1.1", &[], true),
+            ("statd", "1.2", &[], false),
+            ("btop", "2.0", &[], false),
+            ("curl", "8.0", &[], true),
+        ],
+    );
+    let installed = [
+        package("statd", "1.0", &[], &["bin/statd"]),
+        package("btop", "2.0", &[], &["bin/btop"]),
+        package("curl", "8.1", &[], &["bin/curl"]),
+        package("zlib", "1.3", &[], &["lib/libz.so"]),
+    ];
+    let newer = index.newer(&installed);
+    // btop is up to date, curl is newer than the repository's, zlib is not
+    // in it: only statd has a newer version, and 1.1's fix comes with 1.2.
+    assert_eq!(newer.len(), 1);
+    let statd = &newer[0];
+    assert_eq!(statd.name, "statd");
+    assert_eq!(statd.installed.as_str(), "1.0");
+    assert_eq!(statd.newest.version.as_str(), "1.2");
+    let fixes: Vec<&str> = statd.fixes.iter().map(|e| e.version.as_str()).collect();
+    assert_eq!(fixes, ["1.1"]);
+    // Installed at the fixed version, nothing is waiting but 1.2.
+    let at_fix = [package("statd", "1.1", &[], &["bin/statd"])];
+    let newer = index.newer(&at_fix);
+    assert_eq!(newer.len(), 1);
+    assert!(newer[0].fixes.is_empty());
+}
+
+#[test]
+fn an_upgrade_takes_the_newest_and_what_it_needs_by_minimum_version() {
+    let index = index_of(
+        5,
+        &[
+            ("app", "2.0", &["base >= 1.5", "extra"], false),
+            ("base", "1.4", &[], false),
+            ("base", "1.6", &[], false),
+            ("base", "1.9", &[], false),
+            ("extra", "1.0", &[], false),
+            ("lib", "3.0", &[], false),
+        ],
+    );
+    let names = |chosen: Vec<&index::Entry>| -> Vec<String> {
+        chosen
+            .iter()
+            .map(|e| format!("{} {}", e.name, e.version))
+            .collect()
+    };
+    // base 1.2 installed is too old for app 2.0: the newest base comes,
+    // and extra, which is not installed, comes too.
+    let installed = [
+        package("app", "1.0", &["base"], &["bin/app"]),
+        package("base", "1.2", &[], &["bin/base"]),
+    ];
+    let chosen = index
+        .upgrade(&installed, &["app".to_owned()])
+        .expect("an upgrade");
+    assert_eq!(names(chosen), ["app 2.0", "base 1.9", "extra 1.0"]);
+    // base 1.5 installed will do: it stays.
+    let installed = [
+        package("app", "1.0", &[], &["bin/app"]),
+        package("base", "1.5", &[], &["bin/base"]),
+        package("extra", "1.0", &[], &["bin/extra"]),
+    ];
+    let chosen = index
+        .upgrade(&installed, &["app".to_owned()])
+        .expect("an upgrade");
+    assert_eq!(names(chosen), ["app 2.0"]);
+    // Everything: base too, and a package the index lacks is passed over.
+    let installed = [
+        package("app", "2.0", &[], &["bin/app"]),
+        package("base", "1.5", &[], &["bin/base"]),
+        package("mine", "1.0", &[], &["bin/mine"]),
+    ];
+    let chosen = index.upgrade(&installed, &[]).expect("an upgrade");
+    assert_eq!(names(chosen), ["base 1.9"]);
+    // Up to date: nothing.
+    let installed = [package("lib", "3.0", &[], &["lib/x"])];
+    assert!(
+        index
+            .upgrade(&installed, &[])
+            .expect("an upgrade")
+            .is_empty()
+    );
+}
+
+#[test]
+fn an_upgrade_refuses_what_it_cannot_meet() {
+    let index = index_of(
+        5,
+        &[
+            ("app", "2.0", &["missing"], false),
+            ("tool", "2.0", &["base >= 3"], false),
+            ("base", "2.0", &[], false),
+            ("old", "1.0", &["newlib >= 2"], false),
+            ("newlib", "1.0", &[], false),
+            ("pin", "2.0", &["base >= 2.5"], false),
+            ("dual", "2.0", &["base"], false),
+        ],
+    );
+    let refused = |installed: &[Record], names: &[&str], why: &str| {
+        let names: Vec<String> = names.iter().map(|n| (*n).to_owned()).collect();
+        let error = index.upgrade(installed, &names).expect_err(why);
+        assert!(error.0.contains(why), "{error} does not say {why:?}");
+    };
+    let app = package("app", "1.0", &[], &["bin/app"]);
+    refused(
+        core::slice::from_ref(&app),
+        &["app"],
+        "app 2.0 needs missing, which neither this root nor the repository has",
+    );
+    refused(
+        core::slice::from_ref(&app),
+        &["nothing"],
+        "nothing is not installed",
+    );
+    refused(
+        &[package("ghost", "1.0", &[], &["bin/ghost"])],
+        &["ghost"],
+        "the repository has no ghost",
+    );
+    refused(
+        &[package("tool", "1.0", &[], &["bin/tool"])],
+        &["tool"],
+        "tool 2.0 needs base >= 3, which neither",
+    );
+    refused(
+        &[package("old", "0.9", &[], &["bin/old"])],
+        &["old"],
+        "old 1.0 needs newlib >= 2, which neither",
+    );
+    // pin needs base >= 2.5; the upgrade of base itself chose 2.0, which
+    // the index's newest base cannot change: refused, not half done.
+    refused(
+        &[
+            package("pin", "1.0", &[], &["bin/pin"]),
+            package("base", "1.0", &[], &["bin/base"]),
+        ],
+        &["base", "pin"],
+        "pin 2.0 needs base >= 2.5, which neither",
     );
 }

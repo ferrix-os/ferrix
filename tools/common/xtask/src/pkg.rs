@@ -12,9 +12,17 @@
 //! while `pkg-user` needs it. Each refusal is a negative control of the check
 //! behind it, and the installs that go through show the same checks pass a
 //! good package.
+//!
+//! Then the repositories of `docs/UPDATES.md` §2.4, directories in the
+//! boot's root: `pkg update` accepts an index, `pkg newer` names the
+//! security fix waiting with its advisory, `pkg upgrade` puts it in place
+//! with the package the upgrade needs, and an older index, another index of
+//! the accepted sequence, a file whose digest is not the index's and a
+//! dependency no one has are refused, each beside the run that passes.
 
 use std::path::PathBuf;
 
+use ferrix_pkg::index::{self, Index};
 use ferrix_pkg::manifest;
 use ferrix_pkg::record::{self, Installed, Record};
 
@@ -32,7 +40,9 @@ pub(crate) const TASKS: &[Task] = &[
         help: &[
             "test-pkg      Boot with pkg, the package manager, and require it to install, run and remove the stat",
             "              service, to replace a package with its next version and back (`pkg install --replace`),",
-            "              and to refuse a changed package or replacement, a missing dependency and a needed removal",
+            "              and to refuse a changed package or replacement, a missing dependency and a needed removal;",
+            "              then to upgrade from a repository it serves itself, with a security fix, and refuse an older",
+            "              index, a wrong digest and a dependency nobody has (docs/UPDATES.md)",
         ],
         run,
     },
@@ -121,6 +131,18 @@ fn made_at(
     depends: &[&str],
     arch: Arch,
 ) -> Result<Vec<u8>> {
+    Ok(made_with(name, version, says, extra, depends, arch)?.1)
+}
+
+/// [`made_at`], and the package's record.
+fn made_with(
+    name: &str,
+    version: &str,
+    says: &str,
+    extra: Option<&str>,
+    depends: &[&str],
+    arch: Arch,
+) -> Result<(Record, Vec<u8>)> {
     let depends: Vec<String> = depends.iter().map(|name| format!("\"{name}\"")).collect();
     let text = format!(
         "[package]\nname = \"{name}\"\nversion = \"{version}\"\ndescription = \"test-pkg's {name}\"\nlicense = \"MIT\"\n\
@@ -154,7 +176,134 @@ fn made_at(
         mode: 0o644,
         content: Content::Bytes(record::render(&record).into_bytes()),
     });
-    initramfs::package(&files)
+    let bytes = initramfs::package(&files)?;
+    Ok((record, bytes))
+}
+
+/// Where the boot's repositories are (`docs/UPDATES.md` §2.4): one
+/// directory each, `<arch>/index.toml` and the package files it names.
+const REPOSITORIES: &str = "srv/pkg-repo";
+
+/// The advisory of the security fix in the boot's repository.
+const ADVISORY: &str = "FXSA-2026-0001: test-pkg's pkg-base 1.0 fixed in 1.1";
+
+/// One of the boot's repositories: its directory, its index's sequence,
+/// its packages, the one version (`name version`) marked a security fix,
+/// and a file whose one byte is changed after the index named it.
+struct Repository<'a> {
+    dir: &'a str,
+    sequence: u64,
+    packages: Vec<&'a (Record, Vec<u8>)>,
+    security: Option<&'a str>,
+    tamper: Option<&'a str>,
+}
+
+/// `repository`'s files, under [`REPOSITORIES`].
+fn repository_files(arch: Arch, repository: &Repository<'_>) -> Result<Vec<File>> {
+    let at = format!("{REPOSITORIES}/{}/{}", repository.dir, arch.name());
+    let mut files = Vec::new();
+    let mut entries = Vec::new();
+    for (record, bytes) in &repository.packages {
+        let mut entry = index::entry_of(record, bytes);
+        let named = format!("{} {}", entry.name, entry.version);
+        if repository.security == Some(named.as_str()) {
+            entry.security = true;
+            entry.advisory = Some(ADVISORY.to_owned());
+        }
+        let mut bytes = bytes.clone();
+        if repository.tamper == Some(named.as_str()) {
+            // One byte of its program changed, the length kept: only the
+            // digest can tell.
+            bytes = initramfs::with_files_changed(&bytes, |name, data| {
+                let mut data = data.to_vec();
+                if let Some(first) = data.first_mut().filter(|_| name.starts_with("bin/")) {
+                    *first ^= 0x20;
+                }
+                Ok(Some(data))
+            })?;
+        }
+        files.push(File {
+            path: format!("{at}/{}", entry.file),
+            mode: 0o644,
+            content: Content::Bytes(bytes),
+        });
+        entries.push(entry);
+    }
+    let text = index::render(&Index {
+        arch: arch.name().to_owned(),
+        sequence: repository.sequence,
+        entries,
+    });
+    files.push(File {
+        path: format!("{at}/index.toml"),
+        mode: 0o644,
+        content: Content::Bytes(text.into_bytes()),
+    });
+    Ok(files)
+}
+
+/// The boot's repositories: `good`, index 2, whose pkg-base 1.1 is a
+/// security fix and whose pkg-user 2.0 needs it and pkg-lib, which is not
+/// installed; `older`, index 1; `same-sequence`, another index 2;
+/// `bad-digest`, `good` with pkg-base 1.1's program changed after its
+/// index was written; and `missing`, index 3, whose pkg-user 3.0 needs a
+/// package no one has.
+fn repositories(arch: Arch) -> Result<Vec<File>> {
+    let base = made_with("pkg-base", "1.0", "here", None, &[], arch)?;
+    let fixed = made_with("pkg-base", "1.1", "fixed", None, &[], arch)?;
+    let user = made_with("pkg-user", "1.0", "here", None, &["pkg-base"], arch)?;
+    let user2 = made_with(
+        "pkg-user",
+        "2.0",
+        "two",
+        None,
+        &["pkg-base >= 1.1", "pkg-lib"],
+        arch,
+    )?;
+    let user3 = made_with("pkg-user", "3.0", "three", None, &["pkg-gone"], arch)?;
+    let lib = made_with("pkg-lib", "1.0", "here", None, &[], arch)?;
+    let good = || vec![&base, &fixed, &user, &user2, &lib];
+    let mut files = Vec::new();
+    for repository in [
+        Repository {
+            dir: "good",
+            sequence: 2,
+            packages: good(),
+            security: Some("pkg-base 1.1"),
+            tamper: None,
+        },
+        Repository {
+            dir: "older",
+            sequence: 1,
+            packages: vec![&base, &user],
+            security: None,
+            tamper: None,
+        },
+        Repository {
+            dir: "same-sequence",
+            sequence: 2,
+            packages: vec![&base, &user],
+            security: None,
+            tamper: None,
+        },
+        Repository {
+            dir: "bad-digest",
+            sequence: 2,
+            packages: good(),
+            security: Some("pkg-base 1.1"),
+            tamper: Some("pkg-base 1.1"),
+        },
+        Repository {
+            dir: "missing",
+            sequence: 3,
+            packages: vec![&base, &fixed, &user2, &user3, &lib],
+            security: Some("pkg-base 1.1"),
+            tamper: None,
+        },
+    ] {
+        files.extend(repository_files(arch, &repository)?);
+    }
+    Ok(files)
 }
 
 /// What the boot's shell runs. Each check echoes `pkg-test: ok <what>`.
@@ -186,10 +335,28 @@ pkg install --replace $P/base.fxpkg && echo "pkg-test: ok replaced back"
 read -r line < /bin/pkg-base-two || echo "pkg-test: ok the newer version's own file went with it"
 pkg remove pkg-base || echo "pkg-test: ok refused removing a dependency"
 pkg remove pkg-user && pkg remove pkg-base && echo "pkg-test: ok removed both"
+R=/srv/pkg-repo
+pkg install $P/base.fxpkg $P/user.fxpkg && echo "pkg-test: ok installed for the repository"
+pkg newer || echo "pkg-test: ok newer wants an accepted index"
+pkg update --repo $R/good && echo "pkg-test: ok accepted index 2"
+pkg newer | while read -r line; do case "$line" in 'pkg-base 1.0 -> 1.1  (security)') echo "pkg-test: ok newer named the security fix";; 'security fix in 1.1: FXSA-2026-0001: '*) echo "pkg-test: ok newer gave its advisory";; 'pkg-user 1.0 -> 2.0') echo "pkg-test: ok newer named pkg-user 2.0";; esac; done
+pkg update --repo $R/older 2>&1 | while read -r line; do case "$line" in *'index 1 is older than the one accepted, 2: refused') echo "pkg-test: ok refused an older index";; esac; done
+pkg update --repo $R/same-sequence 2>&1 | while read -r line; do case "$line" in *'index 2 is not the index 2 accepted before: refused') echo "pkg-test: ok refused another index 2";; esac; done
+pkg upgrade --repo $R/bad-digest 2>&1 | while read -r line; do case "$line" in *'its SHA-256 differs): refused') echo "pkg-test: ok refused a wrong digest";; esac; done
+read -r line < /bin/pkg-base && case "$line" in 'pkg-base: here') echo "pkg-test: ok the refused upgrade changed nothing";; esac
+read -r line < /bin/pkg-lib || echo "pkg-test: ok nothing it needed went in"
+pkg upgrade --repo $R/good && echo "pkg-test: ok upgraded"
+read -r line < /bin/pkg-base && case "$line" in 'pkg-base: fixed') echo "pkg-test: ok the security fix is in";; esac
+read -r line < /bin/pkg-user && case "$line" in 'pkg-user: two') echo "pkg-test: ok pkg-user is 2.0";; esac
+read -r line < /bin/pkg-lib && echo "pkg-test: ok what it needs came with it"
+pkg newer | while read -r line; do case "$line" in 'pkg: every package is the newest of index 2') echo "pkg-test: ok up to date";; esac; done
+pkg update --repo $R/missing && echo "pkg-test: ok accepted index 3"
+pkg upgrade --repo $R/missing 2>&1 | while read -r line; do case "$line" in *'pkg-user 3.0 needs pkg-gone, which neither this root nor the repository has') echo "pkg-test: ok refused a dependency nobody has";; esac; done
+read -r line < /bin/pkg-user && case "$line" in 'pkg-user: two') echo "pkg-test: ok pkg-user stayed 2.0";; esac
 "#;
 
 /// The lines the boot must print, in any order.
-const WANTED: [&str; 24] = [
+const WANTED: [&str; 43] = [
     "pkg-test: started",
     "pkg-test: ok installed",
     "pkg-test: ok listed",
@@ -214,6 +381,25 @@ const WANTED: [&str; 24] = [
     "pkg-test: ok the newer version's own file went with it",
     "pkg-test: ok refused removing a dependency",
     "pkg-test: ok removed both",
+    "pkg-test: ok installed for the repository",
+    "pkg-test: ok newer wants an accepted index",
+    "pkg-test: ok accepted index 2",
+    "pkg-test: ok newer named the security fix",
+    "pkg-test: ok newer gave its advisory",
+    "pkg-test: ok newer named pkg-user 2.0",
+    "pkg-test: ok refused an older index",
+    "pkg-test: ok refused another index 2",
+    "pkg-test: ok refused a wrong digest",
+    "pkg-test: ok the refused upgrade changed nothing",
+    "pkg-test: ok nothing it needed went in",
+    "pkg-test: ok upgraded",
+    "pkg-test: ok the security fix is in",
+    "pkg-test: ok pkg-user is 2.0",
+    "pkg-test: ok what it needs came with it",
+    "pkg-test: ok up to date",
+    "pkg-test: ok accepted index 3",
+    "pkg-test: ok refused a dependency nobody has",
+    "pkg-test: ok pkg-user stayed 2.0",
 ];
 
 /// The lines the boot must not print.
@@ -247,7 +433,7 @@ pub(crate) fn test_pkg(args: &Args) -> Result<()> {
             mode: 0o644,
             content: Content::Bytes(bytes),
         };
-        let files = vec![
+        let mut files = vec![
             File {
                 path: PROGRAM.to_owned(),
                 mode: 0o755,
@@ -260,6 +446,7 @@ pub(crate) fn test_pkg(args: &Args) -> Result<()> {
             package("base2", base2),
             package("changed2", changed2),
         ];
+        files.extend(repositories(arch)?);
         let shell_program = zinc::built(arch)?.ok_or_else(|| {
             Error::new(format!(
                 "zinc is not built for {arch}, and test-pkg runs its checks in it"
@@ -292,7 +479,7 @@ pub(crate) fn test_pkg(args: &Args) -> Result<()> {
         }
         println!(
             "{arch}: pkg installed, ran and removed the stat service, replaced a package and back, \
-             and refused all five"
+             upgraded from a repository with its security fix, and refused all ten"
         );
     }
     Ok(())

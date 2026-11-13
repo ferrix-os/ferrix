@@ -18,6 +18,9 @@
 //! last and deleted first, so a package whose files are half there has no
 //! record, and is not installed.
 //!
+//! Upgrades from a repository, and the security fixes waiting, are
+//! [`repo`]'s (`docs/UPDATES.md`).
+//!
 //! Every function takes the root, so the host tests run it in a directory.
 
 use std::fs;
@@ -27,6 +30,8 @@ use std::path::{Path, PathBuf};
 use ferrix_cpio::{Archive, FileType};
 use ferrix_pkg::plan::plan;
 use ferrix_pkg::record::{self, Installed, Record};
+
+pub mod repo;
 
 /// Why something was refused, or failed: the line `pkg` prints.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,7 +63,7 @@ pub const fn this_arch() -> &'static str {
 }
 
 /// `path` beneath `root`, a path from the root with no `.` or `..`.
-fn under(root: &Path, path: &str) -> PathBuf {
+pub(crate) fn under(root: &Path, path: &str) -> PathBuf {
     path.split('/')
         .fold(root.to_path_buf(), |at, part| at.join(part))
 }

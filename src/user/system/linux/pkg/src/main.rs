@@ -8,7 +8,18 @@
 //!                                     the same, each in the place of the
 //!                                     version installed, if one is
 //! pkg [--root DIR] remove NAME        remove a package
+//! pkg [--root DIR] update [--repo DIR]
+//!                                     accept the repository's index
+//! pkg [--root DIR] newer              what the accepted index has newer,
+//!                                     and the security fixes waiting
+//! pkg [--root DIR] upgrade [--repo DIR] [NAME...]
+//!                                     fetch, check and put in place the
+//!                                     newest of each (every package when
+//!                                     none is named), with what it needs
 //! ```
+//!
+//! The repository is `--repo`, or the first line of `/etc/pkg/repository`
+//! (`docs/UPDATES.md`).
 //!
 //! The root is `/` unless `--root` names another. A refusal is one line,
 //! `pkg: ` and why, on standard error, and the exit status 1; a command line
@@ -18,10 +29,11 @@ use std::io::Write as _;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use pkg::repo::{self, Updated};
 use pkg::{Error, info_lines, install, install_replacing, installed, read, remove};
 
-const USAGE: &str =
-    "usage: pkg [--root DIR] list | info NAME | install [--replace] FILE... | remove NAME";
+const USAGE: &str = "usage: pkg [--root DIR] list | info NAME | install [--replace] FILE... | \
+                     remove NAME | update [--repo DIR] | newer | upgrade [--repo DIR] [NAME...]";
 
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
@@ -44,6 +56,15 @@ fn main() -> ExitCode {
         }
         ("install", files) if !files.is_empty() => install_files(&root, files),
         ("remove", [name]) => remove_one(&root, name),
+        ("update", []) => update(&root, None),
+        ("update", [flag, repo]) if flag == "--repo" => update(&root, Some(repo)),
+        ("newer", []) => newer(&root),
+        ("upgrade", [flag, repo, names @ ..]) if flag == "--repo" => {
+            upgrade(&root, Some(repo), names)
+        }
+        ("upgrade", names) if !names.first().is_some_and(|n| n.starts_with("--")) => {
+            upgrade(&root, None, names)
+        }
         _ => return usage(),
     };
     match done {
@@ -104,8 +125,20 @@ fn read_files(files: &[String]) -> Result<Vec<pkg::Package>, Error> {
 }
 
 fn replace_files(root: &std::path::Path, files: &[String]) -> Result<(), Error> {
-    let lines: Vec<String> = install_replacing(root, read_files(files)?)?
-        .iter()
+    say(&replaced_lines(&install_replacing(
+        root,
+        read_files(files)?,
+    )?))
+}
+
+/// A line for each package put in place, naming the version it replaced.
+fn replaced_lines(
+    done: &[(
+        ferrix_pkg::record::Record,
+        Option<ferrix_pkg::record::Record>,
+    )],
+) -> Vec<String> {
+    done.iter()
         .map(|(record, old)| {
             let package = &record.package;
             match old {
@@ -124,8 +157,39 @@ fn replace_files(root: &std::path::Path, files: &[String]) -> Result<(), Error> 
                 ),
             }
         })
-        .collect();
-    say(&lines)
+        .collect()
+}
+
+fn update(root: &std::path::Path, given: Option<&str>) -> Result<(), Error> {
+    let repository = repo::repository(root, given)?;
+    let line = match repo::update(root, &repository)? {
+        Updated::Same(index) => format!(
+            "pkg: index {} for {} is the one accepted already",
+            index.sequence, index.arch
+        ),
+        Updated::Accepted(index, before) => format!(
+            "pkg: accepted index {} for {} from {}: {} package version(s){}",
+            index.sequence,
+            index.arch,
+            repository.display(),
+            index.entries.len(),
+            before.map_or_else(String::new, |old| format!(", in the place of index {old}"))
+        ),
+    };
+    say(&[line])
+}
+
+fn newer(root: &std::path::Path) -> Result<(), Error> {
+    say(&repo::newer_lines(root)?)
+}
+
+fn upgrade(root: &std::path::Path, given: Option<&str>, names: &[String]) -> Result<(), Error> {
+    let repository = repo::repository(root, given)?;
+    let done = repo::upgrade(root, &repository, names)?;
+    if done.is_empty() {
+        return say(&["pkg: nothing to upgrade".to_owned()]);
+    }
+    say(&replaced_lines(&done))
 }
 
 fn install_files(root: &std::path::Path, files: &[String]) -> Result<(), Error> {

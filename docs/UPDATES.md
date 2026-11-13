@@ -186,3 +186,16 @@ no row until a claimed profile carries `pkg`.
 ## 5. Where it stands
 
 2026-11-13: this design, on branch `pkg/updates`.
+
+**Step a, as built.** `ferrix_pkg::index` (`src/lib/proto/pkg/src/index.rs`)
+reads and writes the index, says what is newer and which versions are
+security fixes (`Index::newer`), and chooses an upgrade by minimum versions
+(`Index::upgrade`); its host tests are in `src/lib/proto/pkg/src/tests.rs`.
+`pkg update`, `newer` and `upgrade` are `src/user/system/linux/pkg/src/repo.rs`,
+with host tests against a directory as both root and repository: the
+upgrade with its security fix and a dependency it pulls in, an older index
+and another index of the accepted sequence refused, a file one byte
+changed, one byte longer and another package in its place refused with
+nothing written, and a dependency nobody has. `test-pkg` serves five
+repositories from its boot's root (`tools/common/xtask/src/pkg.rs`,
+`repositories`) and requires each of these in the guest.

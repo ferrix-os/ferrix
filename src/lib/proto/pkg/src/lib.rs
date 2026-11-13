@@ -17,12 +17,15 @@
 //! * [`record`] -- what an installed package leaves in
 //!   `lib/ferrix/packages/`.
 //! * [`plan`] -- whether a set of packages installs, and in what order.
+//! * [`index`] -- a repository's index: every version of every package it
+//!   has, and which of them are security fixes (`docs/UPDATES.md`).
 
 #![no_std]
 #![forbid(unsafe_code)]
 
 extern crate alloc;
 
+pub mod index;
 pub mod manifest;
 pub mod plan;
 pub mod record;
