@@ -959,3 +959,86 @@ not decided: it wants more runs and a timeline of one trip.
     ck-b-7 214d46a87b81ae536df297ad51fc16ee2a624358875bd51db6866292a4bf93a6,
     ck-linux-1 090fdb70c5bbf33fba8900d299e61b6a86ec5e4c975371c7813f1a28688d59e2,
     ck-linux-2 0742ade7e358c460bef31e109dc2f9e86702406883e35f097a3867f32e6649fe.
+
+## 8. Idle wakes (perf-cpu-mem, 2026-11-13)
+
+What an idle machine burns, beside Linux in the same guest: nazuna, KVM,
+xtask's `-cpu`, `-smp 4`, `-m 4096`, release kernels, `ferrix.checks=skip`;
+60 s windows with nothing typed, the host's CPU time of the QEMU process
+and the guest's `/proc/stat` and per-process switches read at both ends.
+The host's figure moves with the host's own load and clock (an idle host
+runs slower and charges a wake more); the guest's counts do not.
+Scripts and every window's raw snapshots in
+`~/.local/share/ferrix/perf-cpu-mem/` (`bin/idle.sh`, `bin/cidle.sh`,
+`bin/lboot.sh`; `runs/`).
+
+| idle, a second | QEMU host CPU, % of a core | guest interrupts | guest switches |
+|---|---|---|---|
+| Linux 7.0, busybox `sh` at the console (one window) | 0.98 | 92 | 32 |
+| Ferrix shell boot (`cargo xtask run`), develop 2e54146d5 (two) | 5.46-5.50 | 2,357-2,362 | 4,702-4,709 |
+| the same, branch's load-ring commit (less logctl and itimers; three) | 1.43-1.63 | 558-567 | 1,076-1,110 |
+| the same, the whole load-ring commit, devmgr's listener and a trusting `object_wait_one` (three) | 1.05-1.25 | 366-369 | 727-729 |
+| the same, the branch (three; the host idle, load 0.1 to 1.4) | 1.83-2.03 | 334-346 | 664-680 |
+| Ferrix desktop (`run-compositor --kernel-profile desktop --no-gl --tmpfs-root`, wallpaper `8405963.png`), develop (three) | 7.50-9.66 | 4,072-4,139 | 8,157-8,263 |
+| the same, the branch (three) | 3.66-4.03 | 1,318-1,322 | 2,617-2,622 |
+| the same with a trusting `object_wait_one` too (another kept still picture; three) | 2.37-2.76 | 922-927 | 1,827-1,838 |
+
+Where the wakes were, by `/proc/<pid>/task/*/wchan` and the switch counts:
+every `WaitQueue::wait_until_deadline` looks again every 5 ms whatever its
+deadline, so each kernel ring task (six disks, the net and input rings),
+logctl, itimers, devmgr's listener and every `object_wait_one` (memkeep,
+memscrub) woke 200 times a second; a shell reading `/dev/console` slept
+2 ms between looks (500 a second), one on a pty 5 ms; `pattern
+--wallpaper` slept 2 ms a turn (480) and `term` sleeps 4 ms (245, not
+changed: the apps repository). The branch makes each wait trust the queue
+its wakes already go through, as `port_wait` does since p2-138, with the
+callers' own deadlines and the one-second recheck of a trusted `poll` as
+their rechecks. No shell-boot process waits in `object_wait_one`.
+
+Where it stands. The branch's rows above were measured on `perf/cpu-mem`
+6fa290481 (on develop 2e54146d5), which held devmgr's listener too.
+Reviewed: OK IF (1)-(6), consultant ledger 9956, and landed on its split:
+the load-ring commit, `pattern`, `wallpaper`, and a wake the review found
+missing -- a change of the console's settings (`TCSETS` and its variants)
+woke no reader, which the 2 ms look had covered; `syscall::tty`'s `set`
+now wakes the input queue, and the console check requires the queue's
+wake count to move across a `TCSETSW`. devmgr's listener, the one changed
+wait in the certified item and the one with no deadline, is held back: it
+lands with a requirement for its wait, a gate that reads a line only the
+listener prints, and that gate's control (9956 (2), (3)). So on develop
+the listener still wakes 200 times a second, and the landed tree's idle
+figures, a little above the branch's rows, are not measured. No changed
+ring wait can hang: each keeps its caller's deadline (block 50 ms, net 20,
+input 50, logctl 15 ms or 1 s), so a wake that went missing would cost
+that much and no more. Owed after it (9956 (7)): an N150 run before a
+build with this is left on the box unattended or promoted -- boot to login
+and a 1 GiB read of the root disk within 10 % of the same build without
+it, an ssh session with no stall, no "offline" or patience line from the
+block ring, and the idle interrupt figure for this section.
+
+`object_wait_one` was made to trust its queue as `port_wait` does, and
+taken out again: on aarch64's `test-boot` the region check, from `levels`
+to `bare`, took 11.0 s against 3.8 s without it, and the boot 45.98 s
+against 38.68 (`logs/queue/perfcm-boot-a64.log`, `perfcm-boot-a64-l.log`),
+so some signal or end a native wait there reads is not woken and the 5 ms
+recheck was finding it. Which one is owed before the call can trust its
+queue; memkeep and memscrub wake 200 times a second each until then.
+
+Left: `object_wait_one`, above; `term`; the chardev ring's wait on `work` (its `peer_has_room` is not
+shown to wake it) and the DRM reader's 5 ms looks; about 370 interrupts a
+second on the shell boot that no process's count shows -- kernel tasks have
+no wake count to read, and the six rings' own 50 ms rechecks are 120 of
+them; and one task made every second on the desktop (`processes` in
+`/proc/stat`). The cost of each wake that remains is §2's. A moving
+wallpaper (`pattern --video`, which xtask picks from the kept ones at
+random when none is named) is not idle: 47 to 49 ticks a second of
+`pattern` and 10 of `hyprix`, 62 to 64 % of a host core.
+
+Memory, the same desktop: `MemTotal` 4,147,544 kB, 353,624 kB in use of
+which 194,244 is `--tmpfs-root`'s files and 18,104 `Slab`; the largest
+processes `hyprix` 66 MB, `wallpaper` 51 MB (33 MB of it a 4K drawing of
+the shipped SVG behind a 1080p screen: 27 MB on the branch, and
+`MemFree` 24,324 kB more) and `pattern
+--wallpaper` 18.6 MB, which xtask starts with a kept picture beside the
+theme's `wallpaper =` line, so two wallpaper clients run and one is hidden.
+The shell boot holds 195,492 kB, 136,376 of it page cache.
