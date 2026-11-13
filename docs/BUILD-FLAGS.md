@@ -46,7 +46,17 @@ These come from `MICROKERNEL.md` §12 and the consultant's conditions on it
 1. **Every flag is chosen at compile time.** xtask passes it to rustc as a
    key-value `--cfg`. A flag is never a Cargo feature (`kernel_cargo_features`
    stays 0) and never a boot option. Code a profile does not select is not in
-   its image, so it is neither dead nor deactivated code there.
+   its image, so it is neither dead nor deactivated code there. **A manifest
+   may key a dependency table on a flag's `cfg`**
+   (`[target.'cfg(ferrix_personality = "kernel")'.dependencies]`) **and on
+   nothing else of Cargo's**: no `[features]`, no `optional` dependency in
+   any kernel manifest (`check-build-flags.py` counts both and holds the
+   count to `kernel_cargo_features`). Cargo decides such a table from the
+   `cfg`s on rustc's command line, so xtask gives the flags a manifest keys
+   on (`MANIFEST_FLAGS`: `personality` and `linux_abi`) to rustc too, by
+   `--config target.<triple>.rustflags`, and `src/kernel/build.rs` refuses a
+   build where Cargo saw none, another or two values
+   (`docs/microkernel/CORE-WITHOUT-EXTENSIONS.md` §2; ledger 9212 M1, M2).
 2. **Every flag and value is declared.** xtask generates rustc's
    `--check-cfg` list from the flag file (§5), and the kernel's workspace
    denies `unexpected_cfgs` (it warns today, `Cargo.toml` line 248). A `cfg`
@@ -74,7 +84,14 @@ These come from `MICROKERNEL.md` §12 and the consultant's conditions on it
    3282, (K1), (K4)) -- and a check fails if any crate under `src/lib` names a `ferrix_`
    cfg (a crate built without the cfg would silently take the other branch,
    which `--check-cfg` cannot see), with a planted use as its negative
-   control; (c) a build whose `--set` differs from its profile is refused by
+   control. Since a flag a manifest keys on (rule 1) reaches the rustc line
+   of every crate built for a kernel target, the libraries under `src/lib`
+   included, the check reads manifests too: a table keyed on a `ferrix_`
+   `cfg` stands only in a manifest `certification-item.json`'s
+   `keyed_dependency_tables` names (the binary's since CORE-WITHOUT-EXTENSIONS
+   E1; the core's and the item's from E6), with a key it lists, each key one
+   declared flag and value that xtask gives rustc; a table planted in a
+   `src/lib` manifest is its control (ledger 9212 M1, M5); (c) a build whose `--set` differs from its profile is refused by
    the gate, as a negative control; (d) the line is also the start-up
    configuration audit record (FAU_GEN.1 b), so the Security Target and
    `AUDIT.md` change with it.
@@ -390,6 +407,34 @@ build profile=fast level=none personality=user fs=server mitigations=on partitio
 The kernel computes every word of it from `cfg!` (rule 6). An ad-hoc build
 prints `profile=none level=none`.
 
+**How the flags reach the build** (since CORE-WITHOUT-EXTENSIONS E1). xtask
+hands `src/kernel/build.rs` the chosen words in `FERRIX_BUILD_FLAGS` and the
+declared ones in `FERRIX_FLAG_VALUES`; the script makes them each kernel
+crate's `cfg`s and `--check-cfg`s, as before. The flags a manifest keys a
+dependency table on (`MANIFEST_FLAGS`, `personality` and `linux_abi`) also
+go to rustc for every crate of each kernel target, as `--config
+target.<triple>.rustflags=["--cfg","ferrix_<flag>=\"<value>\"",...]`, which
+joins `.cargo/config.toml`'s array (`RUSTFLAGS` would replace it and stays
+refused). Every path that builds, lints or measures a kernel crate goes
+through `cargo.rs`'s `kernel`, `build_ahead` or `build_native` (linuxd's
+crates), or `check.rs`'s two lint paths, all of which add them: the
+builds, the boots, coverage, `test-removable`, `check-stack-depth`,
+`check-frames`, `test-kernel-shape` and `test-ring0-budget` take the
+kernel from `build_kernel`; clippy's `on`, `off`, `checks=off`,
+`mitigations=off` and `smt=off` lints; the Ferrocene step
+(`check-ferrocene-rust.py`, its own `--config`). No host build, test, doc
+or Miri run builds a kernel crate (`workspace::Members::excludes`); one
+that did would be refused by the script for want of `FERRIX_BUILD_FLAGS`.
+The tools that read Cargo's graph read the reference configuration's:
+`check-crate-layering.sh` with `--target all`, `gen-soup.py` and xtask's
+`gate_rows` with the flags given as above, `check-lift.py`,
+`check-item-boundary.py` and `check-ring0-alloc.py` reading every target
+table of a manifest, and `check-item-boundary.py`'s linked crates from
+`cargo metadata`, which carries every platform's edge.
+`check-core-without-extensions.py` reads the graph under
+`personality=user` and `=none` on each target: no extension but the board
+glue.
+
 ### 5.1 The image manifest
 
 Every image carries `/etc/ferrix/image-manifest`, written by xtask from the
@@ -606,3 +651,20 @@ are still validated, not built; `--personality user` is `feature/mk-lift`'s.
   both image keys, the image manifest, xtask's writer refusal,
   `cargo xtask test-removable`, and the checks of §6.1.
 
+* **Dependency tables keyed on a flag (2026-11-12/13, CORE-WITHOUT-EXTENSIONS
+  E1, `docs/microkernel/CORE-WITHOUT-EXTENSIONS.md`)**: the binary's five
+  Linux parts in `[target.'cfg(ferrix_personality = "kernel")'.dependencies]`
+  (49bd1ae9e, landed ahead of its review on the customer's order, fixed
+  forward by a9751d012, ledger 9361), so a `personality=user` or `=none`
+  kernel compiles none of them. Design review ledger 9212 (M1-M7), the key
+  ruled at 9361 (K1, K2). E1's debt (branch `core-ext/e1-debt`): rule 1's
+  sentence and its count of features and `optional` dependencies; rule 6
+  b's manifest half, the record's `keyed_dependency_tables` and its control;
+  `build.rs` refusing none, another or two values, with three controls per
+  flag and one for two values; the transport's paths listed in §5;
+  `check-core-without-extensions.py` with its control; the graph readers
+  made to read the reference configuration's graph. Diff check OK IF V1-V7,
+  ledger 9510. Not built, as ruled there (M5 met in substance): a `check-cfg` declaration in the workspace manifest, since
+  Cargo 1.99.1 reads none for a target table (a key naming an undeclared
+  flag resolves without a word) and rustc lints no `--cfg` on its command
+  line; `check-build-flags.py` holds every key to the flag file instead.

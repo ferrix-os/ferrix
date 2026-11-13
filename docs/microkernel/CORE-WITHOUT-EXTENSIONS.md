@@ -112,7 +112,8 @@ code that makes it true for the libraries; E6 is the manifests.
 | **E3** | The architecture's Linux code under the flag: the signal frames, the Linux system call numbers of the three entries, TLS descriptors, hwcap, the vDSO and `counter_nanos`. Where `off` already answers `ENOSYS` (`NoLinux`), the entry needs no Linux number; where the trap path hands a signal number to `fault_signal`, it hands a fault kind and the personality picks the number. | `arch/*`, `trap.rs`, `timer.rs`; core ring, three architectures | 13, the uncertain one |
 | E4 | `object/job.rs`'s `Limit` and `controllers`, `panic/catalog.rs`'s one name | core | 2 |
 | E5 | The item's remaining names (`Syscall` in `syscall/mod.rs` and `main.rs`, `OpenFile` in `program.rs`) | item | 3 |
-| **E6** | `ferrix-linux-abi`, `-vdso`, `-vfs`, `-cgroupfs` move to the `linux_abi = "on"` table in the core's and the item's manifests; the `off`-only `unused_crate_dependencies` allow goes. The check of E1 then refuses every Linux-only library in an `off` tree. | manifests, the allow | 2 |
+| **E6** | `ferrix-linux-abi`, `-vdso`, `-vfs`, `-cgroupfs` move to the `linux_abi = "on"` table in the core's and the item's manifests; the `off`-only `unused_crate_dependencies` allow goes. The check of E1 then refuses every Linux-only library in an `off` tree. Found by that check's first run (2026-11-13): four libraries of an `off` tree depend on `ferrix-linux-abi` themselves and keep it there after E6: `ferrix-blkring` and `ferrix-native-abi` for `Errno` (E2 takes them), `ferrix-native-abi` also for `nr`, `ferrix-ustack` for the auxiliary vector's `AT_*` keys, `ferrix-virtio` for the input event codes; those three are E6b's. `ferrix-linux-abi` leaves the unconditional table only once the check's `LINUX_ABI_USERS` is empty (ledger 9510 V4, amending 9212 O2). | manifests, the allow | 2 |
+| E6b | The Linux numbers three libraries name: `ferrix-native-abi`'s `nr`, `ferrix-ustack`'s `AT_*` keys, `ferrix-virtio`'s input event codes. Each moves to a dependency-free crate on Q2.1's terms (the same items by re-export, no conversion, no `cfg`, the crate saying its numbers are Linux's), or the library leaves the `off` tree, decided per library in a design note reviewed before its code (ledger 9510 V4). E2 takes `ferrix-blkring`'s and `ferrix-native-abi`'s `Errno`. | three libraries | per library |
 | E7 | The screen (`ferrix-fbtext`, `ferrix-qr`): CRATE-SPLIT's P5 | | P5's |
 
 ## 4. What each landing shows
@@ -151,6 +152,20 @@ B1-B3). What is built: the transport, the binary's five Linux parts in the
 keyed table, `main.rs`'s globs. What is owed is 9212's conditions as 9361 K1
 reads them and the diff check (BACKLOG); nothing further of §3 lands before
 that verdict.
+
+**E1's debt** (branch `core-ext/e1-debt`, 2026-11-13): BUILD-FLAGS rules 1
+and 6 b written and checked over the manifests (`check-build-flags.py`:
+features and `optional` dependencies counted, keyed tables only where
+`certification-item.json`'s `keyed_dependency_tables` names them, each key
+held to the flag file), `build.rs` refusing none, another or two values of
+each flag, the transport's paths listed (BUILD-FLAGS §5), the graph readers
+reading the reference configuration's graph, and
+`check-core-without-extensions.py` (§4's check), with eleven controls and
+E1's evidence: its kernels' bodies equal to the base's in nine builds,
+the boot lines equal, the `off` images equal. **Diff check OK IF V1-V7,
+ledger 9510**: no blocker, E1 stands; 9341 D2 lifts when this branch lands.
+E1b and E2 may be coded (each its own diff or code review before the take,
+after this branch has landed); E3 starts as a design note (N1-N12).
 
 The comment-only grouping of the core's manifest landed as c29cca330 and is
 replaced by E6's tables.

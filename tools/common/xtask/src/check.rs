@@ -438,11 +438,15 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
     // (rule 6 b), and no boot option read that the registry does not
     // declare (BF4); and the gate's comparison of a kernel's `build` line
     // with its profile, self-tested here, since only a boot runs it whole.
-    // The profile rule itself is the item boundary's, above.
+    // The profile rule itself is the item boundary's, above. And a kernel
+    // built without the Linux personality compiles no extension but the
+    // board glue, read from Cargo's graph per target
+    // (docs/microkernel/CORE-WITHOUT-EXTENSIONS.md; ledger 9212 M7 (d)).
     (
         "build flags",
         &[
             &["tools/common/check/check-build-flags.py"],
+            &["tools/common/check/check-core-without-extensions.py"],
             &["tools/common/check/check-boot-line.py", "--self-test"],
         ],
     ),

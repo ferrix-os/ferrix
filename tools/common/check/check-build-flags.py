@@ -13,6 +13,17 @@ are read, which boot options are, and the kernel's own table of flags.
    for each of them. That they all build with it, and nothing else does, is
    check-item-boundary.py's rule (ledger line 3282, (K1)).
 
+   And over the manifests (rules 1 and 6 b, ledger 9212 M1 and M5;
+   docs/microkernel/CORE-WITHOUT-EXTENSIONS.md section 2): a manifest may key
+   a dependency table on a flag's cfg and on nothing else of Cargo's. No
+   kernel manifest declares `[features]` or an `optional` dependency, their
+   count held to certification-item.json's `kernel_cargo_features`; a table
+   keyed `cfg(ferrix_<flag> = "<value>")` stands only in a manifest that
+   record's `keyed_dependency_tables` names, with a key it lists, naming a
+   declared flag and value that xtask gives rustc (`MANIFEST_FLAGS`, whose
+   three copies -- xtask's cargo.rs, src/kernel/build.rs and
+   check-ferrocene-rust.py -- must agree). Cargo checks no such key itself.
+
 2. **No boot option is read that the registry does not declare** (BF4). Every
    read of the kernel command line in src/kernel and src/boot -- `.option(K)`,
    `.flag(K)`, `option_in(_, K)`, `flag_in(_, K)` -- must name, as a string
@@ -41,7 +52,8 @@ are read, which boot options are, and the kernel's own table of flags.
 
 The first two have a planted negative control (a `ferrix_` cfg in a library; a reader
 of an undeclared option), run with `gate.sh control` over `cargo xtask
-test-flags`.
+test-flags`; the manifest rule's is a table keyed on a flag planted in a
+src/lib manifest, over `cargo xtask check`.
 
     python3 tools/common/check/check-build-flags.py
     python3 tools/common/check/check-build-flags.py --self-test
@@ -452,6 +464,114 @@ def settable_problems(registry: dict, profiles: dict[str, dict]) -> list[str]:
     return problems
 
 
+# Rules 1 and 6 b over the manifests (ledger 9212 M1, M5; 9361 K1;
+# docs/microkernel/CORE-WITHOUT-EXTENSIONS.md section 2). A manifest may key a
+# dependency table on a flag's cfg and on nothing else of Cargo's: no kernel
+# manifest declares `[features]` or an `optional` dependency
+# (`kernel_cargo_features`), and since a flag a manifest keys on is given to
+# rustc for every crate built for a kernel target, only the manifests the
+# record names may hold such a table, each with the keys it lists, each key one
+# declared flag and value of the flags xtask gives rustc.
+DEPENDENCY_TABLES = ("dependencies", "build-dependencies", "dev-dependencies")
+KEYED = re.compile(r'^cfg\(\s*ferrix_([a-z0-9_]+)\s*=\s*"([^"]*)"\s*\)$')
+# The three places that list the flags given to rustc, which must agree:
+# xtask's cargo.rs, the build script that refuses a disagreement, and the
+# Ferrocene step, which builds the kernel crates outside xtask.
+MANIFEST_FLAG_LISTS = (
+    ("tools/common/xtask/src/cargo.rs", re.compile(r"const MANIFEST_FLAGS: \[&str; \d+\] = \[([^\]]*)\]")),
+    ("src/kernel/build.rs", re.compile(r"const MANIFEST_FLAGS: \[&str; \d+\] = \[([^\]]*)\]")),
+    ("tools/common/check/check-ferrocene-rust.py", re.compile(r"^MANIFEST_FLAGS = \(([^)]*)\)", re.M)),
+)
+
+
+def manifest_flag_lists(read) -> tuple[dict[str, tuple[str, ...]], list[str]]:
+    """Each place's list of the flags given to rustc, by file; a list not found is a problem."""
+    lists, problems = {}, []
+    for rel, pattern in MANIFEST_FLAG_LISTS:
+        found = pattern.search(read(rel))
+        if found is None:
+            problems.append(f"{rel}: no MANIFEST_FLAGS list found")
+            continue
+        lists[rel] = tuple(re.findall(r'"([a-z0-9_]+)"', found.group(1)))
+    if len(set(lists.values())) > 1:
+        problems.append("the flags given to rustc differ between " +
+                        "; ".join(f"{rel} {list(names)}" for rel, names in lists.items()))
+    return lists, problems
+
+
+def kernel_manifest(rel: str) -> bool:
+    return rel.startswith(KERNEL)
+
+
+def manifest_problems(manifests: list[tuple[str, dict]], reference: dict, flag_file: dict,
+                      given: set[str]) -> tuple[list[str], int]:
+    """Rules 1 and 6 b over (path, parsed manifest) pairs: (problems, the kernel
+    manifests' feature count). `reference` is certification-item.json's
+    reference_configuration; `given` the flags xtask gives rustc."""
+    record = {rel: keys for rel, keys in reference.get("keyed_dependency_tables", {}).items()
+              if not rel.startswith("//")}
+    declared = flag_file.get("flags", {})
+    problems: list[str] = []
+    features = 0
+    seen: dict[str, set[str]] = {}
+    for rel, cargo in manifests:
+        if kernel_manifest(rel):
+            if "features" in cargo:
+                features += max(1, len(cargo["features"]))
+                problems.append(f"{rel}: declares [features]; a kernel manifest declares none, a build flag "
+                                "is a --cfg (rule 1, kernel_cargo_features)")
+            tables = [(name, cargo.get(name, {})) for name in DEPENDENCY_TABLES]
+            for key, target in cargo.get("target", {}).items():
+                tables += [(f"target.'{key}'.{name}", target.get(name, {})) for name in DEPENDENCY_TABLES]
+            for table, entries in tables:
+                for name, spec in entries.items():
+                    if isinstance(spec, dict) and spec.get("optional"):
+                        features += 1
+                        problems.append(f"{rel}: [{table}] {name} is optional, which makes a Cargo feature "
+                                        "(rule 1, kernel_cargo_features)")
+        for key in cargo.get("target", {}):
+            if "ferrix_" not in key:
+                continue
+            seen.setdefault(rel, set()).add(key)
+            if key not in record.get(rel, []):
+                problems.append(f"{rel}: a dependency table keyed {key}; only the manifests "
+                                "certification-item.json's keyed_dependency_tables names may key a table "
+                                "on a build flag, with the keys it lists (rule 6 b)")
+            match = KEYED.match(key)
+            if match is None:
+                problems.append(f"{rel}: the key {key} is not one flag's cfg, cfg(ferrix_<flag> = \"<value>\")")
+                continue
+            flag, value = match.groups()
+            if value not in declared.get(flag, {}).get("values", {}):
+                problems.append(f"{rel}: the key {key} names an undeclared flag or value (build-flags.toml)")
+            elif flag not in given:
+                problems.append(f"{rel}: the key {key} names {flag}, which xtask does not give rustc "
+                                f"(MANIFEST_FLAGS: {', '.join(sorted(given))})")
+    for rel, keys in sorted(record.items()):
+        for key in keys:
+            if key not in seen.get(rel, set()):
+                problems.append(f"certification-item.json: keyed_dependency_tables names {rel}'s {key}, "
+                                "which that manifest does not hold")
+    wanted = reference.get("kernel_cargo_features")
+    if features != wanted:
+        problems.append(f"the kernel's manifests make {features} Cargo feature(s); "
+                        f"certification-item.json's kernel_cargo_features is {wanted}")
+    return problems, features
+
+
+def manifests() -> list[tuple[str, dict]]:
+    """Every manifest this repository tracks (a component's are its own
+    repository's, CONVENTIONS.md), parsed."""
+    import subprocess
+    listed = subprocess.run(["git", "ls-files", "-z", "--", "Cargo.toml", "*/Cargo.toml"], cwd=ROOT,
+                            capture_output=True, check=True).stdout.decode().split("\0")
+    found = []
+    for rel in sorted(name for name in listed if name):
+        with (ROOT / rel).open("rb") as handle:
+            found.append((rel, tomllib.load(handle)))
+    return found
+
+
 def rust_files() -> list[tuple[str, str]]:
     files = []
     for top in ("src", "tools"):
@@ -570,6 +690,67 @@ def self_test() -> list[str]:
             failures.append(f"the settable rule missed: {expect}")
     if any("desktop" in p for p in found):
         failures.append(f"the settable rule refused desktop's ferrix.badframes: {found}")
+    failures += _manifest_self_test()
+    return failures
+
+
+def _manifest_self_test() -> list[str]:
+    """Rules 1 and 6 b over manifests (ledger 9212 M1, M5)."""
+    failures = []
+    flag_file = {"flags": {"personality": {"values": {"user": {}, "kernel": {}, "none": {}}},
+                           "linux_abi": {"values": {"on": {}, "off": {}}},
+                           "checks": {"values": {"on": {}, "off": {}}}}}
+    key = 'cfg(ferrix_personality = "kernel")'
+    reference = {"kernel_cargo_features": 0,
+                 "keyed_dependency_tables": {"//": ["why"], "src/kernel/Cargo.toml": [key]}}
+    given = {"personality", "linux_abi"}
+    binary = ("src/kernel/Cargo.toml", {"dependencies": {"a": {}}, "target": {key: {"dependencies": {"b": {}}}}})
+    plain = [binary,
+             ("src/lib/x/Cargo.toml", {"target": {'cfg(target_arch = "x86_64")': {"dependencies": {"c": {}}}}}),
+             ("src/user/y/Cargo.toml", {"features": {"default": []}, "dependencies": {"d": {"optional": True}}})]
+    found, count = manifest_problems(plain, reference, flag_file, given)
+    if found or count:
+        failures.append(f"manifests: a tree that keeps rules 1 and 6 b was refused: {found}")
+    for what, extra, expect in [
+        ("[features] in a kernel manifest", ("src/kernel/item/Cargo.toml", {"features": {"f": []}}),
+         "declares [features]"),
+        ("an optional dependency in a kernel manifest",
+         ("src/kernel/core/Cargo.toml", {"target": {"cfg(x)": {"dependencies": {"e": {"optional": True}}}}}),
+         "is optional"),
+        ("a keyed table in a library's manifest",
+         ("src/lib/x/Cargo.toml", {"target": {'cfg(ferrix_linux_abi = "on")': {"dependencies": {}}}}),
+         "only the manifests"),
+        ("a keyed table in an unlisted kernel manifest",
+         ("src/kernel/core/Cargo.toml", {"target": {'cfg(ferrix_linux_abi = "on")': {"dependencies": {}}}}),
+         "only the manifests"),
+        ("a key naming an undeclared value",
+         ("src/lib/x/Cargo.toml", {"target": {'cfg(ferrix_linux_abi = "maybe")': {"dependencies": {}}}}),
+         "undeclared flag or value"),
+        ("a key naming a flag xtask does not give rustc",
+         ("src/lib/x/Cargo.toml", {"target": {'cfg(ferrix_checks = "on")': {"dependencies": {}}}}),
+         "does not give rustc"),
+        ("a key that is not one flag's cfg",
+         ("src/lib/x/Cargo.toml", {"target": {'cfg(any(ferrix_checks = "on", unix))': {"dependencies": {}}}}),
+         "is not one flag's cfg"),
+    ]:
+        found, _ = manifest_problems(plain + [extra], reference, flag_file, given)
+        if not any(expect in problem for problem in found):
+            failures.append(f"manifests: {what} passed ({found})")
+    found, _ = manifest_problems([("src/kernel/Cargo.toml", {"dependencies": {}})], reference, flag_file, given)
+    if not any("does not hold" in problem for problem in found):
+        failures.append(f"manifests: a record naming a key its manifest lacks passed ({found})")
+    texts = {
+        "tools/common/xtask/src/cargo.rs": 'pub(crate) const MANIFEST_FLAGS: [&str; 2] = ["personality", "linux_abi"];\n',
+        "src/kernel/build.rs": 'const MANIFEST_FLAGS: [&str; 2] = ["personality", "linux_abi"];\n',
+        "tools/common/check/check-ferrocene-rust.py": 'MANIFEST_FLAGS = ("personality", "linux_abi")\n',
+    }
+    lists, found = manifest_flag_lists(texts.__getitem__)
+    if found or set(lists.values()) != {("personality", "linux_abi")}:
+        failures.append(f"manifests: three equal MANIFEST_FLAGS lists were refused: {found}")
+    texts["src/kernel/build.rs"] = 'const MANIFEST_FLAGS: [&str; 1] = ["personality"];\n'
+    _, found = manifest_flag_lists(texts.__getitem__)
+    if not any("differ" in problem for problem in found):
+        failures.append(f"manifests: two MANIFEST_FLAGS lists that differ passed ({found})")
     return failures
 
 
@@ -597,6 +778,18 @@ def main() -> int:
             file=sys.stderr,
         )
         for problem in cfg:
+            print(f"    {problem}", file=sys.stderr)
+        status = 1
+    import json
+    reference = json.loads(MANIFEST.read_text(encoding="utf-8")).get("reference_configuration", {})
+    lists, keyed = manifest_flag_lists(lambda rel: (ROOT / rel).read_text(encoding="utf-8"))
+    given = set(next(iter(lists.values()), ()))
+    found, features = manifest_problems(manifests(), reference, flag_file, given)
+    keyed += found
+    if keyed:
+        print("build-flags: a manifest breaks rule 1 or 6 b (a Cargo feature, or a table keyed on a flag "
+              "outside the record):", file=sys.stderr)
+        for problem in keyed:
             print(f"    {problem}", file=sys.stderr)
         status = 1
     profiles = sorted(path.stem for path in (ROOT / "tools/common/data/profiles").glob("*.toml")) + ["none"]
@@ -651,7 +844,9 @@ def main() -> int:
         status = 1
     if status == 0:
         print(
-            f"build-flags: no build-flag cfg outside the kernel's crates; {sum(counts.values())} "
+            f"build-flags: no build-flag cfg outside the kernel's crates; {features} Cargo feature(s) in the "
+            f"kernel's manifests; tables keyed on a flag only where the record names them "
+            f"({', '.join(sorted(given))} given to rustc); {sum(counts.values())} "
             f"boot-option reads, all of the {len(registry)} declared options; the libraries' and "
             f"loaders' option-like literals all accounted for"
         )

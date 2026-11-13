@@ -145,13 +145,18 @@ def package_name(path: Path) -> str:
 
 
 def dependencies(path: Path) -> set[str]:
-    """The packages a manifest depends on: a renamed one under its real name."""
+    """The packages a manifest depends on: a renamed one under its real name.
+    A table keyed on a target or a build flag's cfg is a dependency too (the
+    binary's `cfg(ferrix_personality = "kernel")` table; ledger 9212 M4)."""
     with path.open("rb") as handle:
         cargo = tomllib.load(handle)
+    tables = [cargo]
+    tables += list(cargo.get("target", {}).values())
     names: set[str] = set()
-    for table in ("dependencies", "build-dependencies"):
-        for name, spec in cargo.get(table, {}).items():
-            names.add(spec.get("package", name) if isinstance(spec, dict) else name)
+    for holder in tables:
+        for table in ("dependencies", "build-dependencies"):
+            for name, spec in holder.get(table, {}).items():
+                names.add(spec.get("package", name) if isinstance(spec, dict) else name)
     return names
 
 

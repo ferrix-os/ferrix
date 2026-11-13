@@ -116,7 +116,9 @@ pub(crate) fn flag_environment(resolved: &crate::flags::Resolved) -> [(&'static 
 /// `docs/microkernel/CORE-WITHOUT-EXTENSIONS.md` §2). Cargo decides such a
 /// table from the `cfg`s on rustc's command line, never from what a build
 /// script prints, so these alone are given there too; `src/kernel/build.rs`
-/// holds its own copy of the list and refuses a build where the two differ.
+/// holds its own copy of the list and refuses a build where Cargo's value
+/// is not the one it was handed, and `check-build-flags.py` holds this list,
+/// that one and `check-ferrocene-rust.py`'s equal.
 pub(crate) const MANIFEST_FLAGS: [&str; 2] = ["personality", "linux_abi"];
 
 /// `--config` values that add [`MANIFEST_FLAGS`]' `cfg`s to every kernel

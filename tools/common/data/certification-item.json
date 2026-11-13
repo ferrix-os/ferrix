@@ -57,6 +57,28 @@
     "profile": "release",
     "toolchain": "1.99.1",
     "kernel_cargo_features": 0,
+    "kernel_cargo_features_why": [
+      "check-build-flags.py counts the `[features]` tables and the `optional = true`",
+      "dependencies of every manifest under src/kernel and the kernel's other source",
+      "roots, and fails any count but this one (BUILD-FLAGS.md rule 1; ledger 9212 M1)."
+    ],
+    "keyed_dependency_tables": {
+      "//": [
+        "The manifests that may key a dependency table on a build flag's cfg, and",
+        "the keys each may use (BUILD-FLAGS.md rules 1 and 6 b; ledger 9212 M1, 9361",
+        "K1; docs/microkernel/CORE-WITHOUT-EXTENSIONS.md section 2). Cargo decides",
+        "such a table from the cfgs on rustc's command line, so xtask gives the flags",
+        "a manifest keys on to every crate built for a kernel target, the libraries",
+        "under src/lib included; no other manifest may key a table on a `ferrix_`",
+        "cfg, which check-build-flags.py holds, with a table planted in a src/lib",
+        "manifest as its control. A key names one declared flag and value, of the",
+        "flags xtask gives rustc (MANIFEST_FLAGS); the core's and the item's",
+        "manifests are added here by CORE-WITHOUT-EXTENSIONS E6."
+      ],
+      "src/kernel/Cargo.toml": [
+        "cfg(ferrix_personality = \"kernel\")"
+      ]
+    },
     "mitigations": "on",
     "mitigations_settings": [
       "on",

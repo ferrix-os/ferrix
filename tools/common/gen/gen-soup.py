@@ -50,13 +50,22 @@ SHIPPING = [
 ]
 
 
+# The kernel's manifest keys a table on a build flag, which Cargo decides from
+# rustc's command line (docs/microkernel/CORE-WITHOUT-EXTENSIONS.md section 2):
+# the kernel's graph is read with the flags of the reference configuration,
+# `present`, as xtask gives them to rustc (personality=kernel, linux_abi=on),
+# the graph with every part in it (ledger 9212 M4).
+KERNEL_CFGS = '["--cfg","ferrix_personality=\\"kernel\\"","--cfg","ferrix_linux_abi=\\"on\\""]'
+
+
 def shipping_externals() -> dict[tuple[str, str], list[str]]:
     """External crates reachable from each shipping binary."""
     found: dict[tuple[str, str], list[str]] = {}
     for package, target in SHIPPING:
+        flags = ["--config", f"target.{target}.rustflags={KERNEL_CFGS}"] if package == "ferrix-kernel" else []
         result = subprocess.run(
             ["cargo", "tree", "-p", package, "--edges", "normal",
-             "--prefix", "none", "--target", target],
+             "--prefix", "none", "--target", target, *flags],
             cwd=ROOT, capture_output=True, text=True,
         )
         if result.returncode != 0:

@@ -761,3 +761,11 @@ files and `check-lift.py`'s list of kernel manifests named the old places;
 `check-item-boundary.py`'s seam rule compared a path walked through `..` with the record's;
 `check-kernel-shape.py`'s `LEFT_CRATES` names the raised checks' crate too (9066 V.5).
 Next: P1 (the `fs::DiskFilesystem` seam, then btrfs as a part), after its design review.
+
+**What a kernel compiles of the parts** (CORE-WITHOUT-EXTENSIONS E1, 49bd1ae9e and a9751d012;
+ledger 9212, 9361; its diff check OK IF V1-V7, ledger 9510, branch `core-ext/e1-debt`): the binary depends on the
+load, the raised checks, the settings, logctl and the net ring only under its table keyed
+`cfg(ferrix_personality = "kernel")`, so a `personality=user` or `=none` kernel compiles none
+of them; the board glue stays until E1b's flag. `check-core-without-extensions.py` holds that
+from Cargo's graph per target, and the tools that read the graph (`check-crate-layering.sh`,
+`gen-soup.py`, `check-lift.py`, xtask's `gate_rows`) read the reference configuration's.

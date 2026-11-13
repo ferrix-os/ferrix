@@ -97,8 +97,10 @@ output is used to *satisfy* an objective rather than to find defects.
 | `check-panic-audit.py` | every panic-lint exemption justified | T2 |
 | `check-asm-budget.py` | the assembly allow-list and budget | T2 |
 | `check-device-access.py` | the kernel-enumerates-drivers-drive seam | T2 |
-| `check-crate-layering.sh` | layering; `src/lib/` depends on nothing above | T2 |
-| `gen-soup.py` | the item links no external crate | T2 |
+| `check-crate-layering.sh` | layering; `src/lib/` depends on nothing above; reads every target's table (`--target all`), the binary's keyed one included | T2 |
+| `gen-soup.py` | the item links no external crate; the kernel's graph read with the reference configuration's flags given to rustc | T2 |
+| `check-core-without-extensions.py` | a kernel built without the Linux personality compiles no extension: per kernel target, `cargo tree` of the binary under `personality=user` and `=none` names no package under the parts' place but the board glue, and under `kernel` every package of the binary's keyed table; the Linux-only libraries an `off` tree still names, and the libraries that depend on `ferrix-linux-abi` there, held as data that only shrinks (CORE-WITHOUT-EXTENSIONS E1, ledger 9212 M7 (d)); self-tested on every run; control `e1d-c9-load-plain` | T2 |
+| `check-build-flags.py`'s manifest rule | rules 1 and 6 b over every tracked manifest: no `[features]` or `optional` dependency in a kernel manifest (`kernel_cargo_features`), a table keyed on a flag only where `keyed_dependency_tables` names it, each key a declared flag and value xtask gives rustc, the three `MANIFEST_FLAGS` lists equal (ledger 9212 M1, M5); self-tested on every run; controls `e1d-c8-lib-keyed`, `e1d-c11-undeclared` | T2 |
 | `coverage-report.py` | statement coverage | **T2, and load-bearing** |
 | `decision-coverage.py` | decision (branch) coverage of object code, from the same traces; not yet offered against an objective (F-13) | T2 |
 | `llvm-objdump`, `llvm-nm` (the pinned toolchain's `llvm-tools`) | disassembly and symbols for `decision-coverage.py` | T2 |

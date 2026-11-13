@@ -286,27 +286,39 @@ fn build_flags() -> Result<Vec<(String, String)>, Box<dyn Error>> {
     Ok(flags)
 }
 
+/// The flags a manifest keys a dependency table on, which xtask gives rustc
+/// on its command line too: xtask's `cargo.rs` and `check-ferrocene-rust.py`
+/// hold the same list, and `check-build-flags.py` fails if the three differ.
+const MANIFEST_FLAGS: [&str; 2] = ["personality", "linux_abi"];
+
 /// The flags a manifest keys a dependency table on reach rustc's command
-/// line too, since Cargo decides such a table from there (xtask's
-/// `MANIFEST_FLAGS`; docs/microkernel/CORE-WITHOUT-EXTENSIONS.md §2). A
-/// build where Cargo saw another value than this script was handed would
-/// link one kernel and compile another: refused.
+/// line too, since Cargo decides such a table from there, never from what
+/// this script prints (docs/microkernel/CORE-WITHOUT-EXTENSIONS.md §2;
+/// ledger 9212 M2). Cargo hands a script the values it saw as
+/// `CARGO_CFG_FERRIX_<FLAG>`, several joined by commas. Exactly the one
+/// value this script was handed passes: none (no `--cfg`, so every keyed
+/// table is left out), another value, or two at once (both `cfg`s true, so
+/// both tables would build) would link one kernel and compile another, and
+/// each is refused by name.
 fn manifest_flags_agree(flags: &[(String, String)]) -> Result<(), Box<dyn Error>> {
-    for flag in ["personality", "linux_abi"] {
+    for flag in MANIFEST_FLAGS {
         let handed = flags
             .iter()
             .find(|(name, _)| name == flag)
             .map_or("", |(_, value)| value.as_str());
         let variable = format!("CARGO_CFG_FERRIX_{}", flag.to_uppercase());
-        let seen = std::env::var(&variable).unwrap_or_default();
-        if seen != handed {
-            return Err(format!(
-                "{flag}={handed} in FERRIX_BUILD_FLAGS, but cargo was given `{seen}` for \
-                 cfg(ferrix_{flag}): the kernel's manifests would follow another value than \
-                 its code (docs/microkernel/CORE-WITHOUT-EXTENSIONS.md)"
-            )
-            .into());
-        }
+        let wrong = match std::env::var(&variable) {
+            Ok(seen) if seen == handed => continue,
+            Ok(seen) if seen.contains(',') => format!("two values at once, `{seen}`,"),
+            Ok(seen) => format!("`{seen}`"),
+            Err(_) => "no value (no --cfg)".to_owned(),
+        };
+        return Err(format!(
+            "{flag}={handed} in FERRIX_BUILD_FLAGS, but cargo was given {wrong} for \
+             cfg(ferrix_{flag}): the kernel's manifests would follow another value than \
+             its code (docs/microkernel/CORE-WITHOUT-EXTENSIONS.md)"
+        )
+        .into());
     }
     Ok(())
 }

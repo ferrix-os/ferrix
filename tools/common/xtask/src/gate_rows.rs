@@ -783,17 +783,28 @@ fn area_rows(path: &str, rows: &mut Rows) {
 
 /// The directories of the crates the kernel and the loader build, relative
 /// to the workspace, from `cargo tree` for each architecture's two targets.
+/// The kernel's graph is read with the run's build flags given to rustc as
+/// its builds give them, since its manifest keys a table on one
+/// (`docs/microkernel/CORE-WITHOUT-EXTENSIONS.md` §2): the reference
+/// configuration's, every part in it, unless `--kernel-profile` or `--set`
+/// chose otherwise.
 fn image_crates() -> Result<BTreeSet<String>> {
     let root = paths::workspace_root();
+    let configs = crate::cargo::manifest_cfg_configs(crate::flags::this_run()?);
     let mut found = BTreeSet::new();
     for arch in Arch::ALL {
         for (package, target) in [
             ("ferrix-kernel", arch.kernel_target()),
             ("ferrix-boot", arch.loader_target()),
         ] {
-            let output = Command::new(crate::cargo::cargo())
+            let mut command = Command::new(crate::cargo::cargo());
+            let _ = command
                 .current_dir(&root)
-                .args(["tree", "-q", "-p", package, "--target", target])
+                .args(["tree", "-q", "-p", package, "--target", target]);
+            for config in &configs {
+                let _ = command.args(["--config", config.as_str()]);
+            }
+            let output = command
                 .args(["-e", "normal,build", "--prefix", "none"])
                 .output()
                 .map_err(|error| Error::new(format!("could not run cargo tree: {error}")))?;

@@ -1453,12 +1453,20 @@ def removable_problems(removable: dict, read, crate_files: dict[str, list[str]],
             if named is not None and not renamed and other != "ferrix-kernel":
                 problems.append(f"{directory}: {other} depends on {package}; only the binary may")
         binary = packages.get("ferrix-kernel")
-        # Listed plainly, or in the table of the builds that hold the load, on
-        # which the crate depends (docs/microkernel/CORE-WITHOUT-EXTENSIONS.md
-        # E1): it is compiled in every build that could link it.
+        # Listed: in the binary's [dependencies], or in the dependencies of the
+        # one table keyed _LOAD_TABLE, the key compared as written; no other
+        # keyed table, and no build- or dev-dependencies table, counts. Then it
+        # is compiled in every personality=kernel build, the only builds that
+        # compile the load whose seam it binds (and on which it depends, above),
+        # so removing its line from the composition root is still the only
+        # thing that removes it from a build that has the load (ledger 3623
+        # (R1) as amended by 9361 S1; 9212, 9341 A1;
+        # docs/microkernel/CORE-WITHOUT-EXTENSIONS.md E1).
         with_load = binary[1].get("target", {}).get(_LOAD_TABLE, {}).get("dependencies", {}) if binary else {}
         if binary is not None and package not in binary[1].get("dependencies", {}) and package not in with_load:
-            problems.append(f"src/kernel: the binary's manifest does not list {package} (it is compiled in every build that holds the load, ledger 3623 (R1))")
+            problems.append(f"src/kernel: the binary's manifest does not list {package}, in its [dependencies] or in "
+                            f"the dependencies of the table keyed {_LOAD_TABLE} (it is compiled in every build that "
+                            "holds the load; ledger 3623 (R1), 9212, 9341, 9361)")
         # No kernel file outside the root names the crate.
         for rel in sorted(crate_files.get("kernel", [])):
             if rel == root or rel in crate_files.get(package, []):
@@ -1646,11 +1654,19 @@ def _removable_self_test() -> list[str]:
     in_table = lambda key: {"dependencies": {}, "target": {key: {"dependencies": {"pkg-x": {}}}}}
     if any("does not list" in problem for problem in run(packages=binary_with(in_table(_LOAD_TABLE)))):
         failures.append("removable: the crate listed in the load's table was refused")
+    dev = {"dependencies": {}, "target": {_LOAD_TABLE: {"dev-dependencies": {"pkg-x": {}}}}}
     for what, cargo in [("the crate listed nowhere", {"dependencies": {}}),
-                        ("the crate listed in a table of another key", in_table('cfg(ferrix_f = "on")'))]:
+                        ("the crate listed in a table of another key", in_table('cfg(ferrix_f = "on")')),
+                        ("the crate listed under a respaced key", in_table('cfg(ferrix_personality="kernel")')),
+                        ("the crate in the load table's dev-dependencies (9341 A2 (iii))", dev)]:
         found = run(packages=binary_with(cargo))
         if not any("does not list" in problem for problem in found):
             failures.append(f"removable: {what} passed ({found})")
+    # Listed in the load's table, the crate must itself depend on the load, so
+    # that "every build that could link it" is checked, not said (9361 S1).
+    unloaded = {**binary_with(in_table(_LOAD_TABLE)), "pkg-x": ("src/kernel/x", {"dependencies": {}})}
+    if not any("does not depend on ferrix-kernel-load" in problem for problem in run(packages=unloaded)):
+        failures.append("removable: a crate in the load's table that does not depend on the load passed")
     # The scans over the linked crates (3934 (2), (3)).
     clean = {"src/kernel/src/hooks.rs": hooks, "src/kernel/src/user.rs": "fn u() { crate::hooks::a() }\n"}
     if seam_scan_problems(record, clean, "seam.rs"):
@@ -3016,7 +3032,11 @@ _SEAM_DEFINERS = re.compile(r"no_mangle\s*\)?\s*\]\s*(?:pub\s+)?(?:extern\s+\"[^
 _SEAM_STRING_DEFINERS = re.compile(r"export_name\s*=\s*\"__ferrix_|\.glob(?:a)?l\s+__ferrix_")
 
 
-# The binary's table for what only a kernel holding the load depends on.
+# The one keyed table of the binary's manifest a removable crate may stand in
+# (ledger 9212, 9341 A1, 9361 S1): the Linux personality's, keyed by the flag's
+# own cfg (BUILD-FLAGS.md rule 1), what only a kernel holding the load depends
+# on. The key is compared exactly as it is written here, so a respaced or a
+# different key is refused.
 _LOAD_TABLE = 'cfg(ferrix_personality = "kernel")'
 
 

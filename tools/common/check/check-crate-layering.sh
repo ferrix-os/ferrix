@@ -48,7 +48,7 @@ have() { cargo metadata --no-deps --format-version 1 2>/dev/null | grep -q "\"na
 # and that says nothing about what the kernel links.
 resolve() {
     local crate="$1"
-    if ! cargo tree -p "$crate" --edges normal --prefix none --no-dedupe 2>/tmp/cargo-tree-err.$$; then
+    if ! cargo tree -p "$crate" --target all --edges normal --prefix none --no-dedupe 2>/tmp/cargo-tree-err.$$; then
         echo "ERROR: could not resolve the dependency graph for $crate." >&2
         echo "  The layering rule was NOT checked. Fix the manifest first:" >&2
         sed 's/^/    /' /tmp/cargo-tree-err.$$ >&2
@@ -156,7 +156,7 @@ kernel_rule ferrix-kernel-raised-checks "the kernel's raised checks" "ferrix-ker
 # may link it. Inverted: every package of the workspace that links it, the
 # binary alone allowed.
 raised_users() {
-    cargo tree -i ferrix-kernel-raised-checks --workspace --edges normal --prefix none
+    cargo tree -i ferrix-kernel-raised-checks --workspace --target all --edges normal --prefix none
 }
 if [[ " $listed " == *" ferrix-kernel-raised-checks "* ]]; then
     if ! raised_by=$(raised_users 2>/tmp/cargo-tree-err.$$); then

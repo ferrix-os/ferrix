@@ -21,6 +21,7 @@
     "tools/common/check/check-boot-workers.py": "walker",
     "tools/common/check/check-build-flags.py": "walker",
     "tools/common/check/check-complexity.py": "boundary",
+    "tools/common/check/check-core-without-extensions.py": "packages",
     "tools/common/check/check-crate-layering.sh": "walker",
     "tools/common/check/check-device-access.py": "walker",
     "tools/common/check/check-evidence-homes.py": "boundary",

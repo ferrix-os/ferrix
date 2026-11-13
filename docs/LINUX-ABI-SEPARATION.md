@@ -982,6 +982,40 @@ of row 13's re-homings. The `off` allow stands in each of the four crates'
 roots, as each is now compiled with the flag, and the module declarations'
 `cfg`s moved with them into the roots.
 
+**Since CORE-WITHOUT-EXTENSIONS E1** (`docs/microkernel/CORE-WITHOUT-EXTENSIONS.md`,
+49bd1ae9e and a9751d012, ledger 9212, 9361): `off` no longer compiles the
+binary's five Linux parts (`ferrix-kernel-load`, `-raised-checks`,
+`-settings`, `-logctl`, `-net-ring`). They are dependencies only under the
+binary's table keyed `cfg(ferrix_personality = "kernel")`, which an `off`
+build (`personality=none`) does not meet, and `main.rs` takes the kernel's
+tree through the item where the load is not in ring 0.
+`check-core-without-extensions.py` holds this on every target from Cargo's
+graph: an `off` tree names no package under the parts' place but the two
+board crates (E1b's), and it names the four Linux-only libraries
+(`ferrix-linux-abi`, `-vdso`, `-vfs`, `-cgroupfs`) as data, each with the
+step that removes it, beside the four libraries that keep
+`ferrix-linux-abi` in the tree by depending on it (`ferrix-blkring`,
+`-native-abi`, `-ustack`, `-virtio`), which the plan's steps do not yet
+take. The `off` allow above is unchanged in its predicate and its lints;
+its `unused_crate_dependencies` now covers fewer crates, since the five
+parts are no longer dependencies of an `off` build: the Linux-only
+libraries stay unused there until E6 moves each out of the unconditional
+table. That predicate has been `ferrix_load_built = "none"` since M5
+(fa0ead524, ledger 5714 (5)), so the allow also covers the
+`personality=user` builds with `linux_abi=on` (`fast`, `max`); narrowing it
+to `personality=none` is a precondition of either carrying a level
+(docs/BACKLOG.md).
+
+The 2026-11-13 figures (release, base 157ecc413 against E1 a9751d012, ledger
+9510): the `off` images' text is 2,194,503, 1,888,893 and 2,203,708 bytes
+(x86-64, AArch64, ARMv7-A), byte for byte the base's; symbols of `fs`,
+`net`, `interfaces` and `syscall::{linux,exec,signal,fd,file}`, and of the
+five parts, 0 on each; of the Linux-only libraries 4, 3 and 3, the same on
+the base, all reached from the core: `ferrix_linux_abi::nr::from_*` (the
+entries' numbers, E3 takes them) and `ferrix_cgroupfs`'s `Limit` and `Set`
+`Debug` impls (`object/job.rs`, E4). The evidence table above is
+2026-10-23's; its "0 / 0" for the libraries no longer holds today.
+
 **Review.** Ledger line 3257: OK IF (1) to (7); (1) taken as option (ii),
 (3) and (7) written here and in `BUILD-FLAGS.md`.
 

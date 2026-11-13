@@ -88,7 +88,8 @@ KERNEL_TARGETS = (
     "armv7a-none-eabi",
 )
 # The flags a kernel manifest keys a dependency table on: xtask's cargo.rs
-# MANIFEST_FLAGS and build.rs's list, by name.
+# MANIFEST_FLAGS and build.rs's list, by name (check-build-flags.py holds the
+# three equal).
 MANIFEST_FLAGS = ("personality", "linux_abi")
 
 # What would make the build use another compiler, other flags or nightly
