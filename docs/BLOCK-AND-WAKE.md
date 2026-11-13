@@ -245,7 +245,9 @@ read on the box (`~/.local/share/ferrix/ef-30fps/wake/README`). That says what
 it is worth there. Since the second commit on `sys/epoll-ready` an epoll
 set's `/proc/<pid>/fdinfo/<fd>` has a `tfd:` line for each registration, as
 Linux writes it, so `grep -c tfd: /proc/<pid>/fdinfo/<fd>` counts a set's
-registrations exactly.
+registrations exactly. Since `sys/epoll-clock` its last line, Ferrix's own
+and after Linux's, is `walked:\t<n>`, the walk's count itself: how many
+registrations every wait on the set looks at, whatever woke.
 
 ### 4.4 `sys/epoll-base`: what an epoll wait costs with nothing registered
 
@@ -630,8 +632,27 @@ The controls (`gate.sh control --expect`, FIRED (panic)):
   the rescan case's line, "a change nothing woke was not found by the rescan
   of a sleeping wait". That shows the rescan case reaches the ticks term.
 
-No requirement (load ring; nothing a program sees changes); no ids. The
-rows are EB8's (ledger 9764, CK1-CK9).
+The code review (ledger 9805) found two checks weaker than they read, both
+mended in code:
+- CR1. The rescan case's added assertion first compared the due time after
+  its wait with a counter read before it. The set's creation already put
+  the due time a second past that reading, so the assertion could not fail.
+  It now requires that the due time after the wait is later than the one
+  before it, and no earlier than `rescan_due_after` of the counter read
+  before the wait.
+- CR2. The present reading was used at every rate without being clamped to
+  that rate's ceiling. A counter that had run long at a fast rate, read as
+  if it were 19.2 MHz, would pass saturation (about 2.6 years after a
+  4.32 GHz TSC started) and fail the case on correct code. It is now
+  `now.min(high)`.
+
+No requirement and no ids: load ring. The one change a program can see is
+the epoll fdinfo's new last line, `walked:` (§4.3, the branch's third
+commit). It is Ferrix's own procfs addition, after Linux's `tfd:` lines,
+in Linux's `name:\t` form. It needs the same access as those lines and
+shows no more than a set's registrations do. No requirement names the
+fdinfo's format, which is the reason none is added for it. The rows are
+EB8's (ledger 9764, CK1-CK9; 9805, CR1-CR6).
 
 **The same read on the futex and timer-sleep paths (found, not in this
 cut).**
@@ -750,6 +771,24 @@ whatever woke. On 2026-11-13 the 478 registrations of wineserver's set
 were 395 pipes, 82 sockets and an inotify file, none of them a kind a wait
 walks, so `walked:` should read 0 there. What is left is the base: 8.9 against 5.0 µs, §4.4.
 
+The same kit on develop 699ce191b (cut 1 of §4.4 in), idle, the same
+binaries (`runs/eb1/ferrix-eb-run.txt`), against be12356fd:
+
+| Round trip | Ferrix with cut 1 | Ferrix before (be12356fd) | Linux 7.0 |
+|---|---:|---:|---:|
+| epoll, no idle registration, one processor | 8.67 | 9.05 | 5.00 |
+| epoll, 512 idle registrations, one processor | 8.65 | 8.93 | 4.99 |
+| epoll, 512 idle registrations, two processors | 12.99 | 13.16 | 8.46 |
+| wakebench's epoll row | 8.67 | 9.48 | 5.49 |
+| futex, one processor | 6.23 | 6.30 | 3.67 |
+| futex waitv, one processor | 7.25 | 7.29 | 4.14 |
+
+Cut 1 is worth about 0.3 µs of an epoll round trip of 9 on the real machine.
+What remains against Linux, about 3.7 µs a trip, is the same on every kind
+of wait, a futex's included, which has no epoll in it. It is what a block,
+a switch and a wake cost here, not epoll's own cost. The cuts left in §4.4
+(the clock read, cut 3) are small beside it.
+
 ## 7. Where it stands
 
 - 2026-11-12: measured, and this design written for the design review.
@@ -859,3 +898,50 @@ walks, so `walked:` should read 0 there. What is left is the base: 8.9 against 5
   9764, OK IF CK1-CK9. `sys/wait-one-read` may be a later branch (ledger
   9780, WR1-WR6). The `syscall/time.rs` clock may be a second commit here
   (TN1-TN4).
+- 2026-11-13: cut 4 built (branch `sys/epoll-clock`, four commits): the
+  rescan's due time in counter ticks; the system-call clock made the
+  kernel's own (TN); the fdinfo's `walked:` line; these notes. Code review:
+  ledger 9805, OK IF CR1-CR6. CR1 and CR2 were mended in code, and the case
+  is never inlined (F-100: on ARMv7-A release, `kmain`'s frame had grown
+  from 12256 to 12448 bytes).
+  - The figures, ABAB, seven boots a side. Release desktop guest under
+    KVM, self-checks skipped, one processor, epollbench
+    43f2fb918aea3b99ea0cb80c2def400772b7a60be1b074809e685e744864b6e9, µs a
+    round trip. A is cut 1 (c0c66578c); B is this branch (36a36bd20 in
+    rounds 1-3, 2e21a48e5 in rounds 4-7, the same wait path). The host's
+    1-minute load was 11 to 34 throughout, with the gate pool full: noisy,
+    measured and not judged.
+    - N = 0: A's median 3.47, B's 3.37. Each boot's best: A 3.34 to 3.67
+      (median 3.41), B 3.30 to 3.37 (median 3.35).
+    - N = 512: A's median 3.51, B's 3.42.
+    - Linux 7.0 in the same guest beside them: 1.61 to 1.72 at N = 0, and
+      1.57 to 1.83 at N = 512.
+    - About 0.06 to 0.10 µs a trip, at the guest's noise floor. One B boot
+      had a 40.5 µs row, which was the host's.
+    - The bench reads the clock through the vDSO, for its rows, and
+      through the system call `clock_gettime(CLOCK_THREAD_CPUTIME_ID)`
+      only around each row. The TN commit does not reach its trip.
+  - Controls, `gate.sh control --expect`, FIRED (panic), on 2e21a48e5:
+    - `ck2-ctl-a-a64` (the margin left out, AArch64): "the rescan's due
+      time in ticks is outside the trusted recheck's bound";
+    - `ck2-ctl-b-x86` (a late due time, x86-64 under KVM): "a change
+      nothing woke was not found by the rescan of a sleeping wait".
+
+    The x86-64 pair runs again on the final hash (CR4).
+  - Logs, sha256, in `~/.local/share/ferrix/ef-30fps/faultbench/epoll-clock/`:
+    ck-a-1 01c93793a500ac017034713bbdba02cbe172bb9356b901755b4f347ace870fc4,
+    ck-a-2 59e33f7117687918adaa1cde1f02bd1c4ce1e43a9c6f40b81edd6df1216d3d4e,
+    ck-a-3 7eab4aadb179fd5d35eaece0484d35f949f1c81333b78b1ec6262c91e3f93b55,
+    ck-a-4 89e0b9971f7644871bb8414a79073e03d5a491b35ff101b5664b96a97d507d22,
+    ck-a-5 8f21bb0e4a631f76acf2ee0b0fab06ab12114215a80c89a8e8a2f94fbe9c68c7,
+    ck-a-6 132f7320a8e49efa9005499ffbe89b7afc7969ce289aa133d941265067a3b419,
+    ck-a-7 398745f789e558bc03196423547dec7f00a7ec0289fd5828b846c7f65d10cbb6,
+    ck-b-1 0c349d8526a4f63445dcd5b27cc9377822785f133efbccfe32b467929584bbfa,
+    ck-b-2 ecd2b4eabdf52f4e97df61a3f72e1e482d2bcf290dc82637740a518d67738717,
+    ck-b-3 e264744c43d273199b6d4a196679b5d91a487243b7527ebdb68f0fe1bd0fc44e,
+    ck-b-4 cc01e5eafcca799e44b86d8709b9da0f027a87be723139ac0574896c4a64e27e,
+    ck-b-5 6a7260d022fba9fff1c8062b3df445e9790b3536e30cd41a9005d1b01bdf235d,
+    ck-b-6 ddbe20c20fe925cf70718f2a96a5ab2bd2ccf16d5fe7503373a08cea1a24c61a,
+    ck-b-7 214d46a87b81ae536df297ad51fc16ee2a624358875bd51db6866292a4bf93a6,
+    ck-linux-1 090fdb70c5bbf33fba8900d299e61b6a86ec5e4c975371c7813f1a28688d59e2,
+    ck-linux-2 0742ade7e358c460bef31e109dc2f9e86702406883e35f097a3867f32e6649fe.
