@@ -24,9 +24,13 @@ ferrix-sched.workspace = true
 ferrix-smbios.workspace = true
 ferrix-sync.workspace = true
 ferrix-ustack.workspace = true
+
 # The board glue, installed by the composition root (docs/microkernel/
 # CRATE-SPLIT.md S2): parts that need the core and the item alone, which a
-# kernel without the Linux personality installs too.
+# kernel without the Linux personality installs too. Only a board_glue=on
+# build depends on them (docs/microkernel/CORE-WITHOUT-EXTENSIONS.md E1b);
+# keyed as the table below is.
+[target.'cfg(ferrix_board_glue = "on")'.dependencies]
 ferrix-kernel-board-gs201-usb.workspace = true
 ferrix-kernel-board-stm32mp1.workspace = true
 

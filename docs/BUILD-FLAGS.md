@@ -53,7 +53,7 @@ These come from `MICROKERNEL.md` §12 and the consultant's conditions on it
    any kernel manifest (`check-build-flags.py` counts both and holds the
    count to `kernel_cargo_features`). Cargo decides such a table from the
    `cfg`s on rustc's command line, so xtask gives the flags a manifest keys
-   on (`MANIFEST_FLAGS`: `personality` and `linux_abi`) to rustc too, by
+   on (`MANIFEST_FLAGS`: `personality`, `linux_abi` and `board_glue`) to rustc too, by
    `--config target.<triple>.rustflags`, and `src/kernel/build.rs` refuses a
    build where Cargo saw none, another or two values
    (`docs/microkernel/CORE-WITHOUT-EXTENSIONS.md` §2; ledger 9212 M1, M2).
@@ -143,7 +143,8 @@ explicitly (§4: levels compare standard by standard, so `sc4` covers
 | `smt` | `off`, `stibp` | `off`: the kernel runs one hardware thread per core (§3.1); `stibp`: sibling threads run, with STIBP or eIBRS/AutoIBRS's own cover | `off` | `stibp` | `stibp` | `stibp` | `off`: all; `stibp`: `sc2`, `present`, `none` | `stibp` (SMT runs today; AoU-11 asks the integrator to disable it only on MDS-affected parts) | M0 |
 | `runtime_trades` | `none`, `game_mode` | whether the image contains game mode's privileged, per-application run-time trades (§3.1); with `none` their code is absent | `none` | `none` | `game_mode` | `none` | `none`: all; `game_mode`: `none` | not built | with game mode's design |
 | `runtime_settings` | `fixed`, `live` | whether the kernel contains the entries by which a program changes a system setting at run time (`KERNEL-CRATES.md` §6.2: `sethostname`, `setdomainname`, `/proc/sys` writes, `clock_settime`, `settimeofday`, `syslog`'s clears, `/proc/sysrq-trigger`, sysfs `bind`/`unbind`, `reboot(RESTART2)`). `fixed`: the removable crate `ferrix-kernel-settings` is not linked and each entry answers `EPERM` at its dispatch, before any argument check; `live`: it is, and they act as today. **Not removed by `fixed` today**: powerctl (still in the kernel, deactivated by `ferrix.powerctl`, which no profile permits; step 2 moves it, with native entries answering `NOT_SUPPORTED`), and cgroupfs's budget writes (a residual: a claimed fixed profile reaching the kernel's cgroupfs needs a budget-sealing design review first). A `fixed` kernel is link-only until a fixed profile builds. With `personality=user` the Linux entries are linuxd's, which binds its own the same way (M5). Ledger 3558 (5), (9)-(11), 3623 | `fixed` | `fixed` | `live` | `live` | `fixed`: all; `live`: `present`, `none` | `live` (today's tree) | this landing |
-| `linux_abi` | `on`, `off` | whether the kernel offers the Linux ABI beside the native one (`LINUX-ABI-SEPARATION.md` §11.6-11.8); its levels are its placement's, `personality`. `off` compiles the Linux layer (`syscall`'s personality modules, `fs`, `net`, `interfaces`), `stages_check` and the check modules that run a Linux program out; it is build-only and boots nothing useful until that document's §7 rows land (§11.11), and `xtask check` builds it on every architecture | `on` | `on` | `on` | `on` | `on`: all, its level carried by `personality`; `off`: `none`, until a profile carries it with its own evidence, the board glue then classified or cut (ledger 3257 (1), 3208 (6)(g)) | `on` | §11.11 (build-only) |
+| `linux_abi` | `on`, `off` | whether the kernel offers the Linux ABI beside the native one (`LINUX-ABI-SEPARATION.md` §11.6-11.8); its levels are its placement's, `personality`. `off` compiles the Linux layer (`syscall`'s personality modules, `fs`, `net`, `interfaces`), `stages_check` and the check modules that run a Linux program out; it is build-only and boots nothing useful until that document's §7 rows land (§11.11), and `xtask check` builds it on every architecture | `on` | `on` | `on` | `on` | `on`: all, its level carried by `personality`; `off`: `none`, until a profile carries it with its own evidence, the board glue then classified or cut (cut by `board_glue=off`, E1b) (ledger 3257 (1), 3208 (6)(g)) | `on` | §11.11 (build-only) |
+| `board_glue` | `on`, `off` | whether the kernel contains the board glue, the two parts that tell the item about a board's own peripherals and boot mode (`ferrix-kernel-board-stm32mp1`, the DK1's display, USB host, GPU and SD card and its boot mode; `ferrix-kernel-board-gs201-usb`, the Pixel 7's USB device controller), dependencies of the binary only in its table keyed `cfg(ferrix_board_glue = "on")` (`microkernel/CORE-WITHOUT-EXTENSIONS.md` E1b). `off` compiles neither: such a kernel publishes none of those boards' own peripherals, so no driver is handed one half prepared, keeps no boot mode (reboot's word answers "this machine keeps no boot mode"), names `board_glue=off` on its `build` line and, without the Linux ABI, says at its `hooks` line that it has no board glue. The load in ring 0 requires the boards' registrations, so `off` conflicts with `personality=kernel`; under `personality=user` no glue is installed in either value (M5-LIFT §2), and `off` leaves it uncompiled: that combination resolves at level `none`, but no step of `check` compiles it, only its graph is read (`check-core-without-extensions.py`), and it differs from `fast`'s by two dependencies no user build names in code. What `off` does on the DK1 and the Pixel 7 is argued from the code (`discovery::board::Boards::find`, `power::request_boot_mode`) and shown only on QEMU machines that have neither board (ledger 9647 G2; docs/BACKLOG.md) | `on` | `on` | `on` | `on` | `on`: all; `off`: `none` (ledger 9212 Q1.1) | `on` | E1b |
 
 **`restricted_window=on`, as the resolver takes it (ledger 7224):** with `restricted_fastpath=off`, or `max`'s values:
 refused, "requires restricted_fastpath=on". With any other personality: refused, "requires personality=user". With
@@ -411,7 +412,7 @@ prints `profile=none level=none`.
 hands `src/kernel/build.rs` the chosen words in `FERRIX_BUILD_FLAGS` and the
 declared ones in `FERRIX_FLAG_VALUES`; the script makes them each kernel
 crate's `cfg`s and `--check-cfg`s, as before. The flags a manifest keys a
-dependency table on (`MANIFEST_FLAGS`, `personality` and `linux_abi`) also
+dependency table on (`MANIFEST_FLAGS`: `personality`, `linux_abi`, `board_glue`) also
 go to rustc for every crate of each kernel target, as `--config
 target.<triple>.rustflags=["--cfg","ferrix_<flag>=\"<value>\"",...]`, which
 joins `.cargo/config.toml`'s array (`RUSTFLAGS` would replace it and stays
@@ -421,7 +422,7 @@ crates), or `check.rs`'s two lint paths, all of which add them: the
 builds, the boots, coverage, `test-removable`, `check-stack-depth`,
 `check-frames`, `test-kernel-shape` and `test-ring0-budget` take the
 kernel from `build_kernel`; clippy's `on`, `off`, `checks=off`,
-`mitigations=off` and `smt=off` lints; the Ferrocene step
+`mitigations=off`, `smt=off`, `linux_abi=off` and `board_glue=off` lints; the Ferrocene step
 (`check-ferrocene-rust.py`, its own `--config`). No host build, test, doc
 or Miri run builds a kernel crate (`workspace::Members::excludes`); one
 that did would be refused by the script for want of `FERRIX_BUILD_FLAGS`.
@@ -668,3 +669,14 @@ are still validated, not built; `--personality user` is `feature/mk-lift`'s.
   Cargo 1.99.1 reads none for a target table (a key naming an undeclared
   flag resolves without a word) and rustc lints no `--cfg` on its command
   line; `check-build-flags.py` holds every key to the flag file instead.
+* **`board_glue` (2026-11-13, CORE-WITHOUT-EXTENSIONS E1b, branch
+  `core-ext/e1b-board-glue`; ledger 9212 Q1.1-Q1.4, 9510)**: `on | off`,
+  last in the flag file's order, `on` in every profile, `off` allowing
+  `none` alone and conflicting with `personality=kernel` (§3's row). The two
+  board crates are in the binary's table keyed `cfg(ferrix_board_glue =
+  "on")`, `board_glue` the third of `MANIFEST_FLAGS`. The `build` line ends
+  in `board_glue=on` on every profile's boot, its only change; the audit
+  record's word reads as before for `on` (AUDIT.md §1). `check` lints the
+  kernel with no extension (`linux_abi=off`, `board_glue=off`) on every
+  architecture. Its diff check is ledger 9647, OK IF G1-G8; the ring-0 rise
+  +17, ledger 9665.

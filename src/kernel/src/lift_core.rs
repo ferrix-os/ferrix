@@ -79,6 +79,8 @@ macro_rules! build_flag_word {
             cfg!(ferrix_linux_abi = "off"),
             cfg!(ferrix_runtime_settings = "fixed"),
             cfg!(ferrix_runtime_settings = "live"),
+            cfg!(ferrix_board_glue = "on"),
+            cfg!(ferrix_board_glue = "off"),
         ]
     };
 }

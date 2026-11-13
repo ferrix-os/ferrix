@@ -12,7 +12,7 @@
 // The same allow as `main.rs`'s, for this crate: a kernel without the Linux
 // ABI is build-only and carries no claim (LINUX-ABI-SEPARATION.md §11.11,
 // ledger 3257 (3)), and each of the kernel's crates is compiled with its
-// flags. Never in a build with `linux_abi=on`.
+// flags. Since M5 also in personality=user builds (ledger 9510 V3).
 #![cfg_attr(
     ferrix_load_built = "none",
     allow(
@@ -91,6 +91,8 @@ macro_rules! build_flag_word {
             cfg!(ferrix_linux_abi = "off"),
             cfg!(ferrix_runtime_settings = "fixed"),
             cfg!(ferrix_runtime_settings = "live"),
+            cfg!(ferrix_board_glue = "on"),
+            cfg!(ferrix_board_glue = "off"),
         ]
     };
 }

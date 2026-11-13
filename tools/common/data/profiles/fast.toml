@@ -34,6 +34,7 @@ smt = "stibp"
 runtime_trades = "none"
 linux_abi = "on"
 runtime_settings = "fixed"
+board_glue = "on"
 
 [boot_options]
 "ferrix.checks" = ["run"]

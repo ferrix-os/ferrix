@@ -289,7 +289,7 @@ fn build_flags() -> Result<Vec<(String, String)>, Box<dyn Error>> {
 /// The flags a manifest keys a dependency table on, which xtask gives rustc
 /// on its command line too: xtask's `cargo.rs` and `check-ferrocene-rust.py`
 /// hold the same list, and `check-build-flags.py` fails if the three differ.
-const MANIFEST_FLAGS: [&str; 2] = ["personality", "linux_abi"];
+const MANIFEST_FLAGS: [&str; 3] = ["personality", "linux_abi", "board_glue"];
 
 /// The flags a manifest keys a dependency table on reach rustc's command
 /// line too, since Cargo decides such a table from there, never from what

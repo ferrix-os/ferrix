@@ -90,7 +90,7 @@ KERNEL_TARGETS = (
 # The flags a kernel manifest keys a dependency table on: xtask's cargo.rs
 # MANIFEST_FLAGS and build.rs's list, by name (check-build-flags.py holds the
 # three equal).
-MANIFEST_FLAGS = ("personality", "linux_abi")
+MANIFEST_FLAGS = ("personality", "linux_abi", "board_glue")
 
 # What would make the build use another compiler, other flags or nightly
 # features than the ones this gate means.

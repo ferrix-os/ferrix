@@ -10,10 +10,12 @@ EXTENSIONS §2):
 1. **`personality=user` and `personality=none`** (the `fast` and `max`
    kernels' graph, and the `linux_abi=off` build's) name no package whose
    manifest is under the parts' place (`kernel_source_roots.parts_place`,
-   the extensions) but the board glue, by name (`BOARD_GLUE`, until
-   E1b gives it a flag of its own: ledger 9212 Q1.4).
-2. **`personality=kernel`** names every package of the binary's keyed table:
-   the table is read as a dependency where its flag holds, not as none.
+   the extensions) but, with `board_glue=on`, the board glue, by name
+   (`BOARD_GLUE`); with `board_glue=off` none at all (CORE-WITHOUT-EXTENSIONS
+   E1b; ledger 9212 Q1.4).
+2. **`personality=kernel`** with `board_glue=on` names every package of the
+   binary's keyed tables: each table is read as a dependency where its flag
+   holds, not as none.
 3. **The Linux-only libraries an `off` tree still names** are data here
    (`LINUX_ONLY`), each with the step of the plan that removes it. A listed
    library the `off` tree no longer names fails until its line goes, so the
@@ -26,9 +28,9 @@ EXTENSIONS §2):
    has left the core's and the item's manifests. A new one fails, and a
    listed one that no longer depends on it fails until its line goes.
 
-`--self-test` runs the rules on planted trees; the control is the load put
-back as a plain dependency of the binary, run by `gate.sh control` over
-`cargo xtask check`.
+`--self-test` runs the rules on planted trees; the controls are the load, and
+a board crate, put back as a plain dependency of the binary, run by `gate.sh
+control` over `cargo xtask check`.
 
     python3 tools/common/check/check-core-without-extensions.py
     python3 tools/common/check/check-core-without-extensions.py --self-test
@@ -50,12 +52,14 @@ ROOT = Path(__file__).resolve().parent.parent.parent.parent
 BINARY = "ferrix-kernel"
 TARGETS = ("x86_64-unknown-none", "aarch64-unknown-none-softfloat", "armv7a-none-eabi")
 KEY = 'cfg(ferrix_personality = "kernel")'
-# The builds without the Linux personality in ring 0 (9361 K1): personality
-# and linux_abi as the flag file allows them together.
-WITHOUT = (("user", "on"), ("none", "off"))
-WITH = ("kernel", "on")
-# The board glue: an `off` kernel installs it until E1b's `board_glue` flag
-# (ledger 9212 Q1.1, Q1.4).
+BOARD_KEY = 'cfg(ferrix_board_glue = "on")'
+KEYS = (KEY, BOARD_KEY)
+# The builds without the Linux personality in ring 0 (9361 K1), as
+# (personality, linux_abi, board_glue): each combination the flag file allows.
+WITHOUT = (("user", "on", "on"), ("user", "on", "off"), ("none", "off", "on"), ("none", "off", "off"))
+WITH = ("kernel", "on", "on")
+# The board glue: a kernel without the Linux personality may name it where
+# board_glue=on, and no other extension (ledger 9212 Q1.1, Q1.4).
 BOARD_GLUE = ("ferrix-kernel-board-gs201-usb", "ferrix-kernel-board-stm32mp1")
 # The libraries that exist only for the Linux personality and that an `off`
 # tree still names, each with the step that removes it (ledger 9212 O2: E6 is
@@ -80,26 +84,26 @@ KERNEL_CRATES = ("ferrix-kernel", "ferrix-kernel-core", "ferrix-kernel-item")
 LINE = re.compile(r"^(\S+) v\S+(?: \((.*)\))?")
 
 
-def rustflags(target: str, personality: str, linux_abi: str) -> str:
+def rustflags(target: str, personality: str, linux_abi: str, board_glue: str) -> str:
     """xtask's `manifest_cfg_configs`, for one target."""
     return (f'target.{target}.rustflags=["--cfg","ferrix_personality=\\"{personality}\\"",'
-            f'"--cfg","ferrix_linux_abi=\\"{linux_abi}\\""]')
+            f'"--cfg","ferrix_linux_abi=\\"{linux_abi}\\"","--cfg","ferrix_board_glue=\\"{board_glue}\\""]')
 
 
-def tree(target: str, personality: str, linux_abi: str, prune: tuple[str, ...] = (),
+def tree(target: str, personality: str, linux_abi: str, board_glue: str, prune: tuple[str, ...] = (),
          invert: str | None = None) -> dict[str, str]:
     """`cargo tree`'s packages, by name: each package's directory, relative to the
     repository (empty for one not in it). A tree that errors fails loudly: an
     empty answer would read as a kernel without extensions."""
     command = ["cargo", "tree", "--locked", "--target", target, "--edges", "normal", "--prefix", "none",
-               "--format", "{p}", "--config", rustflags(target, personality, linux_abi)]
+               "--format", "{p}", "--config", rustflags(target, personality, linux_abi, board_glue)]
     command += ["-i", invert, "-p", BINARY, "--depth", "1"] if invert else ["-p", BINARY]
     for name in prune:
         command += ["--prune", name]
     result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
     if result.returncode != 0:
         raise SystemExit(f"core-without-extensions: cargo tree failed for {target}, personality={personality}, "
-                         f"linux_abi={linux_abi}:\n{result.stderr.strip()}")
+                         f"linux_abi={linux_abi}, board_glue={board_glue}:\n{result.stderr.strip()}")
     found = {}
     for line in result.stdout.splitlines():
         match = LINE.match(line.strip())
@@ -114,18 +118,19 @@ def tree(target: str, personality: str, linux_abi: str, prune: tuple[str, ...] =
     return found
 
 
-def without_problems(label: str, packages: dict[str, str], place: str) -> list[str]:
-    """Rule 1: no package under the parts' place but the board glue."""
+def without_problems(label: str, packages: dict[str, str], place: str, glue: bool) -> list[str]:
+    """Rule 1: no package under the parts' place but, where `glue`, the board glue."""
+    allowed = BOARD_GLUE if glue else ()
     return [f"{label}: names {name} ({path}), an extension; a kernel without the Linux personality "
-            "compiles none but the board glue"
+            f"compiles {'none but the board glue' if glue else 'none'}"
             for name, path in sorted(packages.items())
-            if (path == place or path.startswith(place + "/")) and name not in BOARD_GLUE]
+            if (path == place or path.startswith(place + "/")) and name not in allowed]
 
 
-def with_problems(label: str, packages: dict[str, str], keyed: list[str]) -> list[str]:
-    """Rule 2: the keyed table is a dependency where its flag holds."""
-    return [f"{label}: does not name {name}, which the binary's table keyed {KEY} lists"
-            for name in sorted(set(keyed) - set(packages))]
+def with_problems(label: str, packages: dict[str, str], keyed: dict[str, list[str]]) -> list[str]:
+    """Rule 2: each keyed table is a dependency where its flag holds."""
+    return [f"{label}: does not name {name}, which the binary's table keyed {key} lists"
+            for key, names in keyed.items() for name in sorted(set(names) - set(packages))]
 
 
 def linux_only_problems(label: str, packages: dict[str, str], brought: set[str],
@@ -148,22 +153,25 @@ def linux_only_problems(label: str, packages: dict[str, str], brought: set[str],
     return problems
 
 
-def keyed_dependencies() -> list[str]:
+def keyed_dependencies() -> dict[str, list[str]]:
     with (ROOT / "src" / "kernel" / "Cargo.toml").open("rb") as handle:
         cargo = tomllib.load(handle)
     workspace = {}
     with (ROOT / "Cargo.toml").open("rb") as handle:
         workspace = tomllib.load(handle).get("workspace", {}).get("dependencies", {})
-    names = []
-    for key, spec in cargo.get("target", {}).get(KEY, {}).get("dependencies", {}).items():
-        package = key
-        if isinstance(spec, dict) and spec.get("workspace"):
-            root = workspace.get(key, {})
-            package = root.get("package", key) if isinstance(root, dict) else key
-        if isinstance(spec, dict):
-            package = spec.get("package", package)
-        names.append(package)
-    return names
+    tables = {}
+    for table in KEYS:
+        names = []
+        for key, spec in cargo.get("target", {}).get(table, {}).get("dependencies", {}).items():
+            package = key
+            if isinstance(spec, dict) and spec.get("workspace"):
+                root = workspace.get(key, {})
+                package = root.get("package", key) if isinstance(root, dict) else key
+            if isinstance(spec, dict):
+                package = spec.get("package", package)
+            names.append(package)
+        tables[table] = names
+    return tables
 
 
 def self_test() -> list[str]:
@@ -171,14 +179,16 @@ def self_test() -> list[str]:
     place = "src/kernel/parts-fixture"
     clean = {"ferrix-kernel": "src/kernel", "ferrix-kernel-core": "src/kernel/core",
              "ferrix-kernel-board-stm32mp1": f"{place}/board/stm32mp1", "ferrix-sync": "src/lib/kernel/sync"}
-    if without_problems("t", clean, place):
-        failures.append(f"a tree with the board glue alone was refused: {without_problems('t', clean, place)}")
+    if without_problems("t", clean, place, True):
+        failures.append(f"a tree with the board glue alone was refused: {without_problems('t', clean, place, True)}")
+    if not any("ferrix-kernel-board-stm32mp1" in problem for problem in without_problems("t", clean, place, False)):
+        failures.append("the board glue in a board_glue=off tree passed")
     for name, path in [("ferrix-kernel-load", f"{place}/personality/linux"), ("ferrix-kernel-x", place)]:
-        if not any(name in problem for problem in without_problems("t", {**clean, name: path}, place)):
+        if not any(name in problem for problem in without_problems("t", {**clean, name: path}, place, True)):
             failures.append(f"an extension in a tree without the personality passed: {name}")
-    if with_problems("t", {**clean, "ferrix-kernel-load": place}, ["ferrix-kernel-load"]):
+    if with_problems("t", {**clean, "ferrix-kernel-load": place}, {KEY: ["ferrix-kernel-load"]}):
         failures.append("a keyed table read as a dependency was refused")
-    if not with_problems("t", clean, ["ferrix-kernel-load"]):
+    if not with_problems("t", clean, {KEY: ["ferrix-kernel-load"]}):
         failures.append("a keyed table read as no dependency passed")
     off = {**clean, **{name: "src/lib/x" for name in LINUX_ONLY}}
     users = {"ferrix-kernel-core", "ferrix-vfs", *LINUX_ABI_USERS}
@@ -215,25 +225,27 @@ def main() -> int:
     place = kernel_roots.parts_place()
     keyed = keyed_dependencies()
     problems = []
-    if not keyed:
-        problems.append(f"src/kernel/Cargo.toml: no table keyed {KEY}")
+    for table, names in keyed.items():
+        if not names:
+            problems.append(f"src/kernel/Cargo.toml: no table keyed {table}")
     summary = []
     for target in TARGETS:
-        for personality, linux_abi in WITHOUT:
-            label = f"{target} personality={personality} linux_abi={linux_abi}"
-            packages = tree(target, personality, linux_abi)
-            problems += without_problems(label, packages, place)
+        for flags in WITHOUT:
+            personality, linux_abi, board_glue = flags
+            label = f"{target} personality={personality} linux_abi={linux_abi} board_glue={board_glue}"
+            packages = tree(target, *flags)
+            problems += without_problems(label, packages, place, board_glue == "on")
             parts = sorted(name for name, path in packages.items() if path.startswith(place + "/"))
             summary.append(f"{label}: {len(packages)} packages, of the parts' place only {', '.join(parts) or 'none'}")
             if linux_abi == "off":
-                pruned = tree(target, personality, linux_abi, prune=tuple(LINUX_ONLY))
+                pruned = tree(target, *flags, prune=tuple(LINUX_ONLY))
                 brought = set(packages) - set(pruned)
-                users = set(tree(target, personality, linux_abi, invert="ferrix-linux-abi")) \
+                users = set(tree(target, *flags, invert="ferrix-linux-abi")) \
                     if "ferrix-linux-abi" in packages else set()
                 problems += linux_only_problems(label, packages, brought, users)
                 still = sorted(set(LINUX_ONLY) & set(packages))
                 summary.append(f"{label}: Linux-only libraries still named: {', '.join(still) or 'none'}")
-        label = f"{target} personality={WITH[0]} linux_abi={WITH[1]}"
+        label = f"{target} personality={WITH[0]} linux_abi={WITH[1]} board_glue={WITH[2]}"
         problems += with_problems(label, tree(target, *WITH), keyed)
     if problems:
         print(f"core-without-extensions: {len(problems)} problem(s):", file=sys.stderr)
@@ -242,8 +254,9 @@ def main() -> int:
         return 1
     for line in summary:
         print(f"core-without-extensions: {line}")
-    print(f"core-without-extensions: every personality=kernel tree names the {len(keyed)} packages of the "
-          f"binary's keyed table; no tree without the personality names an extension but the board glue")
+    print(f"core-without-extensions: every personality=kernel tree names the "
+          f"{sum(len(names) for names in keyed.values())} packages of the binary's keyed tables; no tree without "
+          f"the personality names an extension but, with board_glue=on, the board glue")
     return 0
 
 

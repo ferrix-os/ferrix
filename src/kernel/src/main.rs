@@ -16,7 +16,7 @@
 // (6) b), and the expectations of dead code those items carry go
 // unfulfilled. The library crates only the Linux ABI reaches stay ordinary
 // dependencies, unused here, and are not linked into the image (ledger 3220
-// (14) a). Never in a build with `linux_abi=on`, which every profile sets.
+// (14) a). Since M5 also in personality=user builds (ledger 9510 V3).
 #![cfg_attr(
     ferrix_load_built = "none",
     allow(
@@ -1728,6 +1728,7 @@ fn register_load(view: &BootView<'_>) {
 /// maker exists to be registered, and the native calls the load would have
 /// served stay unserved (LINUX-ABI-SEPARATION.md §7 rows 2 and 5, §11.11).
 #[cfg(all(ferrix_load_built = "none", not(ferrix_personality = "user")))]
+#[cfg(ferrix_board_glue = "on")]
 fn register_load(view: &BootView<'_>) {
     let registered = ferrix_kernel_board_stm32mp1::platform::st::stm32mp1::install(view)
         .and_then(|()| ferrix_kernel_board_gs201_usb::platform::google::gs201::usb::install());
@@ -1753,6 +1754,20 @@ fn register_load(view: &BootView<'_>) {
     }
     println!(
         "  hooks    {boards} board bindings and the boot mode registered; no Linux ABI: no filesystem, init launcher, devmgr reader or native process maker"
+    );
+}
+
+/// [`register_load`] in a kernel without the Linux ABI and without the board
+/// glue (`board_glue=off`, CORE-WITHOUT-EXTENSIONS E1b; ledger 9212 Q1.3):
+/// nothing above the item is in it to register. A board's own peripherals
+/// (the DK1's display, USB host, GPU and SD card, the Pixel 7's USB device
+/// controller) are never published, so no driver is handed one half
+/// prepared, and reboot's word finds no boot mode; the line says so.
+#[cfg(all(ferrix_load_built = "none", not(ferrix_personality = "user")))]
+#[cfg(ferrix_board_glue = "off")]
+fn register_load(_view: &BootView<'_>) {
+    println!(
+        "  hooks    no board glue (board_glue=off): no board's own peripherals or boot mode; no Linux ABI: nothing above the item"
     );
 }
 

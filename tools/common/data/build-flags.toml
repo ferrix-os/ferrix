@@ -182,6 +182,11 @@ why = "whether the kernel contains the entries by which a program changes a syst
 values.fixed = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
 values.live = { allows = ["present", "none"], lands = "today", built = "yes" }
 
+[flags.board_glue]
+why = "whether the kernel contains the board glue, the two parts that tell the item about a board's own peripherals and boot mode (ferrix-kernel-board-stm32mp1 for the DK1, ferrix-kernel-board-gs201-usb for the Pixel 7; docs/microkernel/CORE-WITHOUT-EXTENSIONS.md E1b, ledger 9212 Q1). `off` compiles neither: such a kernel publishes none of those boards' own peripherals and keeps no boot mode, and says so at boot; the load in ring 0 requires the boards' registrations, so `off` conflicts with personality=kernel. `off` allows `none` alone (Q1.1)"
+values.on = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
+values.off = { allows = ["none"], lands = "CORE-WITHOUT-EXTENSIONS.md E1b", built = "yes", conflicts = ["personality=kernel"] }
+
 # ---------------------------------------------------------------------------
 # The image keys: image content, not kernel code, which every profile names in
 # its `image` table (BUILD-FLAGS.md §3.1, "Not flags"). Each value allows

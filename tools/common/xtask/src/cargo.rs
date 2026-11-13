@@ -119,7 +119,7 @@ pub(crate) fn flag_environment(resolved: &crate::flags::Resolved) -> [(&'static 
 /// holds its own copy of the list and refuses a build where Cargo's value
 /// is not the one it was handed, and `check-build-flags.py` holds this list,
 /// that one and `check-ferrocene-rust.py`'s equal.
-pub(crate) const MANIFEST_FLAGS: [&str; 2] = ["personality", "linux_abi"];
+pub(crate) const MANIFEST_FLAGS: [&str; 3] = ["personality", "linux_abi", "board_glue"];
 
 /// `--config` values that add [`MANIFEST_FLAGS`]' `cfg`s to every kernel
 /// target's `rustflags`. `--config` joins the array in `.cargo/config.toml`,

@@ -76,7 +76,8 @@
         "manifests are added here by CORE-WITHOUT-EXTENSIONS E6."
       ],
       "src/kernel/Cargo.toml": [
-        "cfg(ferrix_personality = \"kernel\")"
+        "cfg(ferrix_personality = \"kernel\")",
+        "cfg(ferrix_board_glue = \"on\")"
       ]
     },
     "mitigations": "on",

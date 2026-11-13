@@ -43,6 +43,7 @@ smt = "stibp"
 runtime_trades = "none"
 linux_abi = "on"
 runtime_settings = "live"
+board_glue = "on"
 
 # The boot options this configuration permits, by value (BF4). `*` is any one
 # word; a flag option is permitted as `true`. Anything not named is outside

@@ -944,6 +944,33 @@ mod tests {
         assert!(off.boot_line().ends_with("; no claim"));
     }
 
+    #[test]
+    fn board_glue_off_goes_only_without_the_load_in_ring_0_and_carries_no_claim() {
+        // Every profile names the board glue on (rule 4: explicitly).
+        for profile in ["present", "desktop", "max", "fast"] {
+            let resolved = resolve_unbuilt(Some(profile), &[]).unwrap();
+            assert_eq!(resolved.value("board_glue"), Some("on"), "{profile}");
+        }
+        // The load in ring 0 requires the boards' registrations (ledger 9212 Q1.3).
+        let why = resolve(None, &set(&[("board_glue", "off")]))
+            .unwrap_err()
+            .to_string();
+        assert!(why.contains("conflicts with personality=kernel"), "{why}");
+        let off = resolve(
+            None,
+            &set(&[
+                ("linux_abi", "off"),
+                ("personality", "none"),
+                ("fs", "none"),
+                ("board_glue", "off"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!((off.profile.as_str(), off.level.as_str()), ("none", "none"));
+        assert!(off.cfg_words().ends_with(" board_glue=off"));
+        assert!(off.boot_line().ends_with("; no claim"));
+    }
+
     /// What `--personality user` sets (M5-LIFT.md §1).
     fn lifted() -> Vec<(String, String)> {
         set(&[

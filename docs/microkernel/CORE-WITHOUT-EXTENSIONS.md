@@ -107,7 +107,7 @@ code that makes it true for the libraries; E6 is the manifests.
 | Step | What | Touches | Size (guess) |
 |---|---|---|---|
 | **E1** | The transport (§2). The binary's five Linux parts (`ferrix-kernel-load`, `-raised-checks`, `-settings`, `-logctl`, `-net-ring`) move to the `personality = "kernel"` table; `main.rs`'s glob of the raised checks' crate and the load's flag word go under `cfg(ferrix_load_built = "ring0")`, with the item's glob otherwise. A check: a `personality=user` and a `personality=none` build's `cargo tree` names no package under the parts' place but the board glue, with a control. | xtask, `build.rs`, `src/kernel/Cargo.toml`, `main.rs` (item, the composition root), the workspace manifest | 3 |
-| E1b | The board glue (`board/stm32mp1`, `board/gs201-usb`): an `off` kernel installs it today. A flag of its own, or the two keyed by `target_arch` (they are Arm's), is a question (§5 Q1). | as E1 | 2 |
+| E1b | The board glue (`board/stm32mp1`, `board/gs201-usb`): a flag `board_glue = on | off` (Q1, ruled a flag), the two crates in the binary's table keyed `cfg(ferrix_board_glue = "on")`, `off` conflicting with `personality=kernel`; built on branch `core-ext/e1b-board-glue` (see *Where it stands*). | as E1, the flag file, the four profiles, AUDIT.md, the Security Target | 2 |
 | **E2** | `Errno` out of the Linux crate: a crate of its own with no dependency, `ferrix-errno`, holding the struct and its constants as they are; `ferrix-linux-abi::errno` and `ferrix-vfs` re-export it, so no caller's type changes. The core and the item name `ferrix_errno::Errno`. | about 30 `use` sites, no body | 3 |
 | **E3** | The architecture's Linux code under the flag: the signal frames, the Linux system call numbers of the three entries, TLS descriptors, hwcap, the vDSO and `counter_nanos`. Where `off` already answers `ENOSYS` (`NoLinux`), the entry needs no Linux number; where the trap path hands a signal number to `fault_signal`, it hands a fault kind and the personality picks the number. | `arch/*`, `trap.rs`, `timer.rs`; core ring, three architectures | 13, the uncertain one |
 | E4 | `object/job.rs`'s `Limit` and `controllers`, `panic/catalog.rs`'s one name | core | 2 |
@@ -166,6 +166,28 @@ the boot lines equal, the `off` images equal. **Diff check OK IF V1-V7,
 ledger 9510**: no blocker, E1 stands; 9341 D2 lifts when this branch lands.
 E1b and E2 may be coded (each its own diff or code review before the take,
 after this branch has landed); E3 starts as a design note (N1-N12).
+
+**E1b, the board glue's flag** (branch `core-ext/e1b-board-glue`,
+2026-11-13, on 9510's terms): `board_glue = on | off`, last in the flag
+file, `on` in every profile, `off` allowing `none` alone and conflicting with
+`personality=kernel`, since the load in ring 0 requires the boards'
+registrations (Q1.1, Q1.3). The two board crates are dependencies of the
+binary only in its table keyed `cfg(ferrix_board_glue = "on")`; an `off`
+kernel without the Linux ABI has a `register_load` of its own, which
+requires no board registration and says on its `hooks` line that the kernel
+has no board glue: a board's own peripherals are never published and no boot
+mode is kept (Q1.3). That is argued from the code (`discovery::board::Boards::find`
+publishes only registered bindings, which only the glue registers;
+`power::request_boot_mode` answers "this machine keeps no boot mode") and shown
+only on QEMU machines that have neither board; a boot on the DK1 is owed before
+any profile carries `board_glue=off` (docs/BACKLOG.md, ledger 9647 G2). The build line and audit record gain `board_glue`
+(Q1.2: AUDIT.md, the Security Target; `on` is its first value, so a word with
+the glue reads as before). `check-core-without-extensions.py` reads every
+combination of `personality`, `linux_abi` and `board_glue` the flag file
+allows: with `board_glue=off` no package under the parts' place at all
+(Q1.4); `check` lints the kernel with no extension on every architecture.
+Its diff check is ledger 9647, OK IF G1-G8; the ring-0 rise (+17, textual)
+ledger 9665.
 
 The comment-only grouping of the core's manifest landed as c29cca330 and is
 replaced by E6's tables.

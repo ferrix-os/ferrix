@@ -1016,6 +1016,13 @@ entries' numbers, E3 takes them) and `ferrix_cgroupfs`'s `Limit` and `Set`
 `Debug` impls (`object/job.rs`, E4). The evidence table above is
 2026-10-23's; its "0 / 0" for the libraries no longer holds today.
 
+**Since CORE-WITHOUT-EXTENSIONS E1b** (`board_glue`, 2026-11-13): with
+`board_glue=off` beside `off`, the two board crates are not compiled either,
+so that kernel holds no package under the parts' place at all; its
+`register_load` requires no board registration and says on its `hooks` line
+that the kernel has no board glue. `board_glue=off` allows `none` alone and
+conflicts with `personality=kernel` (BUILD-FLAGS §3).
+
 **Review.** Ledger line 3257: OK IF (1) to (7); (1) taken as option (ii),
 (3) and (7) written here and in `BUILD-FLAGS.md`.
 

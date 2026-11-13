@@ -31,6 +31,7 @@ smt = "stibp"
 runtime_trades = "game_mode"
 linux_abi = "on"
 runtime_settings = "live"
+board_glue = "on"
 
 # No claim, so every option the registry declares, with any of its values.
 [boot_options]

@@ -387,7 +387,8 @@ action, the power action**; b) **the TOE's configuration at start-up:
 `Config::Build`, KASLR, whether the
 kernel log is kept across a reset (`ferrix.pstore`) and
 `ferrix.efifb`, and the build
-flags the kernel was compiled with**; c) **a
+flags the kernel was compiled with** (every flag of `build-flags.toml`,
+`board_glue` the last since 2026-11-13); c) **a
 native call its handle's rights refused, a widening of rights refused, a
 charge a job's limit refused, a native process made, a job handle given for
 a cgroup, a device's control channel given, `devmgr` started through the

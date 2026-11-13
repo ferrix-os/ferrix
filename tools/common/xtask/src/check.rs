@@ -1537,7 +1537,7 @@ fn cross_target_clippy() -> Result<()> {
     // build, and the kernel `mitigations=off` another in its own target
     // directory, so the two run at once (`docs/TEST-TIME.md`, C1).
     step(
-        "clippy (kernel, every architecture: each buildable profile, checks=off, smt=off, mitigations=off, linux_abi=off)",
+        "clippy (kernel, every architecture: each buildable profile, checks=off, smt=off, mitigations=off, linux_abi=off, board_glue=off)",
         kernel_clippy_every_build,
     )?;
     step(
@@ -2754,7 +2754,7 @@ fn python_captured(script: &str, arguments: &[&str], said: &mut Vec<u8>) -> Resu
 /// kernel build that can be made today, which is what `check` "builds"
 /// them with: every named profile that builds (`present`, `desktop`), and the
 /// ad-hoc builds that must not rot (`docs/BUILD-FLAGS.md` §6): `checks=off`
-/// (BF7), `smt=off` (DF4), `mitigations=off` and `linux_abi=off`. A profile refused by `lands`
+/// (BF7), `smt=off` (DF4), `mitigations=off`, `linux_abi=off` and `board_glue=off`. A profile refused by `lands`
 /// (`max`, `fast` before M5) is reported as not yet buildable, not as a
 /// failure; one that does not resolve at all fails.
 ///
@@ -2822,6 +2822,15 @@ fn kernel_clippy_every_build() -> Result<()> {
     builds.push((
         "ad hoc, linux_abi=off".to_owned(),
         crate::flags::resolve(None, &without_linux)?,
+    ));
+    // And without the board glue as well (CORE-WITHOUT-EXTENSIONS E1b):
+    // the kernel with no extension at all, whose composition root has a
+    // `register_load` of its own.
+    let mut without_extensions = without_linux;
+    without_extensions.push(("board_glue".to_owned(), "off".to_owned()));
+    builds.push((
+        "ad hoc, board_glue=off".to_owned(),
+        crate::flags::resolve(None, &without_extensions)?,
     ));
     // `smt=off`, which no profile that builds today carries (`max` waits
     // for M5): linted here so its parking and checks cannot rot.
