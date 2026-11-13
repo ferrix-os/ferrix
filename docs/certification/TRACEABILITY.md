@@ -22,9 +22,9 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Product functions | Count |
 |---|---:|
 | Named by a low-level requirement | 3582 |
-| Accessors, covered by the requirement they serve | 1515 |
+| Accessors, covered by the requirement they serve | 1527 |
 | Check code in a product file | 131 |
-| Named by none | 1168 |
+| Named by none | 1173 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `ferrix_boot_policy`, `ferrix_sha256`, `ferrix_sigverify`, `ferrix_slots`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 

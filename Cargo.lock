@@ -250,8 +250,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrix-cgroup-model"
+version = "0.1.0"
+
+[[package]]
 name = "ferrix-cgroupfs"
 version = "0.1.0"
+dependencies = [
+ "ferrix-cgroup-model",
+]
 
 [[package]]
 name = "ferrix-channel-echo"
@@ -612,7 +619,7 @@ dependencies = [
  "ferrix-acpi",
  "ferrix-audit",
  "ferrix-bootinfo",
- "ferrix-cgroupfs",
+ "ferrix-cgroup-model",
  "ferrix-description",
  "ferrix-elf",
  "ferrix-errno",
@@ -793,6 +800,7 @@ dependencies = [
  "ferrix-acpi",
  "ferrix-audit",
  "ferrix-bootinfo",
+ "ferrix-cgroup-model",
  "ferrix-cgroupfs",
  "ferrix-description",
  "ferrix-elf",

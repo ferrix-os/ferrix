@@ -61,8 +61,8 @@ use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::sync::SpinLock;
 
-use ferrix_cgroupfs::controllers::{self, Change, Set, Standing};
-use ferrix_cgroupfs::write::Limit;
+use ferrix_cgroup_model::Limit;
+use ferrix_cgroup_model::controllers::{self, Change, Set, Standing};
 use ferrix_native_abi::signals::Signals;
 use ferrix_sync::Once;
 

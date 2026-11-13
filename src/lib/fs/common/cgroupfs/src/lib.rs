@@ -44,18 +44,6 @@ pub mod write;
 #[cfg(test)]
 mod tests;
 
-/// Why a write, or a name, is refused. The kernel turns each into the errno
-/// Linux answers with; the mapping is its, since this crate has no errno.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Refusal {
-    /// Not a thing the file takes: Linux's `EINVAL`.
-    Invalid,
-    /// A number the file takes the form of but not the value of: `ERANGE`.
-    Range,
-    /// Something Linux takes and Ferrix does not do: `EOPNOTSUPP`.
-    NotSupported,
-    /// A name longer than a directory entry may be: `ENAMETOOLONG`.
-    TooLong,
-    /// What the no-internal-process rule forbids: `EBUSY`.
-    Busy,
-}
+/// Why a write, or a name, is refused: `ferrix-cgroup-model`'s, the same
+/// item under this path (`docs/microkernel/CORE-WITHOUT-EXTENSIONS.md` E4).
+pub use ferrix_cgroup_model::Refusal;

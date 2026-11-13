@@ -495,6 +495,12 @@
         "below": "byte slices its caller lends; no trait, no allocation, no dependency",
         "above": "Sha256 (new, update, finish), digest, finish_192 and digest_192: SHA-256 (FIPS 180-4) and SHA-256/192 (RFC 9858), called by ferrix-sigverify and ferrix-slots (docs/SIGNING.md section 5.1)"
       },
+      "ferrix-cgroup-model": {
+        "ring": "core",
+        "path": "src/lib/kernel/cgroup-model",
+        "below": "none: values its caller holds; no trait, no allocation, no dependency (docs/microkernel/CORE-WITHOUT-EXTENSIONS.md E4, on ledger 9212 Q2.1 and Q2.2's terms)",
+        "above": "controllers (Controller, ALL, Set, Change, Standing, vet_enable, vet_destination), Limit and Refusal: Linux's cgroup v2 rules a job keeps, named by object/job.rs, and re-exported unchanged as ferrix_cgroupfs::controllers, ferrix_cgroupfs::write::Limit and ferrix_cgroupfs::Refusal"
+      },
       "ferrix-errno": {
         "ring": "core",
         "path": "src/lib/proto/errno",
@@ -871,7 +877,6 @@
         "ferrix-acpi": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-audit": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-bootinfo": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
-        "ferrix-cgroupfs": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-description": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-fbtext": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-fdt": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",

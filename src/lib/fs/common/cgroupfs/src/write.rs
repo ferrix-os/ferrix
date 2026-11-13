@@ -95,25 +95,10 @@ pub fn parse_kill(text: &[u8]) -> Result<(), Refusal> {
     }
 }
 
-/// A limit on a subtree's size: `cgroup.max.depth` and
-/// `cgroup.max.descendants`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Limit {
-    /// No limit, written and printed as `max`.
-    Max,
-    /// At most this many.
-    At(u32),
-}
-
-impl Limit {
-    /// Whether `count` is within it.
-    pub fn allows(self, count: u32) -> bool {
-        match self {
-            Limit::Max => true,
-            Limit::At(most) => count <= most,
-        }
-    }
-}
+/// A limit on a subtree's size, `cgroup.max.depth` and
+/// `cgroup.max.descendants`: `ferrix-cgroup-model`'s, the same item under this
+/// path (`docs/microkernel/CORE-WITHOUT-EXTENSIONS.md` E4).
+pub use ferrix_cgroup_model::Limit;
 
 /// Parse a write to `cgroup.max.depth` or `cgroup.max.descendants`: `max`,
 /// or a count. Linux stores `max` as `INT_MAX`, so writing `2147483647` is

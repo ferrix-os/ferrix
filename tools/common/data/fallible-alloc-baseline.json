@@ -56,6 +56,11 @@
         "src/lib/proto/partition-desc/src/lib.rs": 2
       }
     },
+    "ferrix-cgroup-model": {
+      "//": "Target zero: values and rules, no allocation (CORE-WITHOUT-EXTENSIONS E4).",
+      "count": 0,
+      "by_file": {}
+    },
     "ferrix-errno": {
       "//": "Target zero: numbers and arithmetic, no allocation (CORE-WITHOUT-EXTENSIONS E2).",
       "count": 0,

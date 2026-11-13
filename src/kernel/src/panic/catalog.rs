@@ -2417,7 +2417,7 @@ pub static RELEASE: Explanation = Explanation {
         "`release` in src/kernel/extensions/personality/linux/src/fs/mod.rs or `give_back_initrd` in src/kernel/src/mm.rs gave \
          back other frames than the archive's whole pages, or left the watermark as it was.",
         "`init::set_inputs` kept a slice of the archive instead of a copy.",
-        "`ferrix_vfs::initramfs::remove` left a name of the archive, or removed a spared one.",
+        "The VFS's `initramfs::remove` left a name of the archive, or removed a spared one.",
     ],
     see: "src/kernel/extensions/personality/linux/src/fs/release_check.rs; docs/RAM-RELEASE.md §2",
 };

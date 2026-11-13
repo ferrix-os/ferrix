@@ -17,6 +17,7 @@ ferrix-sha256.workspace = true
 ferrix-acpi.workspace = true
 ferrix-audit.workspace = true
 ferrix-bootinfo.workspace = true
+ferrix-cgroup-model.workspace = true
 ferrix-cgroupfs.workspace = true
 ferrix-description.workspace = true
 ferrix-elf.workspace = true

@@ -27,10 +27,11 @@ EXTENSIONS §2):
    that would take it out: they keep the library in an `off` tree after E6
    has left the core's and the item's manifests. A new one fails, and a
    listed one that no longer depends on it fails until its line goes.
-5. **The error numbers' crate, ferrix-errno, depends on nothing** (no
+5. **The crates moved out of the Linux libraries depend on nothing**
+   (`DEPENDENCY_FREE`: ferrix-errno, E2, and ferrix-cgroup-model, E4; no
    dependency or build-dependency table, target-specific ones included;
-   ledger 9212 Q2.1): what a kernel without the Linux ABI names for its
-   errors brings nothing in with it.
+   ledger 9212 Q2.1, 9824 E4.1): what a kernel without the Linux ABI names
+   of them brings nothing in with it.
 6. **The kernel's files name the error numbers through ferrix-errno**
    (CORE-WITHOUT-EXTENSIONS E2), not through ferrix-linux-abi's `errno` or
    ferrix-vfs's `Errno`, which re-export the same items: every file under
@@ -77,8 +78,7 @@ BOARD_GLUE = ("ferrix-kernel-board-gs201-usb", "ferrix-kernel-board-stm32mp1")
 # tree still names, each with the step that removes it (ledger 9212 O2: E6 is
 # per library, in the landing that removes its last name).
 LINUX_ONLY = {
-    "ferrix-cgroupfs": "E4 (object/job.rs's Limit and controllers), then E6",
-    "ferrix-vfs": "user/space.rs's one Errno (ERRNO_ELSEWHERE), E4 (panic/catalog.rs), E5 (OpenFile), then E6",
+    "ferrix-vfs": "user/space.rs's one Errno (ERRNO_ELSEWHERE, at the latest E5), E5 (OpenFile), then E6",
     "ferrix-vdso": "E3 (the vDSO and counter_nanos), then E6",
     "ferrix-linux-abi": "E3 (the architecture's Linux code), E5 (Syscall, and main.rs's Errno with it), then E6",
 }
@@ -99,9 +99,11 @@ KERNEL_CRATES = ("ferrix-kernel", "ferrix-kernel-core", "ferrix-kernel-item")
 # the files that still name them through ferrix-linux-abi or ferrix-vfs, each
 # with the step that takes it, only shrink.
 ERRNO = "ferrix-errno"
+# The crates items left the Linux libraries for (E2, E4), each with no dependency.
+DEPENDENCY_FREE = (ERRNO, "ferrix-cgroup-model")
 ERRNO_ELSEWHERE = {
     "main.rs": "NoLinux's ENOSYS: E5, with NoLinux's Syscall beside it",
-    "user/space.rs": "one ENOMEM through ferrix_vfs: the next landing that edits user/space.rs, at the latest E4",
+    "user/space.rs": "one ENOMEM through ferrix_vfs: the next landing that edits user/space.rs, at the latest E5",
 }
 THROUGH = re.compile(r"\bferrix_linux_abi::(?:errno\b|\{[^}]*\berrno\b)|\bferrix_vfs::(?:Errno\b|\{[^}]*\bErrno\b)")
 LINE = re.compile(r"^(\S+) v\S+(?: \((.*)\))?")
@@ -176,12 +178,20 @@ def linux_only_problems(label: str, packages: dict[str, str], brought: set[str],
     return problems
 
 
+def free_problems(manifests: dict[str, dict]) -> list[str]:
+    """Rule 5: each of DEPENDENCY_FREE's crates (`manifests`, name -> its
+    Cargo.toml) depends on nothing."""
+    return [f"{crate}: depends on {name} ([{table}]); a crate moved out of the Linux libraries has no "
+            "dependency (ledger 9212 Q2.1)"
+            for crate, manifest in sorted(manifests.items())
+            for table, names in dependency_tables(manifest) for name in names]
+
+
 def errno_problems(manifest: dict, sources: dict[str, str]) -> list[str]:
-    """Rules 5 and 6: ferrix-errno depends on nothing; the kernel's files
-    (`sources`, name -> text) name the error numbers through it but
+    """Rules 5 (for ferrix-errno, `manifest`) and 6: the kernel's files
+    (`sources`, name -> text) name the error numbers through ferrix-errno but
     ERRNO_ELSEWHERE's, and a listed file that no longer does fails."""
-    problems = [f"{ERRNO}: depends on {name} ([{table}]); the error numbers' crate has no dependency "
-                "(ledger 9212 Q2.1)" for table, names in dependency_tables(manifest) for name in names]
+    problems = free_problems({ERRNO: manifest})
     through = {name for name, text in sources.items() if THROUGH.search(text)}
     problems += [f"src/kernel/src/{name}: names the error numbers through ferrix-linux-abi or ferrix-vfs; "
                  f"name them through ferrix_errno (CORE-WITHOUT-EXTENSIONS E2)"
@@ -214,9 +224,9 @@ def kernel_sources() -> dict[str, str]:
     return out
 
 
-def errno_manifest() -> dict:
+def crate_manifest(crate: str) -> dict:
     with (ROOT / "Cargo.toml").open("rb") as handle:
-        path = tomllib.load(handle)["workspace"]["dependencies"][ERRNO]["path"]
+        path = tomllib.load(handle)["workspace"]["dependencies"][crate]["path"]
     with (ROOT / path / "Cargo.toml").open("rb") as handle:
         return tomllib.load(handle)
 
@@ -263,9 +273,9 @@ def self_test() -> list[str]:
     if linux_only_problems("t", off, set(LINUX_ONLY), users):
         failures.append(f"the listed off tree was refused: {linux_only_problems('t', off, set(LINUX_ONLY), users)}")
     gone = dict(off)
-    del gone["ferrix-cgroupfs"]
+    del gone["ferrix-vdso"]
     for what, args, expect in [
-        ("a listed library the tree lost", (gone, set(LINUX_ONLY) - {"ferrix-cgroupfs"}, users), "no longer names"),
+        ("a listed library the tree lost", (gone, set(LINUX_ONLY) - {"ferrix-vdso"}, users), "no longer names"),
         ("a library the listed ones bring", ({**off, "ferrix-new": "src/lib/n"}, set(LINUX_ONLY) | {"ferrix-new"},
                                              users), "LINUX_ONLY does not list"),
         ("a new library depending on ferrix-linux-abi", ({**off, "ferrix-new": "src/lib/n"}, set(LINUX_ONLY),
@@ -283,6 +293,7 @@ def self_test() -> list[str]:
     for what, manifest, sources, expect in [
         ("a dependency of ferrix-errno", {"dependencies": {"ferrix-linux-abi": {}}}, clean_sources,
          "depends on ferrix-linux-abi ([dependencies])"),
+        ("a dependency of ferrix-cgroup-model", None, None, "ferrix-cgroup-model: depends on ferrix-sync"),
         ("a target-specific build-dependency", {"target": {"cfg(x)": {"build-dependencies": {"y": "1"}}}},
          clean_sources, "depends on y ([target.cfg(x).build-dependencies])"),
         ("a file naming them through ferrix-linux-abi", {}, {**clean_sources, "a.rs": "ferrix_linux_abi::errno::Errno"},
@@ -294,7 +305,9 @@ def self_test() -> list[str]:
         ("a listed file that no longer names them so", {}, {**clean_sources, "main.rs": "ferrix_errno::Errno"},
          "src/kernel/src/main.rs: no longer names"),
     ]:
-        if not any(expect in problem for problem in errno_problems(manifest, sources)):
+        found = free_problems({"ferrix-cgroup-model": {"dependencies": {"ferrix-sync": {}}}}) \
+            if manifest is None else errno_problems(manifest, sources)
+        if not any(expect in problem for problem in found):
             failures.append(f"the error numbers' rules passed {what}")
     return failures
 
@@ -313,7 +326,8 @@ def main() -> int:
         return 0
     place = kernel_roots.parts_place()
     keyed = keyed_dependencies()
-    problems = errno_problems(errno_manifest(), kernel_sources())
+    problems = errno_problems(crate_manifest(ERRNO), kernel_sources())
+    problems += free_problems({crate: crate_manifest(crate) for crate in DEPENDENCY_FREE if crate != ERRNO})
     for table, names in keyed.items():
         if not names:
             problems.append(f"src/kernel/Cargo.toml: no table keyed {table}")
@@ -348,8 +362,9 @@ def main() -> int:
     print(f"core-without-extensions: every personality=kernel tree names the "
           f"{sum(len(names) for names in keyed.values())} packages of the binary's keyed tables; no tree without "
           f"the personality names an extension but, with board_glue=on, the board glue")
-    print(f"core-without-extensions: {ERRNO} depends on nothing; the kernel's files name the error numbers "
-          f"through it but {', '.join(sorted(ERRNO_ELSEWHERE))}")
+    print(f"core-without-extensions: {' and '.join(DEPENDENCY_FREE)} depend on nothing; the kernel's files "
+          f"name the error numbers "
+          f"through ferrix-errno but {', '.join(sorted(ERRNO_ELSEWHERE))}")
     return 0
 
 

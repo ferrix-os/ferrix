@@ -37,8 +37,9 @@ ferrix-sync.workspace = true
 # The core's own mechanisms. Memory: frames, the heap, memory accounting, page
 # tables, address ranges. Objects and the native ABI they are named through,
 # and the error numbers its calls answer with (Linux's, in a crate with no
-# dependency: CORE-WITHOUT-EXTENSIONS E2). The loader's handoff and the audit
-# record.
+# dependency: CORE-WITHOUT-EXTENSIONS E2), and the cgroup rules a job keeps
+# (Linux's, in a crate with no dependency: E4). The loader's handoff and the
+# audit record.
 ferrix-frame.workspace = true
 ferrix-heap.workspace = true
 ferrix-kmem.workspace = true
@@ -47,6 +48,7 @@ ferrix-vma.workspace = true
 ferrix-objects.workspace = true
 ferrix-native-abi.workspace = true
 ferrix-errno.workspace = true
+ferrix-cgroup-model.workspace = true
 ferrix-bootinfo.workspace = true
 ferrix-audit.workspace = true
 
@@ -60,12 +62,11 @@ ferrix-description.workspace = true
 # What the core carries for the Linux personality, which itself is the part
 # src/kernel/extensions/personality/linux/: Linux's numbers and types where
 # the architecture's entry, signal frames and traps meet them, the vDSO's
-# image, and the VFS's and cgroupfs's types a few of the core's files name
-# (user/, object/, panic/). The core's debt to the personality, not parts.
+# image, and the VFS's types a few of the core's files name (user/,
+# panic/). The core's debt to the personality, not parts.
 ferrix-linux-abi.workspace = true
 ferrix-vdso.workspace = true
 ferrix-vfs.workspace = true
-ferrix-cgroupfs.workspace = true
 
 # The screen: text on the framebuffer for the console and the panic screen,
 # and the panic's QR code. A personality=user kernel links neither

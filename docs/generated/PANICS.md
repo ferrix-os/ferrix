@@ -4137,8 +4137,8 @@ file held open and mapped across the release reading as before.
    `give_back_initrd` in src/kernel/src/mm.rs gave back other frames than the
    archive's whole pages, or left the watermark as it was.
 2. `init::set_inputs` kept a slice of the archive instead of a copy.
-3. `ferrix_vfs::initramfs::remove` left a name of the archive, or removed a
-   spared one.
+3. The VFS's `initramfs::remove` left a name of the archive, or removed a spared
+   one.
 
 See: src/kernel/extensions/personality/linux/src/fs/release_check.rs;
 docs/RAM-RELEASE.md §2.

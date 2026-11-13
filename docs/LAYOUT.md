@@ -88,7 +88,7 @@ kernel or a loader. Each crate sits in exactly one group:
 | Group | Holds | Crates |
 |---|---|---|
 | `src/lib/proto/` | The interfaces between components: the ABIs the kernel offers, the rings and control protocols it shares with ring-3 drivers, the loader hand-off | `linux-abi` `errno` `native-abi` `native` `bootinfo` `devmgr-proto` `drvupdate-proto` `blkring` `netring` `displayctl` `renderctl` `inputctl` `sndctl` `logctl` `auth-proto` `pkg` `splash` |
-| `src/lib/kernel/` | Kernel-internal cores: memory, scheduling, synchronisation, objects, randomness, the process stack image, the vDSO, the panic screen | `frame` `heap` `kmem` `paging` `vma` `sched` `sync` `objects` `fallible` `crng` `seccomp` `ustack` `vdso` `qr` `fbtext` |
+| `src/lib/kernel/` | Kernel-internal cores: memory, scheduling, synchronisation, objects, randomness, the process stack image, the vDSO, the panic screen | `frame` `heap` `kmem` `paging` `vma` `sched` `sync` `objects` `cgroup-model` `fallible` `crng` `seccomp` `ustack` `vdso` `qr` `fbtext` |
 | `src/lib/platform/` | Parsers for what firmware and the boot medium hand over, and which of the two descriptions a machine is read by | `acpi` `fdt` `description` `pci` `elf` |
 | `src/lib/fs/` | Storage and filesystems, including the text of the pseudo-filesystems, grouped: one directory per on-disk filesystem, and `common/` for what serves them all (see below) | `btrfs/` `common/` |
 | `src/lib/network/` | The network stack | `net` `netwire` `nettcp` `netlink` |

@@ -1,0 +1,15 @@
+[package]
+name = "ferrix-cgroup-model"
+description = "The job tree's cgroup rules, Linux's cgroup v2: the controllers, their sets, the no-internal-process rule and a subtree's size limit, with no dependency (docs/microkernel/CORE-WITHOUT-EXTENSIONS.md E4)"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license.workspace = true
+publish = false
+
+# None, and none may be added: what a kernel built without the Linux
+# personality names for its jobs' rules (ledger 9212 Q2.1's terms).
+[dependencies]
+
+[lints]
+workspace = true

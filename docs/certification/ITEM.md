@@ -456,6 +456,19 @@ same items: one type, no conversion. Below it: nothing, a number its caller
 holds. Above it: the error of every core and item call.
 `check-core-without-extensions.py` holds that it gains no dependency.
 
+### ferrix-cgroup-model — the job tree's cgroup rules, in the core
+
+`ferrix-cgroup-model` (`src/lib/kernel/cgroup-model`, since 2026-11-13) is
+the controllers (`Controller`, `ALL`, `Set`, `Change`, `Standing`,
+`vet_enable`, `vet_destination`), `Limit` and `Refusal`: Linux's cgroup v2
+rules a job keeps, which `object/job.rs` holds its controllers and limits in
+and refuses by. They were `ferrix-cgroupfs`'s, unclassified (F-76);
+CORE-WITHOUT-EXTENSIONS E4 moved them unchanged into a crate with no
+dependency, classed in the core, the ring of its user, on the terms of ledger
+9212 Q2.1 and Q2.2. `ferrix_cgroupfs::controllers`, `ferrix_cgroupfs::write::Limit`
+and `ferrix_cgroupfs::Refusal` re-export the same items. Below it: nothing,
+values its caller holds. Above it: the job tree's rules.
+
 ### `load` — everything it runs and does not vouch for
 
 The VFS, btrfs's glue into it (`ferrix-btrfs-vfs` and the kernel's
