@@ -35,16 +35,22 @@
 //! start characters as the input fills and empties, and a `BOTHER` speed
 //! is kept as its number.
 //!
-//! # Input arrives when somebody looks, or every twenty milliseconds
+//! # Input arrives by interrupt, or when somebody looks
 //!
-//! There is no receive interrupt, so the UART is drained by [`read`], [`poll`]
-//! and `FIONREAD`, and that is when a byte is echoed. That alone is not enough
+//! Where the console's input comes by a receive interrupt
+//! (`console::input::interrupt_driven`), the interrupt puts each byte in the
+//! input ring and wakes the ring's queue. A reader and the `console` thread
+//! sleep on that queue and look when it is woken; nothing else wakes them but
+//! what changes what they read: a hang-up ([`hang_up`]), a change of the
+//! console's settings (`syscall::tty`'s `set`), a signal and a kill.
+//!
+//! Where it does not, the UART is drained by [`read`], [`poll`] and
+//! `FIONREAD`, and that is when a byte is echoed. That alone is not enough
 //! for the signal characters: while a shell waits for a foreground program,
 //! nothing reads the console, and a Ctrl-C would sit in the UART until the
 //! program it was meant to stop had finished. So the first read starts a
 //! `console` thread that drains it every [`PUMP_NANOS`] whether anybody is
-//! reading or not. It is the part of this that becomes an interrupt handler
-//! when the UART drivers can take one.
+//! reading or not, and a reader looks again every [`POLL_NANOS`].
 
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
@@ -833,10 +839,11 @@ pub(crate) fn hung_up_since(opened: Option<u64>) -> bool {
 /// waiting on it is woken to find that out. Whether it was.
 ///
 /// Counted under the terminal's lock, which [`read`] asks under, and with
-/// the session asked under the same lock. A reader sleeps [`POLL_NANOS`] at
-/// a time and looks again, so it notices by itself; the wake is for a `poll`
-/// that trusts the input queue to wake it, which nothing else would until
-/// the next keystroke.
+/// the session asked under the same lock. A reader of polled input sleeps
+/// [`POLL_NANOS`] at a time and looks again, so it notices by itself; the
+/// wake is for a reader of interrupt-driven input and for a `poll`, which
+/// trust the input queue to wake them, as nothing else would until the next
+/// keystroke.
 pub(crate) fn hang_up(session: u32) -> bool {
     let hung_up = with(|terminal| {
         if session == 0 || terminal.session != session {
@@ -928,7 +935,8 @@ pub(crate) fn read(buf: &mut [u8], nonblock: bool, opened: Option<u64>) -> Resul
 /// interrupt's wake count read `seen`, or until `deadline`.
 ///
 /// With a receive interrupt, on its queue, as a `poll` of the console does:
-/// a byte added to the ring, a hangup ([`hang_up`]), a signal and a kill all
+/// a byte added to the ring, a hangup ([`hang_up`]), a change of the
+/// console's settings (`syscall::tty`'s `set`), a signal and a kill all
 /// wake the task, and the queue's own one-second recheck bounds a wake that
 /// is missed. Without one -- polled input wakes nobody -- every
 /// [`POLL_NANOS`] as before. The look every 2 ms cost an idle shell at the

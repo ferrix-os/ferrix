@@ -3541,11 +3541,18 @@ fn terminal_settings_answer(process: &Process, page: u64) -> Result<(), &'static
     };
     uaccess::copy_to_user(process.space(), page + TTY_TERMIOS, &raw.to_bytes())
         .map_err(|_| "could not stage a termios")?;
+    // A reader asleep on the console reads its settings at every look and
+    // looks when the input queue is woken: a change of them wakes it, or a
+    // canonical read would learn of raw mode only at the next keystroke.
+    let woken_before = crate::console::input::waiters().wakes();
     answers(
         fd::sys_ioctl(process, 0, TCSETSW, page + TTY_TERMIOS),
         0,
         "TCSETSW on the console was refused",
     )?;
+    if crate::console::input::waiters().wakes() == woken_before {
+        return Err("a change of the console's settings did not wake the console's readers");
+    }
     answers(
         fd::sys_ioctl(process, 1, TCGETS, page + TTY_TERMIOS),
         0,

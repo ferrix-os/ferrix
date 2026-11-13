@@ -157,6 +157,12 @@ pub(crate) fn ioctl(
 ///
 /// Nothing is buffered on the way out, so "once output has drained" is now,
 /// and the `W` requests are the plain ones.
+///
+/// A reader asleep on the console is woken once the terminal's lock is let
+/// go, as a hang-up wakes it (`terminal::hang_up`): it reads the settings at
+/// every look and sleeps until the input queue is woken, so without this a
+/// canonical read holding part of a line would learn that another thread
+/// cleared `ICANON` only at the next keystroke (consultant ledger 9956 (1)).
 fn set(flush: bool, settings: impl FnOnce(Termios) -> Termios) {
     terminal::with(|terminal| {
         if flush {
@@ -165,6 +171,7 @@ fn set(flush: bool, settings: impl FnOnce(Termios) -> Termios) {
         let termios = settings(terminal.discipline.termios());
         terminal.discipline.set_termios(termios);
     });
+    crate::console::input::waiters().wake_all();
 }
 
 /// The requests about sessions and process groups.
