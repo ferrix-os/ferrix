@@ -902,7 +902,8 @@ fn run_with(
         match connection.receive() {
             Ok(_) => {}
             Err(RecvError::WouldBlock) => {
-                std::thread::sleep(Duration::from_millis(2));
+                let looks = state.shape == Shape::Twin || connection.has_pending_writes();
+                wait_readable(&connection, idle_for(looks, period, due, state.awaiting));
             }
             Err(RecvError::Closed) => break,
             Err(error) => return Err(format!("reading: {error:?}")),
@@ -2487,6 +2488,58 @@ fn flush(connection: &mut Connection, out: &mut Writer) -> Result<(), String> {
     connection
         .send(&bytes, &fds)
         .map_err(|error| format!("writing: {error:?}"))
+}
+
+/// How often the loop looks when it has something to look at that no
+/// message announces: a twin's close file, or bytes a full socket left
+/// queued. What it slept every turn before it waited on the socket.
+const LOOK_EVERY: Duration = Duration::from_millis(2);
+
+/// The longest the loop sleeps on a quiet socket, so that [`DEADLINE`] is
+/// still noticed about when it passes.
+const LONGEST_SLEEP: Duration = Duration::from_secs(1);
+
+/// How long the loop may sleep on the socket when it found nothing to read:
+/// until a moving picture's next frame is due, or until a stalled one gives
+/// up on its frame callback ([`UNPACED`]); [`LOOK_EVERY`] when `looks`; and
+/// otherwise until the compositor says something, which every other thing
+/// the loop acts on -- a configure, a released buffer, a frame callback, a
+/// key -- arrives as.
+///
+/// The loop slept 2 ms every turn instead, which woke a still wallpaper
+/// nobody touched 480 times a second.
+fn idle_for(looks: bool, period: Option<Duration>, due: Instant, awaiting: bool) -> Duration {
+    if looks {
+        return LOOK_EVERY;
+    }
+    let Some(period) = period else {
+        return LONGEST_SLEEP;
+    };
+    let waited = due.elapsed();
+    let until = if waited < period {
+        period - waited
+    } else if awaiting && waited < UNPACED {
+        UNPACED - waited
+    } else {
+        // Due and not waiting on a callback: what holds the frame back is a
+        // buffer, and its release is a message.
+        LONGEST_SLEEP
+    };
+    until.min(LONGEST_SLEEP)
+}
+
+/// Sleep until the compositor's socket has something to read, or `timeout`.
+fn wait_readable(connection: &Connection, timeout: Duration) {
+    let mut poll = libc::pollfd {
+        fd: connection.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    // Rounded up, so a frame due in half a millisecond is not a busy turn.
+    let millis = i32::try_from(timeout.as_micros().div_ceil(1000)).unwrap_or(i32::MAX);
+    // SAFETY: one `pollfd`, alive for the call, and the socket it names is
+    // `connection`'s, open for as long as the borrow.
+    let _ = unsafe { libc::poll(&raw mut poll, 1, millis) };
 }
 
 /// So the module compiles on a host without the descriptor plumbing.
