@@ -2743,7 +2743,7 @@ checks above is `pub` for raised checks (F3).
 |---|---|---|---|
 | `Ended` | struct | load |  |
 | `Region` | struct | item |  |
-| `Region::enter` | method | item |  |
+| `Region::enter` | method | item, load |  |
 | `Region::job` | method | item, load |  |
 | `Region::leave` | method | item, load |  |
 | `Region::new` | method | item, load, bin |  |

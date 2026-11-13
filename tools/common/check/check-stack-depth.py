@@ -217,6 +217,7 @@ RECURSIONS = (
     (
         "a process's release telling and killing others",
         (r"<ferrix_kernel_load::syscall::process::Process>::release$",
+         r"<ferrix_kernel_load::syscall::process::Process>::let_go$",
          r"<ferrix_kernel_load::syscall::process::Process>::end$",
          r"<ferrix_kernel_load::syscall::process::Process>::leave_stop$",
          r"^ferrix_kernel_load::syscall::kill::send$",
@@ -224,12 +225,13 @@ RECURSIONS = (
          r"^ferrix_kernel_load::syscall::pidns::init_gone$",
          r"^ferrix_kernel_load::syscall::process::kill$"),
         True,
+        "a release reached while another runs on the same task (a fatal signal its body sent ending a "
+        "process with no thread live) is owed to the outermost release there and run after it, before "
+        "it returns: one release body on a kernel stack (Process::release, F-113, ledger 9414, 9427). "
+        "A Linux thread keeps the owed list, a kernel task a slot of 16 by its address; a 17th kernel "
+        "task inside a release at once, or a process no longer listed, releases at once, counted and "
+        "said (the residual)",
         None,
-        "BACKLOG (owner ef-30fps): a release tells the parent (tell_parent -> send), and a namespace's "
-        "init kills its members (init_gone -> send); a fatal signal ends its target (kill -> end), "
-        "which releases it at once when no thread of it is live. Nested namespaces' inits are at most "
-        "pidns::MAX_LEVEL (32) deep, but a parent killed by its child's exit signal is bounded only by "
-        "the process tree",
     ),
 )
 

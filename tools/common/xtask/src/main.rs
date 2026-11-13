@@ -195,6 +195,7 @@ mod procfs;
 mod pty;
 mod qemu;
 mod quarantine;
+mod release_chain;
 mod remote;
 mod rename_crash;
 mod reserve;

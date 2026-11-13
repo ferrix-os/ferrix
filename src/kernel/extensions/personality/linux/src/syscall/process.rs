@@ -170,6 +170,9 @@ pub struct Process {
     attributes_pending: AtomicBool,
     /// Set by the one [`Process::release`] that runs, as it starts.
     released: AtomicBool,
+    /// The next process on a thread's list of owed releases, while this one
+    /// is on it ([`Thread::owe_release`]).
+    owed_next: SpinLock<Option<Arc<Process>>>,
     /// Set as that release finishes, after its orphans have gone on and before
     /// its parent is told: what `wait4` reaps by.
     release_finished: AtomicBool,
@@ -499,6 +502,7 @@ impl Process {
             handed_to: AtomicU32::new(0),
             attributes_pending: AtomicBool::new(false),
             released: AtomicBool::new(false),
+            owed_next: SpinLock::new(None),
             release_finished: AtomicBool::new(false),
             leader_status: AtomicI32::new(0),
             exit_meet: AtomicU32::new(0),
@@ -1407,10 +1411,67 @@ impl Process {
     /// are woken last, when there is nothing left to observe half done. Runs
     /// with interrupts open: closing handles and firing watchers take plain
     /// locks.
+    ///
+    /// A release reached from another one on the same thread -- a fatal
+    /// signal it sent ending a process with no thread live, which a target's
+    /// own exit racing the sender's look at its live count makes possible at
+    /// every link of a chain -- does not run inside it: it is owed to the
+    /// outermost release on that thread, which runs each owed one after its
+    /// own, one at a time. So one release is ever on a stack, however long
+    /// the chain (ledger 9275 K3; `test-release-chain`).
     fn release(&self) {
         if self.released.swap(true, Ordering::AcqRel) {
             return;
         }
+        let holder = Holder::running();
+        if self.owe_release(holder) {
+            return;
+        }
+        let nested = ReleaseNest::enter(holder);
+        self.let_go();
+        if nested.is_outermost() {
+            while let Some(owed) = holder.take_owed() {
+                owed.let_go();
+                drop(owed);
+            }
+        }
+    }
+
+    /// Owe this release to the release the running task is inside, if it is
+    /// inside one and this process can be held for it; whether it was.
+    fn owe_release(&self, holder: Holder) -> bool {
+        if !holder.in_release() {
+            return false;
+        }
+        // Listed until reaped, and a process is reaped only once its release
+        // has finished (`release_finished`, which `wait4` reads): one whose
+        // release has not run cannot be missing here. If it is all the same,
+        // the release runs at once, as before releases were owed, and is
+        // counted.
+        let Some(me) = registry::find(self.pid()).filter(|me| core::ptr::eq(Arc::as_ptr(me), self))
+        else {
+            let _ = RELEASES_UNLISTED.fetch_add(1, Ordering::Relaxed);
+            return false;
+        };
+        match holder.owe(me) {
+            Ok(()) => {
+                let _ = RELEASES_OWED.fetch_add(1, Ordering::Relaxed);
+                true
+            }
+            Err(me) => {
+                drop(me);
+                false
+            }
+        }
+    }
+
+    /// Its link on a thread's list of owed releases ([`Thread::owe_release`]).
+    pub(crate) fn owed_link(&self) -> &SpinLock<Option<Arc<Process>>> {
+        &self.owed_next
+    }
+
+    /// The release's work, once: [`Process::release`] decides when.
+    fn let_go(&self) {
         // A session's leader ending lets go of the session's terminal, the
         // console's or a pty's, as Linux's `disassociate_ctty`: otherwise a
         // later leader given the same pid would find it its own.
@@ -2825,6 +2886,288 @@ fn tell_a_new_task(process: &Process, task: &Arc<Task>) {
         thread.with_signals(|shared, own| super::signal::needs_attention(shared, own))
     }) {
         sched::work::notify(task, sched::work::SIGNAL);
+    }
+}
+
+/// The most releases seen running one inside another on one task's stack;
+/// one until a release ran inside another.
+static RELEASES_DEEPEST: AtomicU32 = AtomicU32::new(1);
+
+/// Releases owed to an outermost one and run after it.
+static RELEASES_OWED: AtomicU32 = AtomicU32::new(0);
+
+/// How many releases have been owed to an outermost one, for the release
+/// check to see its own go that way.
+pub(crate) fn releases_owed() -> u32 {
+    RELEASES_OWED.load(Ordering::Relaxed)
+}
+
+/// Releases that ran inside another one on the same stack: none, while every
+/// release reached from another is owed to the outermost (ledger 9414).
+static RELEASES_NESTED: AtomicU32 = AtomicU32::new(0);
+
+/// Releases run at once inside another because their process was no longer
+/// listed ([`Process::owe_release`]): none expected.
+static RELEASES_UNLISTED: AtomicU32 = AtomicU32::new(0);
+
+/// Releases run at once inside another on a kernel task because
+/// [`KERNEL_RELEASES`] had no free slot: none expected.
+static RELEASES_UNSLOTTED: AtomicU32 = AtomicU32::new(0);
+
+/// Lists of owed releases left behind when their holder went: none, as the
+/// outermost release drains its own before it returns.
+pub(crate) static RELEASES_LEFT_OWED: AtomicU32 = AtomicU32::new(0);
+
+/// What the release checks read: releases nested, run unlisted, run with no
+/// slot, and owed lists left behind.
+pub(crate) fn release_counts() -> [u32; 4] {
+    [
+        RELEASES_NESTED.load(Ordering::Relaxed),
+        RELEASES_UNLISTED.load(Ordering::Relaxed),
+        RELEASES_UNSLOTTED.load(Ordering::Relaxed),
+        RELEASES_LEFT_OWED.load(Ordering::Relaxed),
+    ]
+}
+
+/// How many slots of [`KERNEL_RELEASES`] are held: none between releases.
+pub(crate) fn kernel_release_slots_held() -> usize {
+    KERNEL_RELEASES
+        .lock()
+        .iter()
+        .filter(|slot| slot.task != 0)
+        .count()
+}
+
+/// How many kernel tasks may be inside a release at once with their owed
+/// releases kept; one more runs its nested releases at once, counted.
+const KERNEL_SLOTS: usize = 16;
+
+/// A kernel task inside a release: the owed list a Linux thread keeps on its
+/// [`Thread`], kept here by the task's address for a task with no thread.
+#[derive(Debug)]
+struct KernelSlot {
+    /// The task's address, or 0 for a free slot.
+    task: usize,
+    /// How many releases run on it now.
+    depth: u32,
+    /// Where the outermost began on the stack.
+    base: u64,
+    /// The releases owed to the outermost, last owed first.
+    owed: Option<Arc<Process>>,
+}
+
+impl KernelSlot {
+    /// A free slot.
+    const FREE: KernelSlot = KernelSlot {
+        task: 0,
+        depth: 0,
+        base: 0,
+        owed: None,
+    };
+}
+
+/// The kernel tasks inside a release: a leaf lock, held for a slot's few
+/// words and never across a release or a drop.
+static KERNEL_RELEASES: SpinLock<[KernelSlot; KERNEL_SLOTS]> =
+    SpinLock::new([const { KernelSlot::FREE }; KERNEL_SLOTS]);
+
+/// Whose stack a release runs on, and where that task's owed releases are
+/// kept: its Linux thread's, or for a kernel task a slot found by the task's
+/// address, stable while the task lives, and a release ends before its task
+/// can (ledger 9414 R1).
+#[derive(Debug, Clone, Copy)]
+enum Holder {
+    /// A Linux thread's task: [`Thread`]'s list.
+    Thread,
+    /// A kernel task, by its address: a [`KERNEL_RELEASES`] slot.
+    Kernel(usize),
+    /// No task at all (early boot): nothing kept.
+    Nothing,
+}
+
+impl Holder {
+    /// The running task's.
+    fn running() -> Holder {
+        if thread::with_current(|_| ()).is_some() {
+            return Holder::Thread;
+        }
+        sched::with_current(|task| Holder::Kernel(core::ptr::from_ref(task).addr()))
+            .unwrap_or(Holder::Nothing)
+    }
+
+    /// Whether a release runs on this task's stack now.
+    fn in_release(self) -> bool {
+        match self {
+            Holder::Thread => thread::with_current(Thread::in_release).unwrap_or(false),
+            Holder::Kernel(task) => KERNEL_RELEASES
+                .lock()
+                .iter()
+                .any(|slot| slot.task == task && slot.depth > 0),
+            Holder::Nothing => false,
+        }
+    }
+
+    /// Owe `process`'s release to the outermost one here; `process` back if
+    /// there is nowhere to keep it, to be dropped by the caller unlocked.
+    fn owe(self, process: Arc<Process>) -> Result<(), Arc<Process>> {
+        match self {
+            Holder::Thread => {
+                match thread::with_current(|thread| thread.owe_release(Arc::clone(&process))) {
+                    Some(()) => Ok(()),
+                    None => Err(process),
+                }
+            }
+            Holder::Kernel(task) => {
+                let mut slots = KERNEL_RELEASES.lock();
+                let Some(slot) = slots.iter_mut().find(|slot| slot.task == task) else {
+                    return Err(process);
+                };
+                *process.owed_link().lock() = slot.owed.take();
+                slot.owed = Some(process);
+                Ok(())
+            }
+            Holder::Nothing => Err(process),
+        }
+    }
+
+    /// The release owed here that was owed last, taken off its list.
+    fn take_owed(self) -> Option<Arc<Process>> {
+        match self {
+            Holder::Thread => thread::with_current(Thread::take_owed_release).flatten(),
+            Holder::Kernel(task) => {
+                let mut slots = KERNEL_RELEASES.lock();
+                let slot = slots.iter_mut().find(|slot| slot.task == task)?;
+                let first = slot.owed.take()?;
+                slot.owed = first.owed_link().lock().take();
+                Some(first)
+            }
+            Holder::Nothing => None,
+        }
+    }
+
+    /// Count a release beginning at `here`: how many run here now, this one
+    /// with them, and how far below the outermost one's beginning it begins;
+    /// `None` where nothing is kept.
+    fn enter(self, here: u64) -> Option<(u32, u64)> {
+        match self {
+            Holder::Thread => thread::with_current(|thread| thread.enter_release(here)),
+            Holder::Kernel(task) => enter_kernel_slot(task, here),
+            Holder::Nothing => None,
+        }
+    }
+
+    /// The release [`Holder::enter`] counted has returned.
+    fn leave(self) {
+        match self {
+            Holder::Thread => {
+                let _ = thread::with_current(Thread::leave_release);
+            }
+            Holder::Kernel(task) => leave_kernel_slot(task),
+            Holder::Nothing => {}
+        }
+    }
+}
+
+/// [`Holder::enter`] for a kernel task: its slot's depth one more, or a
+/// free slot taken for it; `None` when every slot is held.
+fn enter_kernel_slot(task: usize, here: u64) -> Option<(u32, u64)> {
+    let mut slots = KERNEL_RELEASES.lock();
+    if let Some(slot) = slots.iter_mut().find(|slot| slot.task == task) {
+        slot.depth = slot.depth.saturating_add(1);
+        return Some((slot.depth, slot.base.saturating_sub(here)));
+    }
+    // Only a free slot is taken: one whose depth is above 0 keeps its task
+    // until its outermost release returns.
+    let Some(slot) = slots.iter_mut().find(|slot| slot.task == 0) else {
+        drop(slots);
+        if RELEASES_UNSLOTTED.fetch_add(1, Ordering::Relaxed) == 0 {
+            crate::console::println!(
+                "release: no slot for a kernel task's owed list; released at once"
+            );
+        }
+        return None;
+    };
+    *slot = KernelSlot {
+        task,
+        depth: 1,
+        base: here,
+        owed: None,
+    };
+    Some((1, 0))
+}
+
+/// [`Holder::leave`] for a kernel task: its slot's depth one less, and the
+/// slot free again at 0.
+fn leave_kernel_slot(task: usize) {
+    let mut slots = KERNEL_RELEASES.lock();
+    let Some(slot) = slots.iter_mut().find(|slot| slot.task == task) else {
+        return;
+    };
+    slot.depth = slot.depth.saturating_sub(1);
+    if slot.depth != 0 {
+        return;
+    }
+    // Nothing owed is left to drop here: the outermost drained its list
+    // before it returned. A list left all the same is counted.
+    if slot.owed.is_some() {
+        let _ = RELEASES_LEFT_OWED.fetch_add(1, Ordering::Relaxed);
+    }
+    slot.task = 0;
+}
+
+/// One [`Process::release`] counted on the running task for its length: a
+/// release reaches others through the signals it sends (`tell_parent`,
+/// `pidns::init_gone`, `kill::send`), and a fatal one releases its target at
+/// once when no thread of that target is live. Each is owed to the outermost
+/// release on the task ([`Process::owe_release`]); one that runs inside all
+/// the same is counted, and each new deepest nesting said, with the stack it
+/// took below the outermost release, for `test-release-chain` to read
+/// (ledger 9275 K3, 9414).
+#[derive(Debug)]
+struct ReleaseNest {
+    /// Where it was counted, if it was.
+    counted: Option<Holder>,
+    /// The first on its task, which runs the releases owed to it.
+    outermost: bool,
+}
+
+impl ReleaseNest {
+    /// Count a release beginning here, on `holder`.
+    fn enter(holder: Holder) -> ReleaseNest {
+        let mark = 0_u8;
+        let here =
+            u64::try_from(core::hint::black_box(core::ptr::from_ref(&mark)).addr()).unwrap_or(0);
+        let Some((depth, below)) = holder.enter(here) else {
+            return ReleaseNest {
+                counted: None,
+                outermost: false,
+            };
+        };
+        if depth > 1 {
+            let _ = RELEASES_NESTED.fetch_add(1, Ordering::Relaxed);
+            if RELEASES_DEEPEST.fetch_max(depth, Ordering::Relaxed) < depth {
+                crate::console::println!(
+                    "release: {depth} releases ran one inside another on one stack, the last {below} bytes below the first"
+                );
+            }
+        }
+        ReleaseNest {
+            counted: Some(holder),
+            outermost: depth == 1,
+        }
+    }
+
+    /// Whether this is the first release on its task's stack.
+    fn is_outermost(&self) -> bool {
+        self.outermost
+    }
+}
+
+impl Drop for ReleaseNest {
+    fn drop(&mut self) {
+        if let Some(holder) = self.counted {
+            holder.leave();
+        }
     }
 }
 

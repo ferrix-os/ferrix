@@ -131,6 +131,14 @@ pub struct Thread {
     /// domain, for a process's first thread made any other way. Read once,
     /// by `sched::prepare_user`; the task's own mask is what changes after.
     start_affinity: Option<ferrix_sched::CpuSet>,
+    /// How many [`Process::release`]s run on its task's stack now, one
+    /// inside another (`check-stack-depth`'s recursion row, ledger 9275 K3).
+    releases: AtomicU32,
+    /// Where the outermost of them began on the stack, while one runs.
+    release_base: AtomicU64,
+    /// The releases owed to the outermost one, last owed first, linked
+    /// through each process's own link ([`Thread::owe_release`]).
+    owed_releases: SpinLock<Option<Arc<Process>>>,
 }
 
 /// The mask of the task running `creator`, if `creator` is the running
@@ -273,7 +281,57 @@ impl Thread {
             timer_slack: AtomicU64::new(crate::syscall::time::slack::DEFAULT_NS),
             default_timer_slack: AtomicU64::new(crate::syscall::time::slack::DEFAULT_NS),
             start_affinity: None,
+            releases: AtomicU32::new(0),
+            release_base: AtomicU64::new(0),
+            owed_releases: SpinLock::new(None),
         }
+    }
+
+    /// A release begins on its task's stack at `here`: how many run there
+    /// now, this one with them, and how far below the outermost one's
+    /// beginning this one begins.
+    pub(crate) fn enter_release(&self, here: u64) -> (u32, u64) {
+        let depth = self
+            .releases
+            .fetch_add(1, Ordering::Relaxed)
+            .saturating_add(1);
+        if depth == 1 {
+            self.release_base.store(here, Ordering::Relaxed);
+            return (1, 0);
+        }
+        (
+            depth,
+            self.release_base
+                .load(Ordering::Relaxed)
+                .saturating_sub(here),
+        )
+    }
+
+    /// The release [`Thread::enter_release`] counted has returned.
+    pub(crate) fn leave_release(&self) {
+        let _ = self.releases.fetch_sub(1, Ordering::Relaxed);
+    }
+
+    /// Whether a release runs on its task's stack now.
+    pub(crate) fn in_release(&self) -> bool {
+        self.releases.load(Ordering::Relaxed) > 0
+    }
+
+    /// Owe `process`'s release to the outermost release running here: put it
+    /// first on the list, its own link holding the rest. Nothing is allocated
+    /// and nothing dropped; the list's lock, then the link's, both leaves.
+    pub(crate) fn owe_release(&self, process: Arc<Process>) {
+        let mut owed = self.owed_releases.lock();
+        *process.owed_link().lock() = owed.take();
+        *owed = Some(process);
+    }
+
+    /// The release owed here that was owed last, taken off the list.
+    pub(crate) fn take_owed_release(&self) -> Option<Arc<Process>> {
+        let mut owed = self.owed_releases.lock();
+        let first = owed.take()?;
+        *owed = first.owed_link().lock().take();
+        Some(first)
     }
 
     /// Its timer slack: see [`Thread::timer_slack`]'s field.
@@ -586,6 +644,12 @@ impl Drop for Thread {
     /// Give its thread id back, unless it is its process's first, whose id is
     /// the pid and goes with the process.
     fn drop(&mut self) {
+        // Its owed releases were run by the outermost release before it
+        // returned; a list left here is counted for the release checks.
+        #[cfg(ferrix_checks = "on")]
+        if self.owed_releases.get_mut().is_some() {
+            let _ = crate::syscall::process::RELEASES_LEFT_OWED.fetch_add(1, Ordering::Relaxed);
+        }
         for _ in 0..self.watched.get_mut().count_ones() {
             seccomp::note_unfiltered();
         }

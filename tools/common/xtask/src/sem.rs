@@ -60,6 +60,15 @@ pub(crate) const TASKS: &[Task] = &[
         run,
     },
     Task {
+        name: "test-release-chain",
+        help_at: 565,
+        help: &[
+            "test-release-chain Boot releasechain-test as init: a chain of processes each killed by its child's exit",
+            "              signal, and pid namespaces nested to their limit, all gone, with no release run inside another",
+        ],
+        run,
+    },
+    Task {
         name: "test-shm",
         help_at: 570,
         help: &[
@@ -283,6 +292,7 @@ pub(crate) fn run(command: &str, args: &Args) -> Result<()> {
         "test-shm" => crate::shm::test_shm(args),
         "test-container" => crate::container::run(args),
         "test-pipewait" => crate::pipe_bench::test_pipewait(args),
+        "test-release-chain" => crate::release_chain::test_release_chain(args),
         "test-seccomp" => crate::seccomp::test_seccomp(args),
         "test-seccomp-selftest" => crate::seccomp_selftest::run(args),
         "test-sud" => crate::sud::test_sud(args),

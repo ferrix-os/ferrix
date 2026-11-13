@@ -126,6 +126,8 @@ resident-counts work owns: trimmed, ARMv7-A could go back to four, on a
 ledger line of its own). The per-processor interrupt stack (column (c)) is
 a BACKLOG row, a later improvement, not started.
 
+**One release body on a kernel stack (2026-11-13, F-113; ledger 9414, 9427).** A process's release sends signals (its parent's exit signal, a namespace's init's `SIGKILL` to every member), and a fatal one ends its target, which is released at once when no thread of it is live: a target's own exit racing its killer's look at the live count let the killer run that release inside its own, at every link of a chain, with no bound. Now a release reached while another runs on the same task is owed to the outermost release there and run after it, before it returns (`Process::release`): a Linux thread keeps the list on its `Thread`, a kernel task in one of 16 slots found by its address. The residual: a 17th kernel task inside a release at once, or a process no longer listed, releases at once as before, counted in every build and said once ("release: no slot for a kernel task's owed list; released at once"). `check-stack-depth`'s listing names the entry bounded; `test-release-chain` holds nesting to one.
+
 ## 2. B: the emptying is an emptier task's
 
 ### 2.1 What happens now

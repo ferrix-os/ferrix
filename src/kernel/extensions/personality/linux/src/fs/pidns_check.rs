@@ -88,6 +88,7 @@ pub fn run() -> Result<Counts, &'static str> {
     cgroup_procs(&mut tally)?;
     closed_by_failed_first_fork(&mut tally)?;
     native_child(&mut tally)?;
+    owed_releases(&mut tally)?;
     Ok(counts)
 }
 
@@ -351,6 +352,55 @@ fn init_death(tally: &mut Tally<'_>) -> Result<(), &'static str> {
         return Err("a process joined a pid namespace whose init had gone");
     }
     tally.report.refusals += 1;
+    Ok(())
+}
+
+/// A release reached from another runs after it, on the same task, before
+/// the outermost returns: never inside it (F-113; ledger 9414 R2, 9427 R1b).
+/// On the check's own task, a kernel task, so through the table of kernel
+/// tasks' owed lists; a Linux thread's list is the same code, which
+/// `test-release-chain` drives. Two shapes, both never started, so each
+/// release runs at once, on this stack: a child whose exit signal is
+/// `SIGKILL`, whose release ends and releases its parent; and a namespace's
+/// init, whose release kills and releases its member.
+fn owed_releases(tally: &mut Tally<'_>) -> Result<(), &'static str> {
+    let before = process::release_counts();
+    let owed = process::releases_owed();
+    let parent = process::new_for_check().map_err(|_| "no process for the owed-release check")?;
+    let child = child_in(&parent)?;
+    child.set_exit_signal(SIGKILL);
+    process::kill(&child, 0);
+    tally.report.calls += 1;
+    if !child.is_released() || !parent.is_released() {
+        return Err(
+            "a release reached from a child's exit signal had not run when the outermost returned",
+        );
+    }
+    if parent.wait_status() != Some(i32::try_from(SIGKILL).unwrap_or(0)) {
+        return Err("a parent was not ended by its child's exit signal SIGKILL");
+    }
+    let World {
+        maker,
+        init,
+        member,
+    } = make_world()?;
+    process::kill(&init, 0);
+    tally.report.calls += 1;
+    if !member.is_released() || !init.is_released() {
+        return Err(
+            "a member's release reached from its init's had not run when the outermost returned",
+        );
+    }
+    if process::releases_owed().wrapping_sub(owed) < 2 {
+        return Err("a release reached from another on the check's own task was not owed to it");
+    }
+    if process::release_counts() != before {
+        return Err("a release ran inside another on the check's own task");
+    }
+    if process::kernel_release_slots_held() != 0 {
+        return Err("a kernel task's owed-release slot was left held");
+    }
+    drop((parent, child, maker, init, member));
     Ok(())
 }
 
