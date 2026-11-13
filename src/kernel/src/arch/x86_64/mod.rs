@@ -61,7 +61,7 @@ pub use signal::{restore_signal_frame, setup_signal_frame};
 use alloc::sync::Arc;
 
 use ferrix_bootinfo::{Arch, BootView};
-use ferrix_linux_abi::errno::Errno;
+use ferrix_errno::Errno;
 use ferrix_linux_abi::nr::{self, Syscall};
 use ferrix_linux_abi::types::{self, OpenFlagBits};
 

@@ -10,7 +10,7 @@ use core::convert::Infallible;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use ferrix_bootinfo::PAGE_SIZE;
-use ferrix_linux_abi::errno::Errno;
+use ferrix_errno::Errno;
 use ferrix_native_abi::first::{self, READY_MAGIC};
 use ferrix_native_abi::rights::Rights;
 use ferrix_native_abi::status;

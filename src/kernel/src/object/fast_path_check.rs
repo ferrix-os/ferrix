@@ -38,7 +38,7 @@
 
 use alloc::sync::Arc;
 
-use ferrix_linux_abi::errno::{self, Errno};
+use ferrix_errno::{self as errno, Errno};
 use ferrix_native_abi::handle::Handle;
 use ferrix_native_abi::nr;
 use ferrix_native_abi::rights::Rights;

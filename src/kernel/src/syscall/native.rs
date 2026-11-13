@@ -53,7 +53,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use ferrix_bootinfo::PAGE_SIZE;
-use ferrix_linux_abi::errno::Errno;
+use ferrix_errno::Errno;
 use ferrix_native_abi::exception::{self as exception_abi, Words};
 use ferrix_native_abi::handle::Handle;
 use ferrix_native_abi::nr::{self, NativeCall};

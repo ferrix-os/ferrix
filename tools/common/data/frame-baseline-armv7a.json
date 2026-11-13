@@ -30,12 +30,12 @@
    "kind": "product",
    "stack": "task"
   },
-  "<ferrix_kernel_load::fs::cgroupfs::reclaim_check::Group>::as_task::<core::result::Result<(), ferrix_linux_abi::errno::Errno>, ferrix_kernel_load::fs::cgroupfs::io_check::accounting::{closure#0}>": {
+  "<ferrix_kernel_load::fs::cgroupfs::reclaim_check::Group>::as_task::<core::result::Result<(), ferrix_errno::Errno>, ferrix_kernel_load::fs::cgroupfs::io_check::accounting::{closure#0}>": {
    "frame": 4144,
    "kind": "check",
    "stack": "task"
   },
-  "<ferrix_kernel_load::fs::cgroupfs::reclaim_check::Group>::as_task::<core::result::Result<(), ferrix_linux_abi::errno::Errno>, ferrix_kernel_load::fs::cgroupfs::io_check::reads::{closure#0}>": {
+  "<ferrix_kernel_load::fs::cgroupfs::reclaim_check::Group>::as_task::<core::result::Result<(), ferrix_errno::Errno>, ferrix_kernel_load::fs::cgroupfs::io_check::reads::{closure#0}>": {
    "frame": 4144,
    "kind": "check",
    "stack": "task"
@@ -242,7 +242,7 @@
    "kind": "product",
    "stack": "task"
   },
-  "<ferrix_kernel_load::fs::cgroupfs::reclaim_check::Group>::as_task::<core::result::Result<(), ferrix_linux_abi::errno::Errno>, ferrix_kernel_load::fs::cgroupfs::io_check::accounting::{closure#0}>": {
+  "<ferrix_kernel_load::fs::cgroupfs::reclaim_check::Group>::as_task::<core::result::Result<(), ferrix_errno::Errno>, ferrix_kernel_load::fs::cgroupfs::io_check::accounting::{closure#0}>": {
    "frame": 4144,
    "kind": "check",
    "stack": "task"
@@ -454,12 +454,12 @@
    "kind": "product",
    "stack": "task"
   },
-  "<ferrix_kernel_load::fs::cgroupfs::reclaim_check::Group>::as_task::<core::result::Result<(), ferrix_linux_abi::errno::Errno>, ferrix_kernel_load::fs::cgroupfs::io_check::accounting::{closure#0}>": {
+  "<ferrix_kernel_load::fs::cgroupfs::reclaim_check::Group>::as_task::<core::result::Result<(), ferrix_errno::Errno>, ferrix_kernel_load::fs::cgroupfs::io_check::accounting::{closure#0}>": {
    "frame": 4144,
    "kind": "check",
    "stack": "task"
   },
-  "<ferrix_kernel_load::fs::cgroupfs::reclaim_check::Group>::as_task::<core::result::Result<(), ferrix_linux_abi::errno::Errno>, ferrix_kernel_load::fs::cgroupfs::io_check::reads::{closure#0}>": {
+  "<ferrix_kernel_load::fs::cgroupfs::reclaim_check::Group>::as_task::<core::result::Result<(), ferrix_errno::Errno>, ferrix_kernel_load::fs::cgroupfs::io_check::reads::{closure#0}>": {
    "frame": 4144,
    "kind": "check",
    "stack": "task"
@@ -666,7 +666,7 @@
    "kind": "product",
    "stack": "task"
   },
-  "<ferrix_kernel_load::fs::cgroupfs::reclaim_check::Group>::as_task::<core::result::Result<(), ferrix_linux_abi::errno::Errno>, ferrix_kernel_load::fs::cgroupfs::io_check::accounting::{closure#0}>": {
+  "<ferrix_kernel_load::fs::cgroupfs::reclaim_check::Group>::as_task::<core::result::Result<(), ferrix_errno::Errno>, ferrix_kernel_load::fs::cgroupfs::io_check::accounting::{closure#0}>": {
    "frame": 4144,
    "kind": "check",
    "stack": "task"

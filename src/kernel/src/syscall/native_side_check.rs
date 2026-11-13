@@ -15,7 +15,7 @@ use crate::syscall::native;
 use crate::syscall::uaccess;
 use crate::trap::SyscallArgs;
 use crate::user::space::AddressSpace;
-use ferrix_linux_abi::errno::Errno;
+use ferrix_errno::Errno;
 
 /// A process that makes native calls from the kernel's side.
 pub(crate) struct NativeSide {

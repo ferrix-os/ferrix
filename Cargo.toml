@@ -68,6 +68,7 @@ members = [
     "src/lib/crypto/argon2",
     "src/lib/crypto/sha256",
     "src/lib/crypto/sigverify",
+    "src/lib/proto/errno",
     "src/lib/proto/linux-abi",
     "src/lib/network/netwire",
     "src/lib/network/nettcp",
@@ -264,6 +265,7 @@ ferrix-seccomp = { path = "src/lib/kernel/seccomp" }
 ferrix-argon2 = { path = "src/lib/crypto/argon2" }
 ferrix-sha256 = { path = "src/lib/crypto/sha256" }
 ferrix-sigverify = { path = "src/lib/crypto/sigverify" }
+ferrix-errno = { path = "src/lib/proto/errno" }
 ferrix-linux-abi = { path = "src/lib/proto/linux-abi" }
 ferrix-native-abi = { path = "src/lib/proto/native-abi" }
 ferrix-native = { path = "src/lib/proto/native" }

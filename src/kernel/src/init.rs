@@ -76,7 +76,7 @@ use core::fmt;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use ferrix_bootinfo::{BootView, option_in};
-use ferrix_linux_abi::errno::Errno;
+use ferrix_errno::Errno;
 use ferrix_native_abi::bootstrap::{
     AUDIT_MAGIC, CPU_SERVICE_MAGIC, DEVMGR_STARTER_MAGIC, MEMORY_SCRUB_MAGIC, ROOT_IN_MEMORY,
     ROOT_MAGIC, ROOT_SWITCHED, after_hello, init_hello,

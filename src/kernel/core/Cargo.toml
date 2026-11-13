@@ -35,8 +35,10 @@ ferrix-sched.workspace = true
 ferrix-sync.workspace = true
 
 # The core's own mechanisms. Memory: frames, the heap, memory accounting, page
-# tables, address ranges. Objects and the native ABI they are named through.
-# The loader's handoff and the audit record.
+# tables, address ranges. Objects and the native ABI they are named through,
+# and the error numbers its calls answer with (Linux's, in a crate with no
+# dependency: CORE-WITHOUT-EXTENSIONS E2). The loader's handoff and the audit
+# record.
 ferrix-frame.workspace = true
 ferrix-heap.workspace = true
 ferrix-kmem.workspace = true
@@ -44,6 +46,7 @@ ferrix-paging.workspace = true
 ferrix-vma.workspace = true
 ferrix-objects.workspace = true
 ferrix-native-abi.workspace = true
+ferrix-errno.workspace = true
 ferrix-bootinfo.workspace = true
 ferrix-audit.workspace = true
 

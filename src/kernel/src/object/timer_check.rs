@@ -420,9 +420,9 @@ fn set(
     deadline: u64,
     slack: u64,
     options: u64,
-) -> Result<usize, ferrix_linux_abi::errno::Errno> {
+) -> Result<usize, ferrix_errno::Errno> {
     side.put(SPEC_AT, &TimerSpec { deadline, slack }.to_bytes())
-        .map_err(|_| ferrix_linux_abi::errno::Errno::EFAULT)?;
+        .map_err(|_| ferrix_errno::Errno::EFAULT)?;
     side.call(nr::TIMER_SET, &[reg(timer), SPEC_AT, options])
 }
 
@@ -801,7 +801,7 @@ fn check_what_timer_calls_refuse(
         &[reg(timer), u64::from((Rights::WAIT | Rights::DUPLICATE).0)],
         "duplicating a timer without WRITE failed",
     )?;
-    let cases: [(Result<usize, ferrix_linux_abi::errno::Errno>, _, &str); 6] = [
+    let cases: [(Result<usize, ferrix_errno::Errno>, _, &str); 6] = [
         (
             side.call(nr::TIMER_CREATE, &[2, 0]),
             status::INVALID_ARGS,

@@ -16,7 +16,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::sync::Arc;
 
-use ferrix_linux_abi::errno::Errno;
+use ferrix_errno::Errno;
 use ferrix_sched::NICE_0_WEIGHT;
 
 use crate::claim::{Claims, Numbers, StillServed};

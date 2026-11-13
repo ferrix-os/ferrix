@@ -13,7 +13,7 @@ use alloc::sync::Arc;
 
 use ferrix_bootinfo::PAGE_SIZE;
 use ferrix_elf::Class;
-use ferrix_linux_abi::errno::Errno;
+use ferrix_errno::Errno;
 use ferrix_native_abi::exception::{
     FLAG_PC_AT_TRAP, FLAG_WRITE, HAND_ON, KILL, KIND_PAGE_FAULT, REPORT_BYTES, RESUME, Registers,
     Report as Report64, STATE_READ, STATE_WRITE, Words,

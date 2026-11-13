@@ -26,6 +26,7 @@ ferrix-audit.workspace = true
 ferrix-bootinfo.workspace = true
 ferrix-cgroupfs.workspace = true
 ferrix-elf.workspace = true
+ferrix-errno.workspace = true
 ferrix-fallible.workspace = true
 ferrix-frame.workspace = true
 ferrix-kmem.workspace = true

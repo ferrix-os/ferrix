@@ -91,7 +91,7 @@ fn pin(
     vmo: Handle,
     pages: u64,
     options: u64,
-) -> Result<usize, ferrix_linux_abi::errno::Errno> {
+) -> Result<usize, ferrix_errno::Errno> {
     side.call(
         nr::VMO_PIN,
         &[reg(device), reg(vmo), 0, pages * PAGE_SIZE, options],
@@ -341,11 +341,11 @@ fn check_the_failure_rule(side: &Side, device: Handle) -> Result<u32, &'static s
 struct Nothing;
 
 impl Filler for Nothing {
-    fn fill(&self, _: &Vmo, _: u64) -> Result<(), ferrix_vfs::Errno> {
+    fn fill(&self, _: &Vmo, _: u64) -> Result<(), ferrix_errno::Errno> {
         Ok(())
     }
 
-    fn fill_one(&self, _: &Vmo, _: u64) -> Result<(), ferrix_vfs::Errno> {
+    fn fill_one(&self, _: &Vmo, _: u64) -> Result<(), ferrix_errno::Errno> {
         Ok(())
     }
 }
@@ -368,11 +368,11 @@ fn check_a_file_is_not_committed() -> Result<(), &'static str> {
 struct ReadAgain;
 
 impl Filler for ReadAgain {
-    fn fill(&self, _: &Vmo, _: u64) -> Result<(), ferrix_vfs::Errno> {
+    fn fill(&self, _: &Vmo, _: u64) -> Result<(), ferrix_errno::Errno> {
         Ok(())
     }
 
-    fn fill_one(&self, _: &Vmo, _: u64) -> Result<(), ferrix_vfs::Errno> {
+    fn fill_one(&self, _: &Vmo, _: u64) -> Result<(), ferrix_errno::Errno> {
         Ok(())
     }
 

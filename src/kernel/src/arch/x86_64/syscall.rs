@@ -438,7 +438,7 @@ ferrix_resume_user:
     selector = sym super::speculation::VERW_SELECTOR,
     bhb_outer = const super::speculation::BHB_LOOP_OUTER,
     bhb_inner = const super::speculation::BHB_LOOP_INNER,
-    enosys = const ferrix_linux_abi::errno::Errno::ENOSYS.0,
+    enosys = const ferrix_errno::Errno::ENOSYS.0,
     options(att_syntax)
 );
 
@@ -1052,7 +1052,7 @@ const ARCH_GET_GS: u64 = 0x1004;
 // If this ever builds in a user kernel, it has a symbol for `check-kernel-shape.py` to refuse.
 #[cfg_attr(ferrix_personality = "user", inline(never))]
 fn arch_prctl(code: u64, value: u64) -> Option<isize> {
-    use ferrix_linux_abi::errno::Errno;
+    use ferrix_errno::Errno;
 
     let answer = match code {
         ARCH_SET_FS => {

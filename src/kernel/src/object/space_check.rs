@@ -53,7 +53,7 @@ use alloc::vec::Vec;
 
 use ferrix_bootinfo::PAGE_SIZE;
 use ferrix_elf::Class;
-use ferrix_linux_abi::errno::Errno;
+use ferrix_errno::Errno;
 use ferrix_native_abi::handle::Handle;
 use ferrix_native_abi::nr;
 use ferrix_native_abi::rights::{Rights, SAME_RIGHTS};

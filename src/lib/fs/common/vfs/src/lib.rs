@@ -109,7 +109,7 @@ pub(crate) type SpinLockGuard<'a, T> =
 
 pub use access::Access;
 pub use dentry::Dentry;
-pub use ferrix_linux_abi::errno::Errno;
+pub use ferrix_errno::Errno;
 pub use file::{OpenFile, OpenFlags, Whence};
 pub use namespace::{
     Context, DEFAULT_CACHE, Location, MOUNT_MAX, Mount, MountFlags, Namespace, RenameMode, Stat,

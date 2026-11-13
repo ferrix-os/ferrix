@@ -11,7 +11,7 @@
 //! [`port_queue_rung`] turn that into [`Rung::Full`], so neither side's glue
 //! treats it as an error.
 
-use ferrix_linux_abi::errno::Errno;
+use ferrix_errno::Errno;
 use ferrix_native_abi::status;
 use ferrix_native_abi::types::{PACKET_USER, PortPacket};
 

@@ -410,7 +410,7 @@ pub const fn power_probe(_view: &ferrix_bootinfo::BootView<'_>) -> bool {
 /// No power core on Arm.
 #[cfg(any(not(target_arch = "x86_64"), ferrix_personality = "user"))]
 pub fn power_claim()
--> Result<alloc::sync::Arc<crate::object::channel::Endpoint>, ferrix_linux_abi::errno::Errno> {
+-> Result<alloc::sync::Arc<crate::object::channel::Endpoint>, ferrix_errno::Errno> {
     Err(ferrix_native_abi::status::WRONG_TYPE)
 }
 
@@ -419,7 +419,7 @@ pub fn power_claim()
 pub fn power_set(
     _claim: &alloc::sync::Arc<crate::object::channel::Endpoint>,
     _eighths: u64,
-) -> Result<usize, ferrix_linux_abi::errno::Errno> {
+) -> Result<usize, ferrix_errno::Errno> {
     Err(ferrix_native_abi::status::WRONG_TYPE)
 }
 
@@ -427,7 +427,7 @@ pub fn power_set(
 #[cfg(any(not(target_arch = "x86_64"), ferrix_personality = "user"))]
 pub fn power_read(
     _claim: &alloc::sync::Arc<crate::object::channel::Endpoint>,
-) -> Result<[u64; ferrix_native_abi::types::POWER_READ_WORDS], ferrix_linux_abi::errno::Errno> {
+) -> Result<[u64; ferrix_native_abi::types::POWER_READ_WORDS], ferrix_errno::Errno> {
     Err(ferrix_native_abi::status::WRONG_TYPE)
 }
 
@@ -1062,7 +1062,7 @@ pub const HAS_RESTRICTED: bool = !cfg!(target_arch = "arm");
 #[cfg(target_arch = "arm")]
 mod no_restricted {
     #![allow(clippy::unnecessary_wraps, reason = "the same signatures as x86-64's")]
-    use ferrix_linux_abi::errno::Errno;
+    use ferrix_errno::Errno;
     use ferrix_native_abi::restricted::{CONTEXT_BYTES, FaultKind, VECTORS_BYTES};
     use ferrix_native_abi::status;
 

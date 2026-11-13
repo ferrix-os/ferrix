@@ -1771,10 +1771,12 @@ fn register_load(_view: &BootView<'_>) {
     );
 }
 
-/// [`register_load`] under `personality=user`: the load is linuxd's, nothing
-/// above the item is in this kernel to register, and the board glue that stays
-/// in ring 0 until M6 is built for the boards that have it
-/// (docs/microkernel/M5-LIFT.md §2).
+/// [`register_load`] under `personality=user`: the load is linuxd's, and
+/// nothing above the item is in this kernel to register. The board glue is
+/// registered by neither value of `board_glue` here: with `on` (every profile)
+/// its two crates are compiled into this kernel and named by no code of it,
+/// with `off` not even compiled (docs/microkernel/M5-LIFT.md §2; ledger 9647
+/// (2), C3).
 #[cfg(ferrix_personality = "user")]
 fn register_load(_view: &BootView<'_>) {
     println!("  hooks    the load is in user space: nothing registered above the item");

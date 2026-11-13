@@ -209,7 +209,7 @@ fn the_old_calls_are_gone() -> Result<(), &'static str> {
     side.end(crate::object::job::KILLED_STATUS);
     if answers
         .iter()
-        .any(|answer| *answer != Err(ferrix_linux_abi::errno::Errno::ENOSYS))
+        .any(|answer| *answer != Err(ferrix_errno::Errno::ENOSYS))
     {
         return Err("build self-check failed: a call that parsed an image still answers");
     }

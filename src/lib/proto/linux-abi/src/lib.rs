@@ -6,7 +6,10 @@
 //! crate is the single written-down copy of it. It is constants, `repr(C)`
 //! layouts and pure functions of them -- the number tables, and [`hwcap`]'s
 //! reading of identification registers into `AT_HWCAP` -- so it is `no_std`,
-//! has no dependencies, forbids `unsafe`, and cannot panic.
+//! forbids `unsafe`, and cannot panic. Its one dependency is `ferrix-errno`,
+//! which has none: [`errno`] is that crate, re-exported, so a kernel built
+//! without the Linux ABI names its errors without naming this crate
+//! (`docs/microkernel/CORE-WITHOUT-EXTENSIONS.md` E2).
 //!
 //! # Why one crate rather than a module in the kernel
 //!
@@ -38,7 +41,6 @@
 #![forbid(unsafe_code)]
 
 pub mod drm;
-pub mod errno;
 pub mod hwcap;
 pub mod inet;
 pub mod input;
@@ -53,6 +55,9 @@ pub mod types;
 pub mod user_desc;
 pub mod virtgpu;
 mod wire;
+
+/// The error numbers: `ferrix-errno`, the same items under this path.
+pub use ferrix_errno as errno;
 
 #[cfg(test)]
 mod tests;

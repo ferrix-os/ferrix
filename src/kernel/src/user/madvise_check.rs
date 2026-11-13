@@ -26,6 +26,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use ferrix_bootinfo::PAGE_SIZE;
+use ferrix_errno::Errno;
 use ferrix_linux_abi::nr::Syscall;
 use ferrix_linux_abi::types::{
     MADV_COLD, MADV_DODUMP, MADV_DOFORK, MADV_DONTDUMP, MADV_DONTFORK, MADV_DONTNEED, MADV_FREE,
@@ -33,7 +34,6 @@ use ferrix_linux_abi::types::{
     MADV_REMOVE, MADV_SEQUENTIAL, MADV_WILLNEED, MADV_WIPEONFORK, MAP_ANONYMOUS, MAP_PRIVATE,
     MAP_SHARED, PROT_READ, PROT_WRITE,
 };
-use ferrix_vfs::Errno;
 
 use crate::mm;
 use crate::syscall::check as syscall_check;

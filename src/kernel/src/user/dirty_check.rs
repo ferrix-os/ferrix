@@ -25,16 +25,16 @@ const HOLE: u64 = PAGES - 1;
 struct Source;
 
 impl Filler for Source {
-    fn fill(&self, vmo: &Vmo, index: u64) -> Result<(), ferrix_vfs::Errno> {
+    fn fill(&self, vmo: &Vmo, index: u64) -> Result<(), ferrix_errno::Errno> {
         self.fill_one(vmo, index)
     }
 
-    fn fill_one(&self, vmo: &Vmo, index: u64) -> Result<(), ferrix_vfs::Errno> {
+    fn fill_one(&self, vmo: &Vmo, index: u64) -> Result<(), ferrix_errno::Errno> {
         // The last page is a hole: past what the source holds, it fills nothing.
         if index == HOLE {
             return Ok(());
         }
-        let frame = mm::allocate_user_frame().ok_or(ferrix_vfs::Errno::ENOMEM)?;
+        let frame = mm::allocate_user_frame().ok_or(ferrix_errno::Errno::ENOMEM)?;
         // SAFETY: (FRAME) a frame just allocated, ours until it goes in; the
         // direct map is writable for all of RAM.
         unsafe {

@@ -86,7 +86,7 @@ pub fn drive_native_words(number: usize, args: [u64; 6]) -> (isize, [u64; 3]) {
     let value = if done.is_ok() {
         frame.x[0] as i64 as isize
     } else {
-        ferrix_linux_abi::errno::Errno::ENOSYS.as_return_value()
+        ferrix_errno::Errno::ENOSYS.as_return_value()
     };
     (value, [frame.x[1], frame.x[2], frame.x[3]])
 }

@@ -10,7 +10,7 @@
 use core::ptr;
 use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
 
-use ferrix_linux_abi::errno::Errno;
+use ferrix_errno::Errno;
 use ferrix_sync::Once;
 
 use crate::arch;

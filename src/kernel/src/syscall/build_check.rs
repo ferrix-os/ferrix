@@ -6,7 +6,7 @@
 use alloc::sync::Arc;
 
 use ferrix_bootinfo::{PAGE_SIZE, USER_VIRT_END};
-use ferrix_linux_abi::errno::Errno;
+use ferrix_errno::Errno;
 use ferrix_native_abi::handle::Handle;
 use ferrix_native_abi::nr;
 use ferrix_native_abi::rights::{IMAGE_RIGHTS, Rights};

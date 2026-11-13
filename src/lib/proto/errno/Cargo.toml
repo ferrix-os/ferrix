@@ -1,0 +1,15 @@
+[package]
+name = "ferrix-errno"
+description = "Linux's error numbers and the negative-return convention: the one error type the kernel's core, its item and the native ABI name, with no dependency (docs/microkernel/CORE-WITHOUT-EXTENSIONS.md E2)"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license.workspace = true
+publish = false
+
+# None, and none may be added: the crate a kernel built without the Linux
+# personality names for its errors (ledger 9212 Q2.1).
+[dependencies]
+
+[lints]
+workspace = true

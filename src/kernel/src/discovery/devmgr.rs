@@ -36,7 +36,7 @@ use ferrix_devmgr_proto::{
     ANSWER_BUSY, ANSWER_DONE, ANSWER_FAILED, ANSWER_NO_DEVICE, BUS_PCI, BUS_PLATFORM,
     DEVICES_MAX_BYTES, Devices, Message, NAME_BYTES, SHORT_BYTES,
 };
-use ferrix_linux_abi::errno::Errno;
+use ferrix_errno::Errno;
 use ferrix_native_abi::handle::Handle;
 use ferrix_native_abi::rights::Rights;
 use ferrix_native_abi::signals::Signals;

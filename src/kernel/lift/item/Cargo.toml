@@ -22,6 +22,7 @@ ferrix-bootinfo.workspace = true
 ferrix-crng.workspace = true
 ferrix-devmgr-proto.workspace = true
 ferrix-elf.workspace = true
+ferrix-errno.workspace = true
 ferrix-fdt.workspace = true
 ferrix-linux-abi.workspace = true
 ferrix-native-abi.workspace = true

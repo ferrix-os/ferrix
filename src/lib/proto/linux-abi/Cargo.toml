@@ -8,6 +8,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+ferrix-errno.workspace = true
 
 [lints]
 workspace = true

@@ -6,7 +6,7 @@
 //! mode and the normal root in normal mode; the kernel stays in `TTBR1_EL1`.
 
 use ferrix_bootinfo::is_user_address;
-use ferrix_linux_abi::errno::Errno;
+use ferrix_errno::Errno;
 use ferrix_native_abi::nr;
 use ferrix_native_abi::restricted::{CONTEXT_BYTES, Context, FaultKind, Reason, SHARED_BASE};
 use ferrix_native_abi::restricted::{ENTER_ALL_CALLS_EXIT, ENTER_COPY_MISS_EXITS, may_continue};

@@ -6,7 +6,7 @@
 //! that no two share a number — a caller that cannot tell "the peer has gone"
 //! from "try again" cannot write a correct loop — and the tests hold it.
 
-use ferrix_linux_abi::errno::Errno;
+use ferrix_errno::Errno;
 
 /// The handle names nothing in this process: never issued, or closed.
 pub const BAD_HANDLE: Errno = Errno::EBADF;

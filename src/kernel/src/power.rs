@@ -32,7 +32,7 @@ use core::sync::atomic::{AtomicU8, Ordering};
 
 use ferrix_bootinfo::pstore::Stop;
 use ferrix_bootinfo::{BootView, option_in};
-use ferrix_linux_abi::errno::Errno;
+use ferrix_errno::Errno;
 use ferrix_sync::Once;
 
 use crate::arch;

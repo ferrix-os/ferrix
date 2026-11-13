@@ -8,7 +8,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
-ferrix-linux-abi = { workspace = true }
+ferrix-errno = { workspace = true }
 ferrix-native-abi = { workspace = true }
 
 [lints]

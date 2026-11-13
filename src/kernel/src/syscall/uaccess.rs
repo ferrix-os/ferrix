@@ -59,7 +59,7 @@
 //! it -- but `clone(CLONE_VM)` will, and nothing about the copy would say so.
 
 use ferrix_bootinfo::{PAGE_SIZE, USER_VIRT_END, is_user_address};
-use ferrix_linux_abi::errno::Errno;
+use ferrix_errno::Errno;
 
 use crate::arch;
 

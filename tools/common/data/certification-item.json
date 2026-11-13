@@ -495,6 +495,12 @@
         "below": "byte slices its caller lends; no trait, no allocation, no dependency",
         "above": "Sha256 (new, update, finish), digest, finish_192 and digest_192: SHA-256 (FIPS 180-4) and SHA-256/192 (RFC 9858), called by ferrix-sigverify and ferrix-slots (docs/SIGNING.md section 5.1)"
       },
+      "ferrix-errno": {
+        "ring": "core",
+        "path": "src/lib/proto/errno",
+        "below": "none: a number its caller holds; no trait, no allocation, no dependency (docs/microkernel/CORE-WITHOUT-EXTENSIONS.md E2, ledger 9212 Q2.1, Q2.2)",
+        "above": "Errno, its constants (Linux's numbers, asm-generic/errno-base.h and errno.h, and the four restart codes), is_restart, as_return_value, encode and MAX_ERRNO: the error every core and item file answers with, ferrix_native_abi::status's values, re-exported unchanged as ferrix_linux_abi::errno and ferrix_vfs::Errno"
+      },
       "ferrix-boot-policy": {
         "ring": "item",
         "path": "src/lib/proto/boot-policy",

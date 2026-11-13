@@ -141,7 +141,7 @@ dependencies = [
 name = "ferrix-blkring"
 version = "0.1.0"
 dependencies = [
- "ferrix-linux-abi",
+ "ferrix-errno",
  "ferrix-native-abi",
 ]
 
@@ -415,6 +415,10 @@ name = "ferrix-elf"
 version = "0.3.0"
 
 [[package]]
+name = "ferrix-errno"
+version = "0.1.0"
+
+[[package]]
 name = "ferrix-eventlog"
 version = "0.3.0"
 dependencies = [
@@ -611,6 +615,7 @@ dependencies = [
  "ferrix-cgroupfs",
  "ferrix-description",
  "ferrix-elf",
+ "ferrix-errno",
  "ferrix-fallible",
  "ferrix-fbtext",
  "ferrix-fdt",
@@ -643,6 +648,7 @@ dependencies = [
  "ferrix-crng",
  "ferrix-devmgr-proto",
  "ferrix-elf",
+ "ferrix-errno",
  "ferrix-fdt",
  "ferrix-kernel-core",
  "ferrix-linux-abi",
@@ -739,6 +745,7 @@ dependencies = [
  "ferrix-bootinfo",
  "ferrix-cgroupfs",
  "ferrix-elf",
+ "ferrix-errno",
  "ferrix-fallible",
  "ferrix-frame",
  "ferrix-kernel-core",
@@ -789,6 +796,7 @@ dependencies = [
  "ferrix-cgroupfs",
  "ferrix-description",
  "ferrix-elf",
+ "ferrix-errno",
  "ferrix-fallible",
  "ferrix-fbtext",
  "ferrix-fdt",
@@ -821,6 +829,7 @@ dependencies = [
  "ferrix-crng",
  "ferrix-devmgr-proto",
  "ferrix-elf",
+ "ferrix-errno",
  "ferrix-fdt",
  "ferrix-lift-core",
  "ferrix-linux-abi",
@@ -931,6 +940,9 @@ dependencies = [
 [[package]]
 name = "ferrix-linux-abi"
 version = "0.1.0"
+dependencies = [
+ "ferrix-errno",
+]
 
 [[package]]
 name = "ferrix-linuxd"
@@ -1039,6 +1051,7 @@ dependencies = [
 name = "ferrix-native-abi"
 version = "0.1.0"
 dependencies = [
+ "ferrix-errno",
  "ferrix-linux-abi",
 ]
 
@@ -1486,6 +1499,7 @@ name = "ferrix-vfs"
 version = "0.1.0"
 dependencies = [
  "ferrix-cpio",
+ "ferrix-errno",
  "ferrix-fallible",
  "ferrix-kmem",
  "ferrix-linux-abi",

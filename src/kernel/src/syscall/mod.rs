@@ -57,7 +57,7 @@ pub use ferrix_kernel_core::syscall::uaccess;
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use ferrix_linux_abi::errno::{self, Errno};
+use ferrix_errno::{self as errno, Errno};
 use ferrix_linux_abi::nr::Syscall;
 
 use crate::arch;

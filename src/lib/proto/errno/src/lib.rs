@@ -1,4 +1,24 @@
-//! Error numbers and the negative-return convention.
+//! Linux's error numbers and the negative-return convention.
+//!
+//! **The numbers here are Linux's.** The kernel's native calls travel as the
+//! same numbers (`ferrix_native_abi::status` gives each one it uses a native
+//! meaning), so that a program's C library prints something a person can act
+//! on.
+//!
+//! # Why a crate of its own
+//!
+//! The kernel's core and item, and the native ABI, answer with these numbers
+//! whether or not the kernel is built with the Linux personality. As
+//! `ferrix-linux-abi`'s `errno` module they kept that whole crate in a kernel
+//! built without the Linux ABI. Here they are a crate with no dependency, and
+//! `ferrix_linux_abi::errno` and `ferrix_vfs::Errno` re-export these same
+//! items: one type under three paths, never a second type or a conversion
+//! (`docs/microkernel/CORE-WITHOUT-EXTENSIONS.md` E2, ledger 9212 Q2.1). The
+//! struct and its constants are as they were in that module.
+//!
+//! `no_std`, no dependency, no `unsafe`.
+//!
+//! # The convention
 //!
 //! A Linux system call has one return register and no separate error channel.
 //! Failure is signalled by returning `-errno`, and the C library turns that
@@ -9,6 +29,12 @@
 //! The values are the generic ones from `include/uapi/asm-generic/errno-base.h`
 //! and `errno.h`. Both architectures Ferrix targets use them unchanged; only
 //! the MIPS and Alpha families renumber, and neither is a target here.
+
+#![no_std]
+#![forbid(unsafe_code)]
+
+#[cfg(test)]
+mod tests;
 
 /// A Linux error number, as a positive value.
 ///

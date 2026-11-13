@@ -442,6 +442,20 @@ and `fixups.rs` are the boot loaders' and xtask's: no kernel file names them, an
 are not reached from any kernel crate's code, so they are not linked and not deactivated
 code; `check-item-boundary.py`'s loader rule holds who may call the parser.
 
+### ferrix-errno — the error numbers, in the core
+
+`ferrix-errno` (`src/lib/proto/errno`, since 2026-11-13) is `Errno`, its
+constants, `is_restart`, `as_return_value`, `encode` and `MAX_ERRNO`: Linux's
+error numbers, which every core and item call and the native ABI's `status`
+answer with. They were `ferrix-linux-abi`'s `errno` module, unclassified
+(F-76); CORE-WITHOUT-EXTENSIONS E2 moved them unchanged into a crate with no
+dependency, so that a kernel without the Linux ABI names its errors without
+naming that crate, and classed it in the core, the ring of its users (ledger
+9212 Q2.2). `ferrix_linux_abi::errno` and `ferrix_vfs::Errno` re-export the
+same items: one type, no conversion. Below it: nothing, a number its caller
+holds. Above it: the error of every core and item call.
+`check-core-without-extensions.py` holds that it gains no dependency.
+
 ### `load` — everything it runs and does not vouch for
 
 The VFS, btrfs's glue into it (`ferrix-btrfs-vfs` and the kernel's

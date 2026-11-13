@@ -873,8 +873,8 @@ fn intel_gpu_at_cap(
         return Err("a pin refused at twice the Intel GPU's budget changed its counts");
     }
     drop(last);
-    if status::QUARANTINE_FULL != ferrix_linux_abi::errno::Errno::EDQUOT
-        || status::LIMIT_REACHED != ferrix_linux_abi::errno::Errno::ENOSPC
+    if status::QUARANTINE_FULL != ferrix_errno::Errno::EDQUOT
+        || status::LIMIT_REACHED != ferrix_errno::Errno::ENOSPC
     {
         return Err("the budget's refusals do not travel as EDQUOT and ENOSPC");
     }

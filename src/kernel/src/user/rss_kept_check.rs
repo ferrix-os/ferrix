@@ -14,12 +14,12 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use ferrix_bootinfo::PAGE_SIZE;
+use ferrix_errno::Errno;
 use ferrix_linux_abi::nr::Syscall;
 use ferrix_linux_abi::types::{
     MADV_DONTNEED, MAP_ANONYMOUS, MAP_FIXED, MAP_PRIVATE, MAP_SHARED, MREMAP_FIXED, MREMAP_MAYMOVE,
     PROT_NONE, PROT_READ, PROT_WRITE,
 };
-use ferrix_vfs::Errno;
 
 use crate::syscall::check as syscall_check;
 use crate::syscall::memory::{self, MmapRequest, OffsetUnit};

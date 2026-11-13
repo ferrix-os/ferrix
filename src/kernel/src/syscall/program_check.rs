@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 
 use ferrix_bootinfo::PAGE_SIZE;
 use ferrix_elf::Class;
-use ferrix_linux_abi::errno::Errno;
+use ferrix_errno::Errno;
 use ferrix_vfs::NewNode;
 
 use crate::arch;

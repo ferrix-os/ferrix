@@ -292,7 +292,7 @@ pub trait Filler: Send + Sync + fmt::Debug {
     ///
     /// The filesystem's: `EIO` for a page it could not read, `ENOMEM` for
     /// frames.
-    fn fill(&self, vmo: &Vmo, index: u64) -> Result<(), ferrix_vfs::Errno>;
+    fn fill(&self, vmo: &Vmo, index: u64) -> Result<(), ferrix_errno::Errno>;
 
     /// Fill page `index` of `vmo` alone, if the file has it and `vmo` lacks
     /// it: no run after it. For a write the kernel makes itself into one page
@@ -303,7 +303,7 @@ pub trait Filler: Send + Sync + fmt::Debug {
     /// # Errors
     ///
     /// As [`Filler::fill`].
-    fn fill_one(&self, vmo: &Vmo, index: u64) -> Result<(), ferrix_vfs::Errno>;
+    fn fill_one(&self, vmo: &Vmo, index: u64) -> Result<(), ferrix_errno::Errno>;
 
     /// Whether pages this object holds may be dropped and filled again from
     /// the source, as they are: every page, for a read-only file; the clean
@@ -1114,7 +1114,7 @@ impl Vmo {
     /// # Errors
     ///
     /// As [`Filler::fill`].
-    pub(crate) fn fill_for_fault(&self, index: u64) -> Result<(), ferrix_vfs::Errno> {
+    pub(crate) fn fill_for_fault(&self, index: u64) -> Result<(), ferrix_errno::Errno> {
         match self.filler() {
             Some(filler) => filler.fill(self, index),
             None => Ok(()),
@@ -1127,7 +1127,7 @@ impl Vmo {
     /// # Errors
     ///
     /// As [`Filler::fill_one`].
-    pub(crate) fn fill_one_page(&self, index: u64) -> Result<(), ferrix_vfs::Errno> {
+    pub(crate) fn fill_one_page(&self, index: u64) -> Result<(), ferrix_errno::Errno> {
         match self.filler() {
             Some(filler) => filler.fill_one(self, index),
             None => Ok(()),

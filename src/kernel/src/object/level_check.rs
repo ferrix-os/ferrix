@@ -285,7 +285,7 @@ fn vmo(side: &Side) -> Result<Handle, &'static str> {
 }
 
 /// Map `vmo` as `protection` from `side`.
-fn map(side: &Side, vmo: Handle, protection: u32) -> Result<usize, ferrix_linux_abi::errno::Errno> {
+fn map(side: &Side, vmo: Handle, protection: u32) -> Result<usize, ferrix_errno::Errno> {
     side.put(OFFSET_AT, &0_u64.to_ne_bytes())
         .map_err(|_| status::FAULT)?;
     side.call(

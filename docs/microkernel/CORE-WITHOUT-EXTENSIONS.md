@@ -110,10 +110,10 @@ code that makes it true for the libraries; E6 is the manifests.
 | E1b | The board glue (`board/stm32mp1`, `board/gs201-usb`): a flag `board_glue = on | off` (Q1, ruled a flag), the two crates in the binary's table keyed `cfg(ferrix_board_glue = "on")`, `off` conflicting with `personality=kernel`; built on branch `core-ext/e1b-board-glue` (see *Where it stands*). | as E1, the flag file, the four profiles, AUDIT.md, the Security Target | 2 |
 | **E2** | `Errno` out of the Linux crate: a crate of its own with no dependency, `ferrix-errno`, holding the struct and its constants as they are; `ferrix-linux-abi::errno` and `ferrix-vfs` re-export it, so no caller's type changes. The core and the item name `ferrix_errno::Errno`. | about 30 `use` sites, no body | 3 |
 | **E3** | The architecture's Linux code under the flag: the signal frames, the Linux system call numbers of the three entries, TLS descriptors, hwcap, the vDSO and `counter_nanos`. Where `off` already answers `ENOSYS` (`NoLinux`), the entry needs no Linux number; where the trap path hands a signal number to `fault_signal`, it hands a fault kind and the personality picks the number. | `arch/*`, `trap.rs`, `timer.rs`; core ring, three architectures | 13, the uncertain one |
-| E4 | `object/job.rs`'s `Limit` and `controllers`, `panic/catalog.rs`'s one name | core | 2 |
-| E5 | The item's remaining names (`Syscall` in `syscall/mod.rs` and `main.rs`, `OpenFile` in `program.rs`) | item | 3 |
-| **E6** | `ferrix-linux-abi`, `-vdso`, `-vfs`, `-cgroupfs` move to the `linux_abi = "on"` table in the core's and the item's manifests; the `off`-only `unused_crate_dependencies` allow goes. The check of E1 then refuses every Linux-only library in an `off` tree. Found by that check's first run (2026-11-13): four libraries of an `off` tree depend on `ferrix-linux-abi` themselves and keep it there after E6: `ferrix-blkring` and `ferrix-native-abi` for `Errno` (E2 takes them), `ferrix-native-abi` also for `nr`, `ferrix-ustack` for the auxiliary vector's `AT_*` keys, `ferrix-virtio` for the input event codes; those three are E6b's. `ferrix-linux-abi` leaves the unconditional table only once the check's `LINUX_ABI_USERS` is empty (ledger 9510 V4, amending 9212 O2). | manifests, the allow | 2 |
-| E6b | The Linux numbers three libraries name: `ferrix-native-abi`'s `nr`, `ferrix-ustack`'s `AT_*` keys, `ferrix-virtio`'s input event codes. Each moves to a dependency-free crate on Q2.1's terms (the same items by re-export, no conversion, no `cfg`, the crate saying its numbers are Linux's), or the library leaves the `off` tree, decided per library in a design note reviewed before its code (ledger 9510 V4). E2 takes `ferrix-blkring`'s and `ferrix-native-abi`'s `Errno`. | three libraries | per library |
+| E4 | `object/job.rs`'s `Limit` and `controllers`, `panic/catalog.rs`'s one name; `user/space.rs`'s one `ENOMEM` through `ferrix_vfs`, if no earlier landing that edits the file takes it (E2's `ERRNO_ELSEWHERE`) | core | 2 |
+| E5 | The item's remaining names (`Syscall` in `syscall/mod.rs` and `main.rs`, `OpenFile` in `program.rs`), and `main.rs`'s `NoLinux` `ENOSYS` beside its `Syscall` (E2's `ERRNO_ELSEWHERE`) | item | 3 |
+| **E6** | `ferrix-linux-abi`, `-vdso`, `-vfs`, `-cgroupfs` move to the `linux_abi = "on"` table in the core's and the item's manifests; the `off`-only `unused_crate_dependencies` allow goes. The check of E1 then refuses every Linux-only library in an `off` tree. Found by that check's first run (2026-11-13): four libraries of an `off` tree depend on `ferrix-linux-abi` themselves and keep it there after E6: `ferrix-blkring` and `ferrix-native-abi` for `Errno` (E2 takes them), `ferrix-native-abi` also for `nr`, `ferrix-ustack` for the auxiliary vector's `AT_*` keys, `ferrix-virtio` for the input event codes; those three are E6b's. E2 took `ferrix-blkring` and `ferrix-native-abi` (whose `nr` turned out to be its tests' alone, now a dev-dependency), so `LINUX_ABI_USERS` holds `ferrix-ustack` and `ferrix-virtio`. `ferrix-linux-abi` leaves the unconditional table only once the check's `LINUX_ABI_USERS` is empty (ledger 9510 V4, amending 9212 O2). | manifests, the allow | 2 |
+| E6b | The Linux numbers two libraries name: `ferrix-ustack`'s `AT_*` keys, `ferrix-virtio`'s input event codes (a third, `ferrix-native-abi`'s `nr`, was found by E2 to be its tests' alone and became a dev-dependency, ledger 9784 ruling A). Each moves to a dependency-free crate on Q2.1's terms (the same items by re-export, no conversion, no `cfg`, the crate saying its numbers are Linux's), or the library leaves the `off` tree, decided per library in a design note reviewed before its code (ledger 9510 V4). E2 took `ferrix-blkring`'s and `ferrix-native-abi`'s `Errno`. | two libraries | per library |
 | E7 | The screen (`ferrix-fbtext`, `ferrix-qr`): CRATE-SPLIT's P5 | | P5's |
 
 ## 4. What each landing shows
@@ -188,6 +188,27 @@ allows: with `board_glue=off` no package under the parts' place at all
 (Q1.4); `check` lints the kernel with no extension on every architecture.
 Its diff check is ledger 9647, OK IF G1-G8; the ring-0 rise (+17, textual)
 ledger 9665.
+
+**E2, the error numbers' crate** (branch `core-ext/e2-errno`, 2026-11-13,
+on 9212 Q2.1-Q2.5 and 9510 V4): `ferrix-errno` (`src/lib/proto/errno`)
+holds `Errno`, its constants, `is_restart`, `as_return_value`, `encode` and
+`MAX_ERRNO` as they were in
+`ferrix-linux-abi`'s `errno` module, and their tests, with no dependency;
+`ferrix_linux_abi::errno` is that crate re-exported and `ferrix_vfs::Errno`
+its `Errno`, so no caller's type changes and nothing converts. It is a `core`
+crate in `certification-item.json` (Q2.2). The kernel's files name it
+directly, check files included (Q2.5), but two that `check-core-without-
+extensions.py` lists in `ERRNO_ELSEWHERE`: `main.rs`'s `NoLinux` (E5 takes it
+with the `Syscall` beside it) and `user/space.rs`'s one `ENOMEM` through
+`ferrix_vfs` (another session's file that night; the next landing that edits
+it, at the latest E4). linuxd's shim (`lift/`, `lift_core.rs`, `lift_item.rs`)
+keeps its own paths; it is the personality's. `ferrix-blkring` and `ferrix-native-abi` name it too and leave
+`LINUX_ABI_USERS`; `LINUX_ONLY` is unchanged, since `ferrix-linux-abi` and
+`ferrix-vfs` are still named by the core and the item for other things. The
+check gains two rules: `ferrix-errno` has no dependency, and the kernel's
+files name the numbers through it. The core-owned error type (Q2.4) is a
+BACKLOG row. Its code review is ledger 9784, OK IF K1-K9; the ring-0 rise
+(+4 on count A, library lines) ledger 9784.
 
 The comment-only grouping of the core's manifest landed as c29cca330 and is
 replaced by E6's tables.

@@ -741,7 +741,7 @@ pub fn device_limit(
     device: usize,
     which: u64,
     [old, new]: [u64; 2],
-    answered: &Result<usize, ferrix_linux_abi::errno::Errno>,
+    answered: &Result<usize, ferrix_errno::Errno>,
 ) {
     let (event, outcome, status) = match answered {
         Ok(_) => (DEVICE_LIMIT_SET, Outcome::Done, 0),

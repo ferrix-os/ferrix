@@ -21,8 +21,8 @@ use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use ferrix_bootinfo::PAGE_SIZE;
+use ferrix_errno::Errno;
 use ferrix_sched::{CpuSet, NICE_0_WEIGHT};
-use ferrix_vfs::Errno;
 
 use crate::mm;
 use crate::user::cache::{self, Totals};

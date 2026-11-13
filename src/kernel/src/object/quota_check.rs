@@ -984,11 +984,11 @@ fn check_no_machine_kill_yet(
 struct ReadAgain;
 
 impl crate::user::vmo::Filler for ReadAgain {
-    fn fill(&self, _: &crate::user::vmo::Vmo, _: u64) -> Result<(), ferrix_vfs::Errno> {
+    fn fill(&self, _: &crate::user::vmo::Vmo, _: u64) -> Result<(), ferrix_errno::Errno> {
         Ok(())
     }
 
-    fn fill_one(&self, _: &crate::user::vmo::Vmo, _: u64) -> Result<(), ferrix_vfs::Errno> {
+    fn fill_one(&self, _: &crate::user::vmo::Vmo, _: u64) -> Result<(), ferrix_errno::Errno> {
         Ok(())
     }
 

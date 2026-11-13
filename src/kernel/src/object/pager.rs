@@ -51,7 +51,7 @@ use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 use ferrix_bootinfo::PAGE_SIZE;
-use ferrix_linux_abi::errno::Errno;
+use ferrix_errno::Errno;
 use ferrix_native_abi::types::{
     PACKET_PAGE_REQUEST, PAGE_REQUEST_DIRTY, PAGE_REQUEST_READ, PAGER_VMO_NO_COPY_WAIT,
     PAGER_VMO_TRAP_DIRTY, PAGER_WAIT_MAX_NS, PAGER_WAIT_MIN_NS, page_request,

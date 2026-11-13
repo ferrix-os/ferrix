@@ -8,6 +8,12 @@ license.workspace = true
 publish = false
 
 [dependencies]
+ferrix-errno = { workspace = true }
+
+# The tests hold the native range clear of Linux's call numbers on every
+# architecture (src/tests.rs); nothing of the library names the Linux ABI
+# (docs/microkernel/CORE-WITHOUT-EXTENSIONS.md E2).
+[dev-dependencies]
 ferrix-linux-abi = { workspace = true }
 
 [lints]

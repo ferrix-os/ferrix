@@ -20,6 +20,7 @@ ferrix-bootinfo.workspace = true
 ferrix-cgroupfs.workspace = true
 ferrix-description.workspace = true
 ferrix-elf.workspace = true
+ferrix-errno.workspace = true
 ferrix-fallible.workspace = true
 ferrix-fbtext.workspace = true
 ferrix-fdt.workspace = true

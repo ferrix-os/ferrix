@@ -16,7 +16,7 @@ use core::any::Any;
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use ferrix_bootinfo::PAGE_SIZE;
-use ferrix_vfs::Errno;
+use ferrix_errno::Errno;
 use ferrix_vma::VmaFlags;
 
 use crate::mm;
