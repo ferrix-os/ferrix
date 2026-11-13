@@ -181,8 +181,8 @@ unusable for about a minute:
 
 * ssh went unanswered at +12, +27, +42 and +59 s after the kill, and
   answered again at +69 s;
-* MemFree was 10.1 GB at +69 s and 11.3 GB at +85 s, then steady (about
-  5 GB back).
+* MemFree was 10.1 GB at +69 s and 11.3 GB at +85 s, then steady (the
+  file holds no reading from before the kill).
 
 File: `~/.local/share/ferrix/ef-30fps/runs/relaunch2/after-kill.txt`
 (seconds since the kill, uptime, MemFree kB, steam and wine processes). It
@@ -408,11 +408,14 @@ read in the code:
 **The measure the landings assert (D5, D1's row on base and tip).**
 `test-exit-regions` keeps its teardown time, and adds *another task's wait*:
 * one canary task pinned to each processor;
-* each makes a small round trip every 10 ms that allocates in the kernel
-  and so takes the heap (a pipe's write and read of one page, which takes
-  the pipe's buffer from the heap), and records its worst lateness against
-  the 10 ms;
-* the row asserts the worst over all processors and the whole teardown.
+* each makes a small round trip every 10 ms that takes the shared heap
+  every round, and records its worst lateness against the 10 ms. A reused
+  pipe does not: `make_room` grows its buffer once and nothing shrinks it.
+  So each round makes a fresh pipe (`pipe2`, a write and a read of one page,
+  both ends closed), whose 4096-byte buffer is above the caches' largest
+  class and goes to `HEAP` every time (ledger 9574 ET.10);
+* the row prints each processor's round count and asserts the worst over
+  all processors and the whole teardown.
 
 Today's canary, a sleeper on another processor that allocates nothing in
 the kernel, saw 0.1-0.5 ms where the box saw a minute: it can see neither
