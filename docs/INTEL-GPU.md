@@ -2432,8 +2432,13 @@ under a running batch, that no memory is freed while a request of its VM
 may reach it, and at the end that nothing is left. CI's `fuzz` job builds
 it, replays the corpus and searches 30 s; that job is in the needs of the
 required "CI result" check and runs on a promotion and nightly, not on
-each landing. The job has not run with this target before this landing;
-its first run on develop is recorded here. About 26 minutes of local search in all, one job. Not
+each landing. Its first run with the target is CI run 43342415207
+(2026-11-13 01:07 UTC, the Promote workflow's dispatch of ci.yml on
+`promote/9f98c414f`, develop at 9f98c414f): the fuzz job (job
+131613654085) green in 8 min 48 s, `intel_uapi`'s 28 seeds
+replayed (39 runs, cov 4899) and searched 30 s, nothing found (the job's
+log kept as `~/.local/share/ferrix/logs/intel-followups/ci-43342415207-fuzz.log`,
+sha256 06415a1d465dbf99...; ledger 9079 P7, 9577). About 26 minutes of local search in all, one job. Not
 covered: the keeper and worker's protocol (`remote`), the real GT back
 end, the contents of batches, and table limits one input of 3000 calls
 cannot reach.
