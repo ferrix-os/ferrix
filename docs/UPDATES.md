@@ -138,7 +138,7 @@ aside, not deleted, until the last record is in place; and a journal,
 the last, so that a failure, or a `pkg` run after a stop, puts back what was
 there.
 
-### 2.4 (d) The gate
+### 2.4 (d) The gate (built with each step)
 
 `cargo xtask test-pkg` serves a repository from a directory in its boot's
 root and requires: an index read and accepted; `pkg newer` naming a newer
@@ -169,23 +169,49 @@ no row until a claimed profile carries `pkg`.
    `etc/pkg/repository`.**
 8. **Advisories are one line in the index**, with an id of the form
    `FXSA-<year>-<n>` by convention; no advisory feed of its own yet.
+9. **No unsigned mode.** A missing signature is refused as a bad one is,
+   and the `pkg` an image carries, trusting no package key yet, refuses every
+   repository rather than accept an unsigned one.
+10. **The index is verified once, when `pkg update` accepts it**, before one
+    byte of it is parsed; `newer` and `upgrade` trust the accepted copy in
+    `var/lib/pkg/`, which only root writes. `upgrade` fetches only what that
+    copy names, so `update` comes first.
+11. **An upgrade installs a dependency the root lacks**, the newest version
+    the index has that meets the minimum, rather than refuse it.
+12. **`test-pkg`'s throwaway keys** take anchor id 0x8f00, a development id
+    `signing-anchors.toml` gives no key; they live for one run in a
+    directory outside any git tree (D5), and the boot's `pkg` is built
+    trusting one of them, through `FERRIX_PKG_ANCHORS`, in a target
+    directory of its own, so the `pkg` every image carries is unchanged.
+13. **The transaction is a journal and renames**, not a snapshot (§2.3); a
+    `.pkg-old` already in the way is refused before anything changes. A
+    removal stays as it was: record first, then files.
+14. **No development-key refusal row.** SIGNING.md §6.4's refusal of a
+    development key is by image, at build time, for a claimed profile, and no
+    claimed profile carries `pkg` with a package anchor, so `test-pkg` has no
+    build that must refuse one.
 
 ## 4. Left, in order
 
-1. A development package key (anchor 0x8003, kind `package`) in
+1. The consultant's review of the kind-5 commit ("sigverify: a fifth
+   manifest kind"), before any of this lands.
+2. A development package key (anchor 0x8003, kind `package`) in
    `signing-anchors.toml`, made by whoever holds `signing-dev`, and `pkg`'s
-   generated table reading it, with `check-signing-anchors.py` taking the
-   kind: until then a development image's `pkg` refuses every repository.
-2. Fetching over HTTP with the curl app.
-3. CI building the index and signing it with the CI development key
+   `build.rs` reading it, with `check-signing-anchors.py` taking the kind:
+   until then a development image's `pkg` refuses every repository.
+3. Fetching over HTTP with the curl app.
+4. CI building the index and signing it with the CI development key
    (SIGNING.md §6.5), served statically; never a release key until S6.
-4. btrfs snapshots in the writer, then the snapshot as the transaction.
-5. D3 (S9, `devmgr`'s kind-3 check), which this does not touch.
-6. Building on Ferrix and the system as packages (APPS.md §7).
+5. A removal as a transaction, and `pkg` reading the build's profile byte
+   rather than taking the development one.
+6. btrfs snapshots in the writer, then the snapshot as the transaction.
+7. D3 (S9, `devmgr`'s kind-3 check), which this does not touch.
+8. Building on Ferrix and the system as packages (APPS.md §7).
 
 ## 5. Where it stands
 
-2026-11-13: this design, on branch `pkg/updates`.
+2026-11-13: this design, and steps a to d, on branch `pkg/updates`. Nothing
+of it has landed; the kind-5 commit waits on the consultant.
 
 **Step a, as built.** `ferrix_pkg::index` (`src/lib/proto/pkg/src/index.rs`)
 reads and writes the index, says what is newer and which versions are
