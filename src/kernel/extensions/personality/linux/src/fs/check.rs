@@ -359,6 +359,7 @@ fn check_page_stores() -> Result<(u64, u64), &'static str> {
     let pages = check_tmpfs_stores_pages()?;
     let filled = check_a_store_fills_from_its_source()?;
     check_a_store_goes_back_to_its_source()?;
+    check_a_commit_asks_without_the_bound_lock()?;
     let streamed = check_a_stream_reads_ahead()?;
     let faulted = check_a_mapping_faults_in_its_source()?;
     Ok((pages, filled + streamed + faulted))
@@ -644,6 +645,13 @@ struct CutSource {
     /// A fill that begins at this page is raced by a whole truncation to
     /// [`RACING_CUT`] pages, made after the fill has read its bytes.
     race_at: AtomicU64,
+    /// As `race_at`, for every fill that begins at this page, not only the
+    /// next one.
+    race_always: AtomicU64,
+    /// The next reclaim finds its store cut at this byte between the choice
+    /// of its pages and their dropping, and the cut never answered: a
+    /// truncation the volume refused.
+    cut_in_reclaim: AtomicU64,
     /// The store, for that truncation.
     store: SpinLock<Option<Arc<dyn Pages>>>,
 }
@@ -679,6 +687,19 @@ impl PageSource for CutSource {
         true
     }
 
+    /// Every page handed is clean, as by default; before they go, the cut
+    /// `cut_in_reclaim` asks for.
+    fn reclaim_clean(&self, pages: &mut Vec<u64>, drop: &mut dyn FnMut(&[u64]) -> u64) -> u64 {
+        let cut = self.cut_in_reclaim.swap(u64::MAX, Ordering::Relaxed);
+        let store = self.store.lock().clone();
+        if cut != u64::MAX
+            && let Some(store) = store
+        {
+            store.discard_from(cut);
+        }
+        if pages.is_empty() { 0 } else { drop(pages) }
+    }
+
     fn fill_range(&self, first: u64, pages: &mut [&mut [u8]]) -> ferrix_vfs::Result<usize> {
         let _ = self.calls.fetch_add(1, Ordering::Relaxed);
         for (index, page) in (first..).zip(pages.iter_mut()) {
@@ -691,7 +712,8 @@ impl PageSource for CutSource {
         let raced = self
             .race_at
             .compare_exchange(first, u64::MAX, Ordering::Relaxed, Ordering::Relaxed)
-            .is_ok();
+            .is_ok()
+            || self.race_always.load(Ordering::Relaxed) == first;
         let store = self.store.lock().clone();
         if raced && let Some(store) = store {
             store.discard_from(RACING_CUT * PAGE_SIZE);
@@ -731,7 +753,10 @@ fn reclaim_everything() {
 ///   the source holds after the truncation;
 /// * a write into part of a page whose fill the truncation overtook fills
 ///   the page again before it writes: the page's other bytes are the
-///   source's, not zeros (ledger 9881 B1).
+///   source's, not zeros (ledger 9881 B1); and one whose every fill is
+///   overtaken is refused with `EIO` after eight, with nothing written;
+/// * a reclaim whose pages were chosen before a cut reads the bound where
+///   they go, and leaves the page that reaches past the cut.
 ///
 /// Before `Pages::source_cut` a cut was for the life of the store: a page
 /// written past it, written back and reclaimed read as zeros (N150 box,
@@ -745,6 +770,8 @@ fn check_a_store_goes_back_to_its_source() -> Result<(), &'static str> {
         cut_at: AtomicU64::new(u64::MAX),
         past: AtomicU8::new(PAST_CUT),
         race_at: AtomicU64::new(u64::MAX),
+        race_always: AtomicU64::new(u64::MAX),
+        cut_in_reclaim: AtomicU64::new(u64::MAX),
         store: SpinLock::new(None),
     });
     let store: Arc<dyn Pages> = Arc::from(
@@ -842,7 +869,60 @@ fn cut_and_go_back(
     if calls() != 6 || one.get(10..10 + written.len()) != Some(&written[..]) || !around {
         return Err("a write whose fill a truncation overtook wrote into a zeroed page");
     }
+
+    // A truncation overtakes every fill of page 5: after eight the write is
+    // refused, and nothing is written (consultant ledger 9898 L1).
+    source.race_always.store(5, Ordering::Relaxed);
+    let refused = store.write(5 * PAGE_SIZE + 10, written);
+    source.race_always.store(u64::MAX, Ordering::Relaxed);
+    if refused != Err(Errno::EIO) || calls() != 14 || held() != 4 {
+        return Err("a write whose every fill a truncation overtook was not refused with EIO");
+    }
+
+    // A cut 7 bytes into page 2 lands between a reclaim's choice of pages
+    // 1 to 4 and their dropping, and is never answered: page 1 goes, the
+    // cut took pages 3 and 4, and page 2, which reaches past it, stays
+    // (consultant ledger 9898 L2).
+    source
+        .cut_in_reclaim
+        .store(2 * PAGE_SIZE + 7, Ordering::Relaxed);
+    reclaim_everything();
+    if held() != 1 {
+        return Err("a reclaim that chose its pages before a cut dropped one that reaches past it");
+    }
     Ok(())
+}
+
+/// A fault's commit asks whether an absent page is its source's while it
+/// holds the object's pages lock, and a fill keeps its pages under the
+/// store's bound lock, taking the pages lock inside it. So the question must
+/// not take the bound's lock: asked with that lock held, it answers.
+///
+/// Before, it took it. On two processors, a fault whose page had gone between
+/// its fill and its commit, beside any fill of the same file at its keeping,
+/// could stop both for good (F-117; found by reading, consultant ledger
+/// 9881). A commit that takes the lock again does not fail this check with a
+/// message: it never returns, and the boot stops after the line printed
+/// here.
+fn check_a_commit_asks_without_the_bound_lock() -> Result<(), &'static str> {
+    let source = Arc::new(CutSource {
+        calls: AtomicUsize::new(0),
+        cut_at: AtomicU64::new(u64::MAX),
+        past: AtomicU8::new(PAST_CUT),
+        race_at: AtomicU64::new(u64::MAX),
+        race_always: AtomicU64::new(u64::MAX),
+        cut_in_reclaim: AtomicU64::new(u64::MAX),
+        store: SpinLock::new(None),
+    });
+    crate::console::println!(
+        "  bound    a fault's commit is asked with the page store's bound lock held; a boot that \
+         stops here takes that lock in it"
+    );
+    match fs::pages::sourced_under_the_bound_lock(source, 3) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err("an absent page of a disk file was not answered as its source's"),
+        Err(_) => Err("no store for the bound lock check"),
+    }
 }
 
 /// A store read as `read` hands a large read to a file -- a page at a time --

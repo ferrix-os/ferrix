@@ -162,6 +162,27 @@ struct Bound {
     moves: u64,
 }
 
+// CHECKS-ONLY: fs/check.rs; home: fs::pages
+/// Whether page `index` of a new store over `source`, which holds no page,
+/// is answered as the source's to fill when the object is asked while the
+/// store's bound lock is held: the question a fault's commit asks under the
+/// object's pages lock (`Vmo::sourced`, from `Vmo::commit_within`). A
+/// question that took the bound's lock would never be answered: the lock is
+/// held here. For F-117's check.
+///
+/// # Errors
+///
+/// As [`VmoStorage`]'s `allocate_with`, and `EIO` for a store with no source.
+pub(crate) fn sourced_under_the_bound_lock(
+    source: Arc<dyn PageSource>,
+    index: u64,
+) -> Result<bool> {
+    let store = VmoPages::new(Some(source))?;
+    let fill = store.fill.as_deref().ok_or(Errno::EIO)?;
+    let _held = fill.bound.lock();
+    Ok(store.vmo.sourced(index))
+}
+
 /// How a file on a disk fills its object: shared by the store, for reads and
 /// partial writes, and by the object, for faults.
 #[derive(Debug)]
@@ -172,6 +193,16 @@ struct Fill {
     /// takes pages away, so a fill that raced the truncation keeps nothing
     /// here or is taken away there.
     bound: SpinLock<Bound>,
+    /// [`Bound::below`] again, stored under the bound's lock each time it
+    /// changes and read without it by [`Fill::sourced`]. A fault's commit
+    /// asks that question holding the object's pages lock
+    /// (`Vmo::commit_within`), and a fill takes the pages lock inside the
+    /// bound's to keep its pages (`Vmo::insert_absent`): were the question
+    /// to take the bound's lock, the two would be taken in both orders, and
+    /// a fault beside a fill of the same file could stop both processors
+    /// for good (F-117). The answer was never more than the bound at one
+    /// instant, which a load is as well.
+    below: AtomicU64,
     /// Where the last read began and ended, in bytes: a read that begins
     /// where it ended, in a later page than it began, continues a
     /// sequential stream and reads ahead (see `VmoPages::read`).
@@ -334,6 +365,7 @@ impl VmoPages {
                     open: 0,
                     moves: 0,
                 }),
+                below: AtomicU64::new(u64::MAX),
                 last_read: (AtomicU64::new(u64::MAX), AtomicU64::new(u64::MAX)),
             })
         });
@@ -395,20 +427,30 @@ impl Filler for Fill {
     /// for the pages that end at or below the cut's bound: one that reaches
     /// past it is not the source's to fill again whole, and dropped it would
     /// read as zeros ([`Bound`]).
+    ///
+    /// The bound is read where the pages go, inside the source's `drop`, not
+    /// where they were chosen: a cut made in between, whose answer never
+    /// comes because the volume refused it, is seen (consultant ledger 9898
+    /// L2). The pages come lowest first, so those to give back are the ones
+    /// before the first that reaches past the bound.
     fn reclaim_clean(&self, pages: &mut Vec<u64>, drop: &mut dyn FnMut(&[u64]) -> u64) -> u64 {
-        let below = self.bound.lock().below;
-        if below != u64::MAX {
-            pages.retain(|&index| {
-                index
+        self.source.reclaim_clean(pages, &mut |clean| {
+            let below = self.below.load(Ordering::Acquire);
+            let reaches_past = |index: u64| {
+                !index
                     .checked_add(1)
                     .and_then(|next| next.checked_mul(PAGE_SIZE))
                     .is_some_and(|end| end <= below)
-            });
-            if pages.is_empty() {
-                return 0;
+            };
+            let before = clean
+                .iter()
+                .position(|&index| reaches_past(index))
+                .unwrap_or(clean.len());
+            match clean.get(..before) {
+                Some(wholly_below) if !wholly_below.is_empty() => drop(wholly_below),
+                _ => 0,
             }
-        }
-        self.source.reclaim_clean(pages, drop)
+        })
     }
 
     fn dirty_pages(&self) -> u64 {
@@ -452,7 +494,7 @@ impl Fill {
     fn sourced(&self, index: u64) -> bool {
         index
             .checked_mul(PAGE_SIZE)
-            .is_some_and(|start| start < self.bound.lock().below)
+            .is_some_and(|start| start < self.below.load(Ordering::Acquire))
     }
 
     /// Page `index` is absent from `vmo` and the source's to fill.
@@ -716,6 +758,7 @@ impl Pages for VmoPages {
             bound.below = bound.below.min(offset);
             bound.open = bound.open.saturating_add(1);
             bound.moves = bound.moves.wrapping_add(1);
+            fill.below.store(bound.below, Ordering::Release);
         }
         let _ = self.vmo.decommit_from(offset.div_ceil(PAGE_SIZE));
         // A private mapping's copies of pages past the cut go too, and so does
@@ -743,6 +786,7 @@ impl Pages for VmoPages {
                 bound.below = u64::MAX;
             }
             bound.moves = bound.moves.wrapping_add(1);
+            fill.below.store(bound.below, Ordering::Release);
         }
     }
 
