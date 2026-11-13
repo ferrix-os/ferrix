@@ -881,6 +881,67 @@ mod repository {
         assert_eq!(version_of(&root, "base"), "2.0");
         let _ = fs::remove_dir_all(&root);
     }
+
+    /// The one check that ties a file's bytes to its signature,
+    /// `check_payload` in [`sig::check`]: a good signature beside other
+    /// bytes is refused, for the index and for a package.
+    #[test]
+    fn a_good_signature_beside_other_bytes_is_refused() {
+        let root = root("repo-payload");
+        let repository = root.join("srv");
+        let at = repository.join(this_arch());
+        let _ = install(&root, read_all(&[made("base", "1.0", &[])])).unwrap();
+        let first = publish(&repository, 1, &[made("base", "1.0", &[])], &[]);
+        let _ = repo::update(&root, &repository, &anchors()).unwrap();
+        // Index 2, signed, then one byte of it changed: the length, the
+        // sequence and the syntax kept, so only the digest can tell.
+        let good = publish(&repository, 2, &[made("base", "2.0", &[])], &["base 2.0"]);
+        let changed = String::from_utf8(good.clone())
+            .unwrap()
+            .replace("fixes a fault", "fixes a fauLt")
+            .into_bytes();
+        assert_eq!(changed.len(), good.len());
+        assert_ne!(changed, good);
+        fs::write(at.join(INDEX), &changed).unwrap();
+        refused(
+            repo::update(&root, &repository, &anchors()),
+            "the repository's index: it is not the file its signature names (PayloadMismatch): refused",
+        );
+        assert_eq!(fs::read(root.join(ACCEPTED)).unwrap(), first);
+        // The control: its own bytes, and it is accepted.
+        fs::write(at.join(INDEX), &good).unwrap();
+        assert!(matches!(
+            repo::update(&root, &repository, &anchors()).unwrap(),
+            Updated::Accepted(ref i, Some(1)) if i.sequence == 2
+        ));
+        // A package the index names, beside a signature under its own name
+        // of other bytes of the same length: refused, nothing written.
+        let base = format!("base-2.0-{}.fxpkg", this_arch());
+        let mut other = fs::read(at.join(&base)).unwrap();
+        let last = other.len() - 1;
+        other[last] ^= 1;
+        fs::write(
+            at.join(format!("{base}{}", sig::SUFFIX)),
+            signed("good", "base", 0, &other),
+        )
+        .unwrap();
+        refused(
+            repo::upgrade(&root, &repository, &[], &anchors()),
+            "base 2.0: it is not the file its signature names (PayloadMismatch): refused",
+        );
+        assert_eq!(version_of(&root, "base"), "1.0");
+        assert_eq!(fs::read(root.join("bin/base")).unwrap(), b"base 1.0\n");
+        // The control: its own signature, and it goes in.
+        sign_file(&repository, &base, "good", "base", 0);
+        assert_eq!(
+            repo::upgrade(&root, &repository, &[], &anchors())
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(version_of(&root, "base"), "2.0");
+        let _ = fs::remove_dir_all(&root);
+    }
 }
 
 mod transaction {

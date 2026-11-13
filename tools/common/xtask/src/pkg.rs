@@ -19,7 +19,8 @@
 //! with the package the upgrade needs, and an older index, another index of
 //! the accepted sequence, a file whose digest is not the index's, an index
 //! signed by a key `pkg` does not trust, a package signed as another, an
-//! unsigned index and package, and a dependency no one has are refused,
+//! unsigned index and package, a dependency no one has, and an index one
+//! byte changed under its good signature are refused,
 //! each beside the run that passes. A replacement with something in the
 //! way of a file being set aside is refused with nothing changed, and a
 //! transaction left half done (its journal written by the script) is undone
@@ -49,7 +50,8 @@ pub(crate) const TASKS: &[Task] = &[
             "              service, to replace a package with its next version and back (`pkg install --replace`),",
             "              and to refuse a changed package or replacement, a missing dependency and a needed removal;",
             "              then to upgrade from a signed repository it serves itself, with a security fix, and refuse an",
-            "              older index, a wrong digest, a bad or missing signature and a dependency nobody has",
+            "              older index, a wrong digest, a bad or missing signature, a dependency nobody has and an index",
+            "              changed under its signature",
             "              (docs/UPDATES.md)",
         ],
         run,
@@ -421,8 +423,9 @@ fn repository_files(
 /// `bad-digest`, `good` with pkg-base 1.1's program changed after its
 /// index was written; `bad-signature`, `good` with the index signed by a
 /// key no `pkg` trusts and pkg-base 1.1 signed as another package;
-/// `unsigned`, `good` with no signatures; and `missing`, index 3, whose
-/// pkg-user 3.0 needs a package no one has.
+/// `unsigned`, `good` with no signatures; `missing`, index 3, whose
+/// pkg-user 3.0 needs a package no one has; and `changed-index`, `missing`
+/// as index 4 with one byte of its index changed under its signature.
 fn repositories(arch: Arch, signer: &mut Signer) -> Result<Vec<File>> {
     let base = made_with("pkg-base", "1.0", "here", None, &[], arch)?;
     let fixed = made_with("pkg-base", "1.1", "fixed", None, &[], arch)?;
@@ -478,6 +481,26 @@ fn repositories(arch: Arch, signer: &mut Signer) -> Result<Vec<File>> {
         },
     ] {
         files.extend(repository_files(arch, &repository, signer)?);
+    }
+    // `changed-index`: `missing` as index 4, signed, then one byte of its
+    // advisory changed. The length, the sequence and the syntax are kept,
+    // so only the signature's digest of the index can tell.
+    let changed = Repository {
+        dir: "changed-index",
+        sequence: 4,
+        packages: vec![&base, &fixed, &user2, &user3, &lib],
+        security: Some("pkg-base 1.1"),
+        tamper: None,
+        signed: Signed::Good,
+    };
+    for mut file in repository_files(arch, &changed, signer)? {
+        if file.path.ends_with("/index.toml")
+            && let Content::Bytes(bytes) = &mut file.content
+        {
+            let text = String::from_utf8_lossy(bytes).replace("FXSA-2026-0001", "FXSA-2026-0002");
+            *bytes = text.into_bytes();
+        }
+        files.push(file);
     }
     Ok(files)
 }
@@ -542,10 +565,12 @@ echo "n bin/pkg-stray" >> /var/lib/pkg/transaction
 echo "pkg-stray: half put down" > /bin/pkg-stray
 pkg update --repo $R/missing | while read -r line; do case "$line" in 'pkg: undid a transaction that stopped before it was done') echo "pkg-test: ok pkg undid a stopped transaction";; esac; done
 read -r line < /bin/pkg-stray || echo "pkg-test: ok what the stopped transaction put down is gone"
+pkg update --repo $R/changed-index 2>&1 | while read -r line; do case "$line" in *'index: it is not the file its signature names (PayloadMismatch): refused') echo "pkg-test: ok refused an index changed under its signature";; esac; done
+pkg newer | while read -r line; do case "$line" in *'(index 3)') echo "pkg-test: ok the changed index left index 3 accepted";; esac; done
 "#;
 
 /// The lines the boot must print, in any order.
-const WANTED: [&str; 51] = [
+const WANTED: [&str; 53] = [
     "pkg-test: started",
     "pkg-test: ok installed",
     "pkg-test: ok listed",
@@ -597,6 +622,8 @@ const WANTED: [&str; 51] = [
     "pkg-test: ok the refused replacement changed nothing",
     "pkg-test: ok pkg undid a stopped transaction",
     "pkg-test: ok what the stopped transaction put down is gone",
+    "pkg-test: ok refused an index changed under its signature",
+    "pkg-test: ok the changed index left index 3 accepted",
 ];
 
 /// The lines the boot must not print.
@@ -677,7 +704,7 @@ pub(crate) fn test_pkg(args: &Args) -> Result<()> {
         }
         println!(
             "{arch}: pkg installed, ran and removed the stat service, replaced a package and back, \
-             upgraded from a signed repository with its security fix, refused all fifteen, and undid a \
+             upgraded from a signed repository with its security fix, refused all sixteen, and undid a \
              stopped transaction"
         );
     }
