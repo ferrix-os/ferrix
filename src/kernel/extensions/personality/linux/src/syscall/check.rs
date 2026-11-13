@@ -158,6 +158,7 @@ pub fn run(unmap: fn() -> Result<bool, &'static str>) -> Result<Report, &'static
     check_identity_answers(&mut counter)?;
     let pids = crate::syscall::registry::check()?;
     check_orphans_are_reparented()?;
+    check_an_end_is_never_refused()?;
     check_an_unknown_number_is_enosys(&mut counter)?;
     check_errors_encode_as_negative(&mut counter)?;
     check_a_call_needing_a_process_says_so(&mut counter)?;
@@ -384,6 +385,103 @@ fn check_identity_answers(counter: &mut Counter) -> Result<(), &'static str> {
     if counter.call(pid) != counter.call(tid) {
         return Err("getpid and gettid disagree with one thread running");
     }
+    Ok(())
+}
+
+/// A process's end gives back every frame only it maps, empties its map and
+/// stores its counts 0, with every fallible allocation of the task that ends
+/// it refused (L.user.247, F-114; ledger 9543 ET.5, 9611 X7): the general
+/// unmap an end once made listed and counted out every region, and a space
+/// that mapped until it was refused had no room for that at its end either.
+/// A fork child ends here: its own regions' frames come back, and the
+/// pages it shares with its parent stay the parent's.
+///
+/// Verifies: L.user.247
+fn check_an_end_is_never_refused() -> Result<(), &'static str> {
+    use crate::user::space::Access;
+    use ferrix_vma::VmaFlags;
+
+    /// Regions the parent has before the fork, which the child shares.
+    const SHARED: u64 = 16;
+    /// Regions the child maps of its own.
+    const OWN: u64 = 256;
+    /// Frames the boot's other tasks may take between the two reads of
+    /// `free_frames` (a timer's work, the net core's buffers, a heap cache
+    /// refilled on another processor): the end gives back at least `OWN`
+    /// less this. A margin chosen, not measured: one sixteenth of `OWN`,
+    /// against a window in which nothing else of this check runs. The
+    /// child's own page tables come back besides and are not counted; the
+    /// boot line prints what came back.
+    const SLACK: u64 = 16;
+    /// Where the check maps.
+    const BASE: u64 = 0x4000_0000;
+
+    /// The injection lifted on every way out of the check.
+    struct Lifted;
+    impl Drop for Lifted {
+        fn drop(&mut self) {
+            let _ = crate::fallible::stop_injecting();
+        }
+    }
+
+    let map_touched = |process: &Process, at: u64, count: u64| -> Result<(), &'static str> {
+        for region in 0..count {
+            let address = at + region * 2 * PAGE_SIZE;
+            let _ = process
+                .space()
+                .map_anonymous(address, PAGE_SIZE, VmaFlags::READ_WRITE)
+                .map_err(|_| "no mapping for the end-never-refused check")?;
+            process
+                .space()
+                .fault(address, Access::WRITE)
+                .map_err(|_| "the end-never-refused check could not fault a page in")?;
+        }
+        Ok(())
+    };
+    let parent =
+        process::new_for_check().map_err(|_| "no process for the end-never-refused check")?;
+    map_touched(&parent, BASE, SHARED)?;
+    let child =
+        process::fork_for_check(&parent).map_err(|_| "no fork for the end-never-refused check")?;
+    map_touched(&child, BASE + 4 * SHARED * PAGE_SIZE, OWN)?;
+    let space = Arc::clone(child.space());
+    let parents_before = parent.space().resident().total();
+    let me = crate::sched::current_id().ok_or("the end-never-refused check runs outside a task")?;
+    let before = mm::free_frames();
+    {
+        let _lifted = Lifted;
+        crate::fallible::inject(me, 1);
+        process::kill(&child, 0);
+    }
+    let after = mm::free_frames();
+    if space.region_count() != 0 || space.resident().total() != 0 {
+        return Err(
+            "a process's end left regions or resident pages when its allocations were refused",
+        );
+    }
+    if space.region_totals(BASE).0.mapped != 0 {
+        return Err("a process's end left its map's totals when its allocations were refused");
+    }
+    if after.saturating_add(SLACK) < before.saturating_add(OWN) {
+        return Err("a process's end kept its own frames when its allocations were refused");
+    }
+    println!(
+        "  exit     an end with its allocations refused gave back {} frames for {OWN} pages \
+         of its own (slack {SLACK})",
+        after.saturating_sub(before)
+    );
+    // The objects the child shared with its parent (the parent's `SHARED`
+    // regions, which the fork maps in both) keep their frames: another
+    // space still maps them.
+    if parent.space().resident().total() != parents_before {
+        return Err("a child's end took pages its parent still maps");
+    }
+    // Cleared: an allocation of this task, every one of which the injection
+    // refused, is served again.
+    if crate::fallible::try_arc(0_u8).is_err() {
+        return Err("the end-never-refused check left its injection on");
+    }
+    process::kill(&parent, 0);
     Ok(())
 }
 

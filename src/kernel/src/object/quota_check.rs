@@ -64,8 +64,18 @@ pub fn run() -> Result<Report, &'static str> {
         report.alone_share = check_the_processor(&tree)?;
         check_the_weight(&tree)?;
         check_an_ended_victim_is_emptied(&tree)?;
+        check_an_unstarted_victim_is_released_by_the_emptier(&tree)?;
         check_the_emptier(&tree)?;
         check_the_machine_wide_kill(&tree)?;
+        // A thread-less victim a kill above ended has its release run by the
+        // emptier (L.object.377): every one run and let go of before the
+        // counts and slots below are read.
+        if !waited_for(|| {
+            let (handed, run) = oom::releases_handed();
+            handed == run
+        }) {
+            return Err("a release an OOM kill owed the emptier was never run");
+        }
         check_a_move_settles_the_pending_charge(&tree)?;
         if Resource::ALL
             .iter()
@@ -550,6 +560,81 @@ fn check_an_ended_victim_is_emptied(tree: &Arc<Job>) -> Result<(), &'static str>
     checked?;
     if used(&job) != 0 {
         return Err("the OOM check's processes gone and their memory still charged");
+    }
+    Ok(())
+}
+
+/// A victim with no thread live -- nobody has started it -- is not let go of
+/// on its kill's own stack, where whatever asked for the kill may hold its
+/// space's layout lock (a creator mapping into the child it has not started
+/// yet): its end owes the release to the emptier, which runs it, and its
+/// memory is back before any parent's wait (ledger 9611 X6, 9740 NR.1).
+///
+/// Verifies: L.object.377
+fn check_an_unstarted_victim_is_released_by_the_emptier(
+    tree: &Arc<Job>,
+) -> Result<(), &'static str> {
+    const VICTIM_PAGES: u64 = 32;
+    const BASE: u64 = 0x40_0000;
+    let job = tree.new_child().map_err(|_| "a job refused a child")?;
+    let victim = member_of(&job)?;
+    let faulter = member_of(&job)?;
+    let used = |job: &Job| job.usage(Resource::Memory).map_or(0, |usage| usage.used);
+    let (checked, _) = as_task_of(&job, || -> Result<(), &'static str> {
+        let _ = victim
+            .space()
+            .map_anonymous(BASE, VICTIM_PAGES * PAGE_SIZE, VmaFlags::READ_WRITE)
+            .map_err(|_| "no mapping for the unstarted victim")?;
+        for page in 0..VICTIM_PAGES {
+            victim
+                .space()
+                .fault(BASE + page * PAGE_SIZE, Access::WRITE)
+                .map_err(|_| "the unstarted victim could not fault its memory in")?;
+        }
+        let _ = faulter
+            .space()
+            .map_anonymous(BASE, PAGE_SIZE, VmaFlags::READ_WRITE)
+            .map_err(|_| "no mapping for the unstarted victim's faulter")?;
+        let _ = job.set_limit(Resource::Memory, used(&job));
+        let full = used(&job);
+        let refused = || {
+            faulter
+                .space()
+                .fault(BASE, Access::WRITE)
+                .is_err_and(|error| oom::is_charge_refusal(&error))
+        };
+        let (handed, _) = oom::releases_handed();
+        if !refused() || oom::out_of_memory(faulter.space()) != oom::Answer::Retry {
+            return Err("a fault at a full limit did not kill an unstarted victim and retry");
+        }
+        if !victim.is_terminated() || faulter.is_terminated() {
+            return Err("the scoped OOM kill did not choose the unstarted victim");
+        }
+        if oom::releases_handed().0.wrapping_sub(handed) != 1 {
+            return Err("an unstarted victim's release ran on its kill's own stack");
+        }
+        // Until the emptier has run it and let its reference go, which holds
+        // the victim, and so its job's slot, past the release.
+        if !waited_for(|| {
+            oom::releases_handed().1 == oom::releases_handed().0
+                && victim.space().region_count() == 0
+                && used(&job).saturating_add(VICTIM_PAGES * PAGE_SIZE) <= full
+        }) {
+            return Err("an unstarted victim's owed release was not run by the emptier");
+        }
+        faulter
+            .space()
+            .fault(BASE, Access::WRITE)
+            .map_err(|_| "the fault after the unstarted victim's release was refused")?;
+        Ok(())
+    });
+    for process in [&victim, &faulter] {
+        process::kill(process, KILLED_STATUS);
+    }
+    drop((victim, faulter));
+    checked?;
+    if used(&job) != 0 {
+        return Err("the unstarted victim's check's processes gone and their memory still charged");
     }
     Ok(())
 }

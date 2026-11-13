@@ -251,6 +251,34 @@ Three paths were rebuilt so that they need no memory at all:
   tables as before, n log n. The room for counting the removed regions out
   (`room_to_count_out`, under the lock) sorts one entry per region the same
   way, and so does `Named::of` when an object has left.
+* **An exit's emptying** (`AddressSpace::empty_for_exit`, L.user.247,
+  `docs/EXIT-TEARDOWN.md` 4.2). A process's end no longer reaches the
+  unmap above, nor its sort. It takes the space's layout lock (a sleeping
+  lock, before any spin lock), then holds the space's spin lock for the
+  whole space in one hold, as the whole-range unmap at the exit held it
+  before: the map's vector moved out; each region's translations taken down
+  into the shootdown's page list, which past its batch becomes a whole flush;
+  the tables no region emptied unlinked into the same list, the prune walking
+  every present table below the space's top (the user half's end, or
+  `SHARED_BASE` for a bound space) in the same hold; every object's
+  and shadow's views forgotten, each object's lock taken under the space's
+  in the documented order (the space's, then the object's, as `forget_views`
+  always takes them); the counts stored 0; the four object tables moved out;
+  the shootdown counted pending. Nothing in the hold allocates, so no refusal
+  can stop or postpone it (F-114). The hold grows with the regions, the
+  leaves mapped and the objects, with no sort, no list and no count-out; it
+  is not stepped, and D3 (ET.6) steps it. After the shootdown, with no lock
+  held, each object is detached, which compacts its mapper list (a fallible
+  allocation that survives a refusal), and dropped: an object only this space
+  maps releases its frames there, and one another space maps keeps them.
+  An OOM kill whose victim has no thread live does not run that release on
+  its own stack (L.object.377): the victim is put in `OWED_RELEASE`, a leaf
+  lock never taken with `EMPTYING`'s and with nothing dropped under it, and
+  the emptier runs the release, which may sleep on the victim's layout lock
+  while the asker holds it, bounded by the asker's own retries
+  (`MOST_ANSWERS`, `KERNEL_HEAP_ANSWERS`); while a release is owed every kill
+  answers retry. Before the emptier has named itself at boot, a kill's
+  release runs at once, as before.
 * **Taking pages out of an object** (munmap, madvise, truncation, mremap,
   copy-on-write). The frames go into a list whose room is had before the
   first frame leaves the object, so a frame is never out of one list and not
@@ -3475,7 +3503,9 @@ reserve, a `brk` heap), so a walk of one whole object under its pages lock
 bounded by the same pages as the many walks before it; and a whole-space or
 large unmap reaching k regions of that object asks its one cover for 2k + 1
 runs in one list (`docs/ANON-MERGE.md` §5.5, about 3 MB at k = 60,000),
-which `fix/exit-unmap-sort`'s design (d) owns at the exit.
+which `fix/exit-unmap-sort`'s design (d) owns at the exit. Since D2 the
+exit asks for no runs: its emptying forgets the object's views and drops
+it, allocating nothing (1.2, "An exit's emptying").
 
 ### 2.2ai A processor's reservations (`schedule=edf`, 2026-11-05)
 

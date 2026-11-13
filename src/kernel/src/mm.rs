@@ -2663,6 +2663,33 @@ pub(crate) fn prune_in(root: u64, virt: u64, len: u64) {
     });
 }
 
+/// [`prune_in`] for a tree a processor may still walk: each table that maps
+/// nothing is unlinked and handed to `flush`, which gives it back only after
+/// its shootdown has reached every processor, and the shootdown is made a
+/// whole flush, since no address of these tables is in it (a space's end on
+/// its exiting task, `AddressSpace::empty_for_exit`). The tables directly
+/// under the root stay when `keep_top`, as [`unmap_in_keeping`] leaves them.
+pub(crate) fn prune_in_unlinking(
+    root: u64,
+    virt: u64,
+    len: u64,
+    flush: &mut crate::smp::TlbPages,
+    keep_top: bool,
+) {
+    let mut mapper: Mapper<crate::arch::PageEncoding> = Mapper::new(PhysAddr(root));
+    if keep_top {
+        mapper.keep_top();
+    }
+    let tables = flush.tables();
+    let _ = mapper.prune_range(&mut KernelPhysMem, VirtAddr(virt), len, |freed| {
+        if let Released::Table { phys } = freed {
+            // NOALLOC: the list is linked through the tables themselves.
+            tables.push(phys);
+        }
+    });
+    flush.everything();
+}
+
 /// Map the 4 KiB page `phys` at I/O address `iova` in the IOMMU tree rooted at
 /// `root`, whose descriptors `E` encodes.
 ///

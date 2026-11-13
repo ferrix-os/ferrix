@@ -113,12 +113,15 @@ HANDED_OVER = re.compile(
 # What sleeps, or waits on another processor. A way to any of these from what is left is F-104 again.
 MAY_SLEEP = re.compile(r"WaitQueue>::wait|sched::block|sched::schedule|sched::sleep|flush_tlb_everywhere|flush_tlb_pages")
 # L.object.374 (F-107's B, docs/OOM-REAPER.md, ledger 8784, 8814): no OOM kill unmaps a space where
-# it was asked -- the emptier does, a task of its own -- and the hand-off allocates nothing. Each rule:
+# it was asked -- the emptier does, a task of its own -- and the hand-off allocates nothing. An exit's
+# emptying (`empty_for_exit`, L.user.247) is an unmap of the whole space and is a target as well; the
+# release that reaches it through the victim's `Host::kill`, a call through a vtable the walk does not
+# follow, is owed to the emptier by `oom::owe_release` (ledger 9611 X6). Each rule:
 # where the walk starts, what it must not reach, and what reaching it would mean.
 EMPTIES_NOTHING = (
     (
         "ferrix_kernel_core::object::oom::kill_in",
-        re.compile(r"user::space::AddressSpace>::unmap$"),
+        re.compile(r"user::space::AddressSpace>::(unmap|empty_for_exit)$"),
         "unmaps a space where it was asked",
     ),
     (
@@ -1002,6 +1005,11 @@ def self_test():
     found = []
     empties_nothing(weights, dirty, found)
     assert len(found) == 2 and any("unmaps a space" in f for f in found) and any("allocates" in f for f in found), found
+    # An exit's emptying is an unmap of the whole space (L.user.247, ledger 9611 X6).
+    empty = "<ferrix_kernel_core::user::space::AddressSpace>::empty_for_exit"
+    found = []
+    empties_nothing(dict(weights, **{empty: 8}), dict(clean, ended=[hand, empty]), found)
+    assert len(found) == 1 and "empty_for_exit" in found[0], found
     assert empties_nothing({"x": 8}, {}, []) is None, "an image with no OOM kill has no such line"
     # A recursion is recorded as a cyclic part, a function calling its own start (not a branch inside
     # it, nor a jump to its start, a loop) included, and found below a root.

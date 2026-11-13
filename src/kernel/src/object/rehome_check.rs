@@ -617,6 +617,7 @@ impl Host for Listed {
     fn wait_interrupted(&self) -> bool {
         false
     }
+    fn release_owed(&self) {}
 }
 
 /// Once unlisted a pid finds nothing and `listed` leaves it out; `live` still

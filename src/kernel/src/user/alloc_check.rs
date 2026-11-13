@@ -116,7 +116,7 @@ type Scenario = (&'static str, fn(u64) -> Result<(), Refusal>);
 ///
 /// Verifies: H.MEM.11, L.mm.48, L.user.20, L.user.100, L.user.106
 pub(crate) fn run(frame: u64) -> Result<Report, &'static str> {
-    let scenarios: [Scenario; 9] = [
+    let scenarios: [Scenario; 10] = [
         ("fork", fork_every_kind_of_region),
         ("move", remap_a_private_region),
         ("shared", remap_a_shared_region),
@@ -126,6 +126,7 @@ pub(crate) fn run(frame: u64) -> Result<Report, &'static str> {
         ("stacks", free_stacks_together),
         ("code", map_shared_code),
         ("page", map_code_page),
+        ("end", end_a_space),
     ];
     let task = crate::sched::current_id().ok_or("the sweep runs outside a task")?;
     // Once each before the window, for the size classes and the tables their
@@ -368,6 +369,57 @@ fn unmap_from_the_middle(_: u64) -> Result<(), Refusal> {
         space_.unmap(at, P),
         "unmapping a file's mapping was refused",
     )
+}
+
+/// A space's end (L.user.247, F-114): private pages written, and an object
+/// mapped shared in it and in another space, then the space emptied as its
+/// process's end empties it. Whichever allocation the sweep fails, the
+/// emptying leaves no region and no resident page, and the other space keeps
+/// the object's page; the private pages come back with the rest (the sweep's
+/// window).
+///
+/// Verifies: L.user.247
+fn end_a_space(_: u64) -> Result<(), Refusal> {
+    let ending = space(AddressSpace::new(), "a fresh space was refused")?;
+    let other = space(AddressSpace::new(), "a fresh space was refused")?;
+    let _ = space(
+        ending.map_anonymous(LOW, 3 * P, VmaFlags::READ_WRITE),
+        "a region was refused",
+    )?;
+    for at in [LOW, LOW + P, LOW + 2 * P] {
+        space(
+            ending.fault(at, Access::WRITE),
+            "a write before the end faulted",
+        )?;
+    }
+    let shared = VmaFlags {
+        shared: true,
+        ..VmaFlags::READ_WRITE
+    };
+    let file = Vmo::new_anonymous(1)?;
+    let at = map_file(&ending, &file, shared, true)?;
+    space(
+        ending.fault(at, Access::WRITE),
+        "a write to a shared page faulted",
+    )?;
+    let there = map_file(&other, &file, shared, true)?;
+    space(
+        other.fault(there, Access::READ),
+        "a read of a shared page in another space faulted",
+    )?;
+    let others = other.resident().total();
+    ending.empty_for_exit();
+    if ending.region_count() != 0 || ending.resident().total() != 0 {
+        return Err(Refusal::Wrong(
+            "a space's end left regions or resident pages",
+        ));
+    }
+    if other.region_count() == 0 || other.resident().total() != others {
+        return Err(Refusal::Wrong(
+            "a space's end took a page another space maps",
+        ));
+    }
+    Ok(())
 }
 
 /// Map all of `file` into `space_` wherever it fits, as a file opened for

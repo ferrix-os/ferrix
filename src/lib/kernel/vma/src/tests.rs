@@ -2243,3 +2243,27 @@ mod cover {
         }
     }
 }
+
+#[test]
+fn take_moves_every_region_out_and_leaves_nothing_counted() {
+    let mut space = space();
+    map(&mut space, 0x1000, 0x3000, VmaFlags::READ_WRITE);
+    map(&mut space, 0x5000, 0x6000, VmaFlags::READ);
+    assert!(space.charged() > 0);
+    let taken = space.take();
+    assert_eq!(
+        taken
+            .iter()
+            .map(|region| (region.range.start(), region.range.end()))
+            .collect::<Vec<_>>(),
+        vec![(0x1000, 0x3000), (0x5000, 0x6000)]
+    );
+    assert!(space.is_empty());
+    assert_eq!(space.totals(), Totals::default());
+    assert_eq!(space.totals(), space.totals_summed());
+    assert_eq!(space.charged(), 0, "the room goes with the regions");
+    check(&space);
+    // The map takes regions again after it.
+    map(&mut space, 0x1000, 0x2000, VmaFlags::READ_WRITE);
+    assert_eq!(space.total_mapped(), 0x1000);
+}

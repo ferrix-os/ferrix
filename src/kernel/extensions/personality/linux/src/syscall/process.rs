@@ -1397,7 +1397,10 @@ impl Process {
         self.vfork_done.wake_all();
         self.signalled.wake_all();
         self.resumed.wake_all();
-        if self.live_threads.load(Ordering::Acquire) == 0 {
+        // With none live, it lets go here, unless this is the OOM kill's
+        // stack, which leaves that to its emptier (L.object.374).
+        if self.live_threads.load(Ordering::Acquire) == 0 && !object::oom::owe_release(self.core())
+        {
             self.release();
         }
         true
@@ -1557,18 +1560,17 @@ impl Process {
         // aarch64). No thread of it runs in user mode any more, and no other
         // process shares the space (`clone` refuses `CLONE_VM` without
         // `CLONE_THREAD`, and `vfork` copies), so nothing can fault it back
-        // in. The unmap's own small allocations are charged to nobody: at
-        // the job's limit they must not be what keeps its memory from being
-        // given back. A refusal leaves the pages to go with the space, as
-        // before.
+        // in. The emptying allocates nothing, so neither the job's limit nor
+        // a machine out of memory can stop or postpone it: a program that
+        // mapped until it was refused gives its memory back here too, as the
+        // general unmap, which lists and counts out every region, could not
+        // (F-114, L.user.247).
+        // Charged to nobody still: the one allocation left on the way, an
+        // object's detach compacting its mapper list, survives a refusal,
+        // and must not be charged to a job at its limit (ledger 9611 X9).
         if !self.keep_space.load(Ordering::Acquire) {
             let space = self.space();
-            let _ = object::quota::charging_nobody(|| {
-                space.unmap(
-                    MMAP_MIN_ADDR,
-                    crate::user::space::PROGRAM_TOP - MMAP_MIN_ADDR,
-                )
-            });
+            object::quota::charging_nobody(|| space.empty_for_exit());
         }
         // Nothing of it can run any more, so it leaves its job's count: a job
         // is empty once its last member gets here, not once that member is
@@ -2573,6 +2575,10 @@ impl Host for Process {
 
     fn wait_interrupted(&self) -> bool {
         self.signal_pending()
+    }
+
+    fn release_owed(&self) {
+        self.release();
     }
 }
 

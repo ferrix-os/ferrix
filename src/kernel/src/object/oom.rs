@@ -63,7 +63,7 @@
 
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 
 use ferrix_bootinfo::PAGE_SIZE;
 
@@ -576,7 +576,7 @@ fn kill_in(
     let Some(scope) = looked.scope else {
         return (Answer::Refused, false);
     };
-    if looked.ending {
+    if looked.ending || release_owed_pending() {
         return (Answer::Retry, true);
     }
     // A victim reaped by its parent leaves the list before its memory is
@@ -857,6 +857,15 @@ pub(crate) fn emptier(_: usize) {
     loop {
         let _ = EMPTIER_WAIT.wait_trusting(|| EMPTY_ASKED.load(Ordering::Acquire));
         EMPTY_ASKED.store(false, Ordering::Release);
+        // A release a kill owed first: it empties the victim's whole space
+        // in one go, which leaves a handed emptying below nothing to do. Its
+        // reference is dropped here, with no lock held.
+        let owed = OWED_RELEASE.lock().take();
+        if let Some(host) = owed {
+            host.release_owed();
+            drop(host);
+            let _ = RELEASES_RUN.fetch_add(1, Ordering::Release);
+        }
         // A space given up while another took the slot is marked here, where
         // an upgrade's last reference may be dropped, if its own look has not
         // marked it yet (L.object.375).
@@ -998,6 +1007,60 @@ pub fn emptier_chunks() -> (u64, u64) {
     )
 }
 
+/// The task inside [`kill_victim`]'s kill, zero for none, and the core
+/// process it is ending (its address): what [`owe_release`] compares with.
+/// One at a time, under [`CHOOSING`].
+static KILLING_TASK: AtomicU64 = AtomicU64::new(0);
+/// The same kill's victim: see [`KILLING_TASK`].
+static KILLING_CORE: AtomicUsize = AtomicUsize::new(0);
+/// Set by [`owe_release`] when the victim's end owed its release here.
+static RELEASE_OWED: AtomicBool = AtomicBool::new(false);
+/// A victim whose release its kill owed to the emptier, until the emptier
+/// runs it. A leaf lock, never taken with [`EMPTYING`]'s; nothing is dropped
+/// under it.
+static OWED_RELEASE: crate::sync::SpinLock<Option<Arc<dyn Host>>> =
+    crate::sync::SpinLock::new(None);
+/// Releases a kill has owed to the emptier since boot, for the check.
+static RELEASES_HANDED: AtomicU64 = AtomicU64::new(0);
+/// Of those, the ones the emptier has run and let go of, for the check.
+static RELEASES_RUN: AtomicU64 = AtomicU64::new(0);
+
+/// Whether the end of `ending`, which found no thread of it live, is to
+/// leave its release to the emptier rather than run it here: it is the
+/// victim [`kill_victim`] is ending on this task, and the emptier runs
+/// (before it starts, at boot, the release runs at once as before). The
+/// personality's and the bare process's `end` ask, and when told so call
+/// nothing; the emptier calls [`Host::release_owed`] (L.object.374, ledger
+/// 9611 X6). Two loads and a store: allocates nothing, takes no lock.
+pub fn owe_release(ending: &process::Process) -> bool {
+    let task = KILLING_TASK.load(Ordering::Acquire);
+    let owed = task != 0
+        && crate::sched::current_id() == Some(task)
+        && KILLING_CORE.load(Ordering::Acquire) == core::ptr::from_ref(ending).addr()
+        && EMPTIER.load(Ordering::Acquire) != 0;
+    if owed {
+        RELEASE_OWED.store(true, Ordering::Release);
+    }
+    owed
+}
+
+/// Whether a release a kill owed is still the emptier's to run: no other
+/// kill until it has run, so that one slot is enough.
+fn release_owed_pending() -> bool {
+    OWED_RELEASE.lock().is_some()
+}
+
+// CHECKS-ONLY: object/quota_check.rs
+/// How many releases a kill has owed to the emptier since boot, and of
+/// those how many the emptier has run and dropped its reference to.
+#[doc(hidden)]
+pub fn releases_handed() -> (u64, u64) {
+    (
+        RELEASES_HANDED.load(Ordering::Relaxed),
+        RELEASES_RUN.load(Ordering::Acquire),
+    )
+}
+
 /// Kill `victim`, with `resident` pages, chosen in `scope` for `scope_of`:
 /// say so, audit it, count it in its job and above and in [`KILLS`], and
 /// start the grace after a machine-wide kill.
@@ -1039,7 +1102,26 @@ fn kill_victim(scope_of: Scope, scope: &Job, victim: &Arc<dyn Host>, resident: u
             .replace((Arc::downgrade(core.own_space()), false));
         drop(old);
     }
+    // A victim with no thread live -- one nobody has started, or whose last
+    // thread is on its way out -- would let go of everything at once inside
+    // `kill`, on this stack, where an allocation of the heap's may have
+    // asked for the kill while it held that very space's layout lock (a
+    // creator mapping into a child it has not started yet). So its release
+    // is owed to the emptier instead (L.object.374, ledger 9611 X6).
+    KILLING_CORE.store(::core::ptr::from_ref(core).addr(), Ordering::Release);
+    KILLING_TASK.store(crate::sched::current_id().unwrap_or(0), Ordering::Release);
     victim.kill(KILLED_STATUS);
+    KILLING_TASK.store(0, Ordering::Release);
+    KILLING_CORE.store(0, Ordering::Release);
+    if RELEASE_OWED.swap(false, Ordering::AcqRel) {
+        // Empty: `kill_in` kills nobody while it is full. The clone only
+        // counts a reference, and nothing is dropped under the leaf lock.
+        let earlier = OWED_RELEASE.lock().replace(Arc::clone(victim));
+        let _ = RELEASES_HANDED.fetch_add(1, Ordering::Relaxed);
+        EMPTY_ASKED.store(true, Ordering::Release);
+        EMPTIER_WAIT.wake_all();
+        drop(earlier);
+    }
     crate::audit::oom_killed(core.pid(), limited, resident);
     core.job().count_oom(true);
     let _ = KILLS.fetch_add(1, Ordering::Relaxed);

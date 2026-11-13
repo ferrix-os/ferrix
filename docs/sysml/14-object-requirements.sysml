@@ -1737,7 +1737,8 @@ package FerrixObjectRequirements {
                 nothing, a Weak in a slot behind a leaf lock and a wake.";
             attribute :>> criterion = "check-stack-depth, on all three
                 architectures: no way by the calls the walk follows from
-                object::oom::kill_in to AddressSpace::unmap, nor from
+                object::oom::kill_in to AddressSpace::unmap or
+                AddressSpace::empty_for_exit, nor from
                 object::oom::hand_over to the kernel allocator's alloc or
                 realloc, leaving out, each named in EMPTIES_NOTHING_STOPS with its
                 reason: failure paths (a panic stops the machine); a switch (what
@@ -1747,7 +1748,10 @@ package FerrixObjectRequirements {
                 what drop_rest's row walks and bounds, F-104, L.mm.143). The tool's
                 self-test has a case of each way. Control: ended's unmap put back
                 -- the row's 'the OOM kill unmaps a space where it was asked' line
-                (f107b-c1).";
+                (f107b-c1); an exit's emptying (AddressSpace::empty_for_exit) is
+                a target too, held by the tool's self-test case (ledger 9611 X6). A
+                victim's release that the kill's own stack would run, which the walk
+                cannot see through the Host vtable, is L.object.377's.";
             attribute :>> parent = "H.QUOTA.6";
             attribute :>> unit = ("object::oom::hand_over");
         }
@@ -1798,6 +1802,32 @@ package FerrixObjectRequirements {
             attribute :>> unit = ("object::oom::emptier", "object::oom::empty",
                 "object::oom::let_go", "object::oom::in_slot",
                 "object::oom::through_gate", "sched::start_reaper");
+        }
+        // docs/EXIT-TEARDOWN.md D2 (ledger 9611 X6, 9740 NR.1).
+        requirement <'L.object.377'> anUnstartedVictimIsReleasedByTheEmptier : ItemLowLevel {
+            attribute :>> statement = "A victim the OOM kill ends with no thread of
+                it live shall not be released on the kill's own stack once the
+                emptier runs: its release shall be owed to the emptier, which runs it
+                before the victim's waiter is told, and no other victim shall be
+                chosen until it has.";
+            attribute :>> criterion = "Boot check (quota_check's
+                check_an_unstarted_victim_is_released_by_the_emptier): a process of
+                the check's own, never started and holding 32 pages, is chosen by a
+                fault at its job's full limit; the kill returns with the victim
+                ended and one release owed, the emptier runs it and lets its
+                reference go, the victim's map is empty and its memory back, and the
+                fault then goes in. Control: the owing made false (owe_release's
+                emptier test never true) -- 'an unstarted victim's release ran on its
+                kill's own stack' (FX panic). Residuals, as built: before the emptier
+                has named itself at boot the release runs at once, as before; an
+                owed release may sleep on the victim's layout lock while the asker
+                holds it, which the asker's own retries bound (MOST_ANSWERS, and
+                KERNEL_HEAP_ANSWERS for the kernel's heap); while a release is owed,
+                every kill answers retry.";
+            attribute :>> parent = "H.QUOTA.6";
+            attribute :>> unit = ("object::oom::owe_release",
+                "object::oom::release_owed_pending",
+                "object::bare::Bare::release_owed");
         }
         requirement <'L.object.106'> cpuIsChargedUp : ItemLowLevel {
             attribute :>> statement = "charge_cpu shall charge the time a task ran

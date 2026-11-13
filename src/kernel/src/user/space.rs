@@ -3540,6 +3540,127 @@ impl AddressSpace {
         Ok(())
     }
 
+    /// Empty the space at its process's end: every region, translation and
+    /// page table of its user half gone, and every object only it maps
+    /// released, with nothing allocated, so that no refusal can stop or
+    /// postpone it (L.user.247, `docs/EXIT-TEARDOWN.md` 4.2). The general
+    /// [`unmap`] lists every region it removes and counts each out, and a
+    /// space whose program mapped until it was refused could not have the
+    /// room for that at its end either (F-114).
+    ///
+    /// `Drop`'s order on a live space: under the layout and the space's
+    /// lock, the map taken whole and its translations taken down in the same
+    /// hold, so no reader of the map finds an object mapped where the tables
+    /// say otherwise (ET.4 (a)); every object's views forgotten, so the
+    /// space's counts need no count-out and are stored 0; the object tables
+    /// taken whole. Then the shootdown, and only after it the tables and the
+    /// objects let go (ET.4 (b)): an object only this space held releases its
+    /// frames as it drops, one another space maps keeps them.
+    ///
+    /// What it empties (ledger 9611 X5): every region of the map, which lies
+    /// in `[MMAP_MIN_ADDR, PROGRAM_TOP)` and below the ceiling ([`new`] makes
+    /// the map so, and [`set_ceiling`] refuses an end below a region), and
+    /// every table under the root's slots below `top`. Above `PROGRAM_TOP`
+    /// there is nothing of the program's: without the lift the user half
+    /// ends there; under `linuxd` it is the region, `[SHARED_BASE,
+    /// USER_VIRT_END)`, whose tables are the region's space's and are named
+    /// only by a bound space's normal root. So a bound space's range stops at
+    /// `SHARED_BASE` in every build. Above a lowered ceiling (a 32-bit
+    /// program's) nothing is mapped. With `keeps_top` (a bound space) the
+    /// take-down and the prune leave every table directly under the root, so
+    /// the normal root's copies of its entries never name a freed table. A
+    /// window has no regions and keeps its window take-down (TD.5).
+    ///
+    /// For a space nothing runs in user mode in and no other process shares:
+    /// its process's end. Nothing of the end reads the program's memory
+    /// after this: a thread's `clear_child_tid` write and wake come before
+    /// its `thread_gone` (`end_thread`), the only way from a thread's end to
+    /// the release, and a robust list is recorded but never walked. Takes
+    /// the layout lock, which sleeps, so the caller holds no spin lock and
+    /// may block; the OOM kill never reaches it on its own stack
+    /// (`oom::owe_release`, L.object.374).
+    ///
+    /// [`unmap`]: AddressSpace::unmap
+    /// [`new`]: AddressSpace::new
+    /// [`set_ceiling`]: AddressSpace::set_ceiling
+    pub fn empty_for_exit(&self) {
+        #[cfg(ferrix_personality = "user")]
+        if self.is_window() {
+            let (low, high) = {
+                let inner = self.inner.lock();
+                (inner.map.low(), inner.map.high())
+            };
+            let _ = self.unmap(low, high - low);
+            return;
+        }
+        let me: *const AddressSpace = self;
+        let _layout = self.layout();
+        let mut pages = TlbPages::new();
+        // A bound space's normal root names the region's tables from
+        // `SHARED_BASE` on, and its ceiling never passes `SHARED_BASE`
+        // (`set_ceiling`): what it empties stops there.
+        let top = if self.is_bound() {
+            SHARED_BASE
+        } else {
+            USER_VIRT_END
+        };
+        // Nothing in this hold allocates (ledger 9611 X2): the map's take
+        // moves its vector out, the walked take-down links the tables it
+        // unlinks through themselves and falls back to a whole flush when its
+        // page list is full, `forget_views` and `clear` store counts, and the
+        // four takes leave empty maps. The pending shootdown it begins under
+        // the same hold is what keeps a frame another space also maps from
+        // going before every processor has dropped this space's translation
+        // to it (X3): another mapper's take-down of such an object, or a
+        // reclaim of it, still finds this space on the object's mapper list
+        // until the detach below, and `forget_runs` makes its own shootdown a
+        // whole flush of this space while one is pending, before it releases
+        // anything (TD.2).
+        let (regions, objects, shadows, files, native, cpus) = {
+            let mut inner = self.inner.lock();
+            let regions = inner.map.take();
+            for region in &regions {
+                self.unmap_range(region.range, &mut pages);
+            }
+            // And the tables no region's walk emptied, which a fault refused
+            // memory above the page it could not map made: unlinked here and
+            // given back after the shootdown, which is made whole for them
+            // (ET.4 (b)).
+            mm::prune_in_unlinking(self.root * PAGE_SIZE, 0, top, &mut pages, self.keeps_top());
+            for vmo in inner.objects.values().chain(inner.shadows.values()) {
+                vmo.forget_views(&self.rss, None);
+            }
+            self.rss.clear();
+            let objects = core::mem::take(&mut inner.objects);
+            let shadows = core::mem::take(&mut inner.shadows);
+            let files = core::mem::take(&mut inner.files);
+            let native = core::mem::take(&mut inner.native);
+            let cpus = self.begin_shootdown(&inner);
+            (regions, objects, shadows, files, native, cpus)
+        };
+        self.shoot(&cpus, &mut pages);
+        for (&id, vmo) in &objects {
+            if writable_ceiling(&native, id) {
+                vmo.lower_writable_region();
+            }
+            vmo.detach(me, id);
+        }
+        for (&id, shadow) in &shadows {
+            shadow.detach(me, id);
+        }
+        for (&id, mapping) in &files {
+            if mapping.may_write
+                && let Some(vmo) = objects.get(&id)
+            {
+                vmo.lower_shared_may_write();
+            }
+        }
+        // The objects, shadows and files go here, with no lock held: an
+        // object's last reference releases its frames, a file's may be its
+        // inode's.
+        drop((objects, shadows, files, native, regions));
+    }
+
     /// Take the translations for `removed` out of the tables, note the pages
     /// behind them in `freeing` for [`AddressSpace::give_back`], and the
     /// addresses in `pages` for the shootdown.

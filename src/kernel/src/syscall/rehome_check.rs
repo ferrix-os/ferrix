@@ -60,6 +60,7 @@ impl Host for Caller {
     fn wait_interrupted(&self) -> bool {
         false
     }
+    fn release_owed(&self) {}
 }
 
 impl Caller {

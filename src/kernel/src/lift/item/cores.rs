@@ -239,6 +239,7 @@ fn no_caller() -> &'static dyn Host {
         fn wait_interrupted(&self) -> bool {
             false
         }
+        fn release_owed(&self) {}
     }
     static NOBODY: Nobody = Nobody;
     &NOBODY

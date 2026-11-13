@@ -968,6 +968,12 @@ pub trait Host: Any + Send + Sync + fmt::Debug {
     /// that no wait may sleep through. What a wait in the item checks beside
     /// its own condition, as the personality's own waits do.
     fn wait_interrupted(&self) -> bool;
+
+    /// Let go of what it holds, as its end does when no thread of it is
+    /// live: what the OOM kill's emptier calls for a victim whose end, on the
+    /// kill's stack, owed it its release (`oom::owe_release`, L.object.374).
+    /// Once, as the release itself is.
+    fn release_owed(&self);
 }
 
 /// The personality's own type back from a [`Host`], or `None` if `host` is

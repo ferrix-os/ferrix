@@ -98,6 +98,14 @@ impl Rss {
         }
     }
 
+    /// Nothing resident: what a space's end stores once every view of it is
+    /// forgotten (L.user.236), so its zombie reads 0.
+    pub(crate) fn clear(&self) {
+        self.anon.store(0, Ordering::Relaxed);
+        self.file.store(0, Ordering::Relaxed);
+        self.shmem.store(0, Ordering::Relaxed);
+    }
+
     /// `pages` more of `kind`.
     fn add(&self, kind: Kind, pages: u64) {
         if pages != 0 {

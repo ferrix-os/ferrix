@@ -195,9 +195,11 @@ pub(crate) const TASKS: &[Task] = &[
 /// `cargo xtask check-stack-depth`: `tools/common/check/check-stack-depth.py` on each
 /// architecture's kernel. Every architecture is walked and printed before the row fails, so
 /// that a red row shows all three (F-107, F-110). Among its walks, L.object.374's: no OOM kill
-/// unmaps a space where it was asked, and its hand-off allocates nothing.
+/// unmaps a space where it was asked, and its hand-off allocates nothing; and its listing of
+/// recursions, which holds an unmap's sort to none (L.user.245).
 ///
 /// Verifies: L.object.374
+/// Verifies: L.user.245
 fn check_stack_depth(_: &str, args: &Args) -> Result<()> {
     let mut failed = None;
     for arch in args.arches()? {

@@ -13,24 +13,6 @@
   "reservations": [
     {
       "ids": [
-        "L.object.377"
-      ],
-      "owner": "ef-30fps",
-      "branch": "exit/never-refused",
-      "date": "2026-11-13",
-      "purpose": "docs/EXIT-TEARDOWN.md D2 (consultant ledger 9740 NR.1): \"A victim the OOM kill ends with no thread of it live shall not be released on the kill's own stack once the emptier runs: its release shall be owed to the emptier, which runs it before the victim's waiter is told, and no other victim shall be chosen until it has.\" Parent H.QUOTA.6; its check the quota case of an unstarted victim. Released in the commit that writes it"
-    },
-    {
-      "ids": [
-        "L.user.247"
-      ],
-      "owner": "ef-30fps",
-      "branch": "exit/never-refused",
-      "date": "2026-11-13",
-      "purpose": "docs/EXIT-TEARDOWN.md D2 (consultant ledger 9543 ET.5, 9574): \"A process's end shall leave no region, translation or page table in its user half, and release every object only it maps, before its waiter is told; no refused allocation shall stop or postpone it.\" Its check: the boot check under the fallible heap-refusal scope; F-114 filed and closed with it (ET.8). Released in the commit that writes it"
-    },
-    {
-      "ids": [
         "L.user.230-234",
         "L.object.373"
       ],

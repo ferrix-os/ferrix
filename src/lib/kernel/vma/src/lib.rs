@@ -756,6 +756,19 @@ impl AddressSpace {
         totals
     }
 
+    /// Every region, moved out whole, in ascending address order: the map is
+    /// left empty, its totals zero and its room given back. Nothing is
+    /// allocated, so nothing can refuse it: what an exit's emptying takes
+    /// (`docs/EXIT-TEARDOWN.md` 4.2, L.user.247), as the space's drop would.
+    #[must_use]
+    pub fn take(&mut self) -> Vec<Vma> {
+        self.totals = Totals::default();
+        let regions = core::mem::take(&mut self.regions);
+        // NOALLOC: a charge shrunk to nothing gives back and cannot be refused.
+        let _ = self.room.0.resize(0);
+        regions
+    }
+
     /// The regions, in ascending address order.
     pub fn iter(&self) -> core::slice::Iter<'_, Vma> {
         self.regions.iter()

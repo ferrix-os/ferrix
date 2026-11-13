@@ -13,6 +13,25 @@ for its addendum (ET.2). F-114 is reserved for the refusal of section 2, filed
 and closed by D2's landing (ET.8). `bugfix/heap-batched-give-back` is
 superseded by D1 and parked; L.mm.135 is released when D1 lands (ruling Q1).
 
+**D2 (2026-11-13, branch `exit/never-refused`, ledger 9611 X1-X10, code review 9740).** Both
+releases empty their space with `AddressSpace::empty_for_exit`, which
+allocates nothing (L.user.247), and F-114 is closed with it. As built: the
+tables no region emptied are unlinked into the shootdown's list and freed
+after it (X1, not left to `Drop`); a bound space empties below
+`SHARED_BASE` only (X5); `charging_nobody` stays round it for the detach's
+compaction (X9). An OOM kill whose victim has no live thread no longer
+runs the victim's release on the kill's stack, where the asker may hold that
+space's layout lock: the release is owed to the emptier
+(`oom::owe_release`, X6), and `empty_for_exit` is a target of L.object.374's
+walk, and the hand-off is L.object.377's. The exit no longer reaches the unmap's sort, so L.user.245 is restated
+for munmap's paths and judged by `check-stack-depth`'s recursion listing,
+whose control fires where the depth did not (X8). D3 steps the one hold.
+The exit's time, `test-exit-regions --arch x86_64 --release --accel kvm`, base
+f1b316fc1 and D2's tip run side by side on nazuna (ledger 9740 NR.7): exit,
+kill and sigpipe of 60,000 regions took 5,742, 4,551 and 4,890 ms on the base
+(load 17.7) and 4,856, 3,980 and 4,145 ms with D2 (load 20.8): the emptying
+costs no more than the unmap it replaces, and the time stays the heap's (D1).
+
 It answers three questions:
 
 1. Can an exit be refused the room to give its memory back? It can.

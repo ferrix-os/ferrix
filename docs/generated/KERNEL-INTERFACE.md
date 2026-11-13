@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-3116 declarations in the core's files, 215 in the item's; 278 checks-only.
+3119 declarations in the core's files, 215 in the item's; 279 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2504,7 +2504,9 @@ checks above is `pub` for raised checks (F3).
 | `machine_out_of_memory_among` | fn | load (checks) | checks-only |
 | `out_of_memory` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `out_of_memory_at` | fn | load (checks) | checks-only |
+| `owe_release` | fn | load |  |
 | `reclaim_for` | fn | item |  |
+| `releases_handed` | fn | load (checks) | checks-only |
 | `throttle` | fn | item, load |  |
 | `user_fault` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
@@ -3738,6 +3740,7 @@ checks above is `pub` for raised checks (F3).
 | `AddressSpace::ceiling` | method | item, load |  |
 | `AddressSpace::check_normal_slots` | method | item (checks) | checks-only |
 | `AddressSpace::domain` | method | item, load |  |
+| `AddressSpace::empty_for_exit` | method | load |  |
 | `AddressSpace::fault` | method | item, load |  |
 | `AddressSpace::fill_file_page_alone` | method | load |  |
 | `AddressSpace::fork` | method | item, load |  |

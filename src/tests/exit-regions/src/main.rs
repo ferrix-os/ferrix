@@ -19,6 +19,10 @@
 //! * **kill**: the child waits in `pause`, and is sent `SIGKILL`;
 //! * **sigpipe**: the child is blocked writing to a pipe whose reader then
 //!   goes, and `SIGPIPE` ends it on its way out of the write.
+//! * **enomem**: a child maps regions until `mmap` refuses it, and exits. Its
+//!   memory must be back while it is a zombie (`waitid` with `WNOWAIT`) and
+//!   at `waitpid`'s return, within the larger of 16 MiB and 2% of MemFree
+//!   before, and its VmRSS as a zombie must be 0 (F-114, L.user.247).
 //!
 //! The parent waits for the child and prints, per phase, `exitregions:
 //! <phase> regions <n> MiB <m> teardown <ms> ms canary worst <ms> ms late`:
@@ -72,6 +76,7 @@ fn main() {
         let end = match end.as_str() {
             "exit" => End::Exit,
             "kill" => End::Kill,
+            "enomem" => End::Enomem,
             _ => End::Pipe,
         };
         child(
@@ -98,7 +103,8 @@ fn main() {
     };
     let result = phase("exit", End::Exit, &canary)
         .and_then(|()| phase("kill", End::Kill, &canary))
-        .and_then(|()| phase("sigpipe", End::Pipe, &canary));
+        .and_then(|()| phase("sigpipe", End::Pipe, &canary))
+        .and_then(|()| enomem());
     canary.stop.store(true, Ordering::Relaxed);
     let _ = sleeper.join();
     match result {
@@ -204,6 +210,146 @@ fn fill() -> Result<usize, String> {
     Ok(REGIONS * REGION_BYTES)
 }
 
+/// Map regions of [`REGION_BYTES`], every page touched, each a page past
+/// the last, until `mmap` refuses one; say where on standard output and on
+/// `ready`, from buffers on the stack, since the heap may be refused too, and
+/// end with `_exit(0)`.
+fn fill_until_refused(ready: i32) -> ! {
+    let stride = REGION_BYTES + PAGE;
+    let mut hint = FIRST_HINT;
+    let mut index = 0_usize;
+    let code = loop {
+        // SAFETY: as `region`'s: an anonymous private mapping the kernel
+        // places; no memory of ours is named.
+        let at = unsafe {
+            libc::mmap(
+                hint as *mut libc::c_void,
+                REGION_BYTES,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+                -1,
+                0,
+            )
+        };
+        if at == libc::MAP_FAILED {
+            break std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+        }
+        let base = at.cast::<u8>();
+        for offset in (0..REGION_BYTES).step_by(PAGE) {
+            // SAFETY: inside the mapping just made, ours alone.
+            unsafe { base.add(offset).write_volatile(1) };
+        }
+        hint = (base as usize).saturating_add(stride);
+        index += 1;
+    };
+    say_unallocated(
+        b"exitregions: enomem: the child was refused at region ",
+        index,
+        code,
+    );
+    // SAFETY: one byte from a live buffer to the pipe's write end.
+    let _ = unsafe { libc::write(ready, b"r".as_ptr().cast(), 1) };
+    // SAFETY: ends this process, with nothing of it to unwind.
+    unsafe { libc::_exit(0) }
+}
+
+/// The kB figure on the line of `text` that starts with `field`, if there is
+/// one: what the enomem phase reads, failing where a figure is missing
+/// rather than reading it as 0 (ledger 9740 NR.5).
+fn kb_read(text: &str, field: &str) -> Option<u64> {
+    text.lines()
+        .find(|line| line.starts_with(field))
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|figure| figure.parse().ok())
+}
+
+/// `/proc/meminfo`'s `field` in kB, or the phase's error naming it.
+fn meminfo_needed(name: &str, field: &str) -> Result<u64, String> {
+    let text = std::fs::read_to_string("/proc/meminfo")
+        .map_err(|error| format!("{name}: /proc/meminfo: {error}"))?;
+    kb_read(&text, field).ok_or_else(|| format!("{name}: /proc/meminfo has no {field} figure"))
+}
+
+/// The enomem phase: a child maps until refused and exits; its memory must
+/// be back while it is a zombie, before it is reaped, and at `waitpid`'s
+/// return, within the larger of 16 MiB and 2% of MemFree before (ledger
+/// 9543 ET.5, F-114), and the zombie's VmRSS must be 0.
+fn enomem() -> Result<(), String> {
+    let name = "enomem";
+    println!("exitregions: {name}: before, {}", memory());
+    let before = meminfo_needed(name, "MemFree:")?;
+    let total = meminfo_needed(name, "MemTotal:")?;
+    let (ready_read, ready_write) = pipe(name)?;
+    let (data_read, data_write) = pipe(name)?;
+    // SAFETY: the child execs or runs `child`, which maps, writes and ends.
+    let pid = unsafe { libc::fork() };
+    if pid < 0 {
+        return Err(format!("{name}: fork: {}", errno()));
+    }
+    if pid == 0 {
+        close(ready_read);
+        close(data_read);
+        exec_child(name, End::Enomem, ready_write, data_write);
+    }
+    close(ready_write);
+    close(data_write);
+    close(data_read);
+    let mut byte = [0_u8; 1];
+    // SAFETY: one byte into a live buffer.
+    let got = unsafe { libc::read(ready_read, byte.as_mut_ptr().cast(), 1) };
+    close(ready_read);
+    // SAFETY: a zeroed siginfo is a valid one to be written.
+    let mut info: libc::siginfo_t = unsafe { core::mem::zeroed() };
+    // SAFETY: the child forked above; WNOWAIT leaves it a zombie.
+    let waited = unsafe {
+        libc::waitid(
+            libc::P_PID,
+            libc::id_t::try_from(pid).unwrap_or(0),
+            &raw mut info,
+            libc::WEXITED | libc::WNOWAIT,
+        )
+    };
+    if waited != 0 {
+        return Err(format!("{name}: waitid: {}", errno()));
+    }
+    let zombie = meminfo_needed(name, "MemFree:")?;
+    let status_text = std::fs::read_to_string(format!("/proc/{pid}/status"))
+        .map_err(|error| format!("{name}: the zombie's status: {error}"))?;
+    let zombie_rss = kb_read(&status_text, "VmRSS:")
+        .ok_or_else(|| format!("{name}: the zombie's status has no VmRSS line"))?;
+    let mut status = 0;
+    // SAFETY: the child forked above, and room for its status.
+    let reaped = unsafe { libc::waitpid(pid, &raw mut status, 0) };
+    let after = meminfo_needed(name, "MemFree:")?;
+    println!("exitregions: {name}: at waitpid's return, {}", memory());
+    if reaped != pid || got != 1 {
+        return Err(format!(
+            "{name}: the child did not map until refused (status {status:#x})"
+        ));
+    }
+    if !libc::WIFEXITED(status) || libc::WEXITSTATUS(status) != 0 {
+        return Err(format!("{name}: the child ended with status {status:#x}"));
+    }
+    let margin = (16 * 1024).max(before / 50);
+    let short = |now: u64| before.saturating_sub(now);
+    println!(
+        "exitregions: {name} guest {} MiB MemFree before {before} kB zombie {zombie} kB at return \
+         {after} kB margin {margin} kB zombie VmRSS {zombie_rss} kB",
+        total >> 10
+    );
+    if short(zombie) > margin || short(after) > margin || zombie_rss != 0 {
+        return Err(format!(
+            "{name}: the child's memory was not back before it was reaped: {} kB short as a \
+             zombie, {} kB at waitpid's return, VmRSS {zombie_rss} kB",
+            short(zombie),
+            short(after)
+        ));
+    }
+    println!("exitregions: {name} ok");
+    let _ = std::io::stdout().flush();
+    Ok(())
+}
+
 /// How a phase's child ends.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum End {
@@ -214,6 +360,9 @@ enum End {
     /// It writes to a pipe whose reader goes, and `SIGPIPE` ends it on the
     /// way out of the write: the box's `lode | head`.
     Pipe,
+    /// It maps regions until `mmap` refuses it, then calls `_exit(0)`: an end
+    /// with no room left for anything (F-114).
+    Enomem,
 }
 
 /// How long the parent lets the child settle in its last call before it
@@ -223,6 +372,9 @@ const SETTLE: Duration = Duration::from_millis(300);
 /// The child's life: make the regions, say so on `ready`, then end as `end`
 /// says, writing to `data` for [`End::Pipe`]. Never returns.
 fn child(name: &str, end: End, ready: i32, data: i32) -> ! {
+    if end == End::Enomem {
+        fill_until_refused(ready);
+    }
     match fill() {
         Ok(_) => {
             let maps = std::fs::read_to_string("/proc/self/maps").unwrap_or_default();
@@ -234,7 +386,7 @@ fn child(name: &str, end: End, ready: i32, data: i32) -> ! {
             // SAFETY: one byte from a live buffer to the pipe's write end.
             let _ = unsafe { libc::write(ready, b"r".as_ptr().cast(), 1) };
             match end {
-                End::Exit => {}
+                End::Exit | End::Enomem => {}
                 End::Kill => loop {
                     // SAFETY: no arguments; it returns only on a signal.
                     let _ = unsafe { libc::pause() };
@@ -271,6 +423,7 @@ fn exec_child(name: &str, end: End, ready: i32, data: i32) -> ! {
         End::Exit => "exit",
         End::Kill => "kill",
         End::Pipe => "pipe",
+        End::Enomem => "enomem",
     };
     let words = [
         "exit-regions-test".to_owned(),
@@ -434,7 +587,7 @@ fn phase(name: &str, end: End, canary: &Canary) -> Result<(), String> {
         ));
     }
     let ended_as_asked = match end {
-        End::Exit => libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
+        End::Exit | End::Enomem => libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
         End::Kill => libc::WIFSIGNALED(status) && libc::WTERMSIG(status) == libc::SIGKILL,
         End::Pipe => libc::WIFSIGNALED(status) && libc::WTERMSIG(status) == libc::SIGPIPE,
     };

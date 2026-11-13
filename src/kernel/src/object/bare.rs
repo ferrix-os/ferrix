@@ -277,7 +277,9 @@ impl Bare {
             return;
         }
         self.core.end_record(status, 0);
-        if self.live.load(Ordering::Acquire) == 0 {
+        // With none live, it lets go here, unless this is the OOM kill's
+        // stack, which leaves that to its emptier (L.object.374).
+        if self.live.load(Ordering::Acquire) == 0 && !object::oom::owe_release(&self.core) {
             self.release();
         }
     }
@@ -292,15 +294,13 @@ impl Bare {
         object::dispose(self.core.with_private_handles(HandleTable::close));
         object::dispose(self.core.close_bootstrap());
         object::dispose(self.core.supervisor().close());
-        // Its memory goes before anything can tell a waiter it has ended, and
-        // charged to nobody, as the personality's does.
+        // Its memory goes before anything can tell a waiter it has ended, by
+        // an emptying that allocates nothing, so no refusal can keep it, as
+        // the personality's does (F-114, L.user.247). Charged to nobody, as
+        // the personality's: a detach's compaction allocates, and survives a
+        // refusal (ledger 9611 X9).
         let space = self.core.own_space();
-        let _ = object::quota::charging_nobody(|| {
-            space.unmap(
-                crate::user::space::MMAP_MIN_ADDR,
-                space.ceiling() - crate::user::space::MMAP_MIN_ADDR,
-            )
-        });
+        object::quota::charging_nobody(|| space.empty_for_exit());
         self.core.leave_job();
         let observers = self.core.exit().close();
         self.core.exited().wake_all();
@@ -356,6 +356,10 @@ impl Host for Bare {
 
     fn wait_interrupted(&self) -> bool {
         self.core.is_terminated()
+    }
+
+    fn release_owed(&self) {
+        self.release();
     }
 }
 

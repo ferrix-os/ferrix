@@ -88,6 +88,7 @@ pub fn run() -> Result<Report, &'static str> {
     check_a_write_to_a_read_only_region_is_refused()?;
     check_a_read_of_an_inaccessible_region_is_refused()?;
     let faulted = check_pages_arrive_on_demand_and_go_back()?;
+    check_a_space_emptied_at_its_end_with_every_allocation_refused()?;
     let walked = check_the_processor_walks_an_installed_space()?;
     arch::check_root_tags()?;
     check_a_space_switched_back_to_sees_its_shootdowns()?;
@@ -603,6 +604,67 @@ fn check_a_read_of_an_inaccessible_region_is_refused() -> Result<(), &'static st
     }
     if mm::translate_in(space.root_table(), at).is_some() {
         return Err("a refused read of an inaccessible region still installed a translation");
+    }
+    Ok(())
+}
+
+/// A space emptied as its process's end empties it, with every fallible
+/// allocation of this task refused, holds no region and no resident page
+/// after (L.user.247, F-114): a fork child's own pages go, and the pages it
+/// shares with its parent stay the parent's. Its frames come back within the
+/// stage's frame window. The injection is lifted on every way out, and is
+/// asserted clear after.
+///
+/// Verifies: L.user.247
+fn check_a_space_emptied_at_its_end_with_every_allocation_refused() -> Result<(), &'static str> {
+    /// The parent's pages, which the child shares.
+    const SHARED: u64 = 4;
+    /// The child's own.
+    const OWN: u64 = 16;
+    /// Where it maps, clear of the other checks of this stage.
+    const AT: u64 = 0x5000_0000;
+    struct Lifted;
+    impl Drop for Lifted {
+        fn drop(&mut self) {
+            let _ = crate::fallible::stop_injecting();
+        }
+    }
+    let me = crate::sched::current_id().ok_or("the end check runs outside a task")?;
+    let parent = AddressSpace::new().map_err(|_| "no space for the end check")?;
+    let _ = parent
+        .map_anonymous(AT, SHARED * PAGE_SIZE, VmaFlags::READ_WRITE)
+        .map_err(|_| "no region for the end check's parent")?;
+    for page in 0..SHARED {
+        parent
+            .fault(AT + page * PAGE_SIZE, Access::WRITE)
+            .map_err(|_| "the end check's parent could not fault a page in")?;
+    }
+    let child = parent.fork().map_err(|_| "no fork for the end check")?;
+    let own = AT + 2 * SHARED * PAGE_SIZE;
+    for page in 0..OWN {
+        let _ = child
+            .map_anonymous(own + 2 * page * PAGE_SIZE, PAGE_SIZE, VmaFlags::READ_WRITE)
+            .map_err(|_| "no region for the end check's child")?;
+        child
+            .fault(own + 2 * page * PAGE_SIZE, Access::WRITE)
+            .map_err(|_| "the end check's child could not fault a page in")?;
+    }
+    let parents = parent.resident().total();
+    {
+        let _lifted = Lifted;
+        crate::fallible::inject(me, 1);
+        child.empty_for_exit();
+    }
+    if crate::fallible::injecting_here() {
+        return Err("the end check left its injection on");
+    }
+    if child.region_count() != 0 || child.resident().total() != 0 {
+        return Err(
+            "a space's end left regions or resident pages when its allocations were refused",
+        );
+    }
+    if parent.resident().total() != parents {
+        return Err("a space's end took pages another space still maps");
     }
     Ok(())
 }

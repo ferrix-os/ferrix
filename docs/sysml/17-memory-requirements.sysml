@@ -3681,18 +3681,26 @@ package FerrixMemoryRequirements {
         // F-112 (consultant ledger 9098, 9112 E6): the sorts on the unmap
         // path, whose length is a program's number of regions.
         requirement <'L.user.245'> anUnmapSortsWithoutRecursion : ItemLowLevel {
-            attribute :>> statement = "An unmap, an exit's whole-space unmap
-                included, shall order the regions it removes, and the ids and
-                views they name, without recursion, in a stack of the same size
-                at any number of regions.";
-            attribute :>> criterion = "test-exit-regions: a process of 60,000
-                regions ended by _exit, by SIGKILL and by SIGPIPE is given back and
-                the kernel stays up (x86-64 KVM release; AArch64 and ARMv7-A as
-                the row sets); control: core's sort put back in give_back: on
-                four-page stacks it stopped the kernel with FX-9004 at 60,000
-                regions; on five pages a paint of the stack under it (x86-64
-                release, KVM, 60,020 ids) reads it within 1,800 bytes of the
-                guard, against at most 512 bytes for sort_flat_by_key.
+            // Restated by D2 (docs/EXIT-TEARDOWN.md 4.2, ledger 9543 ET.4 f,
+            // 9611 X8): an exit no longer unmaps (L.user.247), so the sort is
+            // reached by munmap, mremap, a fixed map over a mapping and the OOM
+            // emptier's chunks.
+            attribute :>> statement = "An unmap shall order the regions it
+                removes, and the ids and views they name, without recursion, in a
+                stack of the same size at any number of regions.";
+            attribute :>> criterion = "check-stack-depth, on all three
+                architectures: every recursion a judged line reaches -- the way
+                out of a system call, which reaches munmap's unmap, and the OOM
+                emptier, whose chunks are unmaps -- is listed in RECURSIONS with
+                its bound, and none is in give_back, room_to_count_out or
+                Named::of; control: core's recursive sort put back in give_back
+                (ids.sort_unstable) -- the row's 'recursion on a judged path, not
+                listed' line naming core's median3_rec (sr6-sort-stack, and again
+                on D2's tip). The depth itself did not decide it: on four-page
+                stacks core's sort stopped the kernel with FX-9004 at 60,000
+                regions, but on five pages a paint of the stack (x86-64 release,
+                KVM, 60,020 ids) read it within 1,800 bytes of the guard, not
+                over it, against at most 512 bytes for sort_flat_by_key.
                 ferrix-fallible's host
                 tests hold sort_flat_by_key's result in order and a permutation of
                 its input at lengths 0 to 60,000, ascending, descending, equal and
@@ -3706,6 +3714,50 @@ package FerrixMemoryRequirements {
                 "user::space::AddressSpace::give_back",
                 "user::space::AddressSpace::room_to_count_out",
                 "user::space::Named::of");
+        }
+        // docs/EXIT-TEARDOWN.md 4.2, D2 (ledger 9543 ET.5, 9611; F-114).
+        requirement <'L.user.247'> anEndIsNeverRefused : ItemLowLevel {
+            attribute :>> statement = "A process's end shall leave no region,
+                translation or page table in its user half, and release every
+                object only it maps, before its waiter is told; no refused
+                allocation shall stop or postpone it.";
+            attribute :>> criterion = "Boot check (stage 6, user::check's
+                check_a_space_emptied_at_its_end_with_every_allocation_refused): a
+                fork child of 16 one-page regions of its own and 4 pages shared
+                with its parent is emptied with every fallible allocation of the
+                task refused; its map is empty and its resident pages 0, its
+                parent's unchanged, the injection clear after, inside the stage's
+                frame window. Control: the emptying replaced by the general unmap --
+                'a space's end left regions or resident pages when its allocations
+                were refused' (FX panic; ex6-c-core). The memory sweep's 'end'
+                scenario (user::alloc_check): each allocation of a space's end,
+                with an object another space maps, failed in turn, leaves no region
+                and no resident page, the other space's page kept, nothing kept.
+                Boot check (stage 7, the syscall layer's
+                check_an_end_is_never_refused): a fork child of 256 one-page
+                regions of its own and 16 shared with its parent is ended with
+                every fallible allocation of the ending task refused
+                (fallible::inject); its map is empty, its counts and its map's
+                totals 0, at least 256 frames less a slack of 16 are back, its
+                parent's resident pages are unchanged, and the injection is clear
+                after. Control: the release put back on the general unmap --
+                'left regions or resident pages when its allocations were
+                refused' (FX panic). test-exit-regions' enomem phase on x86-64
+                KVM, AArch64 and ARMv7-A at --smp 2, release: a child that mapped
+                until mmap refused it exits, and MemFree while it is a zombie
+                (waitid with WNOWAIT) and at waitpid's return is within the
+                larger of 16 MiB and 2% of MemFree before, its zombie VmRSS 0, a
+                figure it cannot read failing the phase; control: on AArch64, the
+                release put back on the general unmap for a space of more than
+                4,096 regions only (so that the stage-7 case above still passes) --
+                'memory was not back'. ferrix-vma's host test
+                take_moves_every_region_out_and_leaves_nothing_counted.";
+            attribute :>> parent = "H.MEM.9";
+            // ferrix-vma's take is a crate the manifest does not list as a
+            // member (F-76); its host test is in the criterion.
+            attribute :>> unit = ("user::space::AddressSpace::empty_for_exit",
+                "mm::prune_in_unlinking",
+                "user::rss::Rss::clear");
         }
         // docs/RAM-RELEASE.md §3: the clean btrfs nodes, reclaimable heap.
         requirement <'L.user.175'> cleanBtrfsNodesAreAvailable : ItemLowLevel {

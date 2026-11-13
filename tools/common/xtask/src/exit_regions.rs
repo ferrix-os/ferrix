@@ -44,7 +44,7 @@ const PHASES: [&str; 3] = ["exit", "kill", "sigpipe"];
 
 /// Boot the program on every architecture asked for.
 ///
-/// Verifies: L.user.245
+/// Verifies: L.user.247
 ///
 /// # Errors
 ///
@@ -88,6 +88,34 @@ fn test(args: &Args) -> Result<()> {
                 .and_then(|at| line.get(at..))
                 .unwrap_or(line);
             println!("  {arch}: {figures} (reporting, not asserted)");
+        }
+        // The enomem phase: a child mapped until refused, its memory back
+        // while a zombie and at `waitpid`'s return (F-114, L.user.247).
+        for want in [
+            "exitregions: enomem: the child was refused at region ",
+            "exitregions: enomem guest ",
+        ] {
+            let Some(line) = lines.iter().find(|line| line.contains(want)) else {
+                return Err(Error::new(format!(
+                    "{arch}: the enomem phase printed no `{want}` line.\n  Serial output is in {}",
+                    log.display()
+                )));
+            };
+            let figures = line
+                .find("exitregions: ")
+                .and_then(|at| line.get(at..))
+                .unwrap_or(line);
+            println!("  {arch}: {figures}");
+        }
+        if !lines
+            .iter()
+            .any(|line| sem::says(line, "exitregions: enomem ok"))
+        {
+            return Err(Error::new(format!(
+                "{arch}: the enomem phase's memory was not back by its child's reap.\n  Serial \
+                 output is in {}",
+                log.display()
+            )));
         }
         if !lines
             .iter()

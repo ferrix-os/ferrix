@@ -168,8 +168,8 @@
     },
     "mm.rs": {
       "bucket": "frames",
-      "what": "the buddy: allocate_frames, _below, _run, user frames (charged), program frames (owner), page tables (the space's owner), the per-processor caches, and a restricted window's frames, charged to its job by their one caller, in a build with the flag on; and the heap's reclaim at the floor (L.mm.136-137), whose four new sites are the failure injection's tests (fallible::injected_failures, fallible::injecting_here), which allocate nothing (ledger 7988); and a reservation's growth for a heap scope (reservation_grow, W1-c, L.mm.146), whose one new site is the same injection test, allocating nothing",
-      "sites": 43
+      "what": "the buddy: allocate_frames, _below, _run, user frames (charged), program frames (owner), page tables (the space's owner), the per-processor caches, and a restricted window's frames, charged to its job by their one caller, in a build with the flag on; and the heap's reclaim at the floor (L.mm.136-137), whose four new sites are the failure injection's tests (fallible::injected_failures, fallible::injecting_here), which allocate nothing (ledger 7988); and a reservation's growth for a heap scope (reservation_grow, W1-c, L.mm.146), whose one new site is the same injection test, allocating nothing; and an exit's emptying's prune (prune_in_unlinking, L.user.247), whose one new site links each freed table into the shootdown's list through the table itself, allocating nothing",
+      "sites": 44
     },
     "mm/large.rs": {
       "bucket": "frames",

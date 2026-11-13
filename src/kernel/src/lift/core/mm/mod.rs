@@ -443,6 +443,19 @@ pub fn prune_in(root: u64, virt: u64, len: u64) {
         });
     });
 }
+/// `prune_in`, for an exit's emptying (`AddressSpace::empty_for_exit`): the
+/// lift gives back what it unlinks at once (`UnlinkedTables`), and the shadow
+/// has no reader of kept top tables, as `unmap_in_keeping` says.
+pub fn prune_in_unlinking(
+    root: u64,
+    virt: u64,
+    len: u64,
+    flush: &mut crate::smp::TlbPages,
+    _keep_top: bool,
+) {
+    prune_in(root, virt, len);
+    flush.everything();
+}
 
 /// Tables unlinked until the shootdown has run: here, at once.
 #[derive(Debug, Default)]
