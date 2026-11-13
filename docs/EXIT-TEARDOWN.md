@@ -7,7 +7,8 @@ follows F-112, which was fixed by `fix/exit-unmap-sort` (ledger 9112, 9327,
 9435). It is for design review. No code is written until the verdict.
 
 **Where it stands (2026-11-13).** Design reviewed: OK IF ET.1-ET.9 (consultant
-ledger 9543). ET.1 is this text's corrections. D2's code may start; D1's waits
+ledger 9543), and with §4.5 and the second box run, OK IF ET.2-ET.10 (9574,
+within 9543). ET.1 is this text's corrections. D2's code may start; D1's waits
 for its addendum (ET.2). F-114 is reserved for the refusal of section 2, filed
 and closed by D2's landing (ET.8). `bugfix/heap-batched-give-back` is
 superseded by D1 and parked; L.mm.135 is released when D1 lands (ruling Q1).
@@ -184,9 +185,22 @@ unusable for about a minute:
 * MemFree was 10.1 GB at +69 s and 11.3 GB at +85 s, then steady (the
   file holds no reading from before the kill).
 
-File: `~/.local/share/ferrix/ef-30fps/runs/relaunch2/after-kill.txt`
-(seconds since the kill, uptime, MemFree kB, steam and wine processes). It
-was not profiled on the box. By the profile above, a 5 GB exit of
+A second kill on the same boot, the game in its world (second launch), was
+worse:
+* ssh went unanswered at every probe for more than 145 s (10 of 10, 12 s
+  timeouts, `after-kill-2.txt`);
+* by the product owner's report, an `Endfield.exe` process was still listed
+  3.5 minutes after the kill, and twelve minutes later the box was up, its
+  uptime unbroken, MemFree back at 11.28 GB.
+
+So "Exit Game" today leaves the player a machine that is gone for one to
+four minutes. That is the figure this design has to move.
+
+Files: `~/.local/share/ferrix/ef-30fps/runs/relaunch2/after-kill.txt`,
+`after-kill-2.txt` and `kill.txt` (the kills' times);
+`after-kill.txt` is
+(seconds since the kill, uptime, MemFree kB, steam and wine processes). Neither
+kill was profiled on the box. By the profile above, a 5 GB exit of
 12,000-16,000 regions lies between the 4 GiB and 9 GiB rows (18 s and 223 s
 under KVM), whose time is the heap walk's. Why the whole machine slows, not
 only the exiting processor, is in 4.5.
@@ -415,7 +429,11 @@ read in the code:
   both ends closed), whose 4096-byte buffer is above the caches' largest
   class and goes to `HEAP` every time (ledger 9574 ET.10);
 * the row prints each processor's round count and asserts the worst over
-  all processors and the whole teardown.
+  all processors and the whole teardown;
+* the shape the assertion is made on is the game's: a process of about
+  5 GB and 16,000 regions (for example 16,384 regions of 320 KiB, in a
+  guest that holds it), beside the present 60,000 x 16 KiB shape and the
+  reused-object variant of section 7.
 
 Today's canary, a sleeper on another processor that allocates nothing in
 the kernel, saw 0.1-0.5 ms where the box saw a minute: it can see neither
@@ -507,6 +525,29 @@ few regions and few objects. (d) still has to do all of it:
   (123 us) should be measured again, to see what remains of it once the
   heap walk is gone. With merging, the release that leaves an object
   unnamed becomes rare.
+
+**What anon-merge should remove from the box's minutes, and what it leaves.**
+Its own bench: the exit of a child holding Wine's 4,000 views went from
+111 ms to 6.9 ms, and the regions from 5,332 to 3,999. That is the part of
+the cost that grows with objects: fewer objects means fewer `Vmo` structs,
+mapper lists and views to free, and so fewer slab pages emptied by them.
+What it leaves is the part that grows with pages. In the 4 GiB row of
+section 2, 232,214 heap frees came from 16,384 objects, about 14 per
+object, most of them the objects' page lists. A merged object of the same
+pages has as long a page list. So on the box, anon-merge should shorten the
+minutes by the share of frees that were per object. The rest, the page
+lists' frees and each walk's length, stays D1's. The emptying's refusal and
+its steps stay D2's and D3's. The product owner's next box run, the same
+kill with anon-merge on the image, measures that split. This note does not
+predict it.
+
+**The reused-object variant (ledger 9561 N8, owed by silent-reset).**
+`test-exit-regions` asks for each region a page past the last one's end,
+so nothing is adjacent and anon-merge joins none. It gains a variant with
+60,000 regions inside one reserve: `MAP_FIXED` views with alternating
+protections, so that one object is reached by tens of thousands of regions.
+That is the shape anon-merge makes of Wine's reserves, and the one whose
+counting, `forget_in` and page-list frees per object are largest.
 
 ## 8. Not in this design
 
