@@ -135,6 +135,13 @@
       "purpose": "docs/SCHED-CLASSES.md section 9g, EDF as the deadline tier of the class stack (develop's schedule=edf, b33c7d740, re-homed; the consultant's OK IF DG.1-DG.11, ledger 7763): the tier's entity and its move at a decision, the reservation cell zero-sized without the tier, HardRt's mode on the windows alone, a child's empty reservation, a stop, a freeze and a move between jobs, a kill waiting out a refill, an earlier deadline preempting, the errno mapping. Panic codes FX-0538 to FX-0541 with them: FX-0538 to FX-0540 the branch's own (FX-0540 renumbered from FX-0537, which develop's BLOCK_IN_AN_INTERRUPT took), FX-0541 for an admitted entity queued where it is not admitted. Split from mk-flip's schedule=edf part by the product owner on 2026-11-07, the customer's decision (ledger 7763 DG.5); mk-flip's owner has been told (docs/BACKLOG.md). Released in the commits that write them."
     },
     {
+      "ids": ["L.btrfs.126"],
+      "owner": "ef-30fps",
+      "branch": "fix/cut-reclaim",
+      "date": "2026-11-13",
+      "purpose": "A file cut and written again is the volume's to fill once the volume holds the cut: a truncation tells the page store so (Pages::source_cut), the store keeps pages that reach past an open cut from reclaim, fills from the volume past the cut afterwards, and keeps nothing of a fill that read across a cut. Found on the N150 box on 2026-11-13: Steam's steam.pid read five zero bytes once the cache was reclaimed (parent H.QUOTA.12, as L.object.188). Released in the commit that writes it."
+    },
+    {
       "ids": ["L.btrfs.117-118"],
       "owner": "i3",
       "branch": "fs-traits",
