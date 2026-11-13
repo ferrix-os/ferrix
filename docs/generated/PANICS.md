@@ -28,6 +28,7 @@ Causes are listed most likely first.
 | [FX-0008](#fx-0008) | an allocation that cannot report failure found the heap empty |
 | [FX-0011](#fx-0011) | the address space ids ran out |
 | [FX-0012](#fx-0012) | the heap caches were drained with a cache lock held |
+| [FX-0013](#fx-0013) | a kernel heap free list's links disagree |
 | [FX-0101](#fx-0101) | the loader's hand-off is not what the kernel needs |
 | [FX-0201](#fx-0201) | the frame allocator could not be built |
 | [FX-0202](#fx-0202) | the kernel address arena could not be created |
@@ -395,6 +396,27 @@ looks before it starts and stops the machine instead.
    reached a refusal's drain without first letting the lock go.
 
 See: docs/HEAP-CACHES.md; src/kernel/src/mm.rs.
+
+<a id="fx-0013"></a>
+
+## FX-0013 — a kernel heap free list's links disagree
+
+Each size class's free objects are on one doubly linked list, through the first
+two words of every free object. When a free empties a slab page, the heap takes
+that page's objects off the list by index, each through its own two links
+(`docs/HEAP-SLAB-GIVE-BACK.md`, `L.mm.147`), and a build with checks on first
+verifies that the object's neighbours name it. They did not: the page's count
+said every object was free while one was not, or a free object's link was
+written over. Going on would write through an object still handed out.
+
+1. A double free into the page: an object freed twice makes the page's count
+   reach full one free early, while another of its objects is still in use.
+2. A write through a dangling pointer into a freed object, over its links.
+3. The slab page's count in the frame record answered more than the page's free
+   objects (`Backing::slab_free`'s contract).
+
+See: docs/HEAP-SLAB-GIVE-BACK.md; src/lib/kernel/heap/src/lib.rs;
+src/kernel/src/mm.rs.
 
 <a id="fx-0101"></a>
 

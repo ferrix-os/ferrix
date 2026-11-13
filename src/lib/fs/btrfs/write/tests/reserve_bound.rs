@@ -48,7 +48,7 @@ use ferrix_btrfs_write::{
     Error, NewInode, OPERATION_FRAMES, Reserve, WriteDevice, WriteVolume, node_frames,
 };
 use ferrix_fallible as _;
-use ferrix_heap::{Backing, Heap, PAGE_SIZE, Request};
+use ferrix_heap::{Backing, CLASSES, Heap, PAGE_SIZE, Request};
 
 // ---------------------------------------------------------------------------
 // The model of the kernel's reserved heap
@@ -79,6 +79,8 @@ struct Pages {
 // the link accessors read and write eight aligned bytes inside such a page,
 // and only addresses the heap was given.
 unsafe impl Backing for Pages {
+    const VERIFY_LINKS: bool = true;
+
     fn allocate_pages(&mut self, order: u8) -> Option<u64> {
         // The model serves the requests of at most a page alone: a slab page
         // or one block of order 0.
@@ -132,6 +134,14 @@ unsafe impl Backing for Pages {
         if let Some(count) = self.slab_free.get_mut(at) {
             *count = objects;
         }
+    }
+
+    #[expect(
+        clippy::panic,
+        reason = "a test model: a disagreeing list fails the test"
+    )]
+    fn links_disagree(&mut self, at: u64) -> ! {
+        panic!("heap: a free list's links disagree at {at:#x}");
     }
 }
 
@@ -556,8 +566,8 @@ fn a_leaf_of_every_class_is_within_a_nodes_frames_and_the_partial_pages() {
     }
 }
 
-/// A partly used slab page for each of the kernel heap's nine size classes.
-const PARTIAL_PAGES: u64 = 9;
+/// A partly used slab page for each of the kernel heap's size classes.
+const PARTIAL_PAGES: u64 = CLASSES as u64;
 
 #[test]
 fn an_internal_node_is_within_a_nodes_frames() {

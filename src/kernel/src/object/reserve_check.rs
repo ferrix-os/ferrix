@@ -122,6 +122,7 @@ pub fn run() -> Result<Report, &'static str> {
             return Err("the reserved job's frames, all freed, did not make its promise whole");
         }
         report.heap_pages = check_the_heap(&reserved, &sibling)?;
+        check_a_reserved_give_back(&reserved)?;
         keep_a_page_of_every_class(&reserved)?;
         kept_entry = reserved.draws_from();
     }
@@ -392,6 +393,40 @@ fn check_the_heap(reserved: &Arc<Job>, sibling: &Arc<Job>) -> Result<u64, &'stat
         return Err("a reserved heap kept more than a page a class once its objects were freed");
     }
     outcome
+}
+
+/// Objects the reserved give-back case makes on the reserved job's heap: 40
+/// pages of the smallest class, within its reservation of [`RESERVED`].
+const GIVE_BACK_MADE: usize = 10_240;
+
+/// `L.mm.147` on a reservation's heap (`L.mm.81`): the reserved job's
+/// objects, made on its own heap, emptied page by page, each give-back
+/// within its link accesses (`mm::check::give_back_case`), said on a line
+/// of its own.
+///
+/// Verifies: L.mm.147
+fn check_a_reserved_give_back(reserved: &Arc<Job>) -> Result<(), &'static str> {
+    let entry = reserved.draws_from();
+    let own = crate::sched::running_group();
+    let made = mm::check::give_back_case(
+        mm::check::GiveBackShape {
+            made: GIVE_BACK_MADE,
+            keepers: 4,
+            emptied: 32,
+        },
+        &|| crate::sched::set_current_group(reserved.quota_index()),
+        &|| crate::sched::set_current_group(own),
+        &|| mm::reserved_heap_unlink_counts(entry),
+    )?;
+    crate::console::println!(
+        "  reserve  a reserved job's heap gave back {} pages: {} objects off their lists in {} \
+         link accesses, at most {} an object (L.mm.147)",
+        made.pages,
+        made.objects,
+        made.accesses,
+        ferrix_heap::UNLINK_ACCESSES,
+    );
+    Ok(())
 }
 
 /// Frames the heap scope's check promises its reservation.

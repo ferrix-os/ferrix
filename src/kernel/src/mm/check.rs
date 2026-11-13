@@ -422,6 +422,7 @@ pub fn memory_check(stats: &mm::Stats) -> Result<(), &'static str> {
     if kept > ferrix_heap::CLASSES {
         return Err("the heap kept more slab pages than one per size class");
     }
+    check_give_back_on_the_shared_heap()?;
 
     // The device-window checks' aperture: a frame of RAM this check owns,
     // which no device is and nothing else maps writable. Not the image, which
@@ -1475,6 +1476,142 @@ fn check_heap() -> Result<(), &'static str> {
         return Err("the heap never took a page, so nothing was really allocated");
     }
     Ok(())
+}
+
+/// `L.mm.147` on the shared heap, and its line: [`give_back_case`] with
+/// 160,000 objects. Out of line, so that nothing of it is in the boot path's
+/// frames (ARMv7-A's `kmain`, F-100).
+#[inline(never)]
+fn check_give_back_on_the_shared_heap() -> Result<(), &'static str> {
+    let shared = give_back_case(
+        GiveBackShape {
+            made: 160_000,
+            keepers: 200,
+            emptied: 400,
+        },
+        &|| {},
+        &|| {},
+        &mm::heap_unlink_counts,
+    )?;
+    println!(
+        "  heap     {} slab pages given back, {} objects off a list of at least {}: {} link \
+         accesses, at most {} an object (L.mm.147)",
+        shared.pages,
+        shared.objects,
+        200 * (PAGE_SIZE as usize / GIVE_BACK_OBJECT - 1),
+        shared.accesses,
+        ferrix_heap::UNLINK_ACCESSES,
+    );
+    Ok(())
+}
+
+/// The object [`give_back_case`] makes: its heap's smallest class, the most
+/// objects to a page.
+pub(crate) const GIVE_BACK_OBJECT: usize = ferrix_heap::SMALLEST_CLASS;
+
+/// How many objects [`give_back_case`] makes, and of the pages they wholly
+/// fill, how many it keeps one object of (`keepers`, the rest of each free
+/// and on the list throughout) and how many it empties.
+#[derive(Clone, Copy)]
+pub(crate) struct GiveBackShape {
+    /// Objects made.
+    pub(crate) made: usize,
+    /// Whole pages kept partly in use, so that their free objects stay on
+    /// the class's list at every give-back.
+    pub(crate) keepers: usize,
+    /// Whole pages emptied, each by its last object's free.
+    pub(crate) emptied: usize,
+}
+
+/// What [`give_back_case`] measured.
+pub(crate) struct GiveBack {
+    /// Pages emptied.
+    pub(crate) pages: u64,
+    /// Objects the heap's give-backs took off their lists meanwhile.
+    pub(crate) objects: u64,
+    /// The link accesses those took.
+    pub(crate) accesses: u64,
+}
+
+/// `L.mm.147`'s case: a free that empties a slab page takes that page's
+/// objects off its class's list in at most `UNLINK_ACCESSES` link accesses
+/// an object, however long the list. `shape.made` objects of the smallest
+/// class are made between `enter` and `leave` (a job's group set, for a
+/// reservation's heap); of the pages they wholly fill, `keepers` keep one
+/// object each, and `emptied` are emptied, every other object freed first
+/// so that each emptying finds the list long. `counts` reads the heap's
+/// give-back counts before and after. A count is asserted, never a time.
+///
+/// Verifies: L.mm.147
+#[inline(never)]
+pub(crate) fn give_back_case(
+    shape: GiveBackShape,
+    enter: &dyn Fn(),
+    leave: &dyn Fn(),
+    counts: &dyn Fn() -> (u64, u64),
+) -> Result<GiveBack, &'static str> {
+    const NO_ROOM: &str = "no memory for the give-back case";
+    let per_page = PAGE_SIZE as usize / GIVE_BACK_OBJECT;
+    let mut objects: Vec<Option<alloc::boxed::Box<[u8; GIVE_BACK_OBJECT]>>> =
+        fallible::try_with_capacity(shape.made).map_err(|_| NO_ROOM)?;
+    let mut order: Vec<(u64, usize)> =
+        fallible::try_with_capacity(shape.made).map_err(|_| NO_ROOM)?;
+    enter();
+    for _ in 0..shape.made {
+        // NOALLOC: the vector's room was had above.
+        objects.push(fallible::try_box([0u8; GIVE_BACK_OBJECT]).ok());
+    }
+    leave();
+    for (index, object) in objects.iter().enumerate() {
+        let object = object.as_ref().ok_or(NO_ROOM)?;
+        let page = (object.as_ptr() as u64) & !(PAGE_SIZE - 1);
+        // NOALLOC: as above.
+        order.push((page, index));
+    }
+    ferrix_fallible::sort_flat_by_key(&mut order, |&entry| entry);
+    // Each page wholly this case's: its objects' indexes, in `order`.
+    let whole: Vec<&[(u64, usize)]> = order
+        .chunk_by(|one, other| one.0 == other.0)
+        .filter(|run| run.len() == per_page)
+        .collect();
+    let (keepers, rest) = whole
+        .split_at_checked(shape.keepers)
+        .ok_or("the give-back case filled too few whole pages")?;
+    let emptied = rest
+        .get(..shape.emptied)
+        .ok_or("the give-back case filled too few whole pages")?;
+    let mut free = |entry: &(u64, usize)| {
+        if let Some(slot) = objects.get_mut(entry.1) {
+            *slot = None;
+        }
+    };
+    for run in keepers.iter().chain(emptied) {
+        run.iter().skip(1).for_each(&mut free);
+    }
+    let before = counts();
+    for run in emptied {
+        run.iter().take(1).for_each(&mut free);
+    }
+    // The last frees may wait in this processor's cache: given to the heap.
+    let _ = mm::drain_caches();
+    let after = counts();
+    drop(whole);
+    drop(order);
+    drop(objects);
+    let made = GiveBack {
+        pages: shape.emptied as u64,
+        objects: after.1.saturating_sub(before.1),
+        accesses: after.0.saturating_sub(before.0),
+    };
+    if made.objects < made.pages * per_page as u64 {
+        return Err("a page the give-back case emptied did not go back");
+    }
+    if made.accesses > ferrix_heap::UNLINK_ACCESSES * made.objects {
+        return Err(
+            "a heap give-back made more link accesses than its page's objects allow (L.mm.147)",
+        );
+    }
+    Ok(made)
 }
 
 // ---------------------------------------------------------------------------

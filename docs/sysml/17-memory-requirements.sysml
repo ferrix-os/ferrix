@@ -692,6 +692,43 @@ package FerrixMemoryRequirements {
             attribute :>> parent = "H.MEM.11";
             attribute :>> unit = ("mm::reservation_grow", "mm::reclaim_for_kernel");
         }
+        // docs/HEAP-SLAB-GIVE-BACK.md (ledger 9543, 9574, 9628 SG.2):
+        // design (d)'s D1, an emptied slab page given back without a walk.
+        requirement <'L.mm.147'> aGiveBackReadsItsPageNotTheList : ItemLowLevel {
+            attribute :>> statement = "A free that empties a slab page shall take that
+                page's objects off its class's free list in at most 6 link accesses for each
+                object one page of its class holds, whatever the length of that list.";
+            attribute :>> criterion = "A link access is one Backing::read_link or
+                Backing::write_link call (ferrix_heap::UNLINK_ACCESSES, 6: an object's own two
+                links read, its two neighbours' links that name it read and verified, up to
+                two writes). ferrix-heap's host test a_give_back_reads_a_page_not_the_list: 400
+                pages of the 16-byte class emptied, 102,400 objects, with at least 51,000
+                others on the list at each emptying; each emptying free within 6 x 256 + 3
+                accesses, and the list then holds exactly the free objects of the pages still
+                held. Control: the class-list walk put back in unlink_page, the test FAILED.
+                The stage 2 boot check (mm::check::give_back_case, 160,000 objects made, 200
+                pages kept partly in use, 400 emptied, on the shared heap) and the
+                reservation check's case on a reserved job's heap (10,240 objects, 32 pages
+                emptied): the heap's give-back counts at most 6 accesses an object, a count
+                and never a time. Control: the walk put back -- the boot stops on 'a heap
+                give-back made more link accesses than its page's objects allow'. With checks
+                on, a neighbour that does not name the object makes the heap stop through
+                Backing::links_disagree before any write, at an unlink and at a pop
+                (a_double_free_into_a_page_stops_its_give_back,
+                an_overwritten_link_stops_its_give_back, an_overwritten_previous_stops_a_pop;
+                controls: the verification taken out, the tests FAILED), and the kernel
+                answers with FX-0013, 'a kernel heap free list's links disagree' (control: a
+                free object's link written over inside the boot case, the boot stops with
+                it).";
+            attribute :>> parent = "H.MEM.9";
+            // The give-back itself is ferrix-heap's (Heap::deallocate,
+            // Heap::unlink_page, Heap::unlink_one), a crate the manifest does
+            // not list as a member (F-76), so its functions cannot be units
+            // here, as L.user.245's sort cannot (F-56): they are named in the
+            // criterion, and the kernel's glue that serves and stops it is.
+            attribute :>> unit = ("mm::KernelAllocator::dealloc",
+                "mm::KernelPages::links_disagree", "mm::ReservedPages::links_disagree");
+        }
         // docs/ROBUSTNESS.md §2.6, R6 (ledger 8481, 8503).
         requirement <'L.mm.141'> aLargeRequestNeedsNoRun : ItemLowLevel {
             attribute :>> statement = "A kernel heap request above a page and at most

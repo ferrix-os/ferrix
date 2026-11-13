@@ -283,6 +283,28 @@ pub static BOOT_OUT_OF_MEMORY: Explanation = Explanation {
           src/kernel/src/fallible.rs",
 };
 
+/// For a kernel heap free list whose links do not name the object being taken
+/// off it (`L.mm.147`), found before the heap writes anything.
+pub(crate) static HEAP_LINKS_DISAGREE: Explanation = Explanation {
+    code: "FX-0013",
+    title: "a kernel heap free list's links disagree",
+    meaning: "Each size class's free objects are on one doubly linked list, through the first \
+              two words of every free object. When a free empties a slab page, the heap takes \
+              that page's objects off the list by index, each through its own two links \
+              (`docs/HEAP-SLAB-GIVE-BACK.md`, `L.mm.147`), and a build with checks on first \
+              verifies that the object's neighbours name it. They did not: the page's count \
+              said every object was free while one was not, or a free object's link was \
+              written over. Going on would write through an object still handed out.",
+    causes: &[
+        "A double free into the page: an object freed twice makes the page's count reach full \
+         one free early, while another of its objects is still in use.",
+        "A write through a dangling pointer into a freed object, over its links.",
+        "The slab page's count in the frame record answered more than the page's free \
+         objects (`Backing::slab_free`'s contract).",
+    ],
+    see: "docs/HEAP-SLAB-GIVE-BACK.md; src/lib/kernel/heap/src/lib.rs; src/kernel/src/mm.rs",
+};
+
 /// For `mm::drain_caches` entered with this processor's cache lock held.
 pub(crate) static HEAP_DRAIN_UNDER_CACHE_LOCK: Explanation = Explanation {
     code: "FX-0012",
@@ -4408,6 +4430,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &ALLOCATION_ABORTED,
     &SPACE_IDS_EXHAUSTED,
     &HEAP_DRAIN_UNDER_CACHE_LOCK,
+    &HEAP_LINKS_DISAGREE,
     &STAGE1_HANDOFF,
     &MEMORY_BRING_UP,
     &VMAP_ARENA_BRING_UP,

@@ -27,9 +27,14 @@
 //! Larger requests go straight to [`Backing`] as whole pages.
 //!
 //! Because the classes are powers of two and a slab page is page aligned,
-//! alignment up to the class size comes out for free — an eight-byte object is
-//! eight-byte aligned because it sits at a multiple of eight from a 4 KiB
-//! boundary.
+//! alignment up to the class size comes out for free — a sixteen-byte object
+//! is sixteen-byte aligned because it sits at a multiple of sixteen from a
+//! 4 KiB boundary.
+//!
+//! **Each class's free list is doubly linked**, through the first two words
+//! of every free object: `next`, then `previous`. That is what lets a page's
+//! objects leave the list without walking it (below), and why the smallest
+//! class is sixteen bytes, two links, where it was eight.
 //!
 //! **A slab page goes back when its last object is freed**, provided the class
 //! still has another page to serve from. The bookkeeping that makes that
@@ -44,7 +49,16 @@
 //! class oscillating around a single object would otherwise return its only
 //! page and immediately ask for it back on the next allocation, which turns a
 //! free-list pop into a buddy allocation and a page of writes. Keeping one
-//! page per class costs at most 36 KiB across all nine classes.
+//! page per class costs at most 32 KiB across all eight classes.
+//!
+//! **Giving a page back walks nothing** (`docs/HEAP-SLAB-GIVE-BACK.md`). The
+//! free that empties a page knows from the page's count that every object of
+//! it is free and on its class's list, so it takes them off by index, each
+//! through its own two links: at most [`UNLINK_ACCESSES`] link accesses an
+//! object, whatever the length of the list. It used to walk the class's whole
+//! list from its head, with the kernel's heap lock held and interrupts
+//! masked: an exit freeing a 9 GiB process's objects read 4.6 billion links
+//! that way (`docs/EXIT-TEARDOWN.md` section 2).
 
 #![no_std]
 
@@ -56,7 +70,7 @@ pub const PAGE_SIZE: usize = 4096;
 /// Size classes, in bytes. Powers of two from a link-sized object up to half a
 /// page: above that, a class wastes more than it saves and the request is
 /// better served as whole pages.
-pub const CLASS_SIZES: [usize; 9] = [8, 16, 32, 64, 128, 256, 512, 1024, 2048];
+pub const CLASS_SIZES: [usize; 8] = [16, 32, 64, 128, 256, 512, 1024, 2048];
 
 /// Number of size classes.
 pub const CLASSES: usize = CLASS_SIZES.len();
@@ -64,8 +78,21 @@ pub const CLASSES: usize = CLASS_SIZES.len();
 /// Largest request served from a size class.
 pub const LARGEST_CLASS: usize = 2048;
 
-/// The smallest object, which must be large enough to hold a free-list link.
-pub const SMALLEST_CLASS: usize = 8;
+/// The smallest object, which must be large enough to hold a free object's
+/// two links, `next` and `previous`.
+pub const SMALLEST_CLASS: usize = 16;
+
+/// The most link accesses -- calls of [`Backing::read_link`] and
+/// [`Backing::write_link`] -- that taking one object off its class's list
+/// makes when a page is given back (`L.mm.147`): its own two links read, its
+/// two neighbours' links that name it read to verify them, and up to two
+/// writes. A page's give-back makes at most this many for each object one
+/// page of its class holds.
+pub const UNLINK_ACCESSES: u64 = 6;
+
+/// Where a free object keeps the link to the object before it on its list:
+/// the word after `next`.
+const PREVIOUS: u64 = 8;
 
 /// The page an object lives in.
 ///
@@ -120,8 +147,21 @@ impl Request {
 ///   page-aligned, otherwise-unused pages, which stay valid until they are
 ///   given back;
 /// * `read_link` and `write_link` address eight readable, writable, aligned
-///   bytes inside memory this heap owns, aliased by nothing else.
+///   bytes inside memory this heap owns, aliased by nothing else;
+/// * `slab_free` never answers more than the free objects the page really
+///   has: the count [`Backing::set_slab_free`] last recorded, or zero. A
+///   higher count would have the heap take a page's objects off its list by
+///   index while one of them is still handed out, and so read that object's
+///   data as links and write through it. Zero is always allowed: the page is
+///   then never given back.
 pub unsafe trait Backing {
+    /// Whether the heap verifies, before it unlinks an object from a free
+    /// list, that the object's neighbours name it (`L.mm.147`): the kernel
+    /// answers its `ferrix_checks` setting, which every certified level
+    /// builds on. A mismatch is reported through
+    /// [`Backing::links_disagree`].
+    const VERIFY_LINKS: bool;
+
     /// Take `1 << order` contiguous pages, or `None` if there are none.
     fn allocate_pages(&mut self, order: u8) -> Option<u64>;
 
@@ -141,11 +181,19 @@ pub unsafe trait Backing {
     /// with nowhere to keep the number may return zero from this and ignore
     /// [`Backing::set_slab_free`]; the only consequence is that slab pages are
     /// never returned, which is what this allocator did before the count
-    /// existed.
+    /// existed. It must never answer more than the page's free objects: see
+    /// the trait's safety contract.
     fn slab_free(&self, page: u64) -> u16;
 
     /// Record how many objects are free in the slab page at `page`.
     fn set_slab_free(&mut self, page: u64, objects: u16);
+
+    /// The free object at `at` is on a free list whose neighbours do not
+    /// name it: a double free into its page, or a link overwritten while the
+    /// object was free. Asked only with [`Backing::VERIFY_LINKS`], before any
+    /// write of the unlink. The kernel stops here; it must not return into
+    /// the heap with the lists as they are.
+    fn links_disagree(&mut self, at: u64) -> !;
 }
 
 /// Why an allocation failed.
@@ -196,6 +244,13 @@ pub struct Heap {
     /// a heap whose classes churn should show this rising, and one that only
     /// ever grows should show it at zero.
     slab_pages_returned: usize,
+    /// Link accesses the give-backs' unlinks have made, and the objects they
+    /// took off their lists: what `L.mm.147`'s checks hold to
+    /// [`UNLINK_ACCESSES`] an object. Changed under the heap's own lock, as
+    /// every other field is.
+    unlink_accesses: u64,
+    /// See `unlink_accesses`.
+    unlinked_objects: u64,
 }
 
 impl Default for Heap {
@@ -215,7 +270,17 @@ impl Heap {
             pages_per_class: [0; CLASSES],
             large_pages: 0,
             slab_pages_returned: 0,
+            unlink_accesses: 0,
+            unlinked_objects: 0,
         }
+    }
+
+    /// The link accesses give-backs have made taking objects off their lists,
+    /// and how many objects they took off, since this heap was made
+    /// (`L.mm.147`): the first is at most [`UNLINK_ACCESSES`] times the second.
+    #[must_use]
+    pub const fn unlink_counts(&self) -> (u64, u64) {
+        (self.unlink_accesses, self.unlinked_objects)
     }
 
     /// Bytes currently handed out.
@@ -360,11 +425,9 @@ impl Heap {
 
     /// Return the slab page holding `address` if that free emptied it.
     ///
-    /// The list walk is what this costs, and it is paid only on the free that
-    /// empties a page rather than on every free: a page with objects still out
-    /// cannot be returned, so there is nothing to look for. What the walk does
-    /// is unlink the page's objects from the class's free list, which a singly
-    /// linked list gives no cheaper way to do.
+    /// Paid only on the free that empties a page: its objects come off the
+    /// class's list by index ([`Heap::unlink_page`]), at most
+    /// [`UNLINK_ACCESSES`] link accesses each, never a walk of the list.
     fn give_back_if_empty(&mut self, backing: &mut impl Backing, class: usize, address: u64) {
         let page = page_of(address);
         let objects = Heap::objects_per_page(class);
@@ -391,42 +454,66 @@ impl Heap {
         }
     }
 
-    /// Take every object belonging to `page` off `class`'s free list.
+    /// Take every object of `page` off `class`'s free list, by index.
     ///
-    /// Every object *is* on the list — the caller has just established that
-    /// the page is entirely free — so this removes exactly
-    /// [`Heap::objects_per_page`] of them.
+    /// Every object *is* on the list -- the caller has just established from
+    /// the page's count that the page is entirely free, and an object in a
+    /// processor's cache or a reserve counts as handed out -- so this visits
+    /// exactly [`Heap::objects_per_page`] objects, each through its own two
+    /// links, and ends whatever the links say (`L.mm.147`).
     fn unlink_page(&mut self, backing: &mut impl Backing, class: usize, page: u64) {
-        let mut cursor = self.head(class);
-        let mut previous = END;
-
-        // Bounded by the objects that can exist on any list, so a corrupted
-        // link that forms a cycle cannot hang the free path.
-        let mut budget = self.slab_pages.saturating_add(1) * (PAGE_SIZE / SMALLEST_CLASS);
-        while cursor != END && budget > 0 {
-            budget -= 1;
-            let next = backing.read_link(cursor);
-            if page_of(cursor) == page {
-                self.unlink_one(backing, class, previous, next);
-            } else {
-                previous = cursor;
-            }
-            cursor = next;
+        let size = Heap::class_size(class) as u64;
+        let objects = Heap::objects_per_page(class) as u64;
+        let mut accesses = 0;
+        for index in 0..objects {
+            accesses += self.unlink_one(backing, class, page + index * size);
         }
+        self.unlink_accesses = self.unlink_accesses.saturating_add(accesses);
+        self.unlinked_objects = self.unlinked_objects.saturating_add(objects);
     }
 
-    /// Drop one object out of a free list, given the object before it.
+    /// Take the free object at `object` off `class`'s list through its own
+    /// links, and answer how many link accesses that took: at most
+    /// [`UNLINK_ACCESSES`].
     ///
-    /// `previous` is [`END`] when the object is the list head, which is the
-    /// only case that touches `self.free` rather than a link in the page.
-    fn unlink_one(&mut self, backing: &mut impl Backing, class: usize, previous: u64, next: u64) {
+    /// With [`Backing::VERIFY_LINKS`], the neighbours are read first and must
+    /// name it -- the object before it (or the class's head) as its next, the
+    /// object after it as its previous -- or the heap stops through
+    /// [`Backing::links_disagree`] before it writes anything.
+    fn unlink_one<B: Backing>(&mut self, backing: &mut B, class: usize, object: u64) -> u64 {
+        let next = backing.read_link(object);
+        let previous = backing.read_link(object + PREVIOUS);
+        let mut accesses = 2;
+        if B::VERIFY_LINKS {
+            let before = if previous == END {
+                self.head(class)
+            } else {
+                accesses += 1;
+                backing.read_link(previous)
+            };
+            let after = if next == END {
+                object
+            } else {
+                accesses += 1;
+                backing.read_link(next + PREVIOUS)
+            };
+            if before != object || after != object {
+                backing.links_disagree(object);
+            }
+        }
         if previous == END {
             if let Some(slot) = self.free.get_mut(class) {
                 *slot = next;
             }
         } else {
             backing.write_link(previous, next);
+            accesses += 1;
         }
+        if next != END {
+            backing.write_link(next + PREVIOUS, previous);
+            accesses += 1;
+        }
+        accesses
     }
 
     /// Objects of `class` that fit in one page.
@@ -479,18 +566,30 @@ impl Heap {
     fn push_raw(&mut self, backing: &mut impl Backing, class: usize, address: u64) {
         let head = self.head(class);
         backing.write_link(address, head);
+        backing.write_link(address + PREVIOUS, END);
+        if head != END {
+            backing.write_link(head + PREVIOUS, address);
+        }
         if let Some(slot) = self.free.get_mut(class) {
             *slot = address;
         }
     }
 
-    /// Take an object off a class's list.
-    fn pop(&mut self, backing: &mut impl Backing, class: usize) -> Option<u64> {
+    /// Take an object off a class's list: its head, whose successor becomes
+    /// the head. With [`Backing::VERIFY_LINKS`], the successor must name the
+    /// head as its previous.
+    fn pop<B: Backing>(&mut self, backing: &mut B, class: usize) -> Option<u64> {
         let head = self.head(class);
         if head == END {
             return None;
         }
         let next = backing.read_link(head);
+        if next != END {
+            if B::VERIFY_LINKS && backing.read_link(next + PREVIOUS) != head {
+                backing.links_disagree(next);
+            }
+            backing.write_link(next + PREVIOUS, END);
+        }
         if let Some(slot) = self.free.get_mut(class) {
             *slot = next;
         }

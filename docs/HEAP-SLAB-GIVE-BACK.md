@@ -5,6 +5,40 @@ Design addendum for branch `heap/slab-give-back` (silent-reset,
 (consultant ledger 9543, OK IF ET.1-ET.9, and 9574). Condition ET.2 asks
 for this addendum to be reviewed before any of D1's code is written.
 
+**Where it stands (2026-11-13).** The addendum was reviewed: OK IF SG.1-SG.11
+(consultant ledger 9628). Its shape (b) is accepted in place of SLUB's, and
+ET.2 of ledger 9543 is met by this text with SG.1-SG.6, which the code
+commit carries:
+
+* SG.1, the shape: `unlink_page` is exactly `objects_per_page` steps.
+* SG.2, the requirement: L.mm.147, with K = `UNLINK_ACCESSES` = 6.
+* SG.3, the bounds: in MEMORY-AND-TIMING, "The per-processor heap caches",
+  and in HEAP-CACHES.md.
+* SG.4, the count's contract: in `Backing`'s safety section.
+* SG.5, the verification: `Backing::VERIFY_LINKS` and `links_disagree`,
+  FX-0013.
+* SG.6, eight classes: carried through, `btrfs-write`'s bound included.
+
+The code was reviewed: OK IF GB.1-GB.10, its ring-0 rise OK IF R1-R3
+(consultant ledger 9717, 9733). This is internal review, not independent
+verification (F-27).
+
+GB.5's figures (never-landing `diag/d1-sites` over the D1 code; release,
+`ferrix.checks=skip`, x86-64 KVM, 36,864 regions of 256 KiB killed, the
+host's load 21 to 25). In three runs the give-back sites' longest holds
+were 8.5-20.6 us at a cache overflow and 2 us at a free no class serves.
+No drain and no reservation heap's free happened during the teardown.
+The refill's longest hold read 4.2, 9.1 and 7.4 ms while the QEMU threads'
+host run delay grew at most 0.04, 1.33 and 0.04 ms, so this was not the
+vCPU waiting for the host. With the guest's memory preallocated on the host
+(`-mem-prealloc`, two runs), every site's longest hold was 17 to 21 us, and
+`FRAMES`' longest hold and wait were 8 to 16 us. The refill's milliseconds
+were the host backing guest memory on first touch, through a fresh slab
+page's links: a host fault that the guest sees as time, and not the
+heap's work. The measured holds, GB.5's per-site figures among
+them, are in the code commit's message and in MEMORY-AND-TIMING, "The
+per-processor heap caches".
+
 ## 1. What it removes
 
 `ferrix-heap` keeps each size class's free objects on one singly linked
@@ -106,10 +140,10 @@ reservation's heap):
 | allocate, class not empty | pop: 1 link read; `take_from_page`: `slab_free` read and set, 2 `FRAMES` holds | pop: 1 link read, 1 link write (the new head's `previous`); the same 2 `FRAMES` holds |
 | allocate, class empty (refill) | 1 page from the buddy (`FRAMES`), `objects_per_page` pushes, 1 `set_slab_free` | the same, each push 2 link writes plus the old head's `previous` |
 | free, page not emptied | push: 1 link write; `slab_free` read and set, 2 `FRAMES` holds | push: 2 link writes and the old head's `previous`; the same 2 `FRAMES` holds |
-| free, page emptied | the class's whole free list walked (up to 94,000 links a walk at 9 GiB), then the page to the buddy (`FRAMES`) | at most `objects_per_page` unlinks (256 for 16 B, 2 for 2 KiB), each 2 link reads and up to 2 link writes, then the page to the buddy |
-| overflow (`CpuCache`, 9 frees) | 9 frees, each up to a whole-list walk | 9 frees, each bounded as above |
-| drain (144 frees a processor) | up to 144 whole-list walks a processor, interrupts masked | at most 144 x 256 unlinks a processor |
-| `release_kept` (an idle reservation heap) | a walk per kept page | `objects_per_page` unlinks per kept page |
+| free, page emptied | the class's whole free list walked (up to 94,000 links a walk at 9 GiB), then the page to the buddy (`FRAMES`) | at most `objects_per_page` unlinks (256 for 16 B, 2 for 2 KiB), each at most 6 link accesses: four reads with the verification, two writes; then the page to the buddy |
+| overflow (`CpuCache`, 9 frees) | 9 frees, each up to a whole-list walk | 9 frees, at most 9 x 256 = 2,304 unlinks |
+| drain (144 frees a processor before, 128 after) | up to 144 whole-list walks a processor, interrupts masked | at most 16 pages a class emptied, 16 x 510 = 8,160 unlinks a processor (ledger 9628 SG.3) |
+| `release_kept` (an idle reservation heap) | a walk per kept page | at most 510 unlinks, one page of each class |
 
 `FRAMES` is taken under `HEAP` exactly as often after as before.
 `MEMORY-AND-TIMING.md` §1.8 gets the new bound: a free's hold of the heap
@@ -167,22 +201,30 @@ Ledger 9543's ruling Q1: D1 supersedes it, and it does not land first.
 > class's free list and give the page back at a cost bounded by the objects
 > one page of its class holds, whatever the length of the class's list."
 
-Parent: H.MEM.9. Units: `Heap::deallocate`, `give_back_if_empty`,
-`unlink_page`, `unlink_one`.
+Parent: H.MEM.9. Units, as sysml has them (ledger 9717 GB.1): the kernel's
+glue, `mm::KernelAllocator::dealloc` and `KernelPages`' and `ReservedPages`'
+`links_disagree`. `ferrix-heap` is not a manifest member (F-76), so its
+functions (`Heap::deallocate`, `give_back_if_empty`, `unlink_page`,
+`unlink_one`, `push_raw`, `pop`) are named in the criterion and F-76's note,
+and verified by its host tests.
 
 **Host test (`ferrix-heap`).** A class list of at least 100,000 free
 objects over many pages. The test's `Backing` counts link reads and writes.
-Each page's give-back must read and write at most 4 x `objects_per_page`
-links, and the class list must hold exactly the objects of the pages still
+Each page's give-back must read and write at most `UNLINK_ACCESSES` (6) x
+`objects_per_page` links, plus the push's 3, and the class list must hold exactly the objects of the pages still
 held. Control (`gate.sh control --expect-host`): the class-list walk put back
 in `unlink_page` -> FIRED (host), the test's line.
 
-**Boot check (stage 3's heap check).** A CHECKS-ONLY counter of the links
-`unlink_page` touches. The check allocates and frees enough objects of one
-class to empty about 1,000 pages, on the main heap and on one reservation's
-heap, and asserts the counter at most 4 x `objects_per_page` x pages
-emptied. It asserts a count, never a time. Control: the same walk put back
--> FIRED (panic).
+**Boot check (stage 2's memory check and the reservation check).** The heap
+counts its give-backs' link accesses and the objects they unlink, in two
+plain fields changed under its own lock (`Heap::unlink_counts`, read by
+CHECKS-ONLY `mm` accessors). `mm::check::give_back_case` makes 160,000
+objects of the 16-byte class on the shared heap, keeps one object on each
+of 200 whole pages (51,000 others stay on the list), and empties 400 whole
+pages, 102,400 objects. On a reserved job's heap it makes 10,240 objects,
+keeps 4 pages and empties 32. Each time it asserts at most
+`UNLINK_ACCESSES` accesses per object unlinked. It asserts a count, never a
+time. Control: the walk put back -> FIRED (panic).
 
 **Ring 0.** A rise of about 30-60 library lines (the second link, the
 unlink by index, the checks-only verification and counter). It is argued in

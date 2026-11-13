@@ -102,7 +102,9 @@ impl Reserved {
 ///
 /// A node's payloads are at most its body, each rounded up to its size class
 /// or to a page -- at most twice what it asks, the worst being a payload of
-/// one byte past a class -- so twice the node's pages; then its list of
+/// one byte past a class (a payload below the smallest class, 16 bytes, takes
+/// more, which the node's item header around it covers and
+/// `tests/reserve_bound.rs` measures) -- so twice the node's pages; then its list of
 /// items or pointers, when that is a page or less, one page; and one page for
 /// its share of the maps that hold it (the dirty set, the clean nodes, the
 /// delayed references' heads and deltas). A list longer than a page (a leaf
@@ -116,7 +118,7 @@ pub const fn node_frames(nodesize: u32) -> u64 {
 }
 
 /// Frames an admitted operation may take besides its nodes': a partly used
-/// page for each of the heap's nine size classes, and what the operation
+/// page for each of the heap's eight size classes, and what the operation
 /// builds beside the trees -- a split's list of pieces, a range set's
 /// entries, an extent record's references.
 pub const OPERATION_FRAMES: u64 = 32;

@@ -798,7 +798,7 @@ load of its per-call target.
 
 ### 1.8 The per-processor heap caches (docs/HEAP-CACHES.md)
 
-Each processor keeps up to `CACHE_DEPTH` (16) free objects of each of the 9
+Each processor keeps up to `CACHE_DEPTH` (16) free objects of each of the 8
 size classes in a `CpuCache` behind an `IrqSpinLock` of its own. An
 allocation or free of a class takes that lock, not the heap's; an empty cache
 refills `REFILL` (8) objects under one hold of the heap's lock, a full one
@@ -814,12 +814,12 @@ what callers hold: the heap's allocated bytes less the cached bytes (L.mm.96).
   drain (`mm::drain_caches`) starts with no cache lock held -- one held on
   this processor stops the machine, FX-0012 -- and takes one cache lock at
   a time with the heap's under it.
-* **Pages held.** At most 144 objects a processor; in the worst case each
-  keeps a slab page of its own from going back: 144 pages, 576 KiB a
-  processor, 2.25 MiB on the N150's four. They are heap pages, as a slab
+* **Pages held.** At most 128 objects a processor; in the worst case each
+  keeps a slab page of its own from going back: 128 pages, 512 KiB a
+  processor, 2 MiB on the N150's four. They are heap pages, as a slab
   page with free objects in it always was, and only a heap refusal drains
   them: a program's frame, a page table or a VMO commit refused at the
-  watermark (L.mm.71) does not. So a program can be refused up to 144 pages
+  watermark (L.mm.71) does not. So a program can be refused up to 128 pages
   a processor sooner than with no caches -- more than `WATERMARK_LEAST`'s
   256 frames on a machine of four processors or more. That is memory a
   program does not get, never memory the kernel cannot get: the watermark
@@ -829,17 +829,37 @@ what callers hold: the heap's allocated bytes less the cached bytes (L.mm.96).
 * **The heap lock's hold.** A refill is up to 8 allocations under one hold:
   each a free-list pop, and when the class's list is empty a page take from
   the buddy under `FRAMES` -- at most 4 page takes for the 2 KiB class, two
-  objects a page. An overflow is 9 frees under one hold; a free that empties
-  a page walks its class's free list to unlink it (`give_back_if_empty`), as
-  every free that empties a page always has.
+  objects a page. A free under the heap's lock is a push (at most three link
+  accesses) and the page's count read and written (two holds of `FRAMES`). A
+  free that empties a page other than its class's last adds at most
+  `objects_per_page` unlinks (256 for the 16 B class, 2 for the 2 KiB) of at
+  most `UNLINK_ACCESSES` (6) link accesses each, and one page to the buddy
+  under `FRAMES`, whatever the length of the class's list (L.mm.147,
+  `docs/HEAP-SLAB-GIVE-BACK.md`): the page's objects come off by index. It
+  used to walk the class's whole list from its head, with interrupts
+  masked: 4.6 billion links over a 9 GiB exit (`docs/EXIT-TEARDOWN.md`
+  section 2). `FRAMES` is taken under the heap's lock as often as before.
+  An overflow, 9 frees of one class, does at most 9 x 256 = 2,304 unlinks;
+  `release_kept`, at most 510 (the objects of one page of each class).
+  Measured beside these bounds, never as them (ledger 9717 GB.6; release,
+  `ferrix.checks=skip`, x86-64 KVM, the exit of `test-exit-regions`' shapes):
+  the shared heap's longest hold over a 60,000-region exit 22 us and over a
+  4 GiB one 85 us; over a 9 GiB one, per call site, at most 21 us at a cache
+  overflow (the give-backs' way in) and 2 us at a free no class serves, and
+  17-21 us at every site with the guest's memory preallocated on the host.
+  Without that, a cache refill's hold read 1.4 to 127 ms while the vCPU
+  threads' host run delay grew less than the hold: the refill's new slab
+  page was guest memory the host had not yet backed, a host fault the guest
+  sees as time (`docs/HEAP-SLAB-GIVE-BACK.md`, "Where it stands").
 * **A cache lock's hold.** One push or pop, or a refill or overflow above.
 * **The drain's masked time.** `MAX_CPUS` cache locks, one at a time, each
-  with interrupts masked for at most 144 frees under the heap's lock, each
-  of which may walk a free list as above. A drain runs only after a refusal,
+  with interrupts masked for at most 128 frees under the heap's lock, at
+  most `CACHE_DEPTH` of each of the 8 classes, which empty at most 16 pages
+  a class: at most 16 x 510 = 8,160 unlinks a processor. A drain runs only after a refusal,
   and in the boot and sweep checks. Entering a reserved section masks
   interrupts first (§1.2), so a drain a section's fill or large hold makes
   runs masked from end to end: every processor's share in turn, at most
-  `MAX_CPUS` times 144 frees, before the retry.
+  `MAX_CPUS` times 128 frees and 8,160 unlinks, before the retry.
 
 ### 1.7 The audit record — F-21b
 

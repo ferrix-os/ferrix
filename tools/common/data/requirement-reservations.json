@@ -13,15 +13,6 @@
   "reservations": [
     {
       "ids": [
-        "L.mm.147"
-      ],
-      "owner": "silent-reset",
-      "branch": "heap/slab-give-back",
-      "date": "2026-11-13",
-      "purpose": "design (d)'s D1 (docs/HEAP-SLAB-GIVE-BACK.md, consultant ledger 9543, 9628 SG.2): a free that empties a slab page takes that page's objects off its class's free list in a bounded number of link accesses an object, whatever the list's length"
-    },
-    {
-      "ids": [
         "L.user.230-234",
         "L.object.373"
       ],
@@ -29,15 +20,6 @@
       "branch": "r5-teardown",
       "date": "2026-11-09",
       "purpose": "R5 step 2a (docs/ROBUSTNESS.md 4.6): an unmap stepped by a layout holder, a stepped last drop, an object's take-down reaching a draining range, a last drop handed to the reaper, every teardown step at preemption count 0, descriptors and handles closed in steps (consultant ledger 8522, TD.11)"
-    },
-    {
-      "ids": [
-        "L.mm.135"
-      ],
-      "owner": "ef-slow",
-      "branch": "bugfix/heap-batched-give-back",
-      "date": "2026-11-08",
-      "purpose": "the kernel heap's set-aside emptied slab pages: at most fifteen at a time, one given back only while wholly free and not its class's last (consultant ledger 7960 HB.1)"
     },
     {
       "ids": [

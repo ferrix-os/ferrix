@@ -7,6 +7,7 @@
 
 extern crate std;
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::vec::Vec;
 
@@ -25,6 +26,9 @@ struct Pages {
     handed_out: usize,
     /// Stands in for the frame allocator's per-frame record.
     slab_free: BTreeMap<u64, u16>,
+    /// Link accesses made, `read_link` and `write_link` alike: what
+    /// `L.mm.147` bounds.
+    accesses: Cell<u64>,
 }
 
 impl Pages {
@@ -36,7 +40,13 @@ impl Pages {
             budget: pages,
             handed_out: 0,
             slab_free: BTreeMap::new(),
+            accesses: Cell::new(0),
         }
+    }
+
+    /// Link accesses made since the supply was made.
+    fn accesses(&self) -> u64 {
+        self.accesses.get()
     }
 
     /// Pages this supply has handed out and not had back.
@@ -49,6 +59,8 @@ impl Pages {
 // type invented. Nothing aliases anything, and every address handed out is
 // unique because `next` only ever moves forward.
 unsafe impl Backing for Pages {
+    const VERIFY_LINKS: bool = true;
+
     fn allocate_pages(&mut self, order: u8) -> Option<u64> {
         let count = 1usize << order;
         if self.handed_out + count > self.budget {
@@ -73,11 +85,13 @@ unsafe impl Backing for Pages {
 
     fn read_link(&self, at: u64) -> u64 {
         assert_eq!(at % 8, 0, "links must be eight-byte aligned");
+        self.accesses.set(self.accesses.get() + 1);
         self.links.get(&at).copied().unwrap_or(0)
     }
 
     fn write_link(&mut self, at: u64, value: u64) {
         assert_eq!(at % 8, 0, "links must be eight-byte aligned");
+        self.accesses.set(self.accesses.get() + 1);
         let _ = self.links.insert(at, value);
     }
 
@@ -92,6 +106,10 @@ unsafe impl Backing for Pages {
             "a slab page must be page aligned"
         );
         let _ = self.slab_free.insert(page, objects);
+    }
+
+    fn links_disagree(&mut self, at: u64) -> ! {
+        panic!("heap: a free list's links disagree at {at:#x}");
     }
 }
 
@@ -126,11 +144,13 @@ fn assert_disjoint(live: &[(u64, Request)]) {
 
 #[test]
 fn a_request_lands_in_the_smallest_class_that_holds_it() {
+    // Sixteen bytes is the smallest class: a free object holds two links.
     assert_eq!(Heap::class_of(Request::new(1, 1)), Some(0));
     assert_eq!(Heap::class_of(Request::new(8, 1)), Some(0));
-    assert_eq!(Heap::class_of(Request::new(9, 1)), Some(1));
-    assert_eq!(Heap::class_of(Request::new(16, 1)), Some(1));
-    assert_eq!(Heap::class_of(Request::new(17, 1)), Some(2));
+    assert_eq!(Heap::class_of(Request::new(16, 1)), Some(0));
+    assert_eq!(Heap::class_of(Request::new(17, 1)), Some(1));
+    assert_eq!(Heap::class_of(Request::new(32, 1)), Some(1));
+    assert_eq!(Heap::class_of(Request::new(33, 1)), Some(2));
     assert_eq!(Heap::class_of(Request::new(2048, 1)), Some(CLASSES - 1));
     assert_eq!(
         Heap::class_of(Request::new(2049, 1)),
@@ -323,18 +343,18 @@ fn a_class_that_is_emptied_and_refilled_conserves_its_objects() {
         taken.push(heap.allocate(&mut pages, request).unwrap());
     }
     // One page of 128-byte objects is exactly 32, so the class is empty again.
-    assert_eq!(heap.free_objects(&pages)[4], 0);
+    assert_eq!(heap.free_objects(&pages)[3], 0);
 
     for address in taken {
         heap.deallocate(&mut pages, address, request);
     }
     assert_eq!(
-        heap.free_objects(&pages)[4],
+        heap.free_objects(&pages)[3],
         32,
         "every object should be back on the list"
     );
     assert_eq!(heap.allocated_bytes(), 0);
-    assert_eq!(before[4], 0, "and the class started empty");
+    assert_eq!(before[3], 0, "and the class started empty");
 }
 
 #[test]
@@ -541,6 +561,8 @@ fn a_backing_that_cannot_count_is_merely_wasteful() {
 
     // SAFETY: a map, as `Pages`; no address here is real memory.
     unsafe impl Backing for Forgetful {
+        const VERIFY_LINKS: bool = true;
+
         fn allocate_pages(&mut self, order: u8) -> Option<u64> {
             if self.next == 0 {
                 self.next = 0xFFFF_8000_0010_0000;
@@ -563,6 +585,9 @@ fn a_backing_that_cannot_count_is_merely_wasteful() {
             0
         }
         fn set_slab_free(&mut self, _page: u64, _objects: u16) {}
+        fn links_disagree(&mut self, at: u64) -> ! {
+            panic!("heap: a free list's links disagree at {at:#x}");
+        }
     }
 
     let mut pages = Forgetful::default();
@@ -631,13 +656,13 @@ fn a_taken_object_is_freed_as_if_the_heap_had_handed_it_out() {
     let request = Request::new(24, 8);
     let object = reserve.take(&pages, request).unwrap();
     assert_eq!(object % 32, 0);
-    assert_eq!(reserve.counts()[2], 1);
+    assert_eq!(reserve.counts()[1], 1);
     heap.deallocate(&mut pages, object, request);
 
     let free_after = heap.free_objects(&pages);
     assert_eq!(
-        free_after[2],
-        free_before[2] + 1,
+        free_after[1],
+        free_before[1] + 1,
         "back on its own class's list"
     );
     let allocated = heap.allocated_bytes();
@@ -860,4 +885,153 @@ fn a_partial_refill_serves_and_an_empty_heap_refuses() {
         Err(HeapError::OutOfMemory)
     );
     assert_eq!(cache.held(class), 0);
+}
+
+// ---------------------------------------------------------------------------
+// Giving a page back walks nothing (L.mm.147)
+// ---------------------------------------------------------------------------
+
+/// Objects of the 16-byte class a page holds.
+const SMALL_PER_PAGE: usize = PAGE_SIZE / 16;
+
+/// Every page's give-back takes its objects off the list in at most
+/// `UNLINK_ACCESSES` link accesses each, however long the list: more than
+/// 100,000 objects emptied, with at least 50,000 others on the list at every
+/// emptying, and the list left holding exactly the free objects of the pages
+/// still held.
+#[test]
+fn a_give_back_reads_a_page_not_the_list() {
+    let request = Request::new(16, 16);
+    let mut pages = Pages::with_budget(1024);
+    let mut heap = Heap::new();
+    // Keepers: 200 pages, one object of each held, the other 255 free, so
+    // 51,000 objects stay on the list throughout.
+    let keeper_pages = 200;
+    let emptied_pages = 400;
+    let keepers: Vec<u64> = (0..keeper_pages * SMALL_PER_PAGE)
+        .map(|_| heap.allocate(&mut pages, request).unwrap())
+        .collect();
+    let emptied: Vec<u64> = (0..emptied_pages * SMALL_PER_PAGE)
+        .map(|_| heap.allocate(&mut pages, request).unwrap())
+        .collect();
+    let mut held_keepers = Vec::new();
+    for page in keepers.chunks(SMALL_PER_PAGE) {
+        let (first, rest) = page.split_first().unwrap();
+        held_keepers.push(*first);
+        for &address in rest {
+            heap.deallocate(&mut pages, address, request);
+        }
+    }
+    // Every page of the emptied set down to one object, so no page empties
+    // yet and the list is longest: 153,000 objects.
+    let mut lasts = Vec::new();
+    for page in emptied.chunks(SMALL_PER_PAGE) {
+        let (first, rest) = page.split_first().unwrap();
+        lasts.push(*first);
+        for &address in rest {
+            heap.deallocate(&mut pages, address, request);
+        }
+    }
+    assert_eq!(
+        heap.free_objects(&pages)[0],
+        (keeper_pages + emptied_pages) * (SMALL_PER_PAGE - 1)
+    );
+    let returned = heap.slab_pages_returned();
+    let (accesses_before, objects_before) = heap.unlink_counts();
+    let bound = UNLINK_ACCESSES * SMALL_PER_PAGE as u64 + 3;
+    for &address in &lasts {
+        let before = pages.accesses();
+        heap.deallocate(&mut pages, address, request);
+        let made = pages.accesses() - before;
+        assert!(
+            made <= bound,
+            "a free that emptied a page made {made} link accesses, past {bound}"
+        );
+    }
+    assert_eq!(heap.slab_pages_returned() - returned, emptied_pages);
+    let (accesses, objects) = heap.unlink_counts();
+    assert_eq!(
+        objects - objects_before,
+        (emptied_pages * SMALL_PER_PAGE) as u64
+    );
+    assert!(accesses - accesses_before <= UNLINK_ACCESSES * (objects - objects_before));
+    assert_eq!(
+        heap.free_objects(&pages)[0],
+        keeper_pages * (SMALL_PER_PAGE - 1),
+        "the list holds exactly the free objects of the pages still held"
+    );
+    for address in held_keepers {
+        heap.deallocate(&mut pages, address, request);
+    }
+    assert_eq!(heap.allocated_bytes(), 0);
+}
+
+/// Two full pages of the 64-byte class, so that neither is its class's last:
+/// a heap, a supply, and the objects in address order.
+fn two_full_pages() -> (Heap, Pages, Vec<u64>, Request) {
+    let request = Request::new(64, 64);
+    let mut pages = Pages::with_budget(16);
+    let mut heap = Heap::new();
+    let mut objects: Vec<u64> = (0..2 * (PAGE_SIZE / 64))
+        .map(|_| heap.allocate(&mut pages, request).unwrap())
+        .collect();
+    objects.sort_unstable();
+    (heap, pages, objects, request)
+}
+
+/// A double free into a page makes its count reach full one free early; the
+/// give-back's verification finds the links disagree before it writes
+/// through the object still handed out.
+#[test]
+#[should_panic(expected = "links disagree")]
+fn a_double_free_into_a_page_stops_its_give_back() {
+    let (mut heap, mut pages, objects, request) = two_full_pages();
+    let page: Vec<u64> = objects
+        .iter()
+        .copied()
+        .filter(|&o| page_of(o) == page_of(objects[0]))
+        .collect();
+    // The first object twice, then all but the last: the count says full.
+    heap.deallocate(&mut pages, page[0], request);
+    heap.deallocate(&mut pages, page[0], request);
+    for &address in &page[1..page.len() - 1] {
+        heap.deallocate(&mut pages, address, request);
+    }
+}
+
+/// A link written over while its object was free is found at the give-back.
+#[test]
+#[should_panic(expected = "links disagree")]
+fn an_overwritten_link_stops_its_give_back() {
+    let (mut heap, mut pages, objects, request) = two_full_pages();
+    let page: Vec<u64> = objects
+        .iter()
+        .copied()
+        .filter(|&o| page_of(o) == page_of(objects[0]))
+        .collect();
+    for &address in &page[..page.len() - 1] {
+        heap.deallocate(&mut pages, address, request);
+    }
+    // A stray write over a free object's next link.
+    pages.write_link(page[3], page[3] + 8);
+    heap.deallocate(&mut pages, page[page.len() - 1], request);
+}
+
+/// The head's successor whose previous link was written over is found at
+/// the next allocation, before the pop writes anything (ledger 9628 C2,
+/// 9717 GB.4).
+#[test]
+#[should_panic(expected = "links disagree")]
+fn an_overwritten_previous_stops_a_pop() {
+    let request = Request::new(64, 64);
+    let mut pages = Pages::with_budget(4);
+    let mut heap = Heap::new();
+    let first = heap.allocate(&mut pages, request).unwrap();
+    let second = heap.allocate(&mut pages, request).unwrap();
+    heap.deallocate(&mut pages, first, request);
+    heap.deallocate(&mut pages, second, request);
+    // The head is `second`, its successor `first`, whose previous must name
+    // the head: a stray write over it.
+    pages.write_link(first + 8, first);
+    let _ = heap.allocate(&mut pages, request);
 }

@@ -3515,6 +3515,16 @@ cover.rs`, the cover a view keeps), one of these libraries, and `L.user.238`
 on its region totals; their units are named in the requirements only where
 they are the item's own, and `Cover` is verified by its host tests.
 
+*Note, 2026-11-13 (silent-reset, ledger 9717 GB.1):* `L.mm.147`, a free
+that empties a slab page taking its objects off its class's list in a
+bounded number of link accesses, rests on `ferrix-heap`, one of these
+libraries: `Heap::deallocate`, `give_back_if_empty`, `unlink_page`,
+`unlink_one`, `push_raw` and `pop` (`src/lib/kernel/heap/src/lib.rs`),
+verified by its host tests. The requirement's units are the kernel's glue
+(`mm::KernelAllocator::dealloc`, `KernelPages`' and `ReservedPages`'
+`links_disagree`); those functions' units, coverage and traceability come
+with this finding's close.
+
 *Closes when* every one of them is classified in a ring, or moved out of
 the core's and the item's dependencies, and `unclassified_deps` is gone --
 classifying is the customer's decision, since it decides what the item

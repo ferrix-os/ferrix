@@ -19,7 +19,8 @@ one cache line.
 ## 2. The design
 
 **A cache per processor and size class.** Each processor has, for each of the
-nine size classes (`ferrix_heap::CLASS_SIZES`, 8 B to 2 KiB), a stack of at
+eight size classes (`ferrix_heap::CLASS_SIZES`, 16 B to 2 KiB, since
+L.mm.147; nine from 8 B before), a stack of at
 most `CACHE_DEPTH` (16) free objects of that class: `ferrix_heap::CpuCache`,
 safe Rust over `Heap` and `Backing`, host-tested. Requests larger than
 `LARGEST_CLASS` go to the heap as now.
@@ -73,22 +74,24 @@ held when it starts.
 
 ## 3. Bounds (condition 4)
 
-* **Pages held.** At most `CACHE_DEPTH` objects of each of 9 classes per
-  processor, 144 objects; in the worst case each keeps a slab page of its own
-  from going back: 144 pages, 576 KiB a processor, 2.25 MiB on the N150's
+* **Pages held.** At most `CACHE_DEPTH` objects of each of 8 classes per
+  processor, 128 objects; in the worst case each keeps a slab page of its own
+  from going back: 128 pages, 512 KiB a processor, 2 MiB on the N150's
   four. `WATERMARK` (L.mm.71) is at least `WATERMARK_LEAST` and the machine's
-  share; 576 KiB a processor is under 1 % of the N150's 16 GiB watermark
+  share; 512 KiB a processor is under 1 % of the N150's 16 GiB watermark
   share and is given back by the drain whenever anything is refused, so the
   caches never stand between a program and the watermark's floor.
 * **The heap lock's hold.** A refill is up to 8 allocations under one hold,
   each a free-list pop and, when its list is empty, a page take from the
   buddy under `FRAMES`: a 2 KiB class takes 2 objects a page, so at most 4
   page takes a refill. An overflow is 9 frees under one hold; a free that
-  empties a page walks the class's free list to unlink it
-  (`give_back_if_empty`), as a free does now.
+  empties a page takes that page's objects off the class's list by index,
+  at most 256 unlinks of 6 link accesses each, never a walk of the list
+  (L.mm.147, `docs/HEAP-SLAB-GIVE-BACK.md`; MEMORY-AND-TIMING, "The
+  per-processor heap caches", gives the bounds).
 * **A cache lock's hold.** One push or pop, or a refill or overflow above.
 * **The drain.** `MAX_CPUS` cache locks, one at a time; under each, at most
-  144 frees under the heap lock, each of which may walk a free list as above.
+  128 frees under the heap lock, at most 8,160 unlinks, as above.
   Interrupts are masked for one processor's share at a time.
 
 ## 4. Requirements (reserved as L.mm.93-98)

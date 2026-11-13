@@ -773,6 +773,19 @@ pub fn reservation_bind() -> Option<Reservation> {
     with_frames(|_| reservation::bind()).flatten()
 }
 
+// CHECKS-ONLY: mm/check.rs, object/reserve_check.rs
+/// The shared heap's give-back counts (`L.mm.147`): the link accesses its
+/// emptied pages' unlinks made, and the objects they took off their lists.
+pub(crate) fn heap_unlink_counts() -> (u64, u64) {
+    with_heap(|heap| heap.unlink_counts())
+}
+
+// CHECKS-ONLY: object/reserve_check.rs
+/// The same counts of reservation `entry`'s heap, or none.
+pub(crate) fn reserved_heap_unlink_counts(entry: Reservation) -> (u64, u64) {
+    reserved_heap(entry).map_or((0, 0), |heap| heap.lock().unlink_counts())
+}
+
 /// The bytes a reservation's heap has out, for the check that a reserved object
 /// freed goes back to its own heap.
 pub(crate) fn reserved_heap_bytes(entry: Reservation) -> usize {
@@ -1417,13 +1430,19 @@ pub fn heap_pages() -> usize {
 /// direct map.
 struct KernelPages;
 
-// SAFETY: (KMEM) `allocate_pages` returns frames the buddy allocator handed out, which
-// are contiguous, page aligned and owned by nobody else, addressed through the
-// direct map, which covers all of RAM for the life of the system. `read_link`
-// and `write_link` are only ever called by the heap on addresses inside pages
-// it took from `allocate_pages` and has not given back, so nothing aliases
-// them.
+// The page count's half of the contract is `Backing`'s own since L.mm.147
+// (docs/HEAP-SLAB-GIVE-BACK.md): never more than a page's free objects.
+// SAFETY: (KMEM) `allocate_pages` returns frames the buddy allocator handed
+// out, contiguous, page aligned and nobody else's, through the direct map,
+// which covers all of RAM for the life of the system. `read_link` and
+// `write_link` are called only on addresses in pages the heap took and has
+// not given back, so nothing aliases them. `slab_free` answers what
+// `set_slab_free`, the heap alone, last wrote into the page's frame record
+// under `FRAMES`, or 0 off the record (the page kept): never more than it has.
 unsafe impl Backing for KernelPages {
+    // Every certified level builds checks on (`tools/common/data/build-flags.toml`).
+    const VERIFY_LINKS: bool = cfg!(ferrix_checks = "on");
+
     fn allocate_pages(&mut self, order: u8) -> Option<u64> {
         let frame = allocate_frames(order)?;
         count(Route::HeapTaken, 1 << order);
@@ -1453,6 +1472,13 @@ unsafe impl Backing for KernelPages {
     fn set_slab_free(&mut self, page: u64, objects: u16) {
         let _ = with_frames(|frames| frames.set_slab_free(unmap(page) / PAGE_SIZE, objects));
     }
+
+    fn links_disagree(&mut self, at: u64) -> ! {
+        crate::panic::fatal!(
+            crate::panic::catalog::HEAP_LINKS_DISAGREE,
+            "a heap free list's links disagree at {at:#x}"
+        );
+    }
 }
 
 /// Each reservation's own heap (`L.mm.81`, `docs/microkernel/K12.md` §2.4):
@@ -1470,8 +1496,11 @@ struct ReservedPages(Reservation);
 // SAFETY: (KMEM) as `KernelPages`: `allocate_pages` returns frames the buddy
 // allocator handed out, drawn from the reservation, addressed through the
 // direct map; the link and slab accessors are `KernelPages`' own, on pages
-// this heap took and has not given back.
+// this heap took and has not given back, so `slab_free` answers no more than
+// the page's free objects, as there.
 unsafe impl Backing for ReservedPages {
+    const VERIFY_LINKS: bool = KernelPages::VERIFY_LINKS;
+
     fn allocate_pages(&mut self, order: u8) -> Option<u64> {
         let frame = take_frames(order, reservation::Floor::Drawn(self.0))?;
         count(Route::HeapTaken, 1 << order);
@@ -1502,6 +1531,10 @@ unsafe impl Backing for ReservedPages {
 
     fn set_slab_free(&mut self, page: u64, objects: u16) {
         KernelPages.set_slab_free(page, objects);
+    }
+
+    fn links_disagree(&mut self, at: u64) -> ! {
+        KernelPages.links_disagree(at)
     }
 }
 

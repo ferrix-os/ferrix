@@ -13,8 +13,8 @@ use crate::{
 
 #[test]
 fn footprint_is_the_heaps_class_or_its_pages() {
-    assert_eq!(footprint(0, 1), 8);
-    assert_eq!(footprint(1, 1), 8);
+    assert_eq!(footprint(0, 1), 16);
+    assert_eq!(footprint(1, 1), 16);
     assert_eq!(footprint(9, 8), 16);
     assert_eq!(footprint(100, 8), 128);
     assert_eq!(footprint(2048, 8), 2048);
@@ -120,8 +120,8 @@ fn a_buffer_is_charged_for_its_room_and_refused_with_nothing_changed() {
     reserve_deque(&mut deque, 3, &mut queued).unwrap();
     assert_eq!(
         (deque.capacity(), queued.charged()),
-        (4, 8),
-        "at least four, an 8-byte class"
+        (4, 16),
+        "at least four, the smallest class, 16 bytes"
     );
     drop((vec, charge, deque, queued));
     assert_eq!((job.used(), job.holds()), (0, 0));

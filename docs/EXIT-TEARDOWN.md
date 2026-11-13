@@ -8,8 +8,12 @@ follows F-112, which was fixed by `fix/exit-unmap-sort` (ledger 9112, 9327,
 
 **Where it stands (2026-11-13).** Design reviewed: OK IF ET.1-ET.9 (consultant
 ledger 9543), and with §4.5 and the second box run, OK IF ET.2-ET.10 (9574,
-within 9543). ET.1 is this text's corrections. D2's code may start; D1's waits
-for its addendum (ET.2). F-114 is reserved for the refusal of section 2, filed
+within 9543). ET.1 is this text's corrections. D2's code may start. D1's
+addendum, `docs/HEAP-SLAB-GIVE-BACK.md`, was reviewed OK IF SG.1-SG.11
+(ledger 9628): it takes shape (b), the class's free list doubly linked and an
+emptied page unlinked by index, not SLUB's per-page lists (4.1); its code is
+on `heap/slab-give-back` (L.mm.147), reviewed OK IF GB.1-GB.10 (ledger 9717)
+with its ring-0 rise at 9733. F-114 is reserved for the refusal of section 2, filed
 and closed by D2's landing (ET.8). `bugfix/heap-batched-give-back` is
 superseded by D1 and parked; L.mm.135 is released when D1 lands (ruling Q1).
 
@@ -283,7 +287,8 @@ only the exiting processor, is in 4.5.
 
 A free that empties a slab page takes that page's objects off the free
 lists at a cost bounded by the objects of that page, not by the class's
-list.
+list. (D1's addendum chose shape (b) below, not SLUB's: see
+`docs/HEAP-SLAB-GIVE-BACK.md` and ledger 9628.)
 
 The shape is SLUB's:
 * each slab page has its own free list;
@@ -512,7 +517,7 @@ times.
 | # | What | Where | Size, roughly | Gates and evidence |
 |---|---|---|---|---|
 | D0 | this note | docs | - | check-docs; design review |
-| D1 | 4.1, SLUB-shaped slab pages | `src/lib/kernel/heap` (F-76, unclassified), `mm.rs` | 250-400 lines with host tests | an addendum reviewed first (ET.2: where the page head and the partial links live, PageEntry's size, FRAMES under HEAP, HEAPS, `release_kept`, `drain_caches`, `CpuCache`, a corrupted list still ends, M&T §1.8's bound); new L.mm id; host-test control (links counted); a boot check counting, main heap and a reservation's; ring0 rise; check, check-docs, check-frames dev and release, check-stack-depth, test-boot x86_64 kvm and tcg, aarch64, armv7a --smp 2, test-threads all, test-exit-regions x3 (x86_64 release kvm on base and tip); N150 A/B not a condition |
+| D1 | 4.1, the emptied page unlinked by index (shape (b), `docs/HEAP-SLAB-GIVE-BACK.md`, ledger 9628) | `src/lib/kernel/heap` (F-76, unclassified), `mm.rs` | 250-400 lines with host tests | an addendum reviewed first (ET.2: where the page head and the partial links live, PageEntry's size, FRAMES under HEAP, HEAPS, `release_kept`, `drain_caches`, `CpuCache`, a corrupted list still ends, M&T §1.8's bound); new L.mm id; host-test control (links counted); a boot check counting, main heap and a reservation's; ring0 rise; check, check-docs, check-frames dev and release, check-stack-depth, test-boot x86_64 kvm and tcg, aarch64, armv7a --smp 2, test-threads all, test-exit-regions x3 (x86_64 release kvm on base and tip); N150 A/B not a condition |
 | D2 | 4.2, the exit's emptying, both ends (`Process::release`, `Bare::release`) | `user/space.rs` (core), `process.rs` (load), `object/bare.rs`, `ferrix_vma::take` (from R5 2a, with the map's totals) | 150-250 lines, on develop with `rss/anon-merge` landed | new L.user id (ET.5); the `enomem` phase on all three architectures and the heap-refusal case, each with its control; L.user.245 restated (ET.4 f); F-114 filed and closed; carry-coverage |
 | D3 | 4.3 for the exit only: D2's emptying stepped | `user/space.rs`, a small `user/teardown.rs` | 200-300 lines | one new L.user id and L.user.234 (moved first); TD.2-4, 7-9, 13, 14; the pinned canaries and their control; stall-probe |
 | D4 | the rest of R5 2a rebased (munmap's `unmap_held`, a stepped last drop and its hand-over, dispose in steps, L.user.231-233, L.object.373) | as R5 2a | its 5,170 lines on 0ec0a3931, 95+ commits stale; conflicts with the rss counts (4120b4def), F-112's heapsort, the OOM emptier, anon-merge | a fresh code review against 8522/8559/8603 |
