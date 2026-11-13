@@ -30,9 +30,13 @@
 //! registration was before: a file that says not every change wakes one of its
 //! queues, a queue there was no memory to hook or no room for in a
 //! registration's [`MAX_HOOKS`], and a set registered in this one, whose own
-//! wait is cheap. A file that says it can be trusted and changes without a wake
-//! is a defect in that file. It is found within a second all the same: once a
-//! second (`fs::wake::TRUSTED_RECHECK_NANOS`, the bound a trusted `poll` sleeps
+//! wait is cheap. The set counts them (`State::always`), and a wait walks its
+//! registrations for them only while the count is not zero: a set with none,
+//! as nearly every set is once its first wait has hooked it, costs a wait
+//! nothing for the registrations nothing woke. A file that says it can be
+//! trusted and changes without a wake is a defect in that file. It is found
+//! within a second all the same: once a second
+//! (`fs::wake::TRUSTED_RECHECK_NANOS`, the bound a trusted `poll` sleeps
 //! between its own looks) a wait puts every registration on `pending`, and the
 //! same rescan drops a registration whose file went while nothing woke it.
 //!
@@ -386,6 +390,13 @@ struct State {
     rescanned_at: u64,
     /// How many registrations are not `trusted`.
     distrusted: usize,
+    /// How many registrations every wait looks at, pending or not
+    /// ([`Item::always`]): a wait walks the registrations for them only while
+    /// this is not zero. Moved under this lock wherever one of the three
+    /// things `always` reads changes, and as a registration is added or taken
+    /// out, by that registration's answer before and after
+    /// ([`State::count_always`]).
+    always: usize,
     /// How many files waits have looked at, for the checks.
     looks: u64,
     /// How many times a wait looked at every registration, for the checks.
@@ -461,8 +472,9 @@ impl State {
         }
     }
 
-    /// Set a registration's trust, keeping the count.
+    /// Set a registration's trust, keeping the counts.
     fn set_trusted(&mut self, at: usize, trusted: bool) {
+        let before = self.always_at(at);
         let Some(item) = self.items.get_mut(at) else {
             return;
         };
@@ -474,6 +486,24 @@ impl State {
                 self.distrusted = self.distrusted.saturating_add(1);
             }
         }
+        self.count_always(before, self.always_at(at));
+    }
+
+    /// Whether the registration at `at` is one every wait looks at; no
+    /// registration there is not.
+    fn always_at(&self, at: usize) -> bool {
+        self.items.get(at).is_some_and(Item::always)
+    }
+
+    /// Move [`State::always`] by one registration's change: `before`, its
+    /// [`Item::always`] before the change (false for one being added), and
+    /// `after`, its answer after it (false for one taken out).
+    fn count_always(&mut self, before: bool, after: bool) {
+        match (before, after) {
+            (false, true) => self.always = self.always.saturating_add(1),
+            (true, false) => self.always = self.always.saturating_sub(1),
+            _ => {}
+        }
     }
 
     /// Take the registration at `at` out, keeping the counts.
@@ -482,6 +512,7 @@ impl State {
         if !item.trusted {
             self.distrusted = self.distrusted.saturating_sub(1);
         }
+        self.count_always(item.always(), false);
         if item.pending {
             let serial = item.serial;
             self.pending.retain(|pending| *pending != serial);
@@ -688,6 +719,7 @@ pub(crate) fn create() -> Result<Arc<OpenFile>, Errno> {
             next_look: 0,
             rescanned_at: crate::timer::now_nanos(),
             distrusted: 0,
+            always: 0,
             looks: 0,
             rescans: 0,
             parents: Vec::new(),
@@ -1088,6 +1120,10 @@ impl Epoll {
             _pinned: pinned,
         });
         state.distrusted = state.distrusted.saturating_add(1);
+        // Untrusted until a wait hooks it, so one every wait looks at until
+        // then; a set always.
+        let after = state.always_at(slot);
+        state.count_always(false, after);
         state.queue_at(slot);
         state.generation = state.generation.wrapping_add(1);
         Ok(())
@@ -1153,6 +1189,7 @@ impl Epoll {
             .items
             .position(|item| (item.key, item.fd) == (key, fd))
             .ok_or(Errno::ENOENT)?;
+        let before = state.always_at(at);
         let item = state.items.get_mut(at).ok_or(Errno::ENOENT)?;
         if item.events & ferrix_linux_abi::types::EPOLLEXCLUSIVE != 0 {
             return Err(Errno::EINVAL);
@@ -1163,6 +1200,10 @@ impl Epoll {
         item.due = seen.0 & item.events != 0;
         item.seen_changes = seen.1;
         item.seen_bits = seen.0;
+        // Nothing `always` reads is changed here: kept to the rule that
+        // every change to a registration settles the count.
+        let after = state.always_at(at);
+        state.count_always(before, after);
         state.queue_at(at);
         state.generation = state.generation.wrapping_add(1);
         Ok(())
@@ -1203,6 +1244,14 @@ impl Epoll {
     /// How many files its waits have looked at, for the checks.
     pub(crate) fn looks(&self) -> u64 {
         self.state.lock().looks
+    }
+
+    /// The count of registrations every wait looks at, and a recount of
+    /// them, for the checks: equal whenever the set's lock is let go.
+    pub(crate) fn always_counts(&self) -> (usize, usize) {
+        let state = self.state.lock();
+        let recount = state.items.iter().filter(|item| item.always()).count();
+        (state.always, recount)
     }
 
     /// How many times its waits looked at every registration, for the
@@ -1309,6 +1358,7 @@ impl Epoll {
                 items,
                 pending,
                 scratch,
+                always,
                 ..
             } = &mut *state;
             // The kept room, or with another wait using it, fresh room.
@@ -1318,11 +1368,16 @@ impl Epoll {
                     copy_out(item, &mut samples, ticket);
                 }
             }
-            for item in items
-                .iter_mut()
-                .filter(|item| !item.pending && item.always())
-            {
-                copy_out(item, &mut samples, ticket);
+            // The registrations walked only while one is to be looked at by
+            // every wait: with none, as nearly always, a wait costs nothing
+            // for each registration nothing woke.
+            if *always != 0 {
+                for item in items
+                    .iter_mut()
+                    .filter(|item| !item.pending && item.always())
+                {
+                    copy_out(item, &mut samples, ticket);
+                }
             }
             state.looks = state
                 .looks
@@ -1441,6 +1496,7 @@ impl Epoll {
         let Ok(at) = state.items.find(serial) else {
             return;
         };
+        let before = state.always_at(at);
         let mut trusted = named.trusted && !named.overflowed;
         if let Some(item) = state.items.get_mut(at) {
             for source in named.queues.iter().flatten() {
@@ -1475,6 +1531,10 @@ impl Epoll {
         if let Some(item) = state.items.get_mut(at) {
             item.fixed = named.fixed;
         }
+        // What the hooking changed (`unhookable`), then the trust, which
+        // settles its own.
+        let after = state.always_at(at);
+        state.count_always(before, after);
         state.set_trusted(at, trusted);
     }
 
@@ -1576,15 +1636,17 @@ impl Inode for Epoll {
     fn poll_changes(&self) -> Option<u64> {
         let (generation, files): (u64, Vec<Weak<OpenFile>>) = {
             let state = self.state.lock();
-            (
-                state.generation,
+            let files = if state.always == 0 {
+                Vec::new()
+            } else {
                 state
                     .items
                     .iter()
                     .filter(|item| item.always())
                     .map(|item| item.file.clone())
-                    .collect(),
-            )
+                    .collect()
+            };
+            (state.generation, files)
         };
         let mut sum = generation.wrapping_add(self.ready.tells());
         for file in files {

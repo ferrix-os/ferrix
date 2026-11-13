@@ -252,7 +252,16 @@ it is worth there.
   trip): it changes when a job is charged for a waiter, and comes after W1 to
   W3 are measured.
 - **The rest of epoll's one-processor gap** (3.6 us against 1.6 with no
-  registrations): its own timeline, after 4.3.
+  registrations): its timeline, taken after 4.3 (§7), puts about 0.45 us of
+  each side's 1.8 us in the wait's looks at the set, about four where Linux
+  makes one (a blocking `epoll_wait` calls `Epoll::ready` before it sleeps,
+  twice as `wait_on`'s test, and twice after the wake; one look after the
+  wake would leave, by estimate, about 0.1 us of it), about 0.27 us in the
+  switch (§4.2), and the rest in three calls' floor and the eventfd's read
+  and write. A read of an eventfd wakes its writable queue, which an `EPOLLIN`
+  registration has hooked as well, so the next wait looks at the file for
+  nothing: Linux's `ep_poll_callback` drops a wake whose key shares no event
+  with the registration. Neither is designed yet.
 
 ## 6. The idle path, on the box
 
@@ -325,3 +334,21 @@ no epoll fdinfo yet. That makes §4.3's change the next one.
     `should_preempt` against `choose_next`'s pick written down, then WD1-WD4.
   - `sys/epoll-always` is OK IF WE1-WE4. It is load ring.
 - 2026-11-13: the box figures are in §6. `sys/epoll-always` is being built.
+- 2026-11-13: `sys/epoll-always` built (branch `sys/epoll-ready`): the set
+  counts the registrations every wait looks at, moved under its lock from
+  each registration's answer before and after wherever its trust, its hook or
+  its presence changes, and a wait walks the registrations only while the
+  count is not zero. Release guest under KVM, self-checks skipped, one
+  processor, µs a round trip, before and after in the same guest, Linux 7.0
+  beside: at N = 0, 3.65-3.78 before and 3.56-3.63 after; at N = 512,
+  7.03-7.09 before and 3.56-3.59 after; Linux 1.54-1.59 throughout. A second
+  pair, host load 7 to 10: at N = 0, 3.45-3.47 before and 3.53-3.54 after;
+  at N = 512, 6.69-6.82 before and 3.58-3.70 after (Linux beside read 1.75
+  to 2.4 as the host's load rose to 15, too noisy to rank). The line is flat
+  in N; at N = 0 the two are within noise. A wait on a set that holds a
+  distrusted file, an unhookable registration or a set still walks every
+  registration, as before. Code review: ledger 9492, OK IF EP1-EP6, for this
+  commit and the fdinfo one below, which may land with it as a second
+  commit.
+  - The timeline of what is left: §5, and the never-land patch
+    `~/.local/share/ferrix/ef-30fps/faultbench/epdiag.patch`.

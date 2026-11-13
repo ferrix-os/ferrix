@@ -36,10 +36,19 @@
 //! changed between a wait's hooking and its looking is reported (the
 //! hook-before-look meet); and a registration whose hook is refused is
 //! looked at by every wait and its set no longer trusted.
+//!
+//! And the walk's count (`docs/BLOCK-AND-WAKE.md` §4.3, ledger 9044): a set
+//! counts the registrations every wait looks at -- distrusted, unhookable or
+//! a set -- and a wait walks its registrations for them only while the count
+//! is not zero. Each kind, a registration distrusted after it was added among
+//! them, is reported by a wait with nothing pending; a set added and removed
+//! moves the count and back; `EPOLL_CTL_MOD` moves it not; and a set back at
+//! zero looks at no file. At each step the count must equal a recount.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::any::Any;
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use ferrix_bootinfo::PAGE_SIZE;
 use ferrix_linux_abi::nr::Syscall;
@@ -49,7 +58,7 @@ use ferrix_linux_abi::types::{
     EPOLLHUP, EPOLLIN, EPOLLONESHOT, EPOLLOUT, F_GETFD, FD_CLOEXEC, MAP_ANONYMOUS, MAP_PRIVATE,
     O_DIRECTORY, O_RDONLY, PROT_READ, PROT_WRITE, SEEK_CUR, SEEK_SET,
 };
-use ferrix_vfs::Errno;
+use ferrix_vfs::{Errno, Inode, Metadata, Readiness, WakeSource};
 
 use crate::fs;
 use crate::fs::epoll;
@@ -835,6 +844,7 @@ fn check_the_ready_list(
     a_refused_hook_is_looked_at_every_wait(process, page)?;
     a_mark_that_found_no_room_still_wakes(process, page, counts)?;
     a_refused_gathering_distrusts(process, page)?;
+    the_walk_count_follows_the_kinds(process, page)?;
     Ok(())
 }
 
@@ -1329,6 +1339,11 @@ fn a_refused_hook_is_looked_at_every_wait(
         // does not trust it (a refused gathering, nth 1, is hooked by it).
         let _ = inner.ready(4);
         let refused = !inner.trusted();
+        // A refused hook is counted among those every wait looks at.
+        let (always, recount) = inner.always_counts();
+        if always != recount || (refused && always == 0) {
+            return Err("a registration whose hook was refused was not counted for every wait");
+        }
         let reported = if refused {
             put_byte(process, page, writer)?;
             let got = inner.ready(4).len();
@@ -1352,4 +1367,270 @@ fn a_refused_hook_is_looked_at_every_wait(
         }
     }
     Err("a registration whose hook was refused was left trusted")
+}
+
+/// A file a walk-count case steers: readable when told, trusted when told,
+/// and changed without a wake unless told to wake, as a file that says it
+/// cannot be trusted may change. It names one queue of its own.
+#[derive(Debug)]
+struct Steered {
+    /// What `poll` reports readable.
+    ready: AtomicBool,
+    /// What `poll_queues` answers.
+    trusted: AtomicBool,
+    /// Its change count, moved with every change.
+    changes: AtomicU64,
+    /// The queue it names.
+    queue: Arc<WaitQueue>,
+}
+
+impl Steered {
+    /// Make it readable or not, waking its queue only when `woken`.
+    fn set(&self, ready: bool, woken: bool) {
+        self.ready.store(ready, Ordering::Release);
+        let _ = self.changes.fetch_add(1, Ordering::AcqRel);
+        if woken {
+            self.queue.wake_all();
+        }
+    }
+}
+
+impl Inode for Steered {
+    fn metadata(&self) -> Metadata {
+        fs::anon::metadata()
+    }
+
+    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
+        self
+    }
+
+    fn is_stream(&self) -> bool {
+        true
+    }
+
+    fn poll(&self) -> Readiness {
+        Readiness {
+            readable: self.ready.load(Ordering::Acquire),
+            ..Readiness::default()
+        }
+    }
+
+    fn poll_queues(&self, visit: &mut dyn FnMut(WakeSource)) -> bool {
+        visit(fs::wake::shared(&self.queue));
+        self.trusted.load(Ordering::Acquire)
+    }
+
+    fn poll_changes(&self) -> Option<u64> {
+        Some(self.changes.load(Ordering::Acquire))
+    }
+}
+
+/// A [`Steered`] file, quiet, trusted or not, installed in `process`.
+fn steered(process: &Process, trusted: bool) -> Result<(Arc<Steered>, i32), &'static str> {
+    let queue = crate::fallible::try_arc(WaitQueue::new()).map_err(|_| "no room for a queue")?;
+    let file = crate::fallible::try_arc(Steered {
+        ready: AtomicBool::new(false),
+        trusted: AtomicBool::new(trusted),
+        changes: AtomicU64::new(0),
+        queue,
+    })
+    .map_err(|_| "no room for a steered file")?;
+    let opened = fs::anon::open(
+        Arc::clone(&file) as Arc<dyn Inode>,
+        b"anon_inode:[steered]",
+        true,
+    )
+    .map_err(|_| "a steered file would not open")?;
+    let fd = process
+        .files()
+        .lock()
+        .insert(opened, false)
+        .map_err(|_| "a steered file would not take a number")?;
+    Ok((file, fd))
+}
+
+/// Require the set's count of registrations every wait looks at to be
+/// `wanted` and to equal a recount.
+fn counted(inner: &epoll::Epoll, wanted: usize, what: &'static str) -> Result<(), &'static str> {
+    let (always, recount) = inner.always_counts();
+    if always != recount {
+        crate::console::println!(
+            "  epoll    the walk's count is {always}, a recount {recount}, at: {what}"
+        );
+        return Err("a set's count of registrations every wait looks at is not their number");
+    }
+    if always != wanted {
+        crate::console::println!(
+            "  epoll    the walk's count is {always}, not {wanted}, at: {what}"
+        );
+        return Err("a set counted a registration every wait looks at wrongly");
+    }
+    Ok(())
+}
+
+/// `file` made readable without a wake is reported with `cookie` by a wait
+/// on `set`, which nothing woke, and made quiet again is dropped. Tried
+/// again if the set's once-a-second rescan, which lists every registration,
+/// fell in between.
+fn reported_unwoken(
+    process: &Process,
+    page: u64,
+    (set, inner): (i32, &epoll::Epoll),
+    file: &Steered,
+    cookie: u64,
+) -> Result<(), &'static str> {
+    for _ in 0..3 {
+        let rescans = inner.rescans();
+        file.set(true, false);
+        let got = wait(process, page, set, 8, 0)?;
+        file.set(false, false);
+        if !wait(process, page, set, 8, 0)?.is_empty() {
+            return Err("a steered file made quiet was still reported");
+        }
+        if inner.rescans() != rescans {
+            continue;
+        }
+        if got != [(EPOLLIN, cookie)] {
+            return Err("a registration every wait looks at was not reported with nothing woken");
+        }
+        return Ok(());
+    }
+    Err("the set's rescan fell in every try of a walk-count case")
+}
+
+/// A wait on `set` with nothing pending looks at no file. Tried again if
+/// the rescan fell in between.
+fn walks_nothing(
+    process: &Process,
+    page: u64,
+    (set, inner): (i32, &epoll::Epoll),
+) -> Result<(), &'static str> {
+    for _ in 0..3 {
+        let (looks, rescans) = (inner.looks(), inner.rescans());
+        if !wait(process, page, set, 8, 0)?.is_empty() {
+            return Err("a set of quiet registrations reported something");
+        }
+        if inner.rescans() != rescans {
+            continue;
+        }
+        if inner.looks() != looks {
+            return Err("a wait on a set counting none every wait looks at looked at a file");
+        }
+        return Ok(());
+    }
+    Err("the set's rescan fell in every try of a walk-count case")
+}
+
+/// Add `target` to `here`'s set for `EPOLLIN` with `cookie`, require the
+/// count at `added`, wait once with nothing to report, and require it at
+/// `hooked`.
+fn add_counted(
+    process: &Process,
+    page: u64,
+    (set, inner): (i32, &epoll::Epoll),
+    (target, cookie): (i32, u64),
+    (added, hooked): (usize, usize),
+) -> Result<(), &'static str> {
+    if ctl(process, page, set, EPOLL_CTL_ADD, target, EPOLLIN, cookie) != Ok(0) {
+        return Err("a quiet file could not be added to a set");
+    }
+    counted(inner, added, "a registration added")?;
+    if !wait(process, page, set, 8, 0)?.is_empty() {
+        return Err("a set of quiet registrations reported something");
+    }
+    counted(inner, hooked, "a registration's first wait")
+}
+
+/// The walk's count, kind by kind: see the module doc's last paragraph.
+/// The unhookable kind is [`a_refused_hook_is_looked_at_every_wait`]'s.
+fn the_walk_count_follows_the_kinds(process: &Process, page: u64) -> Result<(), &'static str> {
+    let set = create(process, 0)?;
+    let inner = set_of(process, set)?;
+    let here = (set, &*inner);
+    let mut opened = Vec::new();
+    // Quiet pipes, each untrusted until a wait hooks it.
+    for at in 0..4_u64 {
+        let (reader, writer) = pipe_pair(process, page)?;
+        opened.extend([reader, writer]);
+        add_counted(process, page, here, (reader, 0x60 + at), (1, 0))?;
+    }
+    walks_nothing(process, page, here)?;
+
+    // A file that says it cannot be trusted.
+    let (distrusted, distrusted_fd) = steered(process, false)?;
+    opened.push(distrusted_fd);
+    add_counted(process, page, here, (distrusted_fd, 0x70), (1, 1))?;
+    reported_unwoken(process, page, here, &distrusted, 0x70)?;
+
+    // A file trusted when added that says it cannot be later on: the wake
+    // that says so lists it, and the look that hears it counts it.
+    let (later, later_fd) = steered(process, true)?;
+    opened.push(later_fd);
+    add_counted(process, page, here, (later_fd, 0x71), (2, 1))?;
+    later.trusted.store(false, Ordering::Release);
+    later.set(false, true);
+    if !wait(process, page, set, 8, 0)?.is_empty() {
+        return Err("a quiet steered file reported something");
+    }
+    counted(&inner, 2, "a hooked file distrusted")?;
+    reported_unwoken(process, page, here, &later, 0x71)?;
+
+    let first_pipe = *opened.first().ok_or("no pipe")?;
+    walk_count_nested_and_back(
+        process,
+        page,
+        here,
+        &mut opened,
+        [distrusted_fd, later_fd, first_pipe],
+    )?;
+    drop(inner);
+    for fd in opened.into_iter().chain([set]) {
+        closed(process, fd)?;
+    }
+    Ok(())
+}
+
+/// The rest of [`the_walk_count_follows_the_kinds`], on its set holding two
+/// distrusted files and quiet pipes: a set registered in it, holding a
+/// distrusted file, counted and reported; `EPOLL_CTL_MOD` moving no count;
+/// and each taken out, back to zero, where a wait walks nothing.
+fn walk_count_nested_and_back(
+    process: &Process,
+    page: u64,
+    here: (i32, &epoll::Epoll),
+    opened: &mut Vec<i32>,
+    [distrusted_fd, later_fd, pipe]: [i32; 3],
+) -> Result<(), &'static str> {
+    let (set, inner) = here;
+    let nested = create(process, 0)?;
+    opened.push(nested);
+    let (deep, deep_fd) = steered(process, false)?;
+    opened.push(deep_fd);
+    if ctl(process, page, nested, EPOLL_CTL_ADD, deep_fd, EPOLLIN, 0x72) != Ok(0) {
+        return Err("a steered file could not be added to a set");
+    }
+    add_counted(process, page, here, (nested, 0x73), (3, 3))?;
+    reported_unwoken(process, page, here, &deep, 0x73)?;
+
+    // EPOLL_CTL_MOD changes no kind: a set, a distrusted file, a pipe.
+    for (target, events, cookie) in [
+        (nested, EPOLLIN | EPOLLET, 0x74),
+        (distrusted_fd, EPOLLIN | EPOLLONESHOT, 0x75),
+        (pipe, EPOLLIN | EPOLLET, 0x76),
+    ] {
+        if ctl(process, page, set, EPOLL_CTL_MOD, target, events, cookie) != Ok(0) {
+            return Err("EPOLL_CTL_MOD was refused");
+        }
+        counted(inner, 3, "a registration modified")?;
+    }
+    let _ = wait(process, page, set, 8, 0)?;
+
+    // Taken out one by one, back to zero, where a wait walks nothing.
+    for (target, left) in [(nested, 2), (distrusted_fd, 1), (later_fd, 0)] {
+        if ctl(process, page, set, EPOLL_CTL_DEL, target, 0, 0) != Ok(0) {
+            return Err("EPOLL_CTL_DEL was refused");
+        }
+        counted(inner, left, "a registration removed")?;
+    }
+    walks_nothing(process, page, here)
 }
