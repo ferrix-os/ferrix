@@ -30,6 +30,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use pkg::repo::{self, Updated};
+use pkg::transaction::{self, Recovered};
 use pkg::{Error, info_lines, install, install_replacing, installed, read, remove};
 
 const USAGE: &str = "usage: pkg [--root DIR] list | info NAME | install [--replace] FILE... | \
@@ -48,6 +49,16 @@ fn main() -> ExitCode {
     let Some((command, rest)) = args.split_first() else {
         return usage();
     };
+    // A transaction that stopped part way is put right before anything
+    // else changes the root.
+    let changes = matches!(
+        command.as_str(),
+        "install" | "remove" | "update" | "upgrade"
+    );
+    if changes && let Err(error) = recover(&root) {
+        let _ = writeln!(std::io::stderr(), "pkg: {error}");
+        return ExitCode::FAILURE;
+    }
     let done = match (command.as_str(), rest) {
         ("list", []) => list(&root),
         ("info", [name]) => info(&root, name),
@@ -73,6 +84,19 @@ fn main() -> ExitCode {
             let _ = writeln!(std::io::stderr(), "pkg: {error}");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// [`transaction::recover`], saying what it did.
+fn recover(root: &std::path::Path) -> Result<(), Error> {
+    match transaction::recover(root)? {
+        Some(Recovered::RolledBack) => {
+            say(&["pkg: undid a transaction that stopped before it was done".to_owned()])
+        }
+        Some(Recovered::Finished) => {
+            say(&["pkg: finished a transaction that stopped after it was done".to_owned()])
+        }
+        None => Ok(()),
     }
 }
 

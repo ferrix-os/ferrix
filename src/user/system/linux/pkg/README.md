@@ -30,7 +30,9 @@ them, `docs/SIGNING.md`'s manifest of kind 5, verified with the anchors
 compiled in from `FERRIX_PKG_ANCHORS` (`build.rs`): none in the `pkg` an
 image carries until a package key exists, so it refuses every repository.
 
-There is no database: the records are what is installed. What a package is
+There is no database: the records are what is installed. An install,
+replacement or upgrade of any number of packages is one transaction, with a
+journal in `/var/lib/pkg/transaction`: all of it, or the root as it was. What a package is
 -- the manifest, the record, the plan that orders a set and refuses a missing
 dependency or a path owned twice -- is `src/lib/proto/pkg`, which xtask
 builds images with, and the archive reader is the kernel's
@@ -39,4 +41,4 @@ builds images with, and the archive reader is the kernel's
 `cargo test` here runs it against a directory as the root;
 `cargo xtask test-pkg` boots it, installs, runs and removes the stat
 service, replaces a package and back, upgrades from repositories it serves
-itself, and requires its fourteen refusals.
+itself, and requires its fifteen refusals and a stopped transaction undone.

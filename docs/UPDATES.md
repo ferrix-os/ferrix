@@ -216,3 +216,21 @@ refused beside its control. `test-pkg` makes two throwaway H10 keys per
 run in a directory outside any git tree (`Signer`), builds its `pkg` with
 one of them, and adds an index signed by the other, a package signed as
 another, and an unsigned repository to its refusals.
+
+**Step c, as built.** `src/user/system/linux/pkg/src/transaction.rs`. Every
+install, `--replace` and upgrade of any number of packages is one
+transaction: every new file staged as `<name>.pkg-new`; the journal,
+`var/lib/pkg/transaction`, written and synced with each path and whether
+something was there, under `swapping`; each path's old file renamed aside
+as `<name>.pkg-old` and the new one into its place, the records last; the
+journal turned `committed`; only then the old files deleted. A failed
+rename undoes everything from the journal, and a `pkg` that changes the
+root first undoes a transaction that stopped before its commit, or
+finishes one that stopped after it. A `.pkg-old` already there is refused
+before anything changes, so undoing puts back only what the transaction
+moved. Host tests stop the swap dead, and fail it, after every one of its
+renames in turn, and require the root byte for byte as it was; `test-pkg`
+refuses a replacement with something in the way, and undoes a journal its
+script leaves half done. A removal is not a transaction yet: it deletes the
+record first, as before. The btrfs snapshot stays the aim (§2.3); this
+needs nothing of the file system but rename.

@@ -14,9 +14,10 @@
 //! [`install_replacing`]), when what it depends on is not installed or
 //! coming with it (`ferrix_pkg::plan`), and when it would put down a path
 //! that is there already -- another package's, or the system's. A removal is
-//! refused while an installed package depends on it. The record is written
-//! last and deleted first, so a package whose files are half there has no
-//! record, and is not installed.
+//! refused while an installed package depends on it. An install, a
+//! replacement or an upgrade of any number of packages is one transaction
+//! ([`transaction`]): all of it, or nothing. A removal deletes the record
+//! first, so a package whose files are half gone is not installed.
 //!
 //! Upgrades from a repository, and the security fixes waiting, are
 //! [`repo`]'s (`docs/UPDATES.md`).
@@ -33,6 +34,9 @@ use ferrix_pkg::record::{self, Installed, Record};
 
 pub mod repo;
 pub mod sig;
+pub mod transaction;
+
+use transaction::Change;
 
 /// Why something was refused, or failed: the line `pkg` prints.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -124,7 +128,7 @@ pub fn info_lines(record: &Record) -> Vec<String> {
 
 /// One entry of a package: a file's bytes or a link's target.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Content {
+pub(crate) enum Content {
     /// A regular file.
     Bytes(Vec<u8>),
     /// A symbolic link.
@@ -242,7 +246,7 @@ pub fn read(archive: &[u8]) -> Result<Package, Error> {
 /// `packages`, a path two packages would own or that is in the root already,
 /// or a file that could not be written.
 pub fn install(root: &Path, packages: Vec<Package>) -> Result<Vec<Record>, Error> {
-    install_with(root, packages, false)
+    install_with(root, packages, false, None)
 }
 
 /// [`install`], where a package of a name that is installed already takes
@@ -255,15 +259,9 @@ pub fn install(root: &Path, packages: Vec<Package>) -> Result<Vec<Record>, Error
 /// A path that is in the root already may be put down only where the
 /// package being replaced owns it.
 ///
-/// Then one transaction per package, in an order that leaves something a
-/// second `pkg install --replace` of the same file repairs, whenever it
-/// stops: every new file is written beside its place first (nothing in use
-/// has changed yet, and a failure removes them again), then each is renamed
-/// over its place, then each file only the old version had is deleted, and
-/// the new record is renamed over the old one last. Until that last rename
-/// the old record is the package's, so a replacement that stopped part way
-/// is still the old package, installed, and owning every path the new one
-/// puts down. A program that is running keeps the file it was started from,
+/// Then every package is put in place in one transaction
+/// ([`transaction`]): all of them, or, on a failure, none, the root left as
+/// it was. A program that is running keeps the file it was started from,
 /// which the rename unlinks rather than writes over.
 ///
 /// # Errors
@@ -283,7 +281,7 @@ pub fn install_replacing(
                 .cloned()
         })
         .collect();
-    let done = install_with(root, packages, true)?;
+    let done = install_with(root, packages, true, None)?;
     Ok(done
         .into_iter()
         .map(|record| {
@@ -297,8 +295,14 @@ pub fn install_replacing(
         .collect())
 }
 
-/// [`install`], and [`install_replacing`] when `replace`.
-fn install_with(root: &Path, packages: Vec<Package>, replace: bool) -> Result<Vec<Record>, Error> {
+/// [`install`], and [`install_replacing`] when `replace`; its transaction
+/// stopped where `stop` says when it is given (the tests').
+fn install_with(
+    root: &Path,
+    packages: Vec<Package>,
+    replace: bool,
+    stop: Option<transaction::Stop>,
+) -> Result<Vec<Record>, Error> {
     let present = installed(root)?;
     let replacing = |name: &str| replace && packages.iter().any(|p| p.record.package.name == name);
     if !replace {
@@ -337,129 +341,45 @@ fn install_with(root: &Path, packages: Vec<Package>, replace: bool) -> Result<Ve
             }
         }
     }
+    // Every package's files in the plan's order, what only its old version
+    // had, then every record: one transaction.
+    let mut changes = Vec::new();
+    let mut records = Vec::new();
     let mut done = Vec::new();
     for at in order {
-        let Some(new) = at.checked_sub(kept.len()) else {
+        let Some(package) = at.checked_sub(kept.len()).and_then(|new| packages.get(new)) else {
             continue;
         };
-        let Some(package) = packages.get(new) else {
-            continue;
-        };
-        match old(&package.record.package.name) {
-            Some(record) => replace_with(root, record, package)?,
-            None => put_down(root, package)?,
+        for (path, mode, content) in &package.entries {
+            changes.push(Change::Put(path.clone(), *mode, content.clone()));
         }
+        if let Some(record) = old(&package.record.package.name) {
+            for file in &record.files {
+                if !package
+                    .entries
+                    .iter()
+                    .any(|(path, _, _)| *path == file.path)
+                {
+                    changes.push(Change::Delete(file.path.clone()));
+                }
+            }
+        }
+        records.push(Change::Put(
+            record::path(&package.record.package.name),
+            0o644,
+            Content::Bytes(record::render(&package.record).into_bytes()),
+        ));
         done.push(package.record.clone());
     }
+    changes.extend(records);
+    transaction::run_until(root, &changes, stop)?;
     Ok(done)
 }
 
-/// Where a file of a replacement waits beside its place: the same name with
-/// [`STAGED`] added, so that no two files of one directory share it.
-fn staged(path: &Path) -> PathBuf {
-    let mut name = path.file_name().unwrap_or_default().to_os_string();
-    name.push(STAGED);
-    path.with_file_name(name)
-}
-
-/// What [`staged`] adds to a name.
-const STAGED: &str = ".pkg-new";
-
-/// Put `package` down in `old`'s place, as [`install_replacing`] says.
-fn replace_with(root: &Path, old: &Record, package: &Package) -> Result<(), Error> {
-    let name = &package.record.package.name;
-    let record_at = under(root, &record::path(name));
-    let mut waiting: Vec<PathBuf> = Vec::new();
-    let unstage = |waiting: &[PathBuf]| {
-        for path in waiting {
-            let _ = fs::remove_file(staged(path));
-        }
-    };
-    // 1. Every new file beside its place; nothing in use has changed.
-    for (path, mode, content) in &package.entries {
-        let target = under(root, path);
-        if let Some(parent) = target.parent()
-            && let Err(error) = fs::create_dir_all(parent)
-        {
-            unstage(&waiting);
-            return refuse(format!("{}: {error}", parent.display()));
-        }
-        let beside = staged(&target);
-        let _ = fs::remove_file(&beside);
-        let written = match content {
-            Content::Bytes(bytes) => write_plain(&beside, *mode, bytes),
-            Content::Link(to) => link(to, &beside),
-        };
-        if let Err(error) = written {
-            unstage(&waiting);
-            return Err(error);
-        }
-        waiting.push(target);
-    }
-    let rendered = record::render(&package.record);
-    if let Err(error) = write_plain(&staged(&record_at), 0o644, rendered.as_bytes()) {
-        unstage(&waiting);
-        return Err(error);
-    }
-    // 2. Each over its place. From here a stop leaves the old record, which
-    // owns every path, so the same command again finishes the work.
-    for target in &waiting {
-        fs::rename(staged(target), target).map_err(io_error(target))?;
-    }
-    // 3. What only the old version had.
-    for file in &old.files {
-        if package
-            .entries
-            .iter()
-            .any(|(path, _, _)| *path == file.path)
-        {
-            continue;
-        }
-        let path = under(root, &file.path);
-        match fs::remove_file(&path) {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return refuse(format!("{}: {error}", path.display())),
-        }
-        let mut at = path;
-        while at.pop() && at != root && fs::remove_dir(&at).is_ok() {}
-    }
-    // 4. The record last: now it is the new version.
-    fs::rename(staged(&record_at), &record_at).map_err(io_error(&record_at))
-}
-
 /// `bytes` at `path` with `mode`, written in place.
-fn write_plain(path: &Path, mode: u32, bytes: &[u8]) -> Result<(), Error> {
+pub(crate) fn write_plain(path: &Path, mode: u32, bytes: &[u8]) -> Result<(), Error> {
     fs::write(path, bytes).map_err(io_error(path))?;
     set_mode(path, mode)
-}
-
-/// Write `package`'s files, then its record.
-fn put_down(root: &Path, package: &Package) -> Result<(), Error> {
-    for (path, mode, content) in &package.entries {
-        let target = under(root, path);
-        if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent).map_err(io_error(parent))?;
-        }
-        match content {
-            Content::Bytes(bytes) => write_file(&target, *mode, bytes)?,
-            Content::Link(to) => link(to, &target)?,
-        }
-    }
-    let name = &package.record.package.name;
-    let target = under(root, &record::path(name));
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent).map_err(io_error(parent))?;
-    }
-    write_file(&target, 0o644, record::render(&package.record).as_bytes())
-}
-
-/// `bytes` at `path` with `mode`, written beside it and renamed into place.
-fn write_file(path: &Path, mode: u32, bytes: &[u8]) -> Result<(), Error> {
-    let partial = path.with_extension("pkg-partial");
-    fs::write(&partial, bytes).map_err(io_error(&partial))?;
-    set_mode(&partial, mode)?;
-    fs::rename(&partial, path).map_err(io_error(path))
 }
 
 #[cfg(unix)]
@@ -474,12 +394,12 @@ fn set_mode(_path: &Path, _mode: u32) -> Result<(), Error> {
 }
 
 #[cfg(unix)]
-fn link(target: &str, path: &Path) -> Result<(), Error> {
+pub(crate) fn link(target: &str, path: &Path) -> Result<(), Error> {
     std::os::unix::fs::symlink(target, path).map_err(io_error(path))
 }
 
 #[cfg(not(unix))]
-fn link(_target: &str, path: &Path) -> Result<(), Error> {
+pub(crate) fn link(_target: &str, path: &Path) -> Result<(), Error> {
     refuse(format!(
         "{}: no symbolic links on this host",
         path.display()

@@ -20,7 +20,10 @@
 //! the accepted sequence, a file whose digest is not the index's, an index
 //! signed by a key `pkg` does not trust, a package signed as another, an
 //! unsigned index and package, and a dependency no one has are refused,
-//! each beside the run that passes. The repositories are signed with two
+//! each beside the run that passes. A replacement with something in the
+//! way of a file being set aside is refused with nothing changed, and a
+//! transaction left half done (its journal written by the script) is undone
+//! by the next `pkg`. The repositories are signed with two
 //! throwaway development keys the run makes and deletes ([`Signer`]), and
 //! the boot's `pkg` is built trusting one of them.
 
@@ -530,10 +533,19 @@ pkg newer | while read -r line; do case "$line" in 'pkg: every package is the ne
 pkg update --repo $R/missing && echo "pkg-test: ok accepted index 3"
 pkg upgrade --repo $R/missing 2>&1 | while read -r line; do case "$line" in *'pkg-user 3.0 needs pkg-gone, which neither this root nor the repository has') echo "pkg-test: ok refused a dependency nobody has";; esac; done
 read -r line < /bin/pkg-user && case "$line" in 'pkg-user: two') echo "pkg-test: ok pkg-user stayed 2.0";; esac
+echo "pkg-user: in the way" > /bin/pkg-user.pkg-old
+pkg install --replace $P/user.fxpkg 2>&1 | while read -r line; do case "$line" in *'/bin/pkg-user.pkg-old is in the way of /bin/pkg-user being set aside: refused, nothing changed') echo "pkg-test: ok refused a replacement with something in the way";; esac; done
+read -r line < /bin/pkg-user && case "$line" in 'pkg-user: two') echo "pkg-test: ok the refused replacement changed nothing";; esac
+echo "pkg transaction 1" > /var/lib/pkg/transaction
+echo "swapping" >> /var/lib/pkg/transaction
+echo "n bin/pkg-stray" >> /var/lib/pkg/transaction
+echo "pkg-stray: half put down" > /bin/pkg-stray
+pkg update --repo $R/missing | while read -r line; do case "$line" in 'pkg: undid a transaction that stopped before it was done') echo "pkg-test: ok pkg undid a stopped transaction";; esac; done
+read -r line < /bin/pkg-stray || echo "pkg-test: ok what the stopped transaction put down is gone"
 "#;
 
 /// The lines the boot must print, in any order.
-const WANTED: [&str; 47] = [
+const WANTED: [&str; 51] = [
     "pkg-test: started",
     "pkg-test: ok installed",
     "pkg-test: ok listed",
@@ -581,6 +593,10 @@ const WANTED: [&str; 47] = [
     "pkg-test: ok accepted index 3",
     "pkg-test: ok refused a dependency nobody has",
     "pkg-test: ok pkg-user stayed 2.0",
+    "pkg-test: ok refused a replacement with something in the way",
+    "pkg-test: ok the refused replacement changed nothing",
+    "pkg-test: ok pkg undid a stopped transaction",
+    "pkg-test: ok what the stopped transaction put down is gone",
 ];
 
 /// The lines the boot must not print.
@@ -661,7 +677,8 @@ pub(crate) fn test_pkg(args: &Args) -> Result<()> {
         }
         println!(
             "{arch}: pkg installed, ran and removed the stat service, replaced a package and back, \
-             upgraded from a signed repository with its security fix, and refused all fourteen"
+             upgraded from a signed repository with its security fix, refused all fifteen, and undid a \
+             stopped transaction"
         );
     }
     Ok(())

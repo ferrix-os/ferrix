@@ -882,3 +882,171 @@ mod repository {
         let _ = fs::remove_dir_all(&root);
     }
 }
+
+mod transaction {
+    use std::fs;
+    use std::path::Path;
+
+    use super::{
+        Made, base, base_two, install, install_replacing, installed, package_at, read_all, root,
+        user, walk,
+    };
+    use crate::transaction::{JOURNAL, OLD, Recovered, Stop, recover, run_until};
+    use crate::{install_with, this_arch};
+
+    /// user 2.0: its program changed.
+    fn user_two() -> Vec<u8> {
+        package_at(
+            "user",
+            "2.0",
+            &["base"],
+            &[("bin/user", Made::File(b"#!/bin/sh\necho user two\n"))],
+            this_arch(),
+            None,
+        )
+    }
+
+    /// Every file and link under `root` with what it holds, sorted.
+    fn snapshot(root: &Path) -> Vec<(String, Vec<u8>)> {
+        let mut out: Vec<(String, Vec<u8>)> = walk(root)
+            .into_iter()
+            .map(|path| {
+                let held = match fs::read_link(&path) {
+                    Ok(target) => target.to_string_lossy().into_owned().into_bytes(),
+                    Err(_) => fs::read(&path).unwrap(),
+                };
+                (path.to_string_lossy().into_owned(), held)
+            })
+            .collect();
+        out.sort();
+        out
+    }
+
+    fn versions(root: &Path) -> Vec<String> {
+        installed(root)
+            .unwrap()
+            .iter()
+            .map(|r| format!("{} {}", r.package.name, r.package.version))
+            .collect()
+    }
+
+    #[test]
+    fn a_failure_part_way_leaves_the_root_as_it_was() {
+        // A rename that fails at each point of the swap: everything before
+        // it is undone, and the root is as it was.
+        for k in 0.. {
+            let root = root(&format!("txn-fail-{k}"));
+            let _ = install(&root, read_all(&[base(), user()])).unwrap();
+            let before = snapshot(&root);
+            let packages = read_all(&[base_two(None), user_two()]);
+            match install_with(&root, packages, true, Some(Stop::Fail(k))) {
+                Err(error) => {
+                    assert!(
+                        error.0.contains("every change undone, nothing changed"),
+                        "{error}"
+                    );
+                    assert_eq!(snapshot(&root), before, "fail {k}");
+                    let _ = fs::remove_dir_all(&root);
+                }
+                Ok(_) => {
+                    assert!(k > 5, "the swap has more than five renames");
+                    let _ = fs::remove_dir_all(&root);
+                    break;
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn something_in_the_way_is_refused_before_anything_changes() {
+        let root = root("txn-in-the-way");
+        let _ = install(&root, read_all(&[base(), user()])).unwrap();
+        fs::create_dir_all(root.join("bin/user.pkg-old/in-the-way")).unwrap();
+        let before = snapshot(&root);
+        let error = install_replacing(&root, read_all(&[base_two(None), user_two()])).unwrap_err();
+        assert!(
+            error
+                .0
+                .contains("/bin/user.pkg-old is in the way of /bin/user being set aside"),
+            "{error}"
+        );
+        assert_eq!(snapshot(&root), before);
+        assert_eq!(versions(&root), ["base 1.0", "user 1.0"]);
+        assert!(!root.join(JOURNAL).exists());
+        // The control: out of the way, the same upgrade goes in whole.
+        fs::remove_dir_all(root.join("bin/user.pkg-old")).unwrap();
+        let _ = install_replacing(&root, read_all(&[base_two(None), user_two()])).unwrap();
+        assert_eq!(versions(&root), ["base 2.0", "user 2.0"]);
+        let leftovers: Vec<_> = walk(&root)
+            .into_iter()
+            .filter(|path| {
+                let path = path.to_string_lossy();
+                path.ends_with(OLD) || path.ends_with(".pkg-new")
+            })
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+        assert!(!root.join("usr/lib/base/data").exists());
+        assert!(!root.join(JOURNAL).exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_stop_at_any_rename_is_undone_by_the_next_pkg() {
+        // Every point of the swap: base 2.0 and user 2.0 replace 1.0 and
+        // stop dead after `k` renames; recovery puts back exactly what was
+        // there. Past the last rename the transaction completes.
+        for k in 0.. {
+            let root = root(&format!("txn-stop-{k}"));
+            let _ = install(&root, read_all(&[base(), user()])).unwrap();
+            let before = snapshot(&root);
+            let packages = read_all(&[base_two(None), user_two()]);
+            match install_with(&root, packages, true, Some(Stop::Crash(k))) {
+                Err(_) => {
+                    assert!(root.join(JOURNAL).exists(), "stop {k}: no journal");
+                    // Nothing else changes the root until it is put right.
+                    let again = run_until(&root, &[], None).unwrap_err();
+                    assert!(again.0.contains("stopped part way"), "{again}");
+                    assert_eq!(recover(&root).unwrap(), Some(Recovered::RolledBack));
+                    assert_eq!(snapshot(&root), before, "stop {k}");
+                    assert_eq!(recover(&root).unwrap(), None);
+                    let _ = fs::remove_dir_all(&root);
+                }
+                Ok(_) => {
+                    assert!(k > 5, "the swap has more than five renames");
+                    assert_eq!(versions(&root), ["base 2.0", "user 2.0"]);
+                    let _ = fs::remove_dir_all(&root);
+                    break;
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_stop_after_the_commit_is_finished_by_the_next_pkg() {
+        let root = root("txn-committed");
+        let _ = install(&root, read_all(&[base_two(None)])).unwrap();
+        // As a stop after the commit leaves it: the new files in place, an
+        // old one still set aside, the journal committed.
+        fs::write(root.join("usr/lib/base/data.pkg-old"), b"base data").unwrap();
+        fs::create_dir_all(root.join("var/lib/pkg")).unwrap();
+        fs::write(
+            root.join(JOURNAL),
+            "pkg transaction 1\ncommitted\nd usr/lib/base/data\n",
+        )
+        .unwrap();
+        assert_eq!(recover(&root).unwrap(), Some(Recovered::Finished));
+        assert!(!root.join("usr/lib/base/data.pkg-old").exists());
+        assert!(!root.join(JOURNAL).exists());
+        assert_eq!(versions(&root), ["base 2.0"]);
+        // A journal pkg did not write is refused, and touched nowhere.
+        fs::write(
+            root.join(JOURNAL),
+            "pkg transaction 1\nswapping\nd ../etc\n",
+        )
+        .unwrap();
+        let error = recover(&root).unwrap_err();
+        assert!(error.0.contains("not a journal pkg wrote"), "{error}");
+        assert!(root.join(JOURNAL).exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+}
