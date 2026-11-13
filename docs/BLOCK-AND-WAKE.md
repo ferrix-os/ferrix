@@ -368,11 +368,18 @@ Cases (`fs::epoll_check`), each with a control through `gate.sh control`:
 - A blocking wait woken by one write makes one real look after its wake. The
   set counts its real looks for the checks (`scans`, beside `looks`). The
   control puts `ready(1)` back as the test and fires on the count.
-- A write that lands between the waiter's listing and its last test is
-  reported by that wait, well before the recheck. The meet is inside
-  `may_report`, armed for the test's second call, since `ready`'s own meet
-  is no longer reached by the last test. The control leaves the wake-count
-  term out of `may_report` and fires on "missed until the rescan".
+- A write that lands while the waiter is held in its first test inside
+  `wait_on`, before it lists itself, is reported by that wait well before
+  the recheck. The write's wake finds nobody listed, so only the test's
+  counts, read after the meet, can see it. The meet is inside `may_report`,
+  at its second call (the way in's is the first), since `ready`'s own meet
+  is no longer reached by the test. A write after the listing is ended by
+  the wake itself, so a meet there shows nothing about the counts (the code
+  review's EC1, ledger 9702, after a control at the third call did not
+  fire). The control takes both count terms out of `may_report`; the first
+  check that catches it is named with its line. The base read before the
+  take (the review's finding) is argued, not shown: a meet would have to
+  hold the waiter inside the set's spin lock.
 - A blocking wait on a set holding a distrusted file that changes without a
   wake is reported well within a second (the case allows 500 ms; the
   untrusted recheck is 5 ms), not by the rescan. The control drops the
@@ -537,8 +544,32 @@ showed 0.07. Ferrix still pays 1.7 times Linux for a futex or an epoll round
 trip with nothing registered. The epoll round trip grows by about 26 ns for
 every idle registration and Linux's does not grow: at 512 it is 4.4 times
 Linux's. With the game running, wineserver holds 1,940 open descriptors and
-the game 970, upper bounds on what their epoll sets hold, since Ferrix has
-no epoll fdinfo yet. That makes §4.3's change the next one.
+the game 970, upper bounds on what their epoll sets hold, since Ferrix had
+no epoll fdinfo then. That made §4.3's change the next one.
+
+The same kit on develop be12356fd (4.3 and the fdinfo in), idle, the same
+binaries (`runs/ep1/ferrix-epr-run.txt`):
+
+| Round trip | Ferrix with 4.3 | Ferrix before 4.3 | Linux 7.0 |
+|---|---:|---:|---:|
+| epoll, no idle registration, one processor | 9.05 | 8.71 | 5.00 |
+| epoll, 16 idle registrations | 8.95 | 9.02 | 4.97 |
+| epoll, 64 idle registrations | 9.01 | 10.35 | 4.96 |
+| epoll, 256 idle registrations | 8.91 | 15.64 | 5.08 |
+| epoll, 512 idle registrations, one processor | 8.93 | 21.88 | 4.99 |
+| epoll, 512 idle registrations, two processors | 13.16 | 18.46 | 8.46 |
+
+Flat in the registrations on the real machine, as in the guest. With the
+game in the world (`runs/ep1/epoll-sets.txt`), the fdinfo shows
+wineserver's one set (descriptor 9) holding 468 registrations, of 1,941
+descriptors open, and the game's one set holding 1. Which of the 468 are of
+the walked kind the fdinfo does not say; the kinds of file it names are
+read on the box with
+
+    p=$(pidof wineserver); for t in $(awk '/^tfd:/{print $2}' /proc/$p/fdinfo/9); do readlink /proc/$p/fd/$t; done | sed 's/:.*//' | sort | uniq -c
+
+(a set, the console, `/dev/kmsg` and a render node are the kinds that can
+be walked). What is left is the base: 8.9 against 5.0 µs, §4.4.
 
 ## 7. Where it stands
 
@@ -601,3 +632,45 @@ no epoll fdinfo yet. That makes §4.3's change the next one.
   built after cut 1's box figures unless they show edge-triggered or
   one-shot registrations on pipes, eventfds or unix sockets, or a set more
   than one thread waits on; cut 3 OK IF EV1-EV4.
+- 2026-11-13: cut 1 built (branch `sys/epoll-base`): `Epoll::may_report`
+  and `Epoll::wait_test` as designed, the bases the set queue's wake count
+  and the ready list's tells read before the take, stored after the flag;
+  `fs::wake`'s looks counted only while `eventfd_check` arms them. Release
+  guest under KVM, self-checks skipped, one processor, µs a round trip
+  (before is `develop` with 4.3): before 3.46 to 3.70 in three boots, after
+  3.28 to 3.40 in three of six; Linux 7.0 beside 1.58 to 1.60. About 0.2 to 0.3 µs a trip, half of what §4.4 expected. A
+  timeline of the built cut (`faultbench/epdiag-cut1.out`) shows why: the
+  test that finds nothing costs about 50 ns, most of it the rescan term's
+  clock read (`timer::now_nanos`, a 128-bit division), where §4.4 counted
+  10. Three of the six after boots read 3.5 to 5.8, with processor time a
+  side rising as much; a never-land stamp on every wait longer than 50 ms
+  found none, so they are the host's, not lost wakes. The test's clock read
+  is the next cut (the rescan's due time kept in counter ticks).
+  - Code review: ledger 9702, OK IF EC1-EC6. A control at the third
+    `may_report` call, after the listing, did not fire there (the wake
+    ends such a wait) and is no evidence; case 2 now meets at the second.
+  - Controls, `gate.sh control`, test-boot x86_64 under KVM, each FIRED
+    (panic), logs in `~/.local/share/ferrix/logs/queue/`: `eb-ctl-a`
+    (the test back to `ready(1)`): "a blocking wait looked at its set more
+    than once after its wake"; `eb-ctl-c` (the flag without the walk's
+    count): "a sleeping wait did not find a distrusted file's change
+    within its recheck"; `eb-ctl-d` (the rescan term false): "a change
+    nothing woke was not found by the rescan of a sleeping wait";
+    `eb-ctl-e` (the looks never armed): "a poll on a quiet eventfd counted
+    no look"; `eb-ctl-f` (both count terms out of `may_report`): caught
+    first by the levels case, "a level-triggered set did not report the
+    pipe's data with its cookie".
+  - The figures' logs, sha256, in
+    `~/.local/share/ferrix/ef-30fps/faultbench/epoll-base/`:
+    c1-before-1 dfdb64b47d8f9bd65ce689eda26df616508b7b3f839229ae30769855405a8b9f,
+    c1-before-2 868941caf68a16113e967114e5d0353cc7d6cc2d2de92133cac07445d1dd7eaa,
+    c1-before-3 938e661d5b45fdb07de396a71011ebcc00e36741b6172cdbfb26ec96183dd925,
+    c1-after-1 b6108f063436e81b46d7741e8d44c54ca3e10e26b5e939883b1fb21371991601,
+    c1-after-2 7e89df9999f3a96a73621c62a20892cc7c5f60352484e75231ba973ca5b8c9a5,
+    c1-after-3 88913700083ebd6608f72728c228aa2779e263016bd1b871dc698e4e55ceba16,
+    c1-after-4 9e7b42b418ec2e27bc5480c55159281a645ebaeab2a282cafd3237632179f347,
+    c1-after-5 2df3beeeb89c0d3084f02e0d4fd9f591603158d4ba7539cfa69bea79f0e9ca29,
+    c1-stall 632a6ce89bbf3d145f100b4d53033f9e1db7b19415ac1815af1fa6da91b29e2a,
+    c1-linux-1 527f5e3ede2c45813b9ed9b2e93b70a8e63975debdb7fd8a4bd4261c85a191d1;
+    the timeline `faultbench/epdiag-cut1.out`
+    1c33a93ea7bf2f90412d6f6b3173cd5756f629681301e4819329ef4d84d3840c.

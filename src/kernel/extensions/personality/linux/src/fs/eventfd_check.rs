@@ -449,11 +449,20 @@ fn check_edges_in_epoll(
 fn check_a_quiet_poll_sleeps(process: &Process, page: u64) -> Result<(), &'static str> {
     let counter = create(process, 0, 0)?;
     stage_pollfd(process, page, counter)?;
+    // Waits count their looks only while a check asks (`fs::wake`'s
+    // `COUNTING`), and only for as long as the poll lasts, whatever it answers.
+    fs::wake::count_looks(true);
     let before = fs::wake::looks();
-    if poll::sys_poll(process, page + AT_EVENT, 1, QUIET_POLL_MILLIS) != Ok(0) {
+    let polled = poll::sys_poll(process, page + AT_EVENT, 1, QUIET_POLL_MILLIS);
+    let looked = fs::wake::looks().saturating_sub(before);
+    fs::wake::count_looks(false);
+    if polled != Ok(0) {
         return Err("a poll on a quiet eventfd did not time out with zero");
     }
-    let looked = fs::wake::looks().saturating_sub(before);
+    // At least its first look: none means no look was counted at all.
+    if looked == 0 {
+        return Err("a poll on a quiet eventfd counted no look");
+    }
     if looked > QUIET_POLL_LOOKS {
         crate::console::println!(
             "  eventfd  a {QUIET_POLL_MILLIS} ms poll on a quiet eventfd looked {looked} times"

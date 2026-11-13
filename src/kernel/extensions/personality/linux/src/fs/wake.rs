@@ -15,7 +15,7 @@
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use ferrix_vfs::{OpenFile, WakeSource};
 
@@ -28,14 +28,32 @@ pub(crate) const TRUSTED_RECHECK_NANOS: u64 = 1_000_000_000;
 /// How long any other wait sleeps between them: a wait queue's own recheck.
 pub(crate) const UNTRUSTED_RECHECK_NANOS: u64 = 5_000_000;
 
-/// Every look a wait gathered here has taken at its condition, for the check
-/// that a wait on quiet files sleeps rather than looking every few
-/// milliseconds.
+/// Every look a wait gathered here has taken at its condition while
+/// [`COUNTING`], for the check that a wait on quiet files sleeps rather than
+/// looking every few milliseconds.
 static LOOKS: AtomicU64 = AtomicU64::new(0);
 
-/// How many looks waits have taken, since boot.
+/// Whether waits count their looks in [`LOOKS`]: only while a check arms it
+/// ([`count_looks`]), so that no wait's look writes one cache line every
+/// processor shares (`docs/BLOCK-AND-WAKE.md` §4.4). Read, never written,
+/// by the waits.
+static COUNTING: AtomicBool = AtomicBool::new(false);
+
+/// How many looks waits have counted, since boot.
 pub(crate) fn looks() -> u64 {
     LOOKS.load(Ordering::Relaxed)
+}
+
+/// Count waits' looks from now while `on`, for a check.
+pub(crate) fn count_looks(on: bool) {
+    COUNTING.store(on, Ordering::Release);
+}
+
+/// Count one look, if a check asked.
+fn counted_look() {
+    if COUNTING.load(Ordering::Relaxed) {
+        let _ = LOOKS.fetch_add(1, Ordering::Relaxed);
+    }
 }
 
 /// A queue a wait holds on to for as long as it sleeps on it.
@@ -139,7 +157,7 @@ impl Sources {
     /// again as an untrusted wait does.
     pub(crate) fn wait(&self, mut ready: impl FnMut() -> bool, deadline: u64) -> bool {
         let counted = || {
-            let _ = LOOKS.fetch_add(1, Ordering::Relaxed);
+            counted_look();
             ready()
         };
         match fallible::try_collect(self.held.iter().map(Held::queue)) {
@@ -162,7 +180,7 @@ pub(crate) fn wait_on(
     trusted: bool,
 ) -> bool {
     let counted = || {
-        let _ = LOOKS.fetch_add(1, Ordering::Relaxed);
+        counted_look();
         ready()
     };
     let recheck = if trusted {

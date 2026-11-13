@@ -45,6 +45,16 @@
 //! moves the count and back; `EPOLL_CTL_MOD` moves it not; and a set back at
 //! zero looks at no file. At each step the count must equal a recount.
 //!
+//! And the wait's test (`docs/BLOCK-AND-WAKE.md` §4.4 cut 1, ledger 9672): a
+//! wait that blocks and is woken by one write looks at the set once after its
+//! wake; a write that lands while the waiter is in its first test, before it
+//! lists itself on the set's queue, is reported by that wait, not by the
+//! rescan; a sleeping
+//! wait on a set holding a distrusted file that changes without a wake
+//! reports it well within a second; and one on a trusted set whose file so
+//! changes is found by the rescan. At every step the test's lock-free mirrors
+//! agree with the set's state.
+//!
 //! And `/proc/<pid>/fdinfo/<set>`: a line for each registration, as Linux's
 //! `ep_show_fdinfo` writes it, with its number, its events (only the flags
 //! once a one-shot registration has reported) and its cookie, and none for a
@@ -55,7 +65,7 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::any::Any;
-use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use ferrix_bootinfo::PAGE_SIZE;
 use ferrix_linux_abi::nr::Syscall;
@@ -141,6 +151,10 @@ static WAITER_DONE: WaitQueue = WaitQueue::new();
 /// Whether the waiter arms the look meet for its first look.
 static WAITER_MEETS: AtomicBool = AtomicBool::new(false);
 
+/// Which of the waiter's tests the meet holds instead, when not 0: see
+/// [`epoll::arm_test_meet`].
+static WAITER_TEST_MEET: AtomicU32 = AtomicU32::new(0);
+
 /// An operation `epoll_ctl` does not have.
 const UNKNOWN_OP: u32 = 99;
 
@@ -173,6 +187,14 @@ pub fn run() -> Result<Report, &'static str> {
     crate::sched::wait_until_reaper_quiet(crate::sched::REAPER_PATIENCE_NANOS)?;
     let window = mm::FrameWindow::open();
     let counts = check_once(&process)?;
+    // The rescan case is the first run's alone: it must have run and
+    // passed, and the boot says so (ledger 9702 EC4).
+    if !RESCAN_PASSED.load(Ordering::Acquire) {
+        return Err("the rescan case did not run in the epoll check's first run");
+    }
+    crate::console::println!(
+        "  epoll    the rescan found a change nothing woke within its second (first run)"
+    );
     crate::sched::wait_until_reaper_quiet(crate::sched::REAPER_PATIENCE_NANOS)?;
     let leaked = window.kept();
     if leaked != 0 {
@@ -856,6 +878,11 @@ fn check_the_ready_list(
     a_refused_hook_is_looked_at_every_wait(process, page)?;
     a_mark_that_found_no_room_still_wakes(process, page, counts)?;
     a_refused_gathering_distrusts(process, page)?;
+    // The wait's test before the walk's count, whose cases lean on it.
+    a_blocking_wait_looks_once_after_its_wake(process, page, counts)?;
+    a_write_between_listing_and_test_is_reported(process, page, counts)?;
+    a_sleeping_wait_finds_a_distrusted_change(process, page, counts)?;
+    the_rescan_finds_a_change_nothing_woke(process, page, counts)?;
     the_walk_count_follows_the_kinds(process, page)?;
     Ok(())
 }
@@ -1061,7 +1088,10 @@ fn ready_list_waiter(_argument: usize) {
     if WAITER_MEETS.load(Ordering::Acquire)
         && let Some(me) = crate::sched::current()
     {
-        epoll::arm_look_meet(me.id);
+        match WAITER_TEST_MEET.load(Ordering::Acquire) {
+            0 => epoll::arm_look_meet(me.id),
+            nth => epoll::arm_test_meet(me.id, nth),
+        }
     }
     let subject = WAITER_SUBJECT.lock().clone();
     let answer = match subject {
@@ -1464,6 +1494,7 @@ fn steered(process: &Process, trusted: bool) -> Result<(Arc<Steered>, i32), &'st
 /// Require the set's count of registrations every wait looks at to be
 /// `wanted` and to equal a recount.
 fn counted(inner: &epoll::Epoll, wanted: usize, what: &'static str) -> Result<(), &'static str> {
+    mirrored(inner)?;
     let (always, recount) = inner.always_counts();
     if always != recount {
         crate::console::println!(
@@ -1749,4 +1780,225 @@ fn fdinfo_text(process: &Process, page: u64, set: i32) -> Result<Vec<u8>, &'stat
     }
     closed(process, opened)?;
     Ok(text)
+}
+
+/// Require the set's lock-free mirrors to agree with its state.
+fn mirrored(inner: &epoll::Epoll) -> Result<(), &'static str> {
+    if inner.mirrors_agree() {
+        Ok(())
+    } else {
+        Err("a set's mirrors for the wait's test do not agree with its state")
+    }
+}
+
+/// What [`quiet_edge_set`] makes: the set's number, its pipe's ends and the
+/// set's object.
+type QuietSet = (i32, (i32, i32), Arc<epoll::Epoll>);
+
+/// A set holding a pipe's read end, edge-triggered (so that nothing stays
+/// pending after a report), hooked by a first wait: the set, its pipe, and
+/// the set's object.
+fn quiet_edge_set(process: &Process, page: u64, cookie: u64) -> Result<QuietSet, &'static str> {
+    let set = create(process, 0)?;
+    let inner = set_of(process, set)?;
+    let (reader, writer) = pipe_pair(process, page)?;
+    if ctl(
+        process,
+        page,
+        set,
+        EPOLL_CTL_ADD,
+        reader,
+        EPOLLIN | EPOLLET,
+        cookie,
+    ) != Ok(0)
+    {
+        return Err("a pipe could not be added to a set");
+    }
+    if !wait(process, page, set, 4, 0)?.is_empty() {
+        return Err("a quiet pipe reported something");
+    }
+    mirrored(&inner)?;
+    Ok((set, (reader, writer), inner))
+}
+
+/// A wait that blocks on a quiet set and is woken by one write looks at the
+/// set once after its wake, as Linux's `ep_poll` does, not again as its test
+/// and then in its loop. Measured again if the rescan fell in between.
+fn a_blocking_wait_looks_once_after_its_wake(
+    process: &Arc<Process>,
+    page: u64,
+    counts: &mut Counts,
+) -> Result<(), &'static str> {
+    let (set, (reader, writer), inner) = quiet_edge_set(process, page, 0x90)?;
+    let mut scanned = None;
+    for _ in 0..3 {
+        let (scans, rescans) = (inner.scans(), inner.rescans());
+        let (answer, _) = with_a_waiter(process, page, set, &inner, None, || {
+            put_byte(process, page, writer)
+        })?;
+        take_byte(process, page, reader)?;
+        if answer != Some(Ok(1)) {
+            return Err("a wait asleep on a quiet set did not report the pipe written");
+        }
+        if inner.rescans() == rescans {
+            scanned = Some(inner.scans().saturating_sub(scans));
+            break;
+        }
+    }
+    mirrored(&inner)?;
+    drop(inner);
+    for opened in [set, reader, writer] {
+        closed(process, opened)?;
+    }
+    match scanned {
+        Some(1) => {
+            counts.events += 1;
+            Ok(())
+        }
+        Some(looked) => {
+            crate::console::println!(
+                "  epoll    a blocking wait looked at its set {looked} times after one write"
+            );
+            Err("a blocking wait looked at its set more than once after its wake")
+        }
+        None => Err("the set's rescan fell in every try of the one-look case"),
+    }
+}
+
+/// A write that lands while the waiter, on another processor, is held in its
+/// first test inside `wait_on`, before it lists itself on the set's queue, is
+/// reported by that wait well before the recheck: the write's wake finds
+/// nobody listed, so only the test's counts, read after the meet, can see it
+/// (ledger 9672 EB4, 9702 EC1). A write after the listing is the wake's to
+/// end the wait, and is not this case's.
+fn a_write_between_listing_and_test_is_reported(
+    process: &Arc<Process>,
+    page: u64,
+    counts: &mut Counts,
+) -> Result<(), &'static str> {
+    let here = crate::sched::current()
+        .ok_or("the epoll check is not running as a task")?
+        .cpu();
+    let Some(there) = (0..crate::smp::count()).find(|&cpu| cpu != here) else {
+        crate::console::println!(
+            "  epoll    a file changed between listing and test: not run, one processor"
+        );
+        return Ok(());
+    };
+    let (set, (reader, writer), inner) = quiet_edge_set(process, page, 0x91)?;
+    // The way in's test, then the first in `wait_on`, before the listing:
+    // the second.
+    WAITER_TEST_MEET.store(2, Ordering::Release);
+    let waited = with_a_waiter(process, page, set, &inner, Some(there), || {
+        put_byte(process, page, writer)
+    });
+    WAITER_TEST_MEET.store(0, Ordering::Release);
+    let (answer, took) = waited?;
+    take_byte(process, page, reader)?;
+    mirrored(&inner)?;
+    drop(inner);
+    for opened in [set, reader, writer] {
+        closed(process, opened)?;
+    }
+    if answer != Some(Ok(1)) || took >= WOKEN_WITHIN_NANOS {
+        return Err(
+            "a file changed before a wait's listing, inside its test, was missed until the rescan",
+        );
+    }
+    counts.events += 1;
+    Ok(())
+}
+
+/// How long a sleeping wait may take to find a distrusted file's change: its
+/// recheck is 5 ms, and this leaves a loaded host room (ledger 9672 EB5).
+const DISTRUSTED_WITHIN_NANOS: u64 = 500_000_000;
+
+/// A wait asleep on a set holding a distrusted file finds the file's change,
+/// which wakes nothing, at its short recheck: the test looks for real while
+/// the walk's count is not zero.
+fn a_sleeping_wait_finds_a_distrusted_change(
+    process: &Arc<Process>,
+    page: u64,
+    counts: &mut Counts,
+) -> Result<(), &'static str> {
+    let set = create(process, 0)?;
+    let inner = set_of(process, set)?;
+    let (file, fd) = steered(process, false)?;
+    if ctl(process, page, set, EPOLL_CTL_ADD, fd, EPOLLIN, 0x92) != Ok(0) {
+        return Err("a steered file could not be added to a set");
+    }
+    if !wait(process, page, set, 4, 0)?.is_empty() {
+        return Err("a quiet steered file reported something");
+    }
+    mirrored(&inner)?;
+    let (answer, took) = with_a_waiter(process, page, set, &inner, None, || {
+        file.set(true, false);
+        Ok(())
+    })?;
+    file.set(false, false);
+    mirrored(&inner)?;
+    drop(inner);
+    for opened in [set, fd] {
+        closed(process, opened)?;
+    }
+    if answer != Some(Ok(1)) || took >= DISTRUSTED_WITHIN_NANOS {
+        return Err("a sleeping wait did not find a distrusted file's change within its recheck");
+    }
+    counts.events += 1;
+    Ok(())
+}
+
+/// How long the rescan may take to find a change nothing woke: once a
+/// second, and half a second's room.
+const RESCAN_WITHIN_NANOS: u64 = 1_500_000_000;
+
+/// Whether this boot's run of the check has made the rescan case: a second
+/// of the boot's time, so made by the first run only.
+static RESCAN_CHECKED: AtomicBool = AtomicBool::new(false);
+
+/// Whether the rescan case, made by the first run, passed: the second run
+/// refuses to finish without it and says so (ledger 9702 EC4).
+static RESCAN_PASSED: AtomicBool = AtomicBool::new(false);
+
+/// A wait asleep on a trusted set whose file changes without a wake -- the
+/// defect in a file the rescan is there for -- is ended by the rescan at its
+/// second's recheck, though nothing woke the set. Made by the first of the
+/// check's two runs only: it waits out a second, and the frames the second
+/// run counts are the other cases' to answer for.
+fn the_rescan_finds_a_change_nothing_woke(
+    process: &Arc<Process>,
+    page: u64,
+    counts: &mut Counts,
+) -> Result<(), &'static str> {
+    if RESCAN_CHECKED.swap(true, Ordering::AcqRel) {
+        return Ok(());
+    }
+    let set = create(process, 0)?;
+    let inner = set_of(process, set)?;
+    let (file, fd) = steered(process, true)?;
+    if ctl(process, page, set, EPOLL_CTL_ADD, fd, EPOLLIN, 0x93) != Ok(0) {
+        return Err("a steered file could not be added to a set");
+    }
+    if !wait(process, page, set, 4, 0)?.is_empty() {
+        return Err("a quiet steered file reported something");
+    }
+    if !inner.trusted() {
+        return Err("a trusted steered file left its set distrusted once hooked");
+    }
+    let (answer, took) = with_a_waiter(process, page, set, &inner, None, || {
+        file.set(true, false);
+        Ok(())
+    })?;
+    file.set(false, false);
+    mirrored(&inner)?;
+    drop(inner);
+    for opened in [set, fd] {
+        closed(process, opened)?;
+    }
+    if answer != Some(Ok(1)) || took >= RESCAN_WITHIN_NANOS {
+        return Err("a change nothing woke was not found by the rescan of a sleeping wait");
+    }
+    RESCAN_PASSED.store(true, Ordering::Release);
+    counts.events += 1;
+    Ok(())
 }

@@ -21,6 +21,18 @@
 //! woken, not what is registered: wineserver's 794 registrations cost every one
 //! of its 8,500 waits a second a look and a listing each before.
 //!
+//! A wait asks first, with no lock, whether a look could find anything
+//! ([`Epoll::may_report`], `docs/BLOCK-AND-WAKE.md` §4.4 cut 1): whether
+//! the set's queue was woken or its ready list told since the last take,
+//! whether `pending` holds anything or the walk's count is not zero, and
+//! whether the rescan is due. Only then does it look, as Linux's `ep_poll`
+//! asks `ep_events_available` before `ep_send_events`, so a wait that blocks
+//! makes one look after its wake. The answers are mirrors the set stores
+//! under its lock ([`Quick`]); a wake is never missed because the waker's
+//! wake of the set's queue takes that queue's waiter lock, which the waiter
+//! lists itself under before its last test (the doc's "Why no wake is
+//! lost").
+//!
 //! Hooking is lazy: a registration is added to `pending`, and the wait that
 //! looks at it hooks every queue its file names *before* it looks, so a wake
 //! after the look is never missed; a queue the file names later, as a unix
@@ -186,6 +198,11 @@ static LOOK_MEET_STAGE: AtomicU32 = AtomicU32::new(0);
 /// No task.
 const NO_MEET: u64 = u64::MAX;
 
+/// For a meet armed by [`arm_test_meet`]: how many more of the armed task's
+/// [`Epoll::may_report`] calls go by before the one that is held; 0 when the
+/// meet is [`arm_look_meet`]'s.
+static TEST_MEET_CALLS: AtomicU32 = AtomicU32::new(0);
+
 /// How long a task waits in the meet for the check to let it go.
 const LOOK_MEET_PATIENCE_NANOS: u64 = 2_000_000_000;
 
@@ -194,6 +211,17 @@ const LOOK_MEET_PATIENCE_NANOS: u64 = 2_000_000_000;
 /// for the check that a file changed there is reported by a wake
 /// (`fs::epoll_check`). One look only.
 pub(crate) fn arm_look_meet(task: crate::sched::TaskId) {
+    TEST_MEET_CALLS.store(0, Ordering::Release);
+    LOOK_MEET_STAGE.store(0, Ordering::Release);
+    LOOK_MEET.store(task, Ordering::Release);
+}
+
+/// Hold `task`'s `nth` [`Epoll::may_report`] call from now, as
+/// [`arm_look_meet`] holds a look, for the check that a file changed between
+/// a wait's listing on the set's queue and its last test is reported by the
+/// wake. One call only.
+pub(crate) fn arm_test_meet(task: crate::sched::TaskId, nth: u32) {
+    TEST_MEET_CALLS.store(nth.max(1), Ordering::Release);
     LOOK_MEET_STAGE.store(0, Ordering::Release);
     LOOK_MEET.store(task, Ordering::Release);
 }
@@ -213,9 +241,33 @@ pub(crate) fn release_look_meet() {
 /// It spins, holding no lock, so the check runs on another processor.
 fn look_meet() {
     let armed = LOOK_MEET.load(Ordering::Relaxed);
-    if armed == NO_MEET || crate::sched::current().is_none_or(|task| task.id != armed) {
+    if armed == NO_MEET
+        || TEST_MEET_CALLS.load(Ordering::Acquire) != 0
+        || crate::sched::current().is_none_or(|task| task.id != armed)
+    {
         return;
     }
+    hold_meet();
+}
+
+/// [`arm_test_meet`]'s meet, in [`Epoll::may_report`]: nothing unless a
+/// check armed it for the running task, and then only at the call it named.
+fn test_meet() {
+    let armed = LOOK_MEET.load(Ordering::Relaxed);
+    if armed == NO_MEET
+        || TEST_MEET_CALLS.load(Ordering::Acquire) == 0
+        || crate::sched::current().is_none_or(|task| task.id != armed)
+    {
+        return;
+    }
+    if TEST_MEET_CALLS.fetch_sub(1, Ordering::AcqRel) == 1 {
+        hold_meet();
+    }
+}
+
+/// Hold the running task at the armed meet until the check lets it go,
+/// disarming it.
+fn hold_meet() {
     LOOK_MEET.store(NO_MEET, Ordering::Relaxed);
     LOOK_MEET_STAGE.store(1, Ordering::Release);
     let until = crate::timer::now_nanos().saturating_add(LOOK_MEET_PATIENCE_NANOS);
@@ -406,6 +458,9 @@ struct State {
     looks: u64,
     /// How many times a wait looked at every registration, for the checks.
     rescans: u64,
+    /// How many looks copied at least one registration out to look at its
+    /// file, for the checks: what a blocking wait spends after its wake.
+    scans: u64,
     /// The sets this one is registered in, for the depth check.
     parents: Vec<Weak<Epoll>>,
     /// Bumped by every change to `items`, so a set holding this one sees a
@@ -697,8 +752,32 @@ pub(crate) struct Epoll {
     /// Its ready list and the queue a wait on it sleeps on, which its
     /// registrations' marks share.
     ready: Arc<ReadyList>,
+    /// What a wait's test reads with no lock.
+    quick: Quick,
     /// Its heap but its lists', charged to the job that made it (F-37).
     _charge: Charge,
+}
+
+/// What [`Epoll::may_report`] reads with no lock: mirrors of the set's state,
+/// each stored under the set's lock in every section that changes what it
+/// mirrors ([`Epoll::mirror`]), and the bases of the counts a take saw. The
+/// order (the bases stored after the flags in a taking section, and read
+/// before them) is `docs/BLOCK-AND-WAKE.md` §4.4's (ledger 9672 EB2).
+#[derive(Debug)]
+struct Quick {
+    /// `pending` holds something, or the walk's count is not zero: a wait's
+    /// test then looks for real.
+    listed: AtomicBool,
+    /// No registration is distrusted: [`Epoll::trusted`].
+    trusted: AtomicBool,
+    /// When a wait last looked at every registration.
+    rescanned_at: AtomicU64,
+    /// The set's queue's wake count, read before the last take of the ready
+    /// list: a wake since moves it.
+    wakes_base: AtomicU64,
+    /// The ready list's tell count, read before the last take: a quiet tell
+    /// since (a queue that went) moves it.
+    tells_base: AtomicU64,
 }
 
 impl fmt::Debug for Epoll {
@@ -729,6 +808,7 @@ pub(crate) fn create() -> Result<Arc<OpenFile>, Errno> {
         Charge::bytes(0).map_err(refused)?,
     );
     let ready = ReadyList::new().map_err(|_| Errno::ENOMEM)?;
+    let now = crate::timer::now_nanos();
     let set = fallible::try_arc_cyclic(|this| Epoll {
         state: SpinLock::new(State {
             items: Items::new(),
@@ -737,11 +817,12 @@ pub(crate) fn create() -> Result<Arc<OpenFile>, Errno> {
             scratch: Vec::new(),
             next_serial: 0,
             next_look: 0,
-            rescanned_at: crate::timer::now_nanos(),
+            rescanned_at: now,
             distrusted: 0,
             always: 0,
             looks: 0,
             rescans: 0,
+            scans: 0,
             parents: Vec::new(),
             generation: 0,
             items_room,
@@ -751,6 +832,13 @@ pub(crate) fn create() -> Result<Arc<OpenFile>, Errno> {
             parents_room,
         }),
         this: this.clone(),
+        quick: Quick {
+            listed: AtomicBool::new(false),
+            trusted: AtomicBool::new(true),
+            rescanned_at: AtomicU64::new(now),
+            wakes_base: AtomicU64::new(0),
+            tells_base: AtomicU64::new(0),
+        },
         ready,
         _charge: charge,
     })
@@ -1146,6 +1234,7 @@ impl Epoll {
         state.count_always(false, after);
         state.queue_at(slot);
         state.generation = state.generation.wrapping_add(1);
+        self.mirror(&state);
         Ok(())
     }
 
@@ -1226,6 +1315,7 @@ impl Epoll {
         state.count_always(before, after);
         state.queue_at(at);
         state.generation = state.generation.wrapping_add(1);
+        self.mirror(&state);
         Ok(())
     }
 
@@ -1242,7 +1332,9 @@ impl Epoll {
                 .items
                 .position(|item| (item.key, item.fd) == (key, fd))
                 .ok_or(Errno::ENOENT)?;
-            state.take_out(at)
+            let removed = state.take_out(at);
+            self.mirror(&state);
+            removed
         };
         if let Some(inner) = removed
             .as_ref()
@@ -1340,7 +1432,71 @@ impl Epoll {
     /// it named, and all of them are hooked: how long a wait may sleep
     /// between its own looks.
     pub(crate) fn trusted(&self) -> bool {
-        self.state.lock().distrusted == 0
+        self.quick.trusted.load(Ordering::Acquire)
+    }
+
+    /// Store the mirrors [`Epoll::may_report`] reads, under the set's lock,
+    /// in a section that changed what they mirror.
+    fn mirror(&self, state: &State) {
+        let quick = &self.quick;
+        quick.listed.store(
+            !state.pending.is_empty() || state.always != 0,
+            Ordering::Release,
+        );
+        quick
+            .trusted
+            .store(state.distrusted == 0, Ordering::Release);
+        quick
+            .rescanned_at
+            .store(state.rescanned_at, Ordering::Release);
+    }
+
+    /// Whether the mirrors agree with the set's state, for the checks: true
+    /// whenever the set's lock is let go.
+    pub(crate) fn mirrors_agree(&self) -> bool {
+        let state = self.state.lock();
+        let quick = &self.quick;
+        quick.listed.load(Ordering::Acquire) == (!state.pending.is_empty() || state.always != 0)
+            && quick.trusted.load(Ordering::Acquire) == (state.distrusted == 0)
+            && quick.rescanned_at.load(Ordering::Acquire) == state.rescanned_at
+    }
+
+    /// Whether a look at the set could find anything, asked with no lock:
+    /// its queue woken or its ready list told since the last take, `pending`
+    /// holding something or the walk's count not zero, or the rescan due.
+    /// No means a look now would find nothing, unless a wake comes after
+    /// this, which a wait listed on the set's queue is woken by.
+    pub(crate) fn may_report(&self) -> bool {
+        test_meet();
+        let quick = &self.quick;
+        // The bases first, then the flag, then the counts (ledger 9672 EB2).
+        let wakes_base = quick.wakes_base.load(Ordering::Acquire);
+        let tells_base = quick.tells_base.load(Ordering::Acquire);
+        if quick.listed.load(Ordering::Acquire) {
+            return true;
+        }
+        if self.ready.queue().wakes() != wakes_base || self.ready.tells() != tells_base {
+            return true;
+        }
+        let rescanned_at = quick.rescanned_at.load(Ordering::Acquire);
+        crate::timer::now_nanos() >= rescanned_at.saturating_add(RESCAN_NANOS)
+    }
+
+    /// The test a wait on the set sleeps until: a real look while `pending`
+    /// holds something or the walk's count is not zero, since a distrusted
+    /// file can change without a wake, and [`Epoll::may_report`] otherwise.
+    /// Chosen at every evaluation.
+    pub(crate) fn wait_test(&self) -> bool {
+        if self.quick.listed.load(Ordering::Acquire) {
+            !self.ready(1).is_empty()
+        } else {
+            self.may_report()
+        }
+    }
+
+    /// How many looks copied a registration out, for the checks.
+    pub(crate) fn scans(&self) -> u64 {
+        self.state.lock().scans
     }
 
     /// `ELOOP` if adding `inner` to this set would make a set contain itself,
@@ -1406,6 +1562,10 @@ impl Epoll {
         let now = crate::timer::now_nanos();
         let (ticket, mut samples) = {
             let mut state = self.state.lock();
+            // Read before the take: a wake whose number the take misses
+            // comes after its push, so after this read (ledger 9672).
+            let wakes = self.ready.queue().wakes();
+            let tells = self.ready.tells();
             state.take_marks(&self.ready, now);
             let ticket = state.next_look.wrapping_add(1);
             state.next_look = ticket;
@@ -1437,6 +1597,14 @@ impl Epoll {
             state.looks = state
                 .looks
                 .wrapping_add(u64::try_from(samples.len()).unwrap_or(u64::MAX));
+            if !samples.is_empty() {
+                state.scans = state.scans.wrapping_add(1);
+            }
+            // The flags, then the bases: the order `may_report` reads them
+            // in reverse.
+            self.mirror(&state);
+            self.quick.wakes_base.store(wakes, Ordering::Release);
+            self.quick.tells_base.store(tells, Ordering::Release);
             (ticket, samples)
         };
 
@@ -1488,6 +1656,7 @@ impl Epoll {
                     .and_then(|at| items.get(at))
                     .is_some_and(|item| item.pending)
             });
+            self.mirror(&state);
         }
         self.keep_scratch(samples);
         // The nesting notes of sets that went, with no lock held.
@@ -1518,6 +1687,7 @@ impl Epoll {
                     state.set_trusted(at, false);
                 }
             }
+            self.mirror(&state);
             return;
         };
         for sample in samples.iter().filter(|sample| !sample.settled()) {
@@ -1527,6 +1697,7 @@ impl Epoll {
         for (serial, named) in &gathered {
             self.hook_named(&mut state, *serial, named);
         }
+        self.mirror(&state);
     }
 
     /// Give the room a wait copied registrations out to back to the set,
@@ -1640,6 +1811,7 @@ impl Epoll {
                 .and_then(|at| items.get(at))
                 .is_some_and(|item| item.pending)
         });
+        self.mirror(&state);
     }
 }
 

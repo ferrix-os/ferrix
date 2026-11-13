@@ -237,9 +237,14 @@ fn wait(
     let file = waitable(process, epfd)?;
     let set = epoll::of(&file).ok_or(Errno::EINVAL)?;
     loop {
-        let ready = set.ready(limit);
-        if !ready.is_empty() {
-            return deliver(process, &set, events, &ready);
+        // Looked at only when a look could find anything, as Linux's
+        // `ep_poll` asks `ep_events_available` first
+        // (`docs/BLOCK-AND-WAKE.md` §4.4, cut 1).
+        if set.may_report() {
+            let ready = set.ready(limit);
+            if !ready.is_empty() {
+                return deliver(process, &set, events, &ready);
+            }
         }
         if deadline.is_some_and(|at| now() >= at) {
             return Ok(0);
@@ -249,14 +254,15 @@ fn wait(
         }
         // Asleep on the set's queue, which a wake of any registered file's
         // queue wakes, until it is woken, a signal wakes the task or the
-        // deadline passes. A look in between is a set with something to
-        // report; the loop asks again for what, and delivers it. So is a
-        // look that found the set no longer trusted: the loop sleeps again
-        // with the shorter recheck.
+        // deadline passes. The test is `Epoll::wait_test`: with nothing
+        // pending, a look with no lock at whether one could find anything,
+        // so the wait looks for real once, in the loop, after its wake. A
+        // test that found the set no longer trusted ends the sleep too: the
+        // loop sleeps again with the shorter recheck.
         let trusted = set.trusted();
         let _ = fs::wake::wait_on(
             set.queue(),
-            || !set.ready(1).is_empty() || process.signal_pending() || set.trusted() != trusted,
+            || set.wait_test() || process.signal_pending() || set.trusted() != trusted,
             deadline.unwrap_or(u64::MAX),
             trusted,
         );
