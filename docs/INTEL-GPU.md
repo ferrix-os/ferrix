@@ -2458,8 +2458,29 @@ the tables' 3 MiB (3,132,800 bytes now): a longer list must name a handle
 twice, which neither anv nor iris does. A handle listed twice is left as
 it was and pinned by a test; i915 no longer refuses it either.
 
-**Open:** H3 to H8; the box run R3, which D2's held memory and D3's copy
-owe. R1 is recorded but for the loader-map region (BACKLOG, intel-k2;
+**R3, the box run (2026-11-12 to 13, ef-30fps; product evidence, not cited
+for the certified item):** Endfield on the N150, headless, 150 s from world
+entry, on `main-341c3f721` (develop 65fd81d68 with the stack fix below, so
+with D1 to D4) against `main-a6e6add2f` (develop before the fixes) at the
+same place in the game. The fixes show no cost. The driver's own processor
+time is 3.35 and 2.91 ms a frame with them and 3.25 ms without (2.93 to 3.14
+in the morning's three runs before them): the same within the spread, so
+D3's smaller copy and D2's store do not show either way. Frames: 29.0 and
+29.1 a second with the fixes, 26.2 without; the place is bound by the GPU
+(97.6 to 99.9 % busy at 1000 MHz) and its picture costs 33 to 38 ms of GPU
+a frame from one entry to the next whichever image runs, which is what
+moves the frame rate. Objects and pinned: 618/615 and 620/617 against
+615/612; bound 9,088 to 9,904 MiB in 2M pages and 483 to 507 MiB in 4K
+against 9,340 and 479. Lines with `uapi refused`, ENOSPC or ENOMEM: 133
+and 133 against 141, the count the game makes at start on either image;
+none new. memkeep's lines: 10 and 8 against 8. A second launch without a
+boot was not tried: it makes no window on Ferrix with or without the fixes
+(BACKLOG). One run without the fixes did not reach the world (first launch
+gone, the second stalled), so "without" is one entry. Runs `r3-1`, `r3-2`,
+`r3b-1` under `~/.local/share/ferrix/ef-30fps/runs/`. Linux 7.0 at the same
+place, the same way: 24.7 and 23.6 frames a second (`r3lx-1`, `r3lx-2`).
+
+**Open:** H3 to H8. R1 is recorded but for the loader-map region (BACKLOG, intel-k2;
 ledger 9053). Consultant: OK IF P1-P8 (ledger 9079); an internal review,
 not independent verification.
 

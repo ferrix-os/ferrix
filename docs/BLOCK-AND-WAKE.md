@@ -267,6 +267,32 @@ cycles and delivers the overflow as an NMI, so it samples time inside masked
 stretches and never wakes an idle processor. The product owner runs these
 when the box is free.
 
+The benches ran on 2026-11-13 on the idle box (no game, the same static
+binaries), under Ferrix on develop ca03c0f2e (the futex change in), under
+Ferrix on the image before it (`main-341c3f721`) and under the box's Linux
+7.0. Median µs a round trip; the files are
+`~/.local/share/ferrix/ef-30fps/runs/wake-after`, `wake-before` and
+`wake-linux`.
+
+| Round trip | Ferrix with the futex change | Ferrix before | Linux 7.0 |
+|---|---:|---:|---:|
+| futex, one processor | 6.23 | 7.01 | 3.67 |
+| futex, two processors | 9.36 | 9.96 | 6.62 |
+| futex waitv, one processor | 7.38 | 8.10 | 4.14 |
+| epoll, no idle registration, one processor | 8.71 | 8.80 | 5.00 |
+| epoll, 64 idle registrations | 10.35 | 10.59 | 4.96 |
+| epoll, 256 idle registrations | 15.64 | 15.59 | 5.08 |
+| epoll, 512 idle registrations, one processor | 21.88 | 21.95 | 4.99 |
+| epoll, 512 idle registrations, two processors | 18.46 | 18.41 | 8.46 |
+
+W1 is worth 0.78 µs of a futex round trip on the box, 11 %, where the guest
+showed 0.07. Ferrix still pays 1.7 times Linux for a futex or an epoll round
+trip with nothing registered. The epoll round trip grows by about 26 ns for
+every idle registration and Linux's does not grow: at 512 it is 4.4 times
+Linux's. With the game running, wineserver holds 1,940 open descriptors and
+the game 970, upper bounds on what their epoll sets hold, since Ferrix has
+no epoll fdinfo yet. That makes §4.3's change the next one.
+
 ## 7. Where it stands
 
 - 2026-11-12: measured, and this design written for the design review.
@@ -298,3 +324,4 @@ when the box is free.
   - `sys/wake-decision` is NOT YET: B1 and B2 come first, the reading of
     `should_preempt` against `choose_next`'s pick written down, then WD1-WD4.
   - `sys/epoll-always` is OK IF WE1-WE4. It is load ring.
+- 2026-11-13: the box figures are in §6. `sys/epoll-always` is being built.
