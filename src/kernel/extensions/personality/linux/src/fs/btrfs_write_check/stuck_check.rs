@@ -77,6 +77,9 @@ impl Pages for Poisoned {
     fn discard_from(&self, offset: u64) {
         self.pages.discard_from(offset);
     }
+    fn source_cut(&self) {
+        self.pages.source_cut();
+    }
     fn committed_bytes(&self) -> u64 {
         self.pages.committed_bytes()
     }

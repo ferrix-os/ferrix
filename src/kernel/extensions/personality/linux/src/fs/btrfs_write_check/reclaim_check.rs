@@ -15,7 +15,11 @@
 //!   ([`write_reclaims_at_max`]);
 //! * a read in a job further past its `memory.max` than one reclaim gives
 //!   back, which holds clean cache of the mount, reclaims until there is room
-//!   and succeeds, where it answered `ENOMEM` ([`fill_reclaims_until_room`]).
+//!   and succeeds, where it answered `ENOMEM` ([`fill_reclaims_until_room`]);
+//! * a file cut and written again gives its pages back to a reclaim once they
+//!   are written back, and reads back as written, where it read zeros; and a
+//!   write into part of such a page keeps the page's other bytes, where it
+//!   wrote zeros over them on the disk ([`cut_then_reclaimed`]).
 
 use alloc::sync::Arc;
 use core::any::Any;
@@ -61,6 +65,7 @@ pub(super) fn run() -> Result<Found, &'static str> {
     resident_of_a_disk_file()?;
     kept_through_a_reclaim()?;
     kept_cache_counts()?;
+    cut_then_reclaimed()?;
     let stolen_at_max = write_reclaims_at_max()?;
     let stolen_by_fill = fill_reclaims_until_room()?;
     Ok(Found {
@@ -294,6 +299,137 @@ fn kept_cache_counts() -> Result<(), &'static str> {
          through a shared mapping and truncated: its share and the machine's sum equal the walk \
          {compared} times over"
     );
+    Ok(())
+}
+
+/// Cut the file at `path` to `len` bytes, as `ftruncate` and `O_TRUNC` do.
+fn cut(path: &[u8], len: u64) -> Result<(), &'static str> {
+    let ns = fs::namespace();
+    let ctx = ns.context();
+    let at = ns
+        .resolve(&ctx, None, path, true)
+        .map_err(|_| "a file to cut is gone")?;
+    ns.truncate(&at, len).map_err(|_| "a file could not be cut")
+}
+
+/// Give back every clean page of the cache, and require that the file at
+/// `path` then holds `left` pages.
+fn reclaim_to(path: &[u8], left: usize, short: &'static str) -> Result<(), &'static str> {
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a raised check: `Reclaimed::stolen` is made pub for the checks alone"
+    )]
+    let _ = cache::reclaim(crate::object::quota::NONE, cache::totals().disk).stolen();
+    if object_of(path)?.committed() == left {
+        Ok(())
+    } else {
+        Err(short)
+    }
+}
+
+/// The file at `path` reads as `want`.
+fn reads_as(path: &[u8], want: &[u8]) -> bool {
+    read_pattern(path).is_ok_and(|read| read == (want.len(), crc32c(want)))
+}
+
+/// A file cut and written again is the volume's to fill once the volume
+/// holds the cut (`Pages::source_cut`): its pages, written back, go to a
+/// reclaim like any other clean page and read back as written.
+///
+/// Before, the store forgot the source from the cut on for as long as the
+/// inode's object lived. A page written past the cut, written back and
+/// reclaimed read as zeros until the object was made again, though the disk
+/// held it: Steam's `steam.pid`, written by `O_TRUNC` and five bytes, read
+/// five zero bytes once Endfield's load had reclaimed the cache, and a second
+/// `steam` then found no running client to hand its address to (N150 box,
+/// 2026-11-13). A write into part of such a page took a zeroed frame for it
+/// and wrote the zeros back over the file's bytes.
+///
+/// Three files: one cut to nothing and written short, as a pid file is, then
+/// appended to after the reclaim; one cut inside its second page and grown
+/// past the cut, with a gap; and one cut to nothing whose first write leaves
+/// a page between unwritten.
+///
+/// Verifies: H.QUOTA.12
+fn cut_then_reclaimed() -> Result<(), &'static str> {
+    const PID: &[u8] = b"/mnt-rw/reclaim-cut-pid";
+    const GROWN: &[u8] = b"/mnt-rw/reclaim-cut-grown";
+    const SPARSE: &[u8] = b"/mnt-rw/reclaim-cut-sparse";
+    const CUT_AT: usize = 5000;
+    const GROWN_FROM: usize = 6000;
+
+    // An old file of three pages on the disk, cut to nothing and written
+    // again, as `echo $$ > steam.pid` does.
+    write_file(PID, &pattern(31, 0, 3 * PAGE))?;
+    sync()?;
+    cut(PID, 0)?;
+    write_at(PID, 0, b"1840\n")?;
+    sync()?;
+    reclaim_to(
+        PID,
+        0,
+        "a page written after a cut and written back stayed through a reclaim",
+    )?;
+    if !reads_as(PID, b"1840\n") {
+        return Err("a file cut, written, written back and reclaimed read otherwise than written");
+    }
+    // The read filled the page again; without it, a write into part of the
+    // page must take the page's other bytes from the volume.
+    reclaim_to(
+        PID,
+        0,
+        "a page filled again after a cut stayed through a reclaim",
+    )?;
+    write_at(PID, 5, b"abc")?;
+    sync()?;
+    reclaim_to(
+        PID,
+        0,
+        "a page appended to after a cut stayed through a reclaim",
+    )?;
+    if !reads_as(PID, b"1840\nabc") {
+        return Err("an append to a reclaimed page of a cut file lost the bytes before it");
+    }
+
+    // Cut inside the second page and grown past the cut, leaving a gap: the
+    // gap reads zeros, never the old bytes, and what was written reads back.
+    write_file(GROWN, &pattern(37, 0, 3 * PAGE))?;
+    sync()?;
+    cut(GROWN, CUT_AT as u64)?;
+    write_at(GROWN, GROWN_FROM as u64, &pattern(41, GROWN_FROM, 3 * PAGE))?;
+    sync()?;
+    reclaim_to(
+        GROWN,
+        0,
+        "pages written past a cut inside a page stayed through a reclaim",
+    )?;
+    let mut want = pattern(37, 0, CUT_AT);
+    want.resize(GROWN_FROM, 0);
+    want.extend_from_slice(&pattern(41, GROWN_FROM, 3 * PAGE));
+    if !reads_as(GROWN, &want) {
+        return Err(
+            "a file cut inside a page and grown read otherwise than written after a reclaim",
+        );
+    }
+
+    // Cut to nothing and written from the third page on: the two pages
+    // before it are a hole, which reads zeros from the volume as it did from
+    // the cut.
+    write_file(SPARSE, &pattern(43, 0, 4 * PAGE))?;
+    sync()?;
+    cut(SPARSE, 0)?;
+    write_at(SPARSE, 2 * PAGE_SIZE, &pattern(47, 0, PAGE))?;
+    sync()?;
+    reclaim_to(
+        SPARSE,
+        0,
+        "a page written past a hole a cut left stayed through a reclaim",
+    )?;
+    let mut want = alloc::vec![0_u8; 2 * PAGE];
+    want.extend_from_slice(&pattern(47, 0, PAGE));
+    if !reads_as(SPARSE, &want) {
+        return Err("a hole a cut left read otherwise than zeros after a reclaim");
+    }
     Ok(())
 }
 

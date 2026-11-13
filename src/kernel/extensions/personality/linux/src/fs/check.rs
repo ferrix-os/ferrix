@@ -20,7 +20,7 @@ use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::any::Any;
-use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 
 use ferrix_bootinfo::PAGE_SIZE;
 use ferrix_linux_abi::nr::Syscall;
@@ -38,6 +38,7 @@ use ferrix_vma::VmaFlags;
 use crate::fs::pages::VmoStorage;
 use crate::fs::{self, Report as Built};
 use crate::mm;
+use crate::sync::SpinLock;
 use crate::syscall::check as syscall_check;
 use crate::syscall::memory::{self, MmapRequest, OffsetUnit};
 use crate::syscall::process::{self, Process};
@@ -357,6 +358,7 @@ fn check_tmpfs_stores_pages() -> Result<u64, &'static str> {
 fn check_page_stores() -> Result<(u64, u64), &'static str> {
     let pages = check_tmpfs_stores_pages()?;
     let filled = check_a_store_fills_from_its_source()?;
+    check_a_store_goes_back_to_its_source()?;
     let streamed = check_a_stream_reads_ahead()?;
     let faulted = check_a_mapping_faults_in_its_source()?;
     Ok((pages, filled + streamed + faulted))
@@ -617,6 +619,230 @@ fn check_a_store_fills_from_its_source() -> Result<u64, &'static str> {
     let filled = store.committed_bytes() / PAGE_SIZE;
     check_a_store_distrusts_and_cuts_its_source(store.as_ref(), &source)?;
     Ok(filled)
+}
+
+/// What [`CutSource`] answers from its cut on, before any cut is made of it
+/// and after [`RACING_CUT`]: never zero, which is what a store answers
+/// without asking, and never [`source_byte`]'s for the pages the check reads.
+const PAST_CUT: u8 = 0xC7;
+const PAST_RACING_CUT: u8 = 0x3D;
+/// The page [`CutSource`] cuts its store to in the middle of a fill.
+const RACING_CUT: u64 = 6;
+
+/// A page source that takes cuts, as a writable volume does, and whose pages
+/// may be dropped: page `index` holds [`source_byte`] below `cut_at` and
+/// `past` from it on, which stands for whatever a volume holds there after
+/// the cut. It can cut its own store in the middle of a fill, as a
+/// truncation on another processor would.
+struct CutSource {
+    /// How many times it has been asked.
+    calls: AtomicUsize,
+    /// The byte offset it was cut at.
+    cut_at: AtomicU64,
+    /// What it holds from `cut_at` on.
+    past: AtomicU8,
+    /// A fill that begins at this page is raced by a whole truncation to
+    /// [`RACING_CUT`] pages, made after the fill has read its bytes.
+    race_at: AtomicU64,
+    /// The store, for that truncation.
+    store: SpinLock<Option<Arc<dyn Pages>>>,
+}
+
+impl core::fmt::Debug for CutSource {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("CutSource").finish_non_exhaustive()
+    }
+}
+
+impl CutSource {
+    /// The byte it holds at `at` within page `index` now.
+    fn byte(&self, index: u64, at: usize) -> u8 {
+        let offset = index.saturating_mul(PAGE_SIZE).saturating_add(at as u64);
+        if offset < self.cut_at.load(Ordering::Relaxed) {
+            source_byte(index, at)
+        } else {
+            self.past.load(Ordering::Relaxed)
+        }
+    }
+
+    /// Whether `buf`, read from byte `offset` of its store, is what it holds.
+    fn holds(&self, buf: &[u8], offset: u64) -> bool {
+        buf.iter().zip(offset..).all(|(&byte, at)| {
+            usize::try_from(at % PAGE_SIZE)
+                .is_ok_and(|within| byte == self.byte(at / PAGE_SIZE, within))
+        })
+    }
+}
+
+impl PageSource for CutSource {
+    fn reclaimable(&self) -> bool {
+        true
+    }
+
+    fn fill_range(&self, first: u64, pages: &mut [&mut [u8]]) -> ferrix_vfs::Result<usize> {
+        let _ = self.calls.fetch_add(1, Ordering::Relaxed);
+        for (index, page) in (first..).zip(pages.iter_mut()) {
+            for (at, byte) in page.iter_mut().enumerate() {
+                *byte = self.byte(index, at);
+            }
+        }
+        // The bytes are read. Now the truncation, whole: the store cut, this
+        // source cut, and the store told so.
+        let raced = self
+            .race_at
+            .compare_exchange(first, u64::MAX, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok();
+        let store = self.store.lock().clone();
+        if raced && let Some(store) = store {
+            store.discard_from(RACING_CUT * PAGE_SIZE);
+            self.cut_at.store(RACING_CUT * PAGE_SIZE, Ordering::Relaxed);
+            self.past.store(PAST_RACING_CUT, Ordering::Relaxed);
+            store.source_cut();
+        }
+        Ok(pages.len())
+    }
+}
+
+/// Every clean page of the cache given back.
+fn reclaim_everything() {
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a raised check: `Reclaimed::stolen` is made pub for the checks alone"
+    )]
+    let _ = crate::user::cache::reclaim(
+        crate::object::quota::NONE,
+        crate::user::cache::totals().disk,
+    )
+    .stolen();
+}
+
+/// A store over a source that takes cuts goes back to it once the source
+/// holds every cut made (`Pages::source_cut`), and not before:
+///
+/// * while a cut is open, reclaim leaves each page that reaches past it --
+///   the one the cut fell in and one written past it -- and takes the page
+///   wholly before it;
+/// * of two cuts, the first one answered leaves the store as it was: a page
+///   past the cut reads zeros and the source is not asked;
+/// * with both answered, reclaim takes those pages, and a read fills them
+///   from the source, the tail of the page the cut fell in too;
+/// * a fill that a whole truncation overtakes -- cut, source cut, store told
+///   -- after it read its bytes keeps none of them: the read answers what
+///   the source holds after the truncation;
+/// * a write into part of a page whose fill the truncation overtook fills
+///   the page again before it writes: the page's other bytes are the
+///   source's, not zeros (ledger 9881 B1).
+///
+/// Before `Pages::source_cut` a cut was for the life of the store: a page
+/// written past it, written back and reclaimed read as zeros (N150 box,
+/// 2026-11-13, `fs/btrfs_write_check/reclaim_check.rs`).
+///
+/// Verifies: H.QUOTA.12
+fn check_a_store_goes_back_to_its_source() -> Result<(), &'static str> {
+    let page = usize::try_from(PAGE_SIZE).map_err(|_| "the page size does not fit")?;
+    let source = Arc::new(CutSource {
+        calls: AtomicUsize::new(0),
+        cut_at: AtomicU64::new(u64::MAX),
+        past: AtomicU8::new(PAST_CUT),
+        race_at: AtomicU64::new(u64::MAX),
+        store: SpinLock::new(None),
+    });
+    let store: Arc<dyn Pages> = Arc::from(
+        VmoStorage
+            .allocate_with(Arc::clone(&source) as Arc<dyn PageSource>)
+            .map_err(|_| "a store over a source that takes cuts was refused")?,
+    );
+    let found = cut_and_go_back(&store, &source, page);
+    // The source holds its store for the race alone: let it go either way.
+    *source.store.lock() = None;
+    found
+}
+
+/// The steps of [`check_a_store_goes_back_to_its_source`].
+fn cut_and_go_back(
+    store: &Arc<dyn Pages>,
+    source: &CutSource,
+    page: usize,
+) -> Result<(), &'static str> {
+    let calls = || source.calls.load(Ordering::Relaxed);
+    let held = || store.committed_bytes() / PAGE_SIZE;
+    let mut four = vec![0_u8; 4 * page];
+    store
+        .read(0, &mut four)
+        .map_err(|_| "a read of a store over a source that takes cuts failed")?;
+    if !source.holds(&four, 0) || calls() != 1 || held() != 4 {
+        return Err("a store over a source that takes cuts did not fill four pages in one run");
+    }
+
+    // Cut 7 bytes into page 1, and page 2 written whole after it.
+    let cut = PAGE_SIZE + 7;
+    store.discard_from(cut);
+    store
+        .write(2 * PAGE_SIZE, &vec![0x5A_u8; page])
+        .map_err(|_| "a write past a cut failed")?;
+    reclaim_everything();
+    if held() != 2 || calls() != 1 {
+        return Err("reclaim did not leave exactly the pages that reach past an open cut");
+    }
+
+    // A second cut, further on, and the first one answered: nothing changes.
+    store.discard_from(3 * PAGE_SIZE);
+    source.cut_at.store(cut, Ordering::Relaxed);
+    store.source_cut();
+    reclaim_everything();
+    let mut one = vec![0xFF_u8; page];
+    store
+        .read(3 * PAGE_SIZE, &mut one)
+        .map_err(|_| "a read past an open cut failed")?;
+    if held() != 2 || calls() != 1 || one.iter().any(|&byte| byte != 0) {
+        return Err("a store went back to its source while one of two cuts was open");
+    }
+
+    // Both answered: the pages go, and come back as the source holds them.
+    store.source_cut();
+    reclaim_everything();
+    if held() != 0 {
+        return Err("reclaim left clean pages of a store whose every cut its source holds");
+    }
+    let mut three = vec![0_u8; 3 * page];
+    store
+        .read(PAGE_SIZE, &mut three)
+        .map_err(|_| "a read past a cut its source holds failed")?;
+    if !source.holds(&three, PAGE_SIZE) || calls() != 2 || held() != 3 {
+        return Err("a store did not fill from its source past a cut the source holds");
+    }
+
+    // A truncation to six pages overtakes the fill of page 8.
+    *source.store.lock() = Some(Arc::clone(store));
+    source.race_at.store(8, Ordering::Relaxed);
+    store
+        .read(8 * PAGE_SIZE, &mut one)
+        .map_err(|_| "a read a truncation overtook failed")?;
+    if one.iter().any(|&byte| byte != PAST_RACING_CUT) || calls() != 4 || held() != 4 {
+        return Err("a fill a truncation overtook kept the bytes it read before it");
+    }
+
+    // The same truncation overtakes the fill a write into part of page 4
+    // makes first: page 4 is before the cut and nothing holds it. The write
+    // fills it again and lands in the source's bytes, not in a zeroed frame.
+    let written = b"past a fill that kept nothing";
+    source.race_at.store(4, Ordering::Relaxed);
+    store
+        .write(4 * PAGE_SIZE + 10, written)
+        .map_err(|_| "a write whose fill a truncation overtook failed")?;
+    store
+        .read(4 * PAGE_SIZE, &mut one)
+        .map_err(|_| "a read of a page written after an overtaken fill failed")?;
+    let around = one
+        .get(..10)
+        .is_some_and(|head| source.holds(head, 4 * PAGE_SIZE))
+        && one
+            .get(10 + written.len()..)
+            .is_some_and(|tail| source.holds(tail, 4 * PAGE_SIZE + 10 + written.len() as u64));
+    if calls() != 6 || one.get(10..10 + written.len()) != Some(&written[..]) || !around {
+        return Err("a write whose fill a truncation overtook wrote into a zeroed page");
+    }
+    Ok(())
 }
 
 /// A store read as `read` hands a large read to a file -- a page at a time --

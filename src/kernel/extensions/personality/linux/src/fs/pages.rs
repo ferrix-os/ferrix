@@ -73,8 +73,10 @@ pub(crate) const MAX_FILE_SIZE: u64 = 1 << 40;
 /// way. A compressed btrfs extent is at most 128 KiB, which is 32 pages.
 pub(crate) const MAX_FILL_RUN: usize = 32;
 
-/// How many times a read fills a page that reclaim took again before it reads
-/// the page from the source directly.
+/// How many times a read fills a page that reclaim took again, or whose fill
+/// a truncation overtook, before it reads the page from the source directly;
+/// and how many times a write into part of a page fills it before it answers
+/// `EIO`.
 const REFILLS: usize = 8;
 
 /// [`PAGE_SIZE`] as a length.
@@ -135,19 +137,41 @@ pub(crate) struct VmoPages {
     _charge: Charge,
 }
 
+/// What a cut leaves of a file's source.
+///
+/// A source knows the file as it was until the cut reaches it, so from
+/// [`Pages::discard_from`] on the bytes from the cut are not the source's:
+/// an absent page there reads as zeros, and a fill keeps no byte past it.
+/// The bound starts past every offset. A source that takes the cut itself
+/// says so once it holds the file as cut ([`Pages::source_cut`]), and when
+/// it has said so for every cut made, the bound is past every offset again:
+/// what is written past the cut and written back is the source's to fill
+/// like any other page. Until then, and for good under a source that never
+/// says so or whose cut failed, a page that reaches past the bound is kept
+/// from reclaim ([`Fill::reclaim_clean`]): dropped, it would read as zeros.
+#[derive(Debug)]
+struct Bound {
+    /// Bytes from here on are not the source's.
+    below: u64,
+    /// The cuts the source has not said it holds: two truncations of one
+    /// file may overlap, and the bound stays until the source holds both.
+    open: u32,
+    /// How many times the bound moved, down or up. A fill that began under
+    /// another count read the source across a cut -- the old bytes past
+    /// it, or the old tail of the page it falls in -- and keeps nothing.
+    moves: u64,
+}
+
 /// How a file on a disk fills its object: shared by the store, for reads and
 /// partial writes, and by the object, for faults.
 #[derive(Debug)]
 struct Fill {
     source: Arc<dyn PageSource>,
-    /// Bytes from here on are not the source's: a source knows the file as it
-    /// was, not as it has been cut. Starts past every offset;
-    /// [`Pages::discard_from`] lowers it and nothing raises it, so a file cut
-    /// and grown again reads zeros past the cut. A fill is kept under this
-    /// lock, which a truncation takes to lower it before it takes pages away,
-    /// so a fill that raced the truncation is either cut back here or taken
-    /// away there.
-    sourced_below: SpinLock<u64>,
+    /// What a cut leaves of the source ([`Bound`]). A fill is kept under
+    /// this lock, which a truncation takes to lower the bound before it
+    /// takes pages away, so a fill that raced the truncation keeps nothing
+    /// here or is taken away there.
+    bound: SpinLock<Bound>,
     /// Where the last read began and ended, in bytes: a read that begins
     /// where it ended, in a later page than it began, continues a
     /// sequential stream and reads ahead (see `VmoPages::read`).
@@ -305,7 +329,11 @@ impl VmoPages {
         let fill = source.map(|source| {
             Arc::new(Fill {
                 source,
-                sourced_below: SpinLock::new(u64::MAX),
+                bound: SpinLock::new(Bound {
+                    below: u64::MAX,
+                    open: 0,
+                    moves: 0,
+                }),
                 last_read: (AtomicU64::new(u64::MAX), AtomicU64::new(u64::MAX)),
             })
         });
@@ -324,6 +352,29 @@ impl VmoPages {
             .is_some_and(|fill| fill.wants_fill(&self.vmo, index))
     }
 
+    /// Have page `index` in the object, or not the source's, before a write
+    /// that covers only part of it. A fill that a truncation overtook keeps
+    /// nothing (`Bound::moves`), and the page is then still absent and the
+    /// source's: it is filled again, and after [`REFILLS`] such fills the
+    /// write is refused rather than made into a zeroed frame, which would be
+    /// written back over the file's bytes.
+    ///
+    /// # Errors
+    ///
+    /// As [`Fill::fill_run`], and `EIO` after [`REFILLS`] fills that kept
+    /// nothing.
+    fn fill_before_part_write(&self, index: u64) -> Result<()> {
+        let mut fills = 0;
+        while self.wants_fill(index) {
+            if fills == REFILLS {
+                return Err(Errno::EIO);
+            }
+            fills += 1;
+            self.fill_from(index, index)?;
+        }
+        Ok(())
+    }
+
     /// Fill the run of absent pages from `index`, no further than `last`.
     ///
     /// # Errors
@@ -340,8 +391,23 @@ impl Filler for Fill {
         self.source.reclaimable()
     }
 
-    /// The source's own answer: a writable file keeps the pages it wrote.
+    /// The source's own answer, a writable file keeping the pages it wrote,
+    /// for the pages that end at or below the cut's bound: one that reaches
+    /// past it is not the source's to fill again whole, and dropped it would
+    /// read as zeros ([`Bound`]).
     fn reclaim_clean(&self, pages: &mut Vec<u64>, drop: &mut dyn FnMut(&[u64]) -> u64) -> u64 {
+        let below = self.bound.lock().below;
+        if below != u64::MAX {
+            pages.retain(|&index| {
+                index
+                    .checked_add(1)
+                    .and_then(|next| next.checked_mul(PAGE_SIZE))
+                    .is_some_and(|end| end <= below)
+            });
+            if pages.is_empty() {
+                return 0;
+            }
+        }
         self.source.reclaim_clean(pages, drop)
     }
 
@@ -386,7 +452,7 @@ impl Fill {
     fn sourced(&self, index: u64) -> bool {
         index
             .checked_mul(PAGE_SIZE)
-            .is_some_and(|start| start < *self.sourced_below.lock())
+            .is_some_and(|start| start < self.bound.lock().below)
     }
 
     /// Page `index` is absent from `vmo` and the source's to fill.
@@ -420,6 +486,9 @@ impl Fill {
     /// error, which for a page that does not verify is `EIO`.
     fn fill_run(&self, vmo: &Vmo, first: u64, count: usize) -> Result<()> {
         let source = self.source.as_ref();
+        // Before the source is read: a cut, or the source taking one, between
+        // here and the keeping below makes what was read the file as it was.
+        let began = self.bound.lock().moves;
         let mut frames: Vec<Frame> = Vec::new();
         frames.try_reserve_exact(count).map_err(|_| Errno::ENOMEM)?;
         for _ in 0..count {
@@ -472,12 +541,16 @@ impl Fill {
             }
         };
 
-        let bound = self.sourced_below.lock();
+        let bound = self.bound.lock();
+        // Nothing of a fill that read across a cut: whoever wanted the page
+        // finds it absent and the source's, and fills it again, as after a
+        // reclaim.
+        let current = bound.moves == began;
         for (index, frame) in (first..).zip(frames) {
             let start = index.saturating_mul(PAGE_SIZE);
-            let keep = index < first.saturating_add(got as u64) && start < *bound;
+            let keep = current && index < first.saturating_add(got as u64) && start < bound.below;
             if keep
-                && let Ok(valid) = usize::try_from(*bound - start)
+                && let Ok(valid) = usize::try_from(bound.below - start)
                 && valid < PAGE_BYTES
             {
                 // SAFETY: as above, the frame is still this call's alone.
@@ -619,8 +692,8 @@ impl Pages for VmoPages {
             let (index, within, take) = piece(offset, done, len)?;
             // A page this write covers only partly keeps the file's other
             // bytes, so it comes from the source first.
-            if take < PAGE_BYTES && self.wants_fill(index) {
-                self.fill_from(index, index)?;
+            if take < PAGE_BYTES {
+                self.fill_before_part_write(index)?;
             }
             let bytes = data.get(done..done + take).ok_or(Errno::EIO)?;
             // Committed and copied under the object's lock: nothing gives
@@ -639,8 +712,10 @@ impl Pages for VmoPages {
         // pages: a fill that kept a page past the cut before this is taken
         // away below, and one after it keeps nothing past the cut.
         if let Some(fill) = &self.fill {
-            let mut bound = fill.sourced_below.lock();
-            *bound = (*bound).min(offset);
+            let mut bound = fill.bound.lock();
+            bound.below = bound.below.min(offset);
+            bound.open = bound.open.saturating_add(1);
+            bound.moves = bound.moves.wrapping_add(1);
         }
         let _ = self.vmo.decommit_from(offset.div_ceil(PAGE_SIZE));
         // A private mapping's copies of pages past the cut go too, and so does
@@ -655,6 +730,20 @@ impl Pages for VmoPages {
         // Under the object's lock, so reclaim cannot give the frame back
         // while it is zeroed.
         let _ = self.vmo.zero_from(offset / PAGE_SIZE, within);
+    }
+
+    /// One cut fewer for the source to take, and with none left the bound
+    /// past every offset again; every fill that began before this keeps
+    /// nothing, as it may have read the source before the cut reached it.
+    fn source_cut(&self) {
+        if let Some(fill) = &self.fill {
+            let mut bound = fill.bound.lock();
+            bound.open = bound.open.saturating_sub(1);
+            if bound.open == 0 {
+                bound.below = u64::MAX;
+            }
+            bound.moves = bound.moves.wrapping_add(1);
+        }
     }
 
     fn committed_bytes(&self) -> u64 {

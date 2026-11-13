@@ -319,6 +319,9 @@ impl ferrix_vfs::tmpfs::Pages for MappedPages {
     fn discard_from(&self, offset: u64) {
         self.0.pages.discard_from(offset);
     }
+    fn source_cut(&self) {
+        self.0.pages.source_cut();
+    }
     fn committed_bytes(&self) -> u64 {
         self.0.pages.committed_bytes()
     }
@@ -1360,6 +1363,9 @@ impl ferrix_vfs::tmpfs::Pages for PoisonedPages {
     fn discard_from(&self, offset: u64) {
         self.pages.discard_from(offset);
     }
+    fn source_cut(&self) {
+        self.pages.source_cut();
+    }
     fn committed_bytes(&self) -> u64 {
         self.pages.committed_bytes()
     }
@@ -1609,6 +1615,9 @@ impl ferrix_vfs::tmpfs::Pages for TellingPages {
     fn discard_from(&self, offset: u64) {
         self.pages.discard_from(offset);
     }
+    fn source_cut(&self) {
+        self.pages.source_cut();
+    }
     fn committed_bytes(&self) -> u64 {
         self.pages.committed_bytes()
     }
@@ -1732,4 +1741,152 @@ fn every_change_of_a_dirty_set_tells_its_store_the_count_after_it() {
     // The cut, then the writeback the truncation makes after it.
     let cut = told(&storage);
     assert!(cut.ends_with(&[3, 1, 0]), "the truncation's cut: {cut:?}");
+}
+
+/// A store that notes each cut and each word that the source holds it, and
+/// at that word what the source reads in the page the cut fell in.
+#[derive(Debug, Default)]
+struct Cutting {
+    heap: Option<HeapStorage>,
+    seen: Arc<Mutex<Vec<Cut>>>,
+}
+
+/// What [`CuttingPages`] saw.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Cut {
+    /// `discard_from` at this offset.
+    Discarded(u64),
+    /// `source_cut`, and the source's bytes of the page the last cut fell
+    /// in: how many from the page's start are not zero.
+    SourceHolds(usize),
+}
+
+#[derive(Debug)]
+struct CuttingPages {
+    pages: Box<dyn ferrix_vfs::tmpfs::Pages>,
+    source: Option<Arc<dyn ferrix_vfs::tmpfs::PageSource>>,
+    seen: Arc<Mutex<Vec<Cut>>>,
+}
+
+impl ferrix_vfs::tmpfs::Pages for CuttingPages {
+    fn read(&self, offset: u64, buf: &mut [u8]) -> ferrix_vfs::Result<()> {
+        self.pages.read(offset, buf)
+    }
+    fn write(&self, offset: u64, data: &[u8]) -> ferrix_vfs::Result<()> {
+        self.pages.write(offset, data)
+    }
+    fn discard_from(&self, offset: u64) {
+        self.seen.lock().unwrap().push(Cut::Discarded(offset));
+        self.pages.discard_from(offset);
+    }
+    fn source_cut(&self) {
+        let at = self
+            .seen
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find_map(|cut| match cut {
+                Cut::Discarded(at) => Some(*at),
+                Cut::SourceHolds(_) => None,
+            })
+            .expect("the source holds a cut nobody made");
+        let mut page = vec![0xee_u8; 4096];
+        let filled = self
+            .source
+            .as_ref()
+            .expect("a store of a disk file has a source")
+            .fill_range(at / 4096, &mut [&mut page[..]])
+            .expect("the source reads the page the cut fell in");
+        assert_eq!(filled, 1);
+        let kept = page
+            .iter()
+            .rposition(|&byte| byte != 0)
+            .map_or(0, |last| last + 1);
+        self.seen.lock().unwrap().push(Cut::SourceHolds(kept));
+        self.pages.source_cut();
+    }
+    fn committed_bytes(&self) -> u64 {
+        self.pages.committed_bytes()
+    }
+    fn resize(&self, len: u64) {
+        self.pages.resize(len);
+    }
+}
+
+impl Storage for Cutting {
+    fn allocate(&self) -> ferrix_vfs::Result<Box<dyn ferrix_vfs::tmpfs::Pages>> {
+        self.heap.as_ref().unwrap().allocate()
+    }
+    fn allocate_with(
+        &self,
+        source: Arc<dyn ferrix_vfs::tmpfs::PageSource>,
+    ) -> ferrix_vfs::Result<Box<dyn ferrix_vfs::tmpfs::Pages>> {
+        let pages = self
+            .heap
+            .as_ref()
+            .unwrap()
+            .allocate_with(Arc::clone(&source))?;
+        Ok(Box::new(CuttingPages {
+            pages,
+            source: Some(source),
+            seen: Arc::clone(&self.seen),
+        }))
+    }
+    fn max_file_size(&self) -> u64 {
+        self.heap.as_ref().unwrap().max_file_size()
+    }
+}
+
+/// A truncation tells the store that the source holds the cut, once for the
+/// cut it made and after the volume took it: at that word the volume reads
+/// the file's bytes up to the cut and zeros from it on, in the page the cut
+/// falls in too, so a store that drops a page past the cut may fill it from
+/// the volume again. A cut to nothing reads nothing at all there.
+///
+/// Verifies: H.QUOTA.12
+#[test]
+fn a_truncation_tells_the_store_when_the_volume_holds_the_cut() {
+    let disk = Disk::new(BLANK);
+    let storage = Arc::new(Cutting {
+        heap: Some(HeapStorage::new(1 << 30)),
+        ..Cutting::default()
+    });
+    let fs = RwBtrfs::mount(
+        disk,
+        0x0800_0016,
+        Arc::clone(&storage) as Arc<dyn Storage>,
+        Arc::new(Fixed),
+        &SpinParker,
+        notice,
+    )
+    .unwrap();
+    let seen = |storage: &Cutting| storage.seen.lock().unwrap().clone();
+    let file = make_file(&fs.root(), b"cut", &vec![7u8; 3 * 4096]);
+    file.fsync(false).unwrap();
+    assert_eq!(seen(&storage), [], "a write cut something");
+
+    // Inside the second page: 904 bytes of it are left, and zeros after.
+    file.set_len(5000).unwrap();
+    assert_eq!(
+        seen(&storage),
+        [Cut::Discarded(5000), Cut::SourceHolds(904)],
+        "a cut inside a page"
+    );
+    // Grown past the cut and written there: no cut, and no word of one.
+    let _ = file.write_at(6000, &[9u8; 100], false).unwrap();
+    file.fsync(false).unwrap();
+    assert_eq!(seen(&storage).len(), 2, "a write past a cut told of a cut");
+
+    // To nothing, as `O_TRUNC` does: the volume reads nothing there.
+    file.set_len(0).unwrap();
+    assert_eq!(
+        seen(&storage).get(2..),
+        Some(&[Cut::Discarded(0), Cut::SourceHolds(0)][..]),
+        "a cut to nothing"
+    );
+    // And what is written after it reads back from the volume.
+    let _ = file.write_at(0, b"1840\n", false).unwrap();
+    file.fsync(false).unwrap();
+    assert_eq!(read_all(&file), b"1840\n");
 }

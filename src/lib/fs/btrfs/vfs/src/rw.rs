@@ -64,6 +64,22 @@
 //! volume lock the writeback holds. Reclaim never waits for a write: it
 //! leaves what is held.
 //!
+//! # A cut file is the volume's again
+//!
+//! A truncation cuts the cache first, and from then on the cache asks
+//! nothing past the cut of the volume, which still holds the file as it was
+//! (`Pages::discard_from`). Then it cuts the volume, which zeroes the rest of
+//! the sector the cut falls in, and tells the cache so
+//! (`Pages::source_cut`): what is written past the cut and written back is
+//! the volume's to fill like any other clean page. Until that word existed
+//! the cache forgot the volume from the cut on for the life of the inode's
+//! object, and a page written there, written back and reclaimed read as
+//! zeros, though the disk held it: Steam's pid file, made by `O_TRUNC` and
+//! five bytes, read five zero bytes once a game's load had reclaimed the
+//! cache, and a write into part of such a page wrote zeros back over the
+//! bytes around it (N150 box, 2026-11-13). A truncation the volume refuses
+//! says nothing, and the cache keeps the pages it holds past the cut.
+//!
 //! # A writeback lets the lock go between slices
 //!
 //! Every read of a page the cache does not hold takes the volume lock, and a
@@ -1603,16 +1619,27 @@ impl<D: WriteHandle> Inode for Node<D> {
             dirty.retain(|&page| page * PAGE_SIZE < len);
             self.shared.release((before - dirty.len()) as u64);
         }
-        drop(still);
         let ino = self.ino;
         let now = self.shared.now();
+        // The pages from the cut on stay held still until the cache is told
+        // that the volume holds the cut: a reclaim that chose its pages
+        // before the cut would otherwise drop one written past it while the
+        // cache still reads zeros there (ledger 9881 C6). The writeback
+        // below holds what it writes still itself, beside this.
         self.with_written_back(|volume| {
             volume.truncate(ino, len)?;
             let mut item = volume.inode(ino)?.ok_or(WriteError::NotFound)?;
             item.mtime = now;
             item.ctime = now;
             volume.write_inode(ino, &item)
-        })
+        })?;
+        // The volume holds the file as cut: zeros from `len` on, in the
+        // sector the cut falls in too (`WriteVolume::truncate`). So the
+        // cache may fill from it past the cut again; had the truncation
+        // failed, the cache would keep what it holds there instead.
+        pages.source_cut();
+        drop(still);
+        Ok(())
     }
 
     fn lookup(&self, name: &[u8]) -> Result<Arc<dyn Inode>> {

@@ -123,6 +123,23 @@ pub trait Pages: Send + Sync + fmt::Debug {
     /// `offset` on are forgotten too.
     fn discard_from(&self, offset: u64);
 
+    /// The source now holds the file as [`Pages::discard_from`] last cut it:
+    /// it reads zeros from the cut on, and whatever is written there and
+    /// written back afterwards. So nothing of the source is forgotten any
+    /// more, and a page past the cut that the store does not hold is the
+    /// source's to fill again.
+    ///
+    /// Called by a file system whose source takes the cut -- a writable
+    /// volume, once its own truncation is done -- once for each
+    /// [`Pages::discard_from`] the source took, after it, and not for one it
+    /// failed to take: cuts of one file may overlap, and the store goes back
+    /// to the source only when every cut made has been answered. A store
+    /// whose pages can be dropped needs it: without it a page written past
+    /// the cut, written back and dropped would read as zeros. The default
+    /// does nothing, which is right for a source that keeps the file as it
+    /// was, and for a store that drops no page.
+    fn source_cut(&self) {}
+
     /// Memory actually committed, in bytes: the pages held, and not what a
     /// source could fill.
     fn committed_bytes(&self) -> u64;

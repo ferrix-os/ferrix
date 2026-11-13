@@ -381,8 +381,10 @@ pub fn run() -> Result<Report, &'static str> {
         crate::console::println!(
             "  reclaim  btrfs-rw: {} clean pages of a writable mount given back, {} written and not \
          written back kept and counted in Dirty, every page read back as last written; a shared \
-         mapping made during a reclaim kept its page; a write at memory.max took back {} pages \
-         and succeeded; a read past it took back {} pages and succeeded",
+         mapping made during a reclaim kept its page; three files cut and written again gave \
+         their pages back once written back and read back as written, an append after it too; \
+         a write at memory.max took back {} pages and succeeded; a read past it took back {} \
+         pages and succeeded",
             reclaim.given,
             reclaim.dirty,
             reclaim.stolen_at_max,

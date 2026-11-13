@@ -1783,7 +1783,11 @@ package FerrixItemRequirements {
                 memory.high is brought back to it, its sibling's cache untouched,
                 every page read back as the source has it, and a read at
                 memory.max kills nothing where its clean cache was room (the
-                `cgroups` line, reclaim).";
+                `cgroups` line, reclaim). And a file of a writable btrfs mount cut
+                and written again, written back and taken back, reads back as
+                written, and a write into part of such a page keeps the page's
+                other bytes (the `reclaim` line of test-btrfs; at stage 8 the
+                page store over a source that takes cuts; F-116).";
             attribute :>> parent = ("G.8", "O.QUOTA");
         }
         requirement <'H.QUOTA.13'> programsStopAtTheWatermark : ItemHighLevel {
