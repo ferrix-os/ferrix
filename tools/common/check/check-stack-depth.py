@@ -231,41 +231,6 @@ RECURSIONS = (
         "pidns::MAX_LEVEL (32) deep, but a parent killed by its child's exit signal is bounded only by "
         "the process tree",
     ),
-    (
-        "core's quicksort of a space's ids",
-        (r"^core::slice::sort::(unstable::quicksort::quicksort|shared::pivot::median3_rec)::<u64, ",),
-        False,
-        None,
-        "F-112 (owner silent-reset): AddressSpace::give_back's sorts of the touched ids "
-        "(all_still_named, Named::of), about 2 log2 n levels; fix/exit-unmap-sort's heapsort takes "
-        "them out, and with them this entry",
-    ),
-    (
-        "core's quicksort of a space's ids and flags",
-        (r"^core::slice::sort::(unstable::quicksort::quicksort|shared::pivot::median3_rec)::<\(u64, bool\), ",),
-        False,
-        None,
-        "F-112 (owner silent-reset): AddressSpace::give_back's sort, about 2 log2 n levels; "
-        "fix/exit-unmap-sort's heapsort takes it out, and with it this entry",
-    ),
-    (
-        "core's quicksort of a space's region counts",
-        (r"^core::slice::sort::(unstable::quicksort::quicksort|shared::pivot::median3_rec)::"
-         r"<ferrix_kernel_core::user::space::Counting, ",),
-        False,
-        None,
-        "F-112 (owner silent-reset): AddressSpace::room_to_count_out's sort, one entry a region, about "
-        "2 log2 n levels; fix/exit-unmap-sort's heapsort takes it out, and with it this entry",
-    ),
-    (
-        "core's quicksort of a space's objects",
-        (r"^core::slice::sort::(unstable::quicksort::quicksort|shared::pivot::median3_rec)::"
-         r"<&alloc::sync::Arc<ferrix_kernel_core::user::vmo::Vmo>, ",),
-        False,
-        None,
-        "F-112 (owner silent-reset): AddressSpace::resident_pages' sort by object, read by the OOM "
-        "survey, about 2 log2 n levels; fix/exit-unmap-sort's heapsort takes it out, and with it this entry",
-    ),
 )
 
 
@@ -1083,10 +1048,11 @@ def self_test():
     assert not recursion_listed(("a", "b", "c"), anchored[0], selfish), "a self-call beside the anchor"
     tree = next(each for each in RECURSIONS if each[0] == "the scheduler's tree")
     assert recursion_listed(("ferrix_sched::tree::insert::<x>",), tree)
+    # core's recursive sort is listed by no entry: its four entries left with F-112's fix
+    # (ledger 9275 K4), so a part of it on a judged line fails the row as not listed.
     assert not any(
         recursion_listed(("core::slice::sort::unstable::quicksort::quicksort::<(u64, bool), x>",), each)
         for each in RECURSIONS
-        if each[0] != "core's quicksort of a space's ids and flags"
     )
     assert all(len(each) == 5 and (each[3] is None) != (each[4] is None) for each in RECURSIONS), "a bound or an owner"
     problems = []
