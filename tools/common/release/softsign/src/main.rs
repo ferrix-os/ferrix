@@ -5,7 +5,7 @@
 //! ferrix-softsign keygen  <label> [--height 10|15|20]
 //! ferrix-softsign pubkey  <label>
 //! ferrix-softsign remaining <label>
-//! ferrix-softsign sign    <label> --kind slot|config|driver|revocation
+//! ferrix-softsign sign    <label> --kind slot|config|driver|revocation|package
 //!                         --anchor-id <0x8000..> --profile <n> --arch <n>
 //!                         --family <n> --security-version <n>
 //!                         --payload <file> --out <file>
@@ -334,6 +334,7 @@ fn body(args: &Args) -> Result<Body, String> {
         "config" => 2,
         "driver" => 3,
         "revocation" => 4,
+        "package" => 5,
         other => return Err(format!("--kind {other}")),
     };
     let anchor_id =

@@ -39,6 +39,7 @@ verifier (§5).
 | **Configuration package** | 2 | One configuration package of 3564's (S1)-(S6): the typed, bounded data `fast` applies at a boot (S7) | init's configuration verifier, before any unit reads the configuration (3564 (S12)) | The package file's first 4 KiB |
 | **Driver image** | 3 | One native driver image that `drvupdated` hands to `devmgr` (`DEVMGR.md` §4.1) | `devmgr`, on its own copy of the VMO, before step 1 of "what devmgr checks" | The first 4 KiB of the bytes the client sends after its 48-byte header |
 | *Revocation* | 4 | A list of revoked keys (trees) of one kind (§7.4) | The verifier of the kind it names | A file next to that kind's anchors (§7.4) |
+| **Package** | 5 | A package repository's index for one architecture, and each package it names (`UPDATES.md` §2.2, added 2026-11-13 for review) | `pkg`, on its own copy in memory, before it accepts an index or writes a package's file | A file beside it, `<file>.fxsig`: the block alone |
 
 **One format, one verifier.** The four kinds share the manifest below and one
 verifier crate (§5). They differ only in four things: the anchor set that
@@ -2134,3 +2135,13 @@ Evidence on the branch:
 
 Owed before landing: the controls of 4016 (7) on the landing hash, the
 rows of (12), and the transcripts of (9).
+
+**Kind 5, packages (2026-11-13, branch `pkg/updates`; for the
+consultant's review).** `UPDATES.md` §2.2 adds a fifth kind for a package
+repository's index and its packages, verified by `pkg`. In
+`ferrix-sigverify` the kind parses, a revocation may target it, and a
+package manifest checked with no subject is refused as a configuration or
+driver manifest is (`L.sigverify.6` and `H.SIGN.2` name it); the soft
+signer signs it (`--kind package`). No anchor of the kind is in
+`signing-anchors.toml` yet: `test-pkg` signs with a throwaway key of its
+own, and the `pkg` an image carries trusts none.

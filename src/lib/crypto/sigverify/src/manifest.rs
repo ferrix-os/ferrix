@@ -41,6 +41,9 @@ pub enum Kind {
     Driver = 3,
     /// A revocation of one kind's trees.
     Revocation = 4,
+    /// A package repository's index or one of its packages
+    /// (`docs/UPDATES.md` §2.2).
+    Package = 5,
 }
 
 impl Kind {
@@ -52,6 +55,7 @@ impl Kind {
             2 => Some(Kind::Config),
             3 => Some(Kind::Driver),
             4 => Some(Kind::Revocation),
+            5 => Some(Kind::Package),
             _ => None,
         }
     }
@@ -128,8 +132,8 @@ pub enum Refusal {
     WrongFamily,
     /// The subject is not the one expected.
     WrongSubject,
-    /// A configuration or driver manifest checked with no subject: the
-    /// caller must name the package or driver it will act on.
+    /// A configuration, driver or package manifest checked with no
+    /// subject: the caller must name what it will act on.
     NoSubject,
     /// The security version is below the floor.
     BelowFloor,
@@ -157,9 +161,9 @@ impl From<lms::Error> for Refusal {
 /// its id, and its HSS public key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Anchor {
-    /// The kind it verifies: [`Kind::Slot`], [`Kind::Config`] or
-    /// [`Kind::Driver`]. A revocation is verified by its target kind's
-    /// anchors.
+    /// The kind it verifies: [`Kind::Slot`], [`Kind::Config`],
+    /// [`Kind::Driver`] or [`Kind::Package`]. A revocation is verified by its
+    /// target kind's anchors.
     pub kind: Kind,
     /// Its `anchor_id`: 0 and 1 for product keys, `0x8000` and up for
     /// development keys (`docs/SIGNING.md` §6.4).
@@ -181,9 +185,9 @@ pub struct Expect<'a> {
     pub arch: u8,
     /// The hardware families it accepts, in no order.
     pub families: &'a [u32],
-    /// The subject the caller will act on: required for a configuration
-    /// or driver manifest (`None` refuses it), compared when given for any
-    /// kind.
+    /// The subject the caller will act on: required for a configuration,
+    /// driver or package manifest (`None` refuses it), compared when given
+    /// for any kind.
     pub subject: Option<&'a [u8; 32]>,
     /// The floor of this kind (`docs/SIGNING.md` §7).
     pub floor: u32,
@@ -309,7 +313,10 @@ fn kind_fields(block: &[u8], kind: Kind) -> Result<(), Refusal> {
         let count = usize::from(le16(block, 162));
         let target = Kind::from_code(le16(block, 160));
         count <= REVOKED_MAX
-            && matches!(target, Some(Kind::Slot | Kind::Config | Kind::Driver))
+            && matches!(
+                target,
+                Some(Kind::Slot | Kind::Config | Kind::Driver | Kind::Package)
+            )
             && zero(block, entry_offset(count), 496)
     } else {
         zero(block, 160, 164) && zero(block, 176, 496)
@@ -383,10 +390,11 @@ fn bindings(block: &[u8], expect: &Expect<'_>) -> Result<(), Refusal> {
     if !expect.families.contains(&le32(block, 24)) {
         return Err(Refusal::WrongFamily);
     }
-    // A configuration or driver names what it is for: a caller that names
-    // no subject for one is refused, never let through (ledger 3803 (1)).
+    // A configuration, driver or package names what it is for: a caller
+    // that names no subject for one is refused, never let through (ledger
+    // 3803 (1)).
     match (expect.kind, expect.subject) {
-        (Kind::Config | Kind::Driver, None) => return Err(Refusal::NoSubject),
+        (Kind::Config | Kind::Driver | Kind::Package, None) => return Err(Refusal::NoSubject),
         (_, Some(subject)) if bytes::<32>(block, 72) != *subject => {
             return Err(Refusal::WrongSubject);
         }

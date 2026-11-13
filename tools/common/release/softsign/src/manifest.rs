@@ -11,7 +11,7 @@ pub const BODY_LEN: usize = 512;
 /// The fields of a manifest's body.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Body {
-    /// 1 slot, 2 config, 3 driver, 4 revocation.
+    /// 1 slot, 2 config, 3 driver, 4 revocation, 5 package.
     pub kind: u16,
     /// The security version.
     pub security_version: u32,

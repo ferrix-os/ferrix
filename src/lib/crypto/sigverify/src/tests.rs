@@ -395,7 +395,7 @@ fn each_structural_field_is_refused_by_its_name() {
     assert_eq!(refused(&with(0, b"FXSIGMAM")), m(Magic));
     assert_eq!(refused(&with(8, &2u16.to_le_bytes())), m(Format));
     assert_eq!(refused(&with(10, &511u16.to_le_bytes())), m(BodyLen));
-    assert_eq!(refused(&with(12, &5u16.to_le_bytes())), m(Kind));
+    assert_eq!(refused(&with(12, &6u16.to_le_bytes())), m(Kind));
     assert_eq!(refused(&with(12, &0u16.to_le_bytes())), m(Kind));
     assert_eq!(refused(&with(14, &1u16.to_le_bytes())), m(Flags));
     assert_eq!(refused(&with(22, &[0])), m(Profile));
@@ -860,7 +860,13 @@ fn floors_outside_a_slot_and_the_kind_codes() {
         verify(&config, &e, &anchors(), &[]),
         Err(Refusal::Malformed(Field::Floors))
     );
-    for kind in [Kind::Slot, Kind::Config, Kind::Driver, Kind::Revocation] {
+    for kind in [
+        Kind::Slot,
+        Kind::Config,
+        Kind::Driver,
+        Kind::Revocation,
+        Kind::Package,
+    ] {
         assert_eq!(Kind::from_code(kind.code()), Some(kind));
     }
 }
@@ -1036,5 +1042,113 @@ fn a_config_or_driver_manifest_without_a_subject_is_refused() {
     assert_eq!(
         verify(&driver, &e, &driver_anchors, &[]),
         Err(Refusal::NoSubject)
+    );
+}
+
+/// Verifies: L.sigverify.6
+/// Verifies: L.sigverify.5
+/// A package manifest (kind 5, `docs/UPDATES.md` §2.2) binds its subject,
+/// is refused with no subject, is told apart from a configuration manifest
+/// by its signed kind and its anchors, and a revocation may target it.
+#[test]
+fn a_package_manifest_binds_its_subject_and_kind() {
+    let mut subject = [0u8; 32];
+    subject[..5].copy_from_slice(b"statd");
+    let mut other = [0u8; 32];
+    other[..6].copy_from_slice(b":index");
+    let package_anchors = [Anchor {
+        kind: Kind::Package,
+        id: 0x8000,
+        public_key: keys().slot,
+    }];
+    let block = sign(
+        "slot",
+        &Body {
+            kind: 5,
+            subject,
+            floors: [0; 4],
+            ..slot_body()
+        },
+    );
+    let e = Expect {
+        kind: Kind::Package,
+        subject: Some(&subject),
+        ..slot_expect()
+    };
+    let v = verify(&block, &e, &package_anchors, &[]).unwrap();
+    assert_eq!(v.kind, Kind::Package);
+    assert_eq!(
+        verify(
+            &block,
+            &Expect {
+                subject: Some(&other),
+                ..e
+            },
+            &package_anchors,
+            &[]
+        ),
+        Err(Refusal::WrongSubject)
+    );
+    assert_eq!(
+        verify(
+            &block,
+            &Expect { subject: None, ..e },
+            &package_anchors,
+            &[]
+        ),
+        Err(Refusal::NoSubject)
+    );
+    // Presented as a configuration package, it is refused by its signed
+    // kind; a configuration manifest presented as a package, likewise; and
+    // a package checked against only another kind's anchor, by the anchor.
+    let config = Expect {
+        kind: Kind::Config,
+        subject: Some(&subject),
+        ..slot_expect()
+    };
+    assert_eq!(
+        verify(&block, &config, &anchors(), &[]),
+        Err(Refusal::WrongKind)
+    );
+    let config_block = sign(
+        "config",
+        &Body {
+            kind: 2,
+            anchor_id: 0x8001,
+            subject,
+            floors: [0; 4],
+            ..slot_body()
+        },
+    );
+    assert_eq!(
+        verify(&config_block, &e, &package_anchors, &[]),
+        Err(Refusal::WrongKind)
+    );
+    assert_eq!(
+        verify(&block, &e, &anchors(), &[]),
+        Err(Refusal::UnknownAnchor)
+    );
+    // A revocation of package trees, signed by a package key.
+    let revocation = sign(
+        "slot",
+        &Body {
+            kind: 4,
+            target_kind: 5,
+            revoked: std::vec![[7u8; 16]],
+            floors: [0; 4],
+            ..slot_body()
+        },
+    );
+    let r = Expect {
+        kind: Kind::Revocation,
+        target: Some(Kind::Package),
+        subject: None,
+        ..slot_expect()
+    };
+    assert_eq!(
+        verify(&revocation, &r, &package_anchors, &[])
+            .unwrap()
+            .revoked(),
+        Some((Kind::Package, &[[7u8; 16]][..]))
     );
 }

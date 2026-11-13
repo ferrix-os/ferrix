@@ -46,8 +46,8 @@ package FerrixSigningRequirements {
         requirement <'H.SIGN.2'> signedFieldsBind : ItemHighLevel {
             attribute :>> statement = "The verifier shall accept a manifest only
                 when its signed kind, profile, arch, hardware family and subject
-                are the ones the caller expects, shall refuse a configuration or
-                driver manifest whose caller names no subject, and shall confirm a
+                are the ones the caller expects, shall refuse a configuration,
+                driver or package manifest whose caller names no subject, and shall confirm a
                 payload only when its length and SHA-256 are the ones the manifest
                 signs.";
             attribute :>> criterion = "Each bound field one off is refused by its
@@ -179,9 +179,10 @@ package FerrixSigningRequirements {
             attribute :>> statement = "verify shall refuse a manifest whose kind,
                 profile, arch, family or subject is not what the caller expects,
                 the kind before the signature is checked and the rest after, and a
-                configuration or driver manifest whose caller names no subject.";
+                configuration, driver or package manifest whose caller names no
+                subject.";
             attribute :>> criterion = "Host tests: each bound field one off refused
-                by its name; a driver manifest binds its subject; a slot manifest
+                by its name; a driver and a package manifest bind their subject; a slot manifest
                 presented as a revocation, and a revocation presented as a slot,
                 refused by the signed kind.";
             attribute :>> parent = "H.SIGN.2";
