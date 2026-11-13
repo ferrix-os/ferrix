@@ -242,7 +242,10 @@ flat in N, from 6.26 us at 512 registrations back towards 3.6.
 
 How many registrations wineserver's and the game's sets hold during play is
 read on the box (`~/.local/share/ferrix/ef-30fps/wake/README`). That says what
-it is worth there.
+it is worth there. Since the second commit on `sys/epoll-ready` an epoll
+set's `/proc/<pid>/fdinfo/<fd>` has a `tfd:` line for each registration, as
+Linux writes it, so `grep -c tfd: /proc/<pid>/fdinfo/<fd>` counts a set's
+registrations exactly.
 
 ## 5. Not in these branches
 
@@ -350,5 +353,8 @@ no epoll fdinfo yet. That makes §4.3's change the next one.
   registration, as before. Code review: ledger 9492, OK IF EP1-EP6, for this
   commit and the fdinfo one below, which may land with it as a second
   commit.
+  - The second commit on `sys/epoll-ready`: an epoll set's fdinfo shows its
+    registrations, as Linux's `ep_show_fdinfo` does (design and code review
+    ledger 9492).
   - The timeline of what is left: §5, and the never-land patch
     `~/.local/share/ferrix/ef-30fps/faultbench/epdiag.patch`.

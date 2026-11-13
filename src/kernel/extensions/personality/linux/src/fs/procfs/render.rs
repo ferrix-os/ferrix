@@ -1079,7 +1079,9 @@ pub(super) fn descriptor(process: &Process, fd: i32) -> Result<Vec<u8>> {
 }
 
 /// `/proc/<pid>/fdinfo/<fd>`: the open file's position, its access mode, the
-/// mount it is on and its inode, as Linux's first lines are.
+/// mount it is on and its inode, as Linux's first lines are; and for an
+/// epoll set a line for each registration whose file is still open, as
+/// Linux's `ep_show_fdinfo` writes it.
 pub(super) fn fdinfo(process: &Process, fd: i32) -> Result<Vec<u8>> {
     let file = process
         .files()
@@ -1102,6 +1104,27 @@ pub(super) fn fdinfo(process: &Process, fd: i32) -> Result<Vec<u8>> {
             file.offset()
         ),
     );
+    if let Some(set) = fs::epoll::of(&file) {
+        for shown in set.shown()? {
+            let Some(target) = shown.file.upgrade() else {
+                continue;
+            };
+            let device = fs::namespace()
+                .stat(target.location())
+                .map_or(0, |stat| stat.dev);
+            put(
+                &mut out,
+                format_args!(
+                    "tfd: {:8} events: {:8x} data: {:16x}  pos:{} ino:{:x} sdev:{device:x}\n",
+                    shown.fd,
+                    shown.events,
+                    shown.data,
+                    target.offset(),
+                    target.inode().metadata().ino,
+                ),
+            );
+        }
+    }
     Ok(out)
 }
 

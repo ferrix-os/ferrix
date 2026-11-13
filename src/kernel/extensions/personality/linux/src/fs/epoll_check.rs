@@ -44,7 +44,14 @@
 //! them, is reported by a wait with nothing pending; a set added and removed
 //! moves the count and back; `EPOLL_CTL_MOD` moves it not; and a set back at
 //! zero looks at no file. At each step the count must equal a recount.
+//!
+//! And `/proc/<pid>/fdinfo/<set>`: a line for each registration, as Linux's
+//! `ep_show_fdinfo` writes it, with its number, its events (only the flags
+//! once a one-shot registration has reported) and its cookie, and none for a
+//! registration taken out.
 
+use alloc::format;
+use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::any::Any;
@@ -54,9 +61,9 @@ use ferrix_bootinfo::PAGE_SIZE;
 use ferrix_linux_abi::nr::Syscall;
 use ferrix_linux_abi::socket::{AF_UNIX, SOCK_STREAM};
 use ferrix_linux_abi::types::{
-    AT_FDCWD, EPOLL_CLOEXEC, EPOLL_CTL_ADD, EPOLL_CTL_DEL, EPOLL_CTL_MOD, EPOLLET, EPOLLEXCLUSIVE,
-    EPOLLHUP, EPOLLIN, EPOLLONESHOT, EPOLLOUT, F_GETFD, FD_CLOEXEC, MAP_ANONYMOUS, MAP_PRIVATE,
-    O_DIRECTORY, O_RDONLY, PROT_READ, PROT_WRITE, SEEK_CUR, SEEK_SET,
+    AT_FDCWD, EPOLL_CLOEXEC, EPOLL_CTL_ADD, EPOLL_CTL_DEL, EPOLL_CTL_MOD, EPOLLERR, EPOLLET,
+    EPOLLEXCLUSIVE, EPOLLHUP, EPOLLIN, EPOLLONESHOT, EPOLLOUT, F_GETFD, FD_CLOEXEC, MAP_ANONYMOUS,
+    MAP_PRIVATE, O_DIRECTORY, O_RDONLY, PROT_READ, PROT_WRITE, SEEK_CUR, SEEK_SET,
 };
 use ferrix_vfs::{Errno, Inode, Metadata, Readiness, WakeSource};
 
@@ -85,6 +92,10 @@ const AT_TIMESPEC: u64 = 64;
 const AT_EVENTS: u64 = 128;
 /// Where `fstatfs` writes, room for the widest layout.
 const AT_STATFS: u64 = 512;
+/// Where a `/proc` path is staged.
+const AT_PATH: u64 = 2048;
+/// Where a `/proc` file is read to, up to the page's end.
+const AT_TEXT: u64 = 2304;
 
 /// `/tmp`, terminated.
 const TMP: &[u8] = b"/tmp\0";
@@ -201,7 +212,8 @@ fn check_once(process: &Arc<Process>) -> Result<Counts, &'static str> {
         .and_then(|()| check_nesting(process, page, &mut counts))
         .and_then(|()| check_refusals(process, page, &mut counts))
         .and_then(|()| check_wait_refusals(process, page, &mut counts))
-        .and_then(|()| check_the_ready_list(process, page, &mut counts));
+        .and_then(|()| check_the_ready_list(process, page, &mut counts))
+        .and_then(|()| check_fdinfo(process, page));
     for fd in 3..64 {
         let _ = fd::sys_close(process, fd);
     }
@@ -1633,4 +1645,108 @@ fn walk_count_nested_and_back(
         counted(inner, left, "a registration removed")?;
     }
     walks_nothing(process, page, here)
+}
+
+/// `/proc/<pid>/fdinfo/<set>`: see the module doc's last paragraph.
+fn check_fdinfo(process: &Process, page: u64) -> Result<(), &'static str> {
+    let set = create(process, 0)?;
+    let mut opened = Vec::new();
+    let mut readers = Vec::new();
+    for (events, cookie) in [
+        (EPOLLIN, 0x81_u64),
+        (EPOLLIN | EPOLLET, 0x82),
+        (EPOLLIN | EPOLLONESHOT, 0x8_0000_0083),
+    ] {
+        let (reader, writer) = pipe_pair(process, page)?;
+        opened.extend([reader, writer]);
+        readers.push((reader, writer, events, cookie));
+        if ctl(process, page, set, EPOLL_CTL_ADD, reader, events, cookie) != Ok(0) {
+            return Err("a pipe could not be added to a set");
+        }
+    }
+    let shown = |text: &[u8], fd: i32, events: u32, cookie: u64| {
+        let line = tfd_line(fd, events | EPOLLERR | EPOLLHUP, cookie);
+        text.windows(line.len())
+            .any(|window| window == line.as_bytes())
+    };
+    let [level, edge, once] = readers.as_slice() else {
+        return Err("the fdinfo case's pipes are short");
+    };
+    let text = fdinfo_text(process, page, set)?;
+    let lines = |text: &[u8]| text.windows(4).filter(|window| *window == b"tfd:").count();
+    if lines(&text) != 3
+        || !shown(&text, level.0, level.2, level.3)
+        || !shown(&text, edge.0, edge.2, edge.3)
+        || !shown(&text, once.0, once.2, once.3)
+    {
+        return Err("an epoll set's fdinfo did not show each registration as Linux does");
+    }
+    // A one-shot registration that reported keeps only its flags.
+    put_byte(process, page, once.1)?;
+    if wait(process, page, set, 4, 0)? != [(EPOLLIN, once.3)] {
+        return Err("a one-shot pipe written was not reported");
+    }
+    take_byte(process, page, once.0)?;
+    let text = fdinfo_text(process, page, set)?;
+    let disarmed = tfd_line(once.0, EPOLLONESHOT, once.3);
+    if !text
+        .windows(disarmed.len())
+        .any(|window| window == disarmed.as_bytes())
+    {
+        return Err("a one-shot registration that reported was not shown with its flags alone");
+    }
+    // One taken out is no longer shown.
+    if ctl(process, page, set, EPOLL_CTL_DEL, level.0, 0, 0) != Ok(0) {
+        return Err("EPOLL_CTL_DEL was refused");
+    }
+    let text = fdinfo_text(process, page, set)?;
+    if lines(&text) != 2 || shown(&text, level.0, level.2, level.3) {
+        return Err("an epoll set's fdinfo still showed a registration taken out");
+    }
+    for fd in opened.into_iter().chain([set]) {
+        closed(process, fd)?;
+    }
+    Ok(())
+}
+
+/// The start of the line Linux's `ep_show_fdinfo` writes for a registration.
+fn tfd_line(fd: i32, events: u32, cookie: u64) -> String {
+    format!("tfd: {fd:8} events: {events:8x} data: {cookie:16x}  pos:")
+}
+
+/// `/proc/<pid>/fdinfo/<set>` read by number, as a program reads it.
+fn fdinfo_text(process: &Process, page: u64, set: i32) -> Result<Vec<u8>, &'static str> {
+    let path = format!("/proc/{}/fdinfo/{set}\0", process.pid());
+    uaccess::copy_to_user(process.space(), page + AT_PATH, path.as_bytes())
+        .map_err(|_| "could not stage an fdinfo path")?;
+    let opened = descriptor(
+        by_number(
+            process,
+            Syscall::Openat,
+            [
+                AT_FDCWD as u64,
+                page + AT_PATH,
+                u64::from(O_RDONLY),
+                0,
+                0,
+                0,
+            ],
+        ),
+        "an epoll set's fdinfo would not open",
+    )?;
+    let room = PAGE_SIZE - AT_TEXT;
+    let mut text = Vec::new();
+    loop {
+        let got = file::sys_read(process, opened, page + AT_TEXT, room)
+            .map_err(|_| "an epoll set's fdinfo would not read")?;
+        if got == 0 {
+            break;
+        }
+        let mut chunk = alloc::vec![0_u8; got];
+        uaccess::copy_from_user(process.space(), page + AT_TEXT, &mut chunk)
+            .map_err(|_| "could not read an fdinfo back")?;
+        text.extend_from_slice(&chunk);
+    }
+    closed(process, opened)?;
+    Ok(text)
 }

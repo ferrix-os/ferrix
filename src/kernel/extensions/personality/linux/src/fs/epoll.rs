@@ -131,8 +131,8 @@ use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use ferrix_kmem::{Charge, arc_footprint};
 use ferrix_linux_abi::types::{
-    EPOLLERR, EPOLLET, EPOLLHUP, EPOLLIN, EPOLLONESHOT, EPOLLOUT, EPOLLPRI, EPOLLRDNORM,
-    EPOLLWRNORM,
+    EPOLLERR, EPOLLET, EPOLLEXCLUSIVE, EPOLLHUP, EPOLLIN, EPOLLONESHOT, EPOLLOUT, EPOLLPRI,
+    EPOLLRDNORM, EPOLLWAKEUP, EPOLLWRNORM,
 };
 use ferrix_vfs::{Errno, Inode, Metadata, OpenFile, Readiness, WakeSource};
 
@@ -162,6 +162,11 @@ const HOOK_ROOM: usize = 4;
 
 /// The name `/proc/self/fd` shows.
 const NAME: &[u8] = b"anon_inode:[eventpoll]";
+
+/// The flags a one-shot registration that has reported keeps of its events,
+/// as `/proc/<pid>/fdinfo` shows them: Linux's `EP_PRIVATE_BITS`, all that
+/// `ep_send_events` leaves of them.
+const PRIVATE_BITS: u32 = EPOLLWAKEUP | EPOLLONESHOT | EPOLLET | EPOLLEXCLUSIVE;
 
 /// Held across `epoll_ctl`'s nesting look and the add it allows: see the
 /// module doc's "Nesting". A sleeping lock -- a flag and the queue its
@@ -658,6 +663,21 @@ pub(crate) struct Event {
     serial: u64,
     /// Which wait looked, for [`Epoll::delivered`].
     look: u64,
+}
+
+/// One registration as `/proc/<pid>/fdinfo` shows it ([`Epoll::shown`]).
+#[derive(Debug)]
+pub(crate) struct Shown {
+    /// The number it was added under.
+    pub(crate) fd: i32,
+    /// Its events as Linux keeps them: those asked for with `EPOLLERR` and
+    /// `EPOLLHUP` and the flags, or only the flags once a one-shot
+    /// registration has reported.
+    pub(crate) events: u32,
+    /// The program's cookie.
+    pub(crate) data: u64,
+    /// The file, held weakly, as the registration holds it.
+    pub(crate) file: Weak<OpenFile>,
 }
 
 /// What `epoll_ctl` asks.
@@ -1191,7 +1211,7 @@ impl Epoll {
             .ok_or(Errno::ENOENT)?;
         let before = state.always_at(at);
         let item = state.items.get_mut(at).ok_or(Errno::ENOENT)?;
-        if item.events & ferrix_linux_abi::types::EPOLLEXCLUSIVE != 0 {
+        if item.events & EPOLLEXCLUSIVE != 0 {
             return Err(Errno::EINVAL);
         }
         item.events = interest.events | EPOLLERR | EPOLLHUP;
@@ -1239,6 +1259,41 @@ impl Epoll {
     /// How many registrations it has, for the checks.
     pub(crate) fn len(&self) -> usize {
         self.state.lock().items.len()
+    }
+
+    /// Its registrations as `/proc/<pid>/fdinfo` shows them, one a line,
+    /// as Linux's `ep_show_fdinfo` does: copied out under the set's lock,
+    /// their files looked at by the caller with none held. The copy is one
+    /// pass over the registrations under the set's spin lock, with nothing
+    /// allocated under it (the room is had before it is taken, and a weak
+    /// reference's clone is a count), the bound `ready`'s walk has.
+    ///
+    /// # Errors
+    ///
+    /// `ENOMEM` for no room to copy them to.
+    pub(crate) fn shown(&self) -> Result<Vec<Shown>, Errno> {
+        let count = self.len();
+        let mut shown = fallible::try_with_capacity(count).map_err(|_| Errno::ENOMEM)?;
+        let state = self.state.lock();
+        for item in state.items.iter() {
+            let events = if item.armed {
+                item.events
+            } else {
+                item.events & PRIVATE_BITS
+            };
+            // Registrations added since the room was had wait for the next
+            // read, as a read of a set that changes under it may miss them.
+            let _ = fallible::push_within(
+                &mut shown,
+                Shown {
+                    fd: item.fd,
+                    events,
+                    data: item.data,
+                    file: item.file.clone(),
+                },
+            );
+        }
+        Ok(shown)
     }
 
     /// How many files its waits have looked at, for the checks.
