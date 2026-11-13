@@ -4343,7 +4343,7 @@ A process's release unmapped its whole space through the general unmap (`Process
 
 ### F-115 — a carried coverage anchor slid onto a new function
 
-**Found 2026-11-13, open, Moderate** (found by the certification consultant in D2's code review, ledger 9740 NR.3; filed by ef-30fps; owner set by the product owner).
+**Found 2026-11-13, open, Moderate** (found by the certification consultant in D2's code review, ledger 9740 NR.3; filed by ef-30fps; owner: ef-30fps, set on 2026-11-13 by the session that held the product owner's seat that night).
 
 `carry-coverage.py` carries a reached statement's anchor through a diff by its text. D2 added `check_a_space_emptied_at_its_end_with_every_allocation_refused` to `user/check.rs` just after `check_a_read_of_an_inaccessible_region_is_refused`, and the reached anchor at the old function's closing line (608, a lone `}`) was carried to the new function's closing line (670) in all three `coverage-<arch>.json` files, where it belongs at 609. No coverage run executed the new function, yet `TRACEABILITY.md` read L.user.247 as reached on all three architectures, and `carry-coverage.py --check` and `gen-coverage-justification.py --check` both passed. The same mechanism as F-75, for an insertion rather than a move. D2 put the anchor back by hand and checked every function it adds for a carried anchor inside it.
 

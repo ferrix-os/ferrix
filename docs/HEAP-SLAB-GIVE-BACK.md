@@ -23,6 +23,14 @@ The code was reviewed: OK IF GB.1-GB.10, its ring-0 rise OK IF R1-R3
 (consultant ledger 9717, 9733). This is internal review, not independent
 verification (F-27).
 
+Landed on 2026-11-13: the code as 2f21d64db and its ring-0 rise as
+9d79f05e6, after a rebase whose diff checks are ledger 9843 and 9868
+(RB.1-RB.5). On the N150 the game killed in its world left ssh unanswered
+for 156 s before it (765406b6d, `runs/an1-kill/`); on 9d79f05e6 ssh answered
+at the first probe, 2 s after the kill, and MemFree went from 2.06 to
+9.64 GB in those 2 s (`runs/d1-kill/`, and two more kills). The report-only
+A/B of ET.3 and GB.7 is that pair; the per-site diag was not run on the box.
+
 GB.5's figures (never-landing `diag/d1-sites` over the D1 code; release,
 `ferrix.checks=skip`, x86-64 KVM, 36,864 regions of 256 KiB killed, the
 host's load 21 to 25). In three runs the give-back sites' longest holds

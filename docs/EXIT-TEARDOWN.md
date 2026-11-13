@@ -17,6 +17,11 @@ with its ring-0 rise at 9733. F-114 is reserved for the refusal of section 2, fi
 and closed by D2's landing (ET.8). `bugfix/heap-batched-give-back` is
 superseded by D1 and parked; L.mm.135 is released when D1 lands (ruling Q1).
 
+Both landed on 2026-11-13: D2 in 3bb233f99 and D1 in 9d79f05e6 (its rebase's
+diff checks: ledger 9843, 9868). On the N150 the kill that left the box
+unanswered for 156 s is answered after 2 s (`docs/HEAP-SLAB-GIVE-BACK.md`,
+"Where it stands"). D3 to D5 are open.
+
 **D2 (2026-11-13, branch `exit/never-refused`, ledger 9611 X1-X10, code review 9740).** Both
 releases empty their space with `AddressSpace::empty_for_exit`, which
 allocates nothing (L.user.247), and F-114 is closed with it. As built: the

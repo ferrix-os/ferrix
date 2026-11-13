@@ -789,6 +789,18 @@ of wait, a futex's included, which has no epoll in it. It is what a block,
 a switch and a wake cost here, not epoll's own cost. The cuts left in §4.4
 (the clock read, cut 3) are small beside it.
 
+On develop 9d79f05e6 (the clock read and `walked:` in, and the heap's
+give-back of `docs/HEAP-SLAB-GIVE-BACK.md`), with the game in the world,
+`walked:` reads 0 for wineserver's set of 479 registrations and 1 for the
+game's set of one (`runs/d1box/walked.txt`): no wait of wineserver's looks at
+a registration nothing woke. The kit, idle, two runs a row
+(`runs/d1box/ferrix-ck-run.txt`), against 699ce191b: epoll with no idle
+registration 9.09 (8.67), with 512 8.68 (8.65), futex 6.50 (6.23), waitv
+7.37 (7.25), wakebench's epoll row 9.10 (8.67). Some rows are 0.3 to 0.4 µs
+slower and others equal. Whether that is the spread of two runs or the
+verification of the heap's links on each allocation and free (L.mm.147) is
+not decided: it wants more runs and a timeline of one trip.
+
 ## 7. Where it stands
 
 - 2026-11-12: measured, and this design written for the design review.
@@ -927,7 +939,9 @@ a switch and a wake cost here, not epoll's own cost. The cuts left in §4.4
     - `ck2-ctl-b-x86` (a late due time, x86-64 under KVM): "a change
       nothing woke was not found by the rescan of a sleeping wait".
 
-    The x86-64 pair runs again on the final hash (CR4).
+    The x86-64 pair ran again on the branch's final hash before its clean
+    rebase, 6c35122bf: `ck4-ctl-a-x86` and `ck4-ctl-b-x86`, each FIRED
+    (panic) with the same message as its `ck2` run (CR4).
   - Logs, sha256, in `~/.local/share/ferrix/ef-30fps/faultbench/epoll-clock/`:
     ck-a-1 01c93793a500ac017034713bbdba02cbe172bb9356b901755b4f347ace870fc4,
     ck-a-2 59e33f7117687918adaa1cde1f02bd1c4ce1e43a9c6f40b81edd6df1216d3d4e,
