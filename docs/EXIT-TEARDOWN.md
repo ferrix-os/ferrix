@@ -6,6 +6,12 @@ take no room it can be refused (forget the views first, as Drop does)". It
 follows F-112, which was fixed by `fix/exit-unmap-sort` (ledger 9112, 9327,
 9435). It is for design review. No code is written until the verdict.
 
+**Where it stands (2026-11-13).** Design reviewed: OK IF ET.1-ET.9 (consultant
+ledger 9543). ET.1 is this text's corrections. D2's code may start; D1's waits
+for its addendum (ET.2). F-114 is reserved for the refusal of section 2, filed
+and closed by D2's landing (ET.8). `bugfix/heap-batched-give-back` is
+superseded by D1 and parked; L.mm.135 is released when D1 lands (ruling Q1).
+
 It answers three questions:
 
 1. Can an exit be refused the room to give its memory back? It can.
@@ -25,8 +31,10 @@ with one `AddressSpace::unmap(MMAP_MIN_ADDR, PROGRAM_TOP - MMAP_MIN_ADDR)`.
 This happens before any waiter is told, as Linux's `exit_mm` runs before
 `exit_notify`. The order matters: a parent's `wait4` must not return while
 the child's frames still count against their cgroup (the release's comment:
-test-container on AArch64). The unmap is the general one
-(`user/space.rs`):
+test-container on AArch64). A bare native process's end (`Bare::release`,
+`object/bare.rs`) makes the same whole-space unmap, charged to nobody, and can
+be refused the same way. D2 takes both ends (4.2). The unmap is the general
+one (`user/space.rs`):
 
 * **Phase one, under the space's spin lock (preemption off):**
   `room_to_count_out` (one `Counting` per region, sorted), `map.remove`
@@ -62,9 +70,14 @@ dropping task ran `Drop`.
 ## 2. Where the time goes, measured
 
 **How it was measured.** Instrumentation never meant to land (branch
-`diag/exit-teardown-profile`, patch
-`~/.local/share/ferrix/ef-30fps/exit-teardown/diag-exit-teardown-profile.patch`,
-on `fix/exit-unmap-sort` f4dc047d7):
+`diag/exit-teardown-profile`, tip 95e21c89f, five DIAG commits on
+`fix/exit-unmap-sort` f4dc047d7; the patch
+`~/.local/share/ferrix/ef-30fps/exit-teardown/diag-exit-teardown-profile.patch`
+is `git diff f4dc047d7 95e21c89f`, sha256
+d3abb333e194d6f65b96d43c8d1f9933f1d058f13ace11dc0b6d3c83ee0b97e5). Run p1 used
+66c7fea7f (the steps of `unmap` and `give_back`), p2 bbffc9532 (and inside
+`drop_objects` and `Vmo::drop`), p3 227813bf0 (and the allocator's
+`dealloc`), p4 and p5 95e21c89f (and the heap's walk counters). It adds:
 * timers around every step of `unmap` and `give_back`;
 * timers inside `drop_objects`, `Vmo::drop`, and the kernel allocator's
   `dealloc`;
@@ -94,7 +107,9 @@ shape was set at build time (`XR_REGIONS`, `XR_KIB`). Logs are in
 
 For the 60,000 row, the parts were measured on the SIGKILL phase of runs
 p2-p4 (logs `p2`-`p4`): the frees took 3,218 ms in p3 and 3,296 ms in p4,
-and the other rows are the range over p2-p4. The 3,279-7,141 ms teardown
+and the other rows are the range over p2-p4. The walk counters are p4's
+alone (and p5's for the 256 KiB rows); they add an atomic increment per link
+read, which is the difference between p3's 3,218 ms and p4's 3,296 ms. The 3,279-7,141 ms teardown
 range adds run p1's three phases (exit 4,258, kill 7,141, sigpipe 4,859).
 
 The canary, a 10 ms sleeper in the parent on another processor, woke at
@@ -116,9 +131,14 @@ worst 0.1-0.5 ms late in the 60,000 runs, 1.0 ms at 4 GiB and 50.7 ms at
 
 **Without the walks, each teardown above is under half a second:** about
 70 ms at 60,000 regions and 0.5 s at 9 GiB, by the rows' sums. So the
-3-9 s on x86-64, the 248 s of the 9 GiB hog are this walk. The
-10-21 s on AArch64 under TCG take the same path and were not profiled
-separately.
+3.3-7.1 s of the 60,000-region exit and the 222.7 s of the 9 GiB one, above,
+are this walk; the same 9 GiB hog took 248 s to `wait4` on 2026-11-12, by an
+init script's centisecond clock, not this profile
+(`~/.local/share/ferrix/ef-30fps/silent-reset/logs/hog-16k-36k-fixed.log`,
+"wait returned after 24803 cs"). AArch64 under TCG, 40,000 regions, took
+7.3 / 11.5 / 8.0 s (`sr2-exit-a64`) and 7.7 / 10.7 / 8.1 s (`sr6-exit-a64`)
+for exit / SIGKILL / SIGPIPE in the gate pool, on the same path; it was not
+profiled separately.
 
 The walk was seen before. `bugfix/heap-batched-give-back` (ef-slow,
 L.mm.135, ledger 7960 OK IF HB.1-HB.7, unlanded) measured 0.38-0.52 billion
@@ -260,13 +280,35 @@ space. The emptying is `Drop`'s order on a live space:
    page tables (`prune_in`).
 
 The taken regions are walked in place: no `Unmapping` list, no `Freeing`
-list, and no touched ids. A refused allocation anywhere below (an object's
-own frees allocate nothing) is not possible on this path. Any helper that
-does want memory follows `tlb_next_batch`'s rule: with no room it does the
-same work one region at a time.
+list, and no touched ids. No refused allocation stops or postpones the
+emptying: what still allocates, `Vmo::detach`'s `compact` of its mapper list,
+already survives a refusal, and any helper that wants memory follows
+`tlb_next_batch`'s rule, doing the same work one region at a time when it has
+no room.
 
-`AddressSpace::drop` stays as it is, and becomes a no-op on an emptied
-space. A zombie then holds no page, only the struct, the root and an empty
+What the emptying must keep (ledger 9543 ET.4):
+
+* The map is taken and its translations taken down in one hold of the
+  space's lock, or a draining record names the range (R5 2a's TD.2): the
+  take-down of an object by another mapper, or a cache reclaim, finds an
+  object's translations through `forget_in`, which walks only `inner.map`.
+* The removal is the walked one, with `TlbPages` and its shootdown, never
+  `Drop`'s `unmap_unwalked`: tables and objects are freed only after the
+  shootdown returns.
+* Once every view is forgotten, the space's `Rss` counts are stored 0
+  (L.user.236), and the take leaves the map's totals at 0 (L.user.238).
+* `keep_space` still skips the emptying, and `exit().close()` stays after it,
+  so `oom::ended` reads Ending, then Gone.
+* The release then takes the layout lock, which sleeps: both callers of
+  `release` must be shown to be allowed to block, with TD.7's argument that
+  it cannot wedge.
+* A window space keeps `window_take_down` (TD.5).
+* The exit no longer reaches the unmap's sort, so L.user.245 is restated
+  for the munmap paths that still reach it, with a check that does reach the
+  sort and its control re-run.
+
+`AddressSpace::drop` stays as it is; on an emptied space it frees only the
+tables and the root. A zombie then holds no page, only the struct, the root and an empty
 map, until it is reaped. This is the state Linux's zombie is in, apart from
 the root table.
 
@@ -313,10 +355,17 @@ The alternatives were weighed against that:
 **New ids,** reserved before they are written:
 * one L.mm (4.1): "a free that empties a slab page shall give it back at a
   cost bounded by that page's objects, not by its class's free list";
-* one L.user (4.2): "a process's end shall give back every page of its
-  space before its waiter is told, allocating nothing it can be refused".
+* one L.user (4.2), as worded at ledger 9543 ET.5: "A process's end shall
+  leave no region, translation or page table in its user half, and release
+  every object only it maps, before its waiter is told; no refused
+  allocation shall stop or postpone it";
+* one L.user for the exit's stepping (4.3).
 
-R5 2a's L.user.230-234 (still reserved to `r5-teardown`) carry 4.3.
+Of R5 2a's ids (reserved to `r5-teardown`), D3 may write L.user.234, its
+statement unchanged, once a docs-only reservation edit moves it to
+silent-reset with the product owner's agreement; L.user.230-233 and
+L.object.373 stay with D4 (ET.6, ET.7). A boot check asserts counts, never
+times.
 
 **Checks and controls,** each control through `gate.sh control`:
 * **4.1, host test (`ferrix-heap`).** A class with a long free list empties
@@ -330,25 +379,29 @@ R5 2a's L.user.230-234 (still reserved to `r5-teardown`) carry 4.3.
   exits. MemFree at `waitpid`'s return must be within a stated margin of
   before. Control: `release` back on the general `unmap` -> FIRED with the
   phase's line (it fails on AArch64 as section 2 measured).
-* **4.2, boot check.** An exit with the kernel heap refusing every
-  allocation during the emptying (a check-only refusal gate, CHECKS-ONLY)
-  still gives back every frame. Control: the gate's refusal reaching the
-  general path.
+* **4.2, boot check.** An exit under the existing fallible heap-refusal
+  scope still gives back every frame. Control: `release` put back on the
+  general unmap -> FIRED (panic).
+* **4.2, the zombie.** The `enomem` phase also reads MemFree while the child
+  is a zombie (`waitid` with `WNOWAIT`, before the reap) and the zombie's
+  VmRSS, which must be 0.
 * **4.3, `test-exit-regions`' canary becomes one sleeper pinned to each
   processor,** as R5 2a's stall-probe has (8426 C1). The present canary,
-  on another processor, cannot see a hold on the exiting one. Its worst
-  lateness and the teardown time are then asserted, with bounds stated
-  from two hosts per CONVENTIONS (the dev and `--release` figures).
-  Control: the steps removed (one hold) -> FIRED.
+  on another processor, cannot see a hold on the exiting one. The row's
+  teardown time and worst lateness are then asserted (the row reports
+  times; a boot check never does), with bounds stated from two hosts per
+  CONVENTIONS (the dev and `--release` figures). The release of one
+  object's frames is stepped or runs with no spin lock held. Control: the
+  steps removed (one hold) -> FIRED.
 
 ## 6. Landings, sized
 
 | # | What | Where | Size, roughly | Gates and evidence |
 |---|---|---|---|---|
 | D0 | this note | docs | - | check-docs; design review |
-| D1 | 4.1, SLUB-shaped slab pages | `src/lib/kernel/heap` (F-76, unclassified), `mm.rs` | 250-400 lines with host tests | consultant code review; new L.mm id; host-test control; ring0-budget rise; check, check-frames, check-stack-depth, test-boot x4, test-exit-regions x3, the 4 GiB shape once by hand; N150 A/B on Endfield's launch (ledger 7960's figure) if the PO allots the box |
-| D2 | 4.2, the exit's emptying | `user/space.rs` (core), `process.rs` (load), `ferrix_vma::take` (from R5 2a) | 150-250 lines | new L.user id; the `enomem` phase and the refusal gate, each with its control; carry-coverage |
-| D3 | 4.3 for the exit only: D2's emptying stepped | `user/space.rs`, a small `user/teardown.rs` | 200-300 lines | L.user.230/234 written (reservation shrunk); the pinned canaries and their control; stall-probe |
+| D1 | 4.1, SLUB-shaped slab pages | `src/lib/kernel/heap` (F-76, unclassified), `mm.rs` | 250-400 lines with host tests | an addendum reviewed first (ET.2: where the page head and the partial links live, PageEntry's size, FRAMES under HEAP, HEAPS, `release_kept`, `drain_caches`, `CpuCache`, a corrupted list still ends, M&T §1.8's bound); new L.mm id; host-test control (links counted); a boot check counting, main heap and a reservation's; ring0 rise; check, check-docs, check-frames dev and release, check-stack-depth, test-boot x86_64 kvm and tcg, aarch64, armv7a --smp 2, test-threads all, test-exit-regions x3 (x86_64 release kvm on base and tip); N150 A/B not a condition |
+| D2 | 4.2, the exit's emptying, both ends (`Process::release`, `Bare::release`) | `user/space.rs` (core), `process.rs` (load), `object/bare.rs`, `ferrix_vma::take` (from R5 2a, with the map's totals) | 150-250 lines, on develop with `rss/anon-merge` landed | new L.user id (ET.5); the `enomem` phase on all three architectures and the heap-refusal case, each with its control; L.user.245 restated (ET.4 f); F-114 filed and closed; carry-coverage |
+| D3 | 4.3 for the exit only: D2's emptying stepped | `user/space.rs`, a small `user/teardown.rs` | 200-300 lines | one new L.user id and L.user.234 (moved first); TD.2-4, 7-9, 13, 14; the pinned canaries and their control; stall-probe |
 | D4 | the rest of R5 2a rebased (munmap's `unmap_held`, a stepped last drop and its hand-over, dispose in steps, L.user.231-233, L.object.373) | as R5 2a | its 5,170 lines on 0ec0a3931, 95+ commits stale; conflicts with the rss counts (4120b4def), F-112's heapsort, the OOM emptier, anon-merge | a fresh code review against 8522/8559/8603 |
 | D5 | `test-exit-regions` bounds asserted, the 9 GiB shape as a manual row | xtask, `src/tests/exit-regions` (outside the item) | 100 lines | the controls above |
 
