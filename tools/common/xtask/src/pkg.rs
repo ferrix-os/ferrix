@@ -228,8 +228,7 @@ struct Signer {
 
 impl Signer {
     fn new() -> Result<Signer> {
-        let dir = std::env::temp_dir().join(format!("ferrix-test-pkg-keys-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = Signer::directory()?;
         let mut signer = Signer {
             dir,
             good: String::new(),
@@ -238,6 +237,42 @@ impl Signer {
         signer.good = signer.softsign(&["keygen", "good", "--height", "10"])?;
         let _ = signer.softsign(&["keygen", "other", "--height", "10"])?;
         Ok(signer)
+    }
+
+    /// A directory of this run's own for the keys, made here and nowhere
+    /// else (only its owner may enter it on Unix): a name already taken,
+    /// by an earlier run or by anyone who guessed it, is passed over, never
+    /// used or removed.
+    fn directory() -> Result<PathBuf> {
+        let mut builder = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt as _;
+            let _ = builder.mode(0o700);
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|since| since.subsec_nanos())
+            .unwrap_or_default();
+        for attempt in 0..64u32 {
+            let dir = std::env::temp_dir().join(format!(
+                "ferrix-test-pkg-keys-{}-{now:08x}-{attempt}",
+                std::process::id()
+            ));
+            match builder.create(&dir) {
+                Ok(()) => return Ok(dir),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => {
+                    return Err(Error::new(format!(
+                        "test-pkg: making {}: {error}",
+                        dir.display()
+                    )));
+                }
+            }
+        }
+        Err(Error::new(
+            "test-pkg: every name tried for the key directory was taken",
+        ))
     }
 
     /// The soft signer's answer to `args`, on this run's keys.

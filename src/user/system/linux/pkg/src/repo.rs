@@ -169,6 +169,10 @@ pub fn update(root: &Path, repository: &Path, anchors: &[Anchor]) -> Result<Upda
         ));
     }
     if let Some((old, old_bytes)) = &before {
+        // The verifier's floor has refused an older index already
+        // (BelowFloor), so this cannot be reached while the signed sequence
+        // is the index's: it is kept as the second check, so that the
+        // refusal does not rest on the signature's floor alone.
         if index.sequence < old.sequence {
             return refuse(format!(
                 "the repository's index {} is older than the one accepted, {}: refused",
