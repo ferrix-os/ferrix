@@ -16,7 +16,6 @@ use ferrix_linux_abi::types::{
     CLOCK_PROCESS_CPUTIME_ID, CLOCK_REALTIME, CLOCK_REALTIME_COARSE, CLOCK_THREAD_CPUTIME_ID,
 };
 
-use crate::arch;
 use crate::sched;
 use crate::sched::WaitQueue;
 use crate::syscall::attributes::int;
@@ -202,19 +201,19 @@ impl TimeWidth {
     }
 }
 
-/// Nanoseconds since the high-resolution counter started.
+/// Nanoseconds since the high-resolution counter started: the kernel's own
+/// clock, `timer::now_nanos`.
 ///
-/// In 128 bits, and not as a courtesy. The counter runs at 100 MHz on the
-/// x86-64 QEMU machine, so `counter * 10^9` overflows 64 bits after about three
-/// minutes of uptime -- and with overflow checks on, that is a kernel panic
-/// inside a system call three minutes into the first interactive session.
+/// That is `counter * 10^9 / hz` rounded down, `u64::MAX` past 64 bits and
+/// zero before the counter's rate is known, exactly as the 128-bit product
+/// this computed until 2026-11-13 gave it. `ferrix_vdso::counter_nanos`'
+/// host test `counter_nanos_is_the_wide_formula_exactly` holds it to that
+/// formula (`L.sched.6`). It splits the work at whole seconds into two 64-bit
+/// divisions the processor makes itself, where the 128-bit division was a
+/// library call. The product never fits 64 bits for long: at the x86-64 QEMU
+/// machine's 100 MHz, `counter * 10^9` overflows after about three minutes.
 pub(crate) fn now_nanos() -> u64 {
-    let hz = arch::counter_hz();
-    if hz == 0 {
-        return 0;
-    }
-    let nanos = u128::from(arch::counter_now()) * u128::from(NANOS) / u128::from(hz);
-    u64::try_from(nanos).unwrap_or(u64::MAX)
+    crate::timer::now_nanos()
 }
 
 /// What `CLOCK_REALTIME` reads minus what the counter reads, in nanoseconds.
