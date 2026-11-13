@@ -79,13 +79,15 @@ pkg upgrade [--repo DIR] [NAME...]
 ```
 
 The repository is `--repo`, or the one line of `etc/pkg/repository`. The
-accepted index is `var/lib/pkg/index.toml` (with its signature beside it
-from step b). An index is refused when it is for another architecture, does
-not parse, or is **older than the accepted one** (a lower sequence), or has
-the accepted one's sequence and other bytes. An upgrade refuses a file whose
-size or SHA-256 is not the index's, a package whose record is not the
-index's name, version and architecture, and a dependency that neither the
-root nor the index has in a version that will do. A dependency the index
+accepted index is `var/lib/pkg/index.toml`: the bytes `pkg update`
+verified, kept without their signature, since the index is verified once,
+as it is accepted (decision 10). An index is refused when it is for
+another architecture, does not parse, or is **older than the accepted one**
+(a lower sequence), or has the accepted one's sequence and other bytes. An
+upgrade refuses a file whose size or SHA-256 is not the index's, a package
+whose record is not the index's name, version and architecture, and a
+dependency that neither the root nor the index has in a version that will
+do. A dependency the index
 has, newer than the installed one or not installed at all, comes with the
 upgrade: minimum versions, no solver, as APPS.md §7 says.
 
@@ -108,8 +110,9 @@ key per kind. Packages are not one of its kinds, so step b adds the fifth:
   verifier's floor check is the "older than accepted" refusal (the floor is
   the accepted sequence); zero for a package, which the index binds by
   digest.
-* `profile`: `0xFF` (development) while only development keys exist; a
-  release package key and `pkg` reading the build's profile come together.
+* `profile`: `0xFF` (development), the only profile a package key exists
+  for; `pkg` reading the build's profile byte comes with the development
+  package key (§4 item 1).
 * `arch`: the package's; `family`: the generic family of its architecture
   (0x0101, 0x0201, 0x0301), since a package is built per architecture, not
   per board.
@@ -124,7 +127,30 @@ key per kind. Packages are not one of its kinds, so step b adds the fifth:
 
 This is a change to `ferrix-sigverify`, which is in the certified item, and
 to the soft signer, which its evidence is measured with. It is one commit
-of its own, for the consultant's review before it lands.
+of its own, reviewed by the consultant (ledger line 9932, §5). Kind 5 is
+for development only: no product key, no slot or TPM floor, and no anchor
+in any image (SIGNING.md §1.1).
+
+**What the signatures do not show.**
+
+* **The floor is a file root writes.** The floor is the sequence of the
+  accepted index in `var/lib/pkg/`, not a TPM index or a slot's floors
+  (SIGNING.md §7). The refusal of an older index holds against a
+  repository and whoever stands between it and the machine. It does not
+  hold against root, or anyone who writes the root's disk while the
+  system is off: deleting or replacing the accepted index lowers the floor.
+* **A first update has floor 0.** A machine with no accepted index takes
+  any index the key signed, the oldest included.
+* **Nothing bounds an index's age.** An index carries no expiry, so a
+  repository, or a path to it, that withholds a newer index is not
+  noticed: the machine stays on the last index it accepted and says it is
+  up to date.
+* **`pkg install FILE` checks no signature.** A package file named on the
+  command line is installed on root's word, as `drvupdated` takes a driver
+  image without D3 (§1).
+* **No revoked list before S7.** `pkg` verifies with an empty list of
+  revoked package keys, so a revoked key's signatures are accepted until
+  S7 gives the slot a list and `pkg` reads it.
 
 ### 2.3 (c) The upgrade as one transaction
 
@@ -145,9 +171,10 @@ root and requires: an index read and accepted; `pkg newer` naming a newer
 version and a security fix with its advisory; the upgrade applied, the
 dependency it pulls with it; and each refusal next to the control that
 passes: a wrong digest, a bad signature, an index older than the accepted
-one, a missing dependency. No build of today refuses a development key at
-`pkg`'s level (S3's refusal is by image, at build time), so that refusal has
-no row until a claimed profile carries `pkg`.
+one, an index changed under its good signature, a missing dependency. No
+build of today refuses a development key at `pkg`'s level (S3's refusal is
+by image, at build time), so that refusal has no row until a claimed
+profile carries `pkg`.
 
 ## 3. Decisions taken where the documents were silent
 
@@ -180,9 +207,10 @@ no row until a claimed profile carries `pkg`.
     the index has that meets the minimum, rather than refuse it.
 12. **`test-pkg`'s throwaway keys** take anchor id 0x8f00, a development id
     `signing-anchors.toml` gives no key; they live for one run in a
-    directory outside any git tree (D5), and the boot's `pkg` is built
-    trusting one of them, through `FERRIX_PKG_ANCHORS`, in a target
-    directory of its own, so the `pkg` every image carries is unchanged.
+    directory the run makes for itself, outside any git tree (D5), and the
+    boot's `pkg` is built trusting one of them, through
+    `FERRIX_PKG_ANCHORS`, in a target directory of its own, so the `pkg`
+    every image carries is unchanged.
 13. **The transaction is a journal and renames**, not a snapshot (§2.3); a
     `.pkg-old` already in the way is refused before anything changes. A
     removal stays as it was: record first, then files.
@@ -193,17 +221,37 @@ no row until a claimed profile carries `pkg`.
 
 ## 4. Left, in order
 
-1. The consultant's review of the kind-5 commit ("sigverify: a fifth
-   manifest kind"), before any of this lands.
-2. A development package key (anchor 0x8003, kind `package`) in
-   `signing-anchors.toml`, made by whoever holds `signing-dev`, and `pkg`'s
-   `build.rs` reading it, with `check-signing-anchors.py` taking the kind:
-   until then a development image's `pkg` refuses every repository.
-3. Fetching over HTTP with the curl app.
-4. CI building the index and signing it with the CI development key
+1. A development package key, its own landing with a one-line OK from the
+   consultant before its take (ledger line 9932 (8)): (a) made by whoever
+   holds `signing-dev` with `ferrix-softsign keygen`, H15, anchor id 0x8003,
+   kind `package`, its private state in `signing-dev` only (D5), with a
+   `made` line; (b) `check-signing-anchors.py` taking the kind under
+   `[development.*]` and refusing it under `[release.*]` until the
+   customer answers (item 3), with a self-test row for each; (c) xtask
+   giving the anchor to an image's `pkg` from `signing-anchors.toml`, never
+   from the caller's environment, and only outside claimed profiles, its
+   claimed-image scan refusing a claimed image whose `pkg` holds the key,
+   shown by a planted control that fires (decision 14's missing row comes
+   then); (d) `pkg` reading the build's profile byte, or keeping 0xFF with
+   the text saying a claimed profile's `pkg` trusts nothing; (e) `test-pkg`
+   keeping its throwaway keys, so the gate never needs `signing-dev`. With
+   it come VULNERABILITY-ANALYSIS's rows for a repository attacker: replay,
+   freeze and the first update (§2.2). Until then a development image's
+   `pkg` refuses every repository.
+2. Fetching over HTTP with the curl app.
+3. **The customer's questions** (ledger line 9932 (7), SIGNING.md §12
+   Q11, filed and not waited for): is there a product package key at all
+   (eight product keys, its leaf budget, its custody)? Does any claimed
+   profile carry `pkg` trusting a package anchor? Do released images trust
+   a CI-signed repository fetched over the network? Whose repositories may
+   an image trust? Until they are answered: no `[release.*]` anchor of kind
+   `package`, `pkg`'s `build.rs` keeps refusing an anchor id below 0x8000,
+   and item 4 does not start.
+4. CI building the index and signing it with a CI development key
    (SIGNING.md §6.5), served statically; never a release key until S6.
-5. A removal as a transaction, and `pkg` reading the build's profile byte
-   rather than taking the development one.
+   It waits on item 3's answers, and takes the review CI's slot key took
+   (ledger 4005, 4188) and the customer's word.
+5. A removal as a transaction.
 6. btrfs snapshots in the writer, then the snapshot as the transaction.
 7. D3 (S9, `devmgr`'s kind-3 check), which this does not touch.
 8. Building on Ferrix and the system as packages (APPS.md §7).
@@ -211,7 +259,31 @@ no row until a claimed profile carries `pkg`.
 ## 5. Where it stands
 
 2026-11-13: this design, and steps a to d, on branch `pkg/updates`. Nothing
-of it has landed; the kind-5 commit waits on the consultant.
+of it has landed. The consultant's design and code review is **OK IF
+(1)-(6)**, ledger `~/.local/share/ferrix/cert-consultant/reviews.md` line
+9932, with (7), the customer's questions, filed beside it (§4 item 3) and
+(8), the development package key, owed by that key's own landing (§4
+item 1). The conditions, met on the branch on top of the reviewed commits
+(the code at 26805f1e0):
+
+1. the item control on the package kind's subject, `control: FIRED
+   (host)` (tag `pkgc-ctl-item`, SIGNING.md §13);
+2. host coverage measured again, `manifest.rs` as committed (SIGNING.md
+   §13);
+3. SIGNING.md true to five kinds (§1.1, §1.2, §6.4, §12, §13);
+4. this document: §2.1's accepted index, §2.2's limits, §4 and this
+   section;
+5. the refusal of a good signature beside other bytes (`PayloadMismatch`,
+   below), with its controls;
+6. `check` and `test-pkg --arch all` `run: PASSED` on 26805f1e0 (tags
+   `pkgc-check`, log sha256 `48c948a1...`, and `pkgc-pkg`, `8e30d3c2...`,
+   aarch64 and armv7a under TCG, x86_64 under KVM), and `check-docs` on the
+   tip.
+
+Two of the review's lesser points are taken in on the branch: `test-pkg`'s
+key directory is made by the run alone, mode 0700, never one already there
+(C3), and `repo.rs`'s own comparison of sequences says it is the second
+check behind the floor (C4). C1, C2 and C5 are BACKLOG rows.
 
 **Step a, as built.** `ferrix_pkg::index` (`src/lib/proto/pkg/src/index.rs`)
 reads and writes the index, says what is newer and which versions are
@@ -227,8 +299,8 @@ repositories from its boot's root (`tools/common/xtask/src/pkg.rs`,
 `repositories`) and requires each of these in the guest.
 
 **Step b, as built.** Kind 5 in `ferrix-sigverify` and the soft signer is
-commit "sigverify: a fifth manifest kind", alone, for the consultant's
-review. `pkg` verifies with it in `src/user/system/linux/pkg/src/sig.rs`:
+commit "sigverify: a fifth manifest kind", alone, reviewed by the
+consultant (above). `pkg` verifies with it in `src/user/system/linux/pkg/src/sig.rs`:
 `pkg update` verifies the index's `index.toml.fxsig` before it reads the
 index, with the accepted sequence as the floor, and requires the sequence
 the index says to be the one signed; `pkg upgrade` verifies each package's
@@ -242,6 +314,26 @@ refused beside its control. `test-pkg` makes two throwaway H10 keys per
 run in a directory outside any git tree (`Signer`), builds its `pkg` with
 one of them, and adds an index signed by the other, a package signed as
 another, and an unsigned repository to its refusals.
+
+**The payload check.** `sig::check` hands the verified manifest's length
+and digest to `check_payload` against the bytes `pkg` holds: the one check
+that ties a file to its signature. A host test,
+`a_good_signature_beside_other_bytes_is_refused`, changes one byte of a
+signed index, its length, sequence and syntax kept, and requires
+"(PayloadMismatch): refused" with the accepted index as it was; then a
+package the index names beside a signature, under its own name, of other
+bytes of the same length, refused with nothing written; each beside the
+control that passes.
+`test-pkg` serves `changed-index`, index 4 with one byte of its advisory
+changed under its signature, and requires the same refusal on every
+architecture with index 3 still accepted after it. With `check_payload`'s
+result dropped in `sig.rs`, both fire: `control: FIRED (line, no panic):
+xtask: x86_64: test-pkg is missing [pkg-test: ok refused an index changed
+under its signature, pkg-test: ok the changed index left index 3 accepted]
+and printed []` (tag `pkgc-ctl-payload`, log sha256 `a82d3ca0...`), and
+`control: FIRED (host): test
+tests::repository::a_good_signature_beside_other_bytes_is_refused ...
+FAILED` (tag `pkgc-ctl-payload-host`, `c79b8ddd...`).
 
 **Step c, as built.** `src/user/system/linux/pkg/src/transaction.rs`. Every
 install, `--replace` and upgrade of any number of packages is one

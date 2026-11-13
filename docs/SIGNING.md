@@ -31,7 +31,7 @@ verifier (§5).
 
 ## 1. (P1) One signed manifest, one key per kind
 
-### 1.1 The three kinds
+### 1.1 The kinds: three product kinds, revocation, and packages
 
 | Kind | Code | The artifact | Who verifies, and when | Where the manifest travels |
 |---|---|---|---|---|
@@ -39,18 +39,19 @@ verifier (§5).
 | **Configuration package** | 2 | One configuration package of 3564's (S1)-(S6): the typed, bounded data `fast` applies at a boot (S7) | init's configuration verifier, before any unit reads the configuration (3564 (S12)) | The package file's first 4 KiB |
 | **Driver image** | 3 | One native driver image that `drvupdated` hands to `devmgr` (`DEVMGR.md` §4.1) | `devmgr`, on its own copy of the VMO, before step 1 of "what devmgr checks" | The first 4 KiB of the bytes the client sends after its 48-byte header |
 | *Revocation* | 4 | A list of revoked keys (trees) of one kind (§7.4) | The verifier of the kind it names | A file next to that kind's anchors (§7.4) |
-| **Package** | 5 | A package repository's index for one architecture, and each package it names (`UPDATES.md` §2.2, added 2026-11-13 for review) | `pkg`, on its own copy in memory, before it accepts an index or writes a package's file | A file beside it, `<file>.fxsig`: the block alone |
+| **Package** | 5 | A package repository's index for one architecture, and each package it names (`UPDATES.md` §2.2, added 2026-11-13; development only, below) | `pkg`, on its own copy in memory, before it accepts an index or writes a package's file | A file beside it, `<file>.fxsig`: the block alone |
 
-**One format, one verifier.** The four kinds share the manifest below and one
+**One format, one verifier.** The five kinds share the manifest below and one
 verifier crate (§5). They differ only in four things: the anchor set that
 verifies them, the kind code the caller expects, the meaning of `subject`, and
 what `payload_sha256` covers.
 
-**A key per kind.** Kinds 1, 2 and 3 each have their own keys, two per kind,
-each with its own public key (§3.3, §4.1). An anchor names the kind it verifies.
+**A key per kind.** Kinds 1, 2 and 3 each have their own product keys, two
+per kind, each with its own public key (§3.3, §4.1); kind 5 has development
+keys only (below). An anchor names the kind it verifies.
 The verifier takes its anchor set from the caller's expected kind, never
-from the kind field in the manifest. So a signature of kind 1, 2 or 3 fails
-under another of those kinds' keys before any field is read. That holds
+from the kind field in the manifest. So a signature of kind 1, 2, 3 or 5
+fails under another of those kinds' keys before any field is read. That holds
 even if a manifest of another kind carried the right kind code, which it
 cannot, because the code is signed. The kind field in the signed bytes is a
 second, independent separation.
@@ -63,6 +64,20 @@ body is used. §8.1's sig-bind names both directions as cases: a slot
 manifest presented where a revocation is expected, and a revocation
 presented as a slot. The kind check's control is in §8.3.
 
+**Kind 5 is for development only** (the consultant, ledger line 9932). It
+has **no product key**: the six product keys of §3.3 and §4.1, and §2.2's
+budget, stand for kinds 1 to 3, and whether a product package key exists
+at all is the customer's open question (§12, Q11). It has **no floor in a
+slot** (`floors` covers kinds 1 to 4) **and no TPM floor** (§7): `pkg`'s
+floor is the sequence of the index it accepted last, a file in the root
+that root writes (`UPDATES.md` §2.2, what the signatures do not show). Its
+anchors are compiled into `pkg` from `FERRIX_PKG_ANCHORS` when it is built,
+development ids only (0x8000 and up, which `pkg`'s `build.rs` holds), and
+**no image carries one**: xtask builds every image's `pkg` with that
+variable empty, so it trusts no package key and refuses every repository.
+Only `test-pkg`'s own `pkg` trusts a key, a throwaway one of that run
+(§6.4).
+
 ### 1.2 The manifest
 
 A **manifest block** is 4096 bytes. All integers are little-endian. The
@@ -74,9 +89,10 @@ message `M` (RFC 8554 §6.2), with the randomiser `C` HSS itself prepends
   0  magic             "FXSIGMAN"
   8  format            u16 = 1
  10  body_len          u16 = 512            the signed message is bytes 0..512
- 12  kind              u16                  1 slot, 2 config, 3 driver, 4 revocation
+ 12  kind              u16                  1 slot, 2 config, 3 driver, 4 revocation, 5 package
  14  flags             u16 = 0
- 16  security_version  u32                  the anti-rollback number of this kind (§7)
+ 16  security_version  u32                  the anti-rollback number of this kind (§7); package
+                                            kind: the index's sequence, zero for a package
  20  anchor_id         u16                  which root of the kind signed it (§3.3)
  22  profile           u8                   1 max, 2 fast, 3 present, 4 desktop; 0xFF development (§6.4)
  23  arch              u8                   1 x86-64, 2 AArch64, 3 ARMv7-A
@@ -85,11 +101,13 @@ message `M` (RFC 8554 §6.2), with the randomiser `C` HSS itself prepends
  32  release           u64                  release sequence, informational (it orders nothing)
  40  label             [u8; 32]             e.g. "ferrix 0.4.0 a1708b49c", NUL padded, informational
  72  subject           [u8; 32]             driver kind: the driver's name as UPDATE names it;
-                                            config kind: the package's name; slot kind: zero
+                                            config kind: the package's name; slot kind: zero;
+                                            package kind: the package's name, ":index" for the index
 104  payload_len       u64
 112  payload_sha256    [u8; 32]             slot: the slot header's seal (AB-BOOT §2, SHA-256 of
                                             header bytes 0..4064); config: the package bytes after
-                                            this block; driver: the image bytes after this block
+                                            this block; driver: the image bytes after this block;
+                                            package kind: the bytes of the file it sits beside
 144  floors            [u32; 4]             slot kind only: the minimum security_version this release
                                             sets for kinds 1..4 (§7.2); zero in every other kind
 160  target_kind       u16                  revocation kind only: the kind whose trees it revokes
@@ -715,6 +733,15 @@ program, slice S1). **It is never used for a release** (D4).
   in the tree that parses as soft-signer state. A development key committed
   by mistake is revoked by replacing its development anchor: new key, new
   anchor id, and the old anchor deleted from `[development]`.
+* **`test-pkg`'s package keys (kind 5).** `cargo xtask test-pkg` makes two
+  H10 keys with the soft signer for each run, in a directory it makes for
+  itself outside any git tree, and deletes them with the run (D5). They take
+  **anchor id 0x8f00**, a development id that `signing-anchors.toml` gives
+  no key: apart from nazuna's 0x8000-0x8002, from 0x8003, which a
+  development package key will take (`UPDATES.md` §4), and from CI's 0x9000
+  and up (§6.5). Only the `pkg` built for that boot trusts one of them, in a
+  target directory of its own. `pkg`'s host tests make keys of their own
+  under the same id.
 * **Its tree.** Development keys default to `LMS_SHA256_M24_H10` (1,024
   signatures), so that one key generation takes about a second. H15 and
   H20 are accepted for tests of the product heights. The tree's nodes are
@@ -1857,6 +1884,12 @@ state lives in a locked file, committed with `fsync` before a signature is
 released, and it can never use a product key (§6.4, ledger 3731
 (D1)-(D5)).
 
+**Open, filed 2026-11-13 and not waited for (ledger line 9932 (7)).**
+
+| | Question | Until it is answered |
+|---|---|---|
+| Q11 | Packages (kind 5, §1.1): is there a **product package key at all**? That would make eight product keys, not six, with a leaf budget of its own (a signature per package version and per index, against §2.2's count of slot, configuration and driver releases) and its custody (§3). Does **any claimed profile carry `pkg` trusting a package anchor** (`max` takes no signed updates before M7, Q9)? Do **released images trust a CI-signed repository fetched over the network**? And **whose repositories may an image trust**? | No `[release.*]` anchor of kind `package`; `pkg`'s `build.rs` keeps refusing an anchor id below 0x8000; and CI does not start signing an index (`UPDATES.md` §4). When it does, it takes the review CI's slot key took (ledger 4005, 4188) and the customer's word |
+
 ## 13. Where it stands
 
 2026-10-24: this design, on branch `docs/product-signing`. The
@@ -2136,12 +2169,36 @@ Evidence on the branch:
 Owed before landing: the controls of 4016 (7) on the landing hash, the
 rows of (12), and the transcripts of (9).
 
-**Kind 5, packages (2026-11-13, branch `pkg/updates`; for the
-consultant's review).** `UPDATES.md` §2.2 adds a fifth kind for a package
-repository's index and its packages, verified by `pkg`. In
-`ferrix-sigverify` the kind parses, a revocation may target it, and a
-package manifest checked with no subject is refused as a configuration or
-driver manifest is (`L.sigverify.6` and `H.SIGN.2` name it); the soft
-signer signs it (`--kind package`). No anchor of the kind is in
-`signing-anchors.toml` yet: `test-pkg` signs with a throwaway key of its
-own, and the `pkg` an image carries trusts none.
+**Kind 5, packages (2026-11-13, branch `pkg/updates`).** `UPDATES.md`
+§2.2 adds a fifth kind for a package repository's index and its packages,
+verified by `pkg`. In `ferrix-sigverify` the kind parses, a revocation may
+target it, and a package manifest checked with no subject is refused as a
+configuration or driver manifest is (`L.sigverify.6` and `H.SIGN.2` name
+it); the soft signer signs it (`--kind package`). No anchor of the kind is
+in `signing-anchors.toml` yet: `test-pkg` signs with a throwaway key of its
+own, and the `pkg` an image carries trusts none. The kind is for
+development only (§1.1).
+
+The consultant's design and code review is **OK IF (1)-(6)**, ledger
+`~/.local/share/ferrix/cert-consultant/reviews.md` line 9932, with (7)
+filed beside it and (8) owed by the development package key's own landing.
+The kind in the verifier, and a development key for it, are within the
+customer's decisions of 2026-10-24; a product package key is not, and is
+§12's Q11. Met on the branch, on the code at commit 26805f1e0:
+
+1. the item control: `Kind::Package` taken out of `bindings`' no-subject
+   arm, `control: FIRED (host): test
+   tests::a_package_manifest_binds_its_subject_and_kind ... FAILED`
+   (`gate.sh` tag `pkgc-ctl-item`, log sha256 `d265f783...`);
+2. host coverage measured again on that tree: `manifest.rs` 202 of 202
+   lines and 68 of 68 branch outcomes, nothing unreached, as committed.
+   The run left `docs/certification/host-coverage.json` byte for byte as
+   it was: "lines 1290/1302, branch outcomes 322/326, 16 argued" for the
+   four crates;
+3. §1.1, §1.2, §6.4, §12 and this paragraph;
+4. `UPDATES.md` §2.1, §2.2, §4 and §5;
+5. the refusal of a good signature beside other bytes (`PayloadMismatch`),
+   a host test in `pkg` and a `test-pkg` row, with their controls
+   (`UPDATES.md` §5);
+6. `check` and `test-pkg --arch all` `run: PASSED` on 26805f1e0 (tags
+   `pkgc-check`, `pkgc-pkg`), and `check-docs` on the branch's tip.
