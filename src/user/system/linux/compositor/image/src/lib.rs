@@ -60,6 +60,10 @@ pub enum Fit {
     /// Scaled to fit inside this box, keeping its shape; the pixmap is the
     /// scaled size.
     Within(u32, u32),
+    /// Scaled to cover this box, keeping its shape: the pixmap is the box
+    /// in one dimension and at least the box in the other, so a picture
+    /// filled or stretched onto a screen of that size is never enlarged.
+    Covering(u32, u32),
     /// Exactly this size. How the drawing fills it is the SVG's own
     /// `preserveAspectRatio`: `none` stretches it (waybar's chip caps), the
     /// default centres it.
@@ -155,6 +159,11 @@ pub fn svg(bytes: &[u8], fit: Fit) -> Result<tiny_skia::Pixmap, Error> {
         Fit::Natural => render(&tree, pixels(width), pixels(height), 1.0, 1.0),
         Fit::Within(most_width, most_height) => {
             let scale = (most_width as f32 / width).min(most_height as f32 / height);
+            let (out_width, out_height) = (pixels(width * scale), pixels(height * scale));
+            render(&tree, out_width, out_height, scale, scale)
+        }
+        Fit::Covering(least_width, least_height) => {
+            let scale = (least_width as f32 / width).max(least_height as f32 / height);
             let (out_width, out_height) = (pixels(width * scale), pixels(height * scale));
             render(&tree, out_width, out_height, scale, scale)
         }

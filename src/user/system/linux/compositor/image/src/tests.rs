@@ -88,6 +88,22 @@ fn a_gradient_in_user_space_keeps_a_vertical_stroke() {
 }
 
 #[test]
+fn a_covering_drawing_is_the_box_in_one_dimension_and_more_in_the_other() {
+    // A square drawing over a wide box: as wide as the box, and as tall as
+    // it is wide, so neither side has to be enlarged to fill the box.
+    let wide =
+        svg(STEM.as_bytes(), Fit::Covering(48, 10)).unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!((wide.width(), wide.height()), (48, 48));
+    let tall =
+        svg(STEM.as_bytes(), Fit::Covering(10, 36)).unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!((tall.width(), tall.height()), (36, 36));
+    // Where `Within` gives the smaller of the two.
+    let within =
+        svg(STEM.as_bytes(), Fit::Within(48, 10)).unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!((within.width(), within.height()), (10, 10));
+}
+
+#[test]
 fn a_png_and_a_jpeg_decode_to_their_pixels() {
     let mut original = tiny_skia::Pixmap::new(3, 2).unwrap_or_else(|| panic!("a pixmap"));
     original.fill(tiny_skia::Color::from_rgba8(10, 200, 30, 255));

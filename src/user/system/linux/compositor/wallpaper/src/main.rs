@@ -78,10 +78,12 @@ struct Shown {
     next: Option<Instant>,
     /// `pattern --video`, playing this line's video.
     video: Option<std::process::Child>,
+    /// The screen size, in pixels, the picture was read for: see [`load`].
+    screen: (u32, u32),
 }
 
 impl Shown {
-    fn new(line: Wallpaper) -> Self {
+    fn new(line: Wallpaper, screen: (u32, u32)) -> Self {
         let mut shown = Self {
             line,
             picture: None,
@@ -89,11 +91,12 @@ impl Shown {
             at: 0,
             next: None,
             video: None,
+            screen,
         };
         match shown.line.source.clone() {
             WallpaperSource::Colour => {}
             WallpaperSource::Picture(path) => {
-                shown.picture = load(&home(&path), shown.line.fit);
+                shown.picture = load(&home(&path), &shown.line, screen);
             }
             WallpaperSource::Slideshow {
                 folder,
@@ -136,7 +139,7 @@ impl Shown {
             let Some(path) = self.slides.get(self.at) else {
                 return;
             };
-            if let Some(picture) = load(path, self.line.fit) {
+            if let Some(picture) = load(path, &self.line, self.screen) {
                 say(&format!("wallpaper: showing {}", path.display()));
                 self.picture = Some(picture);
                 return;
@@ -160,6 +163,22 @@ impl Shown {
         self.show_slide();
     }
 
+    /// Read the picture again if a screen larger than the one it was read
+    /// for has come: a screen plugged in, or a mode changed.
+    fn refit(&mut self, screen: (u32, u32)) {
+        if screen.0 <= self.screen.0 && screen.1 <= self.screen.1 {
+            return;
+        }
+        self.screen = (screen.0.max(self.screen.0), screen.1.max(self.screen.1));
+        match self.line.source.clone() {
+            WallpaperSource::Picture(path) => {
+                self.picture = load(&home(&path), &self.line, self.screen);
+            }
+            WallpaperSource::Slideshow { .. } => self.show_slide(),
+            WallpaperSource::Colour | WallpaperSource::Video(_) => {}
+        }
+    }
+
     /// Seconds between slides.
     fn every(&self) -> Option<Duration> {
         match self.line.source {
@@ -180,8 +199,13 @@ impl Drop for Shown {
 
 fn run() -> Result<(), String> {
     let lines = lines()?;
-    let mut shown: Vec<Shown> = lines.into_iter().map(Shown::new).collect();
+    // Connected first, so a picture is read for the screens there are.
     let mut client = Client::connect().map_err(|error| error.to_string())?;
+    let screen = largest_screen(&client);
+    let mut shown: Vec<Shown> = lines
+        .into_iter()
+        .map(|line| Shown::new(line, screen))
+        .collect();
     let mut surfaces: HashMap<OutputId, (SurfaceId, usize)> = HashMap::new();
     let ids: Vec<OutputId> = client
         .outputs()
@@ -200,13 +224,17 @@ fn run() -> Result<(), String> {
             .map_err(|error| error.to_string())?
         {
             match event {
-                Event::OutputAdded(id) => add(&mut client, &mut surfaces, &shown, id),
+                Event::OutputAdded(id) => {
+                    refit(&mut shown, &client);
+                    add(&mut client, &mut surfaces, &shown, id);
+                }
                 Event::OutputRemoved(id) => {
                     if let Some((surface, _)) = surfaces.remove(&id) {
                         client.destroy(surface);
                     }
                 }
                 Event::Configure { surface, .. } | Event::Scale { surface, .. } => {
+                    refit(&mut shown, &client);
                     paint(&mut client, &surfaces, &shown, surface)?;
                 }
                 Event::Closed(surface) => {
@@ -395,13 +423,45 @@ fn add(
     }
 }
 
+/// The largest screen's width and height in pixels, each the most of any
+/// screen's, or nothing before the compositor has named one.
+fn largest_screen(client: &Client) -> (u32, u32) {
+    client
+        .outputs()
+        .iter()
+        .fold((0, 0), |(width, height), output| {
+            (
+                width.max(u32::try_from(output.mode.0).unwrap_or(0)),
+                height.max(u32::try_from(output.mode.1).unwrap_or(0)),
+            )
+        })
+}
+
+/// Every line's picture read again if the screens outgrew it.
+fn refit(shown: &mut [Shown], client: &Client) {
+    let screen = largest_screen(client);
+    for line in shown {
+        line.refit(screen);
+    }
+}
+
+/// The most an SVG is drawn at: 4K, the largest a screen here is likely to
+/// be.
+const MOST: (u32, u32) = (3840, 2160);
+
 /// A picture, read; `None`, said, when it cannot be. Tiled and centred
-/// pictures keep their own size; the rest are read at most 4K, the
-/// largest a screen here is likely to be, which is what an SVG is drawn at.
-fn load(path: &Path, fit: WallpaperFit) -> Option<Pixmap> {
-    let size = match fit {
+/// pictures keep their own size. An SVG for the rest is drawn to cover the
+/// largest screen, `screen`, up to [`MOST`]; a line that spans the screens,
+/// or one read before any screen is known, at most [`MOST`] as before.
+///
+/// Drawn at 4K whatever the screen, the shipped Nocturne SVG kept a
+/// 3840x2160 pixmap -- 33 MB of the client's 51 MB -- behind a 1920x1080
+/// screen, where covering it takes 8 MB.
+fn load(path: &Path, line: &Wallpaper, screen: (u32, u32)) -> Option<Pixmap> {
+    let size = match line.fit {
         WallpaperFit::Tile | WallpaperFit::Centre => Fit::Natural,
-        _ => Fit::Within(3840, 2160),
+        _ if line.span || screen.0 == 0 || screen.1 == 0 => Fit::Within(MOST.0, MOST.1),
+        _ => Fit::Covering(screen.0.min(MOST.0), screen.1.min(MOST.1)),
     };
     match compositor_image::load(path, size) {
         Ok(picture) => Some(picture),
