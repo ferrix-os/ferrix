@@ -247,6 +247,241 @@ set's `/proc/<pid>/fdinfo/<fd>` has a `tfd:` line for each registration, as
 Linux writes it, so `grep -c tfd: /proc/<pid>/fdinfo/<fd>` counts a set's
 registrations exactly.
 
+### 4.4 `sys/epoll-base`: what an epoll wait costs with nothing registered
+
+After 4.3 the epoll round trip no longer grows with idle registrations, but
+it starts higher than Linux's: 3.6 against 1.55 us in the release guest
+(N = 0, one processor), 8.7 against 5.0 on the box. A never-land timeline
+(`~/.local/share/ferrix/ef-30fps/faultbench/epdiag.patch`, TSC stamps at 29
+points on processor 0, output `epdiag-1.out`) splits one side of the trip,
+an `epoll_wait` that blocks, then `read` and `write` of an eventfd, about
+1.8 us. Figures are ticks of a 4.32 GHz counter per wait, each with about 30
+ticks of the stamp itself:
+
+| Stamp | Where | Ticks a wait (calls) | ns |
+|---|---|---|---|
+| m4 | `ready(limit)` on the way in, nothing to deliver | 376 (0.82) | 87 |
+| m9 | `ready(1)` as `wait_on`'s test, false (at the top and as the last look) | 636 (1.62) | 147 |
+| m10 | `ready(1)` as the test after the wake, true | 559 (0.82) | 129 |
+| m5 | `ready(limit)` after the wake, delivering | 557 (1.00) | 129 |
+| m6 | `deliver`: the copy out and `delivered` | 472 (1.00) | 109 |
+| m15 | the switch's `choose_next` (§4.2) | 1173 (1.00) | 272 |
+| m23 | an eventfd read's wake of its writable queue | 92 (1.00) | 21 |
+
+Calls' entry and exit, the dispatch and the eventfd's own work are the rest.
+
+**What Linux does** (`fs/eventpoll.c`, 6.18):
+- `ep_poll` asks `ep_events_available` first: the ready list's emptiness,
+  read without the lock (`list_empty_careful`), and a sequence count. Only
+  when that says yes does it call `ep_send_events`. Before it sleeps it takes
+  `ep->lock`, marks itself interruptible, asks `ep_events_available` again
+  under the lock and joins `ep->wq`; after the wake it takes events with no
+  second test. A blocking wait makes one real look at the files after its
+  wake, and one on the way in only when something is listed.
+- `ep_send_events` takes the ready list whole (`ep_start_scan`), polls each
+  item, writes each event straight to the caller's buffer
+  (`epoll_put_uevent`), and puts a level-triggered item back on the list
+  (`ep_deliver_event`). There is no events buffer of its own, and the
+  delivery is recorded as it is made, under `ep->mtx`, a sleeping lock held
+  across the copies.
+- `ep_poll_callback` drops a wake whose key shares no event with the
+  registration: `if (pollflags && !(pollflags & epi->event.events))`. An
+  eventfd read wakes with `EPOLLOUT` (`eventfd_read`), a pipe read with
+  `EPOLLOUT | EPOLLWRNORM`, so an `EPOLLIN` registration on either is not
+  listed by them.
+- `ep_done_scan` wakes another waiter when the list is not empty after a
+  scan. Ferrix does not, and this design does not change that.
+
+What is taken: the lock-free availability test before every real look (cut
+1), the key filter (cut 2, done statically per queue rather than per wake,
+so that the core's wait queues are not changed), and no buffer of the
+wait's own (cut 3). Not taken: the sleeping lock held across the copies out,
+since a Ferrix set's lock is a spin lock and a copy to the program can fault.
+
+**Cut 1. One real look after the wake.**
+
+`Epoll::may_report()`, read with no lock, answers whether a look could find
+anything:
+- the set's queue was woken since the last take: `ReadyList::queue().wakes()`
+  against a base the set stores in `take_marks`, read *before*
+  `ReadyList::take`. `wake_all_with` bumps the count before it takes its
+  waiter lock and after the tell's push, so a base read before a take can
+  never count a wake whose number that take missed. (A first draft took
+  `ReadyList::tells()` as this term. `Mark::tell` bumps `tells` before it
+  pushes, so a base read between the bump and the push counts a tell whose
+  number the take misses and whose wake comes later, perhaps before the
+  waiter is listed; with `listed.woken` then set, no later tell wakes the
+  queue, and the set is deaf until the rescan: the design review's
+  finding, ledger 9672.)
+- the ready list was told anything since the last take: `tells()` against
+  its own base, read the same way. A queue that goes tells its marks
+  quietly and wakes nobody, as today, so this term only makes the test say
+  yes sooner; a tell counted early costs a look and loses nothing;
+- `pending` is not empty, or the walk's count (4.3) is not zero: one atomic
+  flag, stored under the set's lock in every section that changes either,
+  `take_marks`'s own included (the end of `ready` and `delivered`, `insert`,
+  `change`, `take_out`), each store made before the section's bases;
+- the once-a-second rescan is due: `rescanned_at` mirrored in an atomic.
+
+`may_report` reads the bases (Acquire), then the flag, then the counts. The
+bases are the set's, not the wait's: another thread's wait, `poll` or
+`select` on the set's descriptor, and a parent set's look (`Epoll::poll` is
+`ready(1)`) all take marks. A base stored by another reader's take is
+followed, in the order above, by a flag stored in that take's own section:
+whatever that take moved onto `pending` is seen, and what it then found
+quiet it dropped. A wake after that take moves the count past the base.
+
+`syscall::epoll::wait` then calls `ready(limit)` only when `may_report()`
+says so, and `wait_on`'s test becomes `may_report() || signal_pending()`.
+While the walk's count is not zero the test is today's `!ready(1).is_empty()`,
+since a distrusted file can change without a tell; which form is used is
+decided at every evaluation. The `set.trusted() != trusted` and
+`signal_pending()` terms stay. `set.trusted()`, which takes the lock twice a
+wait for the recheck's length, reads an atomic mirror of `distrusted == 0`
+kept the same way.
+
+A blocking wait then makes the look on the way in only when something is
+pending (the level-triggered item just delivered, as on Linux), three cheap
+tests where it made three `ready(1)`, and one real look after the wake.
+Expected: m9 and m10 go, less the tests, about 0.25 us a side, about 0.5 us
+of the trip's 2.05 us gap in the guest. On the box, if it scales as the whole
+trip does (8.7 against 3.6), about 1 us of the 3.7.
+
+Why no wake is lost. The waker's path is `WaitQueue::wake_all` on a hooked
+queue, then `tell_marks`, then `Mark::tell`. `Mark::tell` bumps `tells`
+first, then takes the list's lock to push, and then wakes the set's queue,
+which always takes that queue's waiter lock (`wake_all_with`, no lock-free
+skip). The waiter lists itself under the same waiter lock before its last
+test (`wait_on_any`, as today). So either the waker's waiter-lock section
+comes first, and the `tells` bump happens before the waiter's read of it, or
+the waiter's comes first, and the waker finds it listed and wakes it. A tell
+that makes no wake (`listed.woken` already set) comes after one that did,
+since `take` clears the flag. `epoll_ctl`'s changes store the flag under the
+set's lock and then wake the set's queue, which is the same argument.
+`wait_on_any` and `sched/wait.rs` are not changed. The futex change's fence
+pair (4.1, L.user.246) orders a waker that takes no queue lock. It stays
+where it is, paid by every wait as now, and is not what orders this pair:
+the queue's waiter lock does, as it orders today's `ready(1)` through the
+list's lock.
+
+Cases (`fs::epoll_check`), each with a control through `gate.sh control`:
+- A blocking wait woken by one write makes one real look after its wake. The
+  set counts its real looks for the checks (`scans`, beside `looks`). The
+  control puts `ready(1)` back as the test and fires on the count.
+- A write that lands between the waiter's listing and its last test is
+  reported by that wait, well before the recheck. The meet is inside
+  `may_report`, armed for the test's second call, since `ready`'s own meet
+  is no longer reached by the last test. The control leaves the wake-count
+  term out of `may_report` and fires on "missed until the rescan".
+- A blocking wait on a set holding a distrusted file that changes without a
+  wake is reported well within a second (the case allows 500 ms; the
+  untrusted recheck is 5 ms), not by the rescan. The control drops the
+  count's branch from the test.
+- Each mirror equals its value under the lock at every step of the cases
+  (the flag against `pending` and the count, the trust against
+  `distrusted`), asserted in the check build.
+- A blocking wait on a trusted set whose file changes without a wake (a
+  defect the rescan is there for) is reported by the rescan within 1.5 s. The
+  control drops the rescan term.
+
+No requirement (load ring; nothing a program sees changes); no ids.
+
+**`fs::wake`'s `LOOKS`.** It is one machine-wide `AtomicU64`, bumped by every
+`wait_on` and `Sources::wait` test, three times a blocking epoll wait, so
+that `eventfd_check` can say a quiet poll looked at most 12 times. On one
+processor it costs a locked add each, about 15 ns a wait. On the box every
+processor's waits share its cache line. Taken out of the hot path in cut 1:
+counted only while a check arms it (a flag read, never written, by the
+waits). `eventfd_check` arms it, disarms it on every way out of the case,
+and also requires at least one look, so the control (the arming left out)
+fires on that.
+
+**Cut 2. Hooks keyed by direction.**
+
+`Inode::poll_queues` names each queue with the readiness its wakes can
+change, *as this file sees it*: `visit(WakeSource, Wakes)`, where `Wakes` is
+a set of readable (with priority), writable, hang-up and error. A file that
+names one queue names it with all of them, which is today's meaning, so the
+single-queue files change only in signature. An epoll registration hooks a
+queue only when its `Wakes` meet the registration's events with `EPOLLERR`
+and `EPOLLHUP`. `EPOLL_CTL_MOD` to more events makes the registration
+unsettled, so its next look hooks what it now needs. Hooks it no longer
+needs stay until it goes, which can only cost a wake (fail open to more
+wakes, never fewer). `poll` and `select` (`fs::wake::Sources`) may take the
+same keys later; not in this cut.
+
+The files naming more than one queue, and their keys:
+- eventfd: `readable` for readable, `writable` for writable;
+- pipe and FIFO end (`pipe::End`): `readable` for readable and hang-up when
+  the end reads, `writable` for writable and error when it writes. An end
+  that only reads no longer names `writable`, so a reader's `read` (which
+  wakes `writable`) no longer lists the reader's own registration;
+- unix socket: `receive.readable` for readable, hang-up and error;
+  `peer.writable` for writable; `arrivals` for readable (a listener);
+  `receive.writable` and `peer.readable` for nothing this end reports (they
+  are the peer's readiness). This holds only if every hang-up and error
+  transition wakes `receive.readable` as well: `wake_both` on close does.
+  The build reads each wake site in `socket.rs` against it, and names any
+  queue that carries a hang-up with that key;
+- DRM (`readable`, `card.changed`): both readable, as now.
+
+The 2026-10-17 audit of `poll_queues` is redone for every implementer (23,
+all in the Linux personality or `ferrix-vfs`), and `Inode::poll_queues`'
+contract is restated: every change `poll` can report wakes a queue named
+with a key covering it. Every wake site in `socket.rs`, stream and datagram,
+is read against the keys into its module doc. `poll` and `select` keep
+hooking every queue a file names, whatever its key; a read-only pipe end
+that no longer names `writable` changes what they sleep on, which the build
+argues, and the hang-up case runs through `poll` as well. A MOD to more
+events makes even a `poll_queues_fixed` registration unsettled, with a case.
+The kept edge-triggered over-report gets a BACKLOG row for its own design.
+
+Expected in the bench: m23's tell, about 20 ns a side, and nothing more.
+The level-triggered registration is looked at on the next wait anyway, as on
+Linux. What it is for: a set whose registrations are edge-triggered or
+one-shot, where each read of a pipe or eventfd now makes a look for nothing;
+and a thread asleep on a set for `EPOLLIN` while another thread reads the
+same pipe or eventfd, which is woken for nothing today. wineserver's request
+pipes are read ends registered for `EPOLLIN`. The box's fdinfo shows whether
+its sets are edge-triggered. Cut 2 is worth building after cut 1's box
+figures, unless that run shows such sets.
+
+Cases: an `EPOLLIN` registration on a pipe's read end, on an eventfd and on
+a connected unix socket is not told by a read of the same file (the ready
+list's `tells()` does not move across the read), and each is still
+reported for data, for a hang-up and for an error. The controls: key the
+writable queue for readable (fires on the listing), and key the socket's
+`peer.writable` without hang-up while dropping `receive.readable`'s hang-up
+(fires on the hang-up case). No requirement.
+
+Not in cut 2: an edge-triggered registration's due report still reads the
+file's whole `poll_changes`. A read on a pipe's read end moves it through
+the writable queue, so an `EPOLLET | EPOLLIN` registration still readable
+reports again where Linux's would not. Keying `poll_changes` the same way
+would match Linux. That changes what a program sees, so it gets its own
+design and review.
+
+**Cut 3. No buffer of the wait's own.**
+
+`ready` allocates its events `Vec` at every look that copied anything out,
+and `deliver` collects the events it wrote into another `Vec` for
+`delivered`. Instead, `delivered(&ready[..written])` takes the prefix, and
+the events' room is kept in the set as `scratch` is: reserved and charged at
+`insert`, taken, filled, given back on every way out of `deliver`, `EFAULT`
+included. Nothing is allocated under a lock, and fresh room, when another
+wait holds the kept one, is sized by what was looked at, never by
+`maxevents`. That is two heap allocations and two frees less a delivering wait. The
+timeline does not split them out of m5 and m6 (109 ns with the copy out and
+`delivered`'s lock); the estimate is 30 to 60 ns a side, measured ABAB.
+`delivered` keeps its own lock hold: recording under the look's hold would
+need the copy out under a spin lock, which can fault. One new case, since no
+case reaches a failed copy out: with the second event's page unmapped, one
+event is delivered and only it recorded, and an edge-triggered registration
+whose event was not written stays due; a wholly unmapped buffer is `EFAULT`
+with nothing recorded. The control passes the whole room to `delivered`.
+
+None of the three touches `user/address_wait.rs` or `sched/wait.rs`.
+
 ## 5. Not in these branches
 
 - **The switch's 260 ns**: split first (§4.2).
@@ -358,3 +593,11 @@ no epoll fdinfo yet. That makes §4.3's change the next one.
     ledger 9492).
   - The timeline of what is left: §5, and the never-land patch
     `~/.local/share/ferrix/ef-30fps/faultbench/epdiag.patch`.
+- 2026-11-13: §4.4, `sys/epoll-base`'s three cuts, and their design review
+  (ledger 9671-9700): cut 1 OK IF EB1-EB9, with its first test's term
+  corrected (the ready list's `tells` read before the take can count a tell
+  whose push and wake come after it, and the set is then deaf until the
+  rescan: the set queue's wake count is the term); cut 2 OK IF EK1-EK7,
+  built after cut 1's box figures unless they show edge-triggered or
+  one-shot registrations on pipes, eventfds or unix sockets, or a set more
+  than one thread waits on; cut 3 OK IF EV1-EV4.
