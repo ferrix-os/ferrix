@@ -1706,7 +1706,10 @@ fn check_fdinfo(process: &Process, page: u64) -> Result<(), &'static str> {
     };
     let text = fdinfo_text(process, page, set)?;
     let lines = |text: &[u8]| text.windows(4).filter(|window| *window == b"tfd:").count();
+    // Its walk's count: every registration until a wait has hooked it.
+    let walked = |text: &[u8], count: &[u8; 10]| text.windows(10).any(|window| window == count);
     if lines(&text) != 3
+        || !walked(&text, b"walked:\t3\n")
         || !shown(&text, level.0, level.2, level.3)
         || !shown(&text, edge.0, edge.2, edge.3)
         || !shown(&text, once.0, once.2, once.3)
@@ -1721,6 +1724,9 @@ fn check_fdinfo(process: &Process, page: u64) -> Result<(), &'static str> {
     take_byte(process, page, once.0)?;
     let text = fdinfo_text(process, page, set)?;
     let disarmed = tfd_line(once.0, EPOLLONESHOT, once.3);
+    if !walked(&text, b"walked:\t0\n") {
+        return Err("an epoll set's fdinfo did not show its walk's count down to 0 once hooked");
+    }
     if !text
         .windows(disarmed.len())
         .any(|window| window == disarmed.as_bytes())

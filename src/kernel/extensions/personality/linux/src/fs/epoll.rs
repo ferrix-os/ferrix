@@ -1430,6 +1430,12 @@ impl Epoll {
         Ok(shown)
     }
 
+    /// How many registrations every wait looks at, pending or not: the walk's
+    /// count (`State::always`), which its fdinfo shows.
+    pub(crate) fn registrations_walked(&self) -> usize {
+        self.state.lock().always
+    }
+
     /// How many files its waits have looked at, for the checks.
     pub(crate) fn looks(&self) -> u64 {
         self.state.lock().looks

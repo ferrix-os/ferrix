@@ -1124,6 +1124,12 @@ pub(super) fn fdinfo(process: &Process, fd: i32) -> Result<Vec<u8>> {
                 ),
             );
         }
+        // Ferrix's own line, after Linux's: how many registrations every wait
+        // looks at, whatever woke (`docs/BLOCK-AND-WAKE.md` §4.3).
+        put(
+            &mut out,
+            format_args!("walked:\t{}\n", set.registrations_walked()),
+        );
     }
     Ok(out)
 }

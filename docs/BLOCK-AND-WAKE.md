@@ -744,7 +744,11 @@ read on the box with
     p=$(pidof wineserver); for t in $(awk '/^tfd:/{print $2}' /proc/$p/fdinfo/9); do readlink /proc/$p/fd/$t; done | sed 's/:.*//' | sort | uniq -c
 
 (a set, the console, `/dev/kmsg` and a render node are the kinds that can
-be walked). What is left is the base: 8.9 against 5.0 µs, §4.4.
+be walked). Since `sys/epoll-clock`, the fdinfo's last line, `walked:`, gives the
+set's walk count itself: how many registrations every wait looks at,
+whatever woke. On 2026-11-13 the 478 registrations of wineserver's set
+were 395 pipes, 82 sockets and an inotify file, none of them a kind a wait
+walks, so `walked:` should read 0 there. What is left is the base: 8.9 against 5.0 µs, §4.4.
 
 ## 7. Where it stands
 
