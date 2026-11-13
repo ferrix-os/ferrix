@@ -162,7 +162,7 @@ fn replaced_lines(
 
 fn update(root: &std::path::Path, given: Option<&str>) -> Result<(), Error> {
     let repository = repo::repository(root, given)?;
-    let line = match repo::update(root, &repository)? {
+    let line = match repo::update(root, &repository, pkg::sig::ANCHORS)? {
         Updated::Same(index) => format!(
             "pkg: index {} for {} is the one accepted already",
             index.sequence, index.arch
@@ -185,7 +185,7 @@ fn newer(root: &std::path::Path) -> Result<(), Error> {
 
 fn upgrade(root: &std::path::Path, given: Option<&str>, names: &[String]) -> Result<(), Error> {
     let repository = repo::repository(root, given)?;
-    let done = repo::upgrade(root, &repository, names)?;
+    let done = repo::upgrade(root, &repository, names, pkg::sig::ANCHORS)?;
     if done.is_empty() {
         return say(&["pkg: nothing to upgrade".to_owned()]);
     }

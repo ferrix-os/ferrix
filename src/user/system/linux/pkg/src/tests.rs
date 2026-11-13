@@ -418,11 +418,88 @@ mod repository {
     use std::fs;
     use std::path::{Path, PathBuf};
 
+    use std::sync::OnceLock;
+
     use ferrix_pkg::index::{self, Index};
+    use ferrix_sigverify::{Anchor, Kind};
+    use ferrix_softsign::lms::LMS_SHA256_M24_H10;
+    use ferrix_softsign::manifest::{self, Body};
+    use ferrix_softsign::token::{CKA_VALUE, ObjectHandle, SoftToken, Token};
 
     use super::{Made, install, names, package_at, read, read_all, root};
     use crate::repo::{self, ACCEPTED, INDEX, Updated};
-    use crate::{installed, this_arch};
+    use crate::{installed, sig, this_arch};
+
+    /// The anchor id of the tests' package keys.
+    const ANCHOR: u16 = 0x8f00;
+
+    /// A development token holding two H10 package keys, `good` and
+    /// `other`, made once per run outside any git tree; and `good`'s anchor.
+    struct Keys {
+        dir: PathBuf,
+        anchor: Anchor,
+    }
+
+    fn keys() -> &'static Keys {
+        static KEYS: OnceLock<Keys> = OnceLock::new();
+        KEYS.get_or_init(|| {
+            let dir = std::env::temp_dir().join(format!("pkg-test-keys-{}", std::process::id()));
+            let _ = fs::remove_dir_all(&dir);
+            let mut token = SoftToken::open(&dir, Vec::new()).unwrap();
+            let good = token
+                .generate_from("good", LMS_SHA256_M24_H10, [5; 16], [6; 24])
+                .unwrap();
+            let _ = token
+                .generate_from("other", LMS_SHA256_M24_H10, [7; 16], [8; 24])
+                .unwrap();
+            let public = token.get_attribute(&good, CKA_VALUE).unwrap();
+            Keys {
+                dir,
+                anchor: Anchor {
+                    kind: Kind::Package,
+                    id: ANCHOR,
+                    public_key: public.try_into().unwrap(),
+                },
+            }
+        })
+    }
+
+    fn anchors() -> [Anchor; 1] {
+        [keys().anchor]
+    }
+
+    /// The manifest of `payload` as `subject`'s, of `security_version`,
+    /// signed by the key `label`.
+    fn signed(label: &str, subject: &str, security_version: u32, payload: &[u8]) -> Vec<u8> {
+        let mut token = SoftToken::open(&keys().dir, Vec::new()).unwrap();
+        let mut padded = [0u8; 32];
+        padded[..subject.len()].copy_from_slice(subject.as_bytes());
+        let body = Body {
+            kind: 5,
+            security_version,
+            anchor_id: ANCHOR,
+            profile: 0xFF,
+            arch: sig::arch_byte(),
+            family: sig::family(),
+            subject: padded,
+            payload_len: payload.len() as u64,
+            payload_sha256: index::sha256(payload),
+            ..Body::default()
+        };
+        manifest::sign(&mut token, &ObjectHandle(label.into()), &body).unwrap()
+    }
+
+    /// Sign `file` in `dir`'s directory for this architecture as
+    /// `subject`'s, with the key `label`.
+    fn sign_file(dir: &Path, file: &str, label: &str, subject: &str, version: u32) {
+        let at = dir.join(this_arch());
+        let bytes = fs::read(at.join(file)).unwrap();
+        fs::write(
+            at.join(format!("{file}{}", sig::SUFFIX)),
+            signed(label, subject, version, &bytes),
+        )
+        .unwrap();
+    }
 
     /// A package of `name` and `version` whose one program says so.
     fn made(name: &str, version: &str, depends: &[&str]) -> Vec<u8> {
@@ -454,6 +531,7 @@ mod repository {
                 entry.advisory = Some(format!("FXSA-2026-9: {named} fixes a fault"));
             }
             fs::write(arch_dir.join(&entry.file), bytes).unwrap();
+            sign_file(dir, &entry.file, "good", &entry.name, 0);
             entries.push(entry);
         }
         let text = index::render(&Index {
@@ -462,6 +540,13 @@ mod repository {
             entries,
         });
         fs::write(arch_dir.join(INDEX), &text).unwrap();
+        sign_file(
+            dir,
+            INDEX,
+            "good",
+            sig::INDEX_SUBJECT,
+            u32::try_from(sequence).unwrap(),
+        );
         text.into_bytes()
     }
 
@@ -506,11 +591,11 @@ mod repository {
             ],
             &["base 1.1"],
         );
-        let updated = repo::update(&root, &repository).unwrap();
+        let updated = repo::update(&root, &repository, &anchors()).unwrap();
         assert!(matches!(updated, Updated::Accepted(ref i, None) if i.sequence == 1));
         assert!(fs::read(root.join(ACCEPTED)).is_ok());
         assert!(matches!(
-            repo::update(&root, &repository).unwrap(),
+            repo::update(&root, &repository, &anchors()).unwrap(),
             Updated::Same(_)
         ));
         let lines = repo::newer_lines(&root).unwrap();
@@ -524,19 +609,23 @@ mod repository {
             ]
         );
         // base alone, by name.
-        let done = repo::upgrade(&root, &repository, &["base".to_owned()]).unwrap();
+        let done = repo::upgrade(&root, &repository, &["base".to_owned()], &anchors()).unwrap();
         assert_eq!(done.len(), 1);
         assert_eq!(version_of(&root, "base"), "1.2");
         assert_eq!(fs::read(root.join("bin/base")).unwrap(), b"base 1.2\n");
         // The rest: app 2.0, and lib, which it needs and was not installed.
-        let done = repo::upgrade(&root, &repository, &[]).unwrap();
+        let done = repo::upgrade(&root, &repository, &[], &anchors()).unwrap();
         let went: Vec<String> = done
             .iter()
             .map(|(r, old)| format!("{} {}", r.package.name, old.is_some()))
             .collect();
         assert_eq!(went, ["lib false", "app true"]);
         assert_eq!(names(&root), ["app", "base", "lib"]);
-        assert!(repo::upgrade(&root, &repository, &[]).unwrap().is_empty());
+        assert!(
+            repo::upgrade(&root, &repository, &[], &anchors())
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(
             repo::newer_lines(&root).unwrap(),
             ["pkg: every package is the newest of index 1"]
@@ -551,14 +640,14 @@ mod repository {
         let base = made("base", "1.0", &[]);
         let first = publish(&repository, 5, std::slice::from_ref(&base), &[]);
         assert!(matches!(
-            repo::update(&root, &repository).unwrap(),
+            repo::update(&root, &repository, &anchors()).unwrap(),
             Updated::Accepted(_, None)
         ));
         // Older: refused, and the accepted index stays.
         let _ = publish(&repository, 4, std::slice::from_ref(&base), &[]);
         refused(
-            repo::update(&root, &repository),
-            "the repository's index 4 is older than the one accepted, 5: refused",
+            repo::update(&root, &repository, &anchors()),
+            "the repository's index: it is older than the one accepted (BelowFloor): refused",
         );
         assert_eq!(fs::read(root.join(ACCEPTED)).unwrap(), first);
         // The same sequence, other contents: refused.
@@ -569,13 +658,13 @@ mod repository {
             &[],
         );
         refused(
-            repo::update(&root, &repository),
+            repo::update(&root, &repository, &anchors()),
             "the repository's index 5 is not the index 5 accepted before: refused",
         );
         // Newer: accepted, naming the one it replaced.
         let _ = publish(&repository, 6, &[base], &[]);
         assert!(matches!(
-            repo::update(&root, &repository).unwrap(),
+            repo::update(&root, &repository, &anchors()).unwrap(),
             Updated::Accepted(ref i, Some(5)) if i.sequence == 6
         ));
         let _ = fs::remove_dir_all(&root);
@@ -587,7 +676,7 @@ mod repository {
         let repository = root.join("srv");
         let _ = install(&root, read_all(&[made("base", "1.0", &[])])).unwrap();
         let _ = publish(&repository, 1, &[made("base", "2.0", &[])], &[]);
-        let _ = repo::update(&root, &repository).unwrap();
+        let _ = repo::update(&root, &repository, &anchors()).unwrap();
         let file = file_of(&repository, "base", "2.0");
         let good = fs::read(&file).unwrap();
         // One byte changed, the length kept: the digest refuses it.
@@ -596,11 +685,11 @@ mod repository {
         changed[last] ^= 1;
         fs::write(&file, &changed).unwrap();
         refused(
-            repo::upgrade(&root, &repository, &[]),
+            repo::upgrade(&root, &repository, &[], &anchors()),
             "base 2.0: base-2.0-",
         );
         refused(
-            repo::upgrade(&root, &repository, &[]),
+            repo::upgrade(&root, &repository, &[], &anchors()),
             "is not the file the index names (its SHA-256 differs): refused",
         );
         // A byte more: the size refuses it.
@@ -608,7 +697,7 @@ mod repository {
         longer.push(0);
         fs::write(&file, &longer).unwrap();
         refused(
-            repo::upgrade(&root, &repository, &[]),
+            repo::upgrade(&root, &repository, &[], &anchors()),
             &format!("bytes, and the index says {}", good.len()),
         );
         // Another package in its place, with the index made for it: the
@@ -626,10 +715,18 @@ mod repository {
             )
             .replace("sequence = \"1\"", "sequence = \"2\"");
         fs::write(repository.join(this_arch()).join(INDEX), text).unwrap();
+        sign_file(&repository, INDEX, "good", sig::INDEX_SUBJECT, 2);
         fs::write(&file, &other).unwrap();
-        let _ = repo::update(&root, &repository).unwrap();
+        sign_file(
+            &repository,
+            &format!("base-2.0-{}.fxpkg", this_arch()),
+            "good",
+            "base",
+            0,
+        );
+        let _ = repo::update(&root, &repository, &anchors()).unwrap();
         refused(
-            repo::upgrade(&root, &repository, &[]),
+            repo::upgrade(&root, &repository, &[], &anchors()),
             "holds base 3.0, which is not the package the index names: refused",
         );
         // Nothing of any of them went in.
@@ -638,8 +735,13 @@ mod repository {
         // The control: the right file goes in.
         fs::write(&file, &good).unwrap();
         let _ = publish(&repository, 3, &[made("base", "2.0", &[])], &[]);
-        let _ = repo::update(&root, &repository).unwrap();
-        assert_eq!(repo::upgrade(&root, &repository, &[]).unwrap().len(), 1);
+        let _ = repo::update(&root, &repository, &anchors()).unwrap();
+        assert_eq!(
+            repo::upgrade(&root, &repository, &[], &anchors())
+                .unwrap()
+                .len(),
+            1
+        );
         assert_eq!(version_of(&root, "base"), "2.0");
         let _ = fs::remove_dir_all(&root);
     }
@@ -650,13 +752,13 @@ mod repository {
         let repository = root.join("srv");
         let _ = install(&root, read_all(&[made("app", "1.0", &[])])).unwrap();
         let _ = publish(&repository, 1, &[made("app", "2.0", &["gone"])], &[]);
-        let _ = repo::update(&root, &repository).unwrap();
+        let _ = repo::update(&root, &repository, &anchors()).unwrap();
         refused(
-            repo::upgrade(&root, &repository, &[]),
+            repo::upgrade(&root, &repository, &[], &anchors()),
             "app 2.0 needs gone, which neither this root nor the repository has",
         );
         refused(
-            repo::upgrade(&root, &repository, &["other".to_owned()]),
+            repo::upgrade(&root, &repository, &["other".to_owned()], &anchors()),
             "other is not installed",
         );
         assert_eq!(version_of(&root, "app"), "1.0");
@@ -697,10 +799,86 @@ mod repository {
             format!("[index]\narch = \"{other}\"\nsequence = \"1\"\n"),
         )
         .unwrap();
+        sign_file(&repository, INDEX, "good", sig::INDEX_SUBJECT, 1);
         refused(
-            repo::update(&root, &repository),
+            repo::update(&root, &repository, &anchors()),
             &format!("the repository's the index is for {other}"),
         );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_signature_that_does_not_hold_is_refused() {
+        let root = root("repo-signature");
+        let repository = root.join("srv");
+        let _ = install(&root, read_all(&[made("base", "1.0", &[])])).unwrap();
+        let _ = publish(&repository, 2, &[made("base", "2.0", &[])], &[]);
+        let base = format!("base-2.0-{}.fxpkg", this_arch());
+        // The index signed by a key that is not the anchor's.
+        sign_file(&repository, INDEX, "other", sig::INDEX_SUBJECT, 2);
+        refused(
+            repo::update(&root, &repository, &anchors()),
+            "the repository's index: its signature does not verify (BadSignature): refused",
+        );
+        // Signed by the anchor's key, but this pkg trusts no key.
+        sign_file(&repository, INDEX, "good", sig::INDEX_SUBJECT, 2);
+        refused(
+            repo::update(&root, &repository, &[]),
+            "it is signed by no key this pkg trusts (UnknownAnchor): refused",
+        );
+        // Signed as a package, not the index.
+        sign_file(&repository, INDEX, "good", "base", 2);
+        refused(
+            repo::update(&root, &repository, &anchors()),
+            "(WrongSubject): refused",
+        );
+        // Signed with another sequence than the index says.
+        sign_file(&repository, INDEX, "good", sig::INDEX_SUBJECT, 3);
+        refused(
+            repo::update(&root, &repository, &anchors()),
+            "the repository's index says it is 2, and its signature names 3: refused",
+        );
+        // No signature.
+        let at = repository.join(this_arch());
+        fs::remove_file(at.join(format!("{INDEX}{}", sig::SUFFIX))).unwrap();
+        refused(
+            repo::update(&root, &repository, &anchors()),
+            "the repository's index has no signature, index.toml.fxsig: refused",
+        );
+        assert!(fs::read(root.join(ACCEPTED)).is_err());
+        // The control: signed as it should be, it is accepted.
+        sign_file(&repository, INDEX, "good", sig::INDEX_SUBJECT, 2);
+        assert!(matches!(
+            repo::update(&root, &repository, &anchors()).unwrap(),
+            Updated::Accepted(_, None)
+        ));
+        // A package signed by the other key, signed as another package,
+        // and with no signature: each refused, nothing written.
+        sign_file(&repository, &base, "other", "base", 0);
+        refused(
+            repo::upgrade(&root, &repository, &[], &anchors()),
+            "base 2.0: its signature does not verify (BadSignature): refused",
+        );
+        sign_file(&repository, &base, "good", "app", 0);
+        refused(
+            repo::upgrade(&root, &repository, &[], &anchors()),
+            "base 2.0: it is signed for something else (WrongSubject): refused",
+        );
+        fs::remove_file(at.join(format!("{base}{}", sig::SUFFIX))).unwrap();
+        refused(
+            repo::upgrade(&root, &repository, &[], &anchors()),
+            &format!("base 2.0 has no signature, {base}.fxsig: refused"),
+        );
+        assert_eq!(version_of(&root, "base"), "1.0");
+        // The control: its own signature, and it goes in.
+        sign_file(&repository, &base, "good", "base", 0);
+        assert_eq!(
+            repo::upgrade(&root, &repository, &[], &anchors())
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(version_of(&root, "base"), "2.0");
         let _ = fs::remove_dir_all(&root);
     }
 }

@@ -23,9 +23,25 @@ name = "ferrix-sha256"
 version = "0.1.0"
 
 [[package]]
+name = "ferrix-sigverify"
+version = "0.1.0"
+dependencies = [
+ "ferrix-sha256",
+]
+
+[[package]]
+name = "ferrix-softsign"
+version = "0.1.0"
+dependencies = [
+ "ferrix-sha256",
+]
+
+[[package]]
 name = "pkg"
 version = "0.1.0"
 dependencies = [
  "ferrix-cpio",
  "ferrix-pkg",
+ "ferrix-sigverify",
+ "ferrix-softsign",
 ]

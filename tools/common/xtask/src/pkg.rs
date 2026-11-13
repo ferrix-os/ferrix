@@ -17,8 +17,12 @@
 //! boot's root: `pkg update` accepts an index, `pkg newer` names the
 //! security fix waiting with its advisory, `pkg upgrade` puts it in place
 //! with the package the upgrade needs, and an older index, another index of
-//! the accepted sequence, a file whose digest is not the index's and a
-//! dependency no one has are refused, each beside the run that passes.
+//! the accepted sequence, a file whose digest is not the index's, an index
+//! signed by a key `pkg` does not trust, a package signed as another, an
+//! unsigned index and package, and a dependency no one has are refused,
+//! each beside the run that passes. The repositories are signed with two
+//! throwaway development keys the run makes and deletes ([`Signer`]), and
+//! the boot's `pkg` is built trusting one of them.
 
 use std::path::PathBuf;
 
@@ -41,8 +45,9 @@ pub(crate) const TASKS: &[Task] = &[
             "test-pkg      Boot with pkg, the package manager, and require it to install, run and remove the stat",
             "              service, to replace a package with its next version and back (`pkg install --replace`),",
             "              and to refuse a changed package or replacement, a missing dependency and a needed removal;",
-            "              then to upgrade from a repository it serves itself, with a security fix, and refuse an older",
-            "              index, a wrong digest and a dependency nobody has (docs/UPDATES.md)",
+            "              then to upgrade from a signed repository it serves itself, with a security fix, and refuse an",
+            "              older index, a wrong digest, a bad or missing signature and a dependency nobody has",
+            "              (docs/UPDATES.md)",
         ],
         run,
     },
@@ -69,11 +74,23 @@ const PROGRAM: &str = "bin/pkg";
 ///
 /// A build that fails.
 pub(crate) fn build(arch: Arch) -> Result<Option<PathBuf>> {
+    build_trusting(arch, None)
+}
+
+/// [`build`], trusting the package anchors `anchors` names
+/// (`FERRIX_PKG_ANCHORS`, `src/user/system/linux/pkg/build.rs`) in a target
+/// directory of its own; [`build`]'s `pkg`, the one every image carries,
+/// trusts none.
+fn build_trusting(arch: Arch, anchors: Option<&str>) -> Result<Option<PathBuf>> {
     let Some(target) = zinc::target(arch) else {
         println!("  pkg is not built for {arch} yet");
         return Ok(None);
     };
-    let target_dir = paths::target_dir().join("pkg");
+    let target_dir = paths::target_dir().join(if anchors.is_some() {
+        "pkg-test-anchors"
+    } else {
+        "pkg"
+    });
     let program = target_dir.join(target).join("release").join("pkg");
     crate::builds::Build::cargo(
         format!("cargo build (pkg) --target {target}"),
@@ -86,6 +103,7 @@ pub(crate) fn build(arch: Arch) -> Result<Option<PathBuf>> {
     // targets' own C runtime.
     .env("RUSTFLAGS", zinc::RUSTFLAGS)
     .env(&crate::apps::linker_variable(target), "rust-lld")
+    .env("FERRIX_PKG_ANCHORS", anchors.unwrap_or_default())
     .output(&program)
     .run()?;
     Ok(Some(program))
@@ -187,21 +205,162 @@ const REPOSITORIES: &str = "srv/pkg-repo";
 /// The advisory of the security fix in the boot's repository.
 const ADVISORY: &str = "FXSA-2026-0001: test-pkg's pkg-base 1.0 fixed in 1.1";
 
+/// The anchor id of `test-pkg`'s throwaway package keys: a development id
+/// (`docs/SIGNING.md` §6.4) that `signing-anchors.toml` gives no key.
+const ANCHOR: &str = "0x8f00";
+
+/// `test-pkg`'s throwaway development keys (`docs/UPDATES.md` §2.2): two
+/// H10 package keys, `good`, whose anchor the boot's `pkg` is built with,
+/// and `other`, which no `pkg` trusts, made by the soft signer in a
+/// directory of their own outside any git tree, for one run, and deleted
+/// with it. The manifests they sign are kept by what they cover, since the
+/// repositories share most of their files.
+struct Signer {
+    dir: PathBuf,
+    good: String,
+    signed: std::collections::HashMap<(String, String, u32, Vec<u8>), Vec<u8>>,
+}
+
+impl Signer {
+    fn new() -> Result<Signer> {
+        let dir = std::env::temp_dir().join(format!("ferrix-test-pkg-keys-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut signer = Signer {
+            dir,
+            good: String::new(),
+            signed: std::collections::HashMap::new(),
+        };
+        signer.good = signer.softsign(&["keygen", "good", "--height", "10"])?;
+        let _ = signer.softsign(&["keygen", "other", "--height", "10"])?;
+        Ok(signer)
+    }
+
+    /// The soft signer's answer to `args`, on this run's keys.
+    fn softsign(&self, args: &[&str]) -> Result<String> {
+        let out = std::process::Command::new(cargo::cargo())
+            .current_dir(paths::workspace_root())
+            .args(["run", "-q", "--release", "-p", "ferrix-softsign", "--"])
+            .args(args)
+            .arg("--dir")
+            .arg(&self.dir)
+            .output()
+            .map_err(|error| Error::new(format!("running the soft signer: {error}")))?;
+        if !out.status.success() {
+            return Err(Error::new(format!(
+                "test-pkg: the soft signer refused {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            )));
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
+    }
+
+    /// `FERRIX_PKG_ANCHORS` for the boot's `pkg`: `good`'s anchor.
+    fn anchors(&self) -> String {
+        format!("{ANCHOR}:{}", self.good)
+    }
+
+    /// The package manifest of `payload` as `subject`'s, of
+    /// `security_version`, for `arch`, signed by `key`.
+    fn sign(
+        &mut self,
+        key: &str,
+        subject: &str,
+        security_version: u32,
+        arch: Arch,
+        payload: &[u8],
+    ) -> Result<Vec<u8>> {
+        let id = (
+            key.to_owned(),
+            subject.to_owned(),
+            security_version,
+            index::sha256(payload).to_vec(),
+        );
+        if let Some(block) = self.signed.get(&id) {
+            return Ok(block.clone());
+        }
+        let (arch_byte, family) = match arch {
+            Arch::X86_64 => ("1", "0x0101"),
+            Arch::AArch64 => ("2", "0x0201"),
+            Arch::Armv7a => ("3", "0x0301"),
+        };
+        let input = self.dir.join("payload");
+        let output = self.dir.join("manifest");
+        std::fs::write(&input, payload)?;
+        let version = security_version.to_string();
+        let _ = self.softsign(&[
+            "sign",
+            key,
+            "--kind",
+            "package",
+            "--anchor-id",
+            ANCHOR,
+            "--profile",
+            "255",
+            "--arch",
+            arch_byte,
+            "--family",
+            family,
+            "--security-version",
+            &version,
+            "--subject",
+            subject,
+            "--label",
+            "test-pkg",
+            "--payload",
+            &input.to_string_lossy(),
+            "--out",
+            &output.to_string_lossy(),
+        ])?;
+        let block = read(&output)?;
+        let _ = self.signed.insert(id, block.clone());
+        Ok(block)
+    }
+}
+
+impl Drop for Signer {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+/// How one of the boot's repositories is signed.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Signed {
+    /// Every file by `good`, as it should be.
+    Good,
+    /// The index by `other`, and one package (`name version`) signed by
+    /// `good` as another package's.
+    Badly(&'static str),
+    /// Nothing.
+    Not,
+}
+
 /// One of the boot's repositories: its directory, its index's sequence,
 /// its packages, the one version (`name version`) marked a security fix,
-/// and a file whose one byte is changed after the index named it.
+/// a file whose one byte is changed after the index named it, and how it
+/// is signed.
 struct Repository<'a> {
     dir: &'a str,
     sequence: u64,
     packages: Vec<&'a (Record, Vec<u8>)>,
     security: Option<&'a str>,
     tamper: Option<&'a str>,
+    signed: Signed,
 }
 
-/// `repository`'s files, under [`REPOSITORIES`].
-fn repository_files(arch: Arch, repository: &Repository<'_>) -> Result<Vec<File>> {
+/// `repository`'s files, under [`REPOSITORIES`], each with its signature.
+fn repository_files(
+    arch: Arch,
+    repository: &Repository<'_>,
+    signer: &mut Signer,
+) -> Result<Vec<File>> {
     let at = format!("{REPOSITORIES}/{}/{}", repository.dir, arch.name());
     let mut files = Vec::new();
+    let file = |path: String, bytes: Vec<u8>| File {
+        path,
+        mode: 0o644,
+        content: Content::Bytes(bytes),
+    };
     let mut entries = Vec::new();
     for (record, bytes) in &repository.packages {
         let mut entry = index::entry_of(record, bytes);
@@ -209,6 +368,14 @@ fn repository_files(arch: Arch, repository: &Repository<'_>) -> Result<Vec<File>
         if repository.security == Some(named.as_str()) {
             entry.security = true;
             entry.advisory = Some(ADVISORY.to_owned());
+        }
+        let subject = match repository.signed {
+            Signed::Badly(misnamed) if misnamed == named => "pkg-other",
+            _ => entry.name.as_str(),
+        };
+        if repository.signed != Signed::Not {
+            let block = signer.sign("good", subject, 0, arch, bytes)?;
+            files.push(file(format!("{at}/{}.fxsig", entry.file), block));
         }
         let mut bytes = bytes.clone();
         if repository.tamper == Some(named.as_str()) {
@@ -222,23 +389,26 @@ fn repository_files(arch: Arch, repository: &Repository<'_>) -> Result<Vec<File>
                 Ok(Some(data))
             })?;
         }
-        files.push(File {
-            path: format!("{at}/{}", entry.file),
-            mode: 0o644,
-            content: Content::Bytes(bytes),
-        });
+        files.push(file(format!("{at}/{}", entry.file), bytes));
         entries.push(entry);
     }
     let text = index::render(&Index {
         arch: arch.name().to_owned(),
         sequence: repository.sequence,
         entries,
-    });
-    files.push(File {
-        path: format!("{at}/index.toml"),
-        mode: 0o644,
-        content: Content::Bytes(text.into_bytes()),
-    });
+    })
+    .into_bytes();
+    let sequence = u32::try_from(repository.sequence).unwrap_or(u32::MAX);
+    let key = match repository.signed {
+        Signed::Good => Some("good"),
+        Signed::Badly(_) => Some("other"),
+        Signed::Not => None,
+    };
+    if let Some(key) = key {
+        let block = signer.sign(key, ":index", sequence, arch, &text)?;
+        files.push(file(format!("{at}/index.toml.fxsig"), block));
+    }
+    files.push(file(format!("{at}/index.toml"), text));
     Ok(files)
 }
 
@@ -246,9 +416,11 @@ fn repository_files(arch: Arch, repository: &Repository<'_>) -> Result<Vec<File>
 /// security fix and whose pkg-user 2.0 needs it and pkg-lib, which is not
 /// installed; `older`, index 1; `same-sequence`, another index 2;
 /// `bad-digest`, `good` with pkg-base 1.1's program changed after its
-/// index was written; and `missing`, index 3, whose pkg-user 3.0 needs a
-/// package no one has.
-fn repositories(arch: Arch) -> Result<Vec<File>> {
+/// index was written; `bad-signature`, `good` with the index signed by a
+/// key no `pkg` trusts and pkg-base 1.1 signed as another package;
+/// `unsigned`, `good` with no signatures; and `missing`, index 3, whose
+/// pkg-user 3.0 needs a package no one has.
+fn repositories(arch: Arch, signer: &mut Signer) -> Result<Vec<File>> {
     let base = made_with("pkg-base", "1.0", "here", None, &[], arch)?;
     let fixed = made_with("pkg-base", "1.1", "fixed", None, &[], arch)?;
     let user = made_with("pkg-user", "1.0", "here", None, &["pkg-base"], arch)?;
@@ -263,21 +435,24 @@ fn repositories(arch: Arch) -> Result<Vec<File>> {
     let user3 = made_with("pkg-user", "3.0", "three", None, &["pkg-gone"], arch)?;
     let lib = made_with("pkg-lib", "1.0", "here", None, &[], arch)?;
     let good = || vec![&base, &fixed, &user, &user2, &lib];
+    let like_good = |dir, tamper, signed| Repository {
+        dir,
+        sequence: 2,
+        packages: good(),
+        security: Some("pkg-base 1.1"),
+        tamper,
+        signed,
+    };
     let mut files = Vec::new();
     for repository in [
-        Repository {
-            dir: "good",
-            sequence: 2,
-            packages: good(),
-            security: Some("pkg-base 1.1"),
-            tamper: None,
-        },
+        like_good("good", None, Signed::Good),
         Repository {
             dir: "older",
             sequence: 1,
             packages: vec![&base, &user],
             security: None,
             tamper: None,
+            signed: Signed::Good,
         },
         Repository {
             dir: "same-sequence",
@@ -285,23 +460,21 @@ fn repositories(arch: Arch) -> Result<Vec<File>> {
             packages: vec![&base, &user],
             security: None,
             tamper: None,
+            signed: Signed::Good,
         },
-        Repository {
-            dir: "bad-digest",
-            sequence: 2,
-            packages: good(),
-            security: Some("pkg-base 1.1"),
-            tamper: Some("pkg-base 1.1"),
-        },
+        like_good("bad-digest", Some("pkg-base 1.1"), Signed::Good),
+        like_good("bad-signature", None, Signed::Badly("pkg-base 1.1")),
+        like_good("unsigned", None, Signed::Not),
         Repository {
             dir: "missing",
             sequence: 3,
             packages: vec![&base, &fixed, &user2, &user3, &lib],
             security: Some("pkg-base 1.1"),
             tamper: None,
+            signed: Signed::Good,
         },
     ] {
-        files.extend(repository_files(arch, &repository)?);
+        files.extend(repository_files(arch, &repository, signer)?);
     }
     Ok(files)
 }
@@ -340,9 +513,13 @@ pkg install $P/base.fxpkg $P/user.fxpkg && echo "pkg-test: ok installed for the 
 pkg newer || echo "pkg-test: ok newer wants an accepted index"
 pkg update --repo $R/good && echo "pkg-test: ok accepted index 2"
 pkg newer | while read -r line; do case "$line" in 'pkg-base 1.0 -> 1.1  (security)') echo "pkg-test: ok newer named the security fix";; 'security fix in 1.1: FXSA-2026-0001: '*) echo "pkg-test: ok newer gave its advisory";; 'pkg-user 1.0 -> 2.0') echo "pkg-test: ok newer named pkg-user 2.0";; esac; done
-pkg update --repo $R/older 2>&1 | while read -r line; do case "$line" in *'index 1 is older than the one accepted, 2: refused') echo "pkg-test: ok refused an older index";; esac; done
+pkg update --repo $R/older 2>&1 | while read -r line; do case "$line" in *'index: it is older than the one accepted (BelowFloor): refused') echo "pkg-test: ok refused an older index";; esac; done
 pkg update --repo $R/same-sequence 2>&1 | while read -r line; do case "$line" in *'index 2 is not the index 2 accepted before: refused') echo "pkg-test: ok refused another index 2";; esac; done
 pkg upgrade --repo $R/bad-digest 2>&1 | while read -r line; do case "$line" in *'its SHA-256 differs): refused') echo "pkg-test: ok refused a wrong digest";; esac; done
+pkg update --repo $R/bad-signature 2>&1 | while read -r line; do case "$line" in *'index: its signature does not verify (BadSignature): refused') echo "pkg-test: ok refused an index signed by another key";; esac; done
+pkg update --repo $R/unsigned 2>&1 | while read -r line; do case "$line" in *'index has no signature, index.toml.fxsig: refused') echo "pkg-test: ok refused an unsigned index";; esac; done
+pkg upgrade --repo $R/bad-signature 2>&1 | while read -r line; do case "$line" in *'pkg-base 1.1: it is signed for something else (WrongSubject): refused') echo "pkg-test: ok refused another package's signature";; esac; done
+pkg upgrade --repo $R/unsigned 2>&1 | while read -r line; do case "$line" in *'pkg-base 1.1 has no signature, '*) echo "pkg-test: ok refused an unsigned package";; esac; done
 read -r line < /bin/pkg-base && case "$line" in 'pkg-base: here') echo "pkg-test: ok the refused upgrade changed nothing";; esac
 read -r line < /bin/pkg-lib || echo "pkg-test: ok nothing it needed went in"
 pkg upgrade --repo $R/good && echo "pkg-test: ok upgraded"
@@ -356,7 +533,7 @@ read -r line < /bin/pkg-user && case "$line" in 'pkg-user: two') echo "pkg-test:
 "#;
 
 /// The lines the boot must print, in any order.
-const WANTED: [&str; 43] = [
+const WANTED: [&str; 47] = [
     "pkg-test: started",
     "pkg-test: ok installed",
     "pkg-test: ok listed",
@@ -390,6 +567,10 @@ const WANTED: [&str; 43] = [
     "pkg-test: ok refused an older index",
     "pkg-test: ok refused another index 2",
     "pkg-test: ok refused a wrong digest",
+    "pkg-test: ok refused an index signed by another key",
+    "pkg-test: ok refused an unsigned index",
+    "pkg-test: ok refused another package's signature",
+    "pkg-test: ok refused an unsigned package",
     "pkg-test: ok the refused upgrade changed nothing",
     "pkg-test: ok nothing it needed went in",
     "pkg-test: ok upgraded",
@@ -412,8 +593,9 @@ const UNWANTED: [&str; 1] = ["pkg-test: still listed"];
 ///
 /// A build that fails, or a line the boot did not print.
 pub(crate) fn test_pkg(args: &Args) -> Result<()> {
+    let mut signer = Signer::new()?;
     for arch in args.arches()? {
-        let Some(program) = build(arch)? else {
+        let Some(program) = build_trusting(arch, Some(&signer.anchors()))? else {
             continue;
         };
         let statd = crate::apps::built_package("statd", arch, args.release)?
@@ -446,7 +628,7 @@ pub(crate) fn test_pkg(args: &Args) -> Result<()> {
             package("base2", base2),
             package("changed2", changed2),
         ];
-        files.extend(repositories(arch)?);
+        files.extend(repositories(arch, &mut signer)?);
         let shell_program = zinc::built(arch)?.ok_or_else(|| {
             Error::new(format!(
                 "zinc is not built for {arch}, and test-pkg runs its checks in it"
@@ -479,7 +661,7 @@ pub(crate) fn test_pkg(args: &Args) -> Result<()> {
         }
         println!(
             "{arch}: pkg installed, ran and removed the stat service, replaced a package and back, \
-             upgraded from a repository with its security fix, and refused all ten"
+             upgraded from a signed repository with its security fix, and refused all fourteen"
         );
     }
     Ok(())

@@ -199,3 +199,20 @@ changed, one byte longer and another package in its place refused with
 nothing written, and a dependency nobody has. `test-pkg` serves five
 repositories from its boot's root (`tools/common/xtask/src/pkg.rs`,
 `repositories`) and requires each of these in the guest.
+
+**Step b, as built.** Kind 5 in `ferrix-sigverify` and the soft signer is
+commit "sigverify: a fifth manifest kind", alone, for the consultant's
+review. `pkg` verifies with it in `src/user/system/linux/pkg/src/sig.rs`:
+`pkg update` verifies the index's `index.toml.fxsig` before it reads the
+index, with the accepted sequence as the floor, and requires the sequence
+the index says to be the one signed; `pkg upgrade` verifies each package's
+`.fxsig` after its size and digest. The anchors are compiled in from
+`FERRIX_PKG_ANCHORS` (`build.rs`); unset, as for every image, `pkg` trusts
+no package key and refuses every repository. Host tests sign with the soft
+signer as a dev-dependency: a key not the anchor's, no anchor at all, the
+index signed as a package, a sequence other than the signed one, a missing
+signature, a package signed by another key or as another package, each
+refused beside its control. `test-pkg` makes two throwaway H10 keys per
+run in a directory outside any git tree (`Signer`), builds its `pkg` with
+one of them, and adds an index signed by the other, a package signed as
+another, and an unsigned repository to its refusals.

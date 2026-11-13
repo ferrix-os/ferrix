@@ -10,8 +10,11 @@
 //! stands between it and the machine, cannot take a machine back to an
 //! index that lacks a fix it has already seen.
 //!
+//! Every index and package carries a signature beside it ([`crate::sig`]),
+//! verified before anything else is read of it.
+//!
 //! An upgrade checks every file it fetches against the accepted index --
-//! its size, its SHA-256, and that its record is the package and version
+//! its size, its SHA-256, its signature, and that its record is the package and version
 //! the index names, with the dependencies the index resolved -- before
 //! [`crate::install_replacing`] makes any of its own checks, and before one
 //! file is written.
@@ -22,8 +25,9 @@ use std::path::{Path, PathBuf};
 
 use ferrix_pkg::index::{self, Entry, Index};
 use ferrix_pkg::record::Record;
+use ferrix_sigverify::Anchor;
 
-use crate::{Error, Package, install_replacing, installed, read, this_arch, under};
+use crate::{Error, Package, install_replacing, installed, read, sig, this_arch, under};
 
 /// The file naming the repository, from the root: its first line.
 pub const REPOSITORY: &str = "etc/pkg/repository";
@@ -120,18 +124,50 @@ pub enum Updated {
     Accepted(Index, Option<u64>),
 }
 
-/// `pkg update`: read `repository`'s index for this architecture, check
-/// it, and keep it as the accepted index.
+/// `file`'s signature in `repository`, or the refusal that says it has
+/// none.
+fn signature(repository: &Path, file: &str, what: &str) -> Result<Vec<u8>, Error> {
+    let name = format!("{file}{}", sig::SUFFIX);
+    match fs::read(repository.join(this_arch()).join(&name)) {
+        Ok(block) => Ok(block),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            refuse(format!("{what} has no signature, {name}: refused"))
+        }
+        Err(error) => refuse(format!("{name}: {error}")),
+    }
+}
+
+/// `pkg update`: read `repository`'s index for this architecture and its
+/// signature, check both, and keep the index as the accepted one.
+///
+/// The signature is verified under `anchors` before the index is read,
+/// with the accepted index's sequence as the floor, and the sequence the
+/// index says must be the one it signs.
 ///
 /// # Errors
 ///
-/// An index that cannot be read, does not parse, is for another
-/// architecture, is older than the accepted one, or has its sequence and
-/// other contents; or a file that could not be written.
-pub fn update(root: &Path, repository: &Path) -> Result<Updated, Error> {
+/// An index or signature that cannot be read, a signature refused, an index
+/// that does not parse, is for another architecture, is older than the
+/// accepted one, or has its sequence and other contents; or a file that
+/// could not be written.
+pub fn update(root: &Path, repository: &Path, anchors: &[Anchor]) -> Result<Updated, Error> {
+    let what = "the repository's index";
     let bytes = fetch(repository, INDEX)?;
-    let index = parse(&bytes).map_err(|Error(why)| Error(format!("the repository's {why}")))?;
+    let block = signature(repository, INDEX, what)?;
     let before = accepted(root)?;
+    let floor = match &before {
+        Some((old, _)) => signed_sequence(old.sequence)?,
+        None => 0,
+    };
+    let signed = sig::check(&block, sig::INDEX_SUBJECT, floor, &bytes, anchors)
+        .map_err(|Error(why)| Error(format!("{what}: {why}")))?;
+    let index = parse(&bytes).map_err(|Error(why)| Error(format!("the repository's {why}")))?;
+    if signed_sequence(index.sequence)? != signed {
+        return refuse(format!(
+            "{what} says it is {}, and its signature names {signed}: refused",
+            index.sequence
+        ));
+    }
     if let Some((old, old_bytes)) = &before {
         if index.sequence < old.sequence {
             return refuse(format!(
@@ -154,6 +190,15 @@ pub fn update(root: &Path, repository: &Path) -> Result<Updated, Error> {
         index,
         before.map(|(old, _)| old.sequence),
     ))
+}
+
+/// An index's sequence as the security version its signature carries.
+fn signed_sequence(sequence: u64) -> Result<u32, Error> {
+    u32::try_from(sequence).map_err(|_| {
+        Error(format!(
+            "index {sequence} is past what a signature can name"
+        ))
+    })
 }
 
 /// `bytes` at `path` under `root`, written beside it and renamed into place.
@@ -225,10 +270,12 @@ pub fn newer_lines(root: &Path) -> Result<Vec<String>, Error> {
     Ok(lines)
 }
 
-/// `entry`'s file, fetched from `repository` and checked against it.
-fn fetched(repository: &Path, entry: &Entry) -> Result<Package, Error> {
+/// `entry`'s file, fetched from `repository` with its signature and
+/// checked against both.
+fn fetched(repository: &Path, entry: &Entry, anchors: &[Anchor]) -> Result<Package, Error> {
     let what = format!("{} {}", entry.name, entry.version);
     let bytes = fetch(repository, &entry.file)?;
+    let block = signature(repository, &entry.file, &what)?;
     if u64::try_from(bytes.len()).ok() != Some(entry.size) {
         return refuse(format!(
             "{what}: {} is {} bytes, and the index says {}: refused",
@@ -243,6 +290,8 @@ fn fetched(repository: &Path, entry: &Entry) -> Result<Package, Error> {
             entry.file
         ));
     }
+    let _ = sig::check(&block, &entry.name, 0, &bytes, anchors)
+        .map_err(|Error(why)| Error(format!("{what}: {why}")))?;
     let package = read(&bytes).map_err(|Error(why)| Error(format!("{what}: {why}")))?;
     let found = &package.record.package;
     if found.name != entry.name || found.version != entry.version || found.depends != entry.depends
@@ -263,12 +312,14 @@ fn fetched(repository: &Path, entry: &Entry) -> Result<Package, Error> {
 /// # Errors
 ///
 /// No accepted index, a name not installed or not in it, a dependency
-/// neither the root nor the index has, a file not the one the index names,
-/// or any refusal of [`install_replacing`]'s.
+/// neither the root nor the index has, a file not the one the index names
+/// or with no signature `anchors` verify for it, or any refusal of
+/// [`install_replacing`]'s.
 pub fn upgrade(
     root: &Path,
     repository: &Path,
     names: &[String],
+    anchors: &[Anchor],
 ) -> Result<Vec<(Record, Option<Record>)>, Error> {
     let index = accepted_or_refuse(root)?;
     let records = installed(root)?;
@@ -277,7 +328,7 @@ pub fn upgrade(
         .map_err(|error| Error(error.to_string()))?;
     let packages = chosen
         .into_iter()
-        .map(|entry| fetched(repository, entry))
+        .map(|entry| fetched(repository, entry, anchors))
         .collect::<Result<Vec<_>, _>>()?;
     if packages.is_empty() {
         return Ok(Vec::new());

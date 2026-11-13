@@ -32,6 +32,7 @@ use ferrix_pkg::plan::plan;
 use ferrix_pkg::record::{self, Installed, Record};
 
 pub mod repo;
+pub mod sig;
 
 /// Why something was refused, or failed: the line `pkg` prints.
 #[derive(Debug, Clone, PartialEq, Eq)]

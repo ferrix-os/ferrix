@@ -28,6 +28,12 @@ path = "src/main.rs"
 [dependencies]
 ferrix-cpio = { path = "../../../../lib/fs/common/cpio" }
 ferrix-pkg = { path = "../../../../lib/proto/pkg" }
+ferrix-sigverify = { path = "../../../../lib/crypto/sigverify" }
+
+# The tests sign their repositories with the development soft signer; it is
+# never a dependency of the program (docs/SIGNING.md §6.4, D1).
+[dev-dependencies]
+ferrix-softsign = { path = "../../../../../tools/common/release/softsign" }
 
 # The Ferrix discipline, as init's: every failing call is a line saying so,
 # never an abort.

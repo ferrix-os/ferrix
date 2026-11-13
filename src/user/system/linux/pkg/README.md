@@ -25,7 +25,10 @@ A repository is a directory per architecture with an index of every version
 it has, each with its file's size and SHA-256 and, for a security fix, an
 advisory; `pkg update` refuses an index older than the one it accepted
 before, and `pkg upgrade` a file that is not the one the index names
-(`docs/UPDATES.md`).
+(`docs/UPDATES.md`). The index and every package carry a signature beside
+them, `docs/SIGNING.md`'s manifest of kind 5, verified with the anchors
+compiled in from `FERRIX_PKG_ANCHORS` (`build.rs`): none in the `pkg` an
+image carries until a package key exists, so it refuses every repository.
 
 There is no database: the records are what is installed. What a package is
 -- the manifest, the record, the plan that orders a set and refuses a missing
@@ -36,4 +39,4 @@ builds images with, and the archive reader is the kernel's
 `cargo test` here runs it against a directory as the root;
 `cargo xtask test-pkg` boots it, installs, runs and removes the stat
 service, replaces a package and back, upgrades from repositories it serves
-itself, and requires its ten refusals.
+itself, and requires its fourteen refusals.
