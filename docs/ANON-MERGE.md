@@ -570,8 +570,8 @@ back, section 5.4); and the rewritten text, OK IF A8 and A12-A17, line 9183
 (A9 (i) accepted, code begun). Code reviewed: NOT YET, line 9307, for B1 (a
 window's pages were taken before the range was known free, so `brk` over a
 mapped page could free it), fixed by declining any range not free before a
-page is touched, with its case and control. Built on branch
-`rss/anon-merge` (`L.user.242`-`244`). Re-picked over
+page is touched, with its case and control. Landed on 2026-11-13 as
+cf9a3c0cf (branch `rss/anon-merge`, `L.user.242`-`244`). Re-picked over
 `fix/exit-unmap-sort` and checked: OK IF N1-N9, line 9561. The row owed
 after it landed (9307 R7, 9561 N8), the 60,000-region exit in one reused
 object, is `test-exit-regions`' `reused` phase, PASSED on all three

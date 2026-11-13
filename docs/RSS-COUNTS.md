@@ -548,8 +548,8 @@ processor it runs on, or to the early counts before that record can be found.
 
 Design reviewed 2026-11-12: OK IF K1-K11, consultant ledger line 8701
 (conditions 8705-8715); code reviewed the same day: OK IF R1-R9, ledger 8826.
-Built on branch `rss/kept-counts`: the resident counts kept (`L.user.236`,
+Landed on 2026-11-12 as 4120b4def (branch `rss/kept-counts`): the resident counts kept (`L.user.236`,
 `L.user.237`) and the region totals kept (`L.user.238`). `/proc/meminfo` (§9): design
 reviewed 2026-11-12, OK IF M1-M12, ledger line 8919 (conditions 8920-8931);
-built on branch `rss/meminfo` (`L.user.239`-`241`); code reviewed the same
+landed on 2026-11-12 as 0b912e245 (branch `rss/meminfo`, `L.user.239`-`241`); code reviewed the same
 day: OK IF N1-N9, ledger line 8988 (conditions 8991-8999).

@@ -110,7 +110,7 @@ code that makes it true for the libraries; E6 is the manifests.
 | E1b | The board glue (`board/stm32mp1`, `board/gs201-usb`): a flag `board_glue = on | off` (Q1, ruled a flag), the two crates in the binary's table keyed `cfg(ferrix_board_glue = "on")`, `off` conflicting with `personality=kernel`; built on branch `core-ext/e1b-board-glue` (see *Where it stands*). | as E1, the flag file, the four profiles, AUDIT.md, the Security Target | 2 |
 | **E2** | `Errno` out of the Linux crate: a crate of its own with no dependency, `ferrix-errno`, holding the struct and its constants as they are; `ferrix-linux-abi::errno` and `ferrix-vfs` re-export it, so no caller's type changes. The core and the item name `ferrix_errno::Errno`. | about 30 `use` sites, no body | 3 |
 | **E3** | The architecture's Linux code under the flag: the signal frames, the Linux system call numbers of the three entries, TLS descriptors, hwcap, the vDSO and `counter_nanos`. Where `off` already answers `ENOSYS` (`NoLinux`), the entry needs no Linux number; where the trap path hands a signal number to `fault_signal`, it hands a fault kind and the personality picks the number. | `arch/*`, `trap.rs`, `timer.rs`; core ring, three architectures | 13, the uncertain one |
-| E4 | `object/job.rs`'s `Limit` and `controllers` (to `ferrix-cgroup-model`, built on branch `core-ext/e4-cgroupfs`, see *Where it stands*), `panic/catalog.rs`'s one name; `user/space.rs`'s one `ENOMEM` through `ferrix_vfs` was left to E5 (another session's file that night; E2's `ERRNO_ELSEWHERE`) | core | 2 |
+| E4 | `object/job.rs`'s `Limit` and `controllers` (to `ferrix-cgroup-model`, landed as 3710a973d, see *Where it stands*), `panic/catalog.rs`'s one name; `user/space.rs`'s one `ENOMEM` through `ferrix_vfs` was left to E5 (another session's file that night; E2's `ERRNO_ELSEWHERE`) | core | 2 |
 | E5 | The item's remaining names (`Syscall` in `syscall/mod.rs` and `main.rs`, `OpenFile` in `program.rs`), and `main.rs`'s `NoLinux` `ENOSYS` beside its `Syscall`, and `user/space.rs`'s one `ENOMEM` through `ferrix_vfs` if no earlier landing that edits the file takes it (E2's `ERRNO_ELSEWHERE`) | item, core | 3 |
 | **E6** | `ferrix-linux-abi`, `-vdso`, `-vfs` move to the `linux_abi = "on"` table in the core's and the item's manifests; the `off`-only `unused_crate_dependencies` allow goes. The check of E1 then refuses every Linux-only library in an `off` tree. Found by that check's first run (2026-11-13): four libraries of an `off` tree depend on `ferrix-linux-abi` themselves and keep it there after E6: `ferrix-blkring` and `ferrix-native-abi` for `Errno` (E2 takes them), `ferrix-native-abi` also for `nr`, `ferrix-ustack` for the auxiliary vector's `AT_*` keys, `ferrix-virtio` for the input event codes; those three are E6b's. E2 took `ferrix-blkring` and `ferrix-native-abi` (whose `nr` turned out to be its tests' alone, now a dev-dependency), so `LINUX_ABI_USERS` holds `ferrix-ustack` and `ferrix-virtio`. `ferrix-linux-abi` leaves the unconditional table only once the check's `LINUX_ABI_USERS` is empty (ledger 9510 V4, amending 9212 O2). | manifests, the allow | 2 |
 | E6b | The Linux numbers two libraries name: `ferrix-ustack`'s `AT_*` keys, `ferrix-virtio`'s input event codes (a third, `ferrix-native-abi`'s `nr`, was found by E2 to be its tests' alone and became a dev-dependency, ledger 9784 ruling A). Each moves to a dependency-free crate on Q2.1's terms (the same items by re-export, no conversion, no `cfg`, the crate saying its numbers are Linux's), or the library leaves the `off` tree, decided per library in a design note reviewed before its code (ledger 9510 V4). E2 took `ferrix-blkring`'s and `ferrix-native-abi`'s `Errno`. | two libraries | per library |
@@ -153,7 +153,7 @@ keyed table, `main.rs`'s globs. What is owed is 9212's conditions as 9361 K1
 reads them and the diff check (BACKLOG); nothing further of §3 lands before
 that verdict.
 
-**E1's debt** (branch `core-ext/e1-debt`, 2026-11-13): BUILD-FLAGS rules 1
+**E1's debt** (landed 2026-11-13 as 9f98c414f; branch `core-ext/e1-debt`): BUILD-FLAGS rules 1
 and 6 b written and checked over the manifests (`check-build-flags.py`:
 features and `optional` dependencies counted, keyed tables only where
 `certification-item.json`'s `keyed_dependency_tables` names them, each key
@@ -163,12 +163,12 @@ reading the reference configuration's graph, and
 `check-core-without-extensions.py` (§4's check), with eleven controls and
 E1's evidence: its kernels' bodies equal to the base's in nine builds,
 the boot lines equal, the `off` images equal. **Diff check OK IF V1-V7,
-ledger 9510**: no blocker, E1 stands; 9341 D2 lifts when this branch lands.
+ledger 9510**: no blocker, E1 stands; 9341 D2 lifted when this branch landed (9f98c414f).
 E1b and E2 may be coded (each its own diff or code review before the take,
 after this branch has landed); E3 starts as a design note (N1-N12).
 
-**E1b, the board glue's flag** (branch `core-ext/e1b-board-glue`,
-2026-11-13, on 9510's terms): `board_glue = on | off`, last in the flag
+**E1b, the board glue's flag** (landed 2026-11-13 as f1b316fc1; branch
+`core-ext/e1b-board-glue`, on 9510's terms): `board_glue = on | off`, last in the flag
 file, `on` in every profile, `off` allowing `none` alone and conflicting with
 `personality=kernel`, since the load in ring 0 requires the boards'
 registrations (Q1.1, Q1.3). The two board crates are dependencies of the
@@ -189,8 +189,8 @@ allows: with `board_glue=off` no package under the parts' place at all
 Its diff check is ledger 9647, OK IF G1-G8; the ring-0 rise (+17, textual)
 ledger 9665.
 
-**E2, the error numbers' crate** (branch `core-ext/e2-errno`, 2026-11-13,
-on 9212 Q2.1-Q2.5 and 9510 V4): `ferrix-errno` (`src/lib/proto/errno`)
+**E2, the error numbers' crate** (landed 2026-11-13 as f905979de; branch
+`core-ext/e2-errno`, on 9212 Q2.1-Q2.5 and 9510 V4): `ferrix-errno` (`src/lib/proto/errno`)
 holds `Errno`, its constants, `is_restart`, `as_return_value`, `encode` and
 `MAX_ERRNO` as they were in
 `ferrix-linux-abi`'s `errno` module, and their tests, with no dependency;
@@ -210,8 +210,8 @@ files name the numbers through it. The core-owned error type (Q2.4) is a
 BACKLOG row. Its code review is ledger 9784, OK IF K1-K9; the ring-0 rise
 (+4 on count A, library lines) ledger 9784.
 
-**E4, the job tree's cgroup rules** (branch `core-ext/e4-cgroupfs`,
-2026-11-13, on Q2.1's terms as E2): `ferrix-cgroup-model`
+**E4, the job tree's cgroup rules** (landed 2026-11-13 as 3710a973d; branch
+`core-ext/e4-cgroupfs`, on Q2.1's terms as E2): `ferrix-cgroup-model`
 (`src/lib/kernel/cgroup-model`) holds what `object/job.rs` named of
 `ferrix-cgroupfs`: the controllers (`Controller`, `ALL`, `Set`, `Change`,
 `Standing`, `vet_enable`, `vet_destination`), `Limit` and `Refusal`, as they
