@@ -470,6 +470,7 @@ class Units:
         self._product = product
         self._crates = crates
         self._functions: dict[str, list] = {}
+        self._module_files: tuple[int, dict[tuple[str, ...], str]] | None = None
 
     def crates(self) -> dict[tuple[str, ...], str]:
         if self._crates is None:
@@ -517,10 +518,19 @@ class Units:
         return boundary.module_of_file(rel)
 
     def module_files(self) -> dict[tuple[str, ...], str]:
-        crate_files = set(self.crates().values())
-        out = {boundary.module_of_file(rel): rel for rel in self.files() if rel not in crate_files}
-        out.update(self.crates())
-        return out
+        # Asked once per unit a requirement names, and each answer asks the
+        # roots record (a file read and a parse) for every kernel file: five
+        # thousand units by five hundred files was five minutes of this
+        # check's run, twenty-two on CI's runner. The answer depends on the
+        # files' names alone, and `files()` only ever gains a name, so their
+        # count says whether the last answer still stands.
+        count = len(self.files())
+        if self._module_files is None or self._module_files[0] != count:
+            crate_files = set(self.crates().values())
+            out = {boundary.module_of_file(rel): rel for rel in self.files() if rel not in crate_files}
+            out.update(self.crates())
+            self._module_files = (count, out)
+        return self._module_files[1]
 
     def __call__(self, unit: str) -> str | None:
         segments = [s for s in unit.strip().split("::") if s]
