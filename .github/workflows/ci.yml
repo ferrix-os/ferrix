@@ -559,6 +559,13 @@ jobs:
   rustc:
     name: rustc on Ferrix, and Ferrix built on Ferrix (x86_64)
     runs-on: ubuntu-latest
+    # Advisory, as `CI result` below has it. That job's verdict alone did
+    # not make it so: Promote also asks for the run's own conclusion, which
+    # a failed job turns red whatever `CI result` says, and this job's boot
+    # ratchet (28 s) is a wall-clock figure on a shared runner: 31.14 s and
+    # 29.92 s at load 2.4 failed it in three of four runs on 2026-11-25,
+    # each one a promotion held until a person ran the job again.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v6
 
@@ -689,7 +696,8 @@ jobs:
   # part that takes an hour is a failure in an hour, not in six. A sixth
   # the same day: the page tables' six walks were 25 of that part's 28
   # minutes, so they are two parts and the rest of the crate rides in the
-  # fourth.
+  # fifth (in the fourth it made that part the longest, 23 minutes in run
+  # 45715983357, beside a fifth of 10).
   # ----------------------------------------------------------------
   miri:
     name: Miri (UB check, part ${{ matrix.part }})
@@ -839,7 +847,7 @@ jobs:
           the_walk_behaves_the_same --skip the_walk_behaves_the_same_on
 
       - name: Miri (page tables, all but the walks)
-        if: matrix.part == 4
+        if: matrix.part == 5
         run: cargo +nightly miri test -p ferrix-paging --lib -- --skip the_walk_behaves_the_same
 
       # The service manager's pure core. It forbids unsafe, so what Miri
