@@ -25,8 +25,8 @@ that does not exist.
 | Target | Standard | Verdict |
 |---|---|---|
 | EAL5+ | Common Criteria (ISO/IEC 15408) | **Not met.** Security Target and vulnerability analysis written, and the boundary has no upward reference left; blocked on design evidence at module granularity and an accredited laboratory. |
-| DAL C | DO-178C / ED-12C | **Not met.** Coverage of the item's kernel files is measured on every architecture, at 90.1% on x86-64, 89.9% on AArch64 and 84.5% on ARMv7-A (measured under rustc 1.97.1, carried), every other unreached statement argued or put down to absent hardware; the btrfs crates are not measured (F-56); planning data, requirements traceability and the 94, 144 and 163 statements that still need a test are not done. |
-| Class C | IEC 62304 | **Closest of the four.** No SOUP in the item; element-level safety analysis written. Blocked on a QMS and the integrator's risk file. |
+| DAL C | DO-178C / ED-12C | **Not met.** Only `max` will carry DO-178C, at level A's objectives, and it does not build yet (the customer, 2026-11-26; `docs/microkernel/FLIP.md`); DAL C is `present`'s interim claim. Coverage of the item's kernel files is measured on every architecture: 85.2% on x86-64 (the `coverage` profile, 2026-10-23), 89.9% on AArch64 and 84.5% on ARMv7-A (debug, 2026-09-27), all under rustc 1.97.1 and carried since, with 1,241, 162 and 215 unreached statements that still need a test (COVERAGE-RESIDUAL.md) and the rest argued or put down to absent hardware; the btrfs crates are not measured (F-56), the release image's coverage is one x86-64 run with no argued residual (F-11, reopened), data and control coupling are not analysed (F-118) and the toolchain's libraries in the image are counted nowhere (F-119); planning data, requirements traceability and those tests are not done. |
+| Class C | IEC 62304 | **Closest of the four.** No external crate in the item, and the toolchain's `core`, `alloc` and `compiler_builtins` in it unevaluated (F-119); element-level safety analysis written. Blocked on a QMS and the integrator's risk file. |
 | SIL 2 | EN 50716:2023 | **Reachable.** Most of Annex A satisfied; generic software argument and application conditions written. Blocked on independent assessment. |
 
 None of the four can be claimed today. What changed is that the reasons are now
@@ -43,7 +43,7 @@ specific, measured, and mostly documents rather than code.
 * [VULNERABILITY-ANALYSIS.md](VULNERABILITY-ANALYSIS.md) — AVA_VAN.4 over the seven threats; six residual vulnerabilities
 * [SPECULATION.md](SPECULATION.md) — the side-channel defences, per architecture, behind one build switch, and what they cost
 * [MEMORY-AND-TIMING.md](MEMORY-AND-TIMING.md) — what the item allocates, and what it promises about time
-* [SOUP.md](SOUP.md) — generated; the item contains none
+* [SOUP.md](SOUP.md) — generated; the item links no external crate, and the toolchain's three libraries it does link (F-119)
 * [VERIFICATION.md](VERIFICATION.md) — what exercises the item, and the traceability gap
 * [TRACEABILITY.md](TRACEABILITY.md) — generated; the item's requirements, their parents, and the checks that verify each on each architecture
 * [COVERAGE-RESIDUAL.md](COVERAGE-RESIDUAL.md) — generated; the uncovered statements per architecture, sorted into argued and gap
@@ -90,10 +90,10 @@ boundary.
 | Item product code | 79,079 lines: 64,788 in the kernel, 14,291 in the btrfs crates (2026-10-02) |
 | Uncertified load | 64,036 lines in the kernel (2026-10-02) |
 | In-kernel self-tests | 42,634 lines |
-| Statement coverage, certified item's kernel files | **90.1%** x86-64, **89.9%** AArch64, **84.5%** ARMv7-A, measured under rustc 1.97.1, carried; the btrfs crates are not measured (F-56) |
-| Statement coverage, core ring | 90.8% x86-64, 90.8% AArch64, 84.1% ARMv7-A, measured under rustc 1.97.1, carried |
-| Unreached statements, kernel files | x86-64 762 — 438 argued, 227 hardware absent, **97 need a test**; AArch64 746 — 400, 201, **145**; ARMv7-A 1,131 — 557, 444, **130** |
-| SOUP in the item | **0** |
+| Statement coverage, certified item's kernel files | **85.2%** x86-64 (11,148 of 13,080, the `coverage` profile, 2026-10-23, which supersedes 2026-09-27's 90.1% of a smaller item), **89.9%** AArch64, **84.5%** ARMv7-A (debug, 2026-09-27), measured under rustc 1.97.1, carried; the release image 83.4% on x86-64, once (F-11); the btrfs crates are not measured (F-56) |
+| Statement coverage, core ring | 85.9% x86-64 (8,934 of 10,396, 2026-10-23), 90.8% AArch64, 84.1% ARMv7-A (2026-09-27), measured under rustc 1.97.1, carried |
+| Unreached statements, kernel files (COVERAGE-RESIDUAL.md on 4d954b671) | x86-64 1,907 — 395 argued, 271 hardware absent, **1,241 need a test**; AArch64 627 — 308, 157, **162**; ARMv7-A 970 — 409, 346, **215** |
+| External crates in the item | **0**; the toolchain's `core` and `compiler_builtins` are in every image and `alloc` in the kernels, and are not counted (SOUP.md §1a, F-119) |
 | External crates, host-side | 21 |
 | Upward boundary references | **0**, from 94 at the start of the work (29 and 62 before the gate could resolve module paths) |
 | `unsafe` blocks, all documented | 800 |
@@ -109,7 +109,7 @@ boundary.
 | Writable mappings of the kernel's text | **0**, every mapping of its frames swept each boot; the direct map's alias was one until 2026-09-26 (F-34) |
 | Assembly | 500 lines, 22 allow-listed sites, outside the Pixel 7 loader |
 | Cargo features in `src/kernel/`/`src/boot/common/uefi/` | 0 |
-| Requirements of the item, each with a statement, a pass/fail criterion and its parent, gated | **122** high-level (`H.*`) decomposing all 10 objectives and all 9 ASRs; **742** low-level (126 `L.x86_64.*`, 116 `L.btrfs.*`, 109 `L.object.*`, 107 `L.user.*`, 64 `L.mm.*`, 52 `L.aarch64.*`, 44 `L.iommu.*`, 41 `L.console.*`, 32 `L.smp.*`, 21 `L.device.*`, 9 `L.claim.*`, 7 `L.trap.*`, 5 `L.quiesce.*`, 3 `L.syscall.*`, 3 `L.armv7a.*`, 2 `L.sched.*`, 1 `L.discovery.*`); **542** named by a check that proves each whole, 322 in the baseline of the unverified (TRACEABILITY.md, W-8; 2026-10-02) |
+| Requirements of the item, each with a statement, a pass/fail criterion and its parent, gated | *On aecf83e44 (2026-11-25) the gate counts 196 high-level and 1,552 low-level, 1,412 named by a check and 336 in the baseline; the breakdown that follows is 2026-10-02's.* **122** high-level (`H.*`) decomposing all 10 objectives and all 9 ASRs; **742** low-level (126 `L.x86_64.*`, 116 `L.btrfs.*`, 109 `L.object.*`, 107 `L.user.*`, 64 `L.mm.*`, 52 `L.aarch64.*`, 44 `L.iommu.*`, 41 `L.console.*`, 32 `L.smp.*`, 21 `L.device.*`, 9 `L.claim.*`, 7 `L.trap.*`, 5 `L.quiesce.*`, 3 `L.syscall.*`, 3 `L.armv7a.*`, 2 `L.sched.*`, 1 `L.discovery.*`); **542** named by a check that proves each whole, 322 in the baseline of the unverified (TRACEABILITY.md, W-8; 2026-10-02) |
 | Product functions of the item no low-level requirement names | **0** of 261 in `object/`, of 96 in `iommu`, of 299 in `mm`, `vmap`, `early` and `user`, of 57 in `smp` and of 74 in `console`, where a new one fails the build (object/: 175 named, 84 accessors, 2 check code; iommu: 77 named, 19 accessors; memory: 238 named, 49 accessors, 12 check code; smp: 38 named, 17 accessors, 2 check code; console: 62 named, 10 accessors, 2 check code); 890 of 3,131 item-wide on 2026-10-02, the subsystems still to write (F-15), 294 of them among the btrfs crates' 669 (162 named, 213 accessors; F-56) |
 
 The coverage rows were measured on 2026-09-27 over the item's kernel files as
@@ -180,7 +180,7 @@ decomposed to the item's modules.
 
 62 objectives, 5 requiring independence.
 
-*In place:* statement coverage is now measurable and measured (F-10 at 84.5–90.1% across the three architectures),
+*In place:* statement coverage is now measurable and measured (F-10, at 85.2% on x86-64, 89.9% on AArch64 and 84.5% on ARMv7-A as last measured, carried),
 which was the objective everyone assumes is impossible for a kernel. 492 lines
 of assembly across 22 allow-listed sites makes the source-to-object question
 tractable. Zero Cargo features in the item, and one kernel profile, `present`, whose
@@ -191,19 +191,32 @@ the side-channel defences behind `ferrix_mitigations = "off"` among them.
 
 *Missing:* every planning document — PSAC, SDP, SVP, SCMP, SQAP — none drafted.
 Low-level requirements (F-15) and requirements-to-test traceability (F-14),
-which are the spine of the standard: the gate, 95 high-level
-requirements and the 518 low-level ones of `object/`, `iommu`, `mm`, `user`, `smp`, `sched`, `arch/x86_64`, `trap` and `console`
-exist, 338 of them named by a check (W-8); the other subsystems' low level and their tags do not. Tool qualification (F-17 to F-19).
+which are the spine of the standard: the gate, 196 high-level
+requirements and 1,552 low-level ones exist, 1,412 of the 1,748 named by a check and 336 in the baseline of the
+unverified, and 1,173 of the item's 6,417 product functions are named by no requirement (`check-traceability.py` on aecf83e44, 2026-11-25). Tool qualification (F-17 to F-19).
+The analysis of data coupling and control coupling that table A-7 asks at this level beside statement
+coverage (F-118). Coverage of the image that ships: the evidence is the debug and `coverage` profiles', and
+the release profile's is one x86-64 run with nothing argued (F-11, reopened). The toolchain's libraries in
+the image, as previously developed software (F-119). Review records under configuration management (F-120).
+And the level itself: DAL C is assumed here, where the standard takes it from a system safety assessment
+the integrator owns (SAFETY-MANUAL.md). Clause and table numbers in this section are from memory, not
+checked against the text.
+
+*Whose claim it is:* only `max` carries DO-178C, from M7's evidence, at level A's objectives, on AArch64 (the
+customer, 2026-11-26; `docs/BUILD-FLAGS.md` §4). `present`'s DAL C is the interim until the flip, `fast`
+and `desktop` claim none. Level A asks decision coverage and MC/DC (F-13) and independence for many more
+objectives than five, so this verdict is of `present`, and `max`'s is M7's to write.
 
 *Honest gap:* this is the furthest of the four, because DO-178C wants a
 document set that does not exist rather than a property the code lacks.
 
 ### IEC 62304 Class C — closest
 
-*In place:* **zero SOUP in the item**, measured across all three architectures
-and the loader, and now gated. This is the obligation that dominates a Class C
+*In place:* **no external crate in the item**, measured across all three architectures
+and the loader, and now gated; the toolchain's `core` and `compiler_builtins` are in every image and
+`alloc` in the kernels, SOUP in IEC 62304's sense whose anomaly lists nobody has read (F-119). This is the obligation that dominates a Class C
 submission built on Linux — where the kernel is always SOUP, because §5
-lifecycle evidence cannot be produced retroactively — and here it is empty.
+lifecycle evidence cannot be produced retroactively — and here it is those three libraries.
 §4.3(c) segregation is satisfied architecturally: ring-3 drivers behind an
 IOMMU, with the boundary enforced at build time.
 
@@ -218,7 +231,7 @@ ours to write.
 
 *Why it is closest:* the blockers are an organisation and a document set. The
 technical position — first-party code, gated boundary, measured coverage,
-memory-safe language, no SOUP — is unusually strong, and none of it has to be
+memory-safe language, no external crate — is unusually strong, and none of it has to be
 retrofitted.
 
 ### EN 50716:2023 SIL 2 — reachable
@@ -256,7 +269,7 @@ In order of value per unit of effort:
    `user` (166, 111 verified), `smp` (32, 9 verified) and `console` (41,
    12 verified), are in place; the other subsystems' low level and
    tags, copying the pilot's corrected format, are what is left.
-2. **Cover the 94, 144 and 163 statements that still need a test (F-10)**, on
+2. **Cover the 1,241, 162 and 215 statements that still need a test (F-10; COVERAGE-RESIDUAL.md)**, on
    x86-64, AArch64 and ARMv7-A. Every gate counts on every architecture, and
    `cargo xtask coverage` ratchets the union; what is left is tests.
    COVERAGE-WORKLIST.md splits them by module, `syscall/native.rs`,
@@ -268,8 +281,8 @@ In order of value per unit of effort:
    Whether it covers `armv7a-none-eabi` and the UEFI targets is the first
    question.
 Done since the audit began: the vulnerability analysis (F-21a), SMEP, SMAP and
-PAN (F-32), the release profile and both Arm architectures measured (F-11,
-F-12), the complexity and recursion gate (F-25), board support, bring-up
+PAN (F-32), both Arm architectures measured (F-12; the release profile's
+measurement, F-11, was reopened on 2026-11-25), the complexity and recursion gate (F-25), board support, bring-up
 and power registering with the item (F-04, F-08), and the split of `Process`
 into a core object and a POSIX extension (F-01, F-06, W-1), which took the
 boundary from 36 references to 29 by the gate's count of the day and left `object/` and `sched/` naming

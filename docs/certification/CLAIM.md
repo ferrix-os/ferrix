@@ -235,7 +235,8 @@ the assumption it replaces with an argument, and the work becomes orders in
 3. Traceability to finish (F-14, F-15): 1,182 of 2,411 item functions are
    named by a low-level requirement, and several subsystems are not yet
    complete. About 20–30 points.
-4. Coverage residuals (F-10): 94, 144 and 163 statements still need a test.
+4. Coverage residuals (F-10): 1,241, 162 and 215 statements still need a test
+   (COVERAGE-RESIDUAL.md, 2026-11-25; 94, 144 and 163 when this was written).
    About 15–25 points. Decision coverage (F-13) is 28–38% by object-code
    decisions; higher levels will ask for more.
 5. The security features (authentication, AoU-7 and OE.AUTH; seccomp,
@@ -297,7 +298,8 @@ the assumption it replaces with an argument, and the work becomes orders in
 
 **M0, statable today** (every number measured and in this directory):
 "Ferrix runs unmodified Linux programs above a 63,000-line kernel item that
-its build defines and enforces. It contains no third-party code and has no
+its build defines and enforces. It links no third-party crate (the Rust
+toolchain's own libraries are in it, F-119) and has no
 upward dependency, statement coverage is measured at about 90% on three
 architectures, and an element-level safety argument is written against IEC
 61508 SIL 2 and IEC 62304 Class C. Not assessed."

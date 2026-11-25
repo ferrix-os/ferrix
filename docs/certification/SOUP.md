@@ -21,9 +21,12 @@ that is wrong.
 | `ferrix-boot` | `aarch64-unknown-uefi` | **none** |
 | `ferrix-boot` | `armv7-unknown-linux-musleabi` | **none** |
 
-**Total SOUP in the item: 0.**
+**External crates in the item: 0.** The toolchain's own
+libraries are in these images and are not crates of the graph:
+`core` and `compiler_builtins` in every one, `alloc` in the
+kernels; section 1a lists them (FINDINGS.md, F-119).
 
-The item contains no software of unknown provenance. Every line in
+The item links no external crate. Every line in
 the shipping graph is first-party code in this repository, written
 against the design in `docs/ARCHITECTURE.md` and the model in
 `docs/sysml/`, under the conventions and gates this repository
@@ -34,13 +37,43 @@ This is worth stating plainly because it is the position Linux
 structurally cannot reach: a Linux-based medical device classifies
 the kernel itself as SOUP, since §5 lifecycle evidence cannot be
 produced retroactively for code developed elsewhere. The obligation
-that dominates a Class C submission built on Linux is, here, empty.
+that dominates a Class C submission built on Linux is, here, the
+toolchain's three libraries of section 1a and nothing else.
 
 It is not an accident and it is not free. `deny.toml` keeps the
 dependency budget near zero on purpose -- *code that runs in ring 0
 with no memory protection above it is code we want to have read* --
 and the cost is that `src/lib/` contains a hand-written ACPI parser, a
 device-tree parser, a btrfs implementation and a TCP stack.
+
+## 1a. The toolchain's libraries, linked into the item
+
+The Cargo graph does not show the Rust standard libraries. Every
+image above links `core` and `compiler_builtins`, and every image
+one of whose crates says `extern crate alloc` links `alloc`: the
+kernels do, and a loader that gained one would change this table
+and fail `--check`. They reach an image two ways. What is not
+generic is linked as the pinned toolchain ships it, compiled, for
+the target. What is generic (`Vec<T>`, `BTreeMap<K, V>`, the
+iterators) is compiled by this build, from the toolchain's source,
+into the item's own crates. Both are software in the item that
+this repository did not write, and neither is counted in the
+figure above. The version is named from the pin; nothing of the
+libraries is measured here:
+
+| Library | From | Images that link it |
+|---|---|---|
+| `core` | rustc 1.99.1 (`rust-toolchain.toml`) | `ferrix-boot` on `aarch64-unknown-uefi`, `ferrix-boot` on `armv7-unknown-linux-musleabi`, `ferrix-boot` on `x86_64-unknown-uefi`, `ferrix-kernel` on `aarch64-unknown-none-softfloat`, `ferrix-kernel` on `armv7a-none-eabi`, `ferrix-kernel` on `x86_64-unknown-none` |
+| `alloc` | rustc 1.99.1 (`rust-toolchain.toml`) | `ferrix-kernel` on `aarch64-unknown-none-softfloat`, `ferrix-kernel` on `armv7a-none-eabi`, `ferrix-kernel` on `x86_64-unknown-none` |
+| `compiler_builtins` | rustc 1.99.1 (`rust-toolchain.toml`) | `ferrix-boot` on `aarch64-unknown-uefi`, `ferrix-boot` on `armv7-unknown-linux-musleabi`, `ferrix-boot` on `x86_64-unknown-uefi`, `ferrix-kernel` on `aarch64-unknown-none-softfloat`, `ferrix-kernel` on `armv7a-none-eabi`, `ferrix-kernel` on `x86_64-unknown-none` |
+
+None of the item's gates reads them, no coverage figure measures
+them, and their anomaly lists are not evaluated, as IEC 62304 asks
+of SOUP. Which of their functions each image links, of each of the
+two kinds, each archive's digest, and
+whether a qualified library or the item's own measurement stands
+behind them, are what FINDINGS.md F-119 asks for; a qualified
+compiler (F-17) does not answer it.
 
 ## 2. Host-side crates — tools, not SOUP
 

@@ -277,6 +277,10 @@ sentinel defect in 2.3; ARMv7-A's 70.8% did not, and stands for its tree.
 boot. The denominator shrinks by a third and the percentage moves a few points;
 VERIFICATION.md §3.2 states it.
 
+**Reopened 2026-11-25** (FINDINGS.md F-11): one boot answered whether the
+profile can be measured. Owed: the suite on the release image of x86-64 and
+AArch64 under the pinned compiler, with a residual and a floor of its own.
+
 ### 2.3 Cover what needs a test — **F-10**
 **Measured 2026-09-26** at 74.7% on x86-64 over thirteen gates. The 81.9%
 before it was the net of two defects in `coverage-report.py`, one each way

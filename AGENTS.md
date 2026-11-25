@@ -109,7 +109,10 @@ Ferrix's certification targets are required, not optional (customer,
 2026-10-01): Common Criteria EAL5+, DO-178C DAL C, IEC 62304 Class C and
 EN 50716 SIL 2. The consultant's goal is to reach them. Its evidence is in
 [docs/certification/](docs/certification/README.md), and its reviews keep
-that evidence true while dozens of landings move the tree.
+that evidence true while dozens of landings move the tree. Reviews of
+landings are half of the role. The other half is auditing the tree against
+each standard's own list of objectives (*Auditing against the standards*,
+below), because a review sees only what a diff changes.
 
 ### Reviewing before the lock
 
@@ -159,6 +162,96 @@ The rules its reviews enforce, kept from the first consultant's handover:
 * Its reviews are internal. They are **not independent verification** in
   the standards' sense, and are never presented as that.
 
+### Auditing against the standards
+
+**The gap.** Every review above starts from a diff, so it can only find what
+a landing changed. What a standard asks for and the tree has never held
+arrives in no diff. On 2026-11-25 an audit of `develop` against DO-178C's
+level C objectives, table by table, found three such things after eight
+weeks and some 10,000 ledger lines of reviews: no analysis of data and
+control coupling (F-118), the toolchain's libraries linked into the item and
+counted nowhere (F-119), and the ledger itself in no repository (F-120). It
+also found F-11 closed on a narrower question than its title asks, and the
+README's DAL C verdict quoting 95 and 518 requirements where the gate
+counted 196 and 1,552. Since 2026-10-04 each session briefs its own
+consultant for its own landing, so nobody held the register as a whole.
+
+So the consultant's work has a second half, the **objective audit**
+(customer, 2026-11-25; `docs/backlog/DECISIONS.md`). It is a job of its
+own, never part of a landing's review: the customer or the product owner
+orders it ("audit DO-178C"), one standard at a time. How often is not
+decided: before each release tag and monthly while the item changes is
+*proposed*, and waits on the customer (`docs/BACKLOG.md`, *Waiting on the
+customer*). The session that audits a standard did not write the evidence
+it reads in that session.
+
+* **Audit the landing branch's tip, and name it.** `git fetch`, then read
+  `origin/develop` (`docs/REPO-FLOW.md`), and write the hash and the date
+  into every finding and into the ledger. The audit of 2026-11-25 first
+  read a mirror eight weeks and 2,400 commits behind, and two of its five
+  findings were already F-76.
+* **Audit the profile that carries the claim, at its level.**
+  `tools/common/data/build-flags.toml` says which standards each profile's
+  level names. DO-178C is `max`'s alone, at level A's objectives (customer,
+  2026-11-26); `present`'s DAL C is the interim until the flip, and `fast`
+  and `desktop` carry none. Evidence taken on another profile's image is
+  not that profile's, and a finding says which profile's image closes it.
+* **Walk the standard's own list, not this directory's.** Take every
+  objective the claimed level asks for: DO-178C's tables A-1 to A-10, the
+  EAL's assurance components, 62304's clauses for the class, EN 50716's
+  Annex A rows for the SIL. Give each one row in
+  `docs/certification/OBJECTIVES.md`: the evidence that meets it, by file
+  and gate; or the open finding that says it is unmet; or why it does not
+  apply. A row with none of the three is a new finding. That file does not
+  exist yet: the first audit that holds a standard's text creates it and
+  lists it in the README's index. Work from the standard's text. A session
+  that does not have the text says so, in the row and in every finding
+  that cites a clause, asks the customer for it, and never fills a row
+  from memory as if it were read.
+* **Start from the image, then the manifest.** List what the reference
+  images link (`llvm-nm` on each architecture's kernel and loader, from a
+  gate build of the audited hash; the `.efi` loaders carry no symbols, so
+  read the loader's ELF or its map) and ask
+  of each body of code which register holds it: a ring, a classified
+  crate, SOUP.md, or none. The manifest describes what somebody thought
+  to list. F-76 was found when the split forced the question, and F-119 by
+  reading symbols.
+* **Read each scope sentence as a claim.** "The item is", "the reference
+  configuration is", "measured on", "no X in the item": for each, find the
+  evidence of exactly that and of nothing narrower. Coverage of a debug
+  image is not coverage of a release configuration.
+* **Re-read the closed findings.** For each one closed since the last
+  audit, and a sample of the older ones, read the title and its *Closes
+  when* against the tree as it is. A finding closed on part of its title
+  is reopened, with what is left, and the old closure kept as written.
+* **Re-derive every figure in a verdict.** The README's verdict table and
+  its four verdict sections are the audit's to rewrite: run the gates on
+  the audited hash and replace each count, with the hash and date beside
+  it. A figure the audit cannot re-derive is marked as carried, with the
+  date it was measured.
+* **Ask what is missing, last.** Plans, standards, records, analyses: for
+  each kind of life cycle data the standard lists, is there a file, and
+  is it under version control here?
+
+The audit files what it finds: findings in `docs/certification/FINDINGS.md`
+with the register recounted, the objective rows, the rewritten verdicts,
+and a ledger entry naming the hash, the standard and the tables walked. Its
+landing is reviewed before the take by a consultant of another session,
+who also confirms the finding numbers it took, as for any finding. It may
+correct a generator or a gate whose output stated something false (as
+`gen-soup.py` did); that is a tools change, and takes a tools change's
+gate rows and a negative control, not a docs landing's. It fixes no
+product code: a finding in the item goes to the area's owner as a row, and
+a finding that needs a decision goes to the customer through the product
+owner.
+
+A landing's review looks the same way once, for what its diff does not
+show: code the landing links into an image from outside the kernel's
+source roots (a new dependency, a toolchain bump), a figure or a scope
+sentence in `docs/certification/` that the landing makes untrue, and
+evidence it leaves measured on a tree or a compiler that is no longer the
+product's. Each is a condition of the verdict or a row.
+
 ### Watching `main`
 
 At least once per round, the consultant lists the commits since its last
@@ -185,7 +278,9 @@ The review ledger is on the gate host:
 conditions and its outcome, and its open queue at the end. Beside it is
 `HANDOVER.md`. A new consultant tells the product owner its session name,
 works the open queue top to bottom, then audits `main` back to the last
-recorded verdict.
+recorded verdict. The ledger is in no repository yet (F-120): until it is,
+cite an entry by its date and subject as well as its line, and never edit
+or reflow an entry above the last one.
 
 ---
 

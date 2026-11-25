@@ -7,12 +7,18 @@ identified by title, manufacturer and version, with its published anomaly list
 evaluated against the device's hazards. For a Class C item that evaluation is
 the difference between a dependency and a finding.
 
-Two facts, both measured here rather than asserted:
+Two facts, both measured here rather than asserted, and a third, section 1a,
+that is named from the toolchain pin and the sources' `extern crate alloc`
+and measures nothing of the libraries it names:
 
-  1. **The certified item contains no SOUP.** `ferrix-kernel` and `ferrix-boot`
-     link no external crate on any of the three architectures. Everything in
+  1. **The certified item links no external crate.** `ferrix-kernel` and
+     `ferrix-boot` link none on any of the three architectures. Everything in
      the shipping graph is first-party code in this repository, developed under
-     the lifecycle the rest of docs/certification describes. That is the single
+     the lifecycle the rest of docs/certification describes. The graph is not
+     the whole image: the toolchain's `core` and `compiler_builtins` are in
+     every image and `alloc` in the kernels, and they are no crate's
+     dependency, so section 1a names them from the pin (FINDINGS.md F-119)
+     and the count leaves them out. That is the single
      most valuable sentence in this file, so the gate below re-establishes it
      on every run instead of letting it be a thing that used to be true.
 
@@ -30,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -82,7 +89,122 @@ def shipping_externals() -> dict[tuple[str, str], list[str]]:
             if line.strip() and not line.startswith(" ")
         }
         found[(package, target)] = sorted(n for n in names if not n.startswith("ferrix-"))
+        FIRST_PARTY[(package, target)] = sorted(n for n in names if n.startswith("ferrix-"))
     return found
+
+
+# The first-party crates of each shipping graph, filled by shipping_externals:
+# section 1a reads their sources for which toolchain libraries they link.
+FIRST_PARTY: dict[tuple[str, str], list[str]] = {}
+
+ALLOC_DECLARED = re.compile(
+    r"^[ \t]*(?:#\[[^\]]*\][ \t]*)*(?:pub(?:\([^)]*\))?\s+)?extern\s+crate\s+alloc\b",
+    re.MULTILINE,
+)
+
+
+def crate_directories() -> dict[str, Path]:
+    """Each workspace package's directory, by name."""
+    blob = subprocess.run(
+        ["cargo", "metadata", "--format-version", "1", "--no-deps"],
+        cwd=ROOT, capture_output=True, text=True, check=True,
+    ).stdout
+    return {p["name"]: Path(p["manifest_path"]).parent for p in json.loads(blob)["packages"]}
+
+
+def declares_alloc(directory: Path) -> bool:
+    """Whether a crate's product source says `extern crate alloc`.
+
+    A `no_std` crate links `alloc` only by saying so. Test files (`tests.rs`,
+    anything under a `tests` directory) and a declaration under
+    `#[cfg(test)]` are host-test code and do not count.
+    """
+    for path in sorted((directory / "src").rglob("*.rs")):
+        if path.name == "tests.rs" or "tests" in path.relative_to(directory).parts:
+            continue
+        text = path.read_text(encoding="utf-8")
+        for match in ALLOC_DECLARED.finditer(text):
+            before = text[:match.start()].rstrip().splitlines()
+            if before and before[-1].strip() == "#[cfg(test)]":
+                continue
+            return True
+    return False
+
+
+def links_alloc() -> dict[tuple[str, str], bool]:
+    """For each shipping image, whether any crate of its graph links `alloc`."""
+    directories = crate_directories()
+    answer = {}
+    for key, names in FIRST_PARTY.items():
+        missing = [n for n in names if n not in directories]
+        if missing:
+            raise SystemExit(f"gen-soup: no directory for {', '.join(missing)}")
+        answer[key] = any(declares_alloc(directories[n]) for n in names)
+    return answer
+
+
+TOOLCHAIN_LIBRARIES = ("core", "alloc", "compiler_builtins")
+
+
+def pinned_toolchain() -> str:
+    """The channel rust-toolchain.toml pins, which ships the libraries."""
+    text = (ROOT / "rust-toolchain.toml").read_text(encoding="utf-8")
+    match = re.search(r'^channel\s*=\s*"([^"]+)"', text, re.MULTILINE)
+    if not match:
+        raise SystemExit("gen-soup: rust-toolchain.toml pins no channel")
+    return match.group(1)
+
+
+def toolchain_libraries() -> list[str]:
+    """Section 1a: the code in the item that the Cargo graph does not show.
+
+    `core`, `alloc` and `compiler_builtins` are no crate's dependency, so
+    `cargo tree` never names them, and a register read off the graph alone
+    says the item holds nothing third-party while every image links `core`
+    and `compiler_builtins`, and every image whose graph declares it links
+    `alloc` (F-119). The version is named from the pin and `alloc`'s images
+    from the sources; nothing of the libraries themselves is measured:
+    which of their functions an image links is F-119's closing work, and
+    this section says so rather than counting.
+    """
+    channel = pinned_toolchain()
+    with_alloc = links_alloc()
+    lines = [
+        "## 1a. The toolchain's libraries, linked into the item",
+        "",
+        "The Cargo graph does not show the Rust standard libraries. Every",
+        "image above links `core` and `compiler_builtins`, and every image",
+        "one of whose crates says `extern crate alloc` links `alloc`: the",
+        "kernels do, and a loader that gained one would change this table",
+        "and fail `--check`. They reach an image two ways. What is not",
+        "generic is linked as the pinned toolchain ships it, compiled, for",
+        "the target. What is generic (`Vec<T>`, `BTreeMap<K, V>`, the",
+        "iterators) is compiled by this build, from the toolchain's source,",
+        "into the item's own crates. Both are software in the item that",
+        "this repository did not write, and neither is counted in the",
+        "figure above. The version is named from the pin; nothing of the",
+        "libraries is measured here:",
+        "",
+        "| Library | From | Images that link it |",
+        "|---|---|---|",
+    ]
+    every = sorted(FIRST_PARTY)
+    for name in TOOLCHAIN_LIBRARIES:
+        images = [key for key in every if name != "alloc" or with_alloc[key]]
+        shown = ", ".join(f"`{package}` on `{target}`" for package, target in images) or "none"
+        lines.append(f"| `{name}` | rustc {channel} (`rust-toolchain.toml`) | {shown} |")
+    lines += [
+        "",
+        "None of the item's gates reads them, no coverage figure measures",
+        "them, and their anomaly lists are not evaluated, as IEC 62304 asks",
+        "of SOUP. Which of their functions each image links, of each of the",
+        "two kinds, each archive's digest, and",
+        "whether a qualified library or the item's own measurement stands",
+        "behind them, are what FINDINGS.md F-119 asks for; a qualified",
+        "compiler (F-17) does not answer it.",
+        "",
+    ]
+    return lines
 
 
 def host_crates() -> list[dict]:
@@ -135,12 +257,15 @@ def render(ship: dict[tuple[str, str], list[str]], host: list[dict]) -> str:
 
     lines += [
         "",
-        f"**Total SOUP in the item: {total}.**",
+        f"**External crates in the item: {total}.** The toolchain's own",
+        "libraries are in these images and are not crates of the graph:",
+        "`core` and `compiler_builtins` in every one, `alloc` in the",
+        "kernels; section 1a lists them (FINDINGS.md, F-119).",
         "",
     ]
     if total == 0:
         lines += [
-            "The item contains no software of unknown provenance. Every line in",
+            "The item links no external crate. Every line in",
             "the shipping graph is first-party code in this repository, written",
             "against the design in `docs/ARCHITECTURE.md` and the model in",
             "`docs/sysml/`, under the conventions and gates this repository",
@@ -151,7 +276,8 @@ def render(ship: dict[tuple[str, str], list[str]], host: list[dict]) -> str:
             "structurally cannot reach: a Linux-based medical device classifies",
             "the kernel itself as SOUP, since §5 lifecycle evidence cannot be",
             "produced retroactively for code developed elsewhere. The obligation",
-            "that dominates a Class C submission built on Linux is, here, empty.",
+            "that dominates a Class C submission built on Linux is, here, the",
+            "toolchain's three libraries of section 1a and nothing else.",
             "",
             "It is not an accident and it is not free. `deny.toml` keeps the",
             "dependency budget near zero on purpose -- *code that runs in ring 0",
@@ -168,6 +294,8 @@ def render(ship: dict[tuple[str, str], list[str]], host: list[dict]) -> str:
             "hazards. **That evaluation is not yet written.**",
             "",
         ]
+
+    lines += toolchain_libraries()
 
     lines += [
         "## 2. Host-side crates — tools, not SOUP",
@@ -226,12 +354,12 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
-        print(f"gen-soup: register current, no SOUP in the item")
+        print("gen-soup: register current, no external crate in the item; the toolchain's libraries listed (F-119)")
         return 0
 
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text(rendered, encoding="utf-8")
-    print(f"gen-soup: wrote {OUTPUT.relative_to(ROOT)}, no SOUP in the item")
+    print(f"gen-soup: wrote {OUTPUT.relative_to(ROOT)}, no external crate in the item; the toolchain's libraries listed (F-119)")
     return 0
 
 

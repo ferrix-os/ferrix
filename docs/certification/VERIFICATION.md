@@ -345,6 +345,10 @@ because inlining and merging leave fewer distinct `is_stmt` rows to reach. The
 proportion reached moves 3.6 points. So a submission has to say which profile
 it measured, and this one measures both, which is what F-11 asked for.
 
+*2026-11-25:* F-11 was reopened. It asks for more than whether the release
+profile can be measured: the release image's own evidence, residual and
+floor on x86-64 and AArch64, under the pinned compiler (FINDINGS.md F-11).
+
 **The release profile over the whole suite, 2026-10-23** (the kernel split's
 redo, branch `feature/kernel-split-s3`, `docs/KERNEL-CRATES.md` §5.1; ledger
 1477 (9), 3377 (6)): `cargo xtask coverage --arch x86_64 --release`, the

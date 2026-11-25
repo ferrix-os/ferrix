@@ -7,6 +7,20 @@ Moved out of [`docs/BACKLOG.md`](../BACKLOG.md) on 2026-10-16. A decision is rec
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-11-26 (customer)** **DO-178C is `max`'s alone**: "then also fix the other
+  open gaps. But keep in mind that only max gets do178c". Read as: work on
+  DO-178C's findings takes its closing evidence on `max`, at level A's
+  objectives, from M7 (`docs/BUILD-FLAGS.md` §1 and §4; the microkernel
+  amendment of the targets, below); `fast` and `desktop` get none; `present`'s
+  interim DAL C until the flip is unchanged. The same day, to session
+  sebastian-27: "then your task is to also do m5". Read as: M5 as
+  `docs/MICROKERNEL.md` §8's table of stages defines it.
+* **2026-11-25 (customer)** **The consultant audits against the standards, not only
+  landings**: after an audit of `develop` against DO-178C found gaps no review had
+  (F-118 to F-120, F-11 reopened), "improve the instructions for the consultant
+  agent, so that we won't have this gap in the future anymore". `AGENTS.md`,
+  *Auditing against the standards*. How often an audit runs was not said and is
+  under *Waiting on the customer*.
 * **2026-11-05 (customer)** **The optional kernel parts live in
   `src/kernel/extensions/<group>/<name>/`**: "ok i like src/kernel/extensions".
   Over the design's `src/kernel-parts/` and the first suggestion, `src/lib/kernel/`

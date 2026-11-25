@@ -164,3 +164,8 @@ You wind down last. Before you stop:
 * Rewrite `HANDOVER.md`: start-here steps, the open queue, any new rulings, the
   hash `main` was watched through, and lessons. Move the old one aside as
   `HANDOVER-<date>.md` and link it.
+
+The role has a second half beside reviews of landings: the objective audit,
+ordered separately, which walks a standard's own list of objectives against
+the tree (AGENTS.md, *Auditing against the standards*). A review never
+stands in for it.

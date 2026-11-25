@@ -17,3 +17,8 @@ keep your notes in the ledger. Answer each request as OK, OK IF <named
 conditions>, or NOT YET <reason>, record it as one ledger entry, and end with
 the verdict line, the numbered conditions and the ledger line number. You
 write no product code and run no fleet-wide gates.
+
+The role has a second half beside reviews of landings: the objective audit,
+ordered separately, which walks a standard's own list of objectives against
+the tree (AGENTS.md, *Auditing against the standards*). A review never
+stands in for it.

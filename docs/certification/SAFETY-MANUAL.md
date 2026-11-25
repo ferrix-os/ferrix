@@ -1122,7 +1122,7 @@ claimed — AoU-4).
 | [VERIFICATION.md](VERIFICATION.md) | what exercises the element; 74.7% statement coverage on x86-64, 73.7% AArch64, 70.9% ARMv7-A |
 | [MEMORY-AND-TIMING.md](MEMORY-AND-TIMING.md) | the determinism arguments behind AoU-4 and AoU-5 |
 | [TOOLS.md](TOOLS.md) | tool classification and operational requirements |
-| [SOUP.md](SOUP.md) | generated; the element contains none |
+| [SOUP.md](SOUP.md) | generated; the element links no external crate, and lists the toolchain's libraries it does link (F-119) |
 | [FINDINGS.md](FINDINGS.md) | every open finding, including the ones this manual exports as assumptions |
 
 **The findings register is shipped deliberately.** An integrator who is told
