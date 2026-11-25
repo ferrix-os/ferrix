@@ -521,9 +521,28 @@ provider's otherwise.
 (flags only, from one source):** generic publication is compiled only into
 `personality=user` kernels. `present` and `desktop` publish no generic node on any
 board; their `platform/**` and `early.rs` are as they were. So **the rule "writing a
-driver never needs a change to the kernel" is shown by no booting profile yet**:
+driver never needs a change to the kernel" was shown by no booting profile then**:
 `test-driver-model` refuses with a named line until a `personality=user` kernel starts
 devmgr, and that landing owes it on aarch64 (D1, D20, D23, dm2-c9 and c10 FIRED, the
 real tree's L.device.62). Its statements H.DEV.7-8, L.discovery.8-12, L.device.60-65,
 V-19 and CLAIM's ARMv7-A sentence hold where publication is on; the made-up-tree
 checks and their one `generic` line run in every profile.
+
+**2026-11-26 (n27e): `test-driver-model` runs on a `personality=user` kernel, on
+AArch64.** `--personality user`, and `fast`, which carries it, pass the row on
+QEMU `virt` under TCG: the PL031 served under `ferrix,test-seconds` on the kernel
+ELF hashed before the test, and refused with its clock's provider gone. A hybrid is
+refused by name, so the row never goes green on a kernel that publishes nothing (C.2).
+`max` is not buildable, so this is not `max`'s row yet; the image is the test's own,
+not `fast`'s slotted one. Two things the first run found: devmgr's kernel start
+counted two of the four handles the first DEVICES message carries under
+`personality=user` beside its devices (the debug log and the cores' channel, not the
+block and `netd` channels added since), so a device-tree boot's 44 nodes overfilled
+that message and devmgr did not start ("DEVICES could not be written to devmgr's
+channel"); the room is now the message's own `handles` count. And the test's image
+had no init, whose end under `personality=user` is the machine's, before the match
+interrupt: pid 1 is a script that waits (`ferrix.init=`). `gate-rows` asks the row of
+generic publication, devmgr's kernel start, devmgr's generic match, `testseconds`
+and the test. The real tree's L.device.62: the published `/pmu`'s private line
+refused, the PL031's SPI minted and its match interrupt taken by the driver.
+Rows, controls and the review are in the commit.

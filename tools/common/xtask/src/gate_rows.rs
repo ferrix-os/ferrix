@@ -118,6 +118,24 @@ const TEST_GPU_RESTART: &[&str] = &[
     "check-native-stacks --release",
 ];
 
+/// The driver model's own row (`docs/DRIVER-MODEL.md` §8, D23): a device the
+/// kernel never named served on an unchanged kernel, which only a
+/// `personality=user` kernel shows (ledger 5896 C.2).
+const TEST_DRIVER_MODEL: &[&str] = &["test-driver-model --arch aarch64 --personality user"];
+
+/// What asks for [`TEST_DRIVER_MODEL`]: generic publication, the kernel's
+/// half of devmgr's start, devmgr's generic match, the test's driver and
+/// the test itself.
+const DRIVER_MODEL: &[&str] = &[
+    "src/kernel/src/discovery/tree.rs",
+    "src/kernel/src/discovery/board.rs",
+    "src/kernel/src/discovery/devmgr.rs",
+    "src/kernel/src/device/generic_check.rs",
+    "src/user/system/native/devmgr/src/generic.rs",
+    "src/user/system/native/drivers/test/seconds/",
+    "tools/common/xtask/src/driver_model.rs",
+];
+
 /// What asks for [`TEST_GPU_RESTART`]: the Intel driver, its fake and its
 /// library, devmgr, which starts it again, the chardev core its clients
 /// reach it through, and the gate's own program and judge.
@@ -702,8 +720,8 @@ fn rows_for(path: &str, image_crates: &BTreeSet<String>, rows: &mut Rows) {
 }
 
 /// The rows an area of the tree adds to whatever its kind of path asked:
-/// the memory-pressure row, the RAM scrubber's row and the Intel GPU's
-/// restart row.
+/// the memory-pressure row, the RAM scrubber's row, the driver model's row
+/// and the Intel GPU's restart row.
 fn area_rows(path: &str, rows: &mut Rows) {
     let under = |prefix: &str| path.starts_with(prefix);
     let reason = |rows: &mut Rows, why: &str| rows.reasons.push(format!("{path}: {why}"));
@@ -767,6 +785,13 @@ fn area_rows(path: &str, rows: &mut Rows) {
         reason(
             rows,
             "memkeep, the free-memory pacer: test-memkeep and its control",
+        );
+    }
+    if DRIVER_MODEL.iter().any(|prefix| under(prefix)) {
+        rows.add(TEST_DRIVER_MODEL);
+        reason(
+            rows,
+            "the driver model: a device the kernel never named, on a personality=user kernel",
         );
     }
     if GPU_RESTARTED.iter().any(|prefix| under(prefix))
@@ -1191,6 +1216,25 @@ mod tests {
         }
         let rows = rows_of(&["src/user/system/native/memscrub/src/main.rs"]);
         assert!(!rows.commands.iter().any(|c| c == TEST_MEMKEEP[0]));
+    }
+
+    #[test]
+    fn generic_publication_and_devmgrs_start_add_the_driver_model_row() {
+        for path in [
+            "src/kernel/src/discovery/tree.rs",
+            "src/kernel/src/discovery/devmgr.rs",
+            "src/user/system/native/devmgr/src/generic.rs",
+            "src/user/system/native/drivers/test/seconds/src/main.rs",
+            "tools/common/xtask/src/driver_model.rs",
+        ] {
+            let rows = rows_of(&[path]);
+            assert!(
+                rows.commands.iter().any(|c| c == TEST_DRIVER_MODEL[0]),
+                "{path}"
+            );
+        }
+        let rows = rows_of(&["src/user/system/native/devmgr/src/main.rs"]);
+        assert!(!rows.commands.iter().any(|c| c == TEST_DRIVER_MODEL[0]));
     }
 
     #[test]

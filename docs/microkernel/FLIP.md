@@ -62,7 +62,7 @@ Its loader starts only a verifying slot, so each image built for it signs one le
 | BACKLOG 569 | `fault_ahead`'s A7 controls | `built` of `on` (B.6) |
 | BACKLOG 577 | the window's W2-W8 | M5's flip |
 | BACKLOG 636 | `max` without IBPB | M5's flip |
-| BACKLOG 653 | `test-driver-model` on AArch64 | M5's flip |
+| BACKLOG 653 | `test-driver-model` on AArch64: done 2026-11-26 on `personality=user` and `fast` (`DRIVER-MODEL.md` §12); `max`'s run comes with its sweep | M5's flip |
 | BUILD-FLAGS 557 | `linux_abi=off` in a profile | no profile carries it |
 | MICROKERNEL 379 | coverage and rows at the flip | M5's flip |
 | K16 9, 11, 17, 56 | as BACKLOG 426, 429, 436 | `built` of `retyped` |
