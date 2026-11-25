@@ -84,7 +84,7 @@ version = "0.1.0"
 
 [[package]]
 name = "ferrix-ahci-driver"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-ahci",
  "ferrix-blkring",
@@ -109,7 +109,7 @@ version = "0.1.0"
 
 [[package]]
 name = "ferrix-blk"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkring",
  "ferrix-blkserve",
@@ -120,7 +120,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-blk-victim"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkclient",
  "ferrix-blkring",
@@ -130,7 +130,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-blkclient"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkring",
  "ferrix-native",
@@ -160,7 +160,7 @@ version = "0.1.0"
 
 [[package]]
 name = "ferrix-boot"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-boot-policy",
  "ferrix-bootinfo",
@@ -174,7 +174,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-boot-pixel7"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-bootinfo",
  "ferrix-elf",
@@ -193,7 +193,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-bootinfo"
-version = "0.3.0"
+version = "0.3.1"
 
 [[package]]
 name = "ferrix-btrfs"
@@ -233,7 +233,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-btrfsd"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkclient",
  "ferrix-blkring",
@@ -262,7 +262,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-channel-echo"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-rt",
 ]
@@ -277,7 +277,7 @@ version = "0.1.0"
 
 [[package]]
 name = "ferrix-crash-at-start"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkring",
  "ferrix-native-abi",
@@ -294,7 +294,7 @@ version = "0.1.0"
 
 [[package]]
 name = "ferrix-devmgr"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkring",
  "ferrix-devmgr-events-proto",
@@ -311,7 +311,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-devmgr-events"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-devmgr-events-proto",
  "ferrix-rt",
@@ -319,11 +319,11 @@ dependencies = [
 
 [[package]]
 name = "ferrix-devmgr-events-proto"
-version = "0.3.0"
+version = "0.3.1"
 
 [[package]]
 name = "ferrix-devmgr-proto"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkring",
  "ferrix-fdt",
@@ -348,7 +348,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-driver"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkring",
  "ferrix-blkserve",
@@ -367,7 +367,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-driver-derive"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -376,7 +376,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-driver-model-examples"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-driver",
  "ferrix-platform",
@@ -385,11 +385,11 @@ dependencies = [
 
 [[package]]
 name = "ferrix-drvupdate-proto"
-version = "0.3.0"
+version = "0.3.1"
 
 [[package]]
 name = "ferrix-drvupdated"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-drvupdate-proto",
  "ferrix-rt",
@@ -408,7 +408,7 @@ version = "0.1.0"
 
 [[package]]
 name = "ferrix-efifb"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkring",
  "ferrix-display-modes",
@@ -419,7 +419,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-elf"
-version = "0.3.0"
+version = "0.3.1"
 
 [[package]]
 name = "ferrix-errno"
@@ -427,7 +427,7 @@ version = "0.1.0"
 
 [[package]]
 name = "ferrix-eventlog"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-bootinfo",
  "ferrix-slots",
@@ -454,11 +454,11 @@ version = "0.1.0"
 
 [[package]]
 name = "ferrix-frame"
-version = "0.3.0"
+version = "0.3.1"
 
 [[package]]
 name = "ferrix-fsproto"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-linux-abi",
  "ferrix-vfs",
@@ -470,7 +470,7 @@ version = "0.1.0"
 
 [[package]]
 name = "ferrix-gc400-driver"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkring",
  "ferrix-gc400",
@@ -480,7 +480,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-gpu"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkring",
  "ferrix-display-modes",
@@ -494,11 +494,11 @@ dependencies = [
 
 [[package]]
 name = "ferrix-heap"
-version = "0.3.0"
+version = "0.3.1"
 
 [[package]]
 name = "ferrix-input"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-driver",
  "ferrix-inputctl",
@@ -516,7 +516,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-intel-driver"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkring",
  "ferrix-chardevctl",
@@ -531,7 +531,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-intel-fake"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkring",
  "ferrix-chardevctl",
@@ -550,7 +550,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-ipc-bench"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-native-abi",
  "ferrix-process-builder",
@@ -559,7 +559,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-ipc-equiv"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-native-abi",
  "ferrix-process-builder",
@@ -568,7 +568,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-kernel"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-bootinfo",
  "ferrix-crng",
@@ -591,7 +591,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-kernel-board-gs201-usb"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-bootinfo",
  "ferrix-fdt",
@@ -602,7 +602,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-kernel-board-stm32mp1"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-bootinfo",
  "ferrix-fdt",
@@ -614,7 +614,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-kernel-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-acpi",
  "ferrix-audit",
@@ -646,7 +646,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-kernel-item"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-audit",
  "ferrix-blkring",
@@ -674,7 +674,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-kernel-load"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-audit",
  "ferrix-blkring",
@@ -717,7 +717,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-kernel-logctl"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkring",
  "ferrix-kernel-core",
@@ -730,7 +730,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-kernel-net-ring"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkring",
  "ferrix-bootinfo",
@@ -746,7 +746,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-kernel-raised-checks"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-audit",
  "ferrix-bootinfo",
@@ -773,7 +773,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-kernel-settings"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-audit",
  "ferrix-bootinfo",
@@ -795,7 +795,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-lift-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-acpi",
  "ferrix-audit",
@@ -829,7 +829,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-lift-item"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-audit",
  "ferrix-blkring",
@@ -857,7 +857,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-lift-load"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-audit",
  "ferrix-blkring",
@@ -905,7 +905,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-lift-logctl"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkring",
  "ferrix-lift-core",
@@ -918,7 +918,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-lift-net-ring"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkring",
  "ferrix-bootinfo",
@@ -933,7 +933,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-lift-settings"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-audit",
  "ferrix-bootinfo",
@@ -954,7 +954,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-linuxd"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-bootinfo",
  "ferrix-lift-core",
@@ -970,14 +970,14 @@ dependencies = [
 
 [[package]]
 name = "ferrix-linuxd-dies"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-rt",
 ]
 
 [[package]]
 name = "ferrix-lode"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-fat",
  "ferrix-linux-abi",
@@ -992,11 +992,11 @@ dependencies = [
 
 [[package]]
 name = "ferrix-lode-capture"
-version = "0.3.0"
+version = "0.3.1"
 
 [[package]]
 name = "ferrix-lode-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-slots",
  "ruzstd",
@@ -1012,7 +1012,7 @@ version = "0.1.0"
 
 [[package]]
 name = "ferrix-ltdc"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkring",
  "ferrix-displayctl",
@@ -1023,7 +1023,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-mce-victim"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkring",
  "ferrix-chardevctl",
@@ -1033,7 +1033,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-memkeep"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-native-abi",
  "ferrix-rt",
@@ -1041,7 +1041,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-memscrub"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-native-abi",
  "ferrix-rt",
@@ -1049,7 +1049,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-native"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-linux-abi",
  "ferrix-native-abi",
@@ -1074,7 +1074,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-net-driver"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-native-abi",
  "ferrix-netring",
@@ -1086,7 +1086,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-netd"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkclient",
  "ferrix-devmgr-proto",
@@ -1121,7 +1121,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-netswitch"
-version = "0.3.0"
+version = "0.3.1"
 
 [[package]]
 name = "ferrix-nettcp"
@@ -1141,7 +1141,7 @@ version = "0.1.0"
 
 [[package]]
 name = "ferrix-nvme-driver"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkring",
  "ferrix-blkserve",
@@ -1163,7 +1163,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-paging"
-version = "0.3.0"
+version = "0.3.1"
 
 [[package]]
 name = "ferrix-partition"
@@ -1171,11 +1171,11 @@ version = "0.1.0"
 
 [[package]]
 name = "ferrix-partition-desc"
-version = "0.3.0"
+version = "0.3.1"
 
 [[package]]
 name = "ferrix-partition-hello"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-native-abi",
  "ferrix-rt",
@@ -1183,7 +1183,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-partmgr"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-native-abi",
  "ferrix-partition-desc",
@@ -1205,14 +1205,14 @@ dependencies = [
 
 [[package]]
 name = "ferrix-platform"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-driver",
 ]
 
 [[package]]
 name = "ferrix-pong"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-native-abi",
  "ferrix-rt",
@@ -1220,7 +1220,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-power-driver"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkring",
  "ferrix-linux-abi",
@@ -1231,7 +1231,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-process-builder"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-bootinfo",
  "ferrix-elf",
@@ -1253,7 +1253,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-registers"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-driver-derive",
 ]
@@ -1271,7 +1271,7 @@ version = "0.1.0"
 
 [[package]]
 name = "ferrix-restricted-check"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-linux-abi",
  "ferrix-native-abi",
@@ -1280,7 +1280,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-rt"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-linux-abi",
  "ferrix-native",
@@ -1293,7 +1293,7 @@ version = "0.1.0"
 
 [[package]]
 name = "ferrix-rtl8169-driver"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-native-abi",
  "ferrix-netring",
@@ -1305,21 +1305,21 @@ dependencies = [
 
 [[package]]
 name = "ferrix-sched"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-fallible",
 ]
 
 [[package]]
 name = "ferrix-sched-edf"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-sched",
 ]
 
 [[package]]
 name = "ferrix-sdmmc"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkring",
  "ferrix-blkserve",
@@ -1349,7 +1349,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-slots"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-bootinfo",
  "ferrix-partition",
@@ -1362,7 +1362,7 @@ version = "0.1.0"
 
 [[package]]
 name = "ferrix-snd"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkring",
  "ferrix-native-abi",
@@ -1410,7 +1410,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-svc-proto"
-version = "0.3.0"
+version = "0.3.1"
 
 [[package]]
 name = "ferrix-sync"
@@ -1422,7 +1422,7 @@ version = "0.1.0"
 
 [[package]]
 name = "ferrix-test-seconds-driver"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-driver",
  "ferrix-platform",
@@ -1450,7 +1450,7 @@ version = "0.1.0"
 
 [[package]]
 name = "ferrix-usbdev"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkring",
  "ferrix-dwc3",
@@ -1462,7 +1462,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-usbhid"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkring",
  "ferrix-inputctl",
@@ -1479,7 +1479,7 @@ version = "0.1.0"
 
 [[package]]
 name = "ferrix-usbserial"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-linux-abi",
  "ferrix-native-abi",
@@ -1497,7 +1497,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-vdagent"
-version = "0.3.0"
+version = "0.3.1"
 
 [[package]]
 name = "ferrix-vdso"
@@ -1531,7 +1531,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-virtio-console"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-virtio",
 ]
@@ -1579,7 +1579,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-vport"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-blkring",
  "ferrix-linux-abi",
@@ -1609,7 +1609,7 @@ dependencies = [
 
 [[package]]
 name = "ferrix-yt6801-driver"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-dwmac",
  "ferrix-native-abi",
@@ -1863,7 +1863,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "xtask"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-adb",
  "ferrix-argon2",

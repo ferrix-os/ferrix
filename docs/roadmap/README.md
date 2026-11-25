@@ -163,7 +163,7 @@ The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
   manifest; `present` keeps it off until a release key exists).
 
 - **Since 2026-11-05** (details in [Where it stands](where-it-stands.md)):
-  v0.3.0 (tagged 2026-11-08) and Rust 1.99.1; memory under pressure (the heap
+  v0.3.0 (tagged 2026-11-08), v0.3.1 (2026-11-25) and Rust 1.99.1; memory under pressure (the heap
   reclaims at the floor and asks the OOM kill for room, a btrfs abort no longer
   poisons reads, `memkeep` keeps free memory above a mark), a hung program
   restarted rather than the machine reset, kernel stacks of five, six and five

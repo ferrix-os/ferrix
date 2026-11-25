@@ -20,7 +20,7 @@
 //! `uname -a` reads
 //!
 //! ```text
-//! Ferrix ferrix 6.1.0-ferrix #1 Ferrix 0.3.0 x86_64 GNU/Linux
+//! Ferrix ferrix 6.1.0-ferrix #1 Ferrix 0.3.1 x86_64 GNU/Linux
 //! ```
 //!
 //! `nodename` and `domainname` are the two a program may change, with

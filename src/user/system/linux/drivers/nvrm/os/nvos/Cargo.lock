@@ -15,12 +15,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "ferrix-linux-abi"
+name = "ferrix-errno"
 version = "0.1.0"
 
 [[package]]
+name = "ferrix-linux-abi"
+version = "0.1.0"
+dependencies = [
+ "ferrix-errno",
+]
+
+[[package]]
 name = "ferrix-native"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ferrix-linux-abi",
  "ferrix-native-abi",
@@ -30,7 +37,7 @@ dependencies = [
 name = "ferrix-native-abi"
 version = "0.1.0"
 dependencies = [
- "ferrix-linux-abi",
+ "ferrix-errno",
 ]
 
 [[package]]

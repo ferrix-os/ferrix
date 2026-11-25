@@ -29,6 +29,83 @@ runners 418. Each pinned download that such a host serves names a mirror
 too, which is checked against the same pin. See the [discovery plan](marketing/PLAYBOOK.md#what-to-do-next-in-order)
 for how future releases should be presented.
 
+## v0.3.1 (2026-11-25), under memory pressure
+
+Five days of work after v0.3.0 (2026-11-08 to 2026-11-13) and one small
+call since: most of it is what the kernel does when memory runs short and
+when a program hangs, and how long the calls a game makes all day take.
+The live ISO and its installer work as v0.3.0's do. Download
+`ferrix-v0.3.1-x86_64.iso` below, check it against `SHA256SUMS`, and follow
+[Try Ferrix](https://github.com/ferrix-os/ferrix/blob/v0.3.1/docs/TRY-FERRIX.md).
+
+**This is still a development preview, not a finished system.** What
+v0.2.0's notes say about Secure Boot, signatures, the IOMMU and the
+certification claim still holds; it is repeated under *What does not
+work, yet*.
+
+New since v0.3.0:
+
+- **Memory under pressure.** The N150's hangs of 2026-11-08 were one
+  chain: the kernel heap emptied, a btrfs transaction aborted for want of
+  memory, and every read after it failed. Now the heap reclaims at its
+  floor and asks the OOM killer for room when no clean cache is left, an
+  aborted transaction no longer poisons reads, a btrfs edit is admitted
+  for the memory it will need before it starts, and a heap request above
+  a page falls back to single frames. `memkeep`, a ring-3 service on the
+  desktop image, keeps free memory above a mark
+  ([docs/MEMKEEP.md](https://github.com/ferrix-os/ferrix/blob/v0.3.1/docs/MEMKEEP.md)).
+- **A hung service is restarted, not the machine reset.** Init feeds
+  `/dev/watchdog` from a thread of its own and keeps a watchdog per
+  service; lode, auth and the compositor ping it from their own loops,
+  and one that stops is started again
+  ([docs/WATCHDOG-STAGES.md](https://github.com/ferrix-os/ferrix/blob/v0.3.1/docs/WATCHDOG-STAGES.md)).
+- **Package updates, as a mechanism.** `pkg update`, `pkg newer` and
+  `pkg upgrade` read a signed repository index and apply an upgrade as one
+  transaction
+  ([docs/UPDATES.md](https://github.com/ferrix-os/ferrix/blob/v0.3.1/docs/UPDATES.md)).
+  No image carries a package key yet, so nothing is served to this ISO.
+- **An exit is never refused, and is quick.** A process's end empties its
+  address space with nothing a refusal can stop, orders its regions
+  without recursion, and the heap gives an emptied page back without
+  walking a list: a 60,000-region exit that took 3.4 s takes 48 to 58 ms
+  in the test machine, and a kill on the N150 that went 156 s unanswered
+  is answered after 2 s.
+- **Cheaper calls.** A space's resident counts and `/proc/meminfo`'s
+  figures are kept, not walked: over 15,000 regions under KVM,
+  `/proc/<pid>/status` went from 522 to 15.5 µs and `stat` from 511 to
+  9.3 µs. A futex wait blocks on no global queue; an epoll wait walks its
+  registrations only while one needs it; a private anonymous mapping that
+  continues its neighbour joins it, so Wine's views and `brk` merge as on
+  Linux; a big fork write-protects in place; sleeping calls honour the
+  thread's timer slack as Linux does.
+- **Intel graphics on the N150**: the GT's interrupt is handled again
+  after its acknowledgement (the driver had been waiting for its 1 ms
+  poll), and the driver's ioctl surface is fuzzed. Still behind an option
+  this image does not set.
+- **Smaller things.** A boot splash on every desktop image; `mlock`,
+  `mlock2`, `munlock`, `mlockall` and `munlockall` are accepted with
+  Linux's checks, where they were `ENOSYS` (nothing is marked: anonymous
+  memory never leaves RAM here, but a clean page of a disk file can
+  still be reclaimed and read again, and `VmLck` reads 0); the Linux
+  layer's source lives in its own crates under
+  `src/kernel/extensions/personality/linux/`, and the kernel's core
+  builds without it; Ferrix calls itself 0.3.1.
+- **Fixed:** a process whose exit had to unmap tens of thousands of
+  regions recursed deep into the kernel stack (F-112); a release reached
+  from inside another ran inside it (F-113); an exit could be refused
+  half way for want of memory (F-114); a file truncated and written
+  again on btrfs read as zeros once its page was reclaimed, until a
+  reboot (F-116).
+
+What does not work, yet, is what v0.3.0's list says, unchanged.
+
+What was checked for this release: on the landing, the image row's gates
+(`check`, the release build, boots on x86-64 under KVM and under QEMU's
+emulator, AArch64 and ARMv7-A at four and at two processors) and
+`test-procfs`; CI on the promoted commit; and the release workflow's dry
+run. No new pictures: no screen changed that v0.3.0's do not show. Real
+PCs, VirtualBox and VMware were not checked.
+
 ## v0.3.0 (2026-11-08), surviving bad hardware
 
 Nine days of work since v0.2.0, most of it below the desktop: Ferrix now

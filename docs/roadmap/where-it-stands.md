@@ -100,7 +100,9 @@ on a branch is not listed.
 * **Rust 1.99.1** replaces 1.97.1 (2ce25a724, 2026-11-06), with the lint fixes
   it brings and the components re-pinned. **v0.3.0** is tagged on 589fcb096
   (2026-11-08, `docs/RELEASES.md`); the workspace's version and `uname` read
-  0.3.0 (182712930).
+  0.3.0 (182712930). **v0.3.1** (2026-11-25, `docs/RELEASES.md`) carries
+  develop's work of 2026-11-08 to 2026-11-13 and `mlock`'s family accepted
+  (9a40f8e09); the workspace's version and `uname` read 0.3.1.
 * **Exit and release** (`docs/EXIT-TEARDOWN.md`, `docs/HEAP-SLAB-GIVE-BACK.md`).
   An exit's unmap orders its regions without recursion (557f73b11, c9b98d27a,
   41950ec38: F-112 closed); a release reached from another runs after it, not
