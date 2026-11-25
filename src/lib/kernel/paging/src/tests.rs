@@ -1294,6 +1294,10 @@ fn unmapping_releases_what_a_prune_per_leaf_released<E: Encoding>() {
         // A range starting inside a block.
         (&[(512, 512, 0x4020_0000)], &[(513, 4)]),
     ];
+    // The reference prunes after every leaf, a table's read per page: the
+    // two shapes of full tables are millions of descriptor reads, hours of
+    // interpretation over the six encodings. Miri checks the other four.
+    let shapes = if cfg!(miri) { &shapes[2..] } else { shapes };
     for keep_top in [false, true] {
         for (maps, ranges) in shapes {
             let (mut memory, mut mapper) = Memory::with_root::<E>();

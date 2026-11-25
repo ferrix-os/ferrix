@@ -906,8 +906,12 @@ fn a_give_back_reads_a_page_not_the_list() {
     let mut heap = Heap::new();
     // Keepers: 200 pages, one object of each held, the other 255 free, so
     // 51,000 objects stay on the list throughout.
-    let keeper_pages = 200;
-    let emptied_pages = 400;
+    // Under Miri a fiftieth of each: at full length CI's Miri step ran to
+    // its six-hour limit in this test, and what Miri adds, the links'
+    // provenance, shows on twelve pages as on six hundred. The bound on the
+    // list's length is the host's to check.
+    let keeper_pages = if cfg!(miri) { 4 } else { 200 };
+    let emptied_pages = if cfg!(miri) { 8 } else { 400 };
     let keepers: Vec<u64> = (0..keeper_pages * SMALL_PER_PAGE)
         .map(|_| heap.allocate(&mut pages, request).unwrap())
         .collect();
