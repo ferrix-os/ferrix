@@ -639,7 +639,15 @@ fn run(args: &Args) -> Result<()> {
     // (`docs/TEST-TIME.md`, B4). Every part runs to its end whichever fails,
     // and the first failure in the order the steps used to run in is the
     // error.
-    let beside = Beside::start()?;
+    let beside = if side_is_apart() {
+        println!(
+            "\n   the workspaces of their own are not run here ({SIDE}=apart): \
+             `cargo xtask check-side` runs them, in another job"
+        );
+        None
+    } else {
+        Some(Beside::start()?)
+    };
     let ((said, audits), main) = std::thread::scope(|scope| {
         let audits = scope.spawn(|| at_once(AUDITS));
         let main = main_workspace(&root, args);
@@ -653,7 +661,7 @@ fn run(args: &Args) -> Result<()> {
     });
     println!("\n== the audits, run beside the steps above");
     print!("{said}");
-    let side = beside.finish();
+    let side = beside.map_or(Ok(()), Beside::finish);
     audits?;
     let fast = main?;
     side?;
@@ -781,8 +789,100 @@ fn parse_side_jobs(value: Option<&str>) -> Result<usize> {
     }
 }
 
+/// Set to `apart`, `check` leaves the workspaces of their own to a
+/// `cargo xtask check-side` somewhere else: CI's `check` job, whose runner
+/// has four cores and ran both in 38 minutes, runs them in jobs of their own
+/// (`.github/workflows/ci.yml`, `docs/TEST-TIME.md`, *Cut E1*). Unset, as on
+/// every desk and in the gate pool, `check` is whole.
+const SIDE: &str = "FERRIX_SIDE";
+
+/// Whether [`SIDE`] says `check-side` runs somewhere else.
+fn side_is_apart() -> bool {
+    std::env::var(SIDE).is_ok_and(|value| value.trim() == "apart")
+}
+
+/// Set to `K/N`, `check-side` runs the K-th of N shares of its lanes, so
+/// that N jobs each given one share run them all ([`Shard`]).
+const SIDE_SHARD: &str = "FERRIX_SIDE_SHARD";
+
+/// One of `of` shares of `check-side`'s lanes, the one numbered `index`
+/// from 0: lanes are dealt out in turn in the order they start in, heaviest
+/// first ([`lane_order`]), so the shares weigh about the same and each lane
+/// is in exactly one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Shard {
+    index: usize,
+    of: usize,
+}
+
+impl Shard {
+    /// Whether the lane that starts `rank`-th is this share's.
+    const fn takes(self, rank: usize) -> bool {
+        rank % self.of == self.index
+    }
+
+    /// Whether this is the share that also runs the steps that are not
+    /// units, which read the whole tree and run once.
+    const fn is_first(self) -> bool {
+        self.index == 0
+    }
+}
+
+/// [`SIDE_SHARD`]'s share, or none when it is unset.
+fn side_shard() -> Result<Option<Shard>> {
+    parse_side_shard(std::env::var(SIDE_SHARD).ok().as_deref())
+}
+
+/// [`side_shard`] from the variable's value.
+fn parse_side_shard(value: Option<&str>) -> Result<Option<Shard>> {
+    let Some(text) = value else {
+        return Ok(None);
+    };
+    let parsed = text.trim().split_once('/').and_then(|(share, of)| {
+        let share = share.parse::<usize>().ok()?;
+        let of = of.parse::<usize>().ok()?;
+        let is_a_share = share >= 1 && share <= of;
+        is_a_share.then(|| Shard {
+            index: share - 1,
+            of,
+        })
+    });
+    parsed.map(Some).ok_or_else(|| {
+        Error::new(format!(
+            "{SIDE_SHARD}={text}: give K/N, the K-th of N shares, 1 <= K <= N"
+        ))
+    })
+}
+
+/// The lanes of `shard`'s share, in the order they were in.
+fn lanes_of(lanes: Vec<Vec<SideUnit>>, shard: Shard) -> Vec<Vec<SideUnit>> {
+    let weights: Vec<usize> = lanes.iter().map(|lane| lane_weight(lane)).collect();
+    let mut rank_of = vec![0_usize; lanes.len()];
+    for (rank, lane) in lane_order(&weights).into_iter().enumerate() {
+        if let Some(slot) = rank_of.get_mut(lane) {
+            *slot = rank;
+        }
+    }
+    lanes
+        .into_iter()
+        .zip(rank_of)
+        .filter(|&(_, rank)| shard.takes(rank))
+        .map(|(lane, _)| lane)
+        .collect()
+}
+
+/// How much a lane compiles: its units' packages.
+fn lane_weight(lane: &[SideUnit]) -> usize {
+    lane.iter().map(|unit| packages_in(&unit.lock)).sum()
+}
+
 /// [`side_workspaces`] one after another, each in this process.
 fn side_workspaces_in_turn(root: &std::path::Path) -> Result<()> {
+    if side_shard()?.is_some() {
+        return Err(Error::new(format!(
+            "{SIDE_SHARD} shares out lanes, and {SIDE_JOBS}=1 runs none: unset one"
+        )));
+    }
     // loom's models are of the kernel's orderings: the item's, never cached
     // (the certification consultant, ledger line 1447).
     loom(root)?;
@@ -949,23 +1049,38 @@ struct SideRun {
 /// fail; then each log is printed whole in the order the units always ran
 /// in, and the first failure in that order is the error.
 fn side_workspaces_at_once(root: &std::path::Path, jobs: usize) -> Result<()> {
-    step("auth: no sabotage in the environment", no_sabotage)?;
+    let shard = side_shard()?;
     let (apps, dirs) = app_manifests()?;
-    for app in &apps {
-        let name = &app.recipe.package.name;
-        // A search of the whole tree, so never a unit: it reads the item.
-        step(
-            &format!("app {name}: nothing outside its folder names it"),
-            || crate::apps::stays_in_its_folder(app),
-        )?;
+    // The steps that are not units run once, in the first share.
+    if shard.is_none_or(Shard::is_first) {
+        step("auth: no sabotage in the environment", no_sabotage)?;
+        for app in &apps {
+            let name = &app.recipe.package.name;
+            // A search of the whole tree, so never a unit: it reads the item.
+            step(
+                &format!("app {name}: nothing outside its folder names it"),
+                || crate::apps::stays_in_its_folder(app),
+            )?;
+        }
     }
     let lanes = side_lanes(root, &apps, &dirs);
+    let lanes = match shard {
+        Some(shard) => {
+            let all = lanes.len();
+            let lanes = lanes_of(lanes, shard);
+            println!(
+                "\n   {SIDE_SHARD}: share {} of {}, {} of the {all} lanes",
+                shard.index + 1,
+                shard.of,
+                lanes.len()
+            );
+            lanes
+        }
+        None => lanes,
+    };
     let logs = paths::target_dir().join("check-side");
     std::fs::create_dir_all(&logs)?;
-    let weights: Vec<usize> = lanes
-        .iter()
-        .map(|lane| lane.iter().map(|unit| packages_in(&unit.lock)).sum())
-        .collect();
+    let weights: Vec<usize> = lanes.iter().map(|lane| lane_weight(lane)).collect();
     let order = lane_order(&weights);
     let units: usize = lanes.iter().map(Vec::len).sum();
     println!(
@@ -3337,6 +3452,23 @@ mod tests {
 
     #[test]
     fn side_units_run_heaviest_lane_first_and_the_apps_share_one_lane() {
+        assert_eq!(parse_side_shard(None).unwrap(), None);
+        assert_eq!(
+            parse_side_shard(Some(" 2/3 ")).unwrap(),
+            Some(Shard { index: 1, of: 3 })
+        );
+        for refused in ["0/3", "4/3", "3", "a/b", "1/0", ""] {
+            assert!(parse_side_shard(Some(refused)).is_err(), "{refused}");
+        }
+        // Every lane is in exactly one share, whatever the number of shares.
+        for of in 1..=6 {
+            for rank in 0..40 {
+                let takers = (0..of)
+                    .filter(|&index| Shard { index, of }.takes(rank))
+                    .count();
+                assert_eq!(takers, 1, "rank {rank} of {of} shares");
+            }
+        }
         assert_eq!(parse_side_jobs(None).unwrap(), 4);
         assert_eq!(parse_side_jobs(Some("1")).unwrap(), 1);
         assert_eq!(parse_side_jobs(Some(" 6 ")).unwrap(), 6);

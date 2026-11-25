@@ -1135,15 +1135,19 @@ mod fair_shares {
         let (served, _) = serve(&[COST_CEILING, 100, 400], &[false; 3], 1000, true);
         assert_eq!(served, vec![0, 800, 200]);
         // A million requests at the ceiling leave the clock far from its end.
+        // Under Miri a million rounds were 25 of CI's 47 minutes (run
+        // 42482894038) and every round is the same four calls: ten thousand
+        // there, and the clock's reach is what `cargo test` measures.
+        let rounds: u32 = if cfg!(miri) { 10_000 } else { 1_000_000 };
         let mut fair = Fair::new();
         let mut last = 0;
-        for _ in 0..1_000_000 {
+        for _ in 0..rounds {
             let ticket = fair.enqueue(1, last, COST_CEILING, false).unwrap();
             last = ticket.finish;
             assert!(fair.go(ticket.id));
             fair.done(None);
         }
-        assert_eq!(last, 1_000_000 * u128::from(COST_CEILING));
+        assert_eq!(last, u128::from(rounds) * u128::from(COST_CEILING));
         // A cost past the ceiling is the ceiling.
         assert_eq!(
             fair.enqueue(2, 0, u64::MAX, false).unwrap().finish
