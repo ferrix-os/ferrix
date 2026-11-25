@@ -202,9 +202,9 @@ it reads in that session.
   Annex A rows for the SIL. Give each one row in
   `docs/certification/OBJECTIVES.md`: the evidence that meets it, by file
   and gate; or the open finding that says it is unmet; or why it does not
-  apply. A row with none of the three is a new finding. That file does not
-  exist yet: the first audit that holds a standard's text creates it and
-  lists it in the README's index. Work from the standard's text. A session
+  apply. A row with none of the three is a new finding. That file exists as
+  a skeleton holding no objective (2026-11-26): the first audit that holds a
+  standard's text writes its rows. Work from the standard's text. A session
   that does not have the text says so, in the row and in every finding
   that cites a clause, asks the customer for it, and never fills a row
   from memory as if it were read.
@@ -278,9 +278,12 @@ The review ledger is on the gate host:
 conditions and its outcome, and its open queue at the end. Beside it is
 `HANDOVER.md`. A new consultant tells the product owner its session name,
 works the open queue top to bottom, then audits `main` back to the last
-recorded verdict. The ledger is in no repository yet (F-120): until it is,
-cite an entry by its date and subject as well as its line, and never edit
-or reflow an entry above the last one.
+recorded verdict. Since 2026-11-26 that directory is a local git repository
+with no remote (F-120 is narrowed, not closed): after each entry run
+`tools/common/release/ledger-commit.py`, which commits the new lines and
+refuses if any line already committed changed. Never edit or reflow an entry
+above the last one; cite an entry by its date and subject as well as its
+line until the ledger has a copy off this host.
 
 ---
 

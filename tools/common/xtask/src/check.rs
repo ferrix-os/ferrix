@@ -308,12 +308,14 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
         ],
     ),
     // What a commit must say to name a review, and that a review still to
-    // come names none (ledger 6846 C1); the frame check's and the depth row's
-    // own readers, which run on images, proved without one.
+    // come names none (ledger 6846 C1); the ledger's append-only commit, which
+    // must refuse every planted change (F-120); the frame check's and the depth
+    // row's own readers, which run on images, proved without one.
     (
         "the certification verdict and the frame readers",
         &[
             &["tools/common/release/cert-verdict.py", "--self-test"],
+            &["tools/common/release/ledger-commit.py", "--self-test"],
             &["tools/common/check/check-frames.py", "--self-test"],
             &[
                 "tools/common/check/compare-kernel-symbols.py",

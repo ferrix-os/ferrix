@@ -3374,12 +3374,37 @@ from memory, not checked against the texts.) The reviews being internal
 (F-27) is a separate matter: an internal review that cannot be retrieved as
 it was written is not a record of either kind.
 
-*Closes when* the ledger is in a repository -- its own, or this one's
-`docs/certification/reviews/` -- pushed as landings are; an entry has an
-identifier that does not move (the ledger's own running numbers, written
-into the entry, would do); a gate fails a commit citing an entry the
-repository does not hold; and the handovers beside it are kept the same
-way.
+*Narrowed 2026-11-26 (night run, agent sebastian-27d).* True now: both
+`~/.local/share/ferrix/cert-consultant/` and
+`~/.local/share/ferrix/mk-handover/` are local git repositories (branch
+`main`, one commit each, "Ledger state as found on 2026-11-26"), with no hook
+installed, so no session's append is blocked; and
+`tools/common/release/ledger-commit.py` commits the ledger's new lines and
+refuses when the committed bytes are not a prefix of the file on disk, with
+a `--self-test` (run by `cargo xtask check`) that plants six changes and sees
+each refused. What stays open: there is no remote and no copy off this host,
+so the disk's loss still loses the record (where it is published is the
+customer's decision, and it has not been asked tonight), and a local history
+with no copy elsewhere can be rewritten by any session on this host, so it
+shows an edit only while nobody rewrites it too: the copy off the host is
+what makes it a record; the history starts
+on 2026-11-26, so an edit made to the ledger before that day cannot be seen;
+nothing runs `ledger-commit.py` by itself, so a commit exists only when
+someone runs it, and the handovers' later changes (`mk-handover` already
+shows one uncommitted) are committed by nobody; the entries have no identifier that does not move (a line
+number still names an entry only while no line above it changes, which the
+append-only check now guards but the ledger's own text does not carry); and
+no gate fails a commit citing an entry the repository does not hold. The
+other directories of `cert-consultant/` (`archive`, patches, logs) were
+committed as found and are not append-checked.
+
+*Closes when* the ledger has a copy off this host that the customer chose,
+pushed as landings are; `ledger-commit.py` (or a hook that cannot reject
+another session's append) runs after each entry; an entry has an identifier
+that does not move (the ledger's own running numbers, written into the entry,
+would do); and a gate fails a commit citing an entry the repository does not
+hold; and the handovers beside the ledger are kept the same way. The first
+of these is the customer's.
 
 ### F-30 — no field history
 **Moderate.** Every rating here is argued from construction and verification.
