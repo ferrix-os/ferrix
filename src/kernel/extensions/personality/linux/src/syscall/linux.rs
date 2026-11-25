@@ -453,6 +453,12 @@ fn with_process(call: Syscall, args: &SyscallArgs, process: &Process) -> Result<
         Syscall::Msync => memory::sys_msync(process, a[0], a[1], truncate(a[2])),
         Syscall::Madvise => memory::sys_madvise(process, a[0], a[1], attributes::int(a[2])),
         Syscall::Mincore => memory::sys_mincore(process, a[0], a[1], a[2]),
+        Syscall::Mlock => memory::sys_mlock(process, a[0], a[1], 0),
+        Syscall::Mlock2 => memory::sys_mlock(process, a[0], a[1], truncate(a[2])),
+        Syscall::Munlock => memory::sys_munlock(process, a[0], a[1]),
+        Syscall::Mlockall => memory::sys_mlockall(process, truncate(a[0])),
+        // Nothing is locked, so there is nothing to unlock.
+        Syscall::Munlockall => Ok(0),
         // ARMv7-A only: no other table decodes it.
         Syscall::ArmCacheflush => memory::sys_cacheflush(process, a[0], a[1], a[2]),
         Syscall::Unshare => namespace::sys_unshare(process, a[0]),

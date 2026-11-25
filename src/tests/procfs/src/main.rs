@@ -27,6 +27,12 @@
 //!   having written the first two bytes and left the rest; an address off a
 //!   page boundary is `EINVAL`, a vector at address 0 `EFAULT`, and a length
 //!   of 0 answers 0.
+//! * **mlock**: `mlock`, `mlock2`, `munlock`, `mlockall` and `munlockall`,
+//!   which `sshdt` and `authd` keep their secrets out of swap with. Over a
+//!   mapping each answers 0, an address inside a page and a length of 0
+//!   included; an unknown `mlock2` flag, `mlockall` with no flag and with
+//!   `MCL_ONFAULT` alone are `EINVAL`; and with a page of the range unmapped
+//!   `mlock` and `munlock` are `ENOMEM`.
 //! * **debug** (`docs/DEBUG.md` §1): a thread blocked in `read` of a pipe,
 //!   read from outside it through `/proc/self/task/<tid>/syscall`, `wchan`
 //!   and `stack`; a uid 1000 child refused them but `wchan`, which reads
@@ -323,6 +329,83 @@ fn memfd() -> Step {
         Reopen::Opens(libc::O_RDWR),
     )
     .map(drop)
+}
+
+/// `mlock` and its four relatives over three pages, then over the same
+/// range with a hole in it.
+///
+/// Run as root, so no limit is in the way. The locks are accepted and change
+/// nothing a program can see but the answers, which are Linux's.
+fn mlock() -> Step {
+    const PAGES: usize = 3;
+    /// `MLOCK_ONFAULT`, `mlock2`'s one flag.
+    const ONFAULT: libc::c_uint = 1;
+    let page = 4096;
+    // SAFETY: a fresh private anonymous mapping, unmapped before returning.
+    let at = unsafe {
+        libc::mmap(
+            std::ptr::null_mut(),
+            PAGES * page,
+            libc::PROT_READ | libc::PROT_WRITE,
+            libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+            -1,
+            0,
+        )
+    };
+    if at == libc::MAP_FAILED {
+        return Err(format!("mmap: errno {}", errno()));
+    }
+    let whole = PAGES * page;
+    let expect = |what: &str, got: c_int, want: c_int| {
+        let failed = if want == 0 {
+            got != 0
+        } else {
+            got != -1 || errno() != want
+        };
+        if failed {
+            return Err(format!("{what}: {got}, errno {}, wanted {want}", errno()));
+        }
+        Ok(())
+    };
+    let outcome = (|| {
+        // SAFETY: every call below names the mapping above or nothing; a
+        // lock moves no memory and writes through no pointer.
+        unsafe {
+            expect("mlock", libc::mlock(at, whole), 0)?;
+            expect("munlock", libc::munlock(at, whole), 0)?;
+            // Off a page boundary is rounded out, not refused.
+            expect("mlock inside a page", libc::mlock(at.byte_add(1), 1), 0)?;
+            expect("mlock of nothing", libc::mlock(at, 0), 0)?;
+            expect("mlock2", libc::mlock2(at, whole, ONFAULT), 0)?;
+            expect(
+                "mlock2 with an unknown flag",
+                libc::mlock2(at, whole, 2),
+                libc::EINVAL,
+            )?;
+            expect("mlockall of nothing", libc::mlockall(0), libc::EINVAL)?;
+            expect(
+                "mlockall on fault alone",
+                libc::mlockall(libc::MCL_ONFAULT),
+                libc::EINVAL,
+            )?;
+            expect("mlockall", libc::mlockall(libc::MCL_CURRENT), 0)?;
+            expect("munlockall", libc::munlockall(), 0)?;
+            if libc::munmap(at.byte_add(page), page) != 0 {
+                return Err(format!("munmap: errno {}", errno()));
+            }
+            expect("mlock over a hole", libc::mlock(at, whole), libc::ENOMEM)?;
+            expect("munlock over a hole", libc::munlock(at, whole), libc::ENOMEM)?;
+            expect("mlock before the hole", libc::mlock(at, page), 0)?;
+            expect("munlock before the hole", libc::munlock(at, page), 0)?;
+        }
+        Ok(())
+    })();
+    // SAFETY: the mapping made above; its unmapped page is skipped.
+    unsafe {
+        let _ = libc::munmap(at, page);
+        let _ = libc::munmap(at.byte_add(2 * page), page);
+    }
+    outcome
 }
 
 /// `mincore` over four pages, then over the same range with a hole in it.
@@ -818,7 +901,7 @@ fn environ_reads_memory() -> Step {
 }
 
 fn main() {
-    let steps: [Named; 9] = [
+    let steps: [Named; 10] = [
         ("tcp", tcp),
         ("unix", unix),
         ("eventfd", eventfd),
@@ -827,6 +910,7 @@ fn main() {
         ("memfd", memfd),
         ("inodes", inodes),
         ("mincore", mincore),
+        ("mlock", mlock),
         ("debug", debug),
     ];
     for (name, step) in steps {

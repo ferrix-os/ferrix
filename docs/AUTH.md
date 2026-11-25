@@ -88,7 +88,7 @@ Each fact below was read from the tree at `1a8bea54`.
 | Jobs from paths | `job_for_cgroup` gives `MANAGE` to a caller who may write that cgroup's `cgroup.procs`, and delegation chowns that file to a user. | `src/lib/proto/native-abi/src/nr.rs:201-211`; `docs/CGROUPS.md` §3.1, §5 |
 | `/proc/<pid>` | Owned by the process's effective ids, always. `PR_SET_DUMPABLE` is kept as Linux keeps it -- inherited across `fork`, cleared by a set-id `execve` or a change of effective or filesystem ids, set again by any other `execve` -- and since NP (landed with AUTH P2.1) it decides what another process may read of it: `root`, `cwd`, `exe`, `fd` and `fdinfo` (listings, entries and the magic links), `maps`, and every `ns/*` link, `ns/net` included, both read and followed, ask Linux's `ptrace_may_access` (`credentials::may_access`): the same user, by the caller's filesystem ids against the target's real, effective and saved ones, or `CAP_SYS_PTRACE` over its user namespace -- and of a target that is not dumpable, or a child not yet given its attributes, only root. A refusal is `EACCES`. So a set-id program such as `su`, and any program that clears `PR_SET_DUMPABLE` itself, is closed to the rest of the user's programs; hyprlock and `authd`'s clients do not clear it yet (§3). `cmdline`, `status`, `stat`, `comm` and `mountinfo` stay readable, as on Linux. | `src/kernel/extensions/personality/linux/src/fs/procfs.rs` (`may_inspect`, `is_private`), `src/kernel/extensions/personality/linux/src/syscall/credentials.rs` (`may_access`), `src/kernel/extensions/personality/linux/src/fs/nsfs.rs` and `src/kernel/extensions/personality/linux/src/net/netns_file.rs` (`may_open`), `src/kernel/extensions/personality/linux/src/syscall/attributes.rs` (`exec_dumpable`, `credentials_changed`); the `procacc` boot line (FX-0894) |
 | `ptrace` | Not in the call tables: no process can read another's memory, except through a VMO both hold. | `src/lib/proto/linux-abi` has no `Ptrace`; `SECURITY-TARGET.md` FDP_IFC.1 |
-| Memory | No swap and no core dumps: a secret's page never leaves RAM. Frames are zeroed when handed to a new owner, not when freed. The kernel heap is not zeroed. `mlock` is `ENOSYS`. | `src/kernel/extensions/personality/linux/src/syscall/memory.rs:383-390`; `SECURITY-TARGET.md:144`, `:261`; `docs/BACKLOG.md` |
+| Memory | No swap and no core dumps: a secret's page never leaves RAM. Frames are zeroed when handed to a new owner, not when freed. The kernel heap is not zeroed. `mlock` is accepted and changes nothing: an anonymous page stays in RAM without it. | `src/kernel/extensions/personality/linux/src/syscall/memory.rs:383-390`; `SECURITY-TARGET.md:144`, `:261`; `docs/BACKLOG.md` |
 | Randomness | ChaCha20 seeded from firmware, the CPU's instruction and jitter. A machine with neither of the first two says at boot that it is not seeded. | `src/kernel/src/random.rs:1-33` |
 | Device nodes | `/dev/console` is `0600` root. Cards and `event*` are `0660` root:root, and there is no `input` or `video` group. | `src/kernel/extensions/personality/linux/src/fs/devfs.rs:229`; `src/kernel/extensions/personality/linux/src/interfaces/display/mod.rs:447-450`; `src/kernel/extensions/personality/linux/src/interfaces/input/evdev.rs:237-241` |
 | DMA | Contained by an IOMMU on x86-64 and AArch64. On ARMv7-A `virt` and the DK1, any ring-3 driver can read all memory, and the boot says so. | `docs/ARCHITECTURE.md:326-357` |
@@ -480,10 +480,10 @@ fresh, unlocked desktop; the session ends at the console's login.
 * **Argon2id's working memory** is zeroed after each hash, before it is
   freed. It is the largest copy of anything derived from the password.
 * **No swap, no core dumps** (`src/kernel/extensions/personality/linux/src/syscall/memory.rs:387`), so
-  nothing writes a secret's page to disk. `mlock` is `ENOSYS`
-  (`docs/BACKLOG.md`). `authd` calls it anyway and ignores the error,
-  so it is right the day the kernel grows swap. Accepting it as a no-op is
-  slice K-D.
+  nothing writes a secret's page to disk. `mlock` is accepted and marks
+  nothing (slice K-D, done 2026-11-25; `docs/backlog/p2.md`). `authd` calls
+  it, so it is right the day the kernel grows swap, when the call must
+  start to mean something.
 * **The kernel's copies.** A password passes through the tty's line buffer
   or evdev's queue, then the Wayland socket's buffer, then the auth
   socket's. A frame is zeroed when it is handed out again (O.SCRUB). A
@@ -1171,7 +1171,7 @@ phase 1. hyprlock does not change when phase 2 moves the session to
 | P3.5 | Accounts: `useradd`/`userdel`, with `/etc/passwd` generated from `/lib/ferrix/sysusers` plus the store's accounts. The archive stops carrying `/etc/passwd` (§5.2 says why it must). | auth | 4 |
 | P3.6 | A graphical greeter on hyprlock's widgets | desktop clients | 8 |
 | P3.7 | K-E: `SO_PEERCRED` taken at `connect` and `listen`, as Linux does. **Moved into phase 1 and done** (§8.3) | auth | 3 |
-| P3.8 | K-D: `mlock` accepted as a no-op within `RLIMIT_MEMLOCK` (`docs/BACKLOG.md`) | kernel | 1 |
+| P3.8 | K-D: `mlock` accepted as a no-op within `RLIMIT_MEMLOCK` (`docs/BACKLOG.md`). **Done (2026-11-25)**: `syscall/memory.rs::sys_mlock`, `test-procfs`'s `mlock` step | kernel | 1 |
 | — | FIDO2 over USB HID (needs a hidraw path from `src/user/system/native/drivers/usb/usbhid`), fingerprint (needs a reader), a trusted path, several seats | | unsized |
 
 ### Order

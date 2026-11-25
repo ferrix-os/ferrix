@@ -1,5 +1,5 @@
-//! `mmap`, `munmap`, `mprotect`, `mremap`, `madvise`, `mincore` and `brk`,
-//! and ARM's `cacheflush`.
+//! `mmap`, `munmap`, `mprotect`, `mremap`, `madvise`, `mincore`, `mlock` and
+//! `brk`, and ARM's `cacheflush`.
 //!
 //! The four calls a program reshapes its own address space with, and the first
 //! four a static musl binary makes: it allocates with `mmap` before it does
@@ -636,6 +636,137 @@ pub(crate) fn sys_mincore(
     if mapped < pages {
         return Err(Errno::ENOMEM);
     }
+    Ok(0)
+}
+
+/// `RLIMIT_MEMLOCK` in `asm-generic/resource.h`; the same on all three.
+const RLIMIT_MEMLOCK: u32 = 8;
+/// `MLOCK_ONFAULT`, `mlock2`'s one flag: lock the pages as they are faulted.
+const MLOCK_ONFAULT: u32 = 1;
+/// `MCL_CURRENT`: lock what is mapped now.
+const MCL_CURRENT: u32 = 1;
+/// `MCL_FUTURE`: lock what is mapped from now on.
+const MCL_FUTURE: u32 = 2;
+/// `MCL_ONFAULT`: with either of the others, lock pages as they are faulted.
+const MCL_ONFAULT: u32 = 4;
+
+/// Whether `process` may lock `bytes` more, as Linux's `can_do_mlock` and
+/// the limit check after it decide.
+///
+/// Root may (`CAP_IPC_LOCK`). Anyone else is `EPERM` under an
+/// `RLIMIT_MEMLOCK` of zero and `ENOMEM` for more than the limit. Nothing is
+/// counted as locked (see [`sys_mlock`]), so the limit is held against each
+/// call's own size and not against a running sum; unset, the limit reads as
+/// unlimited, as `limits` says of every resource the kernel does not count.
+fn may_lock(process: &Process, bytes: u64) -> Result<(), Errno> {
+    if super::credentials::require_privilege(process).is_ok() {
+        return Ok(());
+    }
+    let limit = super::limits::limit_of(process, RLIMIT_MEMLOCK)?.soft;
+    if limit == 0 {
+        return Err(Errno::EPERM);
+    }
+    if bytes > limit {
+        return Err(Errno::ENOMEM);
+    }
+    Ok(())
+}
+
+/// The whole pages `[addr, addr + len)` touches, as `mlock` and `munlock`
+/// round them, the address down and the length up; `None` for no pages.
+///
+/// Linux's arithmetic, its wrap included: a length that rounds up past the
+/// top of the word wraps to nothing and is no pages, an end that wraps is
+/// `EINVAL`, and a range outside the program's half has no mapping to find,
+/// which is `ENOMEM`.
+fn lock_range(addr: u64, len: u64) -> Result<Option<(u64, u64)>, Errno> {
+    let within = addr % PAGE_SIZE;
+    let start = addr - within;
+    let bytes = len.wrapping_add(within).wrapping_add(PAGE_SIZE - 1) & !(PAGE_SIZE - 1);
+    let end = start.checked_add(bytes).ok_or(Errno::EINVAL)?;
+    if bytes == 0 {
+        return Ok(None);
+    }
+    if !uaccess::is_user_range(start, bytes) {
+        return Err(Errno::ENOMEM);
+    }
+    Ok(Some((start, end)))
+}
+
+/// `ENOMEM` unless every page of `[start, end)` is mapped, which is what
+/// Linux's `apply_vma_lock_flags` answers a range with a gap in it.
+fn fully_mapped(process: &Process, start: u64, end: u64) -> Result<(), Errno> {
+    if mapped_from(process, start, end) < end {
+        return Err(Errno::ENOMEM);
+    }
+    Ok(())
+}
+
+/// `mlock` and `mlock2`.
+///
+/// Accepted and nothing done, because what the callers that exist ask for
+/// already holds. They are programs keeping a secret off a disk -- `sshdt`'s
+/// key buffers through `russh-cryptovec`, `authd`, `gpg-agent` -- and their
+/// pages are anonymous: there is no swap, so such a page, once committed,
+/// stays in memory and goes nowhere else, locked or not. Before this the
+/// call was `ENOSYS` and `sshdt` warned once a run.
+///
+/// Three things Linux does are left out, and a caller that needs one of them
+/// is not served yet. A clean page of a file on a disk can still be reclaimed
+/// under memory pressure and read again at the next touch (`user::cache`), so
+/// the call does not hold a program's text in memory (`docs/ROBUSTNESS.md`
+/// R10, `docs/GAME-PATH.md` G4). The pages are not faulted in; a later touch
+/// commits them, and can fail for want of memory where on Linux the `mlock`
+/// would have. And the regions are not marked locked, so
+/// `/proc/<pid>/status` reads `VmLck: 0 kB`.
+///
+/// The refusals are Linux's, in its order: an unknown flag is `EINVAL`, a
+/// caller with no right to lock `EPERM` and one over its limit `ENOMEM`
+/// ([`may_lock`]), a wrapping range `EINVAL`, and a range with an unmapped
+/// page in it `ENOMEM`. No pages ([`lock_range`]) is a success.
+pub(crate) fn sys_mlock(
+    process: &Process,
+    addr: u64,
+    len: u64,
+    flags: u32,
+) -> Result<usize, Errno> {
+    if flags & !MLOCK_ONFAULT != 0 {
+        return Err(Errno::EINVAL);
+    }
+    may_lock(process, 0)?;
+    let Some((start, end)) = lock_range(addr, len)? else {
+        return Ok(0);
+    };
+    may_lock(process, end - start)?;
+    fully_mapped(process, start, end)?;
+    Ok(0)
+}
+
+/// `munlock`: [`sys_mlock`]'s range checks and nothing else, there being no
+/// lock to take off. Anyone may unlock, as on Linux.
+pub(crate) fn sys_munlock(process: &Process, addr: u64, len: u64) -> Result<usize, Errno> {
+    if let Some((start, end)) = lock_range(addr, len)? {
+        fully_mapped(process, start, end)?;
+    }
+    Ok(0)
+}
+
+/// `mlockall`, accepted as [`sys_mlock`] is and for the same reason.
+///
+/// `EINVAL` for no flag, an unknown one, or `MCL_ONFAULT` with neither of the
+/// other two; then [`may_lock`]'s refusals, `MCL_CURRENT` being held against
+/// everything mapped now.
+pub(crate) fn sys_mlockall(process: &Process, flags: u32) -> Result<usize, Errno> {
+    let known = MCL_CURRENT | MCL_FUTURE | MCL_ONFAULT;
+    if flags == 0 || flags & !known != 0 || flags == MCL_ONFAULT {
+        return Err(Errno::EINVAL);
+    }
+    let mapped = if flags & MCL_CURRENT == 0 {
+        0
+    } else {
+        process.space().region_totals(0).0.mapped
+    };
+    may_lock(process, mapped)?;
     Ok(0)
 }
 

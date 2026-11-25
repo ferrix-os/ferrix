@@ -9,9 +9,10 @@
 //! row for the listening port to carry the socket's inode number, which is
 //! how `lsof -i` finds the process that Steam asks it for. Then it lists
 //! `/proc` recursively and requires every inode number to fit 32 bits and
-//! be a name's own, and every entry's offset to fit a 32-bit `off_t`. Last,
+//! be a name's own, and every entry's offset to fit a 32-bit `off_t`. Then
 //! `mincore` over a mapping and over one with a hole, as Chromium's memory
-//! dumps call it, with Linux's refusals. Then the debug step
+//! dumps call it, with Linux's refusals, and `mlock` and its relatives over
+//! the same two, accepted and refused as Linux does. Then the debug step
 //! (`docs/DEBUG.md` §1): a thread blocked in `read` of a pipe, whose
 //! `/proc/self/task/<tid>/syscall` must be `read`'s number, descriptor, buffer
 //! and length, whose `wchan` names the pipe and whose `stack` is a line per
@@ -42,6 +43,7 @@ const STEPS: &[&str] = &[
     "procfs: memfd ok",
     "procfs: inodes ok",
     "procfs: mincore ok",
+    "procfs: mlock ok",
     "procfs: debug ok",
     "procfs: all ok",
 ];

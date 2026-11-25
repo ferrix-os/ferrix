@@ -121,6 +121,11 @@ const SHARED: &[(usize, usize, Syscall)] = &[
     (x86_64::MMAP, aarch64::MMAP, Syscall::Mmap),
     (x86_64::MPROTECT, aarch64::MPROTECT, Syscall::Mprotect),
     (x86_64::MINCORE, aarch64::MINCORE, Syscall::Mincore),
+    (x86_64::MLOCK, aarch64::MLOCK, Syscall::Mlock),
+    (x86_64::MUNLOCK, aarch64::MUNLOCK, Syscall::Munlock),
+    (x86_64::MLOCKALL, aarch64::MLOCKALL, Syscall::Mlockall),
+    (x86_64::MUNLOCKALL, aarch64::MUNLOCKALL, Syscall::Munlockall),
+    (x86_64::MLOCK2, aarch64::MLOCK2, Syscall::Mlock2),
     (x86_64::MUNMAP, aarch64::MUNMAP, Syscall::Munmap),
     (x86_64::BRK, aarch64::BRK, Syscall::Brk),
     (
@@ -1622,7 +1627,7 @@ fn unknown_numbers_map_to_none_without_panicking() {
         134,
         136,
         139,
-        149,
+        156,
         300,
         400,
         436,
@@ -1754,13 +1759,13 @@ fn table_sizes_are_stable() {
     // `socket` being unreachable on AArch64.
     assert_eq!(
         mapped(from_x86_64).len(),
-        260,
-        "the x86-64 table maps 260 calls"
+        265,
+        "the x86-64 table maps 265 calls"
     );
     assert_eq!(
         mapped(from_aarch64).len(),
-        228,
-        "the AArch64 table maps 228 calls"
+        233,
+        "the AArch64 table maps 233 calls"
     );
 }
 /// Calls only ARMv7-A has, because it is the only 32-bit target.
@@ -1895,6 +1900,10 @@ const ARM_NUMBERS: &[(usize, Syscall)] = &[
     (146, Syscall::Writev),                   // writev
     (147, Syscall::Getsid),                   // getsid
     (148, Syscall::Fdatasync),                // fdatasync
+    (150, Syscall::Mlock),                    // mlock
+    (151, Syscall::Munlock),                  // munlock
+    (152, Syscall::Mlockall),                 // mlockall
+    (153, Syscall::Munlockall),               // munlockall
     (154, Syscall::SchedSetparam),            // sched_setparam
     (155, Syscall::SchedGetparam),            // sched_getparam
     (156, Syscall::SchedSetscheduler),        // sched_setscheduler
@@ -2050,6 +2059,7 @@ const ARM_NUMBERS: &[(usize, Syscall)] = &[
     (385, Syscall::MemfdCreate),              // memfd_create
     (387, Syscall::Execveat),                 // execveat
     (389, Syscall::Membarrier),               // membarrier
+    (390, Syscall::Mlock2),                   // mlock2
     (391, Syscall::CopyFileRange),            // copy_file_range
     (397, Syscall::Statx),                    // statx
     (398, Syscall::Rseq),                     // rseq
@@ -2277,7 +2287,7 @@ fn arm_covers_the_calls_musl_startup_makes() {
 #[test]
 fn arm_table_size_is_stable() {
     // A canary, as for the other two tables.
-    assert_eq!(mapped_arm().len(), 280, "the ARMv7-A table maps 280 calls");
+    assert_eq!(mapped_arm().len(), 285, "the ARMv7-A table maps 285 calls");
 }
 
 /// The filesystem-control and extended-attribute calls, against the numbers in
@@ -3335,7 +3345,7 @@ mod virtgpu;
 /// Every i386 number [`from_i386`] translates beside the thread-area pair:
 /// the constant, the number `asm/unistd_32.h` gives it, and ARMv7-A's constant
 /// for the same call.
-const I386_NUMBERS: [(usize, usize, usize); 250] = [
+const I386_NUMBERS: [(usize, usize, usize); 255] = [
     (i386::FORK, 2, arm::FORK),
     (i386::KILL, 37, arm::KILL),
     (i386::WAIT4, 114, arm::WAIT4),
@@ -3409,6 +3419,10 @@ const I386_NUMBERS: [(usize, usize, usize); 250] = [
     (i386::LLSEEK, 140, arm::LLSEEK),
     (i386::FLOCK, 143, arm::FLOCK),
     (i386::MSYNC, 144, arm::MSYNC),
+    (i386::MLOCK, 150, arm::MLOCK),
+    (i386::MUNLOCK, 151, arm::MUNLOCK),
+    (i386::MLOCKALL, 152, arm::MLOCKALL),
+    (i386::MUNLOCKALL, 153, arm::MUNLOCKALL),
     (i386::READV, 145, arm::READV),
     (i386::WRITEV, 146, arm::WRITEV),
     (i386::GETSID, 147, arm::GETSID),
@@ -3513,6 +3527,7 @@ const I386_NUMBERS: [(usize, usize, usize); 250] = [
     (i386::MEMFD_CREATE, 356, arm::MEMFD_CREATE),
     (i386::EXECVEAT, 358, arm::EXECVEAT),
     (i386::MEMBARRIER, 375, arm::MEMBARRIER),
+    (i386::MLOCK2, 376, arm::MLOCK2),
     (i386::COPY_FILE_RANGE, 377, arm::COPY_FILE_RANGE),
     (i386::STATX, 383, arm::STATX),
     (i386::CLOCK_GETTIME64, 403, arm::CLOCK_GETTIME64),

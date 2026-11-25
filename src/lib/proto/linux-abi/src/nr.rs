@@ -113,6 +113,16 @@ pub mod x86_64 {
     pub const MINCORE: usize = 27;
     /// Advise the kernel about future use of a memory range.
     pub const MADVISE: usize = 28;
+    /// Keep a range of pages resident.
+    pub const MLOCK: usize = 149;
+    /// Let a range of pages be reclaimed again.
+    pub const MUNLOCK: usize = 150;
+    /// Keep every page of the address space resident.
+    pub const MLOCKALL: usize = 151;
+    /// Let every page of the address space be reclaimed again.
+    pub const MUNLOCKALL: usize = 152;
+    /// Keep a range of pages resident, with flags.
+    pub const MLOCK2: usize = 325;
     /// Create or look up a System V shared memory segment.
     pub const SHMGET: usize = 29;
     /// Attach a System V shared memory segment.
@@ -978,6 +988,16 @@ pub mod aarch64 {
     pub const MINCORE: usize = 232;
     /// Advise the kernel about future use of a memory range.
     pub const MADVISE: usize = 233;
+    /// Keep a range of pages resident.
+    pub const MLOCK: usize = 228;
+    /// Let a range of pages be reclaimed again.
+    pub const MUNLOCK: usize = 229;
+    /// Keep every page of the address space resident.
+    pub const MLOCKALL: usize = 230;
+    /// Let every page of the address space be reclaimed again.
+    pub const MUNLOCKALL: usize = 231;
+    /// Keep a range of pages resident, with flags.
+    pub const MLOCK2: usize = 284;
     /// Accept a connection, with flags for the new descriptor.
     pub const ACCEPT4: usize = 242;
     /// Receive several messages in one call, each into an `mmsghdr`.
@@ -1368,6 +1388,16 @@ pub mod arm {
     pub const MINCORE: usize = 219;
     /// Advise the kernel about future use of a memory range.
     pub const MADVISE: usize = 220;
+    /// Keep a range of pages resident.
+    pub const MLOCK: usize = 150;
+    /// Let a range of pages be reclaimed again.
+    pub const MUNLOCK: usize = 151;
+    /// Keep every page of the address space resident.
+    pub const MLOCKALL: usize = 152;
+    /// Let every page of the address space be reclaimed again.
+    pub const MUNLOCKALL: usize = 153;
+    /// Keep a range of pages resident, with flags.
+    pub const MLOCK2: usize = 390;
     /// Manipulate a file descriptor's flags and locks, with 64-bit `flock64`
     /// structures. ARMv7-A only; musl calls it for every `fcntl`, not only
     /// the locking commands.
@@ -1952,6 +1982,16 @@ pub mod i386 {
     pub const MINCORE: usize = 218;
     /// Advise the kernel about future use of a memory range.
     pub const MADVISE: usize = 219;
+    /// Keep a range of pages resident.
+    pub const MLOCK: usize = 150;
+    /// Let a range of pages be reclaimed again.
+    pub const MUNLOCK: usize = 151;
+    /// Keep every page of the address space resident.
+    pub const MLOCKALL: usize = 152;
+    /// Let every page of the address space be reclaimed again.
+    pub const MUNLOCKALL: usize = 153;
+    /// Keep a range of pages resident, with flags.
+    pub const MLOCK2: usize = 376;
     /// Read directory entries in the 64-bit layout.
     pub const GETDENTS64: usize = 220;
     /// Manipulate a file descriptor's flags and locks, with i386's packed
@@ -2369,6 +2409,16 @@ pub enum Syscall {
     Madvise,
     /// Report which pages of a mapping are resident.
     Mincore,
+    /// Keep a range of pages resident.
+    Mlock,
+    /// Let a range of pages be reclaimed again.
+    Munlock,
+    /// Keep every page of the address space resident.
+    Mlockall,
+    /// Let every page of the address space be reclaimed again.
+    Munlockall,
+    /// Keep a range of pages resident, with flags.
+    Mlock2,
     /// Move the program break, the classic heap boundary.
     Brk,
     /// Install a signal handler.
@@ -3037,6 +3087,11 @@ fn x86_64_file_and_process(nr: usize) -> Option<Syscall> {
         x86_64::MSYNC => Syscall::Msync,
         x86_64::MADVISE => Syscall::Madvise,
         x86_64::MINCORE => Syscall::Mincore,
+        x86_64::MLOCK => Syscall::Mlock,
+        x86_64::MUNLOCK => Syscall::Munlock,
+        x86_64::MLOCKALL => Syscall::Mlockall,
+        x86_64::MUNLOCKALL => Syscall::Munlockall,
+        x86_64::MLOCK2 => Syscall::Mlock2,
         x86_64::DUP => Syscall::Dup,
         x86_64::DUP2 => Syscall::Dup2,
         x86_64::NANOSLEEP => Syscall::Nanosleep,
@@ -3499,6 +3554,11 @@ fn aarch64_memory_and_process(nr: usize) -> Option<Syscall> {
         aarch64::MSYNC => Syscall::Msync,
         aarch64::MADVISE => Syscall::Madvise,
         aarch64::MINCORE => Syscall::Mincore,
+        aarch64::MLOCK => Syscall::Mlock,
+        aarch64::MUNLOCK => Syscall::Munlock,
+        aarch64::MLOCKALL => Syscall::Mlockall,
+        aarch64::MUNLOCKALL => Syscall::Munlockall,
+        aarch64::MLOCK2 => Syscall::Mlock2,
         aarch64::WAIT4 => Syscall::Wait4,
         aarch64::PRLIMIT64 => Syscall::Prlimit64,
         aarch64::NAME_TO_HANDLE_AT => Syscall::NameToHandleAt,
@@ -3802,6 +3862,11 @@ fn arm_ids_and_at_family(nr: usize) -> Option<Syscall> {
         arm::GETDENTS64 => Syscall::Getdents64,
         arm::MADVISE => Syscall::Madvise,
         arm::MINCORE => Syscall::Mincore,
+        arm::MLOCK => Syscall::Mlock,
+        arm::MUNLOCK => Syscall::Munlock,
+        arm::MLOCKALL => Syscall::Mlockall,
+        arm::MUNLOCKALL => Syscall::Munlockall,
+        arm::MLOCK2 => Syscall::Mlock2,
         arm::FCNTL64 => Syscall::Fcntl64,
         arm::GETTID => Syscall::Gettid,
         arm::TKILL => Syscall::Tkill,
@@ -4209,6 +4274,11 @@ fn i386_ids_and_at_family(nr: usize) -> Option<Syscall> {
         i386::PIVOT_ROOT => Syscall::PivotRoot,
         i386::MADVISE => Syscall::Madvise,
         i386::MINCORE => Syscall::Mincore,
+        i386::MLOCK => Syscall::Mlock,
+        i386::MUNLOCK => Syscall::Munlock,
+        i386::MLOCKALL => Syscall::Mlockall,
+        i386::MUNLOCKALL => Syscall::Munlockall,
+        i386::MLOCK2 => Syscall::Mlock2,
         i386::GETDENTS64 => Syscall::Getdents64,
         i386::FCNTL64 => Syscall::Fcntl64,
         i386::GETTID => Syscall::Gettid,

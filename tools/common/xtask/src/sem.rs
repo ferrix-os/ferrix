@@ -122,7 +122,7 @@ pub(crate) const TASKS: &[Task] = &[
         help_at: 590,
         help: &[
             "test-procfs   Boot procfs-test as init and require /proc/self/fd links to stat as fstat (sockets, anonymous files, a pipe,",
-            "              a memfd), /proc/net/tcp's inode to match, and every /proc inode number to fit 32 bits, and mincore (--i686: 32-bit x86)",
+            "              a memfd), /proc/net/tcp's inode to match, and every /proc inode number to fit 32 bits, mincore and mlock (--i686: 32-bit x86)",
         ],
         run,
     },
