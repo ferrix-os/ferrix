@@ -3617,15 +3617,23 @@ mod tests {
         let workflow =
             std::fs::read_to_string(paths::workspace_root().join(".github/workflows/ci.yml"))
                 .unwrap();
-        let in_ci: Vec<&str> = workflow
+        // A crate CI interprets in several steps, each a filter of its
+        // tests in a part of its own (the page tables), is one crate here:
+        // its steps stand together, and `cargo xtask miri` runs it whole.
+        // The command is found wherever it stands in its line, since a
+        // step with a long filter folds its `run:` over two.
+        let mut in_ci: Vec<&str> = workflow
             .lines()
             .filter_map(|line| {
-                let rest = line
-                    .trim()
-                    .strip_prefix("run: cargo +nightly miri test -p ")?;
+                let (before, rest) = line.split_once("cargo +nightly miri test -p ")?;
+                let before = before.trim();
+                if !before.is_empty() && before != "run:" {
+                    return None;
+                }
                 rest.split_whitespace().next()
             })
             .collect();
+        in_ci.dedup();
         assert_eq!(
             in_ci, MIRI_PACKAGES,
             "`cargo xtask check --miri` and CI's Miri job must name the same \
