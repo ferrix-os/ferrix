@@ -2080,8 +2080,18 @@ nazuna, the same output byte for byte, its self-test passing.
 Miri runs one test at a time. Of part 3's 28.5 minutes, 25 were the six
 `the_walk_behaves_the_same_*` tests, 3.7 to 4.8 minutes each. They are two parts
 now, the CPUs' three and the IOMMUs' three, and the crate's other 106 tests ride
-in part 4; the three filters partition the crate whatever a test is called
+in part 5 (part 4 at first, which made that part the longest: the figures below); the three filters partition the crate whatever a test is called
 (3 + 3 + 106 of 112, counted with `--list`).
+
+Measured, run 45715983357 (the promotion of these cuts, 2026-11-25): **23 minutes**,
+`cargo xtask check` 15.5, the Miri parts 16.6, 15.0, 14.2, 23.2, 10.1 and 16.5, the
+QEMU boot 11.8. Part 4's 23 is the page tables' rest beside btrfs and the VFS, so
+the rest moved to part 5.
+
+The run ended red all the same: rustc on Ferrix, an advisory job, failed its boot
+ratchet (29.92 s against 28 s, at load 2.4 on the runner), `CI result` said success,
+and Promote, which also reads the run's conclusion, waited. The job is
+`continue-on-error` now, which is what advisory was meant to say.
 
 ### What is left, and not done
 
