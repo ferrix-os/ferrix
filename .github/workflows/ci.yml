@@ -230,6 +230,7 @@ jobs:
   check:
     name: cargo xtask check
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
 
@@ -265,8 +266,53 @@ jobs:
       - name: Arm the commit hooks
         run: git config core.hooksPath .githooks
 
+      # The workspaces of their own (loom, the compositor, the Linux
+      # programs, the apps) are the `side` job's: on this runner's four
+      # cores they and the steps here ran beside each other for 38 minutes
+      # (run 43578295335), the longest job of the run after Miri.
       - name: cargo xtask check
+        env:
+          FERRIX_SIDE: apart
         run: cargo xtask check
+
+  # ----------------------------------------------------------------
+  # check's workspaces of their own, `cargo xtask check-side`, in four
+  # shares: each lane (a workspace, or the apps of one target directory)
+  # is in exactly one share, dealt out heaviest first
+  # (`FERRIX_SIDE_SHARD`, tools/common/xtask/src/check.rs). The share
+  # count here and the N of K/N are one number: change both or neither.
+  # ----------------------------------------------------------------
+  side:
+    name: cargo xtask check-side (share ${{ matrix.share }} of 4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        share: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: rustfmt, clippy
+          targets: x86_64-unknown-none, aarch64-unknown-none-softfloat, armv7a-none-eabi, x86_64-unknown-uefi, aarch64-unknown-uefi, armv7-unknown-linux-musleabi, x86_64-unknown-linux-musl, aarch64-unknown-linux-musl
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: side-${{ matrix.share }}
+
+      - name: Arm the commit hooks
+        run: git config core.hooksPath .githooks
+
+      - name: cargo xtask check-side
+        env:
+          FERRIX_SIDE_SHARD: ${{ matrix.share }}/4
+          # As `check` starts it (docs/TEST-TIME.md, Cut M2).
+          CARGO_INCREMENTAL: "0"
+        run: cargo xtask check-side
 
   # ----------------------------------------------------------------
   # The host tests on Windows: the coverage that is actually
@@ -633,16 +679,23 @@ jobs:
   # Three runners, each taking about a third of the time: in one job the
   # crates were an hour, interpretation being one thread per crate. Each
   # step names its part, balanced by the times measured on 2026-09-28; a
-  # fourth holds btrfs's reader alone (2026-11-02);
+  # fourth holds btrfs's reader (2026-11-02), with the VFS since 2026-11-25;
   # `cargo xtask miri` runs the same crates side by side locally.
+  #
+  # Five since 2026-11-25, the heap and the page tables each alone: from
+  # 2026-11-08 two tests of theirs ran parts 2 and 3 to GitHub's six-hour
+  # limit on every run, and nothing was promoted for seventeen days. Those
+  # tests are shorter under Miri now, and the limit below is the guard: a
+  # part that takes an hour is a failure in an hour, not in six.
   # ----------------------------------------------------------------
   miri:
     name: Miri (UB check, part ${{ matrix.part }})
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        part: [1, 2, 3, 4]
+        part: [1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@v6
 
@@ -689,7 +742,7 @@ jobs:
       # dentries through weak references, which is aliasing Miri can see and
       # a test that merely passes cannot.
       - name: Miri (VFS)
-        if: matrix.part == 1
+        if: matrix.part == 4
         run: cargo +nightly miri test -p ferrix-vfs --lib
 
       # PCI configuration space. The crate forbids unsafe, so what Miri adds
@@ -749,7 +802,7 @@ jobs:
       # neighbour. The tests back that trait with real buffers, and Miri checks
       # each link against the buffer it was carved from.
       - name: Miri (heap)
-        if: matrix.part == 2
+        if: matrix.part == 5
         run: cargo +nightly miri test -p ferrix-heap --lib
 
       # Fallible construction for the certified item (finding F-23). `try_box`
@@ -773,7 +826,7 @@ jobs:
       # adds is the parser's slicing of bytes a unit file chose, and the
       # borrows the loader and the manager take into the unit set.
       - name: Miri (service manager)
-        if: matrix.part == 3
+        if: matrix.part == 2
         run: cargo +nightly miri test -p ferrix-svc --lib
 
       # The password hash authd keeps credentials under. It forbids unsafe;
@@ -933,7 +986,7 @@ jobs:
   result:
     name: CI result
     if: always()
-    needs: [authorship, assembly, audits, model, layering, check, test, ferrousli,
+    needs: [authorship, assembly, audits, model, layering, check, side, test, ferrousli,
             build, boot, rustc, deny, miri, fuzz, dependencies]
     runs-on: ubuntu-latest
     # statuses: the dispatched run reports itself to the promotion (below);

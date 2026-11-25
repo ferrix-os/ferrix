@@ -1998,6 +1998,53 @@ was tens. Release KVM with the checks on: 29.52 to 20.42. Checks skipped, for in
 to the limit is the customer's choice, in `fleet/morning-questions.md`: the remaining time
 is real checks in series, each with its window or its count.
 
+## CI's run, 2026-11-25 (release-031)
+
+Measured from GitHub's own job and step times. The last green run, 42482894038
+(2026-11-08), took 47 minutes; every run after it took six hours, GitHub's limit,
+and nothing was promoted from 2026-11-08 to 2026-11-25.
+
+| Job | 42482894038 (green) | 43578295335 (2026-11-14) |
+|---|---:|---:|
+| Miri, part 1 | 47 min, 25 of them `ferrix-block` | 24 min |
+| Miri, parts 2 and 3 | 12 and 17 min | cancelled at 6 h |
+| `cargo xtask check` | 23 min | 40 min, failed in `app:waybar` |
+| rustc on Ferrix | 16 min | 16 min |
+| every other job | under 9 min | under 11 min |
+
+A run is as long as its longest job, so three things set it.
+
+**Two tests never ended under Miri.** The heap's `a_give_back_reads_a_page_not_the_list`
+and the page tables' `unmapping_releases_what_a_prune_per_leaf_released` are sized for
+`cargo test`; interpreted, neither finished in the 25 and 15 minutes they were given
+on nazuna. Both now take a smaller size under `cfg!(miri)`: the heap's crate is 5.5
+minutes there and the page tables' 14. No job had a time limit, so each run held two
+runners for six hours and the promotion waited for them; the Miri, `check` and
+`check-side` jobs now fail at 60 minutes.
+
+**One test was half of the longest job.** `fair_shares::a_group_at_the_ceiling_does_not_flatten_the_others`
+runs a million rounds of four calls to show the clock's reach; under Miri that was 25
+of part 1's 47 minutes. Ten thousand rounds under `cfg!(miri)`: `ferrix-block` under
+Miri is 45 s on nazuna. The parts are five now, the heap and the page tables each
+alone and the VFS with btrfs's reader.
+
+### Cut E1: `check-side` in jobs of its own
+
+`check` runs its side workspaces beside its main workspace, which a 24-thread host
+has the cores for (*Cut D2*). GitHub's runner has four. In run 43578295335 the 37
+units' own times add up to 5,410 s and the two app lanes, seven apps each in one
+target directory, were the critical path at about 1,600 s each, all of it while the
+main workspace's clippies, tests and documentation ran on the same four cores.
+
+`FERRIX_SIDE=apart` makes `check` leave the side workspaces out, and
+`FERRIX_SIDE_SHARD=K/N` makes `check-side` run the K-th of N shares of its lanes:
+lanes are dealt out in turn in the order they start in, heaviest first, so each lane
+is in exactly one share and the two app lanes are never in the same one. The steps
+that are not units (the sabotage check, each app's "nothing outside its folder names
+it") run in share 1. CI's `check` job sets the first, and a `side` job of four shares
+the second. Neither variable is set anywhere else: on a desk and in the gate pool
+`check` is whole, as before.
+
 ## Next
 
 Phase 2 in the order the numbers give: (3) stop rather than wait for a
