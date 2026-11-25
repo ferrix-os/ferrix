@@ -519,7 +519,10 @@ three agree within four points.
 ### F-13 — no decision or MC/DC coverage
 **Informational.** Not required at DAL C. Required at DAL B and DAL A, and the
 present method (basic-block granularity) cannot produce MC/DC without
-instrumenting conditions.
+instrumenting conditions. *For `max`* (DAL A's objectives, from M7's
+evidence; the customer, 2026-11-26) it is an objective with no evidence at
+all: the severity above is `present`'s DAL C reading, and `max`'s is
+decided when the objectives are walked for it (`OBJECTIVES.md`).
 
 **Measured 2026-09-27** (main at 88d9ce39, debug profile, the §3.1 suite):
 decision coverage of the item's *object code*, from the drcov traces the

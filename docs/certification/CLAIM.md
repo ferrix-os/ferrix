@@ -300,9 +300,12 @@ the assumption it replaces with an argument, and the work becomes orders in
 "Ferrix runs unmodified Linux programs above a 63,000-line kernel item that
 its build defines and enforces. It links no third-party crate (the Rust
 toolchain's own libraries are in it, F-119) and has no
-upward dependency, statement coverage is measured at about 90% on three
-architectures, and an element-level safety argument is written against IEC
-61508 SIL 2 and IEC 62304 Class C. Not assessed."
+upward dependency, statement coverage of the certified item is measured at
+85.2% on x86-64 (the coverage profile, 2026-10-23) and 89.9% on AArch64 (the
+debug profile, 2026-09-27; ARMv7-A, outside the claim, 84.5%, same day),
+with one release run on x86-64 at 83.4% and none on AArch64 (F-11), and an
+element-level safety argument is written against IEC 61508 SIL 2 and IEC
+62304 Class C. Not assessed."
 
 ## 6. What in the roadmap works against the claim
 

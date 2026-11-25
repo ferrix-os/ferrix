@@ -16,7 +16,8 @@ and measures nothing of the libraries it names:
      the shipping graph is first-party code in this repository, developed under
      the lifecycle the rest of docs/certification describes. The graph is not
      the whole image: the toolchain's `core` and `compiler_builtins` are in
-     every image and `alloc` in the kernels, and they are no crate's
+     every image and `alloc` in each whose crates say `extern crate alloc`
+     (section 1a names them), and they are no crate's
      dependency, so section 1a names them from the pin (FINDINGS.md F-119)
      and the count leaves them out. That is the single
      most valuable sentence in this file, so the gate below re-establishes it
@@ -146,6 +147,16 @@ def links_alloc() -> dict[tuple[str, str], bool]:
 TOOLCHAIN_LIBRARIES = ("core", "alloc", "compiler_builtins")
 
 
+def alloc_packages() -> str:
+    """The binaries that link `alloc`, read from the sources, for prose.
+
+    The sentences beside the table say which images link `alloc`; they are
+    built from the same answer as the table, so they cannot disagree with it.
+    """
+    names = sorted({package for (package, _), linked in links_alloc().items() if linked})
+    return ", ".join(f"`{n}`" for n in names) or "no image"
+
+
 def pinned_toolchain() -> str:
     """The channel rust-toolchain.toml pins, which ships the libraries."""
     text = (ROOT / "rust-toolchain.toml").read_text(encoding="utf-8")
@@ -174,9 +185,10 @@ def toolchain_libraries() -> list[str]:
         "",
         "The Cargo graph does not show the Rust standard libraries. Every",
         "image above links `core` and `compiler_builtins`, and every image",
-        "one of whose crates says `extern crate alloc` links `alloc`: the",
-        "kernels do, and a loader that gained one would change this table",
-        "and fail `--check`. They reach an image two ways. What is not",
+        "one of whose crates says `extern crate alloc` links `alloc`: today",
+        f"that is {alloc_packages()}, and a binary that gained or lost the",
+        "line would change this table and fail `--check`. They reach an",
+        "image two ways. What is not",
         "generic is linked as the pinned toolchain ships it, compiled, for",
         "the target. What is generic (`Vec<T>`, `BTreeMap<K, V>`, the",
         "iterators) is compiled by this build, from the toolchain's source,",
@@ -259,8 +271,8 @@ def render(ship: dict[tuple[str, str], list[str]], host: list[dict]) -> str:
         "",
         f"**External crates in the item: {total}.** The toolchain's own",
         "libraries are in these images and are not crates of the graph:",
-        "`core` and `compiler_builtins` in every one, `alloc` in the",
-        "kernels; section 1a lists them (FINDINGS.md, F-119).",
+        "`core` and `compiler_builtins` in every one, `alloc` in the images of",
+        f"{alloc_packages()}; section 1a lists them (FINDINGS.md, F-119).",
         "",
     ]
     if total == 0:

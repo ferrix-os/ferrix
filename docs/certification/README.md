@@ -37,7 +37,8 @@ specific, measured, and mostly documents rather than code.
 * [CLAIM.md](CLAIM.md) — **PROPOSED, not decided**: what "Linux software on a kernel that can be assured" can mean, the first standard, freedom from interference for the ring-0 load, and the milestones; the customer's two decisions are open
 * [SAFETY-MANUAL.md](SAFETY-MANUAL.md) — the out-of-context argument: assumed requirements, safe state, eleven assumptions of use, element failure analysis
 * [ITEM.md](ITEM.md) — what the ratings attach to, and why it is not all of Ferrix
-* [FINDINGS.md](FINDINGS.md) — the audit register, 33 open findings and 83 closed, of 116
+* [FINDINGS.md](FINDINGS.md) — the audit register, 37 open findings and 82 closed, of 119
+* [OBJECTIVES.md](OBJECTIVES.md) — DO-178C's Annex A tables for `max` at level A's objectives: a skeleton, no row read from the standard's text yet
 * [AUDIT.md](AUDIT.md) — the security audit of the TSF's own decisions, built and claimed (F-21b)
 * [SECURITY-TARGET.md](SECURITY-TARGET.md) — EAL5+ claim, SFRs, and where it would fail evaluation
 * [VULNERABILITY-ANALYSIS.md](VULNERABILITY-ANALYSIS.md) — AVA_VAN.4 over the seven threats; six residual vulnerabilities
@@ -205,7 +206,7 @@ checked against the text.
 *Whose claim it is:* only `max` carries DO-178C, from M7's evidence, at level A's objectives, on AArch64 (the
 customer, 2026-11-26; `docs/BUILD-FLAGS.md` §4). `present`'s DAL C is the interim until the flip, `fast`
 and `desktop` claim none. Level A asks decision coverage and MC/DC (F-13) and independence for many more
-objectives than five, so this verdict is of `present`, and `max`'s is M7's to write.
+objectives than five, so this verdict is of `present`, and `max`'s is M7's to write. Between the flip and M7's evidence no profile carries DO-178C at all (`docs/BUILD-FLAGS.md` §1).
 
 *Honest gap:* this is the furthest of the four, because DO-178C wants a
 document set that does not exist rather than a property the code lacks.

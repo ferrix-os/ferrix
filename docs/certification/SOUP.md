@@ -23,8 +23,8 @@ that is wrong.
 
 **External crates in the item: 0.** The toolchain's own
 libraries are in these images and are not crates of the graph:
-`core` and `compiler_builtins` in every one, `alloc` in the
-kernels; section 1a lists them (FINDINGS.md, F-119).
+`core` and `compiler_builtins` in every one, `alloc` in the images of
+`ferrix-kernel`; section 1a lists them (FINDINGS.md, F-119).
 
 The item links no external crate. Every line in
 the shipping graph is first-party code in this repository, written
@@ -50,9 +50,10 @@ device-tree parser, a btrfs implementation and a TCP stack.
 
 The Cargo graph does not show the Rust standard libraries. Every
 image above links `core` and `compiler_builtins`, and every image
-one of whose crates says `extern crate alloc` links `alloc`: the
-kernels do, and a loader that gained one would change this table
-and fail `--check`. They reach an image two ways. What is not
+one of whose crates says `extern crate alloc` links `alloc`: today
+that is `ferrix-kernel`, and a binary that gained or lost the
+line would change this table and fail `--check`. They reach an
+image two ways. What is not
 generic is linked as the pinned toolchain ships it, compiled, for
 the target. What is generic (`Vec<T>`, `BTreeMap<K, V>`, the
 iterators) is compiled by this build, from the toolchain's source,
