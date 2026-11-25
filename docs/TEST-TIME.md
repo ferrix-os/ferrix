@@ -2045,6 +2045,54 @@ it") run in share 1. CI's `check` job sets the first, and a `side` job of four s
 the second. Neither variable is set anywhere else: on a desk and in the gate pool
 `check` is whole, as before.
 
+Measured, run 45704613173 (2026-11-25, the branch's first run, every cache cold):
+
+| Job | 42482894038 (green) | 45704613173 |
+|---|---:|---:|
+| Miri, part 1 | 47 min | 16 min |
+| Miri, the page tables alone (part 3) | in part 3's 17 min | 28.5 min |
+| Miri, the other three parts | 12 min | 12, 14 and 15 min |
+| `cargo xtask check` | 23 min | 23.5 min |
+| `check-side`, shares 1 to 4 | inside `check` | 6.5, 7.7, 4.9 and 1.9 min |
+| rustc on Ferrix (advisory) | 16 min | 22 min, failed at its boot ratchet |
+| every other job | under 9 min | under 12 min |
+
+The run was 30 minutes, set by the page tables under Miri. Taking the side
+workspaces out of `check` did not shorten it, which is the finding of the next cut.
+
+### Cut E2: traceability asked the roots record a million times
+
+`check`'s own lines in that run: the audits "at once" 1,304 s, and the 1,304 s were
+one of them, traceability; the kernel's clippies beside it 362 s, the tests 184 s.
+On nazuna the same unit is 250 s when it is not a cache hit, and a hit hides it,
+which is why no table above shows it (the 14 s of *P3* is from before the crate
+split's roots record, 5399b6e8e).
+
+`Units.module_files` built the module table again for every unit a requirement
+names, 5,101 times, and each build asked `kernel_roots.roots()` for each kernel
+file: 1,054,046 reads and parses of `certification-item.json` (cProfile: 311 of
+315 s). The table depends on the files' names alone, so it is kept and rebuilt only
+when `files()` gains a name. `check-traceability.py --check`: **250 s to 2.4 s** on
+nazuna, the same output byte for byte, its self-test passing.
+
+### Cut E3: the page tables' walks in parts of their own
+
+Miri runs one test at a time. Of part 3's 28.5 minutes, 25 were the six
+`the_walk_behaves_the_same_*` tests, 3.7 to 4.8 minutes each. They are two parts
+now, the CPUs' three and the IOMMUs' three, and the crate's other 106 tests ride
+in part 4; the three filters partition the crate whatever a test is called
+(3 + 3 + 106 of 112, counted with `--list`).
+
+### What is left, and not done
+
+A promotion's CI runs on a branch `promote/<sha>` that no later run can read a
+cache from (a branch's caches are visible to itself and to `main`'s descendants
+only, and no CI run is ever on `main`: `gh cache list` shows none there). So every
+promotion builds the patched QEMU again, 4.6 minutes in two jobs, and every
+dependency. It is not on the critical path after E2 and E3 (the QEMU boot job is
+11 minutes), so it is left; a CI run on `main` after each promotion would fix it
+at the price of a second run per promotion.
+
 ## Next
 
 Phase 2 in the order the numbers give: (3) stop rather than wait for a

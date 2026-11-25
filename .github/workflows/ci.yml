@@ -686,7 +686,10 @@ jobs:
   # 2026-11-08 two tests of theirs ran parts 2 and 3 to GitHub's six-hour
   # limit on every run, and nothing was promoted for seventeen days. Those
   # tests are shorter under Miri now, and the limit below is the guard: a
-  # part that takes an hour is a failure in an hour, not in six.
+  # part that takes an hour is a failure in an hour, not in six. A sixth
+  # the same day: the page tables' six walks were 25 of that part's 28
+  # minutes, so they are two parts and the rest of the crate rides in the
+  # fourth.
   # ----------------------------------------------------------------
   miri:
     name: Miri (UB check, part ${{ matrix.part }})
@@ -695,7 +698,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        part: [1, 2, 3, 4, 5]
+        part: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@v6
 
@@ -818,9 +821,26 @@ jobs:
       # three CPUs', VT-d's second level and the SMMU's stage 2. The walk
       # derives each next table's index from the descriptor it just read,
       # which is exactly the arithmetic this job's comment is about.
-      - name: Miri (page tables)
+      #
+      # Three steps in three parts, since Miri runs one test at a time and
+      # the six `the_walk_behaves_the_same_*` tests are four to five minutes
+      # each on a runner (run 45704613173: 28 min for the crate, 25 of them
+      # these six). The filters partition the crate whatever a test is
+      # called: the CPUs' walks, every other walk, and everything that is
+      # not one of the walks.
+      - name: Miri (page tables, the CPUs' walks)
         if: matrix.part == 3
-        run: cargo +nightly miri test -p ferrix-paging --lib
+        run: cargo +nightly miri test -p ferrix-paging --lib -- the_walk_behaves_the_same_on
+
+      - name: Miri (page tables, the IOMMUs' walks)
+        if: matrix.part == 6
+        run: >
+          cargo +nightly miri test -p ferrix-paging --lib --
+          the_walk_behaves_the_same --skip the_walk_behaves_the_same_on
+
+      - name: Miri (page tables, all but the walks)
+        if: matrix.part == 4
+        run: cargo +nightly miri test -p ferrix-paging --lib -- --skip the_walk_behaves_the_same
 
       # The service manager's pure core. It forbids unsafe, so what Miri
       # adds is the parser's slicing of bytes a unit file chose, and the
