@@ -102,7 +102,7 @@ affected. The hardware's own barrier runs whatever the guest is told.
 
 ### What `max`'s profile adds
 
-`--kernel-profile max` is refused today: "not yet buildable", naming each flag's `lands`. Flag by flag:
+`--kernel-profile max` was refused until its flip of 2026-11-26 ("not yet buildable", naming each flag's `lands`); it builds on AArch64 at level none since (FLIP.md). Flag by flag:
 
 * **`restricted_fastpath=off`: about 800 ns.** It is the whole of `max`'s gap. `values.on` allows `sc2` and
   `none` until K1's review. K1 §7.1 says `on` follows its coverage run, vulnerability-analysis entry and code

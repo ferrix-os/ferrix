@@ -532,8 +532,8 @@ checks and their one `generic` line run in every profile.
 kernel, on AArch64.** The customer's rule of 2026-10-25 is shown on QEMU `virt` under
 TCG by a kernel built with `--personality user`, and by one built with `fast`'s values,
 each in the test's own image (not `fast`'s loader or its signed slot), with the test's
-own driver; on no board, and with no claim. `max` does not build yet, so this is not
-`max`'s row. The PL031 is served under `ferrix,test-seconds` on the kernel ELF hashed
+own driver; on no board, and with no claim. `max` did not build then (its flip of
+2026-11-26 came after), so this is not `max`'s row. The PL031 is served under `ferrix,test-seconds` on the kernel ELF hashed
 before the test, and refused with its clock's provider gone; a hybrid is refused by
 name, so the row never goes green on a kernel that publishes nothing (C.2). The first
 runs found F-123: under `personality=user` devmgr's first DEVICES message left out
