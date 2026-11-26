@@ -688,9 +688,9 @@ fn check_a_reaped_pid_finds_nothing() -> Result<(), &'static str> {
 /// Verifies: H.MEM.33
 #[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
 fn check_the_tables_are_their_boot_size() -> Result<(), &'static str> {
-    use crate::object::quota::{FIXED_JOBS, fixed_slots};
+    use crate::object::quota::{FIXED_JOBS, fixed_held, fixed_slots};
     use crate::user::address_wait::{BUCKET_COUNT, FIXED_WAITERS, bucket_room};
-    if process::fixed_entries() != process::FIXED_TASKS || fixed_slots() != FIXED_JOBS {
+    if process::fixed_entries().0 != process::FIXED_TASKS || fixed_slots() != FIXED_JOBS {
         return Err("a boot-sized table grew");
     }
     if BUCKET_COUNT != 1 || bucket_room(0).1 != FIXED_WAITERS {
@@ -712,7 +712,8 @@ fn check_the_tables_are_their_boot_size() -> Result<(), &'static str> {
             return Err("the pid table took more numbers than its size");
         }
     }
-    let refused_full = !numbers.is_empty();
+    // Refused only when every entry is in use: none short of its size, none past it.
+    let refused_full = !numbers.is_empty() && process::fixed_entries().1 == process::FIXED_TASKS;
     let again = numbers.pop().inspect(|&number| process::release(number));
     let reused = again.and_then(|_| process::allocate());
     for number in numbers.drain(..).chain(reused) {
@@ -731,7 +732,11 @@ fn check_the_tables_are_their_boot_size() -> Result<(), &'static str> {
             return Err("the quota table took more jobs than its size");
         }
     }
+    let held = fixed_held();
     drop(jobs);
+    if held != FIXED_JOBS {
+        return Err("the quota table refused a job while it had room");
+    }
     if parent.new_child().is_err() {
         return Err("the quota table refused a job while it had room");
     }

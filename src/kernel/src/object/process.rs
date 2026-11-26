@@ -1482,10 +1482,11 @@ fn put(live: &mut Live, number: u32, entry: Entry) -> Result<(), AllocError> {
     Ok(())
 }
 
-/// The entries ring 0's table holds: [`FIXED_TASKS`], for K16.9's check.
+/// The entries ring 0's table holds ([`FIXED_TASKS`]) and how many are in use, for K16.9's check.
 #[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
-pub fn fixed_entries() -> usize {
-    TABLE.lock().live.entries.len()
+pub fn fixed_entries() -> (usize, usize) {
+    let table = TABLE.lock();
+    (table.live.entries.len(), table.live.used)
 }
 
 /// What one number of the table holds.

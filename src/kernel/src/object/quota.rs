@@ -451,6 +451,12 @@ pub const fn fixed_slots() -> usize {
     FIXED.len()
 }
 
+/// The slots of ring 0's table a job holds, for K16.9's check.
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+pub fn fixed_held() -> usize {
+    FIXED.iter().filter(|slot| slot.holds.load(Ordering::Acquire) != 0).count()
+}
+
 /// Where the next claim starts looking. A hint, read and written anywhere.
 static HINT: AtomicU32 = AtomicU32::new(0);
 
