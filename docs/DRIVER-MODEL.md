@@ -532,7 +532,10 @@ checks and their one `generic` line run in every profile.
 kernel, on AArch64.** The customer's rule of 2026-10-25 is shown on QEMU `virt` under
 TCG by a kernel built with `--personality user`, and by one built with `fast`'s values,
 each in the test's own image (not `fast`'s loader or its signed slot), with the test's
-own driver; on no board, and with no claim. `max` does not build yet, so this is not
+own driver; on no board, and with no claim. The run with `fast`'s values carries
+`ferrix.unisolated`, which `fast` does not permit: it is evidence of the driver model on
+a user kernel, **not a row of `fast`** (ledger 10312 M3); for `max` the row runs with its
+device translated, or reads NOT RUN with its cause. `max` does not build yet, so this is not
 `max`'s row. The PL031 is served under `ferrix,test-seconds` on the kernel ELF hashed
 before the test, and refused with its clock's provider gone; a hybrid is refused by
 name, so the row never goes green on a kernel that publishes nothing (C.2). The first
