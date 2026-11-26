@@ -52,6 +52,7 @@
 //! reserved from the moment it is chosen, before the process is shared, so
 //! two processes made at once cannot be given the same one.
 
+#[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
 use alloc::collections::BTreeMap;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
@@ -1307,9 +1308,137 @@ pub const INIT_PID: u32 = 1;
 #[derive(Debug)]
 struct Table {
     /// Every number in use.
-    live: BTreeMap<u32, Entry>,
+    live: Live,
     /// The number handed out last.
     last: u32,
+}
+
+/// Every number in use, outside ring 0 under `kernel_memory=retyped`: a map that grows.
+#[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
+type Live = BTreeMap<u32, Entry>;
+
+/// Every number in use and its entry, in ascending order.
+#[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
+fn numbered(live: &Live) -> impl Iterator<Item = (u32, &Entry)> {
+    live.iter().map(|(&number, entry)| (number, entry))
+}
+
+/// Put `entry` under `number`, which holds nothing.
+#[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
+fn put(live: &mut Live, number: u32, entry: Entry) -> Result<(), AllocError> {
+    fallible::insert(live, number, entry).map(|_| ())
+}
+
+/// Tasks ring 0's table holds at once under `kernel_memory=retyped`: K16.9's `N_tasks`, a
+/// capacity of the profile (docs/microkernel/K16.md §3). Tonight's heaviest row held at most 63
+/// (the bucket's upper edge, ledger 10548 Z2), so 1024 is sixteen times it.
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+pub const FIXED_TASKS: usize = 1024;
+
+/// Ring 0's pid table under `kernel_memory=retyped`: a static of [`FIXED_TASKS`] entries and a
+/// lookup from a number to its entry, so that nothing is made after boot, or at all (K16.9,
+/// L.object.339, H.MEM.33). Numbers are chosen as the map's are; only where they are kept
+/// differs, and the entry past the last is refused.
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+#[derive(Debug)]
+struct Live {
+    /// One more than the entry a number is in; zero for a free number.
+    at: [u16; PID_MAX as usize],
+    /// The entries.
+    entries: [Option<Entry>; FIXED_TASKS],
+    /// How many are in use.
+    used: usize,
+}
+
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+const _: () = assert!(FIXED_TASKS < u16::MAX as usize, "an entry's index fits its lookup");
+
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+impl Live {
+    /// An empty table, made by the compiler.
+    const fn new() -> Live {
+        Live {
+            at: [0; PID_MAX as usize],
+            entries: [const { None }; FIXED_TASKS],
+            used: 0,
+        }
+    }
+
+    /// The entry index `number` is in.
+    fn index(&self, number: &u32) -> Option<usize> {
+        let at = *self.at.get(usize::try_from(*number).ok()?)?;
+        usize::from(at).checked_sub(1)
+    }
+
+    fn contains_key(&self, number: &u32) -> bool {
+        self.index(number).is_some()
+    }
+
+    fn get(&self, number: &u32) -> Option<&Entry> {
+        self.entries.get(self.index(number)?)?.as_ref()
+    }
+
+    fn get_mut(&mut self, number: &u32) -> Option<&mut Entry> {
+        let index = self.index(number)?;
+        self.entries.get_mut(index)?.as_mut()
+    }
+
+    fn remove(&mut self, number: &u32) -> Option<Entry> {
+        let index = self.index(number)?;
+        let taken = self.entries.get_mut(index)?.take();
+        if let Some(at) = self.at.get_mut(usize::try_from(*number).ok()?) {
+            *at = 0;
+        }
+        self.used = self.used.saturating_sub(1);
+        taken
+    }
+
+    /// Every number in use and its entry, in ascending order, as the map answered them.
+    fn iter(&self) -> impl Iterator<Item = (u32, &Entry)> {
+        self.at.iter().enumerate().filter_map(|(number, &at)| {
+            let entry = self.entries.get(usize::from(at).checked_sub(1)?)?.as_ref()?;
+            Some((u32::try_from(number).ok()?, entry))
+        })
+    }
+
+    fn values(&self) -> impl Iterator<Item = &Entry> {
+        self.entries.iter().filter_map(Option::as_ref)
+    }
+
+    fn values_mut(&mut self) -> impl Iterator<Item = &mut Entry> {
+        self.entries.iter_mut().filter_map(Option::as_mut)
+    }
+}
+
+/// Every number in use and its entry, in ascending order, as the map answers them.
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+fn numbered(live: &Live) -> impl Iterator<Item = (u32, &Entry)> {
+    live.iter()
+}
+
+/// Put `entry` under `number`, which holds nothing; refused past [`FIXED_TASKS`], which a
+/// fork and a clone answer `EAGAIN` for.
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+fn put(live: &mut Live, number: u32, entry: Entry) -> Result<(), AllocError> {
+    let slot = usize::try_from(number).map_err(|_| AllocError)?;
+    let index = live
+        .entries
+        .iter()
+        .position(Option::is_none)
+        .ok_or(AllocError)?;
+    let at = live.at.get_mut(slot).ok_or(AllocError)?;
+    *at = u16::try_from(index + 1).map_err(|_| AllocError)?;
+    if let Some(free) = live.entries.get_mut(index) {
+        *free = Some(entry);
+    }
+    live.used += 1;
+    Ok(())
+}
+
+/// The entries ring 0's table holds: [`FIXED_TASKS`], for K16.9's check.
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+pub fn fixed_entries() -> usize {
+    TABLE.lock().live.entries.len()
 }
 
 /// What one number of the table holds.
@@ -1340,7 +1469,7 @@ impl Entry {
 
 /// The one table: numbers are global until stage 13's pid namespaces.
 static TABLE: SpinLock<Table> = SpinLock::new(Table {
-    live: BTreeMap::new(),
+    live: Live::new(),
     // So the first ordinary pid is 2: 1 is init's.
     last: INIT_PID,
 });
@@ -1358,7 +1487,7 @@ pub fn allocate() -> Option<u32> {
             candidate + 1
         };
         if !table.live.contains_key(&candidate) {
-            let _ = fallible::insert(&mut table.live, candidate, Entry::RESERVED).ok()?;
+            put(&mut table.live, candidate, Entry::RESERVED).ok()?;
             table.last = candidate;
             return Some(candidate);
         }
@@ -1373,7 +1502,7 @@ pub fn allocate_init() -> Option<u32> {
     if guard.live.contains_key(&INIT_PID) {
         return None;
     }
-    let _ = fallible::insert(&mut guard.live, INIT_PID, Entry::RESERVED).ok()?;
+    put(&mut guard.live, INIT_PID, Entry::RESERVED).ok()?;
     Some(INIT_PID)
 }
 
@@ -1402,7 +1531,7 @@ pub fn name(number: u32, process: Weak<dyn Host>) -> Result<(), AllocError> {
         *entry = named;
         return Ok(());
     }
-    fallible::insert(&mut table.live, number, named).map(|_| ())
+    put(&mut table.live, number, named)
 }
 
 /// Give `number` back, whatever it names. Called by a process as it is
@@ -1502,7 +1631,7 @@ fn gather(listed_only: bool) -> Result<Vec<Arc<dyn Host>>, AllocError> {
     // a process's last, and dropping a process takes the lock.
     let mut entries: Vec<(u32, Arc<dyn Host>)> = {
         let table = TABLE.lock();
-        fallible::try_collect(table.live.iter().filter_map(|(&number, entry)| {
+        fallible::try_collect(numbered(&table.live).filter_map(|(number, entry)| {
             let host = if listed_only {
                 entry.findable()
             } else {
