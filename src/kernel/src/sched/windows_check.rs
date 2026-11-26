@@ -1139,7 +1139,7 @@ pub fn run() -> Result<alloc::string::String, &'static str> {
                     .find(|&i| TR_IDS[i].load(Ordering::Relaxed) + 1 == id)
                     .map_or("other", |i| NAMES[i])
             };
-            if name != last_name {
+            if name != last_name || name == "idle" {
                 use core::fmt::Write;
                 let _ = write!(
                     line,
