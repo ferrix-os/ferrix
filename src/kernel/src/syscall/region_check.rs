@@ -263,6 +263,9 @@ fn run() -> Result<Report, &'static str> {
         .map_err(|_| "no room for the check's job")?;
     let job = side.handle(nr::JOB_CREATE, &[reg(root_handle), 0], "job_create failed")?;
     refusals(&side, job)?;
+    // `boot_authority::make` is `process_make`'s maker in a user kernel alone; a Linux kernel's,
+    // `launch::make_native`, takes no bare creator (F-130's case, 10968 X2).
+    #[cfg(ferrix_personality = "user")]
     a_creator_at_its_task_limit_makes_nothing(&root)?;
     a_region_process_past_its_jobs_task_limit_is_refused(&side, root_handle)?;
     let region = side.handle(
@@ -424,6 +427,7 @@ fn a_region_process_past_its_jobs_task_limit_is_refused(
 /// unchanged; once its child has gone, it makes one again.
 ///
 /// Verifies: L.object.81
+#[cfg(ferrix_personality = "user")]
 fn a_creator_at_its_task_limit_makes_nothing(root: &Arc<Job>) -> Result<(), &'static str> {
     use crate::object::quota::Resource;
     const LIMIT: u64 = 2;
@@ -457,7 +461,6 @@ fn a_creator_at_its_task_limit_makes_nothing(root: &Arc<Job>) -> Result<(), &'st
     let _ = creator.call(nr::HANDLE_CLOSE, &[first as u64]);
     let again = make().map_err(|_| "a creator was refused after its child had gone")?;
     let _ = creator.call(nr::HANDLE_CLOSE, &[again as u64]);
-    #[cfg(ferrix_personality = "user")]
     creator.end(0);
     Ok(())
 }
