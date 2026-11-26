@@ -710,9 +710,16 @@ log path and commit; a new sighting is added to its row the day it is seen.
   arena eaten to 3000 frames, on 2b6fc8c58. Whether `fast`'s four x86-64 sightings stood at a floor is
   not shown. Next step: the arena's free frames printed at such a sighting. `x86_64` stays out of
   `personality=user`'s `built_on`.
-* `fault_ahead`'s five controls of 6537, A7, on this tree, with L.object.314's tag: its
-  cases ran on `feature/mk-perf` (`logs/queue/mkp7-*`), not here; a neighbour's refused
-  charge moving nothing in memory.events is still to read.
+* ~~`fault_ahead`'s five controls of 6537, A7, on this tree, with L.object.314's tag~~ **done 2026-11-26**
+  (sebastian-27c, ledger 10259): on develop under `--personality user --set fault_ahead=on`, x86-64 KVM and
+  AArch64 TCG, `test-threads --smp 2` PASSED and every control FIRED (`n27c-fc-*` on 74f29e33c, first `n27c-fa-*` on de7f2378f): rights, the file's end shared
+  and private, a private copy (E1), the walk's end and its room (E2, the room with F-122's eight walks), and a new
+  case for "only what the object holds" (a sparse file's hole stays one, 6598's "reads no disk"), its control the
+  look's held test dropped. Both gates now demand their step's line, each shown by a control. L.object.314 is tagged
+  on the two gates and out of the baseline, read not built on ARMv7-A. Under the space's lock: by review (6537 A1,
+  6598) and a run (test-threads' munmap-race step). Not shown by a control: the foreign neighbour (E4, by
+  argument), and a neighbour's charge through the OOM path, which `fault_ahead` never takes (refused before a
+  charge). The warm rustc row stays open.
 * ~~**F-122: `fault_ahead=on`'s walk control is dead**~~ **closed 2026-11-26** (ledger 10144 X6, 10178; owner
   sebastian-27c): the control last FIRED on 1aea9a223 and first did not on 4120b4def, whose charged views raised the
   program's own use before the walk (333,912 to 340,216 bytes) and made the walk two pages shorter (1,962 to 1,960),
@@ -1124,11 +1131,11 @@ above, and the page links here.
 
 | Row | State |
 |---|---|
-| E1, one control per hold, seen by a neighbour alone: rights, the file's end (shared and private), a private copy | Built, `test-threads`, each FIRED by a plant around `fault_around`'s resolve, `mkf3e-rights`, `-end-private`, `-end-shared`, `-copy` |
-| E2, `end` and `room` through `gate.sh` on these patches | Both FIRED: `room` `mkm-o-walk`, `end` `mkm-q-end1` ("a walk copied the mapping after its region"), under `--personality user` |
+| E1, one control per hold, seen by a neighbour alone: rights, the file's end (shared and private), a private copy | Built, `test-threads`, each FIRED by a plant around `fault_around`'s resolve, `mkf3e-rights`, `-end-private`, `-end-shared`, `-copy`; again on develop de7f2378f on x86-64 KVM and AArch64 TCG, `n27c-fa-rights-*`, `-end-shared-*`, `-end-private-*`, `-copy-*` (2026-11-26) |
+| E2, `end` and `room` through `gate.sh` on these patches | Both FIRED: `room` `mkm-o-walk`, `end` `mkm-q-end1` ("a walk copied the mapping after its region"), under `--personality user`; again on develop de7f2378f on both architectures, `n27c-fa-end-*`, and `room` as `n27c-fa-walk-*` on F-122's eight walks (2026-11-26) |
 | E3, `test-threads` and `test-container` with `fault_ahead` on and off, through `gate.sh` at the tip | Both ran on the lift's stack (`mkm-lr-18`, `mkm-o-contu` on; `mkm-lr-13`, `mkm-m-cont` off). The walk does nothing with it off: its control fires only under `--personality user` (`mkm-o-walk`). `LEFT = 4` rests on its table count: a flake there is a row here, not a retry |
 | A6 restored, no case: `room` reads `quota::charge_target()`, what a ticket's charge would be charged to, and not the running group's | Not owed as written (ledger 7275): lift's `Task::has_adoption` is a constant false, so no fault in linuxd runs under a ticket and `room`'s two readings are one. A case at the first adoption linuxd has |
 | E4, W+X and foreign neighbours | W+X shown in `test-threads`, read, write and fetch each its own fault. Foreign: by argument, `fill_with` never takes a driver's page ahead (7275), and a row when a row maps a driver's VMO |
 | A `test-rustc` hang in the warm loop | One run in about ten on the first fault-around build, not diagnosed, and its log not kept. Two ways to it are fixed. 52 runs at the lift's tip on 2026-11-05, `--personality user` with `restricted_fastpath=off`, none hung (logs in mk-lift/rustc-loop), which does not prove it |
 
-Until these are met, L.object.314 stays baselined unverified (ledger 6590).
+L.object.314 left the baseline on 2026-11-26 (ledger 10259), tagged on `test-threads` and `test-container`, once E1 and E2's controls and the held-pages case's FIRED on develop on both architectures; the space's lock rests on review and a run; E4's foreign half stays an argument and the warm rustc row stays open, as above (ledger 6590).

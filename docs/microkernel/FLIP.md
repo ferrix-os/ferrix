@@ -59,7 +59,7 @@ Its loader starts only a verifying slot, so each image built for it signs one le
 | BACKLOG 429, 436 | K16.5, K16.9, F.8 | `built` of `retyped` (R.1); K16.2 to M7 (R.4) |
 | BACKLOG 436 | K16.7 | the refusal by name for `built`, the rest to M7 (R.3) |
 | BACKLOG 551 | R3 charging, `TRANSFER`, rows with no check, §7's rows | M5's flip |
-| BACKLOG 569 | `fault_ahead`'s A7 controls | `built` of `on` (B.6) |
+| BACKLOG 569 | `fault_ahead`'s A7 controls | `built` of `on` (B.6): done 2026-11-26, on develop on both architectures (ledger 10259, `n27c-fa-*`) |
 | BACKLOG 577 | the window's W2-W8 | M5's flip |
 | BACKLOG 636 | `max` without IBPB | M5's flip |
 | BACKLOG 653 | `test-driver-model` on AArch64: done 2026-11-26 on `personality=user` and `fast` (`DRIVER-MODEL.md` §12); `max`'s run comes with its sweep | M5's flip |

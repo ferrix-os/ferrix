@@ -46,6 +46,8 @@ fn target(arch: Arch, i686: bool) -> Result<&'static str> {
 
 /// The lines a working run prints, in order.
 const STEPS: &[&str] = &[
+    // L.object.314's step, which runs on every build: the call ends in this line.
+    "threads: fault-ahead ok",
     "threads: armed its-own-number ok",
     "threads: armed reparent ok",
     "threads: armed reparent-working ok",
@@ -171,6 +173,10 @@ fn says(line: &str, want: &str) -> bool {
 ///
 /// Verifies: `L.sched.109`
 /// Verifies: `L.sched.99`, `L.sched.100`, `L.sched.101`
+/// Its fault-ahead step under `personality=user` (ledger 6537 A7): a neighbour's rights, the file's end
+/// shared and private, a private copy.
+///
+/// Verifies: `L.object.314`
 pub(crate) fn test_threads(args: &Args) -> Result<()> {
     for arch in args.arches()? {
         let log = paths::build_dir(arch).join("serial.log");

@@ -28,6 +28,8 @@ const STEPS: &[&str] = &[
     "container: namespaces ok",
     "container: ids ok",
     "container: seccomp ok",
+    // The fault-ahead walk's eight (L.object.314), on every build: the walk runs on each.
+    "container: walk ok",
     "container: reclaim ok",
     "container: oom ok",
     "container: heap-reclaim ok",
@@ -38,6 +40,7 @@ const STEPS: &[&str] = &[
 /// The test on every architecture asked for.
 ///
 /// Verifies: L.object.370
+/// Verifies: L.object.314
 pub(crate) fn run(args: &Args) -> Result<()> {
     for arch in args.arches()? {
         let log = paths::build_dir(arch).join("serial.log");

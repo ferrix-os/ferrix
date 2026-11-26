@@ -272,6 +272,42 @@ fn pattern_file(pages: usize, tail: usize) -> i32 {
     fd
 }
 
+/// A memfd of `pages` pages that holds its first alone, the rest holes.
+#[allow(unsafe_code, reason = "memfd_create, ftruncate and pwrite are libc's")]
+fn sparse_file(pages: usize) -> i32 {
+    // SAFETY: a name the kernel copies.
+    let fd = unsafe { libc::memfd_create(c"fault-ahead-sparse".as_ptr(), 0) };
+    if fd < 0 {
+        fail("fault-ahead: memfd_create of a sparse file");
+    }
+    // SAFETY: a descriptor just made.
+    if unsafe { libc::ftruncate(fd, (pages * PAGE) as libc::off_t) } != 0 {
+        fail("fault-ahead: ftruncate of a sparse file");
+    }
+    let word = 1_u32.to_le_bytes();
+    // SAFETY: four bytes on this stack, at the start of the file just sized.
+    if unsafe { libc::pwrite(fd, word.as_ptr().cast(), 4, 0) } != 4 {
+        fail("fault-ahead: pwrite of a sparse file");
+    }
+    fd
+}
+
+/// `RssFile` and `RssShmem` of `/proc/self/status`, in KiB: the file pages this space counts.
+fn file_resident_kib() -> u64 {
+    let status = std::fs::read_to_string("/proc/self/status")
+        .unwrap_or_else(|_| fail("fault-ahead: /proc/self/status could not be read"));
+    ["RssFile:", "RssShmem:"]
+        .iter()
+        .map(|key| {
+            status
+                .lines()
+                .find_map(|line| line.strip_prefix(key))
+                .and_then(|rest| rest.trim().trim_end_matches("kB").trim().parse::<u64>().ok())
+                .unwrap_or_else(|| fail("fault-ahead: /proc/self/status has no file resident count"))
+        })
+        .sum()
+}
+
 /// `fd` mapped at any address.
 #[allow(unsafe_code, reason = "the call is libc's")]
 fn map_file(fd: i32, pages: usize, protection: i32) -> *mut u8 {
@@ -486,6 +522,19 @@ fn check_fault_ahead() {
     if word_at(walk, 8) != 0x5555 {
         fail("fault-ahead: a walk copied the mapping after its region");
     }
+    // Only what the object holds (L.object.314, ledger 6598's "reads no disk"): beside a page the
+    // file holds, a hole stays a hole. Its fault would commit it, which the space's resident count
+    // (each region's object's committed pages, L.user.171) shows.
+    let sparse = sparse_file(16);
+    let mapping = map_file(sparse, 16, libc::PROT_READ);
+    let before = file_resident_kib();
+    if word_at(mapping, 0) != 1 {
+        fail("fault-ahead: a sparse file's held page read wrong");
+    }
+    if file_resident_kib() != before {
+        fail("fault-ahead: a neighbour's fault brought in a page the file did not hold");
+    }
+
     println!("threads: fault-ahead ok");
 }
 

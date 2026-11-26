@@ -750,6 +750,7 @@ fn walk_to_the_limit() {
     for ballast in 1..=8 {
         walk_once(ballast);
     }
+    step("walk");
 }
 
 /// One walk of [`walk_to_the_limit`], after `ballast` pages touched in a mapping of their own.

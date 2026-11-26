@@ -3934,8 +3934,20 @@ package FerrixObjectRequirements {
             attribute :>> statement = "Under fault_ahead=on a fault shall bring in only pages the region's
                 object already holds, or a run of fresh memory, each with no more than its own
                 rights, under the space's lock; a neighbour's refusal shall not be the program's.";
-            attribute :>> criterion = "test-threads' `fault-ahead` under personality=user (ledger 6537,
-                A1-A7).";
+            attribute :>> criterion = "Under personality=user with fault_ahead=on, on x86-64 and AArch64, clause
+                by clause (ledger 6537 A7, 6598, 10259 V2). Only pages the object already holds:
+                test-threads' fault-ahead step, a sparse file's hole beside its held page left a hole
+                (the file resident count unmoved), its control the look's held test dropped. A run of
+                fresh memory in the faulting page's own region: test-threads' walk case, its control
+                the walk's end bound dropped. No more than its own rights: a neighbour with no access
+                still SIGSEGV, a page past the file's end, shared and private, still SIGBUS, a private
+                copy not replaced by the file's, each controlled by a plant around fault_around's
+                resolve. A neighbour's refusal not the program's, refused before a charge: test-
+                container's walk to memory.max, eight walks, memory.events unmoved, its control
+                write_ahead's room ignored (F-122). Under the space's lock: by review (6537 A1, 6598)
+                and test-threads' munmap-race step as a run; no plant can force the race. Both gates
+                demand their step's line.";
+
             attribute :>> parent = ("H.OBJ.30");
             attribute :>> unit = ("user::space::AddressSpace::fault_around",
                 "user::space::AddressSpace::write_ahead");

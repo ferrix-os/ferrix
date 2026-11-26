@@ -148,6 +148,13 @@ ARCH_ONLY = {
     "arch/arm_common.rs": {"aarch64", "armv7a"},
 }
 
+# Requirements held by an xtask gate whose rows are of some architectures alone: the
+# others read *not built* for them (ledger 10259 V4). L.object.314's unit is linuxd's,
+# under personality=user, built and run on x86-64 and AArch64 (7016 B.1).
+GATE_ARCHES = {
+    "L.object.314": {"x86_64", "aarch64"},
+}
+
 LEVELS = {"ItemHighLevel": "high", "ItemLowLevel": "low"}
 ID_FORM = {
     "high": re.compile(r"H\.[A-Z]+\.[1-9]\d*\Z"),
@@ -1681,7 +1688,12 @@ def main() -> int:
         return cache[rel]
 
     verdicts = {
-        r.id: {a: best([reach(v, a, evidence[a], spans) for v in by_id.get(r.id, [])]) for a in ARCHES}
+        r.id: {
+            a: "not built"
+            if a not in GATE_ARCHES.get(r.id, set(ARCHES))
+            else best([reach(v, a, evidence[a], spans) for v in by_id.get(r.id, [])])
+            for a in ARCHES
+        }
         for r in requirements
     }
     parents_named: dict[str, list[str]] = defaultdict(list)
