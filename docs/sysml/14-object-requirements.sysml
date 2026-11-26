@@ -4158,6 +4158,25 @@ package FerrixObjectRequirements {
             attribute :>> unit = ("mm::seal::charged", "mm::seal::note_payer", "mm::seal::seal_after_boot", "mm::seal::report");
             attribute :>> scope = "kernel_memory=retyped";
         }
+        requirement <'L.object.339'> ringZerosTablesAreTheirBootSize : ItemLowLevel {
+            attribute :>> statement = "In ring 0 under kernel_memory=retyped the pid table shall hold FIXED_TASKS
+                entries, the quota table FIXED_JOBS slots and the address waits' one bucket FIXED_WAITERS, as many
+                as the tasks, each a static that is never grown; the entry past each shall be refused, and the
+                description's max_processes shall limit the pid table to no more than it holds.";
+            attribute :>> criterion = "object::rehome_check's boot-size case: each table its size, the pid table and
+                the quota table filled through their real calls until refused, then one given back taken again;
+                the address waits' bound is unreachable while waiters are tasks. Statically, check-kernel-shape
+                holds user::address_wait::grow built under heap alone and object::process::fixed_entries under
+                retyped alone, its plants FIRED. The description above the size stops the boot (FX-0953), its
+                control FIRED. The seal's own read of the tables is B's line, a BACKLOG row.";
+            attribute :>> parent = "H.MEM.33";
+            attribute :>> unit = ("object::process::put", "object::process::limit_processes",
+                "object::process::Live::index", "object::process::Live::get", "object::process::Live::get_mut",
+                "object::process::Live::remove", "object::process::Live::iter", "object::quota::find_free",
+                "user::address_wait::push_within", "user::address_wait::take_at",
+                "user::address_wait::Bucket::get", "user::address_wait::Bucket::iter_mut");
+            attribute :>> scope = "kernel_memory=retyped";
+        }
         requirement <'L.object.340'> aFrameGoesBackWithNothingOnIt : ItemLowLevel {
             attribute :>> statement = "A frame a job's heap gives back shall hold none of that job's bytes.";
             attribute :>> criterion = "mm::seal::check's large allocation; its control FIRED.";

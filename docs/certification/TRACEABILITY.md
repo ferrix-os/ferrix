@@ -14,15 +14,15 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
-| High (`H.*`) | 196 | 141 | 55 |
-| Low (`L.*`) | 1559 | 1279 | 280 |
+| High (`H.*`) | 197 | 142 | 55 |
+| Low (`L.*`) | 1560 | 1280 | 280 |
 
-3580 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+3591 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 3589 |
-| Accessors, covered by the requirement they serve | 1531 |
+| Named by a low-level requirement | 3607 |
+| Accessors, covered by the requirement they serve | 1543 |
 | Check code in a product file | 133 |
 | Named by none | 1174 |
 
@@ -173,7 +173,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 |---|---|
 | ASR-1 | `H.MEM.1`, `H.MEM.2`, `H.MEM.3`, `H.MEM.7`, `H.MEM.8`, `H.MEM.12`, `H.MEM.14`, `H.MEM.15`, `H.MEM.16`, `H.MEM.17`, `H.MEM.19`, `H.MEM.25`, `H.MEM.23`, `H.SCHED.6`, `H.TRAP.4` |
 | ASR-2 | `H.MEM.4`, `H.MEM.5`, `H.MEM.13`, `H.MEM.27`, `H.MEM.24`, `H.MEM.30` |
-| ASR-3 | `H.MEM.24`, `H.MEM.29`, `H.OBJ.1`, `H.OBJ.2`, `H.OBJ.3`, `H.OBJ.4`, `H.OBJ.5`, `H.OBJ.6`, `H.OBJ.14`, `H.OBJ.15`, `H.IRQ.1`, `H.DEV.1`, `H.DEV.5`, `H.DEV.9`, `H.DEV.10`, `H.DEV.11`, `H.DEV.7`, `H.DEV.8`, `H.DEV.12`, `H.DEV.13`, `H.MEM.32` |
+| ASR-3 | `H.MEM.24`, `H.MEM.29`, `H.OBJ.1`, `H.OBJ.2`, `H.OBJ.3`, `H.OBJ.4`, `H.OBJ.5`, `H.OBJ.6`, `H.OBJ.14`, `H.OBJ.15`, `H.IRQ.1`, `H.DEV.1`, `H.DEV.5`, `H.DEV.9`, `H.DEV.10`, `H.DEV.11`, `H.DEV.7`, `H.DEV.8`, `H.DEV.12`, `H.DEV.13`, `H.MEM.32`, `H.MEM.33` |
 | ASR-4 | `H.DMA.1`, `H.DMA.2`, `H.DMA.6`, `H.DMA.7`, `H.DMA.3`, `H.DMA.8`, `H.DMA.9`, `H.DMA.5`, `H.DMA.10`, `H.DEV.2`, `H.DEV.4` |
 | ASR-5 | `H.MEM.6` |
 | ASR-6 | `H.DEV.6`, `H.BOOT.1`, `H.BOOT.2`, `H.BOOT.4`, `H.BOOT.5`, `H.BOOT.16`, `H.FAIL.1`, `H.FAIL.15`, `H.FAIL.2`, `H.FAIL.3`, `H.FAIL.4`, `H.FAIL.5`, `H.FAIL.8`, `H.FAIL.9`, `H.FAIL.10`, `H.FAIL.12`, `H.FAIL.13`, `H.FAIL.14`, `H.FAIL.11` |
@@ -187,7 +187,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | G.7 | `H.OBJ.11`, `H.OBJ.17`, `H.OBJ.18`, `H.OBJ.19`, `H.OBJ.21`, `H.OBJ.20` |
 | G.8 | `H.OBJ.12`, `H.OBJ.22`, `H.QUOTA.6`, `H.QUOTA.12`, `H.QUOTA.13`, `H.QUOTA.22`, `H.QUOTA.15`, `H.QUOTA.16`, `H.QUOTA.17` |
 | O.AUDIT | `H.AUD.1`, `H.AUD.2`, `H.AUD.3`, `H.AUD.4`, `H.AUD.5`, `H.AUD.6`, `H.AUD.7`, `H.AUD.8`, `H.AUD.9`, `H.AUD.10`, `H.AUD.11`, `H.AUD.12`, `H.AUD.13` |
-| O.CAPABILITY | `H.MEM.24`, `H.MEM.29`, `H.MEM.30`, `H.OBJ.1`, `H.OBJ.2`, `H.OBJ.3`, `H.OBJ.4`, `H.OBJ.5`, `H.OBJ.6`, `H.OBJ.7`, `H.OBJ.8`, `H.OBJ.9`, `H.OBJ.11`, `H.OBJ.14`, `H.OBJ.15`, `H.OBJ.16`, `H.OBJ.17`, `H.OBJ.18`, `H.OBJ.22`, `H.OBJ.19`, `H.OBJ.21`, `H.OBJ.23`, `H.OBJ.24`, `H.IRQ.1`, `H.IRQ.2`, `H.DMA.5`, `H.DEV.1`, `H.DEV.5`, `H.DEV.9`, `H.DEV.10`, `H.DEV.11`, `H.DEV.7`, `H.DEV.8`, `H.TRAP.20`, `H.DEV.12`, `H.DEV.13`, `H.MEM.32` |
+| O.CAPABILITY | `H.MEM.24`, `H.MEM.29`, `H.MEM.30`, `H.OBJ.1`, `H.OBJ.2`, `H.OBJ.3`, `H.OBJ.4`, `H.OBJ.5`, `H.OBJ.6`, `H.OBJ.7`, `H.OBJ.8`, `H.OBJ.9`, `H.OBJ.11`, `H.OBJ.14`, `H.OBJ.15`, `H.OBJ.16`, `H.OBJ.17`, `H.OBJ.18`, `H.OBJ.22`, `H.OBJ.19`, `H.OBJ.21`, `H.OBJ.23`, `H.OBJ.24`, `H.IRQ.1`, `H.IRQ.2`, `H.DMA.5`, `H.DEV.1`, `H.DEV.5`, `H.DEV.9`, `H.DEV.10`, `H.DEV.11`, `H.DEV.7`, `H.DEV.8`, `H.TRAP.20`, `H.DEV.12`, `H.DEV.13`, `H.MEM.32`, `H.MEM.33` |
 | O.DMA | `H.DMA.1`, `H.DMA.2`, `H.DMA.6`, `H.DMA.7`, `H.DMA.3`, `H.DMA.8`, `H.DMA.9`, `H.DMA.4`, `H.DMA.5`, `H.DMA.10`, `H.DEV.2`, `H.DEV.4` |
 | O.FAILSAFE | `H.MEM.22`, `H.DEV.6`, `H.TRAP.6`, `H.BOOT.1`, `H.BOOT.2`, `H.BOOT.4`, `H.BOOT.5`, `H.BOOT.6`, `H.BOOT.7`, `H.BOOT.8`, `H.BOOT.15`, `H.BOOT.16`, `H.FAIL.1`, `H.FAIL.15`, `H.FAIL.2`, `H.FAIL.3`, `H.FAIL.4`, `H.FAIL.5`, `H.FAIL.8`, `H.FAIL.9`, `H.FAIL.10`, `H.FAIL.12`, `H.FAIL.13`, `H.FAIL.14`, `H.FAIL.11` |
 | O.ISOLATE | `H.MEM.1`, `H.MEM.2`, `H.MEM.3`, `H.MEM.7`, `H.MEM.8`, `H.MEM.10`, `H.MEM.12`, `H.MEM.14`, `H.MEM.15`, `H.MEM.16`, `H.MEM.17`, `H.MEM.18`, `H.MEM.19`, `H.OBJ.28`, `H.OBJ.27`, `H.MEM.28`, `H.MEM.24`, `H.MEM.25`, `H.MEM.22`, `H.MEM.23`, `H.OBJ.13`, `H.OBJ.25`, `H.OBJ.26`, `H.OBJ.30`, `H.OBJ.34`, `H.SCHED.6`, `H.SCHED.7`, `H.SCHED.8`, `H.SCHED.12`, `H.TRAP.3`, `H.TRAP.4`, `H.TRAP.5`, `H.TRAP.6`, `H.TRAP.7`, `H.TRAP.8`, `H.TRAP.13`, `H.TRAP.16`, `H.TRAP.17`, `H.TRAP.19`, `H.TRAP.20`, `H.TRAP.21`, `H.TRAP.22`, `H.TRAP.23`, `H.TRAP.24`, `H.BOOT.3`, `H.BOOT.9` |
@@ -469,6 +469,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | Id | Statement | Criterion | Parent | Verified by | x86-64 | AArch64 | ARMv7-A |
 |---|---|---|---|---|---|---|---|
 | `H.MEM.32` | *Under `kernel_memory=retyped`:* After the seal the kernel's global allocator shall serve a job only from the retyped pages of its own promise, a task with no job only from the named kernel pool, and refuse every other request. | A personality=user kernel_memory=retyped boot's mm::seal::check, and test-rustc, test-btrfsd-restart, test-partitions under it reporting zero refused. | O.CAPABILITY, ASR-3 | `src/kernel/src/mm/seal_check.rs::check` | not built | not built | not built |
+| `H.MEM.33` | *Under `kernel_memory=retyped`:* Under kernel_memory=retyped ring 0's tables that grew with use (the pid table, the quota table, the address waits') shall be of a size fixed when the kernel is built, and shall refuse the entry past it. | L.object.339's case at stage 6, and check-kernel-shape's symbols: the growing paths absent from a retyped ring 0, the fixed form present (docs/microkernel/K16.md §3, K16.9). | O.CAPABILITY, ASR-3 | `src/kernel/src/object/rehome_check.rs::check_the_tables_are_their_boot_size` | not built | not built | not built |
 
 ### Signing (`H.SIGN`)
 
@@ -972,6 +973,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.object.336` | *Under `kernel_memory=retyped`:* After the seal a request charged to a job with no promise shall be refused. | mm::seal::check's plant, on a job of its own; its control FIRED. | H.MEM.32 | `mm::seal::route`, `mm::seal::note_shared` | `src/kernel/src/mm/seal_check.rs::check` | not built | not built | not built |
 | `L.object.337` | *Under `kernel_memory=retyped`:* An object shall be on a page of the promise of the job it is charged to. | mm::seal::check, against the job's draws_from; its control FIRED. | H.MEM.32 | `mm::heap_drawn_from` | `src/kernel/src/mm/seal_check.rs::check` | not built | not built | not built |
 | `L.object.338` | *Under `kernel_memory=retyped`:* A task with no job and no ticket shall draw on the pool, whichever job the processor last ran, and nothing shall be served in an interrupt. | mm::seal::check with the processor's group forced to another job's; its control FIRED. | H.MEM.32 | `mm::seal::charged`, `mm::seal::note_payer`, `mm::seal::seal_after_boot`, `mm::seal::report` | `src/kernel/src/mm/seal_check.rs::check` | not built | not built | not built |
+| `L.object.339` | *Under `kernel_memory=retyped`:* In ring 0 under kernel_memory=retyped the pid table shall hold FIXED_TASKS entries, the quota table FIXED_JOBS slots and the address waits' one bucket FIXED_WAITERS, as many as the tasks, each a static that is never grown; the entry past each shall be refused, and the description's max_processes shall limit the pid table to no more than it holds. | object::rehome_check's boot-size case: each table its size, the pid table and the quota table filled through their real calls until refused, then one given back taken again; the address waits' bound is unreachable while waiters are tasks. Statically, check-kernel-shape holds user::address_wait::grow built under heap alone and object::process::fixed_entries under retyped alone, its plants FIRED. The description above the size stops the boot (FX-0953), its control FIRED. The seal's own read of the tables is B's line, a BACKLOG row. | H.MEM.33 | `object::process::put`, `object::process::limit_processes`, `object::process::Live::index`, `object::process::Live::get`, `object::process::Live::get_mut`, `object::process::Live::remove`, `object::process::Live::iter`, `object::quota::find_free`, `user::address_wait::push_within`, `user::address_wait::take_at`, `user::address_wait::Bucket::get`, `user::address_wait::Bucket::iter_mut` | `src/kernel/src/object/rehome_check.rs::check_the_tables_are_their_boot_size` | not built | not built | not built |
 | `L.object.340` | *Under `kernel_memory=retyped`:* A frame a job's heap gives back shall hold none of that job's bytes. | mm::seal::check's large allocation; its control FIRED. | H.MEM.32 | `mm::ReservedPages::deallocate_pages` | `src/kernel/src/mm/seal_check.rs::check` | not built | not built | not built |
 | `L.object.342` | A copy into a program's memory whose page could not be faulted in for want of a frame shall answer NoMemory, and one to an address its space never mapped shall answer Fault. | user::edge_check's copy case: every variant of SpaceError and of VmoError answers as the check's copy_answer, which names each with no wildcard, says: NoMemory for want of a frame and Fault otherwise; and a copy to an address never mapped reads Fault; object::quota_check's memory case: a copy as a task of a job at its memory limit, into the first page refused, reads NoMemory. | H.QUOTA.2 | `syscall::uaccess::UserError::from` | `src/kernel/src/object/quota_check.rs::check_memory`, `src/kernel/src/user/edge_check.rs::check_a_copy_says_why` | reached | reached | reached |
 | `L.object.343` | *Under `kernel_memory=retyped`:* linuxd's arena shall be sized from a promise taken after the initramfs is given back, as large as the reservation's admission allows then. | mm::seal_check::check_linuxd_promise on every checked retyped boot: the initramfs was not held at the promise, the admission refuses the promise 256 frames more (the check's resolution: frames another processor gives back between the promise and the check can widen what it admits by less than that, so it judges "not less"), and the arena is seven eighths of the entry; its control, the promise taken again above the initramfs's return, FIRED. | H.MEM.32 | `linuxd_start::size_the_arena`, `linuxd_start::region_for` | `src/kernel/src/mm/seal_check.rs::check_linuxd_promise` | not built | not built | not built |
@@ -3139,6 +3141,8 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/object/rehome_check.rs::check_oom_counts` | kernel | L.object.80 |
 | `src/kernel/src/object/rehome_check.rs::check_sealed_tree` | kernel | H.OBJ.22 |
 | `src/kernel/src/object/rehome_check.rs::check_the_kernel_charge` | kernel | L.object.56 |
+| `src/kernel/src/object/rehome_check.rs::check_the_tables_are_their_boot_size` | kernel | H.MEM.33 |
+| `src/kernel/src/object/rehome_check.rs::check_the_tables_are_their_boot_size` | kernel | L.object.339 |
 | `src/kernel/src/object/rehome_check.rs::check_the_weight` | kernel | L.object.61 |
 | `src/kernel/src/object/reserve_check.rs::check_a_reserved_give_back` | kernel | L.mm.147 |
 | `src/kernel/src/object/reserve_check.rs::check_the_heap_scope` | kernel | L.mm.140 |

@@ -4647,5 +4647,14 @@ package FerrixMemoryRequirements {
             attribute :>> parent = ("O.CAPABILITY", "ASR-3");
             attribute :>> scope = "kernel_memory=retyped";
         }
+        requirement <'H.MEM.33'> theBootsTablesNeverGrow : ItemHighLevel {
+            attribute :>> statement = "Under kernel_memory=retyped ring 0's tables that grew with use (the pid table,
+                the quota table, the address waits') shall be of a size fixed when the kernel is built, and shall
+                refuse the entry past it.";
+            attribute :>> criterion = "L.object.339's case at stage 6, and check-kernel-shape's symbols: the growing
+                paths absent from a retyped ring 0, the fixed form present (docs/microkernel/K16.md §3, K16.9).";
+            attribute :>> parent = ("O.CAPABILITY", "ASR-3");
+            attribute :>> scope = "kernel_memory=retyped";
+        }
     }
 }

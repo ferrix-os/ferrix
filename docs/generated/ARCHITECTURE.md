@@ -123,7 +123,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 | `FerrixSigningRequirements` | `26-signing-requirements.sysml` | docs/SIGNING.md is the design (the certification consultant's OK IF at ledger lines 3667 and 3738; the customer's decisions at 3731). Slice S1 builds the verify-only crate `ferrix-sigverify` (src/lib/crypto/sigverify) and the hash it rests on, `ferrix-sha256` (src/lib/crypto/sha256), both in the item ring (certification-item.json's crates). What the UEFI loader, init's configuration verifier and devmgr do with the verifier's answer is theirs, and gets ids in their own slices (S4, S8, S9). |
 
-27 files, 168 packages, 10513 elements, 220 relations. Model digest `b1cb754f72bf934e`.
+27 files, 168 packages, 10524 elements, 220 relations. Model digest `06887aeeda8ebd36`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -4308,6 +4308,7 @@ flowchart LR
 | `L.object.336` | `aPostSealRequestWithNoPromiseIsRefused` | — | — | — |
 | `L.object.337` | `anObjectIsOnItsJobsPage` | — | — | — |
 | `L.object.338` | `aKernelTaskChargesNobody` | — | — | — |
+| `L.object.339` | `ringZerosTablesAreTheirBootSize` | — | — | — |
 | `L.object.340` | `aFrameGoesBackWithNothingOnIt` | — | — | — |
 | `L.object.342` | `aCopyRefusedForMemorySaysSo` | — | — | — |
 | `L.object.343` | `linuxdsPromiseIsTakenWhenTheRootIsBack` | — | — | — |
@@ -4824,6 +4825,7 @@ flowchart LR
 | `L.mm.129` | `noSupervisorOutside` | — | — | — |
 | `L.mm.130` | `aGrantHoldsAfterIt` | — | — | — |
 | `H.MEM.32` | `noSharedHeapAfterTheSeal` | — | — | — |
+| `H.MEM.33` | `theBootsTablesNeverGrow` | — | — | — |
 | `L.x86_64.1` | `selectorsRing3MayHoldAreLoadable` | — | — | — |
 | `L.x86_64.2` | `compatUserSegmentsInGdt` | — | — | — |
 | `L.x86_64.3` | `istStacksPerProcessor` | — | — | — |

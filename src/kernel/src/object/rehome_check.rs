@@ -685,6 +685,7 @@ fn check_a_reaped_pid_finds_nothing() -> Result<(), &'static str> {
 /// after the seal is held statically: their growing paths are not built (check-kernel-shape).
 ///
 /// Verifies: L.object.339
+/// Verifies: H.MEM.33
 #[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
 fn check_the_tables_are_their_boot_size() -> Result<(), &'static str> {
     use crate::object::quota::{FIXED_JOBS, fixed_slots};
