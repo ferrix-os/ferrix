@@ -1982,6 +1982,10 @@ pub fn yield_now() {
 /// yield passes only to equals: a waiter above what it waits for, on the same processor and in
 /// the same partition, would starve it for good, so it sleeps a millisecond instead. Elsewhere,
 /// a yield, as before.
+///
+/// Product code calls it in this crate, its home: `arch::speculation`'s `publish_leaving`. It is
+/// `pub` for one caller above the core alone, a check (`syscall/region_check.rs`), which is what
+/// the CHECKS-ONLY line above says (ledger 10222).
 pub fn give_way() {
     #[cfg(ferrix_schedule = "windows")]
     sleep_for(1_000_000);
