@@ -596,7 +596,10 @@ fn a_requeue_moves_waiters_across_buckets(
     let source_bucket = address_wait::bucket_of(&private(a, source));
     let target = (1..256_u64)
         .map(|n| WORD + 4 * n)
-        .find(|&at| address_wait::bucket_of(&private(a, at)) != source_bucket)
+        // Ring 0 under `retyped` has one bucket (K16.9): the move is then within it.
+        .find(|&at| {
+            address_wait::BUCKET_COUNT == 1 || address_wait::bucket_of(&private(a, at)) != source_bucket
+        })
         .ok_or("addrwait: no second word in another bucket")?;
     set(a, source, 9)?;
     let (from, to) = (private(a, source), private(a, target));
@@ -1023,7 +1026,9 @@ fn the_calls_refuse_what_the_abi_refuses(
 /// Verifies: L.user.138, L.user.144
 #[cfg(ferrix_checks = "on")]
 fn a_walk_is_measured_and_its_room_given_back(a: &Side) -> Result<u64, &'static str> {
-    const ENTRIES: usize = 1024;
+    // Ring 0's one fixed bucket under `retyped` holds as many as its tasks (K16.9): a quarter of
+    // it, so that the boot's own waiters keep room.
+    const ENTRIES: usize = if address_wait::BUCKET_COUNT == 1 { 256 } else { 1024 };
     let bucket = address_wait::bucket_of(&private(a, WORD));
     let mut stale = alloc::vec::Vec::new();
     crate::fallible::try_reserve(&mut stale, ENTRIES)
@@ -1054,7 +1059,8 @@ fn a_walk_is_measured_and_its_room_given_back(a: &Side) -> Result<u64, &'static 
         let _ = entry.remove();
     }
     let (len, room) = address_wait::bucket_room(bucket);
-    if room > address_wait::MIN_ROOM.max(len.saturating_mul(4)) {
+    // A fixed bucket keeps its room: there is none to give back (K16.9).
+    if address_wait::BUCKET_COUNT > 1 && room > address_wait::MIN_ROOM.max(len.saturating_mul(4)) {
         return Err("addrwait: a bucket kept its room after its entries left");
     }
     Ok(took / ENTRIES as u64)

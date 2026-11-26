@@ -235,7 +235,8 @@ impl Key {
         ];
         let mixed = fold(base ^ first, at ^ second ^ 0x9E37_79B9_7F4A_7C15)
             .wrapping_mul(0x9E37_79B9_7F4A_7C15);
-        (mixed >> (u64::BITS - BUCKET_BITS)) as usize
+        // `checked_shr`: with no bits (ring 0 under `retyped`) every key is bucket 0.
+        mixed.checked_shr(u64::BITS - BUCKET_BITS).unwrap_or(0) as usize
     }
 }
 
@@ -362,10 +363,23 @@ fn rouse_entry(entry: &Entry) -> bool {
 const TRUSTED_RECHECK_NANOS: u64 = 1_000_000_000;
 
 /// Bits of a key's hash that pick its bucket.
+#[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
 const BUCKET_BITS: u32 = 8;
+
+/// Ring 0's table under `kernel_memory=retyped` is one bucket over a fixed list (K16.9, ledger
+/// 10576 Q): no bits pick a bucket. Ring 0 under `retyped` is always `ferrix_load_built = "none"`
+/// (`retyped` requires `personality=user`, whose kernel holds no load); linuxd's copy of this
+/// table, `"lift"`, keeps its 256 buckets in its own arena.
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+const BUCKET_BITS: u32 = 0;
 
 /// Buckets in [`TABLE`].
 pub(crate) const BUCKETS: usize = 1 << BUCKET_BITS;
+
+// CHECKS-ONLY: user/address_wait_check.rs
+/// [`BUCKETS`], for the self-check: one in ring 0 under `retyped` (K16.9).
+#[doc(hidden)]
+pub const BUCKET_COUNT: usize = BUCKETS;
 
 // CHECKS-ONLY: user/address_wait_check.rs
 /// The least room a bucket keeps once it has had any: [`shrink`] goes no
@@ -378,13 +392,101 @@ pub(crate) const ROUND: usize = 32;
 
 /// Every waiter, by its key's bucket ([`Key::bucket`]), each bucket oldest
 /// first, so that a wake rouses in arrival order.
-static TABLE: [SpinLock<Vec<Entry>>; BUCKETS] = [const { SpinLock::new(Vec::new()) }; BUCKETS];
+static TABLE: [SpinLock<Bucket>; BUCKETS] = [const { SpinLock::new(Bucket::new()) }; BUCKETS];
+
+/// A bucket: a vector that grows and shrinks, outside ring 0 under `retyped`.
+#[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
+type Bucket = Vec<Entry>;
+
+/// Add `entry` at the end of `table`, in its room: answered back if there is none.
+#[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
+fn push_within(table: &mut Bucket, entry: Entry) -> Result<(), Entry> {
+    fallible::push_within(table, entry)
+}
+
+/// Take the entry at `index` off `table`, the ones after it moving up one.
+#[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
+fn take_at(table: &mut Bucket, index: usize) -> Option<Entry> {
+    (index < table.len()).then(|| table.remove(index))
+}
+
+/// Waiters ring 0's one bucket holds under `retyped`: `N_waiters`, as many as the tasks its pid
+/// table holds, so the list cannot fill while waiters are tasks (ledger 10505 C4).
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+pub const FIXED_WAITERS: usize = crate::object::process::FIXED_TASKS;
+
+/// Ring 0's one bucket under `retyped`: a static list of [`FIXED_WAITERS`] entries in arrival
+/// order, the first `len` of them in use, so that nothing is made after boot, or at all (K16.9,
+/// L.object.339, H.MEM.33). A removal moves the ones after it up one (ledger 10576 Q1: the
+/// shift kept, its cost stated in docs/microkernel/K16.md §3).
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+#[derive(Debug)]
+struct Bucket {
+    /// The entries, `len` of them first.
+    slots: [Option<Entry>; FIXED_WAITERS],
+    /// How many are in use.
+    len: usize,
+}
+
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+impl Bucket {
+    /// An empty bucket, made by the compiler.
+    const fn new() -> Bucket {
+        Bucket {
+            slots: [const { None }; FIXED_WAITERS],
+            len: 0,
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    fn capacity(&self) -> usize {
+        self.slots.len()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &Entry> {
+        self.slots.iter().take(self.len).filter_map(Option::as_ref)
+    }
+
+    fn iter_mut(&mut self) -> impl Iterator<Item = &mut Entry> {
+        let len = self.len;
+        self.slots.iter_mut().take(len).filter_map(Option::as_mut)
+    }
+
+    fn get(&self, index: usize) -> Option<&Entry> {
+        self.slots.get(index).filter(|_| index < self.len)?.as_ref()
+    }
+}
+
+/// Add `entry` at the end of `table`: answered back when the list is full.
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+fn push_within(table: &mut Bucket, entry: Entry) -> Result<(), Entry> {
+    let Some(free) = table.slots.get_mut(table.len) else {
+        return Err(entry);
+    };
+    *free = Some(entry);
+    table.len += 1;
+    Ok(())
+}
+
+/// Take the entry at `index` off `table`, the ones after it moving up one.
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+fn take_at(table: &mut Bucket, index: usize) -> Option<Entry> {
+    let len = table.len;
+    let used = table.slots.get_mut(index..len)?;
+    let taken = used.first_mut()?.take();
+    used.rotate_left(1);
+    table.len = len - 1;
+    taken
+}
 
 /// Bucket `index` of [`TABLE`]. [`Key::bucket`] is the top [`BUCKET_BITS`]
 /// of a hash, so every index is in range and the first bucket is never
 /// answered in another's place; it is there because a lookup has to answer
 /// something.
-fn bucket_lock(index: usize) -> &'static SpinLock<Vec<Entry>> {
+fn bucket_lock(index: usize) -> &'static SpinLock<Bucket> {
     TABLE.get(index).unwrap_or(&TABLE[0])
 }
 
@@ -453,6 +555,7 @@ fn read_present_word(space: &AddressSpace, word: &Word) -> Result<Option<u32>, W
 /// # Errors
 ///
 /// [`WaitError::NoMemory`] when the vector cannot be had.
+#[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
 fn grow(index: usize, room: usize) -> Result<(), WaitError> {
     let mut fresh: Vec<Entry> =
         fallible::try_with_capacity(room).map_err(|_| WaitError::NoMemory)?;
@@ -472,6 +575,7 @@ fn grow(index: usize, room: usize) -> Result<(), WaitError> {
 
 /// Move every entry of `table` into `fresh`, in order, without allocating:
 /// the caller made sure `fresh` has the room.
+#[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
 fn move_into(table: &mut Vec<Entry>, fresh: &mut Vec<Entry>) {
     for entry in table.drain(..) {
         // Never refused: the caller checked the room. Were it, the entry
@@ -485,11 +589,13 @@ fn move_into(table: &mut Vec<Entry>, fresh: &mut Vec<Entry>) {
 /// Made under the hold that took entries out, so that a wake, a leave or a
 /// requeue that leaves the bucket within that bound takes its lock no second
 /// time; [`shrink`] makes the test again under its own.
+#[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
 fn shrink_due(table: &Vec<Entry>) -> bool {
     table.capacity() > MIN_ROOM && table.len().saturating_mul(4) < table.capacity()
 }
 
 /// [`shrink`] bucket `index` if a held lock found it [`shrink_due`].
+#[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
 fn shrink_if(due: bool, index: usize) {
     if due {
         shrink(index);
@@ -498,6 +604,7 @@ fn shrink_if(due: bool, index: usize) {
 
 /// [`shrink_due`] for a requeue's source bucket, under its two locks: the
 /// first, the lower bucket's, unless `source_higher` and there is a second.
+#[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
 fn source_shrink_due(first: &Vec<Entry>, second: Option<&Vec<Entry>>, source_higher: bool) -> bool {
     match second {
         Some(higher) if source_higher => shrink_due(higher),
@@ -509,6 +616,7 @@ fn source_shrink_due(first: &Vec<Entry>, second: Option<&Vec<Entry>>, source_hig
 /// [`MIN_ROOM`]: a smaller vector is allocated with nothing held and swapped
 /// in under the lock if the bucket is still that empty; the larger is freed
 /// after it. Memory refused leaves the bucket as it was.
+#[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
 fn shrink(index: usize) {
     let (len, room) = {
         let table = bucket_lock(index).lock();
@@ -532,6 +640,26 @@ fn shrink(index: usize) {
     };
     drop(table);
     drop(unused);
+}
+
+/// Ring 0's list under `retyped` neither grows nor shrinks: a full one refuses, fail closed,
+/// which waiters at or under tasks never reach (ledger 10576 Q2).
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+fn grow(_index: usize, _room: usize) -> Result<(), WaitError> {
+    Err(WaitError::NoMemory)
+}
+
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+fn shrink_due(_table: &Bucket) -> bool {
+    false
+}
+
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+fn shrink_if(_due: bool, _index: usize) {}
+
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+fn source_shrink_due(_first: &Bucket, _second: Option<&Bucket>, _source_higher: bool) -> bool {
+    false
 }
 
 /// Block until `sleeper` is woken, `interrupted` says the caller must leave,
@@ -714,7 +842,7 @@ fn list(
             slot,
         };
         // NOALLOC: the room was checked under this same hold of the lock.
-        let refused = fallible::push_within(&mut table, entry).err();
+        let refused = push_within(&mut table, entry).err();
         drop(table);
         drop(refused);
         return Ok(());
@@ -739,8 +867,8 @@ fn leave(sleeper: &Arc<Sleeper>, slot: usize) {
         }
         let mine = table
             .iter()
-            .position(|entry| Arc::ptr_eq(&entry.sleeper, sleeper) && entry.slot == slot)
-            .map(|index| table.remove(index));
+            .position(|entry| Arc::ptr_eq(&entry.sleeper, sleeper) && entry.slot == slot);
+        let mine = mine.and_then(|index| take_at(&mut table, index));
         let due = shrink_due(&table);
         drop(table);
         drop(mine);
@@ -796,7 +924,9 @@ fn rouse(keys: &[Key], limit: usize, bitset: u32, with: With) -> usize {
                     full = true;
                     break;
                 };
-                let entry = table.remove(index);
+                let Some(entry) = take_at(&mut table, index) else {
+                    break;
+                };
                 if with(&entry) {
                     counted += 1;
                 }
@@ -910,8 +1040,8 @@ fn still_holds(space: &AddressSpace, compare: Option<&Word>) -> Result<bool, Wai
 /// take, at most `most`, and the room the target's bucket must have if it
 /// has less (`None` when it has enough, or is the same bucket).
 fn room_needed(
-    source_table: &[Entry],
-    target_table: Option<&Vec<Entry>>,
+    source_table: &Bucket,
+    target_table: Option<&Bucket>,
     source: &Key,
     most: usize,
 ) -> (usize, Option<usize>) {
@@ -956,8 +1086,8 @@ fn make_room(
     reason = "the locked tables of one requeue"
 )]
 fn take_and_move(
-    source_table: &mut Vec<Entry>,
-    mut target_table: Option<&mut Vec<Entry>>,
+    source_table: &mut Bucket,
+    mut target_table: Option<&mut Bucket>,
     source: &Key,
     target: &Key,
     wake_count: usize,
@@ -976,7 +1106,9 @@ fn take_and_move(
             index += 1;
             continue;
         }
-        let mut entry = source_table.remove(index);
+        let Some(mut entry) = take_at(source_table, index) else {
+            break;
+        };
         end -= 1;
         // A stale entry of a vector waiter already woken through another
         // word is taken off and counted neither as roused nor as moved.
@@ -1010,7 +1142,7 @@ fn take_and_move(
             Some(table) => table,
             None => &mut *source_table,
         };
-        drop(fallible::push_within(table, entry).err());
+        drop(push_within(table, entry).err());
     }
     taken
 }
@@ -1062,7 +1194,7 @@ pub fn bucket_room(index: usize) -> (usize, usize) {
 #[cfg(ferrix_checks = "on")]
 pub mod sabotage {
     use super::{Arc, AtomicUsize, Charge, Entry, Key, MATCH_ANY, Sleeper};
-    use super::{bucket_lock, fallible, leave, rouse};
+    use super::{bucket_lock, fallible, leave, push_within, rouse};
 
     /// Take up to `limit` waiters off `keys` and report them woken without
     /// rousing them: a wake with the one bug a count cannot see.
@@ -1146,7 +1278,7 @@ pub mod sabotage {
                 continue;
             }
             // NOALLOC: the room was checked under this hold of the lock.
-            let refused = fallible::push_within(&mut table, entry).err();
+            let refused = push_within(&mut table, entry).err();
             drop(table);
             drop(refused);
             return Ok(StaleEntry(sleeper));
